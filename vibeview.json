@@ -1,0 +1,11 @@
+{
+  "defaultPlatform": "ios",
+  "platforms": {
+    "ios": {
+      "appId": "wtf-ai-0q2qw16f",
+      "deviceCategory": "phone"
+    }
+  },
+  "metroPort": 8081,
+  "metroCommand": "npx expo start"
+}

@@ -1,0 +1,72 @@
+name: Build Unsigned iOS App
+
+on:
+  workflow_dispatch:
+    inputs:
+      configuration:
+        description: "Release = standalone app (JS embedded). Debug = dev client, needs Metro on your LAN."
+        type: choice
+        options: [Release, Debug]
+        default: Release
+
+jobs:
+  build-ios:
+    # Expo SDK 57 requires Xcode 26.4+
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      CONFIGURATION: ${{ inputs.configuration }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          # Expo SDK 57 requires Node 22.13+
+          node-version: 22
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Expo Prebuild
+        # Prebuild runs `pod install` itself on macOS
+        run: npx expo prebuild --platform ios --clean
+
+      - name: Build unsigned .app
+        run: |
+          WORKSPACE=$(ls -d ios/*.xcworkspace | head -n 1)
+          SCHEME=$(basename "$WORKSPACE" .xcworkspace)
+          echo "Workspace: $WORKSPACE, scheme: $SCHEME"
+          set -o pipefail
+          xcodebuild \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration "$CONFIGURATION" \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Package into IPA
+        run: |
+          APP=$(ls -d build/Build/Products/${CONFIGURATION}-iphoneos/*.app | head -n 1)
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+          zip -qry "wtfai-${CONFIGURATION}-unsigned.ipa" Payload
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wtfai-${{ inputs.configuration }}-unsigned-ipa
+          path: wtfai-*-unsigned.ipa
+          retention-days: 14
