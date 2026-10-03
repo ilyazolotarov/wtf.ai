@@ -161,18 +161,22 @@ export class VehicleLinkCore implements VehicleLink {
     this.refreshDevices();
   }
 
-  /** Connect to the most recently verified adapter, if any (§7 auto-connect). */
+  /**
+   * Connect to the most recently verified adapter, if any (§7 auto-connect). The connect
+   * waits for the adapter to become reachable: an MFi adapter joins iOS only a few seconds
+   * after the car wakes it, often after the app is opened. A failed attempt is retried.
+   */
   async autoConnect(): Promise<boolean> {
-    if (this.snapshot.activeDeviceId) return true;
+    if (this.snapshot.activeDeviceId && this.snapshot.link !== "error") return true;
     const last = [...this.remembered()].sort((a, b) => b.lastVerifiedAt - a.lastVerifiedAt)[0];
     if (!last) return false;
-    await this.connect(last.id);
+    await this.connect(last.id, { wait: true });
     return true;
   }
 
   // ---- VehicleLink: connection ----
 
-  async connect(deviceId: string): Promise<void> {
+  async connect(deviceId: string, options?: { wait?: boolean }): Promise<void> {
     await this.disconnect();
     const gen = ++this.gen;
     const remembered = this.remembered().find((a) => a.id === deviceId);
@@ -203,7 +207,7 @@ export class VehicleLinkCore implements VehicleLink {
       transport.onUnsolicited((text, rxUs) => this.linkEvents.emit({ type: "unsolicited", tUs: rxUs, detail: text })),
     );
     try {
-      const info = await transport.connect();
+      const info = await transport.connect(options);
       this.check(gen);
       await this.runSession(gen, info, { id: device.id, transport: device.transport, name: device.name }, remembered);
     } catch (error) {

@@ -26,7 +26,7 @@ export class NativeTransport implements Transport {
     this.kind = kind;
   }
 
-  async connect(): Promise<ConnectedInfo> {
+  async connect(options?: { wait?: boolean }): Promise<ConnectedInfo> {
     this.listen();
     const gatt = this.remembered?.gatt;
     const result = await VehicleLinkModule.connect({
@@ -34,8 +34,9 @@ export class NativeTransport implements Transport {
       transport: this.kind,
       profiles: GATT_PROFILES.map((p) => ({ id: p.id, service: p.service, notify: p.notify, write: p.write })),
       preferred: gatt ? [gatt.service, gatt.notify, gatt.write] : undefined,
-      // First connect times out; reconnects stay pending until the adapter is back (§11).
-      timeoutMs: this.connectedOnce ? 0 : FIRST_CONNECT_TIMEOUT_MS,
+      // A user-picked first connect times out; auto-connect and reconnects stay pending
+      // until the adapter is back (§7, §11).
+      timeoutMs: this.connectedOnce || options?.wait ? 0 : FIRST_CONNECT_TIMEOUT_MS,
     });
     this.connectedOnce = true;
     this.up = true;

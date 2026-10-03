@@ -24,6 +24,9 @@ trip.to_utc(trip.imu["t_s"])
 `t_s` is seconds since log start on the phone's monotonic clock; all streams share it.
 Logs also open directly in PlotJuggler and Foxglove.
 
+Put real trip logs pulled from the phone in `tools/triplog/logs/`. It is git-ignored,
+because the logs hold the VIN and GPS tracks.
+
 Tests read `tests/data/fixture.ulg`, written by the TS writer
 (`src/triplog/__fixtures__/trip-fixture.ts`; regenerate with `UPDATE_TRIPLOG_FIXTURE=1 npx jest src/triplog`):
 

@@ -140,6 +140,8 @@ final class LinkCore: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
   private var eaSession: EASession?
   private var eaAccessory: EAAccessory?
   private var eaProtocol: String?
+  /** A connect is pending until the MFi accessory connects to iOS (EAAccessoryDidConnect). */
+  private var mfiWaiting = false
   /** Touched on the main thread only (MFi streams live on the main run loop). */
   private var eaOutput = Data()
   private var mainOutputStream: OutputStream?
@@ -358,6 +360,11 @@ final class LinkCore: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
 
   @objc private func accessoryDidConnect(_ note: Notification) {
     emit("onMfiChange", ["accessories": LinkCore.mfiAccessories()])
+    queue.async {
+      guard self.mfiWaiting, self.connectPromise != nil, let options = self.connectOptions else { return }
+      self.mfiWaiting = false
+      self.connectMfi(options: options)
+    }
   }
 
   @objc private func accessoryDidDisconnect(_ note: Notification) {
@@ -401,6 +408,7 @@ final class LinkCore: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
   }
 
   private func failConnect(code: String, message: String) {
+    mfiWaiting = false
     guard let promise = connectPromise else { return }
     connectPromise = nil
     connectTimer?.cancel()
@@ -412,6 +420,7 @@ final class LinkCore: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
   }
 
   private func succeedConnect(_ info: [String: Any]) {
+    mfiWaiting = false
     guard let promise = connectPromise else { return }
     connectPromise = nil
     connectTimer?.cancel()
@@ -424,6 +433,7 @@ final class LinkCore: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
   private func closeLink(reason: String, notify: Bool) {
     let wasUp = linkUp
     linkUp = false
+    mfiWaiting = false
     if let pending = pending {
       self.pending = nil
       pending.promise.reject("link-lost", reason)
@@ -629,9 +639,17 @@ final class LinkCore: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
       let accessory = EAAccessoryManager.shared().connectedAccessories.first { a in
         a.protocolStrings.contains(proto) && (serial.isEmpty || a.serialNumber == serial)
       }
-      guard let accessory = accessory, let session = EASession(accessory: accessory, forProtocol: proto),
+      guard let accessory = accessory else {
+        // The adapter joins iOS a few seconds after the car wakes it: wait for it until the
+        // connect times out (timeoutMs 0 = indefinitely) or is cancelled.
+        self.queue.async {
+          if self.connectPromise != nil { self.mfiWaiting = true }
+        }
+        return
+      }
+      guard let session = EASession(accessory: accessory, forProtocol: proto),
             let input = session.inputStream, let output = session.outputStream else {
-        self.queue.async { self.failConnect(code: "device-not-found", message: "MFi accessory not connected") }
+        self.queue.async { self.failConnect(code: "device-not-found", message: "MFi session could not be opened") }
         return
       }
       self.mainOutputStream = output

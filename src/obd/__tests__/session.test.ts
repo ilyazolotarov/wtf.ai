@@ -207,4 +207,27 @@ describe("ObdPoller", () => {
     await until(() => engine.state === "engine-running");
     await poller.stop();
   });
+
+  test("ECU awake with the engine off, answering a latched rpm: engine-off until it really runs", async () => {
+    const { session, clock, emu, send } = await setup();
+    await probeAdapter(send);
+    const init = await initVehicle(send);
+    const engine = new EngineStateMachine(() => undefined);
+    const poller = new ObdPoller(session, clock, engine, init.poll, {
+      onSpeed: () => undefined,
+      onRpm: () => undefined,
+      onBattery: () => undefined,
+      onNeedsReinit: () => undefined,
+    });
+    emu.setVehicle({ rpm: 0, rpmLatched: 796.5 });
+    poller.start();
+    const t0 = clock.nowUs();
+    await until(() => clock.nowUs() - t0 >= 60_000_000);
+    expect(engine.state).toBe("engine-off");
+    emu.setVehicle({ rpm: 850, rpmLatched: undefined });
+    await until(() => engine.state === "engine-running");
+    emu.setVehicle({ rpm: 0, rpmLatched: 724 });
+    await until(() => engine.state === "engine-off");
+    await poller.stop();
+  });
 });

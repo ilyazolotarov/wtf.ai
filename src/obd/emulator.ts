@@ -34,6 +34,8 @@ export interface VehicleState {
   ignition: boolean;
   rpm: number;
   speedKph: number;
+  /** Engine stopped but the ECU answers 010C with this RPM latched at shutdown (seen on a Mazda CX-5). */
+  rpmLatched?: number;
 }
 
 export const GENUINE_PROFILE: EmulatorProfile = {
@@ -95,6 +97,7 @@ export class Elm327Emulator implements Transport {
   readonly kind = "emulator" as const;
   readonly profile: EmulatorProfile;
   vehicle: VehicleState = { ignition: true, rpm: 800, speedKph: 0 };
+  private rpmReads = 0;
 
   private unsolicited = new Emitter<[string, number]>();
   private linkLost = new Emitter<[string]>();
@@ -302,7 +305,14 @@ export class Elm327Emulator implements Transport {
     } else if (mode === "01" && pid === "0D") {
       answers = p.ecus.map((ecu) => ({ ecu, data: [0x41, 0x0d, Math.round(this.vehicle.speedKph) & 0xff] }));
     } else if (mode === "01" && pid === "0C") {
-      const raw = Math.round(this.vehicle.rpm * 4);
+      // A running engine never reports the same RPM twice in a row: jitter by ±0.25 rpm.
+      const { rpm, rpmLatched } = this.vehicle;
+      const raw =
+        rpmLatched !== undefined
+          ? Math.round(rpmLatched * 4)
+          : rpm > 0
+            ? Math.round(rpm * 4) + (this.rpmReads++ % 3) - 1
+            : 0;
       answers = [{ ecu: engine, data: [0x41, 0x0c, (raw >> 8) & 0xff, raw & 0xff] }];
     } else if (mode === "09" && pid === "02") {
       return { body: this.vinFrames(engine), delayMs: searchDelay + p.obdLatencyMs + p.multiResponseWaitMs };

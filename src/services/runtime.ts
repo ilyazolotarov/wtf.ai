@@ -92,7 +92,8 @@ export function getRuntime(): Runtime {
 /** Auto-connect to the remembered adapter without triggering a permission prompt (§7). */
 export async function autoConnect(): Promise<void> {
   const { link } = getRuntime();
-  if (link.getSnapshot().activeDeviceId) return;
+  const { activeDeviceId, link: state } = link.getSnapshot();
+  if (activeDeviceId && state !== "error") return;
   if (Platform.OS !== "ios") return;
   if (VehicleLinkModule.getBluetoothState() === "notDetermined") return;
   await VehicleLinkModule.initialize(null);

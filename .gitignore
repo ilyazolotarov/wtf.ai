@@ -54,3 +54,6 @@ __pycache__/
 # Offline map pipeline (tools/tiles): downloads and built packs
 /tools/tiles/cache/
 /tools/tiles/out/
+
+# Real trip logs (tools/triplog): VIN and GPS tracks, keep them local
+/tools/triplog/logs/

@@ -77,10 +77,11 @@ describe("VehicleLinkCore", () => {
     void core.connect("emu-1");
     await until(() => core.getSnapshot().link === "polling" && core.getSnapshot().lastSpeed !== null);
     expect(states).toEqual(["idle", "connecting", "probing", "initializing", "polling"]);
+    // Running is confirmed by a second, different RPM reading (§10.4).
+    await until(() => core.getSnapshot().engine === "engine-running");
     const snap = core.getSnapshot();
     expect(snap.adapter?.elmVersion).toBe("ELM327 v1.5");
     expect(snap.vehicle?.vin).toBe("JM3KFBDM1J0123456");
-    expect(snap.engine).toBe("engine-running");
     expect(exchanges.some((e) => e.pollPid === 0x0d && e.status === "ok")).toBe(true);
     expect(exchanges.some((e) => e.command === "ATZ")).toBe(true);
 
@@ -94,6 +95,30 @@ describe("VehicleLinkCore", () => {
     // A fresh app start auto-connects to the remembered adapter.
     const second = setup({}, store);
     second.emulators.set("emu-1", emulators.get("emu-1")!);
+    expect(await second.core.autoConnect()).toBe(true);
+    await until(() => second.core.getSnapshot().link === "polling");
+    await second.core.disconnect();
+  });
+
+  test("auto-connect waits for the adapter and retries after a failed attempt", async () => {
+    const { core, store, emulators } = setup();
+    core.startDiscovery();
+    void core.connect("emu-1");
+    await until(() => core.getSnapshot().link === "polling");
+    await core.disconnect();
+
+    // Next app start: the adapter isn't reachable yet and the first attempt fails.
+    const second = setup({}, store);
+    const emu = emulators.get("emu-1")!;
+    second.emulators.set("emu-1", emu);
+    const connect = jest
+      .spyOn(emu, "connect")
+      .mockRejectedValueOnce(Object.assign(new Error("not reachable"), { code: "device-not-found" }));
+    await second.core.autoConnect();
+    expect(second.core.getSnapshot()).toMatchObject({ link: "error", activeDeviceId: "emu-1" });
+    expect(connect).toHaveBeenLastCalledWith({ wait: true });
+
+    // Returning to the foreground retries instead of leaving the error until "Disconnect".
     expect(await second.core.autoConnect()).toBe(true);
     await until(() => second.core.getSnapshot().link === "polling");
     await second.core.disconnect();

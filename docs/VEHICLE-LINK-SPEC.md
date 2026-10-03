@@ -139,8 +139,8 @@ Local Expo module (see the `expo-module` skill). Swift only; iOS first.
 | `getMfiAccessories()`                       | `EAAccessoryManager.connectedAccessories` filtered to declared protocol strings.                                                 |
 | `showMfiPicker(nameFilter?)`                | `showBluetoothAccessoryPicker` — lets the user pair a nearby MFi adapter without leaving the app.                                |
 | `retrieveKnownPeripheral(id)`               | `retrievePeripherals(withIdentifiers:)` — reconnect a remembered BLE adapter without scanning.                                   |
-| `connect(deviceRef, gattProfiles)`          | BLE: connect, discover services/characteristics, pick the UART per profile list (§8.2), subscribe to notify, return the chosen pair + full GATT dump. MFi: open `EASession` for the protocol string. |
-| `disconnect()`                              | Close session / cancel connection (also cancels a pending BLE connect).                                                          |
+| `connect(deviceRef, gattProfiles)`          | BLE: connect, discover services/characteristics, pick the UART per profile list (§8.2), subscribe to notify, return the chosen pair + full GATT dump. MFi: open `EASession` for the protocol string; if the accessory isn't connected to iOS yet, wait for `EAAccessoryDidConnect` until the timeout (`timeoutMs: 0` = wait indefinitely). |
+| `disconnect()`                              | Close session / cancel connection (also cancels a pending BLE or MFi connect).                                                   |
 | `transact(command, { timeoutMs })`          | Write `command + "\r"`, collect bytes until the `>` prompt or timeout. Returns `{ raw, status: 'ok' \| 'timeout', txUs, rxFirstUs, rxUs }`. One in flight; a second call while busy rejects. |
 | `writeRaw(text)`                            | Debug only (ELM terminal escape hatch): write without waiting for a prompt.                                                     |
 | `nowUs()`                                   | Current monotonic time in µs (same clock as all timestamps).                                                                    |
@@ -320,7 +320,7 @@ Rules:
   2. **BLE scan** results, ranked by catalog: advertised known service UUID → `known-profile`; name matches §3.3 → `known-name`; other named connectable devices → `unknown`; known non-ELM names → `non-elm`.
   3. **MFi accessories** already paired, plus a "Pair MFi adapter" action (`showMfiPicker`).
 - List UI: sections *Remembered*, *OBD adapters* (known-profile + known-name + MFi), *Other Bluetooth devices* (collapsed; "Try anyway"). Unnamed devices hidden behind a toggle. Show RSSI bars and brand hint.
-- **Auto-connect**: on app start and when the app returns to the foreground, connect to the most recently verified adapter if it is reachable (BLE: pending connect via identifier; MFi: accessory present). The user doesn't pick from the list again.
+- **Auto-connect**: on app start and when the app returns to the foreground, connect to the most recently verified adapter with a pending connect that waits for it to become reachable (BLE: connect via identifier; MFi: wait for the accessory to connect to iOS, which takes a few seconds after the car wakes the adapter). A previous attempt that ended in `error` is retried. The user doesn't pick from the list again.
 - Persist per adapter (`expo-sqlite/kv-store`): id, transport, name, chosen GATT profile + characteristic UUIDs, `AdapterInfo`, capabilities, last protocol (`ATSPn`) per VIN, measured poll rate, `lastVerifiedAt`.
 
 ## 8. Verification on connect (probe)
@@ -415,13 +415,15 @@ Not used: bare-CR "repeat last command" (it saves nothing on BLE and breaks when
 
 | From → To                       | Condition                                                                                      |
 | ------------------------------- | ---------------------------------------------------------------------------------------------- |
-| any → `engine-running`          | 2 consecutive RPM samples ≥ 400 rpm                                                           |
+| any → `engine-running`          | 2 consecutive RPM samples ≥ 400 rpm, each different from the one before                       |
 | `engine-running` → `engine-off` | 2 consecutive RPM samples < 250 rpm (auto stop-start, hybrid EV mode, key in ON position)      |
+| `engine-running` → `engine-off` | the same non-zero RPM read 3 times in a row (stale value, see below)                           |
 | any → `ignition-off`            | no valid response (`no-data`, `unable-to-connect`, `bus-error`, `timeout`) for ≥ 10 s          |
-| `ignition-off` → `engine-off` / `engine-running` | first valid RPM response, classified by value                                    |
+| `unknown` / `ignition-off` → `engine-off` | first valid RPM response (a high one counts as the first of the 2 for `engine-running`) |
 | link lost                       | state becomes `unknown`                                                                        |
 
 - Speed > 0 while `engine-off` is valid (hybrids, coasting with stop-start) — speed polling keeps going.
+- A running engine's RPM never repeats exactly (0.25 rpm resolution, polled seconds apart: 0 repeats in 167 samples over three real trips). Some ECUs answer with the RPM latched at the last shutdown while awake with the engine off: a Mazda CX-5 reported 796.50 for 280 s while parked with the engine off, and 724.00 after the engine was stopped. Without the repeat rule that started a trip and blocked the parked timeout.
 - `ATRV` is read every 30 s (and logged). Voltage is a hint only (smart alternators make it unreliable for engine-state decisions).
 - Trip start/end on top of these states: TRIP-LOGGER-SPEC §4.
 

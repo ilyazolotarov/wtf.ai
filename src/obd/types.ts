@@ -43,7 +43,8 @@ export interface ConnectedInfo {
 
 export interface Transport {
   readonly kind: TransportKind;
-  connect(): Promise<ConnectedInfo>;
+  /** `wait`: keep the connect pending until the adapter is reachable (no timeout). */
+  connect(options?: { wait?: boolean }): Promise<ConnectedInfo>;
   disconnect(): Promise<void>;
   /** Write `command + "\r"`, resolve on `>` or timeout. One in flight. */
   exchange(command: string, timeoutMs: number): Promise<RawExchange>;
