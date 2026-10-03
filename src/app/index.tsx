@@ -22,6 +22,7 @@ import {
     usePositionPermission,
 } from "@/providers/position-provider";
 import { useRoute } from "@/providers/route-provider";
+import { useRecorderSnapshot, useVehicleLinkValue } from "@/providers/runtime-provider";
 
 type CameraMode = "follow" | "follow-heading" | "free";
 
@@ -58,6 +59,16 @@ export default function HomeScreen() {
   const [menuVisible, setMenuVisible] = useState(false);
   const [requesting, setRequesting] = useState(false);
   const trust = position?.trust ?? "NO_FIX";
+  const adapterLabel = useVehicleLinkValue((s) =>
+    s.link === "polling"
+      ? `${t("adapterOnline")} ${s.stats ? Math.round(s.stats.speedHz) : "…"} Hz`
+      : s.link === "standby"
+        ? t("adapterStandby")
+        : s.link === "connecting" || s.link === "probing" || s.link === "initializing" || s.link === "reconnecting"
+          ? t("adapterConnecting")
+          : t("adapterDisconnected"),
+  );
+  const recording = useRecorderSnapshot().state === "recording";
   const isDenied = permission?.status === "denied";
 
   const cycleCameraMode = useCallback(() => {
@@ -122,7 +133,8 @@ export default function HomeScreen() {
                   tintColor="#E9F0EF"
                 />
                 <Text style={styles.adapterText}>
-                  {t("adapterDisconnected")}
+                  {recording ? `● ${t("recordingBadge")} · ` : ""}
+                  {adapterLabel}
                 </Text>
               </Pressable>
             </Link>

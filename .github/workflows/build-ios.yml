@@ -1,5 +1,7 @@
 name: Build Unsigned iOS App
 
+# Unsigned IPA for sideloading with AltStore (no paid Apple account, no EAS).
+# Runs on demand, and from ci.yml after the checks pass on every commit.
 on:
   workflow_dispatch:
     inputs:
@@ -8,6 +10,14 @@ on:
         type: choice
         options: [Release, Debug]
         default: Release
+  workflow_call:
+    inputs:
+      configuration:
+        type: string
+        default: Release
+    secrets:
+      SENTRY_AUTH_TOKEN:
+        required: false
 
 jobs:
   build-ios:
@@ -16,9 +26,15 @@ jobs:
     timeout-minutes: 60
     env:
       CONFIGURATION: ${{ inputs.configuration }}
+      # Source maps / dSYMs go to Sentry only when the SENTRY_AUTH_TOKEN secret (plus SENTRY_ORG and
+      # SENTRY_PROJECT repo variables) are set; otherwise the Sentry build phases skip the upload.
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+      SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+      SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
+      SENTRY_DISABLE_AUTO_UPLOAD: ${{ secrets.SENTRY_AUTH_TOKEN == '' && 'true' || 'false' }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Select Xcode
         uses: maxim-lobanov/setup-xcode@v1
@@ -26,10 +42,10 @@ jobs:
           xcode-version: latest-stable
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           # Expo SDK 57 requires Node 22.13+
-          node-version: 22
+          node-version: 24
           cache: "npm"
 
       - name: Install dependencies
@@ -40,6 +56,9 @@ jobs:
         run: npx expo prebuild --platform ios --clean
 
       - name: Build unsigned .app
+        env:
+          # Forces Xcode build phase to run Metro bundling step even for Debug configuration
+          FORCE_BUNDLING: "true"
         run: |
           WORKSPACE=$(ls -d ios/*.xcworkspace | head -n 1)
           SCHEME=$(basename "$WORKSPACE" .xcworkspace)
@@ -65,8 +84,9 @@ jobs:
           zip -qry "wtfai-${CONFIGURATION}-unsigned.ipa" Payload
 
       - name: Upload IPA Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: wtfai-${{ inputs.configuration }}-unsigned-ipa
-          path: wtfai-*-unsigned.ipa
+          # Upload the .ipa as-is (no zip wrapper); artifact is named after the file
+          archive: false
+          path: wtfai-${{ inputs.configuration }}-unsigned.ipa
           retention-days: 14

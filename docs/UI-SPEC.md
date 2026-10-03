@@ -2,6 +2,10 @@
 
 Status: draft v1 (2026-09-29). Companion to [SPEC.md](SPEC.md) §3.9. Source of truth for coding agents implementing the UI milestone.
 
+> Builds (2026-10-03): EAS is no longer used. Read the EAS steps in §3 as history; builds come from GitHub Actions as unsigned IPAs sideloaded with AltStore (SPEC §2, AGENTS.md).
+>
+> Follow-up (2026-10-03): the mock `vehicle` (§7.2) and `debug` (§7.5) screens become real in the trip logger milestone — see [TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md) §9 and [VEHICLE-LINK-SPEC.md](VEHICLE-LINK-SPEC.md). The `AdapterChip` (§6.3) then shows the real link state.
+
 ## 1. Goal
 
 Get a visible, working app on the iPhone fast:

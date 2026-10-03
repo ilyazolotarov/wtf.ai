@@ -5,6 +5,7 @@
   "dependencies": {
     "@expo/ui": "~57.0.21",
     "@maplibre/maplibre-react-native": "^11.4.0",
+    "@sentry/react-native": "~7.11.0",
     "expo": "~57.0.26",
     "expo-constants": "~57.0.20",
     "expo-dev-client": "~57.0.19",
@@ -57,5 +58,8 @@
   "jest": {
     "preset": "jest-expo"
   },
-  "private": true
+  "private": true,
+  "allowScripts": {
+    "@sentry/cli@2.58.4": true
+  }
 }

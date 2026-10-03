@@ -3,13 +3,18 @@ import * as SplashScreen from "expo-splash-screen";
 import { useEffect } from "react";
 import { useColorScheme } from "react-native";
 
+import { initSentry, Sentry } from "@/config/sentry";
 import { I18nProvider, useT } from "@/i18n/provider";
 import { PositionProvider } from "@/providers/position-provider";
 import { RouteProvider } from "@/providers/route-provider";
+import { RuntimeProvider } from "@/providers/runtime-provider";
 
+initSentry();
 void SplashScreen.preventAutoHideAsync();
 
-export default function RootLayout() {
+export default Sentry.wrap(RootLayout);
+
+function RootLayout() {
   const colorScheme = useColorScheme();
 
   useEffect(() => {
@@ -20,9 +25,11 @@ export default function RootLayout() {
     <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
       <I18nProvider>
         <PositionProvider>
-          <RouteProvider>
-            <AppStack />
-          </RouteProvider>
+          <RuntimeProvider>
+            <RouteProvider>
+              <AppStack />
+            </RouteProvider>
+          </RuntimeProvider>
         </PositionProvider>
       </I18nProvider>
     </ThemeProvider>
@@ -81,6 +88,14 @@ function AppStack() {
           presentation: "formSheet",
           sheetGrabberVisible: true,
         }}
+      />
+      <Stack.Screen
+        name="debug-terminal"
+        options={{ title: t("elmTerminal"), presentation: "modal" }}
+      />
+      <Stack.Screen
+        name="trips"
+        options={{ title: t("trips"), presentation: "modal" }}
       />
       <Stack.Screen
         name="settings"

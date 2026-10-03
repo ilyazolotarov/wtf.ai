@@ -1,0 +1,77 @@
+name: CI
+
+# Every commit: lint, typecheck, unit tests (TS, Swift logic, Python), expo-doctor, then an unsigned iOS build.
+# No EAS: the unsigned IPA is sideloaded with AltStore (docs/SPEC.md §2).
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Expo type declarations
+        # expo-env.d.ts is gitignored and normally written by `expo start`.
+        run: echo '/// <reference types="expo/types" />' > expo-env.d.ts
+
+      - name: Lint
+        run: npx expo lint
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Unit tests
+        run: npx jest --ci
+
+      - name: Expo doctor
+        run: npx expo-doctor
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: tools/triplog/pyproject.toml
+
+      - name: Python tests (tools/triplog)
+        run: |
+          pip install -e "tools/triplog[dev]"
+          python -m pytest tools/triplog
+
+  native-logic:
+    # Swift unit tests for the Foundation-only logic of the local Expo modules (Package.swift, native-tests/).
+    runs-on: ubuntu-latest
+    container: swift:6.1
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Swift tests
+        run: swift test
+
+  build-ios:
+    needs: [checks, native-logic]
+    uses: ./.github/workflows/build-ios.yml
+    with:
+      configuration: Debug
+    secrets: inherit

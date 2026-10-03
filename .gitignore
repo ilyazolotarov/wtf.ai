@@ -41,3 +41,12 @@ example
 # generated native folders
 /ios
 /android
+
+# Python (tools/)
+__pycache__/
+*.egg-info/
+.pytest_cache/
+
+# SwiftPM (native logic tests)
+.build/
+.swiftpm/

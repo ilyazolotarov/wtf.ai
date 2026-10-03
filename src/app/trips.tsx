@@ -1,0 +1,84 @@
+import * as Sharing from "expo-sharing";
+import { useEffect } from "react";
+import { Alert, StyleSheet, Text, useColorScheme, View } from "react-native";
+
+import { ScreenAction, ScreenContent, ScreenNote, ScreenRow, ScreenSection } from "@/components/screens/screen-ui";
+import { fmt, fmtBytes, fmtDate, fmtDuration } from "@/components/vehicle/format";
+import { Colors } from "@/constants/theme";
+import { useT } from "@/i18n/provider";
+import { useRecorderSnapshot, useRuntime } from "@/providers/runtime-provider";
+import type { TripIndexEntry } from "@/services/trip-recorder/trip-recorder";
+
+/** Dev-only trip list: share / delete ULog files (TRIP-LOGGER-SPEC §7, §9.4). */
+export default function TripsScreen() {
+  const { t } = useT();
+  const { recorder } = useRuntime();
+  const snap = useRecorderSnapshot();
+  const palette = Colors[useColorScheme() === "dark" ? "dark" : "light"];
+
+  useEffect(() => recorder.refresh(), [recorder]);
+
+  const share = async (trip: TripIndexEntry) => {
+    await Sharing.shareAsync(recorder.tripUri(trip), {
+      mimeType: "application/octet-stream",
+      UTI: "public.data",
+      dialogTitle: trip.fileName,
+    });
+  };
+
+  const confirmDelete = (onYes: () => void) =>
+    Alert.alert(t("delete"), undefined, [
+      { text: t("no"), style: "cancel" },
+      { text: t("yes"), style: "destructive", onPress: onYes },
+    ]);
+
+  return (
+    <ScreenContent>
+      <ScreenSection>
+        <ScreenRow labelKey="freeSpace" value={fmtBytes(snap.freeBytes)} />
+        <ScreenRow labelKey="trips" value={String(snap.trips.length)} />
+        {snap.trips.length > 0 && (
+          <ScreenAction labelKey="deleteAll" secondary onPress={() => confirmDelete(() => recorder.deleteAll())} />
+        )}
+      </ScreenSection>
+      {snap.trips.length === 0 && <ScreenNote>{t("noTrips")}</ScreenNote>}
+      {snap.trips.map((trip) => {
+        const live = snap.current?.id === trip.id;
+        const meta = [
+          live ? t("recording") : trip.complete ? fmtDuration(trip.durationS) : t("incomplete"),
+          fmtBytes(live ? snap.current?.bytes : trip.bytes),
+          trip.distanceM > 0 || live ? fmt(((live ? snap.current?.distanceM : trip.distanceM) ?? 0) / 1000, 2, "km") : null,
+          trip.adapterName,
+          trip.endReason,
+        ]
+          .filter(Boolean)
+          .join(" · ");
+        return (
+          <View key={trip.id} style={[styles.card, { backgroundColor: palette.backgroundElement }]}>
+            <Text style={[styles.title, { color: palette.text }]}>
+              {fmtDate(trip.startUtcMs)} · {trip.id}
+            </Text>
+            <Text style={[styles.meta, { color: live ? "#C0392B" : palette.textSecondary }]}>{meta}</Text>
+            <View style={styles.actions}>
+              <View style={styles.action}>
+                <ScreenAction labelKey="share" secondary disabled={live} onPress={() => void share(trip)} />
+              </View>
+              <View style={styles.action}>
+                <ScreenAction labelKey="delete" secondary disabled={live} onPress={() => confirmDelete(() => recorder.deleteTrip(trip.id))} />
+              </View>
+            </View>
+          </View>
+        );
+      })}
+      <ScreenNote>{t("tripsHint")}</ScreenNote>
+    </ScreenContent>
+  );
+}
+
+const styles = StyleSheet.create({
+  card: { padding: 14, borderRadius: 8, gap: 6 },
+  title: { fontSize: 15, fontWeight: "600" },
+  meta: { fontSize: 13 },
+  actions: { flexDirection: "row", gap: 10 },
+  action: { flex: 1 },
+});

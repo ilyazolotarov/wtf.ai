@@ -23,7 +23,7 @@ npx expo-doctor             # diagnose dependency and config issues
 npx expo install --fix      # fix incompatible package versions
 ```
 
-Run lint and typecheck before declaring any task done.
+Run lint and typecheck before declaring any task done. When touching native modules, also run the Swift logic tests (`swift test`, see README) and keep logic in `modules/*/ios/Logic/` so it stays testable without Xcode.
 
 ## Navigation & Routing
 
@@ -31,13 +31,20 @@ Run lint and typecheck before declaring any task done.
 - Import `Link`, `router`, and `useLocalSearchParams` from `expo-router`.
 - Docs: https://docs.expo.dev/router/introduction.md
 
-## Building with EAS
+## Building — GitHub Actions, not EAS
 
-Use EAS to build, sign, and submit the app in the cloud (`eas build`, `eas submit`) and to ship over-the-air updates (`eas update`) — no local Xcode or Android Studio required. Run EAS CLI as `bunx eas-cli <command>` in Bun projects, or `npx eas-cli@latest <command>` otherwise; substitute that for bare `eas` in docs examples.
-Docs: https://docs.expo.dev/eas/index.md
+**Do not use EAS Build, EAS Submit, or EAS Update, and do not suggest them.** There is no paid Apple Developer account and no Mac. iOS builds are made like this:
+
+- `.github/workflows/ci.yml` runs on every push/PR: lint, typecheck, Jest, Python tests, `expo-doctor`, then calls `.github/workflows/build-ios.yml`.
+- `build-ios.yml` runs `expo prebuild` + `xcodebuild` on a GitHub macOS runner with code signing disabled and uploads an **unsigned IPA** artifact (can also be started by hand: Actions → *Build Unsigned iOS App*, Release or Debug).
+- The IPA is sideloaded with **AltStore** (re-signed with a free Apple ID: the app expires after 7 days and must be refreshed via AltServer on Windows).
+- The CI build is the only native compiler available: a Swift or config-plugin mistake shows up as a failed `build-ios` job. Read its log; there is no local Xcode.
+- Release builds embed the JS bundle (standalone). Debug builds are a dev client that needs Metro (`npx expo start`) on the same LAN.
+
+`eas.json` is a leftover and is not used.
 
 ## Rules
 
 - If `ios/` and `android/` directories do not exist, they are generated (Continuous Native Generation). Never create or edit them by hand — configure native behavior in `app.json` and config plugins.
-- Expo Go only includes its bundled native modules. After adding a library with native code, the app needs a development build: `npx expo run:ios|android` locally, or `eas build --profile development`.
+- Expo Go only includes its bundled native modules. After adding a library with native code, the app needs a new native build: push and use the IPA from the CI `build-ios` job (see above).
 - Prefer recommended Expo modules over third-party libraries, and check your available skills before adding dependencies. Docs: https://docs.expo.dev/versions/latest/index.md

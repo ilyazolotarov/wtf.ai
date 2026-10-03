@@ -45,12 +45,36 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Allow wtf.ai to use your location while navigating."
+          "locationWhenInUsePermission": "Allow wtf.ai to use your location while navigating.",
+          "isIosBackgroundLocationEnabled": true
         }
       ],
       "expo-localization",
       "expo-sqlite",
-      "expo-sharing"
+      "expo-sharing",
+      [
+        "expo-file-system",
+        {
+          "enableFileSharing": true,
+          "supportsOpeningDocumentsInPlace": true
+        }
+      ],
+      [
+        "./modules/vehicle-link/app.plugin.js",
+        {
+          "mfiProtocols": [
+            "com.obdlink",
+            "com.vgatemall"
+          ]
+        }
+      ],
+      [
+        "@sentry/react-native/expo",
+        {
+          "url": "https://de.sentry.io/",
+          "note": "Set SENTRY_AUTH_TOKEN, SENTRY_ORG and SENTRY_PROJECT to upload source maps; otherwise set SENTRY_DISABLE_AUTO_UPLOAD=true."
+        }
+      ]
     ],
     "locales": {
       "en": "./locales/en.json",
