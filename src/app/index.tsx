@@ -131,7 +131,6 @@ export default function HomeScreen() {
       <MapSurface
         mode={cameraMode}
         ghostView={showingGhost}
-        tripActive={recording}
         compass={compass}
         onUserInteraction={() => setCameraMode("free")}
         onLongPress={() => Alert.alert(t("manualFixTitle"), t("manualFixBody"))}

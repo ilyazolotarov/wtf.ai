@@ -12,7 +12,7 @@ import type {
   Point,
   Polygon,
 } from "geojson";
-import { useEffect, useRef, useState, type ComponentProps } from "react";
+import { useEffect, useRef, type ComponentProps } from "react";
 import { useColorScheme, View, type NativeSyntheticEvent } from "react-native";
 
 import { useMapStyle } from "@/config/map";
@@ -29,8 +29,6 @@ interface MapSurfaceProps {
   mode: CameraMode;
   /** Frame both the position and the raw (spoofed) GNSS fix. */
   ghostView: boolean;
-  /** A trip is being recorded: tilt the camera like a navigator. */
-  tripActive: boolean;
   /** Walking compass (see `walkingCompass`): beam replaces the course cone and drives heading-up. */
   compass: CompassHeading | null;
   onUserInteraction(): void;
@@ -42,21 +40,23 @@ const CONE_HALF_ANGLE_RAD = (28 * Math.PI) / 180;
 const BEAM_RADIUS_M = 70;
 const BEAM_CORE_RADIUS_M = 40;
 
-/** Navigator-style tilt, applied during a trip or when zoomed in to street level. */
-const TILT_PITCH = 50;
-/** Zoom hysteresis so pinching around one level doesn't flip the tilt back and forth. */
-const TILT_ZOOM_IN = 16.5;
-const TILT_ZOOM_OUT = 16;
-/** Following snaps to these; any gesture drops to free, so they never fight a pinch. */
-const FOLLOW_ZOOM: Record<Exclude<CameraMode, "free">, number> = {
-  follow: 16,
-  "follow-heading": 17,
+/**
+ * Camera per follow mode; heading-up gets the navigator tilt. Any gesture drops to free,
+ * so these never fight a pinch, and the tilt changes only when the mode does.
+ */
+const FOLLOW_CAMERA: Record<
+  Exclude<CameraMode, "free">,
+  { zoom: number; pitch: number }
+> = {
+  follow: { zoom: 16, pitch: 0 },
+  "follow-heading": { zoom: 17, pitch: 50 },
 };
+/** Leaving follow by the button steps back to a flat overview. */
+const FREE_ZOOM = 15.5;
 
 export function MapSurface({
   mode,
   ghostView,
-  tripActive,
   compass,
   onUserInteraction,
   onLongPress,
@@ -73,33 +73,49 @@ export function MapSurface({
       : null;
   const deadReckoning = position != null && position.trust !== "TRUSTED";
   const tint = deadReckoning ? palette.warn.c : palette.accent;
-  const [zoomedIn, setZoomedIn] = useState(false);
-  const followZoom = mode === "free" ? null : FOLLOW_ZOOM[mode];
-  // While following the zoom is known up front, so tilt with the zoom-in instead of after it.
-  const streetLevel = followZoom == null ? zoomedIn : followZoom >= TILT_ZOOM_IN;
-  const pitch = !ghostView && (tripActive || streetLevel) ? TILT_PITCH : 0;
+  const follow = mode === "free" ? null : FOLLOW_CAMERA[mode];
 
   const followBearing =
     mode === "follow-heading" && position
       ? (headingUpRad(position, compass) * 180) / Math.PI
       : 0;
 
-  // Tilt changes only when the rule flips, so a manual two-finger tilt otherwise sticks.
+  // A gesture that drops follow keeps the zoom the finger chose; only the button zooms out.
+  const leftByGesture = useRef(false);
+  // Free is flat, but nothing may animate under the finger: a gesture that leaves a tilted
+  // follow mode flattens once the map settles. Holds the pitch that mode had.
+  const flattenFrom = useRef<number | null>(null);
+  const flattenTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(flattenTimer.current), []);
   useEffect(() => {
-    if (ghostView) return;
-    void cameraRef.current?.setStop({ pitch, duration: 600, easing: "ease" });
-  }, [pitch, ghostView]);
+    if (mode !== "free") {
+      flattenFrom.current = null;
+      clearTimeout(flattenTimer.current);
+      return;
+    }
+    const byGesture = leftByGesture.current;
+    leftByGesture.current = false;
+    if (byGesture || ghostView) return;
+    void cameraRef.current?.setStop({
+      zoom: FREE_ZOOM,
+      pitch: 0,
+      duration: 600,
+      easing: "ease",
+    });
+    // Once per switch to free, not when the ghost view changes later.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
 
   useEffect(() => {
-    if (!position || followZoom == null || ghostView) return;
+    if (!position || !follow || ghostView) return;
     cameraRef.current?.easeTo({
       center: [position.lon, position.lat],
-      zoom: followZoom,
+      zoom: follow.zoom,
       bearing: followBearing,
-      pitch,
+      pitch: follow.pitch,
       duration: 450,
     });
-  }, [followZoom, position, ghostView, pitch, followBearing]);
+  }, [follow, position, ghostView, followBearing]);
 
   const hasGhost = ghost != null;
   useEffect(() => {
@@ -125,13 +141,29 @@ export function MapSurface({
   const handleRegionChange = (
     event: NativeSyntheticEvent<{ userInteraction?: boolean }>,
   ) => {
-    if (event.nativeEvent.userInteraction) onUserInteraction();
+    // Still moving: the gesture hasn't settled yet.
+    clearTimeout(flattenTimer.current);
+    if (!event.nativeEvent.userInteraction) return;
+    if (follow) {
+      leftByGesture.current = true;
+      flattenFrom.current = follow.pitch > 0 ? follow.pitch : null;
+    }
+    onUserInteraction();
   };
   const handleRegionDidChange = (
-    event: NativeSyntheticEvent<{ zoom: number }>,
+    event: NativeSyntheticEvent<{ pitch: number }>,
   ) => {
-    const { zoom } = event.nativeEvent;
-    setZoomedIn((was) => (was ? zoom >= TILT_ZOOM_OUT : zoom >= TILT_ZOOM_IN));
+    const from = flattenFrom.current;
+    if (from == null) return;
+    const { pitch } = event.nativeEvent;
+    // A pan cancelling the follow ease reports did-change at its start, so wait for quiet.
+    clearTimeout(flattenTimer.current);
+    flattenTimer.current = setTimeout(() => {
+      flattenFrom.current = null;
+      // A deliberate two-finger tilt sticks.
+      if (Math.abs(pitch - from) > 2) return;
+      void cameraRef.current?.setStop({ pitch: 0, duration: 300, easing: "ease" });
+    }, 80);
   };
   const accuracy = position ? accuracyFeatures(position) : emptyPolygons();
   const cone =
@@ -146,21 +178,21 @@ export function MapSurface({
   const beam =
     position && compass
       ? sectorFeatures(
-        position,
-        compass.headingRad,
-        compass.uncertaintyRad,
-        BEAM_RADIUS_M,
-      )
-    : emptyPolygons();
+          position,
+          compass.headingRad,
+          compass.uncertaintyRad,
+          BEAM_RADIUS_M,
+        )
+      : emptyPolygons();
   const beamCore =
     position && compass
       ? sectorFeatures(
-        position,
-        compass.headingRad,
-        compass.uncertaintyRad,
-        BEAM_CORE_RADIUS_M,
-      )
-    : emptyPolygons();
+          position,
+          compass.headingRad,
+          compass.uncertaintyRad,
+          BEAM_CORE_RADIUS_M,
+        )
+      : emptyPolygons();
   const puck = position ? pointFeatures(position) : emptyPoints();
   const ghostPoint = ghost ? pointFeatures(ghost) : emptyPoints();
   const route = activeRoute
