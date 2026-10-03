@@ -57,8 +57,9 @@ INDEX_FORMAT = 2
 
 # Every glyph range below U+3000: all alphabets OSM names use in Ukraine plus punctuation and
 # symbol blocks (☦ ✝ ①), ~2.8 MB per font. A missing range logs a MapLibre error per label.
-# CJK and up would be 30 MB more per font.
-GLYPH_RANGES = list(range(0, 0x3000, 256))
+# CJK and up would be 30 MB more per font, so above it only variation selectors (U+FE0F after
+# ✝ or ❤ in names) and full-width forms.
+GLYPH_RANGES = [*range(0, 0x3000, 256), 0xFE00, 0xFF00]
 
 
 def log(msg: str) -> None:

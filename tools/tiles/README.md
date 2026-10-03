@@ -46,7 +46,7 @@ folders):
 | `index.json` | catalog: `format`, `osm_date`, `common[]` (asset, path, size, md5, sha256), `regions[]` (region, iso, name en/uk, bounds, asset, size, md5, sha256) |
 | `<region>.pmtiles` | OpenMapTiles-schema vector tiles, clipped to the region polygon (Ukraine 1.2 GB, oblasts 36–89 MB) |
 | `style.json` | OpenFreeMap Liberty (`style/liberty.json`, pinned snapshot); URLs use `{common}` (shared files directory) and `{tiles}` (region file), substituted by the app |
-| `sprite-ofm*`, `font-<slug>-<range>.pbf` | Liberty sprite and Noto Sans glyphs (every range below U+3000: all alphabets and symbols, no CJK); `path` in index.json says where the app stores each |
+| `sprite-ofm*`, `font-<slug>-<range>.pbf` | Liberty sprite and Noto Sans glyphs (every range below U+3000: all alphabets and symbols, no CJK; plus variation selectors and full-width forms); `path` in index.json says where the app stores each |
 
 The OpenMapTiles schema keeps the style identical to the online Liberty map, including the
 app's dark re-tint (`src/config/map-dark.ts`).
@@ -59,7 +59,8 @@ Adding a region = an entry in `regions.json` + its `.poly`.
 ## In the app
 
 Downloads lists the regions of the newest `maps-*` release (GitHub API → `index.json`). It
-downloads the shared files once and any region's `.pmtiles` (iOS background session,
+downloads the shared files once (again when their MD5s change, even under the same OSM
+date) and any region's `.pmtiles` (iOS background session,
 pause/resume across restarts), checks size and MD5, and stores them in `Documents/maps/`
 (`src/services/offline-map/`). One downloaded region is active; the map uses only it, with no
 online requests. Without a downloaded region the map falls back to online OpenFreeMap.

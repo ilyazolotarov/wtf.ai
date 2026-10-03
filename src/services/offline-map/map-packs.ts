@@ -24,10 +24,13 @@ export interface InstalledRegion {
   bounds: [number, number, number, number];
   osm_date: string;
   size: number;
+  /** Tiles checksum; absent on installs made before it was recorded. */
+  md5?: string;
 }
 
 export interface InstalledState {
-  common: { osm_date: string } | null;
+  /** `fingerprint` (of the shared files' MD5s) is absent on installs made before it was recorded. */
+  common: { osm_date: string; fingerprint?: string } | null;
   regions: Record<string, InstalledRegion>;
   active: string | null;
 }
@@ -144,10 +147,36 @@ function verify(file: File, expected: { size: number; md5: string }, label: stri
   if (info.md5 !== expected.md5) throw new Error(`${label}: checksum mismatch`);
 }
 
+/**
+ * Identifies the shared files by content, not `osm_date`: a forced rebuild of the same OSM
+ * extract (new glyphs, style fixes) keeps the date but changes the files. FNV-1a over the MD5s.
+ */
+function commonFingerprint(catalog: MapCatalog): string {
+  let hash = 0x811c9dc5;
+  for (const entry of [...catalog.common].sort((a, b) => a.path.localeCompare(b.path))) {
+    for (const ch of `${entry.path}:${entry.md5};`) hash = Math.imul(hash ^ ch.charCodeAt(0), 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+const commonCurrent = (installed: InstalledState, catalog: MapCatalog) =>
+  installed.common?.fingerprint === commonFingerprint(catalog) && new File(COMMON(), "style.json").exists;
+
+const tilesCurrent = (have: InstalledRegion | undefined, entry: CatalogRegion) =>
+  have?.md5 === entry.md5 && tilesFile(entry.region).exists;
+
+/** An installed region whose tiles or shared files differ from the catalog's. */
+export function regionNeedsUpdate(installed: InstalledState, catalog: MapCatalog, region: string): boolean {
+  const have = installed.regions[region];
+  const entry = catalog.regions.find((r) => r.region === region);
+  if (!have || !entry) return false;
+  return !tilesCurrent(have, entry) || !commonCurrent(installed, catalog);
+}
+
 /** Shared style, sprites and glyphs for the catalog's release, swapped in only when all verify. */
 async function ensureCommon(id: number, catalog: MapCatalog, region: string) {
   const { installed } = getState();
-  if (installed.common?.osm_date === catalog.osm_date && new File(COMMON(), "style.json").exists) return;
+  if (commonCurrent(installed, catalog)) return;
   const total = catalog.common.reduce((sum, f) => sum + f.size, 0);
   const staging = new Directory(ROOT(), "common.staging");
   if (staging.exists) staging.delete();
@@ -165,7 +194,10 @@ async function ensureCommon(id: number, catalog: MapCatalog, region: string) {
   const common = COMMON();
   if (common.exists) common.delete();
   staging.rename("common");
-  saveInstalled({ ...getState().installed, common: { osm_date: catalog.osm_date } });
+  saveInstalled({
+    ...getState().installed,
+    common: { osm_date: catalog.osm_date, fingerprint: commonFingerprint(catalog) },
+  });
 }
 
 function installTiles(entry: CatalogRegion, osm_date: string) {
@@ -175,7 +207,7 @@ function installTiles(entry: CatalogRegion, osm_date: string) {
   if (dest.exists) dest.delete();
   part.rename(dest.name);
   const { installed } = getState();
-  const { asset: _asset, md5: _md5, sha256: _sha256, ...info } = entry;
+  const { asset: _asset, sha256: _sha256, ...info } = entry;
   saveInstalled({
     ...installed,
     regions: { ...installed.regions, [entry.region]: { ...info, osm_date } },
@@ -237,13 +269,20 @@ export async function downloadRegion(region: string): Promise<void> {
   if (!catalog || !entry || download) return;
   const id = ++runId;
   try {
-    const needed = entry.size + catalog.common.reduce((sum, f) => sum + f.size, 0) + DISK_MARGIN;
+    // Update of a region whose tiles didn't change: only the shared files are fetched.
+    const tiles = tilesCurrent(getState().installed.regions[region], entry) ? 0 : entry.size;
+    const needed = tiles + catalog.common.reduce((sum, f) => sum + f.size, 0) + DISK_MARGIN;
     if (Paths.availableDiskSpace < needed) {
       throw new Error(`Not enough free space: ${Math.ceil(needed / 1e6)} MB needed`);
     }
     setState({ downloadError: null });
     await ensureCommon(id, catalog, region);
     if (id !== runId) return;
+    if (tiles === 0) {
+      // ensureCommon leaves the "common" progress up; nothing else to download.
+      setState({ download: null });
+      return;
+    }
     const part = partFile(region);
     if (part.exists) part.delete();
     await runTiles(id, entry, catalog.osm_date, assetUrl(catalog, entry));
@@ -280,7 +319,11 @@ export function removeRegion(region: string): void {
   const { installed } = getState();
   const { [region]: _removed, ...regions } = installed.regions;
   const active = installed.active === region ? (Object.keys(regions)[0] ?? null) : installed.active;
-  saveInstalled({ ...installed, regions, active });
+  // Last region gone: drop the shared files too, so a fresh download fetches them anew
+  // (unless a download in progress has already fetched them for its own region).
+  const last = Object.keys(regions).length === 0 && !getState().download;
+  if (last && COMMON().exists) COMMON().delete();
+  saveInstalled({ ...installed, regions, active, common: last ? null : installed.common });
 }
 
 export function setActiveRegion(region: string): void {

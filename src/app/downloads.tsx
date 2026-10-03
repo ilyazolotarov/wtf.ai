@@ -19,6 +19,7 @@ import {
     getCatalogUrl,
     loadCatalog,
     pauseDownload,
+    regionNeedsUpdate,
     removeRegion,
     resumeDownload,
     setActiveRegion,
@@ -133,7 +134,7 @@ export default function DownloadsScreen() {
         )}
         {sorted.map((row) => {
           const have = installed.regions[row.region];
-          const outdated = have && catalog && row.available && have.osm_date < catalog.osm_date;
+          const outdated = have && catalog && row.available && regionNeedsUpdate(installed, catalog, row.region);
           const isActive = installed.active === row.region;
           const busy = download?.region === row.region;
           return (
