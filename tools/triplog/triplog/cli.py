@@ -59,6 +59,10 @@ def _refresh(args) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Windows consoles default to cp1252, which can't print "−" or "°".
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     p = argparse.ArgumentParser(prog="triplog", description="wtf.ai trip log tools")
     sub = p.add_subparsers(dest="cmd", required=True)
 
