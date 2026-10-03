@@ -17,7 +17,7 @@ export interface CompassHeading {
 /** Walking pace and below (~11 km/h): the compass shows where the phone points. */
 const COMPASS_MAX_SPEED_MPS = 3;
 /** Heading-up from GNSS course only when moving; course is noise below this. */
-const COURSE_MIN_SPEED_MPS = 2;
+export const COURSE_MIN_SPEED_MPS = 2;
 const MIN_CHANGE_DEG = 2;
 const MIN_INTERVAL_MS = 100;
 /** iOS accuracy 0–3 → "< 50° / < 35° / < 20°" uncertainty; 0 means worse than 50°. */
@@ -80,15 +80,34 @@ export function walkingCompass(
     : null;
 }
 
-/** Map bearing for heading-up: walking compass first, then GNSS course when moving, else north. */
+/**
+ * Direction of travel worth turning the map to, or undefined. The navigator's heading
+ * (dr/fused) holds through stops; a GNSS course is noise unless moving.
+ */
+export function travelHeadingRad(
+  position: PositionEstimate | null | undefined,
+): number | undefined {
+  if (position?.headingRad == null) return undefined;
+  if (position.source === "dr" || position.source === "fused") return position.headingRad;
+  return (position.speedMps ?? 0) > COURSE_MIN_SPEED_MPS ? position.headingRad : undefined;
+}
+
+/** Map bearing for heading-up: walking compass first, then travel heading, else the last one held. */
 export function headingUpRad(
   position: PositionEstimate | null | undefined,
   compass: CompassHeading | null,
+  heldRad = 0,
 ): number {
-  if (compass) return compass.headingRad;
-  return position &&
-    (position.speedMps ?? 0) > COURSE_MIN_SPEED_MPS &&
-    position.headingRad != null
-    ? position.headingRad
-    : 0;
+  return compass?.headingRad ?? travelHeadingRad(position) ?? heldRad;
+}
+
+/** `headingUpRad` that keeps the last travel heading through a stop instead of snapping north. */
+export function useHeadingUp(
+  position: PositionEstimate | null | undefined,
+  compass: CompassHeading | null,
+): number {
+  const travel = travelHeadingRad(position);
+  const [held, setHeld] = useState(0);
+  if (travel !== undefined && travel !== held) setHeld(travel);
+  return headingUpRad(position, compass, held);
 }

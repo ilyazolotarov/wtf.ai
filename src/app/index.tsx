@@ -1,6 +1,6 @@
 import { useKeepAwake } from "expo-keep-awake";
 import { Link, router } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
     Alert,
     Animated,
@@ -14,8 +14,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { MapSurface } from "@/components/map/map-surface";
 import {
-    headingUpRad,
+    COURSE_MIN_SPEED_MPS,
     useCompassHeading,
+    useHeadingUp,
     walkingCompass,
 } from "@/components/map/use-compass-heading";
 import {
@@ -44,6 +45,9 @@ const CAMERA: Record<CameraMode, { icon: IconName; label: "follow" | "followHead
   free: { icon: "location_searching", label: "free" },
 };
 
+/** Driving this long on a trip turns follow into heading-up (UI-SPEC §6.2). */
+const AUTO_HEADING_UP_MS = 2000;
+
 export default function HomeScreen() {
   useKeepAwake();
   const insets = useSafeAreaInsets();
@@ -56,12 +60,44 @@ export default function HomeScreen() {
   const [cameraMode, setCameraMode] = useState<CameraMode>("follow");
   const [ghostView, setGhostView] = useState(false);
   const [requesting, setRequesting] = useState(false);
-  const recording = useRecorderSnapshot().state === "recording";
+  const recorderState = useRecorderSnapshot().state;
+  const recording = recorderState === "recording";
+  // A linger after engine off is still the same drive for the camera.
+  const onTrip = recording || recorderState === "lingering";
   // Not in a car (no trip, no adapter): the phone compass may stand in for heading.
   const compass = walkingCompass(
     position,
     useCompassHeading(!recording && nav.adapter !== "on" && position != null),
   );
+  const headingUp = useHeadingUp(position, compass);
+
+  // Once per trip: follow becomes heading-up when the car first drives off, and goes back
+  // to follow when the trip ends unless the driver has picked a mode since.
+  const autoHeadingUp = useRef<"armed" | "on" | "done">("armed");
+  const driving = recording && (position?.speedMps ?? 0) > COURSE_MIN_SPEED_MPS;
+  useEffect(() => {
+    if (!driving || autoHeadingUp.current !== "armed") return;
+    const timer = setTimeout(() => {
+      if (cameraMode !== "follow") {
+        autoHeadingUp.current = "done";
+        return;
+      }
+      autoHeadingUp.current = "on";
+      setCameraMode("follow-heading");
+    }, AUTO_HEADING_UP_MS);
+    return () => clearTimeout(timer);
+  }, [driving, cameraMode]);
+  useEffect(() => {
+    if (onTrip) return;
+    if (autoHeadingUp.current === "on") {
+      setCameraMode((mode) => (mode === "follow-heading" ? "follow" : mode));
+    }
+    autoHeadingUp.current = "armed";
+  }, [onTrip]);
+  const pickCameraMode = (next: (mode: CameraMode) => CameraMode) => {
+    if (autoHeadingUp.current === "on") autoHeadingUp.current = "done";
+    setCameraMode(next);
+  };
 
   useEffect(() => {
     if (!isOnboardingDone()) router.push("/onboarding");
@@ -69,7 +105,7 @@ export default function HomeScreen() {
 
   const cycleCameraMode = () => {
     setGhostView(false);
-    setCameraMode((mode) =>
+    pickCameraMode((mode) =>
       mode === "follow" ? "follow-heading" : mode === "follow-heading" ? "free" : "follow",
     );
   };
@@ -112,7 +148,7 @@ export default function HomeScreen() {
       ? (() => {
           const bearing = toDegrees(bearingRad(position, activeRoute));
           const heading =
-            cameraMode === "follow-heading" ? toDegrees(headingUpRad(position, compass)) : 0;
+            cameraMode === "follow-heading" ? toDegrees(headingUp) : 0;
           return {
             title: `${t("toward")} ${activeRoute.name[language]}`,
             sub: `${formatDistance(haversineM(position, activeRoute), language)} · ${cardinal(bearing, language)} ${Math.round(bearing)}°`,
@@ -132,7 +168,8 @@ export default function HomeScreen() {
         mode={cameraMode}
         ghostView={showingGhost}
         compass={compass}
-        onUserInteraction={() => setCameraMode("free")}
+        headingUpRad={headingUp}
+        onUserInteraction={() => pickCameraMode(() => "free")}
         onLongPress={() => Alert.alert(t("manualFixTitle"), t("manualFixBody"))}
       />
       <View

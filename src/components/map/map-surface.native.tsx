@@ -21,7 +21,7 @@ import { circlePolygon, destinationAtBearing } from "@/nav/geo";
 import type { PositionEstimate } from "@/nav/position/types";
 import { usePosition } from "@/providers/position-provider";
 import { useRoute } from "@/providers/route-provider";
-import { headingUpRad, type CompassHeading } from "./use-compass-heading";
+import type { CompassHeading } from "./use-compass-heading";
 
 type CameraMode = "follow" | "follow-heading" | "free";
 
@@ -31,6 +31,8 @@ interface MapSurfaceProps {
   ghostView: boolean;
   /** Walking compass (see `walkingCompass`): beam replaces the course cone and drives heading-up. */
   compass: CompassHeading | null;
+  /** Map bearing in follow-heading (see `useHeadingUp`). */
+  headingUpRad: number;
   onUserInteraction(): void;
   onLongPress(): void;
 }
@@ -58,6 +60,7 @@ export function MapSurface({
   mode,
   ghostView,
   compass,
+  headingUpRad,
   onUserInteraction,
   onLongPress,
 }: MapSurfaceProps) {
@@ -77,7 +80,7 @@ export function MapSurface({
 
   const followBearing =
     mode === "follow-heading" && position
-      ? (headingUpRad(position, compass) * 180) / Math.PI
+      ? (headingUpRad * 180) / Math.PI
       : 0;
 
   // A gesture that drops follow keeps the zoom the finger chose; only the button zooms out.

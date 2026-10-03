@@ -139,7 +139,11 @@ Depends on Phase 2.
 
 ### 6.2 Camera modes
 
-`follow` → `follow-heading` (heading-up from the walking compass beam when shown, else GNSS course when speed > ~2 m/s, else north-up) → `free`. User pan/zoom gesture switches to `free`. `RecenterButton` cycles modes and shows the current one.
+`follow` → `follow-heading` → `free`. User pan/zoom gesture switches to `free`. `RecenterButton` cycles modes and shows the current one.
+
+Heading-up bearing: the walking compass beam when shown; else the navigator heading (`dr`/`fused` source, valid while stopped); else GNSS course when speed > ~2 m/s; else the last of these held, so the map does not snap north at a stop (north-up only before any heading is known).
+
+Auto heading-up: once per trip, when a trip is recording and speed stays > ~2 m/s for 2 s, `follow` switches to `follow-heading` (any other mode is left alone). When the trip ends (recorder leaves `recording`/`lingering`) it goes back to `follow`, unless the driver changed the mode by button or gesture in between.
 
 Tilt: the camera tilts to 50° (navigator view) while a trip is recording or when zoomed in to ≥ 16.5 (back to top-down below 16). It applies in every mode and returns to top-down while the ghost view is open. Pitch is set only when this rule flips, so a manual two-finger tilt stays until then.
 
@@ -211,7 +215,7 @@ Parallel with Phase 3; each screen is independent. Use `@expo/ui` for settings-l
 3. On device:
    - Permission prompt appears, localized per device language.
    - Puck tracks while walking/driving; accuracy circle scales with reported accuracy.
-   - Heading-up engages only when moving; pan → free; recenter restores follow.
+   - Driving off on a trip turns follow into heading-up; it holds its heading at a stop; pan → free; recenter restores follow.
    - Airplane mode / indoors → `NO FIX` within ~5 s.
    - Deny permission → `PermissionCard`.
    - Dark mode switches map style.
