@@ -1,6 +1,6 @@
 # wtf.ai — Stage 1 Navigator Specification
 
-Status: draft v1 (2026-10-03). Implements SPEC.md Phase 2 (TS EKF + replay) and the parts of Phase 4 (calibration) that
+Status: draft v2 (2026-10-03). Implements SPEC.md Phase 2 (TS EKF + replay) and the parts of Phase 4 (calibration) that
 need no UI. Source of truth for coding agents. Inputs come from [TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md) streams;
 the vehicle link is specified in [VEHICLE-LINK-SPEC.md](VEHICLE-LINK-SPEC.md).
 
@@ -20,7 +20,8 @@ jammed:
   tests.
 - **Measured** on 7 real drives: CX-5 KF, OBDLink MX+, iPhone 13 (iOS 26), phone in a mount, Slavutych. Of these,
   4 drives have clean GNSS, 1 is jammed then clean, and 2 are jammed throughout.
-- **Not wired into the app yet.** The map shows phone GNSS from `GnssPositionSource`; §9 is the plan.
+- **Wired into the app** (§9): `NavigatorService` drives the map and saves the GNSS lag and the speed scale (§7.4).
+  Checked by replaying the real logs through the service; not field-tested yet.
 
 ## 3. Inputs (`src/nav/types.ts`)
 
@@ -40,7 +41,7 @@ jammed:
 
 | Mode       | Position                                    | Uncertainty                                  | Leaves when                                   |
 | ---------- | ------------------------------------------- | -------------------------------------------- | --------------------------------------------- |
-| `none`     | —                                           | —                                            | first usable fix → `anchored`                 |
+| `none`     | —                                           | —                                            | first usable fix → `anchored`; parked pose (§6.1) → `dr` |
 | `anchored` | best recent fix (heading unknown)           | fix accuracy + OBD distance driven since it  | heading known (§6) → `dr`                     |
 | `dr`       | EKF                                         | EKF covariance (reported as a 68 % radius)   | 5 satellite fixes in a row fail the gate → `anchored` at the latest fix |
 
@@ -70,6 +71,8 @@ jammed:
 - Each sample updates `v = k_s · s_OBD` with σ 0.3 m/s. A raw 0 gets σ 0.8 m/s, because the ECU cuts off below
   ~2–3 km/h.
 - At standstill a zero-velocity update (σ 0.02 m/s) replaces the OBD update.
+- OBD speed older than 2.5 s (link lost) is unknown: the relative track breaks (alignment and lag windows start
+  over), and the anchored radius keeps growing at the last speed. The EKF's own speed random-walks meanwhile.
 - CX-5: OBD reads about 2 % below GNSS. Direct comparison gives 1.016–1.021; `k_s` learns 1.00–1.03 per drive.
 
 ## 6. EKF (`ekf/dr-ekf.ts`) and heading initialization
@@ -95,6 +98,30 @@ jammed:
     - Position σ = fit noise + heading σ × the lever arm to the fixes.
     - On the jammed drives it started after about 450–600 m. One drive never got enough distinct fixes and stayed
       anchored, which is correct.
+  - **Parked pose** (§6.1): from the previous session, before any fix.
+
+### 6.1 Parked pose (SPEC §3.3 startup)
+
+- **Why:** a session otherwise has no heading until a GNSS course (≥ 5 m/s) or, under jamming, alignment after
+  ~500 m. The car usually starts where it was parked, facing the same way.
+- **Saved** (`Navigator.parkedPose`): position, heading and their σ while the car stands (standstill, or OBD 0) in
+  mode `dr`. The service stores it per VIN at engine/ignition off, every 30 s while parked, and when it stops.
+  The first OBD speed > 0 clears it, so a pose never outlives a drive.
+- **Used** (`Navigator.startFromPose`): when the app starts and the VIN matches, the car of the adapter auto-connect
+  will use, known before it connects. The EKF starts at once with σ widened by 5 m and 2°. Refused if the fixes so
+  far disagree with it.
+- **Checked:** until confirmed, any fix that fails the EKF gate drops it (the car was moved or turned): reset to
+  `anchored` at that fix, and the stored pose is deleted. It is confirmed by an agreeing fix ≤ 100 m after 150 m of
+  driving, because a fix while parked says nothing about the heading. A live VIN other than the expected one
+  restarts the navigator without it.
+- **Not checked:** with no fix at all, nothing can tell that the car was moved while the app was off.
+- **Measured** (`replay --chain`, 3 consecutive pairs of the real drives):
+  - q8tfjs, jammed for its first 10 min: DR from 0 s instead of alignment at 613 s; coarse fixes median 9 m from
+    the prediction, 90 % inside their radius.
+  - 6vccgr: DR from 0 s instead of a course at 136 s; 49 m off at the first satellite fix after 850 m.
+  - s4fkdm: DR from 0 s instead of a course at 162 s.
+  - Wrong poses: 300 m off is dropped by the first fix; a heading turned 180° is dropped on all 3; 90° on 2 of 3
+    (on the jammed one, coarse fixes pulled the heading round instead).
 
 ## 7. Calibration (online)
 
@@ -127,10 +154,20 @@ leak into the bias.
 - **Measured:** −0.1 ± 0.1 s on all drives (fit RMS 1.4 m vs 2.6 m at +0.4 s). An earlier 0.4 s guess from one turn
   cost about a third of the outage accuracy.
 
-### 7.4 Persistence (planned with §9)
+### 7.4 Persistence (`src/services/navigation/calibration-store.ts`)
 
-Store `k_s` and `b_ω` per VIN, and the GNSS lag per phone (kv-store), so the next session starts calibrated. Learned
-values only replace defaults after enough data, as in §7.3.
+Learned values go to kv-store (`nav.calibration`) every 30 s and when the navigator stops, so the next session starts
+calibrated. They only replace defaults after enough data. The parked pose (§6.1) is kept separately
+(`nav.parkedPose`).
+
+- **GNSS lag**, per phone model (`sys_hw`) and iOS version: saved once §7.3 has an estimate (6 turn windows), used
+  as `gnssLagS` on the next start until the new session measures its own. A value from another model or iOS version
+  is dropped.
+- **Speed scale `k_s`**, per VIN: saved once its σ ≤ 0.01 (clean GNSS gets there in 1–2 km; jammed drives stay at
+  ~0.025 and don't save). It seeds the next EKF with its σ widened by 0.01, since one car's drives learn 1.00–1.03.
+  Within a session it also survives an EKF reset.
+- **Not stored:** the gyro bias (CoreMotion corrects it, and it drifts with temperature) and `k_ω` (the learned
+  value mostly absorbs GNSS timing, §7.2).
 
 ## 8. Trust (interim, `src/services/position/gnss-trust.ts`)
 
@@ -142,21 +179,34 @@ Until `src/nav/integrity` (SPEC Phase 3), the map's trust state comes from `Gnss
 - **Regaining trust:** satellite fixes ≤ 30 m arriving steadily for 5 s.
 - Trust changes are written to the trip log (app tag: `gnss trust <state> (±N m)`).
 
-## 9. Wiring into the app (next)
+## 9. Wiring into the app (`src/services/navigation/navigator-service.ts`)
 
-- **NavigatorService** (`src/services/navigation/`):
-  - Owns one `Navigator`. It takes GNSS and IMU from `SensorService` (owner `navigator`: IMU must run whenever the
-    navigator does, not only during trips) and speed from `VehicleLink.onSpeed`.
-  - It exposes a `PositionSource` (§4.3 of UI-SPEC), so the map switches source without UI changes.
+- **NavigatorService:**
+  - Owns one `Navigator`. It takes GNSS and IMU from `SensorService` (owner `navigator`: IMU runs whenever the
+    navigator does) and speed from `VehicleLink.onSpeed`.
+  - It is the runtime's `PositionSource` (§4.3 of UI-SPEC), so the map switched source without UI changes.
+  - **Runs** while the map is on screen or a trip records, so DR isn't interrupted when the app is backgrounded
+    mid-trip. When it stops, the next start begins with a fresh navigator (the car may have moved).
+  - **Input order:** inputs are held 300 ms and fed in time order, because IMU arrives in 100 ms batches and fixes
+    ~50 ms late (p90 on the real logs; outliers take seconds). A fix more than 2 s behind is dropped.
+  - **Display:** the DR position is extrapolated along the heading to "now" (≤ 1 s), since the navigator runs
+    300 ms behind.
+  - A new VIN starts a new navigator. At start the VIN is `VehicleLinkCore.expectedVin()`: the connected car's,
+    else the last verified adapter's car, so the parked pose (§6.1) applies before the adapter connects.
 - **Mapping to `PositionEstimate`:**
-  - mode `dr` → `source: 'dr'` (or `'fused'` while trusted GNSS updates it);
+  - mode `dr` → `source: 'fused'` while trust is `TRUSTED` and a satellite fix was accepted in the last 3 s, else
+    `'dr'`;
   - `anchored` → `source: 'gnss'` with the grown radius;
   - trust from §8;
-  - `rawGnss` = the latest fix, for the ghost marker.
-- **Without an adapter:** phone GNSS only, as today. The navigator needs OBD speed for DR.
+  - `rawGnss` = the latest fix, for the ghost marker; `distanceSinceTrustedM` from OBD.
+- **Without OBD speed** (no adapter, or none for 10 s): phone GNSS only, as before. The navigator needs OBD speed
+  for DR.
+- **Trip log:** mode changes, resets, the parked pose (used, confirmed, rejected), and loaded/saved calibration are
+  app notes (`nav …`).
 - **Persistence** per §7.4.
-- **Test:** replay a trip log through the service with the native modules mocked, then a field drive comparing the
-  map with a second phone's GNSS.
+- **Tests:** unit tests replay synthetic drives through the service. The 7 real logs replayed through it (real
+  delivery delays) match the offline replay: median 0.1–1 m apart, identical learned values.
+- **Next:** a field drive comparing the map with a second phone's GNSS (§12.6).
 
 ## 10. Replay and benchmark (`src/nav/replay`, `tools/replay`)
 
@@ -222,9 +272,5 @@ needed to check them (`replay:bench`).
 4. Second phone and mount, to check the tuning values (§11).
 5. Integrity (SPEC Phase 3) replaces the interim trust tracker and the EKF gate as the GNSS acceptance rule.
 6. Spoofing replay: offsetting fixes in clean logs (SPEC §3.10) isn't implemented yet.
-7. **TODO: save the measured GNSS lag** (§7.3, §7.4).
-   - Today every session starts from the default (`gnssLagS` 0) and re-learns the lag over 1–3 min of turns.
-   - When the navigator is wired into the app (§9), store `Navigator.gnssLagEstimate` in kv-store whenever it
-     updates, and pass it as `gnssLagS` on the next start.
-   - Key the stored value by phone model (`sys_hw`) and iOS version, and drop it when either changes: Apple's GNSS
-     filtering can differ between them.
+7. Trip logs don't record the navigator's output, only its notes. Replay reproduces it from the same inputs, but
+   a stored calibration changes the starting point: replay with `--lag` to match.

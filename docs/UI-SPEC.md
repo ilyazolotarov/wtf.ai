@@ -6,7 +6,7 @@ Status: draft v1 (2026-09-29). Companion to [SPEC.md](SPEC.md) §3.9. Source of 
 >
 > Redesign (2026-10-03): the UI follows the **Calm** design (claude.ai/design project "wtf.ai Redesign", option 1b): Onest type, frosted-glass map panels (`expo-blur` + translucent tint, `src/components/ui/glass-fill.tsx`), sentence-case trust status, big light speed numeral, OpenFreeMap **Liberty** style in both color schemes. Theme tokens live in `src/constants/theme.ts` (`usePalette()`), icons in `src/components/ui/icon.tsx` (Material names → SF Symbols). Changes to the sections below: the menu is a `more` sheet (Offline data, Calibration, Diagnostics, Settings; nested sheets get `?from=more` for a back button); sheets draw their own header (`headerShown: false`); Settings adds an Appearance override (System / Light / Dark via `Appearance.setColorScheme`, persisted); a first-run `onboarding` route (welcome → location → adapter → calibration) shows until `onboarding-done` is set in kv-store; on `UNTRUSTED` the map shows the raw GNSS ghost and can frame it ("Show where GPS thinks you are").
 >
-> Position source (2026-10-03): §4.3 is updated. The map's GNSS now comes from `modules/sensor-capture` (shared with the trip log), not `expo-location`'s watcher, which stopped for good after jamming. Only satellite fixes count for trust. The navigator replaces this source next ([NAVIGATOR-SPEC.md](NAVIGATOR-SPEC.md) §9).
+> Position source (2026-10-03): §4.3 is updated. The map's GNSS now comes from `modules/sensor-capture` (shared with the trip log), not `expo-location`'s watcher, which stopped for good after jamming. Only satellite fixes count for trust. Since then `NavigatorService` ([NAVIGATOR-SPEC.md](NAVIGATOR-SPEC.md) §9) is the map's source; it shows phone GNSS as below when there is no OBD speed.
 >
 > Follow-up (2026-10-03): the mock `vehicle` (§7.2) and `debug` (§7.5) screens become real in the trip logger milestone — see [TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md) §9 and [VEHICLE-LINK-SPEC.md](VEHICLE-LINK-SPEC.md). The `AdapterChip` (§6.3) then shows the real link state.
 
@@ -71,10 +71,9 @@ Can run in parallel with Phase 0 once deps are installed.
 ### 4.3 Position service — `src/services/position/` (may import Expo)
 
 - `PositionSource` interface: `start()`, `stop()`, `subscribe(listener) → unsubscribe`, `getSnapshot()`, permission status.
-- `GnssPositionSource`:
+- Phone GNSS (`gnss-position-source.ts`, used by `NavigatorService` without OBD speed):
   - **Fixes:** from `SensorService` (`modules/sensor-capture`: `BestForNavigation`, automotive, never paused by iOS).
-    It registers as capture owner `position` while the map is on screen; a trip keeps GNSS running in the
-    background.
+    `NavigatorService` registers as capture owner `navigator` while the map is on screen or a trip records.
   - **Mapping:** `GnssRecord` → `PositionEstimate` with `source: 'gnss'`; course → `headingRad`. Invalid
     speed/course (NaN) → undefined.
   - **Trust:** decided over time by `GnssTrustTracker` (`src/services/position/gnss-trust.ts`), not per fix, so

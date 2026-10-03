@@ -15,7 +15,6 @@ import { dash, fmt, fmtBytes, fmtDuration } from "@/components/vehicle/format";
 import { usePalette } from "@/constants/theme";
 import type { Strings } from "@/i18n/en";
 import { useT } from "@/i18n/provider";
-import { ekfMock } from "@/mocks";
 import {
   useRecorderSnapshot,
   useRuntime,
@@ -51,22 +50,13 @@ function CycleRow<T extends number | null>({
   );
 }
 
-const EKF_ROWS = [
-  ["E", "eastM"],
-  ["N", "northM"],
-  ["ψ", "headingRad"],
-  ["v", "speedMps"],
-  ["kₛ", "speedScale"],
-  ["bω", "yawBias"],
-  ["kω", "yawScale"],
-] as const;
 
 export default function DebugScreen() {
   const { t } = useT();
   const palette = usePalette();
   const nav = useNavStatus();
   const { position } = nav;
-  const { link, recorder, sensors, getDevSettings, setDevSettings } = useRuntime();
+  const { link, recorder, sensors, position: navigator, getDevSettings, setDevSettings } = useRuntime();
   const rec = useRecorderSnapshot();
   const sensor = useSensorSnapshot();
   const speedHz = useVehicleLinkValue((s) => s.stats?.speedHz ?? null);
@@ -85,6 +75,9 @@ export default function DebugScreen() {
   const heading =
     position?.headingRad == null ? dash : `${Math.round((position.headingRad * 180) / Math.PI)}°`;
   const recording = rec.state === "recording";
+  // Re-read every second (clock).
+  const ekf = navigator.getDebug();
+  const num = (v: number | null, digits: number, unit = "") => (v === null ? dash : `${v.toFixed(digits)}${unit}`);
 
   return (
     <ScreenContent title={t("debug")}>
@@ -146,9 +139,13 @@ export default function DebugScreen() {
       )}
 
       <ScreenSection title={t("ekfState")}>
-        {EKF_ROWS.map(([label, key]) => (
-          <ScreenRow key={key} label={label} value={ekfMock[key] ?? dash} />
-        ))}
+        <ScreenRow label="mode" value={`${ekf.mode}${ekf.source ? ` · ${ekf.source}` : ""}`} />
+        <ScreenRow label="ψ σ" value={num(ekf.headingSigmaDeg, 1, "°")} />
+        <ScreenRow label="kₛ" value={ekf.speedScale === null ? dash : `${ekf.speedScale.toFixed(4)} ±${ekf.speedScaleSigma!.toFixed(4)}`} />
+        <ScreenRow label="bω" value={num(ekf.gyroBiasDegS, 4, " °/s")} />
+        <ScreenRow label="kω" value={num(ekf.gyroScale, 4)} />
+        <ScreenRow label="GNSS lag" value={`${num(ekf.gnssLagS, 2, " s")}${ekf.gnssLagWindows ? ` (${ekf.gnssLagWindows} turns)` : ""}`} />
+        <ScreenRow label="parked pose" value={ekf.parkedPose} />
       </ScreenSection>
 
       <ScreenSection title={t("developerSettings")} plain>

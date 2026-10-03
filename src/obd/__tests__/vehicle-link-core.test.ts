@@ -92,8 +92,10 @@ describe("VehicleLinkCore", () => {
       protocolNumber: 6,
     });
 
-    // A fresh app start auto-connects to the remembered adapter.
+    // A fresh app start auto-connects to the remembered adapter, and knows its car before connecting.
+    expect(setup().core.expectedVin()).toBeNull();
     const second = setup({}, store);
+    expect(second.core.expectedVin()).toBe("JM3KFBDM1J0123456");
     second.emulators.set("emu-1", emulators.get("emu-1")!);
     expect(await second.core.autoConnect()).toBe(true);
     await until(() => second.core.getSnapshot().link === "polling");

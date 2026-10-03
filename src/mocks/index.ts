@@ -33,13 +33,3 @@ export const downloadsMock: {
   { id: "map", size: "1.2 GB", version: "2026.09", status: "not-downloaded" },
   { id: "routing", size: "840 MB", version: "2026.09", status: "not-downloaded" },
 ];
-
-export const ekfMock = {
-  eastM: null,
-  northM: null,
-  headingRad: null,
-  speedMps: null,
-  speedScale: null,
-  yawBias: null,
-  yawScale: null,
-} as const;

@@ -11,7 +11,8 @@ import { createClock } from "@/obd/clock";
 import { VehicleLinkCore } from "@/obd/vehicle-link-core";
 
 import { kvStore } from "./kv-store";
-import { GnssPositionSource } from "./position/gnss-position-source";
+import { CalibrationStore } from "./navigation/calibration-store";
+import { NavigatorService } from "./navigation/navigator-service";
 import { SensorService } from "./sensor-capture/sensor-service";
 import { createTripFiles } from "./trip-recorder/trip-files";
 import { TripRecorder } from "./trip-recorder/trip-recorder";
@@ -29,8 +30,8 @@ export interface Runtime {
   link: VehicleLinkCore;
   sensors: SensorService;
   recorder: TripRecorder;
-  /** Phone GNSS for the map (shares the native stream with the trip log). */
-  position: GnssPositionSource;
+  /** The map's position: the navigator (NAVIGATOR-SPEC §9), or phone GNSS without an OBD adapter. */
+  position: NavigatorService;
   getDevSettings(): DevSettings;
   setDevSettings(patch: Partial<DevSettings>): void;
 }
@@ -54,6 +55,8 @@ export function getRuntime(): Runtime {
         : new NativeTransport(device.id, device.transport, remembered),
   });
   const sensors = new SensorService();
+  const sysHw = Device.modelId ?? Device.modelName ?? "unknown";
+  const sysOsVer = `${Platform.OS} ${Device.osVersion ?? ""}`.trim();
   const recorder = new TripRecorder({
     link,
     sensors,
@@ -63,13 +66,25 @@ export function getRuntime(): Runtime {
     appInfo: () => ({
       sys_name: "wtf.ai",
       ver_sw: `${Constants.expoConfig?.version ?? "?"} (${Constants.nativeBuildVersion ?? "dev"})`,
-      sys_hw: Device.modelId ?? Device.modelName ?? "unknown",
-      sys_os_ver: `${Platform.OS} ${Device.osVersion ?? ""}`.trim(),
+      sys_hw: sysHw,
+      sys_os_ver: sysOsVer,
     }),
   });
   recorder.start();
 
-  const position = new GnssPositionSource(sensors);
+  const position = new NavigatorService({
+    sensors,
+    link,
+    // The GNSS lag is stored per phone model and iOS version (NAVIGATOR-SPEC §7.4).
+    calibration: new CalibrationStore(kvStore, { model: sysHw, os: sysOsVer }),
+    nowUs,
+    note: (text) => recorder.note(text),
+  });
+  // During a trip the navigator keeps running with the map off screen, so dead reckoning
+  // doesn't start over each time the app comes back.
+  const syncKeepAlive = () => position.setKeepAlive(recorder.getSnapshot().state === "recording");
+  recorder.subscribe(syncKeepAlive);
+  syncKeepAlive();
   // Trust changes go into the trip log, so a stuck or flickering status shows up in replay.
   let lastTrust: string | null = null;
   position.subscribe(() => {

@@ -5,8 +5,8 @@
 // - none: no fix yet.
 // - anchored: position = best recent fix; the heading is unknown, so the uncertainty
 //   radius grows by the distance driven (OBD) since that fix.
-// - dr: the EKF runs (initialized from a GNSS course, or from fitting the gyro/OBD track
-//   shape to coarse fixes when jamming leaves no course).
+// - dr: the EKF runs (initialized from a GNSS course, from fitting the gyro/OBD track
+//   shape to coarse fixes when jamming leaves no course, or from the pose saved when parked).
 
 import { GnssLagEstimator, type GnssLagConfig, type GnssLagEstimate } from "./calibration/gnss-lag";
 import { DrEkf, wrapAngle, type EkfConfig } from "./ekf/dr-ekf";
@@ -37,6 +37,8 @@ export interface NavConfig {
   obdZeroSigmaMps: number;
   /** Standstill = OBD 0 and a quiet IMU for this long. */
   standstillUs: number;
+  /** OBD speed older than this is unknown (link lost); the parked poll runs at 1 Hz. */
+  obdStaleUs: number;
   /** Init from a GNSS course needs at least this speed and course accuracy. */
   courseInitMinSpeedMps: number;
   courseInitMaxAccRad: number;
@@ -47,6 +49,10 @@ export interface NavConfig {
   alignMinSpacingM: number;
   /** Re-anchor the local frame beyond this distance from its origin. */
   reanchorM: number;
+  /** A parked pose is confirmed by a fix at least this accurate that agrees with it… */
+  poseConfirmAccuracyM: number;
+  /** …after driving this far: a fix taken while parked says nothing about the heading. */
+  poseConfirmDistanceM: number;
   ekf: Partial<EkfConfig>;
   gnssLag: Partial<GnssLagConfig>;
   imu: Partial<ImuConfig>;
@@ -63,6 +69,7 @@ export const DEFAULT_NAV_CONFIG: NavConfig = {
   obdSigmaMps: 0.3,
   obdZeroSigmaMps: 0.8,
   standstillUs: 2_000_000,
+  obdStaleUs: 2_500_000,
   // Pulling away, CoreLocation's course can be off by tens of degrees while claiming ±18°.
   courseInitMinSpeedMps: 5,
   courseInitMaxAccRad: (10 * Math.PI) / 180,
@@ -70,6 +77,8 @@ export const DEFAULT_NAV_CONFIG: NavConfig = {
   alignWindowUs: 15 * 60_000_000,
   alignMinSpacingM: 25,
   reanchorM: 5000,
+  poseConfirmAccuracyM: 100,
+  poseConfirmDistanceM: 150,
   ekf: {},
   gnssLag: {},
   imu: {},
@@ -88,6 +97,17 @@ export interface NavEstimate {
   speedMps?: number;
 }
 
+/** Vehicle pose while parked: the next session starts from it (SPEC §3.3 startup). */
+export interface ParkedPose {
+  lat: number;
+  lon: number;
+  /** Clockwise from north. */
+  headingRad: number;
+  /** 1σ. */
+  posSigmaM: number;
+  headingSigmaRad: number;
+}
+
 export type FixStatus = "init" | "accepted" | "rejected" | "anchored" | "skipped";
 
 export interface FixOutcome {
@@ -98,6 +118,8 @@ export interface FixOutcome {
   predictedSigmaM?: number;
   nis?: number;
   initMethod?: "course" | "alignment";
+  /** A pose from `startFromPose`: the first good fix that agrees confirms it; one that disagrees drops it. */
+  pose?: "confirmed" | "rejected";
 }
 
 /** Short state history for lag-corrected GNSS updates. */
@@ -172,6 +194,10 @@ export class Navigator {
   private anchor: { coord: Coordinate; sigma: number; distanceM: number } | null = null;
   private lastFix: GnssFix | null = null;
   private rejectedSat = 0;
+  /** Speed scale for the next EKF start: a stored per-car value, or the one learned before a reset. */
+  private speedScale: { ks: number; ksVar: number } | null = null;
+  /** The EKF started from a parked pose that no fix has confirmed yet (OBD distance at the start). */
+  private poseUnverifiedFromM: number | null = null;
   private lagEstimator: GnssLagEstimator;
   readonly stats: NavStats = { imuInvalidS: 0, standstillS: 0, obdDistanceM: 0, resets: 0 };
 
@@ -203,6 +229,11 @@ export class Navigator {
   /** Learned parameters (speed scale, gyro bias/scale) while the EKF runs. */
   get params() {
     return this.ekf?.params() ?? null;
+  }
+
+  /** Start the EKF from a speed scale learned earlier (stored per car). Applies at the next EKF start. */
+  setSpeedScalePrior(ks: number, ksVar: number): void {
+    this.speedScale = { ks, ksVar };
   }
 
   onImu(s: ImuSample): void {
@@ -276,6 +307,38 @@ export class Navigator {
     return null;
   }
 
+  /** Pose to start the next session from, while the car stands (null: moving, or heading unknown). */
+  get parkedPose(): ParkedPose | null {
+    const o = this.lastObd;
+    const parked = this.standstill || (o !== null && o.rawKph === 0 && this.lastTUs !== null && this.lastTUs - o.tUs < this.config.obdStaleUs);
+    if (!parked || !this.ekf || !this.frame) return null;
+    const psi = this.ekf.psi < 0 ? this.ekf.psi + 2 * Math.PI : this.ekf.psi;
+    return { ...this.frame.toCoordinate(this.ekf.east, this.ekf.north), headingRad: psi, posSigmaM: this.ekf.positionSigma, headingSigmaRad: this.ekf.psiSigma };
+  }
+
+  /**
+   * Start dead reckoning from a pose saved when parked, before any fix. Until a fix confirms it, a fix
+   * that disagrees (the car was moved, or it's another car) drops it. Returns false when the EKF already
+   * runs or the fixes so far disagree with the pose.
+   */
+  startFromPose(pose: ParkedPose): boolean {
+    if (this.ekf) return false;
+    if (this.anchor) {
+      const d = this.frame!.toEnu(pose);
+      const a = this.frame!.toEnu(this.anchor.coord);
+      const sigma = Math.hypot(this.anchor.sigma + this.anchor.distanceM, pose.posSigmaM);
+      if (Math.hypot(d[0] - a[0], d[1] - a[1]) > Math.sqrt(this.config.gate) * sigma) return false;
+    }
+    this.frame ??= new LocalFrame(pose);
+    const [e, n] = this.frame.toEnu(pose);
+    const theta = wrapAngle(this.rel.psi - pose.headingRad);
+    const cs = Math.cos(theta);
+    const sn = Math.sin(theta);
+    this.initEkf(theta, e - (cs * this.rel.e - sn * this.rel.n), n - (sn * this.rel.e + cs * this.rel.n), pose.posSigmaM, pose.headingSigmaRad);
+    this.poseUnverifiedFromM = this.stats.obdDistanceM;
+    return true;
+  }
+
   /** Predicted position at a past time (within ~3 s), for evaluating held-out fixes. */
   positionAt(tUs: number): { coord: Coordinate; sigmaM: number } | null {
     if (!this.ekf || !this.frame) return null;
@@ -300,7 +363,8 @@ export class Navigator {
     const dt = (tUs - this.lastTUs) / 1e6;
     if (dt <= 0) return;
     this.lastTUs = tUs;
-    const speed = this.lastObd?.speedMps ?? 0;
+    const obdFresh = this.lastObd !== null && tUs - this.lastObd.tUs < this.config.obdStaleUs;
+    const speed = obdFresh ? this.lastObd!.speedMps : 0;
     // A gap in the IMU stream or a handled phone means the rotation is unknown, unless the
     // car stands (OBD 0): then it isn't turning, whatever the phone does.
     const parked = this.lastObd !== null && this.lastObd.rawKph === 0;
@@ -309,15 +373,16 @@ export class Navigator {
     if (yaw === null && !parked) this.stats.imuInvalidS += dt;
     if (this.standstill) this.stats.standstillS += dt;
     this.stats.obdDistanceM += speed * dt;
-    if (this.anchor) this.anchor.distanceM += speed * dt;
+    // Without speed the car may still move: grow the radius at the last known speed.
+    if (this.anchor) this.anchor.distanceM += (this.lastObd?.speedMps ?? 0) * dt;
 
     const relRate = hold || yaw === null ? 0 : yaw - this.rel.bias;
     this.rel.psi = wrapAngle(this.rel.psi - relRate * dt);
     this.rel.e += speed * Math.sin(this.rel.psi) * dt;
     this.rel.n += speed * Math.cos(this.rel.psi) * dt;
     this.relHistory.push(tUs, [this.rel.e, this.rel.n, this.rel.psi]);
-    if (yaw === null && !hold) {
-      // Track shape broken: start over.
+    if ((yaw === null && !hold) || !obdFresh) {
+      // Track shape broken (rotation or distance unknown): start over.
       if (!this.ekf) this.alignPoints = [];
       this.lagEstimator.breakTrack();
     } else {
@@ -396,13 +461,14 @@ export class Navigator {
         posSigma,
         psiSigma,
         speedSigma: 0.5,
-        params: { bw: this.rel.bias },
+        params: { bw: this.rel.bias, ...this.speedScale },
       },
       this.config.ekf,
     );
     this.ekfHistory.clear();
-    this.ekfHistory.push(this.lastTUs!, [this.ekf.east, this.ekf.north, this.ekf.psi, this.ekf.speed]);
+    if (this.lastTUs !== null) this.ekfHistory.push(this.lastTUs, [this.ekf.east, this.ekf.north, this.ekf.psi, this.ekf.speed]);
     this.alignPoints = [];
+    this.poseUnverifiedFromM = null;
     this.anchor = null;
     this.rejectedSat = 0;
   }
@@ -418,6 +484,16 @@ export class Navigator {
     const pos = ekf.updatePosition(rE, rN, sigma, c.gate);
     const outcome: FixOutcome = { status: pos.accepted ? "accepted" : "rejected", errorM: Math.hypot(rE, rN), predictedSigmaM, nis: pos.nis };
     const sat = isSatelliteFix(fix);
+    if (this.poseUnverifiedFromM !== null) {
+      if (!pos.accepted) {
+        this.reset(fix, sigma);
+        return { ...outcome, pose: "rejected" };
+      }
+      if (fix.hAccM <= c.poseConfirmAccuracyM && this.stats.obdDistanceM - this.poseUnverifiedFromM >= c.poseConfirmDistanceM) {
+        this.poseUnverifiedFromM = null;
+        outcome.pose = "confirmed";
+      }
+    }
     if (!pos.accepted) {
       if (sat && ++this.rejectedSat >= c.resetAfterRejected) this.reset(fix, sigma);
       return outcome;
@@ -434,11 +510,15 @@ export class Navigator {
 
   /** The EKF disagrees with good fixes: start over, anchored at the latest one. */
   private reset(fix: GnssFix, sigma: number): void {
+    // The speed scale is a property of the car, not of the diverged track: keep it.
+    const { ks, ksVar } = this.ekf!.params();
+    this.speedScale = { ks, ksVar };
     this.anchor = { coord: { lat: fix.lat, lon: fix.lon }, sigma, distanceM: 0 };
     this.ekf = null;
     this.ekfHistory.clear();
     this.alignPoints = [];
     this.rejectedSat = 0;
+    this.poseUnverifiedFromM = null;
     this.stats.resets++;
   }
 }

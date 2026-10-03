@@ -4,7 +4,7 @@
 import type { GnssLagEstimate } from "../calibration/gnss-lag";
 import type { TripLog } from "../../triplog/trip-log-reader";
 import { haversineM } from "../geo";
-import { Navigator, type FixOutcome, type NavConfig, type NavEstimate } from "../navigator";
+import { Navigator, type FixOutcome, type NavConfig, type NavEstimate, type ParkedPose } from "../navigator";
 import { isSatelliteFix, type GnssFix } from "../types";
 
 export interface ReplayCut {
@@ -30,6 +30,8 @@ export interface ReplayOptions {
    * after `delayS` more seconds of normal fusion (lets speed scale and bias settle).
    */
   openLoop?: { delayS: number };
+  /** Start from the pose saved at the end of the previous drive (as the app does after parking). */
+  startPose?: ParkedPose;
 }
 
 export interface TrackPoint extends NavEstimate {
@@ -62,6 +64,10 @@ export interface ReplaySummary {
   durationS: number;
   obdDistanceM: number;
   init: { tS: number; method: string } | null;
+  /** What became of `startPose`: refused at start, confirmed or rejected by a fix (time since log start). */
+  startPose: { status: "refused" | "unverified" | "confirmed" | "rejected"; tS: number } | null;
+  /** Pose to start the next drive from (null: not parked in mode dr at the end). */
+  endPose: ParkedPose | null;
   fixes: Record<FixRecord["status"], number> & { total: number; satellite: number };
   /** Median distance between prediction and fix before the update, per fix kind (mode dr). */
   medianErrorM: { satellite: number | null; coarse: number | null };
@@ -102,6 +108,12 @@ export function replayTrip(trip: TripLog, options: ReplayOptions = {}): ReplayRe
   let lastDistance = 0;
   let nextTrackUs = -Infinity;
   let init: ReplaySummary["init"] = null;
+  let startPose: ReplaySummary["startPose"] = null;
+  if (options.startPose) {
+    const ok = nav.startFromPose(options.startPose);
+    startPose = { status: ok ? "unverified" : "refused", tS: 0 };
+    if (ok) init = { tS: 0, method: "parked pose" };
+  }
 
   const afterEvent = (tUs: number) => {
     const d = nav.stats.obdDistanceM;
@@ -146,6 +158,7 @@ export function replayTrip(trip: TripLog, options: ReplayOptions = {}): ReplayRe
       } else {
         const out = nav.onGnss(fix);
         fixes.push({ tS: t, fix, satellite, ...out });
+        if (out.pose) startPose = { status: out.pose, tS: t };
         if (out.status === "init" && !init) {
           init = { tS: t, method: out.initMethod ?? "?" };
           if (options.openLoop) {
@@ -176,6 +189,8 @@ export function replayTrip(trip: TripLog, options: ReplayOptions = {}): ReplayRe
       durationS,
       obdDistanceM: nav.stats.obdDistanceM,
       init,
+      startPose,
+      endPose: nav.parkedPose,
       fixes: { ...counts, total: fixes.length, satellite: fixes.filter((f) => f.satellite).length },
       medianErrorM: {
         satellite: median(compared.filter((f) => f.satellite).map((f) => f.errorM!)),

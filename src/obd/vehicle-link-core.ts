@@ -168,10 +168,15 @@ export class VehicleLinkCore implements VehicleLink {
    */
   async autoConnect(): Promise<boolean> {
     if (this.snapshot.activeDeviceId && this.snapshot.link !== "error") return true;
-    const last = [...this.remembered()].sort((a, b) => b.lastVerifiedAt - a.lastVerifiedAt)[0];
+    const last = this.lastRemembered();
     if (!last) return false;
     await this.connect(last.id, { wait: true });
     return true;
+  }
+
+  /** The car's VIN: the connected one, else the one auto-connect expects (its adapter's last car). */
+  expectedVin(): string | null {
+    return this.snapshot.vehicle?.vin || this.lastRemembered()?.vin || null;
   }
 
   // ---- VehicleLink: connection ----
@@ -502,6 +507,10 @@ export class VehicleLinkCore implements VehicleLink {
     if (this.speedCapOverride !== null) return this.speedCapOverride;
     const caps = this.deps.store.getJson<Record<string, number>>(SPEED_CAPS_KEY) ?? {};
     return (vin && caps[vin]) || Infinity;
+  }
+
+  private lastRemembered(): RememberedAdapter | undefined {
+    return [...this.remembered()].sort((a, b) => b.lastVerifiedAt - a.lastVerifiedAt)[0];
   }
 
   private remembered(): RememberedAdapter[] {

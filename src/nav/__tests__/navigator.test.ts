@@ -174,3 +174,59 @@ describe("buildViewerData", () => {
     expect(d.options.cuts).toEqual([{ fromS: 30, toS: 40 }]);
   });
 });
+
+describe("Navigator from a parked pose", () => {
+  const DRIVE: DriveSegment[] = [
+    { durationS: 10, speedMps: 0, yawRateDegS: 0 },
+    { durationS: 10, speedMps: 10, yawRateDegS: 0 },
+    { durationS: 9, speedMps: 8, yawRateDegS: 10 },
+    { durationS: 40, speedMps: 12, yawRateDegS: 0 },
+    { durationS: 5, speedMps: 0, yawRateDegS: 0 },
+    { durationS: 5, speedMps: 0, yawRateDegS: 0 },
+  ];
+  const drive = syntheticDrive({ segments: DRIVE, gnss: "coarse", startHeadingRad: 2, seed: 4 });
+  const start = drive.truth[0];
+  const pose = { lat: start.lat, lon: start.lon, headingRad: start.psi, posSigmaM: 5, headingSigmaRad: 0.04 };
+
+  test("dead-reckons from the start under jamming; a fix after some driving confirms it", () => {
+    const plain = replayTrip(drive.trip).summary;
+    const r = replayTrip(drive.trip, { startPose: pose });
+    expect(r.summary.init).toEqual({ tS: 0, method: "parked pose" });
+    expect(r.summary.startPose?.status).toBe("confirmed");
+    // Confirmed only after driving: a fix while parked says nothing about the heading.
+    expect(r.summary.startPose!.tS).toBeGreaterThan(20);
+    expect(plain.init === null || plain.init.tS > 30).toBe(true);
+    expect(endError(drive, r).posM).toBeLessThan(20);
+  });
+
+  test("ends parked: the pose for the next start", () => {
+    const end = replayTrip(drive.trip, { startPose: pose }).summary.endPose!;
+    const truth = drive.truth.at(-1)!;
+    expect(haversineM(end, truth)).toBeLessThan(20);
+    expect(angleDiffDeg(end.headingRad, truth.psi)).toBeLessThan(5);
+  });
+
+  test("no pose while moving", () => {
+    const moving = syntheticDrive({ segments: DRIVE.slice(0, 4), gnss: "clean", seed: 4 });
+    expect(replayTrip(moving.trip).summary.endPose).toBeNull();
+  });
+
+  test("a fix far from the pose drops it: back to a normal start", () => {
+    const r = replayTrip(drive.trip, { startPose: { ...pose, lat: pose.lat + 0.005 } });
+    expect(r.summary.startPose).toMatchObject({ status: "rejected" });
+    expect(r.summary.startPose!.tS).toBeLessThan(5);
+    expect(r.track.find((t) => t.tS > r.summary.startPose!.tS)?.mode).toBe("anchored");
+  });
+
+  test("a heading turned around is dropped once the car drives", () => {
+    const r = replayTrip(drive.trip, { startPose: { ...pose, headingRad: pose.headingRad + Math.PI } });
+    expect(r.summary.startPose?.status).toBe("rejected");
+  });
+
+  test("refused when the fixes so far disagree", () => {
+    const nav = new Navigator();
+    nav.onGnss({ tUs: 1, lat: pose.lat + 0.01, lon: pose.lon, hAccM: 20 });
+    expect(nav.startFromPose(pose)).toBe(false);
+    expect(nav.mode).toBe("anchored");
+  });
+});

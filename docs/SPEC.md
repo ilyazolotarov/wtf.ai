@@ -144,7 +144,7 @@ States: `TRUSTED` → `UNTRUSTED` → `REACQUIRING` → `TRUSTED`.
    - fix-to-fix displacement inconsistent with odometry distance over the same interval (+ margin).
    - DR uncertainty = particle-filter posterior (all clusters) when map matching is active, else EKF covariance. A fix is consistent if it is within k·σ of *any* cluster.
 3. **Re-acceptance**: N consecutive fixes consistent with DR (within k·σ) → `TRUSTED`.
-4. **Startup**: last pose persisted at ignition off; first fix of new session is checked for teleport against it (odometry distance since = 0 until driving).
+4. **Startup**: last pose persisted at ignition off; first fix of new session is checked for teleport against it (odometry distance since = 0 until driving). Stage 1: NAVIGATOR-SPEC §6.1.
 5. **Jamming:** iOS falls back to Wi-Fi/cell positions. They have no speed, claim ±7 m … 150 km, and are often
    repeated.
    - They are not GNSS: they never make the state `TRUSTED`.
@@ -195,7 +195,8 @@ States: `TRUSTED` → `UNTRUSTED` → `REACQUIRING` → `TRUSTED`.
 - **Online**: EKF continues estimating parameters while `TRUSTED`. Persist per VIN (and per phone mount for `k_ω`).
   Also the GNSS position lag, measured from turns and persisted per phone (NAVIGATOR-SPEC §7).
 - Implemented online today: gyro bias at stops, `k_s`, `k_ω` and the GNSS lag. The learned `k_ω` is a timing
-  artifact (NAVIGATOR-SPEC §7.2). Not yet: persistence and the initial-drive wizard.
+  artifact (NAVIGATOR-SPEC §7.2). Persisted: `k_s` per VIN and the GNSS lag per phone model + iOS version
+  (NAVIGATOR-SPEC §7.4). The pose at ignition off starts the next session (NAVIGATOR-SPEC §6.1). Not yet: the initial-drive wizard.
 
 ### 3.7 Map matching — road-constrained particle filter (`src/nav/mapmatch/`)
 
@@ -251,7 +252,7 @@ Reference approach: Gustafsson et al., "Particle filters for positioning, naviga
 UI-first milestone (map with live GNSS + mock screens): see [UI-SPEC.md](UI-SPEC.md). Phase 1 makes `vehicle` and `debug` real and adds dev-only `trips` and `debug-terminal` routes: see [TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md) §9.
 
 - Native launch splash — displays `wtf.ai` and **"Where the f\* am I?"**.
-- `index` — map. Today it shows phone GNSS from `modules/sensor-capture` with the interim trust tracker; the navigator is wired in next (NAVIGATOR-SPEC §9). Target: fused position puck + uncertainty circle (dominant hypothesis), alternative map-match hypotheses as secondary markers when ambiguous, raw GNSS ghost marker, trust badge (`GPS OK` / `UNTRUSTED` / `REACQUIRING`), time & distance since last trusted fix, adapter status.
+- `index` — map. Today it shows the Stage 1 navigator (NAVIGATOR-SPEC §9), or phone GNSS from `modules/sensor-capture` without an OBD adapter, with the interim trust tracker. Target: fused position puck + uncertainty circle (dominant hypothesis), alternative map-match hypotheses as secondary markers when ambiguous, raw GNSS ghost marker, trust badge (`GPS OK` / `UNTRUSTED` / `REACQUIRING`), time & distance since last trusted fix, adapter status.
 - `onboarding` — first-run flow (welcome, location permission, adapter, calibration).
 - `more` — sheet linking Offline data, Calibration, Diagnostics, Settings.
 - `calibration` — first-run wizard.
@@ -316,8 +317,8 @@ Status (2026-10-03):
     DeviceMotion at 100 Hz, MapLibre offline tiles (per-region packs).
   - Open: a BLE clone, valhalla-mobile, the road graph.
 - **Phase 1:** done and field-tested (7 drives, TRIP-LOGGER-SPEC §11).
-- **Phase 2:** the navigator and replay are implemented and measured on replay. Wiring it into the app is next
-  (NAVIGATOR-SPEC §2, §9).
+- **Phase 2:** the navigator and replay are implemented and measured on replay. It drives the map through
+  `NavigatorService` and saves its calibration. A field drive is still needed (NAVIGATOR-SPEC §2, §9).
 
 ### Stage 2 & 3 — vehicle-specific improvements
 

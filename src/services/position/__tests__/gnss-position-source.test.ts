@@ -1,12 +1,5 @@
-import { Emitter } from "@/obd/emitter";
-import { GnssPositionSource, mapFixToPosition } from "@/services/position/gnss-position-source";
-import type { SensorService } from "@/services/sensor-capture/sensor-service";
+import { mapFixToPosition } from "@/services/position/gnss-position-source";
 import type { GnssRecord } from "@/triplog/schema";
-
-jest.mock("expo-location", () => ({
-  getForegroundPermissionsAsync: jest.fn(async () => ({ granted: true, status: "granted" })),
-  requestForegroundPermissionsAsync: jest.fn(async () => ({ granted: true, status: "granted" })),
-}));
 
 function fix(overrides: Partial<GnssRecord> = {}): GnssRecord {
   return {
@@ -26,12 +19,6 @@ function fix(overrides: Partial<GnssRecord> = {}): GnssRecord {
     flags: 0,
     ...overrides,
   };
-}
-
-function fakeSensors() {
-  const gnss = new Emitter<[GnssRecord]>();
-  const want = jest.fn();
-  return { sensors: { gnss, want } as unknown as SensorService, gnss, want };
 }
 
 describe("GNSS position mapping", () => {
@@ -54,40 +41,5 @@ describe("GNSS position mapping", () => {
     expect(p.headingRad).toBeUndefined();
     expect(p.speedMps).toBeUndefined();
     expect(p.accuracyM).toBe(9999);
-  });
-});
-
-describe("GnssPositionSource", () => {
-  test("asks the shared sensor service for GNSS and releases it on stop", async () => {
-    const { sensors, want } = fakeSensors();
-    const source = new GnssPositionSource(sensors);
-    await source.start();
-    expect(want).toHaveBeenLastCalledWith(true, false, "position");
-    source.stop();
-    expect(want).toHaveBeenLastCalledWith(false, false, "position");
-  });
-
-  test("start() again re-requests capture without subscribing twice", async () => {
-    const { sensors, gnss, want } = fakeSensors();
-    const source = new GnssPositionSource(sensors);
-    const seen = jest.fn();
-    source.subscribe(seen);
-    await source.start();
-    await source.start();
-    expect(want).toHaveBeenCalledTimes(2);
-    gnss.emit(fix());
-    expect(seen).toHaveBeenCalledTimes(1);
-    source.stop();
-  });
-
-  test("a Wi-Fi fix (no speed) moves the position but isn't trusted GNSS", async () => {
-    const { sensors, gnss } = fakeSensors();
-    const source = new GnssPositionSource(sensors);
-    await source.start();
-    gnss.emit(fix({ speedMps: NaN, courseRad: NaN, hAccM: 12 }));
-    expect(source.getSnapshot()).toMatchObject({ lat: 50.45, accuracyM: 12, trust: "NO_FIX" });
-    gnss.emit(fix({ utcUs: 1_800_000_001_000_000 }));
-    expect(source.getSnapshot()?.trust).toBe("TRUSTED");
-    source.stop();
   });
 });
