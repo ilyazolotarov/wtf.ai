@@ -407,7 +407,7 @@ Not used: bare-CR "repeat last command" (it saves nothing on BLE and breaks when
 | Engine state      | Speed job     | RPM job (`010C`, response count when supported) |
 | ----------------- | ------------- | ----------------------------------------------- |
 | `engine-running`  | back-to-back  | every 5 s                                       |
-| `engine-off`      | back-to-back  | every 2 s (catch restarts after auto stop-start) |
+| `engine-off`      | 1 Hz while speed is 0; back-to-back once the car rolls (hybrid EV mode, coasting) | every 2 s (catch restarts after auto stop-start) |
 | `ignition-off`    | stopped       | every 5 s as the ignition probe                  |
 | `unknown`         | stopped       | immediately, then per the resulting state        |
 
@@ -422,7 +422,7 @@ Not used: bare-CR "repeat last command" (it saves nothing on BLE and breaks when
 | `unknown` / `ignition-off` → `engine-off` | first valid RPM response (a high one counts as the first of the 2 for `engine-running`) |
 | link lost                       | state becomes `unknown`                                                                        |
 
-- Speed > 0 while `engine-off` is valid (hybrids, coasting with stop-start) — speed polling keeps going.
+- Speed > 0 while `engine-off` is valid (hybrids, coasting with stop-start). Parked with the engine off, speed drops to 1 Hz: it only has to notice the car rolling, and it keeps the parked timeout fed (TRIP-LOGGER-SPEC §4).
 - A running engine's RPM never repeats exactly (0.25 rpm resolution, polled seconds apart: 0 repeats in 167 samples over three real trips). Some ECUs answer with the RPM latched at the last shutdown while awake with the engine off: a Mazda CX-5 reported 796.50 for 280 s while parked with the engine off, and 724.00 after the engine was stopped. Without the repeat rule that started a trip and blocked the parked timeout.
 - `ATRV` is read every 30 s (and logged). Voltage is a hint only (smart alternators make it unreliable for engine-state decisions).
 - Trip start/end on top of these states: TRIP-LOGGER-SPEC §4.

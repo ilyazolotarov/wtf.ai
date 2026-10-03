@@ -14,6 +14,8 @@ export interface PollerConfig {
   rpmCommand: string;
   /** Speed cap; back-to-back below it. 50 Hz safety ceiling by default (§10.2). */
   maxSpeedHz: number;
+  /** Engine off and standing: speed only needs to notice the car rolling (hybrid EV, coasting). */
+  speedHzEngineOffStanding: number;
   rpmPeriodRunningMs: number;
   rpmPeriodEngineOffMs: number;
   rpmPeriodIgnitionOffMs: number;
@@ -27,6 +29,7 @@ export const DEFAULT_POLLER_CONFIG: PollerConfig = {
   speedCommand: "010D",
   rpmCommand: "010C",
   maxSpeedHz: SAFETY_CEILING_HZ,
+  speedHzEngineOffStanding: 1,
   rpmPeriodRunningMs: 5000,
   rpmPeriodEngineOffMs: 2000,
   rpmPeriodIgnitionOffMs: 5000,
@@ -71,6 +74,7 @@ export class ObdPoller {
   private config: PollerConfig;
   private consecutiveTimeouts = 0;
   private speedWorked = false;
+  private lastSpeedRaw: number | null = null;
 
   constructor(
     private readonly session: Elm327Session,
@@ -153,7 +157,8 @@ export class ObdPoller {
         await this.clock.sleep(Math.max(1, waitUs / 1000));
         continue;
       }
-      const minGapUs = 1e6 / this.effectiveCap();
+      const standingOff = state === "engine-off" && this.lastSpeedRaw === 0;
+      const minGapUs = 1e6 / (standingOff ? Math.min(this.config.speedHzEngineOffStanding, this.effectiveCap()) : this.effectiveCap());
       const waitUs = Math.min(lastSpeedTxUs + minGapUs - now, nextRpmUs - now);
       if (waitUs > 0) {
         await this.clock.sleep(waitUs / 1000);
@@ -196,6 +201,7 @@ export class ObdPoller {
     this.stats.onSpeedPoll(r.rxUs, r.rxUs - r.txUs, ok);
     if (!ok || !o?.bytes) return;
     this.speedWorked = true;
+    this.lastSpeedRaw = o.bytes[0];
     const sample: SpeedSample = {
       txUs: r.txUs,
       rxUs: r.rxUs,

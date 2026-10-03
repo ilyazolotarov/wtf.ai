@@ -1,29 +1,42 @@
-import type { LocationObject } from "expo-location";
+import { Emitter } from "@/obd/emitter";
+import { GnssPositionSource, mapFixToPosition } from "@/services/position/gnss-position-source";
+import type { SensorService } from "@/services/sensor-capture/sensor-service";
+import type { GnssRecord } from "@/triplog/schema";
 
-import { mapLocationToPosition } from "@/services/position/gnss-position-source";
+jest.mock("expo-location", () => ({
+  getForegroundPermissionsAsync: jest.fn(async () => ({ granted: true, status: "granted" })),
+  requestForegroundPermissionsAsync: jest.fn(async () => ({ granted: true, status: "granted" })),
+}));
 
-function makeLocation(
-  overrides: Partial<LocationObject["coords"]> = {},
-): LocationObject {
+function fix(overrides: Partial<GnssRecord> = {}): GnssRecord {
   return {
-    coords: {
-      latitude: 50.45,
-      longitude: 30.52,
-      altitude: 180,
-      accuracy: 4.5,
-      altitudeAccuracy: 3,
-      heading: 90,
-      speed: 12,
-      ...overrides,
-    },
-    timestamp: 1_800_000_000_000,
+    timestampUs: 5_000_000,
+    utcUs: 1_800_000_000_000_000,
+    latDeg: 50.45,
+    lonDeg: 30.52,
+    altMslM: 180,
+    altEllipsoidM: 210,
+    hAccM: 4.5,
+    vAccM: 3,
+    speedMps: 12,
+    speedAccMps: 0.3,
+    courseRad: Math.PI / 2,
+    courseAccRad: 0.05,
+    deliveryDelayUs: 10_000,
+    flags: 0,
+    ...overrides,
   };
 }
 
+function fakeSensors() {
+  const gnss = new Emitter<[GnssRecord]>();
+  const want = jest.fn();
+  return { sensors: { gnss, want } as unknown as SensorService, gnss, want };
+}
+
 describe("GNSS position mapping", () => {
-  test("maps degrees to radians and preserves valid speed and accuracy", () => {
-    const estimate = mapLocationToPosition(makeLocation());
-    expect(estimate).toMatchObject({
+  test("maps a native fix, course in radians, time in ms", () => {
+    expect(mapFixToPosition(fix())).toMatchObject({
       lat: 50.45,
       lon: 30.52,
       headingRad: Math.PI / 2,
@@ -36,17 +49,45 @@ describe("GNSS position mapping", () => {
     });
   });
 
-  test("omits unavailable heading and negative speed", () => {
-    const estimate = mapLocationToPosition(
-      makeLocation({ heading: -1, speed: -1 }),
-    );
-    expect(estimate.headingRad).toBeUndefined();
-    expect(estimate.speedMps).toBeUndefined();
+  test("invalid (NaN) course, speed, and accuracy", () => {
+    const p = mapFixToPosition(fix({ courseRad: NaN, speedMps: NaN, hAccM: NaN }));
+    expect(p.headingRad).toBeUndefined();
+    expect(p.speedMps).toBeUndefined();
+    expect(p.accuracyM).toBe(9999);
+  });
+});
+
+describe("GnssPositionSource", () => {
+  test("asks the shared sensor service for GNSS and releases it on stop", async () => {
+    const { sensors, want } = fakeSensors();
+    const source = new GnssPositionSource(sensors);
+    await source.start();
+    expect(want).toHaveBeenLastCalledWith(true, false, "position");
+    source.stop();
+    expect(want).toHaveBeenLastCalledWith(false, false, "position");
   });
 
-  test("uses a conservative accuracy when the provider omits it", () => {
-    expect(
-      mapLocationToPosition(makeLocation({ accuracy: null })).accuracyM,
-    ).toBe(9999);
+  test("start() again re-requests capture without subscribing twice", async () => {
+    const { sensors, gnss, want } = fakeSensors();
+    const source = new GnssPositionSource(sensors);
+    const seen = jest.fn();
+    source.subscribe(seen);
+    await source.start();
+    await source.start();
+    expect(want).toHaveBeenCalledTimes(2);
+    gnss.emit(fix());
+    expect(seen).toHaveBeenCalledTimes(1);
+    source.stop();
+  });
+
+  test("a Wi-Fi fix (no speed) moves the position but isn't trusted GNSS", async () => {
+    const { sensors, gnss } = fakeSensors();
+    const source = new GnssPositionSource(sensors);
+    await source.start();
+    gnss.emit(fix({ speedMps: NaN, courseRad: NaN, hAccM: 12 }));
+    expect(source.getSnapshot()).toMatchObject({ lat: 50.45, accuracyM: 12, trust: "NO_FIX" });
+    gnss.emit(fix({ utcUs: 1_800_000_001_000_000 }));
+    expect(source.getSnapshot()?.trust).toBe("TRUSTED");
+    source.stop();
   });
 });

@@ -3,34 +3,50 @@ import * as Location from "expo-location";
 import type { PositionEstimate, TrustState } from "@/nav/position/types";
 import { GnssTrustTracker } from "@/services/position/gnss-trust";
 import type { PositionSource } from "@/services/position/position-source";
+import type { SensorService } from "@/services/sensor-capture/sensor-service";
+import type { GnssRecord } from "@/triplog/schema";
 
-export function mapLocationToPosition(
-  location: Location.LocationObject,
+const OWNER = "position";
+const finite = (v: number) => (Number.isFinite(v) ? v : undefined);
+
+/** Satellite fix vs Wi-Fi/cell fallback: only satellite fixes carry a speed (0 when standing). */
+export const isSatelliteRecord = (fix: GnssRecord) => Number.isFinite(fix.speedMps) && fix.speedMps >= 0;
+
+export function mapFixToPosition(
+  fix: GnssRecord,
   trust: TrustState = "TRUSTED",
-  lastTrustedFixAt: number | undefined = location.timestamp,
+  lastTrustedFixAt: number | undefined = fix.utcUs / 1000,
 ): PositionEstimate {
-  const { latitude, longitude, accuracy, heading, speed } = location.coords;
-
+  const speed = finite(fix.speedMps);
   return {
-    lat: latitude,
-    lon: longitude,
-    headingRad:
-      heading === null || heading < 0 ? undefined : (heading * Math.PI) / 180,
-    speedMps: speed === null || speed < 0 ? undefined : speed,
-    accuracyM: accuracy ?? 9999,
+    lat: fix.latDeg,
+    lon: fix.lonDeg,
+    headingRad: finite(fix.courseRad),
+    speedMps: speed !== undefined && speed >= 0 ? speed : undefined,
+    accuracyM: finite(fix.hAccM) ?? 9999,
     source: "gnss",
     trust,
-    timestamp: location.timestamp,
+    timestamp: fix.utcUs / 1000,
     lastTrustedFixAt,
   };
 }
 
+/**
+ * Phone GNSS for the map, from the same native CoreLocation stream as the trip log
+ * (modules/sensor-capture: automotive navigation, never paused by iOS). expo-location's
+ * watcher used to stall for good, until an app restart, after a jamming episode.
+ */
 export class GnssPositionSource implements PositionSource {
   private position: PositionEstimate | null = null;
   private trust = new GnssTrustTracker();
-  private locationSubscription: Location.LocationSubscription | null = null;
+  private unsubscribe: (() => void) | null = null;
   private noFixTimer: ReturnType<typeof setInterval> | null = null;
   private listeners = new Set<() => void>();
+  private readonly sensors: SensorService;
+
+  constructor(sensors: SensorService) {
+    this.sensors = sensors;
+  }
 
   getSnapshot = (): PositionEstimate | null => this.position;
 
@@ -39,56 +55,40 @@ export class GnssPositionSource implements PositionSource {
     return () => this.listeners.delete(listener);
   };
 
-  getPermission = (): Promise<Location.LocationPermissionResponse> =>
-    Location.getForegroundPermissionsAsync();
+  getPermission = (): Promise<Location.LocationPermissionResponse> => Location.getForegroundPermissionsAsync();
 
-  requestPermission = (): Promise<Location.LocationPermissionResponse> =>
-    Location.requestForegroundPermissionsAsync();
+  requestPermission = (): Promise<Location.LocationPermissionResponse> => Location.requestForegroundPermissionsAsync();
 
+  /** Idempotent; also retries native capture that couldn't start (e.g. before permission). */
   async start(): Promise<void> {
-    if (this.locationSubscription) return;
     const permission = await this.getPermission();
     if (!permission.granted) return;
-
-    this.locationSubscription = await Location.watchPositionAsync(
-      {
-        accuracy: Location.Accuracy.BestForNavigation,
-        distanceInterval: 0,
-        timeInterval: 1000,
-      },
-      (location) => {
-        const accuracyM = location.coords.accuracy ?? 9999;
-        const trust = this.trust.onFix(accuracyM, location.timestamp);
-        this.position = mapLocationToPosition(
-          location,
-          trust,
-          this.trust.lastTrustedFixAt,
-        );
-        this.emit();
-      },
-      // iOS reports transient errors (e.g. location unknown) routinely; losing trust is
-      // left to the tracker's timeout so they don't flip the status.
-      () => {},
-    );
-
+    this.sensors.want(true, false, OWNER);
+    if (this.unsubscribe) return;
+    this.unsubscribe = this.sensors.gnss.on((fix) => this.onFix(fix));
     this.noFixTimer = setInterval(() => {
       if (!this.position) return;
       const trust = this.trust.check(Date.now());
-      if (trust !== this.position.trust) {
-        this.position = { ...this.position, trust };
-        this.emit();
-      }
+      if (trust !== this.position.trust) this.setPosition({ ...this.position, trust });
     }, 1000);
   }
 
   stop(): void {
-    this.locationSubscription?.remove();
-    this.locationSubscription = null;
+    this.sensors.want(false, false, OWNER);
+    this.unsubscribe?.();
+    this.unsubscribe = null;
     if (this.noFixTimer) clearInterval(this.noFixTimer);
     this.noFixTimer = null;
   }
 
-  private emit(): void {
+  private onFix(fix: GnssRecord): void {
+    if (!Number.isFinite(fix.latDeg) || !Number.isFinite(fix.lonDeg)) return;
+    const trust = this.trust.onFix(finite(fix.hAccM) ?? 9999, fix.utcUs / 1000, isSatelliteRecord(fix));
+    this.setPosition(mapFixToPosition(fix, trust, this.trust.lastTrustedFixAt));
+  }
+
+  private setPosition(position: PositionEstimate): void {
+    this.position = position;
     this.listeners.forEach((listener) => listener());
   }
 }

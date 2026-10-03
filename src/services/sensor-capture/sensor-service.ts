@@ -106,6 +106,8 @@ export class SensorService {
   private lastNotifyUs = 0;
   private imuSettings: ImuSettings = { rateHz: 100, raw: false };
   private wanted = { gnss: false, imu: false };
+  /** What each consumer (trip recorder, map position) needs; capture runs for their union. */
+  private owners = new Map<string, { gnss: boolean; imu: boolean }>();
   private applying: Promise<void> = Promise.resolve();
 
   constructor() {
@@ -152,16 +154,38 @@ export class SensorService {
     const changed = settings.rateHz !== this.imuSettings.rateHz || settings.raw !== this.imuSettings.raw;
     this.imuSettings = settings;
     if (changed && this.snapshot.imuRunning) {
-      this.wanted.imu = false;
-      void this.apply().then(() => this.want(this.wanted.gnss, true));
+      // Stop and start again with the new options, then back to what the owners want.
+      this.wanted = { ...this.wanted, imu: false };
+      void this.apply().then(() => {
+        this.wanted = this.union();
+        return this.apply();
+      });
     }
   }
 
-  /** Declare what should be running; idempotent. */
-  want(gnss: boolean, imu: boolean): void {
-    if (this.wanted.gnss === gnss && this.wanted.imu === imu) return;
-    this.wanted = { gnss, imu };
-    void this.apply();
+  /**
+   * Declare what `owner` needs running; capture runs for the union of all owners.
+   * Idempotent, but retries a start that failed (e.g. before location permission was granted).
+   */
+  want(gnss: boolean, imu: boolean, owner = "recorder"): void {
+    this.owners.set(owner, { gnss, imu });
+    const next = this.union();
+    const satisfied =
+      next.gnss === this.wanted.gnss &&
+      next.imu === this.wanted.imu &&
+      next.gnss === this.snapshot.gnssRunning &&
+      next.imu === this.snapshot.imuRunning;
+    this.wanted = next;
+    if (!satisfied) void this.apply();
+  }
+
+  private union(): { gnss: boolean; imu: boolean } {
+    const u = { gnss: false, imu: false };
+    for (const o of this.owners.values()) {
+      u.gnss ||= o.gnss;
+      u.imu ||= o.imu;
+    }
+    return u;
   }
 
   private apply(): Promise<void> {

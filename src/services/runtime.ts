@@ -11,6 +11,7 @@ import { createClock } from "@/obd/clock";
 import { VehicleLinkCore } from "@/obd/vehicle-link-core";
 
 import { kvStore } from "./kv-store";
+import { GnssPositionSource } from "./position/gnss-position-source";
 import { SensorService } from "./sensor-capture/sensor-service";
 import { createTripFiles } from "./trip-recorder/trip-files";
 import { TripRecorder } from "./trip-recorder/trip-recorder";
@@ -28,6 +29,8 @@ export interface Runtime {
   link: VehicleLinkCore;
   sensors: SensorService;
   recorder: TripRecorder;
+  /** Phone GNSS for the map (shares the native stream with the trip log). */
+  position: GnssPositionSource;
   getDevSettings(): DevSettings;
   setDevSettings(patch: Partial<DevSettings>): void;
 }
@@ -66,6 +69,16 @@ export function getRuntime(): Runtime {
   });
   recorder.start();
 
+  const position = new GnssPositionSource(sensors);
+  // Trust changes go into the trip log, so a stuck or flickering status shows up in replay.
+  let lastTrust: string | null = null;
+  position.subscribe(() => {
+    const p = position.getSnapshot();
+    if (!p || p.trust === lastTrust) return;
+    lastTrust = p.trust;
+    recorder.note(`gnss trust ${p.trust} (±${Math.round(p.accuracyM)} m)`);
+  });
+
   // Breadcrumbs give crash reports context; scrubbing removes VINs/coordinates (src/config/sentry-scrub.ts).
   link.onLinkEvent((e) => {
     Sentry.addBreadcrumb({ category: "vehicle-link", message: e.detail ? `${e.type}: ${e.detail}` : e.type, level: e.type === "error" ? "error" : "info" });
@@ -80,6 +93,7 @@ export function getRuntime(): Runtime {
     link,
     sensors,
     recorder,
+    position,
     getDevSettings: () => dev,
     setDevSettings: (patch) => {
       dev = { ...dev, ...patch };

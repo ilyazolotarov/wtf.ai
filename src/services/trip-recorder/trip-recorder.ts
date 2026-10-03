@@ -208,6 +208,12 @@ export class TripRecorder {
     });
   }
 
+  /** App-side event worth seeing in the log (no marker); dropped when not recording. */
+  note(text: string): void {
+    const t = this.deps.nowUs();
+    this.record(t, (w) => w.log("info", LOG_TAGS.app, t, text));
+  }
+
   updateSettings(patch: Partial<TripSettings>): void {
     const settings = { ...this.snapshot.settings, ...patch };
     this.deps.store.setJson(SETTINGS_KEY, settings);

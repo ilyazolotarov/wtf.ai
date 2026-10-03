@@ -44,6 +44,23 @@ describe("GNSS trust", () => {
     expect(states).toEqual(["NO_FIX", "NO_FIX", "NO_FIX", "NO_FIX", "NO_FIX", "TRUSTED"]);
   });
 
+  test("Wi-Fi/cell fixes (no speed) never count as GNSS, however accurate", () => {
+    const t = new GnssTrustTracker();
+    // Jammed from the start: a ±9 m Wi-Fi fix every few seconds (seen in a real drive).
+    const states = [0, 3, 6, 9, 12, 15].map((s) => t.onFix(9, s * 1000, false));
+    expect(states.every((s) => s === "NO_FIX")).toBe(true);
+    // Lock returns: 1 Hz satellite fixes regain trust after 5 s.
+    const back = [20, 21, 22, 23, 24, 25].map((s) => t.onFix(5, s * 1000, true));
+    expect(back).toEqual(["TRUSTED", "TRUSTED", "TRUSTED", "TRUSTED", "TRUSTED", "TRUSTED"]);
+  });
+
+  test("while trusted, Wi-Fi fixes don't keep trust alive", () => {
+    const t = new GnssTrustTracker();
+    t.onFix(5, 0, true);
+    [2, 4, 6, 8].forEach((s) => t.onFix(9, s * 1000, false));
+    expect(t.check(8_500)).toBe("NO_FIX");
+  });
+
   test("a 30–50 m fix keeps trust but does not count toward regaining it", () => {
     const t = new GnssTrustTracker();
     feed(t, [[8, 0]]);

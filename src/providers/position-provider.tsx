@@ -4,7 +4,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { AppState, type AppStateStatus } from "react-native";
 
 import type { PositionEstimate } from "@/nav/position/types";
-import { GnssPositionSource } from "@/services/position/gnss-position-source";
+import { getRuntime } from "@/services/runtime";
 
 interface PositionContextValue {
   position: PositionEstimate | null;
@@ -15,7 +15,7 @@ interface PositionContextValue {
 const PositionContext = React.createContext<PositionContextValue | null>(null);
 
 export function PositionProvider({ children }: React.PropsWithChildren) {
-  const [source] = useState(() => new GnssPositionSource());
+  const [source] = useState(() => getRuntime().position);
   const [permission, setPermission] =
     useState<LocationPermissionResponse | null>(null);
   const position = useSyncExternalStore(
@@ -35,7 +35,9 @@ export function PositionProvider({ children }: React.PropsWithChildren) {
     const subscription = AppState.addEventListener(
       "change",
       (state: AppStateStatus) => {
+        // The map needs GNSS only on screen; a trip keeps it running in the background.
         if (state === "active") refresh();
+        else if (state === "background") source.stop();
       },
     );
     return () => {

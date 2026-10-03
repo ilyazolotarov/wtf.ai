@@ -3,8 +3,10 @@ import type { TrustState } from "@/nav/position/types";
 /**
  * Interim GNSS trust for the phone-only source, until `src/nav/integrity` exists.
  *
- * Under jamming iOS falls back to Wi-Fi/cell fixes (±30–300 m, ~0.1 Hz) with real
- * GPS fixes leaking through in between. Those coarse fixes are "no GNSS" (SPEC §3.3).
+ * Under jamming iOS falls back to Wi-Fi/cell fixes (±8–300 m, ~0.1 Hz) with real
+ * GPS fixes leaking through in between. Those coarse fixes are "no GNSS" (SPEC §3.3)
+ * however accurate they claim to be: they carry no speed, a satellite fix always does
+ * (0 when standing). Good Wi-Fi coverage gives ±8–20 m, which used to flip trust on.
  * Deciding per fix makes the status flicker, so trust is decided over time:
  * - lost when no good fix (≤ 50 m) has arrived for 8 s, which covers both gaps and
  *   a run of coarse fixes, while a single coarse fix in a 1 Hz stream is ignored;
@@ -25,14 +27,16 @@ export class GnssTrustTracker {
   /** Time of the last fix that arrived while trusted and good. */
   lastTrustedFixAt: number | undefined;
 
-  onFix(accuracyM: number, at: number): TrustState {
+  /** `satellite`: the fix has a valid speed (Wi-Fi/cell fixes don't). */
+  onFix(accuracyM: number, at: number, satellite = true): TrustState {
     const gap = at - this.lastFixAt;
     this.lastFixAt = at;
-    if (accuracyM <= GOOD_ACCURACY_M) this.lastGoodAt = at;
+    const good = satellite && accuracyM <= GOOD_ACCURACY_M;
+    if (good) this.lastGoodAt = at;
 
     if (this.trusted) {
       this.check(at);
-    } else if (accuracyM <= REGAIN_ACCURACY_M) {
+    } else if (satellite && accuracyM <= REGAIN_ACCURACY_M) {
       if (this.streakSince == null || gap > LOSE_AFTER_MS) this.streakSince = at;
       // The very first fix has nothing to have been distrusted against: accept it.
       if (this.lastTrustedFixAt == null || at - this.streakSince >= REGAIN_AFTER_MS) {
@@ -43,7 +47,7 @@ export class GnssTrustTracker {
       this.streakSince = null;
     }
 
-    if (this.trusted && accuracyM <= GOOD_ACCURACY_M) this.lastTrustedFixAt = at;
+    if (this.trusted && good) this.lastTrustedFixAt = at;
     return this.state();
   }
 

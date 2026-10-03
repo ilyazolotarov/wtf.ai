@@ -105,6 +105,32 @@ describe("SensorService", () => {
     expect(s.getSnapshot().imuRunning).toBe(false);
   });
 
+  test("capture runs for the union of owners", async () => {
+    const s = new SensorService();
+    s.want(true, true, "recorder");
+    s.want(true, false, "position");
+    await flush();
+    s.want(false, false, "recorder");
+    await flush();
+    expect(mockNative.stopImu).toHaveBeenCalledTimes(1);
+    expect(mockNative.stopGnss).not.toHaveBeenCalled();
+    s.want(false, false, "position");
+    await flush();
+    expect(mockNative.stopGnss).toHaveBeenCalledTimes(1);
+  });
+
+  test("a start that failed (no permission yet) is retried on the next want()", async () => {
+    mockNative.startGnss.mockResolvedValueOnce(false);
+    const s = new SensorService();
+    s.want(true, false, "position");
+    await flush();
+    expect(s.getSnapshot().gnssRunning).toBe(false);
+    s.want(true, false, "position");
+    await flush();
+    expect(mockNative.startGnss).toHaveBeenCalledTimes(2);
+    expect(s.getSnapshot().gnssRunning).toBe(true);
+  });
+
   test("missing location permission is reported, not thrown", async () => {
     mockNative.startGnss.mockResolvedValueOnce(false);
     const s = new SensorService();

@@ -163,6 +163,36 @@ describe("ObdPoller", () => {
     expect(speeds[1].tUs).toBe((speeds[1].txUs + speeds[1].rxUs) / 2);
   });
 
+  test("engine off and standing: speed once a second; rolling brings the full rate back", async () => {
+    const { session, clock, emu, send } = await setup();
+    await probeAdapter(send);
+    const init = await initVehicle(send);
+    emu.setVehicle({ rpm: 0, speedKph: 0 });
+    const speeds: SpeedSample[] = [];
+    const engine = new EngineStateMachine(() => undefined);
+    const poller = new ObdPoller(session, clock, engine, init.poll, {
+      onSpeed: (s) => speeds.push(s),
+      onRpm: () => undefined,
+      onBattery: () => undefined,
+      onNeedsReinit: () => undefined,
+    });
+    poller.start();
+    await until(() => engine.state === "engine-off");
+    const t0 = clock.nowUs();
+    const n0 = speeds.length;
+    await until(() => clock.nowUs() - t0 >= 20_000_000);
+    expect(speeds.length - n0).toBeGreaterThanOrEqual(18);
+    expect(speeds.length - n0).toBeLessThanOrEqual(22);
+    // Hybrid pulling away in EV mode: engine still off, speed > 0.
+    emu.setVehicle({ speedKph: 15 });
+    await until(() => speeds.at(-1)!.raw === 15);
+    const t1 = clock.nowUs();
+    const n1 = speeds.length;
+    await until(() => clock.nowUs() - t1 >= 5_000_000);
+    expect(speeds.length - n1).toBeGreaterThan(80);
+    await poller.stop();
+  });
+
   test("speed cap limits the rate", async () => {
     const { session, clock, send } = await setup();
     await probeAdapter(send);
