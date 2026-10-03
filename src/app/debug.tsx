@@ -1,21 +1,21 @@
 import { Host, Switch } from "@expo/ui";
 import { router } from "expo-router";
 import { useEffect, useState } from "react";
-import { Pressable, StyleSheet, Text, useColorScheme, View } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
 
 import {
   ScreenAction,
   ScreenContent,
   ScreenRow,
   ScreenSection,
-  ScreenTitle,
 } from "@/components/screens/screen-ui";
+import { useNavStatus } from "@/components/status/use-nav-status";
+import { T } from "@/components/ui/text";
 import { dash, fmt, fmtBytes, fmtDuration } from "@/components/vehicle/format";
-import { Colors } from "@/constants/theme";
+import { usePalette } from "@/constants/theme";
 import type { Strings } from "@/i18n/en";
 import { useT } from "@/i18n/provider";
 import { ekfMock } from "@/mocks";
-import { usePosition } from "@/providers/position-provider";
 import {
   useRecorderSnapshot,
   useRuntime,
@@ -37,19 +37,35 @@ function CycleRow<T extends number | null>({
   onChange: (v: T) => void;
 }) {
   const { t } = useT();
-  const palette = Colors[useColorScheme() === "dark" ? "dark" : "light"];
+  const palette = usePalette();
   const next = () => onChange(options[(options.indexOf(value) + 1) % options.length]);
   return (
     <Pressable onPress={next} accessibilityRole="button" style={styles.cycle}>
-      <Text style={[styles.cycleLabel, { color: palette.textSecondary }]}>{t(labelKey)}</Text>
-      <Text style={styles.cycleValue}>{format(value)} ›</Text>
+      <T size={14} color={palette.text2} style={styles.flex}>
+        {t(labelKey)}
+      </T>
+      <T w="semibold" size={14} color={palette.accent}>
+        {format(value)} ›
+      </T>
     </Pressable>
   );
 }
 
+const EKF_ROWS = [
+  ["E", "eastM"],
+  ["N", "northM"],
+  ["ψ", "headingRad"],
+  ["v", "speedMps"],
+  ["kₛ", "speedScale"],
+  ["bω", "yawBias"],
+  ["kω", "yawScale"],
+] as const;
+
 export default function DebugScreen() {
   const { t } = useT();
-  const position = usePosition();
+  const palette = usePalette();
+  const nav = useNavStatus();
+  const { position } = nav;
   const { link, recorder, sensors, getDevSettings, setDevSettings } = useRuntime();
   const rec = useRecorderSnapshot();
   const sensor = useSensorSnapshot();
@@ -65,47 +81,77 @@ export default function DebugScreen() {
   }, []);
 
   const fixAge =
-    position && clock ? `${Math.max(0, Math.floor((clock - position.timestamp) / 1000))} s` : t("unavailableValue");
+    position && clock ? `${Math.max(0, Math.floor((clock - position.timestamp) / 1000))} s` : dash;
   const heading =
-    position?.headingRad == null ? t("unavailableValue") : `${Math.round((position.headingRad * 180) / Math.PI)}°`;
+    position?.headingRad == null ? dash : `${Math.round((position.headingRad * 180) / Math.PI)}°`;
+  const recording = rec.state === "recording";
 
   return (
-    <ScreenContent>
-      <ScreenTitle>{t("debug")}</ScreenTitle>
+    <ScreenContent title={t("debug")}>
+      <ScreenSection title={t("liveGnss")}>
+        <ScreenRow labelKey="latitude" value={position?.lat.toFixed(6) ?? dash} />
+        <ScreenRow labelKey="longitude" value={position?.lon.toFixed(6) ?? dash} />
+        <ScreenRow labelKey="accuracy" value={position ? `${position.accuracyM.toFixed(1)} m` : dash} />
+        <ScreenRow
+          labelKey="speed"
+          value={position?.speedMps == null ? dash : `${(position.speedMps * 3.6).toFixed(1)} km/h`}
+        />
+        <ScreenRow labelKey="heading" value={heading} />
+        <ScreenRow labelKey="fixAge" value={fixAge} />
+        <ScreenRow labelKey="gnssRate" value={sensor.gnssRunning ? fmt(sensor.gnssHz, 1, "Hz") : dash} />
+      </ScreenSection>
+
+      <ScreenSection title={t("integrity")}>
+        <ScreenRow labelKey="recorderState" value={nav.trust} valueColor={nav.color.c} />
+        <ScreenRow labelKey="positionSource" value={nav.source} />
+      </ScreenSection>
 
       <ScreenSection title={t("tripRecorder")}>
-        <ScreenRow labelKey="recorderState" value={rec.state} valueColor={rec.state === "recording" ? "#C0392B" : undefined} />
+        <ScreenRow labelKey="recorderState" value={rec.state} valueColor={recording ? palette.bad.c : undefined} />
         <ScreenRow labelKey="tripId" value={rec.current?.id ?? dash} />
         <ScreenRow labelKey="startReason" value={rec.current?.startReason ?? dash} />
         <ScreenRow labelKey="tripDuration" value={rec.current ? fmtDuration(rec.current.durationS) : dash} />
         <ScreenRow labelKey="fileSize" value={rec.current ? fmtBytes(rec.current.bytes) : dash} />
         <ScreenRow labelKey="distance" value={rec.current ? fmt(rec.current.distanceM / 1000, 2, "km") : dash} />
         <ScreenRow labelKey="obdPollRate" value={fmt(speedHz, 1, "Hz")} />
-        {rec.lastError && <ScreenRow labelKey="lastError" value={rec.lastError} valueColor="#C0392B" />}
-        {rec.state === "recording" ? (
+        {rec.lastError && <ScreenRow labelKey="lastError" value={rec.lastError} valueColor={palette.bad.c} />}
+      </ScreenSection>
+      <View style={styles.actions}>
+        {recording ? (
           <>
-            <ScreenAction labelKey="addMarker" secondary onPress={() => recorder.marker()} />
             <ScreenAction labelKey="stopTrip" onPress={() => recorder.manualStop()} />
+            <ScreenAction labelKey="addMarker" secondary onPress={() => recorder.marker()} />
           </>
         ) : (
           <ScreenAction labelKey="startManualTrip" onPress={() => recorder.manualStart()} />
         )}
-        <ScreenAction labelKey="trips" secondary onPress={() => router.push("/trips")} />
-        <ScreenAction labelKey="elmTerminal" secondary onPress={() => router.push("/debug-terminal")} />
-      </ScreenSection>
+        <View style={styles.row}>
+          <View style={styles.flex}>
+            <ScreenAction labelKey="trips" secondary compact onPress={() => router.push("/trips")} />
+          </View>
+          <View style={styles.flex}>
+            <ScreenAction labelKey="elmTerminal" secondary compact onPress={() => router.push("/debug-terminal")} />
+          </View>
+        </View>
+      </View>
 
       <ScreenSection title={t("sensors")}>
-        <ScreenRow labelKey="gnssRate" value={sensor.gnssRunning ? fmt(sensor.gnssHz, 1, "Hz") : dash} />
         <ScreenRow labelKey="accuracy" value={fmt(sensor.lastFix?.hAccM, 1, "m")} />
         <ScreenRow labelKey="speedAccuracy" value={fmt(sensor.lastFix?.speedAccMps, 2, "m/s")} />
         <ScreenRow labelKey="imuRate" value={sensor.imuRunning ? fmt(sensor.imuHz, 0, "Hz") : dash} />
-        {sensor.lastError && <ScreenRow labelKey="lastError" value={sensor.lastError} valueColor="#C0392B" />}
-        {sensor.permission !== "whenInUse" && sensor.permission !== "always" && (
-          <ScreenAction labelKey="allowLocation" secondary onPress={() => void sensors.requestPermission()} />
-        )}
+        {sensor.lastError && <ScreenRow labelKey="lastError" value={sensor.lastError} valueColor={palette.bad.c} />}
+      </ScreenSection>
+      {sensor.permission !== "whenInUse" && sensor.permission !== "always" && (
+        <ScreenAction labelKey="allowLocation" secondary onPress={() => void sensors.requestPermission()} />
+      )}
+
+      <ScreenSection title={t("ekfState")}>
+        {EKF_ROWS.map(([label, key]) => (
+          <ScreenRow key={key} label={label} value={ekfMock[key] ?? dash} />
+        ))}
       </ScreenSection>
 
-      <ScreenSection title={t("developerSettings")}>
+      <ScreenSection title={t("developerSettings")} plain>
         <Host matchContents>
           <Switch
             value={rec.settings.rawImu}
@@ -165,40 +211,13 @@ export default function DebugScreen() {
           onChange={(v) => recorder.updateSettings({ lingerMin: v })}
         />
       </ScreenSection>
-
-      <ScreenSection title={t("liveGnss")}>
-        <ScreenRow labelKey="latitude" value={position?.lat.toFixed(6) ?? t("unavailableValue")} />
-        <ScreenRow labelKey="longitude" value={position?.lon.toFixed(6) ?? t("unavailableValue")} />
-        <ScreenRow labelKey="accuracy" value={position ? `${position.accuracyM.toFixed(1)} m` : t("unavailableValue")} />
-        <ScreenRow
-          labelKey="speed"
-          value={position?.speedMps == null ? t("unavailableValue") : `${(position.speedMps * 3.6).toFixed(1)} km/h`}
-        />
-        <ScreenRow labelKey="heading" value={heading} />
-        <ScreenRow labelKey="fixAge" value={fixAge} />
-      </ScreenSection>
-
-      <ScreenSection title={t("integrity")}>
-        <ScreenRow labelKey="integrity" value={position?.trust ?? t("unavailableValue")} />
-      </ScreenSection>
-
-      <ScreenSection title={t("ekfState")}>
-        <View style={styles.ekf}>
-          {(["eastM", "northM", "headingRad", "speedMps", "speedScale", "yawBias", "yawScale"] as const).map((k) => (
-            <Text key={k} style={styles.ekfItem}>
-              {k}: {ekfMock[k] ?? t("unavailableValue")}
-            </Text>
-          ))}
-        </View>
-      </ScreenSection>
     </ScreenContent>
   );
 }
 
 const styles = StyleSheet.create({
   cycle: { minHeight: 36, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
-  cycleLabel: { flex: 1, fontSize: 14 },
-  cycleValue: { color: "#176FA9", fontSize: 14, fontWeight: "600" },
-  ekf: { gap: 4 },
-  ekfItem: { fontSize: 13, color: "#888" },
+  flex: { flex: 1 },
+  actions: { gap: 10, marginTop: -6 },
+  row: { flexDirection: "row", gap: 10 },
 });

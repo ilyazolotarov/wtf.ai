@@ -47,7 +47,7 @@ export default function DebugTerminalScreen() {
 
   return (
     <ScreenContent>
-      <ScreenSection title={t("elmTerminal")}>
+      <ScreenSection title={t("elmTerminal")} plain>
         <TextInput
           value={command}
           onChangeText={setCommand}
@@ -61,8 +61,8 @@ export default function DebugTerminalScreen() {
         />
         <View style={styles.quick}>
           {QUICK.map((q) => (
-            <Pressable key={q} onPress={() => void run(q)} disabled={!connected || busy} style={styles.chip}>
-              <Text style={styles.chipText}>{q}</Text>
+            <Pressable key={q} onPress={() => void run(q)} disabled={!connected || busy} style={[styles.chip, { backgroundColor: palette.accentA }]}>
+              <Text style={[styles.chipText, { color: palette.accent }]}>{q}</Text>
             </Pressable>
           ))}
         </View>
@@ -91,8 +91,8 @@ export default function DebugTerminalScreen() {
 const styles = StyleSheet.create({
   input: { minHeight: 48, borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, fontSize: 16, fontFamily: "Menlo" },
   quick: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  chip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16, backgroundColor: "rgba(23,111,169,0.15)" },
-  chipText: { color: "#176FA9", fontWeight: "600", fontFamily: "Menlo" },
-  entry: { padding: 12, borderRadius: 8, gap: 2 },
+  chip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16 },
+  chipText: { fontWeight: "600", fontFamily: "Menlo" },
+  entry: { padding: 12, borderRadius: 12, gap: 2 },
   mono: { fontFamily: "Menlo", fontSize: 13 },
 });

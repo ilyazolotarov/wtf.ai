@@ -34,7 +34,7 @@ export default function TripsScreen() {
 
   return (
     <ScreenContent>
-      <ScreenSection>
+      <ScreenSection plain>
         <ScreenRow labelKey="freeSpace" value={fmtBytes(snap.freeBytes)} />
         <ScreenRow labelKey="trips" value={String(snap.trips.length)} />
         {snap.trips.length > 0 && (
@@ -58,7 +58,7 @@ export default function TripsScreen() {
             <Text style={[styles.title, { color: palette.text }]}>
               {fmtDate(trip.startUtcMs)} · {trip.id}
             </Text>
-            <Text style={[styles.meta, { color: live ? "#C0392B" : palette.textSecondary }]}>{meta}</Text>
+            <Text style={[styles.meta, { color: live ? palette.bad.c : palette.textSecondary }]}>{meta}</Text>
             <View style={styles.actions}>
               <View style={styles.action}>
                 <ScreenAction labelKey="share" secondary disabled={live} onPress={() => void share(trip)} />
@@ -76,7 +76,7 @@ export default function TripsScreen() {
 }
 
 const styles = StyleSheet.create({
-  card: { padding: 14, borderRadius: 8, gap: 6 },
+  card: { padding: 16, borderRadius: 24, borderCurve: "continuous", gap: 6 },
   title: { fontSize: 15, fontWeight: "600" },
   meta: { fontSize: 13 },
   actions: { flexDirection: "row", gap: 10 },

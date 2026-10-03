@@ -1,6 +1,7 @@
+/** OpenFreeMap Liberty in both color schemes (Calm redesign). */
 export const MAP_STYLES = {
-  light: "https://tiles.openfreemap.org/styles/positron",
-  dark: "https://tiles.openfreemap.org/styles/dark",
+  light: "https://tiles.openfreemap.org/styles/liberty",
+  dark: "https://tiles.openfreemap.org/styles/liberty",
 } as const;
 
 export function getMapStyle(

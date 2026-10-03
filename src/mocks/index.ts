@@ -15,15 +15,24 @@ export const vehicleMock = {
   yawSource: "phone-gyro",
 } as const;
 
-export const calibrationMock = {
+export type CalibrationStatus = "not-calibrated" | "calibrating" | "calibrated" | "skipped";
+
+export const calibrationMock: { status: CalibrationStatus; steps: number } = {
   status: "not-calibrated",
   steps: 3,
-} as const;
+};
 
-export const downloadsMock = [
-  { id: "map", size: "1.2 GB", version: "2026.09" },
-  { id: "routing", size: "840 MB", version: "2026.09" },
-] as const;
+export type PackStatus = "not-downloaded" | "downloading" | "ready";
+
+export const downloadsMock: {
+  id: "map" | "routing";
+  size: string;
+  version: string;
+  status: PackStatus;
+}[] = [
+  { id: "map", size: "1.2 GB", version: "2026.09", status: "not-downloaded" },
+  { id: "routing", size: "840 MB", version: "2026.09", status: "not-downloaded" },
+];
 
 export const ekfMock = {
   eastM: null,

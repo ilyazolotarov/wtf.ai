@@ -1,25 +1,46 @@
+import {
+  Onest_300Light,
+  Onest_400Regular,
+  Onest_500Medium,
+  Onest_600SemiBold,
+  Onest_700Bold,
+  useFonts,
+} from "@expo-google-fonts/onest";
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect } from "react";
 import { useColorScheme } from "react-native";
 
 import { initSentry, Sentry } from "@/config/sentry";
+import { Colors } from "@/constants/theme";
 import { I18nProvider, useT } from "@/i18n/provider";
 import { PositionProvider } from "@/providers/position-provider";
 import { RouteProvider } from "@/providers/route-provider";
 import { RuntimeProvider } from "@/providers/runtime-provider";
+import { applyAppearance, loadAppearance } from "@/services/preferences";
 
 initSentry();
+applyAppearance(loadAppearance());
 void SplashScreen.preventAutoHideAsync();
 
 export default Sentry.wrap(RootLayout);
 
 function RootLayout() {
   const colorScheme = useColorScheme();
+  const [fontsLoaded, fontError] = useFonts({
+    Onest_300Light,
+    Onest_400Regular,
+    Onest_500Medium,
+    Onest_600SemiBold,
+    Onest_700Bold,
+  });
+  const ready = fontsLoaded || fontError != null;
 
   useEffect(() => {
-    void SplashScreen.hideAsync();
-  }, []);
+    if (ready) void SplashScreen.hideAsync();
+  }, [ready]);
+
+  if (!ready) return null;
 
   return (
     <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
@@ -36,57 +57,43 @@ function RootLayout() {
   );
 }
 
+const SHEETS = [
+  "route",
+  "vehicle",
+  "more",
+  "calibration",
+  "downloads",
+  "debug",
+  "settings",
+] as const;
+
 function AppStack() {
   const { t } = useT();
-  const colorScheme = useColorScheme();
+  const palette = Colors[useColorScheme() === "dark" ? "dark" : "light"];
 
   return (
-    <Stack
-      screenOptions={{
-        contentStyle: {
-          backgroundColor: colorScheme === "dark" ? "#101A1D" : "#F4F5F2",
-        },
-      }}
-    >
+    <Stack screenOptions={{ contentStyle: { backgroundColor: palette.sheetBg } }}>
       <Stack.Screen name="index" options={{ headerShown: false }} />
+      {SHEETS.map((name) => (
+        <Stack.Screen
+          key={name}
+          name={name}
+          options={{
+            headerShown: false,
+            presentation: "formSheet",
+            sheetGrabberVisible: true,
+            sheetCornerRadius: 32,
+            sheetAllowedDetents: name === "more" ? [0.5] : [0.86],
+          }}
+        />
+      ))}
       <Stack.Screen
-        name="route"
+        name="onboarding"
         options={{
-          title: t("route"),
-          presentation: "formSheet",
-          sheetGrabberVisible: true,
-        }}
-      />
-      <Stack.Screen
-        name="vehicle"
-        options={{
-          title: t("vehicle"),
-          presentation: "formSheet",
-          sheetGrabberVisible: true,
-        }}
-      />
-      <Stack.Screen
-        name="calibration"
-        options={{
-          title: t("calibration"),
-          presentation: "formSheet",
-          sheetGrabberVisible: true,
-        }}
-      />
-      <Stack.Screen
-        name="downloads"
-        options={{
-          title: t("downloads"),
-          presentation: "formSheet",
-          sheetGrabberVisible: true,
-        }}
-      />
-      <Stack.Screen
-        name="debug"
-        options={{
-          title: t("debug"),
-          presentation: "formSheet",
-          sheetGrabberVisible: true,
+          headerShown: false,
+          presentation: "fullScreenModal",
+          gestureEnabled: false,
+          contentStyle: { backgroundColor: palette.bg },
         }}
       />
       <Stack.Screen
@@ -96,14 +103,6 @@ function AppStack() {
       <Stack.Screen
         name="trips"
         options={{ title: t("trips"), presentation: "modal" }}
-      />
-      <Stack.Screen
-        name="settings"
-        options={{
-          title: t("settings"),
-          presentation: "formSheet",
-          sheetGrabberVisible: true,
-        }}
       />
     </Stack>
   );

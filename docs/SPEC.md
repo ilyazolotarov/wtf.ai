@@ -234,6 +234,8 @@ UI-first milestone (map with live GNSS + mock screens): see [UI-SPEC.md](UI-SPEC
 
 - Native launch splash — displays `wtf.ai` and **"Where the f\* am I?"**.
 - `index` — map: fused position puck + uncertainty circle (dominant hypothesis), alternative map-match hypotheses as secondary markers when ambiguous, raw GNSS ghost marker, trust badge (`GPS OK` / `UNTRUSTED` / `REACQUIRING`), time & distance since last trusted fix, adapter status.
+- `onboarding` — first-run flow (welcome, location permission, adapter, calibration).
+- `more` — sheet linking Offline data, Calibration, Diagnostics, Settings.
 - `calibration` — first-run wizard.
 - `vehicle` — adapter discovery list and connection (transport, ELM version, protocol, poll rate), VIN, engine state, active odometry stage.
 - `downloads` — offline data manager.

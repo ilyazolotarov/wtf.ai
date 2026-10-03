@@ -4,6 +4,8 @@ Status: draft v1 (2026-09-29). Companion to [SPEC.md](SPEC.md) §3.9. Source of 
 
 > Builds (2026-10-03): EAS is no longer used. Read the EAS steps in §3 as history; builds come from GitHub Actions as unsigned IPAs sideloaded with AltStore (SPEC §2, AGENTS.md).
 >
+> Redesign (2026-10-03): the UI follows the **Calm** design (claude.ai/design project "wtf.ai Redesign", option 1b): Onest type, frosted-glass map panels (`expo-blur` + translucent tint, `src/components/ui/glass-fill.tsx`), sentence-case trust status, big light speed numeral, OpenFreeMap **Liberty** style in both color schemes. Theme tokens live in `src/constants/theme.ts` (`usePalette()`), icons in `src/components/ui/icon.tsx` (Material names → SF Symbols). Changes to the sections below: the menu is a `more` sheet (Offline data, Calibration, Diagnostics, Settings; nested sheets get `?from=more` for a back button); sheets draw their own header (`headerShown: false`); Settings adds an Appearance override (System / Light / Dark via `Appearance.setColorScheme`, persisted); a first-run `onboarding` route (welcome → location → adapter → calibration) shows until `onboarding-done` is set in kv-store; on `UNTRUSTED` the map shows the raw GNSS ghost and can frame it ("Show where GPS thinks you are").
+>
 > Follow-up (2026-10-03): the mock `vehicle` (§7.2) and `debug` (§7.5) screens become real in the trip logger milestone — see [TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md) §9 and [VEHICLE-LINK-SPEC.md](VEHICLE-LINK-SPEC.md). The `AdapterChip` (§6.3) then shows the real link state.
 
 ## 1. Goal

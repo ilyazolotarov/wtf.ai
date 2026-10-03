@@ -38,7 +38,7 @@ function DeviceRow({
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
-      style={({ pressed }) => [styles.row, pressed && styles.pressed, active && styles.active]}
+      style={({ pressed }) => [styles.row, pressed && styles.pressed, active && { backgroundColor: palette.accentA }]}
     >
       <View style={styles.rowText}>
         <Text style={[styles.name, { color: palette.text }]} numberOfLines={1}>
@@ -88,7 +88,7 @@ export function DeviceList({
       )}
       {showOther && section(`${t("otherDevices")} · ${t("tryAnyway")}`, other)}
       <Pressable onPress={() => setShowOther((v) => !v)} accessibilityRole="button">
-        <Text style={styles.link}>{showOther ? t("hideOtherDevices") : t("showOtherDevices")}</Text>
+        <Text style={[styles.link, { color: palette.accent }]}>{showOther ? t("hideOtherDevices") : t("showOtherDevices")}</Text>
       </Pressable>
     </View>
   );
@@ -105,13 +105,12 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingVertical: 6,
     paddingHorizontal: 8,
-    borderRadius: 8,
+    borderRadius: 12,
   },
   rowText: { flex: 1, gap: 2 },
   name: { fontSize: 15, fontWeight: "600" },
   subtitle: { fontSize: 12 },
   rssi: { fontSize: 12, fontVariant: ["tabular-nums"] },
   pressed: { opacity: 0.7 },
-  active: { backgroundColor: "rgba(23,111,169,0.15)" },
-  link: { color: "#176FA9", fontSize: 14, fontWeight: "600", paddingVertical: 4 },
+  link: { fontSize: 14, fontWeight: "600", paddingVertical: 4 },
 });

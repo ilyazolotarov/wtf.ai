@@ -1,125 +1,292 @@
+import { router, useLocalSearchParams } from "expo-router";
+import { Children, Fragment, isValidElement } from "react";
 import {
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    useColorScheme,
-    View,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View,
+  type StyleProp,
+  type ViewStyle,
 } from "react-native";
 
-import { Colors } from "@/constants/theme";
+import { Icon, type IconName } from "@/components/ui/icon";
+import { T } from "@/components/ui/text";
+import { Radius, usePalette } from "@/constants/theme";
 import type { Strings } from "@/i18n/en";
 import { useT } from "@/i18n/provider";
 
-export function ScreenContent({ children }: React.PropsWithChildren) {
+/**
+ * Sheet body. With `title`, renders the sheet header: title, a back button
+ * when opened from the More sheet (`?from=more`), and a close button.
+ */
+export function ScreenContent({
+  title,
+  children,
+}: React.PropsWithChildren<{ title?: string }>) {
+  const palette = usePalette();
   return (
     <ScrollView
+      style={{ backgroundColor: palette.sheetBg }}
       contentInsetAdjustmentBehavior="automatic"
       keyboardShouldPersistTaps="handled"
-      contentContainerStyle={styles.content}
+      contentContainerStyle={[styles.content, !title && styles.contentNoHeader]}
     >
+      {title && <SheetHeader title={title} />}
       {children}
     </ScrollView>
   );
 }
 
+function SheetHeader({ title }: { title: string }) {
+  const { t } = useT();
+  const { from } = useLocalSearchParams<{ from?: string }>();
+  const nested = from === "more";
+  return (
+    <View style={styles.header}>
+      {nested && (
+        <RoundButton icon="arrow_back" label={t("back")} onPress={() => router.back()} />
+      )}
+      <T w="semibold" size={24} style={styles.headerTitle} numberOfLines={1}>
+        {title}
+      </T>
+      <RoundButton
+        icon="close"
+        label={t("close")}
+        onPress={() => (nested ? router.dismiss(2) : router.back())}
+      />
+    </View>
+  );
+}
+
+function RoundButton({
+  icon,
+  label,
+  onPress,
+}: {
+  icon: IconName;
+  label: string;
+  onPress(): void;
+}) {
+  const palette = usePalette();
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      hitSlop={6}
+      style={({ pressed }) => [
+        styles.roundButton,
+        { backgroundColor: palette.surface },
+        pressed && styles.pressed,
+      ]}
+    >
+      <Icon name={icon} size={16} color={palette.text} />
+    </Pressable>
+  );
+}
+
+/** Section label (optional) above a grouped card. Rows are separated by hairlines; `plain` lays children out with a gap instead. */
 export function ScreenSection({
   title,
+  plain = false,
   children,
-}: React.PropsWithChildren<{ title?: string }>) {
-  const colorScheme = useColorScheme();
-  const palette = Colors[colorScheme === "dark" ? "dark" : "light"];
+}: React.PropsWithChildren<{ title?: string; plain?: boolean }>) {
+  const palette = usePalette();
+  const items = Children.toArray(children).filter(isValidElement);
   return (
     <View style={styles.section}>
-      {title && (
-        <Text style={[styles.sectionTitle, { color: palette.textSecondary }]}>
-          {title}
-        </Text>
-      )}
+      {title && <SectionLabel>{title}</SectionLabel>}
       <View
-        style={[styles.surface, { backgroundColor: palette.backgroundElement }]}
+        style={[
+          plain ? styles.plainGroup : styles.group,
+          { backgroundColor: palette.groupBg },
+        ]}
       >
-        {children}
+        {plain
+          ? items
+          : items.map((item, i) => (
+              <Fragment key={item.key ?? i}>
+                {i > 0 && (
+                  <View style={[styles.separator, { backgroundColor: palette.line }]} />
+                )}
+                {item}
+              </Fragment>
+            ))}
       </View>
+    </View>
+  );
+}
+
+export function SectionLabel({ children }: React.PropsWithChildren) {
+  const palette = usePalette();
+  return (
+    <T w="medium" size={12} color={palette.text2} style={styles.sectionLabel}>
+      {children}
+    </T>
+  );
+}
+
+/** Free-form grouped card. */
+export function ScreenCard({
+  children,
+  style,
+}: React.PropsWithChildren<{ style?: StyleProp<ViewStyle> }>) {
+  const palette = usePalette();
+  return (
+    <View style={[styles.card, { backgroundColor: palette.groupBg }, style]}>
+      {children}
     </View>
   );
 }
 
 export function ScreenRow({
   labelKey,
+  label,
   value,
   valueColor,
 }: {
-  labelKey: keyof Strings;
+  labelKey?: keyof Strings;
+  label?: string;
   value: string;
   valueColor?: string;
 }) {
   const { t } = useT();
-  const colorScheme = useColorScheme();
-  const palette = Colors[colorScheme === "dark" ? "dark" : "light"];
+  const palette = usePalette();
   return (
     <View style={styles.row}>
-      <Text style={[styles.rowLabel, { color: palette.textSecondary }]}>
-        {t(labelKey)}
-      </Text>
-      <Text
+      <T size={14} color={palette.text2} style={styles.rowLabel}>
+        {label ?? (labelKey ? t(labelKey) : "")}
+      </T>
+      <T
         selectable
-        style={[styles.rowValue, { color: valueColor ?? palette.text }]}
+        w="medium"
+        size={14}
+        color={valueColor ?? palette.text}
+        style={styles.rowValue}
       >
         {value}
-      </Text>
+      </T>
     </View>
   );
 }
 
 export function ScreenAction({
   labelKey,
+  label,
+  icon,
   onPress,
   disabled = false,
   secondary = false,
+  compact = false,
 }: {
-  labelKey: keyof Strings;
+  labelKey?: keyof Strings;
+  label?: string;
+  icon?: IconName;
   onPress?: () => void;
   disabled?: boolean;
   secondary?: boolean;
+  compact?: boolean;
 }) {
   const { t } = useT();
+  const palette = usePalette();
+  const fg = secondary ? palette.text : palette.onAccent;
   return (
     <Pressable
       onPress={onPress}
       disabled={disabled}
       accessibilityRole="button"
+      accessibilityState={{ disabled }}
       style={({ pressed }) => [
         styles.action,
-        secondary && styles.secondaryAction,
-        disabled && styles.disabledAction,
+        compact && styles.actionCompact,
+        { backgroundColor: secondary ? palette.secBg : palette.accent },
+        disabled && styles.disabled,
         pressed && !disabled && styles.pressed,
       ]}
     >
-      <Text
-        style={[styles.actionText, secondary && styles.secondaryActionText]}
-      >
-        {t(labelKey)}
-      </Text>
+      {icon && <Icon name={icon} size={18} color={fg} />}
+      <T w="semibold" size={compact ? 14 : 15} color={fg}>
+        {label ?? (labelKey ? t(labelKey) : "")}
+      </T>
     </Pressable>
   );
 }
 
-export function ScreenNote({ children }: React.PropsWithChildren) {
-  const colorScheme = useColorScheme();
-  const palette = Colors[colorScheme === "dark" ? "dark" : "light"];
+export function ScreenLink({
+  label,
+  onPress,
+}: {
+  label: string;
+  onPress(): void;
+}) {
+  const palette = usePalette();
   return (
-    <Text style={[styles.note, { color: palette.textSecondary }]}>
-      {children}
-    </Text>
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      style={({ pressed }) => [styles.link, pressed && styles.pressed]}
+    >
+      <T w="semibold" size={14} color={palette.accent}>
+        {label}
+      </T>
+    </Pressable>
   );
 }
 
-export function ScreenTitle({ children }: React.PropsWithChildren) {
-  const colorScheme = useColorScheme();
-  const palette = Colors[colorScheme === "dark" ? "dark" : "light"];
+export function ScreenNote({
+  children,
+  color,
+}: React.PropsWithChildren<{ color?: string }>) {
+  const palette = usePalette();
   return (
-    <Text style={[styles.title, { color: palette.text }]}>{children}</Text>
+    <T size={13} color={color ?? palette.text2} style={styles.note}>
+      {children}
+    </T>
+  );
+}
+
+export function Segmented<V extends string>({
+  value,
+  options,
+  onChange,
+}: {
+  value: V;
+  options: { value: V; label: string }[];
+  onChange(value: V): void;
+}) {
+  const palette = usePalette();
+  return (
+    <View style={[styles.segmented, { backgroundColor: palette.surface }]}>
+      {options.map((option) => {
+        const active = option.value === value;
+        return (
+          <Pressable
+            key={option.value}
+            onPress={() => onChange(option.value)}
+            accessibilityRole="button"
+            accessibilityState={{ selected: active }}
+            style={[styles.segment, active && { backgroundColor: palette.accent }]}
+          >
+            <T
+              w="semibold"
+              size={14}
+              numberOfLines={1}
+              color={active ? palette.onAccent : palette.text}
+            >
+              {option.label}
+            </T>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+export function StatusDot({ color, size = 10 }: { color: string; size?: number }) {
+  return (
+    <View
+      style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: color }}
+    />
   );
 }
 
@@ -135,51 +302,72 @@ export const screenStyles = StyleSheet.create({
 
 const styles = StyleSheet.create({
   content: {
-    paddingHorizontal: 18,
-    paddingTop: 12,
-    paddingBottom: 28,
-    gap: 16,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 40,
+    gap: 18,
   },
-  section: { gap: 7 },
-  sectionTitle: {
-    paddingHorizontal: 3,
-    fontSize: 12,
-    fontWeight: "700",
-    textTransform: "uppercase",
+  contentNoHeader: { paddingTop: 16 },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingTop: 6,
   },
-  surface: { gap: 13, padding: 15, borderRadius: 8 },
+  headerTitle: { flex: 1, letterSpacing: -0.24 },
+  roundButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  section: { gap: 8 },
+  sectionLabel: { paddingHorizontal: 4 },
+  group: { paddingHorizontal: 16, borderRadius: Radius.rL, borderCurve: "continuous" },
+  plainGroup: { padding: 16, gap: 12, borderRadius: Radius.rL, borderCurve: "continuous" },
+  separator: { height: StyleSheet.hairlineWidth },
+  card: { padding: 16, gap: 8, borderRadius: Radius.rL, borderCurve: "continuous" },
   row: {
-    minHeight: 24,
+    minHeight: 46,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     gap: 12,
+    paddingVertical: 8,
   },
-  rowLabel: { flex: 1, fontSize: 14 },
+  rowLabel: { flexShrink: 1 },
   rowValue: {
-    maxWidth: "55%",
-    fontSize: 14,
+    maxWidth: "60%",
     fontVariant: ["tabular-nums"],
-    fontWeight: "600",
     textAlign: "right",
   },
   action: {
-    minHeight: 48,
+    minHeight: 52,
+    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 16,
-    borderRadius: 10,
-    backgroundColor: "#176FA9",
+    gap: 8,
+    paddingHorizontal: 20,
+    borderRadius: Radius.pill,
   },
-  secondaryAction: {
-    backgroundColor: "transparent",
-    borderWidth: 1,
-    borderColor: "#176FA9",
+  actionCompact: { minHeight: 40, paddingHorizontal: 16 },
+  disabled: { opacity: 0.4 },
+  pressed: { opacity: 0.75 },
+  link: { alignSelf: "center", paddingVertical: 4, paddingHorizontal: 8 },
+  note: { paddingHorizontal: 4, lineHeight: 19 },
+  segmented: {
+    flexDirection: "row",
+    gap: 4,
+    padding: 4,
+    borderRadius: Radius.pill,
   },
-  actionText: { color: "#FFFFFF", fontSize: 14, fontWeight: "700" },
-  secondaryActionText: { color: "#176FA9" },
-  disabledAction: { opacity: 0.45 },
-  pressed: { opacity: 0.82 },
-  note: { paddingHorizontal: 3, fontSize: 13, lineHeight: 19 },
-  title: { fontSize: 20, fontWeight: "700" },
+  segment: {
+    flex: 1,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: Radius.pill,
+    paddingHorizontal: 6,
+  },
 });

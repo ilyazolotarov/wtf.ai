@@ -1,85 +1,67 @@
 import { useKeepAwake } from "expo-keep-awake";
-import { Link } from "expo-router";
-import { SymbolView } from "expo-symbols";
-import { useCallback, useState } from "react";
+import { Link, router } from "expo-router";
+import { useEffect, useState } from "react";
 import {
     Alert,
+    Animated,
     Linking,
     Pressable,
     StyleSheet,
-    Text,
-    useColorScheme,
     View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { MapSurface } from "@/components/map/map-surface";
-import { Colors } from "@/constants/theme";
-import { useT } from "@/i18n/provider";
-import type { TrustState } from "@/nav/position/types";
 import {
-    usePosition,
-    usePositionPermission,
-} from "@/providers/position-provider";
+    cardinal,
+    formatDistance,
+    toDegrees,
+} from "@/components/status/format-geo";
+import { useNavStatus } from "@/components/status/use-nav-status";
+import { GlassFill } from "@/components/ui/glass-fill";
+import { Icon, type IconName } from "@/components/ui/icon";
+import { T } from "@/components/ui/text";
+import { Radius, usePalette } from "@/constants/theme";
+import { useT } from "@/i18n/provider";
+import { bearingRad, haversineM } from "@/nav/geo";
+import { calibrationMock } from "@/mocks";
+import { usePositionPermission } from "@/providers/position-provider";
 import { useRoute } from "@/providers/route-provider";
-import { useRecorderSnapshot, useVehicleLinkValue } from "@/providers/runtime-provider";
+import { useRecorderSnapshot } from "@/providers/runtime-provider";
+import { isOnboardingDone } from "@/services/preferences";
 
 type CameraMode = "follow" | "follow-heading" | "free";
 
-const trustColorKey: Record<
-  TrustState,
-  "trustOk" | "untrusted" | "reacquiring" | "noFix"
-> = {
-  TRUSTED: "trustOk",
-  UNTRUSTED: "untrusted",
-  REACQUIRING: "reacquiring",
-  NO_FIX: "noFix",
-};
-
-const trustTextKey: Record<
-  TrustState,
-  "gpsOk" | "untrusted" | "reacquiring" | "noFix"
-> = {
-  TRUSTED: "gpsOk",
-  UNTRUSTED: "untrusted",
-  REACQUIRING: "reacquiring",
-  NO_FIX: "noFix",
+const CAMERA: Record<CameraMode, { icon: IconName; label: "follow" | "followHeading" | "free" }> = {
+  follow: { icon: "my_location", label: "follow" },
+  "follow-heading": { icon: "navigation", label: "followHeading" },
+  free: { icon: "location_searching", label: "free" },
 };
 
 export default function HomeScreen() {
   useKeepAwake();
   const insets = useSafeAreaInsets();
   const { t, language } = useT();
-  const position = usePosition();
+  const palette = usePalette();
+  const nav = useNavStatus();
+  const { position, trust } = nav;
   const { permission, requestPermission } = usePositionPermission();
   const { activeRoute } = useRoute();
-  const colorScheme = useColorScheme();
-  const palette = Colors[colorScheme === "dark" ? "dark" : "light"];
   const [cameraMode, setCameraMode] = useState<CameraMode>("follow");
-  const [menuVisible, setMenuVisible] = useState(false);
+  const [ghostView, setGhostView] = useState(false);
   const [requesting, setRequesting] = useState(false);
-  const trust = position?.trust ?? "NO_FIX";
-  const adapterLabel = useVehicleLinkValue((s) =>
-    s.link === "polling"
-      ? `${t("adapterOnline")} ${s.stats ? Math.round(s.stats.speedHz) : "…"} Hz`
-      : s.link === "standby"
-        ? t("adapterStandby")
-        : s.link === "connecting" || s.link === "probing" || s.link === "initializing" || s.link === "reconnecting"
-          ? t("adapterConnecting")
-          : t("adapterDisconnected"),
-  );
   const recording = useRecorderSnapshot().state === "recording";
-  const isDenied = permission?.status === "denied";
 
-  const cycleCameraMode = useCallback(() => {
-    setCameraMode((mode) =>
-      mode === "follow"
-        ? "follow-heading"
-        : mode === "follow-heading"
-          ? "free"
-          : "follow",
-    );
+  useEffect(() => {
+    if (!isOnboardingDone()) router.push("/onboarding");
   }, []);
+
+  const cycleCameraMode = () => {
+    setGhostView(false);
+    setCameraMode((mode) =>
+      mode === "follow" ? "follow-heading" : mode === "follow-heading" ? "free" : "follow",
+    );
+  };
 
   const enableLocation = async () => {
     setRequesting(true);
@@ -90,10 +72,56 @@ export default function HomeScreen() {
     }
   };
 
+  const accuracy = position ? Math.round(position.accuracyM) : null;
+  const accuracyText = accuracy == null ? "—" : `±${accuracy} m`;
+  const accuracyColor =
+    accuracy != null && accuracy > 25 && trust !== "TRUSTED" ? palette.warn.c : palette.text;
+  const speed =
+    position?.speedMps == null ? "—" : String(Math.round(position.speedMps * 3.6));
+  const isDenied = permission?.status === "denied";
+  const needsPermission = permission != null && !permission.granted;
+  const ghost = trust === "UNTRUSTED" ? position?.rawGnss : undefined;
+  const showingGhost = ghostView && ghost != null;
+  const alertBody = position
+    ? trust === "UNTRUSTED"
+      ? t("alertSpoof")
+      : trust === "NO_FIX"
+        ? t("alertNoFix")
+        : trust === "REACQUIRING"
+          ? t("alertReacq")
+          : null
+    : null;
+  const alertText =
+    alertBody && trust !== "REACQUIRING" && nav.adapter !== "on"
+      ? `${alertBody} ${t("alertPhoneOnly")}`
+      : alertBody;
+
+  const routeInfo =
+    activeRoute && position
+      ? (() => {
+          const bearing = toDegrees(bearingRad(position, activeRoute));
+          const heading =
+            cameraMode === "follow-heading" && position.headingRad != null
+              ? toDegrees(position.headingRad)
+              : 0;
+          return {
+            title: `${t("toward")} ${activeRoute.name[language]}`,
+            sub: `${formatDistance(haversineM(position, activeRoute), language)} · ${cardinal(bearing, language)} ${Math.round(bearing)}°`,
+            rotation: bearing - heading,
+          };
+        })()
+      : null;
+
+  const panel = [
+    styles.panel,
+    { boxShadow: palette.shadow },
+  ];
+
   return (
-    <View style={styles.root}>
+    <View style={[styles.root, { backgroundColor: palette.bg }]}>
       <MapSurface
         mode={cameraMode}
+        ghostView={showingGhost}
         onUserInteraction={() => setCameraMode("free")}
         onLongPress={() => Alert.alert(t("manualFixTitle"), t("manualFixBody"))}
       />
@@ -101,212 +129,200 @@ export default function HomeScreen() {
         pointerEvents="box-none"
         style={[
           styles.overlay,
-          { paddingTop: insets.top + 10, paddingBottom: insets.bottom + 12 },
+          {
+            paddingTop: insets.top + 10,
+            paddingBottom: Math.max(insets.bottom - 6, 14),
+          },
         ]}
       >
-        <View style={styles.topStack}>
+        <View pointerEvents="box-none" style={styles.topStack}>
           <View style={styles.topRow}>
-            <View
-              style={[
-                styles.trustBadge,
-                { backgroundColor: palette[trustColorKey[trust]] },
-              ]}
-            >
-              <View style={styles.statusDot} />
-              <Text style={styles.badgeText}>{t(trustTextKey[trust])}</Text>
-            </View>
-            <View style={styles.sinceStrip}>
-              <Text style={styles.sinceLabel}>{t("sinceTrusted")}</Text>
-              <Text style={styles.sinceValue}>
-                {position ? formatFixAge(position.timestamp) : "—"}
-              </Text>
+            <View style={[panel, styles.statusPill]}>
+              <GlassFill radius={Radius.pill} />
+              <View style={[styles.statusHalo, { backgroundColor: nav.color.a }]}>
+                <View style={[styles.statusDot, { backgroundColor: nav.color.c }]} />
+              </View>
+              <View style={styles.statusCopy}>
+                <T w="semibold" size={15} numberOfLines={1}>
+                  {nav.sentence}
+                </T>
+                <T size={12} color={palette.text2} numberOfLines={1}>
+                  {position ? `${nav.source} · ${accuracyText}` : "—"}
+                </T>
+              </View>
             </View>
             <Link href="/vehicle" asChild>
-              <Pressable style={styles.adapterChip} accessibilityRole="button">
-                <SymbolView
-                  name={{
-                    ios: "car.side",
-                    android: "directions_car",
-                    web: "directions_car",
-                  }}
-                  size={17}
-                  tintColor="#E9F0EF"
-                />
-                <Text style={styles.adapterText}>
-                  {recording ? `● ${t("recordingBadge")} · ` : ""}
-                  {adapterLabel}
-                </Text>
+              <Pressable
+                style={[panel, styles.vehicleButton]}
+                accessibilityRole="button"
+                accessibilityLabel={`${t("vehicle")}: ${nav.adapterLabel}`}
+              >
+                <GlassFill radius={28} />
+                <Icon name="directions_car" size={24} color={nav.adapterColor} />
+                {recording && (
+                  <View
+                    style={[styles.recDot, { backgroundColor: palette.bad.c, borderColor: palette.groupBg }]}
+                    accessibilityLabel={t("recording")}
+                  />
+                )}
               </Pressable>
             </Link>
           </View>
-          <Link href="/calibration" asChild>
-            <Pressable style={styles.accuracyBadge} accessibilityRole="button">
-              <SymbolView
-                name={{
-                  ios: "scope",
-                  android: "my_location",
-                  web: "my_location",
-                }}
-                size={16}
-                tintColor="#FFE09A"
-              />
-              <Text style={styles.accuracyText}>{t("lowAccuracy")}</Text>
-            </Pressable>
-          </Link>
+
+          {alertText && (
+            <View style={[panel, styles.alertCard]}>
+              <GlassFill radius={Radius.rL} />
+              <View style={styles.alertRow}>
+                <View style={[styles.alertIcon, { backgroundColor: nav.color.a }]}>
+                  <Icon name={nav.icon} size={20} color={nav.color.c} />
+                </View>
+                <T size={14} style={styles.alertText}>
+                  {alertText}
+                </T>
+              </View>
+              {ghost && position && (
+                <Pressable
+                  onPress={() => setGhostView(!showingGhost)}
+                  accessibilityRole="button"
+                  style={({ pressed }) => [
+                    styles.ghostButton,
+                    { backgroundColor: palette.surface },
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <T w="semibold" size={14} color={palette.accent}>
+                    {showingGhost ? t("backToMe") : t("showGhost")}
+                  </T>
+                  <T size={12} color={palette.text2}>
+                    {t("ghostClaim")
+                      .replace("{d}", formatDistance(haversineM(position, ghost), language))
+                      .replace("{dir}", cardinal(toDegrees(bearingRad(position, ghost)), language))}
+                  </T>
+                </Pressable>
+              )}
+            </View>
+          )}
+
+          {position && trust === "TRUSTED" && calibrationMock.status === "not-calibrated" && (
+            <Link href="/calibration" asChild>
+              <Pressable
+                style={[panel, styles.calChip]}
+                accessibilityRole="button"
+              >
+                <GlassFill radius={Radius.pill} />
+                <View style={[styles.calDot, { backgroundColor: palette.warn.c }]} />
+                <T w="medium" size={13}>
+                  {t("notCalibrated")}
+                </T>
+                <T w="semibold" size={13} color={palette.accent}>
+                  {t("calibrate")}
+                </T>
+              </Pressable>
+            </Link>
+          )}
+
+          {routeInfo && (
+            <View style={[panel, styles.routeBanner]}>
+              <GlassFill radius={Radius.rL} />
+              <View style={[styles.routeIcon, { backgroundColor: palette.accent }]}>
+                <View style={{ transform: [{ rotate: `${routeInfo.rotation}deg` }] }}>
+                  <Icon name="navigation" size={22} color={palette.onAccent} />
+                </View>
+              </View>
+              <View style={styles.routeCopy}>
+                <T w="semibold" size={17} numberOfLines={1}>
+                  {routeInfo.title}
+                </T>
+                <T size={13} color={palette.text2} numberOfLines={1}>
+                  {routeInfo.sub}
+                </T>
+              </View>
+            </View>
+          )}
         </View>
 
-        {activeRoute && (
-          <View style={styles.maneuverBanner}>
-            <SymbolView
-              name={{
-                ios: "arrow.up.right",
-                android: "north_east",
-                web: "north_east",
-              }}
-              size={19}
-              tintColor="#FFFFFF"
-            />
-            <View style={styles.maneuverCopy}>
-              <Text style={styles.maneuverTitle}>
-                {t("headToward")} {activeRoute.name[language]}
-              </Text>
-              <Text style={styles.maneuverDistance}>
-                {formatDistance(activeRoute.distanceM)}
-              </Text>
-            </View>
-          </View>
-        )}
-
         {!position && (
-          <View style={styles.centerCard}>
-            <SymbolView
-              name={{
-                ios: "location.slash.fill",
-                android: "location_disabled",
-                web: "location_disabled",
-              }}
-              size={25}
-              tintColor="#1676D2"
-            />
-            <Text style={styles.centerTitle}>
-              {isDenied ? t("locationNeeded") : t("waitingForGps")}
-            </Text>
-            {permission?.status !== "granted" && (
-              <Pressable
-                onPress={
-                  isDenied
-                    ? () => void Linking.openURL("app-settings:")
-                    : enableLocation
-                }
-                disabled={requesting}
-                style={styles.locationButton}
-                accessibilityRole="button"
-              >
-                <Text style={styles.locationButtonText}>
-                  {isDenied ? t("openSettings") : t("enableLocation")}
-                </Text>
-              </Pressable>
+          <CenterCard>
+            {needsPermission ? (
+              <>
+                <Icon name="location_off" size={34} color={palette.bad.c} />
+                <T w="semibold" size={19} style={styles.centerText}>
+                  {t("locationOff")}
+                </T>
+                <T size={14} color={palette.text2} style={styles.centerBody}>
+                  {t("locationNeeded")}
+                </T>
+                <Pressable
+                  onPress={
+                    isDenied && !permission.canAskAgain
+                      ? () => void Linking.openURL("app-settings:")
+                      : enableLocation
+                  }
+                  disabled={requesting}
+                  style={({ pressed }) => [
+                    styles.centerButton,
+                    { backgroundColor: palette.accent },
+                    pressed && styles.pressed,
+                  ]}
+                  accessibilityRole="button"
+                >
+                  <T w="semibold" size={15} color={palette.onAccent}>
+                    {isDenied && !permission.canAskAgain ? t("openSettings") : t("enableLocation")}
+                  </T>
+                </Pressable>
+              </>
+            ) : (
+              <>
+                <Pulse>
+                  <Icon name="satellite_alt" size={34} color={palette.accent} />
+                </Pulse>
+                <T w="semibold" size={19} style={styles.centerText}>
+                  {t("waitingForGps")}
+                </T>
+                <T size={14} color={palette.text2} style={styles.centerBody}>
+                  {t("waitingBody")}
+                </T>
+              </>
             )}
-          </View>
+          </CenterCard>
         )}
 
-        <View style={styles.bottomStack}>
-          <View style={styles.bottomControls}>
-            <View style={styles.speedReadout}>
-              <Text style={styles.speedNumber}>
-                {position?.speedMps == null
-                  ? "—"
-                  : Math.round(position.speedMps * 3.6).toString()}
-              </Text>
-              <Text style={styles.speedUnit}>{t("speed")}</Text>
+        <View pointerEvents="box-none" style={styles.bottomStack}>
+          <Pressable
+            style={({ pressed }) => [panel, styles.cameraButton, pressed && styles.pressed]}
+            onPress={cycleCameraMode}
+            accessibilityRole="button"
+          >
+            <GlassFill radius={Radius.pill} />
+            <Icon name={CAMERA[cameraMode].icon} size={22} color={palette.accent} />
+            <T w="medium" size={14}>
+              {t(CAMERA[cameraMode].label)}
+            </T>
+          </Pressable>
+          <View style={[panel, styles.bottomCard]}>
+            <GlassFill radius={30} />
+            <View style={styles.readouts}>
+              <View style={styles.speed}>
+                <T w="light" size={60} style={styles.speedNumber}>
+                  {speed}
+                </T>
+                <T size={14} color={palette.text2}>
+                  {t("speed")}
+                </T>
+              </View>
+              <View style={styles.accuracy}>
+                <T size={12} color={palette.text2}>
+                  {t("accuracy")}
+                </T>
+                <T w="semibold" size={18} color={accuracyColor} style={styles.tabular}>
+                  {accuracyText}
+                </T>
+              </View>
             </View>
-            <Pressable
-              style={styles.recenterButton}
-              onPress={cycleCameraMode}
-              accessibilityRole="button"
-              accessibilityLabel={t(
-                cameraMode === "follow-heading" ? "followHeading" : cameraMode,
-              )}
-            >
-              <SymbolView
-                name={{
-                  ios: "location.north.fill",
-                  android: "navigation",
-                  web: "navigation",
-                }}
-                size={21}
-                tintColor="#F4F8F7"
-              />
-              <Text style={styles.recenterText}>
-                {t(
-                  cameraMode === "follow-heading"
-                    ? "followHeading"
-                    : cameraMode,
-                )}
-              </Text>
-            </Pressable>
-          </View>
-          <View style={styles.toolbar}>
-            <Link href="/route" asChild>
-              <Pressable
-                style={styles.toolbarButton}
-                accessibilityRole="button"
-              >
-                <SymbolView
-                  name={{
-                    ios: "arrow.triangle.turn.up.right.diamond.fill",
-                    android: "alt_route",
-                    web: "alt_route",
-                  }}
-                  size={19}
-                  tintColor="#EAF2F0"
-                />
-                <Text style={styles.toolbarText}>{t("route")}</Text>
-              </Pressable>
-            </Link>
-            <Link href="/vehicle" asChild>
-              <Pressable
-                style={styles.toolbarButton}
-                accessibilityRole="button"
-              >
-                <SymbolView
-                  name={{
-                    ios: "car.side.fill",
-                    android: "directions_car",
-                    web: "directions_car",
-                  }}
-                  size={19}
-                  tintColor="#EAF2F0"
-                />
-                <Text style={styles.toolbarText}>{t("vehicle")}</Text>
-              </Pressable>
-            </Link>
-            <View>
-              <Pressable
-                style={styles.toolbarButton}
-                onPress={() => setMenuVisible((visible) => !visible)}
-                accessibilityRole="button"
-                accessibilityLabel={t("menu")}
-              >
-                <SymbolView
-                  name={{
-                    ios: "ellipsis",
-                    android: "more_horiz",
-                    web: "more_horiz",
-                  }}
-                  size={21}
-                  tintColor="#EAF2F0"
-                />
-                <Text style={styles.toolbarText}>{t("menu")}</Text>
-              </Pressable>
-              {menuVisible && (
-                <View style={styles.menuPanel}>
-                  <MenuLink href="/downloads" label={t("downloads")} />
-                  <MenuLink href="/calibration" label={t("calibration")} />
-                  <MenuLink href="/debug" label={t("debug")} />
-                  <MenuLink href="/settings" label={t("settings")} />
-                </View>
-              )}
+            <View style={styles.actions}>
+              <HudAction icon="alt_route" label={t("route")} href="/route" />
+              <HudAction icon="directions_car" label={t("vehicle")} href="/vehicle" />
+              <HudAction icon="more_horiz" label={t("more")} href="/more" />
             </View>
           </View>
         </View>
@@ -315,197 +331,213 @@ export default function HomeScreen() {
   );
 }
 
-function MenuLink({
-  href,
+function HudAction({
+  icon,
   label,
+  href,
 }: {
-  href: "/downloads" | "/calibration" | "/debug" | "/settings";
+  icon: IconName;
   label: string;
+  href: "/route" | "/vehicle" | "/more";
 }) {
+  const palette = usePalette();
   return (
     <Link href={href} asChild>
-      <Pressable style={styles.menuItem} accessibilityRole="button">
-        <Text style={styles.menuText}>{label}</Text>
+      <Pressable
+        style={({ pressed }) => [styles.action, pressed && styles.pressed]}
+        accessibilityRole="button"
+      >
+        <View style={[styles.actionCircle, { backgroundColor: palette.surface }]}>
+          <Icon name={icon} size={22} color={palette.text} />
+        </View>
+        <T w="medium" size={12}>
+          {label}
+        </T>
       </Pressable>
     </Link>
   );
 }
 
-function formatFixAge(timestamp: number): string {
-  const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
-  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m`;
+function CenterCard({ children }: React.PropsWithChildren) {
+  const palette = usePalette();
+  return (
+    <View
+      style={[
+        styles.centerCard,
+        { backgroundColor: palette.sheetBg, boxShadow: palette.cardShadow },
+      ]}
+    >
+      {children}
+    </View>
+  );
 }
 
-function formatDistance(distanceM: number): string {
-  return distanceM >= 1000
-    ? `${(distanceM / 1000).toFixed(1)} km`
-    : `${Math.round(distanceM)} m`;
+function Pulse({ children }: React.PropsWithChildren) {
+  const [opacity] = useState(() => new Animated.Value(1));
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, { toValue: 0.3, duration: 700, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 1, duration: 700, useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [opacity]);
+  return <Animated.View style={{ opacity }}>{children}</Animated.View>;
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#D9E1DD" },
+  root: { flex: 1 },
   overlay: {
     ...StyleSheet.absoluteFill,
     justifyContent: "space-between",
     paddingHorizontal: 14,
   },
-  topStack: { gap: 9 },
-  topRow: { flexDirection: "row", alignItems: "center", gap: 7 },
-  trustBadge: {
-    minHeight: 42,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 7,
-    paddingHorizontal: 12,
-    borderRadius: 22,
-  },
-  statusDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: "#FFFFFF",
-  },
-  badgeText: { color: "#FFFFFF", fontSize: 11, fontWeight: "800" },
-  sinceStrip: {
+  panel: { borderCurve: "continuous" },
+  pressed: { opacity: 0.75 },
+  tabular: { fontVariant: ["tabular-nums"] },
+  topStack: { gap: 10 },
+  topRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  statusPill: {
     flex: 1,
-    minHeight: 42,
-    justifyContent: "center",
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    backgroundColor: "rgba(16, 28, 30, 0.88)",
-  },
-  sinceLabel: { color: "#AEBFBB", fontSize: 9, fontWeight: "700" },
-  sinceValue: {
-    color: "#F5FAF8",
-    fontSize: 14,
-    fontVariant: ["tabular-nums"],
-    fontWeight: "700",
-  },
-  adapterChip: {
-    minHeight: 42,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 10,
-    borderRadius: 12,
-    backgroundColor: "#1C3031",
-  },
-  adapterText: { color: "#E9F0EF", fontSize: 10, fontWeight: "700" },
-  accuracyBadge: {
-    alignSelf: "flex-start",
-    minHeight: 38,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 7,
-    paddingHorizontal: 12,
-    borderRadius: 20,
-    backgroundColor: "#46371D",
-  },
-  accuracyText: { color: "#FFE09A", fontSize: 10, fontWeight: "800" },
-  maneuverBanner: {
+    minHeight: 56,
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
-    padding: 14,
-    borderRadius: 14,
-    backgroundColor: "#176FA9",
+    paddingLeft: 12,
+    paddingRight: 18,
+    paddingVertical: 8,
+    borderRadius: Radius.pill,
   },
-  maneuverCopy: { flex: 1, gap: 3 },
-  maneuverTitle: { color: "#FFFFFF", fontSize: 14, fontWeight: "700" },
-  maneuverDistance: {
-    color: "#D6E9F4",
-    fontSize: 12,
-    fontVariant: ["tabular-nums"],
+  statusHalo: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: "center",
+    justifyContent: "center",
   },
+  statusDot: { width: 12, height: 12, borderRadius: 6 },
+  statusCopy: { flex: 1, gap: 1 },
+  vehicleButton: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  recDot: {
+    position: "absolute",
+    top: 9,
+    right: 9,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    borderWidth: 2,
+  },
+  alertCard: { gap: 12, padding: 16, borderRadius: Radius.rL },
+  alertRow: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
+  alertIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  alertText: { flex: 1, lineHeight: 20 },
+  ghostButton: {
+    gap: 2,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 18,
+  },
+  calChip: {
+    alignSelf: "flex-start",
+    height: 36,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingLeft: 12,
+    paddingRight: 14,
+    borderRadius: Radius.pill,
+  },
+  calDot: { width: 8, height: 8, borderRadius: 4 },
+  routeBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    paddingVertical: 12,
+    paddingLeft: 12,
+    paddingRight: 18,
+    borderRadius: Radius.rL,
+  },
+  routeIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  routeCopy: { flex: 1, gap: 2 },
   centerCard: {
     alignSelf: "center",
     alignItems: "center",
-    gap: 12,
+    gap: 10,
     width: "88%",
-    maxWidth: 340,
-    padding: 20,
-    borderRadius: 18,
-    backgroundColor: "rgba(250, 252, 250, 0.96)",
-    boxShadow: "0 8px 26px rgba(23, 39, 38, 0.18)",
+    maxWidth: 350,
+    paddingHorizontal: 22,
+    paddingVertical: 24,
+    borderRadius: Radius.rL,
+    borderCurve: "continuous",
   },
-  centerTitle: {
-    color: "#263537",
-    fontSize: 15,
-    fontWeight: "700",
-    textAlign: "center",
-  },
-  locationButton: {
-    minHeight: 48,
+  centerText: { textAlign: "center" },
+  centerBody: { textAlign: "center", lineHeight: 20 },
+  centerButton: {
+    alignSelf: "stretch",
+    height: 50,
+    marginTop: 4,
     alignItems: "center",
     justifyContent: "center",
-    alignSelf: "stretch",
-    borderRadius: 12,
-    backgroundColor: "#176FA9",
+    borderRadius: Radius.pill,
   },
-  locationButtonText: { color: "#FFFFFF", fontSize: 14, fontWeight: "700" },
   bottomStack: { gap: 12 },
-  bottomControls: {
+  cameraButton: {
+    alignSelf: "flex-end",
+    height: 52,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingLeft: 14,
+    paddingRight: 18,
+    borderRadius: Radius.pill,
+  },
+  bottomCard: {
+    gap: 16,
+    paddingTop: 18,
+    paddingHorizontal: 18,
+    paddingBottom: 14,
+    borderRadius: 30,
+  },
+  readouts: {
     flexDirection: "row",
     alignItems: "flex-end",
     justifyContent: "space-between",
+    gap: 12,
   },
-  speedReadout: {
-    minWidth: 106,
-    minHeight: 82,
-    flexDirection: "row",
-    alignItems: "baseline",
-    gap: 6,
-    paddingHorizontal: 15,
-    paddingTop: 15,
-    borderRadius: 16,
-    backgroundColor: "#15282B",
-  },
+  speed: { flexDirection: "row", alignItems: "baseline", gap: 6 },
   speedNumber: {
-    color: "#F8FCFA",
-    fontSize: 34,
+    lineHeight: 58,
+    letterSpacing: -1.8,
     fontVariant: ["tabular-nums"],
-    fontWeight: "700",
   },
-  speedUnit: { color: "#AFC2BD", fontSize: 11, fontWeight: "700" },
-  recenterButton: {
-    minWidth: 128,
-    minHeight: 62,
-    flexDirection: "row",
+  accuracy: { alignItems: "flex-end", gap: 2 },
+  actions: { flexDirection: "row" },
+  action: { flex: 1, alignItems: "center", gap: 6 },
+  actionCircle: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     alignItems: "center",
     justifyContent: "center",
-    gap: 9,
-    paddingHorizontal: 14,
-    borderRadius: 15,
-    backgroundColor: "#176FA9",
   },
-  recenterText: { color: "#F4F8F7", fontSize: 13, fontWeight: "700" },
-  toolbar: {
-    minHeight: 70,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-around",
-    borderRadius: 19,
-    backgroundColor: "#15282B",
-    boxShadow: "0 5px 18px rgba(12, 26, 27, 0.28)",
-  },
-  toolbarButton: {
-    minWidth: 80,
-    minHeight: 62,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 4,
-  },
-  toolbarText: { color: "#DCE8E4", fontSize: 10, fontWeight: "700" },
-  menuPanel: {
-    position: "absolute",
-    right: 0,
-    bottom: 70,
-    width: 180,
-    paddingVertical: 5,
-    borderRadius: 14,
-    backgroundColor: "#15282B",
-    boxShadow: "0 6px 20px rgba(12, 26, 27, 0.3)",
-  },
-  menuItem: { minHeight: 48, justifyContent: "center", paddingHorizontal: 16 },
-  menuText: { color: "#EDF4F1", fontSize: 14, fontWeight: "600" },
 });
