@@ -54,3 +54,4 @@ Position data stays on the device; there is no position upload. Standalone (Rele
 - [UI milestone specification](docs/UI-SPEC.md)
 - [Vehicle link (Bluetooth ELM327) specification](docs/VEHICLE-LINK-SPEC.md)
 - [Trip logger milestone specification](docs/TRIP-LOGGER-SPEC.md)
+- [Stage 1 navigator (EKF, calibration, replay) specification](docs/NAVIGATOR-SPEC.md)

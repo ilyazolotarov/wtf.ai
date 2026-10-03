@@ -1,6 +1,6 @@
 # wtf.ai — Vehicle Link (Bluetooth ELM327) Specification
 
-Status: draft v1 (2026-10-03). Companion to [SPEC.md](SPEC.md) §3.1. Source of truth for coding agents implementing adapter communication. The trip logger built on top of it is specified in [TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md).
+Status: draft v2 (2026-10-03), field-tested with the OBDLink MX+ on the CX-5. Companion to [SPEC.md](SPEC.md) §3.1. Source of truth for coding agents implementing adapter communication. The trip logger built on top of it is specified in [TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md).
 
 ## 1. Goal
 
@@ -457,7 +457,7 @@ The same contract with two transports: BLE (same GATT catalog) and Classic SPP (
 
 | Adapter | Transport | Chip / ELM version | Profile | Car / protocol | Speed rate (Hz) | Latency p50 / p95 | Notes |
 | ------- | --------- | ------------------ | ------- | -------------- | --------------- | ----------------- | ----- |
-| OBDLink MX+ | MFi | | | Mazda CX-5 KF | | | Phase 0 |
+| OBDLink MX+ | MFi (`com.obdlink`) | STN2255 v5.10.3 / ELM327 v1.4b | — | Mazda CX-5 KF / 6 (CAN 11-bit 500k) | 25–29 (`010D1`, `ATSH7E0`, `ATAT1`) | 16–18 / 53–71 ms | 7 drives. Rare stalls: replies arrive one command late, then `STOPPED` → re-init (2–6 s gap). VIN read only sometimes (§15). |
 
 ## 14. Verification targets
 
@@ -470,8 +470,10 @@ The same contract with two transports: BLE (same GATT catalog) and Classic SPP (
 
 ## 15. Open items
 
-1. Check on device that the MX+ reports `com.obdlink` in `EAAccessory.protocolStrings` and that an `EASession` opens (§3.4).
+1. ~~Check on device that the MX+ reports `com.obdlink` and that an `EASession` opens (§3.4)~~ — verified on 7 drives.
 2. Test a vLinker FS/MS over `com.vgatemall` once one is available; until then their BLE+BT mode is the tested path.
 3. Measure real BLE connection intervals and poll rates (§3.5) and fill the tested-adapter table.
 4. Verify Expo Modules event payload performance for scan batches; switch to typed arrays if needed.
-5. Decide whether a native "repeat mode" (SPEC §3.1) is needed — only if bridge overhead measurably limits the poll rate.
+5. Decide whether a native "repeat mode" (SPEC §3.1) is needed — only if bridge overhead measurably limits the poll rate. With the MX+ the JS loop reaches 25–29 Hz, so not needed so far.
+6. The VIN (`0902`) was in only 2 of 7 trip logs, though the CX-5 answers it. Find out why the first init misses it (engine off at connect? the 5 s timeout?). Per-VIN storage (speed cap, calibration) depends on it.
+7. Verify the auto-connect fix on device: open the app before the car wakes the MX+; it must connect once iOS reports the accessory.

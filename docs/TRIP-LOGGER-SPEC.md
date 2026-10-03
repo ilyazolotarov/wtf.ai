@@ -1,6 +1,6 @@
 # wtf.ai — Trip Logger Milestone Specification
 
-Status: draft v1 (2026-10-03). Implements SPEC.md Phase 1 (Logger). Source of truth for coding agents. Adapter communication is specified in [VEHICLE-LINK-SPEC.md](VEHICLE-LINK-SPEC.md).
+Status: draft v2 (2026-10-03), field-tested. Implements SPEC.md Phase 1 (Logger). Source of truth for coding agents. Adapter communication is specified in [VEHICLE-LINK-SPEC.md](VEHICLE-LINK-SPEC.md).
 
 ## 1. Goal
 
@@ -17,7 +17,7 @@ First end-to-end target for the whole app:
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Log format       | **ULog** (PX4), version 1. Self-describing, append-only, truncation-tolerant. Readers: `pyulog`, PlotJuggler, Foxglove.                                                     |
 | Log writer       | Pure TS encoder (`src/triplog/`), file sink via `expo-file-system` `File.open(FileMode.Append)` + `FileHandle.writeBytes`.                                                   |
-| Sensor capture   | Own native module `modules/sensor-capture` (Swift): CoreLocation + CoreMotion, batched to JS. `expo-location` stays for the map's `PositionSource` for now.                  |
+| Sensor capture   | Own native module `modules/sensor-capture` (Swift): CoreLocation + CoreMotion, batched to JS. The map's position uses the same GNSS stream (`SensorService` runs capture for the union of its owners: recorder, map). |
 | Time base        | Monotonic uptime µs (`ProcessInfo.systemUptime`) for every record — same clock as CoreMotion and `modules/vehicle-link`. Wall clock via `time_sync` records.                |
 | Automation       | Open the app once; connect, trip start/end, and recording are automatic and survive screen lock / background while the app stays alive (§4.3).                              |
 | Permissions      | Location **When In Use** is enough (a session started in the foreground may continue in the background with the blue indicator). "Always" only for the later auto-wake.    |
@@ -44,7 +44,7 @@ modules/sensor-capture ─▶ src/services/sensor-capture ──(SensorStream)�
 
 - `src/triplog/**` follows the `src/nav/**` rule (no React Native/Expo imports), so the replay harness can reuse the schemas and a future TS reader.
 - The trip state machine itself is pure TS in `src/triplog/trip-detector.ts`. `src/services/trip-recorder` wires it to the link and sensors and owns the pre-roll buffer, the writer lifecycle, and the trip index; it exposes a `TripRecorder` store (`getSnapshot`/`subscribe`) for the UI.
-- `src/services/runtime.ts` creates the vehicle link, sensor service, and recorder once for the app's lifetime; `src/providers/runtime-provider.tsx` exposes them to screens and auto-connects on launch/foreground.
+- `src/services/runtime.ts` creates the vehicle link, sensor service, recorder and the map's GNSS position source once for the app's lifetime; `src/providers/runtime-provider.tsx` exposes them to screens and auto-connects on launch/foreground.
 
 ## 4. Trip detection
 
@@ -146,7 +146,7 @@ modules/sensor-capture ─▶ src/services/sensor-capture ──(SensorStream)�
 
 ### 6.4 Text (`C` tagged logged strings)
 
-- Tags: `1` ELM transcript, `2` link events, `3` trip recorder, `4` sensors, `5` app.
+- Tags: `1` ELM transcript, `2` link events, `3` trip recorder, `4` sensors, `5` app (markers, and map GNSS trust changes: `gnss trust <state> (±N m)`).
 - ELM transcript (tag 1): every non-poll exchange (probe, init, VIN, `ATRV`, terminal commands) and every poll with a non-`ok` status or unexpected text. Format: `tx=<txUs> <command> | <raw response, CR→\r escaped>`; the message timestamp is `rxUs`.
 - Levels: `'6'` info, `'4'` warning, `'3'` error, `'7'` debug.
 
@@ -189,12 +189,13 @@ The trip list shows free space; recording refuses to start below 200 MB free.
 from triplog import load
 trip = load("20261003-081500_k3x9qa.ulg")
 trip.info            # dict of I messages
-trip.obd_speed       # DataFrame: t_s (midpoint), speed_mps, raw_kph, latency_ms, status
-trip.obd_rpm         # DataFrame: t_s, rpm, status
-trip.gnss            # DataFrame: t_s, utc, lat, lon, alt, h_acc, v_acc, speed, speed_acc, course, course_acc, flags
-trip.imu             # DataFrame: t_s, gyro_x/y/z, ua_x/y/z, g_x/y/z, q_w/x/y/z, yaw_rate_vertical (gyro · ĝ)
-trip.events          # engine_state + trip_event + link_stats
-trip.transcript      # tagged strings
+trip.obd             # every poll: t_s (midpoint), t_rx_s, latency_ms, mode, pid, status, b0..b3, ecu, value
+trip.obd_speed       # DataFrame: t_s (midpoint), speed_mps, raw_kph, latency_ms, status, ecu
+trip.obd_rpm         # DataFrame: t_s, rpm, latency_ms, status
+trip.gnss            # DataFrame: t_s, utc, lat, lon, alt, h_acc, v_acc, speed, speed_acc, course, course_acc, simulated, from_accessory
+trip.imu             # DataFrame: t_s, gyro_x/y/z, ua_x/y/z, g_x/y/z, q_w/x/y/z, yaw_rate_up (gyro · up, CCW+)
+trip.engine, trip.trip_events, trip.link_stats, trip.time_sync
+trip.transcript      # tagged strings (level, tag, text)
 ```
 
 - CLI:
@@ -203,7 +204,9 @@ trip.transcript      # tagged strings
   - `triplog plot <file>` — OBD speed vs GNSS speed, vertical yaw rate, GNSS track with accuracy, poll rate/latency.
   - `triplog check <file>` — monotonic timestamps, expected rates, OBD vs GNSS speed agreement, incomplete trip.
   - `triplog refresh <file…>` — estimates the ECU refresh period P of PID `0D` from value-change timing (phase coherence over 30 s windows) and suggests a speed cap of 2/P (VEHICLE-LINK-SPEC §10.2).
-- Cross-language golden test: a TS script (`scripts/make-triplog-fixture.ts`) writes `tools/triplog/tests/data/fixture.ulg` from synthetic records; the TS unit test checks the bytes match, and the Python tests load it and check values. Both sides break if the schema drifts.
+- Cross-language golden test: `src/triplog/__fixtures__/trip-fixture.ts` builds `tools/triplog/tests/data/fixture.ulg` from synthetic records (regenerate with `UPDATE_TRIPLOG_FIXTURE=1 npx jest src/triplog`); the TS unit test checks the bytes match, and the Python tests load it and check values. Both sides break if the schema drifts.
+- A TS reader (`src/triplog/trip-log-reader.ts`) feeds the replay harness (SPEC §3.10, NAVIGATOR-SPEC §10).
+- Put real logs in `tools/triplog/logs/`; it is git-ignored (VIN, GPS tracks).
 - The files also open directly in PlotJuggler and Foxglove for quick looks.
 
 ## 9. Developer UI (temporary)
@@ -254,7 +257,14 @@ All native changes land in one CI build (`build-ios` job → unsigned IPA → Al
 
 L1 and L2 need no device and can start immediately.
 
-Status (2026-10-03): L1, L2 and the L3 code are implemented and unit-tested on Windows (emulator-driven end-to-end test from adapter connect to a complete ULog file). The Swift modules (L0) are written but not yet compiled — the first green CI `build-ios` job is the next step, followed by the on-device checks in §12 and VEHICLE-LINK-SPEC §15.
+Status (2026-10-03): L0–L3 done. L4 started: 7 drives on the CX-5 with the MX+ (MFi); no BLE clone yet.
+
+Field fixes:
+
+- **Stale RPM:** a latched RPM started a trip with the engine off (VEHICLE-LINK-SPEC §10.4).
+- **Auto-connect:** it didn't wait for the MFi accessory to appear (VEHICLE-LINK-SPEC §7).
+- **Parked polling:** speed is now polled at 1 Hz when parked (VEHICLE-LINK-SPEC §10.3).
+- **Map GNSS:** the map's GNSS no longer stalls after jamming (§2).
 
 ## 12. Verification targets
 
@@ -266,9 +276,27 @@ Status (2026-10-03): L1, L2 and the L3 code are implemented and unit-tested on W
 6. Size ≈ 26 MB/h with default settings.
 7. Lint, typecheck, TS and Python unit tests pass.
 
+Results (2026-10-03, 7 drives):
+
+- **1:** auto start ✓.
+  - IMU: 100.6 Hz, max gap 10 ms.
+  - OBD speed: 25–29 Hz.
+  - GNSS: 1 Hz when clean, ~0.1 Hz jammed.
+  - Not yet tested with the phone locked for 20+ min.
+- **2:** trip ends ✓.
+  - Ignition off: ended 10 s after the ECU went silent.
+  - Parked with the engine off: ended at 5 min.
+  - Link lost (driver walked away): ended at 2 min.
+  - Back-to-back trips started on their own.
+- **3:** not tested yet.
+- **4:** OBD reads about 2 % below GNSS (−0.3 … −0.8 km/h median); `triplog check` passes on the clean drives.
+- **5:** logs load in Python ✓. PlotJuggler not tried.
+- **6:** 26–27 MB/h ✓.
+
 ## 13. Open items
 
 1. Expo Modules event payloads: typed arrays vs number arrays for IMU batches (§5.3).
 2. Files app visibility of `Documents/` (§7).
-3. Whether `expo-location` (map) and `modules/sensor-capture` (log) should merge into one GNSS source; for now two `CLLocationManager`s run side by side, which iOS supports.
-4. Tune trip thresholds (§4.2) from field data.
+3. ~~Whether the map and the log should share one GNSS source~~ — done: the map uses `modules/sensor-capture` too. `expo-location`'s watcher stopped for good after a jamming episode, until an app restart.
+4. Tune trip thresholds (§4.2) from field data. So far the defaults behaved correctly on all 7 drives.
+5. The VIN is often missing from the log (VEHICLE-LINK-SPEC §15).

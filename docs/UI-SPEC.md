@@ -6,6 +6,8 @@ Status: draft v1 (2026-09-29). Companion to [SPEC.md](SPEC.md) §3.9. Source of 
 >
 > Redesign (2026-10-03): the UI follows the **Calm** design (claude.ai/design project "wtf.ai Redesign", option 1b): Onest type, frosted-glass map panels (`expo-blur` + translucent tint, `src/components/ui/glass-fill.tsx`), sentence-case trust status, big light speed numeral, OpenFreeMap **Liberty** style in both color schemes. Theme tokens live in `src/constants/theme.ts` (`usePalette()`), icons in `src/components/ui/icon.tsx` (Material names → SF Symbols). Changes to the sections below: the menu is a `more` sheet (Offline data, Calibration, Diagnostics, Settings; nested sheets get `?from=more` for a back button); sheets draw their own header (`headerShown: false`); Settings adds an Appearance override (System / Light / Dark via `Appearance.setColorScheme`, persisted); a first-run `onboarding` route (welcome → location → adapter → calibration) shows until `onboarding-done` is set in kv-store; on `UNTRUSTED` the map shows the raw GNSS ghost and can frame it ("Show where GPS thinks you are").
 >
+> Position source (2026-10-03): §4.3 is updated. The map's GNSS now comes from `modules/sensor-capture` (shared with the trip log), not `expo-location`'s watcher, which stopped for good after jamming. Only satellite fixes count for trust. The navigator replaces this source next ([NAVIGATOR-SPEC.md](NAVIGATOR-SPEC.md) §9).
+>
 > Follow-up (2026-10-03): the mock `vehicle` (§7.2) and `debug` (§7.5) screens become real in the trip logger milestone — see [TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md) §9 and [VEHICLE-LINK-SPEC.md](VEHICLE-LINK-SPEC.md). The `AdapterChip` (§6.3) then shows the real link state.
 
 ## 1. Goal
@@ -70,10 +72,21 @@ Can run in parallel with Phase 0 once deps are installed.
 
 - `PositionSource` interface: `start()`, `stop()`, `subscribe(listener) → unsubscribe`, `getSnapshot()`, permission status.
 - `GnssPositionSource`:
-  - `watchPositionAsync` with `Accuracy.BestForNavigation`.
-  - Map `LocationObject` → `PositionEstimate` with `source: 'gnss'`; heading deg → rad; heading `-1`/`null` → undefined; speed `< 0`/`null` → undefined.
-  - Trust is decided over time by `GnssTrustTracker` (`src/services/position/gnss-trust.ts`), not per fix, so intermittent jamming doesn't flicker it. `'TRUSTED'` → `'NO_FIX'` when no fix ≤ 50 m has arrived for 8 s (gaps and coarse Wi-Fi/cell fallback fixes alike, SPEC §3.3). `'NO_FIX'` → `'TRUSTED'` after fixes ≤ 30 m have kept arriving for 5 s with no coarse fix or gap. Coarse fixes are still shown and don't advance `lastTrustedFixAt`. Transient location errors don't change trust.
-- Unit-test the `LocationObject` → `PositionEstimate` mapping.
+  - **Fixes:** from `SensorService` (`modules/sensor-capture`: `BestForNavigation`, automotive, never paused by iOS).
+    It registers as capture owner `position` while the map is on screen; a trip keeps GNSS running in the
+    background.
+  - **Mapping:** `GnssRecord` → `PositionEstimate` with `source: 'gnss'`; course → `headingRad`. Invalid
+    speed/course (NaN) → undefined.
+  - **Trust:** decided over time by `GnssTrustTracker` (`src/services/position/gnss-trust.ts`), not per fix, so
+    intermittent jamming doesn't flicker it.
+    - Only **satellite fixes** (they have a speed) count as good. Wi-Fi/cell fallback fixes never do, however
+      accurate they claim to be (±7 m is common).
+    - `'TRUSTED'` → `'NO_FIX'` when no satellite fix ≤ 50 m has arrived for 8 s.
+    - `'NO_FIX'` → `'TRUSTED'` after satellite fixes ≤ 30 m have kept arriving for 5 s with no gap.
+    - Coarse fixes are still shown and don't advance `lastTrustedFixAt`. Transient location errors don't change
+      trust.
+  - **Logging:** trust changes go into the trip log (TRIP-LOGGER-SPEC §6.4).
+- Unit-test the mapping and the trust rules.
 
 ### 4.4 React binding — `src/providers/position-provider.tsx`
 
