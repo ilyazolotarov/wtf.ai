@@ -12,10 +12,10 @@ import type {
     Point,
     Polygon,
 } from "geojson";
-import { useEffect, useRef } from "react";
-import { useColorScheme, type NativeSyntheticEvent } from "react-native";
+import { useEffect, useRef, type ComponentProps } from "react";
+import { useColorScheme, View, type NativeSyntheticEvent } from "react-native";
 
-import { getMapStyle } from "@/config/map";
+import { useMapStyle } from "@/config/map";
 import { Colors } from "@/constants/theme";
 import { circlePolygon, destinationAtBearing } from "@/nav/geo";
 import type { PositionEstimate } from "@/nav/position/types";
@@ -43,6 +43,7 @@ export function MapSurface({
 }: MapSurfaceProps) {
   const scheme = useColorScheme() === "dark" ? "dark" : "light";
   const palette = Colors[scheme];
+  const mapStyle = useMapStyle(scheme);
   const position = usePosition();
   const { activeRoute } = useRoute();
   const cameraRef = useRef<CameraRef | null>(null);
@@ -99,9 +100,12 @@ export function MapSurface({
     ? routeFeatures(activeRoute.coordinates)
     : emptyLines();
 
+  // Dark style is still being tinted: hold a plain dark canvas instead of flashing light tiles.
+  if (mapStyle == null) return <View style={{ flex: 1, backgroundColor: palette.bg }} />;
+
   return (
     <Map
-      mapStyle={getMapStyle(scheme)}
+      mapStyle={mapStyle as ComponentProps<typeof Map>["mapStyle"]}
       style={{ flex: 1 }}
       attribution
       attributionPosition={{ bottom: 8, left: 8 }}
