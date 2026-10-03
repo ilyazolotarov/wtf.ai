@@ -1,7 +1,18 @@
 // Trip log → typed sensor streams for replay (SPEC §3.10). Schema: ./schema.ts.
 
 import type { GnssFix, ImuSample, ObdSpeedSample, Vec3 } from "../nav/types";
-import { END_REASONS, ENGINE_STATE_CODES, GNSS_FLAGS, LOG_TAGS, TRIP_EVENTS } from "./schema";
+import {
+  END_REASONS,
+  ENGINE_STATE_CODES,
+  GNSS_FLAGS,
+  LOG_TAGS,
+  NAV_MODE_CODES,
+  NAV_POSE_CODES,
+  NAV_SOURCE_CODES,
+  NAV_TRUST_CODES,
+  TRIP_EVENTS,
+  type NavEstimateRecord,
+} from "./schema";
 import { readULog, type RecordValue, type ULogRecord } from "./ulog/reader";
 
 const PID_SPEED = 0x0d;
@@ -23,6 +34,8 @@ export interface TripLog {
   timeSync: { tUs: number; utcUs: number }[];
   /** Text log lines except the ELM transcript: link events, markers, app notes. */
   messages: { tUs: number; tag: string; text: string }[];
+  /** What the map showed (absent in logs before the navigator was wired in). */
+  navEstimate: (Omit<NavEstimateRecord, "timestampUs"> & { tUs: number })[];
   truncated: boolean;
 }
 
@@ -93,6 +106,23 @@ export function readTripLog(bytes: Uint8Array): TripLog {
     .filter((m) => m.tag !== LOG_TAGS.elm)
     .map((m) => ({ tUs: m.timestampUs, tag: m.tag === null ? "" : nameOf(LOG_TAGS, m.tag), text: m.text }));
 
+  const navEstimate = rows("nav_estimate").map((r) => ({
+    tUs: num(r, "timestamp"),
+    latDeg: num(r, "lat_deg"),
+    lonDeg: num(r, "lon_deg"),
+    accuracyM: num(r, "accuracy_m"),
+    headingRad: num(r, "heading_rad"),
+    headingSigmaRad: num(r, "heading_sigma_rad"),
+    speedMps: num(r, "speed_mps"),
+    speedScale: num(r, "speed_scale"),
+    gnssLagS: num(r, "gnss_lag_s"),
+    behindUs: num(r, "behind_us"),
+    mode: NAV_MODE_CODES[num(r, "mode")] ?? "none",
+    source: NAV_SOURCE_CODES[num(r, "source")] ?? "gnss",
+    trust: NAV_TRUST_CODES[num(r, "trust")] ?? "NO_FIX",
+    parkedPose: NAV_POSE_CODES[num(r, "parked_pose")] ?? "none",
+  }));
+
   return {
     startUs: log.startUs,
     info: log.info,
@@ -104,6 +134,7 @@ export function readTripLog(bytes: Uint8Array): TripLog {
     events,
     timeSync,
     messages,
+    navEstimate,
     truncated: log.truncated,
   };
 }

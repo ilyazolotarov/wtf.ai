@@ -69,6 +69,22 @@ export function buildFixture(): Uint8Array {
       attitude: [1, 0, 0, 0],
     });
   }
+  w.navEstimate({
+    timestampUs: t0 + 1_500_000,
+    latDeg: 50.4501,
+    lonDeg: 30.52,
+    accuracyM: 3.5,
+    headingRad: 0.25,
+    headingSigmaRad: 0.02,
+    speedMps: 10.5,
+    speedScale: 1.02,
+    gnssLagS: -0.1,
+    behindUs: 300_000,
+    mode: "dr",
+    source: "fused",
+    trust: "TRUSTED",
+    parkedPose: "confirmed",
+  });
   w.linkStats({ timestampUs: t0 + 1_000_000, speedHz: 19.5, latencyP50Ms: 40, latencyP95Ms: 55, errors: 1, linkState: 6, batteryV: 14.2 });
   w.log("info", LOG_TAGS.elm, t0 + 1, "tx=10000000 ATI | ELM327 v1.5\\r\\r>");
   w.tripEvent(t0 + 3_000_000, TRIP_EVENTS.end, 0);

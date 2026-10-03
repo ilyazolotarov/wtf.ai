@@ -13,7 +13,7 @@ import { isSatelliteRecord, mapFixToPosition } from "@/services/position/gnss-po
 import { GnssTrustTracker } from "@/services/position/gnss-trust";
 import type { PositionSource } from "@/services/position/position-source";
 import type { SensorService } from "@/services/sensor-capture/sensor-service";
-import { GNSS_FLAGS, type GnssRecord, type ImuMotionRecord } from "@/triplog/schema";
+import { GNSS_FLAGS, type GnssRecord, type ImuMotionRecord, type NavEstimateRecord } from "@/triplog/schema";
 
 import type { CalibrationStore } from "./calibration-store";
 
@@ -69,6 +69,8 @@ export interface NavigatorServiceDeps {
   nowUs(): number;
   /** Navigator events for the trip log. */
   note?(text: string): void;
+  /** Every published position, for the trip log (`nav_estimate`). */
+  log?(record: NavEstimateRecord): void;
   nav?: Partial<NavConfig>;
 }
 
@@ -383,7 +385,8 @@ export class NavigatorService implements PositionSource {
       lat += ((d * Math.cos(heading)) / EARTH_RADIUS_M) * (180 / Math.PI);
       lon += ((d * Math.sin(heading)) / (EARTH_RADIUS_M * Math.cos((lat * Math.PI) / 180))) * (180 / Math.PI);
     }
-    this.set({
+    this.set(
+      {
       lat,
       lon,
       headingRad: heading,
@@ -397,7 +400,9 @@ export class NavigatorService implements PositionSource {
       rawGnss: fix
         ? { lat: fix.latDeg, lon: fix.lonDeg, accuracyM: Number.isFinite(fix.hAccM) ? fix.hAccM : 9999, timestamp: fix.utcUs / 1000 }
         : undefined,
-    });
+      },
+      nowUs - estimate.tUs,
+    );
   }
 
   private setMode(mode: NavMode): void {
@@ -411,9 +416,33 @@ export class NavigatorService implements PositionSource {
     this.deps.note?.(text);
   }
 
-  private set(position: PositionEstimate): void {
+  /** `behindUs`: how far the navigator's state lags now (the drawn position is extrapolated over it). */
+  private set(position: PositionEstimate, behindUs = 0): void {
     this.position = position;
+    this.logPosition(position, behindUs);
     this.listeners.forEach((listener) => listener());
+  }
+
+  private logPosition(p: PositionEstimate, behindUs: number): void {
+    if (!this.deps.log) return;
+    const nav = this.nav;
+    const params = nav?.params;
+    this.deps.log({
+      timestampUs: this.deps.nowUs(),
+      latDeg: p.lat,
+      lonDeg: p.lon,
+      accuracyM: p.accuracyM,
+      headingRad: p.headingRad ?? NaN,
+      headingSigmaRad: nav?.estimate()?.headingSigmaRad ?? NaN,
+      speedMps: p.speedMps ?? NaN,
+      speedScale: params?.ks ?? NaN,
+      gnssLagS: nav?.gnssLagS ?? NaN,
+      behindUs,
+      mode: nav?.mode ?? "none",
+      source: p.source,
+      trust: p.trust,
+      parkedPose: this.poseStatus,
+    });
   }
 }
 

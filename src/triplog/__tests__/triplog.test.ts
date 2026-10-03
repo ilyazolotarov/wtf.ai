@@ -2,6 +2,7 @@
 import * as fs from "fs";
 import * as path from "path";
 
+import { readTripLog } from "@/triplog/trip-log-reader";
 import { TripLogWriter, type ByteSink } from "@/triplog/trip-log-writer";
 import { readULog } from "@/triplog/ulog/reader";
 import { ULogEncoder } from "@/triplog/ulog/encoder";
@@ -77,6 +78,9 @@ describe("TripLogWriter", () => {
     expect(f.data.time_sync[0].utc_us).toBe(1_791_000_000_000_000);
     expect(f.data.trip_event.map((e) => e.event)).toEqual([0, 1]);
     expect(f.logs[0].tag).toBe(1);
+    expect(readTripLog(buildFixture()).navEstimate).toEqual([
+      expect.objectContaining({ tUs: FIXTURE_START_US + 1_500_000, latDeg: 50.4501, behindUs: 300_000, mode: "dr", source: "fused", trust: "TRUSTED", parkedPose: "confirmed" }),
+    ]);
   });
 
   test("flushes on interval with a sync message, closes the sink", () => {

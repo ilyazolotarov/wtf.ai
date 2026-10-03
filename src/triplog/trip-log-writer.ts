@@ -9,6 +9,11 @@ import {
   GYRO_RAW,
   IMU_MOTION,
   LINK_STATS,
+  NAV_ESTIMATE,
+  NAV_MODE_CODES,
+  NAV_POSE_CODES,
+  NAV_SOURCE_CODES,
+  NAV_TRUST_CODES,
   OBD_PID,
   TIME_SYNC,
   TRIP_EVENT,
@@ -16,6 +21,7 @@ import {
   type GnssRecord,
   type ImuMotionRecord,
   type LinkStatsRecord,
+  type NavEstimateRecord,
   type ObdPidRecord,
   type Vec3Record,
 } from "./schema";
@@ -149,6 +155,25 @@ export class TripLogWriter {
       Math.min(0xffff, r.errors),
       r.linkState,
       r.batteryV,
+    ]);
+  }
+
+  navEstimate(r: NavEstimateRecord): void {
+    this.enc.data(NAV_ESTIMATE.name, [
+      r.timestampUs,
+      r.latDeg,
+      r.lonDeg,
+      r.accuracyM,
+      r.headingRad,
+      r.headingSigmaRad,
+      r.speedMps,
+      r.speedScale,
+      r.gnssLagS,
+      Math.min(0xffffffff, Math.max(0, Math.round(r.behindUs))),
+      NAV_MODE_CODES.indexOf(r.mode),
+      NAV_SOURCE_CODES.indexOf(r.source),
+      NAV_TRUST_CODES.indexOf(r.trust),
+      NAV_POSE_CODES.indexOf(r.parkedPose),
     ]);
   }
 

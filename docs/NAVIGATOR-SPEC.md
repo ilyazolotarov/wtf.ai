@@ -201,12 +201,17 @@ Until `src/nav/integrity` (SPEC Phase 3), the map's trust state comes from `Gnss
   - `rawGnss` = the latest fix, for the ghost marker; `distanceSinceTrustedM` from OBD.
 - **Without OBD speed** (no adapter, or none for 10 s): phone GNSS only, as before. The navigator needs OBD speed
   for DR.
-- **Trip log:** mode changes, resets, the parked pose (used, confirmed, rejected), and loaded/saved calibration are
-  app notes (`nav …`).
+- **Trip log:**
+  - `nav_estimate` (TRIP-LOGGER-SPEC §6.3): every position the map was given (~2–3 Hz). It holds the drawn
+    position and radius, mode, source, trust, heading and its σ, `k_s`, the GNSS lag in use, the parked-pose status,
+    and how far the navigator ran behind (`behind_us`, ~300 ms). This is what the driver saw, including the stored
+    calibration and parked pose that a replay doesn't have.
+  - Mode changes, resets, the parked pose (saved, used, confirmed, rejected), and loaded/saved calibration are app
+    notes (`nav …`).
 - **Persistence** per §7.4.
 - **Tests:** unit tests replay synthetic drives through the service. The 7 real logs replayed through it (real
   delivery delays) match the offline replay: median 0.1–1 m apart, identical learned values.
-- **Next:** a field drive comparing the map with a second phone's GNSS (§12.6).
+- **Next:** a field drive (§12.6).
 
 ## 10. Replay and benchmark (`src/nav/replay`, `tools/replay`)
 
@@ -260,8 +265,10 @@ needed to check them (`replay:bench`).
 3. Standstill: heading change < 0.5° over a 60 s stop, including handling the phone while parked.
 4. The GNSS lag estimate lies within ±0.1 s of the per-drive turn fit on every drive with ≥ 6 turn windows.
 5. Unit tests (`src/nav/__tests__`, synthetic drives) pass; lint and typecheck pass.
-6. Field (after §9): during a real jamming episode the map dot keeps moving, and its radius covers the true position
-   in a later check against satellite fixes.
+6. Field (after §9): during a real jamming episode the map dot keeps moving, and its radius covers the true position.
+   - **Truth:** the first satellite fixes after the outage, compared with `nav_estimate` at the same time. That's
+     where the DR error is largest. It needs nothing done in the car; a second phone in the same car is jammed too.
+   - Error during an outage is measured by `replay:bench` on clean drives (§10).
 
 ## 13. Open items
 
@@ -272,5 +279,5 @@ needed to check them (`replay:bench`).
 4. Second phone and mount, to check the tuning values (§11).
 5. Integrity (SPEC Phase 3) replaces the interim trust tracker and the EKF gate as the GNSS acceptance rule.
 6. Spoofing replay: offsetting fixes in clean logs (SPEC §3.10) isn't implemented yet.
-7. Trip logs don't record the navigator's output, only its notes. Replay reproduces it from the same inputs, but
-   a stored calibration changes the starting point: replay with `--lag` to match.
+7. Replay doesn't load the stored calibration or parked pose a live session started from. `nav_estimate` and the
+   `nav …` notes record them; use `--lag` and `--chain` to come close.

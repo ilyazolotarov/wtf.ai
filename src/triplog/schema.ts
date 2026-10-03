@@ -91,6 +91,27 @@ export const TIME_SYNC: ULogFormat = {
   fields: [ts, { type: "int64_t", name: "utc_us" }],
 };
 
+/** What the map showed: every position the navigator service published (NAVIGATOR-SPEC §9). */
+export const NAV_ESTIMATE: ULogFormat = {
+  name: "nav_estimate",
+  fields: [
+    ts,
+    { type: "double", name: "lat_deg" },
+    { type: "double", name: "lon_deg" },
+    { type: "float", name: "accuracy_m" },
+    { type: "float", name: "heading_rad" },
+    { type: "float", name: "heading_sigma_rad" },
+    { type: "float", name: "speed_mps" },
+    { type: "float", name: "speed_scale" },
+    { type: "float", name: "gnss_lag_s" },
+    { type: "uint32_t", name: "behind_us" },
+    { type: "uint8_t", name: "mode" },
+    { type: "uint8_t", name: "source" },
+    { type: "uint8_t", name: "trust" },
+    { type: "uint8_t", name: "parked_pose" },
+  ],
+};
+
 export const ALL_FORMATS: readonly ULogFormat[] = [
   OBD_PID,
   GNSS,
@@ -101,6 +122,7 @@ export const ALL_FORMATS: readonly ULogFormat[] = [
   TRIP_EVENT,
   LINK_STATS,
   TIME_SYNC,
+  NAV_ESTIMATE,
 ];
 
 export const ENGINE_STATE_CODES = ["unknown", "ignition-off", "engine-off", "engine-running"] as const;
@@ -150,6 +172,11 @@ export const LOG_TAGS = {
   app: 5,
 } as const;
 
+export const NAV_MODE_CODES = ["none", "anchored", "dr"] as const;
+export const NAV_SOURCE_CODES = ["gnss", "fused", "dr", "manual"] as const;
+export const NAV_TRUST_CODES = ["TRUSTED", "UNTRUSTED", "REACQUIRING", "NO_FIX"] as const;
+export const NAV_POSE_CODES = ["none", "unverified", "confirmed", "rejected"] as const;
+
 export const GNSS_FLAGS = {
   simulated: 1,
   fromAccessory: 2,
@@ -184,6 +211,26 @@ export interface GnssRecord {
   courseAccRad: number;
   deliveryDelayUs: number;
   flags: number;
+}
+
+export interface NavEstimateRecord {
+  /** Publish time, µs uptime. */
+  timestampUs: number;
+  latDeg: number;
+  lonDeg: number;
+  accuracyM: number;
+  /** NaN when unknown. */
+  headingRad: number;
+  headingSigmaRad: number;
+  speedMps: number;
+  speedScale: number;
+  gnssLagS: number;
+  /** How far the navigator's state lagged the publish time (the drawn position is extrapolated over it). */
+  behindUs: number;
+  mode: (typeof NAV_MODE_CODES)[number];
+  source: (typeof NAV_SOURCE_CODES)[number];
+  trust: (typeof NAV_TRUST_CODES)[number];
+  parkedPose: (typeof NAV_POSE_CODES)[number];
 }
 
 export interface ImuMotionRecord {

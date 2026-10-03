@@ -79,6 +79,7 @@ export function getRuntime(): Runtime {
     calibration: new CalibrationStore(kvStore, { model: sysHw, os: sysOsVer }),
     nowUs,
     note: (text) => recorder.note(text),
+    log: (record) => recorder.navEstimate(record),
   });
   // During a trip the navigator keeps running with the map off screen, so dead reckoning
   // doesn't start over each time the app comes back.

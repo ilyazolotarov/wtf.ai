@@ -13,6 +13,7 @@ import {
   TRIP_EVENTS,
   type EndReason,
   type GnssRecord,
+  type NavEstimateRecord,
 } from "@/triplog/schema";
 import {
   DEFAULT_TRIP_CONFIG,
@@ -206,6 +207,11 @@ export class TripRecorder {
       w.tripEvent(t, TRIP_EVENTS.marker);
       w.log("info", LOG_TAGS.app, t, text);
     });
+  }
+
+  /** A position the map showed (NAVIGATOR-SPEC §9); dropped when not recording. */
+  navEstimate(r: NavEstimateRecord): void {
+    this.record(r.timestampUs, (w) => w.navEstimate(r));
   }
 
   /** App-side event worth seeing in the log (no marker); dropped when not recording. */

@@ -7,7 +7,7 @@ import type { KeyValueStore } from "@/obd/vehicle-link-core";
 import { CALIBRATION_KEY, CalibrationStore, PARKED_POSE_KEY, type StoredPose } from "@/services/navigation/calibration-store";
 import { NavigatorService } from "@/services/navigation/navigator-service";
 import type { decodeImuBatch } from "@/services/sensor-capture/sensor-service";
-import type { GnssRecord } from "@/triplog/schema";
+import type { GnssRecord, NavEstimateRecord } from "@/triplog/schema";
 
 jest.mock("expo-location", () => ({
   getForegroundPermissionsAsync: jest.fn(async () => ({ granted: true, status: "granted" })),
@@ -71,6 +71,7 @@ function harness(options: { vin?: string | null; store?: ReturnType<typeof memor
   const engine = new Emitter<[EngineState, number]>();
   const want = jest.fn();
   const notes: string[] = [];
+  const logged: NavEstimateRecord[] = [];
   const store = options.store ?? memoryStore();
   let nowUs = 1_000_000_000;
   jest.setSystemTime((nowUs + UTC_OFFSET_US) / 1000);
@@ -85,6 +86,7 @@ function harness(options: { vin?: string | null; store?: ReturnType<typeof memor
     calibration: new CalibrationStore(store, PHONE),
     nowUs: () => nowUs,
     note: (text) => notes.push(text),
+    log: (r) => logged.push(r),
   });
 
   /** Deliver a trip the way the phone does: IMU in 100 ms batches, OBD live, fixes 50 ms late. */
@@ -120,7 +122,7 @@ function harness(options: { vin?: string | null; store?: ReturnType<typeof memor
     }
   }
 
-  return { service, gnss, engine, want, notes, store, play, now: () => nowUs };
+  return { service, gnss, engine, want, notes, logged, store, play, now: () => nowUs };
 }
 
 beforeEach(() => jest.useFakeTimers());
@@ -169,7 +171,7 @@ describe("NavigatorService", () => {
 
   test("fuses GNSS with OBD and IMU, then dead-reckons through a GNSS outage", async () => {
     const drive = syntheticDrive({ segments: cityDrive(4), gnss: "clean", obdScale: 0.985, startHeadingRad: 1 });
-    const { service, play, notes } = harness();
+    const { service, play, notes, logged } = harness();
     await service.start();
     const durationS = (drive.trip.imu.at(-1)!.tUs - drive.trip.startUs) / 1e6;
     const outageS = durationS - 40;
@@ -192,6 +194,12 @@ describe("NavigatorService", () => {
     expect(haversineM(p, truth)).toBeLessThan(10);
     expect(p.accuracyM).toBeGreaterThan(2);
     expect(p.distanceSinceTrustedM).toBeGreaterThan(400);
+    // The trip log gets what the map showed, including how far the navigator ran behind.
+    const last = logged.at(-1)!;
+    expect(last).toMatchObject({ latDeg: p.lat, lonDeg: p.lon, accuracyM: p.accuracyM, mode: "dr", source: "dr", trust: "NO_FIX" });
+    expect(last.behindUs).toBeGreaterThanOrEqual(200_000);
+    expect(last.behindUs).toBeLessThanOrEqual(500_000);
+    expect(logged.some((r) => r.source === "fused")).toBe(true);
     service.stop();
   });
 

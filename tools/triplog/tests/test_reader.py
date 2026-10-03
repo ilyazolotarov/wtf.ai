@@ -79,6 +79,17 @@ def test_events_and_time(trip):
     assert trip.link_stats["link_state"].tolist() == ["polling"]
 
 
+def test_nav(trip):
+    nav = trip.nav
+    assert len(nav) == 1
+    row = nav.iloc[0]
+    assert row["t_s"] == pytest.approx(1.5)
+    assert row["lat"] == pytest.approx(50.4501)
+    assert row["accuracy_m"] == pytest.approx(3.5)
+    assert row["behind_ms"] == pytest.approx(300)
+    assert (row["mode"], row["source"], row["trust"], row["parked_pose"]) == ("dr", "fused", "TRUSTED", "confirmed")
+
+
 def test_summary_and_check(trip):
     s = summary(trip)
     assert s["complete"] is True

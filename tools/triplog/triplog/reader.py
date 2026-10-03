@@ -41,6 +41,10 @@ LINK_STATES = [
     "reconnecting",
     "error",
 ]
+NAV_MODES = ["none", "anchored", "dr"]
+NAV_SOURCES = ["gnss", "fused", "dr", "manual"]
+NAV_TRUST = ["TRUSTED", "UNTRUSTED", "REACQUIRING", "NO_FIX"]
+NAV_POSES = ["none", "unverified", "confirmed", "rejected"]
 LOG_TAGS = {1: "elm", 2: "link", 3: "trip", 4: "sensors", 5: "app"}
 LOG_LEVELS = {ord("3"): "error", ord("4"): "warning", ord("6"): "info", ord("7"): "debug"}
 
@@ -69,6 +73,8 @@ class Trip:
     link_stats: pd.DataFrame
     time_sync: pd.DataFrame
     transcript: pd.DataFrame
+    # What the map showed (navigator output); empty in logs from before it was wired in.
+    nav: pd.DataFrame
     dropouts_ms: list[int] = field(default_factory=list)
 
     @property
@@ -106,6 +112,7 @@ class Trip:
             "link_stats": self.link_stats,
             "time_sync": self.time_sync,
             "transcript": self.transcript,
+            "nav": self.nav,
         }
 
 
@@ -275,6 +282,30 @@ def load(path: str | Path) -> Trip:
         else pd.DataFrame(columns=["t_s", "utc_us"])
     )
 
+    d = _dataset(ulog, "nav_estimate")
+    nav = (
+        pd.DataFrame(
+            {
+                "t_s": _t(start, d["timestamp"]),
+                "lat": d["lat_deg"],
+                "lon": d["lon_deg"],
+                "accuracy_m": d["accuracy_m"].astype("float64"),
+                "heading": d["heading_rad"].astype("float64"),
+                "heading_sigma": d["heading_sigma_rad"].astype("float64"),
+                "speed": d["speed_mps"].astype("float64"),
+                "speed_scale": d["speed_scale"].astype("float64"),
+                "gnss_lag_s": d["gnss_lag_s"].astype("float64"),
+                "behind_ms": d["behind_us"] / 1000.0,
+                "mode": [_name(NAV_MODES, int(v)) for v in d["mode"]],
+                "source": [_name(NAV_SOURCES, int(v)) for v in d["source"]],
+                "trust": [_name(NAV_TRUST, int(v)) for v in d["trust"]],
+                "parked_pose": [_name(NAV_POSES, int(v)) for v in d["parked_pose"]],
+            }
+        )
+        if d is not None
+        else pd.DataFrame(columns=["t_s", "lat", "lon", "accuracy_m", "heading", "heading_sigma", "speed", "speed_scale", "gnss_lag_s", "behind_ms", "mode", "source", "trust", "parked_pose"])
+    )
+
     rows = []
     for tag, messages in getattr(ulog, "logged_messages_tagged", {}).items():
         for m in messages:
@@ -308,5 +339,6 @@ def load(path: str | Path) -> Trip:
         link_stats=link_stats,
         time_sync=time_sync,
         transcript=transcript,
+        nav=nav,
         dropouts_ms=dropouts,
     )
