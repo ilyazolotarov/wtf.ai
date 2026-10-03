@@ -230,6 +230,7 @@ export const en = {
   back: "Back",
   close: "Close",
   obdAdapter: "OBD adapter",
+  splashTagline: "Where the f* am I?",
 } as const;
 
 export type Strings = { [Key in keyof typeof en]: string };

@@ -8,9 +8,10 @@ import {
 } from "@expo-google-fonts/onest";
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import { useEffect } from "react";
+import { useState } from "react";
 import { useColorScheme } from "react-native";
 
+import { AnimatedSplash } from "@/components/animated-splash";
 import { initSentry, Sentry } from "@/config/sentry";
 import { Colors } from "@/constants/theme";
 import { I18nProvider, useT } from "@/i18n/provider";
@@ -35,10 +36,8 @@ function RootLayout() {
     Onest_700Bold,
   });
   const ready = fontsLoaded || fontError != null;
-
-  useEffect(() => {
-    if (ready) void SplashScreen.hideAsync();
-  }, [ready]);
+  // The animated overlay takes over from the native splash and hides it.
+  const [splashDone, setSplashDone] = useState(false);
 
   if (!ready) return null;
 
@@ -52,6 +51,7 @@ function RootLayout() {
             </RouteProvider>
           </RuntimeProvider>
         </PositionProvider>
+        {!splashDone && <AnimatedSplash onDone={() => setSplashDone(true)} />}
       </I18nProvider>
     </ThemeProvider>
   );

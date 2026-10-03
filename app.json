@@ -8,7 +8,7 @@
     "scheme": "wtfai",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon",
+      "icon": "./assets/images/icon.png",
       "bundleIdentifier": "ai.wtf.navigator",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
@@ -16,7 +16,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#121211",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
@@ -44,9 +44,13 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
-          "image": "./assets/images/splash-brand.png",
-          "imageWidth": 310
+          "backgroundColor": "#F5F4F1",
+          "image": "./assets/images/splash-light.png",
+          "imageWidth": 300,
+          "dark": {
+            "backgroundColor": "#121211",
+            "image": "./assets/images/splash-dark.png"
+          }
         }
       ],
       "@maplibre/maplibre-react-native",

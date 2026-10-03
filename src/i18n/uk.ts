@@ -232,4 +232,5 @@ export const uk = {
   back: "Назад",
   close: "Закрити",
   obdAdapter: "Адаптер OBD",
+  splashTagline: "Where the f* am I?",
 } satisfies Strings;
