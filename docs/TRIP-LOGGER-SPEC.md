@@ -175,7 +175,7 @@ The trip list shows free space; recording refuses to start below 200 MB free.
 
 ## 7. Export to PC
 
-- **Share sheet** (`expo-sharing`) from the trip list: one or several `.ulg` files → AirDrop is not available (no Mac), so typical targets are Files/iCloud Drive, OneDrive, Telegram, e-mail.
+- **Share sheet** (`expo-sharing`) from the trip list: one `.ulg` file, or **Share all** — every finished trip stored (not deflated) in one `wtf-trips-<UTC stamp>.zip`, built in `Caches/trip-archives` (only the latest is kept) → AirDrop is not available (no Mac), so typical targets are Files/iCloud Drive, OneDrive, Telegram, e-mail.
 - **Files app / USB**: `expo-file-system` config plugin `enableFileSharing: true` exposes `Documents/` (includes `trips/`). On Windows, the "Apple Devices" app (or iTunes) → device → Files → wtf.ai lets you copy logs over USB. Verify the folder appears in the Files app in Phase 0 (`LSSupportsOpeningDocumentsInPlace` may also be needed).
 - Delete single / all trips from the trip list.
 - No automatic upload (SPEC §2 privacy).
@@ -233,7 +233,7 @@ Dev builds only. Replace mocks in existing screens; add routes under `src/app/`.
 
 ### 9.4 `trips` (new route, modal)
 
-- List of logs: date, duration, distance, size, adapter, complete/incomplete. Actions: share, share selected, delete, delete all. Free space indicator.
+- List of logs: date, duration, distance, size, adapter, complete/incomplete. Actions: share, share all (ZIP), delete, delete all. Free space indicator.
 
 ## 10. App configuration (one native batch)
 

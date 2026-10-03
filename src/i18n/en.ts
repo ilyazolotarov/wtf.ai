@@ -185,6 +185,7 @@ export const en = {
   freeSpace: "Free space",
   share: "Share",
   shareAll: "Share all",
+  archiving: "Packing…",
   delete: "Delete",
   deleteAll: "Delete all",
   incomplete: "Incomplete",

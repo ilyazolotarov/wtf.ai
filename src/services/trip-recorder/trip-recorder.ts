@@ -226,6 +226,16 @@ export class TripRecorder {
     return this.deps.files.uri(entry.fileName);
   }
 
+  /** One ZIP of every finished trip (the one being recorded is left out); null when there are none. */
+  archiveAll(): string | null {
+    const trips = this.snapshot.trips.filter((t) => t.id !== this.current?.id);
+    if (trips.length === 0) return null;
+    return this.deps.files.archive(
+      `wtf-trips-${fileStamp(new Date())}.zip`,
+      trips.map((t) => ({ name: t.fileName, modified: new Date(t.endUtcMs ?? t.startUtcMs) })),
+    );
+  }
+
   deleteTrip(id: string): void {
     if (this.current?.id === id) return;
     const entry = this.snapshot.trips.find((t) => t.id === id);

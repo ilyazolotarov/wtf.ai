@@ -31,6 +31,7 @@ function memoryFiles() {
     list: () => [...files.entries()].map(([name, chunks]) => ({ name, uri: `mem://${name}`, size: chunks.reduce((n, c) => n + c.length, 0) })),
     remove: (name) => void files.delete(name),
     uri: (name) => `mem://${name}`,
+    archive: (name) => `mem://${name}`,
     freeBytes: () => 10 * 1024 ** 3,
   };
   const bytes = (name: string) => {

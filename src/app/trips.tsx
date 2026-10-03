@@ -1,5 +1,5 @@
 import * as Sharing from "expo-sharing";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Alert, StyleSheet, Text, useColorScheme, View } from "react-native";
 
 import { ScreenAction, ScreenContent, ScreenNote, ScreenRow, ScreenSection } from "@/components/screens/screen-ui";
@@ -15,6 +15,7 @@ export default function TripsScreen() {
   const { recorder } = useRuntime();
   const snap = useRecorderSnapshot();
   const palette = Colors[useColorScheme() === "dark" ? "dark" : "light"];
+  const [archiving, setArchiving] = useState(false);
 
   useEffect(() => recorder.refresh(), [recorder]);
 
@@ -25,6 +26,23 @@ export default function TripsScreen() {
       dialogTitle: trip.fileName,
     });
   };
+
+  const shareAll = () => {
+    setArchiving(true);
+    // Building the ZIP blocks the JS thread; let the disabled button render first.
+    setTimeout(async () => {
+      try {
+        const uri = recorder.archiveAll();
+        if (uri) await Sharing.shareAsync(uri, { mimeType: "application/zip", UTI: "public.zip-archive" });
+      } catch (e) {
+        Alert.alert(t("shareAll"), e instanceof Error ? e.message : String(e));
+      } finally {
+        setArchiving(false);
+      }
+    }, 50);
+  };
+
+  const finished = snap.trips.filter((trip) => trip.id !== snap.current?.id).length;
 
   const confirmDelete = (onYes: () => void) =>
     Alert.alert(t("delete"), undefined, [
@@ -37,6 +55,15 @@ export default function TripsScreen() {
       <ScreenSection plain>
         <ScreenRow labelKey="freeSpace" value={fmtBytes(snap.freeBytes)} />
         <ScreenRow labelKey="trips" value={String(snap.trips.length)} />
+        {finished > 0 && (
+          <ScreenAction
+            labelKey="shareAll"
+            label={archiving ? t("archiving") : undefined}
+            secondary
+            disabled={archiving}
+            onPress={shareAll}
+          />
+        )}
         {snap.trips.length > 0 && (
           <ScreenAction labelKey="deleteAll" secondary onPress={() => confirmDelete(() => recorder.deleteAll())} />
         )}

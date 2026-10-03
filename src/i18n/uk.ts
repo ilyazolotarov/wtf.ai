@@ -187,6 +187,7 @@ export const uk = {
   freeSpace: "Вільне місце",
   share: "Поділитися",
   shareAll: "Поділитися всіма",
+  archiving: "Пакування…",
   delete: "Видалити",
   deleteAll: "Видалити всі",
   incomplete: "Незавершена",
