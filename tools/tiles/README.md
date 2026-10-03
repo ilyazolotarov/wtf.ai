@@ -1,57 +1,68 @@
 # tiles — wtf.ai offline map data
 
-Builds offline map packs from the Geofabrik Ukraine extract (SPEC §3.8). Today: the display
-pack (vector tiles + style). Next: the map-matching road graph, then Valhalla routing tiles.
+Builds the offline map release from the Geofabrik Ukraine extract (SPEC §3.8). Today: display
+maps (vector tiles + style). Next: the map-matching road graph, then Valhalla routing tiles.
 
-Needs Python ≥ 3.11 and Java ≥ 21 (Planetiler).
+Needs Python ≥ 3.11, Java ≥ 21 (Planetiler) and `osmium` (osmium-tool). Without `osmium` on
+PATH (Windows) the build runs it in Docker, building `docker/osmium.Dockerfile` on first use.
 
 ```bash
 pip install -e "tools/tiles[dev]"
 cd tools/tiles
-python -m tiles.cli region chernihiv 71249     # regions/chernihiv.poly from OSM relation (committed)
-python -m tiles.cli build-map chernihiv        # → out/chernihiv/
-python -m tiles.cli serve                      # http://<PC IP>:8765/ for the app
+python -m tiles.cli regions                    # (re)write regions/*.poly from regions/regions.json
+python -m tiles.cli build-all --heap 8g        # out/release/: ukraine, every region, index.json
+python -m tiles.cli build-region chernihiv     # one region (+ index.json)
+python -m tiles.cli index                      # shared files + index.json
+python -m tiles.cli serve                      # http://<PC IP>:8765/ — app: Downloads → Map source
+python -m tiles.cli osm-date                   # date of the current Geofabrik extract
 python -m pytest
 ```
 
+## Regions
+
+`ukraine` plus its 27 ISO 3166-2 subdivisions (24 oblasts, Crimea, Kyiv city, Sevastopol),
+listed with their OSM boundary relation in `regions/regions.json`. Each `.poly` is the
+boundary's outer ring (holes filled, so enclaves belong to the surrounding region: Slavutych
+is in both `chernihiv` and its own `kyiv` oblast), buffered by 500 m and simplified to ~20 m.
+
+One `osmium extract --strategy smart` pass clips the Ukraine extract to every region
+(`cache/extracts/`): only data inside the polygon, with ways and multipolygons that cross the
+border kept whole. Planetiler then builds each region from its own extract, so its tiles hold
+nothing from neighbouring regions at any zoom — only coarse Natural Earth context (borders,
+large water) at z ≤ 6. Clipping tiles instead (Planetiler `--polygon`, `pmtiles extract`)
+keeps whole tiles, which at z8 span ~150 km and showed half of Kyiv oblast in Chernihiv's map.
+
 The first build downloads ~2.3 GB into `cache/` (gitignored): the Ukraine PBF, Planetiler and
-its Natural Earth / water polygon sources. Later builds reuse it; `--refresh-osm` fetches a new
-extract, `--skip-tiles` only redoes style, glyphs, sprites and the manifest.
+its Natural Earth / water polygon sources. Later builds reuse it; `--refresh-osm` fetches a
+new extract.
 
-## Pack (`out/<region>/`)
+## Release (`out/release/`)
 
-| File | |
+One flat directory, published as-is as GitHub release assets (release assets can't have
+folders):
+
+| Asset | |
 |---|---|
-| `manifest.json` | `format`, `region`, `version` / `osm_date`, `bounds`, `total_size`, `files[]` (path, size, sha256) |
-| `map.pmtiles` | OpenMapTiles-schema vector tiles from Planetiler, clipped to the region polygon |
-| `style.json` | OpenFreeMap Liberty (`style/liberty.json`, pinned snapshot) with every URL pointing to `{pack}`; the app substitutes the pack's `file://` URL |
-| `sprites/ofm{,@2x}.{json,png}` | Liberty sprite |
-| `fonts/<slug>/<range>.pbf` | Noto Sans glyphs for Latin, Cyrillic and punctuation ranges; font stacks are renamed to slugs (`noto-sans-regular`) so glyph URLs have no spaces |
+| `index.json` | catalog: `format`, `osm_date`, `common[]` (asset, path, size, md5, sha256), `regions[]` (region, iso, name en/uk, bounds, asset, size, md5, sha256) |
+| `<region>.pmtiles` | OpenMapTiles-schema vector tiles, clipped to the region polygon (Ukraine 1.2 GB, oblasts 36–89 MB) |
+| `style.json` | OpenFreeMap Liberty (`style/liberty.json`, pinned snapshot); URLs use `{common}` (shared files directory) and `{tiles}` (region file), substituted by the app |
+| `sprite-ofm*`, `font-<slug>-<range>.pbf` | Liberty sprite and Noto Sans glyphs (Latin, Cyrillic, punctuation); `path` in index.json says where the app stores each |
 
-The OpenMapTiles schema keeps the style identical to the online Liberty map, including
-the app's dark re-tint (`src/config/map-dark.ts`).
+The OpenMapTiles schema keeps the style identical to the online Liberty map, including the
+app's dark re-tint (`src/config/map-dark.ts`).
 
-## Bundled pack (interim)
+`.github/workflows/map-packs.yml` runs weekly (and by hand: Actions → *Build Offline Map Packs*,
+*force* to rebuild). If Geofabrik's extract is newer than the newest `maps-*` release it runs
+`build-all` and publishes `out/release/` as release `maps-<osm_date>`, keeping the last 3.
+Adding a region = an entry in `regions.json` + its `.poly`.
 
-Until in-app downloads exist, one pack is embedded in the iOS app: `plugins/with-map-pack.js`
-copies `tools/tiles/out/chernihiv/` into the app as `map-pack.bundle` at prebuild (skipped
-with a warning if it's missing). CI gets the pack from the GitHub release named in
-`bundled-pack.json`. To ship a new one:
+## In the app
 
-```bash
-python -m tiles.cli build-map chernihiv --refresh-osm
-python -m tiles.cli pack chernihiv                  # → out/chernihiv.tar.gz
-gh release create map-chernihiv-<osm_date> out/chernihiv.tar.gz --title "Map pack chernihiv <osm_date>" --notes "© OpenStreetMap contributors (ODbL), OpenMapTiles"
-# then update "tag" in bundled-pack.json and push
-```
+Downloads lists the regions of the newest `maps-*` release (GitHub API → `index.json`). It
+downloads the shared files once and any region's `.pmtiles` (iOS background session,
+pause/resume across restarts), checks size and MD5, and stores them in `Documents/maps/`
+(`src/services/offline-map/`). One downloaded region is active; the map uses only it, with no
+online requests. Without a downloaded region the map falls back to online OpenFreeMap.
 
-The app prefers a downloaded pack (`Documents/map/`), then the bundled one, then the online map.
-
-## Getting a pack onto the phone (dev)
-
-Until hosted downloads exist: `tiles serve` on a PC in the same Wi-Fi, then in the app
-**More → Offline data → Install from computer**, enter `http://<PC IP>:8765/chernihiv/` and
-Download. The app downloads into `Documents/map.staging/`, checks each file's size and swaps it
-into `Documents/map/`. From then on the map uses only the pack, with no online requests.
-
-Windows Firewall may need to allow Python on private networks for the phone to connect.
+For testing, Downloads → *Map source* takes `http://<PC IP>:8765/` from `tiles serve`. Windows
+Firewall may need to allow Python on private networks for the phone to connect.

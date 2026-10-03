@@ -8,16 +8,16 @@ import { T } from "@/components/ui/text";
 import { usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
 import { calibrationMock, downloadsMock } from "@/mocks";
-import { useActiveMapPack } from "@/services/offline-map/map-pack";
+import { useMapPacks } from "@/services/offline-map/map-packs";
 
 export default function MoreScreen() {
   const { t, language } = useT();
   const palette = usePalette();
   const dark = useColorScheme() === "dark";
   const nav = useNavStatus();
-  const mapPack = useActiveMapPack();
+  const { installed } = useMapPacks();
   const ready = downloadsMock.filter((pack) =>
-    pack.id === "map" ? mapPack != null : pack.status === "ready",
+    pack.id === "map" ? installed.active != null : pack.status === "ready",
   ).length;
   const calibrated = calibrationMock.status === "calibrated";
 
@@ -27,7 +27,7 @@ export default function MoreScreen() {
       label: t("downloads"),
       sub: ready
         ? `${ready}/${downloadsMock.length} · ${t("readyOffline")}`
-        : `2.0 GB · ${t("notDownloaded")}`,
+        : t("notDownloaded"),
       subColor: ready === downloadsMock.length ? palette.ok.c : undefined,
       href: "/downloads?from=more",
     },

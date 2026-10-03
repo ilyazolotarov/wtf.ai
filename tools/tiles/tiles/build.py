@@ -1,13 +1,24 @@
-"""Build an offline map pack for one region.
+"""Build the offline map release.
 
-Pack layout (everything the map needs, no network):
+One `osmium extract` pass clips the Geofabrik extract to every region polygon in
+`regions/regions.json` (strategy `smart`: ways and multipolygons crossing the border stay
+whole), then Planetiler builds each region from its own clipped data. So a region's tiles
+contain only that region at every zoom (no neighbouring data in the big low-zoom tiles),
+apart from Natural Earth context at z ≤ 6.
 
-    out/<region>/
-      manifest.json          format, region, OSM date, bounds, files with size + sha256
-      map.pmtiles            OpenMapTiles-schema vector tiles (Planetiler)
-      style.json             Liberty with `{pack}` placeholders (see style.py)
-      sprites/ofm{,@2x}.{json,png}
-      fonts/<slug>/<range>.pbf
+Output is one flat directory, published as-is as GitHub release assets (`maps-<osm_date>`)
+and served by `tiles serve` for LAN testing. The app downloads the shared files once and
+any number of regions:
+
+    out/release/
+      index.json                 catalog: OSM date, shared files, regions (size, md5, sha256)
+      <region>.pmtiles           OpenMapTiles-schema vector tiles, one per region
+      style.json                 Liberty with `{common}` / `{tiles}` placeholders (style.py)
+      sprite-ofm{,@2x}.{json,png}
+      font-<slug>-<range>.pbf
+
+Assets are flat (release assets can't have directories); each shared file's `path` in
+index.json is where the app stores it, so the style's relative URLs resolve.
 """
 
 from __future__ import annotations
@@ -21,23 +32,28 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .region import read_poly
+from .region import load_registry, read_poly
 from .style import SPRITE_NAME, collect_fonts, font_slug, offline_style
 
 ROOT = Path(__file__).resolve().parent.parent
 CACHE = ROOT / "cache"
 OUT = ROOT / "out"
+RELEASE = OUT / "release"
 REGIONS = ROOT / "regions"
 LIBERTY = ROOT / "style" / "liberty.json"
 
 PLANETILER_VERSION = "0.10.2"
 PLANETILER_URL = f"https://github.com/onthegomap/planetiler/releases/download/v{PLANETILER_VERSION}/planetiler.jar"
+CLIP_BATCH = 4  # regions per osmium pass (memory)
+OSMIUM_IMAGE = "wtf-osmium"  # docker/osmium.Dockerfile, used when `osmium` is not on PATH
 OSM_URL = "https://download.geofabrik.de/europe/ukraine-latest.osm.pbf"
+OSM_META = CACHE / "ukraine-latest.osm.pbf.json"
 USER_AGENT = "wtf.ai-tiles/0.1"
-PACK_FORMAT = 1
+INDEX_FORMAT = 2
 
 # Glyph ranges for Ukrainian/Russian/English labels: Basic Latin … Cyrillic Supplement,
 # Latin Extended Additional, General Punctuation (– „ “ …), Letterlike (№), Math.
@@ -68,17 +84,27 @@ def download(url: str, dest: Path) -> dict[str, str]:
     return headers
 
 
+def remote_osm_date() -> str:
+    """Date (YYYY-MM-DD) of the current Geofabrik extract, without downloading it."""
+    req = urllib.request.Request(OSM_URL, method="HEAD", headers={"User-Agent": USER_AGENT})
+    with urllib.request.urlopen(req, timeout=60) as res:
+        return email.utils.parsedate_to_datetime(res.headers["Last-Modified"]).date().isoformat()
+
+
 def ensure_osm(refresh: bool) -> tuple[Path, str]:
     """Cached Ukraine extract and its date (Geofabrik Last-Modified, YYYY-MM-DD)."""
     pbf = CACHE / "ukraine-latest.osm.pbf"
-    meta = CACHE / "ukraine-latest.osm.pbf.json"
-    if refresh or not pbf.exists() or not meta.exists():
+    if refresh or not pbf.exists() or not OSM_META.exists():
         log(f"Downloading {OSM_URL}")
         headers = download(OSM_URL, pbf)
         modified = email.utils.parsedate_to_datetime(headers["Last-Modified"])
-        meta.write_text(json.dumps({"url": OSM_URL, "last_modified": modified.isoformat()}), encoding="utf-8")
-    modified = datetime.fromisoformat(json.loads(meta.read_text(encoding="utf-8"))["last_modified"])
-    return pbf, modified.date().isoformat()
+        OSM_META.write_text(json.dumps({"url": OSM_URL, "last_modified": modified.isoformat()}), encoding="utf-8")
+    return pbf, osm_date()
+
+
+def osm_date() -> str:
+    modified = datetime.fromisoformat(json.loads(OSM_META.read_text(encoding="utf-8"))["last_modified"])
+    return modified.date().isoformat()
 
 
 def ensure_planetiler() -> Path:
@@ -104,6 +130,43 @@ def run_planetiler(jar: Path, pbf: Path, poly: Path, output: Path, heap: str) ->
     subprocess.run(cmd, check=True)
 
 
+def osmium_command() -> tuple[list[str], Callable[[Path], str]]:
+    """`osmium` from PATH, else the Docker image (built on first use) with ROOT mounted at /work.
+    Returns the command prefix and a function mapping local paths to paths it can see."""
+    if shutil.which("osmium"):
+        return ["osmium"], lambda path: str(path)
+    images = subprocess.run(["docker", "images", "-q", OSMIUM_IMAGE], capture_output=True, text=True, check=True)
+    if not images.stdout.strip():
+        log("Building the osmium Docker image")
+        dockerfile = ROOT / "docker" / "osmium.Dockerfile"
+        subprocess.run(["docker", "build", "-t", OSMIUM_IMAGE, "-f", str(dockerfile), str(dockerfile.parent)], check=True)
+    prefix = ["docker", "run", "--rm", "-v", f"{ROOT}:/work", "-w", "/work", OSMIUM_IMAGE]
+    return prefix, lambda path: "/work/" + Path(path).resolve().relative_to(ROOT).as_posix()
+
+
+def clip_regions(pbf: Path, names: list[str], batch: int = CLIP_BATCH) -> dict[str, Path]:
+    """cache/extracts/<region>.osm.pbf for every region, `batch` regions per osmium pass
+    (each output keeps its own node/way ID sets; all 28 at once needs well over 16 GB)."""
+    prefix, to_cmd = osmium_command()
+    out_dir = CACHE / "extracts"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for i in range(0, len(names), batch):
+        group = names[i : i + batch]
+        config = {
+            "directory": to_cmd(out_dir),
+            "extracts": [
+                {"output": f"{n}.osm.pbf", "polygon": {"file_name": to_cmd(REGIONS / f"{n}.poly"), "file_type": "poly"}}
+                for n in group
+            ],
+        }
+        config_path = out_dir / "config.json"
+        config_path.write_text(json.dumps(config, indent=1), encoding="utf-8")
+        cmd = [*prefix, "extract", "--config", to_cmd(config_path), "--strategy", "smart", "--overwrite", to_cmd(pbf)]
+        log(f"Clipping {', '.join(group)}")
+        subprocess.run(cmd, check=True)
+    return {name: out_dir / f"{name}.osm.pbf" for name in names}
+
+
 def fetch_cached(url: str, cache_path: Path) -> Path | None:
     if not cache_path.exists():
         try:
@@ -115,81 +178,98 @@ def fetch_cached(url: str, cache_path: Path) -> Path | None:
     return cache_path
 
 
-def copy_glyphs(liberty: dict, pack: Path) -> None:
-    base = liberty["glyphs"]
+def build_common(release: Path = RELEASE) -> list[dict[str, str]]:
+    """Style, sprites and glyphs shared by all regions; returns [{asset, path}]."""
+    liberty = json.loads(LIBERTY.read_text(encoding="utf-8"))
+    release.mkdir(parents=True, exist_ok=True)
+    files: list[dict[str, str]] = []
+
+    def put(src: Path, asset: str, path: str) -> None:
+        shutil.copyfile(src, release / asset)
+        files.append({"asset": asset, "path": path})
+
     for font in collect_fonts(liberty):
+        slug = font_slug(font)
         for start in GLYPH_RANGES:
             rng = f"{start}-{start + 255}"
-            url = base.replace("{fontstack}", urllib.parse.quote(font)).replace("{range}", rng)
-            src = fetch_cached(url, CACHE / "glyphs" / font_slug(font) / f"{rng}.pbf")
+            url = liberty["glyphs"].replace("{fontstack}", urllib.parse.quote(font)).replace("{range}", rng)
+            src = fetch_cached(url, CACHE / "glyphs" / slug / f"{rng}.pbf")
             if src is None:
                 log(f"  no glyphs for {font} {rng}")
                 continue
-            dest = pack / "fonts" / font_slug(font) / f"{rng}.pbf"
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(src, dest)
+            put(src, f"font-{slug}-{rng}.pbf", f"fonts/{slug}/{rng}.pbf")
 
-
-def copy_sprites(liberty: dict, pack: Path) -> None:
-    base = liberty["sprite"]
-    sprite_id = base.rstrip("/").split("/")[-2]  # e.g. ofm_f384, pins the sprite version
+    sprite = liberty["sprite"]
+    sprite_id = sprite.rstrip("/").split("/")[-2]  # e.g. ofm_f384, pins the sprite version
     for suffix in (".json", ".png", "@2x.json", "@2x.png"):
-        src = fetch_cached(base + suffix, CACHE / "sprites" / sprite_id / f"{SPRITE_NAME}{suffix}")
+        src = fetch_cached(sprite + suffix, CACHE / "sprites" / sprite_id / f"{SPRITE_NAME}{suffix}")
         if src is None:
-            raise RuntimeError(f"sprite {base + suffix} not found")
-        dest = pack / "sprites" / f"{SPRITE_NAME}{suffix}"
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(src, dest)
+            raise RuntimeError(f"sprite {sprite + suffix} not found")
+        put(src, f"sprite-{SPRITE_NAME}{suffix}", f"sprites/{SPRITE_NAME}{suffix}")
+
+    style = offline_style(liberty, "wtf.ai Liberty offline")
+    (release / "style.json").write_text(json.dumps(style, ensure_ascii=False), encoding="utf-8", newline="\n")
+    files.append({"asset": "style.json", "path": "style.json"})
+    return files
 
 
-def sha256(path: Path) -> str:
-    h = hashlib.sha256()
+def build_region(region: str, clipped: Path, heap: str = "4g", release: Path = RELEASE) -> Path:
+    """Planetiler on the region's clipped extract → out/release/<region>.pmtiles."""
+    poly = REGIONS / f"{region}.poly"
+    release.mkdir(parents=True, exist_ok=True)
+    output = release / f"{region}.pmtiles"
+    run_planetiler(ensure_planetiler(), clipped, poly, output, heap)
+    log(f"{region}: {output.stat().st_size / 1e6:.1f} MB")
+    return output
+
+
+def hashes(path: Path) -> dict[str, str | int]:
+    md5, sha256 = hashlib.md5(), hashlib.sha256()
     with open(path, "rb") as f:
         while chunk := f.read(1 << 20):
-            h.update(chunk)
-    return h.hexdigest()
+            md5.update(chunk)
+            sha256.update(chunk)
+    return {"size": path.stat().st_size, "md5": md5.hexdigest(), "sha256": sha256.hexdigest()}
 
 
-def write_manifest(pack: Path, region: str, osm_date: str, poly: Path) -> dict:
-    files = sorted(p for p in pack.rglob("*") if p.is_file() and p.name != "manifest.json")
-    entries = [
-        {"path": p.relative_to(pack).as_posix(), "size": p.stat().st_size, "sha256": sha256(p)} for p in files
-    ]
-    minx, miny, maxx, maxy = read_poly(poly).bounds
-    manifest = {
-        "format": PACK_FORMAT,
-        "region": region,
-        "version": osm_date,
-        "osm_date": osm_date,
+def write_index(common: list[dict[str, str]], release: Path = RELEASE) -> dict:
+    """index.json for every region present in `release` (registry order)."""
+    registry = load_registry(REGIONS)
+    regions = []
+    for name, info in registry.items():
+        tiles = release / f"{name}.pmtiles"
+        if not tiles.exists():
+            continue
+        minx, miny, maxx, maxy = read_poly(REGIONS / f"{name}.poly").bounds
+        regions.append({
+            "region": name,
+            "iso": info["iso"],
+            "name": {"en": info["name_en"], "uk": info["name_uk"]},
+            "bounds": [round(v, 5) for v in (minx, miny, maxx, maxy)],
+            "asset": tiles.name,
+            **hashes(tiles),
+        })
+    index = {
+        "format": INDEX_FORMAT,
+        "osm_date": osm_date(),
         "built_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
-        "bounds": [round(v, 5) for v in (minx, miny, maxx, maxy)],
-        "total_size": sum(e["size"] for e in entries),
-        "files": entries,
+        "common": [{**f, **hashes(release / f["asset"])} for f in common],
+        "regions": regions,
     }
-    (pack / "manifest.json").write_text(json.dumps(manifest, indent=1), encoding="utf-8", newline="\n")
-    return manifest
+    (release / "index.json").write_text(json.dumps(index, ensure_ascii=False, indent=1), encoding="utf-8", newline="\n")
+    log(f"index.json: {len(regions)} regions, OSM {index['osm_date']}, "
+        f"{sum(r['size'] for r in regions) / 1e9:.2f} GB")
+    return index
 
 
-def build_map(region: str, refresh_osm: bool = False, heap: str = "4g", skip_tiles: bool = False) -> Path:
-    poly = REGIONS / f"{region}.poly"
-    if not poly.exists():
-        raise FileNotFoundError(f"{poly} missing; create it with `tiles region {region} <relation-id>`")
-    liberty = json.loads(LIBERTY.read_text(encoding="utf-8"))
-    pack = OUT / region
-    pack.mkdir(parents=True, exist_ok=True)
-
-    pbf, osm_date = ensure_osm(refresh_osm)
-    if not skip_tiles:
-        run_planetiler(ensure_planetiler(), pbf, poly, pack / "map.pmtiles", heap)
-
-    log("Glyphs and sprites")
-    shutil.rmtree(pack / "fonts", ignore_errors=True)
-    copy_glyphs(liberty, pack)
-    copy_sprites(liberty, pack)
-
-    style = offline_style(liberty, f"wtf.ai Liberty offline ({region})")
-    (pack / "style.json").write_text(json.dumps(style, ensure_ascii=False), encoding="utf-8", newline="\n")
-
-    manifest = write_manifest(pack, region, osm_date, poly)
-    log(f"Pack {pack}: {len(manifest['files'])} files, {manifest['total_size'] / 1e6:.1f} MB, OSM {osm_date}")
-    return pack
+def build_all(regions: list[str] | None = None, refresh_osm: bool = False, heap: str = "4g") -> dict:
+    """Clip every region (or the given ones) from the Ukraine extract, build each, write index.json."""
+    registry = load_registry(REGIONS)
+    names = regions or list(registry)
+    missing = [n for n in names if n not in registry or not (REGIONS / f"{n}.poly").exists()]
+    if missing:
+        raise FileNotFoundError(f"unknown regions or missing .poly: {missing}; see `tiles regions`")
+    pbf, _ = ensure_osm(refresh_osm)
+    for name, clipped in clip_regions(pbf, names).items():
+        build_region(name, clipped, heap=heap)
+    return write_index(build_common())

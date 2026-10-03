@@ -12,7 +12,7 @@
       "bundleIdentifier": "ai.wtf.navigator",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "NSLocalNetworkUsageDescription": "wtf.ai downloads offline map data from your computer on the local network."
+        "NSLocalNetworkUsageDescription": "wtf.ai downloads offline maps from your computer on the local network (developer map source)."
       }
     },
     "android": {
@@ -86,12 +86,6 @@
         {
           "url": "https://de.sentry.io/",
           "note": "Set SENTRY_AUTH_TOKEN, SENTRY_ORG and SENTRY_PROJECT to upload source maps; otherwise set SENTRY_DISABLE_AUTO_UPLOAD=true."
-        }
-      ],
-      [
-        "./plugins/with-map-pack.js",
-        {
-          "source": "./tools/tiles/out/chernihiv"
         }
       ]
     ],

@@ -1,0 +1,170 @@
+{
+ "ukraine": {
+  "relation": 60199,
+  "iso": "UA",
+  "name_en": "Ukraine",
+  "name_uk": "Україна"
+ },
+ "vinnytsia": {
+  "relation": 90726,
+  "iso": "UA-05",
+  "name_en": "Vinnytsia Oblast",
+  "name_uk": "Вінницька область"
+ },
+ "volyn": {
+  "relation": 71064,
+  "iso": "UA-07",
+  "name_en": "Volyn Oblast",
+  "name_uk": "Волинська область"
+ },
+ "luhansk": {
+  "relation": 71971,
+  "iso": "UA-09",
+  "name_en": "Luhansk Oblast",
+  "name_uk": "Луганська область"
+ },
+ "dnipropetrovsk": {
+  "relation": 101746,
+  "iso": "UA-12",
+  "name_en": "Dnipropetrovsk Oblast",
+  "name_uk": "Дніпропетровська область"
+ },
+ "donetsk": {
+  "relation": 71973,
+  "iso": "UA-14",
+  "name_en": "Donetsk Oblast",
+  "name_uk": "Донецька область"
+ },
+ "zhytomyr": {
+  "relation": 71245,
+  "iso": "UA-18",
+  "name_en": "Zhytomyr Oblast",
+  "name_uk": "Житомирська область"
+ },
+ "zakarpattia": {
+  "relation": 72489,
+  "iso": "UA-21",
+  "name_en": "Zakarpattia Oblast",
+  "name_uk": "Закарпатська область"
+ },
+ "zaporizhzhia": {
+  "relation": 71980,
+  "iso": "UA-23",
+  "name_en": "Zaporizhia Oblast",
+  "name_uk": "Запорізька область"
+ },
+ "ivano-frankivsk": {
+  "relation": 72488,
+  "iso": "UA-26",
+  "name_en": "Ivano-Frankivsk Oblast",
+  "name_uk": "Івано-Франківська область"
+ },
+ "kyiv-city": {
+  "relation": 421866,
+  "iso": "UA-30",
+  "name_en": "Kyiv",
+  "name_uk": "Київ"
+ },
+ "kyiv": {
+  "relation": 71248,
+  "iso": "UA-32",
+  "name_en": "Kyiv Oblast",
+  "name_uk": "Київська область"
+ },
+ "kirovohrad": {
+  "relation": 101859,
+  "iso": "UA-35",
+  "name_en": "Kirovohrad Oblast",
+  "name_uk": "Кіровоградська область"
+ },
+ "sevastopol": {
+  "relation": 1574364,
+  "iso": "UA-40",
+  "name_en": "Sevastopol",
+  "name_uk": "Севастополь"
+ },
+ "crimea": {
+  "relation": 72639,
+  "iso": "UA-43",
+  "name_en": "Autonomous Republic of Crimea",
+  "name_uk": "Автономна Республіка Крим"
+ },
+ "lviv": {
+  "relation": 72380,
+  "iso": "UA-46",
+  "name_en": "Lviv Oblast",
+  "name_uk": "Львівська область"
+ },
+ "mykolaiv": {
+  "relation": 72635,
+  "iso": "UA-48",
+  "name_en": "Mykolaiv Oblast",
+  "name_uk": "Миколаївська область"
+ },
+ "odesa": {
+  "relation": 72634,
+  "iso": "UA-51",
+  "name_en": "Odesa Oblast",
+  "name_uk": "Одеська область"
+ },
+ "poltava": {
+  "relation": 91294,
+  "iso": "UA-53",
+  "name_en": "Poltava Oblast",
+  "name_uk": "Полтавська область"
+ },
+ "rivne": {
+  "relation": 71236,
+  "iso": "UA-56",
+  "name_en": "Rivne Oblast",
+  "name_uk": "Рівненська область"
+ },
+ "sumy": {
+  "relation": 71250,
+  "iso": "UA-59",
+  "name_en": "Sumy Oblast",
+  "name_uk": "Сумська область"
+ },
+ "ternopil": {
+  "relation": 72525,
+  "iso": "UA-61",
+  "name_en": "Ternopil Oblast",
+  "name_uk": "Тернопільська область"
+ },
+ "kharkiv": {
+  "relation": 71254,
+  "iso": "UA-63",
+  "name_en": "Kharkiv Oblast",
+  "name_uk": "Харківська область"
+ },
+ "kherson": {
+  "relation": 71022,
+  "iso": "UA-65",
+  "name_en": "Kherson Oblast",
+  "name_uk": "Херсонська область"
+ },
+ "khmelnytskyi": {
+  "relation": 90742,
+  "iso": "UA-68",
+  "name_en": "Khmelnytskyi Oblast",
+  "name_uk": "Хмельницька область"
+ },
+ "cherkasy": {
+  "relation": 91278,
+  "iso": "UA-71",
+  "name_en": "Cherkasy Oblast",
+  "name_uk": "Черкаська область"
+ },
+ "chernihiv": {
+  "relation": 71249,
+  "iso": "UA-74",
+  "name_en": "Chernihiv Oblast",
+  "name_uk": "Чернігівська область"
+ },
+ "chernivtsi": {
+  "relation": 72526,
+  "iso": "UA-77",
+  "name_en": "Chernivtsi Oblast",
+  "name_uk": "Чернівецька область"
+ }
+}

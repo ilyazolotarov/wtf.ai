@@ -1,25 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { tintDarkStyle, type MapStyleJson } from "@/config/map-dark";
-import {
-  readMapPackStyle,
-  useActiveMapPack,
-  type ActiveMapPack,
-} from "@/services/offline-map/map-pack";
+import { readActiveStyle, useMapPacks, type InstalledState } from "@/services/offline-map/map-packs";
 
 /**
  * OpenFreeMap Liberty in both color schemes (Calm redesign); dark re-tints it.
- * Online only until an offline pack is installed (SPEC §9 privacy exception).
+ * Used only while no offline map is downloaded (SPEC §9 privacy exception).
  */
 export const MAP_STYLE_URL = "https://tiles.openfreemap.org/styles/liberty";
 
 export type MapStyle = string | MapStyleJson;
 
-/** Offline pack style for the scheme, or `null` when there is no usable pack. */
-function packStyle(pack: ActiveMapPack | null, scheme: "light" | "dark"): MapStyleJson | null {
-  if (!pack) return null;
+/** Active offline region's style for the scheme, or `null` when there is no usable pack. */
+function packStyle(installed: InstalledState, scheme: "light" | "dark"): MapStyleJson | null {
   try {
-    const style = readMapPackStyle(pack);
+    const style = readActiveStyle(installed);
+    if (!style) return null;
     return scheme === "dark" ? tintDarkStyle(style) : style;
   } catch (error) {
     console.warn("Offline map style unreadable, using online map", error);
@@ -45,7 +41,7 @@ function loadDarkStyle(): Promise<MapStyleJson> {
 }
 
 /**
- * Style for the current scheme: the installed offline pack if there is one, else
+ * Style for the current scheme: the active offline region if one is downloaded, else
  * online Liberty. Online dark mode is `null` until the tinted style is ready, so
  * the map never flashes the light style at night; if the fetch fails it falls
  * back to plain Liberty.
@@ -53,8 +49,8 @@ function loadDarkStyle(): Promise<MapStyleJson> {
 export function useMapStyle(scheme: "light" | "dark"): MapStyle | null {
   const [, setLoaded] = useState(0);
   const [failed, setFailed] = useState(false);
-  const pack = useActiveMapPack();
-  const offline = useMemo(() => packStyle(pack, scheme), [pack, scheme]);
+  const { installed } = useMapPacks();
+  const offline = useMemo(() => packStyle(installed, scheme), [installed, scheme]);
 
   useEffect(() => {
     if (offline || scheme !== "dark" || darkStyle) return;

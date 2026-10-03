@@ -1,24 +1,42 @@
 """Region polygons (.poly) that clip the Ukraine extract.
 
-A region is an OSM admin boundary, buffered so roads that cross the border
-near the edge stay whole, simplified to keep the file small, and committed as
-`regions/<name>.poly` so builds are reproducible without network lookups.
+`regions/regions.json` lists the regions (Ukraine plus its 27 ISO 3166-2 subdivisions) by
+OSM boundary relation. Each boundary is buffered slightly (so simplification never cuts
+into the region) and simplified to ~20 m, then committed as `regions/<slug>.poly` so builds
+are reproducible without network lookups. Roads crossing the border stay whole anyway:
+`osmium extract --strategy smart` keeps complete ways and multipolygons.
 """
 
 from __future__ import annotations
 
 import json
 import math
+import time
 import urllib.request
 from pathlib import Path
+from typing import TypedDict
 
 from shapely.geometry import MultiPolygon, Polygon, shape
-from shapely.ops import transform
+from shapely.ops import transform, unary_union
 
-NOMINATIM = "https://nominatim.openstreetmap.org/lookup?osm_ids=R{id}&format=json&polygon_geojson=1"
+NOMINATIM = (
+    "https://nominatim.openstreetmap.org/lookup?osm_ids=R{id}&format=json"
+    "&polygon_geojson=1&polygon_threshold=0.0001"
+)
 USER_AGENT = "wtf.ai-tiles/0.1"
 M_PER_DEG_LAT = 110_540.0
 M_PER_DEG_LON_EQ = 111_320.0
+
+
+class RegionInfo(TypedDict):
+    relation: int
+    iso: str
+    name_en: str
+    name_uk: str
+
+
+def load_registry(regions_dir: Path) -> dict[str, RegionInfo]:
+    return json.loads((regions_dir / "regions.json").read_text(encoding="utf-8"))
 
 
 def fetch_boundary(relation_id: int) -> Polygon | MultiPolygon:
@@ -41,8 +59,11 @@ def buffer_simplify(geom: Polygon | MultiPolygon, buffer_m: float, tolerance_m: 
 
 
 def to_poly(name: str, geom: Polygon | MultiPolygon) -> str:
-    """Osmosis .poly text (exterior rings only; holes are irrelevant for clipping)."""
-    polygons = list(geom.geoms) if isinstance(geom, MultiPolygon) else [geom]
+    """Osmosis .poly text of the outer rings, merged: holes (and anything inside them, like
+    Kyiv oblast's enclaves within Kyiv city) belong to the region for clipping purposes."""
+    parts = list(geom.geoms) if isinstance(geom, MultiPolygon) else [geom]
+    merged = unary_union([Polygon(p.exterior) for p in parts])
+    polygons = list(merged.geoms) if isinstance(merged, MultiPolygon) else [merged]
     lines = [name]
     for i, poly in enumerate(polygons, start=1):
         lines.append(str(i))
@@ -69,8 +90,20 @@ def read_poly(path: Path) -> MultiPolygon:
     return MultiPolygon([Polygon(r) for r in rings])
 
 
-def write_region(name: str, relation_id: int, out_dir: Path, buffer_m: float = 3000, tolerance_m: float = 200) -> Path:
+def write_region(name: str, relation_id: int, out_dir: Path, buffer_m: float = 500, tolerance_m: float = 20) -> Path:
     geom = buffer_simplify(fetch_boundary(relation_id), buffer_m, tolerance_m)
     path = out_dir / f"{name}.poly"
     path.write_text(to_poly(name, geom), encoding="utf-8", newline="\n")
     return path
+
+
+def write_regions(regions_dir: Path, names: list[str] | None = None, buffer_m: float = 500) -> list[Path]:
+    """(Re)write .poly files from the registry; Nominatim allows one request per second."""
+    registry = load_registry(regions_dir)
+    paths = []
+    for i, name in enumerate(names or list(registry)):
+        if i:
+            time.sleep(1.1)
+        paths.append(write_region(name, registry[name]["relation"], regions_dir, buffer_m=buffer_m))
+    return paths
+
