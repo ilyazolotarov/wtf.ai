@@ -222,3 +222,9 @@ needed to check them (`replay:bench`).
 4. Second phone and mount, to check the tuning values (§11).
 5. Integrity (SPEC Phase 3) replaces the interim trust tracker and the EKF gate as the GNSS acceptance rule.
 6. Spoofing replay: offsetting fixes in clean logs (SPEC §3.10) isn't implemented yet.
+7. **TODO: save the measured GNSS lag** (§7.3, §7.4).
+   - Today every session starts from the default (`gnssLagS` 0) and re-learns the lag over 1–3 min of turns.
+   - When the navigator is wired into the app (§9), store `Navigator.gnssLagEstimate` in kv-store whenever it
+     updates, and pass it as `gnssLagS` on the next start.
+   - Key the stored value by phone model (`sys_hw`) and iOS version, and drop it when either changes: Apple's GNSS
+     filtering can differ between them.
