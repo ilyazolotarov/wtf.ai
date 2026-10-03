@@ -1,0 +1,594 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Trip Replay</title>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.css" />
+<script src="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #16181d; --text2: #5b6270; --line: #e3e6eb;
+    --pred: #2563eb; --gps: #16a34a; --coarse: #d97706; --rej: #dc2626; --cut: #8b93a1;
+    --obd: #2563eb; --engine: #7c3aed; --accent: #2563eb;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1115; --panel: #171a21; --text: #e8eaee; --text2: #9aa2b1; --line: #2a2f3a;
+      --pred: #60a5fa; --gps: #4ade80; --coarse: #fbbf24; --rej: #f87171; --cut: #8b93a1;
+      --obd: #60a5fa; --engine: #a78bfa; --accent: #60a5fa;
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  body { display: grid; grid-template-rows: auto 1fr auto auto; height: 100vh; }
+  header, .controls { display: flex; gap: 8px; align-items: center; padding: 8px 12px; background: var(--panel);
+    border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .controls { border-top: 1px solid var(--line); border-bottom: none; }
+  header h1 { font-size: 14px; margin: 0 8px 0 0; }
+  select, input, button { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line);
+    border-radius: 6px; padding: 4px 8px; }
+  button { cursor: pointer; }
+  button.primary { background: var(--accent); color: #fff; border-color: transparent; }
+  button[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: transparent; }
+  label { color: var(--text2); display: flex; gap: 4px; align-items: center; }
+  #status { color: var(--text2); margin-left: auto; }
+  main { display: grid; grid-template-columns: 1fr 300px; min-height: 0; }
+  #maps { display: grid; grid-template-columns: 1fr; gap: 2px; background: var(--line); min-height: 0; }
+  #maps.split { grid-template-columns: 1fr 1fr; }
+  .mapwrap { position: relative; min-height: 0; }
+  .map { position: absolute; inset: 0; }
+  .maplabel { position: absolute; top: 8px; left: 8px; z-index: 2; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 6px; padding: 2px 8px; font-weight: 600; }
+  #maps.split #mapBwrap { display: block; }
+  #mapBwrap { display: none; }
+  aside { background: var(--panel); border-left: 1px solid var(--line); overflow: auto; padding: 10px 12px; }
+  aside h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--text2); margin: 14px 0 6px; }
+  aside h2:first-child { margin-top: 0; }
+  table { width: 100%; border-collapse: collapse; margin: 6px 0 10px; font-variant-numeric: tabular-nums; }
+  th, td { padding: 3px 4px; text-align: right; border-bottom: 1px solid var(--line); }
+  th:first-child, td:first-child { text-align: left; color: var(--text2); font-weight: 400; }
+  th { font-size: 12px; }
+  th.gps { color: var(--gps); } th.pred { color: var(--pred); }
+  td.diff { color: var(--text); font-weight: 600; }
+  dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 0; }
+  dt { color: var(--text2); }
+  dd { margin: 0; font-variant-numeric: tabular-nums; text-align: right; }
+  .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; vertical-align: -1px; }
+  #events { list-style: none; margin: 0; padding: 0; }
+  #events li { padding: 2px 0; cursor: pointer; display: grid; grid-template-columns: 52px 1fr; gap: 6px; color: var(--text2); }
+  #events li.past { color: var(--text); }
+  #events li.marker { font-weight: 600; }
+  #events li span:first-child { font-variant-numeric: tabular-nums; text-align: right; }
+  #timeline { width: 100%; height: 230px; display: block; background: var(--panel); cursor: crosshair; touch-action: none; }
+  #time { font-variant-numeric: tabular-nums; min-width: 190px; }
+  .muted { color: var(--text2); }
+  #summary { white-space: pre-wrap; font-size: 12px; color: var(--text2); }
+  @media (max-width: 800px) { main { grid-template-columns: 1fr; } aside { display: none; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Trip replay</h1>
+  <select id="file" aria-label="Trip log"></select>
+  <label>GPS cuts <input id="cuts" placeholder="start:length, …  e.g. 100:240" size="22" /></label>
+  <label title="Withhold all GPS once the heading is known: the prediction runs on OBD + gyro only">Open loop
+    <select id="openLoop">
+      <option value="">off</option>
+      <option value="0">from heading fix</option>
+      <option value="30">30 s after</option>
+      <option value="60">60 s after</option>
+      <option value="120">120 s after</option>
+    </select></label>
+  <label>lag <input id="lag" type="number" step="0.1" value="0.4" style="width:60px" /> s</label>
+  <button id="run" class="primary">Replay</button>
+  <span id="status"></span>
+</header>
+<main>
+  <div id="maps">
+    <div class="mapwrap" id="mapAwrap"><div class="map" id="mapA"></div><div class="maplabel" id="labelA">GPS + prediction</div></div>
+    <div class="mapwrap" id="mapBwrap"><div class="map" id="mapB"></div><div class="maplabel" id="labelB">Prediction</div></div>
+  </div>
+  <aside>
+    <h2>Now</h2>
+    <div id="clock" class="muted"></div>
+    <table id="compare"></table>
+    <dl id="now"></dl>
+    <h2>Legend</h2>
+    <div class="muted">
+      <div><span class="swatch" style="background:var(--pred)"></span>prediction (fused)</div>
+      <div><span class="swatch" style="background:var(--gps)"></span>GPS satellite fix</div>
+      <div><span class="swatch" style="background:var(--coarse)"></span>Wi-Fi/cell fix (no speed)</div>
+      <div><span class="swatch" style="background:var(--rej)"></span>fix rejected by the filter</div>
+      <div><span class="swatch" style="background:var(--cut)"></span>fix withheld (cut)</div>
+    </div>
+    <h2>Events</h2>
+    <ul id="events"></ul>
+    <h2>Replay summary</h2>
+    <div id="summary"></div>
+  </aside>
+</main>
+<canvas id="timeline" aria-label="Timeline: click or drag to seek"></canvas>
+<div class="controls">
+  <button id="play" title="Space">▶ Play</button>
+  <select id="speed" aria-label="Playback speed">
+    <option value="1">1×</option><option value="2">2×</option><option value="5">5×</option>
+    <option value="10" selected>10×</option><option value="30">30×</option><option value="60">60×</option>
+  </select>
+  <button id="back" title="← (Shift: 30 s)">−5 s</button>
+  <button id="fwd" title="→ (Shift: 30 s)">+5 s</button>
+  <span id="time"></span>
+  <button id="follow" aria-pressed="true">Follow</button>
+  <button id="split" aria-pressed="false">Side by side</button>
+  <label><input id="showFixes" type="checkbox" checked /> all fixes</label>
+  <label><input id="showErr" type="checkbox" checked /> error line</label>
+  <span class="muted">Map: OpenFreeMap (online)</span>
+</div>
+
+<script>
+"use strict";
+const STYLE = "https://tiles.openfreemap.org/styles/liberty";
+const showError = (msg) => { const el = document.getElementById("status"); if (el) el.textContent = "error: " + msg; };
+window.addEventListener("error", (e) => showError(e.message));
+window.addEventListener("unhandledrejection", (e) => showError(e.reason?.stack ?? e.reason));
+const $ = (id) => document.getElementById(id);
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+let data = null;
+let t = 0;
+let playing = false;
+let lastFrame = 0;
+let split = false;
+let follow = true;
+
+// ---------- geometry ----------
+const R = 6371000;
+const rad = (d) => (d * Math.PI) / 180;
+function haversine(a, b) {
+  const dLat = rad(b.lat - a.lat), dLon = rad(b.lon - a.lon);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+function offset(p, bearingDeg, m) {
+  const b = rad(bearingDeg);
+  return [p.lon + (m * Math.sin(b)) / (R * Math.cos(rad(p.lat))) * (180 / Math.PI), p.lat + ((m * Math.cos(b)) / R) * (180 / Math.PI)];
+}
+function circle(p, m, steps = 64) {
+  const ring = [];
+  for (let i = 0; i <= steps; i++) ring.push(offset(p, (i / steps) * 360, m));
+  return { type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [ring] } };
+}
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const fc = (features) => ({ type: "FeatureCollection", features });
+const pt = (p, props = {}) => ({ type: "Feature", properties: props, geometry: { type: "Point", coordinates: [p.lon, p.lat] } });
+const line = (coords, props = {}) => ({ type: "Feature", properties: props, geometry: { type: "LineString", coordinates: coords } });
+
+/** Last index with arr[i].t ≤ t (or -1). */
+function indexAt(arr, time, key = (x) => x.t) {
+  let lo = 0, hi = arr.length - 1, ans = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (key(arr[mid]) <= time) { ans = mid; lo = mid + 1; } else hi = mid - 1;
+  }
+  return ans;
+}
+
+function predAt(time) {
+  const tr = data.track;
+  const i = indexAt(tr, time);
+  if (i < 0) return null;
+  const a = tr[i], b = tr[Math.min(i + 1, tr.length - 1)];
+  const f = b.t > a.t ? Math.min(1, Math.max(0, (time - a.t) / (b.t - a.t))) : 0;
+  return { ...a, lat: a.lat + (b.lat - a.lat) * f, lon: a.lon + (b.lon - a.lon) * f, acc: a.acc + (b.acc - a.acc) * f };
+}
+function fixAt(time) {
+  const i = indexAt(data.fixes, time);
+  return i < 0 ? null : data.fixes[i];
+}
+
+// ---------- maps ----------
+function fixColorExpr() {
+  return ["match", ["get", "status"],
+    "cut", css("--cut"), "rejected", css("--rej"),
+    ["case", ["get", "sat"], css("--gps"), css("--coarse")]];
+}
+
+/** role: "both" | "gps" | "pred" */
+function addLayers(map, role) {
+  const gps = role !== "pred", pred = role !== "gps";
+  const empty = fc([]);
+  for (const id of ["fixes", "gpsTrack", "predTrack", "predNow", "predAcc", "predHdg", "gpsNow", "gpsAcc", "errLine", "cuts"]) {
+    map.addSource(id, { type: "geojson", data: empty });
+  }
+  if (gps) {
+    map.addLayer({ id: "gpsTrack", type: "line", source: "gpsTrack",
+      paint: { "line-color": css("--gps"), "line-width": 2, "line-opacity": 0.55 } });
+    map.addLayer({ id: "fixes", type: "circle", source: "fixes",
+      paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 12, 2, 17, 4.5],
+        "circle-color": fixColorExpr(), "circle-opacity": 0.75,
+        "circle-stroke-width": ["case", ["==", ["get", "status"], "cut"], 1.5, 0],
+        "circle-stroke-color": css("--cut") } });
+    map.addLayer({ id: "gpsAcc", type: "fill", source: "gpsAcc",
+      paint: { "fill-color": ["get", "color"], "fill-opacity": 0.12 } });
+    map.addLayer({ id: "gpsAccLine", type: "line", source: "gpsAcc",
+      paint: { "line-color": ["get", "color"], "line-width": 1.2, "line-opacity": 0.7 } });
+  }
+  if (pred) {
+    // Dead reckoning solid, anchored (heading unknown) dashed. Dash patterns can't be data-driven.
+    map.addLayer({ id: "predTrack", type: "line", source: "predTrack", filter: ["==", ["get", "mode"], "dr"],
+      paint: { "line-color": css("--pred"), "line-width": 3, "line-opacity": 0.8 } });
+    map.addLayer({ id: "predTrackAnchored", type: "line", source: "predTrack", filter: ["!=", ["get", "mode"], "dr"],
+      paint: { "line-color": css("--pred"), "line-width": 2, "line-opacity": 0.45, "line-dasharray": [2, 2] } });
+    map.addLayer({ id: "predAcc", type: "fill", source: "predAcc",
+      paint: { "fill-color": css("--pred"), "fill-opacity": 0.12 } });
+    map.addLayer({ id: "predAccLine", type: "line", source: "predAcc",
+      paint: { "line-color": css("--pred"), "line-width": 1.2, "line-opacity": 0.7 } });
+  }
+  if (role === "both") {
+    map.addLayer({ id: "errLine", type: "line", source: "errLine",
+      paint: { "line-color": css("--rej"), "line-width": 2, "line-dasharray": [1.5, 1.5] } });
+  }
+  if (pred) {
+    map.addLayer({ id: "predHdg", type: "line", source: "predHdg",
+      paint: { "line-color": css("--pred"), "line-width": 3 } });
+    map.addLayer({ id: "predNow", type: "circle", source: "predNow",
+      paint: { "circle-radius": 7, "circle-color": css("--pred"), "circle-stroke-width": 2.5, "circle-stroke-color": "#fff" } });
+  }
+  if (gps) {
+    map.addLayer({ id: "gpsNow", type: "circle", source: "gpsNow",
+      paint: { "circle-radius": 6, "circle-color": ["get", "color"], "circle-opacity": ["get", "opacity"],
+        "circle-stroke-width": 2, "circle-stroke-color": "#fff", "circle-stroke-opacity": ["get", "opacity"] } });
+  }
+  if (gps) {
+    const popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false });
+    map.on("mouseenter", "fixes", (e) => {
+      map.getCanvas().style.cursor = "pointer";
+      const p = e.features[0].properties;
+      popup.setLngLat(e.lngLat).setHTML(
+        `<b>${fmtT(+p.t)}</b> ${p.sat ? "satellite" : "Wi-Fi/cell"}<br>±${p.acc} m · ${p.status}` +
+        (p.err !== "null" && p.err != null ? `<br>prediction off by ${p.err} m` : "") +
+        (p.spd !== "null" && p.spd != null ? `<br>${p.spd} km/h` : "")).addTo(map);
+    });
+    map.on("mouseleave", "fixes", () => { map.getCanvas().style.cursor = ""; popup.remove(); });
+    map.on("click", "fixes", (e) => seek(+e.features[0].properties.t));
+  }
+}
+
+function newMap(container, role) {
+  const map = new maplibregl.Map({ container, style: STYLE, center: [30.76, 51.52], zoom: 13, attributionControl: { compact: true } });
+  map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+  // The style is enough to add our layers; don't wait for basemap tiles (slow or offline).
+  map.ready = new Promise((resolve) => map.once("style.load", () => { addLayers(map, role); resolve(); }));
+  map.on("dragstart", () => setFollow(false));
+  map.on("error", (e) => showError(`map: ${e.error?.message ?? e.error}`));
+  return map;
+}
+
+const mapA = newMap("mapA", "both");
+let mapB = null;
+let syncing = false;
+function syncFrom(src, dst) {
+  src.on("move", () => {
+    if (syncing || !dst) return;
+    syncing = true;
+    dst.jumpTo({ center: src.getCenter(), zoom: src.getZoom(), bearing: src.getBearing(), pitch: src.getPitch() });
+    syncing = false;
+  });
+}
+
+async function setStatic(map) {
+  await map.ready;
+  const role = map === mapA ? (split ? "gps" : "both") : "pred";
+  const segs = [];
+  for (const p of data.track) {
+    const last = segs[segs.length - 1];
+    if (last && last.mode === p.mode) last.coords.push([p.lon, p.lat]);
+    else segs.push({ mode: p.mode, coords: last ? [last.coords[last.coords.length - 1], [p.lon, p.lat]] : [[p.lon, p.lat]] });
+  }
+  const showPred = role !== "gps";
+  const showGps = role !== "pred";
+  map.getSource("predTrack")?.setData(fc(showPred ? segs.filter((s) => s.coords.length > 1).map((s) => line(s.coords, { mode: s.mode })) : []));
+  const sats = data.fixes.filter((f) => f.sat && f.status !== "skipped");
+  map.getSource("gpsTrack")?.setData(fc(showGps && sats.length > 1 ? [line(sats.map((f) => [f.lon, f.lat]))] : []));
+  map.getSource("fixes")?.setData(fc(showGps && $("showFixes").checked ? data.fixes.map((f) => pt(f, f)) : []));
+}
+
+function setLayerVisibility(map, role) {
+  const show = (id, on) => map.getLayer(id) && map.setLayoutProperty(id, "visibility", on ? "visible" : "none");
+  const gps = role !== "pred", pred = role !== "gps";
+  for (const id of ["gpsTrack", "fixes", "gpsAcc", "gpsAccLine", "gpsNow"]) show(id, gps);
+  for (const id of ["predTrack", "predTrackAnchored", "predAcc", "predAccLine", "predHdg", "predNow"]) show(id, pred);
+  show("errLine", role === "both" && $("showErr").checked);
+}
+
+function updateDynamic() {
+  if (!data) return;
+  const p = predAt(t);
+  const f = fixAt(t);
+  const age = f ? t - f.t : Infinity;
+  const fixColor = f ? (f.status === "cut" ? css("--cut") : f.status === "rejected" ? css("--rej") : f.sat ? css("--gps") : css("--coarse")) : "#000";
+  const opacity = age < 3 ? 1 : age < 15 ? 0.5 : 0.2;
+  for (const map of [mapA, mapB]) {
+    if (!map || !map.getSource("predNow")) continue;
+    map.getSource("predNow").setData(fc(p ? [pt(p)] : []));
+    map.getSource("predAcc").setData(fc(p ? [circle(p, Math.max(1, p.acc))] : []));
+    map.getSource("predHdg").setData(fc(p && p.hdg != null ? [line([[p.lon, p.lat], offset(p, p.hdg, 40)])] : []));
+    map.getSource("gpsNow").setData(fc(f ? [pt(f, { color: fixColor, opacity })] : []));
+    map.getSource("gpsAcc").setData(fc(f ? [{ ...circle(f, Math.max(1, f.acc)), properties: { color: fixColor } }] : []));
+    map.getSource("errLine").setData(fc(p && f && age < 15 ? [line([[p.lon, p.lat], [f.lon, f.lat]])] : []));
+  }
+  if (follow && p) mapA.jumpTo({ center: [p.lon, p.lat] });
+  updatePanel(p, f, age);
+  drawTimeline();
+}
+
+// ---------- panel ----------
+const fmtT = (s) => {
+  const m = Math.floor(s / 60), r = s - m * 60;
+  return `${m}:${r.toFixed(1).padStart(4, "0")}`;
+};
+const utc = (s) => data.startUtcMs == null ? "" : new Date(data.startUtcMs + s * 1000).toISOString().slice(11, 19) + " UTC";
+function lastBefore(arr, time) { const i = indexAt(arr, time, (x) => x[0] ?? x.t); return i < 0 ? null : arr[i]; }
+
+function updatePanel(p, f, age) {
+  const obd = lastBefore(data.obd, t);
+  const rpm = lastBefore(data.rpm, t);
+  const eng = lastBefore(data.engine, t);
+  const dist = p && f ? haversine(p, f) : null;
+  const dash = "—";
+  const hdgDiff = p && f && p.hdg != null && f.crs != null ? Math.abs(((p.hdg - f.crs + 540) % 360) - 180) : null;
+  const cmp = [
+    ["", "GPS", "Prediction", "Δ"],
+    ["source", f ? (f.sat ? "satellite" : "Wi-Fi/cell") : dash, p ? (p.mode === "dr" ? "dead reckoning" : "anchored") + (p.still ? ", standing" : "") : dash, ""],
+    ["age", f ? `${age.toFixed(1)} s` : dash, p ? "now" : dash, ""],
+    ["accuracy", f ? `±${Math.round(f.acc)} m` : dash, p ? `±${Math.round(p.acc)} m` : dash, ""],
+    ["position", "", "", dist != null ? `${Math.round(dist)} m` : dash],
+    ["speed", f && f.spd != null ? `${f.spd.toFixed(0)} km/h` : dash, p && p.spd != null ? `${p.spd.toFixed(0)} km/h` : dash,
+      f && p && f.spd != null && p.spd != null ? `${(p.spd - f.spd).toFixed(1)}` : ""],
+    ["heading", f && f.crs != null ? `${f.crs}°` : dash, p && p.hdg != null ? `${Math.round(p.hdg)}° ±${p.hdgSd?.toFixed(0)}°` : dash,
+      hdgDiff != null ? `${hdgDiff.toFixed(0)}°` : ""],
+  ];
+  $("compare").innerHTML = cmp.map((row, i) => i === 0
+    ? `<tr><th></th><th class="gps">GPS</th><th class="pred">Prediction</th><th>Δ</th></tr>`
+    : `<tr>${row.map((c, j) => `<td class="${j === 3 ? "diff" : ""}">${c}</td>`).join("")}</tr>`).join("");
+  $("clock").textContent = `${fmtT(t)}  ${utc(t)}`;
+  const rows = [
+    ["filter used fix", f ? f.status + (f.err != null ? `, predicted ${Math.round(f.err)} m off` : "") : "—"],
+    ["OBD speed", obd ? `${obd[1]} km/h` : "—"],
+    ["RPM", rpm ? `${rpm[1]}` : "—"],
+    ["engine", eng ? eng.state : "—"],
+  ];
+  $("now").innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
+  for (const li of $("events").children) li.classList.toggle("past", +li.dataset.t <= t);
+}
+
+function renderStatic() {
+  // Late adapter replies ("unsolicited") are frequent and only matter when debugging the link.
+  $("events").innerHTML = data.events.filter((e) => !e.text.startsWith("unsolicited")).map((e) =>
+    `<li data-t="${e.t}" class="${e.kind === "marker" || e.text === "marker" ? "marker" : ""}"><span>${fmtT(e.t)}</span><span>${esc(e.text.replace(/[\r\n]+/g, " "))}</span></li>`).join("");
+  for (const li of $("events").children) li.onclick = () => seek(+li.dataset.t);
+  const s = data.summary, fx = s.fixes;
+  const lines = [
+    `${data.file}`,
+    `${data.durationS.toFixed(0)} s, OBD ${(s.obdDistanceM / 1000).toFixed(2)} km`,
+    `init: ${s.init ? `${s.init.method} at ${s.init.tS.toFixed(0)} s` : "never"}`,
+    `fixes ${fx.total} (${fx.satellite} sat): ${fx.accepted} accepted, ${fx.rejected} rejected, ${fx.cut} cut`,
+    `pre-fix error median: sat ${s.medianErrorM.satellite?.toFixed(0) ?? "—"} m, coarse ${s.medianErrorM.coarse?.toFixed(0) ?? "—"} m`,
+    s.params ? `speed scale ${s.params.speedScale.toFixed(4)}, gyro bias ${s.params.gyroBiasDegS.toFixed(4)} °/s, scale ${s.params.gyroScale.toFixed(4)}` : "",
+    ...s.cuts.map((c) => `${c.openLoop ? "open loop" : "cut"} ${c.fromS.toFixed(0)}–${c.toS.toFixed(0)} s: ${(c.distanceM / 1000).toFixed(2)} km, max err ${c.maxErrorM?.toFixed(0) ?? "—"} m (σ ${c.meanSigmaM?.toFixed(0) ?? "—"} m)`),
+  ];
+  $("summary").textContent = lines.filter(Boolean).join("\n");
+}
+
+// ---------- timeline ----------
+const tl = $("timeline");
+const PAD_L = 46, PAD_R = 10;
+const ROWS = { speed: [6, 86], err: [96, 156], bands: [166, 224] };
+function x(time) { return PAD_L + (time / data.durationS) * (tl.clientWidth - PAD_L - PAD_R); }
+function tAtX(px) { return Math.max(0, Math.min(data.durationS, ((px - PAD_L) / (tl.clientWidth - PAD_L - PAD_R)) * data.durationS)); }
+
+function drawTimeline() {
+  const dpr = window.devicePixelRatio || 1;
+  const w = tl.clientWidth, h = tl.clientHeight;
+  if (tl.width !== w * dpr || tl.height !== h * dpr) { tl.width = w * dpr; tl.height = h * dpr; }
+  const g = tl.getContext("2d");
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, w, h);
+  if (!data) return;
+  const text2 = css("--text2"), lineC = css("--line");
+  g.font = "11px system-ui, sans-serif";
+
+  // cut windows behind everything
+  g.fillStyle = css("--cut") + "33";
+  for (const c of data.options.cuts) g.fillRect(x(c.fromS), 0, x(c.toS) - x(c.fromS), ROWS.err[1]);
+
+  // speed chart
+  const [s0, s1] = ROWS.speed;
+  const maxKph = Math.max(20, ...data.obd.map((o) => o[1]), ...data.fixes.map((f) => f.spd ?? 0));
+  const ys = (v) => s1 - (v / maxKph) * (s1 - s0);
+  g.strokeStyle = lineC; g.beginPath(); g.moveTo(PAD_L, s1); g.lineTo(w - PAD_R, s1); g.stroke();
+  g.fillStyle = text2; g.fillText("km/h", 4, s0 + 10); g.fillText(String(Math.round(maxKph)), 4, s0 + 24);
+  g.strokeStyle = css("--obd"); g.lineWidth = 1.2; g.beginPath();
+  data.obd.forEach(([tt, v], i) => (i ? g.lineTo(x(tt), ys(v)) : g.moveTo(x(tt), ys(v))));
+  g.stroke();
+  g.fillStyle = css("--gps");
+  for (const f of data.fixes) if (f.spd != null) g.fillRect(x(f.t) - 1, ys(f.spd) - 1, 2.5, 2.5);
+
+  // error chart: pre-fix distance prediction ↔ GPS, predicted accuracy band (log scale)
+  const [e0, e1] = ROWS.err;
+  const ye = (m) => e1 - (Math.log10(Math.max(1, m)) / 3) * (e1 - e0); // 1 m … 1 km
+  g.strokeStyle = lineC; g.lineWidth = 1;
+  for (const m of [1, 10, 100, 1000]) { g.beginPath(); g.moveTo(PAD_L, ye(m)); g.lineTo(w - PAD_R, ye(m)); g.stroke(); }
+  g.fillStyle = text2; g.fillText("error", 4, e0 + 10);
+  for (const m of [10, 100]) g.fillText(`${m} m`, 4, ye(m) + 4);
+  g.fillStyle = css("--pred") + "26"; g.beginPath();
+  data.track.forEach((p, i) => (i ? g.lineTo(x(p.t), ye(p.acc)) : g.moveTo(x(p.t), ye(p.acc))));
+  g.lineTo(x(data.track[data.track.length - 1]?.t ?? 0), e1); g.lineTo(x(data.track[0]?.t ?? 0), e1); g.closePath(); g.fill();
+  for (const f of data.fixes) {
+    if (f.err == null) continue;
+    g.fillStyle = f.status === "cut" ? css("--rej") : f.status === "rejected" ? css("--rej") : f.sat ? css("--gps") : css("--coarse");
+    const r = f.status === "cut" ? 2.2 : 1.6;
+    g.beginPath(); g.arc(x(f.t), ye(f.err), r, 0, 7); g.fill();
+  }
+
+  // bands: GPS quality, prediction mode, engine, events
+  const [b0] = ROWS.bands;
+  const band = (y, label) => { g.fillStyle = text2; g.fillText(label, 4, y + 9); };
+  band(b0, "GPS");
+  for (let i = 0; i < data.fixes.length; i++) {
+    const f = data.fixes[i], next = data.fixes[i + 1];
+    const end = Math.min(next ? next.t : f.t + 1, f.t + 2);
+    g.fillStyle = f.status === "cut" ? css("--cut") : f.sat ? css("--gps") : css("--coarse");
+    g.fillRect(x(f.t), b0, Math.max(1, x(end) - x(f.t)), 10);
+  }
+  band(b0 + 14, "mode");
+  for (let i = 0; i < data.track.length - 1; i++) {
+    const p = data.track[i];
+    g.fillStyle = p.mode === "dr" ? css("--pred") : css("--coarse");
+    g.globalAlpha = p.mode === "dr" ? 0.8 : 0.5;
+    g.fillRect(x(p.t), b0 + 14, Math.max(1, x(data.track[i + 1].t) - x(p.t)), 10);
+  }
+  g.globalAlpha = 1;
+  band(b0 + 28, "engine");
+  data.engine.forEach((e, i) => {
+    const end = data.engine[i + 1]?.t ?? data.durationS;
+    g.fillStyle = e.state === "engine-running" ? css("--engine") : e.state === "engine-off" ? css("--engine") + "55" : lineC;
+    g.fillRect(x(e.t), b0 + 28, Math.max(1, x(end) - x(e.t)), 10);
+  });
+  band(b0 + 42, "events");
+  for (const e of data.events) {
+    const marker = e.kind === "marker" || e.text === "marker";
+    g.fillStyle = marker ? css("--rej") : text2;
+    g.fillRect(x(e.t) - (marker ? 1 : 0.5), b0 + 42, marker ? 2 : 1, 12);
+  }
+
+  // playhead
+  g.strokeStyle = css("--text"); g.lineWidth = 1.5;
+  g.beginPath(); g.moveTo(x(t), 0); g.lineTo(x(t), h); g.stroke();
+  $("time").textContent = `${fmtT(t)} / ${fmtT(data.durationS)}  ${utc(t)}`;
+}
+
+let dragging = false;
+tl.addEventListener("pointerdown", (e) => { if (!data) return; dragging = true; tl.setPointerCapture(e.pointerId); seek(tAtX(e.offsetX)); });
+tl.addEventListener("pointermove", (e) => { if (dragging) seek(tAtX(e.offsetX)); });
+tl.addEventListener("pointerup", () => (dragging = false));
+
+// ---------- playback ----------
+function seek(time) {
+  if (!data) return;
+  t = Math.max(0, Math.min(data.durationS, time));
+  updateDynamic();
+}
+function setPlaying(on) {
+  playing = on && !!data;
+  $("play").textContent = playing ? "❚❚ Pause" : "▶ Play";
+  if (playing) { lastFrame = performance.now(); requestAnimationFrame(frame); }
+}
+function frame(now) {
+  if (!playing) return;
+  t += ((now - lastFrame) / 1000) * Number($("speed").value);
+  lastFrame = now;
+  if (t >= data.durationS) { t = data.durationS; setPlaying(false); }
+  updateDynamic();
+  if (playing) requestAnimationFrame(frame);
+}
+function setFollow(on) { follow = on; $("follow").setAttribute("aria-pressed", String(on)); }
+
+$("play").onclick = () => setPlaying(!playing);
+$("back").onclick = () => seek(t - 5);
+$("fwd").onclick = () => seek(t + 5);
+$("follow").onclick = () => { setFollow(!follow); updateDynamic(); };
+$("showFixes").onchange = () => { setStatic(mapA); if (mapB) setStatic(mapB); };
+$("showErr").onchange = () => setLayerVisibility(mapA, split ? "gps" : "both");
+$("split").onclick = async () => {
+  split = !split;
+  $("split").setAttribute("aria-pressed", String(split));
+  $("maps").classList.toggle("split", split);
+  $("labelA").textContent = split ? "GPS" : "GPS + prediction";
+  if (split && !mapB) {
+    mapB = newMap("mapB", "pred");
+    syncFrom(mapA, mapB);
+    syncFrom(mapB, mapA);
+  }
+  mapA.resize();
+  if (mapB) {
+    mapB.resize();
+    await mapB.ready;
+    mapB.jumpTo({ center: mapA.getCenter(), zoom: mapA.getZoom() });
+    if (data) await setStatic(mapB);
+  }
+  await mapA.ready;
+  setLayerVisibility(mapA, split ? "gps" : "both");
+  if (data) await setStatic(mapA);
+  updateDynamic();
+};
+document.addEventListener("keydown", (e) => {
+  if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
+  if (e.code === "Space") { e.preventDefault(); setPlaying(!playing); }
+  if (e.code === "ArrowLeft") seek(t - (e.shiftKey ? 30 : 5));
+  if (e.code === "ArrowRight") seek(t + (e.shiftKey ? 30 : 5));
+});
+window.addEventListener("resize", drawTimeline);
+
+// ---------- loading ----------
+async function loadList() {
+  const logs = await (await fetch("/api/logs")).json();
+  $("file").innerHTML = logs.map((l) => `<option value="${l.file}">${l.file} (${l.sizeMb} MB)</option>`).join("");
+  const params = new URLSearchParams(location.hash.slice(1));
+  if (params.get("file")) $("file").value = params.get("file");
+  if (params.get("cuts")) $("cuts").value = params.get("cuts");
+  if (params.get("lag")) $("lag").value = params.get("lag");
+  if (params.has("openLoop")) $("openLoop").value = params.get("openLoop");
+  if (!logs.length) return;
+  if (params.get("split") === "1") await $("split").onclick();
+  await run();
+  if (params.get("t")) {
+    seek(Number(params.get("t")));
+    setFollow(true);
+    mapA.jumpTo({ zoom: 16 });
+    updateDynamic();
+  }
+}
+
+async function run() {
+  const file = $("file").value;
+  if (!file) return;
+  const cuts = $("cuts").value.replace(/\s+/g, "");
+  const lag = $("lag").value;
+  const openLoop = $("openLoop").value;
+  history.replaceState(null, "", "#" + new URLSearchParams({ file, cuts, lag, openLoop }).toString());
+  setPlaying(false);
+  $("status").textContent = "replaying…";
+  const started = performance.now();
+  const res = await fetch(`/api/replay?${new URLSearchParams({ file, cuts, lag, openLoop })}`);
+  if (!res.ok) { $("status").textContent = await res.text(); return; }
+  data = await res.json();
+  if (!("openLoopDelayS" in data.options)) {
+    $("status").textContent = "The viewer server is older than this page: stop it and run npm run replay:view again.";
+    return;
+  }
+  $("status").textContent = `${data.track.length} track points, ${data.fixes.length} fixes · ${Math.round(performance.now() - started)} ms`;
+  const ol = data.options.cuts.find((c) => c.openLoop);
+  $("labelB").textContent = ol ? `Prediction · no GPS after ${fmtT(ol.fromS)}` : "Prediction";
+  renderStatic();
+  await setStatic(mapA);
+  if (mapB) await setStatic(mapB);
+  const pts = [...data.track, ...data.fixes.filter((f) => f.acc < 500)];
+  if (pts.length) {
+    const lons = pts.map((p) => p.lon), lats = pts.map((p) => p.lat);
+    setFollow(false);
+    mapA.fitBounds([[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]], { padding: 40, duration: 0 });
+  }
+  seek(0);
+}
+$("run").onclick = run;
+$("file").onchange = run;
+$("openLoop").onchange = run;
+$("cuts").addEventListener("keydown", (e) => e.key === "Enter" && run());
+loadList();
+</script>
+</body>
+</html>

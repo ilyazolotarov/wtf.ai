@@ -1,0 +1,444 @@
+// Stage 1 navigator: phone IMU + OBD speed + CoreLocation → fused position (SPEC §3.2–3.6).
+// Pure TS, event-driven: feed samples in time order (live services or the replay harness).
+//
+// Modes:
+// - none: no fix yet.
+// - anchored: position = best recent fix; the heading is unknown, so the uncertainty
+//   radius grows by the distance driven (OBD) since that fix.
+// - dr: the EKF runs (initialized from a GNSS course, or from fitting the gyro/OBD track
+//   shape to coarse fixes when jamming leaves no course).
+
+import { GnssLagEstimator, type GnssLagConfig, type GnssLagEstimate } from "./calibration/gnss-lag";
+import { DrEkf, wrapAngle, type EkfConfig } from "./ekf/dr-ekf";
+import { alignHeading, type AlignConfig, type AlignPoint } from "./ekf/heading-align";
+import type { Coordinate } from "./geo";
+import { LocalFrame } from "./geo/local-frame";
+import { ImuProcessor, type ImuConfig } from "./odometry/imu/imu-processor";
+import { isSatelliteFix, type GnssFix, type ImuSample, type ObdSpeedSample } from "./types";
+
+export type NavMode = "none" | "anchored" | "dr";
+
+export interface NavConfig {
+  /** CoreLocation position/course lag behind OBD/IMU until the online estimate is ready (or always,
+   *  with `estimateGnssLag: false`). Measured on 7 drives (iPhone 13): −0.1 ± 0.1 s. */
+  gnssLagS: number;
+  /** Measure the lag on the device from turns (calibration/gnss-lag.ts). */
+  estimateGnssLag: boolean;
+  /** CoreLocation speed (Doppler, smoothed) lags OBD by this much (measured 1.0 s). */
+  gnssSpeedLagS: number;
+  /** Ignore fixes worse than this (cell-level fixes claim up to 150 km). */
+  maxFixAccuracyM: number;
+  /** Innovation gate (χ², 2 dof for position). */
+  gate: number;
+  /** Consecutive rejected satellite fixes that reset the EKF (it has diverged). */
+  resetAfterRejected: number;
+  obdSigmaMps: number;
+  /** OBD reads 0 below ~2–3 km/h, so a zero is a weak measurement unless the IMU agrees. */
+  obdZeroSigmaMps: number;
+  /** Standstill = OBD 0 and a quiet IMU for this long. */
+  standstillUs: number;
+  /** Init from a GNSS course needs at least this speed and course accuracy. */
+  courseInitMinSpeedMps: number;
+  courseInitMaxAccRad: number;
+  courseUpdateMinSpeedMps: number;
+  /** Alignment fixes older than this are dropped. */
+  alignWindowUs: number;
+  /** Alignment fixes closer than this along the relative track count as one place. */
+  alignMinSpacingM: number;
+  /** Re-anchor the local frame beyond this distance from its origin. */
+  reanchorM: number;
+  ekf: Partial<EkfConfig>;
+  gnssLag: Partial<GnssLagConfig>;
+  imu: Partial<ImuConfig>;
+  align: Partial<AlignConfig>;
+}
+
+export const DEFAULT_NAV_CONFIG: NavConfig = {
+  gnssLagS: 0,
+  estimateGnssLag: true,
+  gnssSpeedLagS: 1.0,
+  maxFixAccuracyM: 2000,
+  gate: 16,
+  resetAfterRejected: 5,
+  obdSigmaMps: 0.3,
+  obdZeroSigmaMps: 0.8,
+  standstillUs: 2_000_000,
+  // Pulling away, CoreLocation's course can be off by tens of degrees while claiming ±18°.
+  courseInitMinSpeedMps: 5,
+  courseInitMaxAccRad: (10 * Math.PI) / 180,
+  courseUpdateMinSpeedMps: 4,
+  alignWindowUs: 15 * 60_000_000,
+  alignMinSpacingM: 25,
+  reanchorM: 5000,
+  ekf: {},
+  gnssLag: {},
+  imu: {},
+  align: {},
+};
+
+export interface NavEstimate {
+  tUs: number;
+  mode: Exclude<NavMode, "none">;
+  lat: number;
+  lon: number;
+  /** ~68 % radius, m (comparable to CoreLocation's horizontal accuracy). */
+  accuracyM: number;
+  headingRad?: number;
+  headingSigmaRad?: number;
+  speedMps?: number;
+}
+
+export type FixStatus = "init" | "accepted" | "rejected" | "anchored" | "skipped";
+
+export interface FixOutcome {
+  status: FixStatus;
+  /** Distance from the predicted position at the fix time, before the update (mode dr). */
+  errorM?: number;
+  /** Predicted 1σ at the fix time, m. */
+  predictedSigmaM?: number;
+  nis?: number;
+  initMethod?: "course" | "alignment";
+}
+
+/** Short state history for lag-corrected GNSS updates. */
+class History {
+  private rows: { t: number; v: number[] }[] = [];
+  private readonly spanUs: number;
+  constructor(spanUs: number) {
+    this.spanUs = spanUs;
+  }
+  push(t: number, v: number[]): void {
+    this.rows.push({ t, v });
+    while (this.rows.length > 2 && this.rows[1].t < t - this.spanUs) this.rows.shift();
+  }
+  /** Linear interpolation (angles at index `angleIndex` unwrapped); clamps to the ends. */
+  at(t: number, angleIndex = -1): number[] | null {
+    const rows = this.rows;
+    if (rows.length === 0) return null;
+    if (t <= rows[0].t) return rows[0].v;
+    if (t >= rows[rows.length - 1].t) return rows[rows.length - 1].v;
+    let lo = 0;
+    let hi = rows.length - 1;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (rows[mid].t <= t) lo = mid;
+      else hi = mid;
+    }
+    const a = rows[lo];
+    const b = rows[hi];
+    const f = (t - a.t) / (b.t - a.t || 1);
+    return a.v.map((va, i) => (i === angleIndex ? va + f * wrapAngle(b.v[i] - va) : va + f * (b.v[i] - va)));
+  }
+  shift(dE: number, dN: number): void {
+    for (const r of this.rows) {
+      r.v[0] -= dE;
+      r.v[1] -= dN;
+    }
+  }
+  clear(): void {
+    this.rows = [];
+  }
+}
+
+const SQRT_68 = 1.5;
+const fixSigma = (f: GnssFix) => (isSatelliteFix(f) ? f.hAccM / SQRT_68 : f.hAccM);
+
+export interface NavStats {
+  imuInvalidS: number;
+  standstillS: number;
+  obdDistanceM: number;
+  resets: number;
+}
+
+export class Navigator {
+  readonly config: NavConfig;
+  private imu: ImuProcessor;
+  private frame: LocalFrame | null = null;
+  private ekf: DrEkf | null = null;
+  private ekfHistory = new History(3_000_000);
+
+  private lastTUs: number | null = null;
+  private lastYaw: { tUs: number; rate: number; valid: boolean } | null = null;
+  private lastObd: ObdSpeedSample | null = null;
+  private quietSinceUs: number | null = null;
+  private lastBiasUpdateUs = -Infinity;
+  private standstill = false;
+
+  // Relative track (arbitrary rotation) for alignment before the heading is known.
+  private rel = { e: 0, n: 0, psi: 0, bias: 0 };
+  private relHistory = new History(3_000_000);
+  private alignPoints: (AlignPoint & { tUs: number })[] = [];
+
+  private anchor: { coord: Coordinate; sigma: number; distanceM: number } | null = null;
+  private lastFix: GnssFix | null = null;
+  private rejectedSat = 0;
+  private lagEstimator: GnssLagEstimator;
+  readonly stats: NavStats = { imuInvalidS: 0, standstillS: 0, obdDistanceM: 0, resets: 0 };
+
+  constructor(config: Partial<NavConfig> = {}) {
+    this.config = { ...DEFAULT_NAV_CONFIG, ...config };
+    this.imu = new ImuProcessor(this.config.imu);
+    this.lagEstimator = new GnssLagEstimator(this.config.gnssLag);
+  }
+
+  get mode(): NavMode {
+    return this.ekf ? "dr" : this.anchor ? "anchored" : "none";
+  }
+
+  get isStandstill(): boolean {
+    return this.standstill;
+  }
+
+  /** GNSS lag in use, s: the online estimate once ready, else the configured default. */
+  get gnssLagS(): number {
+    const estimate = this.config.estimateGnssLag ? this.lagEstimator.estimate() : null;
+    return estimate?.lagS ?? this.config.gnssLagS;
+  }
+
+  /** Online GNSS lag estimate (store it per phone model to start the next session with it). */
+  get gnssLagEstimate(): GnssLagEstimate | null {
+    return this.lagEstimator.estimate();
+  }
+
+  /** Learned parameters (speed scale, gyro bias/scale) while the EKF runs. */
+  get params() {
+    return this.ekf?.params() ?? null;
+  }
+
+  onImu(s: ImuSample): void {
+    const out = this.imu.process(s);
+    // With the engine off the poller reads speed once a second.
+    const lastObdZero = this.lastObd !== null && this.lastObd.rawKph === 0 && s.tUs - this.lastObd.tUs < 2_500_000;
+    if (out.quiet && lastObdZero) this.quietSinceUs ??= s.tUs;
+    else this.quietSinceUs = null;
+    this.standstill = this.quietSinceUs !== null && s.tUs - this.quietSinceUs >= this.config.standstillUs;
+
+    this.advance(s.tUs, out.valid ? out.yawRate : null);
+    this.lastYaw = { tUs: s.tUs, rate: out.yawRate, valid: out.valid };
+
+    if (this.standstill && s.tUs - this.lastBiasUpdateUs >= 1_000_000) {
+      this.lastBiasUpdateUs = s.tUs;
+      if (this.ekf) this.ekf.updateGyroBias(out.windowMeanYaw, 0.002, this.config.gate);
+      else this.rel.bias += 0.3 * (out.windowMeanYaw - this.rel.bias);
+    }
+  }
+
+  onObdSpeed(s: ObdSpeedSample): void {
+    this.advance(s.tUs, this.heldYaw(s.tUs));
+    this.lastObd = s;
+    if (!this.ekf) return;
+    if (this.standstill) this.ekf.updateZeroSpeed(0.02);
+    else this.ekf.updateObdSpeed(s.speedMps, s.rawKph === 0 ? this.config.obdZeroSigmaMps : this.config.obdSigmaMps);
+  }
+
+  onGnss(fix: GnssFix): FixOutcome {
+    const c = this.config;
+    if (fix.hAccM > c.maxFixAccuracyM || !(fix.hAccM > 0)) return { status: "skipped" };
+    // Under jamming iOS repeats the same Wi-Fi position; repeats carry no new information.
+    // (A parked satellite fix repeats too, but that one is a real measurement.)
+    if (!isSatelliteFix(fix) && this.lastFix && this.lastFix.lat === fix.lat && this.lastFix.lon === fix.lon) {
+      return { status: "skipped" };
+    }
+    this.lastFix = fix;
+    this.advance(fix.tUs, this.heldYaw(fix.tUs));
+    this.frame ??= new LocalFrame(fix);
+    const [fE, fN] = this.frame.toEnu(fix);
+    this.lagEstimator.onFix(fix.tUs, fix, fix.hAccM, isSatelliteFix(fix));
+    const tRef = fix.tUs - this.gnssLagS * 1e6;
+    const sigma = fixSigma(fix);
+    return this.ekf ? this.updateEkf(fix, fE, fN, tRef, sigma) : this.updateBeforeInit(fix, fE, fN, tRef, sigma);
+  }
+
+  estimate(): NavEstimate | null {
+    if (this.lastTUs === null) return null;
+    if (this.ekf && this.frame) {
+      const coord = this.frame.toCoordinate(this.ekf.east, this.ekf.north);
+      const heading = this.ekf.psi < 0 ? this.ekf.psi + 2 * Math.PI : this.ekf.psi;
+      return {
+        tUs: this.lastTUs,
+        mode: "dr",
+        ...coord,
+        accuracyM: SQRT_68 * this.ekf.positionSigma,
+        headingRad: heading,
+        headingSigmaRad: this.ekf.psiSigma,
+        speedMps: Math.max(0, this.ekf.speed),
+      };
+    }
+    if (this.anchor) {
+      return {
+        tUs: this.lastTUs,
+        mode: "anchored",
+        ...this.anchor.coord,
+        accuracyM: SQRT_68 * this.anchor.sigma + this.anchor.distanceM,
+        speedMps: this.lastObd?.speedMps,
+      };
+    }
+    return null;
+  }
+
+  /** Predicted position at a past time (within ~3 s), for evaluating held-out fixes. */
+  positionAt(tUs: number): { coord: Coordinate; sigmaM: number } | null {
+    if (!this.ekf || !this.frame) return null;
+    const h = this.ekfHistory.at(tUs, 2);
+    if (!h) return null;
+    return { coord: this.frame.toCoordinate(h[0], h[1]), sigmaM: this.ekf.positionSigma };
+  }
+
+  // ---- internals ----
+
+  /** Yaw rate to hold over an interval that has no IMU sample (null = unknown). */
+  private heldYaw(tUs: number): number | null {
+    const y = this.lastYaw;
+    return y && y.valid && tUs - y.tUs < 200_000 ? y.rate : null;
+  }
+
+  private advance(tUs: number, yawRate: number | null): void {
+    if (this.lastTUs === null) {
+      this.lastTUs = tUs;
+      return;
+    }
+    const dt = (tUs - this.lastTUs) / 1e6;
+    if (dt <= 0) return;
+    this.lastTUs = tUs;
+    const speed = this.lastObd?.speedMps ?? 0;
+    // A gap in the IMU stream or a handled phone means the rotation is unknown, unless the
+    // car stands (OBD 0): then it isn't turning, whatever the phone does.
+    const parked = this.lastObd !== null && this.lastObd.rawKph === 0;
+    const yaw = dt > 0.2 ? null : yawRate;
+    const hold = this.standstill || (yaw === null && parked);
+    if (yaw === null && !parked) this.stats.imuInvalidS += dt;
+    if (this.standstill) this.stats.standstillS += dt;
+    this.stats.obdDistanceM += speed * dt;
+    if (this.anchor) this.anchor.distanceM += speed * dt;
+
+    const relRate = hold || yaw === null ? 0 : yaw - this.rel.bias;
+    this.rel.psi = wrapAngle(this.rel.psi - relRate * dt);
+    this.rel.e += speed * Math.sin(this.rel.psi) * dt;
+    this.rel.n += speed * Math.cos(this.rel.psi) * dt;
+    this.relHistory.push(tUs, [this.rel.e, this.rel.n, this.rel.psi]);
+    if (yaw === null && !hold) {
+      // Track shape broken: start over.
+      if (!this.ekf) this.alignPoints = [];
+      this.lagEstimator.breakTrack();
+    } else {
+      this.lagEstimator.onTrack(tUs, this.rel.e, this.rel.n, this.rel.psi, speed);
+    }
+
+    if (this.ekf) {
+      // Standing: hold the heading (yaw input = bias → no rotation).
+      this.ekf.predict(dt, hold ? this.ekf.params().bw : yaw);
+      this.ekfHistory.push(tUs, [this.ekf.east, this.ekf.north, this.ekf.psi, this.ekf.speed]);
+      if (this.frame && Math.hypot(this.ekf.east, this.ekf.north) > this.config.reanchorM) this.reanchor();
+    }
+  }
+
+  private reanchor(): void {
+    const ekf = this.ekf!;
+    const dE = ekf.east;
+    const dN = ekf.north;
+    this.frame = new LocalFrame(this.frame!.toCoordinate(dE, dN));
+    ekf.shift(dE, dN);
+    this.ekfHistory.shift(dE, dN);
+  }
+
+  private updateBeforeInit(fix: GnssFix, fE: number, fN: number, tRef: number, sigma: number): FixOutcome {
+    const c = this.config;
+    if (!this.anchor || SQRT_68 * sigma < SQRT_68 * this.anchor.sigma + this.anchor.distanceM) {
+      this.anchor = { coord: { lat: fix.lat, lon: fix.lon }, sigma, distanceM: 0 };
+    }
+    const relThen = this.relHistory.at(tRef, 2) ?? [this.rel.e, this.rel.n, this.rel.psi];
+
+    // A GNSS course gives the heading directly.
+    if (
+      isSatelliteFix(fix) &&
+      fix.courseRad !== undefined &&
+      (fix.speedMps ?? 0) >= c.courseInitMinSpeedMps &&
+      (fix.courseAccRad ?? Infinity) <= c.courseInitMaxAccRad
+    ) {
+      const theta = wrapAngle(relThen[2] - fix.courseRad);
+      const cs = Math.cos(theta);
+      const sn = Math.sin(theta);
+      this.initEkf(theta, fE - (cs * relThen[0] - sn * relThen[1]), fN - (sn * relThen[0] + cs * relThen[1]), sigma, Math.max(fix.courseAccRad ?? 0, (3 * Math.PI) / 180));
+      return { status: "init", initMethod: "course" };
+    }
+
+    this.alignPoints = this.alignPoints.filter((p) => fix.tUs - p.tUs <= c.alignWindowUs);
+    // Fixes taken in one place (parked) have correlated errors: keep only the best of them.
+    const point = { tUs: fix.tUs, relE: relThen[0], relN: relThen[1], worldE: fE, worldN: fN, sigma };
+    const prev = this.alignPoints.at(-1);
+    if (prev && Math.hypot(prev.relE - point.relE, prev.relN - point.relN) < c.alignMinSpacingM) {
+      if (point.sigma < prev.sigma) this.alignPoints[this.alignPoints.length - 1] = point;
+    } else {
+      this.alignPoints.push(point);
+    }
+    const a = alignHeading(this.alignPoints, c.align);
+    if (!a) return { status: "anchored" };
+    // Position uncertainty: fit noise plus the heading error over the lever arm from the fixes.
+    const n = this.alignPoints.length;
+    const cE = this.alignPoints.reduce((s, p) => s + p.relE, 0) / n;
+    const cN = this.alignPoints.reduce((s, p) => s + p.relN, 0) / n;
+    const lever = Math.hypot(this.rel.e - cE, this.rel.n - cN);
+    const fitSigma = 1 / Math.sqrt(this.alignPoints.reduce((s, p) => s + 1 / (p.sigma * p.sigma), 0));
+    this.initEkf(a.theta, a.tE, a.tN, Math.hypot(fitSigma, lever * a.thetaSigma), a.thetaSigma);
+    return { status: "init", initMethod: "alignment" };
+  }
+
+  /** Start the EKF at the current relative-track position mapped by rot(θ) + t. */
+  private initEkf(theta: number, tE: number, tN: number, posSigma: number, psiSigma: number): void {
+    const cs = Math.cos(theta);
+    const sn = Math.sin(theta);
+    this.ekf = new DrEkf(
+      {
+        east: cs * this.rel.e - sn * this.rel.n + tE,
+        north: sn * this.rel.e + cs * this.rel.n + tN,
+        psi: wrapAngle(this.rel.psi - theta),
+        speed: this.lastObd?.speedMps ?? 0,
+        posSigma,
+        psiSigma,
+        speedSigma: 0.5,
+        params: { bw: this.rel.bias },
+      },
+      this.config.ekf,
+    );
+    this.ekfHistory.clear();
+    this.ekfHistory.push(this.lastTUs!, [this.ekf.east, this.ekf.north, this.ekf.psi, this.ekf.speed]);
+    this.alignPoints = [];
+    this.anchor = null;
+    this.rejectedSat = 0;
+  }
+
+  private updateEkf(fix: GnssFix, fE: number, fN: number, tRef: number, sigma: number): FixOutcome {
+    const c = this.config;
+    const ekf = this.ekf!;
+    const h = this.ekfHistory.at(tRef, 2) ?? [ekf.east, ekf.north, ekf.psi, ekf.speed];
+    const hv = this.ekfHistory.at(fix.tUs - c.gnssSpeedLagS * 1e6, 2) ?? h;
+    const rE = fE - h[0];
+    const rN = fN - h[1];
+    const predictedSigmaM = ekf.positionSigma;
+    const pos = ekf.updatePosition(rE, rN, sigma, c.gate);
+    const outcome: FixOutcome = { status: pos.accepted ? "accepted" : "rejected", errorM: Math.hypot(rE, rN), predictedSigmaM, nis: pos.nis };
+    const sat = isSatelliteFix(fix);
+    if (!pos.accepted) {
+      if (sat && ++this.rejectedSat >= c.resetAfterRejected) this.reset(fix, sigma);
+      return outcome;
+    }
+    if (sat) this.rejectedSat = 0;
+    if (sat && fix.speedMps !== undefined) {
+      ekf.updateSpeed(fix.speedMps - hv[3], Math.max(fix.speedAccMps ?? 0.5, 0.2), c.gate);
+      if (fix.courseRad !== undefined && fix.speedMps >= c.courseUpdateMinSpeedMps && fix.courseAccRad !== undefined) {
+        ekf.updateHeading(fix.courseRad - h[2], Math.max(fix.courseAccRad, (2 * Math.PI) / 180), c.gate);
+      }
+    }
+    return outcome;
+  }
+
+  /** The EKF disagrees with good fixes: start over, anchored at the latest one. */
+  private reset(fix: GnssFix, sigma: number): void {
+    this.anchor = { coord: { lat: fix.lat, lon: fix.lon }, sigma, distanceM: 0 };
+    this.ekf = null;
+    this.ekfHistory.clear();
+    this.alignPoints = [];
+    this.rejectedSat = 0;
+    this.stats.resets++;
+  }
+}
