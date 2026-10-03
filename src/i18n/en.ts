@@ -112,6 +112,7 @@ export const en = {
   stopScan: "Stop scan",
   scanning: "Scanning…",
   pairMfi: "Pair MFi adapter",
+  mfiNotFound: "No MFi adapter found. Put the adapter in pairing mode (OBDLink MX+: press the button; vLinker: plug it into the car) and try again.",
   remembered: "Remembered",
   obdAdapters: "OBD adapters",
   otherDevices: "Other Bluetooth devices",

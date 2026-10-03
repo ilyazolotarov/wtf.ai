@@ -70,11 +70,16 @@ public class VehicleLinkModule: Module {
         ? NSPredicate(format: "SELF CONTAINS[c] %@", nameFilter!)
         : nil
       EAAccessoryManager.shared().showBluetoothAccessoryPicker(withNameFilter: predicate) { error in
-        if let error = error as NSError?, error.code != EABluetoothAccessoryPickerError.Code.alreadyConnected.rawValue,
-           error.code != EABluetoothAccessoryPickerError.Code.resultCancelled.rawValue {
-          promise.reject("picker-failed", error.localizedDescription)
-        } else {
+        guard let error = error as NSError? else { return promise.resolve(nil) }
+        switch error.code {
+        case EABluetoothAccessoryPickerError.Code.alreadyConnected.rawValue,
+             EABluetoothAccessoryPickerError.Code.resultCancelled.rawValue:
           promise.resolve(nil)
+        case EABluetoothAccessoryPickerError.Code.resultNotFound.rawValue:
+          // Picker closed without a matching accessory in range — expected, not a failure.
+          promise.reject("mfi-not-found", error.localizedDescription)
+        default:
+          promise.reject("picker-failed", error.localizedDescription)
         }
       }
     }.runOnQueue(.main)

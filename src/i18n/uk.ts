@@ -114,6 +114,7 @@ export const uk = {
   stopScan: "Зупинити пошук",
   scanning: "Пошук…",
   pairMfi: "Під'єднати MFi-адаптер",
+  mfiNotFound: "MFi-адаптер не знайдено. Переведіть адаптер у режим пари (OBDLink MX+: натисніть кнопку; vLinker: вставте в авто) і спробуйте ще раз.",
   remembered: "Збережені",
   obdAdapters: "OBD-адаптери",
   otherDevices: "Інші Bluetooth-пристрої",

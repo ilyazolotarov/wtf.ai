@@ -40,6 +40,11 @@ export default function VehicleScreen() {
     }
   };
 
+  const pairMfi = () =>
+    link.pairMfi().catch((e: { code?: string; message?: string }) =>
+      Alert.alert(t("pairMfi"), e.code === "mfi-not-found" ? t("mfiNotFound") : (e.message ?? String(e))),
+    );
+
   const gattDump = snap.error?.code === "other" && snap.error.message?.startsWith("[") ? snap.error.message : null;
   const caps = adapter?.capabilities;
   const capText = caps
@@ -57,7 +62,7 @@ export default function VehicleScreen() {
           secondary
           onPress={() => (snap.discovering ? link.stopDiscovery() : link.startDiscovery())}
         />
-        <ScreenAction labelKey="pairMfi" secondary onPress={() => void link.pairMfi()} />
+        <ScreenAction labelKey="pairMfi" secondary onPress={pairMfi} />
       </ScreenSection>
 
       {snap.activeDeviceId && (
