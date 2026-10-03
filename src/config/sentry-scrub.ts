@@ -66,3 +66,16 @@ export function scrubEvent<T extends ScrubbableEvent>(event: T): T {
     breadcrumbs: event.breadcrumbs?.map((b) => scrubBreadcrumb(b)),
   };
 }
+
+interface ScrubbableLog {
+  message: unknown;
+  attributes?: Record<string, unknown>;
+}
+
+export function scrubLog<T extends ScrubbableLog>(log: T): T {
+  return {
+    ...log,
+    message: scrubText(String(log.message)),
+    attributes: log.attributes === undefined ? undefined : (scrubValue(log.attributes) as Record<string, unknown>),
+  };
+}

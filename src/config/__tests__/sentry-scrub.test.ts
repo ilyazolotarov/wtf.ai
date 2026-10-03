@@ -1,4 +1,4 @@
-import { scrubBreadcrumb, scrubEvent, scrubText } from "@/config/sentry-scrub";
+import { scrubBreadcrumb, scrubEvent, scrubLog, scrubText } from "@/config/sentry-scrub";
 
 describe("Sentry scrubbing", () => {
   test("redacts coordinates and VINs in text", () => {
@@ -30,5 +30,15 @@ describe("Sentry scrubbing", () => {
     expect(e.extra).toEqual({ position: "[redacted]" });
     expect(e.user).toBeUndefined();
     expect(e.breadcrumbs?.[0].message).toBe("[num]");
+  });
+});
+
+describe("Sentry log scrubbing", () => {
+  test("scrubs log message and attributes", () => {
+    expect(scrubLog({ level: "warn", message: "fix 50.450123, 30.523456", attributes: { lat: 50.45, n: 3 } })).toEqual({
+      level: "warn",
+      message: "fix [num], [num]",
+      attributes: { lat: "[redacted]", n: 3 },
+    });
   });
 });

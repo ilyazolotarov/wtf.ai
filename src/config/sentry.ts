@@ -1,6 +1,6 @@
 import * as Sentry from "@sentry/react-native";
 
-import { scrubBreadcrumb, scrubEvent } from "./sentry-scrub";
+import { scrubBreadcrumb, scrubEvent, scrubLog } from "./sentry-scrub";
 
 // Crash and error reporting (SPEC §2 privacy exception). The DSN is a public client key.
 export const SENTRY_DSN =
@@ -9,15 +9,18 @@ export const SENTRY_DSN =
 export function initSentry(): void {
   Sentry.init({
     dsn: SENTRY_DSN,
-    // Off in Metro-served debug builds; on in standalone (Release) builds.
-    enabled: !__DEV__,
+    // On in every build (Debug IPAs run without a Mac console); filter by environment in Sentry.
     environment: __DEV__ ? "development" : "production",
     sendDefaultPii: false,
-    tracesSampleRate: 0.1,
+    tracesSampleRate: __DEV__ ? 1 : 0.1,
     attachScreenshot: false,
     attachViewHierarchy: false,
+    enableLogs: true,
+    integrations: [Sentry.consoleLoggingIntegration({ levels: ["log", "info", "warn", "error"] })],
     beforeSend: (event) => scrubEvent(event),
+    beforeSendTransaction: (event) => scrubEvent(event),
     beforeBreadcrumb: (crumb) => scrubBreadcrumb(crumb),
+    beforeSendLog: (log) => scrubLog(log),
   });
 }
 

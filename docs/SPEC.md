@@ -35,7 +35,7 @@ Odometry is built up in stages (§2.1). Stage 1 uses the minimum that works on a
 | Phone mount                 | Stage 1 requires a **rigid phone mount** (the gyro is the only yaw source).                                                                                                                                               |
 | Standstill bias calibration | **2–3 s**, refined at every stop (ZUPT). No dedicated long standstill step.                                                                                                                                               |
 | Distribution                | Sideloading via AltStore now. App Store later needs a paid Apple Developer account; then BLE needs nothing more, MFi adapters need the vendors' authorizations (see §9).                                                    |
-| Privacy                     | All data stays on device. No position upload; trip logs exported only by explicit user action. **One exception: Sentry crash/error reports** (EU region, standalone builds only, no PII, no replay/screenshots; coordinates and VINs scrubbed in `src/config/sentry-scrub.ts`). |
+| Privacy                     | All data stays on device. No position upload; trip logs exported only by explicit user action. **One exception: Sentry crash/error reports and logs** (EU region, all builds with `environment` = development/production, no PII, no replay/screenshots; coordinates and VINs scrubbed from events, breadcrumbs and logs in `src/config/sentry-scrub.ts`). |
 
 ### 2.1 Odometry stages
 
