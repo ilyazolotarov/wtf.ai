@@ -8,6 +8,7 @@ import {
     Pressable,
     StyleSheet,
     View,
+    type ViewStyle,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -153,7 +154,7 @@ export default function HomeScreen() {
             </View>
             <Link href="/vehicle" asChild>
               <Pressable
-                style={[panel, styles.vehicleButton]}
+                style={StyleSheet.flatten<ViewStyle>([panel, styles.vehicleButton])}
                 accessibilityRole="button"
                 accessibilityLabel={`${t("vehicle")}: ${nav.adapterLabel}`}
               >
@@ -206,7 +207,7 @@ export default function HomeScreen() {
           {position && trust === "TRUSTED" && calibrationMock.status === "not-calibrated" && (
             <Link href="/calibration" asChild>
               <Pressable
-                style={[panel, styles.calChip]}
+                style={StyleSheet.flatten<ViewStyle>([panel, styles.calChip])}
                 accessibilityRole="button"
               >
                 <GlassFill radius={Radius.pill} />
@@ -342,17 +343,19 @@ function HudAction({
 }) {
   const palette = usePalette();
   return (
+    // Link asChild drops function styles, so press feedback lives on the content.
     <Link href={href} asChild>
-      <Pressable
-        style={({ pressed }) => [styles.action, pressed && styles.pressed]}
-        accessibilityRole="button"
-      >
-        <View style={[styles.actionCircle, { backgroundColor: palette.surface }]}>
-          <Icon name={icon} size={22} color={palette.text} />
-        </View>
-        <T w="medium" size={12}>
-          {label}
-        </T>
+      <Pressable style={styles.action} accessibilityRole="button">
+        {({ pressed }) => (
+          <View style={[styles.actionContent, pressed && styles.pressed]}>
+            <View style={[styles.actionCircle, { backgroundColor: palette.surface }]}>
+              <Icon name={icon} size={24} color={palette.text} />
+            </View>
+            <T w="medium" size={12}>
+              {label}
+            </T>
+          </View>
+        )}
       </Pressable>
     </Link>
   );
@@ -531,8 +534,9 @@ const styles = StyleSheet.create({
     fontVariant: ["tabular-nums"],
   },
   accuracy: { alignItems: "flex-end", gap: 2 },
-  actions: { flexDirection: "row" },
-  action: { flex: 1, alignItems: "center", gap: 6 },
+  actions: { flexDirection: "row", gap: 8 },
+  action: { flex: 1 },
+  actionContent: { alignItems: "center", gap: 6 },
   actionCircle: {
     width: 52,
     height: 52,
