@@ -34,6 +34,14 @@
     "plugins": [
       "expo-router",
       [
+        "expo-dev-client",
+        {
+          "ios": {
+            "embeddedBundle": true
+          }
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "backgroundColor": "#208AEF",
