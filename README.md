@@ -20,7 +20,14 @@ You need Node.js with npm. Expo Go is not supported because the app uses native 
    npm install
    ```
 
-2. Get an unsigned iOS build from GitHub Actions: every push runs the **CI** workflow, whose `build-ios` job uploads `wtfai-Release-unsigned.ipa` as an artifact. For a dev client, run **Build Unsigned iOS App** by hand with `Debug`.
+2. Get an unsigned iOS build from GitHub Actions: every push runs the **CI** workflow, whose `build-ios` job uploads `wtfai-Debug-unsigned.ipa` (a dev client with the JS bundle embedded) as an artifact. For a Release build (production JS, no dev client), run **Build Unsigned iOS App** by hand with `Release`.
+
+   Optional: get each IPA in Telegram as soon as it's built.
+   1. In Telegram, create a bot with [@BotFather](https://t.me/BotFather) (`/newbot`) and copy its token.
+   2. Send the bot any message, then open `https://api.telegram.org/bot<token>/getUpdates` and copy `"chat":{"id":…}`.
+   3. Add both as repository secrets: `gh secret set TELEGRAM_BOT_TOKEN`, then `gh secret set TELEGRAM_CHAT_ID` (each prompts for the value).
+
+   Every build then sends the IPA with the branch, commit and run link. Builds without the secrets skip the step.
 
 3. Sideload the IPA with [AltStore](https://altstore.io) (free Apple ID; refresh the app every 7 days with AltServer). For a Debug build, start Metro on the same network:
 

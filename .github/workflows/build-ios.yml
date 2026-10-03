@@ -18,6 +18,10 @@ on:
     secrets:
       SENTRY_AUTH_TOKEN:
         required: false
+      TELEGRAM_BOT_TOKEN:
+        required: false
+      TELEGRAM_CHAT_ID:
+        required: false
 
 jobs:
   build-ios:
@@ -32,6 +36,9 @@ jobs:
       SENTRY_ORG: ${{ vars.SENTRY_ORG }}
       SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
       SENTRY_DISABLE_AUTO_UPLOAD: ${{ secrets.SENTRY_AUTH_TOKEN == '' && 'true' || 'false' }}
+      # Optional: the IPA is also sent to a Telegram chat when both secrets are set (README).
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -96,3 +103,21 @@ jobs:
           archive: false
           path: wtfai-${{ inputs.configuration }}-unsigned.ipa
           retention-days: 14
+
+      - name: Send IPA to Telegram
+        if: ${{ env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != '' }}
+        # A delivery problem must not fail the build: the artifact above is the source of truth.
+        continue-on-error: true
+        run: |
+          IPA="wtfai-${CONFIGURATION}-unsigned.ipa"
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          CAPTION="wtf.ai ${CONFIGURATION} · ${GITHUB_REF_NAME} @ ${GITHUB_SHA:0:7}
+          $(git log -1 --format=%s)
+          ${RUN_URL}"
+          API="https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}"
+          # Bot API uploads are limited to 50 MB; past that, send the link to the run instead.
+          if [ "$(stat -f%z "$IPA")" -lt 49000000 ]; then
+            curl -sS --fail-with-body -o /dev/null -F chat_id="$TELEGRAM_CHAT_ID" -F caption="$CAPTION" -F document=@"$IPA" "$API/sendDocument"
+          else
+            curl -sS --fail-with-body -o /dev/null --data-urlencode chat_id="$TELEGRAM_CHAT_ID" --data-urlencode text="$CAPTION (IPA over 50 MB: download it from the run)" "$API/sendMessage"
+          fi
