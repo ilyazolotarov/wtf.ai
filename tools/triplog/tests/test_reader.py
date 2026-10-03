@@ -9,7 +9,7 @@ import pandas as pd
 import pytest
 
 from triplog import load
-from triplog.analysis import check, estimate_refresh, summary
+from triplog.analysis import check, estimate_refresh, gnss_distance_m, summary
 from triplog.cli import main
 
 FIXTURE = Path(__file__).parent / "data" / "fixture.ulg"
@@ -47,6 +47,18 @@ def test_gnss(trip):
     assert g["speed"].tolist() == [10, 11, 12]
     assert g["delivery_delay_ms"].iloc[0] == 120
     assert g["utc"].iloc[0] == pd.Timestamp(1_791_000_000_000_000, unit="us", tz="UTC")
+
+
+def test_gnss_distance_skips_fixes_without_satellite_lock(trip):
+    # Jammed GNSS: iOS Wi-Fi/cell fixes have no speed; hops touching them don't count.
+    g = pd.DataFrame({"lat": [50.45, 50.451, 50.451, 50.452], "lon": [30.52] * 4,
+                      "h_acc": [4, 40, 4, 4], "speed": [8.0, np.nan, 8.0, 8.0]})
+    assert gnss_distance_m(g) == pytest.approx(111.2, abs=0.5)
+    jammed = trip.gnss.assign(speed=np.nan)
+    assert gnss_distance_m(jammed) == 0
+    findings = check(replace(trip, gnss=jammed))
+    assert any("no satellite lock" in f.message for f in findings)
+    assert not any("speed agreement" in f.message for f in findings)
 
 
 def test_imu(trip):

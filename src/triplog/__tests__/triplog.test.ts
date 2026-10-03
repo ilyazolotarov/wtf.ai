@@ -45,11 +45,14 @@ describe("ULog encoder/reader", () => {
     expect(f.truncated).toBe(false);
   });
 
-  test("definitions must precede data", () => {
+  test("formats must precede data; late info overrides the header", () => {
     const enc = new ULogEncoder(0);
+    enc.infoString("vin", "");
     enc.format({ name: "m", fields: [{ type: "uint64_t", name: "timestamp" }] });
     enc.subscribe("m");
-    expect(() => enc.infoString("late", "x")).toThrow();
+    expect(() => enc.format({ name: "n", fields: [{ type: "uint64_t", name: "timestamp" }] })).toThrow();
+    enc.infoString("vin", "JM3KFBDM1J0123456");
+    expect(readULog(enc.take()).info.vin).toBe("JM3KFBDM1J0123456");
   });
 
   test("truncated file is still readable", () => {

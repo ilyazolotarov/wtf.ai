@@ -104,6 +104,8 @@ export class Elm327Emulator implements Transport {
   /** Count of commands handled, for tests. */
   commandCount = 0;
   readonly log: string[] = [];
+  private desyncWhen: ((command: string) => boolean) | null = null;
+  private heldReply: string | null = null;
 
   // ELM state
   private echo = true;
@@ -136,6 +138,15 @@ export class Elm327Emulator implements Transport {
     this.connected = false;
   }
 
+  /**
+   * Simulate a reply arriving one command late (seen on a real OBDLink MX+): the next
+   * command (or the first one `when` accepts) gets a stale "STOPPED"; its own reply answers
+   * the command after it, which is lost.
+   */
+  desyncOnce(when: (command: string) => boolean = () => true): void {
+    this.desyncWhen = when;
+  }
+
   /** Simulate the adapter dropping off (unplugged / brown-out). */
   dropLink(reason = "emulated link loss"): void {
     this.connected = false;
@@ -163,6 +174,14 @@ export class Elm327Emulator implements Transport {
     }
     this.firstCommand = false;
 
+    const eol = this.profile.lineEnding;
+    if (this.heldReply !== null) {
+      const raw = this.heldReply;
+      this.heldReply = null;
+      await this.clock.sleep(this.profile.atLatencyMs);
+      return { raw, status: "ok", txUs, rxFirstUs: this.clock.nowUs(), rxUs: this.clock.nowUs() };
+    }
+
     let cmd = command.replace(/\s+/g, "").toUpperCase();
     if (cmd === "") cmd = this.lastCommand;
     else this.lastCommand = cmd;
@@ -174,9 +193,13 @@ export class Elm327Emulator implements Transport {
       return { raw: "", status: "timeout", txUs, rxUs: this.clock.nowUs() };
     }
     await this.clock.sleep(totalDelay);
-    const eol = this.profile.lineEnding;
     let raw = (this.echo ? command + eol : "") + body.join(eol) + eol + eol + ">";
     if (this.profile.nulBytes) raw = "\0" + raw;
+    if (this.desyncWhen?.(cmd)) {
+      this.desyncWhen = null;
+      this.heldReply = raw;
+      raw = `STOPPED${eol}${eol}>`;
+    }
     const rxUs = this.clock.nowUs();
     return { raw, status: "ok", txUs, rxFirstUs: rxUs, rxUs };
   }

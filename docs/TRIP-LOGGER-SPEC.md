@@ -105,7 +105,7 @@ modules/sensor-capture ─▶ src/services/sensor-capture ──(SensorStream)�
 ### 6.1 File
 
 - Path: `Documents/trips/<startUTC as YYYYMMDD-HHMMSS>_<6-char id>.ulg`; manual sessions get suffix `_manual`.
-- Standard ULog v1 layout: 16-byte header (magic `55 4C 6F 67 01 12 35`, version 1, uint64 start timestamp µs), `B` flag-bits message (all zero), then definitions (`I` info, `F` formats), then data (`A` subscriptions, `D` data, `C` tagged strings, `S` sync, `O` dropout). Little-endian, unaligned, no padding fields.
+- Standard ULog v1 layout: 16-byte header (magic `55 4C 6F 67 01 12 35`, version 1, uint64 start timestamp µs), `B` flag-bits message (all zero), then definitions (`I` info, `F` formats), then data (`A` subscriptions, `D` data, `C` tagged strings, `S` sync, `O` dropout, and `I` info for values learned after the header — readers keep the last value per key). Little-endian, unaligned, no padding fields.
 - Every subscribed message starts with `uint64_t timestamp` = monotonic uptime µs (§2). Readers convert to seconds since log start.
 
 ### 6.2 Info messages (`I`)
@@ -124,7 +124,7 @@ modules/sensor-capture ─▶ src/services/sensor-capture ──(SensorStream)�
 | `char[] adapter_elm`              | `ATI` answer                                           |
 | `char[] adapter_chip`             | `STI` answer or empty                                  |
 | `char[] obd_protocol`             | `ATDPN` answer                                         |
-| `char[] vehicle_vin`              | VIN or empty                                           |
+| `char[] vehicle_vin`              | VIN or empty; repeated in the data section if read later |
 | `char[] imu_frame`                | `xArbitraryZVertical`                                  |
 
 ### 6.3 Data messages (`F` + `D`)
@@ -198,7 +198,7 @@ trip.transcript      # tagged strings
 ```
 
 - CLI:
-  - `triplog info <file>` — summary: duration, distance (GNSS), rates per stream, gaps, dropouts, adapter/vehicle info.
+  - `triplog info <file>` — summary: duration, distance (GNSS, satellite fixes only: Wi-Fi/cell fallback under jamming has no speed), rates per stream, gaps, dropouts, adapter/vehicle info.
   - `triplog export <file> --csv|--parquet <dir>` — one file per stream.
   - `triplog plot <file>` — OBD speed vs GNSS speed, vertical yaw rate, GNSS track with accuracy, poll rate/latency.
   - `triplog check <file>` — monotonic timestamps, expected rates, OBD vs GNSS speed agreement, incomplete trip.

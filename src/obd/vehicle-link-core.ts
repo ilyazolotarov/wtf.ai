@@ -4,7 +4,7 @@
 
 import { compareDevices, rankDevice } from "./catalog";
 import type { Clock } from "./clock";
-import { probeAdapter } from "./elm327/probe";
+import { probeAdapter, warmReset } from "./elm327/probe";
 import { initVehicle } from "./elm327/init";
 import { parseMode01 } from "./elm327/parser";
 import { Elm327Session, Priority, SessionClosedError } from "./elm327/session";
@@ -381,7 +381,7 @@ export class VehicleLinkCore implements VehicleLink {
       await this.poller?.stop();
       this.poller = null;
       this.check(gen);
-      await this.requireSession().send("ATWS", { timeoutMs: 3000 });
+      await warmReset((c, o) => this.requireSession().send(c, o));
       await this.initAndPoll(gen);
     } catch (error) {
       this.handleFailure(gen, error);

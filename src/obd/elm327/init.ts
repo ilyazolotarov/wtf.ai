@@ -30,17 +30,28 @@ const hex = (n: number) => n.toString(16).toUpperCase();
 
 interface Measurement {
   ok: boolean;
-  meanMs: number;
+  latencyMs: number;
 }
 
+/**
+ * Median latency over `polls` requests. One failure is tolerated: a single adapter stall
+ * shouldn't lock in a slower command for the whole session; an unsupported one fails them all.
+ */
 async function measure(send: Send, command: string, polls: number): Promise<Measurement> {
-  let total = 0;
+  const latencies: number[] = [];
+  let failures = 0;
   for (let i = 0; i < polls; i++) {
     const r = await send(command, { timeoutMs: 1000 });
-    if (r.status !== "ok" || parseMode01(r.lines, PID_SPEED, 1).length === 0) return { ok: false, meanMs: Infinity };
-    total += (r.rxUs - r.txUs) / 1000;
+    if (r.status !== "ok" || parseMode01(r.lines, PID_SPEED, 1).length === 0) {
+      if (++failures > 1 || failures === polls) return { ok: false, latencyMs: Infinity };
+      continue;
+    }
+    latencies.push((r.rxUs - r.txUs) / 1000);
   }
-  return { ok: true, meanMs: total / polls };
+  latencies.sort((a, b) => a - b);
+  const mid = latencies.length >> 1;
+  const median = latencies.length % 2 ? latencies[mid] : (latencies[mid - 1] + latencies[mid]) / 2;
+  return { ok: true, latencyMs: median };
 }
 
 export async function initVehicle(send: Send, opts: InitOptions = {}): Promise<InitResult> {
@@ -60,7 +71,11 @@ export async function initVehicle(send: Send, opts: InitOptions = {}): Promise<I
     poll: { speedCommand: "010D", rpmCommand: "010C" },
   });
 
-  for (const c of ["ATE0", "ATL0", "ATS0", "ATH1", "ATAT1"]) await send(c, { timeoutMs: 1000 });
+  // Retry once without an OK: a late reply (e.g. a reset banner) means the command was lost.
+  for (const c of ["ATE0", "ATL0", "ATS0", "ATH1", "ATAT1"]) {
+    const r = await send(c, { timeoutMs: 1000 });
+    if (!/\bOK\b/.test(r.lines.join(" "))) await send(c, { timeoutMs: 1000 });
+  }
 
   // 1. Protocol: auto search (or cached), then lock it.
   const cached = opts.cachedProtocol ?? 0;
@@ -109,14 +124,14 @@ export async function initVehicle(send: Send, opts: InitOptions = {}): Promise<I
   // 4. Speed-up probes (§9.3).
   const plain = await measure(send, "010D", polls);
   const counted = await measure(send, "010D1", polls);
-  capabilities.responseCount = counted.ok && counted.meanMs <= plain.meanMs * 1.05;
+  capabilities.responseCount = counted.ok && counted.latencyMs <= plain.latencyMs * 1.05;
   const speedCommand = capabilities.responseCount ? "010D1" : "010D";
   const baseline = capabilities.responseCount ? counted : plain;
 
   const at2 = await send("ATAT2", { timeoutMs: 1000 });
   if (at2.status === "ok") {
     const fast = await measure(send, speedCommand, polls);
-    capabilities.adaptiveTiming2 = fast.ok && fast.meanMs <= baseline.meanMs;
+    capabilities.adaptiveTiming2 = fast.ok && fast.latencyMs <= baseline.latencyMs;
     if (!capabilities.adaptiveTiming2) await send("ATAT1", { timeoutMs: 1000 });
   }
 

@@ -25,6 +25,19 @@ function text(r: ElmResponse): string {
   return r.lines.join(" ");
 }
 
+/**
+ * ATWS until the banner shows up. After an interrupted command the first reply can be a
+ * stale "STOPPED"; the banner then arrives as the answer to the next command (which the
+ * resetting adapter drops), so another ATWS collects it instead of the following setup.
+ */
+export async function warmReset(send: Send, attempts = 3): Promise<boolean> {
+  for (let i = 0; i < attempts; i++) {
+    const r = await send("ATWS", { timeoutMs: 3000 });
+    if (r.status !== "timeout" && BANNER.test(text(r))) return true;
+  }
+  return false;
+}
+
 export interface ProbeOptions {
   /** Cached protocol number for the vehicle check, else auto (0). */
   protocol?: number | null;

@@ -157,6 +157,11 @@ export class TripLogWriter {
     this.lastTimeSyncUs = timestampUs;
   }
 
+  /** Late info message; readers keep the last value per key. */
+  info(key: string, value: string): void {
+    this.enc.infoString(key, value);
+  }
+
   log(level: LogLevel, tag: number, timestampUs: number, text: string): void {
     this.enc.tagged(LOG_LEVEL[level], tag, timestampUs, text);
   }

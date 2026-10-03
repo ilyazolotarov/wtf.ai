@@ -19,7 +19,14 @@ def _rate_hz(t: pd.Series) -> float:
     return (len(t) - 1) / span if span > 0 else 0.0
 
 
+def satellite_fix(gnss: pd.DataFrame) -> pd.Series:
+    """Fixes with a satellite lock. Under GNSS jamming iOS falls back to Wi-Fi/cell
+    positions, which carry no speed; the 50 m gate matches the recorder's distance."""
+    return (gnss["speed"] >= 0) & (gnss["h_acc"] < 50)
+
+
 def gnss_distance_m(gnss: pd.DataFrame) -> float:
+    """Sum of hops between consecutive fixes that both have a satellite lock."""
     if len(gnss) < 2:
         return 0.0
     lat = np.radians(gnss["lat"].to_numpy())
@@ -27,7 +34,8 @@ def gnss_distance_m(gnss: pd.DataFrame) -> float:
     dlat = np.diff(lat)
     dlon = np.diff(lon)
     a = np.sin(dlat / 2) ** 2 + np.cos(lat[:-1]) * np.cos(lat[1:]) * np.sin(dlon / 2) ** 2
-    return float(np.sum(2 * EARTH_R * np.arcsin(np.sqrt(a))))
+    good = satellite_fix(gnss).to_numpy()
+    return float(np.sum((2 * EARTH_R * np.arcsin(np.sqrt(a)))[good[:-1] & good[1:]]))
 
 
 def summary(trip: Trip) -> dict:
@@ -41,6 +49,7 @@ def summary(trip: Trip) -> dict:
         "start_reason": trip.info.get("start_reason"),
         "end_reason": (trip.trip_events[trip.trip_events["event"] == "end"]["reason"].tolist() or [None])[-1],
         "gnss_distance_km": round(gnss_distance_m(trip.gnss) / 1000, 3),
+        "gnss_satellite_fixes": f"{int(satellite_fix(trip.gnss).sum())}/{len(trip.gnss)}",
         "adapter": {
             "transport": trip.info.get("adapter_transport"),
             "name": trip.info.get("adapter_name"),
@@ -99,12 +108,19 @@ def check(trip: Trip) -> list[Finding]:
         out.append(Finding("warn", "no IMU data"))
     if len(trip.gnss):
         out.append(Finding("ok" if 0.5 <= rates["gnss"] <= 2 else "warn", f"GNSS rate {rates['gnss']} Hz (expected ~1)"))
+        n_sat = int(satellite_fix(trip.gnss).sum())
+        if n_sat == 0:
+            out.append(Finding("warn", f"no satellite lock in {len(trip.gnss)} GNSS fixes (no speed): jamming or no sky view"))
+        elif n_sat < len(trip.gnss):
+            out.append(Finding("ok", f"{n_sat}/{len(trip.gnss)} GNSS fixes with satellite lock"))
     else:
         out.append(Finding("warn", "no GNSS data"))
     if len(trip.obd_speed):
         out.append(Finding("ok" if rates["obd_speed"] >= 5 else "warn", f"OBD speed rate {rates['obd_speed']} Hz"))
         agree = speed_agreement(trip)
-        if len(agree) >= 20:
+        if not satellite_fix(trip.gnss).any():
+            pass  # reported above; nothing to compare against
+        elif len(agree) >= 20:
             med = float(np.median(agree["diff_kph"]))
             mad = float(np.median(np.abs(agree["diff_kph"] - med)))
             level = "ok" if abs(med) <= 1.0 else "warn"

@@ -98,14 +98,19 @@ test("engine start → recording → key off → complete ULog trip", async () =
   emu.setVehicle({ rpm: 900 });
   await until(() => recorder.getSnapshot().state === "recording");
   emu.setVehicle({ speedKph: 30 });
-  const fix = (t: number): GnssRecord => ({
-    timestampUs: t, utcUs: 1.79e15, latDeg: 50.45, lonDeg: 30.52, altMslM: 180, altEllipsoidM: 210, hAccM: 4,
-    vAccM: 6, speedMps: 8.3, speedAccMps: 0.4, courseRad: 1, courseAccRad: 0.1, deliveryDelayUs: 1000, flags: 0,
+  const fix = (t: number, latDeg = 50.45, satellite = true): GnssRecord => ({
+    timestampUs: t, utcUs: 1.79e15, latDeg, lonDeg: 30.52, altMslM: 180, altEllipsoidM: 210, hAccM: satellite ? 4 : 40,
+    vAccM: 6, speedMps: satellite ? 8.3 : NaN, speedAccMps: 0.4, courseRad: 1, courseAccRad: 0.1, deliveryDelayUs: 1000, flags: 0,
   });
-  gnss.emit(fix(clock.nowUs()));
+  // Jammed GNSS: Wi-Fi/cell fixes (no speed) don't add distance, even with h_acc < 50 m.
+  gnss.emit(fix(clock.nowUs(), 50.45));
+  gnss.emit(fix(clock.nowUs(), 50.451, false));
+  gnss.emit(fix(clock.nowUs(), 50.451));
+  gnss.emit(fix(clock.nowUs(), 50.452));
   const t0 = clock.nowUs();
   await until(() => clock.nowUs() - t0 > 3_000_000);
   recorder.tick();
+  expect(recorder.getSnapshot().current?.distanceM).toBeCloseTo(111.2, 0);
 
   emu.setVehicle({ ignition: false, rpm: 0, speedKph: 0 });
   await until(() => recorder.getSnapshot().state === "lingering");
@@ -120,9 +125,10 @@ test("engine start → recording → key off → complete ULog trip", async () =
   expect(speeds.length).toBeGreaterThan(20);
   expect(speeds.some((r) => (r.data as number[])[0] === 30)).toBe(true);
   expect(log.data.obd_pid.some((r) => r.pid === 0x0c)).toBe(true);
-  expect(log.data.gnss).toHaveLength(1);
+  expect(log.data.gnss).toHaveLength(4);
   expect(log.data.trip_event.map((e) => [e.event, e.reason])).toEqual([[0, 0], [1, 0]]);
-  expect(log.data.engine_state.map((e) => e.state)).toContain(3);
+  // Running at trip start (not the link snapshot's stale "engine-off"), then ignition off.
+  expect(log.data.engine_state.map((e) => e.state)).toEqual([3, 3, 1]);
   expect(log.data.link_stats.length).toBeGreaterThanOrEqual(1);
   } finally {
     recorder.stop();

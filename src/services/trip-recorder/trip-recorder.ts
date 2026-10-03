@@ -104,6 +104,9 @@ function fileStamp(d: Date): string {
   return `${d.getUTCFullYear()}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}-${p(d.getUTCHours())}${p(d.getUTCMinutes())}${p(d.getUTCSeconds())}`;
 }
 
+/** Satellite fix: iOS reports no speed for Wi-Fi/cell fallback positions (e.g. under GNSS jamming). */
+const isSatelliteFix = (f: GnssRecord) => f.speedMps >= 0 && f.hAccM < 50;
+
 const escapeRaw = (s: string) => s.replace(/\r/g, "\\r").replace(/\n/g, "\\n").replace(/\0/g, "");
 
 export class TripRecorder {
@@ -119,6 +122,9 @@ export class TripRecorder {
   private timer: ReturnType<typeof setInterval> | null = null;
   private unsubscribers: (() => void)[] = [];
   private lastLinkUp = false;
+  /** Tracked here: the link snapshot lags behind its engine-state event. */
+  private engine: EngineState = "unknown";
+  private loggedVin = "";
 
   constructor(private readonly deps: TripRecorderDeps) {
     const settings = { ...DEFAULT_TRIP_SETTINGS, ...(deps.store.getJson<Partial<TripSettings>>(SETTINGS_KEY) ?? {}) };
@@ -173,6 +179,7 @@ export class TripRecorder {
       }),
     );
     this.timer = setInterval(() => this.tick(), 1000);
+    this.engine = link.getSnapshot().engine;
     this.onLinkSnapshot();
   }
 
@@ -232,7 +239,14 @@ export class TripRecorder {
   // ---- inputs ----
 
   private onLinkSnapshot(): void {
-    const up = LINK_UP.includes(this.deps.link.getSnapshot().link);
+    const snap = this.deps.link.getSnapshot();
+    const vin = snap.vehicle?.vin;
+    if (this.writer && vin && vin !== this.loggedVin) {
+      // Read after the header was written (e.g. on reinit): later info messages override it.
+      this.loggedVin = vin;
+      this.record(this.deps.nowUs(), (w) => w.info("vehicle_vin", vin));
+    }
+    const up = LINK_UP.includes(snap.link);
     if (up !== this.lastLinkUp) {
       this.lastLinkUp = up;
       this.detector.onLink(up, this.deps.nowUs());
@@ -241,6 +255,7 @@ export class TripRecorder {
   }
 
   private onEngine(state: EngineState, tUs: number): void {
+    this.engine = state;
     const code = ENGINE_STATE_CODES.indexOf(state);
     this.record(tUs, (w) => w.engineState(tUs, code));
     this.detector.onEngine(state, tUs);
@@ -272,7 +287,7 @@ export class TripRecorder {
   }
 
   private onGnss(fix: GnssRecord): void {
-    if (this.writer && this.current && this.lastFix && fix.hAccM < 50 && this.lastFix.hAccM < 50) {
+    if (this.writer && this.current && this.lastFix && isSatelliteFix(fix) && isSatelliteFix(this.lastFix)) {
       this.current.distanceM += haversineM(
         { lat: this.lastFix.latDeg, lon: this.lastFix.lonDeg },
         { lat: fix.latDeg, lon: fix.lonDeg },
@@ -335,7 +350,8 @@ export class TripRecorder {
     for (const p of this.preroll) if (p.tUs >= cutoff) p.write(this.writer);
     this.preroll = [];
     this.writer.tripEvent(Math.round(tUs), TRIP_EVENTS.start);
-    this.writer.engineState(Math.round(tUs), ENGINE_STATE_CODES.indexOf(link.engine));
+    this.writer.engineState(Math.round(tUs), ENGINE_STATE_CODES.indexOf(this.engine));
+    this.loggedVin = link.vehicle?.vin ?? "";
     this.current = { id, fileName, startedUs: tUs, startReason: reason, bytes: 0, distanceM: 0, durationS: 0 };
     const entry: TripIndexEntry = {
       id,

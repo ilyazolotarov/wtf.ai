@@ -1,5 +1,5 @@
-// Streaming ULog v1 encoder. Definitions (info, formats) must come before the
-// first subscription/data message; the encoder enforces that.
+// Streaming ULog v1 encoder. Formats must come before the first subscription/data
+// message; the encoder enforces that. Info messages may also appear in the data section.
 
 import { ByteWriter, utf8 } from "./bytes";
 import {
@@ -134,7 +134,6 @@ export class ULogEncoder {
   }
 
   private info(key: string, writeValue: (w: ByteWriter) => void): void {
-    this.requireDefinitions();
     const keyBytes = utf8(key);
     this.message(MSG.info, () => {
       this.out.u8(keyBytes.length);

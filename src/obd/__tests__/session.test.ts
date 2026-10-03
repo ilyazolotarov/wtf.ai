@@ -1,6 +1,6 @@
 import { VirtualClock, yieldMacrotask } from "@/obd/clock";
 import { initVehicle } from "@/obd/elm327/init";
-import { probeAdapter } from "@/obd/elm327/probe";
+import { probeAdapter, warmReset } from "@/obd/elm327/probe";
 import { Elm327Session, Priority } from "@/obd/elm327/session";
 import { CLONE_PROFILE, Elm327Emulator, STN_PROFILE } from "@/obd/emulator";
 import { EngineStateMachine } from "@/obd/engine-state";
@@ -90,6 +90,35 @@ describe("init", () => {
     expect(r.poll).toEqual({ speedCommand: "010D1", rpmCommand: "010C1" });
     expect(emu.log).toContain("ATSP6");
     expect(emu.log).toContain("ATSH7E0");
+  });
+
+  test("reset after a reply arrived one command late still turns echo off", async () => {
+    const { send, emu } = await setup(STN_PROFILE);
+    await probeAdapter(send);
+    emu.desyncOnce();
+    expect(await warmReset(send)).toBe(true);
+    expect((await initVehicle(send)).ok).toBe(true);
+    expect((await send("ATI")).raw).not.toMatch(/^ATI/);
+  });
+
+  test("setup command answered by a late banner is sent again", async () => {
+    const { send, emu } = await setup(STN_PROFILE);
+    await probeAdapter(send);
+    emu.desyncOnce();
+    await send("ATWS"); // stale "STOPPED"; the banner answers the next command
+    expect((await initVehicle(send)).ok).toBe(true);
+    expect((await send("ATI")).raw).not.toMatch(/^ATI/);
+  });
+
+  test("one stall while timing 010D1 doesn't rule it out", async () => {
+    const { send, emu } = await setup(STN_PROFILE);
+    await probeAdapter(send);
+    let n = 0;
+    emu.desyncOnce((c) => c === "010D1" && ++n === 3);
+    const r = await initVehicle(send);
+    expect(n).toBeGreaterThanOrEqual(3);
+    expect(r.capabilities.responseCount).toBe(true);
+    expect(r.poll.speedCommand).toBe("010D1");
   });
 
   test("clone: falls back to plain commands and functional addressing", async () => {
