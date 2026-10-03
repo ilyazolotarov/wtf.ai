@@ -55,9 +55,10 @@ OSM_META = CACHE / "ukraine-latest.osm.pbf.json"
 USER_AGENT = "wtf.ai-tiles/0.1"
 INDEX_FORMAT = 2
 
-# Glyph ranges for Ukrainian/Russian/English labels: Basic Latin … Cyrillic Supplement,
-# Latin Extended Additional, General Punctuation (– „ “ …), Letterlike (№), Math.
-GLYPH_RANGES = [0, 256, 512, 768, 1024, 1280, 7680, 8192, 8448, 8704]
+# Every glyph range below U+3000: all alphabets OSM names use in Ukraine plus punctuation and
+# symbol blocks (☦ ✝ ①), ~2.8 MB per font. A missing range logs a MapLibre error per label.
+# CJK and up would be 30 MB more per font.
+GLYPH_RANGES = list(range(0, 0x3000, 256))
 
 
 def log(msg: str) -> None:
