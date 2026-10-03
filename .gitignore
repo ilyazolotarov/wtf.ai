@@ -50,3 +50,7 @@ __pycache__/
 # SwiftPM (native logic tests)
 .build/
 .swiftpm/
+
+# Offline map pipeline (tools/tiles): downloads and built packs
+/tools/tiles/cache/
+/tools/tiles/out/

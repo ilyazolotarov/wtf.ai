@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wtf-tiles"
+version = "0.1.0"
+description = "Offline map data pipeline for wtf.ai (vector tiles, style, glyphs)"
+requires-python = ">=3.11"
+dependencies = ["shapely>=2"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+tiles = "tiles.cli:main"
+
+[tool.setuptools]
+packages = ["tiles"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

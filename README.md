@@ -37,6 +37,7 @@ npx expo lint
 npx tsc --noEmit
 npx jest
 python -m pytest tools/triplog          # after: pip install -e "tools/triplog[dev]"
+python -m pytest tools/tiles            # after: pip install -e "tools/tiles[dev]"
 swift test                              # Swift logic of the native modules; on Windows via Docker:
 docker run --rm -v "$PWD:/src" -w /src swift:6.1 swift test --scratch-path /tmp/build
 ```

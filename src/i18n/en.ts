@@ -72,6 +72,13 @@ export const en = {
   notDownloaded: "Not downloaded",
   downloadUnavailable: "Downloads are not available yet",
   onlineMapNote: "Using the online map during development.",
+  bundledPack: "built into the app",
+  removePack: "Remove",
+  cancel: "Cancel",
+  downloading: "Downloading",
+  installFromComputer: "Install from computer",
+  installFromComputerNote:
+    "Dev: run `tiles serve` in tools/tiles on a PC in the same Wi-Fi and enter its address and the pack folder.",
   liveGnss: "Live GNSS",
   latitude: "Latitude",
   longitude: "Longitude",

@@ -51,6 +51,20 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Download bundled map pack
+        # Interim offline map embedded in the app by plugins/with-map-pack.js until in-app
+        # downloads exist. The pack is a GitHub release asset named in tools/tiles/bundled-pack.json.
+        if: hashFiles('tools/tiles/bundled-pack.json') != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(jq -r .tag tools/tiles/bundled-pack.json)
+          region=$(jq -r .region tools/tiles/bundled-pack.json)
+          gh release download "$tag" --pattern "$region.tar.gz" --dir "$RUNNER_TEMP"
+          mkdir -p tools/tiles/out
+          tar -xzf "$RUNNER_TEMP/$region.tar.gz" -C tools/tiles/out
+          test -f "tools/tiles/out/$region/manifest.json"
+
       - name: Run Expo Prebuild
         # Prebuild runs `pod install` itself on macOS
         run: npx expo prebuild --platform ios --clean

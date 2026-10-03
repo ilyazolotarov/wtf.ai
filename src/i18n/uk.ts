@@ -74,6 +74,13 @@ export const uk = {
   notDownloaded: "Не завантажено",
   downloadUnavailable: "Завантаження ще недоступні",
   onlineMapNote: "Під час розробки використовується онлайн-мапа.",
+  bundledPack: "вбудовано в застосунок",
+  removePack: "Видалити",
+  cancel: "Скасувати",
+  downloading: "Завантаження",
+  installFromComputer: "Встановити з комп'ютера",
+  installFromComputerNote:
+    "Розробка: запустіть `tiles serve` у tools/tiles на ПК в тій самій Wi-Fi мережі та введіть його адресу й папку пакета.",
   liveGnss: "Поточний GNSS",
   latitude: "Широта",
   longitude: "Довгота",

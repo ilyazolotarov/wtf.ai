@@ -8,13 +8,17 @@ import { T } from "@/components/ui/text";
 import { usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
 import { calibrationMock, downloadsMock } from "@/mocks";
+import { useActiveMapPack } from "@/services/offline-map/map-pack";
 
 export default function MoreScreen() {
   const { t, language } = useT();
   const palette = usePalette();
   const dark = useColorScheme() === "dark";
   const nav = useNavStatus();
-  const ready = downloadsMock.filter((pack) => pack.status === "ready").length;
+  const mapPack = useActiveMapPack();
+  const ready = downloadsMock.filter((pack) =>
+    pack.id === "map" ? mapPack != null : pack.status === "ready",
+  ).length;
   const calibrated = calibrationMock.status === "calibrated";
 
   const items: { icon: IconName; label: string; sub: string; subColor?: string; href: Href }[] = [
