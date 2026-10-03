@@ -47,6 +47,11 @@ const TILT_PITCH = 50;
 /** Zoom hysteresis so pinching around one level doesn't flip the tilt back and forth. */
 const TILT_ZOOM_IN = 16.5;
 const TILT_ZOOM_OUT = 16;
+/** Following snaps to these; any gesture drops to free, so they never fight a pinch. */
+const FOLLOW_ZOOM: Record<Exclude<CameraMode, "free">, number> = {
+  follow: 16,
+  "follow-heading": 17,
+};
 
 export function MapSurface({
   mode,
@@ -69,7 +74,10 @@ export function MapSurface({
   const deadReckoning = position != null && position.trust !== "TRUSTED";
   const tint = deadReckoning ? palette.warn.c : palette.accent;
   const [zoomedIn, setZoomedIn] = useState(false);
-  const pitch = !ghostView && (tripActive || zoomedIn) ? TILT_PITCH : 0;
+  const followZoom = mode === "free" ? null : FOLLOW_ZOOM[mode];
+  // While following the zoom is known up front, so tilt with the zoom-in instead of after it.
+  const streetLevel = followZoom == null ? zoomedIn : followZoom >= TILT_ZOOM_IN;
+  const pitch = !ghostView && (tripActive || streetLevel) ? TILT_PITCH : 0;
 
   const followBearing =
     mode === "follow-heading" && position
@@ -83,14 +91,15 @@ export function MapSurface({
   }, [pitch, ghostView]);
 
   useEffect(() => {
-    if (!position || mode === "free" || ghostView) return;
+    if (!position || followZoom == null || ghostView) return;
     cameraRef.current?.easeTo({
       center: [position.lon, position.lat],
+      zoom: followZoom,
       bearing: followBearing,
       pitch,
       duration: 450,
     });
-  }, [mode, position, ghostView, pitch, followBearing]);
+  }, [followZoom, position, ghostView, pitch, followBearing]);
 
   const hasGhost = ghost != null;
   useEffect(() => {
