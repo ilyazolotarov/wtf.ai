@@ -120,12 +120,15 @@ Depends on Phase 2.
 
 - Full-screen MapLibre `MapView`, style from `getMapStyle(colorScheme)`. Read the MapLibre RN docs for the installed version before coding (API changed between majors).
 - **Custom puck** from `usePosition()` via GeoJSON source + layers: dot + heading arrow (arrow only when heading known) + accuracy circle (`circlePolygon`). Do **not** use MapLibre's built-in user location — it bypasses the abstraction.
+- **Compass beam** (display-only, `useCompassHeading`): when not in a car (no trip recording, adapter not connected) and speed < 3 m/s, a wide faint sector from `watchHeadingAsync` replaces the course cone and shows where the phone points. Half-width = iOS compass uncertainty (20°/35°/50°/60° for accuracy 3–0). The compass runs only while allowed and never reaches `PositionEstimate`.
 - Raw GNSS **ghost marker** from `rawGnss`; hidden while `source === 'gnss'`.
 - `useKeepAwake()` while the map screen is focused.
 
 ### 6.2 Camera modes
 
-`follow` → `follow-heading` (heading-up only when speed > ~2 m/s) → `free`. User pan/zoom gesture switches to `free`. `RecenterButton` cycles modes and shows the current one.
+`follow` → `follow-heading` (heading-up from the walking compass beam when shown, else GNSS course when speed > ~2 m/s, else north-up) → `free`. User pan/zoom gesture switches to `free`. `RecenterButton` cycles modes and shows the current one.
+
+Tilt: the camera tilts to 50° (navigator view) while a trip is recording or when zoomed in to ≥ 16.5 (back to top-down below 16). It applies in every mode and returns to top-down while the ghost view is open. Pitch is set only when this rule flips, so a manual two-finger tilt stays until then.
 
 ### 6.3 Overlays — `src/components/map/`
 

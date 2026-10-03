@@ -31,7 +31,7 @@ Odometry is built up in stages (§2.1). Stage 1 uses the minimum that works on a
 | Estimator location          | **TypeScript** (`src/nav/`), not native. Reason: Windows-only dev; logic must hot-reload and be unit-testable/replayable on Windows. Native code stays thin.                                                              |
 | GNSS integrity              | Only two checks: **outside-Ukraine polygon** and **teleport vs odometry/DR**. Do **not** use raw GNSS data. Do **not** implement slow drag-off detection.                                                                 |
 | Yaw source                  | Stage 1: **phone gyro** projected onto gravity. Stage 2: rear wheel-speed differential. Stage 3: **CAN yaw rate** (to be reverse-engineered; not in opendbc).                                                            |
-| Absolute heading            | From trusted GNSS course, particle-filter road heading, manual fix, and the pose persisted at ignition off. **The magnetometer is not used**: in-car distortion (body steel, wiring, mount) is typically 10–30° and changes when the phone moves. |
+| Absolute heading            | From trusted GNSS course, particle-filter road heading, manual fix, and the pose persisted at ignition off. **The magnetometer is not used** for navigation: in-car distortion (body steel, wiring, mount) is typically 10–30° and changes when the phone moves. Exception: a display-only compass beam on the map when walking (UI-SPEC §6.1). |
 | Phone mount                 | Stage 1 requires a **rigid phone mount** (the gyro is the only yaw source).                                                                                                                                               |
 | Standstill bias calibration | **2–3 s**, refined at every stop (ZUPT). No dedicated long standstill step.                                                                                                                                               |
 | Distribution                | Sideloading via AltStore now. App Store later needs a paid Apple Developer account; then BLE needs nothing more, MFi adapters need the vendors' authorizations (see §9).                                                    |
@@ -337,7 +337,7 @@ tools/triplog/           Python: ULog trip log reader, CSV/Parquet export, plots
 
 ## 8. Out of scope (v1)
 
-Google Maps; Android; raw GNSS analysis; slow drag-off spoofing detection; Wi-Fi ELM327 adapters; magnetometer heading; STN/OBDLink-specific commands in Stage 1 (read-only `STI` identification excepted); Classic Bluetooth adapters without MFi on iOS (impossible); lane-level accuracy; any cloud services; feeding corrected location to other apps.
+Google Maps; Android; raw GNSS analysis; slow drag-off spoofing detection; Wi-Fi ELM327 adapters; magnetometer heading for navigation; STN/OBDLink-specific commands in Stage 1 (read-only `STI` identification excepted); Classic Bluetooth adapters without MFi on iOS (impossible); lane-level accuracy; any cloud services; feeding corrected location to other apps.
 
 ## 9. Risks & open items
 

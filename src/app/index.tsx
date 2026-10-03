@@ -14,6 +14,11 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { MapSurface } from "@/components/map/map-surface";
 import {
+    headingUpRad,
+    useCompassHeading,
+    walkingCompass,
+} from "@/components/map/use-compass-heading";
+import {
     cardinal,
     formatDistance,
     toDegrees,
@@ -52,6 +57,11 @@ export default function HomeScreen() {
   const [ghostView, setGhostView] = useState(false);
   const [requesting, setRequesting] = useState(false);
   const recording = useRecorderSnapshot().state === "recording";
+  // Not in a car (no trip, no adapter): the phone compass may stand in for heading.
+  const compass = walkingCompass(
+    position,
+    useCompassHeading(!recording && nav.adapter !== "on" && position != null),
+  );
 
   useEffect(() => {
     if (!isOnboardingDone()) router.push("/onboarding");
@@ -102,9 +112,7 @@ export default function HomeScreen() {
       ? (() => {
           const bearing = toDegrees(bearingRad(position, activeRoute));
           const heading =
-            cameraMode === "follow-heading" && position.headingRad != null
-              ? toDegrees(position.headingRad)
-              : 0;
+            cameraMode === "follow-heading" ? toDegrees(headingUpRad(position, compass)) : 0;
           return {
             title: `${t("toward")} ${activeRoute.name[language]}`,
             sub: `${formatDistance(haversineM(position, activeRoute), language)} · ${cardinal(bearing, language)} ${Math.round(bearing)}°`,
@@ -123,6 +131,8 @@ export default function HomeScreen() {
       <MapSurface
         mode={cameraMode}
         ghostView={showingGhost}
+        tripActive={recording}
+        compass={compass}
         onUserInteraction={() => setCameraMode("free")}
         onLongPress={() => Alert.alert(t("manualFixTitle"), t("manualFixBody"))}
       />

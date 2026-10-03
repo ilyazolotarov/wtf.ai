@@ -1,18 +1,18 @@
 import {
-    Camera,
-    GeoJSONSource,
-    Layer,
-    Map,
-    type CameraRef,
+  Camera,
+  GeoJSONSource,
+  Layer,
+  Map,
+  type CameraRef,
 } from "@maplibre/maplibre-react-native";
 import type {
-    Feature,
-    FeatureCollection,
-    LineString,
-    Point,
-    Polygon,
+  Feature,
+  FeatureCollection,
+  LineString,
+  Point,
+  Polygon,
 } from "geojson";
-import { useEffect, useRef, type ComponentProps } from "react";
+import { useEffect, useRef, useState, type ComponentProps } from "react";
 import { useColorScheme, View, type NativeSyntheticEvent } from "react-native";
 
 import { useMapStyle } from "@/config/map";
@@ -21,6 +21,7 @@ import { circlePolygon, destinationAtBearing } from "@/nav/geo";
 import type { PositionEstimate } from "@/nav/position/types";
 import { usePosition } from "@/providers/position-provider";
 import { useRoute } from "@/providers/route-provider";
+import { headingUpRad, type CompassHeading } from "./use-compass-heading";
 
 type CameraMode = "follow" | "follow-heading" | "free";
 
@@ -28,16 +29,30 @@ interface MapSurfaceProps {
   mode: CameraMode;
   /** Frame both the position and the raw (spoofed) GNSS fix. */
   ghostView: boolean;
+  /** A trip is being recorded: tilt the camera like a navigator. */
+  tripActive: boolean;
+  /** Walking compass (see `walkingCompass`): beam replaces the course cone and drives heading-up. */
+  compass: CompassHeading | null;
   onUserInteraction(): void;
   onLongPress(): void;
 }
 
 const CONE_RADIUS_M = 45;
 const CONE_HALF_ANGLE_RAD = (28 * Math.PI) / 180;
+const BEAM_RADIUS_M = 70;
+const BEAM_CORE_RADIUS_M = 40;
+
+/** Navigator-style tilt, applied during a trip or when zoomed in to street level. */
+const TILT_PITCH = 50;
+/** Zoom hysteresis so pinching around one level doesn't flip the tilt back and forth. */
+const TILT_ZOOM_IN = 16.5;
+const TILT_ZOOM_OUT = 16;
 
 export function MapSurface({
   mode,
   ghostView,
+  tripActive,
+  compass,
   onUserInteraction,
   onLongPress,
 }: MapSurfaceProps) {
@@ -48,24 +63,34 @@ export function MapSurface({
   const { activeRoute } = useRoute();
   const cameraRef = useRef<CameraRef | null>(null);
   const ghost =
-    position?.trust === "UNTRUSTED" && position.rawGnss ? position.rawGnss : null;
+    position?.trust === "UNTRUSTED" && position.rawGnss
+      ? position.rawGnss
+      : null;
   const deadReckoning = position != null && position.trust !== "TRUSTED";
   const tint = deadReckoning ? palette.warn.c : palette.accent;
+  const [zoomedIn, setZoomedIn] = useState(false);
+  const pitch = !ghostView && (tripActive || zoomedIn) ? TILT_PITCH : 0;
+
+  const followBearing =
+    mode === "follow-heading" && position
+      ? (headingUpRad(position, compass) * 180) / Math.PI
+      : 0;
+
+  // Tilt changes only when the rule flips, so a manual two-finger tilt otherwise sticks.
+  useEffect(() => {
+    if (ghostView) return;
+    void cameraRef.current?.setStop({ pitch, duration: 600, easing: "ease" });
+  }, [pitch, ghostView]);
 
   useEffect(() => {
     if (!position || mode === "free" || ghostView) return;
-    const bearing =
-      mode === "follow-heading" &&
-      (position.speedMps ?? 0) > 2 &&
-      position.headingRad != null
-        ? (position.headingRad * 180) / Math.PI
-        : 0;
     cameraRef.current?.easeTo({
       center: [position.lon, position.lat],
-      bearing,
+      bearing: followBearing,
+      pitch,
       duration: 450,
     });
-  }, [mode, position, ghostView]);
+  }, [mode, position, ghostView, pitch, followBearing]);
 
   const hasGhost = ghost != null;
   useEffect(() => {
@@ -80,6 +105,7 @@ export function MapSurface({
       {
         padding: { top: 300, bottom: 260, left: 60, right: 60 },
         bearing: 0,
+        pitch: 0,
         duration: 900,
       },
     );
@@ -92,8 +118,40 @@ export function MapSurface({
   ) => {
     if (event.nativeEvent.userInteraction) onUserInteraction();
   };
+  const handleRegionDidChange = (
+    event: NativeSyntheticEvent<{ zoom: number }>,
+  ) => {
+    const { zoom } = event.nativeEvent;
+    setZoomedIn((was) => (was ? zoom >= TILT_ZOOM_OUT : zoom >= TILT_ZOOM_IN));
+  };
   const accuracy = position ? accuracyFeatures(position) : emptyPolygons();
-  const cone = position ? coneFeatures(position) : emptyPolygons();
+  const cone =
+    position && !compass && position.headingRad != null
+      ? sectorFeatures(
+          position,
+          position.headingRad,
+          CONE_HALF_ANGLE_RAD,
+          CONE_RADIUS_M,
+        )
+      : emptyPolygons();
+  const beam =
+    position && compass
+      ? sectorFeatures(
+        position,
+        compass.headingRad,
+        compass.uncertaintyRad,
+        BEAM_RADIUS_M,
+      )
+    : emptyPolygons();
+  const beamCore =
+    position && compass
+      ? sectorFeatures(
+        position,
+        compass.headingRad,
+        compass.uncertaintyRad,
+        BEAM_CORE_RADIUS_M,
+      )
+    : emptyPolygons();
   const puck = position ? pointFeatures(position) : emptyPoints();
   const ghostPoint = ghost ? pointFeatures(ghost) : emptyPoints();
   const route = activeRoute
@@ -101,7 +159,8 @@ export function MapSurface({
     : emptyLines();
 
   // Dark style is still being tinted: hold a plain dark canvas instead of flashing light tiles.
-  if (mapStyle == null) return <View style={{ flex: 1, backgroundColor: palette.bg }} />;
+  if (mapStyle == null)
+    return <View style={{ flex: 1, backgroundColor: palette.bg }} />;
 
   return (
     <Map
@@ -114,6 +173,7 @@ export function MapSurface({
       scaleBar={false}
       onLongPress={onLongPress}
       onRegionIsChanging={handleRegionChange}
+      onRegionDidChange={handleRegionDidChange}
     >
       <Camera
         ref={cameraRef}
@@ -140,7 +200,10 @@ export function MapSurface({
         <Layer
           id="position-accuracy-fill"
           type="fill"
-          paint={{ "fill-color": tint, "fill-opacity": deadReckoning ? 0.18 : 0.16 }}
+          paint={{
+            "fill-color": tint,
+            "fill-opacity": deadReckoning ? 0.18 : 0.16,
+          }}
         />
         <Layer
           id="position-accuracy-outline"
@@ -157,6 +220,21 @@ export function MapSurface({
           id="position-cone-fill"
           type="fill"
           paint={{ "fill-color": tint, "fill-opacity": 0.28 }}
+        />
+      </GeoJSONSource>
+      {/* Two stacked sectors fake a fade-out; wider and fainter than the course cone. */}
+      <GeoJSONSource id="compass-beam" data={beam}>
+        <Layer
+          id="compass-beam-fill"
+          type="fill"
+          paint={{ "fill-color": tint, "fill-opacity": 0.1 }}
+        />
+      </GeoJSONSource>
+      <GeoJSONSource id="compass-beam-core" data={beamCore}>
+        <Layer
+          id="compass-beam-core-fill"
+          type="fill"
+          paint={{ "fill-color": tint, "fill-opacity": 0.14 }}
         />
       </GeoJSONSource>
       <GeoJSONSource id="gnss-ghost" data={ghostPoint}>
@@ -233,15 +311,18 @@ function accuracyFeatures(
   };
 }
 
-/** Heading cone: a 56° sector ahead of the puck. */
-function coneFeatures(position: PositionEstimate): FeatureCollection<Polygon> {
-  if (position.headingRad == null) return emptyPolygons();
+/** Sector ahead of the puck: the course cone or the compass beam. */
+function sectorFeatures(
+  position: PositionEstimate,
+  headingRad: number,
+  halfAngleRad: number,
+  radiusM: number,
+): FeatureCollection<Polygon> {
   const ring: [number, number][] = [[position.lon, position.lat]];
-  const steps = 8;
+  const steps = Math.max(8, Math.round((halfAngleRad * 180) / Math.PI / 4));
   for (let i = 0; i <= steps; i++) {
-    const bearing =
-      position.headingRad - CONE_HALF_ANGLE_RAD + (2 * CONE_HALF_ANGLE_RAD * i) / steps;
-    const p = destinationAtBearing(position, bearing, CONE_RADIUS_M);
+    const bearing = headingRad - halfAngleRad + (2 * halfAngleRad * i) / steps;
+    const p = destinationAtBearing(position, bearing, radiusM);
     ring.push([p.lon, p.lat]);
   }
   ring.push([position.lon, position.lat]);
@@ -257,7 +338,10 @@ function coneFeatures(position: PositionEstimate): FeatureCollection<Polygon> {
   };
 }
 
-function pointFeatures(point: { lat: number; lon: number }): FeatureCollection<Point> {
+function pointFeatures(point: {
+  lat: number;
+  lon: number;
+}): FeatureCollection<Point> {
   const feature: Feature<Point> = {
     type: "Feature",
     properties: {},
