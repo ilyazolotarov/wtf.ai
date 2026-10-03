@@ -1,12 +1,13 @@
 import * as Location from "expo-location";
 
-import type { PositionEstimate } from "@/nav/position/types";
+import type { PositionEstimate, TrustState } from "@/nav/position/types";
+import { GnssTrustTracker } from "@/services/position/gnss-trust";
 import type { PositionSource } from "@/services/position/position-source";
-
-const NO_FIX_AFTER_MS = 5000;
 
 export function mapLocationToPosition(
   location: Location.LocationObject,
+  trust: TrustState = "TRUSTED",
+  lastTrustedFixAt: number | undefined = location.timestamp,
 ): PositionEstimate {
   const { latitude, longitude, accuracy, heading, speed } = location.coords;
 
@@ -18,14 +19,15 @@ export function mapLocationToPosition(
     speedMps: speed === null || speed < 0 ? undefined : speed,
     accuracyM: accuracy ?? 9999,
     source: "gnss",
-    trust: "TRUSTED",
+    trust,
     timestamp: location.timestamp,
-    lastTrustedFixAt: location.timestamp,
+    lastTrustedFixAt,
   };
 }
 
 export class GnssPositionSource implements PositionSource {
   private position: PositionEstimate | null = null;
+  private trust = new GnssTrustTracker();
   private locationSubscription: Location.LocationSubscription | null = null;
   private noFixTimer: ReturnType<typeof setInterval> | null = null;
   private listeners = new Set<() => void>();
@@ -55,23 +57,23 @@ export class GnssPositionSource implements PositionSource {
         timeInterval: 1000,
       },
       (location) => {
-        this.position = mapLocationToPosition(location);
+        const accuracyM = location.coords.accuracy ?? 9999;
+        const trust = this.trust.onFix(accuracyM, location.timestamp);
+        this.position = mapLocationToPosition(
+          location,
+          trust,
+          this.trust.lastTrustedFixAt,
+        );
         this.emit();
       },
-      () => {
-        if (this.position) {
-          this.position = { ...this.position, trust: "NO_FIX" };
-          this.emit();
-        }
-      },
+      // iOS reports transient errors (e.g. location unknown) routinely; losing trust is
+      // left to the tracker's timeout so they don't flip the status.
+      () => {},
     );
 
     this.noFixTimer = setInterval(() => {
       if (!this.position) return;
-      const trust =
-        Date.now() - this.position.timestamp > NO_FIX_AFTER_MS
-          ? "NO_FIX"
-          : "TRUSTED";
+      const trust = this.trust.check(Date.now());
       if (trust !== this.position.trust) {
         this.position = { ...this.position, trust };
         this.emit();

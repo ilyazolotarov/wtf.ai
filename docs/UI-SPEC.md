@@ -72,7 +72,7 @@ Can run in parallel with Phase 0 once deps are installed.
 - `GnssPositionSource`:
   - `watchPositionAsync` with `Accuracy.BestForNavigation`.
   - Map `LocationObject` → `PositionEstimate` with `source: 'gnss'`; heading deg → rad; heading `-1`/`null` → undefined; speed `< 0`/`null` → undefined.
-  - `trust = 'TRUSTED'` while fixes arrive; `'NO_FIX'` when last fix is older than 5 s (timer).
+  - Trust is decided over time by `GnssTrustTracker` (`src/services/position/gnss-trust.ts`), not per fix, so intermittent jamming doesn't flicker it. `'TRUSTED'` → `'NO_FIX'` when no fix ≤ 50 m has arrived for 8 s (gaps and coarse Wi-Fi/cell fallback fixes alike, SPEC §3.3). `'NO_FIX'` → `'TRUSTED'` after fixes ≤ 30 m have kept arriving for 5 s with no coarse fix or gap. Coarse fixes are still shown and don't advance `lastTrustedFixAt`. Transient location errors don't change trust.
 - Unit-test the `LocationObject` → `PositionEstimate` mapping.
 
 ### 4.4 React binding — `src/providers/position-provider.tsx`
