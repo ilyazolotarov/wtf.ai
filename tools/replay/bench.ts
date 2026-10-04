@@ -4,6 +4,7 @@
 //   npm run replay:bench -- tools/triplog/logs/*.ulg
 //   npm run replay:bench -- tools/triplog/logs/*.ulg --nav '{"ekf":{"initYawScaleSigma":0}}'
 //   npm run replay:bench -- tools/triplog/logs/*.ulg --mm [--seeds 3] [--mm-config '{"particles":1000}'] [--graph <file>]
+//   npm run replay:bench -- tools/triplog/logs/*.ulg --mm --durations 300,600   (longer outages; default 60,120,240)
 //   npm run replay:bench -- tools/triplog/logs/*.ulg --jam-start [--every 60] [--seeds 3] [--mm-config '<json>'] [--graph <file>]
 //
 // With --mm the particle filter runs in every window (open loop) and its dominant cluster is
@@ -26,7 +27,8 @@ import { readTripLog, type TripLog } from "../../src/triplog/trip-log-reader";
 import { findGraph, openGraph } from "./graph-file";
 import { runInitBench } from "./init-bench";
 
-const DURATIONS_S = [60, 120, 240];
+/** Outage lengths, s (`--durations 300,600`). */
+let DURATIONS_S = [60, 120, 240];
 /** Particle-filter runs pooled per window or session (one seed is too noisy to compare changes by). */
 const DEFAULT_SEEDS = 3;
 const STEP_S = 30;
@@ -77,6 +79,7 @@ function parseArgs(argv: string[]) {
     else if (argv[i] === "--compass") compass = true;
     else if (argv[i] === "--every") everyS = Number(argv[++i]);
     else if (argv[i] === "--seeds") seedCount = Number(argv[++i]);
+    else if (argv[i] === "--durations") DURATIONS_S = argv[++i].split(",").map(Number);
     else files.push(argv[i]);
   }
   if (!(Number.isInteger(seedCount) && seedCount >= 1)) throw new Error("--seeds takes a whole number ≥ 1");

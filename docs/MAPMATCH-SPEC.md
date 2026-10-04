@@ -665,6 +665,15 @@ share of held-out fixes within the circle the map draws (1.5 σ, the ~68 % radiu
   64 % (open loop 58 / 65 / 81 %), j5m8tq 67 / 59 / 56 % (65 / 66 / 62 %).
 - The dominant cluster and the EKF now agree: the app's puck rule (the cluster while dead-reckoning, §11) matters
   less with the loop closed.
+- **Longer outages** (`--durations 300,480,600`): the error stops growing once the loop is closed.
+
+  | Outage | Windows (drives) | Open loop max / end median | Closed max / end median | Closed max p90 | Inside circle |
+  | --- | --- | --- | --- | --- | --- |
+  | 300 s | 84 (5) | 90.7 / 43.2 m | 17.5 / 8.9 m | 20.6 m | 66 % |
+  | 480 s, 5.6 km | 24 (2: 5mn7ai, j5m8tq) | 93.4 / 35.0 m | 20.0 / 4.3 m | 24.8 m | 64 % |
+
+  No 600 s window has 80 % clean GNSS: the logs are 4–12 min of driving. Hours in a city need longer drives (Cut
+  GPS keeps the real fixes in the log as truth) and grids with parallel roads; Slavutych has few.
 - Synthetic drive (`particle-filter.test.ts`): GNSS cut 50 s before a junction, unlearned gyro bias, OBD 3 % low; no
   road position with GNSS throughout; with the cut, the EKF ends closer to the truth than open loop, with a smaller
   radius that still covers it.
