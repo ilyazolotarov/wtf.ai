@@ -16,7 +16,7 @@ export interface OdometryStep {
   /** Cumulative distance and unwrapped cumulative heading change at `t1Us`, since the navigator started. */
   distanceM: number;
   turnRad: number;
-  /** The car stood still for the whole chunk (zero speed, or standstill detected). */
+  /** The car stood still for the whole chunk (standstill detected, or speed below 0.2 m/s). */
   stopped: boolean;
   /** Part of the chunk had no valid gyro while moving: `dpsiRad` is 0 and `dpsiVar` large. */
   yawUnknown: boolean;
@@ -90,6 +90,11 @@ export class OdometryChunker {
     }
     const q = this.pending!;
     if (q.dsM >= this.config.maxDistanceM || q.durationS >= this.config.maxDurationS) this.flush();
+  }
+
+  /** Cumulative distance and turn of the chunks emitted so far. */
+  get totals(): { distanceM: number; turnRad: number } {
+    return { distanceM: this.distanceM, turnRad: this.turnRad };
   }
 
   /** Emit what has been summed so far (source change, reset, end of input). */

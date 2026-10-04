@@ -75,6 +75,10 @@ export interface RoadGraph {
   node(id: NodeId): RoadNode;
   /** Exits at the node reached by travelling along `via` in direction `dir`. */
   exits(via: EdgeId, dir: 1 | -1): Exit[];
+  /** Non-empty tiles around (e, n). */
+  tilesAround(e: number, n: number, radiusM: number): number[];
+  /** Tiles to keep decoded (the working set); replaces the previous set. */
+  pin(tiles: Iterable<number>): void;
 }
 
 export interface GraphInfo {
