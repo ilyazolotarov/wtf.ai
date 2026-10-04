@@ -15,6 +15,8 @@ export interface ViewerTrackPoint {
   hdgSd: number | null;
   spd: number | null;
   still: boolean;
+  /** Map matching: state and up to 3 clusters [lat, lon, weight, spread m, on-road 1/0]. */
+  mm?: { s: string; c: [number, number, number, number, number][] };
 }
 
 export interface ViewerFix {
@@ -46,6 +48,8 @@ export interface ViewerData {
   rpm: [number, number][];
   engine: { t: number; state: string }[];
   events: { t: number; kind: string; text: string }[];
+  /** Map-matching particles once a second: [t, [lat, lon, weight, off-road 1/0][]] (heaviest first). */
+  particles: [number, [number, number, number, number][]][];
 }
 
 const r = (v: number, digits: number) => {
@@ -55,7 +59,7 @@ const r = (v: number, digits: number) => {
 const deg = (rad: number) => (rad * 180) / Math.PI;
 
 export function buildViewerData(file: string, trip: TripLog, options: ReplayOptions = {}): ViewerData {
-  const result = replayTrip(trip, { trackStepS: 0.2, ...options });
+  const result = replayTrip(trip, { trackStepS: 0.2, ...options, ...(options.mapMatch ? { mapMatch: { particlesEveryS: 1, ...options.mapMatch } } : {}) });
   const tS = (tUs: number) => r((tUs - trip.startUs) / 1e6, 2);
 
   const info: Record<string, string | number> = {};
@@ -97,6 +101,16 @@ export function buildViewerData(file: string, trip: TripLog, options: ReplayOpti
       hdgSd: p.headingSigmaRad === undefined ? null : r(deg(p.headingSigmaRad), 1),
       spd: p.speedMps === undefined ? null : r(p.speedMps * 3.6, 1),
       still: p.standstill,
+      ...(p.mapMatch
+        ? {
+            mm: {
+              s: p.mapMatch.state,
+              c: p.mapMatch.clusters
+                .slice(0, 3)
+                .map((c): [number, number, number, number, number] => [r(c.lat, 6), r(c.lon, 6), r(c.weight, 3), r(c.spreadM, 1), c.edge === null ? 0 : 1]),
+            },
+          }
+        : {}),
     })),
     fixes: result.fixes.map((f) => ({
       t: r(f.tS, 2),
@@ -113,5 +127,9 @@ export function buildViewerData(file: string, trip: TripLog, options: ReplayOpti
     rpm: trip.rpm.map((s) => [tS(s.tUs), Math.round(s.rpm)]),
     engine: trip.engine.map((e) => ({ t: tS(e.tUs), state: e.state })),
     events,
+    particles: result.particles.map((s) => [
+      r(s.tS, 2),
+      s.particles.map(([lat, lon, w, off]): [number, number, number, number] => [r(lat, 6), r(lon, 6), Number(w.toPrecision(3)), off]),
+    ]),
   };
 }

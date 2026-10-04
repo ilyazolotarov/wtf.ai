@@ -23,7 +23,10 @@ Place the car on the offline road network, so that:
   `replay:view`. Measured in §5.1.
 - **M3 done:** the navigator's odometry output (§6.1), the ground-truth HMM (§10.1), `npm run replay:truth`, and
   a truth layer in `replay:view`. Measured in §10.4.
-- Next: M4 (particle filter, open loop). Order of work in §12.
+- **M4 done:** the particle filter `src/nav/mapmatch/particle-filter.ts` (§7), run by the navigator
+  (`setRoadGraph`) open loop; `npm run replay:mm`, `replay:bench --mm`, particles in `replay:view`. Measured in
+  §7.7.
+- Next: M5 (heading init from the map) and M6 (closed loop). Order of work in §12.
 
 ## 3. Decisions
 
@@ -250,9 +253,10 @@ now hands them out (computed only while someone listens; `flushOdometry()` at th
   - `particles`: the particle count;
   - `updateMs`: the time the last PF update took.
 - **Map puck:**
-  - `tracking` or `multimodal`: the dominant cluster, with radius = its spread (68 %). Alternatives are drawn as
-    secondary markers (SPEC §3.9).
-  - Otherwise: the EKF as today.
+  - `tracking`, `multimodal` or `offroad`: the dominant cluster, with radius = its spread (68 %). Alternatives are
+    drawn as secondary markers (SPEC §3.9). An off-road cluster follows the car into yards and parking areas better
+    than the EKF (measured in replay: showing the EKF instead doubled the 240 s end error, §7.7).
+  - `off` or `init`: the EKF as today.
 - **Integrity** (SPEC §3.3), when it exists, uses all clusters.
 
 ## 7. Particle filter (`src/nav/mapmatch/`)
@@ -262,7 +266,8 @@ Arrays of numbers, not objects (structure of arrays over typed arrays), for Herm
 ### 7.1 Particle state
 
 - **On-road:** `edgeId`, `offsetM` along the edge, `dir` (+1 or −1 along the geometry), `dks` (distance-scale
-  perturbation), `roadTurn` (cumulative unwrapped road-heading change along this particle's path), `weight`.
+  perturbation), `roadTurn` (cumulative unwrapped road-heading change along this particle's path), `anchorTurn`
+  (`roadTurn` at the last turn comparison, §7.4), `weight`. Position and travel heading are kept for all particles.
 - **Off-road:** `e`, `n`, `psi`, `dks`, `weight`.
 - At least 5 % of particles are off-road (§7.5).
 
@@ -298,34 +303,49 @@ Arrays of numbers, not objects (structure of arrays over typed arrays), for Herm
   particles reverses `dir`.
 - **`roadTurn`:** accumulates the road-heading change along the particle's path, from geometry vertices and junction
   angles.
-- **Off-road particle:** unicycle step with `Δs·(1 + dks)` and `Δψ`, plus noise. With some probability per step, an
-  off-road particle within 5 m of an edge, heading within 20° of it, snaps onto the edge.
+- **Off-road particle:** unicycle step with `Δs·(1 + dks)` and `Δψ`, plus heading noise (0.01 rad/√m). With 2 %
+  probability per step, an off-road particle within 5 m of an edge, heading within 20° of it, snaps onto the edge.
+- **Stopped chunks** (speed below 0.2 m/s) freeze the particles.
 - **`yawUnknown` chunks:** junction choice stays uniform, and the next relative-heading weight is skipped.
 
 ### 7.4 Weighting
 
-Evaluated every 10 m of travel. All terms are log-likelihoods, summed.
+Every 10 m of travel, plus each accepted fix. All terms are log-likelihoods, summed.
 
-- **Relative heading (main term):**
-  - Over the last 30 m: measured `ΔΨ` versus the particle's `ΔroadTurn`.
-  - Gaussian with σ² = σ²_gyro(window) + σ²_road. σ_road (≈5°) absorbs OSM geometry error and corner cutting.
-  - Windows overlap three times, so the term is scaled by 1/3.
-  - It uses heading changes, so gyro drift and absolute heading error don't matter.
-- **Absolute heading (weak, `dr` mode only):** EKF ψ versus the road heading, with the EKF σ_ψ widened ×3. It
-  mostly separates the two directions on a straight road. It is kept weak because the EKF heading itself takes
-  PF corrections (§9).
-- **GNSS position:**
-  - Satellite fixes the navigator accepted: σ = `h_acc/1.5` ⊕ 3 m (lane offset from the centre line).
-  - Coarse fixes (NAVIGATOR-SPEC §3): σ = `h_acc` × 2 for their correlated errors. Only distinct positions count
-    (≥ 25 m apart along the track, as in alignment).
-  - Compared at fix time, shifted along the particle's travel direction by GNSS lag × speed.
+- **Relative heading (main term):** the car's measured turn against each particle's road turn, between two
+  *comparison moments*, not over a sliding window:
+  - A comparison happens when the car drives straight (turned < 8° over the last 10 m), so a whole turn lies
+    inside it for the car and for the road. Mid-turn the car turns gradually while a polyline turns at its
+    vertex, and a few metres of along-track offset looked like a 50° heading error (the first version, with a
+    30 m sliding window, put the filter off-road at every turn entry).
+  - Also when the car halts (a turn into a parking space or yard), and after 20 m without a straight moment (a
+    curve, or manoeuvring in a yard: it is the evidence that the car left the roads).
+  - Gaussian with σ² = gyro variance since the last comparison + σ_road² (5°) + (10 % of the turn)², or 30 % of
+    the turn for a forced (curve) comparison. Skipped when the gyro was invalid since the last comparison.
+  - It uses heading changes, so gyro drift and absolute heading error don't matter. Particles still before the
+    vertex when the car has finished turning are pruned: turns correct the along-track error.
+- **Absolute heading (weak, `dr` mode, straight moments only):** EKF ψ versus the particle's travel heading, with
+  the EKF σ_ψ widened ×3, the term scaled by 0.3. It mostly separates the two directions on a straight road.
+- **EKF position (weak, `dr` mode; added in M4):** distance to the EKF position, σ = max(2 × EKF σ, 10 m), term
+  scaled by 0.3. In open loop the EKF position carries the absolute heading it integrated; without it, a
+  hypothesis on a road 50 m from a 6 m-accurate EKF could win. It must be revisited for the closed loop (§9).
+- **GNSS position** (fixes the navigator accepted):
+  - Satellite fixes count only 10 m of travel apart: their errors are correlated, and at a standstill repeated
+    fixes made the off-road particles (which can sit exactly at a biased fix) win over the road.
+  - On-road particles: the first 3 m from the fix cost nothing (lane offset from the centre line), then σ =
+    `h_acc/1.5` ⊕ 2 m. Off-road particles: distance as is.
+  - Coarse fixes (NAVIGATOR-SPEC §3): σ = `h_acc` × 2 for their correlated errors, 25 m of travel apart.
+  - Compared at fix time, shifted back along the particle's travel direction by GNSS lag × speed.
+  - A fix more than 5σ + 3 m from every particle means the filter lost the car: it restarts around the EKF.
   - Until integrity exists, the navigator's acceptance decides which fixes count.
-- **Off-road:** a fixed penalty per evaluation, instead of the relative-heading term.
+- **Off-road:** a fixed penalty (×0.5) per 10 m, instead of the relative-heading term.
 
 ### 7.5 Resampling and particle count
 
 - Systematic resampling when ESS < N/2.
 - Off-road share kept ≥ 5 %.
+- On-road share kept ≥ 10 %: off-road particles are projected onto the nearest edge within 15 m whose direction
+  fits within 30°. While off-road dominates, on-road hypotheses stay where the car will come back onto a road.
 - 2 % of particles re-injected around the clusters: nearby edges, both directions when the cluster is new.
 - `dks` jittered at resampling.
 - **Count:** `N_track` = 500 while tracking. Above that only during init (§7.2), shrinking back to `N_track` at
@@ -339,12 +359,57 @@ Evaluated every 10 m of travel. All terms are log-likelihoods, summed.
   within 45°, so opposite directions on one road are different hypotheses.
 - **Cluster values:** weight, weighted mean position, circular-mean heading, spread (weighted RMS distance), the
   edge holding the most weight.
+- Clusters mix on- and off-road particles; a cluster's edge is the one holding most of its on-road weight (null:
+  all off-road).
 - **States:**
   - `tracking`: top cluster ≥ 0.9 of the weight and spread ≤ 25 m;
   - `multimodal`: otherwise, while on-road;
   - `offroad`: off-road particles hold > 50 % of the weight;
   - `init`: unknown-heading start until the first `tracking` (§8);
   - `off`: no graph, or not initialized.
+
+### 7.7 Integration and measurements (M4)
+
+- **Navigator** (`setRoadGraph(graph, config)`): starts the filter whenever the EKF starts (known heading) and again
+  when a fix says it is lost, or after 300 m off-road; stops it at an EKF reset. It feeds the odometry (flushed at
+  each fix, so the filter is at the fix time), the EKF pose, and accepted fixes; moves the graph's frame with the
+  navigator's. `estimate().mapMatch` reports state, up to 5 clusters (lat/lon), particle count and update time.
+- **Replay** (`replayTrip` option `mapMatch: { graph, truth, config, particlesEveryS }`): the §10.2 metrics, the
+  dominant cluster's error at held-out fixes in cuts, particle snapshots for the viewer.
+- **Tests** (`src/nav/mapmatch/__tests__/particle-filter.test.ts`, synthetic drives on the fixture graph): with GNSS
+  cut 50 s before a junction, the filter takes the branch the car turned onto and ends within 25 m; a turn into
+  open country hands over to the off-road particles; no filter without a graph.
+
+With GNSS (no cuts), `npm run replay:mm`:
+
+| Drive | Samples | Wrong road | Truth survival | Multimodal | Off-road |
+| --- | --- | --- | --- | --- | --- |
+| q8tfjs | 280 | 0.7 % | 100 % | 7.9 % | 0.4 % |
+| 5mn7ai | 259 | 1.9 % | 99.2 % | 6.2 % | 3.1 % |
+| 6vccgr | 119 | 0 % | 100 % | 14.3 % | 5.9 % |
+| s4fkdm | 115 | 0.9 % | 100 % | 15.7 % | 0.9 % |
+| 79xky3 | 28 | 0 % | 100 % | 7.1 % | 0 % |
+
+- The one survival miss is the 2 s after 5mn7ai leaves the unmapped yard (§10.4): the filter is off-road and
+  re-locks on the road a moment later.
+- Update time (Node, 500 particles): p50 0.06–0.10 ms, p99 0.4–0.9 ms; single updates up to 7 ms (not yet broken
+  down: starts, tile loads and GC are candidates).
+
+Outages (`npm run replay:bench -- --mm`, same windows as NAVIGATOR-SPEC §10; filter open loop):
+
+| Outage | Windows | Max error median / p90: EKF | Map match | End error median / p90: EKF | Map match | Map match max better |
+| --- | --- | --- | --- | --- | --- | --- |
+| 60 s | 21 | 11.1 / 20.8 m | 10.4 / 16.2 m | 9.5 / 20.8 m | 7.0 / 15.5 m | 9 of 21 |
+| 120 s | 19 | 19.9 / 31.3 m | 16.1 / 49.2 m | 19.2 / 29.3 m | 6.9 / 19.5 m | 14 of 19 |
+| 240 s | 16 | 37.1 / 87.6 m | 30.5 / 64.0 m | 32.9 / 84.8 m | 14.8 / 48.0 m | 9 of 16 |
+
+- The end of an outage is where map matching pays: turns reset the along-track error (240 s: 15 m instead of 33 m).
+- The worst windows are low-speed manoeuvring around yards and service roads (q8tfjs 920–1100 s, the 5mn7ai yard):
+  reversing reads as driving forward (unsigned OBD speed), and the filter spends 20–30 m deciding between road and
+  off-road. Windows overlap, so these few events weigh in several windows each (120 s p90).
+- Tuning that mattered, in order: straight-moment comparisons (off-road share at turns 7–23 % → 0–6 %), fix spacing
+  and the lane dead zone (no off-road takeover at a standstill), the EKF position prior (no 50 m excursions to
+  nearby roads), the halt and 20 m forced comparisons (yards), the on-road floor.
 
 ## 8. Heading initialization from the map (jammed start)
 
@@ -382,6 +447,9 @@ odometry, which doesn't depend on the absolute heading.
   - From the cluster's weighted covariance, floored at 3 m across the road and 5 m along it.
   - **Not sent while GNSS is trusted.** The PF already weighs the same fixes, so sending it would count them twice.
 - Both use the EKF χ² gate (16). A rejection is an app note, not a reset.
+- **The EKF-position term of the filter (§7.4)** feeds the EKF back into the filter. With the loop closed, the
+  filter would partly confirm its own corrections: turn it off, or weaken it, while pseudo-measurements are sent,
+  and check max error ÷ σ in replay.
 - Replay switch: `--mm off | open | closed`. Open loop = PF runs and is scored but sends nothing.
 
 ## 10. Replay, ground truth and metrics
@@ -425,6 +493,10 @@ odometry, which doesn't depend on the absolute heading.
 
 ### 10.3 Tooling (`tools/replay`)
 
+- `npm run replay:mm -- [--graph <file>] [--cut s:len]… [--open-loop] [--mm '<json config>'] [--trace from:to] <logs>`
+  (M4): the §10.2 metrics per drive, wrong-road and lost stretches, update time, filter vs EKF error in cuts;
+  `--trace` prints per second the state, top clusters (OSM way, weight, spread), the true way, both errors.
+- `npm run replay:bench -- --mm [--mm-config '<json>']` (M4): the outage benchmark with the filter's columns.
 - `npm run replay:truth -- [--graph <file>] [--json <out>] <logs>` (M3): chains, breaks with their reason and place,
   moving-fix distance to the road, route vs OBD vs navigator odometry, legs that don't fit, penalised legs.
 
@@ -443,8 +515,8 @@ odometry, which doesn't depend on the absolute heading.
   - graph edges, colored by class, one-ways marked (done in M2: roads around the trip's fixes, junction, dead-end
     and boundary nodes at zoom ≥ 15, hover for way id, class, length, flags; `replay:view -- --graph <file>`);
   - truth route (done in M3: the matched route, the leg at the cursor thick, breaks as × with their reason on hover);
-  - the particle cloud at the cursor time;
-  - clusters with their weights.
+  - the particle cloud at the cursor time, and clusters with their weights (done in M4: particles once a second,
+    200 heaviest, size by weight; clusters as rings sized by spread, labelled with weight and state).
 - **Logs:** all 7 current logs are from Slavutych, a small planned town. Parallel-road and dense-grid cases (SPEC §7.5)
   need drives elsewhere: Kyiv, or Chernihiv's ring roads. Record some before calling M5 done.
 
@@ -492,7 +564,7 @@ odometry, which doesn't depend on the absolute heading.
 | M1 | Graph builder (§4) | `chernihiv` and `ukraine` built; size, build time and peak memory recorded here; pytest green. **Done** (§4.7) |
 | M2 | Reader + viewer layer (§5, §10.3) | TS round-trip tests on a fixture; graph drawn over the drives in `replay:view` and checked by eye; tile load time in Node. **Done** (§5.1) |
 | M3 | Odometry output + ground truth (§6.1, §10.1) | odometry chunks sum to the EKF's distance and heading change; truth edge sequences for the 4 clean drives with no unexplained breaks. **Done** (§10.4) |
-| M4 | PF open loop, known heading (§7) | §10.2 metrics on all drives; dominant-cluster max error on 240 s cuts better than the EKF's 37 m median; truth survival 100 % |
+| M4 | PF open loop, known heading (§7) | §10.2 metrics on all drives; dominant-cluster max error on 240 s cuts better than the EKF's 37 m median; truth survival 100 %. **Done** (§7.7): 30.5 m; survival 100 % except 2 s leaving a yard |
 | M5 | Heading init from the map (§8) | EKF starts sooner than alignment on the jammed drives and on `--jam-start`, with no start > 10° off |
 | M6 | Closed loop (§9) | `replay:bench` better at 120 / 240 s; max error ÷ σ stays within 0.5–2 (NAVIGATOR-SPEC §12.1) |
 | M7 | App (§11) | graph download, `nav_mapmatch` in trip logs, alternatives on the map, update time on iPhone < 5 ms p99 |
@@ -505,10 +577,16 @@ M1–M3 can partly overlap. M4 needs M1–M3. M5 and M6 are independent of each 
 | --- | --- | --- |
 | `N_track` / `N_max` | 500 / 4000 | §7.2, §7.5 |
 | Odometry chunk | 2 m or 0.2 s | §6.1 |
-| Weight interval / relative-heading window | 10 m / 30 m | §7.4 |
-| σ_road | 5° | OSM geometry, corner cutting |
-| Lane offset in GNSS σ | 3 m | §7.4 |
+| Weight interval | 10 m | §7.4 |
+| Straight moment / forced comparison | < 8° over 10 m / after 20 m, or at a halt | §7.4 |
+| σ_road, turn tolerance | 5°, 10 % of the turn (30 % forced) | OSM geometry, corner cutting |
+| Lane dead zone / lane σ | 3 m / 2 m | §7.4 |
+| Fix spacing (satellite / coarse) | 10 m / 25 m | correlated errors |
 | Coarse-fix σ inflation | × 2 | correlated errors |
+| Absolute heading | EKF σ_ψ × 3, scale 0.3 | §7.4 |
+| EKF position prior | σ = max(2σ, 10 m), scale 0.3 | open loop only (§9) |
+| Off-road penalty | × 0.5 per 10 m | §7.4 |
+| On-road floor while off-road | 10 %, projection ≤ 15 m, ≤ 30° | §7.5 |
 | `dks` prior / jitter | 0.02 / 0.002 | per-particle distance scale |
 | Off-road share / re-injection | 5 % / 2 % | §7.5 |
 | Soft-rule factors | §7.3 table | |
@@ -540,3 +618,8 @@ M1–M3 can partly overlap. M4 needs M1–M3. M5 and M6 are independent of each 
 4. Via-way restrictions, ferries and street names are not in v1.
 5. Test drives beyond Slavutych for parallel roads and dense grids (§10.3).
 6. Spoofing replay (NAVIGATOR-SPEC §13.6) is needed before integrity can use the clusters.
+7. **Reversing.** OBD speed is unsigned, so reversing moves particles forward. It costs most in yards (§7.7).
+   PID `A4` (gear) or the accelerometer could tell; check what the CX-5 answers.
+8. **Low-speed manoeuvring** decides road vs off-road 20–30 m late; the 120 s p90 is worse than the EKF's because
+   of it. More drives with parking and yards are needed before tuning further.
+9. **Device timing:** 500 particles take < 1 ms p99 in Node; measure on the iPhone (M7).

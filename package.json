@@ -60,7 +60,8 @@
     "replay:bench": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/bench.ts",
     "replay:view": "node --watch --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/viewer/server.ts",
     "replay:graph": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/graph.ts",
-    "replay:truth": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/truth.ts"
+    "replay:truth": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/truth.ts",
+    "replay:mm": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/mapmatch.ts"
   },
   "jest": {
     "preset": "jest-expo"

@@ -6,7 +6,7 @@
 
 import type { TripLog } from "../../triplog/trip-log-reader";
 import { LocalFrame } from "../geo/local-frame";
-import type { EdgeId, RoadEdge, TiledRoadGraph } from "../mapmatch/graph/road-graph";
+import type { EdgeId, RoadEdge, RoadGraph, TiledRoadGraph } from "../mapmatch/graph/road-graph";
 import { isSatelliteFix, type GnssFix } from "../types";
 
 export interface TruthOptions {
@@ -348,7 +348,7 @@ function positionOnLeg(graph: TiledRoadGraph, leg: TruthLeg, a: TruthPoint, b: T
  * Same road for the metrics (§10.1): the same edge, or an edge that shares a node with the truth
  * edge while the truth position is within `toleranceM` of that node (junction tolerance).
  */
-export function isSameRoad(graph: TiledRoadGraph, truth: { edge: EdgeId; alongM: number }, edge: EdgeId, toleranceM = 15): boolean {
+export function isSameRoad(graph: Pick<RoadGraph, "edge">, truth: { edge: EdgeId; alongM: number }, edge: EdgeId, toleranceM = 15): boolean {
   if (truth.edge === edge) return true;
   const t = graph.edge(truth.edge);
   const e = graph.edge(edge);

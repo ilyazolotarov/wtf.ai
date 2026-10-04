@@ -4,8 +4,11 @@
 import type { GnssLagEstimate } from "../calibration/gnss-lag";
 import type { TripLog } from "../../triplog/trip-log-reader";
 import { haversineM } from "../geo";
-import { Navigator, type FixOutcome, type NavConfig, type NavEstimate, type ParkedPose } from "../navigator";
+import type { MapMatchConfig } from "../mapmatch/particle-filter";
+import { Navigator, type FixOutcome, type MapMatchGraph, type NavConfig, type NavEstimate, type ParkedPose } from "../navigator";
 import type { OdometryStep } from "../odometry/odometry-output";
+import { MapMatchMetrics, type MapMatchSummary } from "./mapmatch-metrics";
+import type { TruthMatch } from "./truth-match";
 import { isSatelliteFix, type GnssFix } from "../types";
 
 export interface ReplayCut {
@@ -35,6 +38,17 @@ export interface ReplayOptions {
   startPose?: ParkedPose;
   /** Receives the navigator's odometry chunks (MAPMATCH-SPEC §6.1). */
   odometry?: (step: OdometryStep) => void;
+  /**
+   * Run map matching (MAPMATCH-SPEC §7) on this graph. With `truth` (truth-match.ts) the summary gets
+   * the §10.2 metrics; `particlesEveryS` keeps particle snapshots for the viewer.
+   */
+  mapMatch?: { graph: MapMatchGraph; truth?: TruthMatch; config?: Partial<MapMatchConfig>; particlesEveryS?: number };
+}
+
+/** Particle positions at one moment: [lat, lon, weight, off-road 1/0] heaviest first. */
+export interface ParticleSnapshot {
+  tS: number;
+  particles: [number, number, number, number][];
 }
 
 export interface TrackPoint extends NavEstimate {
@@ -51,6 +65,8 @@ export interface FixRecord {
   errorM?: number;
   predictedSigmaM?: number;
   initMethod?: FixOutcome["initMethod"];
+  /** Map matching: distance from the dominant cluster to the fix (held-out fixes in cuts). */
+  mapMatchErrorM?: number;
 }
 
 export interface CutResult extends ReplayCut {
@@ -61,6 +77,9 @@ export interface CutResult extends ReplayCut {
   lastErrorM: number | null;
   /** Mean predicted 1σ at the truth fixes, m (is the uncertainty honest?). */
   meanSigmaM: number | null;
+  /** The same for the dominant map-matching cluster (with `mapMatch`), off-road clusters included. */
+  mapMatchMaxErrorM: number | null;
+  mapMatchLastErrorM: number | null;
 }
 
 export interface ReplaySummary {
@@ -83,12 +102,16 @@ export interface ReplaySummary {
   standstillS: number;
   resets: number;
   cuts: CutResult[];
+  /** Map-matching metrics (with `mapMatch.truth`). */
+  mapMatch: MapMatchSummary | null;
 }
 
 export interface ReplayResult {
   track: TrackPoint[];
   fixes: FixRecord[];
   summary: ReplaySummary;
+  /** With `mapMatch.particlesEveryS`. */
+  particles: ParticleSnapshot[];
 }
 
 const median = (v: number[]) => {
@@ -100,6 +123,11 @@ const median = (v: number[]) => {
 export function replayTrip(trip: TripLog, options: ReplayOptions = {}): ReplayResult {
   const nav = new Navigator(options.nav);
   if (options.odometry) nav.subscribeOdometry(options.odometry);
+  const mm = options.mapMatch;
+  if (mm) nav.setRoadGraph(mm.graph, mm.config);
+  const metrics = mm?.truth ? new MapMatchMetrics(mm.graph, mm.truth, trip.startUs) : null;
+  const particles: ParticleSnapshot[] = [];
+  let nextParticlesUs = -Infinity;
   const cuts: ReplayCut[] = [...(options.cuts ?? [])];
   const stepUs = (options.trackStepS ?? 1) * 1e6;
   const truthAcc = options.truthAccuracyM ?? 10;
@@ -124,10 +152,15 @@ export function replayTrip(trip: TripLog, options: ReplayOptions = {}): ReplayRe
     const cutIndex = cuts.findIndex((c) => tS(tUs) >= c.fromS && tS(tUs) < c.toS);
     if (cutIndex >= 0) cutDistance[cutIndex] += d - lastDistance;
     lastDistance = d;
+    if (mm?.particlesEveryS && tUs >= nextParticlesUs && nav.mapMatcher?.isActive) {
+      nextParticlesUs = tUs + mm.particlesEveryS * 1e6;
+      particles.push({ tS: tS(tUs), particles: nav.mapMatchParticles(200) });
+    }
     if (tUs < nextTrackUs) return;
     nextTrackUs = tUs + stepUs;
     const e = nav.estimate();
     if (e) track.push({ ...e, tS: tS(tUs), standstill: nav.isStandstill });
+    if (metrics && e && !nav.isStandstill && (e.speedMps ?? 0) >= 2) metrics.sample(tUs, e.mapMatch, nav.mapMatcher, d);
   };
 
   // Merge the three time-sorted streams.
@@ -151,6 +184,7 @@ export function replayTrip(trip: TripLog, options: ReplayOptions = {}): ReplayRe
       const satellite = isSatelliteFix(fix);
       if (inCut(t)) {
         const p = nav.positionAt(fix.tUs - (options.truthLagS ?? 0) * 1e6);
+        const top = mm ? nav.estimate()?.mapMatch?.clusters[0] : undefined;
         fixes.push({
           tS: t,
           fix,
@@ -158,6 +192,7 @@ export function replayTrip(trip: TripLog, options: ReplayOptions = {}): ReplayRe
           status: "cut",
           errorM: p ? haversineM(p.coord, fix) : undefined,
           predictedSigmaM: p?.sigmaM,
+          mapMatchErrorM: top ? haversineM(top, fix) : undefined,
         });
       } else {
         const out = nav.onGnss(fix);
@@ -190,6 +225,7 @@ export function replayTrip(trip: TripLog, options: ReplayOptions = {}): ReplayRe
   return {
     track,
     fixes,
+    particles,
     summary: {
       durationS,
       obdDistanceM: nav.stats.obdDistanceM,
@@ -211,10 +247,12 @@ export function replayTrip(trip: TripLog, options: ReplayOptions = {}): ReplayRe
       imuInvalidS: nav.stats.imuInvalidS,
       standstillS: nav.stats.standstillS,
       resets: nav.stats.resets,
+      mapMatch: metrics?.summary(nav.mapMatcher?.updateTimes ?? []) ?? null,
       cuts: cuts.map((c, k) => {
         const truth = fixes.filter(
           (f) => f.status === "cut" && f.tS >= c.fromS && f.tS < c.toS && f.satellite && f.fix.hAccM <= truthAcc && f.errorM !== undefined,
         );
+        const mmErrors = truth.map((f) => f.mapMatchErrorM).filter((v): v is number => v !== undefined);
         return {
           ...c,
           toS: Math.min(c.toS, durationS),
@@ -223,6 +261,8 @@ export function replayTrip(trip: TripLog, options: ReplayOptions = {}): ReplayRe
           maxErrorM: truth.length ? Math.max(...truth.map((f) => f.errorM!)) : null,
           lastErrorM: truth.length ? truth[truth.length - 1].errorM! : null,
           meanSigmaM: truth.length ? truth.reduce((s, f) => s + (f.predictedSigmaM ?? 0), 0) / truth.length : null,
+          mapMatchMaxErrorM: mmErrors.length ? Math.max(...mmErrors) : null,
+          mapMatchLastErrorM: mmErrors.length ? mmErrors[mmErrors.length - 1] : null,
         };
       }),
     },

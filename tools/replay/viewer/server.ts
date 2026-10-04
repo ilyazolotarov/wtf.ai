@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 
 import { buildViewerData } from "../../../src/nav/replay/viewer-data";
 import { readTripLog, type TripLog } from "../../../src/triplog/trip-log-reader";
-import { findGraph, roadsAround, truthRoute } from "../graph-file";
+import { findGraph, openGraph, roadsAround, truthRoute } from "../graph-file";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -68,12 +68,21 @@ const server = createServer((req, res) => {
       const openLoop = url.searchParams.get("openLoop");
       const started = Date.now();
       const trip = loadTrip(file);
-      const data = buildViewerData(file, trip, {
-        cuts: parseCuts(url.searchParams.get("cuts")),
-        nav: lag ? { gnssLagS: Number(lag), estimateGnssLag: false } : {},
-        openLoop: openLoop ? { delayS: Number(openLoop) } : undefined,
-      });
-      send(res, 200, "application/json", JSON.stringify(data));
+      // Map matching on the trip's road graph, when there is one.
+      const first = trip.gnss.find((f) => f.hAccM <= 500);
+      const graphFile = first ? (GRAPH ?? findGraph(first)) : null;
+      const opened = graphFile && first ? openGraph(graphFile, first) : null;
+      try {
+        const data = buildViewerData(file, trip, {
+          cuts: parseCuts(url.searchParams.get("cuts")),
+          nav: lag ? { gnssLagS: Number(lag), estimateGnssLag: false } : {},
+          openLoop: openLoop ? { delayS: Number(openLoop) } : undefined,
+          ...(opened ? { mapMatch: { graph: opened.graph } } : {}),
+        });
+        send(res, 200, "application/json", JSON.stringify(data));
+      } finally {
+        opened?.close();
+      }
       console.log(`replayed ${file} in ${Date.now() - started} ms`);
     } else if (url.pathname === "/api/roads") {
       const file = path.basename(url.searchParams.get("file") ?? "");

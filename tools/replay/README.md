@@ -78,6 +78,9 @@ trip's first fix, so the oblast rather than Ukraine; `--graph <file>` overrides.
 ```bash
 npm run replay:graph -- tools/triplog/logs/*.ulg                       # graph vs clean fixes, reader timing
 npm run replay:truth -- tools/triplog/logs/*.ulg                       # ground truth: which road, breaks
+npm run replay:mm -- tools/triplog/logs/*.ulg                          # map matching vs the ground truth
+npm run replay:mm -- trip.ulg --cut 241:240 --trace 330:360            # one outage, second by second
+npm run replay:bench -- tools/triplog/logs/*.ulg --mm                  # outage benchmark with map matching
 npm run replay:graph -- --graph tools/tiles/out/release/ukraine.graph.bin trip.ulg
 npm run replay:view -- --graph tools/tiles/out/release/kyiv.graph.bin  # viewer with a given graph
 ```
@@ -90,11 +93,20 @@ npm run replay:view -- --graph tools/tiles/out/release/kyiv.graph.bin  # viewer 
   break (off the graph, gap, no route) with time and place, how far moving fixes are from the road, the route vs
   OBD vs navigator odometry distance, and any legs that don't fit or needed a one-way/restriction/U-turn penalty.
   `--json <out>` saves the matched points, legs and breaks.
+- **`replay:mm`:** runs the particle filter (MAPMATCH-SPEC §7, open loop) in the replay and scores it against
+  the ground truth: wrong-road rate, truth survival, multimodal and off-road shares, re-lock time, update time,
+  and the stretches where it was on a wrong road or lost the true one. With `--cut`, the filter's and the EKF's
+  error at the held-out fixes. `--trace from:to` prints, per second, the state, the top clusters (OSM way, weight,
+  spread), the true way and both errors. `--mm '<json>'` overrides the filter's config.
+- **`replay:bench --mm`:** the outage benchmark with the filter's error next to the EKF's (dominant cluster,
+  off-road clusters included).
 - **Viewer:** the *roads* checkbox draws the graph around the trip's fixes, under the tracks: major roads thick,
   service roads and tracks dashed, arrows on one-ways (zoom ≥ 14). At zoom ≥ 15 it adds junctions, dead ends
   (orange) and region-boundary ends (red). Hover for the OSM way id, class, length and flags. Its tooltip says
   which graph file is in use. The *truth* checkbox draws the matched route in teal, the leg at the cursor thick,
-  and breaks as red × (hover for the reason).
+  and breaks as red × (hover for the reason). With a road graph the replay also runs map matching: the
+  *particles* checkbox shows the particles at the cursor (once a second, size by weight) and the top clusters as
+  rings sized by their spread, labelled with weight, "off" for an off-road cluster, and the filter's state.
 
 ## Reading the summary
 

@@ -11,7 +11,7 @@
     --bg: #f6f7f9; --panel: #ffffff; --text: #16181d; --text2: #5b6270; --line: #e3e6eb;
     --pred: #2563eb; --gps: #16a34a; --coarse: #d97706; --rej: #dc2626; --cut: #8b93a1;
     --obd: #2563eb; --engine: #7c3aed; --accent: #2563eb;
-    --road: #a21caf; --road-end: #ea580c; --truth: #0f766e;
+    --road: #a21caf; --road-end: #ea580c; --truth: #0f766e; --mm: #111827;
     color-scheme: light;
   }
   @media (prefers-color-scheme: dark) {
@@ -19,7 +19,7 @@
       --bg: #0f1115; --panel: #171a21; --text: #e8eaee; --text2: #9aa2b1; --line: #2a2f3a;
       --pred: #60a5fa; --gps: #4ade80; --coarse: #fbbf24; --rej: #f87171; --cut: #8b93a1;
       --obd: #60a5fa; --engine: #a78bfa; --accent: #60a5fa;
-      --road: #e879f9; --road-end: #fb923c; --truth: #2dd4bf;
+      --road: #e879f9; --road-end: #fb923c; --truth: #2dd4bf; --mm: #fde047;
       color-scheme: dark;
     }
   }
@@ -129,6 +129,7 @@
   <label><input id="showErr" type="checkbox" checked /> error line</label>
   <label title="Road graph used for map matching (tools/tiles graph): lines by class, arrows on one-ways; at zoom ≥ 15 junctions, dead ends (orange) and region-boundary ends (red)"><input id="showRoads" type="checkbox" checked /> roads</label>
   <label title="Ground truth (MAPMATCH-SPEC §10.1): the road the car was on, from an offline HMM over clean satellite fixes. The leg at the cursor is thick; × marks breaks (hover for why)"><input id="showTruth" type="checkbox" checked /> truth</label>
+  <label title="Map matching (MAPMATCH-SPEC §7, open loop): particles at the cursor (size by weight; hollow = off-road) and the top clusters (ring = spread, label = weight)"><input id="showMm" type="checkbox" checked /> particles</label>
   <span class="muted">Map: OpenFreeMap (online)</span>
 </div>
 
@@ -206,7 +207,7 @@ function fixColorExpr() {
 function addLayers(map, role) {
   const gps = role !== "pred", pred = role !== "gps";
   const empty = fc([]);
-  for (const id of ["roads", "roadNodes", "truth", "truthBreaks", "fixes", "gpsTrack", "predTrack", "predNow", "predAcc", "predHdg", "gpsNow", "gpsAcc", "errLine", "cuts"]) {
+  for (const id of ["roads", "roadNodes", "truth", "truthBreaks", "particles", "clusters", "fixes", "gpsTrack", "predTrack", "predNow", "predAcc", "predHdg", "gpsNow", "gpsAcc", "errLine", "cuts"]) {
     map.addSource(id, { type: "geojson", data: empty });
   }
   addRoadLayers(map);
@@ -234,6 +235,7 @@ function addLayers(map, role) {
     map.addLayer({ id: "predAccLine", type: "line", source: "predAcc",
       paint: { "line-color": css("--pred"), "line-width": 1.2, "line-opacity": 0.7 } });
   }
+  if (pred) addMapMatchLayers(map);
   if (role === "both") {
     map.addLayer({ id: "errLine", type: "line", source: "errLine",
       paint: { "line-color": css("--rej"), "line-width": 2, "line-dasharray": [1.5, 1.5] } });
@@ -267,6 +269,30 @@ function addLayers(map, role) {
 const ROAD_CLASSES = ["motorway", "trunk", "primary", "secondary", "tertiary", "unclassified", "residential",
   "living_street", "service", "track", "road"];
 const EDGE_FLAGS = [[1, "link"], [2, "roundabout"], [4, "tunnel"], [8, "bridge"], [16, "private"], [32, "minor service"]];
+
+/** Particles (size and opacity by weight relative to the heaviest; hollow = off-road) and clusters. */
+function addMapMatchLayers(map) {
+  const rel = ["get", "rel"];
+  const off = ["==", ["get", "off"], 1];
+  map.addLayer({ id: "clusters", type: "circle", source: "clusters",
+    paint: { "circle-color": css("--mm"), "circle-opacity": 0.06, "circle-stroke-color": css("--mm"),
+      "circle-stroke-width": ["case", ["==", ["get", "rank"], 0], 2.5, 1.5],
+      "circle-stroke-opacity": ["case", ["==", ["get", "rank"], 0], 0.9, 0.5],
+      "circle-radius": ["interpolate", ["exponential", 2], ["zoom"], 12, ["*", ["get", "spread"], 0.03], 18, ["*", ["get", "spread"], 2]] } });
+  map.addLayer({ id: "particles", type: "circle", source: "particles",
+    paint: {
+      "circle-radius": ["interpolate", ["linear"], ["zoom"], 12, ["+", 2, ["*", 2, rel]], 16, ["+", 3.5, ["*", 4, rel]], 19, ["+", 5, ["*", 5, rel]]],
+      "circle-color": css("--mm"),
+      "circle-opacity": ["case", off, 0, ["+", 0.45, ["*", 0.5, rel]]],
+      "circle-stroke-color": ["case", off, css("--mm"), css("--panel")],
+      "circle-stroke-width": ["case", off, 1.5, 1],
+      "circle-stroke-opacity": ["case", off, ["+", 0.5, ["*", 0.5, rel]], 0.9],
+    } });
+  map.addLayer({ id: "clusterLabels", type: "symbol", source: "clusters",
+    layout: { "text-field": ["get", "label"], "text-font": ["Noto Sans Bold"], "text-size": 13, "text-offset": [0, -1.5],
+      "text-allow-overlap": true },
+    paint: { "text-color": css("--mm"), "text-halo-color": css("--panel"), "text-halo-width": 2 } });
+}
 
 function addRoadLayers(map) {
   const major = ["<=", ["get", "cls"], 4];
@@ -333,6 +359,21 @@ async function setTruth(map) {
   const on = truth && $("showTruth").checked;
   map.getSource("truth")?.setData(on ? truth.legs : fc([]));
   map.getSource("truthBreaks")?.setData(on ? truth.breaks : fc([]));
+}
+
+/** Particles and clusters at the cursor (map matching). */
+function updateMapMatch(map) {
+  if (!map?.getSource("particles") || !data) return;
+  // The prediction map in side by side, else the single map.
+  const on = $("showMm").checked && (map === mapB || !split);
+  const p = predAt(t);
+  const snap = on && data.particles?.length ? lastBefore(data.particles, t) : null;
+  const pts = snap && t - snap[0] < 1.5 ? snap[1] : [];
+  const maxW = pts.reduce((m, q) => Math.max(m, q[2]), 0) || 1;
+  map.getSource("particles").setData(fc(pts.map(([lat, lon, w, off]) => pt({ lat, lon }, { rel: w / maxW, off }))));
+  const mm = on ? p?.mm : null;
+  map.getSource("clusters").setData(fc(mm ? mm.c.map(([lat, lon, w, spread, road], rank) =>
+    pt({ lat, lon }, { rank, spread: Math.max(spread, 2), label: `${Math.round(w * 100)}%${road ? "" : " off"}${rank === 0 ? ` · ${mm.s}` : ""}` })) : []));
 }
 
 /** Thick line on the truth leg under the time cursor. */
@@ -421,6 +462,8 @@ function updateDynamic() {
   if (!data) return;
   updateTruthNow(mapA);
   updateTruthNow(mapB);
+  updateMapMatch(mapA);
+  updateMapMatch(mapB);
   const p = predAt(t);
   const f = fixAt(t);
   const age = f ? t - f.t : Infinity;
@@ -620,6 +663,7 @@ $("showFixes").onchange = () => { setStatic(mapA); if (mapB) setStatic(mapB); };
 $("showErr").onchange = () => setLayerVisibility(mapA, split ? "gps" : "both");
 $("showRoads").onchange = () => { setRoads(mapA); if (mapB) setRoads(mapB); };
 $("showTruth").onchange = () => { setTruth(mapA); if (mapB) setTruth(mapB); };
+$("showMm").onchange = () => updateDynamic();
 $("split").onclick = async () => {
   split = !split;
   $("split").setAttribute("aria-pressed", String(split));
