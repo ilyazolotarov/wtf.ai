@@ -18,6 +18,7 @@ Plan a drive to a destination offline and guide the driver along it, so that:
 - **R1 done:** this spec; SPEC.md moved routing here from Valhalla.
 - **R2 done:** the planner `src/nav/routing/` (§4–5) and `npm run route` (§7): city routes in 0.1 s or less, oblast
   routes up to 1 s, in Node.
+- **R3 done:** turn instructions (§6).
 - The app's `route` screen is still the UI-first mock (UI-SPEC §7.1): a list of cities and a straight line.
 
 ## 3. Decisions
@@ -96,11 +97,23 @@ drives (trip logs give the real time per edge class).
 `RouteSearch.run(maxStates)` advances by at most that many states and returns `done` or `more`; the app runs it in
 slices between frames and shows progress. `planRoute()` runs it to the end (tools, tests).
 
-## 6. Instructions (R3)
+## 6. Instructions (R3, `src/nav/routing/maneuvers.ts`)
 
-From the legs: one maneuver per junction where the route does not simply continue (turn ≥ 30°, or a fork where
-another exit is within 30° of the route's), plus roundabouts ("take the 2nd exit") and arrival. Each with its
-distance from the start. Details in R3.
+`routeManeuvers(graph, plan)` gives `depart`, then one maneuver per junction where the driver has to choose, then
+`arrive`, each with its distance from the start, position and turn angle:
+
+- **Choices.** At the end of each leg, the other legal ways on (not U-turns, one-ways against, restricted turns).
+  From a main road, driveways, service roads, tracks, private roads and slip roads don't count: staying on the road
+  past them needs no instruction. No other way: no instruction, however much the road bends.
+- **Straight on.** The straightest way, turning less than 45°, needs none, unless another way of similar
+  importance (road class at most one step lower) is within 35° of it: then `keep-left` / `keep-right`.
+- **Turns** otherwise, by angle: `slight-*` under 45°, `left` / `right` up to 135°, `sharp-*` beyond; `u-turn`
+  back along the same road (a dead end).
+- **Roundabouts:** one `roundabout` maneuver at the entry, with the exit to take: the legal ways off it passed on
+  the way, plus one.
+
+Checked by eye on Chernihiv and Kyiv routes (`npm run route` prints them): 5 instructions on 4.2 km across
+Chernihiv, 12 on 13 km across Kyiv, 12 on 172 km across the oblast.
 
 ## 7. Measurements (`npm run route`)
 

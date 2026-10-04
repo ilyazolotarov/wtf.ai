@@ -12,6 +12,7 @@ import path from "node:path";
 import type { Coordinate } from "../../src/nav/geo";
 import { LocalFrame } from "../../src/nav/geo/local-frame";
 import { TiledRoadGraph } from "../../src/nav/mapmatch/graph/road-graph";
+import { routeManeuvers } from "../../src/nav/routing/maneuvers";
 import { planRoute, type RouteStart } from "../../src/nav/routing/router";
 import { fileByteSource, findGraph } from "./graph-file";
 
@@ -72,6 +73,7 @@ if (!args.bench) {
   if (!args.from || !args.to) throw new Error("pass --from and --to, or --bench <n>");
   const { graph, frame, close } = openGraph(args.from);
   const r = planRoute(graph, frame, args.from, args.to);
+  const maneuvers = r.status === "done" ? routeManeuvers(graph, r.plan) : [];
   close();
   console.log(`${path.basename(graphFile)}: ${r.stats.states} states, ${r.stats.tilesRead} tiles read, ${r.stats.ms.toFixed(0)} ms`);
   if (r.status === "failed") {
@@ -80,9 +82,14 @@ if (!args.bench) {
   }
   const { plan } = r;
   console.log(`${km(plan.lengthM)}, ${min(plan.durationS)}, ${plan.legs.length} edges; ends ${Math.round(plan.offRoadM.start)} m and ${Math.round(plan.offRoadM.end)} m off the points`);
+  for (const m of maneuvers) {
+    const extra = m.exit ? ` exit ${m.exit}` : m.kind === "depart" || m.kind === "arrive" ? "" : ` ${Math.round((m.turnRad * 180) / Math.PI)}°`;
+    console.log(`  ${km(m.atM).padStart(9)}  ${m.kind}${extra}  ${m.lat.toFixed(5)},${m.lon.toFixed(5)}`);
+  }
   if (args.geojson) {
     const line = { type: "Feature", properties: { lengthM: Math.round(plan.lengthM), durationS: Math.round(plan.durationS) }, geometry: { type: "LineString", coordinates: plan.coordinates.map((c) => [c.lon, c.lat]) } };
-    writeFileSync(args.geojson, JSON.stringify({ type: "FeatureCollection", features: [line] }));
+    const points = maneuvers.map((m) => ({ type: "Feature", properties: { kind: m.kind, atM: Math.round(m.atM), ...(m.exit ? { exit: m.exit } : {}) }, geometry: { type: "Point", coordinates: [m.lon, m.lat] } }));
+    writeFileSync(args.geojson, JSON.stringify({ type: "FeatureCollection", features: [line, ...points] }));
     console.log(`wrote ${args.geojson}`);
   }
 } else {

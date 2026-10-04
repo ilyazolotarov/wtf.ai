@@ -96,6 +96,9 @@ const geometryLength = (edge: RoadEdge) => edge.cum[edge.cum.length - 1];
 const allowed = (edge: RoadEdge, dir: 1 | -1) => edge.oneway !== (dir === 1 ? Oneway.backward : Oneway.forward);
 const isPublic = (edge: RoadEdge) => !(edge.flags & (EdgeFlag.private | EdgeFlag.minorService));
 
+/** A leg's length, m (OSM lengths, as the route's). */
+export const legLengthM = (edge: RoadEdge, leg: RouteLeg) => stretchM(edge, leg.fromM, leg.toM);
+
 /** Metres of the edge's OSM length between two positions along its geometry. */
 function stretchM(edge: RoadEdge, a: number, b: number): number {
   const length = geometryLength(edge);
