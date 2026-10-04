@@ -104,6 +104,7 @@
     <h2>Legend</h2>
     <div class="muted">
       <div><span class="swatch" style="background:var(--pred)"></span>prediction (fused)</div>
+      <div><span class="swatch" style="background:var(--mm)"></span>snapped to road (map matching)</div>
       <div><span class="swatch" style="background:var(--gps)"></span>GPS satellite fix</div>
       <div><span class="swatch" style="background:var(--coarse)"></span>Wi-Fi/cell fix (no speed)</div>
       <div><span class="swatch" style="background:var(--rej)"></span>fix rejected by the filter</div>
@@ -132,6 +133,7 @@
   <label title="Road graph used for map matching (tools/tiles graph): lines by class, arrows on one-ways; at zoom ≥ 15 junctions, dead ends (orange) and region-boundary ends (red)"><input id="showRoads" type="checkbox" checked /> roads</label>
   <label title="Ground truth (MAPMATCH-SPEC §10.1): the road the car was on, from an offline HMM over clean satellite fixes. The leg at the cursor is thick; × marks breaks (hover for why)"><input id="showTruth" type="checkbox" checked /> truth</label>
   <label title="Map matching (MAPMATCH-SPEC §7, open loop): particles at the cursor (size by weight; hollow = off-road) and the top clusters (ring = spread, label = weight)"><input id="showMm" type="checkbox" checked /> particles</label>
+  <label title="Snap to road: the path map matching puts the car on (best particle cluster while on a road), drawn over the raw prediction. Pair it with Open loop or jamming to see what the road constraint buys"><input id="showSnap" type="checkbox" checked /> snap to road</label>
   <span class="muted">Map: OpenFreeMap (online)</span>
 </div>
 
@@ -209,7 +211,7 @@ function fixColorExpr() {
 function addLayers(map, role) {
   const gps = role !== "pred", pred = role !== "gps";
   const empty = fc([]);
-  for (const id of ["roads", "roadNodes", "truth", "truthBreaks", "particles", "clusters", "fixes", "gpsTrack", "predTrack", "predNow", "predAcc", "predHdg", "gpsNow", "gpsAcc", "errLine", "cuts"]) {
+  for (const id of ["roads", "roadNodes", "truth", "truthBreaks", "particles", "clusters", "mmTrack", "mmNow", "fixes", "gpsTrack", "predTrack", "predNow", "predAcc", "predHdg", "gpsNow", "gpsAcc", "errLine", "cuts"]) {
     map.addSource(id, { type: "geojson", data: empty });
   }
   addRoadLayers(map);
@@ -290,6 +292,13 @@ function addMapMatchLayers(map) {
       "circle-stroke-width": ["case", off, 1.5, 1],
       "circle-stroke-opacity": ["case", off, ["+", 0.5, ["*", 0.5, rel]], 0.9],
     } });
+  // The snapped path: the best cluster over time, i.e. where map matching puts the car on the road.
+  map.addLayer({ id: "mmTrackCase", type: "line", source: "mmTrack", layout: { "line-cap": "round", "line-join": "round" },
+    paint: { "line-color": css("--panel"), "line-width": 7, "line-opacity": 0.8 } });
+  map.addLayer({ id: "mmTrack", type: "line", source: "mmTrack", layout: { "line-cap": "round", "line-join": "round" },
+    paint: { "line-color": css("--mm"), "line-width": 4 } });
+  map.addLayer({ id: "mmNow", type: "circle", source: "mmNow",
+    paint: { "circle-radius": 7, "circle-color": css("--mm"), "circle-stroke-width": 2.5, "circle-stroke-color": css("--panel") } });
   map.addLayer({ id: "clusterLabels", type: "symbol", source: "clusters",
     layout: { "text-field": ["get", "label"], "text-font": ["Noto Sans Bold"], "text-size": 13, "text-offset": [0, -1.5],
       "text-allow-overlap": true },
@@ -374,6 +383,8 @@ function updateMapMatch(map) {
   const maxW = pts.reduce((m, q) => Math.max(m, q[2]), 0) || 1;
   map.getSource("particles").setData(fc(pts.map(([lat, lon, w, off]) => pt({ lat, lon }, { rel: w / maxW, off }))));
   const mm = on ? p?.mm : null;
+  const top = $("showSnap").checked && (map === mapB || !split) ? p?.mm?.c[0] : null;
+  map.getSource("mmNow")?.setData(fc(top && top[4] ? [pt({ lat: top[0], lon: top[1] })] : []));
   map.getSource("clusters").setData(fc(mm ? mm.c.map(([lat, lon, w, spread, road], rank) =>
     pt({ lat, lon }, { rank, spread: Math.max(spread, 2), label: `${Math.round(w * 100)}%${road ? "" : " off"}${rank === 0 ? ` · ${mm.s}` : ""}` })) : []));
 }
@@ -446,6 +457,17 @@ async function setStatic(map) {
   }
   const showPred = role !== "gps";
   const showGps = role !== "pred";
+  // Snapped path: top cluster while it sits on a road; broken where it is off-road, missing or > 2 s apart.
+  const snapped = [];
+  let cur = null, prev = -Infinity;
+  for (const p of data.track) {
+    const top = p.mm?.c[0];
+    if (!top || !top[4]) { cur = null; continue; }
+    if (!cur || p.t - prev > 2) { cur = []; snapped.push(cur); }
+    cur.push([top[1], top[0]]);
+    prev = p.t;
+  }
+  map.getSource("mmTrack")?.setData(fc(showPred && $("showSnap").checked ? snapped.filter((c) => c.length > 1).map((c) => line(c)) : []));
   map.getSource("predTrack")?.setData(fc(showPred ? segs.filter((s) => s.coords.length > 1).map((s) => line(s.coords, { mode: s.mode })) : []));
   const sats = data.fixes.filter((f) => f.sat && f.status !== "skipped");
   map.getSource("gpsTrack")?.setData(fc(showGps && sats.length > 1 ? [line(sats.map((f) => [f.lon, f.lat]))] : []));
@@ -666,6 +688,7 @@ $("showErr").onchange = () => setLayerVisibility(mapA, split ? "gps" : "both");
 $("showRoads").onchange = () => { setRoads(mapA); if (mapB) setRoads(mapB); };
 $("showTruth").onchange = () => { setTruth(mapA); if (mapB) setTruth(mapB); };
 $("showMm").onchange = () => updateDynamic();
+$("showSnap").onchange = () => { if (data) { setStatic(mapA); if (mapB) setStatic(mapB); } updateDynamic(); };
 $("split").onclick = async () => {
   split = !split;
   $("split").setAttribute("aria-pressed", String(split));
