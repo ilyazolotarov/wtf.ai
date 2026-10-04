@@ -4,14 +4,64 @@
 // in typed arrays (structure of arrays) for Hermes. Pure TS.
 
 import type { OdometryStep } from "../odometry/odometry-output";
-import { EdgeFlag, NodeFlag, RoadClass } from "./graph/format";
-import type { EdgeId, Exit, RoadEdge, RoadGraph } from "./graph/road-graph";
+import { EdgeFlag, NodeFlag, Oneway, RoadClass } from "./graph/format";
+import type { EdgeId, Exit, NearEdge, RoadEdge, RoadGraph } from "./graph/road-graph";
 
 export interface MapMatchConfig {
   /** Particle count while tracking (N_track). */
   particles: number;
+  /** Upper bound for an unknown-heading start (N_max, §7.2). */
+  maxParticles: number;
+  /** Unknown-heading start: one particle per this much road per direction, m. */
+  initSpacingM: number;
+  /** Unknown-heading start: wait while the anchor radius is larger than this (cost and hypothesis count), m. */
+  unknownMaxRadiusM: number;
+  /**
+   * Until an unknown-heading start first tracks, this share of particles is re-seeded at each resampling
+   * on all roads of the search region (the navigator's anchor), with a neutral turn history: a true road
+   * pruned early (an unmapped yard, an unlucky turn sequence) can come back.
+   */
+  initReinjectShare: number;
+  /**
+   * Heading from the map (§8, the navigator): start the EKF once the heading has been settled over
+   * `mapStartTrackingM`: the filter tracks one hypothesis, or one travel direction holds `trackingWeight`
+   * with a heading spread ≤ `mapStartHeadingSpreadRad` and a position spread ≤ `mapStartSpreadM` (one
+   * direction along one road: the turn that will fix the position along it hasn't come yet). σ floored
+   * at the `mapStartMin*` values.
+   */
+  mapStartTrackingM: number;
+  mapStartHeadingSpreadRad: number;
+  mapStartSpreadM: number;
+  mapStartMinPosSigmaM: number;
+  mapStartMinHeadingSigmaRad: number;
+  /**
+   * Heading σ at a map start grows by the position spread × this: roads bend, and a cloud ahead of or
+   * behind the car along a bend carries the road heading of another place (rad per m).
+   */
+  mapStartCurvatureRadPerM: number;
+  /**
+   * A map start waits until most weight (`trackingWeight`) is where the road is straight: heading
+   * within `mapStartRoadStraightRad` over ±(`mapStartRoadWindowM` + the position spread). A polyline
+   * bends at a vertex, the car gradually, so near a bend the road heading is not the car's; and the car
+   * may be anywhere within the spread.
+   */
+  mapStartRoadWindowM: number;
+  mapStartRoadStraightRad: number;
+  /**
+   * An EKF started by a course, alignment or parked pose keeps a filter that is `tracking` with its top
+   * cluster within 3σ of the EKF plus these margins; otherwise the filter restarts around the EKF.
+   */
+  agreeMarginM: number;
+  agreeMarginRad: number;
   /** Minimum share of off-road particles (parking lots, roads missing from OSM). */
   offRoadShare: number;
+  /**
+   * Resample when the off-road particles hold less weight than this. Their penalty accumulates while
+   * the car follows a road, and without resampling they drift away from it: when the car then leaves
+   * the road, none would be near it or heavy enough to take over. Resampling makes fresh off-road
+   * copies of the on-road particles.
+   */
+  offRoadMinWeight: number;
   /**
    * Minimum share of on-road particles while off-road dominates: off-road particles projected onto
    * the nearest aligned edge, so the car is re-locked where it comes back onto a road.
@@ -80,9 +130,10 @@ export interface MapMatchConfig {
   uTurnFactor: number;
   privateFactor: number;
   serviceFactor: number;
-  /** Clustering (§7.6). */
+  /** Clustering (§7.6). Greedy clustering stops after `maxClusters` (the rest holds little weight). */
   clusterRadiusM: number;
   clusterHeadingRad: number;
+  maxClusters: number;
   trackingWeight: number;
   trackingSpreadM: number;
   /** Init around a known pose: candidate radius (σ multiples, minimum) and heading margin. */
@@ -101,7 +152,22 @@ const DEG = Math.PI / 180;
 
 export const DEFAULT_MAP_MATCH: MapMatchConfig = {
   particles: 500,
+  maxParticles: 4000,
+  initSpacingM: 10,
+  unknownMaxRadiusM: 1000,
+  initReinjectShare: 0.05,
+  mapStartTrackingM: 100,
+  mapStartHeadingSpreadRad: 10 * DEG,
+  mapStartSpreadM: 150,
+  mapStartMinPosSigmaM: 10,
+  mapStartMinHeadingSigmaRad: 3 * DEG,
+  mapStartCurvatureRadPerM: 0.1 * DEG,
+  mapStartRoadWindowM: 15,
+  mapStartRoadStraightRad: 5 * DEG,
+  agreeMarginM: 30,
+  agreeMarginRad: 30 * DEG,
   offRoadShare: 0.05,
+  offRoadMinWeight: 1e-5,
   onRoadShare: 0.1,
   onRoadProjectM: 15,
   onRoadProjectHeadingRad: 30 * DEG,
@@ -141,6 +207,7 @@ export const DEFAULT_MAP_MATCH: MapMatchConfig = {
   serviceFactor: 0.5,
   clusterRadiusM: 30,
   clusterHeadingRad: 45 * DEG,
+  maxClusters: 64,
   trackingWeight: 0.9,
   trackingSpreadM: 25,
   initSigmas: 3,
@@ -162,6 +229,8 @@ export interface MapMatchCluster {
   n: number;
   /** Circular-mean travel heading, clockwise from north. */
   headingRad: number;
+  /** Circular standard deviation of the travel headings. */
+  headingSpreadRad: number;
   /** Weighted RMS distance from the mean, m. */
   spreadM: number;
   /** Edge holding the most weight (null: off-road cluster). */
@@ -209,6 +278,53 @@ interface ExitChoice {
   exits: Exit[];
   /** Cumulative probabilities. */
   cum: number[];
+}
+
+/** A stretch [a, b] (m along the geometry) of an edge inside a circle. */
+interface Span {
+  edge: RoadEdge;
+  a: number;
+  b: number;
+}
+
+/** The parts of the edges that lie within `radius` of (e, n), segment by segment. */
+function spansInCircle(near: NearEdge[], e: number, n: number, radius: number): Span[] {
+  const out: Span[] = [];
+  const r2 = radius * radius;
+  for (const { edge } of near) {
+    const { xy, cum } = edge;
+    let open: Span | null = null;
+    for (let s = 0; s + 1 < cum.length; s++) {
+      const len = cum[s + 1] - cum[s];
+      if (len <= 0) continue;
+      // |p0 + t·d − c|² = r² for t in [0, 1], d the segment.
+      const px = xy[2 * s] - e;
+      const py = xy[2 * s + 1] - n;
+      const dx = xy[2 * s + 2] - xy[2 * s];
+      const dy = xy[2 * s + 3] - xy[2 * s + 1];
+      const qa = dx * dx + dy * dy;
+      const qb = px * dx + py * dy;
+      const disc = qb * qb - qa * (px * px + py * py - r2);
+      if (disc <= 0) {
+        open = null;
+        continue;
+      }
+      const root = Math.sqrt(disc);
+      const t0 = Math.max(0, (-qb - root) / qa);
+      const t1 = Math.min(1, (-qb + root) / qa);
+      if (t1 <= t0) {
+        open = null;
+        continue;
+      }
+      const a = cum[s] + t0 * len;
+      const b = cum[s] + t1 * len;
+      // Consecutive segments inside the circle form one span.
+      if (open && Math.abs(open.b - a) < 1e-6) open.b = b;
+      else out.push((open = { edge, a, b }));
+      if (t1 < 1) open = null;
+    }
+  }
+  return out;
 }
 
 /** Per-particle state, one typed array per field. */
@@ -262,6 +378,11 @@ export class ParticleFilter {
   private spare: Particles;
   private readonly random: ReturnType<typeof rng>;
   private active = false;
+  /** False after an unknown-heading start until the filter first tracks (state `init`, §7.6). */
+  private resolved = true;
+  /** Unknown heading: where the car can be (centre, radius at odometry distance `atM`), and its roads. */
+  private region: { e: number; n: number; radiusM: number; atM: number } | null = null;
+  private regionSpans: { e: number; n: number; radiusM: number; spans: Span[]; starts: number[]; total: number } | null = null;
   private readonly exitCache = new Map<string, ExitChoice>();
 
   /** Odometry totals at the last chunk (from the navigator: distance, turn, and a running sum of turn variance). */
@@ -305,6 +426,11 @@ export class ParticleFilter {
     return this.p.size;
   }
 
+  /** The heading was unknown at the start and the filter hasn't tracked yet (state `init`). */
+  get initializing(): boolean {
+    return this.active && !this.resolved;
+  }
+
   /**
    * Start around a known pose (§7.2): particles on edges within 3σ whose direction fits the
    * heading, weighted by the position likelihood; the off-road share at the pose. `distanceM` /
@@ -313,16 +439,9 @@ export class ParticleFilter {
   init(e: number, n: number, posSigmaM: number, psi: number, psiSigma: number, odometry: { distanceM: number; turnRad: number }): void {
     const c = this.config;
     const t0 = now();
-    this.active = true;
-    this.cached = null;
-    this.distanceM = odometry.distanceM;
-    this.turnRad = odometry.turnRad;
-    this.nextEvalM = this.distanceM + c.evalIntervalM;
-    this.nextWorkingSetM = this.distanceM;
-    this.recentTurns = [];
-    this.lastFixM = -Infinity;
-    this.lastCoarseM = -Infinity;
-    this.setAnchor();
+    this.allocate(c.particles);
+    this.begin(odometry);
+    this.resolved = true;
     const radius = Math.max(c.initMinRadiusM, c.initSigmas * posSigmaM);
     const margin = c.initSigmas * psiSigma + c.initHeadingMarginRad;
     const candidates: { edge: RoadEdge; dir: 1 | -1; along: number }[] = [];
@@ -362,6 +481,137 @@ export class ParticleFilter {
     this.normalize();
     this.updateWorkingSet();
     this.record(now() - t0);
+  }
+
+  /**
+   * Start with the heading unknown (§7.2, §8): particles evenly along every road within `radiusM`
+   * of (e, n), in both directions (against a one-way at its soft factor); off-road ones anywhere in
+   * the circle, heading anywhere. One particle per `initSpacingM` of road and direction, within
+   * [N_track, N_max]. Returns false, and doesn't start, when the radius exceeds `unknownMaxRadiusM`.
+   */
+  initUnknown(e: number, n: number, radiusM: number, odometry: { distanceM: number; turnRad: number }): boolean {
+    const c = this.config;
+    if (!(radiusM <= c.unknownMaxRadiusM)) return false;
+    const t0 = now();
+    const radius = Math.max(c.initMinRadiusM, radiusM);
+    const { spans, starts, total } = this.roadsIn(e, n, radius);
+    const size = Math.min(c.maxParticles, Math.max(c.particles, Math.round((2 * total) / c.initSpacingM)));
+    this.allocate(size);
+    this.begin(odometry);
+    this.resolved = false;
+    this.region = { e, n, radiusM: radius, atM: odometry.distanceM };
+    const p = this.p;
+    const offRoad = total > 0 ? Math.ceil(c.offRoadShare * size) : size;
+    // Systematic placement over the roads twice: along their geometry, then against it.
+    const step = (2 * total) / Math.max(1, size - offRoad);
+    let u = this.random.uniform() * step;
+    const againstOneway = Math.log(c.againstOnewayFactor);
+    for (let i = 0; i < size; i++) {
+      p.dks[i] = c.dksSigma * this.random.gauss();
+      p.logw[i] = 0;
+      if (i < offRoad) {
+        const r = radius * Math.sqrt(this.random.uniform());
+        const a = TWO_PI * this.random.uniform();
+        p.offRoad[i] = 1;
+        p.e[i] = e + r * Math.sin(a);
+        p.n[i] = n + r * Math.cos(a);
+        p.psi[i] = wrap(TWO_PI * this.random.uniform());
+      } else {
+        if (this.placeAlong(i, spans, starts, total, u)) p.logw[i] = againstOneway;
+        u += step;
+      }
+      p.anchorTurn[i] = p.roadTurn[i];
+    }
+    this.normalize();
+    this.updateWorkingSet();
+    this.record(now() - t0);
+    return true;
+  }
+
+  /**
+   * Unknown heading: the navigator's anchor moved or grew (centre and radius in the local frame). The
+   * radius grows by the distance driven from here on, up to `unknownMaxRadiusM`.
+   */
+  setSearchRegion(e: number, n: number, radiusM: number): void {
+    if (this.resolved) return;
+    this.region = { e, n, radiusM: Math.max(this.config.initMinRadiusM, radiusM), atM: this.distanceM };
+  }
+
+  /** Road spans within a circle, laid end to end (cached for the search region). */
+  private roadsIn(e: number, n: number, radiusM: number): { spans: Span[]; starts: number[]; total: number } {
+    const cached = this.regionSpans;
+    if (cached && Math.hypot(cached.e - e, cached.n - n) < 1 && Math.abs(cached.radiusM - radiusM) < 10) return cached;
+    const spans = spansInCircle(this.graph.edgesNear(e, n, radiusM), e, n, radiusM);
+    const starts: number[] = [];
+    let total = 0;
+    for (const s of spans) {
+      starts.push(total);
+      total += s.b - s.a;
+    }
+    this.regionSpans = { e, n, radiusM, spans, starts, total };
+    return this.regionSpans;
+  }
+
+  /**
+   * Put particle `i` at `u` along the spans laid end to end twice (along their geometry, then against
+   * it). Returns true when that is against a one-way.
+   */
+  private placeAlong(i: number, spans: Span[], starts: number[], total: number, u: number): boolean {
+    const p = this.p;
+    const dir: 1 | -1 = u < total ? 1 : -1;
+    const x = dir === 1 ? u : u - total;
+    let lo = 0;
+    let hi = spans.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (starts[mid] <= x) lo = mid;
+      else hi = mid - 1;
+    }
+    const span = spans[lo];
+    p.offRoad[i] = 0;
+    p.edge[i] = span.edge.id;
+    p.dir[i] = dir;
+    p.offset[i] = Math.min(span.b, span.a + x - starts[lo]);
+    this.placeOnRoad(i, span.edge);
+    return span.edge.oneway === (dir === 1 ? Oneway.backward : Oneway.forward);
+  }
+
+  /** Unknown heading, not tracking yet: re-seed `initReinjectShare` of the particles on the region's roads. */
+  private reinjectInRegion(): void {
+    const c = this.config;
+    const region = this.region;
+    if (!region || c.initReinjectShare <= 0) return;
+    const radius = Math.min(c.unknownMaxRadiusM, region.radiusM + Math.max(0, this.distanceM - region.atM));
+    const { spans, starts, total } = this.roadsIn(region.e, region.n, radius);
+    if (!(total > 0)) return;
+    const p = this.p;
+    const count = Math.round(c.initReinjectShare * p.size);
+    for (let k = 0; k < count; k++) {
+      const i = Math.floor(this.random.uniform() * p.size);
+      this.placeAlong(i, spans, starts, total, 2 * total * this.random.uniform());
+      this.neutralHistory(i);
+    }
+  }
+
+  /** Common start: odometry totals now, the weighting schedule, no fix weighed yet. */
+  private begin(odometry: { distanceM: number; turnRad: number }): void {
+    this.active = true;
+    this.cached = null;
+    this.distanceM = odometry.distanceM;
+    this.turnRad = odometry.turnRad;
+    this.nextEvalM = this.distanceM + this.config.evalIntervalM;
+    this.nextWorkingSetM = this.distanceM;
+    this.recentTurns = [];
+    this.lastFixM = -Infinity;
+    this.lastCoarseM = -Infinity;
+    this.movedSinceEval = false;
+    this.setAnchor();
+  }
+
+  /** Particle arrays of `size` (kept when the size doesn't change). */
+  private allocate(size: number): void {
+    if (this.p.size !== size) this.p = new Particles(size);
+    if (this.spare.size !== size) this.spare = new Particles(size);
   }
 
   stop(): void {
@@ -468,15 +718,99 @@ export class ParticleFilter {
       let offRoadWeight = 0;
       for (let i = 0; i < p.size; i++) if (p.offRoad[i]) offRoadWeight += Math.exp(p.logw[i]);
       const top = clusters[0];
-      const state: MapMatchState =
+      let state: MapMatchState =
         offRoadWeight > 0.5
           ? "offroad"
           : top && top.weight >= this.config.trackingWeight && top.spreadM <= this.config.trackingSpreadM
             ? "tracking"
             : "multimodal";
+      // An unknown-heading start stays `init` until it first tracks.
+      if (state === "tracking") this.resolved = true;
+      else if (!this.resolved) state = "init";
       this.cached = { state, clusters: clusters.slice(0, 5), particles: p.size, updateMs: this.lastUpdateMs };
     }
     return this.cached;
+  }
+
+  /**
+   * The dominant travel direction: particles within `clusterHeadingRad` of the circular-mean heading
+   * (iterated once), with their weight, weighted mean position and RMS distance, and their heading
+   * mean and circular spread. On one road in one direction the position along it may still be open.
+   */
+  dominantHeading(): { weight: number; e: number; n: number; spreadM: number; headingRad: number; headingSpreadRad: number } {
+    const p = this.p;
+    const c = this.config;
+    let sx = 0;
+    let sy = 0;
+    for (let i = 0; i < p.size; i++) {
+      const w = Math.exp(p.logw[i]);
+      sx += w * Math.sin(p.psi[i]);
+      sy += w * Math.cos(p.psi[i]);
+    }
+    let mean = Math.atan2(sx, sy);
+    let weight = 0;
+    let e = 0;
+    let n = 0;
+    for (let pass = 0; pass < 2; pass++) {
+      weight = e = n = sx = sy = 0;
+      for (let i = 0; i < p.size; i++) {
+        if (Math.abs(wrap(p.psi[i] - mean)) > c.clusterHeadingRad) continue;
+        const w = Math.exp(p.logw[i]);
+        weight += w;
+        e += w * p.e[i];
+        n += w * p.n[i];
+        sx += w * Math.sin(p.psi[i]);
+        sy += w * Math.cos(p.psi[i]);
+      }
+      if (weight <= 0) return { weight: 0, e: 0, n: 0, spreadM: Infinity, headingRad: mean, headingSpreadRad: Math.PI };
+      mean = Math.atan2(sx, sy);
+    }
+    e /= weight;
+    n /= weight;
+    let spread = 0;
+    for (let i = 0; i < p.size; i++) {
+      if (Math.abs(wrap(p.psi[i] - mean)) > c.clusterHeadingRad) continue;
+      spread += Math.exp(p.logw[i]) * ((p.e[i] - e) ** 2 + (p.n[i] - n) ** 2);
+    }
+    const resultant = Math.min(1, Math.hypot(sx, sy) / weight);
+    return {
+      weight,
+      e,
+      n,
+      spreadM: Math.sqrt(spread / weight),
+      headingRad: wrap(mean),
+      headingSpreadRad: Math.sqrt(-2 * Math.log(Math.max(resultant, 1e-12))),
+    };
+  }
+
+  /** The car drove straight over the last `straightWindowM` (turned less than `straightTurnRad`). */
+  get isStraight(): boolean {
+    const c = this.config;
+    return Math.abs(this.turnRad - this.turnSince(c.straightWindowM)) < c.straightTurnRad;
+  }
+
+  /**
+   * Share of the weight on roads that are straight around the particle (heading within `toleranceRad`
+   * over ±`windowM` along its edge; the part of the window beyond the edge's ends is not checked).
+   */
+  straightRoadWeight(windowM: number, toleranceRad: number): number {
+    const p = this.p;
+    let share = 0;
+    for (let i = 0; i < p.size; i++) {
+      if (p.offRoad[i]) continue;
+      const { cum, xy } = this.graph.edge(p.edge[i]);
+      const from = p.offset[i] - windowM;
+      const to = p.offset[i] + windowM;
+      const heading = p.dir[i] === 1 ? p.psi[i] : p.psi[i] + Math.PI;
+      let straight = true;
+      for (let s = 0; s + 1 < cum.length && straight; s++) {
+        if (cum[s + 1] <= cum[s] || cum[s + 1] < from || cum[s] > to) continue;
+        const h = Math.atan2(xy[2 * s + 2] - xy[2 * s], xy[2 * s + 3] - xy[2 * s + 1]);
+        straight = Math.abs(wrap(h - heading)) <= toleranceRad;
+      }
+      if (straight) share += Math.exp(p.logw[i]);
+    }
+    return share;
   }
 
   /** Weight held by off-road particles (cheap; `output()` clusters). */
@@ -716,26 +1050,39 @@ export class ParticleFilter {
     for (let i = 0; i < w.length; i++) w[i] -= shift;
   }
 
+  /** When the weights degenerate (ESS < N/2), the off-road particles go stale, or a start just resolved. */
   private maybeResample(): void {
-    const w = this.p.logw;
+    const p = this.p;
+    const w = p.logw;
     let sum2 = 0;
-    for (let i = 0; i < w.length; i++) sum2 += Math.exp(2 * w[i]);
-    if (1 / sum2 >= w.length / 2) return;
+    let offRoad = 0;
+    for (let i = 0; i < w.length; i++) {
+      const wi = Math.exp(w[i]);
+      sum2 += wi * wi;
+      if (p.offRoad[i]) offRoad += wi;
+    }
+    // A start that has just resolved shrinks to N_track.
+    const shrink = this.resolved && p.size !== this.config.particles;
+    if (1 / sum2 >= w.length / 2 && offRoad >= this.config.offRoadMinWeight && !shrink) return;
     this.resample();
   }
 
-  /** Systematic resampling, then the off-road floor, re-injection near the clusters, and `dks` jitter. */
+  /**
+   * Systematic resampling, then the off-road floor, re-injection near the clusters, and `dks` jitter.
+   * An unknown-heading start keeps its particle count until it first tracks, then shrinks to N_track.
+   */
   private resample(): void {
     const c = this.config;
     const from = this.p;
+    const size = this.resolved ? c.particles : from.size;
+    if (this.spare.size !== size) this.spare = new Particles(size);
     const to = this.spare;
-    const size = from.size;
     const step = 1 / size;
     let u = this.random.uniform() * step;
     let cum = Math.exp(from.logw[0]);
     let src = 0;
     for (let dst = 0; dst < size; dst++) {
-      while (cum < u && src < size - 1) cum += Math.exp(from.logw[++src]);
+      while (cum < u && src < from.size - 1) cum += Math.exp(from.logw[++src]);
       to.copy(from, src, dst);
       to.logw[dst] = -Math.log(size);
       u += step;
@@ -757,6 +1104,7 @@ export class ParticleFilter {
     }
     this.keepOnRoad(size - offRoad);
     this.reinject();
+    if (!this.resolved) this.reinjectInRegion();
     this.cached = null;
   }
 
@@ -818,7 +1166,9 @@ export class ParticleFilter {
     let left = order;
     const out: MapMatchCluster[] = [];
     const r2 = c.clusterRadiusM * c.clusterRadiusM;
-    while (left.length) {
+    let assigned = 0;
+    // Spread-out starts have hundreds of tiny clusters; past the cap they hold almost no weight.
+    while (left.length && out.length < c.maxClusters && assigned < 1 - 1e-4) {
       const seed = left[0];
       const members: number[] = [];
       const rest: number[] = [];
@@ -848,6 +1198,7 @@ export class ParticleFilter {
         // The remaining particles carry no weight at all.
         break;
       }
+      assigned += w;
       e /= w;
       n /= w;
       let spread = 0;
@@ -855,7 +1206,17 @@ export class ParticleFilter {
       let edge: EdgeId | null = null;
       let best = 0;
       for (const [id, we] of edgeWeight) if (we > best) [edge, best] = [id, we];
-      out.push({ weight: w, e, n, headingRad: wrap(Math.atan2(sx, sy)), spreadM: Math.sqrt(spread / w), edge, particles: members.length });
+      const resultant = Math.min(1, Math.hypot(sx, sy) / w);
+      out.push({
+        weight: w,
+        e,
+        n,
+        headingRad: wrap(Math.atan2(sx, sy)),
+        headingSpreadRad: Math.sqrt(-2 * Math.log(Math.max(resultant, 1e-12))),
+        spreadM: Math.sqrt(spread / w),
+        edge,
+        particles: members.length,
+      });
     }
     return out.sort((a, b) => b.weight - a.weight);
   }

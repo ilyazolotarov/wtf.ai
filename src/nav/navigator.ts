@@ -6,7 +6,8 @@
 // - anchored: position = best recent fix; the heading is unknown, so the uncertainty
 //   radius grows by the distance driven (OBD) since that fix.
 // - dr: the EKF runs (initialized from a GNSS course, from fitting the gyro/OBD track
-//   shape to coarse fixes when jamming leaves no course, or from the pose saved when parked).
+//   shape to coarse fixes when jamming leaves no course, from the pose saved when parked, or
+//   from map matching the track to the roads).
 
 import { GnssLagEstimator, type GnssLagConfig, type GnssLagEstimate } from "./calibration/gnss-lag";
 import { DEFAULT_EKF_CONFIG, DrEkf, wrapAngle, type EkfConfig } from "./ekf/dr-ekf";
@@ -20,6 +21,9 @@ import { OdometryChunker, type OdometryStep } from "./odometry/odometry-output";
 import { isSatelliteFix, type GnssFix, type ImuSample, type ObdSpeedSample } from "./types";
 
 export type NavMode = "none" | "anchored" | "dr";
+
+/** How the EKF got its heading: GNSS course, alignment to coarse fixes, parked pose, or the road map. */
+export type InitMethod = "course" | "alignment" | "pose" | "map";
 
 export interface NavConfig {
   /** CoreLocation position/course lag behind OBD/IMU until the online estimate is ready (or always,
@@ -230,6 +234,12 @@ export class Navigator {
   private mapMatchListening = false;
   /** Odometry distance where the filter's weight went mostly off-road (null: on the roads). */
   private offRoadFromM: number | null = null;
+  /** Unknown-heading start (MAPMATCH-SPEC §8): odometry distance since the filter tracks, next check. */
+  private trackingFromM: number | null = null;
+  private nextMapStartCheckM = 0;
+  /** Start the EKF from the map at the end of the current step. */
+  private mapStartDue = false;
+  private started: { method: InitMethod; tUs: number } | null = null;
   readonly stats: NavStats = { imuInvalidS: 0, standstillS: 0, obdDistanceM: 0, resets: 0 };
 
   constructor(config: Partial<NavConfig> = {}) {
@@ -251,14 +261,17 @@ export class Navigator {
   }
 
   /**
-   * Map matching (MAPMATCH-SPEC §7), open loop for now: a road-constrained particle filter runs on
-   * this navigator's odometry and accepted fixes, starting whenever the EKF does. Its hypotheses
-   * appear in `estimate().mapMatch`; nothing goes back into the EKF yet. Null switches it off.
+   * Map matching (MAPMATCH-SPEC §7, §8): a road-constrained particle filter runs on this navigator's
+   * odometry and fixes. Anchored (heading unknown) it starts from all roads around the anchor, and
+   * once it tracks one hypothesis long enough it starts the EKF (`initialization.method` "map"). In
+   * mode dr it runs open loop: its hypotheses appear in `estimate().mapMatch`, nothing goes back
+   * into the EKF yet. Null switches it off.
    */
   setRoadGraph(graph: MapMatchGraph | null, config: Partial<MapMatchConfig> = {}): void {
     this.mapGraph = graph;
     this.pf = graph ? new ParticleFilter(graph, config) : null;
     this.offRoadFromM = null;
+    this.trackingFromM = null;
     if (!graph) return;
     if (this.frame) graph.setFrame(this.frame);
     if (!this.mapMatchListening) {
@@ -266,6 +279,12 @@ export class Navigator {
       this.odometryListeners.push((step) => this.mapMatchOdometry(step));
     }
     if (this.ekf) this.startMapMatch();
+    else this.startMapMatchAtAnchor();
+  }
+
+  /** How and when the EKF last started (null: not running). */
+  get initialization(): { method: InitMethod; tUs: number } | null {
+    return this.ekf ? this.started : null;
   }
 
   /** The particle filter, for replay metrics (null without a road graph). */
@@ -359,9 +378,18 @@ export class Navigator {
     const tRef = fix.tUs - this.gnssLagS * 1e6;
     const sigma = fixSigma(fix);
     // The filter must be at the fix time before it weighs the fix.
-    if (this.pf?.isActive) this.odometry.flush();
+    if (this.pf) this.odometry.flush();
     const outcome = this.ekf ? this.updateEkf(fix, fE, fN, tRef, sigma) : this.updateBeforeInit(fix, fE, fN, tRef, sigma);
-    if (this.pf?.isActive && outcome.status === "accepted" && !this.pf.onFix(fE, fN, sigma, !isSatelliteFix(fix), this.gnssLagS)) {
+    const pf = this.pf;
+    if (pf && outcome.status === "anchored") {
+      // Heading unknown: every fix counts (there is no gate yet).
+      if (!pf.isActive) this.startMapMatchAtAnchor();
+      if (pf.isActive && !pf.onFix(fE, fN, sigma, !isSatelliteFix(fix), this.gnssLagS)) this.startMapMatchAtAnchor();
+      else if (pf.isActive && this.anchor) {
+        const [aE, aN] = frame.toEnu(this.anchor.coord);
+        pf.setSearchRegion(aE, aN, pf.config.initSigmas * this.anchor.sigma + this.anchor.distanceM);
+      }
+    } else if (pf?.isActive && (outcome.status === "accepted" || outcome.status === "init") && !pf.onFix(fE, fN, sigma, !isSatelliteFix(fix), this.gnssLagS)) {
       // The fix agrees with the EKF but not with any particle: the filter lost the car.
       this.startMapMatch();
     }
@@ -391,6 +419,7 @@ export class Navigator {
         ...this.anchor.coord,
         accuracyM: SQRT_68 * this.anchor.sigma + this.anchor.distanceM,
         speedMps: this.lastObd?.speedMps,
+        ...(this.pf?.isActive && this.frame ? { mapMatch: this.mapMatchEstimate(this.frame) } : {}),
       };
     }
     return null;
@@ -423,7 +452,7 @@ export class Navigator {
     const theta = wrapAngle(this.rel.psi - pose.headingRad);
     const cs = Math.cos(theta);
     const sn = Math.sin(theta);
-    this.initEkf(theta, e - (cs * this.rel.e - sn * this.rel.n), n - (sn * this.rel.e + cs * this.rel.n), pose.posSigmaM, pose.headingSigmaRad);
+    this.initEkf(theta, e - (cs * this.rel.e - sn * this.rel.n), n - (sn * this.rel.e + cs * this.rel.n), pose.posSigmaM, pose.headingSigmaRad, "pose");
     this.poseUnverifiedFromM = this.stats.obdDistanceM;
     return true;
   }
@@ -486,6 +515,11 @@ export class Navigator {
       this.ekfHistory.push(tUs, [this.ekf.east, this.ekf.north, this.ekf.psi, this.ekf.speed]);
       if (this.frame && Math.hypot(this.ekf.east, this.ekf.north) > this.config.reanchorM) this.reanchor();
     }
+    // After this step's prediction would have run: the new EKF starts at the state now.
+    if (this.mapStartDue) {
+      this.mapStartDue = false;
+      if (!this.ekf) this.startFromMap();
+    }
   }
 
   /**
@@ -546,7 +580,75 @@ export class Navigator {
     if (!this.pf || !ekf) return;
     this.odometry.flush();
     this.offRoadFromM = null;
+    this.trackingFromM = null;
     this.pf.init(ekf.east, ekf.north, ekf.positionSigma, ekf.psi, ekf.psiSigma, this.odometry.totals);
+  }
+
+  /**
+   * Heading unknown (mode anchored): start the filter on every road within the anchor's radius
+   * (3σ of the fix plus the distance driven since). Waits while that exceeds the filter's limit.
+   */
+  private startMapMatchAtAnchor(): void {
+    const pf = this.pf;
+    const anchor = this.anchor;
+    if (!pf || !anchor || !this.frame || this.ekf) return;
+    this.odometry.flush();
+    this.offRoadFromM = null;
+    this.trackingFromM = null;
+    this.nextMapStartCheckM = 0;
+    const [e, n] = this.frame.toEnu(anchor.coord);
+    if (!pf.initUnknown(e, n, pf.config.initSigmas * anchor.sigma + anchor.distanceM, this.odometry.totals)) pf.stop();
+  }
+
+  /**
+   * An EKF started by a course, alignment or parked pose: keep the filter when it already tracks a
+   * hypothesis that fits the new pose (it carries the turns driven so far), else restart it there.
+   */
+  private mapMatchAgrees(): boolean {
+    const pf = this.pf;
+    const ekf = this.ekf;
+    if (!pf?.isActive || !ekf) return false;
+    const out = pf.output();
+    const top = out.clusters[0];
+    if (out.state !== "tracking" || !top) return false;
+    const c = pf.config;
+    const d = Math.hypot(top.e - ekf.east, top.n - ekf.north);
+    const dPsi = Math.abs(wrapAngle(top.headingRad - ekf.psi));
+    return d <= 3 * ekf.positionSigma + c.agreeMarginM && dPsi <= 3 * ekf.psiSigma + c.agreeMarginRad;
+  }
+
+  /**
+   * The heading is settled (MAPMATCH-SPEC §8): the pose to start the EKF from — the tracked cluster,
+   * or the dominant travel direction when the particles agree on it but not yet on the position along
+   * the road.
+   */
+  private mapPose(): { e: number; n: number; spreadM: number; headingRad: number; headingSpreadRad: number } | null {
+    const pf = this.pf;
+    if (!pf?.isActive) return null;
+    const c = pf.config;
+    const out = pf.output();
+    if (out.state === "tracking" && out.clusters[0]) return out.clusters[0];
+    const d = pf.dominantHeading();
+    return d.weight >= c.trackingWeight && d.headingSpreadRad <= c.mapStartHeadingSpreadRad && d.spreadM <= c.mapStartSpreadM ? d : null;
+  }
+
+  /** Start the EKF from the map (MAPMATCH-SPEC §8): position and heading from the roads. */
+  private startFromMap(): void {
+    const pf = this.pf;
+    const top = this.mapPose();
+    if (!pf || !top || !this.frame) return;
+    const c = pf.config;
+    const theta = wrapAngle(this.rel.psi - top.headingRad);
+    const cs = Math.cos(theta);
+    const sn = Math.sin(theta);
+    this.initEkf(
+      theta,
+      top.e - (cs * this.rel.e - sn * this.rel.n),
+      top.n - (sn * this.rel.e + cs * this.rel.n),
+      Math.max(top.spreadM, c.mapStartMinPosSigmaM),
+      Math.hypot(Math.max(top.headingSpreadRad, c.mapStartMinHeadingSigmaRad), top.spreadM * c.mapStartCurvatureRadPerM),
+      "map",
+    );
   }
 
   private mapMatchOdometry(step: OdometryStep): void {
@@ -555,9 +657,33 @@ export class Navigator {
     const ekf = this.ekf;
     pf.onOdometry(step, ekf ? { psi: ekf.psi, psiSigma: ekf.psiSigma, e: ekf.east, n: ekf.north, posSigma: ekf.positionSigma } : null);
     if (step.stopped) return;
+    if (!ekf && step.distanceM >= this.nextMapStartCheckM) {
+      // Heading unknown: a heading settled over `mapStartTrackingM` starts the EKF.
+      this.nextMapStartCheckM = step.distanceM + pf.config.evalIntervalM;
+      if (this.mapPose()) {
+        this.trackingFromM ??= step.distanceM;
+        // Mid-turn, or near a bend of the road polyline, the road heading is not the car's: start on a
+        // straight road, driving straight. The car is somewhere within the cloud's spread along it.
+        const c = pf.config;
+        const pose = this.mapPose();
+        if (
+          pose &&
+          step.distanceM - this.trackingFromM >= c.mapStartTrackingM &&
+          pf.isStraight &&
+          pf.straightRoadWeight(c.mapStartRoadWindowM + pose.spreadM, c.mapStartRoadStraightRad) >= c.trackingWeight
+        ) {
+          this.mapStartDue = true;
+        }
+      } else {
+        this.trackingFromM = null;
+      }
+    }
     if (pf.offRoadWeight() > 0.5) {
       this.offRoadFromM ??= step.distanceM;
-      if (step.distanceM - this.offRoadFromM >= MAP_MATCH_REINIT_OFFROAD_M) this.startMapMatch();
+      if (step.distanceM - this.offRoadFromM >= MAP_MATCH_REINIT_OFFROAD_M) {
+        if (ekf) this.startMapMatch();
+        else this.startMapMatchAtAnchor();
+      }
     } else {
       this.offRoadFromM = null;
     }
@@ -588,7 +714,7 @@ export class Navigator {
       const theta = wrapAngle(relThen[2] - fix.courseRad);
       const cs = Math.cos(theta);
       const sn = Math.sin(theta);
-      this.initEkf(theta, fE - (cs * relThen[0] - sn * relThen[1]), fN - (sn * relThen[0] + cs * relThen[1]), sigma, Math.max(fix.courseAccRad ?? 0, (3 * Math.PI) / 180));
+      this.initEkf(theta, fE - (cs * relThen[0] - sn * relThen[1]), fN - (sn * relThen[0] + cs * relThen[1]), sigma, Math.max(fix.courseAccRad ?? 0, (3 * Math.PI) / 180), "course");
       return { status: "init", initMethod: "course" };
     }
 
@@ -609,12 +735,12 @@ export class Navigator {
     const cN = this.alignPoints.reduce((s, p) => s + p.relN, 0) / n;
     const lever = Math.hypot(this.rel.e - cE, this.rel.n - cN);
     const fitSigma = 1 / Math.sqrt(this.alignPoints.reduce((s, p) => s + 1 / (p.sigma * p.sigma), 0));
-    this.initEkf(a.theta, a.tE, a.tN, Math.hypot(fitSigma, lever * a.thetaSigma), a.thetaSigma);
+    this.initEkf(a.theta, a.tE, a.tN, Math.hypot(fitSigma, lever * a.thetaSigma), a.thetaSigma, "alignment");
     return { status: "init", initMethod: "alignment" };
   }
 
   /** Start the EKF at the current relative-track position mapped by rot(θ) + t. */
-  private initEkf(theta: number, tE: number, tN: number, posSigma: number, psiSigma: number): void {
+  private initEkf(theta: number, tE: number, tN: number, posSigma: number, psiSigma: number, method: InitMethod): void {
     const cs = Math.cos(theta);
     const sn = Math.sin(theta);
     this.ekf = new DrEkf(
@@ -636,7 +762,10 @@ export class Navigator {
     this.poseUnverifiedFromM = null;
     this.anchor = null;
     this.rejectedSat = 0;
-    this.startMapMatch();
+    this.started = { method, tUs: this.lastTUs ?? 0 };
+    this.trackingFromM = null;
+    // Started from the map, the filter carries on; otherwise it is kept only if it agrees.
+    if (method !== "map" && !this.mapMatchAgrees()) this.startMapMatch();
   }
 
   private updateEkf(fix: GnssFix, fE: number, fN: number, tRef: number, sigma: number): FixOutcome {
@@ -687,6 +816,6 @@ export class Navigator {
     this.poseUnverifiedFromM = null;
     this.stats.resets++;
     this.pf?.stop();
-    this.offRoadFromM = null;
+    this.startMapMatchAtAnchor();
   }
 }
