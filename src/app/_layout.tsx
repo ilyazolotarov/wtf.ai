@@ -12,6 +12,7 @@ import { useState } from "react";
 import { useColorScheme } from "react-native";
 
 import { AnimatedSplash } from "@/components/animated-splash";
+import { setSheetClosing } from "@/components/map/sheet-closing";
 import { initSentry, Sentry } from "@/config/sentry";
 import { Colors } from "@/constants/theme";
 import { I18nProvider, useT } from "@/i18n/provider";
@@ -63,7 +64,6 @@ const SHEETS = [
   "more",
   "calibration",
   "downloads",
-  "debug",
   "settings",
 ] as const;
 
@@ -78,6 +78,11 @@ function AppStack() {
         <Stack.Screen
           key={name}
           name={name}
+          listeners={{
+            transitionStart: (e) => setSheetClosing(e.data.closing),
+            transitionEnd: () => setSheetClosing(false),
+            gestureCancel: () => setSheetClosing(false),
+          }}
           options={{
             headerShown: false,
             presentation: "formSheet",

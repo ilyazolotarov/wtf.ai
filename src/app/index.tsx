@@ -1,5 +1,6 @@
 import { useKeepAwake } from "expo-keep-awake";
-import { Link, router } from "expo-router";
+import { BlurView } from "expo-blur";
+import { Link, router, useIsFocused } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
     Alert,
@@ -7,6 +8,7 @@ import {
     Linking,
     Pressable,
     StyleSheet,
+    useColorScheme,
     View,
     type ViewStyle,
 } from "react-native";
@@ -24,6 +26,7 @@ import {
     formatDistance,
     toDegrees,
 } from "@/components/status/format-geo";
+import { useSheetClosing } from "@/components/map/sheet-closing";
 import { useNavStatus } from "@/components/status/use-nav-status";
 import { GlassFill } from "@/components/ui/glass-fill";
 import { Icon, type IconName } from "@/components/ui/icon";
@@ -103,11 +106,10 @@ export default function HomeScreen() {
     if (!isOnboardingDone()) router.push("/onboarding");
   }, []);
 
-  const cycleCameraMode = () => {
+  // Tap never enters free (only map gestures do); from free it returns to follow.
+  const toggleCameraMode = () => {
     setGhostView(false);
-    pickCameraMode((mode) =>
-      mode === "follow" ? "follow-heading" : mode === "follow-heading" ? "free" : "follow",
-    );
+    pickCameraMode((mode) => (mode === "follow" ? "follow-heading" : "follow"));
   };
 
   const enableLocation = async () => {
@@ -194,26 +196,25 @@ export default function HomeScreen() {
                   {nav.sentence}
                 </T>
                 <T size={12} color={palette.text2} numberOfLines={1}>
-                  {position ? `${nav.source} · ${accuracyText}` : "—"}
+                  {position ? (
+                    <>
+                      {nav.source} · <T size={12} color={accuracyColor}>{accuracyText}</T>
+                    </>
+                  ) : (
+                    "—"
+                  )}
                 </T>
               </View>
             </View>
-            <Link href="/vehicle" asChild>
-              <Pressable
-                style={StyleSheet.flatten<ViewStyle>([panel, styles.vehicleButton])}
-                accessibilityRole="button"
-                accessibilityLabel={`${t("vehicle")}: ${nav.adapterLabel}`}
-              >
-                <GlassFill radius={28} />
-                <Icon name="directions_car" size={24} color={nav.adapterColor} />
-                {recording && (
-                  <View
-                    style={[styles.recDot, { backgroundColor: palette.bad.c, borderColor: palette.groupBg }]}
-                    accessibilityLabel={t("recording")}
-                  />
-                )}
-              </Pressable>
-            </Link>
+            <View style={[panel, styles.speedPanel]}>
+              <GlassFill radius={28} />
+              <T w="light" size={28} style={styles.speedNumber}>
+                {speed}
+              </T>
+              <T size={11} color={palette.text2}>
+                {t("speed")}
+              </T>
+            </View>
           </View>
 
           {alertText && (
@@ -337,43 +338,36 @@ export default function HomeScreen() {
         <View pointerEvents="box-none" style={styles.bottomStack}>
           <Pressable
             style={({ pressed }) => [panel, styles.cameraButton, pressed && styles.pressed]}
-            onPress={cycleCameraMode}
+            onPress={toggleCameraMode}
             accessibilityRole="button"
+            accessibilityLabel={
+              cameraMode === "free"
+                ? `${t(CAMERA.free.label)}, ${t("tapToFollow")}`
+                : t(CAMERA[cameraMode].label)
+            }
           >
-            <GlassFill radius={Radius.pill} />
-            <Icon name={CAMERA[cameraMode].icon} size={22} color={palette.accent} />
-            <T w="medium" size={14}>
-              {t(CAMERA[cameraMode].label)}
-            </T>
+            <GlassFill radius={26} />
+            <Icon
+              name={CAMERA[cameraMode].icon}
+              size={24}
+              color={cameraMode === "free" ? palette.text2 : palette.accent}
+            />
           </Pressable>
           <View style={[panel, styles.bottomCard]}>
             <GlassFill radius={30} />
-            <View style={styles.readouts}>
-              <View style={styles.speed}>
-                <T w="light" size={60} style={styles.speedNumber}>
-                  {speed}
-                </T>
-                <T size={14} color={palette.text2}>
-                  {t("speed")}
-                </T>
-              </View>
-              <View style={styles.accuracy}>
-                <T size={12} color={palette.text2}>
-                  {t("accuracy")}
-                </T>
-                <T w="semibold" size={18} color={accuracyColor} style={styles.tabular}>
-                  {accuracyText}
-                </T>
-              </View>
-            </View>
-            <View style={styles.actions}>
-              <HudAction icon="alt_route" label={t("route")} href="/route" />
-              <HudAction icon="directions_car" label={t("vehicle")} href="/vehicle" />
-              <HudAction icon="more_horiz" label={t("more")} href="/more" />
-            </View>
+            <HudAction icon="alt_route" label={t("route")} href="/route" />
+            <HudAction
+              icon="directions_car"
+              label={t("vehicle")}
+              href="/vehicle"
+              recording={recording}
+              recordingLabel={t("recording")}
+            />
+            <HudAction icon="more_horiz" label={t("more")} href="/more" />
           </View>
         </View>
       </View>
+      <SheetBlur />
     </View>
   );
 }
@@ -382,10 +376,14 @@ function HudAction({
   icon,
   label,
   href,
+  recording,
+  recordingLabel,
 }: {
   icon: IconName;
   label: string;
   href: "/route" | "/vehicle" | "/more";
+  recording?: boolean;
+  recordingLabel?: string;
 }) {
   const palette = usePalette();
   return (
@@ -393,10 +391,19 @@ function HudAction({
     <Link href={href} asChild>
       <Pressable style={styles.action} accessibilityRole="button">
         {({ pressed }) => (
-          <View style={[styles.actionContent, pressed && styles.pressed]}>
-            <View style={[styles.actionCircle, { backgroundColor: palette.surface }]}>
-              <Icon name={icon} size={24} color={palette.text} />
-            </View>
+          <View
+            style={[
+              styles.actionContent,
+              pressed && { backgroundColor: palette.line },
+            ]}
+          >
+            <Icon name={icon} size={24} color={palette.text} />
+            {recording && (
+              <View
+                style={[styles.recDot, { backgroundColor: palette.bad.c, borderColor: palette.groupBg }]}
+                accessibilityLabel={recordingLabel}
+              />
+            )}
             <T w="medium" size={12}>
               {label}
             </T>
@@ -404,6 +411,28 @@ function HudAction({
         )}
       </Pressable>
     </Link>
+  );
+}
+
+/** Blurs the map and the HUD over it while a sheet (route, vehicle, more…) is open over this screen. */
+function SheetBlur() {
+  // Blurred while a sheet is open, and un-blurs as soon as it starts closing.
+  const isFocused = useIsFocused();
+  const closing = useSheetClosing();
+  const focused = isFocused || closing;
+  const dark = useColorScheme() === "dark";
+  const [opacity] = useState(() => new Animated.Value(0));
+  useEffect(() => {
+    Animated.timing(opacity, {
+      toValue: focused ? 0 : 1,
+      duration: 150,
+      useNativeDriver: true,
+    }).start();
+  }, [focused, opacity]);
+  return (
+    <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { opacity }]}>
+      <BlurView intensity={40} tint={dark ? "dark" : "light"} style={StyleSheet.absoluteFill} />
+    </Animated.View>
   );
 }
 
@@ -445,9 +474,8 @@ const styles = StyleSheet.create({
   },
   panel: { borderCurve: "continuous" },
   pressed: { opacity: 0.75 },
-  tabular: { fontVariant: ["tabular-nums"] },
   topStack: { gap: 10 },
-  topRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  topRow: { flexDirection: "row", alignItems: "stretch", gap: 10 },
   statusPill: {
     flex: 1,
     minHeight: 56,
@@ -468,17 +496,22 @@ const styles = StyleSheet.create({
   },
   statusDot: { width: 12, height: 12, borderRadius: 6 },
   statusCopy: { flex: 1, gap: 1 },
-  vehicleButton: {
-    width: 56,
-    height: 56,
+  speedPanel: {
+    minWidth: 76,
+    minHeight: 56,
     borderRadius: 28,
     alignItems: "center",
     justifyContent: "center",
   },
+  speedNumber: {
+    lineHeight: 28,
+    letterSpacing: -0.8,
+    fontVariant: ["tabular-nums"],
+  },
   recDot: {
     position: "absolute",
-    top: 9,
-    right: 9,
+    top: 8,
+    right: 22,
     width: 12,
     height: 12,
     borderRadius: 6,
@@ -552,42 +585,24 @@ const styles = StyleSheet.create({
   bottomStack: { gap: 12 },
   cameraButton: {
     alignSelf: "flex-end",
-    height: 52,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    paddingLeft: 14,
-    paddingRight: 18,
-    borderRadius: Radius.pill,
-  },
-  bottomCard: {
-    gap: 16,
-    paddingTop: 18,
-    paddingHorizontal: 18,
-    paddingBottom: 14,
-    borderRadius: 30,
-  },
-  readouts: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  speed: { flexDirection: "row", alignItems: "baseline", gap: 6 },
-  speedNumber: {
-    lineHeight: 58,
-    letterSpacing: -1.8,
-    fontVariant: ["tabular-nums"],
-  },
-  accuracy: { alignItems: "flex-end", gap: 2 },
-  actions: { flexDirection: "row", gap: 8 },
-  action: { flex: 1 },
-  actionContent: { alignItems: "center", gap: 6 },
-  actionCircle: {
     width: 52,
     height: 52,
     borderRadius: 26,
     alignItems: "center",
     justifyContent: "center",
+  },
+  bottomCard: {
+    flexDirection: "row",
+    gap: 4,
+    padding: 6,
+    borderRadius: 30,
+  },
+  action: { flex: 1 },
+  actionContent: {
+    height: 60,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 3,
+    borderRadius: 24,
   },
 });

@@ -2,7 +2,6 @@ import { router, type Href } from "expo-router";
 import { Pressable, StyleSheet, useColorScheme, View } from "react-native";
 
 import { ScreenContent, ScreenSection } from "@/components/screens/screen-ui";
-import { useNavStatus } from "@/components/status/use-nav-status";
 import { Icon, type IconName } from "@/components/ui/icon";
 import { T } from "@/components/ui/text";
 import { usePalette } from "@/constants/theme";
@@ -14,7 +13,6 @@ export default function MoreScreen() {
   const { t, language } = useT();
   const palette = usePalette();
   const dark = useColorScheme() === "dark";
-  const nav = useNavStatus();
   const { installed } = useMapPacks();
   const ready = downloadsMock.filter((pack) =>
     pack.id === "map" ? installed.active != null : pack.status === "ready",
@@ -37,12 +35,6 @@ export default function MoreScreen() {
       sub: calibrated ? t("calDone") : t("notCalibrated"),
       subColor: calibrated ? palette.ok.c : palette.warn.c,
       href: "/calibration?from=more",
-    },
-    {
-      icon: "monitoring",
-      label: t("debug"),
-      sub: `${nav.label} · ${nav.source}`,
-      href: "/debug?from=more",
     },
     {
       icon: "settings",

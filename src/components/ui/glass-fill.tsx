@@ -14,7 +14,7 @@ export function GlassFill({ radius }: { radius: number }) {
   const shape = { borderRadius: radius, borderCurve: "continuous" as const };
   return (
     <View pointerEvents="none" style={[StyleSheet.absoluteFill, shape, styles.clip]}>
-      <BlurView intensity={60} tint={dark ? "dark" : "light"} style={StyleSheet.absoluteFill} />
+      <BlurView intensity={35} tint={dark ? "dark" : "light"} style={StyleSheet.absoluteFill} />
       <View style={[StyleSheet.absoluteFill, { backgroundColor: palette.panel }]} />
     </View>
   );

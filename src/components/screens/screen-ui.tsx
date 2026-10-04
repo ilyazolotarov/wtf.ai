@@ -17,7 +17,8 @@ import { useT } from "@/i18n/provider";
 
 /**
  * Sheet body. With `title`, renders the sheet header: title, a back button
- * when opened from the More sheet (`?from=more`), and a close button.
+ * when opened from the More sheet (`?from=more`), and a close button. The header stays
+ * pinned while the body scrolls.
  */
 export function ScreenContent({
   title,
@@ -29,6 +30,7 @@ export function ScreenContent({
       style={{ backgroundColor: palette.sheetBg }}
       contentInsetAdjustmentBehavior="automatic"
       keyboardShouldPersistTaps="handled"
+      stickyHeaderIndices={title ? [0] : undefined}
       contentContainerStyle={[styles.content, !title && styles.contentNoHeader]}
     >
       {title && <SheetHeader title={title} />}
@@ -41,8 +43,10 @@ function SheetHeader({ title }: { title: string }) {
   const { t } = useT();
   const { from } = useLocalSearchParams<{ from?: string }>();
   const nested = from === "more";
+  const palette = usePalette();
   return (
-    <View style={styles.header}>
+    // Opaque and full-bleed so scrolled content doesn't show beside or under the pinned header.
+    <View style={[styles.header, { backgroundColor: palette.sheetBg }]}>
       {nested && (
         <RoundButton icon="arrow_back" label={t("back")} onPress={() => router.back()} />
       )}
@@ -312,7 +316,11 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
+    marginHorizontal: -16,
+    paddingHorizontal: 16,
     paddingTop: 6,
+    paddingBottom: 12,
+    marginBottom: -6,
   },
   headerTitle: { flex: 1, letterSpacing: -0.24 },
   roundButton: {
