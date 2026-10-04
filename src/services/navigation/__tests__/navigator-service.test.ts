@@ -436,6 +436,48 @@ describe("map matching", () => {
     service.stop();
   });
 
+  test("a simulated outage withholds GNSS from the navigator and scores the dot against it", async () => {
+    const drive = syntheticDrive({ segments: JUNCTION_DRIVE, origin: GRAPH_ORIGIN, startHeadingRad: Math.PI / 2, gnss: "clean", obdScale: 0.99 });
+    const { service, play, notes, logged } = harness({ roadGraph: fixtureGraphSource() });
+    await service.start();
+    play(drive, { untilS: 100 });
+    service.setSimulatedOutage(true);
+    expect(notes.at(-1)).toBe("sim gnss outage on");
+    play(drive);
+
+    const p = service.getSnapshot()!;
+    // As in a real outage: dead-reckoning on the map, GNSS no longer trusted.
+    expect(p).toMatchObject({ source: "dr", mapMatch: "tracking" });
+    expect(p.trust).not.toBe("TRUSTED");
+    const o = p.simulatedOutage!;
+    expect(o.gnss).toBeDefined();
+    expect(o.distanceM).toBeGreaterThan(700); // ~800 m driven after the cut
+    expect(o.errorM).toBeLessThan(25);
+    expect(o.maxErrorM).toBeGreaterThanOrEqual(o.errorM!);
+    // The trip log still sees what the map showed.
+    expect(logged.at(-1)?.source).toBe("dr");
+
+    service.setSimulatedOutage(false);
+    expect(notes.at(-1)).toMatch(/^sim gnss outage off: \d+ s, \d+\.\d\d km, dot \d+ m from GPS \(max \d+ m\)$/);
+    expect(service.getSnapshot()?.simulatedOutage).toBeUndefined();
+    service.stop();
+  });
+
+  test("the debug overlay has the heaviest particles and the hypotheses", async () => {
+    const drive = syntheticDrive({ segments: JUNCTION_DRIVE, origin: GRAPH_ORIGIN, startHeadingRad: Math.PI / 2, gnss: "clean", obdScale: 0.99 });
+    const { service, play } = harness({ roadGraph: fixtureGraphSource() });
+    await service.start();
+    play(drive, { untilS: 60 });
+    const overlay = service.getMapMatchOverlay()!;
+    expect(overlay.particles.length).toBeGreaterThan(0);
+    expect(overlay.particles.length).toBeLessThanOrEqual(200);
+    expect(overlay.particles[0][2]).toBe(1);
+    expect(overlay.clusters[0].weight).toBeGreaterThan(0.9);
+    // The same object until the next published position.
+    expect(service.getMapMatchOverlay()).toBe(overlay);
+    service.stop();
+  });
+
   test("without a graph nothing changes", async () => {
     const drive = syntheticDrive({ segments: JUNCTION_DRIVE, origin: GRAPH_ORIGIN, startHeadingRad: Math.PI / 2, gnss: "clean", obdScale: 0.99 });
     const { service, play, notes, loggedMapMatch } = harness();
@@ -444,6 +486,7 @@ describe("map matching", () => {
     expect(service.getSnapshot()?.mapMatch).toBeUndefined();
     expect(loggedMapMatch).toEqual([]);
     expect(notes.some((n) => n.startsWith("mm "))).toBe(false);
+    expect(service.getMapMatchOverlay()).toBeNull();
     service.stop();
   });
 });

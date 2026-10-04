@@ -291,6 +291,12 @@ Until `src/nav/integrity` (SPEC Phase 3), the map's trust state comes from `Gnss
   - Mode changes, resets, the parked pose (saved, used, confirmed, rejected), and loaded/saved calibration are app
     notes (`nav …`).
 - **Persistence** per §7.4.
+- **Simulated GNSS outage** (test tool; Developer settings → "GPS outage button on the map"): a "Cut GPS" chip on
+  the map withholds every fix from the navigator and the trust tracker, as a real outage would, while
+  `SensorService` keeps logging them. The map shows the newest withheld satellite fix (≤ 10 m, ≤ 3 s old) as a
+  green "GPS" marker, and a card with the time, the OBD distance and the dot's distance from that fix (now and
+  max). Notes: `sim gnss outage on`, `sim gnss outage off: <s> s, <km> km, dot <m> m from GPS (max <m> m)`.
+  `npm run replay -- --app-cuts` (and `replay:mm`) cuts the same windows. Switching the button off ends an outage.
 - **Tests:** unit tests replay synthetic drives through the service. The 7 real logs replayed through it (real
   delivery delays) match the offline replay: median 0.1–1 m apart, identical learned values.
 

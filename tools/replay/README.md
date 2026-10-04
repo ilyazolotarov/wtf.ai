@@ -13,6 +13,7 @@ npm run replay -- trip.ulg --lag 0.5                             # fixed GNSS po
 npm run replay -- trip.ulg --sweep-lag                           # pre-fix error per fixed lag (can't see a constant lag; prefer the measured one)
 npm run replay -- trip.ulg --json                                # summary as JSON
 npm run replay -- --chain a.ulg b.ulg c.ulg                      # each log starts from the pose the previous one parked in
+npm run replay -- --app-cuts trip.ulg                            # cut where "Cut GPS" was on in the app (also replay:mm)
 ```
 
 Keep outputs in `tools/triplog/logs/` (git-ignored). They contain coordinates.

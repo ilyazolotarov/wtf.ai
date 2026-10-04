@@ -21,6 +21,25 @@ export interface ReplayCut {
   openLoop?: boolean;
 }
 
+/**
+ * The GNSS outages simulated in the app (NavigatorService test tool), from its `sim gnss outage on`
+ * / `off` notes, as cuts: replay withholds the same fixes. One still on at the end runs to the end.
+ */
+export function appOutageCuts(trip: TripLog): ReplayCut[] {
+  const cuts: ReplayCut[] = [];
+  let fromS: number | null = null;
+  for (const m of trip.messages) {
+    const tS = (m.tUs - trip.startUs) / 1e6;
+    if (m.text === "sim gnss outage on") fromS = tS;
+    else if (m.text.startsWith("sim gnss outage off") && fromS !== null) {
+      cuts.push({ fromS, toS: tS });
+      fromS = null;
+    }
+  }
+  if (fromS !== null) cuts.push({ fromS, toS: Infinity });
+  return cuts;
+}
+
 export interface ReplayOptions {
   nav?: Partial<NavConfig>;
   cuts?: ReplayCut[];

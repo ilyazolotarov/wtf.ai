@@ -8,7 +8,7 @@ import { basename } from "node:path";
 
 import type { MapMatchConfig } from "../../src/nav/mapmatch/particle-filter";
 import type { JamWindow } from "../../src/nav/replay/jam";
-import { replayTrip, type ReplayCut } from "../../src/nav/replay/replay";
+import { appOutageCuts, replayTrip, type ReplayCut } from "../../src/nav/replay/replay";
 import { matchTruth } from "../../src/nav/replay/truth-match";
 import { isSatelliteFix } from "../../src/nav/types";
 import { readTripLog } from "../../src/triplog/trip-log-reader";
@@ -23,6 +23,7 @@ function parseArgs(argv: string[]) {
   let trace: [number, number] | undefined;
   const jam: JamWindow[] = [];
   let startAtS: number | undefined;
+  let appCuts = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--graph") graph = argv[++i];
@@ -35,6 +36,7 @@ function parseArgs(argv: string[]) {
       const [from, len] = argv[++i].split(":");
       jam.push({ fromS: Number(from), toS: len === "inf" ? Infinity : Number(from) + Number(len) });
     } else if (a === "--start") startAtS = Number(argv[++i]);
+    else if (a === "--app-cuts") appCuts = true;
     else if (a === "--cut") {
       const [from, len] = argv[++i].split(":").map(Number);
       cuts.push({ fromS: from, toS: from + len });
@@ -43,13 +45,13 @@ function parseArgs(argv: string[]) {
       openLoopDelayS = next !== undefined && /^\d+(\.\d+)?$/.test(next) ? Number(argv[++i]) : 0;
     } else if (a === "-h" || a === "--help") {
       console.log(
-        "replay:mm [--graph <file>] [--cut <startS>:<lenS>]... [--open-loop [delayS]] [--mm '<json>'] [--start <s>] [--jam <startS>:<lenS|inf>]... [--trace <fromS>:<toS>] <trip.ulg...>",
+        "replay:mm [--graph <file>] [--cut <startS>:<lenS>]... [--open-loop [delayS]] [--app-cuts] [--mm '<json>'] [--start <s>] [--jam <startS>:<lenS|inf>]... [--trace <fromS>:<toS>] <trip.ulg...>",
       );
       process.exit(0);
     } else files.push(a);
   }
   if (!files.length) throw new Error("no trip log given (see --help)");
-  return { files, cuts, graph, config, openLoopDelayS, trace, jam, startAtS };
+  return { files, cuts, graph, config, openLoopDelayS, trace, jam, startAtS, appCuts };
 }
 
 const pct = (v: number | null) => (v === null ? "—" : `${(v * 100).toFixed(1)} %`);
@@ -72,7 +74,7 @@ for (const file of args.files) {
   const navGraph = openGraph(graphFile, first);
   const started = performance.now();
   const r = replayTrip(trip, {
-    cuts: args.cuts,
+    cuts: args.appCuts ? [...args.cuts, ...appOutageCuts(trip)] : args.cuts,
     openLoop: args.openLoopDelayS === undefined ? undefined : { delayS: args.openLoopDelayS },
     mapMatch: { graph: navGraph.graph, truth, config: args.config },
     jam: args.jam,

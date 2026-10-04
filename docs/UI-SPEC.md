@@ -136,6 +136,9 @@ Depends on Phase 2.
 - Raw GNSS **ghost marker** from `rawGnss`; hidden while `source === 'gnss'`.
 - **Map-match alternatives** from `alternatives` (other roads the car may be on, MAPMATCH-SPEC §11): hollow
   markers under the puck, more opaque the heavier they are.
+- **Test tools** (Developer settings, off by default): the map-matching particle overlay (MAPMATCH-SPEC §11) and a
+  "Cut GPS" chip that simulates a GNSS outage; while it is on, a card replaces the trust alert with the time,
+  distance, the dot's distance from the withheld GPS fix and "Restore GPS" (NAVIGATOR-SPEC §9).
 - `useKeepAwake()` while the map screen is focused.
 
 ### 6.2 Camera modes

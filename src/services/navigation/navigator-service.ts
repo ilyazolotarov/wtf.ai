@@ -7,7 +7,8 @@ import * as Location from "expo-location";
 import type { MapMatchState } from "@/nav/mapmatch/particle-filter";
 import type { MapMatchEstimate, NavConfig, NavMode, ParkedPose } from "@/nav/navigator";
 import { Navigator } from "@/nav/navigator";
-import type { PositionEstimate, PositionSourceKind } from "@/nav/position/types";
+import { haversineM } from "@/nav/geo";
+import type { PositionEstimate, PositionSourceKind, SimulatedOutage } from "@/nav/position/types";
 import type { CompassTrust } from "@/nav/compass/compass";
 import type { GnssFix, ImuSample, MagSample, ObdSpeedSample } from "@/nav/types";
 import type { EngineState, SpeedSample, VehicleLinkSnapshot } from "@/obd/types";
@@ -54,6 +55,11 @@ const MAP_MATCH_PUCK: ReadonlySet<MapMatchState> = new Set(["tracking", "multimo
 const ALTERNATIVE_MIN_WEIGHT = 0.05;
 /** The puck's radius from a hypothesis' spread is at least this (a tight cluster isn't a perfect one). */
 const MAP_MATCH_MIN_ACCURACY_M = 5;
+/** In a simulated outage, a withheld fix is the truth when it is a satellite fix this accurate and recent. */
+const OUTAGE_TRUTH_MAX_ACC_M = 10;
+const OUTAGE_TRUTH_MAX_AGE_MS = 3000;
+/** Particles in the debug overlay, heaviest first. */
+const OVERLAY_PARTICLES = 200;
 
 export interface NavigatorLink {
   onSpeed(listener: (s: SpeedSample) => void): () => void;
@@ -83,6 +89,13 @@ export interface NavigatorDebug {
   /** Map matching: the region whose graph is set (null: none), the filter's state and cost. */
   mapMatchRegion: string | null;
   mapMatch: MapMatchEstimate | null;
+}
+
+/** The particle filter's state for the map's debug overlay (MAPMATCH-SPEC §11). */
+export interface MapMatchOverlay {
+  /** [lat, lon, weight ÷ the heaviest particle's, off-road 1/0], heaviest first. */
+  particles: [number, number, number, number][];
+  clusters: MapMatchEstimate["clusters"];
 }
 
 export interface NavigatorServiceDeps {
@@ -156,12 +169,56 @@ export class NavigatorService implements PositionSource {
   /** The road graph set on the navigator: its key, region and build time. */
   private graph: { key: string; region: string; builtAt: number } | null = null;
   private notedMapMatch: MapMatchState = "off";
+  /** Test tool: GNSS withheld from the navigator. `hidden` is the newest fix withheld. */
+  private outage: { startedAt: number; startDistanceM: number | null; hidden: GnssRecord | null; maxErrorM: number } | null = null;
+  private overlay: MapMatchOverlay | null = null;
+  private overlayStale = true;
 
   constructor(deps: NavigatorServiceDeps) {
     this.deps = deps;
   }
 
   getSnapshot = (): PositionEstimate | null => this.position;
+
+  get simulatedOutage(): boolean {
+    return this.outage !== null;
+  }
+
+  /**
+   * Test tool: cut GNSS for the navigator (and the trust status) as a real outage would, while the
+   * sensors keep logging it. The map shows the withheld fix and how far the dot is from it.
+   */
+  setSimulatedOutage(on: boolean): void {
+    if (on === (this.outage !== null)) return;
+    if (on) {
+      this.outage = { startedAt: Date.now(), startDistanceM: this.nav?.stats.obdDistanceM ?? null, hidden: null, maxErrorM: 0 };
+      this.note("sim gnss outage on");
+    } else {
+      const o = this.position?.simulatedOutage;
+      const parts = [`${Math.round((Date.now() - this.outage!.startedAt) / 1000)} s`];
+      if (o?.distanceM !== undefined) parts.push(`${(o.distanceM / 1000).toFixed(2)} km`);
+      if (o?.errorM !== undefined) parts.push(`dot ${Math.round(o.errorM)} m from GPS (max ${Math.round(o.maxErrorM ?? 0)} m)`);
+      this.note(`sim gnss outage off: ${parts.join(", ")}`);
+      this.outage = null;
+    }
+    if (this.position) this.set(this.position);
+  }
+
+  /** Particles and hypotheses now (null: map matching off); recomputed once per published position. */
+  getMapMatchOverlay(): MapMatchOverlay | null {
+    if (!this.overlayStale) return this.overlay;
+    this.overlayStale = false;
+    const nav = this.nav;
+    const mm = nav?.estimate()?.mapMatch;
+    if (!nav || !mm) return (this.overlay = null);
+    const particles = nav.mapMatchParticles(OVERLAY_PARTICLES);
+    const heaviest = particles[0]?.[2] ?? 0;
+    this.overlay = {
+      particles: particles.map(([lat, lon, w, off]) => [lat, lon, heaviest > 0 ? w / heaviest : 0, off]),
+      clusters: mm.clusters,
+    };
+    return this.overlay;
+  }
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
@@ -350,6 +407,11 @@ export class NavigatorService implements PositionSource {
 
   private onGnss(r: GnssRecord): void {
     if (!Number.isFinite(r.latDeg) || !Number.isFinite(r.lonDeg)) return;
+    if (this.outage) {
+      this.outage.hidden = r;
+      this.publish();
+      return;
+    }
     this.lastFix = r;
     const satellite = isSatelliteRecord(r);
     this.trust.onFix(Number.isFinite(r.hAccM) ? r.hAccM : 9999, r.utcUs / 1000, satellite);
@@ -555,9 +617,30 @@ export class NavigatorService implements PositionSource {
 
   /** `behindUs`: how far the navigator's state lags now (the drawn position is extrapolated over it). */
   private set(position: PositionEstimate, behindUs = 0): void {
-    this.position = position;
+    const { simulatedOutage: _, ...rest } = position;
+    const outage = this.outageInfo(rest);
+    this.position = outage ? { ...rest, simulatedOutage: outage } : rest;
+    this.overlayStale = true;
     this.logPosition(position, behindUs);
     this.listeners.forEach((listener) => listener());
+  }
+
+  private outageInfo(p: PositionEstimate): SimulatedOutage | undefined {
+    const o = this.outage;
+    if (!o) return undefined;
+    const h = o.hidden;
+    const truth =
+      h && isSatelliteRecord(h) && h.hAccM <= OUTAGE_TRUTH_MAX_ACC_M && Date.now() - h.utcUs / 1000 <= OUTAGE_TRUTH_MAX_AGE_MS
+        ? { lat: h.latDeg, lon: h.lonDeg, accuracyM: h.hAccM, timestamp: h.utcUs / 1000 }
+        : undefined;
+    const errorM = truth ? haversineM(p, truth) : undefined;
+    if (errorM !== undefined) o.maxErrorM = Math.max(o.maxErrorM, errorM);
+    const nav = this.nav;
+    return {
+      startedAt: o.startedAt,
+      ...(nav && o.startDistanceM !== null ? { distanceM: Math.max(0, nav.stats.obdDistanceM - o.startDistanceM) } : {}),
+      ...(truth ? { gnss: truth, errorM, maxErrorM: o.maxErrorM } : {}),
+    };
   }
 
   private logPosition(p: PositionEstimate, behindUs: number): void {

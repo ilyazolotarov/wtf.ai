@@ -22,6 +22,7 @@ import type { Strings } from "@/i18n/en";
 import { useT } from "@/i18n/provider";
 import type { DiscoveredDevice } from "@/obd/types";
 import {
+  useDevSettings,
   useRecorderSnapshot,
   useRuntime,
   useSensorSnapshot,
@@ -326,10 +327,10 @@ function CycleRow<T extends number | null>({
 
 function DeveloperTab() {
   const { t } = useT();
-  const { link, recorder, getDevSettings, setDevSettings } = useRuntime();
+  const { link, recorder, setDevSettings } = useRuntime();
   const rec = useRecorderSnapshot();
   const activeDeviceId = useVehicleLinkSnapshot().activeDeviceId;
-  const [dev, setDev] = useState(getDevSettings());
+  const dev = useDevSettings();
   const [speedCap, setSpeedCap] = useState<number | null>(null);
   const [rpmPeriod, setRpmPeriod] = useState<number>(5);
 
@@ -353,11 +354,22 @@ function DeveloperTab() {
         <Host matchContents>
           <Switch
             value={dev.showEmulators}
-            onValueChange={(v) => {
-              setDevSettings({ showEmulators: v });
-              setDev(getDevSettings());
-            }}
+            onValueChange={(v) => setDevSettings({ showEmulators: v })}
             label={t("showEmulators")}
+          />
+        </Host>
+        <Host matchContents>
+          <Switch
+            value={dev.showParticles}
+            onValueChange={(v) => setDevSettings({ showParticles: v })}
+            label={t("showParticles")}
+          />
+        </Host>
+        <Host matchContents>
+          <Switch
+            value={dev.outageButton}
+            onValueChange={(v) => setDevSettings({ outageButton: v })}
+            label={t("outageButton")}
           />
         </Host>
         <CycleRow

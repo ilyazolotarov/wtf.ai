@@ -31,8 +31,8 @@ Place the car on the offline road network, so that:
   beyond Slavutych (§10.3).
 - **M7 in the app, not yet on a drive (2026-10-04):** the graph downloads with the region, the navigator runs
   the filter on it, the puck follows the dominant hypothesis while dead-reckoning with alternatives on the map,
-  and trip logs carry `nav_mapmatch` (§11). Still to do: a drive with it, update time on the iPhone, the
-  particle overlay on the debug screen.
+  and trip logs carry `nav_mapmatch` (§11), with a particle overlay and a simulated outage for testing on the
+  road (NAVIGATOR-SPEC §9). Still to do: a drive with it, update time on the iPhone.
 - Next: M6 (closed loop), and a drive for M7. Order of work in §12.
 
 ## 3. Decisions
@@ -639,6 +639,7 @@ NAVIGATOR-SPEC §4, §5.1):
 - Both run the filter with 3 seeds by default (`--seeds N`) and pool them: with one seed, single sessions flip
   between a map and an alignment start from one seed to the next (§8.2). With the map the EKF's columns vary by
   seed too (a map start sets its pose). Numbers measured before 2026-10-04 are one seed.
+- `replay`, `replay:mm`: `--app-cuts` cuts where the app simulated an outage (NAVIGATOR-SPEC §9).
 - `replay:mm`, `replay:view`: `--start <s>` / *start* begins the session that far into the log; `--jam
   start:len|inf` / *jam* simulates jamming (M5).
 - `npm run replay:truth -- [--graph <file>] [--json <out>] <logs>` (M3): chains, breaks with their reason and place,
@@ -713,7 +714,9 @@ NAVIGATOR-SPEC §4, §5.1):
   at start.
 - **Map:** the dominant hypothesis as the puck and alternatives as hollow markers, fainter the lighter they are
   (§6.2). The Vehicle sheet's diagnostics show the graph's region, state, particle count, hypothesis weights and
-  update time. Still to do: the particle-cloud overlay.
+  update time. Developer settings → "Map matching on the map (particles)" draws the 200 heaviest particles (size
+  by weight, amber off-road) and each hypothesis as a dashed ring of its spread labelled with its weight. They
+  are the navigator's state ~300 ms back, not extrapolated like the puck.
 
 ## 12. Milestones
 

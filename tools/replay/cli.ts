@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { basename } from "node:path";
 
 import { replayToGeoJson } from "../../src/nav/replay/geojson";
-import { replayTrip, type ReplayCut, type ReplayResult } from "../../src/nav/replay/replay";
+import { appOutageCuts, replayTrip, type ReplayCut, type ReplayResult } from "../../src/nav/replay/replay";
 import { readTripLog, type TripLog } from "../../src/triplog/trip-log-reader";
 
 interface Args {
@@ -16,10 +16,12 @@ interface Args {
   json: boolean;
   openLoopDelayS?: number;
   chain: boolean;
+  /** Also cut where the app simulated outages. */
+  appCuts: boolean;
 }
 
 function parseArgs(argv: string[]): Args {
-  const args: Args = { files: [], cuts: [], sweepLag: false, json: false, chain: false };
+  const args: Args = { files: [], cuts: [], sweepLag: false, json: false, chain: false, appCuts: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--cut") {
@@ -30,6 +32,7 @@ function parseArgs(argv: string[]): Args {
     else if (a === "--geojson") args.geojson = argv[++i];
     else if (a === "--json") args.json = true;
     else if (a === "--chain") args.chain = true;
+    else if (a === "--app-cuts") args.appCuts = true;
     else if (a === "--open-loop") {
       // Optional delay: `--open-loop 60`; a following flag or file means no delay.
       const next = argv[i + 1];
@@ -37,7 +40,7 @@ function parseArgs(argv: string[]): Args {
     }
     else if (a === "-h" || a === "--help") {
       console.log(
-        "replay <trip.ulg...> [--cut <startS>:<lengthS>]... [--open-loop [delayS]] [--lag <s>] [--sweep-lag] [--chain] [--geojson <out>] [--json]",
+        "replay <trip.ulg...> [--cut <startS>:<lengthS>]... [--open-loop [delayS]] [--lag <s>] [--app-cuts] [--sweep-lag] [--chain] [--geojson <out>] [--json]",
       );
       process.exit(0);
     } else args.files.push(a);
@@ -91,17 +94,18 @@ function main(): void {
   for (const file of args.files) {
     const trip = readTripLog(new Uint8Array(readFileSync(file)));
     const name = basename(file);
+    const cuts = args.appCuts ? [...args.cuts, ...appOutageCuts(trip)] : args.cuts;
     if (args.sweepLag) {
       console.log(`== ${name}: median pre-fix error of satellite fixes by GNSS lag`);
       for (let lag = 0; lag <= 2.001; lag += 0.25) {
-        const r = replayTrip(trip, { nav: { gnssLagS: lag, estimateGnssLag: false }, cuts: args.cuts });
+        const r = replayTrip(trip, { nav: { gnssLagS: lag, estimateGnssLag: false }, cuts });
         console.log(`  lag ${lag.toFixed(2)} s: ${m(r.summary.medianErrorM.satellite)} (${r.summary.fixes.accepted} accepted)`);
       }
       continue;
     }
     const result = replayTrip(trip, {
       nav: args.lagS === undefined ? {} : { gnssLagS: args.lagS, estimateGnssLag: false },
-      cuts: args.cuts,
+      cuts,
       openLoop: args.openLoopDelayS === undefined ? undefined : { delayS: args.openLoopDelayS },
       startPose: args.chain ? (pose ?? undefined) : undefined,
     });

@@ -11,6 +11,19 @@ export interface RawGnssFix {
   timestamp: number;
 }
 
+/** A GNSS outage simulated in the app (test tool): fixes are withheld from the navigator, not from the log. */
+export interface SimulatedOutage {
+  /** Wall clock, ms. */
+  startedAt: number;
+  /** Distance driven since GNSS was cut (OBD odometry), m; absent without the navigator. */
+  distanceM?: number;
+  /** The newest withheld satellite fix (≤ 10 m): where the car really is. */
+  gnss?: RawGnssFix;
+  /** The dot's distance from that fix now, and the largest so far, m. */
+  errorM?: number;
+  maxErrorM?: number;
+}
+
 export interface PositionEstimate {
   lat: number;
   lon: number;
@@ -27,4 +40,5 @@ export interface PositionEstimate {
   mapMatch?: MapMatchState;
   /** Other roads the car may be on while map matching is ambiguous, heaviest first. */
   alternatives?: { lat: number; lon: number; weight: number }[];
+  simulatedOutage?: SimulatedOutage;
 }

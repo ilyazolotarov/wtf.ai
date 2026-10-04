@@ -20,6 +20,8 @@ import { Colors } from "@/constants/theme";
 import { circlePolygon, destinationAtBearing } from "@/nav/geo";
 import type { PositionEstimate } from "@/nav/position/types";
 import { usePosition } from "@/providers/position-provider";
+import { useDevSettings, useRuntime } from "@/providers/runtime-provider";
+import type { MapMatchOverlay } from "@/services/navigation/navigator-service";
 import { useRoute } from "@/providers/route-provider";
 import type { CompassHeading } from "./use-compass-heading";
 
@@ -69,6 +71,8 @@ export function MapSurface({
   const mapStyle = useMapStyle(scheme);
   const position = usePosition();
   const { activeRoute } = useRoute();
+  const { showParticles } = useDevSettings();
+  const { position: navigator } = useRuntime();
   const cameraRef = useRef<CameraRef | null>(null);
   const ghost =
     position?.trust === "UNTRUSTED" && position.rawGnss
@@ -198,6 +202,14 @@ export function MapSurface({
       : emptyPolygons();
   const puck = position ? pointFeatures(position) : emptyPoints();
   const alternatives = alternativeFeatures(position?.alternatives ?? []);
+  // Debug overlay: recomputed by the service once per published position.
+  const overlay = showParticles && position ? navigator.getMapMatchOverlay() : null;
+  const particles = particleFeatures(overlay);
+  const hypotheses = hypothesisFeatures(overlay);
+  // Simulated outage: where GPS (withheld from the navigator) says the car is.
+  const truth = position?.simulatedOutage?.gnss
+    ? pointFeatures(position.simulatedOutage.gnss)
+    : emptyPoints();
   const ghostPoint = ghost ? pointFeatures(ghost) : emptyPoints();
   const route = activeRoute
     ? routeFeatures(activeRoute.coordinates)
@@ -320,6 +332,65 @@ export function MapSurface({
           }}
         />
       </GeoJSONSource>
+      {/* Debug: the filter's particles (heaviest 200, size by weight, amber off-road) and its
+          hypotheses as rings of their spread, labelled with their weight. */}
+      <GeoJSONSource id="map-match-hypotheses" data={hypotheses.rings}>
+        <Layer
+          id="map-match-hypothesis-ring"
+          type="line"
+          paint={{ "line-color": palette.text2, "line-width": 1.5, "line-dasharray": [2, 2] }}
+        />
+      </GeoJSONSource>
+      <GeoJSONSource id="map-match-particles" data={particles}>
+        <Layer
+          id="map-match-particle"
+          type="circle"
+          paint={{
+            "circle-radius": ["interpolate", ["linear"], ["get", "w"], 0, 1.5, 1, 4.5],
+            "circle-color": ["case", ["==", ["get", "off"], 1], palette.warn.c, palette.accent],
+            "circle-opacity": 0.7,
+          }}
+        />
+      </GeoJSONSource>
+      <GeoJSONSource id="map-match-hypothesis-labels" data={hypotheses.labels}>
+        <Layer
+          id="map-match-hypothesis-label"
+          type="symbol"
+          layout={{
+            "text-field": ["get", "label"],
+            "text-font": ["Noto Sans Bold"],
+            "text-size": 11,
+            "text-anchor": "bottom",
+            "text-allow-overlap": true,
+          }}
+          paint={{ "text-color": palette.text, "text-halo-color": palette.bg, "text-halo-width": 2 }}
+        />
+      </GeoJSONSource>
+      <GeoJSONSource id="simulated-outage-gps" data={truth}>
+        <Layer
+          id="simulated-outage-gps-dot"
+          type="circle"
+          paint={{
+            "circle-radius": 5,
+            "circle-color": palette.ok.c,
+            "circle-stroke-color": palette.bg,
+            "circle-stroke-width": 2,
+          }}
+        />
+        <Layer
+          id="simulated-outage-gps-label"
+          type="symbol"
+          layout={{
+            "text-field": "GPS",
+            "text-font": ["Noto Sans Bold"],
+            "text-size": 11,
+            "text-offset": [0, 1.2],
+            "text-anchor": "top",
+            "text-allow-overlap": true,
+          }}
+          paint={{ "text-color": palette.ok.c, "text-halo-color": palette.bg, "text-halo-width": 2 }}
+        />
+      </GeoJSONSource>
       {/* Other roads the car may be on while map matching can't tell (MAPMATCH-SPEC §6.2). */}
       <GeoJSONSource id="map-match-alternatives" data={alternatives}>
         <Layer
@@ -420,6 +491,41 @@ function alternativeFeatures(
       properties: { weight: p.weight },
       geometry: { type: "Point", coordinates: [p.lon, p.lat] },
     })),
+  };
+}
+
+function particleFeatures(overlay: MapMatchOverlay | null): FeatureCollection<Point> {
+  return {
+    type: "FeatureCollection",
+    features: (overlay?.particles ?? []).map(([lat, lon, w, off]) => ({
+      type: "Feature",
+      properties: { w, off },
+      geometry: { type: "Point", coordinates: [lon, lat] },
+    })),
+  };
+}
+
+function hypothesisFeatures(overlay: MapMatchOverlay | null): {
+  rings: FeatureCollection<Polygon>;
+  labels: FeatureCollection<Point>;
+} {
+  const clusters = overlay?.clusters ?? [];
+  return {
+    rings: {
+      type: "FeatureCollection",
+      features: clusters.map((c) => circlePolygon(c, Math.max(3, c.spreadM), 32)),
+    },
+    labels: {
+      type: "FeatureCollection",
+      features: clusters.map((c) => ({
+        type: "Feature",
+        properties: { label: `${Math.round(c.weight * 100)}%` },
+        geometry: {
+          type: "Point",
+          coordinates: (({ lat, lon }) => [lon, lat])(destinationAtBearing(c, 0, Math.max(3, c.spreadM))),
+        },
+      })),
+    },
   };
 }
 

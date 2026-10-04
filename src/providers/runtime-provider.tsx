@@ -3,7 +3,7 @@ import { AppState } from "react-native";
 
 import type { VehicleLinkSnapshot } from "@/obd/types";
 import type { SensorSnapshot } from "@/services/sensor-capture/sensor-service";
-import { autoConnect, getRuntime, type Runtime } from "@/services/runtime";
+import { autoConnect, getRuntime, type DevSettings, type Runtime } from "@/services/runtime";
 import type { RecorderSnapshot } from "@/services/trip-recorder/trip-recorder";
 
 /** Starts the app-lifetime services and auto-connects on launch / foreground. */
@@ -45,4 +45,9 @@ export function useRecorderSnapshot(): RecorderSnapshot {
 export function useSensorSnapshot(): SensorSnapshot {
   const { sensors } = getRuntime();
   return useSyncExternalStore(sensors.subscribe, sensors.getSnapshot, sensors.getSnapshot);
+}
+
+export function useDevSettings(): DevSettings {
+  const { subscribeDevSettings, getDevSettings } = getRuntime();
+  return useSyncExternalStore(subscribeDevSettings, getDevSettings, getDevSettings);
 }

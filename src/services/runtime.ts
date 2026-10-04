@@ -23,6 +23,10 @@ import { NativeTransport } from "./vehicle-link/native-transport";
 
 export interface DevSettings {
   showEmulators: boolean;
+  /** Map matching's particles and hypotheses on the map. */
+  showParticles: boolean;
+  /** A "Cut GPS" button on the map that simulates a GNSS outage. */
+  outageButton: boolean;
 }
 
 const DEV_SETTINGS_KEY = "dev.settings";
@@ -35,6 +39,7 @@ export interface Runtime {
   position: NavigatorService;
   getDevSettings(): DevSettings;
   setDevSettings(patch: Partial<DevSettings>): void;
+  subscribeDevSettings(listener: () => void): () => void;
 }
 
 let runtime: Runtime | null = null;
@@ -42,7 +47,8 @@ let runtime: Runtime | null = null;
 export function getRuntime(): Runtime {
   if (runtime) return runtime;
 
-  let dev: DevSettings = { showEmulators: __DEV__, ...(kvStore.getJson<Partial<DevSettings>>(DEV_SETTINGS_KEY) ?? {}) };
+  let dev: DevSettings = { showEmulators: __DEV__, showParticles: false, outageButton: false, ...(kvStore.getJson<Partial<DevSettings>>(DEV_SETTINGS_KEY) ?? {}) };
+  const devListeners = new Set<() => void>();
   const nowUs = () => VehicleLinkModule.nowUs();
   const clock = createClock(nowUs);
 
@@ -118,6 +124,13 @@ export function getRuntime(): Runtime {
     setDevSettings: (patch) => {
       dev = { ...dev, ...patch };
       kvStore.setJson(DEV_SETTINGS_KEY, dev);
+      devListeners.forEach((listener) => listener());
+      // Hiding the button ends a simulated outage, so it can't be left on unseen.
+      if (patch.outageButton === false) position.setSimulatedOutage(false);
+    },
+    subscribeDevSettings: (listener) => {
+      devListeners.add(listener);
+      return () => devListeners.delete(listener);
     },
   };
   return runtime;

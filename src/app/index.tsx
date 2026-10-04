@@ -37,7 +37,7 @@ import { bearingRad, haversineM } from "@/nav/geo";
 import { calibrationMock } from "@/mocks";
 import { usePositionPermission } from "@/providers/position-provider";
 import { useRoute } from "@/providers/route-provider";
-import { useRecorderSnapshot } from "@/providers/runtime-provider";
+import { useDevSettings, useRecorderSnapshot, useRuntime } from "@/providers/runtime-provider";
 import { isOnboardingDone } from "@/services/preferences";
 
 type CameraMode = "follow" | "follow-heading" | "free";
@@ -64,6 +64,9 @@ export default function HomeScreen() {
   const [ghostView, setGhostView] = useState(false);
   const [requesting, setRequesting] = useState(false);
   const recorderState = useRecorderSnapshot().state;
+  const { outageButton } = useDevSettings();
+  const { position: navigator } = useRuntime();
+  const outage = position?.simulatedOutage;
   const recording = recorderState === "recording";
   // A linger after engine off is still the same drive for the camera.
   const onTrip = recording || recorderState === "lingering";
@@ -217,7 +220,58 @@ export default function HomeScreen() {
             </View>
           </View>
 
-          {alertText && (
+          {outage && (
+            <View style={[panel, styles.alertCard]}>
+              <GlassFill radius={Radius.rL} />
+              <View style={styles.alertRow}>
+                <View style={[styles.alertIcon, { backgroundColor: palette.warn.a }]}>
+                  <Icon name="gps_off" size={20} color={palette.warn.c} />
+                </View>
+                <View style={styles.alertText}>
+                  <T w="semibold" size={15}>
+                    {t("simOutage")}
+                  </T>
+                  <T size={13} color={palette.text2}>
+                    {t("simOutageStats")
+                      .replace("{t}", formatDuration(position.timestamp - outage.startedAt))
+                      .replace("{d}", formatDistance(outage.distanceM ?? 0, language))}
+                  </T>
+                  <T size={13} color={palette.text2}>
+                    {outage.errorM === undefined
+                      ? t("simOutageNoGps")
+                      : t("simOutageError")
+                          .replace("{e}", formatDistance(outage.errorM, language))
+                          .replace("{m}", formatDistance(outage.maxErrorM ?? outage.errorM, language))}
+                  </T>
+                </View>
+              </View>
+              <Pressable
+                onPress={() => navigator.setSimulatedOutage(false)}
+                accessibilityRole="button"
+                style={({ pressed }) => [styles.ghostButton, { backgroundColor: palette.surface }, pressed && styles.pressed]}
+              >
+                <T w="semibold" size={14} color={palette.accent}>
+                  {t("restoreGps")}
+                </T>
+              </Pressable>
+            </View>
+          )}
+
+          {outageButton && position && !outage && (
+            <Pressable
+              onPress={() => navigator.setSimulatedOutage(true)}
+              style={({ pressed }) => [panel, styles.calChip, pressed && styles.pressed]}
+              accessibilityRole="button"
+            >
+              <GlassFill radius={Radius.pill} />
+              <Icon name="gps_off" size={16} color={palette.accent} />
+              <T w="semibold" size={13} color={palette.accent}>
+                {t("cutGps")}
+              </T>
+            </Pressable>
+          )}
+
+          {alertText && !outage && (
             <View style={[panel, styles.alertCard]}>
               <GlassFill radius={Radius.rL} />
               <View style={styles.alertRow}>
@@ -370,6 +424,12 @@ export default function HomeScreen() {
       <SheetBlur />
     </View>
   );
+}
+
+/** m:ss */
+function formatDuration(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
 function HudAction({
