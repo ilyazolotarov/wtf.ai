@@ -12,7 +12,7 @@
 import { GnssLagEstimator, type GnssLagConfig, type GnssLagEstimate } from "./calibration/gnss-lag";
 import { DEFAULT_EKF_CONFIG, DrEkf, wrapAngle, type EkfConfig } from "./ekf/dr-ekf";
 import { alignHeading, type AlignConfig, type AlignPoint } from "./ekf/heading-align";
-import type { Coordinate } from "./geo";
+import { haversineM, type Coordinate } from "./geo";
 import { LocalFrame } from "./geo/local-frame";
 import type { EdgeId, RoadGraph } from "./mapmatch/graph/road-graph";
 import { ParticleFilter, type MapMatchConfig, type MapMatchState } from "./mapmatch/particle-filter";
@@ -35,6 +35,11 @@ export interface NavConfig {
   gnssSpeedLagS: number;
   /** Ignore fixes worse than this (cell-level fixes claim up to 150 km). */
   maxFixAccuracyM: number;
+  /** A Wi-Fi/cell fix that moved less than this share of its accuracy since the previous fix is a
+   *  repeat. iOS repeats them with jitter ≤ 0.8 % of the accuracy (0.4 m at ±108 m); counted as
+   *  new, six of them turned the heading by 22° on a jammed drive. Dense-area Wi-Fi at ±7–15 m
+   *  moving 0.4–1.7 m between fixes is not a repeat (skipping it cost outage accuracy). */
+  coarseRepeatShare: number;
   /** Innovation gate (χ², 2 dof for position). */
   gate: number;
   /** Consecutive rejected satellite fixes that reset the EKF (it has diverged). */
@@ -71,6 +76,7 @@ export const DEFAULT_NAV_CONFIG: NavConfig = {
   estimateGnssLag: true,
   gnssSpeedLagS: 1.0,
   maxFixAccuracyM: 2000,
+  coarseRepeatShare: 0.02,
   gate: 16,
   resetAfterRejected: 5,
   obdSigmaMps: 0.3,
@@ -223,6 +229,8 @@ export class Navigator {
   private speedScale: { ks: number; ksVar: number } | null = null;
   /** The EKF started from a parked pose that no fix has confirmed yet (OBD distance at the start). */
   private poseUnverifiedFromM: number | null = null;
+  /** Parked pose taken when the phone was first handled while parked: it may leave the car after that. */
+  private frozenPose: ParkedPose | null = null;
   private lagEstimator: GnssLagEstimator;
   private readonly ekfConfig: EkfConfig;
   private odometryListeners: ((step: OdometryStep) => void)[] = [];
@@ -338,6 +346,9 @@ export class Navigator {
 
   onImu(s: ImuSample): void {
     const out = this.imu.process(s);
+    // Handled while parked: the phone may now leave the car with the driver, so later fixes and
+    // positions are not the car's. Keep the pose of the car from before it.
+    if (!out.valid && this.frozenPose === null) this.frozenPose = this.currentParkedPose();
     // With the engine off the poller reads speed once a second.
     const lastObdZero = this.lastObd !== null && this.lastObd.rawKph === 0 && s.tUs - this.lastObd.tUs < 2_500_000;
     if (out.quiet && lastObdZero) this.quietSinceUs ??= s.tUs;
@@ -357,6 +368,7 @@ export class Navigator {
   onObdSpeed(s: ObdSpeedSample): void {
     this.advance(s.tUs, this.heldYaw(s.tUs));
     this.lastObd = s;
+    if (s.rawKph > 0) this.frozenPose = null;
     if (!this.ekf) return;
     if (this.standstill) this.ekf.updateZeroSpeed(0.02);
     else this.ekf.updateObdSpeed(s.speedMps, s.rawKph === 0 ? this.config.obdZeroSigmaMps : this.config.obdSigmaMps);
@@ -367,7 +379,7 @@ export class Navigator {
     if (fix.hAccM > c.maxFixAccuracyM || !(fix.hAccM > 0)) return { status: "skipped" };
     // Under jamming iOS repeats the same Wi-Fi position; repeats carry no new information.
     // (A parked satellite fix repeats too, but that one is a real measurement.)
-    if (!isSatelliteFix(fix) && this.lastFix && this.lastFix.lat === fix.lat && this.lastFix.lon === fix.lon) {
+    if (!isSatelliteFix(fix) && this.lastFix && haversineM(this.lastFix, fix) < c.coarseRepeatShare * fix.hAccM) {
       return { status: "skipped" };
     }
     this.lastFix = fix;
@@ -425,8 +437,16 @@ export class Navigator {
     return null;
   }
 
-  /** Pose to start the next session from, while the car stands (null: moving, or heading unknown). */
+  /**
+   * Pose to start the next session from, while the car stands (null: moving, or heading unknown).
+   * Frozen once the phone is handled while parked: a driver who walks off with it takes it out of
+   * the car, and the fixes then follow the driver.
+   */
   get parkedPose(): ParkedPose | null {
+    return this.frozenPose ?? this.currentParkedPose();
+  }
+
+  private currentParkedPose(): ParkedPose | null {
     const o = this.lastObd;
     const parked = this.standstill || (o !== null && o.rawKph === 0 && this.lastTUs !== null && this.lastTUs - o.tUs < this.config.obdStaleUs);
     if (!parked || !this.ekf || !this.frame) return null;
@@ -781,6 +801,8 @@ export class Navigator {
     const sat = isSatelliteFix(fix);
     if (this.poseUnverifiedFromM !== null) {
       if (!pos.accepted) {
+        // The car isn't where it was parked: a pose frozen from it would be wrong too.
+        this.frozenPose = null;
         this.reset(fix, sigma);
         return { ...outcome, pose: "rejected" };
       }

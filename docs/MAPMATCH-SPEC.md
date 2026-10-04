@@ -504,6 +504,24 @@ Simulated jams on the clean drives: 35 sessions starting every 60 s, jammed from
 - Holding the heading for 50 m instead of 100 m starts a little sooner (median 0.36 km, map 31 of 35) with the
   same accuracy here. 100 m stays until drives beyond Slavutych show grids and parallel roads.
 
+With the 7 drives of 2026-10-04 (65 simulated sessions, after the handling and coarse-repeat changes of
+NAVIGATOR-SPEC §4, §5.1):
+
+| | Starts | Distance to start, median | Heading error median / max | Position error median / max | Error ÷ σ, heading / position (max) |
+| --- | --- | --- | --- | --- | --- |
+| Without map | alignment 63 | 0.64 km | 3.1° / 43.3° (11 > 10°) | 36 / 85 m | 4.9 / 2.3 |
+| With map | map 31, alignment 32 | 0.54 km | 1.5° / 20.7° (9 > 10°) | 26 / 87 m | 2.4 / 2.3 |
+
+- All 37 map starts (sessions and drives as recorded) are within 2.3°. Every start over 10° is an alignment start
+  that the map didn't beat.
+- The map starts first less often on the new drives (10 of 30 sessions against 21 of 35 on the old ones): longer
+  straight roads, and alignment no longer restarts at false handling triggers, so it finishes sooner.
+- On the 7 old drives the handling change alone took map starts from 29 to 23 of 35 for the same reason, with
+  alignment better (position median 41 → 31 m, > 10° starts 4 → 2).
+- The real jammed drive of 2026-10-04 (3afby6) never starts, with or without the map: in the app the navigator
+  carried over from the previous drive (NAVIGATOR-SPEC §9.1).
+- M5's exit (no start > 10° off) holds for map starts. Alignment starts are overconfident (NAVIGATOR-SPEC §13.9).
+
 ## 9. Closed loop (PF → EKF)
 
 - **When:** state `tracking`, navigator in `dr`, every 25 m of travel. The interval limits the correlation, because
@@ -591,14 +609,14 @@ Simulated jams on the clean drives: 35 sessions starting every 60 s, jammed from
   - the particle cloud at the cursor time, and clusters with their weights (done in M4: particles once a second,
     200 heaviest, size by weight; clusters as rings sized by spread, labelled with weight and state; from M5 also
     while anchored).
-- **Logs:** all 7 current logs are from Slavutych, a small planned town. Parallel-road and dense-grid cases (SPEC §7.5)
+- **Logs:** all 14 current logs are from Slavutych, a small planned town. Parallel-road and dense-grid cases (SPEC §7.5)
   need drives elsewhere: Kyiv, or Chernihiv's ring roads. Record some before calling M5 done.
 
 ### 10.4 Measured (M3, `npm run replay:truth`)
 
 | Drive | Clean fixes matched | Moving fix → road (median / p95) | Route / OBD / odometry | Breaks |
 | --- | --- | --- | --- | --- |
-| q8tfjs | 402 of 422 | 2.1 / 6.0 m | 2.98 / 2.87 / 2.94 km | 1: off the graph (yard at the end, 20 fixes) |
+| q8tfjs | 402 of 422 | 2.1 / 6.0 m | 2.98 / 2.87 / 2.94 km | 1: off the graph (at the end, 20 fixes: most likely the driver walking off with the phone, see below) |
 | 5mn7ai | 656 of 672 | 3.2 / 6.4 m | 3.32 / 3.27 / 3.34 km | 1: off the graph (yard, 16 fixes) |
 | 6vccgr | 196 of 196 | 2.2 / 7.5 m | 1.18 / 1.12 / 1.14 km | 2: gaps of 30 and 38 s, fixes 11–27 m |
 | s4fkdm | 308 of 308 | 1.8 / 4.8 m | 1.05 / 1.01 / 1.01 km | none |
@@ -606,6 +624,10 @@ Simulated jams on the clean drives: 35 sessions starting every 60 s, jammed from
 
 - No `no route` break on any drive. Every break was checked on a map: two are the car driving off the graph into
   an unmapped yard, two are stretches of degraded GNSS.
+- Revisited after the 2026-10-04 drives: at the end of q8tfjs the phone is handled (gravity swinging ~100°), GNSS
+  moves at 6–7 km/h and OBD reads 0, then nothing. That is the driver walking off with the phone, as on two of the
+  new drives, rather than the car in a yard. The new drives' walks show up the same way (9qw8wn: a 31-fix break,
+  route 149 % of the OBD distance).
 - Routes are 1–7 % longer than OBD: OBD reads ~2 % low on the CX-5 (NAVIGATOR-SPEC §5.2), and the centre line is
   not the driven line. The navigator's odometry (`k_s` learned) is 0.7 % above to 5.4 % below the route.
 - Of 725 moving legs, one doesn't fit its OBD distance (a 1 s fix jump). No leg needed a penalty.
@@ -696,8 +718,9 @@ M1–M3 can partly overlap. M4 needs M1–M3. M5 and M6 are independent of each 
 4. Via-way restrictions, ferries and street names are not in v1.
 5. Test drives beyond Slavutych for parallel roads and dense grids (§10.3).
 6. Spoofing replay (NAVIGATOR-SPEC §13.6) is needed before integrity can use the clusters.
-7. **Reversing.** OBD speed is unsigned, so reversing moves particles forward. It costs most in yards (§7.7).
-   PID `A4` (gear) or the accelerometer could tell; check what the CX-5 answers.
+7. **Reversing.** The CX-5 reads OBD 0 while reversing (VEHICLE-LINK-SPEC §10.4), so the particles stand still
+   while the gyro turns them: they rotate in place and lose the 5–15 m driven. It costs most in yards (§7.7). OBD
+   0 with the gyro turning and the phone steady in the mount marks a reverse; PID `A4` (gear) could confirm it.
 8. **Low-speed manoeuvring** decides road vs off-road 20–30 m late; the 120 s p90 is worse than the EKF's because
    of it. More drives with parking and yards are needed before tuning further.
 9. **Device timing:** 500 particles take < 1 ms p99 in Node; measure on the iPhone (M7). An unknown-heading start

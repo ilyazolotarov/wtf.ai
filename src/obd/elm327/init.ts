@@ -28,6 +28,28 @@ export interface InitOptions {
 
 const hex = (n: number) => n.toString(16).toUpperCase();
 
+/** 11-bit CAN response id of the engine ECU, which holds the VIN (mode 09). */
+const ENGINE_ECU = 0x7e8;
+
+/**
+ * VIN (non-fatal). Mode 09 is the engine ECU's; the ECU pinned for speed may be another one (on a
+ * CX-5 the TCM at 7E9 answers 0902 with 7F 09 12). With another ECU pinned, ask the engine ECU,
+ * then pin the speed ECU again; the pinned one is the fallback.
+ */
+async function readVin(send: Send, pinned: number | null): Promise<string | null> {
+  const ask = async () => {
+    const r = await send("0902", { timeoutMs: 5000 });
+    return r.status === "ok" ? parseVin(r.lines) : null;
+  };
+  if (pinned === null || pinned === ENGINE_ECU) return ask();
+  let vin: string | null = null;
+  const sh = await send(`ATSH${hex(ENGINE_ECU - 8)}`, { timeoutMs: 1000 });
+  if (sh.status === "ok" && (await send(`ATCRA${hex(ENGINE_ECU)}`, { timeoutMs: 1000 })).status === "ok") vin = await ask();
+  await send(`ATSH${hex(pinned - 8)}`, { timeoutMs: 1000 });
+  await send(`ATCRA${hex(pinned)}`, { timeoutMs: 1000 });
+  return vin ?? ask();
+}
+
 interface Measurement {
   ok: boolean;
   latencyMs: number;
@@ -100,9 +122,10 @@ export async function initVehicle(send: Send, opts: InitOptions = {}): Promise<I
   if (!pids.has("0D")) return fail("no-speed-pid");
 
   // 3. Pin the speed ECU (11-bit CAN only).
+  let pinned: number | null = null;
   const speedProbe = await send("010D", { timeoutMs: 2000 });
   const ecus = respondingEcus(parseMode01(speedProbe.lines, PID_SPEED, 1));
-  const chosen = ecus.includes(0x7e8) ? 0x7e8 : ecus[0];
+  const chosen = ecus.includes(ENGINE_ECU) ? ENGINE_ECU : ecus[0];
   if (chosen !== undefined) vehicle.speedEcu = hex(chosen);
   if ((protocolNumber === 6 || protocolNumber === 8) && chosen !== undefined && chosen >= 0x7e8 && chosen <= 0x7ef) {
     const sh = await send(`ATSH${hex(chosen - 8)}`, { timeoutMs: 1000 });
@@ -110,6 +133,7 @@ export async function initVehicle(send: Send, opts: InitOptions = {}): Promise<I
     const check = cra.status === "ok" ? await send("010D", { timeoutMs: 2000 }) : cra;
     if (check.status === "ok" && parseMode01(check.lines, PID_SPEED, 1).length > 0) {
       capabilities.physicalAddressing = true;
+      pinned = chosen;
     } else {
       await send("ATSH7DF", { timeoutMs: 1000 });
       await send("ATAR", { timeoutMs: 1000 });
@@ -117,9 +141,7 @@ export async function initVehicle(send: Send, opts: InitOptions = {}): Promise<I
   }
   await send("ATH0", { timeoutMs: 1000 });
 
-  // VIN (non-fatal).
-  const vin = await send("0902", { timeoutMs: 5000 });
-  if (vin.status === "ok") vehicle.vin = parseVin(vin.lines);
+  vehicle.vin = await readVin(send, pinned);
 
   // 4. Speed-up probes (§9.3).
   const plain = await measure(send, "010D", polls);

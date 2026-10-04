@@ -1,6 +1,6 @@
 # wtf.ai — Stage 1 Navigator Specification
 
-Status: draft v2 (2026-10-03). Implements SPEC.md Phase 2 (TS EKF + replay) and the parts of Phase 4 (calibration) that
+Status: draft v3 (2026-10-04), field-tested. Implements SPEC.md Phase 2 (TS EKF + replay) and the parts of Phase 4 (calibration) that
 need no UI. Source of truth for coding agents. Inputs come from [TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md) streams;
 the vehicle link is specified in [VEHICLE-LINK-SPEC.md](VEHICLE-LINK-SPEC.md).
 
@@ -14,14 +14,14 @@ jammed:
 3. Calibrate itself online (gyro bias, speed scale, GNSS timing), so tuning doesn't depend on one phone or car.
 4. Be developed and measured on Windows by replaying real trip logs.
 
-## 2. Status (2026-10-03)
+## 2. Status (2026-10-04)
 
 - **Implemented:** `src/nav` (pure TS), replay CLI, browser viewer and outage benchmark (`tools/replay`), 30+ unit
   tests.
-- **Measured** on 7 real drives: CX-5 KF, OBDLink MX+, iPhone 13 (iOS 26), phone in a mount, Slavutych. Of these,
-  4 drives have clean GNSS, 1 is jammed then clean, and 2 are jammed throughout.
-- **Wired into the app** (§9): `NavigatorService` drives the map and saves the GNSS lag and the speed scale (§7.4).
-  Checked by replaying the real logs through the service; not field-tested yet.
+- **Measured** on 14 real drives: CX-5 KF, OBDLink MX+, iPhone 13 (iOS 26), phone in a mount, Slavutych. Of these,
+  10 have clean GNSS, 1 is jammed then clean, and 3 are jammed throughout.
+- **Wired into the app** (§9) and **field-tested** on the 7 drives of 2026-10-04 (§9.1), one of them jammed
+  throughout.
 
 ## 3. Inputs (`src/nav/types.ts`)
 
@@ -45,8 +45,13 @@ jammed:
 | `anchored` | best recent fix (heading unknown)           | fix accuracy + OBD distance driven since it  | heading known (§6) → `dr`                     |
 | `dr`       | EKF                                         | EKF covariance (reported as a 68 % radius)   | 5 satellite fixes in a row fail the gate → `anchored` at the latest fix |
 
-- **Fix filtering:** fixes worse than 2 km are ignored. Coarse repeats of the same position are skipped. Satellite
-  repeats while parked are kept, because they are real measurements.
+- **Fix filtering:** fixes worse than 2 km are ignored. A coarse fix that moved less than 2 % of its accuracy since
+  the previous fix is a repeat and is skipped.
+  - iOS repeats Wi-Fi positions with sub-metre jitter (≤ 0.8 % of their accuracy in the logs). Counted as new, six
+    of them turned the heading by 22° on a jammed drive.
+  - Dense-area Wi-Fi at ±7–15 m moves 0.4–1.7 m between fixes, which is new information: an absolute 2 m rule
+    skipped 52 such fixes on one drive and cost outage accuracy.
+  - Satellite repeats while parked are kept, because they are real measurements.
 - **Frame:** local ENU plane, re-anchored when the position is more than 5 km from its origin.
 
 ## 5. Odometry inputs
@@ -57,10 +62,14 @@ jammed:
   is positive.
 - **Handling detection:** the gyro is invalid while the phone moves in the mount or in a hand. Triggers:
   - Gravity direction differs from its 3 s average by more than 8°.
-  - The 0.1 s mean of rotation off the vertical exceeds 1.5 rad/s.
+  - The rotation off the vertical, averaged as a vector over 0.1 s, exceeds 1.0 rad/s.
 
-  Each trigger holds for 1.5 s. Thresholds come from mounted driving, which stays under 4° and about 1 rad/s.
-  Single bump spikes reach 1.9 rad/s, which is why the rotation rate is averaged.
+  Each trigger holds for 1.5 s. Thresholds come from mounted driving, which stays under 4°.
+  - Bumps shake the phone back and forth: the vector mean stays ≤ 0.7 rad/s with ≤ 4° net rotation. Every real
+    handling in 14 drives reached ≥ 1.4 rad/s and ≥ 7.6°.
+  - The first version averaged the magnitude, which bumps pushed to 1.6–2.0 rad/s: 6 false triggers while driving
+    in 4 of 14 drives. Each added ~20° of heading σ (0.3 rad/√s over 1.5 s). On the jammed drive the radius reached
+    370 m instead of 90 m, while the heading stayed within ~5° (§7.5).
 - While the gyro is invalid: if the car stands (OBD 0) the heading is held, because the car can't be turning.
   Otherwise the EKF propagates without yaw input and with heading noise 0.3 rad/√s.
 - **Quiet:** over 1 s, the yaw-rate std is below 0.01 rad/s, the mean yaw below 0.005 rad/s, and the acceleration std
@@ -107,6 +116,14 @@ jammed:
 - **Saved** (`Navigator.parkedPose`): position, heading and their σ while the car stands (standstill, or OBD 0) in
   mode `dr`. The service stores it per VIN at engine/ignition off, every 30 s while parked, and when it stops.
   The first OBD speed > 0 clears it, so a pose never outlives a drive.
+- **Frozen** at the first handling while parked. The driver often takes the phone out and walks off with it while
+  the ECU is still awake (2 of 7 drives on 2026-10-04). The fixes then follow the driver, and without the freeze
+  the saved pose would follow them too. A fix that rejects an unverified pose also drops the frozen one.
+- **Needs the VIN.** On 2026-10-04 it was never used: the VIN was read on 1 of 7 drives (VEHICLE-LINK-SPEC §9.1,
+  now fixed). Every drive started anchored for 72–264 s, though the car always stood within 3–9 m of where the
+  last one ended.
+- **Reversing:** the CX-5 reads OBD 0 while reversing (VEHICLE-LINK-SPEC §10.4). Reversing into a parking space
+  turns the saved heading in place without moving the position (5–15 m).
 - **Used** (`Navigator.startFromPose`): when the app starts and the VIN matches, the car of the adapter auto-connect
   will use, known before it connects. The EKF starts at once with σ widened by 5 m and 2°. Refused if the fixes so
   far disagree with it.
@@ -169,6 +186,24 @@ calibrated. They only replace defaults after enough data. The parked pose (§6.1
 - **Not stored:** the gyro bias (CoreMotion corrects it, and it drifts with temperature) and `k_ω` (the learned
   value mostly absorbs GNSS timing, §7.2).
 
+### 7.5 Magnetometer (logged, not used; SPEC §2)
+
+Measured on the 7 drives of 2026-10-04 (`mag_raw`, 19.4 Hz):
+
+- **Field:** about 160 µT raw against Earth's ~50 µT: a large constant offset (the phone's own and the car's). The
+  heading-dependent part is 17–19 µT, Earth's horizontal field in Slavutych, so the car hardly distorts it.
+- **Calibration:** horizontal components in a gravity-levelled frame fixed to the phone, fitted against GNSS course
+  as offset + rotation + scale (4 parameters, linear least squares).
+- **Error** with the calibration from the other drives:
+  - median 4–18°, p90 12–31° per drive;
+  - under 90° for every sample, except where the GNSS course itself was wrong at low speed;
+  - over the first 200 m after pulling away, median 5–24°;
+  - within one mounting of the phone, 4–6°.
+- **What moves it:** taking the phone out of the mount and back, ~6 µT (15–20°); starting the engine, 2–4 µT.
+- On the jammed drive it agreed with the DR heading within ~5° until near-repeated coarse fixes turned it (§4).
+- **So:** it picks the travel direction along a road at a jammed start with a wide margin, and could be a weak
+  absolute heading (σ ≈ 25°). Not wired in; SPEC §2 still excludes it from navigation.
+
 ## 8. Trust (interim, `src/services/position/gnss-trust.ts`)
 
 Until `src/nav/integrity` (SPEC Phase 3), the map's trust state comes from `GnssTrustTracker`:
@@ -211,7 +246,20 @@ Until `src/nav/integrity` (SPEC Phase 3), the map's trust state comes from `Gnss
 - **Persistence** per §7.4.
 - **Tests:** unit tests replay synthetic drives through the service. The 7 real logs replayed through it (real
   delivery delays) match the offline replay: median 0.1–1 m apart, identical learned values.
-- **Next:** a field drive (§12.6).
+
+### 9.1 Field results (2026-10-04, 7 drives, `nav_estimate`)
+
+- **Clean GNSS:** the map was a median 0.9–2.3 m from the moving satellite fixes (p95 2.8–6.3 m). Its radius
+  (median 1.6–2.2 m) is slightly small for a 68 % circle. The navigator ran 305 ms behind (p99 313 ms).
+- **Jammed throughout** (3afby6: 9 min, 2.7 km, no satellite fix): the navigator kept running from the previous
+  drive, so it dead-reckoned from the first second. It ended 26 m from the next drive's first satellite fixes (the
+  car stood there), with a radius of ±64 m. 32 of 35 coarse fixes fell inside their own radius.
+  - Replay can't carry a navigator over between drives. `--chain` (starting from the parked pose) gives 48 m. With
+    the changes of §4 and §5.1 it gives 57 m (±81 m), and the worst radius is 93 m instead of 370 m.
+- **Walking off with the phone** (2 drives): the link drops when the phone leaves Bluetooth range; GNSS shows
+  2–7 km/h while OBD reads 0. One drive reset to `anchored` (5 fixes failed the gate). Handled by the frozen pose
+  (§6.1); `replay:bench` skips such windows (§10).
+- **GNSS lag** measured on the device: −0.05 to −0.2 s, saved per phone. **Speed scale:** saved only with a VIN.
 
 ## 10. Replay and benchmark (`src/nav/replay`, `tools/replay`)
 
@@ -222,11 +270,15 @@ Until `src/nav/integrity` (SPEC Phase 3), the map's trust state comes from `Gnss
     yardstick.
   - Only satellite fixes ≤ 10 m count as truth.
 - **`npm run replay:bench`:**
-  - Outages of 60/120/240 s starting every 30 s after the EKF starts. A window counts when the held-out satellite
-    fixes cover ≥ 80 % of it and the car drives ≥ 200 m.
+  - Outages of 60/120/240 s on a 30 s grid of log time, from 10 s after the EKF starts. A window counts when the
+    held-out satellite fixes cover ≥ 80 % of it and the car drives ≥ 200 m.
+  - A window is skipped when ≥ 5 satellite fixes in it move while OBD reads 0 or is silent: the phone left the car
+    with the driver (q8tfjs, 9qw8wn, qfger8). A reverse makes 3–5 such fixes, so far never inside a window.
+  - The grid is fixed so that a change that moves the EKF start by a few seconds still scores the same windows.
+    With the grid relative to the start, an 8 s shift moved the 120 s median by 5 m.
   - Reports max and end error (median, p90), error per km, and max error ÷ predicted σ.
   - Windows overlap, so small differences are noise.
-- **Current numbers** (56 windows, 7 drives):
+- **First 7 drives** (2026-10-03, 56 windows; window grid relative to the EKF start):
 
 | Outage | Median distance | Max error median / p90 | Max error ÷ σ |
 | ------ | --------------- | ---------------------- | ------------- |
@@ -234,6 +286,20 @@ Until `src/nav/integrity` (SPEC Phase 3), the map's trust state comes from `Gnss
 | 120 s  | 1.3 km          | 20 / 31 m              | 0.9           |
 | 240 s  | 2.1 km          | 37 / 88 m              | 0.6           |
 
+- **14 drives** (2026-10-04, fixed grid, the same windows before and after the changes of §4 and §5.1; map
+  matching on, so the EKF can start from the map):
+
+| Outage | Windows | Max error median / p90, before | After | End error median / p90, after | Max error ÷ σ, after |
+| ------ | ------- | ------------------------------ | ----- | ----------------------------- | -------------------- |
+| 60 s   | 59      | 12.4 / 35.8 m                  | 11.7 / 34.5 m  | 8.8 / 27.0 m         | 2.3                  |
+| 120 s  | 50      | 24.6 / 74.3 m                  | 24.7 / 64.7 m  | 20.6 / 56.0 m        | 2.3                  |
+| 240 s  | 36      | 67.3 / 128.7 m                 | 59.3 / 123.7 m | 36.0 / 107.6 m       | 2.3                  |
+
+  - The new drives are harder. j5m8tq (7 km at up to 70 km/h) loses 50–90 m in 1–2 min, nearly all cross-track:
+    its heading is 2–3° off at the outage start while σ_ψ claims 0.6–1°. In one outage the error grows from 2° to
+    9° through gentle curves and a sharp turn, while the distance stays within 1 %. Cause not found (§13.8).
+  - On the 7 older drives the changes are neutral: 60 and 120 s identical, 240 s median 27.6 → 31.8 m and p90
+    80 → 73 m. Max error ÷ σ at 240 s went from 0.5 to 0.9, because false handling no longer inflates σ.
 - **Error budget:**
   - About 2° RMS heading error already at the start of the outage, growing only to 2.8° after 3 min.
   - ±2–3 % along-track error.
@@ -266,6 +332,7 @@ needed to check them (`replay:bench`).
 4. The GNSS lag estimate lies within ±0.1 s of the per-drive turn fit on every drive with ≥ 6 turn windows.
 5. Unit tests (`src/nav/__tests__`, synthetic drives) pass; lint and typecheck pass.
 6. Field (after §9): during a real jamming episode the map dot keeps moving, and its radius covers the true position.
+   **Met** on 2026-10-04 (§9.1): 26 m off after 2.7 km jammed, radius ±64 m.
    - **Truth:** the first satellite fixes after the outage, compared with `nav_estimate` at the same time. That's
      where the DR error is largest. It needs nothing done in the car; a second phone in the same car is jammed too.
    - Error during an outage is measured by `replay:bench` on clean drives (§10).
@@ -273,11 +340,20 @@ needed to check them (`replay:bench`).
 ## 13. Open items
 
 1. **Heading at outage start** (about 2° RMS) limits DR. Candidates: map matching (SPEC §3.7), longer GNSS baselines.
-2. **OBD speed truncation at low speed:** could explain the ±2–3 % along-track error. Check on logs; consider a speed
-   offset state (SPEC §9.2).
+2. ~~OBD speed truncation at low speed~~: ruled out on 8 clean drives. GNSS − OBD grows with speed (0.04 km/h at
+   14 km/h, 0.9 km/h at 55 km/h): a scale of 1.019 with a −0.23 km/h offset. The scale varies by drive,
+   1.005–1.022 even back to back; `k_s` learns it per drive.
 3. Longer outages (5 / 15 min, SPEC §7) need longer clean drives than the current logs.
 4. Second phone and mount, to check the tuning values (§11).
 5. Integrity (SPEC Phase 3) replaces the interim trust tracker and the EKF gate as the GNSS acceptance rule.
 6. Spoofing replay: offsetting fixes in clean logs (SPEC §3.10) isn't implemented yet.
 7. Replay doesn't load the stored calibration or parked pose a live session started from. `nav_estimate` and the
-   `nav …` notes record them; use `--lag` and `--chain` to come close.
+   `nav …` notes record them; use `--lag` and `--chain` to come close. Nor can it carry the navigator over from
+   the previous drive, as the app did on the jammed drive of §9.1.
+8. **Overconfident heading at speed** (j5m8tq, §10): 2–3° off at the outage start against σ_ψ 0.6–1°, and
+   growing through curves at ~70 km/h. Candidates: the phone slipping in the mount at speed, gyro scale in sharp
+   turns, GNSS course lag at speed. Max error ÷ σ is 2.3 over 14 drives (target 0.5–2, §12.1).
+9. **Alignment is overconfident** on the new drives (simulated jams, MAPMATCH-SPEC §8.1): 9 of 28 alignment
+   starts are over 10° off, the worst 43° at 4.9σ.
+10. **Reversing reads OBD 0** on the CX-5 (VEHICLE-LINK-SPEC §10.4), so the car turns in place in the model. It
+    could be detected from OBD 0 + the gyro turning + the phone steady in the mount; its speed is still unknown.

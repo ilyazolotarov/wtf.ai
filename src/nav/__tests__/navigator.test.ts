@@ -78,6 +78,16 @@ describe("Navigator on a synthetic drive", () => {
     expect(err.posM).toBeLessThan(2 * err.last.accuracyM);
   });
 
+  test("a Wi-Fi fix repeated with sub-metre jitter is skipped like an exact repeat", () => {
+    const nav = new Navigator();
+    const fix = { tUs: 1_000_000, lat: 51.519191, lon: 30.756957, hAccM: 108 };
+    expect(nav.onGnss(fix).status).toBe("anchored");
+    expect(nav.onGnss({ ...fix, tUs: 5_000_000, lat: 51.519193 }).status).toBe("skipped");
+    expect(nav.onGnss({ ...fix, tUs: 9_000_000, lat: 51.5193 }).status).toBe("anchored");
+    // Dense-area Wi-Fi claims ±10 m: a metre is a new measurement, not a repeat.
+    expect(nav.onGnss({ ...fix, tUs: 13_000_000, lat: 51.51931, hAccM: 10 }).status).toBe("anchored");
+  });
+
   test("before the heading is known the radius grows with the distance driven", () => {
     const drive = syntheticDrive({
       segments: [{ durationS: 3, speedMps: 0, yawRateDegS: 0 }, { durationS: 30, speedMps: 10, yawRateDegS: 0 }],
@@ -221,6 +231,25 @@ describe("Navigator from a parked pose", () => {
   test("a heading turned around is dropped once the car drives", () => {
     const r = replayTrip(drive.trip, { startPose: { ...pose, headingRad: pose.headingRad + Math.PI } });
     expect(r.summary.startPose?.status).toBe("rejected");
+  });
+
+  test("the phone handled while parked, then carried off: the pose stays where the car is", () => {
+    const parked = syntheticDrive({
+      segments: [
+        { durationS: 30, speedMps: 12, yawRateDegS: 0 },
+        { durationS: 5, speedMps: 0, yawRateDegS: 0 },
+        { durationS: 60, speedMps: 0, yawRateDegS: 0 },
+      ],
+      gnss: "clean",
+      handling: { fromS: 45, toS: 95, tiltRad: 0.8, yawRateRadS: 0.5 },
+    });
+    // The driver walks north with the phone at 1.5 m/s: 75 m by the end.
+    const walkUs = parked.trip.startUs + 45e6;
+    parked.trip.gnss = parked.trip.gnss.map((f) =>
+      f.tUs < walkUs ? f : { ...f, lat: f.lat + (1.5 * (f.tUs - walkUs)) / 1e6 / 111_320, speedMps: 1.5, courseRad: 0 },
+    );
+    const end = replayTrip(parked.trip).summary.endPose!;
+    expect(haversineM(end, parked.truth.at(-1)!)).toBeLessThan(10);
   });
 
   test("refused when the fixes so far disagree", () => {

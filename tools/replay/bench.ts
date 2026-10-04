@@ -17,7 +17,7 @@ import type { MapMatchConfig } from "../../src/nav/mapmatch/particle-filter";
 import type { NavConfig } from "../../src/nav/navigator";
 import { replayTrip, type CutResult, type ReplayOptions } from "../../src/nav/replay/replay";
 import { isSatelliteFix } from "../../src/nav/types";
-import { readTripLog } from "../../src/triplog/trip-log-reader";
+import { readTripLog, type TripLog } from "../../src/triplog/trip-log-reader";
 import { findGraph, openGraph } from "./graph-file";
 import { runInitBench } from "./init-bench";
 
@@ -27,6 +27,27 @@ const STEP_S = 30;
 const MIN_TRUTH_SHARE = 0.8;
 /** And the car actually drives in it. */
 const MIN_DISTANCE_M = 200;
+/**
+ * And the phone is in the car: skip windows with this many satellite fixes moving while OBD reads 0
+ * or is silent (a driver walking off with the phone after parking; the odometry can't follow that).
+ * One or two such fixes are normal when stopping: CoreLocation's speed lags OBD.
+ */
+const MAX_PHONE_AWAY_FIXES = 5;
+
+/** Log times (s) of satellite fixes that move while OBD says the car doesn't (or says nothing). */
+function phoneAwayTimes(trip: TripLog): number[] {
+  const obd = trip.obdSpeed;
+  const out: number[] = [];
+  let j = 0;
+  for (const f of trip.gnss) {
+    if (!isSatelliteFix(f) || f.speedMps === undefined) continue;
+    while (j + 1 < obd.length && obd[j + 1].tUs <= f.tUs) j++;
+    const o = obd[j];
+    const fresh = o !== undefined && o.tUs <= f.tUs && f.tUs - o.tUs < 2_500_000;
+    if ((fresh && o.rawKph === 0 && f.speedMps >= 1.5) || (!fresh && f.speedMps >= 1)) out.push((f.tUs - trip.startUs) / 1e6);
+  }
+  return out;
+}
 
 function parseArgs(argv: string[]) {
   const files: string[] = [];
@@ -79,9 +100,13 @@ function main() {
       opened = openGraph(graphFile, first!);
     }
     const options: ReplayOptions = { nav, ...(opened ? { mapMatch: { graph: opened.graph, config: mmConfig } } : {}) };
-    const from = Math.ceil(base.summary.init.tS + 10);
+    // On a fixed grid of log time: a change that moves the EKF start by a few seconds then still
+    // scores the same windows (a shifted grid samples other outages and moved the medians by 5 m).
+    const from = Math.ceil((base.summary.init.tS + 10) / STEP_S) * STEP_S;
+    const away = phoneAwayTimes(trip);
     for (const d of DURATIONS_S) {
       for (let t = from; t + d <= base.summary.durationS; t += STEP_S) {
+        if (away.filter((a) => a >= t && a < t + d).length >= MAX_PHONE_AWAY_FIXES) continue;
         const cut = replayTrip(trip, { ...options, cuts: [{ fromS: t, toS: t + d }] }).summary.cuts[0];
         if (cut.truthFixes < MIN_TRUTH_SHARE * d || cut.distanceM < MIN_DISTANCE_M || cut.maxErrorM === null) continue;
         byDuration.get(d)!.push({ ...cut, file: path.basename(file) });

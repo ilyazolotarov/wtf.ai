@@ -20,6 +20,8 @@ export interface EmulatorProfile {
   nulBytes: boolean;
   /** ECUs answering functional requests for speed. First is the engine ECU. */
   ecus: number[];
+  /** ECUs answering 010D, if not all of `ecus` (the engine ECU can miss the speed probe at init). */
+  speedEcus?: number[];
   atLatencyMs: number;
   obdLatencyMs: number;
   /** Extra wait when the adapter doesn't know how many answers to expect. */
@@ -303,7 +305,7 @@ export class Elm327Emulator implements Transport {
     if (mode === "01" && pid === "00") {
       answers = p.ecus.map((ecu) => ({ ecu, data: [0x41, 0x00, ...bitmap(SUPPORTED_01)] }));
     } else if (mode === "01" && pid === "0D") {
-      answers = p.ecus.map((ecu) => ({ ecu, data: [0x41, 0x0d, Math.round(this.vehicle.speedKph) & 0xff] }));
+      answers = (p.speedEcus ?? p.ecus).map((ecu) => ({ ecu, data: [0x41, 0x0d, Math.round(this.vehicle.speedKph) & 0xff] }));
     } else if (mode === "01" && pid === "0C") {
       // A running engine never reports the same RPM twice in a row: jitter by ±0.25 rpm.
       const { rpm, rpmLatched } = this.vehicle;
@@ -315,6 +317,8 @@ export class Elm327Emulator implements Transport {
             : 0;
       answers = [{ ecu: engine, data: [0x41, 0x0c, (raw >> 8) & 0xff, raw & 0xff] }];
     } else if (mode === "09" && pid === "02") {
+      // Only the engine ECU has the VIN; another one addressed physically refuses (seen on a CX-5 TCM).
+      if (this.header !== 0x7df && this.header + 8 !== engine) return { body: ["7F0912"], delayMs: searchDelay + p.obdLatencyMs };
       return { body: this.vinFrames(engine), delayMs: searchDelay + p.obdLatencyMs + p.multiResponseWaitMs };
     } else {
       return { body: ["NO DATA"], delayMs: searchDelay + p.noDataWaitMs };

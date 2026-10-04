@@ -24,9 +24,11 @@ npm run replay:bench -- tools/triplog/logs/*.ulg                                
 npm run replay:bench -- tools/triplog/logs/*.ulg --nav '{"ekf":{"gyroNoise":0.001}}'  # try a variant
 ```
 
-- **Windows:** hides GPS for 60, 120 and 240 s, starting every 30 s after the EKF starts. A window counts only
-  if the hidden satellite fixes cover ≥ 80 % of it and the car drives ≥ 200 m, so only clean-GPS stretches
-  score.
+- **Windows:** hides GPS for 60, 120 and 240 s, starting every 30 s of log time from 10 s after the EKF starts
+  (a fixed grid, so two variants score the same windows). A window counts only if the hidden satellite fixes
+  cover ≥ 80 % of it and the car drives ≥ 200 m, so only clean-GPS stretches score. Windows where the phone
+  left the car (≥ 5 satellite fixes moving while OBD reads 0 or is silent: the driver walking off with it) are
+  skipped.
 - **Output, per outage length:** max and end error (median and p90), end error per km, and `err/σ`.
   - `err/σ` is max error ÷ the predicted 1σ. Below 1 means the filter is too pessimistic; above about 2 means
     it's overconfident.

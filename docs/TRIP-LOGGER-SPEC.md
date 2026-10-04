@@ -263,7 +263,7 @@ All native changes land in one CI build (`build-ios` job → unsigned IPA → Al
 
 L1 and L2 need no device and can start immediately.
 
-Status (2026-10-03): L0–L3 done. L4 started: 7 drives on the CX-5 with the MX+ (MFi); no BLE clone yet.
+Status (2026-10-04): L0–L3 done. L4 started: 14 drives on the CX-5 with the MX+ (MFi); no BLE clone yet.
 
 Field fixes:
 
@@ -294,10 +294,20 @@ Results (2026-10-03, 7 drives):
   - Parked with the engine off: ended at 5 min.
   - Link lost (driver walked away): ended at 2 min.
   - Back-to-back trips started on their own.
-- **3:** not tested yet.
+- **3:** ✓ (2026-10-04). The app was closed mid-trip: the log reads up to its last second, has no end record, and
+  the next trip started 17 s later when the app was opened again.
 - **4:** OBD reads about 2 % below GNSS (−0.3 … −0.8 km/h median); `triplog check` passes on the clean drives.
 - **5:** logs load in Python ✓. PlotJuggler not tried.
 - **6:** 26–27 MB/h ✓.
+
+2026-10-04, 7 more drives (the dev UI's parked timeout was set to 1 min, so parked trips ended 60 s after
+engine-off):
+
+- **Raw magnetometer:** 19.4 Hz, always on with the IMU ✓. What it measures: NAVIGATOR-SPEC §7.5.
+- **The driver walks off with the phone:** on 2 drives the phone left the mount after engine-off while the ECU was
+  awake. The link was lost out of Bluetooth range (one trip ended by link timeout; on the other the driver came back
+  and the link was restored). It looks like an adapter fault; the IMU and GNSS show the walk (NAVIGATOR-SPEC §9.1).
+- **VIN:** read on 1 of 7 drives; the cause is fixed (VEHICLE-LINK-SPEC §9.1).
 
 ## 13. Open items
 
@@ -305,4 +315,5 @@ Results (2026-10-03, 7 drives):
 2. Files app visibility of `Documents/` (§7).
 3. ~~Whether the map and the log should share one GNSS source~~ — done: the map uses `modules/sensor-capture` too. `expo-location`'s watcher stopped for good after a jamming episode, until an app restart.
 4. Tune trip thresholds (§4.2) from field data. So far the defaults behaved correctly on all 7 drives.
-5. The VIN is often missing from the log (VEHICLE-LINK-SPEC §15).
+5. ~~The VIN is often missing from the log~~ — `0902` went to the ECU pinned for speed (VEHICLE-LINK-SPEC §9.1).
+   Verify on the next drives.

@@ -92,6 +92,18 @@ describe("init", () => {
     expect(emu.log).toContain("ATSH7E0");
   });
 
+  test("VIN from the engine ECU while another ECU is pinned for speed (CX-5 TCM)", async () => {
+    const { send, emu } = await setup({ ...STN_PROFILE, speedEcus: [0x7e9] });
+    await probeAdapter(send);
+    const r = await initVehicle(send);
+    expect(r.vehicle).toMatchObject({ vin: "JM3KFBDM1J0123456", speedEcu: "7E9" });
+    expect(r.capabilities.physicalAddressing).toBe(true);
+    // Pinned back to the speed ECU before polling.
+    const vinAt = emu.log.indexOf("0902");
+    expect(emu.log.slice(vinAt)).toContain("ATSH7E1");
+    expect((await send("010D")).lines.join("")).toMatch(/^410D/);
+  });
+
   test("reset after a reply arrived one command late still turns echo off", async () => {
     const { send, emu } = await setup(STN_PROFILE);
     await probeAdapter(send);

@@ -31,7 +31,7 @@ Odometry is built up in stages (§2.1). Stage 1 uses the minimum that works on a
 | Estimator location          | **TypeScript** (`src/nav/`), not native. Reason: Windows-only dev; logic must hot-reload and be unit-testable/replayable on Windows. Native code stays thin.                                                              |
 | GNSS integrity              | Only two checks: **outside-Ukraine polygon** and **teleport vs odometry/DR**. Do **not** use raw GNSS data. Do **not** implement slow drag-off detection.                                                                 |
 | Yaw source                  | Stage 1: **phone gyro** projected onto gravity. Stage 2: rear wheel-speed differential. Stage 3: **CAN yaw rate** (to be reverse-engineered; not in opendbc).                                                            |
-| Absolute heading            | From trusted GNSS course, particle-filter road heading, manual fix, and the pose persisted at ignition off. **The magnetometer is not used** for navigation: in-car distortion (body steel, wiring, mount) is typically 10–30° and changes when the phone moves. Exceptions: a display-only compass beam on the map when walking (UI-SPEC §6.1); the raw magnetometer is logged (TRIP-LOGGER-SPEC §5.2) to measure in replay whether it can pick the travel direction along a road at a jammed start, which needs only < 90° error. |
+| Absolute heading            | From trusted GNSS course, particle-filter road heading, manual fix, and the pose persisted at ignition off. **The magnetometer is not used** for navigation: in-car distortion (body steel, wiring, mount) changes when the phone moves. Exceptions: a display-only compass beam on the map when walking (UI-SPEC §6.1); the raw magnetometer is logged (TRIP-LOGGER-SPEC §5.2). Measured on 7 drives (NAVIGATOR-SPEC §7.5): calibrated on other drives, median error 4–18°, always < 90°, so it could pick the travel direction along a road at a jammed start; re-seating the phone costs 15–20°. |
 | Phone mount                 | Stage 1 requires a **rigid phone mount** (the gyro is the only yaw source).                                                                                                                                               |
 | Standstill bias calibration | **2–3 s**, refined at every stop (ZUPT). No dedicated long standstill step.                                                                                                                                               |
 | Distribution                | Sideloading via AltStore now. App Store later needs a paid Apple Developer account; then BLE needs nothing more, MFi adapters need the vendors' authorizations (see §9).                                                    |
@@ -318,9 +318,9 @@ Status (2026-10-04):
   - Road graph built (MAPMATCH-SPEC §4.7): Ukraine 452 MB, 4.3 M edges, 2–3 min and 2.9 GB to build; Chernihiv
     15 MB.
   - Open: a BLE clone, valhalla-mobile.
-- **Phase 1:** done and field-tested (7 drives, TRIP-LOGGER-SPEC §11).
-- **Phase 2:** the navigator and replay are implemented and measured on replay. It drives the map through
-  `NavigatorService` and saves its calibration. A field drive is still needed (NAVIGATOR-SPEC §2, §9).
+- **Phase 1:** done and field-tested (14 drives, TRIP-LOGGER-SPEC §11).
+- **Phase 2:** the navigator and replay are implemented. It drives the map through `NavigatorService` and saves its
+  calibration. Field-tested on 7 drives (NAVIGATOR-SPEC §9.1): 26 m off after 2.7 km jammed throughout.
 - **Phase 5:** in progress, measured on replay only (MAPMATCH-SPEC §2): road graph, particle filter (open loop),
   heading init from the map under jamming. Next: closed loop (M6) and the app (M7).
 
@@ -357,7 +357,8 @@ Status (2026-10-04):
 
 1. Phase 0: `010D1` poll rate on CX-5 via MX+ measured and reported (target ≥ 10 Hz); PID `0D` matches GNSS speed within 1 km/h at steady speed; VIN read via `0902`.
    - Result (2026-10-03): 25–29 Hz, p50 latency 16–18 ms. OBD reads about 2 % below GNSS (−0.3 … −0.8 km/h median).
-   - The VIN was read in only 2 of 7 logs (VEHICLE-LINK-SPEC §15).
+   - The VIN was read in only 3 of 14 logs: `0902` went to the TCM when it was pinned for speed. Fixed
+     (VEHICLE-LINK-SPEC §9.1).
 2. Standstill: heading drift ≈ 0 while stopped after 2–3 s bias estimate.
 3. Handling detection: picking up / re-seating the phone during a logged drive invalidates the gyro window; no heading step after re-seating.
 4. Replay: GNSS cut for 1 / 5 / 15 min on clean logs — report DR error with and without map matching. Without map matching so far: median max error 11 / 20 / 37 m after 1 / 2 / 4 min (NAVIGATOR-SPEC §10). 5 / 15 min need longer clean drives.
@@ -379,7 +380,7 @@ Google Maps; Android; raw GNSS analysis; slow drag-off spoofing detection; Wi-Fi
 ## 9. Risks & open items
 
 1. **ELM327 clone quality**: many clones (fake "v2.1") are slow, lack the response-count suffix, or mis-handle timeouts → poll rate may drop to ~3–8 Hz. Measure per adapter; define a minimum usable rate; keep a tested-adapter list.
-2. **OBD speed quality**: 1 km/h resolution; some ECUs truncate rather than round (small constant bias that `k_s` can't absorb — consider a speed-offset state if replay shows it); zero cutoff at low speed; unsigned (reversing counted as forward unless PID `A4` is supported). ZUPT and map matching must absorb these.
+2. **OBD speed quality**: 1 km/h resolution; some ECUs truncate rather than round (small constant bias that `k_s` can't absorb; not the case on the CX-5, NAVIGATOR-SPEC §13.2); zero cutoff at low speed; unsigned, so reversing counts as forward unless PID `A4` is supported, or reads 0 (CX-5: the car turns in place in the model). ZUPT and map matching must absorb these.
 3. **Gyro-only heading drift** in Stage 1 during long outages (residual bias ~0.01°/s ≈ 9° per 15 min). Depends on map matching and on a rigid mount; quantify in Phase 7.
    - Measured in replay (NAVIGATOR-SPEC §10): the gyro is fine (scale 1.007 over 13 turns, bias 0.007 °/s). DR is
      limited by about 2° of heading error at the start of an outage plus ±2–3 % along-track error, not by gyro
@@ -397,8 +398,9 @@ Google Maps; Android; raw GNSS analysis; slow drag-off spoofing detection; Wi-Fi
 14. **BLE throughput ceiling**: iOS connection intervals (15–30 ms) limit one adapter to roughly 15–30 polls/s at best; clones are lower. Measure per adapter (VEHICLE-LINK-SPEC §3.5).
 15. **BLE catalog completeness**: no-name adapters use varied GATT layouts and names, and many don't advertise services. Mitigations: unfiltered scan + name ranking + heuristic UART search + "Try anyway"; GATT dumps of unknown devices are logged to extend the catalog.
 16. **Vehicle ECU quirks:** while the ECU is awake with the engine off, the CX-5 answers PID `0C` with a stale RPM
-    latched at shutdown. The repeat rule handles it (VEHICLE-LINK-SPEC §10.4). Other makes may have other quirks,
-    so check engine state against logs on every new car.
+    latched at shutdown. The repeat rule handles it (VEHICLE-LINK-SPEC §10.4). It reads speed 0 while reversing, and
+    battery voltage ~12 V while driving on some drives. Other makes may have other quirks, so check engine state
+    and speed against logs on every new car.
 17. **Tuning from one phone:** all navigator tuning comes from one iPhone 13, one mount and one car. GNSS timing is
     measured online; the rest needs logs from another phone and mount (NAVIGATOR-SPEC §11).
 18. **Sentry source maps**: uploads need the `SENTRY_AUTH_TOKEN` secret and `SENTRY_ORG` / `SENTRY_PROJECT` repo variables; without them builds skip the upload and JS stack traces are minified.

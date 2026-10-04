@@ -364,7 +364,10 @@ Rules:
 
 1. Protocol: `ATSP0` + `0100` (auto search) → `ATDPN` → `ATSPn` (lock it, so later requests never re-search). Cache `n` per VIN/adapter for fast reconnect.
 2. Supported PIDs: `0100` bitmap must contain `0C` and `0D`. Missing `0D` → error "vehicle doesn't report speed over OBD".
-3. VIN: `0902` once (multi-frame; clones may fail — non-fatal).
+3. VIN: `0902` once, after §9.2 (multi-frame; clones may fail — non-fatal). Mode 09 is the engine ECU's, so with
+   another ECU pinned for speed it goes to the engine ECU (`ATSH7E0` + `ATCRA7E8`), then the speed ECU is pinned
+   again; the pinned ECU is the fallback. On the CX-5 the TCM (`7E9`) is pinned when the engine ECU misses the
+   speed probe, and it answers `0902` with `7F 09 12`: that is why the VIN was in only 3 of 14 logs.
 
 ### 9.2 Pin the speed ECU
 
@@ -424,7 +427,11 @@ Not used: bare-CR "repeat last command" (it saves nothing on BLE and breaks when
 
 - Speed > 0 while `engine-off` is valid (hybrids, coasting with stop-start). Parked with the engine off, speed drops to 1 Hz: it only has to notice the car rolling, and it keeps the parked timeout fed (TRIP-LOGGER-SPEC §4).
 - A running engine's RPM never repeats exactly (0.25 rpm resolution, polled seconds apart: 0 repeats in 167 samples over three real trips). Some ECUs answer with the RPM latched at the last shutdown while awake with the engine off: a Mazda CX-5 reported 796.50 for 280 s while parked with the engine off, and 724.00 after the engine was stopped. Without the repeat rule that started a trip and blocked the parked timeout.
-- `ATRV` is read every 30 s (and logged). Voltage is a hint only (smart alternators make it unreliable for engine-state decisions).
+- `ATRV` is read every 30 s (and logged). Voltage is a hint only (smart alternators make it unreliable for
+  engine-state decisions): the CX-5 read 11.9–12.1 V for 85 % of the driving on 2 of 14 drives, 14.0–14.4 V on the
+  rest.
+- The CX-5 reports PID `0D` = 0 while reversing (3 manoeuvres in 14 drives: 2–10 km/h by GNSS, the car turning
+  10–20 °/s, the phone still in the mount). Reversing isn't counted as driving forward; it looks like standing.
 - Trip start/end on top of these states: TRIP-LOGGER-SPEC §4.
 
 ### 10.5 Errors and recovery
@@ -457,7 +464,7 @@ The same contract with two transports: BLE (same GATT catalog) and Classic SPP (
 
 | Adapter | Transport | Chip / ELM version | Profile | Car / protocol | Speed rate (Hz) | Latency p50 / p95 | Notes |
 | ------- | --------- | ------------------ | ------- | -------------- | --------------- | ----------------- | ----- |
-| OBDLink MX+ | MFi (`com.obdlink`) | STN2255 v5.10.3 / ELM327 v1.4b | — | Mazda CX-5 KF / 6 (CAN 11-bit 500k) | 25–29 (`010D1`, `ATSH7E0`, `ATAT1`) | 16–18 / 53–71 ms | 7 drives. Rare stalls: replies arrive one command late, then `STOPPED` → re-init (2–6 s gap). VIN read only sometimes (§15). |
+| OBDLink MX+ | MFi (`com.obdlink`) | STN2255 v5.10.3 / ELM327 v1.4b | — | Mazda CX-5 KF / 6 (CAN 11-bit 500k) | 25–32 moving, 20 on one drive (`010D1`, `ATSH7E0` or `7E1`, `ATAT1`) | 16–19 / 49–65 ms; 30–49 / 70–86 ms on 4 drives (cause unknown) | 14 drives. Rare stalls: replies arrive one command late, then `STOPPED` → re-init (2–6 s gap). The VIN was missed with `7E1` pinned (§9.1). |
 
 ## 14. Verification targets
 
@@ -475,5 +482,6 @@ The same contract with two transports: BLE (same GATT catalog) and Classic SPP (
 3. Measure real BLE connection intervals and poll rates (§3.5) and fill the tested-adapter table.
 4. Verify Expo Modules event payload performance for scan batches; switch to typed arrays if needed.
 5. Decide whether a native "repeat mode" (SPEC §3.1) is needed — only if bridge overhead measurably limits the poll rate. With the MX+ the JS loop reaches 25–29 Hz, so not needed so far.
-6. The VIN (`0902`) was in only 2 of 7 trip logs, though the CX-5 answers it. Find out why the first init misses it (engine off at connect? the 5 s timeout?). Per-VIN storage (speed cap, calibration) depends on it.
+6. ~~The VIN (`0902`) was in only 2 of 7 trip logs~~ — `0902` went to the ECU pinned for speed; it now goes to the
+   engine ECU (§9.1). Verify on the next drives: per-VIN storage (speed scale, parked pose) depends on it.
 7. Verify the auto-connect fix on device: open the app before the car wakes the MX+; it must connect once iOS reports the accessory.

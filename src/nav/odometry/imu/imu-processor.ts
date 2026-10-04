@@ -5,8 +5,9 @@ import type { ImuSample, Vec3 } from "../../types";
 export interface ImuConfig {
   /** Gravity direction vs its slow average beyond this = phone moved (mounted driving stays < 4°). */
   handlingTiltRad: number;
-  /** 0.1 s mean rotation rate off the vertical beyond this = phone moved (mount wobble reaches
-   *  ~1 rad/s; single samples spike to ~1.9 rad/s on bumps). */
+  /** Rotation off the vertical, averaged as a vector over 0.1 s, beyond this = phone moved. A bump
+   *  shakes the phone back and forth, so the vector mean stays ≤ 0.7 rad/s (its magnitude averaged
+   *  reached 1.8); handling turns it one way, ≥ 1.4 rad/s (14 real drives). */
   handlingRateRadS: number;
   /** Gyro stays invalid this long after the last handling trigger. */
   handlingHoldUs: number;
@@ -20,7 +21,7 @@ export interface ImuConfig {
 
 export const DEFAULT_IMU_CONFIG: ImuConfig = {
   handlingTiltRad: (8 * Math.PI) / 180,
-  handlingRateRadS: 1.5,
+  handlingRateRadS: 1.0,
   handlingHoldUs: 1_500_000,
   gravityTauS: 3,
   stillWindow: 100,
@@ -88,7 +89,7 @@ export class ImuProcessor {
   private handlingUntilUs = -Infinity;
   private yawLp = new RollingStats(10);
   private accelLp = new RollingStats(10);
-  private offLp = new RollingStats(10);
+  private offLp = [new RollingStats(10), new RollingStats(10), new RollingStats(10)];
   private yawWindow: RollingStats;
   private yawLpWindow: RollingStats;
   private accelLpWindow: RollingStats;
@@ -119,8 +120,9 @@ export class ImuProcessor {
     }
     const tilt = Math.acos(Math.min(1, Math.max(-1, dot(up, this.gravityRef))));
     const off: Vec3 = [s.gyro[0] - yawRate * up[0], s.gyro[1] - yawRate * up[1], s.gyro[2] - yawRate * up[2]];
-    this.offLp.push(norm(off));
-    if (tilt > c.handlingTiltRad || this.offLp.mean > c.handlingRateRadS) this.handlingUntilUs = s.tUs + c.handlingHoldUs;
+    for (let i = 0; i < 3; i++) this.offLp[i].push(off[i]);
+    const offMean = norm([this.offLp[0].mean, this.offLp[1].mean, this.offLp[2].mean]);
+    if (tilt > c.handlingTiltRad || offMean > c.handlingRateRadS) this.handlingUntilUs = s.tUs + c.handlingHoldUs;
     const valid = s.tUs >= this.handlingUntilUs;
 
     this.yawLp.push(yawRate);
