@@ -1,8 +1,8 @@
 # wtf.ai — Spoofing-Resilient Car Navigator: High-Level Specification
 
-Status: draft v7 (2026-10-03). Source of truth for coding agents. Update this file when decisions change.
+Status: draft v8 (2026-10-04). Source of truth for coding agents. Update this file when decisions change.
 
-Companion specs: [UI-SPEC.md](UI-SPEC.md) (UI-first milestone), [VEHICLE-LINK-SPEC.md](VEHICLE-LINK-SPEC.md) (Bluetooth ELM327 communication), [TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md) (trip detection, logging, export — Phase 1), [NAVIGATOR-SPEC.md](NAVIGATOR-SPEC.md) (Stage 1 EKF, online calibration, replay — Phase 2).
+Companion specs: [UI-SPEC.md](UI-SPEC.md) (UI-first milestone), [VEHICLE-LINK-SPEC.md](VEHICLE-LINK-SPEC.md) (Bluetooth ELM327 communication), [TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md) (trip detection, logging, export — Phase 1), [NAVIGATOR-SPEC.md](NAVIGATOR-SPEC.md) (Stage 1 EKF, online calibration, replay — Phase 2), [MAPMATCH-SPEC.md](MAPMATCH-SPEC.md) (road graph, particle filter — Phase 5).
 
 ## 1. Problem & goal
 
@@ -200,7 +200,7 @@ States: `TRUSTED` → `UNTRUSTED` → `REACQUIRING` → `TRUSTED`.
 
 ### 3.7 Map matching — road-constrained particle filter (`src/nav/mapmatch/`)
 
-Reference approach: Gustafsson et al., "Particle filters for positioning, navigation, and tracking", IEEE Trans. Signal Processing, 2002 (car positioning from wheel speeds + road map, no GNSS).
+Detailed in [MAPMATCH-SPEC.md](MAPMATCH-SPEC.md). Reference approach: Gustafsson et al., "Particle filters for positioning, navigation, and tracking", IEEE Trans. Signal Processing, 2002 (car positioning from wheel speeds + road map, no GNSS).
 
 **Roles**
 
@@ -234,7 +234,7 @@ Reference approach: Gustafsson et al., "Particle filters for positioning, naviga
 - **Multimodal**: no EKF update. The UI shows the dominant hypothesis and marks the alternatives. Integrity uses the full spread (§3.3).
 - **On-road weight collapses**: off-road mode (free DR) until particles re-lock onto the graph.
 
-**Initialization**: around the last trusted GNSS fix, the pose persisted at startup, or a manual fix. Spread over edges within k·σ, with direction consistent with heading.
+**Initialization**: around the last trusted GNSS fix, the pose persisted at startup, or a manual fix. Spread over edges within k·σ, with direction consistent with heading. Under jamming with no heading yet: over all edges near the anchored position, both directions; the PF can then start the EKF with the road heading (MAPMATCH-SPEC §8).
 
 **Budget**: ~300–1000 particles; target < 5 ms per update on iPhone on the JS thread (measure in replay and on device).
 
@@ -244,7 +244,7 @@ Reference approach: Gustafsson et al., "Particle filters for positioning, naviga
 - Outputs:
   1. Valhalla routing tiles tarball (routing only).
   2. Vector map tiles (PMTiles/MBTiles) + MapLibre style.
-  3. **Road graph for map matching**: drivable OSM ways (no footway/path/cycleway/steps; `service`/`private` kept but flagged), split at intersections. Per edge: simplified polyline (≤ ~1 m deviation), length, road class, one-way, connectivity, turn restrictions (OSM relations). Tiled (e.g. z14) with a per-tile spatial index in a compact binary format; the device loads tiles around the active hypotheses. Size to be measured in Phase 0.
+  3. **Road graph for map matching**: drivable OSM ways (no footway/path/cycleway/steps; `service`/`private` kept but flagged), split at intersections. Per edge: simplified polyline (≤ ~1 m deviation), length, road class, one-way, connectivity, turn restrictions (OSM relations). One file per region (`<region>.graph.bin`, `ukraine` included; no cross-region navigation), tiled internally at z14 with a directory and per-tile spatial lists, read by random access: the device decodes only tiles around the active hypotheses, so the Ukraine graph costs about what an oblast's does. Built with pyosmium. Size to be measured in Phase 0. Format: MAPMATCH-SPEC §4.
 - Hosted as versioned, checksummed downloads. In-app download manager: resumable, checksum-verified, update check.
 
 ### 3.9 App (`src/app/`, Expo Router)
@@ -305,17 +305,19 @@ tools/triplog/           Python: ULog trip log reader, CSV/Parquet export, plots
 | 2   | TS EKF + replay             | 1          | `src/nav/odometry` (obd, imu), `src/nav/ekf`, replay metrics                                                                                                                                             |
 | 3   | Integrity                   | 2          | `src/nav/integrity`                                                                                                                                                                                      |
 | 4   | Calibration                 | 2, 3       | wizard + online estimation, per-VIN storage                                                                                                                                                              |
-| 5   | Map matching (particle filter) | 0, 2    | road-graph pipeline + `RoadGraph` reader (device + Node), `src/nav/mapmatch` PF, EKF pseudo-measurements, replay map-matching metrics (§3.10)                                                           |
+| 5   | Map matching (particle filter) | 0, 2    | road-graph pipeline + `RoadGraph` reader (device + Node), `src/nav/mapmatch` PF, heading init from the map under jamming, EKF pseudo-measurements, replay map-matching metrics (§3.10); see MAPMATCH-SPEC §12 |
 | 6   | App UI, routing, background | 2–5        | screens, download manager                                                                                                                                                                                |
 | 7   | Field test (Stage 1)        | 6          | real outage drives; baseline DR error numbers                                                                                                                                                            |
 | 7b  | Adapter coverage            | 1          | more BLE clones, OBDLink CX, vLinker; grow the GATT catalog and the tested-adapter list with measured poll rates (VEHICLE-LINK-SPEC §13)                                                                  |
 
-Status (2026-10-03):
+Status (2026-10-04):
 
 - **Phase 0:**
   - Done: CI unsigned build + AltStore, MX+ EA session over `com.obdlink`, `010D1` at ~27 Hz on the CX-5,
     DeviceMotion at 100 Hz, MapLibre offline tiles (per-region packs).
-  - Open: a BLE clone, valhalla-mobile, the road graph.
+  - Road graph built (MAPMATCH-SPEC §4.7): Ukraine 452 MB, 4.3 M edges, 2–3 min and 2.9 GB to build; Chernihiv
+    15 MB.
+  - Open: a BLE clone, valhalla-mobile.
 - **Phase 1:** done and field-tested (7 drives, TRIP-LOGGER-SPEC §11).
 - **Phase 2:** the navigator and replay are implemented and measured on replay. It drives the map through
   `NavigatorService` and saves its calibration. A field drive is still needed (NAVIGATOR-SPEC §2, §9).
