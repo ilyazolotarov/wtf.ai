@@ -27,7 +27,7 @@ export interface DevSettings {
   showParticles: boolean;
   /** A "Cut GPS" button on the map that simulates a GNSS outage. */
   outageButton: boolean;
-  /** How map matching feeds back into the navigator (MAPMATCH-SPEC §9): open (today), heading, closed. */
+  /** How map matching feeds back into the navigator (MAPMATCH-SPEC §9): open, heading, closed. */
   mapMatchLoop: MapMatchLoop;
 }
 

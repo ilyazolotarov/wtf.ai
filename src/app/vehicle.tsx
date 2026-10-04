@@ -250,7 +250,7 @@ function PositionTab() {
 
       <ScreenSection title={t("mapMatching")}>
         <ScreenRow label="road graph" value={ekf.mapMatchRegion ?? dash} />
-        <ScreenRow label="feeds back" value={t(ekf.mapMatchLoop === "open" ? "loopToday" : ekf.mapMatchLoop === "heading" ? "loopHeading" : "loopClosed")} />
+        <ScreenRow label="feeds back" value={t(ekf.mapMatchLoop === "open" ? "loopOpen" : ekf.mapMatchLoop === "heading" ? "loopHeading" : "loopClosed")} />
         {ekf.mapMatchLoop !== "open" && (
           <ScreenRow
             label="road corrections"
@@ -421,7 +421,7 @@ function DeveloperTab() {
           labelKey="mapMatchLoop"
           value={dev.mapMatchLoop}
           options={["open", "heading", "closed"] satisfies MapMatchLoop[]}
-          format={(v) => t(v === "open" ? "loopToday" : v === "heading" ? "loopHeading" : "loopClosed")}
+          format={(v) => t(v === "open" ? "loopOpen" : v === "heading" ? "loopHeading" : "loopClosed")}
           onChange={(v) => setDevSettings({ mapMatchLoop: v })}
         />
         <CycleRow

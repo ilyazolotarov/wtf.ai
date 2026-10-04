@@ -65,9 +65,9 @@ function listLogs() {
     .sort((a, b) => b.file.localeCompare(a.file));
 }
 
-/** Navigator versions (MAPMATCH-SPEC §9): what the app runs today, and the closed-loop steps. */
+/** Navigator versions (MAPMATCH-SPEC §9): the open-loop baseline (what the app runs), and the closed-loop steps. */
 const LOOPS: Record<string, { label: string; nav: Partial<NavConfig> }> = {
-  open: { label: "Today", nav: { mapMatchLoop: "open" } },
+  open: { label: "Open loop", nav: { mapMatchLoop: "open" } },
   heading: { label: "Road heading", nav: { mapMatchLoop: "heading" } },
   closed: { label: "Full correction", nav: { mapMatchLoop: "closed" } },
 };

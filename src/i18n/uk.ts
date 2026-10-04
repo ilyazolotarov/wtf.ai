@@ -190,7 +190,7 @@ export const uk = {
   showParticles: "Прив’язка до доріг на мапі (частинки)",
   outageButton: "Кнопка втрати GPS на мапі",
   mapMatchLoop: "Версія навігатора",
-  loopToday: "Поточна (прив’язка лише спостерігає)",
+  loopOpen: "Розімкнена (прив’язка лише спостерігає)",
   loopHeading: "Напрям дороги",
   loopClosed: "Повна корекція",
   cutGps: "Вимкнути GPS",

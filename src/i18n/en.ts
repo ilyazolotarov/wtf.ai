@@ -188,7 +188,7 @@ export const en = {
   showParticles: "Map matching on the map (particles)",
   outageButton: "GPS outage button on the map",
   mapMatchLoop: "Navigator version",
-  loopToday: "Today (map matching only watches)",
+  loopOpen: "Open loop (map matching only watches)",
   loopHeading: "Road heading",
   loopClosed: "Full correction",
   cutGps: "Cut GPS",

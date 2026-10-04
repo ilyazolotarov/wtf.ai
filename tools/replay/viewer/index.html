@@ -89,10 +89,10 @@
 <header>
   <h1>Drive replay</h1>
   <select id="file" aria-label="Drive"></select>
-  <label title="The navigator the replay runs. Today = what the app runs now; the others close the loop from map matching (MAPMATCH-SPEC §9)">Navigator
+  <label title="The navigator the replay runs. Open loop = what the app runs now; the others close the loop from map matching (MAPMATCH-SPEC §9)">Navigator
     <select id="loop">
       <option value="">As on the phone</option>
-      <option value="open">Today</option>
+      <option value="open">Open loop</option>
       <option value="heading">Road heading</option>
       <option value="closed">Full correction</option>
     </select></label>
@@ -108,7 +108,7 @@
   <label title="Run a second navigator version and draw it in orange">Compare
     <select id="compare">
       <option value="">—</option>
-      <option value="open">Today</option>
+      <option value="open">Open loop</option>
       <option value="heading">Road heading</option>
       <option value="closed">Full correction</option>
     </select></label>
