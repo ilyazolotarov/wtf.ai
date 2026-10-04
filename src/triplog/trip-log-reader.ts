@@ -11,9 +11,17 @@ import {
   NAV_POSE_CODES,
   NAV_SOURCE_CODES,
   NAV_TRUST_CODES,
+  ROUTE_MANEUVER_CODES,
+  ROUTE_REASON_CODES,
+  ROUTE_STATE_CODES,
+  ROUTE_STATUS_CODES,
   TRIP_EVENTS,
   type NavEstimateRecord,
   type NavMapMatchRecord,
+  type NavRouteManeuverRecord,
+  type NavRoutePointRecord,
+  type NavRouteProgressRecord,
+  type NavRouteRecord,
 } from "./schema";
 import { readULog, type RecordValue, type ULogRecord } from "./ulog/reader";
 
@@ -42,6 +50,11 @@ export interface TripLog {
   navEstimate: (Omit<NavEstimateRecord, "timestampUs"> & { tUs: number })[];
   /** Map matching in the app (absent in logs before it ran there); `top` without the NaN padding. */
   navMapMatch: (Omit<NavMapMatchRecord, "timestampUs"> & { tUs: number })[];
+  /** Routes planned, their polylines and maneuvers, and guidance along them (absent before routing). */
+  navRoute: (Omit<NavRouteRecord, "timestampUs"> & { tUs: number })[];
+  navRoutePoints: (Omit<NavRoutePointRecord, "timestampUs"> & { tUs: number })[];
+  navRouteManeuvers: (Omit<NavRouteManeuverRecord, "timestampUs"> & { tUs: number })[];
+  navRouteProgress: (Omit<NavRouteProgressRecord, "timestampUs"> & { tUs: number })[];
   truncated: boolean;
 }
 
@@ -151,6 +164,59 @@ export function readTripLog(bytes: Uint8Array): TripLog {
     };
   });
 
+  const navRoute = rows("nav_route").map((r) => ({
+    tUs: num(r, "timestamp"),
+    planId: num(r, "plan_id"),
+    reason: ROUTE_REASON_CODES[num(r, "reason")] ?? "new",
+    status: ROUTE_STATUS_CODES[num(r, "status")] ?? "cancelled",
+    fromLatDeg: num(r, "from_lat_deg"),
+    fromLonDeg: num(r, "from_lon_deg"),
+    fromHeadingRad: num(r, "from_heading_rad"),
+    toLatDeg: num(r, "to_lat_deg"),
+    toLonDeg: num(r, "to_lon_deg"),
+    lengthM: num(r, "length_m"),
+    durationS: num(r, "duration_s"),
+    offStartM: num(r, "off_start_m"),
+    offEndM: num(r, "off_end_m"),
+    states: num(r, "states"),
+    tiles: num(r, "tiles"),
+    planMs: num(r, "plan_ms"),
+    wallMs: num(r, "wall_ms"),
+    slices: num(r, "slices"),
+    points: num(r, "points"),
+    maneuvers: num(r, "maneuvers"),
+    graphBuilt: num(r, "graph_built"),
+  }));
+  const navRoutePoints = rows("nav_route_point").map((r) => ({
+    tUs: num(r, "timestamp"),
+    planId: num(r, "plan_id"),
+    index: num(r, "index"),
+    latDeg: num(r, "lat_deg"),
+    lonDeg: num(r, "lon_deg"),
+  }));
+  const navRouteManeuvers = rows("nav_route_maneuver").map((r) => ({
+    tUs: num(r, "timestamp"),
+    planId: num(r, "plan_id"),
+    index: num(r, "index"),
+    kind: ROUTE_MANEUVER_CODES[num(r, "kind")] ?? "depart",
+    exit: num(r, "exit"),
+    latDeg: num(r, "lat_deg"),
+    lonDeg: num(r, "lon_deg"),
+    atM: num(r, "at_m"),
+    turnRad: num(r, "turn_rad"),
+  }));
+  const navRouteProgress = rows("nav_route_progress").map((r) => ({
+    tUs: num(r, "timestamp"),
+    planId: num(r, "plan_id"),
+    state: ROUTE_STATE_CODES[num(r, "state")] ?? "on",
+    nextIndex: num(r, "next_index"),
+    alongM: num(r, "along_m"),
+    offM: num(r, "off_m"),
+    remainingM: num(r, "remaining_m"),
+    remainingS: num(r, "remaining_s"),
+    toNextM: num(r, "to_next_m"),
+  }));
+
   return {
     startUs: log.startUs,
     info: log.info,
@@ -165,6 +231,10 @@ export function readTripLog(bytes: Uint8Array): TripLog {
     messages,
     navEstimate,
     navMapMatch,
+    navRoute,
+    navRoutePoints,
+    navRouteManeuvers,
+    navRouteProgress,
     truncated: log.truncated,
   };
 }

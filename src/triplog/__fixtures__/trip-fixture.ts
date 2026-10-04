@@ -103,6 +103,35 @@ export function buildFixture(): Uint8Array {
       { weight: 0.25, latDeg: 50.4498, lonDeg: 30.5195, headingRad: 1.8, spreadM: 9 },
     ],
   });
+  // A two-point route with its depart and arrive, and guidance along it.
+  w.navRoute({
+    timestampUs: t0 + 1_600_000,
+    planId: 1,
+    reason: "new",
+    status: "done",
+    fromLatDeg: 50.4501,
+    fromLonDeg: 30.52,
+    fromHeadingRad: 0.25,
+    toLatDeg: 50.46,
+    toLonDeg: 30.53,
+    lengthM: 1500,
+    durationS: 150,
+    offStartM: 2,
+    offEndM: 5,
+    states: 1234,
+    tiles: 7,
+    planMs: 12.5,
+    wallMs: 30,
+    slices: 2,
+    points: 2,
+    maneuvers: 2,
+    graphBuilt: 1_791_000_000,
+  });
+  w.navRoutePoint({ timestampUs: t0 + 1_600_000, planId: 1, index: 0, latDeg: 50.4501, lonDeg: 30.52 });
+  w.navRoutePoint({ timestampUs: t0 + 1_600_000, planId: 1, index: 1, latDeg: 50.46, lonDeg: 30.53 });
+  w.navRouteManeuver({ timestampUs: t0 + 1_600_000, planId: 1, index: 0, kind: "depart", exit: 0, latDeg: 50.4501, lonDeg: 30.52, atM: 0, turnRad: 0 });
+  w.navRouteManeuver({ timestampUs: t0 + 1_600_000, planId: 1, index: 1, kind: "roundabout", exit: 2, latDeg: 50.455, lonDeg: 30.525, atM: 700, turnRad: 1.5 });
+  w.navRouteProgress({ timestampUs: t0 + 1_700_000, planId: 1, state: "leaving", nextIndex: 1, alongM: 100, offM: 45, remainingM: 1400, remainingS: 140, toNextM: 600 });
   w.linkStats({ timestampUs: t0 + 1_000_000, speedHz: 19.5, latencyP50Ms: 40, latencyP95Ms: 55, errors: 1, linkState: 6, batteryV: 14.2 });
   w.log("info", LOG_TAGS.elm, t0 + 1, "tx=10000000 ATI | ELM327 v1.5\\r\\r>");
   w.tripEvent(t0 + 3_000_000, TRIP_EVENTS.end, 0);

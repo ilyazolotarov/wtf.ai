@@ -18,6 +18,10 @@ function trip(notes: [number, string][]): TripLog {
     messages: notes.map(([tS, text]) => ({ tUs: START_US + tS * 1e6, tag: "app", text })),
     navEstimate: [],
     navMapMatch: [],
+    navRoute: [],
+    navRoutePoints: [],
+    navRouteManeuvers: [],
+    navRouteProgress: [],
     truncated: false,
   };
 }

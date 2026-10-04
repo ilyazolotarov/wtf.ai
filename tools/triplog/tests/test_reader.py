@@ -117,6 +117,21 @@ def test_map_match(trip):
     assert timing["rows_over_budget"] == 0
 
 
+def test_route(trip):
+    plan = trip.route.iloc[0]
+    assert len(trip.route) == 1
+    assert plan["t_s"] == pytest.approx(1.6)
+    assert (plan["plan_id"], plan["reason"], plan["status"]) == (1, "new", "done")
+    assert (plan["length_m"], plan["states"], plan["slices"], plan["maneuvers"]) == (1500, 1234, 2, 2)
+    assert plan["plan_ms"] == pytest.approx(12.5)
+    assert list(trip.route_points["lat"]) == [pytest.approx(50.4501), pytest.approx(50.46)]
+    assert list(trip.route_maneuvers["kind"]) == ["depart", "roundabout"]
+    assert trip.route_maneuvers.iloc[1]["exit"] == 2
+    progress = trip.route_progress.iloc[0]
+    assert (progress["state"], progress["next_index"]) == ("leaving", 1)
+    assert (progress["off_m"], progress["to_next_m"]) == (pytest.approx(45), pytest.approx(600))
+
+
 def test_summary_and_check(trip):
     s = summary(trip)
     assert s["complete"] is True

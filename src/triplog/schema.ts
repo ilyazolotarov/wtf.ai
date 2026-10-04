@@ -142,6 +142,78 @@ export const NAV_MAPMATCH: ULogFormat = {
   ],
 };
 
+/** Each route plan (ROUTING-SPEC §8): why, from where to where, the result and what planning cost. */
+export const NAV_ROUTE: ULogFormat = {
+  name: "nav_route",
+  fields: [
+    ts,
+    { type: "uint16_t", name: "plan_id" },
+    { type: "uint8_t", name: "reason" },
+    { type: "uint8_t", name: "status" },
+    { type: "double", name: "from_lat_deg" },
+    { type: "double", name: "from_lon_deg" },
+    { type: "float", name: "from_heading_rad" },
+    { type: "double", name: "to_lat_deg" },
+    { type: "double", name: "to_lon_deg" },
+    { type: "float", name: "length_m" },
+    { type: "float", name: "duration_s" },
+    { type: "float", name: "off_start_m" },
+    { type: "float", name: "off_end_m" },
+    { type: "uint32_t", name: "states" },
+    { type: "uint32_t", name: "tiles" },
+    { type: "float", name: "plan_ms" },
+    { type: "float", name: "wall_ms" },
+    { type: "uint16_t", name: "slices" },
+    { type: "uint16_t", name: "points" },
+    { type: "uint16_t", name: "maneuvers" },
+    { type: "uint32_t", name: "graph_built" },
+  ],
+};
+
+/** The planned route's polyline: a record per vertex, after each plan. */
+export const NAV_ROUTE_POINT: ULogFormat = {
+  name: "nav_route_point",
+  fields: [
+    ts,
+    { type: "uint16_t", name: "plan_id" },
+    { type: "uint16_t", name: "index" },
+    { type: "double", name: "lat_deg" },
+    { type: "double", name: "lon_deg" },
+  ],
+};
+
+/** The planned route's maneuvers, after each plan. */
+export const NAV_ROUTE_MANEUVER: ULogFormat = {
+  name: "nav_route_maneuver",
+  fields: [
+    ts,
+    { type: "uint16_t", name: "plan_id" },
+    { type: "uint16_t", name: "index" },
+    { type: "uint8_t", name: "kind" },
+    { type: "uint8_t", name: "exit" },
+    { type: "double", name: "lat_deg" },
+    { type: "double", name: "lon_deg" },
+    { type: "float", name: "at_m" },
+    { type: "float", name: "turn_rad" },
+  ],
+};
+
+/** Guidance at each `nav_estimate` while a route is active (ROUTING-SPEC §8). */
+export const NAV_ROUTE_PROGRESS: ULogFormat = {
+  name: "nav_route_progress",
+  fields: [
+    ts,
+    { type: "uint16_t", name: "plan_id" },
+    { type: "uint8_t", name: "state" },
+    { type: "uint16_t", name: "next_index" },
+    { type: "float", name: "along_m" },
+    { type: "float", name: "off_m" },
+    { type: "float", name: "remaining_m" },
+    { type: "float", name: "remaining_s" },
+    { type: "float", name: "to_next_m" },
+  ],
+};
+
 export const ALL_FORMATS: readonly ULogFormat[] = [
   OBD_PID,
   GNSS,
@@ -155,6 +227,10 @@ export const ALL_FORMATS: readonly ULogFormat[] = [
   NAV_ESTIMATE,
   MAG_RAW,
   NAV_MAPMATCH,
+  NAV_ROUTE,
+  NAV_ROUTE_POINT,
+  NAV_ROUTE_MANEUVER,
+  NAV_ROUTE_PROGRESS,
 ];
 
 export const ENGINE_STATE_CODES = ["unknown", "ignition-off", "engine-off", "engine-running"] as const;
@@ -209,6 +285,15 @@ export const NAV_SOURCE_CODES = ["gnss", "fused", "dr", "manual"] as const;
 export const NAV_TRUST_CODES = ["TRUSTED", "UNTRUSTED", "REACQUIRING", "NO_FIX"] as const;
 export const NAV_POSE_CODES = ["none", "unverified", "confirmed", "rejected"] as const;
 export const NAV_MAPMATCH_STATE_CODES = ["off", "init", "tracking", "multimodal", "offroad"] as const;
+/** Why a route was planned: a new destination, the car left the route, or logged again at a trip's start. */
+export const ROUTE_REASON_CODES = ["new", "off-route", "resume"] as const;
+export const ROUTE_STATUS_CODES = ["done", "no-road-at-start", "no-road-at-destination", "no-route", "too-far", "cancelled"] as const;
+export const ROUTE_STATE_CODES = ["on", "leaving", "off", "unsure", "arrived"] as const;
+/** `ManeuverKind` (src/nav/routing/maneuvers.ts), in its order. */
+export const ROUTE_MANEUVER_CODES = [
+  "depart", "slight-left", "slight-right", "left", "right", "sharp-left", "sharp-right",
+  "keep-left", "keep-right", "u-turn", "roundabout", "arrive",
+] as const;
 
 export const GNSS_FLAGS = {
   simulated: 1,
@@ -312,4 +397,66 @@ export interface LinkStatsRecord {
   errors: number;
   linkState: number;
   batteryV: number;
+}
+
+export interface NavRouteRecord {
+  timestampUs: number;
+  /** Counts up from 1 within an app session; each re-plan is a new plan. */
+  planId: number;
+  reason: (typeof ROUTE_REASON_CODES)[number];
+  status: (typeof ROUTE_STATUS_CODES)[number];
+  fromLatDeg: number;
+  fromLonDeg: number;
+  /** NaN when unknown. */
+  fromHeadingRad: number;
+  toLatDeg: number;
+  toLonDeg: number;
+  /** NaN unless done. */
+  lengthM: number;
+  durationS: number;
+  offStartM: number;
+  offEndM: number;
+  states: number;
+  tiles: number;
+  /** Time in the search, and from the request to the result (with the pauses between slices). */
+  planMs: number;
+  wallMs: number;
+  slices: number;
+  points: number;
+  maneuvers: number;
+  graphBuilt: number;
+}
+
+export interface NavRoutePointRecord {
+  timestampUs: number;
+  planId: number;
+  index: number;
+  latDeg: number;
+  lonDeg: number;
+}
+
+export interface NavRouteManeuverRecord {
+  timestampUs: number;
+  planId: number;
+  index: number;
+  kind: (typeof ROUTE_MANEUVER_CODES)[number];
+  /** Roundabout exit; 0 otherwise. */
+  exit: number;
+  latDeg: number;
+  lonDeg: number;
+  atM: number;
+  turnRad: number;
+}
+
+export interface NavRouteProgressRecord {
+  timestampUs: number;
+  planId: number;
+  state: (typeof ROUTE_STATE_CODES)[number];
+  nextIndex: number;
+  alongM: number;
+  /** NaN when nothing of the route matched. */
+  offM: number;
+  remainingM: number;
+  remainingS: number;
+  toNextM: number;
 }

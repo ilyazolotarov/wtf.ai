@@ -47,6 +47,14 @@ NAV_TRUST = ["TRUSTED", "UNTRUSTED", "REACQUIRING", "NO_FIX"]
 NAV_POSES = ["none", "unverified", "confirmed", "rejected"]
 NAV_MAPMATCH_STATES = ["off", "init", "tracking", "multimodal", "offroad"]
 MAPMATCH_TOP = 3
+# Routing (ROUTING-SPEC §8); the maneuver kinds in src/nav/routing/maneuvers.ts order.
+ROUTE_REASONS = ["new", "off-route", "resume"]
+ROUTE_STATUSES = ["done", "no-road-at-start", "no-road-at-destination", "no-route", "too-far", "cancelled"]
+ROUTE_STATES = ["on", "leaving", "off", "unsure", "arrived"]
+ROUTE_MANEUVERS = [
+    "depart", "slight-left", "slight-right", "left", "right", "sharp-left", "sharp-right",
+    "keep-left", "keep-right", "u-turn", "roundabout", "arrive",
+]
 _MAPMATCH_TOP_FIELDS = [("weight", "weight"), ("lat_deg", "lat"), ("lon_deg", "lon"), ("heading_rad", "heading"), ("spread_m", "spread_m")]
 LOG_TAGS = {1: "elm", 2: "link", 3: "trip", 4: "sensors", 5: "app"}
 LOG_LEVELS = {ord("3"): "error", ord("4"): "warning", ord("6"): "info", ord("7"): "debug"}
@@ -83,6 +91,12 @@ class Trip:
     # Map matching in the app, one row per `nav` row while it ran: state, cost, and the top
     # hypotheses as `<field>_<i>` (i = 0 heaviest; NaN when fewer). Empty in older logs.
     map_match: pd.DataFrame = field(default_factory=pd.DataFrame)
+    # Routing: each plan, its polyline and maneuvers (by plan_id), and guidance at each `nav` row while a route
+    # was active. Empty in logs from before routing.
+    route: pd.DataFrame = field(default_factory=pd.DataFrame)
+    route_points: pd.DataFrame = field(default_factory=pd.DataFrame)
+    route_maneuvers: pd.DataFrame = field(default_factory=pd.DataFrame)
+    route_progress: pd.DataFrame = field(default_factory=pd.DataFrame)
     dropouts_ms: list[int] = field(default_factory=list)
 
     @property
@@ -134,6 +148,18 @@ def _dataset(ulog: ULog, name: str) -> dict[str, np.ndarray] | None:
 
 def _t(start_us: int, timestamps: np.ndarray) -> np.ndarray:
     return (timestamps.astype("float64") - start_us) / 1e6
+
+
+def _frame(ulog: ULog, name: str, start_us: int, columns: dict[str, tuple[str, list[str] | None]]) -> pd.DataFrame:
+    """A dataset as `t_s` plus the given columns: {column: (field, code names or None)}; empty when absent."""
+    d = _dataset(ulog, name)
+    if d is None:
+        return pd.DataFrame(columns=["t_s", *columns])
+    out: dict[str, object] = {"t_s": _t(start_us, d["timestamp"])}
+    for column, (field_name, codes) in columns.items():
+        v = d[field_name]
+        out[column] = [_name(codes, int(x)) for x in v] if codes else (v.astype("float64") if v.dtype.kind == "f" else v.astype("int64"))
+    return pd.DataFrame(out)
 
 
 def _vec(d: dict, base: str, n: int) -> list[np.ndarray]:
@@ -340,6 +366,65 @@ def load(path: str | Path) -> Trip:
     else:
         map_match = pd.DataFrame(columns=mm_columns)
 
+    route = _frame(
+        ulog,
+        "nav_route",
+        start,
+        {
+            "plan_id": ("plan_id", None),
+            "reason": ("reason", ROUTE_REASONS),
+            "status": ("status", ROUTE_STATUSES),
+            "from_lat": ("from_lat_deg", None),
+            "from_lon": ("from_lon_deg", None),
+            "from_heading": ("from_heading_rad", None),
+            "to_lat": ("to_lat_deg", None),
+            "to_lon": ("to_lon_deg", None),
+            "length_m": ("length_m", None),
+            "duration_s": ("duration_s", None),
+            "off_start_m": ("off_start_m", None),
+            "off_end_m": ("off_end_m", None),
+            "states": ("states", None),
+            "tiles": ("tiles", None),
+            "plan_ms": ("plan_ms", None),
+            "wall_ms": ("wall_ms", None),
+            "slices": ("slices", None),
+            "points": ("points", None),
+            "maneuvers": ("maneuvers", None),
+            "graph_built": ("graph_built", None),
+        },
+    )
+    route_points = _frame(ulog, "nav_route_point", start, {"plan_id": ("plan_id", None), "index": ("index", None), "lat": ("lat_deg", None), "lon": ("lon_deg", None)})
+    route_maneuvers = _frame(
+        ulog,
+        "nav_route_maneuver",
+        start,
+        {
+            "plan_id": ("plan_id", None),
+            "index": ("index", None),
+            "kind": ("kind", ROUTE_MANEUVERS),
+            "exit": ("exit", None),
+            "lat": ("lat_deg", None),
+            "lon": ("lon_deg", None),
+            "at_m": ("at_m", None),
+            "turn": ("turn_rad", None),
+        },
+    )
+    route_progress = _frame(
+        ulog,
+        "nav_route_progress",
+        start,
+        {
+            "plan_id": ("plan_id", None),
+            "state": ("state", ROUTE_STATES),
+            "next_index": ("next_index", None),
+            "along_m": ("along_m", None),
+            "off_m": ("off_m", None),
+            "remaining_m": ("remaining_m", None),
+            "remaining_s": ("remaining_s", None),
+            "to_next_m": ("to_next_m", None),
+        },
+    )
+
     rows = []
     for tag, messages in getattr(ulog, "logged_messages_tagged", {}).items():
         for m in messages:
@@ -376,5 +461,9 @@ def load(path: str | Path) -> Trip:
         transcript=transcript,
         nav=nav,
         map_match=map_match,
+        route=route,
+        route_points=route_points,
+        route_maneuvers=route_maneuvers,
+        route_progress=route_progress,
         dropouts_ms=dropouts,
     )

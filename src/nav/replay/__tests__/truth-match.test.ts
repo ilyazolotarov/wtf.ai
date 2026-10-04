@@ -48,7 +48,7 @@ function drive(waypoints: [number, number][], speed: number, options: { offsetM?
   }
   for (let t = 0; t <= duration + 1; t += 0.1) obdSpeed.push({ tUs: START_US + t * 1e6, speedMps: speed, rawKph: Math.round(speed * 3.6) });
   return {
-    startUs: START_US, info: {}, imu: [], mag: [], obdSpeed, gnss, engine: [], rpm: [], events: [], timeSync: [], messages: [], navEstimate: [], navMapMatch: [], truncated: false,
+    startUs: START_US, info: {}, imu: [], mag: [], obdSpeed, gnss, engine: [], rpm: [], events: [], timeSync: [], messages: [], navEstimate: [], navMapMatch: [], navRoute: [], navRoutePoints: [], navRouteManeuvers: [], navRouteProgress: [], truncated: false,
   };
 }
 

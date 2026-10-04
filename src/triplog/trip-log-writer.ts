@@ -16,9 +16,17 @@ import {
   NAV_MAPMATCH_STATE_CODES,
   NAV_MODE_CODES,
   NAV_POSE_CODES,
+  NAV_ROUTE,
+  NAV_ROUTE_MANEUVER,
+  NAV_ROUTE_POINT,
+  NAV_ROUTE_PROGRESS,
   NAV_SOURCE_CODES,
   NAV_TRUST_CODES,
   OBD_PID,
+  ROUTE_MANEUVER_CODES,
+  ROUTE_REASON_CODES,
+  ROUTE_STATE_CODES,
+  ROUTE_STATUS_CODES,
   TIME_SYNC,
   TRIP_EVENT,
   WTF_LOG_VERSION,
@@ -27,6 +35,10 @@ import {
   type LinkStatsRecord,
   type NavEstimateRecord,
   type NavMapMatchRecord,
+  type NavRouteManeuverRecord,
+  type NavRoutePointRecord,
+  type NavRouteProgressRecord,
+  type NavRouteRecord,
   type ObdPidRecord,
   type Vec3Record,
 } from "./schema";
@@ -206,6 +218,66 @@ export class TripLogWriter {
       top("lonDeg"),
       top("headingRad"),
       top("spreadM"),
+    ]);
+  }
+
+  navRoute(r: NavRouteRecord): void {
+    const u16 = (v: number) => Math.min(0xffff, Math.max(0, Math.round(v)));
+    const u32 = (v: number) => Math.min(0xffffffff, Math.max(0, Math.round(v)));
+    this.enc.data(NAV_ROUTE.name, [
+      r.timestampUs,
+      u16(r.planId),
+      ROUTE_REASON_CODES.indexOf(r.reason),
+      ROUTE_STATUS_CODES.indexOf(r.status),
+      r.fromLatDeg,
+      r.fromLonDeg,
+      r.fromHeadingRad,
+      r.toLatDeg,
+      r.toLonDeg,
+      r.lengthM,
+      r.durationS,
+      r.offStartM,
+      r.offEndM,
+      u32(r.states),
+      u32(r.tiles),
+      r.planMs,
+      r.wallMs,
+      u16(r.slices),
+      u16(r.points),
+      u16(r.maneuvers),
+      u32(r.graphBuilt),
+    ]);
+  }
+
+  navRoutePoint(r: NavRoutePointRecord): void {
+    this.enc.data(NAV_ROUTE_POINT.name, [r.timestampUs, Math.min(0xffff, r.planId), Math.min(0xffff, r.index), r.latDeg, r.lonDeg]);
+  }
+
+  navRouteManeuver(r: NavRouteManeuverRecord): void {
+    this.enc.data(NAV_ROUTE_MANEUVER.name, [
+      r.timestampUs,
+      Math.min(0xffff, r.planId),
+      Math.min(0xffff, r.index),
+      ROUTE_MANEUVER_CODES.indexOf(r.kind),
+      Math.min(0xff, r.exit),
+      r.latDeg,
+      r.lonDeg,
+      r.atM,
+      r.turnRad,
+    ]);
+  }
+
+  navRouteProgress(r: NavRouteProgressRecord): void {
+    this.enc.data(NAV_ROUTE_PROGRESS.name, [
+      r.timestampUs,
+      Math.min(0xffff, r.planId),
+      ROUTE_STATE_CODES.indexOf(r.state),
+      Math.min(0xffff, r.nextIndex),
+      r.alongM,
+      r.offM,
+      r.remainingM,
+      r.remainingS,
+      r.toNextM,
     ]);
   }
 

@@ -18,7 +18,7 @@ function trip(): TripLog {
   }
   return {
     startUs: START_US, info: {}, imu: [], mag: [], obdSpeed, gnss, engine: [], rpm: [], events: [], timeSync: [],
-    messages: [], navEstimate: [], navMapMatch: [], truncated: false,
+    messages: [], navEstimate: [], navMapMatch: [], navRoute: [], navRoutePoints: [], navRouteManeuvers: [], navRouteProgress: [], truncated: false,
   };
 }
 

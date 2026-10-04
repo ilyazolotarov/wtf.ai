@@ -387,7 +387,7 @@ export function cityDrive(o: CityDriveOptions): CityDrive {
   return {
     trip: {
       startUs: START_US, info: { sim: "city-drive" }, imu, mag: [], obdSpeed, gnss, engine: [], rpm: [], events: [],
-      timeSync: [], messages: [], navEstimate: [], navMapMatch: [], truncated: false,
+      timeSync: [], messages: [], navEstimate: [], navMapMatch: [], navRoute: [], navRoutePoints: [], navRouteManeuvers: [], navRouteProgress: [], truncated: false,
     },
     truth,
     truthAt,

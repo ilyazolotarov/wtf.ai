@@ -2,6 +2,8 @@
 import * as fs from "fs";
 import * as path from "path";
 
+import { MANEUVER_KINDS } from "@/nav/routing/maneuvers";
+import { ROUTE_MANEUVER_CODES } from "@/triplog/schema";
 import { readTripLog } from "@/triplog/trip-log-reader";
 import { TripLogWriter, type ByteSink } from "@/triplog/trip-log-writer";
 import { readULog } from "@/triplog/ulog/reader";
@@ -99,6 +101,23 @@ describe("TripLogWriter", () => {
         ],
       },
     ]);
+  });
+
+  test("route records: plan, polyline, maneuvers, progress", () => {
+    const log = readTripLog(buildFixture());
+    expect(log.navRoute).toEqual([
+      expect.objectContaining({ tUs: FIXTURE_START_US + 1_600_000, planId: 1, reason: "new", status: "done", lengthM: 1500, states: 1234, slices: 2, maneuvers: 2 }),
+    ]);
+    expect(log.navRoute[0].fromHeadingRad).toBeCloseTo(0.25, 6);
+    expect(log.navRoutePoints.map((p) => [p.index, p.latDeg, p.lonDeg])).toEqual([[0, 50.4501, 30.52], [1, 50.46, 30.53]]);
+    expect(log.navRouteManeuvers.map((m) => [m.kind, m.exit, m.atM])).toEqual([["depart", 0, 0], ["roundabout", 2, 700]]);
+    expect(log.navRouteProgress).toEqual([
+      { tUs: FIXTURE_START_US + 1_700_000, planId: 1, state: "leaving", nextIndex: 1, alongM: 100, offM: 45, remainingM: 1400, remainingS: 140, toNextM: 600 },
+    ]);
+  });
+
+  test("route maneuver codes follow the planner's kinds", () => {
+    expect([...ROUTE_MANEUVER_CODES]).toEqual([...MANEUVER_KINDS]);
   });
 
   test("flushes on interval with a sync message, closes the sink", () => {
