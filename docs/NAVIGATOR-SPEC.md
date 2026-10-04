@@ -227,8 +227,21 @@ Measured on the 7 drives of 2026-10-04 (`mag_raw`, 19.4 Hz):
   before it has a heading from elsewhere: the calibration is trusted on the last drive's word. Not covered: the
   phone turned in its mount at the same tilt (the tilt check doesn't see it); turned 90° or 180°, it gave 3 wrong
   map starts in 180 benchmark sessions (MAPMATCH-SPEC §8.2).
+- **Next: shadow mode in the app** (decided 2026-10-04). The app runs the compass but doesn't navigate with it,
+  until real drives show how often a stored calibration is wrong (the phone turned in its mount at the same tilt
+  is the case nothing catches).
+  - `NavigatorService` feeds `mag_raw` to `Navigator.onMag` and stores `compassCalibration` per VIN, next to the
+    parked pose and `k_s`; the next drive loads it with `setCompassCalibration`.
+  - A navigator option (shadow / on) keeps the compass heading away from the particle filter in shadow; learning
+    and the trust check run as in replay.
+  - Logged per drive (app notes, so replay and `triplog` read them): at each filter start with the heading
+    unknown, the compass heading and its trust; once the heading is known, the compass minus the known heading,
+    and the trust verdict at the end of the drive.
+  - A replay summary over the logs: how often the stored calibration was confirmed or rejected, and how far off
+    it was at the starts. Re-seat the phone on purpose once to see the check work.
+  - Switch to `on` only if those numbers hold up; otherwise drop the compass.
 - **Not yet:** a heading prior for alignment (§6), re-fitting the offset from gyro turns after the phone is
-  re-seated, wiring into the app (`NavigatorService` feeding `mag_raw` and persisting the calibration per VIN).
+  re-seated.
 
 ## 8. Trust (interim, `src/services/position/gnss-trust.ts`)
 
@@ -383,3 +396,5 @@ needed to check them (`replay:bench`).
    starts are over 10° off, the worst 43° at 4.9σ.
 10. **Reversing reads OBD 0** on the CX-5 (VEHICLE-LINK-SPEC §10.4), so the car turns in place in the model. It
     could be detected from OBD 0 + the gyro turning + the phone steady in the mount; its speed is still unknown.
+11. **Compass shadow mode** (§7.6): wire the compass into the app without navigating with it, and collect how often
+    the stored calibration is wrong on real drives before switching it on.
