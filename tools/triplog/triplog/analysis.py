@@ -67,6 +67,30 @@ def summary(trip: Trip) -> dict:
         "obd_latency_ms_p50": float(np.nanmedian(ok_speed["latency_ms"])) if len(ok_speed) else None,
         "imu_max_gap_s": float(trip.imu["t_s"].diff().max()) if len(trip.imu) > 1 else None,
         "dropouts_ms": trip.dropouts_ms,
+        "map_match_timing": map_match_timing(trip),
+    }
+
+
+def map_match_timing(trip: Trip, budget_ms: float = 5.0) -> dict | None:
+    """How long the app's particle-filter updates took (MAPMATCH-SPEC §11), from `nav_mapmatch`.
+
+    Rows carry the count, total and slowest of the updates since the previous row, so the
+    slowest update is exact; p99 is of those per-row maxima (an upper bound on the true p99).
+    """
+    mm = trip.map_match
+    if not len(mm) or "updates" not in mm or not mm["updates"].sum():
+        return None
+    rows = mm[mm["updates"] > 0]
+    span_s = float(mm["t_s"].iloc[-1] - mm["t_s"].iloc[0]) if len(mm) > 1 else 0.0
+    total_ms = float(rows["updates_total_ms"].sum())
+    return {
+        "updates": int(rows["updates"].sum()),
+        "mean_ms": round(total_ms / int(rows["updates"].sum()), 3),
+        "row_max_p50_ms": round(float(rows["updates_max_ms"].quantile(0.5)), 3),
+        "row_max_p99_ms": round(float(rows["updates_max_ms"].quantile(0.99)), 3),
+        "max_ms": round(float(rows["updates_max_ms"].max()), 3),
+        "rows_over_budget": int((rows["updates_max_ms"] > budget_ms).sum()),
+        "share_of_time": round(total_ms / (span_s * 1000), 5) if span_s > 0 else None,
     }
 
 

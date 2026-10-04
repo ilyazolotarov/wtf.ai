@@ -625,7 +625,7 @@ NAVIGATOR-SPEC §4, §5.1):
 | Multimodal share | Share of moving time in `multimodal` |
 | Position error | Dominant cluster versus held-out fixes, in the `replay:bench` windows (NAVIGATOR-SPEC §10), next to the EKF |
 | Heading init | Distance to EKF start, heading and position error at start, and both ÷ the σ it started with (§8.1), versus alignment |
-| Update time | PF update p50 / p99 (ms) in Node; on device from `nav_mapmatch` |
+| Update time | PF update p50 / p99 (ms) in Node; on device from the `mm timing` note and `nav_mapmatch` (§11) |
 
 ### 10.3 Tooling (`tools/replay`)
 
@@ -705,7 +705,14 @@ NAVIGATOR-SPEC §4, §5.1):
   Hz) while the filter runs:
   - state, particle count, cluster count;
   - top 3 clusters (weight, lat, lon, heading, spread);
-  - update µs and graph version (the file's build time).
+  - update µs and graph version (the file's build time);
+  - every filter update since the previous record: count, total µs and the slowest. The filter updates 5–10 times
+    a second and a record goes out 2–3 times, so the last update's time alone would miss the spikes.
+- **Update time on the phone** (§14.5): `NavigatorService` drains the filter's update times at each published
+  position into a per-drive histogram (`src/nav/mapmatch/update-timing.ts`, buckets 5 % apart). The Vehicle
+  sheet shows p50 / p99, the slowest, how many exceeded 5 ms and the share of the time spent; at engine off a note
+  `mm timing: <n> updates, p50 … ms, p99 … ms, max … ms, … % of the time, <k> over 5 ms` closes the drive.
+  `tools/triplog` sums the records (`summary()["map_match_timing"]`).
 
   Read by `readTripLog` (`navMapMatch`) and `tools/triplog` (`Trip.map_match`). App notes: `mm graph …`, `mm
   <state>` on each change except flips between `tracking` and `multimodal` (those are in `nav_mapmatch`), `nav

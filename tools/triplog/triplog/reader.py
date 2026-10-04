@@ -317,7 +317,7 @@ def load(path: str | Path) -> Trip:
     )
 
     d = _dataset(ulog, "nav_mapmatch")
-    mm_columns = ["t_s", "state", "particles", "clusters", "update_ms", "graph_built"] + [
+    mm_columns = ["t_s", "state", "particles", "clusters", "update_ms", "updates", "updates_total_ms", "updates_max_ms", "graph_built"] + [
         f"{name}_{i}" for _, name in _MAPMATCH_TOP_FIELDS for i in range(MAPMATCH_TOP)
     ]
     if d is not None:
@@ -327,6 +327,10 @@ def load(path: str | Path) -> Trip:
             "particles": d["particles"].astype("int64"),
             "clusters": d["clusters"].astype("int64"),
             "update_ms": d["update_us"] / 1000.0,
+            # Every filter update since the previous row: count, total and slowest.
+            "updates": d["update_count"].astype("int64"),
+            "updates_total_ms": d["update_total_us"] / 1000.0,
+            "updates_max_ms": d["update_max_us"] / 1000.0,
             "graph_built": d["graph_built"].astype("int64"),
         }
         for field_name, name in _MAPMATCH_TOP_FIELDS:

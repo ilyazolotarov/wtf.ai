@@ -109,6 +109,12 @@ def test_map_match(trip):
     assert row["lat_1"] == pytest.approx(50.4498)
     assert row["heading_1"] == pytest.approx(1.8, rel=1e-6)
     assert np.isnan(row["weight_2"])
+    assert (row["updates"], row["updates_total_ms"], row["updates_max_ms"]) == (4, pytest.approx(0.9), pytest.approx(0.4))
+    timing = summary(trip)["map_match_timing"]
+    assert timing["updates"] == 4
+    assert timing["mean_ms"] == pytest.approx(0.225)
+    assert timing["max_ms"] == pytest.approx(0.4)
+    assert timing["rows_over_budget"] == 0
 
 
 def test_summary_and_check(trip):

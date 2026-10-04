@@ -130,6 +130,9 @@ export const NAV_MAPMATCH: ULogFormat = {
     { type: "uint8_t", name: "clusters" },
     { type: "uint16_t", name: "particles" },
     { type: "uint32_t", name: "update_us" },
+    { type: "uint16_t", name: "update_count" },
+    { type: "uint32_t", name: "update_total_us" },
+    { type: "uint32_t", name: "update_max_us" },
     { type: "uint32_t", name: "graph_built" },
     { type: "float", name: "weight", count: MAPMATCH_TOP },
     { type: "double", name: "lat_deg", count: MAPMATCH_TOP },
@@ -278,7 +281,10 @@ export interface NavMapMatchRecord {
   particles: number;
   /** All hypotheses (up to 5); `top` holds the first `MAPMATCH_TOP`. */
   clusters: number;
+  /** The last filter update's time. */
   updateUs: number;
+  /** Every filter update since the previous record: how many, their total and the slowest (µs). */
+  updates: { count: number; totalUs: number; maxUs: number };
   /** The graph file's build time (unix s): identifies the graph version. */
   graphBuilt: number;
   top: NavMapMatchHypothesis[];

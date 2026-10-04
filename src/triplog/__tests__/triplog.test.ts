@@ -91,6 +91,7 @@ describe("TripLogWriter", () => {
         particles: 500,
         clusters: 2,
         updateUs: 250,
+        updates: { count: 4, totalUs: 900, maxUs: 400 },
         graphBuilt: 1_791_000_000,
         top: [
           { weight: 0.75, latDeg: 50.4502, lonDeg: 30.5201, headingRad: 0.25, spreadM: 6 },

@@ -399,7 +399,7 @@ const JUNCTION_DRIVE: DriveSegment[] = [
 describe("map matching", () => {
   test("in a GNSS outage the dot follows the road the car turned onto, and the trip log has it", async () => {
     const drive = syntheticDrive({ segments: JUNCTION_DRIVE, origin: GRAPH_ORIGIN, startHeadingRad: Math.PI / 2, gnss: "clean", obdScale: 0.99 });
-    const { service, play, notes, loggedMapMatch } = harness({ roadGraph: fixtureGraphSource() });
+    const { service, play, notes, loggedMapMatch, engine, now } = harness({ roadGraph: fixtureGraphSource() });
     await service.start();
     play(drive, { withoutGnssFromS: 100 });
 
@@ -417,6 +417,18 @@ describe("map matching", () => {
     expect(last).toMatchObject({ state: "tracking", particles: expect.any(Number) });
     expect(last.top[0].weight).toBeGreaterThan(0.8);
     expect(service.getDebug()).toMatchObject({ mapMatchRegion: "net", mapMatch: expect.objectContaining({ state: "tracking" }) });
+
+    // Speed: every filter update is counted, between records and over the drive.
+    const logged = loggedMapMatch.reduce((n, r) => n + r.updates.count, 0);
+    expect(logged).toBeGreaterThan(500);
+    expect(loggedMapMatch.every((r) => r.updates.maxUs * r.updates.count >= r.updates.totalUs - 1)).toBe(true);
+    const timing = service.getDebug().mapMatchTiming!;
+    expect(timing.count).toBeGreaterThanOrEqual(logged);
+    expect(timing.p99Ms).toBeLessThanOrEqual(timing.maxMs);
+    expect(timing.share).toBeGreaterThanOrEqual(0); // fake timers stop performance.now: updates take 0 ms here
+    engine.emit("engine-off", now());
+    expect(notes.at(-1)).toMatch(/^mm timing: \d+ updates, p50 [\d.]+ ms, p99 [\d.]+ ms, max [\d.]+ ms, [\d.]+ % of the time, \d+ over 5 ms$/);
+    expect(service.getDebug().mapMatchTiming).toBeNull(); // counting afresh for the next drive
     service.stop();
   });
 

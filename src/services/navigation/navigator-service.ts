@@ -5,6 +5,7 @@
 import * as Location from "expo-location";
 
 import type { MapMatchState } from "@/nav/mapmatch/particle-filter";
+import { UpdateTiming, type UpdateTimingSummary } from "@/nav/mapmatch/update-timing";
 import type { MapMatchEstimate, NavConfig, NavMode, ParkedPose } from "@/nav/navigator";
 import { Navigator } from "@/nav/navigator";
 import { haversineM } from "@/nav/geo";
@@ -89,6 +90,8 @@ export interface NavigatorDebug {
   /** Map matching: the region whose graph is set (null: none), the filter's state and cost. */
   mapMatchRegion: string | null;
   mapMatch: MapMatchEstimate | null;
+  /** Every filter update this drive (since the last `mm timing` note), and its share of the time. */
+  mapMatchTiming: (UpdateTimingSummary & { share: number }) | null;
 }
 
 /** The particle filter's state for the map's debug overlay (MAPMATCH-SPEC §11). */
@@ -173,6 +176,10 @@ export class NavigatorService implements PositionSource {
   private outage: { startedAt: number; startDistanceM: number | null; hidden: GnssRecord | null; maxErrorM: number } | null = null;
   private overlay: MapMatchOverlay | null = null;
   private overlayStale = true;
+  /** Filter update times: this drive's, and those since the last `nav_mapmatch` record. */
+  private timing = new UpdateTiming();
+  private timingSince = 0;
+  private interval = { count: 0, totalMs: 0, maxMs: 0 };
 
   constructor(deps: NavigatorServiceDeps) {
     this.deps = deps;
@@ -291,6 +298,7 @@ export class NavigatorService implements PositionSource {
       compassOffDeg: nav ? compassOff(nav) : null,
       mapMatchRegion: this.graph?.region ?? null,
       mapMatch: e?.mapMatch ?? null,
+      mapMatchTiming: this.timingSummary(),
     };
   }
 
@@ -315,6 +323,7 @@ export class NavigatorService implements PositionSource {
         this.flush(this.deps.nowUs() - REORDER_US);
         this.saveCalibration();
         this.noteCompassSummary();
+        this.noteMapMatchTiming();
       }),
     );
     this.lastSaveAt = Date.now();
@@ -325,6 +334,7 @@ export class NavigatorService implements PositionSource {
     this.flush(Infinity);
     this.saveCalibration();
     this.noteCompassSummary();
+    this.noteMapMatchTiming();
     this.unsubscribers.forEach((u) => u());
     this.unsubscribers = [];
     if (this.timer) clearInterval(this.timer);
@@ -337,6 +347,7 @@ export class NavigatorService implements PositionSource {
 
   private createNavigator(): void {
     const { calibration, link } = this.deps;
+    this.drainUpdateTimes(); // from the navigator being replaced
     const lag = calibration.gnssLag();
     const nav = new Navigator({ ...this.deps.nav, ...(lag ? { gnssLagS: lag.lagS } : {}) });
     this.nav = nav;
@@ -351,6 +362,7 @@ export class NavigatorService implements PositionSource {
     // Before the parked pose: the filter then starts around it.
     this.graph = null;
     this.notedMapMatch = "off";
+    this.interval = { count: 0, totalMs: 0, maxMs: 0 };
     this.applyRoadGraph();
     // Known before the adapter connects: the car of the adapter auto-connect will use.
     const vin = link.expectedVin();
@@ -370,6 +382,7 @@ export class NavigatorService implements PositionSource {
     if (!nav || !this.deps.roadGraph) return;
     const active = this.deps.roadGraph.current();
     if ((active?.key ?? null) === (this.graph?.key ?? null)) return;
+    this.drainUpdateTimes(); // the filter is about to be replaced
     nav.setRoadGraph(active?.graph ?? null);
     this.graph = active ? { key: active.key, region: active.region, builtAt: active.graph.info.builtAt } : null;
     this.note(active ? `mm graph ${active.region} (OSM ${active.graph.info.osmDate})` : "mm graph none");
@@ -617,12 +630,47 @@ export class NavigatorService implements PositionSource {
 
   /** `behindUs`: how far the navigator's state lags now (the drawn position is extrapolated over it). */
   private set(position: PositionEstimate, behindUs = 0): void {
+    this.drainUpdateTimes();
     const { simulatedOutage: _, ...rest } = position;
     const outage = this.outageInfo(rest);
     this.position = outage ? { ...rest, simulatedOutage: outage } : rest;
     this.overlayStale = true;
     this.logPosition(position, behindUs);
     this.listeners.forEach((listener) => listener());
+  }
+
+  // ---- map-matching speed (MAPMATCH-SPEC §11) ----
+
+  /** Every filter update since the last drain, out of the filter (whose list would grow all drive). */
+  private drainUpdateTimes(): void {
+    const times = this.nav?.mapMatcher?.updateTimes;
+    if (!times?.length) return;
+    if (!this.timing.count) this.timingSince = Date.now();
+    for (const ms of times.splice(0)) {
+      this.timing.add(ms);
+      this.interval.count++;
+      this.interval.totalMs += ms;
+      this.interval.maxMs = Math.max(this.interval.maxMs, ms);
+    }
+  }
+
+  private timingSummary(): NavigatorDebug["mapMatchTiming"] {
+    this.drainUpdateTimes();
+    const s = this.timing.summary();
+    if (!s) return null;
+    return { ...s, share: s.totalMs / Math.max(1, Date.now() - this.timingSince) };
+  }
+
+  /** At the end of a drive: how long the filter's updates took, then start counting afresh. */
+  private noteMapMatchTiming(): void {
+    const s = this.timingSummary();
+    if (!s) return;
+    const ms = (v: number) => (v < 10 ? v.toFixed(2) : v.toFixed(0));
+    this.note(
+      `mm timing: ${s.count} updates, p50 ${ms(s.p50Ms)} ms, p99 ${ms(s.p99Ms)} ms, max ${ms(s.maxMs)} ms, ` +
+        `${(s.share * 100).toFixed(2)} % of the time, ${s.overBudget} over 5 ms`,
+    );
+    this.timing = new UpdateTiming();
   }
 
   private outageInfo(p: PositionEstimate): SimulatedOutage | undefined {
@@ -671,6 +719,7 @@ export class NavigatorService implements PositionSource {
       particles: mm.particles,
       clusters: mm.clusters.length,
       updateUs: mm.updateMs * 1000,
+      updates: { count: this.interval.count, totalUs: this.interval.totalMs * 1000, maxUs: this.interval.maxMs * 1000 },
       graphBuilt: this.graph?.builtAt ?? 0,
       top: mm.clusters.slice(0, MAPMATCH_TOP).map((c) => ({
         weight: c.weight,
@@ -680,6 +729,7 @@ export class NavigatorService implements PositionSource {
         spreadM: c.spreadM,
       })),
     });
+    this.interval = { count: 0, totalMs: 0, maxMs: 0 };
   }
 }
 

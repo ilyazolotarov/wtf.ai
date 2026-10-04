@@ -188,6 +188,7 @@ export class TripLogWriter {
   }
 
   navMapMatch(r: NavMapMatchRecord): void {
+    const us = (v: number) => Math.min(0xffffffff, Math.max(0, Math.round(v)));
     const top = (key: keyof NavMapMatchRecord["top"][number]) =>
       Array.from({ length: MAPMATCH_TOP }, (_, i) => r.top[i]?.[key] ?? NaN);
     this.enc.data(NAV_MAPMATCH.name, [
@@ -195,7 +196,10 @@ export class TripLogWriter {
       NAV_MAPMATCH_STATE_CODES.indexOf(r.state),
       Math.min(0xff, r.clusters),
       Math.min(0xffff, r.particles),
-      Math.min(0xffffffff, Math.max(0, Math.round(r.updateUs))),
+      us(r.updateUs),
+      Math.min(0xffff, r.updates.count),
+      us(r.updates.totalUs),
+      us(r.updates.maxUs),
       r.graphBuilt,
       top("weight"),
       top("latDeg"),

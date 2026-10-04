@@ -143,6 +143,7 @@ export function readTripLog(bytes: Uint8Array): TripLog {
       particles: num(r, "particles"),
       clusters: num(r, "clusters"),
       updateUs: num(r, "update_us"),
+      updates: { count: num(r, "update_count"), totalUs: num(r, "update_total_us"), maxUs: num(r, "update_max_us") },
       graphBuilt: num(r, "graph_built"),
       top: weight
         .map((w, i) => ({ weight: w, latDeg: lat[i], lonDeg: lon[i], headingRad: heading[i], spreadM: spread[i] }))
