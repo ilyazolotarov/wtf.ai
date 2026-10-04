@@ -90,6 +90,14 @@ export interface MapMatchConfig {
   /** Absolute heading: EKF σ_ψ widened by this, and the term scaled down (its errors are correlated). */
   absHeadingInflation: number;
   absHeadingScale: number;
+  /**
+   * Compass (§8.2), only while the heading is unknown: once per filter start, at the first straight
+   * moment, each particle is weighted by inlier · Gaussian(travel direction − compass, σ) + (1 − inlier).
+   * Once, because its error is a bias that lasts the drive: repeating it would count the same error
+   * again. The best and the worst direction differ by at most 1 / (1 − inlier), so the compass alone
+   * never gives one direction the weight a map start needs (`trackingWeight`); a wrong one costs time.
+   */
+  compassInlier: number;
   /** Lane offset: distance from the centre line up to this costs on-road particles nothing at a fix, m. */
   laneHalfWidthM: number;
   /** Lane offset beyond the dead zone, added to the fix σ, m. */
@@ -181,6 +189,7 @@ export const DEFAULT_MAP_MATCH: MapMatchConfig = {
   curveShare: 0.3,
   absHeadingInflation: 3,
   absHeadingScale: 0.3,
+  compassInlier: 0.85,
   laneHalfWidthM: 3,
   laneSigmaM: 2,
   fixSpacingM: 10,
@@ -399,6 +408,8 @@ export class ParticleFilter {
   private nextWorkingSetM = 0;
   private lastCoarseM = -Infinity;
   private lastFixM = -Infinity;
+  private compassUsed = false;
+  private compass: { psi: number; sigma: number } | null = null;
   /** The car moved since the last weighting: a stop then closes the turn comparison. */
   private movedSinceEval = false;
   /** Recent (distance, turn) for the U-turn and straight tests. */
@@ -604,6 +615,7 @@ export class ParticleFilter {
     this.recentTurns = [];
     this.lastFixM = -Infinity;
     this.lastCoarseM = -Infinity;
+    this.compassUsed = false;
     this.movedSinceEval = false;
     this.setAnchor();
   }
@@ -631,6 +643,11 @@ export class ParticleFilter {
       }
     }
     this.cached = null;
+  }
+
+  /** The compass heading for the next weightings (null: none, or not trusted). Used only in state `init`. */
+  setCompass(compass: { psi: number; sigma: number } | null): void {
+    this.compass = compass;
   }
 
   /** One odometry chunk: propagate (frozen when stopped), then weight every `evalIntervalM`. */
@@ -829,6 +846,14 @@ export class ParticleFilter {
   }
 
   /** Particle positions and weights, heaviest first (viewer). */
+  /** Share of the weight travelling within `toleranceRad` of a heading (tests, diagnostics). */
+  directionShare(headingRad: number, toleranceRad: number): number {
+    const p = this.p;
+    let share = 0;
+    for (let i = 0; i < p.size; i++) if (Math.abs(wrap(p.psi[i] - headingRad)) <= toleranceRad) share += Math.exp(p.logw[i]);
+    return share;
+  }
+
   particles(max = Infinity): { e: number; n: number; w: number; offRoad: boolean }[] {
     const p = this.p;
     const out = [];
@@ -992,6 +1017,8 @@ export class ParticleFilter {
     const relVar = Math.max(0, this.turnVarSum - this.anchorVar) + c.roadSigmaRad ** 2 + (share * Math.abs(measured)) ** 2;
     const absVar = heading ? (c.absHeadingInflation * heading.psiSigma) ** 2 + c.roadSigmaRad ** 2 : 0;
     const posVar = heading ? Math.max(c.ekfPositionInflation * heading.posSigma, c.ekfPositionFloorM) ** 2 : 0;
+    const compass = !this.resolved && !this.compassUsed && straight ? this.compass : null;
+    if (compass) this.compassUsed = true;
     for (let i = 0; i < p.size; i++) {
       if (p.offRoad[i]) {
         p.logw[i] += c.offRoadLogPenalty;
@@ -1002,6 +1029,10 @@ export class ParticleFilter {
       if (heading && straight) {
         const d = wrap(p.psi[i] - heading.psi);
         p.logw[i] += (c.absHeadingScale * -0.5 * d * d) / absVar;
+      }
+      if (compass) {
+        const d = wrap(p.psi[i] - compass.psi);
+        p.logw[i] += Math.log(c.compassInlier * Math.exp((-0.5 * d * d) / (compass.sigma * compass.sigma)) + 1 - c.compassInlier);
       }
       if (heading && c.ekfPositionScale > 0) {
         const de = p.e[i] - heading.e;

@@ -88,6 +88,7 @@ npm run replay:mm -- tools/triplog/logs/*.ulg                          # map mat
 npm run replay:mm -- trip.ulg --cut 241:240 --trace 330:360            # one outage, second by second
 npm run replay:bench -- tools/triplog/logs/*.ulg --mm                  # outage benchmark with map matching
 npm run replay:bench -- tools/triplog/logs/*.ulg --jam-start --verbose # heading init under jamming, with and without the map
+npm run replay:bench -- tools/triplog/logs/*.ulg --jam-start --compass   # …and with a compass calibrated on the other drives (right, turned 90°/180°)
 npm run replay:mm -- trip.ulg --start 300 --jam 300:inf --trace 300:420 # one jammed start, second by second
 npm run replay:graph -- --graph tools/tiles/out/release/ukraine.graph.bin trip.ulg
 npm run replay:view -- --graph tools/tiles/out/release/kyiv.graph.bin  # viewer with a given graph

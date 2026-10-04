@@ -9,6 +9,7 @@
 //   shape to coarse fixes when jamming leaves no course, from the pose saved when parked, or
 //   from map matching the track to the roads).
 
+import { Compass, type CompassCalibration, type CompassConfig, type CompassTrust } from "./compass/compass";
 import { GnssLagEstimator, type GnssLagConfig, type GnssLagEstimate } from "./calibration/gnss-lag";
 import { DEFAULT_EKF_CONFIG, DrEkf, wrapAngle, type EkfConfig } from "./ekf/dr-ekf";
 import { alignHeading, type AlignConfig, type AlignPoint } from "./ekf/heading-align";
@@ -18,7 +19,7 @@ import type { EdgeId, RoadGraph } from "./mapmatch/graph/road-graph";
 import { ParticleFilter, type MapMatchConfig, type MapMatchState } from "./mapmatch/particle-filter";
 import { ImuProcessor, type ImuConfig } from "./odometry/imu/imu-processor";
 import { OdometryChunker, type OdometryStep } from "./odometry/odometry-output";
-import { isSatelliteFix, type GnssFix, type ImuSample, type ObdSpeedSample } from "./types";
+import { isSatelliteFix, type GnssFix, type ImuSample, type MagSample, type ObdSpeedSample } from "./types";
 
 export type NavMode = "none" | "anchored" | "dr";
 
@@ -68,6 +69,10 @@ export interface NavConfig {
   ekf: Partial<EkfConfig>;
   gnssLag: Partial<GnssLagConfig>;
   imu: Partial<ImuConfig>;
+  compass: Partial<CompassConfig>;
+  /** The compass learns from the EKF heading while its σ is below this, driving at least `compassMinSpeedMps`. */
+  compassLearnSigmaRad: number;
+  compassMinSpeedMps: number;
   align: Partial<AlignConfig>;
 }
 
@@ -95,6 +100,9 @@ export const DEFAULT_NAV_CONFIG: NavConfig = {
   ekf: {},
   gnssLag: {},
   imu: {},
+  compass: {},
+  compassLearnSigmaRad: (3 * Math.PI) / 180,
+  compassMinSpeedMps: 4,
   align: {},
 };
 
@@ -232,6 +240,8 @@ export class Navigator {
   /** Parked pose taken when the phone was first handled while parked: it may leave the car after that. */
   private frozenPose: ParkedPose | null = null;
   private lagEstimator: GnssLagEstimator;
+  private readonly compass: Compass;
+  private nextCompassUs = -Infinity;
   private readonly ekfConfig: EkfConfig;
   private odometryListeners: ((step: OdometryStep) => void)[] = [];
   private readonly odometry = new OdometryChunker((step) => {
@@ -255,6 +265,7 @@ export class Navigator {
     this.ekfConfig = { ...DEFAULT_EKF_CONFIG, ...this.config.ekf };
     this.imu = new ImuProcessor(this.config.imu);
     this.lagEstimator = new GnssLagEstimator(this.config.gnssLag);
+    this.compass = new Compass(this.config.compass);
   }
 
   /**
@@ -344,6 +355,30 @@ export class Navigator {
     this.speedScale = { ks, ksVar };
   }
 
+  /** Raw magnetometer: the compass (§7.6), used only to find the heading at a jammed start. */
+  onMag(s: MagSample): void {
+    this.compass.onMag(s.tUs, s.field);
+  }
+
+  /** A compass calibration from earlier drives of this car and phone (null: none). */
+  setCompassCalibration(cal: CompassCalibration | null): void {
+    this.compass.setCalibration(cal);
+  }
+
+  /** The compass calibration to keep for the next drive (stored + learned on this one). */
+  get compassCalibration(): CompassCalibration | null {
+    return this.compass.calibration;
+  }
+
+  get compassTrust(): CompassTrust {
+    return this.compass.trust;
+  }
+
+  /** Compass minus EKF heading at each trust check (replay statistics). */
+  get compassCheckDiffs(): readonly number[] {
+    return this.compass.checkDiffs;
+  }
+
   onImu(s: ImuSample): void {
     const out = this.imu.process(s);
     // Handled while parked: the phone may now leave the car with the driver, so later fixes and
@@ -357,6 +392,7 @@ export class Navigator {
 
     this.advance(s.tUs, out.valid ? out.yawRate : null);
     this.lastYaw = { tUs: s.tUs, rate: out.yawRate, valid: out.valid };
+    this.feedCompass(s, out.yawRate, out.valid);
 
     if (this.standstill && s.tUs - this.lastBiasUpdateUs >= 1_000_000) {
       this.lastBiasUpdateUs = s.tUs;
@@ -486,6 +522,22 @@ export class Navigator {
   }
 
   // ---- internals ----
+
+  /**
+   * The compass gets the phone's attitude at the IMU rate. Once a second, while the EKF knows the heading
+   * well and the car drives, it checks itself against that heading and learns from it.
+   */
+  private feedCompass(s: ImuSample, yawRate: number, valid: boolean): void {
+    const g = s.gravity;
+    const gn = Math.hypot(g[0], g[1], g[2]);
+    if (gn > 0) this.compass.onImu(s.tUs, [-g[0] / gn, -g[1] / gn, -g[2] / gn], yawRate, valid);
+    if (s.tUs < this.nextCompassUs) return;
+    this.nextCompassUs = s.tUs + 1_000_000;
+    const ekf = this.ekf;
+    const o = this.lastObd;
+    const moving = o !== null && s.tUs - o.tUs < this.config.obdStaleUs && o.speedMps >= this.config.compassMinSpeedMps;
+    if (ekf && moving && ekf.psiSigma <= this.config.compassLearnSigmaRad) this.compass.observe(ekf.psi);
+  }
 
   /** Yaw rate to hold over an interval that has no IMU sample (null = unknown). */
   private heldYaw(tUs: number): number | null {
@@ -675,6 +727,7 @@ export class Navigator {
     const pf = this.pf;
     if (!pf?.isActive) return;
     const ekf = this.ekf;
+    pf.setCompass(pf.initializing ? this.compass.heading() : null);
     pf.onOdometry(step, ekf ? { psi: ekf.psi, psiSigma: ekf.psiSigma, e: ekf.east, n: ekf.north, posSigma: ekf.positionSigma } : null);
     if (step.stopped) return;
     if (!ekf && step.distanceM >= this.nextMapStartCheckM) {

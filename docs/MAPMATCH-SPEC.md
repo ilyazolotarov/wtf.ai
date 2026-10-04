@@ -521,6 +521,34 @@ NAVIGATOR-SPEC §4, §5.1):
 - The real jammed drive of 2026-10-04 (3afby6) never starts, with or without the map: in the app the navigator
   carried over from the previous drive (NAVIGATOR-SPEC §9.1).
 - M5's exit (no start > 10° off) holds for map starts. Alignment starts are overconfident (NAVIGATOR-SPEC §13.9).
+- **Truth survival** (now measured per session): even without a compass, the true road has no particle for a while
+  in 21 of the 30 sessions, at worst 27 % of the moving time (§15.12).
+
+### 8.2 Compass at a jammed start (replay only; NAVIGATOR-SPEC §7.6)
+
+- **Rule:** while the heading is unknown (state `init`), once per filter start, at the first straight moment, each
+  particle is weighted by `inlier · N(travel direction − compass; 25°) + (1 − inlier)`, `inlier` = 0.85.
+  - Once, because the compass error is a bias that lasts the drive: applying it every 50 m stacked the same
+    error, and a compass turned 180° left the true direction ~1/280 of the weight.
+  - Bounded: the best and worst directions differ by at most 1 / (1 − inlier) = 6.7:1. The compass alone can't
+    reach the 0.9 of one direction a map start needs; other evidence must agree.
+- **Measured** (`replay:bench --jam-start --compass`): the 7 drives of 2026-10-04 (30 simulated sessions), each
+  with the calibration pooled from the other drives, right and turned 90° / 180°:
+
+| | Map starts | Distance to start, median | Position error median | Starts > 10° off |
+| --- | --- | --- | --- | --- |
+| Map, no compass | 10 | 0.61 km | 38 m | 7 (alignment) |
+| + compass | 11 | 0.57 km | 30 m | 7 (alignment) |
+| + compass turned 90° | 5 | 0.61 km | 41 m | 9 (alignment) |
+| + compass turned 180° | 8 | 0.61 km | 39 m | 9 (alignment) |
+
+  - With the right compass the EKF starts sooner in 6 sessions and later in 5: a small gain. On these drives
+    the start waits for the position along the road and for straight road, rather than for the direction.
+  - A wrong compass costs map starts (to alignment), never a wrong start.
+  - Stronger: at 20:1 (`inlier` 0.95) sooner in 8, later in 4, and a 180° compass gave one start at 3.5σ; at 100:1
+    (0.99) a 180° compass started the EKF 179° wrong, 612 m off. 6.7:1 stays until more drives.
+- Unit tests (`particle-filter.test.ts`): mid-road on the fixture graph, the right compass gives the true
+  direction > 0.7 of the weight (without it, even); turned 180°, the true direction keeps > 0.1.
 
 ## 9. Closed loop (PF → EKF)
 
@@ -729,3 +757,5 @@ M1–M3 can partly overlap. M4 needs M1–M3. M5 and M6 are independent of each 
     open loop). Decide in M6.
 11. **Flip-flopping starts** (ng2n9z): a filter alternating between `tracking` and `multimodal` never holds 100 m.
     A start criterion on the share of the last 100 m, rather than all of it, may help; needs more jammed drives.
+12. **Truth lost at jammed starts:** in 21 of 30 simulated sessions on the 2026-10-04 drives the true road had no
+    particle for a while (§8.1). Re-seeding brings it back, but where it goes missing hasn't been looked at.

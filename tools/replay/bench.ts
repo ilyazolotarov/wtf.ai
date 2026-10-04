@@ -57,6 +57,7 @@ function parseArgs(argv: string[]) {
   let mmConfig: Partial<MapMatchConfig> = {};
   let graph: string | undefined;
   let jamStart = false;
+  let compass = false;
   let everyS = 60;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--nav") nav = JSON.parse(argv[++i]) as Partial<NavConfig>;
@@ -65,10 +66,11 @@ function parseArgs(argv: string[]) {
     else if (argv[i] === "--mm-config") mmConfig = JSON.parse(argv[++i]) as Partial<MapMatchConfig>;
     else if (argv[i] === "--graph") graph = argv[++i];
     else if (argv[i] === "--jam-start") jamStart = true;
+    else if (argv[i] === "--compass") compass = true;
     else if (argv[i] === "--every") everyS = Number(argv[++i]);
     else files.push(argv[i]);
   }
-  return { files, nav, verbose, mm, mmConfig, graph, jamStart, everyS };
+  return { files, nav, verbose, mm, mmConfig, graph, jamStart, everyS, compass };
 }
 
 const median = (v: number[]) => {
@@ -81,9 +83,9 @@ const pct = (v: number[], p: number) => {
 };
 
 function main() {
-  const { files, nav, verbose, mm, mmConfig, graph: graphArg, jamStart, everyS } = parseArgs(process.argv.slice(2));
+  const { files, nav, verbose, mm, mmConfig, graph: graphArg, jamStart, everyS, compass } = parseArgs(process.argv.slice(2));
   if (jamStart) {
-    runInitBench(files, { nav, mmConfig, graph: graphArg, everyS, verbose });
+    runInitBench(files, { nav, mmConfig, graph: graphArg, everyS, verbose, compass });
     return;
   }
   const byDuration = new Map<number, (CutResult & { file: string })[]>(DURATIONS_S.map((d) => [d, []]));

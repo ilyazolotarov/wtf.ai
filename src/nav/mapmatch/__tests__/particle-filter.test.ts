@@ -1,11 +1,13 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
-import { syntheticDrive, type DriveSegment } from "@/nav/__fixtures__/synthetic-drive";
+import { syntheticCompassCalibration, syntheticDrive, type DriveSegment } from "@/nav/__fixtures__/synthetic-drive";
 import { LocalFrame } from "@/nav/geo/local-frame";
 import { bufferByteSource } from "@/nav/mapmatch/graph/byte-source";
 import { TiledRoadGraph } from "@/nav/mapmatch/graph/road-graph";
 import { replayTrip } from "@/nav/replay/replay";
+import { rotateCalibration } from "@/nav/compass/compass";
+import { Navigator } from "@/nav/navigator";
 
 // The fixture's long road (tools/tiles tests/test_graph.py): 60 —160— 61 —161— 63 due east at
 // LAT0 + 0.01, with the one-way 162 running north from 61 (1.73 km east of 60).
@@ -110,6 +112,39 @@ describe("ParticleFilter in the navigator (synthetic drives on the fixture graph
     expect(facing(Math.PI / 2)).toBe(true);
     expect(facing(-Math.PI / 2)).toBe(true);
     expect(top[0].weight).toBeLessThan(0.9);
+  });
+
+  test("jammed start mid-road with a compass: the true direction wins; a compass turned around still keeps it", () => {
+    const origin = { lat: ORIGIN.lat, lon: ORIGIN.lon + 800 / (111_195 * Math.cos((ORIGIN.lat * Math.PI) / 180)) };
+    const segments = [
+      { durationS: 3, speedMps: 0, yawRateDegS: 0 },
+      { durationS: 10, speedMps: 12, yawRateDegS: 0 },
+      { durationS: 28, speedMps: 12, yawRateDegS: 0 },
+    ];
+    const drive = syntheticDrive({ segments, origin, startHeadingRad: Math.PI / 2, gnss: "coarse", magnetometer: {} });
+    // East's share of the weight at the end, fed like the replay with every fix after 3.5 s withheld.
+    const eastShare = (rotateRad: number) => {
+      const nav = new Navigator();
+      nav.setRoadGraph(graph());
+      nav.setCompassCalibration(rotateCalibration(syntheticCompassCalibration(), rotateRad));
+      const t = drive.trip;
+      const events = [
+        ...t.imu.map((x) => ({ tUs: x.tUs, go: () => nav.onImu(x) })),
+        ...t.obdSpeed.map((x) => ({ tUs: x.tUs, go: () => nav.onObdSpeed(x) })),
+        ...t.mag.map((x) => ({ tUs: x.tUs, go: () => nav.onMag(x) })),
+        ...t.gnss.filter((f) => f.tUs < t.startUs + 3.5e6).map((x) => ({ tUs: x.tUs, go: () => nav.onGnss(x) })),
+      ].sort((a, b) => a.tUs - b.tUs);
+      for (const ev of events) ev.go();
+      expect(nav.mode).toBe("anchored");
+      return nav.mapMatcher!.directionShare(Math.PI / 2, 0.3);
+    };
+    // Right compass: east is preferred (without a compass both directions stay even, test above).
+    expect(eastShare(0)).toBeGreaterThan(0.7);
+    // Turned 180°: west is preferred, but east keeps the weight to win at the next turn or dead end,
+    // and the compass alone can't reach the 0.9 a map start needs.
+    const wrong = eastShare(Math.PI);
+    expect(wrong).toBeLessThan(0.5);
+    expect(wrong).toBeGreaterThan(0.1);
   });
 
   test("waits while the anchor is too coarse", () => {

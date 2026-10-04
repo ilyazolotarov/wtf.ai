@@ -4,11 +4,15 @@
 // (drives with clean GNSS only). Starts are scored against the ground truth (truth-match.ts), else
 // against a clean replay's EKF, else (heading only) against its later heading taken back by the gyro.
 //
-//   npm run replay:bench -- --jam-start [--every 60] [--graph <file>] [--mm-config '<json>'] [--verbose] <logs>
+//   npm run replay:bench -- --jam-start [--every 60] [--graph <file>] [--mm-config '<json>'] [--compass] [--verbose] <logs>
+//
+// --compass (drives with a magnetometer only) adds map runs with a compass calibrated on the other
+// drives, and with that calibration turned 90° and 180°: a wrong one must cost time, never the road.
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
+import { mergeCalibrations, type CompassCalibration } from "../../src/nav/compass/compass";
 import { haversineM } from "../../src/nav/geo";
 import type { MapMatchConfig } from "../../src/nav/mapmatch/particle-filter";
 import type { NavConfig } from "../../src/nav/navigator";
@@ -25,6 +29,7 @@ export interface InitBenchOptions {
   graph?: string;
   everyS: number;
   verbose: boolean;
+  compass?: boolean;
 }
 
 /** A session's EKF start, scored. */
@@ -38,6 +43,8 @@ interface Scored {
   headingRatio: number | null;
   posRatio: number | null;
   ref: string;
+  /** Share of moving samples with a particle on the true road (null: no truth, or no map). */
+  survival: number | null;
 }
 
 const DEG = 180 / Math.PI;
@@ -90,8 +97,8 @@ function referenceAt(ref: Reference, tS: number): { lat?: number; lon?: number; 
   return { headingRad: best.headingRad! - turn, source: `gyro ±${(best.headingSigmaRad! * DEG).toFixed(0)}°` };
 }
 
-function score(init: ReplayInit | null, ref: Reference, totalM: number): Scored {
-  if (!init) return { method: "never", tS: null, distanceM: totalM, headingErrDeg: null, posErrM: null, headingRatio: null, posRatio: null, ref: "" };
+function score(init: ReplayInit | null, ref: Reference, totalM: number, survival: number | null = null): Scored {
+  if (!init) return { method: "never", tS: null, distanceM: totalM, headingErrDeg: null, posErrM: null, headingRatio: null, posRatio: null, ref: "", survival };
   const truth = referenceAt(ref, init.tS);
   const e = init.estimate;
   const headingErrDeg = truth && e?.headingRad !== undefined ? wrapDeg(e.headingRad - truth.headingRad) : null;
@@ -106,6 +113,7 @@ function score(init: ReplayInit | null, ref: Reference, totalM: number): Scored 
     // accuracyM is the 68 % radius (1.5 σ).
     posRatio: posErrM !== null && e ? posErrM / (e.accuracyM / 1.5) : null,
     ref: truth?.source ?? "none",
+    survival,
   };
 }
 
@@ -120,11 +128,27 @@ const median = (v: number[]) => {
   return s.length ? s[Math.floor(s.length / 2)] : NaN;
 };
 
+const COMPASS_KEYS = ["compass", "compass 90°", "compass 180°"] as const;
+const ROTATIONS: Record<(typeof COMPASS_KEYS)[number], number> = { compass: 0, "compass 90°": Math.PI / 2, "compass 180°": Math.PI };
+type Key = "plain" | "map" | (typeof COMPASS_KEYS)[number];
+type Row = { file: string; session: string } & Partial<Record<Key, Scored>>;
+
 export function runInitBench(files: string[], o: InitBenchOptions): void {
-  const rows: { file: string; session: string; plain: Scored; map: Scored }[] = [];
-  for (const file of files) {
-    const trip = readTripLog(new Uint8Array(readFileSync(file)));
+  const rows: Row[] = [];
+  const trips = files.map((file) => ({ file, trip: readTripLog(new Uint8Array(readFileSync(file))) }));
+  // Each drive's compass calibration as it learns it alone; a drive then runs with the others' merged.
+  const learned = new Map<string, CompassCalibration>();
+  if (o.compass) {
+    for (const { file, trip } of trips) {
+      const cal = trip.mag?.length ? replayTrip(trip, { nav: o.nav }).summary.compass.calibration : null;
+      if (cal) learned.set(file, cal);
+    }
+  }
+  for (const { file, trip } of trips) {
     const name = path.basename(file);
+    const others = [...learned].filter(([f]) => f !== file).map(([, c]) => c);
+    const compassCal = o.compass && trip.mag?.length && others.length ? others.reduce((a, b) => mergeCalibrations(a, b)) : null;
+    if (o.compass && !compassCal) continue;
     const first = trip.gnss.find((f) => isSatelliteFix(f) && f.hAccM <= 10) ?? trip.gnss.find((f) => f.hAccM < 500);
     const graphFile = o.graph ?? (first ? findGraph(first) : null);
     if (!first || !graphFile) {
@@ -149,10 +173,17 @@ export function runInitBench(files: string[], o: InitBenchOptions): void {
       const plain = replayTrip(trip, { nav: o.nav, ...s.options });
       const totalM = plain.summary.obdDistanceM;
       if (s.options.startAtS !== undefined && totalM < MIN_SESSION_M) continue;
-      const map = replayTrip(trip, { nav: o.nav, ...s.options, mapMatch: { graph: navGraph.graph, config: o.mmConfig } });
-      const row = { file: name, session: s.label, plain: score(plain.summary.init, ref, totalM), map: score(map.summary.init, ref, totalM) };
+      const withMap = (extra: ReplayOptions) => {
+        const r = replayTrip(trip, { nav: o.nav, ...s.options, ...extra, mapMatch: { graph: navGraph.graph, truth, config: o.mmConfig } });
+        return score(r.summary.init, ref, totalM, r.summary.mapMatch?.truthSurvival ?? null);
+      };
+      const row: Row = { file: name, session: s.label, plain: score(plain.summary.init, ref, totalM), map: withMap({}) };
+      if (compassCal) for (const key of COMPASS_KEYS) row[key] = withMap({ compass: { calibration: compassCal, rotateRad: ROTATIONS[key] } });
       rows.push(row);
-      if (o.verbose || s.options.startAtS === undefined) console.log(`  ${s.label.padEnd(15)} no map: ${fmt(row.plain)}   |   map: ${fmt(row.map)}`);
+      if (o.verbose || s.options.startAtS === undefined) {
+        const extra = compassCal ? COMPASS_KEYS.map((k) => `   |   ${k}: ${fmt(row[k]!)}`).join("") : "";
+        console.log(`  ${s.label.padEnd(15)} no map: ${fmt(row.plain!)}   |   map: ${fmt(row.map!)}${extra}`);
+      }
     }
     truthGraph.close();
     navGraph.close();
@@ -165,24 +196,34 @@ export function runInitBench(files: string[], o: InitBenchOptions): void {
   ] as const) {
     if (!set.length) continue;
     console.log(`\n${label}: ${set.length} sessions`);
-    for (const key of ["plain", "map"] as const) {
-      const started = set.filter((r) => r[key].tS !== null);
-      const hdg = started.map((r) => r[key].headingErrDeg).filter((v): v is number => v !== null);
-      const pos = started.map((r) => r[key].posErrM).filter((v): v is number => v !== null);
-      const hr = started.map((r) => r[key].headingRatio).filter((v): v is number => v !== null);
-      const pr = started.map((r) => r[key].posRatio).filter((v): v is number => v !== null);
+    const keys: Key[] = ["plain", "map", ...(o.compass ? COMPASS_KEYS : [])];
+    for (const key of keys) {
+      const all = set.map((r) => r[key]).filter((v): v is Scored => v !== undefined);
+      const started = all.filter((r) => r.tS !== null);
+      const hdg = started.map((r) => r.headingErrDeg).filter((v): v is number => v !== null);
+      const pos = started.map((r) => r.posErrM).filter((v): v is number => v !== null);
+      const hr = started.map((r) => r.headingRatio).filter((v): v is number => v !== null);
+      const pr = started.map((r) => r.posRatio).filter((v): v is number => v !== null);
+      const surv = all.map((r) => r.survival).filter((v): v is number => v !== null);
       const byMethod = new Map<string, number>();
-      for (const r of started) byMethod.set(r[key].method, (byMethod.get(r[key].method) ?? 0) + 1);
+      for (const r of started) byMethod.set(r.method, (byMethod.get(r.method) ?? 0) + 1);
       console.log(
-        `  ${key === "plain" ? "no map" : "map   "}  started ${started.length}/${set.length} (${[...byMethod].map(([m, k]) => `${m} ${k}`).join(", ") || "—"})` +
-          `  distance median ${(median(started.map((r) => r[key].distanceM)) / 1000).toFixed(2)} km` +
+        `  ${(key === "plain" ? "no map" : key).padEnd(12)}  started ${started.length}/${set.length} (${[...byMethod].map(([m, k]) => `${m} ${k}`).join(", ") || "—"})` +
+          `  distance median ${(median(started.map((r) => r.distanceM)) / 1000).toFixed(2)} km` +
           `  heading error median ${median(hdg).toFixed(1)}° max ${hdg.length ? Math.max(...hdg).toFixed(1) : "—"}° (>10°: ${hdg.filter((v) => v > 10).length})` +
           `  position error median ${median(pos).toFixed(0)} m max ${pos.length ? Math.max(...pos).toFixed(0) : "—"} m` +
-          `  error ÷ σ: heading median ${median(hr).toFixed(1)} max ${hr.length ? Math.max(...hr).toFixed(1) : "—"}, position median ${median(pr).toFixed(1)} max ${pr.length ? Math.max(...pr).toFixed(1) : "—"}`,
+          `  error ÷ σ: heading median ${median(hr).toFixed(1)} max ${hr.length ? Math.max(...hr).toFixed(1) : "—"}, position median ${median(pr).toFixed(1)} max ${pr.length ? Math.max(...pr).toFixed(1) : "—"}` +
+          (surv.length ? `  truth survival min ${(Math.min(...surv) * 100).toFixed(1)} % (< 100 %: ${surv.filter((v) => v < 1).length})` : ""),
       );
     }
-    const both = set.filter((r) => r.map.tS !== null);
-    const sooner = both.filter((r) => r.plain.tS === null || r.map.distanceM < r.plain.distanceM).length;
+    const both = set.filter((r) => r.map!.tS !== null);
+    const sooner = both.filter((r) => r.plain!.tS === null || r.map!.distanceM < r.plain!.distanceM).length;
     console.log(`  map starts sooner than without it in ${sooner} of ${set.length}`);
+    if (o.compass) {
+      const c = set.filter((r) => r.compass && r.compass.tS !== null);
+      const sooner = c.filter((r) => r.map!.tS === null || r.compass!.distanceM < r.map!.distanceM).length;
+      const later = c.filter((r) => r.map!.tS !== null && r.compass!.distanceM > r.map!.distanceM).length;
+      console.log(`  with the compass the EKF starts sooner than with the map alone in ${sooner} of ${set.length}, later in ${later}`);
+    }
   }
 }

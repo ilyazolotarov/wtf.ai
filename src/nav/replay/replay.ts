@@ -2,6 +2,7 @@
 // and DR error during simulated GNSS outages ("cuts"). Pure TS; the CLI is tools/replay.
 
 import type { GnssLagEstimate } from "../calibration/gnss-lag";
+import { rotateCalibration, type CompassCalibration, type CompassTrust } from "../compass/compass";
 import type { TripLog } from "../../triplog/trip-log-reader";
 import { haversineM } from "../geo";
 import type { MapMatchConfig } from "../mapmatch/particle-filter";
@@ -42,6 +43,11 @@ export interface ReplayOptions {
   /** Simulated jamming (jam.ts): satellite fixes in these windows become coarse ones. */
   jam?: JamWindow[];
   jamOptions?: Partial<JamOptions>;
+  /**
+   * A compass calibration from other drives (NAVIGATOR-SPEC §7.6); `rotateRad` turns it to simulate a
+   * wrong one (the phone turned in its mount, another car).
+   */
+  compass?: { calibration: CompassCalibration | null; rotateRad?: number };
   /** Receives the navigator's odometry chunks (MAPMATCH-SPEC §6.1). */
   odometry?: (step: OdometryStep) => void;
   /**
@@ -121,6 +127,8 @@ export interface ReplaySummary {
   cuts: CutResult[];
   /** Map-matching metrics (with `mapMatch.truth`). */
   mapMatch: MapMatchSummary | null;
+  /** The compass at the end: its trust, what it learned (stored + this drive), and its trust checks. */
+  compass: { trust: CompassTrust; calibration: CompassCalibration | null; checkDiffsRad: number[] };
 }
 
 export interface ReplayResult {
@@ -139,6 +147,8 @@ const median = (v: number[]) => {
 
 export function replayTrip(trip: TripLog, options: ReplayOptions = {}): ReplayResult {
   const nav = new Navigator(options.nav);
+  const cal = options.compass?.calibration;
+  if (cal) nav.setCompassCalibration(options.compass?.rotateRad ? rotateCalibration(cal, options.compass.rotateRad) : cal);
   if (options.odometry) nav.subscribeOdometry(options.odometry);
   const mm = options.mapMatch;
   if (mm) nav.setRoadGraph(mm.graph, mm.config);
@@ -195,14 +205,19 @@ export function replayTrip(trip: TripLog, options: ReplayOptions = {}): ReplayRe
   const imu = from(trip.imu);
   const obdSpeed = from(trip.obdSpeed);
   const gnss = from(options.jam?.length ? jamFixes(trip.gnss, trip.startUs, options.jam, options.jamOptions) : trip.gnss);
+  const mag = from(trip.mag ?? []);
   let i = 0;
   let o = 0;
   let g = 0;
-  while (i < imu.length || o < obdSpeed.length || g < gnss.length) {
+  let k = 0;
+  while (i < imu.length || o < obdSpeed.length || g < gnss.length || k < mag.length) {
     const ti = i < imu.length ? imu[i].tUs : Infinity;
     const to = o < obdSpeed.length ? obdSpeed[o].tUs : Infinity;
     const tg = g < gnss.length ? gnss[g].tUs : Infinity;
-    if (ti <= to && ti <= tg) {
+    const tm = k < mag.length ? mag[k].tUs : Infinity;
+    if (tm < ti && tm < to && tm < tg) {
+      nav.onMag(mag[k++]);
+    } else if (ti <= to && ti <= tg) {
       nav.onImu(imu[i++]);
       afterEvent(ti);
     } else if (to <= tg) {
@@ -271,6 +286,7 @@ export function replayTrip(trip: TripLog, options: ReplayOptions = {}): ReplayRe
       standstillS: nav.stats.standstillS,
       resets: nav.stats.resets,
       mapMatch: metrics?.summary(nav.mapMatcher?.updateTimes ?? []) ?? null,
+      compass: { trust: nav.compassTrust, calibration: nav.compassCalibration, checkDiffsRad: [...nav.compassCheckDiffs] },
       cuts: cuts.map((c, k) => {
         const truth = fixes.filter(
           (f) => f.status === "cut" && f.tS >= c.fromS && f.tS < c.toS && f.satellite && f.fix.hAccM <= truthAcc && f.errorM !== undefined,

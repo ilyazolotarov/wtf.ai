@@ -202,7 +202,28 @@ Measured on the 7 drives of 2026-10-04 (`mag_raw`, 19.4 Hz):
 - **What moves it:** taking the phone out of the mount and back, ~6 µT (15–20°); starting the engine, 2–4 µT.
 - On the jammed drive it agreed with the DR heading within ~5° until near-repeated coarse fixes turned it (§4).
 - **So:** it picks the travel direction along a road at a jammed start with a wide margin, and could be a weak
-  absolute heading (σ ≈ 25°). Not wired in; SPEC §2 still excludes it from navigation.
+  absolute heading (σ ≈ 25°).
+
+### 7.6 Compass (`compass/compass.ts`, replay only)
+
+- **Input:** `Navigator.onMag` (raw field), the IMU's gravity and yaw rate, `setCompassCalibration` from earlier
+  drives; `compassCalibration` is what to keep for the next drive.
+- **Model** (§7.5): levelled horizontal field = offset + rotation and scale of Earth's field, in a frame fixed to
+  the phone (the axis nearest the horizontal, projected). Kept as the fit's normal equations, so drives add up.
+  Holds only for the mounting it was learned in: tilted more than 10° from it, there is no heading.
+- **Learning:** once a second while the EKF heading σ ≤ 3°, at ≥ 4 m/s, driving straight (< 3° over the 1 s
+  window), with the phone in its mount. A fit needs 60 samples over 5 of 8 heading sectors: alone, only the two
+  longest drives of 2026-10-04 reached that; pooled, all drives do.
+- **Trust:** a stored calibration starts `unverified` and is judged on its own (what the drive learns doesn't
+  correct it before the check). The first 10 learning moments compare it with the EKF heading: median > 45° →
+  `rejected`, the stored one is dropped and the drive's own learning takes over; else `confirmed`. Measured:
+  calibrations from the other drives were confirmed on all 6 drives that could check (median 3–20° off);
+  turned 90° or 180°, rejected within the first 10 checks on 4 of 6. On the other two the turned calibration
+  was never used before the drive learned its own.
+- **Use:** only the particle filter's jammed start (MAPMATCH-SPEC §8.2). A jammed drive can't check the compass
+  before it has a heading from elsewhere, so the use is bounded, not trusted.
+- **Not yet:** a heading prior for alignment (§6), re-fitting the offset from gyro turns after the phone is
+  re-seated, wiring into the app (`NavigatorService` feeding `mag_raw` and persisting the calibration per VIN).
 
 ## 8. Trust (interim, `src/services/position/gnss-trust.ts`)
 
