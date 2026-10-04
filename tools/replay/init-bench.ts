@@ -4,7 +4,10 @@
 // (drives with clean GNSS only). Starts are scored against the ground truth (truth-match.ts), else
 // against a clean replay's EKF, else (heading only) against its later heading taken back by the gyro.
 //
-//   npm run replay:bench -- --jam-start [--every 60] [--graph <file>] [--mm-config '<json>'] [--compass] [--verbose] <logs>
+//   npm run replay:bench -- --jam-start [--every 60] [--seeds 3] [--graph <file>] [--mm-config '<json>'] [--compass] [--verbose] <logs>
+//
+// The particle filter is random, and one seed is too noisy to compare changes by (single sessions
+// flip between a map and an alignment start): each session runs with `--seeds` seeds, pooled.
 //
 // --compass (drives with a magnetometer only) adds map runs with a compass calibrated on the other
 // drives, and with that calibration turned 90° and 180°: a wrong one must cost time, never the road.
@@ -30,6 +33,8 @@ export interface InitBenchOptions {
   everyS: number;
   verbose: boolean;
   compass?: boolean;
+  /** Particle-filter seeds: every session runs once per seed and the results are pooled. */
+  seeds: number[];
 }
 
 /** A session's EKF start, scored. */
@@ -132,7 +137,7 @@ const median = (v: number[]) => {
 const COMPASS_KEYS = ["compass", "compass 90°", "compass 180°"] as const;
 const ROTATIONS: Record<(typeof COMPASS_KEYS)[number], number> = { compass: 0, "compass 90°": Math.PI / 2, "compass 180°": Math.PI };
 type Key = "plain" | "map" | (typeof COMPASS_KEYS)[number];
-type Row = { file: string; session: string } & Partial<Record<Key, Scored>>;
+type Row = { file: string; session: string; seed: number } & Partial<Record<Key, Scored>>;
 
 export function runInitBench(files: string[], o: InitBenchOptions): void {
   const rows: Row[] = [];
@@ -174,16 +179,22 @@ export function runInitBench(files: string[], o: InitBenchOptions): void {
       const plain = replayTrip(trip, { nav: o.nav, ...s.options });
       const totalM = plain.summary.obdDistanceM;
       if (s.options.startAtS !== undefined && totalM < MIN_SESSION_M) continue;
-      const withMap = (extra: ReplayOptions) => {
-        const r = replayTrip(trip, { nav: o.nav, ...s.options, ...extra, mapMatch: { graph: navGraph.graph, truth, config: o.mmConfig } });
-        return score(r.summary.init, ref, totalM, r.summary.mapMatch?.truthSurvival ?? null);
-      };
-      const row: Row = { file: name, session: s.label, plain: score(plain.summary.init, ref, totalM), map: withMap({}) };
-      if (compassCal) for (const key of COMPASS_KEYS) row[key] = withMap({ compass: { calibration: compassCal, rotateRad: ROTATIONS[key] } });
-      rows.push(row);
-      if (o.verbose || s.options.startAtS === undefined) {
-        const extra = compassCal ? COMPASS_KEYS.map((k) => `   |   ${k}: ${fmt(row[k]!)}`).join("") : "";
-        console.log(`  ${s.label.padEnd(15)} no map: ${fmt(row.plain!)}   |   map: ${fmt(row.map!)}${extra}`);
+      const plainScore = score(plain.summary.init, ref, totalM);
+      // The particle filter is random: each seed is a row (the run without the map is the same in each).
+      for (const seed of o.seeds) {
+        const withMap = (extra: ReplayOptions) => {
+          const config = { ...o.mmConfig, seed };
+          const r = replayTrip(trip, { nav: o.nav, ...s.options, ...extra, mapMatch: { graph: navGraph.graph, truth, config } });
+          return score(r.summary.init, ref, totalM, r.summary.mapMatch?.truthSurvival ?? null);
+        };
+        const row: Row = { file: name, session: s.label, seed, plain: plainScore, map: withMap({}) };
+        if (compassCal) for (const key of COMPASS_KEYS) row[key] = withMap({ compass: { calibration: compassCal, rotateRad: ROTATIONS[key] } });
+        rows.push(row);
+        if (o.verbose || s.options.startAtS === undefined) {
+          const extra = compassCal ? COMPASS_KEYS.map((k) => `   |   ${k}: ${fmt(row[k]!)}`).join("") : "";
+          const label = o.seeds.length > 1 ? `${s.label} #${seed}` : s.label;
+          console.log(`  ${label.padEnd(20)} no map: ${fmt(row.plain!)}   |   map: ${fmt(row.map!)}${extra}`);
+        }
       }
     }
     truthGraph.close();
@@ -196,7 +207,8 @@ export function runInitBench(files: string[], o: InitBenchOptions): void {
     ["simulated jam", simulated],
   ] as const) {
     if (!set.length) continue;
-    console.log(`\n${label}: ${set.length} sessions`);
+    const seeds = o.seeds.length > 1 ? ` × ${o.seeds.length} seeds (${o.seeds.join(", ")})` : "";
+    console.log(`\n${label}: ${set.length / o.seeds.length} sessions${seeds}, counts over all ${set.length}`);
     const keys: Key[] = ["plain", "map", ...(o.compass ? COMPASS_KEYS : [])];
     for (const key of keys) {
       const all = set.map((r) => r[key]).filter((v): v is Scored => v !== undefined);

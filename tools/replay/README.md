@@ -119,6 +119,11 @@ npm run replay:view -- --graph tools/tiles/out/release/kyiv.graph.bin  # viewer 
   heading and position error at the start, also ÷ the σ it started with. The reference is the ground truth, else a
   clean replay's EKF, else (heading only, marked `gyro`) the clean replay's later heading taken back by the
   gyro. `--verbose` prints every session.
+- **Seeds:** the filter is random, and one run of it is too noisy to compare changes by (single sessions flip
+  between a map and an alignment start). With the map, both benchmarks run every window or session with 3 seeds
+  and pool the results (counts are over windows or sessions × seeds; slower by as much). `--seeds N` changes the
+  number, `--seeds 1` for a quick look; the first seed is `--mm-config`'s `seed`, else 1. Without the map nothing
+  is random and it runs once.
 - **Viewer:** the *roads* checkbox draws the graph around the trip's fixes, under the tracks: major roads thick,
   service roads and tracks dashed, arrows on one-ways (zoom ≥ 14). At zoom ≥ 15 it adds junctions, dead ends
   (orange) and region-boundary ends (red). Hover for the OSM way id, class, length and flags. Its tooltip says

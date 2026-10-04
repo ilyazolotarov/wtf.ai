@@ -3,12 +3,17 @@
 //
 //   npm run replay:bench -- tools/triplog/logs/*.ulg
 //   npm run replay:bench -- tools/triplog/logs/*.ulg --nav '{"ekf":{"initYawScaleSigma":0}}'
-//   npm run replay:bench -- tools/triplog/logs/*.ulg --mm [--mm-config '{"particles":1000}'] [--graph <file>]
-//   npm run replay:bench -- tools/triplog/logs/*.ulg --jam-start [--every 60] [--mm-config '<json>'] [--graph <file>]
+//   npm run replay:bench -- tools/triplog/logs/*.ulg --mm [--seeds 3] [--mm-config '{"particles":1000}'] [--graph <file>]
+//   npm run replay:bench -- tools/triplog/logs/*.ulg --jam-start [--every 60] [--seeds 3] [--mm-config '<json>'] [--graph <file>]
 //
 // With --mm the particle filter runs in every window (open loop) and its dominant cluster is
 // scored against the same held-out fixes as the EKF (MAPMATCH-SPEC §10.2). --jam-start runs the
 // heading-init benchmark instead (init-bench.ts, MAPMATCH-SPEC §8).
+//
+// The particle filter is random and one run of it is noisy, so whatever uses it runs with `--seeds`
+// seeds (default 3, from `--mm-config`'s `seed`, else 1) and the results are pooled. With the map the
+// EKF varies by seed too (a map start sets its pose); without it, it is deterministic and runs once.
+// `--seeds 1` for a quick look.
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -22,6 +27,8 @@ import { findGraph, openGraph } from "./graph-file";
 import { runInitBench } from "./init-bench";
 
 const DURATIONS_S = [60, 120, 240];
+/** Particle-filter runs pooled per window or session (one seed is too noisy to compare changes by). */
+const DEFAULT_SEEDS = 3;
 const STEP_S = 30;
 /** A window counts when held-out satellite fixes cover most of it (clean GNSS). */
 const MIN_TRUTH_SHARE = 0.8;
@@ -59,6 +66,7 @@ function parseArgs(argv: string[]) {
   let jamStart = false;
   let compass = false;
   let everyS = 60;
+  let seedCount = DEFAULT_SEEDS;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--nav") nav = JSON.parse(argv[++i]) as Partial<NavConfig>;
     else if (argv[i] === "--verbose") verbose = true;
@@ -68,9 +76,13 @@ function parseArgs(argv: string[]) {
     else if (argv[i] === "--jam-start") jamStart = true;
     else if (argv[i] === "--compass") compass = true;
     else if (argv[i] === "--every") everyS = Number(argv[++i]);
+    else if (argv[i] === "--seeds") seedCount = Number(argv[++i]);
     else files.push(argv[i]);
   }
-  return { files, nav, verbose, mm, mmConfig, graph, jamStart, everyS, compass };
+  if (!(Number.isInteger(seedCount) && seedCount >= 1)) throw new Error("--seeds takes a whole number ≥ 1");
+  const first = mmConfig.seed ?? 1;
+  const seeds = Array.from({ length: seedCount }, (_, k) => first + k);
+  return { files, nav, verbose, mm, mmConfig, graph, jamStart, everyS, compass, seeds };
 }
 
 const median = (v: number[]) => {
@@ -83,12 +95,15 @@ const pct = (v: number[], p: number) => {
 };
 
 function main() {
-  const { files, nav, verbose, mm, mmConfig, graph: graphArg, jamStart, everyS, compass } = parseArgs(process.argv.slice(2));
+  const { files, nav, verbose, mm, mmConfig, graph: graphArg, jamStart, everyS, compass, seeds } = parseArgs(process.argv.slice(2));
   if (jamStart) {
-    runInitBench(files, { nav, mmConfig, graph: graphArg, everyS, verbose, compass });
+    runInitBench(files, { nav, mmConfig, graph: graphArg, everyS, verbose, compass, seeds });
     return;
   }
   const byDuration = new Map<number, (CutResult & { file: string })[]>(DURATIONS_S.map((d) => [d, []]));
+  /** Map matching, one entry per window and seed (the EKF's max error alongside, for "better than"). */
+  const mmByDuration = new Map<number, { maxM: number; endM: number; ekfMaxM: number }[]>(DURATIONS_S.map((d) => [d, []]));
+  const runSeeds = mm ? seeds : [seeds[0]];
 
   for (const file of files) {
     const trip = readTripLog(new Uint8Array(readFileSync(file)));
@@ -101,7 +116,7 @@ function main() {
       if (!graphFile) throw new Error(`${path.basename(file)}: no road graph covers it (tiles graph <region>, or --graph)`);
       opened = openGraph(graphFile, first!);
     }
-    const options: ReplayOptions = { nav, ...(opened ? { mapMatch: { graph: opened.graph, config: mmConfig } } : {}) };
+    const optionsFor = (seed: number): ReplayOptions => ({ nav, ...(opened ? { mapMatch: { graph: opened.graph, config: { ...mmConfig, seed } } } : {}) });
     // On a fixed grid of log time: a change that moves the EKF start by a few seconds then still
     // scores the same windows (a shifted grid samples other outages and moved the medians by 5 m).
     const from = Math.ceil((base.summary.init.tS + 10) / STEP_S) * STEP_S;
@@ -109,20 +124,28 @@ function main() {
     for (const d of DURATIONS_S) {
       for (let t = from; t + d <= base.summary.durationS; t += STEP_S) {
         if (away.filter((a) => a >= t && a < t + d).length >= MAX_PHONE_AWAY_FIXES) continue;
-        const cut = replayTrip(trip, { ...options, cuts: [{ fromS: t, toS: t + d }] }).summary.cuts[0];
-        if (cut.truthFixes < MIN_TRUTH_SHARE * d || cut.distanceM < MIN_DISTANCE_M || cut.maxErrorM === null) continue;
-        byDuration.get(d)!.push({ ...cut, file: path.basename(file) });
-        if (verbose) {
-          console.log(
-            `  ${path.basename(file)} ${t}+${d}s ${(cut.distanceM / 1000).toFixed(2)} km: max ${cut.maxErrorM.toFixed(0)} m, end ${cut.lastErrorM!.toFixed(0)} m, σ ${cut.meanSigmaM!.toFixed(0)} m` +
-              (mm ? ` | map match max ${cut.mapMatchMaxErrorM?.toFixed(0) ?? "—"} m, end ${cut.mapMatchLastErrorM?.toFixed(0) ?? "—"} m` : ""),
-          );
+        // With the map the EKF depends on the seed too: a map start sets the pose everything after carries.
+        for (const seed of runSeeds) {
+          const cut = replayTrip(trip, { ...optionsFor(seed), cuts: [{ fromS: t, toS: t + d }] }).summary.cuts[0];
+          if (cut.truthFixes < MIN_TRUTH_SHARE * d || cut.distanceM < MIN_DISTANCE_M || cut.maxErrorM === null) break;
+          byDuration.get(d)!.push({ ...cut, file: path.basename(file) });
+          if (cut.mapMatchMaxErrorM !== null && cut.mapMatchMaxErrorM !== undefined) {
+            mmByDuration.get(d)!.push({ maxM: cut.mapMatchMaxErrorM, endM: cut.mapMatchLastErrorM!, ekfMaxM: cut.maxErrorM });
+          }
+          if (verbose) {
+            console.log(
+              `  ${path.basename(file)} ${t}+${d}s${runSeeds.length > 1 ? ` #${seed}` : ""} ${(cut.distanceM / 1000).toFixed(2)} km: ` +
+                `max ${cut.maxErrorM.toFixed(0)} m, end ${cut.lastErrorM!.toFixed(0)} m, σ ${cut.meanSigmaM!.toFixed(0)} m` +
+                (mm ? ` | map match max ${cut.mapMatchMaxErrorM?.toFixed(0) ?? "—"} m, end ${cut.mapMatchLastErrorM?.toFixed(0) ?? "—"} m` : ""),
+            );
+          }
         }
       }
     }
     opened?.close();
   }
 
+  if (runSeeds.length > 1) console.log(`${runSeeds.length} seeds (${runSeeds.join(", ")}) pooled: windows × seeds`);
   console.log("outage  windows  km/win   max err: median  p90   end err: median  p90   err per km  err/σ");
   for (const [d, cuts] of byDuration) {
     if (!cuts.length) continue;
@@ -140,12 +163,11 @@ function main() {
   if (!mm) return;
   console.log("\nmap match (dominant cluster, open loop)");
   console.log("outage  windows   max err: median  p90   end err: median  p90   better than EKF (max)");
-  for (const [d, cuts] of byDuration) {
-    const scored = cuts.filter((c) => c.mapMatchMaxErrorM !== null);
+  for (const [d, scored] of mmByDuration) {
     if (!scored.length) continue;
-    const max = scored.map((c) => c.mapMatchMaxErrorM!);
-    const end = scored.map((c) => c.mapMatchLastErrorM!);
-    const better = scored.filter((c) => c.mapMatchMaxErrorM! < c.maxErrorM!).length;
+    const max = scored.map((c) => c.maxM);
+    const end = scored.map((c) => c.endM);
+    const better = scored.filter((c) => c.maxM < c.ekfMaxM).length;
     console.log(
       `${String(d).padStart(4)} s  ${String(scored.length).padStart(7)}` +
         `   ${median(max).toFixed(1).padStart(13)} ${pct(max, 0.9).toFixed(1).padStart(5)}` +

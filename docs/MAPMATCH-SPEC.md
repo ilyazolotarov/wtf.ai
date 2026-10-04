@@ -546,8 +546,8 @@ NAVIGATOR-SPEC §4, §5.1):
   check; the protection is the calibration's validity, not the weight's cap.
 - **Measured** (`replay:bench --jam-start --compass`): the 7 drives of 2026-10-04 (30 simulated sessions), each
   with the calibration pooled from the other drives, right and turned 90° / 180°. The filter is random and one
-  seed is noisy (single sessions flip between a map and an alignment start), so three seeds
-  (`--mm-config '{"seed":2}'`, 3), 90 sessions:
+  seed is noisy (single sessions flip between a map and an alignment start), so three seeds (1–3, now the
+  default), 90 sessions:
 
 | | Map starts | Distance to start, median | Position error median | Starts > 10° off | Map starts > 10° off | Truth survival min (< 100 %) |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -632,6 +632,9 @@ NAVIGATOR-SPEC §4, §5.1):
 - `npm run replay:bench -- --jam-start [--every 60] [--verbose]` (M5): §8.1. Each drive as recorded, and clean ones as
   sessions every 60 s jammed from their start; each without and with the map. Reference: the truth, else a clean
   replay's EKF, else its later heading taken back by the gyro.
+- Both run the filter with 3 seeds by default (`--seeds N`) and pool them: with one seed, single sessions flip
+  between a map and an alignment start from one seed to the next (§8.2). With the map the EKF's columns vary by
+  seed too (a map start sets its pose). Numbers measured before 2026-10-04 are one seed.
 - `replay:mm`, `replay:view`: `--start <s>` / *start* begins the session that far into the log; `--jam
   start:len|inf` / *jam* simulates jamming (M5).
 - `npm run replay:truth -- [--graph <file>] [--json <out>] <logs>` (M3): chains, breaks with their reason and place,
