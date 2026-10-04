@@ -39,17 +39,22 @@ export default function VehicleScreen() {
   const [tab, setTab] = useState<Tab>(TABS.find((x) => x === params.tab) ?? "car");
 
   return (
-    <ScreenContent title={t("vehicle")}>
-      <Segmented<Tab>
-        value={tab}
-        onChange={setTab}
-        options={[
-          { value: "car", label: t("tabCar") },
-          { value: "position", label: t("tabPosition") },
-          { value: "recorder", label: t("tabRecorder") },
-          { value: "developer", label: t("tabDeveloper") },
-        ]}
-      />
+    <ScreenContent
+      title={t("vehicle")}
+      scrollKey={tab}
+      tabs={
+        <Segmented<Tab>
+          value={tab}
+          onChange={setTab}
+          options={[
+            { value: "car", label: t("tabCar") },
+            { value: "position", label: t("tabPosition") },
+            { value: "recorder", label: t("tabRecorder") },
+            { value: "developer", label: t("tabDeveloper") },
+          ]}
+        />
+      }
+    >
       {tab === "car" && <CarTab />}
       {tab === "position" && <PositionTab />}
       {tab === "recorder" && <RecorderTab />}
@@ -66,14 +71,23 @@ function CarTab() {
   const snap = useVehicleLinkSnapshot();
   const { adapter, vehicle, stats } = snap;
 
+  // With an adapter connected the list stays hidden until the driver asks to switch.
+  const [switching, setSwitching] = useState(false);
+  const showList = !snap.activeDeviceId || switching;
+  const devSettings = useDevSettings();
+
   useEffect(() => {
+    if (!showList) return;
     link.startDiscovery();
     return () => link.stopDiscovery();
-  }, [link]);
+  }, [link, showList, devSettings.showEmulators]);
 
   const select = (device: DiscoveredDevice) => {
     if (device.id === snap.activeDeviceId) return;
-    const go = () => void link.connect(device.id);
+    const go = () => {
+      setSwitching(false);
+      void link.connect(device.id);
+    };
     if (device.rank === "unknown" || device.rank === "non-elm") {
       Alert.alert(device.name ?? device.id, t("tryAnyway"), [
         { text: t("no"), style: "cancel" },
@@ -101,72 +115,83 @@ function CarTab() {
 
   return (
     <>
-      <ScreenCard style={styles.adapterCard}>
-        <View style={[styles.adapterTile, { backgroundColor: nav.adapterTint }]}>
-          <Icon name="bluetooth" size={24} color={nav.adapterColor} />
+      <ScreenCard>
+        <View style={styles.adapterCard}>
+          <View style={[styles.adapterTile, { backgroundColor: nav.adapterTint }]}>
+            <Icon name="bluetooth" size={24} color={nav.adapterColor} />
+          </View>
+          <View style={styles.adapterCopy}>
+            <T w="semibold" size={16} numberOfLines={1}>
+              {adapterName}
+            </T>
+            <T size={13} color={nav.adapterColor}>
+              {nav.adapterLabel}
+            </T>
+          </View>
+          {snap.activeDeviceId ? (
+            <ScreenAction labelKey="disconnect" secondary compact onPress={() => void link.disconnect()} />
+          ) : remembered ? (
+            <ScreenAction
+              labelKey="connect"
+              compact
+              disabled={nav.adapter === "searching"}
+              onPress={() => void link.autoConnect()}
+            />
+          ) : null}
         </View>
-        <View style={styles.adapterCopy}>
-          <T w="semibold" size={16} numberOfLines={1}>
-            {adapterName}
-          </T>
-          <T size={13} color={nav.adapterColor}>
-            {nav.adapterLabel}
-          </T>
-        </View>
-        {snap.activeDeviceId ? (
-          <ScreenAction labelKey="disconnect" secondary compact onPress={() => void link.disconnect()} />
-        ) : remembered ? (
-          <ScreenAction
-            labelKey="connect"
-            compact
-            disabled={nav.adapter === "searching"}
-            onPress={() => void link.autoConnect()}
-          />
-        ) : null}
+        {snap.activeDeviceId && (
+          <>
+            <ScreenRow labelKey="linkState" value={snap.link} />
+            <ScreenRow labelKey="transport" value={adapter?.transport ?? dash} />
+            <ScreenRow labelKey="elmVersion" value={adapter?.elmVersion ?? dash} />
+            <ScreenRow labelKey="chip" value={adapter?.chip ?? adapter?.description ?? dash} />
+            <ScreenRow labelKey="suspectedClone" value={adapter ? (adapter.suspectedClone ? t("yes") : t("no")) : dash} />
+            <ScreenRow labelKey="batteryVoltage" value={fmt(adapter?.batteryV, 1, "V")} />
+            <ScreenRow labelKey="obdProtocol" value={vehicle?.protocol ?? dash} />
+            <ScreenRow labelKey="capabilities" value={capText} />
+            <ScreenRow labelKey="gattProfile" value={adapter?.connected?.gatt?.profileId ?? adapter?.connected?.protocol ?? dash} />
+          </>
+        )}
+        {errorText && <ScreenRow labelKey="lastError" value={errorText} valueColor={palette.bad.c} />}
       </ScreenCard>
-
-      <ScreenSection title={t("adapters")} plain>
-        <DeviceList devices={snap.devices} activeId={snap.activeDeviceId} onSelect={select} />
-      </ScreenSection>
-      <View style={styles.actions}>
-        <View style={styles.flex}>
-          <ScreenAction
-            labelKey={snap.discovering ? "stopScan" : "scan"}
-            secondary
-            compact
-            onPress={() => (snap.discovering ? link.stopDiscovery() : link.startDiscovery())}
-          />
-        </View>
-        <View style={styles.flex}>
-          <ScreenAction labelKey="pairMfi" secondary compact onPress={pairMfi} />
-        </View>
-      </View>
-      <ScreenNote>{t("pairHint")}</ScreenNote>
-
-      {snap.activeDeviceId && (
-        <ScreenSection title={t("connectedAdapter")}>
-          <ScreenRow labelKey="linkState" value={snap.link} />
-          <ScreenRow labelKey="transport" value={adapter?.transport ?? dash} />
-          <ScreenRow labelKey="elmVersion" value={adapter?.elmVersion ?? dash} />
-          <ScreenRow labelKey="chip" value={adapter?.chip ?? adapter?.description ?? dash} />
-          <ScreenRow labelKey="suspectedClone" value={adapter ? (adapter.suspectedClone ? t("yes") : t("no")) : dash} />
-          <ScreenRow labelKey="batteryVoltage" value={fmt(adapter?.batteryV, 1, "V")} />
-          <ScreenRow labelKey="obdProtocol" value={vehicle?.protocol ?? dash} />
-          <ScreenRow labelKey="capabilities" value={capText} />
-          <ScreenRow labelKey="gattProfile" value={adapter?.connected?.gatt?.profileId ?? adapter?.connected?.protocol ?? dash} />
-          {errorText && <ScreenRow labelKey="lastError" value={errorText} valueColor={palette.bad.c} />}
-        </ScreenSection>
-      )}
-      {!snap.activeDeviceId && errorText && (
-        <ScreenSection>
-          <ScreenRow labelKey="lastError" value={errorText} valueColor={palette.bad.c} />
-        </ScreenSection>
-      )}
       {gattDump && (
         <ScreenAction labelKey="copyGattDump" secondary onPress={() => void Share.share({ message: gattDump })} />
       )}
       {snap.activeDeviceId && (
-        <ScreenAction labelKey="forget" secondary onPress={() => link.forget(snap.activeDeviceId!)} />
+        <View style={styles.actions}>
+          <View style={styles.flex}>
+            <ScreenAction labelKey="changeAdapter" secondary compact onPress={() => setSwitching((v) => !v)} />
+          </View>
+          <View style={styles.flex}>
+            <ScreenAction labelKey="forget" secondary compact onPress={() => link.forget(snap.activeDeviceId!)} />
+          </View>
+        </View>
+      )}
+
+      {showList && (
+        <>
+          <ScreenSection title={t("adapters")} plain>
+            <DeviceList
+              devices={devSettings.showEmulators ? snap.devices : snap.devices.filter((d) => d.transport !== "emulator")}
+              activeId={snap.activeDeviceId}
+              onSelect={select}
+            />
+          </ScreenSection>
+          <View style={styles.actions}>
+            <View style={styles.flex}>
+              <ScreenAction
+                labelKey={snap.discovering ? "stopScan" : "scan"}
+                secondary
+                compact
+                onPress={() => (snap.discovering ? link.stopDiscovery() : link.startDiscovery())}
+              />
+            </View>
+            <View style={styles.flex}>
+              <ScreenAction labelKey="pairMfi" secondary compact onPress={pairMfi} />
+            </View>
+          </View>
+          <ScreenNote>{t("pairHint")}</ScreenNote>
+        </>
       )}
 
       <ScreenSection title={t("odometry")}>
@@ -350,6 +375,21 @@ function CycleRow<T extends number | string | null>({
   );
 }
 
+/** Label wraps beside the switch; a label inside the native switch overflows the card. */
+function SwitchRow({ value, onValueChange, label }: { value: boolean; onValueChange: (v: boolean) => void; label: string }) {
+  const palette = usePalette();
+  return (
+    <View style={styles.switchRow}>
+      <T size={14} color={palette.text} style={styles.flex}>
+        {label}
+      </T>
+      <Host matchContents>
+        <Switch value={value} onValueChange={onValueChange} />
+      </Host>
+    </View>
+  );
+}
+
 function DeveloperTab() {
   const { t } = useT();
   const { link, recorder, setDevSettings } = useRuntime();
@@ -362,41 +402,31 @@ function DeveloperTab() {
   return (
     <>
       <ScreenSection title={t("developerSettings")} plain>
-        <Host matchContents>
-          <Switch
-            value={rec.settings.rawImu}
-            onValueChange={(v) => recorder.updateSettings({ rawImu: v })}
-            label={t("rawImu")}
-          />
-        </Host>
-        <Host matchContents>
-          <Switch
-            value={rec.settings.imuRateHz === 100}
-            onValueChange={(v) => recorder.updateSettings({ imuRateHz: v ? 100 : 50 })}
-            label={t("imuRate100")}
-          />
-        </Host>
-        <Host matchContents>
-          <Switch
-            value={dev.showEmulators}
-            onValueChange={(v) => setDevSettings({ showEmulators: v })}
-            label={t("showEmulators")}
-          />
-        </Host>
-        <Host matchContents>
-          <Switch
-            value={dev.showParticles}
-            onValueChange={(v) => setDevSettings({ showParticles: v })}
-            label={t("showParticles")}
-          />
-        </Host>
-        <Host matchContents>
-          <Switch
-            value={dev.outageButton}
-            onValueChange={(v) => setDevSettings({ outageButton: v })}
-            label={t("outageButton")}
-          />
-        </Host>
+        <SwitchRow
+          value={rec.settings.rawImu}
+          onValueChange={(v) => recorder.updateSettings({ rawImu: v })}
+          label={t("rawImu")}
+        />
+        <SwitchRow
+          value={rec.settings.imuRateHz === 100}
+          onValueChange={(v) => recorder.updateSettings({ imuRateHz: v ? 100 : 50 })}
+          label={t("imuRate100")}
+        />
+        <SwitchRow
+          value={dev.showEmulators}
+          onValueChange={(v) => setDevSettings({ showEmulators: v })}
+          label={t("showEmulators")}
+        />
+        <SwitchRow
+          value={dev.showParticles}
+          onValueChange={(v) => setDevSettings({ showParticles: v })}
+          label={t("showParticles")}
+        />
+        <SwitchRow
+          value={dev.outageButton}
+          onValueChange={(v) => setDevSettings({ outageButton: v })}
+          label={t("outageButton")}
+        />
         <CycleRow
           labelKey="speedCap"
           value={speedCap}
@@ -450,7 +480,8 @@ function DeveloperTab() {
 }
 
 const styles = StyleSheet.create({
-  adapterCard: { flexDirection: "row", alignItems: "center", gap: 14 },
+  adapterCard: { flexDirection: "row", alignItems: "center", gap: 14, marginBottom: 4 },
+  switchRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
   adapterTile: {
     width: 48,
     height: 48,

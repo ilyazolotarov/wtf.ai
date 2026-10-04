@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams } from "expo-router";
-import { Children, Fragment, isValidElement } from "react";
+import { Children, Fragment, isValidElement, useEffect, useRef } from "react";
 import {
   Pressable,
   ScrollView,
@@ -22,42 +22,53 @@ import { useT } from "@/i18n/provider";
  */
 export function ScreenContent({
   title,
+  tabs,
+  scrollKey,
   children,
-}: React.PropsWithChildren<{ title?: string }>) {
+}: React.PropsWithChildren<{ title?: string; tabs?: React.ReactNode; scrollKey?: string }>) {
   const palette = usePalette();
+  const scroll = useRef<ScrollView>(null);
+  // A new key (e.g. another tab) starts at the top instead of keeping the old offset.
+  useEffect(() => {
+    scroll.current?.scrollTo({ y: 0, animated: false });
+  }, [scrollKey]);
   return (
     <ScrollView
+      ref={scroll}
       style={{ backgroundColor: palette.sheetBg }}
       contentInsetAdjustmentBehavior="automatic"
       keyboardShouldPersistTaps="handled"
       stickyHeaderIndices={title ? [0] : undefined}
       contentContainerStyle={[styles.content, !title && styles.contentNoHeader]}
     >
-      {title && <SheetHeader title={title} />}
+      {title && <SheetHeader title={title} tabs={tabs} />}
       {children}
     </ScrollView>
   );
 }
 
-function SheetHeader({ title }: { title: string }) {
+function SheetHeader({ title, tabs }: { title: string; tabs?: React.ReactNode }) {
   const { t } = useT();
   const { from } = useLocalSearchParams<{ from?: string }>();
   const nested = from === "more";
   const palette = usePalette();
   return (
     // Opaque and full-bleed so scrolled content doesn't show beside or under the pinned header.
-    <View style={[styles.header, { backgroundColor: palette.sheetBg }]}>
-      {nested && (
-        <RoundButton icon="arrow_back" label={t("back")} onPress={() => router.back()} />
-      )}
-      <T w="semibold" size={24} style={styles.headerTitle} numberOfLines={1}>
-        {title}
-      </T>
-      <RoundButton
-        icon="close"
-        label={t("close")}
-        onPress={() => (nested ? router.dismiss(2) : router.back())}
-      />
+    <View style={[styles.headerWrap, { backgroundColor: palette.sheetBg }]}>
+      <View style={styles.header}>
+        {nested && (
+          <RoundButton icon="arrow_back" label={t("back")} onPress={() => router.back()} />
+        )}
+        <T w="semibold" size={24} style={styles.headerTitle} numberOfLines={1}>
+          {title}
+        </T>
+        <RoundButton
+          icon="close"
+          label={t("close")}
+          onPress={() => (nested ? router.dismiss(2) : router.back())}
+        />
+      </View>
+      {tabs}
     </View>
   );
 }
@@ -275,6 +286,8 @@ export function Segmented<V extends string>({
               w="semibold"
               size={14}
               numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.75}
               color={active ? palette.onAccent : palette.text}
             >
               {option.label}
@@ -312,15 +325,13 @@ const styles = StyleSheet.create({
     gap: 18,
   },
   contentNoHeader: { paddingTop: 16 },
+  headerWrap: { marginHorizontal: -16, paddingHorizontal: 16, paddingBottom: 6, marginBottom: -6 },
   header: {
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    marginHorizontal: -16,
-    paddingHorizontal: 16,
     paddingTop: 6,
     paddingBottom: 12,
-    marginBottom: -6,
   },
   headerTitle: { flex: 1, letterSpacing: -0.24 },
   roundButton: {
