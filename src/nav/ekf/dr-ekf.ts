@@ -1,10 +1,11 @@
 // Stage 1 dead-reckoning EKF (SPEC §3.4). State in a local ENU plane:
-// [E, N, ψ (heading, clockwise from north), v, k_s (v = k_s·s_OBD), b_ω (gyro yaw bias), k_ω (gyro yaw scale)].
+// [E, N, ψ (heading, clockwise from north), v, k_s, b_ω (gyro yaw bias), k_ω (gyro yaw scale), o_s], with the OBD
+// speed v = k_s·s_OBD + o_s while it reads above zero (NAVIGATOR-SPEC §5.2: the CX-5 fits 1.019 and −0.23 km/h).
 
 import { identity, inverse, maxEigen2, mul, symmetrize, transpose, zeros, type Mat } from "./matrix";
 
-export const IX = { E: 0, N: 1, PSI: 2, V: 3, KS: 4, BW: 5, KW: 6 } as const;
-const DIM = 7;
+export const IX = { E: 0, N: 1, PSI: 2, V: 3, KS: 4, BW: 5, KW: 6, SO: 7 } as const;
+const DIM = 8;
 
 export interface EkfConfig {
   /** Speed random walk (acceleration), m/s². */
@@ -17,11 +18,15 @@ export interface EkfConfig {
   biasWalk: number;
   speedScaleWalk: number;
   yawScaleWalk: number;
+  /** Speed offset random walk, m/s/√s. */
+  speedOffsetWalk: number;
   /** Position model slack, m/√s. */
   positionNoise: number;
   initSpeedScaleSigma: number;
   initBiasSigma: number;
   initYawScaleSigma: number;
+  /** Speed offset prior σ, m/s; 0 fixes the offset at 0 (the scale-only model). */
+  initSpeedOffsetSigma: number;
 }
 
 export const DEFAULT_EKF_CONFIG: EkfConfig = {
@@ -39,6 +44,11 @@ export const DEFAULT_EKF_CONFIG: EkfConfig = {
   // a loose prior lets heading errors from GNSS course leak into the bias.
   initBiasSigma: 0.0005,
   initYawScaleSigma: 0.02,
+  // Off (0): the CX-5 reads 0.23 km/h low on top of its scale, but the EKF can't tell the offset from the scale
+  // (both explain town speeds), so it learned 0.5 km/h on a drive whose truth was 0.23. Neutral on the 14 logs,
+  // mixed on simulated highways (NAVIGATOR-SPEC §13.12). 0.15 m/s turns it on.
+  initSpeedOffsetSigma: 0,
+  speedOffsetWalk: 1e-5,
 };
 
 export interface EkfInit {
@@ -50,7 +60,7 @@ export interface EkfInit {
   psiSigma: number;
   speedSigma: number;
   /** Carry over learned parameters (and their variances) from a previous run. */
-  params?: Partial<{ ks: number; bw: number; kw: number; ksVar: number; bwVar: number; kwVar: number }>;
+  params?: Partial<{ ks: number; bw: number; kw: number; so: number; ksVar: number; bwVar: number; kwVar: number; soVar: number }>;
 }
 
 export interface UpdateResult {
@@ -70,7 +80,8 @@ export class DrEkf {
     this.config = { ...DEFAULT_EKF_CONFIG, ...config };
     const c = this.config;
     const p = init.params;
-    this.x = [init.east, init.north, init.psi, init.speed, p?.ks ?? 1, p?.bw ?? 0, p?.kw ?? 1];
+    const offset = c.initSpeedOffsetSigma > 0;
+    this.x = [init.east, init.north, init.psi, init.speed, p?.ks ?? 1, p?.bw ?? 0, p?.kw ?? 1, offset ? (p?.so ?? 0) : 0];
     this.P = zeros(DIM, DIM);
     this.P[IX.E][IX.E] = this.P[IX.N][IX.N] = init.posSigma ** 2;
     this.P[IX.PSI][IX.PSI] = init.psiSigma ** 2;
@@ -78,6 +89,7 @@ export class DrEkf {
     this.P[IX.KS][IX.KS] = p?.ksVar ?? c.initSpeedScaleSigma ** 2;
     this.P[IX.BW][IX.BW] = p?.bwVar ?? c.initBiasSigma ** 2;
     this.P[IX.KW][IX.KW] = p?.kwVar ?? c.initYawScaleSigma ** 2;
+    this.P[IX.SO][IX.SO] = offset ? (p?.soVar ?? c.initSpeedOffsetSigma ** 2) : 0;
   }
 
   get east() {
@@ -137,18 +149,24 @@ export class DrEkf {
     next[IX.KS][IX.KS] += c.speedScaleWalk ** 2 * dt;
     next[IX.BW][IX.BW] += c.biasWalk ** 2 * dt;
     next[IX.KW][IX.KW] += c.yawScaleWalk ** 2 * dt;
+    if (c.initSpeedOffsetSigma > 0) next[IX.SO][IX.SO] += c.speedOffsetWalk ** 2 * dt;
     symmetrize(next);
     for (let i = 0; i < DIM; i++) this.P[i] = next[i];
   }
 
-  /** OBD speed: s_OBD = v / k_s. */
+  /**
+   * OBD speed: s_OBD = (v − o_s) / k_s. A zero reading is the cutoff below ~2–3 km/h, not the linear fit:
+   * s_OBD = v / k_s there, with a loose σ.
+   */
   updateObdSpeed(speedMps: number, sigma: number): UpdateResult {
     const v = this.x[IX.V];
     const ks = this.x[IX.KS];
+    const o = speedMps > 0 ? this.x[IX.SO] : 0;
     const H = zeros(1, DIM);
     H[0][IX.V] = 1 / ks;
-    H[0][IX.KS] = -v / (ks * ks);
-    return this.update(H, [speedMps - v / ks], [[sigma * sigma]]);
+    H[0][IX.KS] = -(v - o) / (ks * ks);
+    if (speedMps > 0) H[0][IX.SO] = -1 / ks;
+    return this.update(H, [speedMps - (v - o) / ks], [[sigma * sigma]]);
   }
 
   /** Zero-velocity update at standstill. */
@@ -211,9 +229,11 @@ export class DrEkf {
       ks: this.x[IX.KS],
       bw: this.x[IX.BW],
       kw: this.x[IX.KW],
+      so: this.x[IX.SO],
       ksVar: this.P[IX.KS][IX.KS],
       bwVar: this.P[IX.BW][IX.BW],
       kwVar: this.P[IX.KW][IX.KW],
+      soVar: this.P[IX.SO][IX.SO],
     };
   }
 

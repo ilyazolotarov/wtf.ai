@@ -10,6 +10,7 @@ import path from "node:path";
 
 import { haversineM, type Coordinate } from "../../src/nav/geo";
 import { LocalFrame } from "../../src/nav/geo/local-frame";
+import type { MapMatchConfig } from "../../src/nav/mapmatch/particle-filter";
 import type { NavConfig } from "../../src/nav/navigator";
 import { replayShownTrack } from "../../src/nav/replay/drive-report";
 import { replayTrip } from "../../src/nav/replay/replay";
@@ -27,6 +28,8 @@ function parseArgs(argv: string[]) {
   let bucketMin = 10;
   let route: "city" | "arterial" = "city";
   let trace = false;
+  let nav: Partial<NavConfig> = {};
+  let mmConfig: Partial<MapMatchConfig> = {};
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--at") {
@@ -41,12 +44,14 @@ function parseArgs(argv: string[]) {
     else if (a === "--every") bucketMin = Number(argv[++i]);
     else if (a === "--route") route = argv[++i] as "city" | "arterial";
     else if (a === "--trace") trace = true;
+    else if (a === "--nav") nav = JSON.parse(argv[++i]) as Partial<NavConfig>;
+    else if (a === "--mm-config") mmConfig = JSON.parse(argv[++i]) as Partial<MapMatchConfig>;
     else if (a === "-h" || a === "--help") {
-      console.log("replay:sim [--at lat,lon] [--graph <file>] [--minutes 60] [--seeds 3] [--loops open,heading,closed] [--gps-min 3] [--imu-hz 100] [--every 10] [--route city|arterial] [--trace]");
+      console.log("replay:sim [--at lat,lon] [--graph <file>] [--minutes 60] [--seeds 3] [--loops open,heading,closed] [--gps-min 3] [--imu-hz 100] [--every 10] [--route city|arterial] [--trace] [--nav '<json NavConfig>'] [--mm-config '<json>']");
       process.exit(0);
     }
   }
-  return { at, graph, minutes, seeds, loops, gpsMin, imuHz, bucketMin, route, trace };
+  return { at, graph, minutes, seeds, loops, gpsMin, imuHz, bucketMin, route, trace, nav, mmConfig };
 }
 
 const quantile = (v: number[], q: number) => {
@@ -81,8 +86,8 @@ for (let seed = 1; seed <= args.seeds; seed++) {
     const navGraph = openGraph(graphFile, args.at);
     const t0 = performance.now();
     const result = replayTrip(drive.trip, {
-      nav: { mapMatchLoop: loop },
-      mapMatch: { graph: navGraph.graph },
+      nav: { ...args.nav, mapMatchLoop: loop },
+      mapMatch: { graph: navGraph.graph, config: args.mmConfig },
       cuts: [{ fromS: cutS, toS: Infinity }],
       trackStepS: 1,
     });

@@ -365,7 +365,8 @@ export function cityDrive(o: CityDriveOptions): CityDrive {
       gE = gK * gE + Math.sqrt(1 - gK * gK) * s.gnssSigmaM * r.gauss();
       gN = gK * gN + Math.sqrt(1 - gK * gK) * s.gnssSigmaM * r.gauss();
       const c = o.frame.toCoordinate(x + gE, y + gN);
-      const lagged = truth[Math.max(0, truth.length - 7)];
+      // CoreLocation's speed (Doppler, smoothed) lags ~1.0 s (NAVIGATOR-SPEC §11); its position and course don't.
+      const lagged = truth[Math.max(0, truth.length - 11)];
       gnss.push({
         tUs,
         lat: c.lat,
@@ -373,8 +374,8 @@ export function cityDrive(o: CityDriveOptions): CityDrive {
         hAccM: s.gnssSigmaM * 1.5 + r.uniform(),
         speedMps: lagged.speedMps,
         speedAccMps: 0.3,
-        courseRad: lagged.speedMps > 1 ? (lagged.psi + 2 * Math.PI) % (2 * Math.PI) : undefined,
-        courseAccRad: lagged.speedMps > 1 ? 0.05 : undefined,
+        courseRad: v > 1 ? (psi + 2 * Math.PI) % (2 * Math.PI) : undefined,
+        courseAccRad: v > 1 ? 0.05 : undefined,
       });
     }
   }

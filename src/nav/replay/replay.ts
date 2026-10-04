@@ -85,6 +85,9 @@ export interface ParticleSnapshot {
 export interface TrackPoint extends NavEstimate {
   tS: number;
   standstill: boolean;
+  /** The OBD speed calibration then (v = k_s·s_OBD + o_s, o_s in m/s), while the EKF runs. */
+  ks?: number;
+  so?: number;
 }
 
 export interface FixRecord {
@@ -143,7 +146,8 @@ export interface ReplaySummary {
   medianErrorM: { satellite: number | null; coarse: number | null };
   /** Share of coarse fixes whose prediction lies inside the fix's own accuracy radius. */
   coarseInsideAccuracy: number | null;
-  params: { speedScale: number; gyroBiasDegS: number; gyroScale: number } | null;
+  /** `speedOffsetKph`: the OBD speed offset (v = k_s·s_OBD + o_s), km/h. */
+  params: { speedScale: number; speedOffsetKph: number; gyroBiasDegS: number; gyroScale: number } | null;
   /** Online GNSS lag estimate at the end of the log (null: not enough turns with good fixes). */
   gnssLag: GnssLagEstimate | null;
   imuInvalidS: number;
@@ -226,7 +230,8 @@ export function replayTrip(trip: TripLog, options: ReplayOptions = {}): ReplayRe
     if (tUs < nextTrackUs) return;
     nextTrackUs = tUs + stepUs;
     const e = nav.estimate();
-    if (e) track.push({ ...e, tS: tS(tUs), standstill: nav.isStandstill });
+    const p = nav.params;
+    if (e) track.push({ ...e, tS: tS(tUs), standstill: nav.isStandstill, ...(p ? { ks: p.ks, so: p.so } : {}) });
     if (metrics && e && !nav.isStandstill && (e.speedMps ?? 0) >= 2) metrics.sample(tUs, e.mapMatch, nav.mapMatcher, d);
   };
 
@@ -308,6 +313,7 @@ export function replayTrip(trip: TripLog, options: ReplayOptions = {}): ReplayRe
       coarseInsideAccuracy: coarse.length ? coarse.filter((f) => f.errorM! <= f.fix.hAccM).length / coarse.length : null,
       params: params && {
         speedScale: params.ks,
+        speedOffsetKph: params.so * 3.6,
         gyroBiasDegS: (params.bw * 180) / Math.PI,
         gyroScale: params.kw,
       },

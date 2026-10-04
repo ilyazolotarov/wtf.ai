@@ -314,7 +314,8 @@ export class Navigator {
   private lastFix: GnssFix | null = null;
   private rejectedSat = 0;
   /** Speed scale for the next EKF start: a stored per-car value, or the one learned before a reset. */
-  private speedScale: { ks: number; ksVar: number } | null = null;
+  /** The OBD speed calibration the next EKF starts from (stored per car; carried over a reset). */
+  private speedScale: { ks: number; ksVar: number; so?: number; soVar?: number } | null = null;
   /** The EKF started from a parked pose that no fix has confirmed yet (OBD distance at the start). */
   private poseUnverifiedFromM: number | null = null;
   /** Parked pose taken when the phone was first handled while parked: it may leave the car after that. */
@@ -444,9 +445,9 @@ export class Navigator {
     return this.ekf?.params() ?? null;
   }
 
-  /** Start the EKF from a speed scale learned earlier (stored per car). Applies at the next EKF start. */
-  setSpeedScalePrior(ks: number, ksVar: number): void {
-    this.speedScale = { ks, ksVar };
+  /** Start the EKF from a speed scale (and offset) learned earlier (stored per car). Applies at the next EKF start. */
+  setSpeedScalePrior(ks: number, ksVar: number, offset?: { so: number; soVar: number }): void {
+    this.speedScale = { ks, ksVar, ...(offset ?? {}) };
   }
 
   /** Raw magnetometer: the compass (§7.6), at most a hint for the heading at a jammed start (`compassUse`). */
@@ -724,7 +725,8 @@ export class Navigator {
     } else {
       const ks = this.speedScale?.ks ?? 1;
       kw = 1;
-      ds = ks * obdSpeed * dt;
+      // The offset applies only to readings above the zero cutoff, as in the EKF.
+      ds = (obdSpeed > 0 ? ks * obdSpeed + (this.speedScale?.so ?? 0) : 0) * dt;
       dpsi = hold || yaw === null ? 0 : -(yaw - this.rel.bias) * dt;
       calibration = {
         speedScaleRelSigma: Math.sqrt(this.speedScale?.ksVar ?? c.initSpeedScaleSigma ** 2) / ks,
@@ -1052,8 +1054,8 @@ export class Navigator {
   /** The EKF disagrees with good fixes: start over, anchored at the latest one. */
   private reset(fix: GnssFix, sigma: number): void {
     // The speed scale is a property of the car, not of the diverged track: keep it.
-    const { ks, ksVar } = this.ekf!.params();
-    this.speedScale = { ks, ksVar };
+    const { ks, ksVar, so, soVar } = this.ekf!.params();
+    this.speedScale = { ks, ksVar, so, soVar };
     this.anchor = { coord: { lat: fix.lat, lon: fix.lon }, sigma, distanceM: 0 };
     this.ekf = null;
     this.ekfHistory.clear();

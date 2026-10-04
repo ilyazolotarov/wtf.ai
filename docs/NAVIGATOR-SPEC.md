@@ -432,5 +432,7 @@ needed to check them (`replay:bench`).
 11. **Compass in shadow** (§7.6): built; collect how often the stored calibration is wrong on real drives
     (`replay:compass`) before switching it on.
 12. **Speed offset.** On the CX-5, GNSS − OBD fits a scale of 1.019 with a −0.23 km/h offset (§13.2), but the EKF
-    learns only the scale `k_s`: at low speed a few percent stay unexplained. With MAPMATCH-SPEC §9's closed loop the
-    error between turns grows ~1–3 m per km; an offset state is a candidate if city drives show more.
+    learns only the scale `k_s`. Built: an offset state `o_s` (v = k_s·s_OBD + o_s above the zero cutoff; `ekf.
+    initSpeedOffsetSigma`, carried with `k_s`), **off by default**: the EKF can't tell it from the scale with town
+    speeds and GNSS speed (a simulated drive learned 0.5 km/h for a true 0.23); neutral on the 14 logs (`replay:bench
+    --mm`, closed loop: 240 s 16.7 vs 17.2 m), mixed on simulated highways (MAPMATCH-SPEC §9.4).

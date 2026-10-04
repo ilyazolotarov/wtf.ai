@@ -690,32 +690,42 @@ iPhone 13: gyro bias 0.05 °/s with a random walk of 0.03 °/s per √h, scale 1
 − 0.23 km/h, rounded, 0 below 2.5 km/h; GNSS errors σ 2.5 m correlated over 30 s. The truth is exact, scored every
 second. `tools/replay/simulate.ts` runs it: GPS for the first 3 minutes, then none to the end.
 
-Three 3-hour drives per city (seeds 1–3, IMU 50 Hz):
+Three 3-hour drives per case (seeds 1–3, IMU 50 Hz; GNSS speed 1.0 s late, as CoreLocation's). Per seed:
 
-| City | Loop | Dot error median | p90 | Max over 3 h | > 50 m | Navigator (EKF) median |
-| --- | --- | --- | --- | --- | --- | --- |
-| Chernihiv (64 km, 660 junctions per drive) | open | 5.6 / 7.8 / 541 m | 248 / 333 / 2847 m | 2.4 / 1.9 / 5.3 km | 16 / 26 / 61 % | 467 / 88 / 668 m |
-| | closed | 5.1 / 4.6 / 5.8 m | 10 / 9.3 / 14 m | 44 / 34 / 86 m | 0 / 0 / 0.3 % | 5.1 / 4.3 / 5.0 m |
-| Kyiv city centre (58 km, 990 junctions) | open | 1176 / 6.5 / 354 m | 3727 / 18 / 2386 m | 8.9 / 0.6 / 3.8 km | 68 / 2 / 58 % | 911 / 63 / 426 m |
-| | closed | 4.4 / 4.8 / 4.3 m | 9.1 / 11 / 9.6 m | 34 / 41 / 38 m | 0 % | 3.9 / 5.3 / 4.4 m |
+| Case | Loop | Dot error median | Max over 3 h | > 50 m of the time |
+| --- | --- | --- | --- | --- |
+| Chernihiv city (65 km, a turn per 0.3–0.4 km) | open | 8 / 178 / 353 m | 8.0 / 1.8 / 10.6 km | 32 / 66 / 64 % |
+| | closed | 4.6 / 4.9 / 4.9 m | 41 / 50 / 35 m | 0 % |
+| Kyiv city centre (58 km, a turn per 0.4 km) | open | 89 / 5 / 537 m | 9.9 / 0.2 / 4.5 km | 51 / 2 / 74 % |
+| | closed | 4.8 / 5.5 / 4.0 m | 39 / 32 / 54 m | 0 / 0 / 0.2 % |
+| Kyiv avenues (`--route arterial`, a turn per 1.8–3.7 km) | open | 4.8 / 4.3 / 3.7 m | 178 / 360 / 104 m | 2 / 2 / 0 % |
+| | closed | 3.4 / 4.4 / 4.4 m | 26 / 33 / 21 m | 0 % |
+| Chernihiv oblast main roads (`arterial`, a turn per 2.3–10 km, intercity at 70 km/h) | open | 13 / 15 / 3062 m | 23 / 3.6 / 17 km | 40 / 43 / 62 % |
+| | closed | 6.5 / 28 / 3.6 m | 140 / 188 / 48 m | 11 / 41 / 0 % |
 
-- Closed loop, every 30 min of the 3 h: dot error median 3.9–5.6 m, p90 8–18 m. It doesn't grow with time.
-- Open loop gets lost on every run sooner or later: the EKF drifts hundreds of metres, its position prior (§7.4)
-  then pulls the filter onto wrong roads, and nothing brings it back without GNSS.
-- About 1 road-heading correction per 50 m and 1 road position per 200 m; 2–10 of ~1400 per drive refused by the gate.
+- Closed loop holds wherever there are turns: city drives and avenues stay within 4–6 m median and ~50 m worst over
+  3 h, every half hour alike. Open loop gets lost on most runs: the EKF drifts hundreds of metres, its position prior
+  (§7.4) pulls the filter onto wrong roads, and nothing brings it back without GNSS.
+- About 1 road-heading correction per 50 m and 1 road position per 200 m; a few per thousand refused by the gate.
 - 30 min drives replay in ~4 s, 3 h in ~20 s (Node, Windows PC).
-- **Long roads, few turns** (`--route arterial`: secondary and up, straight on nearly always). Kyiv city (44–87 km
-  per drive): closed loop median 3.4–4.5 m, max 23–47 m, never lost. Chernihiv oblast (78–141 km; the route leaves
-  the city on intercity roads, one turn per 3–10 km): closed loop fine on one drive, but 100–280 m off for 38–72 min
-  on the other two; open loop lost on two of three (up to 53 km).
-  - Traced (`--trace`): the error is along the road (across median 2.2 m; across > 15 m 1.7 % of the time). The dot
-    falls behind ~0.2 % of the distance at 70 km/h (0 → 134 m over ~80 km), then a turn is matched to the next
-    junction and it is 125 m ahead with no turn left to correct it. Not a wrong road.
-  - Cause: the simulated OBD has the CX-5's offset (−0.23 km/h); the EKF learns only a scale (NAVIGATOR-SPEC
-    §13.12), from 3 min of GNSS mostly in town, so at 70 km/h it is a few tenths of a percent off.
-  - Candidates: a speed offset state; Wi-Fi/cell fixes during jamming (the simulator gives none; even ±100 m ones
-    bound along-track drift); longer GNSS before the outage. A second, map-free EKF (to keep map errors out of the
-    odometry and to detect wrong-road locks) doesn't help here: it shares the speed error.
+- **Long roads with few turns** fail (Chernihiv intercity, seeds 1–2). Traced (`--trace`):
+  - The error is along the road (across median 2.2 m): the dot falls behind ~0.15–0.25 % of the distance at
+    70 km/h. After an hour of highway it is 110–170 m behind; a turn is then matched to the next junction (the dot
+    jumps ahead by twice that), and on one drive the filter later lost the road (2.2 km off).
+  - Throughout, the filter reports `tracking` with a tight cluster: confident while 170 m off. Its spread along the
+    road doesn't grow with the distance driven, so at the turn there is no alternative at the right junction.
+  - Cause of the drift: the speed calibration. 15 min of GNSS mostly in town left the speed at 70 km/h 0.4–0.5 %
+    low; the closed loop corrects it at turns (k_s 1.011 → 1.021 over 2 h, truth 1.019) but too slowly for a road
+    with a turn every 10 km.
+  - Tried, not kept: a speed offset state (NAVIGATOR-SPEC §13.12): the EKF can't separate it from the scale with
+    town speeds and GNSS speed (learned 0.5 km/h, truth 0.23); neutral on the 14 logs, mixed here. The filter's
+    EKF-position prior at 0.1 or 0 instead of 0.3: fixes one drive (30 → 9 % of the time > 50 m) and breaks
+    another (0 → 43 %, 1.7 km).
+  - Next candidates: (1) a map-free twin EKF whose σ grows honestly along the road, as the filter's position prior
+    and odometry source, so the filter keeps alternatives at junctions when the along-road error has grown and
+    can't confirm its own corrections; (2) Wi-Fi/cell fixes during jamming (the simulator gives none; ±50–150 m
+    ones bound along-road drift); (3) the speed calibration kept per car across drives (the app does; the
+    simulator starts from 1 ± 0.03 each time).
 - **Optimistic:** the map is the road network the car drives (topology exact, only the geometry wanders), and there
   is no parking, reversing, yard, unmapped road, traffic jam, tunnel or phone handling. Real long drives with Cut GPS
   (NAVIGATOR-SPEC §9) are the check.
