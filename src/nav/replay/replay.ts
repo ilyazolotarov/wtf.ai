@@ -146,7 +146,8 @@ const median = (v: number[]) => {
 };
 
 export function replayTrip(trip: TripLog, options: ReplayOptions = {}): ReplayResult {
-  const nav = new Navigator(options.nav);
+  // With a compass option the particle filter uses it (`on`); otherwise it runs in shadow, as in the app.
+  const nav = new Navigator({ ...(options.compass ? { compassUse: "on" as const } : {}), ...options.nav });
   const cal = options.compass?.calibration;
   if (cal) nav.setCompassCalibration(options.compass?.rotateRad ? rotateCalibration(cal, options.compass.rotateRad) : cal);
   if (options.odometry) nav.subscribeOdometry(options.odometry);

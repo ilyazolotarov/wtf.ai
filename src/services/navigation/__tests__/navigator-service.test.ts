@@ -101,12 +101,19 @@ function harness(options: { vin?: string | null; store?: ReturnType<typeof memor
     if (i < 0) i = trip.imu.length;
     if (o < 0) o = trip.obdSpeed.length;
     if (g < 0) g = trip.gnss.length;
+    let k = trip.mag.findIndex((s) => s.tUs > nowUs);
+    if (k < 0) k = trip.mag.length;
     while (nowUs < lastUs) {
       nowUs += 100_000;
       const batch = [];
       while (i < trip.imu.length && trip.imu[i].tUs <= nowUs) {
         const s = trip.imu[i++];
         batch.push({ timestampUs: s.tUs, gyro: s.gyro, gravity: s.gravity, userAccel: s.userAccel, attitude: [1, 0, 0, 0] as [number, number, number, number] });
+      }
+      const mag = [];
+      while (k < trip.mag.length && trip.mag[k].tUs <= nowUs) {
+        const s = trip.mag[k++];
+        mag.push({ timestampUs: s.tUs, v: s.field });
       }
       while (o < trip.obdSpeed.length && trip.obdSpeed[o].tUs <= nowUs) {
         const s = trip.obdSpeed[o++];
@@ -116,7 +123,7 @@ function harness(options: { vin?: string | null; store?: ReturnType<typeof memor
         const f = trip.gnss[g++];
         if (opts.withoutGnssFromS === undefined || f.tUs < trip.startUs + opts.withoutGnssFromS * 1e6) gnss.emit(record(f));
       }
-      imu.emit({ motion: batch, gyro: [], accel: [], mag: [] });
+      imu.emit({ motion: batch, gyro: [], accel: [], mag });
       jest.advanceTimersByTime(100);
       opts.onStep?.(nowUs);
     }
@@ -303,6 +310,46 @@ describe("parked pose", () => {
     await other.service.start();
     expect(other.notes.some((n) => n.includes("parked pose"))).toBe(false);
     other.service.stop();
+  });
+});
+
+describe("compass in shadow", () => {
+  // Turning right 45° at a time: every heading sector, enough for a drive to learn the compass alone.
+  const ROUND: DriveSegment[] = [{ durationS: 5, speedMps: 0, yawRateDegS: 0 }];
+  for (let i = 0; i < 9; i++) ROUND.push({ durationS: 15, speedMps: 12, yawRateDegS: 0 }, { durationS: 3, speedMps: 8, yawRateDegS: 15 });
+  ROUND.push({ durationS: 10, speedMps: 12, yawRateDegS: 0 });
+
+  test("learns the compass per car, keeps it, and logs how far off it was at the next start", async () => {
+    const store = memoryStore();
+    const drive = syntheticDrive({ segments: ROUND, gnss: "clean", magnetometer: {}, seed: 5 });
+    const first = harness({ store });
+    await first.service.start();
+    first.play(drive);
+    first.engine.emit("engine-off", first.now());
+    expect(first.notes).toContain("nav compass at start: none (none)");
+    expect(first.notes.some((n) => n.startsWith("nav compass none → confirmed"))).toBe(true);
+    expect(first.notes.some((n) => n.startsWith("nav compass drive: confirmed"))).toBe(true);
+    first.service.stop();
+    const kept = new CalibrationStore(store, PHONE).compassCalibrations(VIN);
+    expect(kept).toHaveLength(1);
+    expect(kept[0].confirmed).toBe(true);
+
+    const second = harness({ store });
+    await second.service.start();
+    second.play(drive, { untilS: 40 });
+    expect(second.notes).toContain(`nav compass from storage: 1 mounting(s) (${kept[0].samples} samples)`);
+    const atStart = second.notes.find((n) => n.startsWith("nav compass at start:"))!;
+    expect(atStart).toMatch(/° off \(unverified\)$/);
+    expect(Math.abs(parseFloat(atStart.slice("nav compass at start: ".length)))).toBeLessThan(10);
+    expect(second.service.getDebug().compassOffDeg).not.toBeNull();
+    second.service.stop();
+  });
+
+  test("another car doesn't get it", async () => {
+    const calibration = new CalibrationStore(memoryStore(), PHONE);
+    calibration.saveCompassCalibrations(VIN, [{ refAxis: 0, up: [0, 0, 1], xtx: new Array(16).fill(1), xty: [1, 1, 1, 1], yty: 1, samples: 80, sectors: 255, confirmed: true }]);
+    expect(calibration.compassCalibrations(VIN)).toHaveLength(1);
+    expect(calibration.compassCalibrations("OTHERVIN")).toEqual([]);
   });
 });
 

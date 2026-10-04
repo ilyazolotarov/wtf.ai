@@ -6,11 +6,16 @@ const DEG = Math.PI / 180;
 const OFFSET: Vec3 = [45, 135, 60];
 const angleDeg = (a: number, b: number) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b))) / DEG;
 
-/** Drive straight at heading `psi` for 1.2 s (flat phone, x forward), optionally tilted, then return the time. */
+/**
+ * Drive straight at heading `psi` for 1.2 s (x forward), then return the time. The phone is flat, or
+ * tilted about its x axis (`up` = [0, sin θ, cos θ]): Earth's field turns with it, the offset is the phone's.
+ */
 function hold(compass: Compass, tUs: number, psi: number, up: Vec3 = [0, 0, 1]): number {
+  const [wx, wy, wz] = [19 * Math.cos(psi), 19 * Math.sin(psi), -46];
+  const field: Vec3 = [OFFSET[0] + wx, OFFSET[1] + up[2] * wy + up[1] * wz, OFFSET[2] - up[1] * wy + up[2] * wz];
   for (let k = 0; k < 120; k++, tUs += 10_000) {
     compass.onImu(tUs, up, 0, true);
-    if (k % 5 === 0) compass.onMag(tUs, [OFFSET[0] + 19 * Math.cos(psi), OFFSET[1] + 19 * Math.sin(psi), OFFSET[2] - 46]);
+    if (k % 5 === 0) compass.onMag(tUs, field);
   }
   return tUs;
 }
@@ -91,6 +96,53 @@ describe("Compass", () => {
     expect(next.trust).toBe("confirmed");
     expect(angleDeg(next.heading()!.psi, 300 * DEG)).toBeLessThan(1);
     expect(next.calibration!.confirmed).toBe(true);
+  });
+
+  test("each mounting keeps its own calibration: learning in another tilt leaves the stored one alone", () => {
+    const flat = syntheticCompassCalibration();
+    const tilted: Vec3 = [0, Math.sin(30 * DEG), Math.cos(30 * DEG)];
+    const compass = new Compass();
+    compass.setCalibration(flat);
+    // A drive with the phone tilted 30°: the flat calibration doesn't apply; this tilt is learned anew.
+    let t = 0;
+    for (let pass = 0; pass < 2; pass++) {
+      for (let deg = 0; deg < 360; deg += 10) {
+        t = hold(compass, t, deg * DEG, tilted);
+        compass.observe(deg * DEG);
+      }
+    }
+    t = hold(compass, t, 75 * DEG, tilted);
+    expect(angleDeg(compass.heading()!.psi, 75 * DEG)).toBeLessThan(1);
+    const kept = compass.calibrations;
+    expect(kept).toHaveLength(2);
+    expect(kept[0].up[2]).toBeCloseTo(Math.cos(30 * DEG));
+    // The flat one as stored (not sat in: its confirmation unchanged).
+    expect(kept[1].samples).toBe(flat.samples);
+    expect(kept[1].xty).toEqual(flat.xty);
+    expect(kept[1].confirmed).toBe(true);
+    // The next drive picks whichever matches the tilt.
+    const next = new Compass();
+    next.setCalibrations(kept);
+    hold(next, 0, 200 * DEG);
+    expect(angleDeg(next.heading()!.psi, 200 * DEG)).toBeLessThan(1);
+    hold(next, 2e7, 200 * DEG, tilted);
+    expect(angleDeg(next.heading()!.psi, 200 * DEG)).toBeLessThan(1);
+  });
+
+  test("keeps at most three mountings, dropping the least used", () => {
+    const compass = new Compass();
+    let t = 0;
+    for (const tiltDeg of [0, 20, 40, 60]) {
+      const up: Vec3 = [0, Math.sin(tiltDeg * DEG), Math.cos(tiltDeg * DEG)];
+      for (let i = 0; i < 5 + tiltDeg; i++) {
+        t = hold(compass, t, i * 10 * DEG, up);
+        compass.observe(i * 10 * DEG);
+      }
+    }
+    const kept = compass.calibrations;
+    expect(kept).toHaveLength(3);
+    // The 0° one had the fewest samples.
+    expect(kept.map((c) => Math.round(Math.acos(c.up[2]) / DEG))).toEqual([60, 40, 20]);
   });
 
   test("no heading while the phone is tilted away from its mounting, or handled", () => {

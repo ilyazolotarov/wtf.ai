@@ -70,6 +70,12 @@ export interface NavConfig {
   gnssLag: Partial<GnssLagConfig>;
   imu: Partial<ImuConfig>;
   compass: Partial<CompassConfig>;
+  /**
+   * `shadow`: the compass learns, checks itself and reports its heading (`compassHeading`), but the
+   * particle filter never gets it (the app, until real drives show how often a stored calibration is
+   * wrong, §7.6). `on`: the particle filter weighs it at a jammed start (MAPMATCH-SPEC §8.2).
+   */
+  compassUse: "shadow" | "on";
   /** The compass learns from the EKF heading while its σ is below this, driving at least `compassMinSpeedMps`. */
   compassLearnSigmaRad: number;
   compassMinSpeedMps: number;
@@ -101,6 +107,7 @@ export const DEFAULT_NAV_CONFIG: NavConfig = {
   gnssLag: {},
   imu: {},
   compass: {},
+  compassUse: "shadow",
   compassLearnSigmaRad: (3 * Math.PI) / 180,
   compassMinSpeedMps: 4,
   align: {},
@@ -357,7 +364,7 @@ export class Navigator {
     this.speedScale = { ks, ksVar };
   }
 
-  /** Raw magnetometer: the compass (§7.6), used only to find the heading at a jammed start. */
+  /** Raw magnetometer: the compass (§7.6), at most a hint for the heading at a jammed start (`compassUse`). */
   onMag(s: MagSample): void {
     this.compass.onMag(s.tUs, s.field);
   }
@@ -367,13 +374,28 @@ export class Navigator {
     this.compass.setCalibration(cal);
   }
 
-  /** The compass calibration to keep for the next drive (stored + learned on this one). */
+  /** Compass calibrations from earlier drives of this car and phone, one per mounting, most recent first. */
+  setCompassCalibrations(cals: readonly CompassCalibration[]): void {
+    this.compass.setCalibrations(cals);
+  }
+
+  /** The compass calibration of the mounting this drive used most (stored + learned on this one). */
   get compassCalibration(): CompassCalibration | null {
     return this.compass.calibration;
   }
 
+  /** The compass calibrations to keep for the next drive, one per mounting, most recent first. */
+  get compassCalibrations(): CompassCalibration[] {
+    return this.compass.calibrations;
+  }
+
   get compassTrust(): CompassTrust {
     return this.compass.trust;
+  }
+
+  /** The compass's heading now (null: no usable calibration, or the phone handled or tilted). */
+  get compassHeading(): { psi: number; sigma: number } | null {
+    return this.compass.heading();
   }
 
   /** Compass minus EKF heading at each trust check (replay statistics). */
@@ -729,7 +751,7 @@ export class Navigator {
     const pf = this.pf;
     if (!pf?.isActive) return;
     const ekf = this.ekf;
-    pf.setCompass(pf.initializing ? this.compass.heading() : null);
+    pf.setCompass(pf.initializing && this.config.compassUse === "on" ? this.compass.heading() : null);
     pf.onOdometry(step, ekf ? { psi: ekf.psi, psiSigma: ekf.psiSigma, e: ekf.east, n: ekf.north, posSigma: ekf.positionSigma } : null);
     if (step.stopped) return;
     if (!ekf && step.distanceM >= this.nextMapStartCheckM) {

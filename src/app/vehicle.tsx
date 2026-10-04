@@ -240,6 +240,10 @@ function PositionTab() {
         <ScreenRow label="kω" value={num(ekf.gyroScale, 4)} />
         <ScreenRow label="GNSS lag" value={`${num(ekf.gnssLagS, 2, " s")}${ekf.gnssLagWindows ? ` (${ekf.gnssLagWindows} turns)` : ""}`} />
         <ScreenRow label="parked pose" value={ekf.parkedPose} />
+        <ScreenRow
+          label="compass (shadow)"
+          value={`${ekf.compassTrust}${ekf.compassOffDeg === null ? "" : ` · ${ekf.compassOffDeg.toFixed(0)}° off`}`}
+        />
       </ScreenSection>
     </>
   );

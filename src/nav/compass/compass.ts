@@ -10,7 +10,8 @@
 // with ψ the car's heading (clockwise from north): an offset c plus Earth's field turned by the
 // mounting and scaled (4 parameters, linear least squares). It is learned while the EKF's heading is
 // good and kept as normal equations, so drives add up and a stored calibration seeds the next drive.
-// It holds only as long as the phone sits in the same mount: a different tilt invalidates it.
+// It holds only as long as the phone sits in the same mount, so each mounting (tilt) has its own. A
+// phone turned in its mount at the same tilt can't be told apart: the trust check has to catch it.
 
 import type { Vec3 } from "../types";
 
@@ -25,6 +26,8 @@ export interface CompassConfig {
   minSectors: number;
   /** The phone's tilt may differ this much from the one the calibration was learned at. */
   mountToleranceRad: number;
+  /** Calibrations kept per car, one per mounting (tilt), most recent first. */
+  maxMountings: number;
   /** Trust check: this many comparisons with a known heading… */
   checkSamples: number;
   /** …whose median difference beyond this rejects the stored calibration. */
@@ -41,6 +44,7 @@ export const DEFAULT_COMPASS_CONFIG: CompassConfig = {
   minSamples: 60,
   minSectors: 5,
   mountToleranceRad: 10 * DEG,
+  maxMountings: 3,
   checkSamples: 10,
   rejectRad: 45 * DEG,
   sigmaRad: 25 * DEG,
@@ -153,13 +157,34 @@ function horizontalAxis(up: Vec3): 0 | 1 | 2 {
   return a[0] <= a[1] && a[0] <= a[2] ? 0 : a[1] <= a[2] ? 1 : 2;
 }
 
+/**
+ * One way the phone sits in the car (its tilt): the calibration stored for it, what this drive learns
+ * there, and the trust check of the stored one. A calibration holds only for its own mounting, so each
+ * is kept apart: learning in one never changes another.
+ */
+interface Mounting {
+  stored: CompassCalibration | null;
+  session: CompassCalibration | null;
+  trust: CompassTrust;
+  checks: number[];
+  fit: Fit | null;
+  /** The phone sat this way at some point of this drive. */
+  used: boolean;
+}
+
+/** The frame a mounting's samples are levelled in: the stored calibration's, else this drive's. */
+const frameOf = (m: Mounting): CompassCalibration | null => m.stored ?? m.session;
+const samplesOf = (m: Mounting) => (m.stored?.samples ?? 0) + (m.session?.samples ?? 0);
+const tiltBetween = (a: Vec3, b: Vec3) => Math.acos(Math.min(1, dot(a, b)));
+const combined = (m: Mounting): CompassCalibration | null =>
+  m.stored && m.session ? mergeCalibrations(m.stored, m.session) : (m.stored ?? m.session);
+
 export class Compass {
   readonly config: CompassConfig;
-  private stored: CompassCalibration | null = null;
-  private session: CompassCalibration | null = null;
-  private fit: Fit | null = null;
-  private trustState: CompassTrust = "none";
-  private checks: number[] = [];
+  private mountings: Mounting[] = [];
+  /** The mounting the phone's tilt matches now (null: none known). */
+  private active: Mounting | null = null;
+  private lastActive: Mounting | null = null;
   private up: Vec3 | null = null;
   private handled = false;
   // The window: levelled samples, and the yaw rate (with its time step) to sum the turn over it.
@@ -176,31 +201,51 @@ export class Compass {
     this.config = { ...DEFAULT_COMPASS_CONFIG, ...config };
   }
 
-  /** A calibration from earlier drives (same phone, same car). Unverified until checked. */
+  /**
+   * Calibrations from earlier drives (same phone, same car), one per mounting, most recent first.
+   * Each is unverified until checked.
+   */
+  setCalibrations(cals: readonly CompassCalibration[]): void {
+    this.mountings = cals.map((stored) => ({ stored, session: null, trust: "unverified", checks: [], fit: null, used: false }));
+    this.mountings.forEach((m) => this.refit(m));
+    this.active = null;
+    this.lastActive = null;
+    this.clearWindow();
+  }
+
   setCalibration(cal: CompassCalibration | null): void {
-    this.stored = cal;
-    this.trustState = cal ? "unverified" : "none";
-    this.checks = [];
-    this.refit();
+    this.setCalibrations(cal ? [cal] : []);
   }
 
   /**
-   * Stored and learned together, to keep for the next drive (null: nothing learned). Confirmed unless
-   * it holds a stored calibration this drive never checked.
+   * What to keep for the next drive, most recent first (this drive's mountings, then the rest as
+   * stored), at most `maxMountings`. Each is stored and learned together; confirmed unless this drive
+   * sat in a stored one and never checked it.
    */
-  get calibration(): CompassCalibration | null {
-    const cal = this.stored && this.session ? mergeCalibrations(this.stored, this.session) : (this.stored ?? this.session);
-    return cal && { ...cal, confirmed: !(this.stored && this.trustState === "unverified") };
+  get calibrations(): CompassCalibration[] {
+    const used = this.mountings.filter((m) => m.used).sort((a, b) => samplesOf(b) - samplesOf(a));
+    const rest = this.mountings.filter((m) => !m.used);
+    return [...used, ...rest]
+      .map((m) => this.kept(m))
+      .filter((c): c is CompassCalibration => c !== null)
+      .slice(0, this.config.maxMountings);
   }
 
+  /** The mounting this drive used most (or the first stored one): replay and the benchmarks. */
+  get calibration(): CompassCalibration | null {
+    return this.calibrations[0] ?? null;
+  }
+
+  /** Trust of the mounting the phone sits in (or last sat in on this drive). */
   get trust(): CompassTrust {
-    return this.trustState;
+    return (this.active ?? this.lastActive)?.trust ?? "none";
   }
 
   /** Every IMU sample: the phone's attitude and yaw rate, and whether it is being handled. */
   onImu(tUs: number, up: Vec3, yawRate: number, valid: boolean): void {
     this.up = up;
     this.handled = !valid;
+    if (valid) this.selectMounting(up);
     const dt = this.lastImuUs === null ? 0 : Math.min(0.2, Math.max(0, (tUs - this.lastImuUs) / 1e6));
     this.lastImuUs = tUs;
     const turn = yawRate * dt;
@@ -213,7 +258,8 @@ export class Compass {
   onMag(tUs: number, field: Vec3): void {
     const up = this.up;
     if (!up) return;
-    const axis = (this.calibrationFrame()?.refAxis ?? horizontalAxis(up)) as number;
+    const frame = this.active ? frameOf(this.active) : null;
+    const axis = (frame?.refAxis ?? horizontalAxis(up)) as number;
     // e1 = the reference axis projected onto the horizontal, e2 = up × e1 (right-handed, like forward/left).
     const r: Vec3 = [axis === 0 ? 1 : 0, axis === 1 ? 1 : 0, axis === 2 ? 1 : 0];
     const k = dot(r, up);
@@ -237,24 +283,13 @@ export class Compass {
 
   /**
    * The car's heading from the field (clockwise from north) and its σ. Null without a usable
-   * calibration, after a rejection, with the phone handled or tilted away from its mounting.
+   * calibration for the phone's mounting, after a rejection, or with the phone handled.
    */
   heading(): { psi: number; sigma: number } | null {
+    const m = this.active;
     // Not confirmed on the drive that kept it (never checked there): checked here, not handed out.
-    if (this.trustState === "unverified" && !this.stored?.confirmed) return null;
-    return this.estimate();
-  }
-
-  /** The heading from the current fit, before the gate on unconfirmed calibrations. */
-  private estimate(): { psi: number; sigma: number } | null {
-    if (!this.fit || this.trustState === "rejected" || this.handled || !this.mounted()) return null;
-    const m = this.mean();
-    if (!m) return null;
-    const { cx, cy, a, b } = this.fit;
-    // A⁻¹ (m − c) = [cos ψ, sin ψ] · |A|
-    const dx = m.x - cx;
-    const dy = m.y - cy;
-    return { psi: Math.atan2(-b * dx + a * dy, a * dx + b * dy), sigma: this.config.sigmaRad };
+    if (!m || (m.trust === "unverified" && !m.stored?.confirmed)) return null;
+    return this.estimate(m);
   }
 
   /**
@@ -263,37 +298,40 @@ export class Compass {
    */
   observe(psi: number): void {
     if (this.handled || !this.straight()) return;
-    const m = this.mean();
+    const mean = this.mean();
     const up = this.up;
-    if (!m || !up) return;
-    const own = this.estimate();
-    if (own && this.trustState === "unverified") {
+    if (!mean || !up) return;
+    // A mounting no calibration knows: learn it as a new one.
+    const m = this.active ?? this.addMounting(up);
+    const own = this.estimate(m);
+    if (own && m.trust === "unverified") {
       const d = wrap(own.psi - psi);
       this.checkDiffs.push(d);
-      this.checks.push(Math.abs(d));
-      if (this.checks.length >= this.config.checkSamples) {
-        const sorted = [...this.checks].sort((x, y) => x - y);
+      m.checks.push(Math.abs(d));
+      if (m.checks.length >= this.config.checkSamples) {
+        const sorted = [...m.checks].sort((x, y) => x - y);
         const median = sorted[sorted.length >> 1];
         if (median > this.config.rejectRad) {
-          // Wrong for this car or mounting: start over from what this drive learns.
-          this.trustState = "rejected";
-          this.stored = null;
+          // Wrong for this car or mounting: start over from what this drive learns (in the same frame).
+          m.trust = "rejected";
+          m.session ??= emptyCalibration(m.stored!.refAxis, m.stored!.up);
+          m.stored = null;
         } else {
-          this.trustState = "confirmed";
+          m.trust = "confirmed";
         }
       }
-    } else if (own && this.trustState === "confirmed") {
+    } else if (own && m.trust === "confirmed") {
       this.checkDiffs.push(wrap(own.psi - psi));
     }
-    // Learn into the session's calibration (in the stored one's frame while that holds).
-    const frame = this.calibrationFrame();
-    if (!this.session) this.session = emptyCalibration(frame?.refAxis ?? horizontalAxis(up), frame?.up ?? up);
-    const s = this.session;
+    // Learn into this mounting's session, in its frame.
+    const frame = frameOf(m)!;
+    m.session ??= emptyCalibration(frame.refAxis, frame.up);
+    const s = m.session;
     const c = Math.cos(psi);
     const sn = Math.sin(psi);
     const rows = [
-      { x: [1, 0, c, -sn], y: m.x },
-      { x: [0, 1, sn, c], y: m.y },
+      { x: [1, 0, c, -sn], y: mean.x },
+      { x: [0, 1, sn, c], y: mean.y },
     ];
     for (const row of rows) {
       for (let i = 0; i < 4; i++) {
@@ -304,27 +342,81 @@ export class Compass {
     }
     s.samples++;
     s.sectors |= 1 << Math.floor(((psi % TWO_PI) + TWO_PI) % TWO_PI / (Math.PI / 4)) % 8;
-    this.refit();
+    this.refit(m);
   }
 
-  private refit(): void {
+  /** The heading from a mounting's fit, before the gate on unconfirmed calibrations. */
+  private estimate(m: Mounting): { psi: number; sigma: number } | null {
+    if (!m.fit || m.trust === "rejected" || this.handled) return null;
+    const mean = this.mean();
+    if (!mean) return null;
+    const { cx, cy, a, b } = m.fit;
+    // A⁻¹ (m − c) = [cos ψ, sin ψ] · |A|
+    const dx = mean.x - cx;
+    const dy = mean.y - cy;
+    return { psi: Math.atan2(-b * dx + a * dy, a * dx + b * dy), sigma: this.config.sigmaRad };
+  }
+
+  /** The mounting the tilt matches: the current one while it still does, else the closest. */
+  private selectMounting(up: Vec3): void {
+    const tol = this.config.mountToleranceRad;
+    const current = this.active ? frameOf(this.active) : null;
+    if (current && tiltBetween(up, current.up) <= tol) return;
+    let best: Mounting | null = null;
+    let bestTilt = tol;
+    for (const m of this.mountings) {
+      const frame = frameOf(m);
+      const tilt = frame ? tiltBetween(up, frame.up) : Infinity;
+      if (tilt <= bestTilt) {
+        best = m;
+        bestTilt = tilt;
+      }
+    }
+    if (best === this.active) return;
+    this.active = best;
+    if (best) {
+      best.used = true;
+      this.lastActive = best;
+    }
+    // The window was levelled in the previous mounting's frame.
+    this.clearWindow();
+  }
+
+  /** A new mounting, learned from scratch in the current tilt; the least useful one makes room. */
+  private addMounting(up: Vec3): Mounting {
+    if (this.mountings.length >= this.config.maxMountings) {
+      const spare = [...this.mountings].sort((a, b) => Number(a.used) - Number(b.used) || samplesOf(a) - samplesOf(b))[0];
+      this.mountings = this.mountings.filter((m) => m !== spare);
+    }
+    // The window is already levelled on this axis (no mounting was active).
+    const m: Mounting = { stored: null, session: emptyCalibration(horizontalAxis(up), up), trust: "none", checks: [], fit: null, used: true };
+    this.mountings.push(m);
+    this.active = m;
+    this.lastActive = m;
+    return m;
+  }
+
+  private kept(m: Mounting): CompassCalibration | null {
+    const cal = combined(m);
+    if (!cal) return null;
+    // Sat in and never checked: unconfirmed. Not sat in: as it was stored.
+    const confirmed = m.used ? !(m.stored && m.trust === "unverified") : (m.stored?.confirmed ?? true);
+    return { ...cal, confirmed };
+  }
+
+  private refit(m: Mounting): void {
     // Until checked, the stored calibration is judged on its own: what this drive learns would
     // otherwise correct a wrong one and let it pass the check.
-    const cal = this.trustState === "unverified" ? this.stored : this.calibration;
-    this.fit = cal && cal.samples >= this.config.minSamples && popcount(cal.sectors) >= this.config.minSectors ? solve(cal) : null;
+    const cal = m.trust === "unverified" ? m.stored : combined(m);
+    m.fit = cal && cal.samples >= this.config.minSamples && popcount(cal.sectors) >= this.config.minSectors ? solve(cal) : null;
     // Learned on this drive alone (nothing stored, or the stored one rejected): its own headings.
-    if (this.fit && !this.stored && this.trustState !== "confirmed") this.trustState = "confirmed";
+    if (m.fit && !m.stored && m.trust !== "confirmed") m.trust = "confirmed";
   }
 
-  /** The frame calibrations are learned in: the stored one's, else this drive's. */
-  private calibrationFrame(): CompassCalibration | null {
-    return this.stored ?? this.session;
-  }
-
-  private mounted(): boolean {
-    const frame = this.calibrationFrame();
-    if (!frame || !this.up) return false;
-    return Math.acos(Math.min(1, dot(this.up, frame.up))) <= this.config.mountToleranceRad;
+  private clearWindow(): void {
+    this.window = [];
+    this.sumX = 0;
+    this.sumY = 0;
   }
 
   private straight(): boolean {

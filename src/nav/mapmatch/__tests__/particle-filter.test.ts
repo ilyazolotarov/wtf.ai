@@ -124,7 +124,7 @@ describe("ParticleFilter in the navigator (synthetic drives on the fixture graph
     const drive = syntheticDrive({ segments, origin, startHeadingRad: Math.PI / 2, gnss: "coarse", magnetometer: {} });
     // East's share of the weight at the end, fed like the replay with every fix after 3.5 s withheld.
     const eastShare = (rotateRad: number) => {
-      const nav = new Navigator();
+      const nav = new Navigator({ compassUse: "on" });
       nav.setRoadGraph(graph());
       nav.setCompassCalibration(rotateCalibration(syntheticCompassCalibration(), rotateRad));
       const t = drive.trip;

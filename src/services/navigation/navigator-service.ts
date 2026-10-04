@@ -7,13 +7,14 @@ import * as Location from "expo-location";
 import type { NavConfig, NavMode, ParkedPose } from "@/nav/navigator";
 import { Navigator } from "@/nav/navigator";
 import type { PositionEstimate, PositionSourceKind } from "@/nav/position/types";
-import type { GnssFix, ImuSample, ObdSpeedSample } from "@/nav/types";
+import type { CompassTrust } from "@/nav/compass/compass";
+import type { GnssFix, ImuSample, MagSample, ObdSpeedSample } from "@/nav/types";
 import type { EngineState, SpeedSample, VehicleLinkSnapshot } from "@/obd/types";
 import { isSatelliteRecord, mapFixToPosition } from "@/services/position/gnss-position-source";
 import { GnssTrustTracker } from "@/services/position/gnss-trust";
 import type { PositionSource } from "@/services/position/position-source";
 import type { SensorService } from "@/services/sensor-capture/sensor-service";
-import { GNSS_FLAGS, type GnssRecord, type ImuMotionRecord, type NavEstimateRecord } from "@/triplog/schema";
+import { GNSS_FLAGS, type GnssRecord, type ImuMotionRecord, type NavEstimateRecord, type Vec3Record } from "@/triplog/schema";
 
 import type { CalibrationStore } from "./calibration-store";
 
@@ -36,6 +37,7 @@ const EARTH_RADIUS_M = 6_371_000;
 /** Added to a stored parked pose's 1σ: the car settles, the phone may sit differently in the mount. */
 const POSE_POSITION_SLACK_M = 5;
 const POSE_HEADING_SLACK_RAD = (2 * Math.PI) / 180;
+const DEG = 180 / Math.PI;
 
 export interface NavigatorLink {
   onSpeed(listener: (s: SpeedSample) => void): () => void;
@@ -59,6 +61,9 @@ export interface NavigatorDebug {
   gnssLagWindows: number;
   /** The pose this session started from. */
   parkedPose: "none" | "unverified" | "confirmed" | "rejected";
+  /** Compass in shadow (NAVIGATOR-SPEC §7.6): its trust, and how far it is off the EKF heading now. */
+  compassTrust: CompassTrust | "off";
+  compassOffDeg: number | null;
 }
 
 export interface NavigatorServiceDeps {
@@ -74,7 +79,11 @@ export interface NavigatorServiceDeps {
   nav?: Partial<NavConfig>;
 }
 
-type Input = { tUs: number; imu: ImuSample } | { tUs: number; obd: ObdSpeedSample } | { tUs: number; fix: GnssFix };
+type Input =
+  | { tUs: number; imu: ImuSample }
+  | { tUs: number; mag: MagSample }
+  | { tUs: number; obd: ObdSpeedSample }
+  | { tUs: number; fix: GnssFix };
 
 /** CoreLocation record → navigator fix (as the trip-log reader does); null for unusable fixes. */
 export function toNavFix(r: GnssRecord): GnssFix | null {
@@ -118,6 +127,9 @@ export class NavigatorService implements PositionSource {
   /** A parked pose is in storage: cleared once the car moves. */
   private poseStored = false;
   private poseStatus: NavigatorDebug["parkedPose"] = "none";
+  /** Compass shadow notes: the trust last noted, and the trust checks already summarised. */
+  private notedCompassTrust: CompassTrust = "none";
+  private summarisedChecks = 0;
 
   constructor(deps: NavigatorServiceDeps) {
     this.deps = deps;
@@ -167,6 +179,8 @@ export class NavigatorService implements PositionSource {
     }
     const lag = nav.gnssLagEstimate;
     if (lag && this.deps.calibration.saveGnssLag(lag)) this.note(`nav gnss lag saved ${lag.lagS} s (${lag.windows} turn windows)`);
+    const compass = nav.compassCalibrations;
+    if (compass.length && this.vin) this.deps.calibration.saveCompassCalibrations(this.vin, compass);
     const params = nav.params;
     if (!params || !this.vin || !this.deps.calibration.saveSpeedScale(this.vin, params.ks, params.ksVar)) return;
     if (this.notedSpeedScale === null || Math.abs(params.ks - this.notedSpeedScale) >= SPEED_SCALE_NOTE_STEP) {
@@ -190,6 +204,8 @@ export class NavigatorService implements PositionSource {
       gnssLagS: nav?.gnssLagS ?? null,
       gnssLagWindows: nav?.gnssLagEstimate?.windows ?? 0,
       parkedPose: this.poseStatus,
+      compassTrust: nav ? nav.compassTrust : "off",
+      compassOffDeg: nav ? compassOff(nav) : null,
     };
   }
 
@@ -205,13 +221,14 @@ export class NavigatorService implements PositionSource {
     this.createNavigator();
     this.unsubscribers.push(
       sensors.gnss.on((r) => this.onGnss(r)),
-      sensors.imu.on((batch) => this.onImu(batch.motion)),
+      sensors.imu.on((batch) => this.onImu(batch.motion, batch.mag)),
       link.onSpeed((s) => this.onSpeed(s)),
       link.onEngineState((state) => {
         // Parked: keep the pose for the next start, even if the app is killed later.
         if (state !== "engine-off" && state !== "ignition-off") return;
         this.flush(this.deps.nowUs() - REORDER_US);
         this.saveCalibration();
+        this.noteCompassSummary();
       }),
     );
     this.lastSaveAt = Date.now();
@@ -221,6 +238,7 @@ export class NavigatorService implements PositionSource {
   private detach(): void {
     this.flush(Infinity);
     this.saveCalibration();
+    this.noteCompassSummary();
     this.unsubscribers.forEach((u) => u());
     this.unsubscribers = [];
     if (this.timer) clearInterval(this.timer);
@@ -242,6 +260,8 @@ export class NavigatorService implements PositionSource {
     this.trustedDistanceM = null;
     this.vin = null;
     this.poseStatus = "none";
+    this.notedCompassTrust = "none";
+    this.summarisedChecks = 0;
     // Known before the adapter connects: the car of the adapter auto-connect will use.
     const vin = link.expectedVin();
     if (!vin) return;
@@ -274,6 +294,12 @@ export class NavigatorService implements PositionSource {
       this.nav.setSpeedScalePrior(ks.ks, ks.ksVar);
       this.note(`nav speed scale ${ks.ks.toFixed(4)} from storage`);
     }
+    const compass = this.deps.calibration.compassCalibrations(vin);
+    if (compass.length && this.nav) {
+      this.nav.setCompassCalibrations(compass);
+      const each = compass.map((c) => `${c.samples} samples${c.confirmed ? "" : " unconfirmed"}`).join(", ");
+      this.note(`nav compass from storage: ${compass.length} mounting(s) (${each})`);
+    }
   }
 
   // ---- inputs ----
@@ -291,10 +317,11 @@ export class NavigatorService implements PositionSource {
     this.publish();
   }
 
-  private onImu(motion: ImuMotionRecord[]): void {
+  private onImu(motion: ImuMotionRecord[], mag: Vec3Record[]): void {
     for (const m of motion) {
       this.pending.push({ tUs: m.timestampUs, imu: { tUs: m.timestampUs, gyro: m.gyro, gravity: m.gravity, userAccel: m.userAccel } });
     }
+    for (const f of mag) this.pending.push({ tUs: f.timestampUs, mag: { tUs: f.timestampUs, field: [f.v[0], f.v[1], f.v[2]] } });
     this.flush(this.deps.nowUs() - REORDER_US);
   }
 
@@ -335,6 +362,8 @@ export class NavigatorService implements PositionSource {
         continue;
       } else if ("imu" in input) {
         nav.onImu(input.imu);
+      } else if ("mag" in input) {
+        nav.onMag(input.mag);
       } else {
         nav.onObdSpeed(input.obd);
       }
@@ -346,7 +375,42 @@ export class NavigatorService implements PositionSource {
     this.checkVehicle();
     this.flush(this.deps.nowUs() - REORDER_US);
     this.publish();
+    this.noteCompassTrust();
     if (Date.now() - this.lastSaveAt >= SAVE_EVERY_MS) this.saveCalibration();
+  }
+
+  // ---- compass in shadow (NAVIGATOR-SPEC §7.6): logged, never navigated with ----
+
+  /** The heading just became known: what the compass said at that moment. */
+  private noteCompassAtStart(): void {
+    const nav = this.nav;
+    if (!nav) return;
+    const off = compassOff(nav);
+    this.note(`nav compass at start: ${off === null ? "none" : `${off.toFixed(0)}° off`} (${nav.compassTrust})`);
+  }
+
+  /** A stored calibration checked against the known heading: confirmed or rejected. */
+  private noteCompassTrust(): void {
+    const nav = this.nav;
+    if (!nav || nav.compassTrust === this.notedCompassTrust) return;
+    const before = this.notedCompassTrust;
+    this.notedCompassTrust = nav.compassTrust;
+    const diffs = nav.compassCheckDiffs.slice(-10).map((d) => Math.abs(d) * DEG);
+    const median = diffs.length ? ` (median ${percentile(diffs, 0.5).toFixed(0)}° over ${diffs.length} checks)` : "";
+    this.note(`nav compass ${before} → ${nav.compassTrust}${median}`);
+  }
+
+  /** At the end of a drive: how the compass did against the known heading. */
+  private noteCompassSummary(): void {
+    const nav = this.nav;
+    if (!nav) return;
+    const diffs = nav.compassCheckDiffs.map((d) => Math.abs(d) * DEG);
+    if (diffs.length === this.summarisedChecks) return;
+    this.summarisedChecks = diffs.length;
+    this.note(
+      `nav compass drive: ${nav.compassTrust}, ${diffs.length} checks, median ${percentile(diffs, 0.5).toFixed(0)}°, ` +
+        `p90 ${percentile(diffs, 0.9).toFixed(0)}°, ${nav.compassCalibrations.length} mounting(s) kept`,
+    );
   }
 
   // ---- output ----
@@ -410,6 +474,7 @@ export class NavigatorService implements PositionSource {
     // Entering dr is noted with its init method when the fix is processed.
     if (mode === "anchored") this.note(this.mode === "dr" ? "nav reset: fixes disagree with dead reckoning" : "nav mode anchored");
     this.mode = mode;
+    if (mode === "dr") this.noteCompassAtStart();
   }
 
   private note(text: string): void {
@@ -444,6 +509,19 @@ export class NavigatorService implements PositionSource {
       parkedPose: this.poseStatus,
     });
   }
+}
+
+/** Compass heading minus the EKF heading now, degrees (null: either unknown). */
+function compassOff(nav: Navigator): number | null {
+  const compass = nav.compassHeading;
+  const heading = nav.estimate()?.headingRad;
+  if (!compass || heading === undefined) return null;
+  return Math.atan2(Math.sin(compass.psi - heading), Math.cos(compass.psi - heading)) * DEG;
+}
+
+function percentile(values: number[], q: number): number {
+  const s = [...values].sort((a, b) => a - b);
+  return s[Math.min(s.length - 1, Math.floor(q * s.length))];
 }
 
 /** A stored pose gets some slack: the car settles, and the saved σ came from a converged filter. */

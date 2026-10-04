@@ -204,13 +204,19 @@ Measured on the 7 drives of 2026-10-04 (`mag_raw`, 19.4 Hz):
 - **So:** it picks the travel direction along a road at a jammed start with a wide margin, and could be a weak
   absolute heading (σ ≈ 25°).
 
-### 7.6 Compass (`compass/compass.ts`, replay only)
+### 7.6 Compass (`compass/compass.ts`; in the app in shadow only)
 
-- **Input:** `Navigator.onMag` (raw field), the IMU's gravity and yaw rate, `setCompassCalibration` from earlier
-  drives; `compassCalibration` is what to keep for the next drive.
+- **Input:** `Navigator.onMag` (raw field), the IMU's gravity and yaw rate, `setCompassCalibrations` from earlier
+  drives; `compassCalibrations` is what to keep for the next drive.
 - **Model** (§7.5): levelled horizontal field = offset + rotation and scale of Earth's field, in a frame fixed to
   the phone (the axis nearest the horizontal, projected). Kept as the fit's normal equations, so drives add up.
-  Holds only for the mounting it was learned in: tilted more than 10° from it, there is no heading.
+  Holds only for the mounting it was learned in.
+- **One calibration per mounting** (the phone's tilt), at most 3 per car, most recent first. The active one is
+  the one within 10° of the phone's tilt (the current one while it still is); none matching, no heading. A drive
+  learns only into the mounting the phone sits in, or starts a new one; the least used makes room. Before this, a
+  drive in another tilt learned into the stored calibration, labelled with the stored tilt, and corrupted it for
+  the next drive in the old mount. A phone turned in its mount at the same tilt still matches: only the trust
+  check can catch that.
 - **Learning:** once a second while the EKF heading σ ≤ 3°, at ≥ 4 m/s, driving straight (< 3° over the 1 s
   window), with the phone in its mount. A fit needs 60 samples over 5 of 8 heading sectors: alone, only the two
   longest drives of 2026-10-04 reached that; pooled, all drives do.
@@ -221,24 +227,26 @@ Measured on the 7 drives of 2026-10-04 (`mag_raw`, 19.4 Hz):
   turned 90° or 180°, rejected within the first 10 checks on 4 of 6. On the other two the turned calibration
   was never used before the drive learned its own.
 - **Kept for the next drive** with `confirmed`: everything in it was learned or confirmed on this drive. A drive that
-  never checked its stored calibration (no known heading while driving straight) keeps it unconfirmed; the next
-  drive still checks it, but hands out no heading until it passes.
-- **Use:** only the particle filter's jammed start (MAPMATCH-SPEC §8.2). A jammed drive can't check the compass
+  sat in a stored mounting and never checked it (no known heading while driving straight) keeps it unconfirmed;
+  the next drive still checks it, but hands out no heading until it passes. Mountings not sat in keep their flag.
+- **Use** (`compassUse`): `shadow` (default, the app) computes, checks and learns, but the particle filter never
+  gets the heading; `on` (replay with `--compass`) weighs it at the filter's jammed start (MAPMATCH-SPEC §8.2).
+  Until 2026-10-04 replay without the option also used the compass a drive learned for itself (no change in `--jam-start`). A jammed drive can't check the compass
   before it has a heading from elsewhere: the calibration is trusted on the last drive's word. Not covered: the
   phone turned in its mount at the same tilt (the tilt check doesn't see it); turned 90° or 180°, it gave 3 wrong
   map starts in 180 benchmark sessions (MAPMATCH-SPEC §8.2).
-- **Next: shadow mode in the app** (decided 2026-10-04). The app runs the compass but doesn't navigate with it,
-  until real drives show how often a stored calibration is wrong (the phone turned in its mount at the same tilt
-  is the case nothing catches).
-  - `NavigatorService` feeds `mag_raw` to `Navigator.onMag` and stores `compassCalibration` per VIN, next to the
-    parked pose and `k_s`; the next drive loads it with `setCompassCalibration`.
-  - A navigator option (shadow / on) keeps the compass heading away from the particle filter in shadow; learning
-    and the trust check run as in replay.
-  - Logged per drive (app notes, so replay and `triplog` read them): at each filter start with the heading
-    unknown, the compass heading and its trust; once the heading is known, the compass minus the known heading,
-    and the trust verdict at the end of the drive.
-  - A replay summary over the logs: how often the stored calibration was confirmed or rejected, and how far off
-    it was at the starts. Re-seat the phone on purpose once to see the check work.
+- **Shadow mode in the app** (decided 2026-10-04): the app runs the compass but doesn't navigate with it, until
+  real drives show how often a stored calibration is wrong.
+  - `NavigatorService` feeds `mag_raw` to `Navigator.onMag` and stores `compassCalibrations` per VIN (with the
+    other calibration, every 30 s and at engine off); the next drive loads them once the VIN is known.
+  - App notes (trip log): `nav compass from storage: N mounting(s) (… samples[ unconfirmed], …)`;
+    `nav compass at start: X° off (trust)` (or `none`) when the EKF starts, the compass minus the starting heading;
+    `nav compass A → B (median X° over N checks)` at each trust change; `nav compass drive: trust, N checks, median
+    X°, p90 Y°, M mounting(s) kept` at engine off and when the navigator stops.
+  - Debug screen (Vehicle, EKF): `compass (shadow)`: trust and how far it is off the EKF heading now.
+  - `npm run replay:compass -- <logs>` lists those notes per drive and sums them up: stored calibrations confirmed
+    and rejected, the compass error at the starts (median, p90, max, > 45°).
+  - To do on the road: re-seat the phone on purpose once (same tilt, turned) to see the check reject it.
   - Switch to `on` only if those numbers hold up; otherwise drop the compass.
 - **Not yet:** a heading prior for alignment (§6), re-fitting the offset from gyro turns after the phone is
   re-seated.
@@ -396,5 +404,5 @@ needed to check them (`replay:bench`).
    starts are over 10° off, the worst 43° at 4.9σ.
 10. **Reversing reads OBD 0** on the CX-5 (VEHICLE-LINK-SPEC §10.4), so the car turns in place in the model. It
     could be detected from OBD 0 + the gyro turning + the phone steady in the mount; its speed is still unknown.
-11. **Compass shadow mode** (§7.6): wire the compass into the app without navigating with it, and collect how often
-    the stored calibration is wrong on real drives before switching it on.
+11. **Compass in shadow** (§7.6): built; collect how often the stored calibration is wrong on real drives
+    (`replay:compass`) before switching it on.

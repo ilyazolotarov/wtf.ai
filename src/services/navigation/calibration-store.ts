@@ -5,10 +5,14 @@
 // - OBD speed scale k_s, per VIN: a property of the car and its tyres.
 // - the pose while parked, per VIN: the next session starts dead reckoning from it at once
 //   instead of waiting for a GNSS course, or for ~500 m of alignment under jamming.
+// - the compass calibrations, per VIN (§7.6): the car's own magnetic field and the phone's angle in
+//   the mount, learned against known headings over earlier drives, one per mounting (the phone's
+//   tilt), most recent first. This phone only (the store is local).
 // The gyro bias and scale are not stored: CoreMotion corrects the bias itself and it drifts
 // with temperature, and the learned k_ω mostly absorbs GNSS timing (§7.2), not the gyro.
 
 import type { GnssLagEstimate } from "@/nav/calibration/gnss-lag";
+import type { CompassCalibration } from "@/nav/compass/compass";
 import type { ParkedPose } from "@/nav/navigator";
 import type { KeyValueStore } from "@/obd/vehicle-link-core";
 
@@ -34,9 +38,15 @@ export interface StoredPose extends ParkedPose {
   savedAt: number;
 }
 
+interface StoredCompass {
+  calibrations: CompassCalibration[];
+  savedAt: number;
+}
+
 interface Stored {
   gnssLag?: StoredLag;
   speedScaleByVin?: Record<string, StoredSpeedScale>;
+  compassByVin?: Record<string, StoredCompass>;
 }
 
 export const CALIBRATION_KEY = "nav.calibration";
@@ -91,6 +101,16 @@ export class CalibrationStore {
     return true;
   }
 
+  /** The compass calibrations learned in this car, one per mounting, most recent first (malformed ones dropped). */
+  compassCalibrations(vin: string): CompassCalibration[] {
+    const list = this.read().compassByVin?.[vin]?.calibrations;
+    return Array.isArray(list) ? list.filter(isCalibration) : [];
+  }
+
+  saveCompassCalibrations(vin: string, calibrations: CompassCalibration[], now = Date.now()): void {
+    this.write((s) => (s.compassByVin = { ...s.compassByVin, [vin]: { calibrations, savedAt: now } }));
+  }
+
   /** Pose saved when this car was last parked. */
   parkedPose(vin: string): StoredPose | null {
     const pose = this.store.getJson<StoredPose>(PARKED_POSE_KEY);
@@ -115,4 +135,9 @@ export class CalibrationStore {
     change(s);
     this.store.setJson(CALIBRATION_KEY, s);
   }
+}
+
+function isCalibration(c: CompassCalibration): boolean {
+  const numbers = [...(c?.xtx ?? []), ...(c?.xty ?? []), ...(c?.up ?? []), c?.yty, c?.samples, c?.sectors];
+  return c?.xtx?.length === 16 && c.xty?.length === 4 && c.up?.length === 3 && [0, 1, 2].includes(c.refAxis) && numbers.every(Number.isFinite);
 }
