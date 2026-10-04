@@ -18,6 +18,8 @@ const TRUST: Record<
   NO_FIX: { color: "idle", label: "noFix", sentence: "sNoFix", icon: "gps_off" },
 };
 
+const APPROX = { color: "warn", label: "approxFix", sentence: "sApprox", icon: "location_searching" } as const;
+
 export function useAdapterStatus(): AdapterStatus {
   return useVehicleLinkValue((s) =>
     s.link === "polling" || s.link === "standby"
@@ -38,7 +40,12 @@ export function useNavStatus() {
   const position = usePosition();
   const adapter = useAdapterStatus();
   const trust: TrustState = position?.trust ?? "NO_FIX";
-  const meta = TRUST[trust];
+  // Wi-Fi/cell fixes (no speed) never earn trust, but the position is still a real, if coarse, one.
+  const approximate =
+    trust === "NO_FIX" &&
+    position?.source === "gnss" &&
+    position.speedMps === undefined;
+  const meta = approximate ? APPROX : TRUST[trust];
   const color: StatusColor = palette[meta.color];
   const source =
     trust === "TRUSTED"
@@ -53,6 +60,7 @@ export function useNavStatus() {
   return {
     position,
     trust,
+    approximate,
     color,
     icon: meta.icon,
     label: t(meta.label),

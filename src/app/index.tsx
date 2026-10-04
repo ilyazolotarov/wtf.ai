@@ -138,7 +138,7 @@ export default function HomeScreen() {
     ? trust === "UNTRUSTED"
       ? t("alertSpoof")
       : trust === "NO_FIX"
-        ? t("alertNoFix")
+        ? t(nav.approximate ? "alertApprox" : "alertNoFix")
         : trust === "REACQUIRING"
           ? t("alertReacq")
           : null
