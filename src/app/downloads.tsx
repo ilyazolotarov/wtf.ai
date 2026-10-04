@@ -54,9 +54,10 @@ export default function DownloadsScreen() {
 
   // Catalog regions plus installed ones (so they stay manageable offline); Ukraine first.
   const rows = new Map<string, RegionRow>();
-  for (const r of catalog?.regions ?? []) rows.set(r.region, { ...r, available: true });
+  // Sizes include the road graph that comes with the tiles.
+  for (const r of catalog?.regions ?? []) rows.set(r.region, { ...r, size: r.size + (r.graph?.size ?? 0), available: true });
   for (const r of Object.values(installed.regions)) {
-    if (!rows.has(r.region)) rows.set(r.region, { ...r, available: false });
+    if (!rows.has(r.region)) rows.set(r.region, { ...r, size: r.size + (r.graph?.size ?? 0), available: false });
   }
   const sorted = [...rows.values()].sort((a, b) =>
     a.region === "ukraine" ? -1 : b.region === "ukraine" ? 1 : a.name[language].localeCompare(b.name[language], language),
@@ -79,7 +80,11 @@ export default function DownloadsScreen() {
               {active ? active.name[language] : t("mapTiles")}
             </T>
             <T size={12} color={palette.text2}>
-              {active ? `${formatMb(active.size)} · OSM ${active.osm_date}` : t("onlineMapNote")}
+              {active
+                ? [formatMb(active.size + (active.graph?.size ?? 0)), `OSM ${active.osm_date}`, !active.graph && t("noRoadData")]
+                    .filter(Boolean)
+                    .join(" · ")
+                : t("onlineMapNote")}
             </T>
           </View>
           <T w="semibold" size={13} color={active ? palette.ok.c : palette.text2}>

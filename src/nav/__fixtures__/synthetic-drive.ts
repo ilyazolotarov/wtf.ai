@@ -152,7 +152,7 @@ export function syntheticDrive(o: SyntheticOptions): SyntheticDrive {
   }
 
   return {
-    trip: { startUs, info: {}, imu, mag, obdSpeed, gnss, engine: [], rpm: [], events: [], timeSync: [], messages: [], navEstimate: [], truncated: false },
+    trip: { startUs, info: {}, imu, mag, obdSpeed, gnss, engine: [], rpm: [], events: [], timeSync: [], messages: [], navEstimate: [], navMapMatch: [], truncated: false },
     truth,
     truthAt,
   };

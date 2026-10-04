@@ -322,7 +322,8 @@ Status (2026-10-04):
 - **Phase 2:** the navigator and replay are implemented. It drives the map through `NavigatorService` and saves its
   calibration. Field-tested on 7 drives (NAVIGATOR-SPEC §9.1): 26 m off after 2.7 km jammed throughout.
 - **Phase 5:** in progress, measured on replay only (MAPMATCH-SPEC §2): road graph, particle filter (open loop),
-  heading init from the map under jamming. Next: closed loop (M6) and the app (M7).
+  heading init from the map under jamming. The app (M7) is built: graph download, map matching on the phone, the
+  puck on the road while dead-reckoning, `nav_mapmatch` in trip logs; not yet driven. Next: closed loop (M6).
 
 ### Stage 2 & 3 — vehicle-specific improvements
 

@@ -10,7 +10,10 @@ import {
   GYRO_RAW,
   IMU_MOTION,
   LINK_STATS,
+  MAPMATCH_TOP,
   NAV_ESTIMATE,
+  NAV_MAPMATCH,
+  NAV_MAPMATCH_STATE_CODES,
   NAV_MODE_CODES,
   NAV_POSE_CODES,
   NAV_SOURCE_CODES,
@@ -23,6 +26,7 @@ import {
   type ImuMotionRecord,
   type LinkStatsRecord,
   type NavEstimateRecord,
+  type NavMapMatchRecord,
   type ObdPidRecord,
   type Vec3Record,
 } from "./schema";
@@ -180,6 +184,24 @@ export class TripLogWriter {
       NAV_SOURCE_CODES.indexOf(r.source),
       NAV_TRUST_CODES.indexOf(r.trust),
       NAV_POSE_CODES.indexOf(r.parkedPose),
+    ]);
+  }
+
+  navMapMatch(r: NavMapMatchRecord): void {
+    const top = (key: keyof NavMapMatchRecord["top"][number]) =>
+      Array.from({ length: MAPMATCH_TOP }, (_, i) => r.top[i]?.[key] ?? NaN);
+    this.enc.data(NAV_MAPMATCH.name, [
+      r.timestampUs,
+      NAV_MAPMATCH_STATE_CODES.indexOf(r.state),
+      Math.min(0xff, r.clusters),
+      Math.min(0xffff, r.particles),
+      Math.min(0xffffffff, Math.max(0, Math.round(r.updateUs))),
+      r.graphBuilt,
+      top("weight"),
+      top("latDeg"),
+      top("lonDeg"),
+      top("headingRad"),
+      top("spreadM"),
     ]);
   }
 

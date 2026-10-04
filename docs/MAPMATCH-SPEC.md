@@ -29,7 +29,11 @@ Place the car on the offline road network, so that:
 - **M5 done in replay:** the filter starts at the first fix with the heading unknown and can start the EKF (§8);
   simulated jamming (`--jam`, `--start`) and `replay:bench --jam-start`. Measured in §8.1. Still to do: drives
   beyond Slavutych (§10.3).
-- Next: M6 (closed loop). Order of work in §12.
+- **M7 in the app, not yet on a drive (2026-10-04):** the graph downloads with the region, the navigator runs
+  the filter on it, the puck follows the dominant hypothesis while dead-reckoning with alternatives on the map,
+  and trip logs carry `nav_mapmatch` (§11). Still to do: a drive with it, update time on the iPhone, the
+  particle overlay on the debug screen.
+- Next: M6 (closed loop), and a drive for M7. Order of work in §12.
 
 ## 3. Decisions
 
@@ -683,23 +687,33 @@ NAVIGATOR-SPEC §4, §5.1):
 
 ## 11. App
 
-- **Downloads:** fetches `graph` together with the region's `.pmtiles`, using the same checks, into
-  `Documents/maps/`. Regions downloaded before this change get their graph through the existing update check.
+- **Downloads** (`src/services/offline-map/map-packs.ts`): fetches `graph` after the region's `.pmtiles`, with the
+  same size and MD5 checks, into `Documents/maps/<region>.graph.bin`. In the foreground and not pausable (an
+  oblast's graph is 10–40 MB). Regions downloaded before this change show "Update available" and fetch only the
+  graph. The active map's card says when it has no road data yet.
 - **NavigatorService:**
-  - opens the active region's graph (`FileHandle` `ByteSource`, §5) and passes the `RoadGraph` to the navigator;
-  - a region change restarts the PF;
-  - without a graph, `mapMatch` is `off` and everything works as today.
-- **Trip log:** new ULog message `nav_mapmatch`, published with each `nav_estimate` (~2–3 Hz):
+  - opens the active region's graph (`src/services/offline-map/road-graph-file.ts`: a `FileHandle` `ByteSource`,
+    §5) and passes the `RoadGraph` to the navigator;
+  - a change of active region or graph version restarts the PF (`mm graph <region>` / `mm graph none`);
+  - without a graph, `mapMatch` is absent and everything works as today.
+  - **Puck:** the dominant hypothesis only while the position source is `dr` (no recent trusted satellite fix),
+    with radius max(spread, 5 m). With GNSS the EKF stays the puck: it is within a few metres there (NAVIGATOR-SPEC
+    §9.1), and the filter's position was measured only in outages (§7.7). This narrows §6.2. Alternatives (weight
+    ≥ 0.05) are drawn in state `multimodal`.
+- **Trip log:** ULog message `nav_mapmatch` (TRIP-LOGGER-SPEC §6.3), published with each `nav_estimate` (~2–3
+  Hz) while the filter runs:
   - state, particle count, cluster count;
   - top 3 clusters (weight, lat, lon, heading, spread);
-  - update µs and graph version.
+  - update µs and graph version (the file's build time).
 
-  App notes: `mm init`, `mm state`, `nav init map`, and pseudo-measurement rejections. Add it to TRIP-LOGGER-SPEC
-  §6.3. ULog is self-describing, so it's additive.
+  Read by `readTripLog` (`navMapMatch`) and `tools/triplog` (`Trip.map_match`). App notes: `mm graph …`, `mm
+  <state>` on each change except flips between `tracking` and `multimodal` (those are in `nav_mapmatch`), `nav
+  mode dr (map)`; pseudo-measurement rejections come with M6.
 - **Parked pose:** stays position + heading. Edge ids change between graph versions; the PF snaps onto the graph
   at start.
-- **Map:** the dominant hypothesis as the puck and alternatives as secondary markers (§6.2). The `debug` screen gets
-  a particle-cloud overlay and cluster weights. The UI details go in UI-SPEC.
+- **Map:** the dominant hypothesis as the puck and alternatives as hollow markers, fainter the lighter they are
+  (§6.2). The Vehicle sheet's diagnostics show the graph's region, state, particle count, hypothesis weights and
+  update time. Still to do: the particle-cloud overlay.
 
 ## 12. Milestones
 
@@ -711,7 +725,7 @@ NAVIGATOR-SPEC §4, §5.1):
 | M4 | PF open loop, known heading (§7) | §10.2 metrics on all drives; dominant-cluster max error on 240 s cuts better than the EKF's 37 m median; truth survival 100 %. **Done** (§7.7): 30.5 m; survival 100 % except 2 s leaving a yard |
 | M5 | Heading init from the map (§8) | EKF starts sooner than alignment on the jammed drives and on `--jam-start`, with no start > 10° off. **Done in replay** (§8.1): sooner on 2 of 3 jammed drives (the third as soon) and 29 of 35 simulated sessions; map starts ≤ 2.6° off. To confirm on drives beyond Slavutych |
 | M6 | Closed loop (§9) | `replay:bench` better at 120 / 240 s; max error ÷ σ stays within 0.5–2 (NAVIGATOR-SPEC §12.1) |
-| M7 | App (§11) | graph download, `nav_mapmatch` in trip logs, alternatives on the map, update time on iPhone < 5 ms p99 |
+| M7 | App (§11) | graph download, `nav_mapmatch` in trip logs, alternatives on the map, update time on iPhone < 5 ms p99. **Built** (§2): needs a drive for the update time |
 
 M1–M3 can partly overlap. M4 needs M1–M3. M5 and M6 are independent of each other.
 

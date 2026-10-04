@@ -245,6 +245,19 @@ function PositionTab() {
           value={`${ekf.compassTrust}${ekf.compassOffDeg === null ? "" : ` · ${ekf.compassOffDeg.toFixed(0)}° off`}`}
         />
       </ScreenSection>
+
+      <ScreenSection title={t("mapMatching")}>
+        <ScreenRow label="road graph" value={ekf.mapMatchRegion ?? dash} />
+        <ScreenRow
+          label="state"
+          value={ekf.mapMatch ? `${ekf.mapMatch.state} · ${ekf.mapMatch.particles} particles` : ekf.mapMatchRegion ? "off" : dash}
+        />
+        <ScreenRow
+          label="hypotheses"
+          value={ekf.mapMatch?.clusters.length ? ekf.mapMatch.clusters.map((c) => `${Math.round(c.weight * 100)}%`).join(" · ") : dash}
+        />
+        <ScreenRow label="update" value={ekf.mapMatch ? `${ekf.mapMatch.updateMs.toFixed(2)} ms` : dash} />
+      </ScreenSection>
     </>
   );
 }

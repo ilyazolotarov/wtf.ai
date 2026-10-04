@@ -197,6 +197,7 @@ export function MapSurface({
         )
       : emptyPolygons();
   const puck = position ? pointFeatures(position) : emptyPoints();
+  const alternatives = alternativeFeatures(position?.alternatives ?? []);
   const ghostPoint = ghost ? pointFeatures(ghost) : emptyPoints();
   const route = activeRoute
     ? routeFeatures(activeRoute.coordinates)
@@ -319,6 +320,21 @@ export function MapSurface({
           }}
         />
       </GeoJSONSource>
+      {/* Other roads the car may be on while map matching can't tell (MAPMATCH-SPEC §6.2). */}
+      <GeoJSONSource id="map-match-alternatives" data={alternatives}>
+        <Layer
+          id="map-match-alternative-dot"
+          type="circle"
+          paint={{
+            "circle-radius": 6,
+            "circle-color": palette.bg,
+            "circle-opacity": ["interpolate", ["linear"], ["get", "weight"], 0, 0.35, 0.5, 0.9],
+            "circle-stroke-color": palette.warn.c,
+            "circle-stroke-width": 2,
+            "circle-stroke-opacity": ["interpolate", ["linear"], ["get", "weight"], 0, 0.35, 0.5, 0.9],
+          }}
+        />
+      </GeoJSONSource>
       <GeoJSONSource id="position-puck" data={puck}>
         <Layer
           id="position-shadow"
@@ -392,6 +408,19 @@ function pointFeatures(point: {
     geometry: { type: "Point", coordinates: [point.lon, point.lat] },
   };
   return { type: "FeatureCollection", features: [feature] };
+}
+
+function alternativeFeatures(
+  points: { lat: number; lon: number; weight: number }[],
+): FeatureCollection<Point> {
+  return {
+    type: "FeatureCollection",
+    features: points.map((p) => ({
+      type: "Feature",
+      properties: { weight: p.weight },
+      geometry: { type: "Point", coordinates: [p.lon, p.lat] },
+    })),
+  };
 }
 
 function routeFeatures(

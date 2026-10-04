@@ -4,7 +4,8 @@
 
 import * as Location from "expo-location";
 
-import type { NavConfig, NavMode, ParkedPose } from "@/nav/navigator";
+import type { MapMatchState } from "@/nav/mapmatch/particle-filter";
+import type { MapMatchEstimate, NavConfig, NavMode, ParkedPose } from "@/nav/navigator";
 import { Navigator } from "@/nav/navigator";
 import type { PositionEstimate, PositionSourceKind } from "@/nav/position/types";
 import type { CompassTrust } from "@/nav/compass/compass";
@@ -12,9 +13,18 @@ import type { GnssFix, ImuSample, MagSample, ObdSpeedSample } from "@/nav/types"
 import type { EngineState, SpeedSample, VehicleLinkSnapshot } from "@/obd/types";
 import { isSatelliteRecord, mapFixToPosition } from "@/services/position/gnss-position-source";
 import { GnssTrustTracker } from "@/services/position/gnss-trust";
+import type { RoadGraphSource } from "@/services/offline-map/road-graph-file";
 import type { PositionSource } from "@/services/position/position-source";
 import type { SensorService } from "@/services/sensor-capture/sensor-service";
-import { GNSS_FLAGS, type GnssRecord, type ImuMotionRecord, type NavEstimateRecord, type Vec3Record } from "@/triplog/schema";
+import {
+  GNSS_FLAGS,
+  MAPMATCH_TOP,
+  type GnssRecord,
+  type ImuMotionRecord,
+  type NavEstimateRecord,
+  type NavMapMatchRecord,
+  type Vec3Record,
+} from "@/triplog/schema";
 
 import type { CalibrationStore } from "./calibration-store";
 
@@ -38,6 +48,12 @@ const EARTH_RADIUS_M = 6_371_000;
 const POSE_POSITION_SLACK_M = 5;
 const POSE_HEADING_SLACK_RAD = (2 * Math.PI) / 180;
 const DEG = 180 / Math.PI;
+/** Map-match states in which the dominant hypothesis is the puck while dead-reckoning (MAPMATCH-SPEC §6.2). */
+const MAP_MATCH_PUCK: ReadonlySet<MapMatchState> = new Set(["tracking", "multimodal", "offroad"]);
+/** Alternatives lighter than this aren't drawn. */
+const ALTERNATIVE_MIN_WEIGHT = 0.05;
+/** The puck's radius from a hypothesis' spread is at least this (a tight cluster isn't a perfect one). */
+const MAP_MATCH_MIN_ACCURACY_M = 5;
 
 export interface NavigatorLink {
   onSpeed(listener: (s: SpeedSample) => void): () => void;
@@ -64,6 +80,9 @@ export interface NavigatorDebug {
   /** Compass in shadow (NAVIGATOR-SPEC §7.6): its trust, and how far it is off the EKF heading now. */
   compassTrust: CompassTrust | "off";
   compassOffDeg: number | null;
+  /** Map matching: the region whose graph is set (null: none), the filter's state and cost. */
+  mapMatchRegion: string | null;
+  mapMatch: MapMatchEstimate | null;
 }
 
 export interface NavigatorServiceDeps {
@@ -76,6 +95,10 @@ export interface NavigatorServiceDeps {
   note?(text: string): void;
   /** Every published position, for the trip log (`nav_estimate`). */
   log?(record: NavEstimateRecord): void;
+  /** Map matching with each published position while it runs (`nav_mapmatch`). */
+  logMapMatch?(record: NavMapMatchRecord): void;
+  /** The active region's road graph; map matching is off without it. */
+  roadGraph?: RoadGraphSource;
   nav?: Partial<NavConfig>;
 }
 
@@ -130,6 +153,9 @@ export class NavigatorService implements PositionSource {
   /** Compass shadow notes: the trust last noted, and the trust checks already summarised. */
   private notedCompassTrust: CompassTrust = "none";
   private summarisedChecks = 0;
+  /** The road graph set on the navigator: its key, region and build time. */
+  private graph: { key: string; region: string; builtAt: number } | null = null;
+  private notedMapMatch: MapMatchState = "off";
 
   constructor(deps: NavigatorServiceDeps) {
     this.deps = deps;
@@ -206,6 +232,8 @@ export class NavigatorService implements PositionSource {
       parkedPose: this.poseStatus,
       compassTrust: nav ? nav.compassTrust : "off",
       compassOffDeg: nav ? compassOff(nav) : null,
+      mapMatchRegion: this.graph?.region ?? null,
+      mapMatch: e?.mapMatch ?? null,
     };
   }
 
@@ -220,6 +248,7 @@ export class NavigatorService implements PositionSource {
     const { sensors, link } = this.deps;
     this.createNavigator();
     this.unsubscribers.push(
+      this.deps.roadGraph?.subscribe(() => this.applyRoadGraph()) ?? (() => {}),
       sensors.gnss.on((r) => this.onGnss(r)),
       sensors.imu.on((batch) => this.onImu(batch.motion, batch.mag)),
       link.onSpeed((s) => this.onSpeed(s)),
@@ -262,6 +291,10 @@ export class NavigatorService implements PositionSource {
     this.poseStatus = "none";
     this.notedCompassTrust = "none";
     this.summarisedChecks = 0;
+    // Before the parked pose: the filter then starts around it.
+    this.graph = null;
+    this.notedMapMatch = "off";
+    this.applyRoadGraph();
     // Known before the adapter connects: the car of the adapter auto-connect will use.
     const vin = link.expectedVin();
     if (!vin) return;
@@ -272,6 +305,17 @@ export class NavigatorService implements PositionSource {
       this.poseStatus = "unverified";
       this.note(`nav mode dr (parked pose, ${Math.round((Date.now() - pose.savedAt) / 60_000)} min old)`);
     }
+  }
+
+  /** The active region's road graph onto the navigator; a new region (or graph version) restarts the filter. */
+  private applyRoadGraph(): void {
+    const nav = this.nav;
+    if (!nav || !this.deps.roadGraph) return;
+    const active = this.deps.roadGraph.current();
+    if ((active?.key ?? null) === (this.graph?.key ?? null)) return;
+    nav.setRoadGraph(active?.graph ?? null);
+    this.graph = active ? { key: active.key, region: active.region, builtAt: active.graph.info.builtAt } : null;
+    this.note(active ? `mm graph ${active.region} (OSM ${active.graph.info.osmDate})` : "mm graph none");
   }
 
   /** The connected car's VIN: the first one applies its speed scale; another car starts a new navigator. */
@@ -440,22 +484,38 @@ export class NavigatorService implements PositionSource {
       : trust === "TRUSTED" && estimate.tUs - this.lastAcceptedSatUs < FUSED_WINDOW_US
         ? "fused"
         : "dr";
-    let { lat, lon } = estimate;
+    const mm = estimate.mapMatch;
+    this.noteMapMatch(mm?.state ?? "off");
+    // Dead-reckoning on the map: the dominant hypothesis is the puck, the others its alternatives
+    // (MAPMATCH-SPEC §6.2). With GNSS the EKF stays the puck: it is within a few metres there.
+    const top = source === "dr" && mm && MAP_MATCH_PUCK.has(mm.state) ? mm.clusters[0] : undefined;
     const speed = estimate.speedMps;
-    const heading = dr ? estimate.headingRad : trust === "TRUSTED" && fix && Number.isFinite(fix.courseRad) ? fix.courseRad : undefined;
-    if (dr && speed !== undefined && heading !== undefined) {
-      // The navigator runs a reorder window behind: draw the car where it is now.
-      const d = speed * Math.min(Math.max(0, (nowUs - estimate.tUs) / 1e6), MAX_EXTRAPOLATE_S);
-      lat += ((d * Math.cos(heading)) / EARTH_RADIUS_M) * (180 / Math.PI);
-      lon += ((d * Math.sin(heading)) / (EARTH_RADIUS_M * Math.cos((lat * Math.PI) / 180))) * (180 / Math.PI);
-    }
+    const heading = top
+      ? top.headingRad
+      : dr
+        ? estimate.headingRad
+        : trust === "TRUSTED" && fix && Number.isFinite(fix.courseRad)
+          ? fix.courseRad
+          : undefined;
+    // The navigator runs a reorder window behind: draw the car where it is now.
+    const aheadM = dr && speed !== undefined ? speed * Math.min(Math.max(0, (nowUs - estimate.tUs) / 1e6), MAX_EXTRAPOLATE_S) : 0;
+    const { lat, lon } = ahead(top ?? estimate, heading, aheadM);
+    const alternatives =
+      top && mm?.state === "multimodal"
+        ? mm.clusters
+            .slice(1)
+            .filter((c) => c.weight >= ALTERNATIVE_MIN_WEIGHT)
+            .map((c) => ({ ...ahead(c, c.headingRad, aheadM), weight: c.weight }))
+        : undefined;
     this.set(
       {
       lat,
       lon,
       headingRad: heading,
       speedMps: speed,
-      accuracyM: estimate.accuracyM,
+      accuracyM: top ? Math.max(top.spreadM, MAP_MATCH_MIN_ACCURACY_M) : estimate.accuracyM,
+      ...(mm ? { mapMatch: mm.state } : {}),
+      ...(alternatives?.length ? { alternatives } : {}),
       source,
       trust,
       timestamp: now,
@@ -474,7 +534,19 @@ export class NavigatorService implements PositionSource {
     // Entering dr is noted with its init method when the fix is processed.
     if (mode === "anchored") this.note(this.mode === "dr" ? "nav reset: fixes disagree with dead reckoning" : "nav mode anchored");
     this.mode = mode;
-    if (mode === "dr") this.noteCompassAtStart();
+    if (mode !== "dr") return;
+    // Fix-based starts are noted with the fix; a map start happens between fixes.
+    if (this.nav?.initialization?.method === "map") this.note("nav mode dr (map)");
+    this.noteCompassAtStart();
+  }
+
+  /** Map-match state changes into the trip log, except the flips between tracking and multimodal. */
+  private noteMapMatch(state: MapMatchState): void {
+    const onRoad = (s: MapMatchState) => s === "tracking" || s === "multimodal";
+    if (state === this.notedMapMatch || (onRoad(state) && onRoad(this.notedMapMatch))) return;
+    const mm = this.nav?.estimate()?.mapMatch;
+    this.notedMapMatch = state;
+    this.note(`mm ${state}${mm ? ` (${mm.particles} particles, ${mm.clusters.length} hypotheses)` : ""}`);
   }
 
   private note(text: string): void {
@@ -508,7 +580,32 @@ export class NavigatorService implements PositionSource {
       trust: p.trust,
       parkedPose: this.poseStatus,
     });
+    const mm = nav?.estimate()?.mapMatch;
+    if (!mm || !this.deps.logMapMatch) return;
+    this.deps.logMapMatch({
+      timestampUs: this.deps.nowUs(),
+      state: mm.state,
+      particles: mm.particles,
+      clusters: mm.clusters.length,
+      updateUs: mm.updateMs * 1000,
+      graphBuilt: this.graph?.builtAt ?? 0,
+      top: mm.clusters.slice(0, MAPMATCH_TOP).map((c) => ({
+        weight: c.weight,
+        latDeg: c.lat,
+        lonDeg: c.lon,
+        headingRad: c.headingRad,
+        spreadM: c.spreadM,
+      })),
+    });
   }
+}
+
+/** `d` metres from `p` along `headingRad` (unchanged without a heading). */
+function ahead(p: { lat: number; lon: number }, headingRad: number | undefined, d: number): { lat: number; lon: number } {
+  if (headingRad === undefined || d === 0) return { lat: p.lat, lon: p.lon };
+  const lat = p.lat + ((d * Math.cos(headingRad)) / EARTH_RADIUS_M) * (180 / Math.PI);
+  const lon = p.lon + ((d * Math.sin(headingRad)) / (EARTH_RADIUS_M * Math.cos((lat * Math.PI) / 180))) * (180 / Math.PI);
+  return { lat, lon };
 }
 
 /** Compass heading minus the EKF heading now, degrees (null: either unknown). */

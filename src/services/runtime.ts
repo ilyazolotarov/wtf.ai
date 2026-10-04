@@ -13,6 +13,7 @@ import { VehicleLinkCore } from "@/obd/vehicle-link-core";
 import { kvStore } from "./kv-store";
 import { CalibrationStore } from "./navigation/calibration-store";
 import { NavigatorService } from "./navigation/navigator-service";
+import { activeRoadGraph } from "./offline-map/road-graph-file";
 import { SensorService } from "./sensor-capture/sensor-service";
 import { createTripFiles } from "./trip-recorder/trip-files";
 import { TripRecorder } from "./trip-recorder/trip-recorder";
@@ -80,6 +81,9 @@ export function getRuntime(): Runtime {
     nowUs,
     note: (text) => recorder.note(text),
     log: (record) => recorder.navEstimate(record),
+    logMapMatch: (record) => recorder.navMapMatch(record),
+    // Map matching on the active offline region's road graph (MAPMATCH-SPEC §11).
+    roadGraph: activeRoadGraph,
   });
   // During a trip the navigator keeps running with the map off screen, so dead reckoning
   // doesn't start over each time the app comes back.

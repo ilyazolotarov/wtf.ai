@@ -45,6 +45,9 @@ NAV_MODES = ["none", "anchored", "dr"]
 NAV_SOURCES = ["gnss", "fused", "dr", "manual"]
 NAV_TRUST = ["TRUSTED", "UNTRUSTED", "REACQUIRING", "NO_FIX"]
 NAV_POSES = ["none", "unverified", "confirmed", "rejected"]
+NAV_MAPMATCH_STATES = ["off", "init", "tracking", "multimodal", "offroad"]
+MAPMATCH_TOP = 3
+_MAPMATCH_TOP_FIELDS = [("weight", "weight"), ("lat_deg", "lat"), ("lon_deg", "lon"), ("heading_rad", "heading"), ("spread_m", "spread_m")]
 LOG_TAGS = {1: "elm", 2: "link", 3: "trip", 4: "sensors", 5: "app"}
 LOG_LEVELS = {ord("3"): "error", ord("4"): "warning", ord("6"): "info", ord("7"): "debug"}
 
@@ -77,6 +80,9 @@ class Trip:
     transcript: pd.DataFrame
     # What the map showed (navigator output); empty in logs from before it was wired in.
     nav: pd.DataFrame
+    # Map matching in the app, one row per `nav` row while it ran: state, cost, and the top
+    # hypotheses as `<field>_<i>` (i = 0 heaviest; NaN when fewer). Empty in older logs.
+    map_match: pd.DataFrame = field(default_factory=pd.DataFrame)
     dropouts_ms: list[int] = field(default_factory=list)
 
     @property
@@ -310,6 +316,26 @@ def load(path: str | Path) -> Trip:
         else pd.DataFrame(columns=["t_s", "lat", "lon", "accuracy_m", "heading", "heading_sigma", "speed", "speed_scale", "gnss_lag_s", "behind_ms", "mode", "source", "trust", "parked_pose"])
     )
 
+    d = _dataset(ulog, "nav_mapmatch")
+    mm_columns = ["t_s", "state", "particles", "clusters", "update_ms", "graph_built"] + [
+        f"{name}_{i}" for _, name in _MAPMATCH_TOP_FIELDS for i in range(MAPMATCH_TOP)
+    ]
+    if d is not None:
+        columns = {
+            "t_s": _t(start, d["timestamp"]),
+            "state": [_name(NAV_MAPMATCH_STATES, int(v)) for v in d["state"]],
+            "particles": d["particles"].astype("int64"),
+            "clusters": d["clusters"].astype("int64"),
+            "update_ms": d["update_us"] / 1000.0,
+            "graph_built": d["graph_built"].astype("int64"),
+        }
+        for field_name, name in _MAPMATCH_TOP_FIELDS:
+            for i, v in enumerate(_vec(d, field_name, MAPMATCH_TOP)):
+                columns[f"{name}_{i}"] = v.astype("float64")
+        map_match = pd.DataFrame(columns)
+    else:
+        map_match = pd.DataFrame(columns=mm_columns)
+
     rows = []
     for tag, messages in getattr(ulog, "logged_messages_tagged", {}).items():
         for m in messages:
@@ -345,5 +371,6 @@ def load(path: str | Path) -> Trip:
         time_sync=time_sync,
         transcript=transcript,
         nav=nav,
+        map_match=map_match,
         dropouts_ms=dropouts,
     )

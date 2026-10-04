@@ -90,6 +90,18 @@ export function buildFixture(): Uint8Array {
     trust: "TRUSTED",
     parkedPose: "confirmed",
   });
+  w.navMapMatch({
+    timestampUs: t0 + 1_500_000,
+    state: "multimodal",
+    particles: 500,
+    clusters: 2,
+    updateUs: 250,
+    graphBuilt: 1_791_000_000,
+    top: [
+      { weight: 0.75, latDeg: 50.4502, lonDeg: 30.5201, headingRad: 0.25, spreadM: 6 },
+      { weight: 0.25, latDeg: 50.4498, lonDeg: 30.5195, headingRad: 1.8, spreadM: 9 },
+    ],
+  });
   w.linkStats({ timestampUs: t0 + 1_000_000, speedHz: 19.5, latencyP50Ms: 40, latencyP95Ms: 55, errors: 1, linkState: 6, batteryV: 14.2 });
   w.log("info", LOG_TAGS.elm, t0 + 1, "tx=10000000 ATI | ELM327 v1.5\\r\\r>");
   w.tripEvent(t0 + 3_000_000, TRIP_EVENTS.end, 0);

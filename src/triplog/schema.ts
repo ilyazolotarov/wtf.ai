@@ -118,6 +118,27 @@ export const NAV_ESTIMATE: ULogFormat = {
   ],
 };
 
+/** Number of map-match hypotheses kept per `nav_mapmatch` record (heaviest first; NaN-padded). */
+export const MAPMATCH_TOP = 3;
+
+/** Map matching at each `nav_estimate` while a road graph is set (MAPMATCH-SPEC §11). */
+export const NAV_MAPMATCH: ULogFormat = {
+  name: "nav_mapmatch",
+  fields: [
+    ts,
+    { type: "uint8_t", name: "state" },
+    { type: "uint8_t", name: "clusters" },
+    { type: "uint16_t", name: "particles" },
+    { type: "uint32_t", name: "update_us" },
+    { type: "uint32_t", name: "graph_built" },
+    { type: "float", name: "weight", count: MAPMATCH_TOP },
+    { type: "double", name: "lat_deg", count: MAPMATCH_TOP },
+    { type: "double", name: "lon_deg", count: MAPMATCH_TOP },
+    { type: "float", name: "heading_rad", count: MAPMATCH_TOP },
+    { type: "float", name: "spread_m", count: MAPMATCH_TOP },
+  ],
+};
+
 export const ALL_FORMATS: readonly ULogFormat[] = [
   OBD_PID,
   GNSS,
@@ -130,6 +151,7 @@ export const ALL_FORMATS: readonly ULogFormat[] = [
   TIME_SYNC,
   NAV_ESTIMATE,
   MAG_RAW,
+  NAV_MAPMATCH,
 ];
 
 export const ENGINE_STATE_CODES = ["unknown", "ignition-off", "engine-off", "engine-running"] as const;
@@ -183,6 +205,7 @@ export const NAV_MODE_CODES = ["none", "anchored", "dr"] as const;
 export const NAV_SOURCE_CODES = ["gnss", "fused", "dr", "manual"] as const;
 export const NAV_TRUST_CODES = ["TRUSTED", "UNTRUSTED", "REACQUIRING", "NO_FIX"] as const;
 export const NAV_POSE_CODES = ["none", "unverified", "confirmed", "rejected"] as const;
+export const NAV_MAPMATCH_STATE_CODES = ["off", "init", "tracking", "multimodal", "offroad"] as const;
 
 export const GNSS_FLAGS = {
   simulated: 1,
@@ -238,6 +261,27 @@ export interface NavEstimateRecord {
   source: (typeof NAV_SOURCE_CODES)[number];
   trust: (typeof NAV_TRUST_CODES)[number];
   parkedPose: (typeof NAV_POSE_CODES)[number];
+}
+
+export interface NavMapMatchHypothesis {
+  weight: number;
+  latDeg: number;
+  lonDeg: number;
+  headingRad: number;
+  spreadM: number;
+}
+
+export interface NavMapMatchRecord {
+  /** Publish time, µs uptime (the same as the `nav_estimate` it goes with). */
+  timestampUs: number;
+  state: (typeof NAV_MAPMATCH_STATE_CODES)[number];
+  particles: number;
+  /** All hypotheses (up to 5); `top` holds the first `MAPMATCH_TOP`. */
+  clusters: number;
+  updateUs: number;
+  /** The graph file's build time (unix s): identifies the graph version. */
+  graphBuilt: number;
+  top: NavMapMatchHypothesis[];
 }
 
 export interface ImuMotionRecord {

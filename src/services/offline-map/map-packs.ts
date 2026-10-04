@@ -12,10 +12,12 @@ import { assetUrl, fetchCatalog, type CatalogRegion, type MapCatalog } from "@/s
  *     installed.json        InstalledState (what is complete and verified)
  *     common/               style.json, sprites/, fonts/ — shared by all regions
  *     <region>.pmtiles      one per installed region; `.part` while downloading
+ *     <region>.graph.bin    its road graph for map matching (MAPMATCH-SPEC §11); `.part` too
  *
  * One download at a time. Tiles download in an iOS background session; a paused download
- * survives app restarts (DownloadTask.savable() in kv-store). Every file is checked against
- * the catalog's size and MD5 before it is used.
+ * survives app restarts (DownloadTask.savable() in kv-store). The graph follows the tiles in
+ * the foreground (an oblast's is 10–40 MB). Every file is checked against the catalog's size
+ * and MD5 before it is used.
  */
 export interface InstalledRegion {
   region: string;
@@ -26,6 +28,8 @@ export interface InstalledRegion {
   size: number;
   /** Tiles checksum; absent on installs made before it was recorded. */
   md5?: string;
+  /** Road graph; absent until downloaded (regions installed before graphs get it as an update). */
+  graph?: { size: number; md5: string };
 }
 
 export interface InstalledState {
@@ -37,7 +41,7 @@ export interface InstalledState {
 
 export interface MapDownload {
   region: string;
-  phase: "common" | "tiles" | "verifying" | "paused";
+  phase: "common" | "tiles" | "graph" | "verifying" | "paused";
   bytes: number;
   total: number;
 }
@@ -62,6 +66,8 @@ const ROOT = () => new Directory(Paths.document, "maps");
 const COMMON = () => new Directory(ROOT(), "common");
 const tilesFile = (region: string) => new File(ROOT(), `${region}.pmtiles`);
 const partFile = (region: string) => new File(ROOT(), `${region}.pmtiles.part`);
+const graphFile = (region: string) => new File(ROOT(), `${region}.graph.bin`);
+const graphPartFile = (region: string) => new File(ROOT(), `${region}.graph.bin.part`);
 const INSTALLED = () => new File(ROOT(), "installed.json");
 const PAUSED_KEY = "map-download-paused";
 const CATALOG_URL_KEY = "map-catalog-url";
@@ -118,13 +124,15 @@ function saveInstalled(installed: InstalledState) {
   setState({ installed });
 }
 
-function subscribe(listener: () => void) {
+export function subscribeMapPacks(listener: () => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
 }
 
+export const getMapPacks = getState;
+
 export function useMapPacks(): MapPacksState {
-  return useSyncExternalStore(subscribe, getState);
+  return useSyncExternalStore(subscribeMapPacks, getState);
 }
 
 export const getCatalogUrl = () => kvStore.getJson<string>(CATALOG_URL_KEY) ?? "";
@@ -165,12 +173,25 @@ const commonCurrent = (installed: InstalledState, catalog: MapCatalog) =>
 const tilesCurrent = (have: InstalledRegion | undefined, entry: CatalogRegion) =>
   have?.md5 === entry.md5 && tilesFile(entry.region).exists;
 
-/** An installed region whose tiles or shared files differ from the catalog's. */
+/** True also when the catalog has no graph for the region: nothing to fetch. */
+const graphCurrent = (have: InstalledRegion | undefined, entry: CatalogRegion) =>
+  !entry.graph || (have?.graph?.md5 === entry.graph.md5 && graphFile(entry.region).exists);
+
+/** An installed region whose tiles, graph or shared files differ from the catalog's. */
 export function regionNeedsUpdate(installed: InstalledState, catalog: MapCatalog, region: string): boolean {
   const have = installed.regions[region];
   const entry = catalog.regions.find((r) => r.region === region);
   if (!have || !entry) return false;
-  return !tilesCurrent(have, entry) || !commonCurrent(installed, catalog);
+  return !tilesCurrent(have, entry) || !graphCurrent(have, entry) || !commonCurrent(installed, catalog);
+}
+
+/** The active region's road graph file; null when it has none (display-only, or not downloaded yet). */
+export function activeGraphFile(installed: InstalledState): { region: string; file: File; md5: string } | null {
+  const region = installed.active;
+  const graph = region ? installed.regions[region]?.graph : undefined;
+  if (!region || !graph) return null;
+  const file = graphFile(region);
+  return file.exists ? { region, file, md5: graph.md5 } : null;
 }
 
 /** Shared style, sprites and glyphs for the catalog's release, swapped in only when all verify. */
@@ -207,20 +228,23 @@ function installTiles(entry: CatalogRegion, osm_date: string) {
   if (dest.exists) dest.delete();
   part.rename(dest.name);
   const { installed } = getState();
-  const { asset: _asset, sha256: _sha256, ...info } = entry;
+  const { asset: _asset, sha256: _sha256, graph: _graph, ...info } = entry;
+  // The graph installed so far stays until ensureGraph replaces it.
+  const graph = installed.regions[entry.region]?.graph;
   saveInstalled({
     ...installed,
-    regions: { ...installed.regions, [entry.region]: { ...info, osm_date } },
+    regions: { ...installed.regions, [entry.region]: { ...info, osm_date, ...(graph ? { graph } : {}) } },
     active: installed.active && installed.regions[installed.active] ? installed.active : entry.region,
   });
 }
 
 /**
  * Runs the tiles download: a new one, the paused in-memory task, or one rebuilt from saved
- * state after a restart. Returns when complete or paused; throws on failure. Results of a run
- * that was cancelled meanwhile (`id` no longer current) are ignored.
+ * state after a restart. Returns true once the tiles are installed, false when paused or
+ * cancelled; throws on failure. Results of a run that was cancelled meanwhile (`id` no longer
+ * current) are ignored.
  */
-async function runTiles(id: number, entry: CatalogRegion, osm_date: string, url: string, saved?: DownloadPauseState) {
+async function runTiles(id: number, entry: CatalogRegion, osm_date: string, url: string, saved?: DownloadPauseState): Promise<boolean> {
   // Not gated on `id`: a paused in-memory task keeps the callback from the run that created it.
   const onProgress = ({ bytesWritten }: { bytesWritten: number }) => {
     if (getState().download?.region === entry.region) setDownload(entry.region, "tiles", bytesWritten, entry.size);
@@ -238,27 +262,60 @@ async function runTiles(id: number, entry: CatalogRegion, osm_date: string, url:
   setDownload(entry.region, "tiles", getState().download?.bytes ?? 0, entry.size);
   setState({ downloadError: null });
   const file = await operation;
-  if (id !== runId) return;
+  if (id !== runId) return false;
   if (file == null) {
     // Paused: keep the resume data so the download survives an app restart.
     kvStore.setJson(PAUSED_KEY, { region: entry, osm_date, url, state: task.savable() } satisfies PausedDownload);
     setDownload(entry.region, "paused", getState().download?.bytes ?? 0, entry.size);
-    return;
+    return false;
   }
   task = null;
   kvStore.setJson(PAUSED_KEY, null);
   setDownload(entry.region, "verifying", entry.size, entry.size);
-  await new Promise((resolve) => setTimeout(resolve, 50)); // let "verifying" render before MD5 blocks
+  await letRender(); // "verifying" before MD5 blocks
   installTiles(entry, osm_date);
-  setState({ download: null });
+  return true;
+}
+
+const letRender = () => new Promise((resolve) => setTimeout(resolve, 50));
+
+/**
+ * The region's road graph, when the catalog has one that isn't installed yet. Foreground and
+ * not pausable: it is small next to the tiles (Ukraine's is the exception, ~450 MB).
+ */
+async function ensureGraph(id: number, baseUrl: string, entry: CatalogRegion) {
+  const graph = entry.graph;
+  if (!graph || graphCurrent(getState().installed.regions[entry.region], entry)) return;
+  const part = graphPartFile(entry.region);
+  if (part.exists) part.delete();
+  setDownload(entry.region, "graph", 0, graph.size);
+  const onProgress = ({ bytesWritten }: { bytesWritten: number }) => {
+    if (getState().download?.region === entry.region) setDownload(entry.region, "graph", bytesWritten, graph.size);
+  };
+  task = new DownloadTask(baseUrl + encodeURIComponent(graph.asset), part, { onProgress });
+  const file = await task.downloadAsync();
+  if (id !== runId || file == null) return;
+  task = null;
+  setDownload(entry.region, "verifying", graph.size, graph.size);
+  await letRender();
+  verify(part, graph, graph.asset);
+  const dest = graphFile(entry.region);
+  if (dest.exists) dest.delete();
+  part.rename(dest.name);
+  const { installed } = getState();
+  const have = installed.regions[entry.region];
+  if (!have) return;
+  saveInstalled({
+    ...installed,
+    regions: { ...installed.regions, [entry.region]: { ...have, graph: { size: graph.size, md5: graph.md5 } } },
+  });
 }
 
 /** Drops the download and its partial file; shows `error` if given. */
 function cleanUp(region: string, error?: unknown) {
   task = null;
   kvStore.setJson(PAUSED_KEY, null);
-  const part = partFile(region);
-  if (part.exists) part.delete();
+  for (const part of [partFile(region), graphPartFile(region)]) if (part.exists) part.delete();
   const message = error == null ? null : error instanceof Error ? error.message : String(error);
   setState({ download: null, downloadError: message });
 }
@@ -269,30 +326,32 @@ export async function downloadRegion(region: string): Promise<void> {
   if (!catalog || !entry || download) return;
   const id = ++runId;
   try {
-    // Update of a region whose tiles didn't change: only the shared files are fetched.
-    const tiles = tilesCurrent(getState().installed.regions[region], entry) ? 0 : entry.size;
-    const needed = tiles + catalog.common.reduce((sum, f) => sum + f.size, 0) + DISK_MARGIN;
+    // Update of a region whose tiles didn't change: only the shared files and the graph are fetched.
+    const have = getState().installed.regions[region];
+    const tiles = tilesCurrent(have, entry) ? 0 : entry.size;
+    const graph = graphCurrent(have, entry) ? 0 : (entry.graph?.size ?? 0);
+    const needed = tiles + graph + catalog.common.reduce((sum, f) => sum + f.size, 0) + DISK_MARGIN;
     if (Paths.availableDiskSpace < needed) {
       throw new Error(`Not enough free space: ${Math.ceil(needed / 1e6)} MB needed`);
     }
     setState({ downloadError: null });
     await ensureCommon(id, catalog, region);
     if (id !== runId) return;
-    if (tiles === 0) {
-      // ensureCommon leaves the "common" progress up; nothing else to download.
-      setState({ download: null });
-      return;
+    if (tiles > 0) {
+      const part = partFile(region);
+      if (part.exists) part.delete();
+      if (!(await runTiles(id, entry, catalog.osm_date, assetUrl(catalog, entry)))) return;
     }
-    const part = partFile(region);
-    if (part.exists) part.delete();
-    await runTiles(id, entry, catalog.osm_date, assetUrl(catalog, entry));
+    await ensureGraph(id, catalog.baseUrl, entry);
+    if (id === runId) setState({ download: null });
   } catch (e) {
     if (id === runId) cleanUp(region, e);
   }
 }
 
+/** Only the tiles pause; the graph download is short. */
 export function pauseDownload(): void {
-  if (task?.state === "active") task.pause();
+  if (getState().download?.phase === "tiles" && task?.state === "active") task.pause();
 }
 
 export async function resumeDownload(): Promise<void> {
@@ -300,7 +359,10 @@ export async function resumeDownload(): Promise<void> {
   if (!paused) return;
   const id = ++runId;
   try {
-    await runTiles(id, paused.region, paused.osm_date, paused.url, paused.state);
+    if (!(await runTiles(id, paused.region, paused.osm_date, paused.url, paused.state))) return;
+    // The graph is an asset of the same release as the tiles.
+    await ensureGraph(id, paused.url.slice(0, paused.url.lastIndexOf("/") + 1), paused.region);
+    if (id === runId) setState({ download: null });
   } catch (e) {
     if (id === runId) cleanUp(paused.region.region, e);
   }
@@ -314,8 +376,7 @@ export function cancelDownload(): void {
 }
 
 export function removeRegion(region: string): void {
-  const file = tilesFile(region);
-  if (file.exists) file.delete();
+  for (const file of [tilesFile(region), graphFile(region)]) if (file.exists) file.delete();
   const { installed } = getState();
   const { [region]: _removed, ...regions } = installed.regions;
   const active = installed.active === region ? (Object.keys(regions)[0] ?? null) : installed.active;

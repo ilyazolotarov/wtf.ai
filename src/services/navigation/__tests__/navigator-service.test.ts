@@ -1,13 +1,20 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
 import { syntheticDrive, type DriveSegment, type SyntheticDrive } from "@/nav/__fixtures__/synthetic-drive";
 import { haversineM } from "@/nav/geo";
+import { LocalFrame } from "@/nav/geo/local-frame";
+import { bufferByteSource } from "@/nav/mapmatch/graph/byte-source";
+import { TiledRoadGraph } from "@/nav/mapmatch/graph/road-graph";
 import type { GnssFix } from "@/nav/types";
 import { Emitter } from "@/obd/emitter";
 import type { EngineState, SpeedSample } from "@/obd/types";
 import type { KeyValueStore } from "@/obd/vehicle-link-core";
 import { CALIBRATION_KEY, CalibrationStore, PARKED_POSE_KEY, type StoredPose } from "@/services/navigation/calibration-store";
 import { NavigatorService } from "@/services/navigation/navigator-service";
+import type { ActiveRoadGraph, RoadGraphSource } from "@/services/offline-map/road-graph-file";
 import type { decodeImuBatch } from "@/services/sensor-capture/sensor-service";
-import type { GnssRecord, NavEstimateRecord } from "@/triplog/schema";
+import type { GnssRecord, NavEstimateRecord, NavMapMatchRecord } from "@/triplog/schema";
 
 jest.mock("expo-location", () => ({
   getForegroundPermissionsAsync: jest.fn(async () => ({ granted: true, status: "granted" })),
@@ -64,7 +71,7 @@ function record(f: Partial<GnssFix> & Pick<GnssFix, "tUs" | "lat" | "lon">, over
 }
 
 /** The app around the service: fake sensors, vehicle link and clocks, driven by a synthetic trip. */
-function harness(options: { vin?: string | null; store?: ReturnType<typeof memoryStore> } = {}) {
+function harness(options: { vin?: string | null; store?: ReturnType<typeof memoryStore>; roadGraph?: RoadGraphSource } = {}) {
   const gnss = new Emitter<[GnssRecord]>();
   const imu = new Emitter<[ReturnType<typeof decodeImuBatch>]>();
   const speed = new Emitter<[SpeedSample]>();
@@ -72,6 +79,7 @@ function harness(options: { vin?: string | null; store?: ReturnType<typeof memor
   const want = jest.fn();
   const notes: string[] = [];
   const logged: NavEstimateRecord[] = [];
+  const loggedMapMatch: NavMapMatchRecord[] = [];
   const store = options.store ?? memoryStore();
   let nowUs = 1_000_000_000;
   jest.setSystemTime((nowUs + UTC_OFFSET_US) / 1000);
@@ -87,6 +95,8 @@ function harness(options: { vin?: string | null; store?: ReturnType<typeof memor
     nowUs: () => nowUs,
     note: (text) => notes.push(text),
     log: (r) => logged.push(r),
+    logMapMatch: (r) => loggedMapMatch.push(r),
+    roadGraph: options.roadGraph,
   });
 
   /** Deliver a trip the way the phone does: IMU in 100 ms batches, OBD live, fixes 50 ms late. */
@@ -129,7 +139,7 @@ function harness(options: { vin?: string | null; store?: ReturnType<typeof memor
     }
   }
 
-  return { service, gnss, engine, want, notes, logged, store, play, now: () => nowUs };
+  return { service, gnss, engine, want, notes, logged, loggedMapMatch, store, play, now: () => nowUs };
 }
 
 beforeEach(() => jest.useFakeTimers());
@@ -350,6 +360,91 @@ describe("compass in shadow", () => {
     calibration.saveCompassCalibrations(VIN, [{ refAxis: 0, up: [0, 0, 1], xtx: new Array(16).fill(1), xty: [1, 1, 1, 1], yty: 1, samples: 80, sectors: 255, confirmed: true }]);
     expect(calibration.compassCalibrations(VIN)).toHaveLength(1);
     expect(calibration.compassCalibrations("OTHERVIN")).toEqual([]);
+  });
+});
+
+// The fixture graph's long road (src/nav/mapmatch/__tests__/particle-filter.test.ts): due east from a
+// dead end, with a one-way branching north 1.73 km along it.
+const GRAPH_ORIGIN = { lat: 51.53, lon: 30.75 };
+const GRAPH_FILE = readFileSync(path.join(__dirname, "../../../nav/mapmatch/__fixtures__/net.graph.bin"));
+
+function fixtureGraphSource(): RoadGraphSource & { set(on: boolean): void } {
+  const listeners = new Set<() => void>();
+  const active: ActiveRoadGraph = {
+    key: "net:1",
+    region: "net",
+    graph: new TiledRoadGraph(bufferByteSource(new Uint8Array(GRAPH_FILE)), new LocalFrame(GRAPH_ORIGIN)),
+  };
+  let on = true;
+  return {
+    current: () => (on ? active : null),
+    subscribe: (l) => (listeners.add(l), () => listeners.delete(l)),
+    set: (value) => {
+      on = value;
+      listeners.forEach((l) => l());
+    },
+  };
+}
+
+// East along the road, then a 90° left onto the branch at the junction (as in particle-filter.test.ts).
+const JUNCTION_DRIVE: DriveSegment[] = [
+  { durationS: 3, speedMps: 0, yawRateDegS: 0 },
+  { durationS: 10, speedMps: 12, yawRateDegS: 0 },
+  { durationS: 133.9, speedMps: 12, yawRateDegS: 0 },
+  { durationS: 6, speedMps: 5, yawRateDegS: 0 },
+  { durationS: 4.5, speedMps: 5, yawRateDegS: 20 },
+  { durationS: 20, speedMps: 10, yawRateDegS: 0 },
+];
+
+describe("map matching", () => {
+  test("in a GNSS outage the dot follows the road the car turned onto, and the trip log has it", async () => {
+    const drive = syntheticDrive({ segments: JUNCTION_DRIVE, origin: GRAPH_ORIGIN, startHeadingRad: Math.PI / 2, gnss: "clean", obdScale: 0.99 });
+    const { service, play, notes, loggedMapMatch } = harness({ roadGraph: fixtureGraphSource() });
+    await service.start();
+    play(drive, { withoutGnssFromS: 100 });
+
+    expect(notes[0]).toMatch(/^mm graph net \(OSM /);
+    expect(notes.some((n) => n.startsWith("mm tracking"))).toBe(true);
+    const p = service.getSnapshot()!;
+    expect(p).toMatchObject({ source: "dr", mapMatch: "tracking" });
+    // On the branch, ~70 s and ~0.9 km after GNSS was cut, including the turn.
+    const truth = drive.truthAt(drive.trip.imu.at(-1)!.tUs);
+    expect(haversineM(p, truth)).toBeLessThan(25);
+    expect(p.alternatives).toBeUndefined();
+
+    expect(loggedMapMatch.length).toBeGreaterThan(100);
+    const last = loggedMapMatch.at(-1)!;
+    expect(last).toMatchObject({ state: "tracking", particles: expect.any(Number) });
+    expect(last.top[0].weight).toBeGreaterThan(0.8);
+    expect(service.getDebug()).toMatchObject({ mapMatchRegion: "net", mapMatch: expect.objectContaining({ state: "tracking" }) });
+    service.stop();
+  });
+
+  test("with GNSS the dot stays the EKF's; removing the region's graph switches map matching off", async () => {
+    const drive = syntheticDrive({ segments: JUNCTION_DRIVE, origin: GRAPH_ORIGIN, startHeadingRad: Math.PI / 2, gnss: "clean", obdScale: 0.99 });
+    const source = fixtureGraphSource();
+    const { service, play, notes } = harness({ roadGraph: source });
+    await service.start();
+    play(drive, { untilS: 60 });
+    expect(service.getSnapshot()).toMatchObject({ source: "fused", mapMatch: "tracking" });
+
+    source.set(false);
+    expect(notes.at(-1)).toBe("mm graph none");
+    play(drive, { untilS: 62 });
+    expect(service.getSnapshot()?.mapMatch).toBeUndefined();
+    expect(service.getDebug().mapMatchRegion).toBeNull();
+    service.stop();
+  });
+
+  test("without a graph nothing changes", async () => {
+    const drive = syntheticDrive({ segments: JUNCTION_DRIVE, origin: GRAPH_ORIGIN, startHeadingRad: Math.PI / 2, gnss: "clean", obdScale: 0.99 });
+    const { service, play, notes, loggedMapMatch } = harness();
+    await service.start();
+    play(drive, { untilS: 30 });
+    expect(service.getSnapshot()?.mapMatch).toBeUndefined();
+    expect(loggedMapMatch).toEqual([]);
+    expect(notes.some((n) => n.startsWith("mm "))).toBe(false);
+    service.stop();
   });
 });
 

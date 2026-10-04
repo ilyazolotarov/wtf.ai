@@ -14,6 +14,7 @@ import {
   type EndReason,
   type GnssRecord,
   type NavEstimateRecord,
+  type NavMapMatchRecord,
 } from "@/triplog/schema";
 import {
   DEFAULT_TRIP_CONFIG,
@@ -213,6 +214,11 @@ export class TripRecorder {
   /** A position the map showed (NAVIGATOR-SPEC §9); dropped when not recording. */
   navEstimate(r: NavEstimateRecord): void {
     this.record(r.timestampUs, (w) => w.navEstimate(r));
+  }
+
+  /** Map matching at that position (MAPMATCH-SPEC §11); dropped when not recording. */
+  navMapMatch(r: NavMapMatchRecord): void {
+    this.record(r.timestampUs, (w) => w.navMapMatch(r));
   }
 
   /** App-side event worth seeing in the log (no marker); dropped when not recording. */

@@ -97,6 +97,20 @@ def test_nav(trip):
     assert (row["mode"], row["source"], row["trust"], row["parked_pose"]) == ("dr", "fused", "TRUSTED", "confirmed")
 
 
+def test_map_match(trip):
+    mm = trip.map_match
+    assert len(mm) == 1
+    row = mm.iloc[0]
+    assert row["t_s"] == pytest.approx(1.5)
+    assert (row["state"], row["particles"], row["clusters"]) == ("multimodal", 500, 2)
+    assert row["update_ms"] == pytest.approx(0.25)
+    assert row["graph_built"] == 1_791_000_000
+    assert row["weight_0"] == pytest.approx(0.75)
+    assert row["lat_1"] == pytest.approx(50.4498)
+    assert row["heading_1"] == pytest.approx(1.8, rel=1e-6)
+    assert np.isnan(row["weight_2"])
+
+
 def test_summary_and_check(trip):
     s = summary(trip)
     assert s["complete"] is True

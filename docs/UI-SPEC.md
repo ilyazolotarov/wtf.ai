@@ -134,6 +134,8 @@ Depends on Phase 2.
 - **Custom puck** from `usePosition()` via GeoJSON source + layers: dot + heading arrow (arrow only when heading known) + accuracy circle (`circlePolygon`). Do **not** use MapLibre's built-in user location — it bypasses the abstraction.
 - **Compass beam** (display-only, `useCompassHeading`): when not in a car (no trip recording, adapter not connected) and speed < 3 m/s, a wide faint sector from `watchHeadingAsync` replaces the course cone and shows where the phone points. Half-width = iOS compass uncertainty (20°/35°/50°/60° for accuracy 3–0). The compass runs only while allowed and never reaches `PositionEstimate`.
 - Raw GNSS **ghost marker** from `rawGnss`; hidden while `source === 'gnss'`.
+- **Map-match alternatives** from `alternatives` (other roads the car may be on, MAPMATCH-SPEC §11): hollow
+  markers under the puck, more opaque the heavier they are.
 - `useKeepAwake()` while the map screen is focused.
 
 ### 6.2 Camera modes

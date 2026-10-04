@@ -83,6 +83,21 @@ describe("TripLogWriter", () => {
     expect(readTripLog(buildFixture()).navEstimate).toEqual([
       expect.objectContaining({ tUs: FIXTURE_START_US + 1_500_000, latDeg: 50.4501, behindUs: 300_000, mode: "dr", source: "fused", trust: "TRUSTED", parkedPose: "confirmed" }),
     ]);
+    // Two hypotheses: the third slot is NaN padding and is dropped.
+    expect(readTripLog(buildFixture()).navMapMatch).toEqual([
+      {
+        tUs: FIXTURE_START_US + 1_500_000,
+        state: "multimodal",
+        particles: 500,
+        clusters: 2,
+        updateUs: 250,
+        graphBuilt: 1_791_000_000,
+        top: [
+          { weight: 0.75, latDeg: 50.4502, lonDeg: 30.5201, headingRad: 0.25, spreadM: 6 },
+          { weight: 0.25, latDeg: 50.4498, lonDeg: 30.5195, headingRad: expect.closeTo(1.8, 6), spreadM: 9 },
+        ],
+      },
+    ]);
   });
 
   test("flushes on interval with a sync message, closes the sink", () => {

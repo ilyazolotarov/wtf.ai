@@ -6,12 +6,14 @@ import {
   ENGINE_STATE_CODES,
   GNSS_FLAGS,
   LOG_TAGS,
+  NAV_MAPMATCH_STATE_CODES,
   NAV_MODE_CODES,
   NAV_POSE_CODES,
   NAV_SOURCE_CODES,
   NAV_TRUST_CODES,
   TRIP_EVENTS,
   type NavEstimateRecord,
+  type NavMapMatchRecord,
 } from "./schema";
 import { readULog, type RecordValue, type ULogRecord } from "./ulog/reader";
 
@@ -38,6 +40,8 @@ export interface TripLog {
   messages: { tUs: number; tag: string; text: string }[];
   /** What the map showed (absent in logs before the navigator was wired in). */
   navEstimate: (Omit<NavEstimateRecord, "timestampUs"> & { tUs: number })[];
+  /** Map matching in the app (absent in logs before it ran there); `top` without the NaN padding. */
+  navMapMatch: (Omit<NavMapMatchRecord, "timestampUs"> & { tUs: number })[];
   truncated: boolean;
 }
 
@@ -127,6 +131,25 @@ export function readTripLog(bytes: Uint8Array): TripLog {
     parkedPose: NAV_POSE_CODES[num(r, "parked_pose")] ?? "none",
   }));
 
+  const navMapMatch = rows("nav_mapmatch").map((r) => {
+    const weight = r.weight as number[];
+    const lat = r.lat_deg as number[];
+    const lon = r.lon_deg as number[];
+    const heading = r.heading_rad as number[];
+    const spread = r.spread_m as number[];
+    return {
+      tUs: num(r, "timestamp"),
+      state: NAV_MAPMATCH_STATE_CODES[num(r, "state")] ?? "off",
+      particles: num(r, "particles"),
+      clusters: num(r, "clusters"),
+      updateUs: num(r, "update_us"),
+      graphBuilt: num(r, "graph_built"),
+      top: weight
+        .map((w, i) => ({ weight: w, latDeg: lat[i], lonDeg: lon[i], headingRad: heading[i], spreadM: spread[i] }))
+        .filter((c) => Number.isFinite(c.weight)),
+    };
+  });
+
   return {
     startUs: log.startUs,
     info: log.info,
@@ -140,6 +163,7 @@ export function readTripLog(bytes: Uint8Array): TripLog {
     timeSync,
     messages,
     navEstimate,
+    navMapMatch,
     truncated: log.truncated,
   };
 }
