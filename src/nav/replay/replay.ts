@@ -5,6 +5,7 @@ import type { GnssLagEstimate } from "../calibration/gnss-lag";
 import type { TripLog } from "../../triplog/trip-log-reader";
 import { haversineM } from "../geo";
 import { Navigator, type FixOutcome, type NavConfig, type NavEstimate, type ParkedPose } from "../navigator";
+import type { OdometryStep } from "../odometry/odometry-output";
 import { isSatelliteFix, type GnssFix } from "../types";
 
 export interface ReplayCut {
@@ -32,6 +33,8 @@ export interface ReplayOptions {
   openLoop?: { delayS: number };
   /** Start from the pose saved at the end of the previous drive (as the app does after parking). */
   startPose?: ParkedPose;
+  /** Receives the navigator's odometry chunks (MAPMATCH-SPEC §6.1). */
+  odometry?: (step: OdometryStep) => void;
 }
 
 export interface TrackPoint extends NavEstimate {
@@ -96,6 +99,7 @@ const median = (v: number[]) => {
 
 export function replayTrip(trip: TripLog, options: ReplayOptions = {}): ReplayResult {
   const nav = new Navigator(options.nav);
+  if (options.odometry) nav.subscribeOdometry(options.odometry);
   const cuts: ReplayCut[] = [...(options.cuts ?? [])];
   const stepUs = (options.trackStepS ?? 1) * 1e6;
   const truthAcc = options.truthAccuracyM ?? 10;
@@ -171,6 +175,7 @@ export function replayTrip(trip: TripLog, options: ReplayOptions = {}): ReplayRe
     }
   }
 
+  nav.flushOdometry();
   const end = nav.estimate();
   if (end && end.tUs > (track.at(-1)?.tUs ?? -Infinity)) track.push({ ...end, tS: tS(end.tUs), standstill: nav.isStandstill });
 

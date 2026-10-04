@@ -9,11 +9,12 @@
 //   shape to coarse fixes when jamming leaves no course, or from the pose saved when parked).
 
 import { GnssLagEstimator, type GnssLagConfig, type GnssLagEstimate } from "./calibration/gnss-lag";
-import { DrEkf, wrapAngle, type EkfConfig } from "./ekf/dr-ekf";
+import { DEFAULT_EKF_CONFIG, DrEkf, wrapAngle, type EkfConfig } from "./ekf/dr-ekf";
 import { alignHeading, type AlignConfig, type AlignPoint } from "./ekf/heading-align";
 import type { Coordinate } from "./geo";
 import { LocalFrame } from "./geo/local-frame";
 import { ImuProcessor, type ImuConfig } from "./odometry/imu/imu-processor";
+import { OdometryChunker, type OdometryStep } from "./odometry/odometry-output";
 import { isSatelliteFix, type GnssFix, type ImuSample, type ObdSpeedSample } from "./types";
 
 export type NavMode = "none" | "anchored" | "dr";
@@ -199,12 +200,34 @@ export class Navigator {
   /** The EKF started from a parked pose that no fix has confirmed yet (OBD distance at the start). */
   private poseUnverifiedFromM: number | null = null;
   private lagEstimator: GnssLagEstimator;
+  private readonly ekfConfig: EkfConfig;
+  private odometryListeners: ((step: OdometryStep) => void)[] = [];
+  private readonly odometry = new OdometryChunker((step) => {
+    for (const listener of this.odometryListeners) listener(step);
+  });
   readonly stats: NavStats = { imuInvalidS: 0, standstillS: 0, obdDistanceM: 0, resets: 0 };
 
   constructor(config: Partial<NavConfig> = {}) {
     this.config = { ...DEFAULT_NAV_CONFIG, ...config };
+    this.ekfConfig = { ...DEFAULT_EKF_CONFIG, ...this.config.ekf };
     this.imu = new ImuProcessor(this.config.imu);
     this.lagEstimator = new GnssLagEstimator(this.config.gnssLag);
+  }
+
+  /**
+   * Calibrated odometry in chunks of ≤ 2 m / 0.2 s (MAPMATCH-SPEC §6.1), for the map-matching
+   * particle filter. Computed only while someone listens. Returns the unsubscribe function.
+   */
+  subscribeOdometry(listener: (step: OdometryStep) => void): () => void {
+    this.odometryListeners.push(listener);
+    return () => {
+      this.odometryListeners = this.odometryListeners.filter((l) => l !== listener);
+    };
+  }
+
+  /** Hand out the odometry summed since the last chunk (end of input). */
+  flushOdometry(): void {
+    this.odometry.flush();
   }
 
   get mode(): NavMode {
@@ -389,12 +412,50 @@ export class Navigator {
       this.lagEstimator.onTrack(tUs, this.rel.e, this.rel.n, this.rel.psi, speed);
     }
 
+    if (this.odometryListeners.length) this.addOdometry(tUs, dt, speed, yaw, hold, obdFresh);
+
     if (this.ekf) {
       // Standing: hold the heading (yaw input = bias → no rotation).
       this.ekf.predict(dt, hold ? this.ekf.params().bw : yaw);
       this.ekfHistory.push(tUs, [this.ekf.east, this.ekf.north, this.ekf.psi, this.ekf.speed]);
       if (this.frame && Math.hypot(this.ekf.east, this.ekf.north) > this.config.reanchorM) this.reanchor();
     }
+  }
+
+  /**
+   * One odometry increment, from the state before this step's prediction: in mode dr exactly the
+   * EKF's own motion (v·dt and −k_ω(ω − b_ω)·dt); before that, OBD × the stored speed scale and the
+   * gyro minus the bias learned at stops.
+   */
+  private addOdometry(tUs: number, dt: number, obdSpeed: number, yaw: number | null, hold: boolean, obdFresh: boolean): void {
+    const c = this.ekfConfig;
+    const yawUnknown = yaw === null && !hold;
+    let ds: number;
+    let dpsi: number;
+    let kw: number;
+    let calibration;
+    if (this.ekf) {
+      const p = this.ekf.params();
+      kw = p.kw;
+      ds = Math.max(0, this.ekf.speed) * dt;
+      dpsi = hold || yaw === null ? 0 : -p.kw * (yaw - p.bw) * dt;
+      calibration = { speedScaleRelSigma: Math.sqrt(p.ksVar) / p.ks, gyroBiasSigma: Math.sqrt(p.bwVar) * p.kw, gyroScaleSigma: Math.sqrt(p.kwVar) };
+    } else {
+      const ks = this.speedScale?.ks ?? 1;
+      kw = 1;
+      ds = ks * obdSpeed * dt;
+      dpsi = hold || yaw === null ? 0 : -(yaw - this.rel.bias) * dt;
+      calibration = {
+        speedScaleRelSigma: Math.sqrt(this.speedScale?.ksVar ?? c.initSpeedScaleSigma ** 2) / ks,
+        gyroBiasSigma: c.initBiasSigma,
+        gyroScaleSigma: c.initYawScaleSigma,
+      };
+    }
+    const white = yawUnknown ? c.handlingYawNoise ** 2 * dt : hold ? 0 : (c.gyroNoise * kw) ** 2 * dt;
+    this.odometry.add(
+      { tUs, dtS: dt, dsM: ds, dpsiRad: dpsi, dpsiWhiteVar: white, stopped: hold || ds === 0, yawUnknown, speedUnknown: !obdFresh, source: this.ekf ? "ekf" : "relative" },
+      calibration,
+    );
   }
 
   private reanchor(): void {
