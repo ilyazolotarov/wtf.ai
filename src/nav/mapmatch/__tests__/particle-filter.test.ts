@@ -250,4 +250,17 @@ describe("road position into the EKF", () => {
     // With GNSS throughout, the filter weighs the same fixes: no road position.
     expect(run("closed", false).summary.roadPosition).toEqual({ accepted: 0, rejected: 0 });
   });
+
+  test("the map-free twin (off by default) runs alongside and can feed the filter", () => {
+    const drive = syntheticDrive({ segments: junctionDrive(20), origin: ORIGIN, startHeadingRad: Math.PI / 2, gnss: "clean", obdScale: 0.97 });
+    const result = replayTrip(drive.trip, {
+      nav: { mapMatchLoop: "closed", mapMatchTwin: { prior: true, odometry: true } },
+      mapMatch: { graph: graph() },
+      cuts: [{ fromS: 100, toS: 1e9 }],
+    });
+    const end = result.track.at(-1)!;
+    const truth = drive.truthAt(drive.trip.imu.at(-1)!.tUs);
+    expect(Math.hypot((end.lat - truth.lat) * 111_195, (end.lon - truth.lon) * 111_195 * Math.cos((truth.lat * Math.PI) / 180))).toBeLessThan(25);
+    expect(result.summary.roadPosition.accepted).toBeGreaterThan(0);
+  });
 });

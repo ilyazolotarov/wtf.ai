@@ -590,6 +590,9 @@ NAVIGATOR-SPEC §4, §5.1):
   - Its weighted covariance (`MapMatchCluster.covariance`), floored at 12 m along the road and 5 m across it, as a
     full 2×2 measurement (`DrEkf.updatePositionCovariance`). 25 m with 5 / 3 m floors, the first values, made the
     EKF badly overconfident (§9.3).
+  - Along the road the floor also grows with the distance since the car last turned (≥ 30° within 50 m): 1 % of it
+    (`roadPosition.alongPerM`). Only turns tell where along a road the car is; without this the EKF stayed confident
+    on long straights, its prior held the filter's spread, and a turn was matched to the wrong junction (§9.4).
   - **Not sent while GNSS is trusted.** The PF already weighs the same fixes, so sending it would count them twice.
   - **"Trusted" until integrity exists** (SPEC Phase 3): a satellite fix was accepted by the EKF in the last 3 s,
     the rule that makes the app's source `fused` rather than `dr` (NAVIGATOR-SPEC §9). Integrity replaces it.
@@ -701,14 +704,16 @@ Three 3-hour drives per case (seeds 1–3, IMU 50 Hz; GNSS speed 1.0 s late, as 
 | Kyiv avenues (`--route arterial`, a turn per 1.8–3.7 km) | open | 4.8 / 4.3 / 3.7 m | 178 / 360 / 104 m | 2 / 2 / 0 % |
 | | closed | 3.4 / 4.4 / 4.4 m | 26 / 33 / 21 m | 0 % |
 | Chernihiv oblast main roads (`arterial`, a turn per 2.3–10 km, intercity at 70 km/h) | open | 13 / 15 / 3062 m | 23 / 3.6 / 17 km | 40 / 43 / 62 % |
-| | closed | 6.5 / 28 / 3.6 m | 140 / 188 / 48 m | 11 / 41 / 0 % |
+| | closed, fixed along floor | 6.5 / 28 / 3.6 m | 140 / 188 / 48 m | 11 / 41 / 0 % |
+| | closed (along floor 1 % since the last turn) | 5.8 / 15 / 3.8 m | 64 / 67 / 48 m | 4 / 9 / 0 % |
 
 - Closed loop holds wherever there are turns: city drives and avenues stay within 4–6 m median and ~50 m worst over
   3 h, every half hour alike. Open loop gets lost on most runs: the EKF drifts hundreds of metres, its position prior
   (§7.4) pulls the filter onto wrong roads, and nothing brings it back without GNSS.
 - About 1 road-heading correction per 50 m and 1 road position per 200 m; a few per thousand refused by the gate.
 - 30 min drives replay in ~4 s, 3 h in ~20 s (Node, Windows PC).
-- **Long roads with few turns** fail (Chernihiv intercity, seeds 1–2). Traced (`--trace`):
+- **Long roads with few turns** (Chernihiv intercity, seeds 1–2) failed with a fixed along-road floor. Traced
+  (`--trace`):
   - The error is along the road (across median 2.2 m): the dot falls behind ~0.15–0.25 % of the distance at
     70 km/h. After an hour of highway it is 110–170 m behind; a turn is then matched to the next junction (the dot
     jumps ahead by twice that), and on one drive the filter later lost the road (2.2 km off).
@@ -721,11 +726,32 @@ Three 3-hour drives per case (seeds 1–3, IMU 50 Hz; GNSS speed 1.0 s late, as 
     town speeds and GNSS speed (learned 0.5 km/h, truth 0.23); neutral on the 14 logs, mixed here. The filter's
     EKF-position prior at 0.1 or 0 instead of 0.3: fixes one drive (30 → 9 % of the time > 50 m) and breaks
     another (0 → 43 %, 1.7 km).
-  - Next candidates: (1) a map-free twin EKF whose σ grows honestly along the road, as the filter's position prior
-    and odometry source, so the filter keeps alternatives at junctions when the along-road error has grown and
-    can't confirm its own corrections; (2) Wi-Fi/cell fixes during jamming (the simulator gives none; ±50–150 m
-    ones bound along-road drift); (3) the speed calibration kept per car across drives (the app does; the
-    simulator starts from 1 ± 0.03 each time).
+  - **Kept:** the road position's along-road floor grows by 1 % of the distance since the last turn (§9). On a long
+    road the EKF's along σ then grows, its prior no longer holds the filter's spread, and the next turn's shape
+    picks the junction. Seeds 1–2: max 140 / 188 → 64 / 67 m, time > 50 m 11 / 41 → 4 / 9 %. 0.3 % helped one seed
+    and hurt the other; 0.6 % was in between. City, Kyiv and avenue drives and the 14 logs are unchanged
+    (`replay:bench --mm`, closed: 240 s 16.9 vs 17.2 m, inside circle 65 %).
+  - **Tried, not kept: a map-free twin EKF** (`mapMatchTwin`, §9.5).
+- Next candidates: Wi-Fi/cell fixes during jamming (the simulator gives none; ±50–150 m ones bound along-road drift);
+  the speed calibration kept per car across drives (the app does; the simulator starts from 1 ± 0.03 each time).
+
+### 9.5 A map-free twin EKF (tried; `mapMatchTwin`, off)
+
+The navigator can run a second EKF on the same sensors and GNSS that never takes a road correction, so map-matching
+mistakes can't reach the filter through the EKF and a wrong-road lock shows as the two disagreeing. Two uses tried
+on the simulated drives (3 h, seeds 1–3):
+
+| Filter takes from the twin | Chernihiv intercity: time > 50 m off | Kyiv city: max |
+| --- | --- | --- |
+| nothing (main EKF, as kept) | 11 / 41 / 0 % | 39 / 32 / 54 m |
+| position prior | 39 / 83 / 25 % (up to 66 km) | 478 / 120 / 381 m |
+| position prior and odometry | 11 / 49 / 62 % | 483 / 188 / 428 m |
+
+The twin drifts like the open loop (§9.4), and pulling the filter toward it brings back the open loop's failure:
+the filter follows a drifting position onto wrong roads. The main EKF's prior is what anchors the filter; its fault
+was only claiming to know the position along the road, fixed by the growing floor (§9). Kept, off, for the third
+use, not built: a tripwire that stops the road corrections when the corrected track's shape over the last few
+hundred metres stops matching the twin's.
 - **Optimistic:** the map is the road network the car drives (topology exact, only the geometry wanders), and there
   is no parking, reversing, yard, unmapped road, traffic jam, tunnel or phone handling. Real long drives with Cut GPS
   (NAVIGATOR-SPEC §9) are the check.
@@ -914,6 +940,7 @@ M1–M3 can partly overlap. M4 needs M1–M3. M5 and M6 are independent of each 
 | Map start σ | position max(spread, 10 m); heading hypot(max(spread, 3°), 0.1°/m × spread) | §8 |
 | Pseudo-measurement interval / heading σ | 25 m / 4° (2° was overconfident) | §9.2 |
 | Road position interval / floors along, across | 200 m / 12 m, 5 m (25 m / 5, 3 m was overconfident) | §9.3 |
+| Road position along floor growth | 1 % of the distance since the last turn (≥ 30° within 50 m) | §9.4 |
 | Tile cache / working-set margin | 128 tiles / 300 m | §5 |
 
 ## 14. Verification targets

@@ -87,6 +87,12 @@ export interface NavConfig {
    * position corrects the EKF position.
    */
   mapMatchLoop: "open" | "heading" | "closed";
+  /**
+   * A map-free twin EKF (MAPMATCH-SPEC §9.5): the same sensors and GNSS, never a road correction. With the loop
+   * closed it can give the filter its position prior (`prior`) and its odometry (`odometry`), so the filter's
+   * evidence doesn't carry its own corrections back to it. Off: the main EKF, as before.
+   */
+  mapMatchTwin: { prior?: boolean; odometry?: boolean };
   roadHeading: Partial<RoadHeadingConfig>;
   roadPosition: Partial<RoadPositionConfig>;
 }
@@ -100,6 +106,14 @@ export interface RoadPositionConfig {
   minAcrossSigmaM: number;
   /** And its σ multiplied by this (updates on one road share its errors). */
   inflation: number;
+  /**
+   * Along the road the floor also grows with the distance since the car last turned (≥ `turnRad` within
+   * `turnWindowM`): only turns tell where along a road the car is, and between them the speed calibration's error
+   * (~0.1–0.5 %) adds up. 0: a fixed floor.
+   */
+  alongPerM: number;
+  turnRad: number;
+  turnWindowM: number;
   /**
    * GNSS counts as trusted while a satellite fix was accepted this recently: the filter weighs the
    * same fixes, so the road position would count them twice. Stand-in until integrity (SPEC §3.3).
@@ -152,6 +166,7 @@ export const DEFAULT_NAV_CONFIG: NavConfig = {
   compassMinSpeedMps: 4,
   align: {},
   mapMatchLoop: "open",
+  mapMatchTwin: {},
   roadHeading: {},
   roadPosition: {},
 };
@@ -163,6 +178,11 @@ export const DEFAULT_ROAD_POSITION_CONFIG: RoadPositionConfig = {
   minAlongSigmaM: 12,
   minAcrossSigmaM: 5,
   inflation: 1,
+  // 1 % of the distance since the last turn: 0.3 % (about the speed calibration's error) still let the filter
+  // snap a turn to the wrong junction on simulated intercity roads; 1 % didn't, and changed nothing on the logs.
+  alongPerM: 0.01,
+  turnRad: (30 * Math.PI) / 180,
+  turnWindowM: 50,
   trustedWindowUs: 3_000_000,
 };
 
@@ -272,6 +292,11 @@ class History {
   clear(): void {
     this.rows = [];
   }
+  copy(): History {
+    const h = new History(this.spanUs);
+    h.rows = this.rows.map((r) => ({ t: r.t, v: [...r.v] }));
+    return h;
+  }
 }
 
 /** The ~68 % radius of a 2D error in σ (the circle the map draws is this × the EKF σ). */
@@ -297,6 +322,9 @@ export class Navigator {
   private frame: LocalFrame | null = null;
   private ekf: DrEkf | null = null;
   private ekfHistory = new History(3_000_000);
+  /** The map-free twin (`mapMatchTwin`), while the loop is closed and the twin is used. */
+  private twin: DrEkf | null = null;
+  private twinHistory = new History(3_000_000);
 
   private lastTUs: number | null = null;
   private lastYaw: { tUs: number; rate: number; valid: boolean } | null = null;
@@ -344,6 +372,9 @@ export class Navigator {
   private nextRoadHeadingM = 0;
   private readonly roadHeadingConfig: RoadHeadingConfig;
   private nextRoadPositionM = 0;
+  /** Recent odometry [distance, cumulative turn], to tell when the car last turned (road position, §9.3). */
+  private turnLog: [number, number][] = [];
+  private lastTurnM = 0;
   private readonly roadPositionConfig: RoadPositionConfig;
   /** Time of the last satellite fix the EKF accepted (GNSS trusted, for the road position). */
   private lastSatAcceptedUs = -Infinity;
@@ -394,6 +425,20 @@ export class Navigator {
   /** Switch how map matching feeds back into the EKF (MAPMATCH-SPEC §9); takes effect at the next odometry chunk. */
   setMapMatchLoop(loop: NavConfig["mapMatchLoop"]): void {
     this.config.mapMatchLoop = loop;
+    this.syncTwin();
+  }
+
+  /** The twin exists while it is used: a copy of the main EKF when it starts (they agree until a road correction). */
+  private syncTwin(): void {
+    const t = this.config.mapMatchTwin;
+    const wanted = !!this.ekf && this.config.mapMatchLoop !== "open" && !!(t.prior || t.odometry);
+    if (wanted && !this.twin) {
+      this.twin = this.ekf!.clone();
+      this.twinHistory = this.ekfHistory.copy();
+    } else if (!wanted && this.twin) {
+      this.twin = null;
+      this.twinHistory.clear();
+    }
   }
 
   /** How and when the EKF last started (null: not running). */
@@ -506,8 +551,10 @@ export class Navigator {
 
     if (this.standstill && s.tUs - this.lastBiasUpdateUs >= 1_000_000) {
       this.lastBiasUpdateUs = s.tUs;
-      if (this.ekf) this.ekf.updateGyroBias(out.windowMeanYaw, 0.002, this.config.gate);
-      else this.rel.bias += 0.3 * (out.windowMeanYaw - this.rel.bias);
+      if (this.ekf) {
+        this.ekf.updateGyroBias(out.windowMeanYaw, 0.002, this.config.gate);
+        this.twin?.updateGyroBias(out.windowMeanYaw, 0.002, this.config.gate);
+      } else this.rel.bias += 0.3 * (out.windowMeanYaw - this.rel.bias);
     }
   }
 
@@ -516,8 +563,11 @@ export class Navigator {
     this.lastObd = s;
     if (s.rawKph > 0) this.frozenPose = null;
     if (!this.ekf) return;
-    if (this.standstill) this.ekf.updateZeroSpeed(0.02);
-    else this.ekf.updateObdSpeed(s.speedMps, s.rawKph === 0 ? this.config.obdZeroSigmaMps : this.config.obdSigmaMps);
+    const obdSigma = s.rawKph === 0 ? this.config.obdZeroSigmaMps : this.config.obdSigmaMps;
+    for (const ekf of this.twin ? [this.ekf, this.twin] : [this.ekf]) {
+      if (this.standstill) ekf.updateZeroSpeed(0.02);
+      else ekf.updateObdSpeed(s.speedMps, obdSigma);
+    }
   }
 
   onGnss(fix: GnssFix): FixOutcome {
@@ -695,6 +745,10 @@ export class Navigator {
       // Standing: hold the heading (yaw input = bias → no rotation).
       this.ekf.predict(dt, hold ? this.ekf.params().bw : yaw);
       this.ekfHistory.push(tUs, [this.ekf.east, this.ekf.north, this.ekf.psi, this.ekf.speed]);
+      if (this.twin) {
+        this.twin.predict(dt, hold ? this.twin.params().bw : yaw);
+        this.twinHistory.push(tUs, [this.twin.east, this.twin.north, this.twin.psi, this.twin.speed]);
+      }
       if (this.frame && Math.hypot(this.ekf.east, this.ekf.north) > this.config.reanchorM) this.reanchor();
     }
     // After this step's prediction would have run: the new EKF starts at the state now.
@@ -716,10 +770,12 @@ export class Navigator {
     let dpsi: number;
     let kw: number;
     let calibration;
-    if (this.ekf) {
-      const p = this.ekf.params();
+    // The twin's motion when asked: its calibration came from GNSS only, never from the filter's corrections (§9.5).
+    const src = this.config.mapMatchTwin.odometry && this.twin ? this.twin : this.ekf;
+    if (src) {
+      const p = src.params();
       kw = p.kw;
-      ds = Math.max(0, this.ekf.speed) * dt;
+      ds = Math.max(0, src.speed) * dt;
       dpsi = hold || yaw === null ? 0 : -p.kw * (yaw - p.bw) * dt;
       calibration = { speedScaleRelSigma: Math.sqrt(p.ksVar) / p.ks, gyroBiasSigma: Math.sqrt(p.bwVar) * p.kw, gyroScaleSigma: Math.sqrt(p.kwVar) };
     } else {
@@ -748,6 +804,8 @@ export class Navigator {
     this.setFrame(new LocalFrame(this.frame!.toCoordinate(dE, dN)));
     ekf.shift(dE, dN);
     this.ekfHistory.shift(dE, dN);
+    this.twin?.shift(dE, dN);
+    this.twinHistory.shift(dE, dN);
     this.pf?.reframe(dE, dN);
   }
 
@@ -839,8 +897,11 @@ export class Navigator {
     if (!pf?.isActive) return;
     const ekf = this.ekf;
     pf.setCompass(pf.initializing && this.config.compassUse === "on" ? this.compass.heading() : null);
-    pf.onOdometry(step, ekf ? { psi: ekf.psi, psiSigma: ekf.psiSigma, e: ekf.east, n: ekf.north, posSigma: ekf.positionSigma } : null);
+    // The position prior from the twin when asked: it hasn't taken the filter's own corrections (§9.5).
+    const prior = this.config.mapMatchTwin.prior && this.twin ? this.twin : ekf;
+    pf.onOdometry(step, prior ? { psi: prior.psi, psiSigma: prior.psiSigma, e: prior.east, n: prior.north, posSigma: prior.positionSigma } : null);
     if (step.stopped) return;
+    this.noteTurn(step);
     if (ekf && this.config.mapMatchLoop !== "open" && step.distanceM >= this.nextRoadHeadingM) this.roadHeadingUpdate(step.distanceM);
     if (ekf && this.config.mapMatchLoop === "closed" && step.distanceM >= this.nextRoadPositionM) this.roadPositionUpdate(step);
     if (!ekf && step.distanceM >= this.nextMapStartCheckM) {
@@ -902,6 +963,14 @@ export class Navigator {
    * filter tracks one road: the dominant cluster's mean, with its covariance floored along and
    * across the road. That is what turns give the filter and the EKF can't get: where along the road.
    */
+  /** Did the car just turn (≥ `turnRad` over the last `turnWindowM`)? Keeps `lastTurnM`. */
+  private noteTurn(step: OdometryStep): void {
+    const c = this.roadPositionConfig;
+    this.turnLog.push([step.distanceM, step.turnRad]);
+    while (this.turnLog.length > 1 && this.turnLog[1][0] <= step.distanceM - c.turnWindowM) this.turnLog.shift();
+    if (Math.abs(step.turnRad - this.turnLog[0][1]) >= c.turnRad) this.lastTurnM = step.distanceM;
+  }
+
   private roadPositionUpdate(step: OdometryStep): void {
     const pf = this.pf!;
     const ekf = this.ekf!;
@@ -916,7 +985,8 @@ export class Navigator {
     const ca = Math.cos(top.headingRad);
     const [ee, en, nn] = top.covariance;
     const k = c.inflation * c.inflation;
-    const along = Math.max(k * (sa * sa * ee + 2 * sa * ca * en + ca * ca * nn), c.minAlongSigmaM ** 2);
+    const alongFloor = Math.max(c.minAlongSigmaM, c.alongPerM * (step.distanceM - this.lastTurnM));
+    const along = Math.max(k * (sa * sa * ee + 2 * sa * ca * en + ca * ca * nn), alongFloor ** 2);
     const across = Math.max(k * (ca * ca * ee - 2 * sa * ca * en + sa * sa * nn), c.minAcrossSigmaM ** 2);
     const cross = k * (sa * ca * (ee - nn) + (ca * ca - sa * sa) * en);
     // along = (sin, cos), across = (cos, −sin) in (E, N).
@@ -1001,6 +1071,8 @@ export class Navigator {
     );
     this.ekfHistory.clear();
     if (this.lastTUs !== null) this.ekfHistory.push(this.lastTUs, [this.ekf.east, this.ekf.north, this.ekf.psi, this.ekf.speed]);
+    this.twin = null;
+    this.syncTwin();
     this.alignPoints = [];
     this.poseUnverifiedFromM = null;
     this.anchor = null;
@@ -1012,6 +1084,7 @@ export class Navigator {
   }
 
   private updateEkf(fix: GnssFix, fE: number, fN: number, tRef: number, sigma: number): FixOutcome {
+    if (this.twin) this.updateTwin(fix, fE, fN, tRef, sigma);
     const c = this.config;
     const ekf = this.ekf!;
     const h = this.ekfHistory.at(tRef, 2) ?? [ekf.east, ekf.north, ekf.psi, ekf.speed];
@@ -1051,6 +1124,20 @@ export class Navigator {
     return outcome;
   }
 
+  /** The twin takes every fix the main EKF is offered, through its own gate; it never resets the navigator. */
+  private updateTwin(fix: GnssFix, fE: number, fN: number, tRef: number, sigma: number): void {
+    const c = this.config;
+    const twin = this.twin!;
+    const h = this.twinHistory.at(tRef, 2) ?? [twin.east, twin.north, twin.psi, twin.speed];
+    const hv = this.twinHistory.at(fix.tUs - c.gnssSpeedLagS * 1e6, 2) ?? h;
+    if (!twin.updatePosition(fE - h[0], fN - h[1], sigma, c.gate).accepted) return;
+    if (!isSatelliteFix(fix) || fix.speedMps === undefined) return;
+    twin.updateSpeed(fix.speedMps - hv[3], Math.max(fix.speedAccMps ?? 0.5, 0.2), c.gate);
+    if (fix.courseRad !== undefined && fix.speedMps >= c.courseUpdateMinSpeedMps && fix.courseAccRad !== undefined) {
+      twin.updateHeading(fix.courseRad - h[2], Math.max(fix.courseAccRad, (2 * Math.PI) / 180), c.gate);
+    }
+  }
+
   /** The EKF disagrees with good fixes: start over, anchored at the latest one. */
   private reset(fix: GnssFix, sigma: number): void {
     // The speed scale is a property of the car, not of the diverged track: keep it.
@@ -1059,6 +1146,8 @@ export class Navigator {
     this.anchor = { coord: { lat: fix.lat, lon: fix.lon }, sigma, distanceM: 0 };
     this.ekf = null;
     this.ekfHistory.clear();
+    this.twin = null;
+    this.twinHistory.clear();
     this.alignPoints = [];
     this.rejectedSat = 0;
     this.poseUnverifiedFromM = null;

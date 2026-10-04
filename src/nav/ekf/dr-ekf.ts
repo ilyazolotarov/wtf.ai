@@ -92,6 +92,16 @@ export class DrEkf {
     this.P[IX.SO][IX.SO] = offset ? (p?.soVar ?? c.initSpeedOffsetSigma ** 2) : 0;
   }
 
+  /** An independent copy: same state, covariance and configuration. */
+  clone(): DrEkf {
+    const copy = new DrEkf({ east: 0, north: 0, psi: 0, speed: 0, posSigma: 1, psiSigma: 1, speedSigma: 1 }, this.config);
+    for (let i = 0; i < DIM; i++) {
+      copy.x[i] = this.x[i];
+      copy.P[i] = [...this.P[i]];
+    }
+    return copy;
+  }
+
   get east() {
     return this.x[IX.E];
   }
