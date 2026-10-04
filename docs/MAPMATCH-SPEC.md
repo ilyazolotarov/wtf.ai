@@ -36,7 +36,8 @@ Place the car on the offline road network, so that:
 - **M6 done in replay:** the road heading and position go back into the EKF (`mapMatchLoop: "closed"`, §9.2,
   §9.3); the 240 s max error median falls from 59 to 17 m, its p90 from 124 to 20 m, with the truth inside the drawn
   circle 61–65 % of the time. Simulated 3 h city drives without GPS (§9.4): dot median 4–6 m, never lost. A developer
-  setting switches it on in the app (§11); off by default until a real drive confirms it.
+  setting picks it in the app (§11); Full correction is the app's default since 2026-10-05 (replay tools keep the
+  open loop as their baseline).
 - Next: an app switch to compare the loops on a drive, and a drive for M7. Order of work in §12.
 
 ## 3. Decisions
@@ -893,9 +894,9 @@ hundred metres stops matching the twin's.
   update time. Developer settings → "Map matching on the map (particles)" draws the 200 heaviest particles (size
   by weight, amber off-road) and each hypothesis as a dashed ring of its spread labelled with its weight. They
   are the navigator's state ~300 ms back, not extrapolated like the puck.
-- **Navigator version** (Developer settings, `mapMatchLoop`, default *Open loop* = `open`): *Road heading* or *Full
-  correction* (§9) on the phone, applied to the running navigator at once. The trip log header records the
-  version a drive started with (`nav_mapmatch_loop`), a change is the note `nav map-match loop <v>`, and at engine off
+- **Navigator version** (Developer settings, `mapMatchLoop`, §9): default *Full correction* (`closed`); *Open loop*
+  and *Road heading* for comparing on the road. Applied to the running navigator at once. The trip log header records
+  the version a drive started with (`nav_mapmatch_loop`), a change is the note `nav map-match loop <v>`, and at engine off
   `mm loop <v>: road heading N (k refused), road position M (k refused)`. The Vehicle sheet shows the counts live.
   `replay:view` replays a drive with the phone's version by default.
 

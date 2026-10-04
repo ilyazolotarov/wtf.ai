@@ -49,7 +49,9 @@ let runtime: Runtime | null = null;
 export function getRuntime(): Runtime {
   if (runtime) return runtime;
 
-  let dev: DevSettings = { showEmulators: __DEV__, showParticles: false, outageButton: false, mapMatchLoop: "open", ...(kvStore.getJson<Partial<DevSettings>>(DEV_SETTINGS_KEY) ?? {}) };
+  // Full correction by default (MAPMATCH-SPEC §9): replay and simulation beat the open loop everywhere; the open loop
+  // stays one tap away in the developer settings for comparing on the road.
+  let dev: DevSettings = { showEmulators: __DEV__, showParticles: false, outageButton: false, mapMatchLoop: "closed", ...(kvStore.getJson<Partial<DevSettings>>(DEV_SETTINGS_KEY) ?? {}) };
   const devListeners = new Set<() => void>();
   const nowUs = () => VehicleLinkModule.nowUs();
   const clock = createClock(nowUs);
