@@ -105,7 +105,7 @@
     <h2>Legend</h2>
     <div class="muted">
       <div><span class="swatch" style="background:var(--pred)"></span>prediction (fused)</div>
-      <div><span class="swatch" style="background:var(--mm)"></span>snapped to road (map matching)</div>
+      <div><span class="swatch" style="background:var(--mm)"></span>snapped to road (dashed: still initialising)</div>
       <div><span class="swatch" style="background:var(--gps)"></span>GPS satellite fix</div>
       <div><span class="swatch" style="background:var(--coarse)"></span>Wi-Fi/cell fix (no speed)</div>
       <div><span class="swatch" style="background:var(--rej)"></span>fix rejected by the filter</div>
@@ -296,8 +296,10 @@ function addMapMatchLayers(map) {
   // The snapped path: the best cluster over time, i.e. where map matching puts the car on the road.
   map.addLayer({ id: "mmTrackCase", type: "line", source: "mmTrack", layout: { "line-cap": "round", "line-join": "round" },
     paint: { "line-color": css("--panel"), "line-width": 7, "line-opacity": 0.8 } });
-  map.addLayer({ id: "mmTrack", type: "line", source: "mmTrack", layout: { "line-cap": "round", "line-join": "round" },
-    paint: { "line-color": css("--mm"), "line-width": 4 } });
+  map.addLayer({ id: "mmTrack", type: "line", source: "mmTrack", filter: ["!=", ["get", "mode"], "init"],
+    layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": css("--mm"), "line-width": 4 } });
+  map.addLayer({ id: "mmTrackInit", type: "line", source: "mmTrack", filter: ["==", ["get", "mode"], "init"],
+    layout: { "line-join": "round" }, paint: { "line-color": css("--mm"), "line-width": 3, "line-dasharray": [2, 2] } });
   map.addLayer({ id: "mmNow", type: "circle", source: "mmNow",
     paint: { "circle-radius": 7, "circle-color": css("--mm"), "circle-stroke-width": 2.5, "circle-stroke-color": css("--panel") } });
   map.addLayer({ id: "clusterLabels", type: "symbol", source: "clusters",
@@ -373,6 +375,33 @@ async function setTruth(map) {
   map.getSource("truthBreaks")?.setData(on ? truth.breaks : fc([]));
 }
 
+/**
+ * The cluster centre is a mean of particles, so at a junction or on a bend it can sit beside the road. Project it
+ * onto the nearest road edge within 30 m (the loaded graph); beyond that, or without a graph, keep it as is.
+ */
+function snapToRoads(lat, lon) {
+  if (!roads) return { lat, lon };
+  if (!roads.segs) {
+    roads.segs = [];
+    for (const f of roads.roads.features) {
+      const lines = f.geometry.type === "MultiLineString" ? f.geometry.coordinates : [f.geometry.coordinates];
+      for (const c of lines) for (let i = 1; i < c.length; i++) roads.segs.push([c[i - 1][0], c[i - 1][1], c[i][0], c[i][1]]);
+    }
+  }
+  const kx = Math.cos(rad(lat));
+  let best = { lat, lon }, bestD = 30;
+  for (const [x1, y1, x2, y2] of roads.segs) {
+    if (Math.abs(y1 - lat) > 0.002 && Math.abs(y2 - lat) > 0.002) continue;
+    // Metric local frame centred on the point.
+    const ax = (x1 - lon) * kx * 111320, ay = (y1 - lat) * 111320, bx = (x2 - lon) * kx * 111320, by = (y2 - lat) * 111320;
+    const dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy;
+    const u = len2 > 0 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / len2)) : 0;
+    const px = ax + u * dx, py = ay + u * dy, d = Math.hypot(px, py);
+    if (d < bestD) { bestD = d; best = { lat: lat + py / 111320, lon: lon + px / (111320 * kx) }; }
+  }
+  return best;
+}
+
 /** Particles and clusters at the cursor (map matching). */
 function updateMapMatch(map) {
   if (!map?.getSource("particles") || !data) return;
@@ -385,7 +414,7 @@ function updateMapMatch(map) {
   map.getSource("particles").setData(fc(pts.map(([lat, lon, w, off]) => pt({ lat, lon }, { rel: w / maxW, off }))));
   const mm = on ? p?.mm : null;
   const top = $("showSnap").checked && (map === mapB || !split) ? p?.mm?.c[0] : null;
-  map.getSource("mmNow")?.setData(fc(top && top[4] ? [pt({ lat: top[0], lon: top[1] })] : []));
+  map.getSource("mmNow")?.setData(fc(top && top[4] ? [pt(snapToRoads(top[0], top[1]))] : []));
   map.getSource("clusters").setData(fc(mm ? mm.c.map(([lat, lon, w, spread, road], rank) =>
     pt({ lat, lon }, { rank, spread: Math.max(spread, 2), label: `${Math.round(w * 100)}%${road ? "" : " off"}${rank === 0 ? ` · ${mm.s}` : ""}` })) : []));
 }
@@ -423,6 +452,8 @@ async function loadRoads(file) {
     : "No road graph covers this trip: build one with `python -m tiles.cli graph <region>` (tools/tiles)";
   await setRoads(mapA);
   if (mapB) await setRoads(mapB);
+  // The snapped path projects onto these roads.
+  if (data) { await setStatic(mapA); if (mapB) await setStatic(mapB); }
 }
 
 function newMap(container, role) {
@@ -458,17 +489,27 @@ async function setStatic(map) {
   }
   const showPred = role !== "gps";
   const showGps = role !== "pred";
-  // Snapped path: top cluster while it sits on a road; broken where it is off-road, missing or > 2 s apart.
+  // Snapped path: top cluster while it sits on a road. Broken where it is off-road, missing, > 2 s apart, or jumps
+  // farther than the car could have driven (the best cluster flipped to another hypothesis). Segments are
+  // "init" (state still ambiguous, drawn dashed) or "ok".
   const snapped = [];
-  let cur = null, prev = -Infinity;
+  let cur = null, prevP = null;
   for (const p of data.track) {
     const top = p.mm?.c[0];
     if (!top || !top[4]) { cur = null; continue; }
-    if (!cur || p.t - prev > 2) { cur = []; snapped.push(cur); }
-    cur.push([top[1], top[0]]);
-    prev = p.t;
+    const mode = p.mm.s === "init" ? "init" : "ok";
+    const at = snapToRoads(top[0], top[1]);
+    if (cur) {
+      const dt = p.t - prevP.t;
+      const reach = 3 + ((p.spd ?? 30) / 3.6) * dt * 1.2;
+      if (dt > 2 || mode !== cur.mode || haversine(at, prevP.top) > reach) cur = null;
+    }
+    if (!cur) { cur = { mode, coords: [] }; snapped.push(cur); }
+    cur.coords.push([at.lon, at.lat]);
+    prevP = { t: p.t, top: at };
   }
-  map.getSource("mmTrack")?.setData(fc(showPred && $("showSnap").checked ? snapped.filter((c) => c.length > 1).map((c) => line(c)) : []));
+  map.getSource("mmTrack")?.setData(fc(showPred && $("showSnap").checked
+    ? snapped.filter((s) => s.coords.length > 1).map((s) => line(s.coords, { mode: s.mode })) : []));
   map.getSource("predTrack")?.setData(fc(showPred ? segs.filter((s) => s.coords.length > 1).map((s) => line(s.coords, { mode: s.mode })) : []));
   const sats = data.fixes.filter((f) => f.sat && f.status !== "skipped");
   map.getSource("gpsTrack")?.setData(fc(showGps && sats.length > 1 ? [line(sats.map((f) => [f.lon, f.lat]))] : []));
