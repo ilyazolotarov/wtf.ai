@@ -121,6 +121,7 @@ const fmt = (s: Scored) =>
   `${s.method.padEnd(9)} ${s.tS === null ? "      " : `${s.tS.toFixed(0).padStart(5)}s`} ${(s.distanceM / 1000).toFixed(2)} km` +
   `  hdg ${s.headingErrDeg === null ? "  —" : `${s.headingErrDeg.toFixed(1).padStart(4)}° ${s.headingRatio!.toFixed(1)}σ`}` +
   `  pos ${s.posErrM === null ? "   —" : `${s.posErrM.toFixed(0).padStart(4)} m ${s.posRatio!.toFixed(1)}σ`}` +
+  (s.survival !== null && s.survival < 1 ? `  surv ${(s.survival * 100).toFixed(0)} %` : "") +
   (s.ref && s.ref !== "truth" ? ` (${s.ref})` : "");
 
 const median = (v: number[]) => {

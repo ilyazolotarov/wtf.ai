@@ -473,6 +473,12 @@ odometry, which doesn't depend on the absolute heading.
   - In a grid, all junctions with the same turn sequence stay alive until fixes or further turns separate them.
     If one of them wins by chance, the start is on the wrong road: see the 52 m start in §8.1.
   - Unimodality is the rule; no extra rule ("needs N turns") is added.
+- **The pull-out turn is weighed like any other.** Leaving a parking space turns the car 50–120° within the first
+  10–25 m (all 14 drives), and on ka4rza a parallel road's junction turn matched it. Not comparing the turns over
+  the first 30 m after a parked start was tried (`replay:bench --jam-start --compass`, 3 seeds): more map starts
+  (map alone 28 → 31, with the compass 43 → 45) but more wrong ones: map alone 0 → 1 (j5m8tq from 0 s, 116° and
+  302 m off), compass turned 90° 1 → 7, most of them parked starts. The pull-out often is a mapped turn (out of
+  a service road or driveway), and it is what lets the roads overrule a wrong alias or compass. Dropped.
 - **Tests** (`particle-filter.test.ts`, fixture graph, Wi-Fi-like fixes only while parked): start at a dead end,
   map start within 400 m, heading < 5° off, position within 2 × its accuracy, then the turn onto 162 followed;
   mid-road, both directions alive and no start; no filter while the anchor is coarser than 1 km.
@@ -539,19 +545,21 @@ NAVIGATOR-SPEC §4, §5.1):
   the particles of the true direction are gone, so the weights without the compass agree with it. Kept as a cheap
   check; the protection is the calibration's validity, not the weight's cap.
 - **Measured** (`replay:bench --jam-start --compass`): the 7 drives of 2026-10-04 (30 simulated sessions), each
-  with the calibration pooled from the other drives, right and turned 90° / 180°:
+  with the calibration pooled from the other drives, right and turned 90° / 180°. The filter is random and one
+  seed is noisy (single sessions flip between a map and an alignment start), so three seeds
+  (`--mm-config '{"seed":2}'`, 3), 90 sessions:
 
-| | Map starts | Distance to start, median | Position error median | Starts > 10° off | Truth survival min (< 100 %) |
-| --- | --- | --- | --- | --- | --- |
-| Map, no compass | 10 | 0.61 km | 38 m | 7 (alignment) | 73 % (21) |
-| + compass | 15 | 0.54 km | 25 m | 4 (alignment) | 76 % (18) |
-| + compass turned 90° | 11 | 0.60 km | 36 m | 7 (one map start 93° off) | 15 % (23) |
-| + compass turned 180° | 7 | 0.61 km | 41 m | 9 (alignment) | 74 % (23) |
+| | Map starts | Distance to start, median | Position error median | Starts > 10° off | Map starts > 10° off | Truth survival min (< 100 %) |
+| --- | --- | --- | --- | --- | --- | --- |
+| Map, no compass | 28 | 0.60 km | 36 m | 21 | 0 | 73 % (60) |
+| + compass | 43 | 0.55 km | 26 m | 17 | 0 | 64 % (49) |
+| + compass turned 90° | 31 | 0.56 km | 37 m | 22 | 1 | 15 % (65) |
+| + compass turned 180° | 26 | 0.60 km | 39 m | 25 | 2 | 53 % (70) |
 
-  - With the right compass the EKF starts sooner in 12 sessions and later in 1.
-  - Turned 90°: 94zf2q from 0 s started 93° wrong and 258 m off (25.8σ); the true road's particles were gone by
-    then. A compass 90° off is perpendicular to the road, so it favours a crossing road; turned 180° it only
-    reorders the two directions of the same road, which the map then corrects.
+  - With the right compass (seed 1) the EKF starts sooner in 12 sessions and later in 1.
+  - Wrong starts: turned 90°, 94zf2q from 60 s started 93° wrong and 258 m off (25.8σ); turned 180°, 9qw8wn from
+    0 s 102° wrong and 457 m off, j5m8tq from 240 s 10.5° and 189 m off. Each time the true road's particles were
+    gone before the start. The right compass gave none.
   - Tried and dropped: one look per filter start (sooner in 6, later in 5, never a wrong start: little gain);
     the compass in the start decision only, not in the weights (the gain gone, and a 180° compass still gave a
     98° wrong start, 216 m off, on 9qw8wn). Stronger looks in the one-look version: with a 180° compass, `inlier`

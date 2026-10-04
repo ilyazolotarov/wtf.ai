@@ -225,8 +225,8 @@ Measured on the 7 drives of 2026-10-04 (`mag_raw`, 19.4 Hz):
   drive still checks it, but hands out no heading until it passes.
 - **Use:** only the particle filter's jammed start (MAPMATCH-SPEC §8.2). A jammed drive can't check the compass
   before it has a heading from elsewhere: the calibration is trusted on the last drive's word. Not covered: the
-  phone turned in its mount at the same tilt (the tilt check doesn't see it); a 90° turn then gave one 93° wrong
-  start in the benchmark.
+  phone turned in its mount at the same tilt (the tilt check doesn't see it); turned 90° or 180°, it gave 3 wrong
+  map starts in 180 benchmark sessions (MAPMATCH-SPEC §8.2).
 - **Not yet:** a heading prior for alignment (§6), re-fitting the offset from gyro turns after the phone is
   re-seated, wiring into the app (`NavigatorService` feeding `mag_raw` and persisting the calibration per VIN).
 
