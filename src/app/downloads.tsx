@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ActivityIndicator, StyleSheet, TextInput, View } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, TextInput, View } from "react-native";
 
 import {
     ScreenAction,
@@ -9,13 +9,14 @@ import {
     ScreenNote,
     ScreenSection,
 } from "@/components/screens/screen-ui";
+import { Icon, type IconName } from "@/components/ui/icon";
 import { T } from "@/components/ui/text";
 import { usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
-import { downloadsMock } from "@/mocks";
 import {
     cancelDownload,
     downloadRegion,
+    type MapDownload,
     getCatalogUrl,
     loadCatalog,
     pauseDownload,
@@ -37,10 +38,63 @@ interface RegionRow {
   available: boolean;
 }
 
+
+function IconButton({ icon, label, danger, filled, onPress }: { icon: IconName; label: string; danger?: boolean; filled?: boolean; onPress(): void }) {
+  const palette = usePalette();
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      hitSlop={4}
+      style={({ pressed }) => [styles.iconButton, { backgroundColor: filled ? palette.accent : palette.surface }, pressed && { opacity: 0.6 }]}
+    >
+      <Icon name={icon} size={18} color={filled ? palette.onAccent : danger ? palette.bad.c : palette.accent} />
+    </Pressable>
+  );
+}
+
+/** Progress text, bar and pause/resume/cancel controls of the running download. */
+function DownloadProgress({ download }: { download: MapDownload }) {
+  const { t } = useT();
+  const palette = usePalette();
+  return (
+    <View style={styles.progress}>
+      <T size={13} color={palette.text2}>
+        {download.phase === "paused"
+          ? t("paused") + (download.bytes ? ` · ${formatMb(download.bytes)} / ${formatMb(download.total)}` : "")
+          : download.phase === "verifying"
+            ? t("verifying")
+            : `${t("downloading")} ${formatMb(download.bytes)} / ${formatMb(download.total)}`}
+      </T>
+      <View style={[styles.bar, { backgroundColor: palette.surface }]}>
+        <View
+          style={[
+            styles.barFill,
+            {
+              backgroundColor: palette.accent,
+              width: `${download.total ? Math.min(100, (100 * download.bytes) / download.total) : 0}%`,
+            },
+          ]}
+        />
+      </View>
+      <View style={styles.actions}>
+        {download.phase !== "paused" && (
+          <ScreenAction labelKey="pause" compact secondary onPress={pauseDownload} />
+        )}
+        {download.phase === "paused" && (
+          <ScreenAction labelKey="resume" compact onPress={() => void resumeDownload()} />
+        )}
+        {download.phase !== "verifying" && <ScreenAction labelKey="cancel" compact secondary onPress={cancelDownload} />}
+      </View>
+    </View>
+  );
+}
+
 /**
  * Offline maps (SPEC §3.8): regions from the newest GitHub map release (or a custom catalog
  * URL, e.g. `tiles serve` on a PC), downloaded one at a time; one installed region is active.
- * The routing pack is still a mock.
+ * Each region bundles its road graph; progress and pause/cancel controls show in the region's row.
  */
 export default function DownloadsScreen() {
   const { t, language } = useT();
@@ -63,8 +117,15 @@ export default function DownloadsScreen() {
     a.region === "ukraine" ? -1 : b.region === "ukraine" ? 1 : a.name[language].localeCompare(b.name[language], language),
   );
   const active = installed.active ? installed.regions[installed.active] : null;
-  const downloadName = download ? (rows.get(download.region)?.name[language] ?? download.region) : "";
-  const routing = downloadsMock.find((p) => p.id === "routing");
+  const activeOutdated =
+    !!active && !!catalog && regionNeedsUpdate(installed, catalog, active.region);
+  const activeBusy = !!download && download.region === installed.active;
+
+  // Switching to a region also brings it up to date, if the catalog has a newer version.
+  const switchRegion = (region: string) => {
+    setActiveRegion(region);
+    if (catalog && !download && regionNeedsUpdate(installed, catalog, region)) void downloadRegion(region);
+  };
 
   const applySource = () => {
     setCatalogUrl(source);
@@ -81,54 +142,23 @@ export default function DownloadsScreen() {
             </T>
             <T size={12} color={palette.text2}>
               {active
-                ? [formatMb(active.size + (active.graph?.size ?? 0)), `OSM ${active.osm_date}`, !active.graph && t("noRoadData")]
+                ? [formatMb(active.size + (active.graph?.size ?? 0)), `OSM ${active.osm_date}`, !active.graph && t("noRoadData"), activeOutdated && t("updateAvailable")]
                     .filter(Boolean)
                     .join(" · ")
                 : t("onlineMapNote")}
             </T>
           </View>
-          <T w="semibold" size={13} color={active ? palette.ok.c : palette.text2}>
-            {active ? t("readyOffline") : t("notDownloaded")}
-          </T>
+          {activeOutdated && !download ? (
+            <IconButton icon="sync" filled label={t("update")} onPress={() => void downloadRegion(active.region)} />
+          ) : (
+            <T w="semibold" size={13} color={active ? palette.ok.c : palette.text2}>
+              {active ? t("readyOffline") : t("notDownloaded")}
+            </T>
+          )}
         </View>
+        {activeBusy && download && <DownloadProgress download={download} />}
       </ScreenCard>
 
-      {download && (
-        <ScreenCard style={styles.card}>
-          <T w="semibold" size={14}>
-            {downloadName}
-          </T>
-          <T size={13} color={palette.text2}>
-            {download.phase === "paused"
-              ? t("paused") + (download.bytes ? ` · ${formatMb(download.bytes)} / ${formatMb(download.total)}` : "")
-              : download.phase === "verifying"
-                ? t("verifying")
-                : `${t("downloading")} ${formatMb(download.bytes)} / ${formatMb(download.total)}`}
-          </T>
-          <View style={[styles.bar, { backgroundColor: palette.surface }]}>
-            <View
-              style={[
-                styles.barFill,
-                {
-                  backgroundColor: palette.accent,
-                  width: `${download.total ? Math.min(100, (100 * download.bytes) / download.total) : 0}%`,
-                },
-              ]}
-            />
-          </View>
-          <View style={styles.actions}>
-            {download.phase === "tiles" && (
-              <ScreenAction labelKey="pause" compact secondary onPress={pauseDownload} />
-            )}
-            {download.phase === "paused" && (
-              <ScreenAction labelKey="resume" compact onPress={() => void resumeDownload()} />
-            )}
-            {download.phase !== "verifying" && (
-              <ScreenAction labelKey="cancel" compact secondary onPress={cancelDownload} />
-            )}
-          </View>
-        </ScreenCard>
-      )}
       {downloadError && <ScreenNote color={palette.bad.c}>{downloadError}</ScreenNote>}
 
       <ScreenSection title={catalog ? `${t("mapRegions")} · OSM ${catalog.osm_date}` : t("mapRegions")}>
@@ -139,35 +169,38 @@ export default function DownloadsScreen() {
         )}
         {sorted.map((row) => {
           const have = installed.regions[row.region];
-          const outdated = have && catalog && row.available && regionNeedsUpdate(installed, catalog, row.region);
           const isActive = installed.active === row.region;
           const busy = download?.region === row.region;
           return (
             <View key={row.region} style={styles.row}>
-              <View style={styles.copy}>
-                <T w={isActive ? "semibold" : "regular"} size={15}>
-                  {row.name[language]}
-                </T>
-                <T size={12} color={isActive ? palette.ok.c : palette.text2}>
-                  {[
-                    formatMb(row.size),
-                    have && (isActive ? t("activeMap") : t("downloaded")),
-                    outdated && t("updateAvailable"),
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </T>
+              <View style={styles.rowHead}>
+                <Pressable
+                  style={styles.copy}
+                  disabled={!have || isActive}
+                  onPress={() => switchRegion(row.region)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${t("useMap")}: ${row.name[language]}`}
+                >
+                  <T w={isActive ? "semibold" : "regular"} size={15}>
+                    {row.name[language]}
+                  </T>
+                  <T size={12} color={isActive ? palette.ok.c : palette.text2}>
+                    {[
+                      formatMb(row.size),
+                      have && (isActive ? t("activeMap") : t("downloaded")),
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </T>
+                </Pressable>
+                {!download && row.available && !have && (
+                  <IconButton icon="download" label={t("download")} onPress={() => void downloadRegion(row.region)} />
+                )}
+                {have && !busy && (
+                  <IconButton icon="delete" danger label={t("delete")} onPress={() => removeRegion(row.region)} />
+                )}
               </View>
-              {!download && row.available && (!have || outdated) && (
-                <ScreenLink
-                  label={t(outdated ? "update" : "download")}
-                  onPress={() => void downloadRegion(row.region)}
-                />
-              )}
-              {have && !isActive && !busy && (
-                <ScreenLink label={t("useMap")} onPress={() => setActiveRegion(row.region)} />
-              )}
-              {have && !busy && <ScreenLink label={t("delete")} onPress={() => removeRegion(row.region)} />}
+              {busy && !isActive && download && <DownloadProgress download={download} />}
             </View>
           );
         })}
@@ -199,33 +232,18 @@ export default function DownloadsScreen() {
         <ScreenNote>{t("catalogSourceNote")}</ScreenNote>
       </ScreenCard>
 
-      {routing && (
-        <ScreenCard style={styles.card}>
-          <View style={styles.head}>
-            <View style={styles.copy}>
-              <T w="semibold" size={16}>
-                {t("routingData")}
-              </T>
-              <T size={12} color={palette.text2}>
-                {`${routing.size} · v${routing.version}`}
-              </T>
-            </View>
-            <T w="semibold" size={13} color={palette.text2}>
-              {t("notDownloaded")}
-            </T>
-          </View>
-          <ScreenAction labelKey="download" compact disabled />
-        </ScreenCard>
-      )}
     </ScreenContent>
   );
 }
 
 const styles = StyleSheet.create({
   card: { gap: 12 },
-  head: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 10 },
+  head: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 10 },
   copy: { flex: 1, gap: 3 },
-  row: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingVertical: 12 },
+  row: { gap: 8, paddingVertical: 10 },
+  rowHead: { flexDirection: "row", alignItems: "center", gap: 8 },
+  iconButton: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
+  progress: { gap: 8 },
   actions: { flexDirection: "row", gap: 10 },
   bar: { height: 6, borderRadius: 3, overflow: "hidden" },
   barFill: { height: 6, borderRadius: 3 },

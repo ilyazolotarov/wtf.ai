@@ -14,10 +14,11 @@ import { assetUrl, fetchCatalog, type CatalogRegion, type MapCatalog } from "@/s
  *     <region>.pmtiles      one per installed region; `.part` while downloading
  *     <region>.graph.bin    its road graph for map matching (MAPMATCH-SPEC §11); `.part` too
  *
- * One download at a time. Tiles download in an iOS background session; a paused download
- * survives app restarts (DownloadTask.savable() in kv-store). The graph follows the tiles in
- * the foreground (an oblast's is 10–40 MB). Every file is checked against the catalog's size
- * and MD5 before it is used.
+ * One download at a time, shown as one: the shared files (when changed), tiles and graph are
+ * fetched in turn in an iOS background session into `common.staging/` and `.part` files, with
+ * one byte count and pause/resume on whichever file is current. The job (with the current
+ * file's DownloadTask.savable()) is kept in kv-store, so it survives app restarts. Only when
+ * every file matches the catalog's size and MD5 is it all installed, in one step.
  */
 export interface InstalledRegion {
   region: string;
@@ -39,9 +40,10 @@ export interface InstalledState {
   active: string | null;
 }
 
+/** Progress of the whole download (shared files, tiles and road graph together), in bytes. */
 export interface MapDownload {
   region: string;
-  phase: "common" | "tiles" | "graph" | "verifying" | "paused";
+  phase: "downloading" | "verifying" | "paused";
   bytes: number;
   total: number;
 }
@@ -55,22 +57,51 @@ export interface MapPacksState {
   downloadError: string | null;
 }
 
-interface PausedDownload {
+/** One file of a download job; `dest` is relative to the maps directory. */
+interface JobFile {
+  url: string;
+  dest: string;
+  size: number;
+  md5: string;
+  label: string;
+}
+
+/**
+ * A region download: every file it needs, fetched one after another into staging locations,
+ * then verified and installed together. Saved in kv-store, so a paused (or interrupted)
+ * download survives an app restart.
+ */
+interface DownloadJob {
   region: CatalogRegion;
   osm_date: string;
-  url: string;
-  state: DownloadPauseState;
+  /** Shared files to install (into `common/`), when they are part of this job. */
+  common: { osm_date: string; fingerprint: string } | null;
+  tiles: boolean;
+  graph: boolean;
+  files: JobFile[];
+  /** Next file to fetch; bytes of the files before it. */
+  index: number;
+  done: number;
+  total: number;
+  /** Resume data of `files[index]` when paused mid-file. */
+  resume?: DownloadPauseState;
 }
 
 const ROOT = () => new Directory(Paths.document, "maps");
 const COMMON = () => new Directory(ROOT(), "common");
+const STAGING = "common.staging";
 const tilesFile = (region: string) => new File(ROOT(), `${region}.pmtiles`);
-const partFile = (region: string) => new File(ROOT(), `${region}.pmtiles.part`);
+const tilesPart = (region: string) => `${region}.pmtiles.part`;
 const graphFile = (region: string) => new File(ROOT(), `${region}.graph.bin`);
-const graphPartFile = (region: string) => new File(ROOT(), `${region}.graph.bin.part`);
+const graphPart = (region: string) => `${region}.graph.bin.part`;
 const INSTALLED = () => new File(ROOT(), "installed.json");
-const PAUSED_KEY = "map-download-paused";
+const JOB_KEY = "map-download-job";
+/** Key of the earlier tiles-only pause state; dropped on start. */
+const LEGACY_PAUSED_KEY = "map-download-paused";
 const CATALOG_URL_KEY = "map-catalog-url";
+/** Files below this size are fetched `PARALLEL` at a time over a normal session. */
+const SMALL_FILE = 4e6;
+const PARALLEL = 6;
 /** Keep this much free space beyond the download itself. */
 const DISK_MARGIN = 300e6;
 
@@ -86,20 +117,25 @@ function readInstalled(): InstalledState {
 }
 
 function initialState(): MapPacksState {
-  const paused = kvStore.getJson<PausedDownload>(PAUSED_KEY);
+  kvStore.setJson(LEGACY_PAUSED_KEY, null);
+  job = kvStore.getJson<DownloadJob>(JOB_KEY);
   return {
     installed: readInstalled(),
     catalog: null,
     catalogLoading: false,
     catalogError: null,
-    download: paused ? { region: paused.region.region, phase: "paused", bytes: 0, total: paused.region.size } : null,
+    // A job found at start is paused: the app was closed (or killed) during the download.
+    download: job ? { region: job.region.region, phase: "paused", bytes: job.done, total: job.total } : null,
     downloadError: null,
   };
 }
 
 let state: MapPacksState | null = null;
 const listeners = new Set<() => void>();
+let job: DownloadJob | null = null;
 let task: DownloadTask | null = null;
+/** Set by pause; honoured between small-file batches (the big files pause their task). */
+let pauseRequested = false;
 /** Incremented by every start, resume and cancel; a stale run ignores its own result. */
 let runId = 0;
 
@@ -113,8 +149,12 @@ function setState(patch: Partial<MapPacksState>) {
   listeners.forEach((listener) => listener());
 }
 
-function setDownload(region: string, phase: MapDownload["phase"], bytes: number, total: number) {
-  setState({ download: { region, phase, bytes, total } });
+function setDownload(phase: MapDownload["phase"], bytes: number) {
+  if (job) setState({ download: { region: job.region.region, phase, bytes, total: job.total } });
+}
+
+function saveJob() {
+  kvStore.setJson(JOB_KEY, job);
 }
 
 function saveInstalled(installed: InstalledState) {
@@ -194,130 +234,189 @@ export function activeGraphFile(installed: InstalledState): { region: string; fi
   return file.exists ? { region, file, md5: graph.md5 } : null;
 }
 
-/** Shared style, sprites and glyphs for the catalog's release, swapped in only when all verify. */
-async function ensureCommon(id: number, catalog: MapCatalog, region: string) {
+/** What `region` still lacks: shared files (if changed), tiles and graph (if changed). */
+function planJob(catalog: MapCatalog, entry: CatalogRegion): DownloadJob {
   const { installed } = getState();
-  if (commonCurrent(installed, catalog)) return;
-  const total = catalog.common.reduce((sum, f) => sum + f.size, 0);
-  const staging = new Directory(ROOT(), "common.staging");
-  if (staging.exists) staging.delete();
-  staging.create({ intermediates: true });
-  let bytes = 0;
-  for (const entry of catalog.common) {
-    if (id !== runId) return;
-    setDownload(region, "common", bytes, total);
-    const dest = new File(staging, entry.path);
-    dest.parentDirectory.create({ intermediates: true, idempotent: true });
-    await File.downloadFileAsync(assetUrl(catalog, entry), dest, { idempotent: true });
-    verify(dest, entry, entry.asset);
-    bytes += entry.size;
+  const have = installed.regions[entry.region];
+  const files: JobFile[] = [];
+  const common = !commonCurrent(installed, catalog);
+  if (common) {
+    for (const f of catalog.common) {
+      files.push({ url: assetUrl(catalog, f), dest: `${STAGING}/${f.path}`, size: f.size, md5: f.md5, label: f.asset });
+    }
   }
-  const common = COMMON();
-  if (common.exists) common.delete();
-  staging.rename("common");
-  saveInstalled({
-    ...getState().installed,
-    common: { osm_date: catalog.osm_date, fingerprint: commonFingerprint(catalog) },
-  });
-}
-
-function installTiles(entry: CatalogRegion, osm_date: string) {
-  const part = partFile(entry.region);
-  verify(part, entry, entry.asset);
-  const dest = tilesFile(entry.region);
-  if (dest.exists) dest.delete();
-  part.rename(dest.name);
-  const { installed } = getState();
-  const { asset: _asset, sha256: _sha256, graph: _graph, ...info } = entry;
-  // The graph installed so far stays until ensureGraph replaces it.
-  const graph = installed.regions[entry.region]?.graph;
-  saveInstalled({
-    ...installed,
-    regions: { ...installed.regions, [entry.region]: { ...info, osm_date, ...(graph ? { graph } : {}) } },
-    active: installed.active && installed.regions[installed.active] ? installed.active : entry.region,
-  });
-}
-
-/**
- * Runs the tiles download: a new one, the paused in-memory task, or one rebuilt from saved
- * state after a restart. Returns true once the tiles are installed, false when paused or
- * cancelled; throws on failure. Results of a run that was cancelled meanwhile (`id` no longer
- * current) are ignored.
- */
-async function runTiles(id: number, entry: CatalogRegion, osm_date: string, url: string, saved?: DownloadPauseState): Promise<boolean> {
-  // Not gated on `id`: a paused in-memory task keeps the callback from the run that created it.
-  const onProgress = ({ bytesWritten }: { bytesWritten: number }) => {
-    if (getState().download?.region === entry.region) setDownload(entry.region, "tiles", bytesWritten, entry.size);
+  const tiles = !tilesCurrent(have, entry);
+  if (tiles) {
+    files.push({ url: assetUrl(catalog, entry), dest: tilesPart(entry.region), size: entry.size, md5: entry.md5, label: entry.asset });
+  }
+  const graph = !graphCurrent(have, entry) && entry.graph ? entry.graph : null;
+  if (graph) {
+    files.push({ url: assetUrl(catalog, graph), dest: graphPart(entry.region), size: graph.size, md5: graph.md5, label: graph.asset });
+  }
+  return {
+    region: entry,
+    osm_date: catalog.osm_date,
+    common: common ? { osm_date: catalog.osm_date, fingerprint: commonFingerprint(catalog) } : null,
+    tiles,
+    graph: !!graph,
+    files,
+    index: 0,
+    done: 0,
+    total: files.reduce((sum, f) => sum + f.size, 0),
   };
-  let operation: Promise<File | null>;
-  if (task?.state === "paused") {
-    operation = task.resumeAsync();
-  } else if (saved) {
-    task = DownloadTask.fromSavable(saved, { onProgress });
-    operation = task.resumeAsync();
-  } else {
-    task = new DownloadTask(url, partFile(entry.region), { onProgress, sessionType: "background" });
-    operation = task.downloadAsync();
-  }
-  setDownload(entry.region, "tiles", getState().download?.bytes ?? 0, entry.size);
-  setState({ downloadError: null });
-  const file = await operation;
-  if (id !== runId) return false;
-  if (file == null) {
-    // Paused: keep the resume data so the download survives an app restart.
-    kvStore.setJson(PAUSED_KEY, { region: entry, osm_date, url, state: task.savable() } satisfies PausedDownload);
-    setDownload(entry.region, "paused", getState().download?.bytes ?? 0, entry.size);
-    return false;
-  }
-  task = null;
-  kvStore.setJson(PAUSED_KEY, null);
-  setDownload(entry.region, "verifying", entry.size, entry.size);
-  await letRender(); // "verifying" before MD5 blocks
-  installTiles(entry, osm_date);
-  return true;
 }
 
 const letRender = () => new Promise((resolve) => setTimeout(resolve, 50));
 
-/**
- * The region's road graph, when the catalog has one that isn't installed yet. Foreground and
- * not pausable: it is small next to the tiles (Ukraine's is the exception, ~450 MB).
- */
-async function ensureGraph(id: number, baseUrl: string, entry: CatalogRegion) {
-  const graph = entry.graph;
-  if (!graph || graphCurrent(getState().installed.regions[entry.region], entry)) return;
-  const part = graphPartFile(entry.region);
-  if (part.exists) part.delete();
-  setDownload(entry.region, "graph", 0, graph.size);
-  const onProgress = ({ bytesWritten }: { bytesWritten: number }) => {
-    if (getState().download?.region === entry.region) setDownload(entry.region, "graph", bytesWritten, graph.size);
-  };
-  task = new DownloadTask(baseUrl + encodeURIComponent(graph.asset), part, { onProgress });
-  const file = await task.downloadAsync();
-  if (id !== runId || file == null) return;
-  task = null;
-  setDownload(entry.region, "verifying", graph.size, graph.size);
-  await letRender();
-  verify(part, graph, graph.asset);
-  const dest = graphFile(entry.region);
-  if (dest.exists) dest.delete();
-  part.rename(dest.name);
+/** Moves the verified files into place and records the region, all at once. */
+function install(j: DownloadJob) {
+  const region = j.region.region;
+  if (j.common) {
+    const common = COMMON();
+    if (common.exists) common.delete();
+    new Directory(ROOT(), STAGING).rename("common");
+  }
+  for (const [want, part, dest] of [
+    [j.tiles, tilesPart(region), tilesFile(region)],
+    [j.graph, graphPart(region), graphFile(region)],
+  ] as const) {
+    if (!want) continue;
+    if (dest.exists) dest.delete();
+    new File(ROOT(), part).rename(dest.name);
+  }
   const { installed } = getState();
-  const have = installed.regions[entry.region];
-  if (!have) return;
+  const have = installed.regions[region];
+  const { asset: _asset, md5, sha256: _sha256, graph, size, ...info } = j.region;
+  const regionGraph = j.graph && graph ? { size: graph.size, md5: graph.md5 } : have?.graph;
   saveInstalled({
     ...installed,
-    regions: { ...installed.regions, [entry.region]: { ...have, graph: { size: graph.size, md5: graph.md5 } } },
+    common: j.common ?? installed.common,
+    regions: {
+      ...installed.regions,
+      [region]: {
+        ...info,
+        osm_date: j.tiles ? j.osm_date : (have?.osm_date ?? j.osm_date),
+        size: j.tiles ? size : (have?.size ?? size),
+        md5: j.tiles ? md5 : have?.md5,
+        ...(regionGraph ? { graph: regionGraph } : {}),
+      },
+    },
+    active: installed.active && installed.regions[installed.active] ? installed.active : region,
   });
 }
 
-/** Drops the download and its partial file; shows `error` if given. */
-function cleanUp(region: string, error?: unknown) {
+/**
+ * Fetches the job's remaining files (resuming the current one when paused), then verifies and
+ * installs them. Stops quietly when paused or when a newer run (cancel, restart) takes over.
+ */
+async function run(id: number) {
+  const j = job;
+  if (!j) return;
+  setState({ downloadError: null });
+  pauseRequested = false;
+  while (j.index < j.files.length) {
+    // Pause pressed while no task was running (between files).
+    if (pauseRequested && task?.state !== "paused") {
+      setDownload("paused", j.done);
+      return;
+    }
+    const f = j.files[j.index];
+    const index = j.index;
+    if (f.size < SMALL_FILE && !j.resume && task?.state !== "paused") {
+      // A batch of small files (glyphs, sprites) in parallel over a normal session: one by one
+      // through the background session, each with its own redirect, crawls.
+      const batch: JobFile[] = [];
+      for (let k = index; k < j.files.length && batch.length < PARALLEL && j.files[k].size < SMALL_FILE; k++) {
+        batch.push(j.files[k]);
+      }
+      let fetched = 0;
+      await Promise.all(
+        batch.map(async (b) => {
+          const dest = new File(ROOT(), b.dest);
+          dest.parentDirectory.create({ intermediates: true, idempotent: true });
+          await File.downloadFileAsync(b.url, dest, { idempotent: true });
+          fetched += b.size;
+          if (id === runId) setDownload("downloading", j.done + fetched);
+        }),
+      );
+      if (id !== runId) return;
+      j.done += fetched;
+      j.index += batch.length;
+      saveJob();
+      // Pause lands between batches; a batch takes a moment.
+      if (pauseRequested) {
+        setDownload("paused", j.done);
+        return;
+      }
+      continue;
+    }
+    // Not gated on `id`: a paused in-memory task keeps the callback from the run that created it.
+    const onProgress = ({ bytesWritten }: { bytesWritten: number }) => {
+      if (job === j && j.index === index && getState().download?.phase === "downloading") {
+        setDownload("downloading", j.done + bytesWritten);
+      }
+    };
+    let operation: Promise<File | null>;
+    if (task?.state === "paused") {
+      operation = task.resumeAsync();
+    } else if (j.resume) {
+      task = DownloadTask.fromSavable(j.resume, { onProgress });
+      operation = task.resumeAsync();
+    } else {
+      const dest = new File(ROOT(), f.dest);
+      dest.parentDirectory.create({ intermediates: true, idempotent: true });
+      if (dest.exists) dest.delete();
+      task = new DownloadTask(f.url, dest, { onProgress, sessionType: "background" });
+      operation = task.downloadAsync();
+    }
+    setDownload("downloading", Math.max(j.done, getState().download?.bytes ?? 0));
+    const file = await operation;
+    if (id !== runId) return;
+    if (file == null) {
+      j.resume = task?.savable();
+      saveJob();
+      setDownload("paused", getState().download?.bytes ?? j.done);
+      return;
+    }
+    task = null;
+    j.resume = undefined;
+    j.done += f.size;
+    j.index++;
+    saveJob();
+  }
+  setDownload("verifying", j.total);
+  await letRender(); // "verifying" before MD5 blocks
+  for (const f of j.files) verify(new File(ROOT(), f.dest), f, f.label);
+  if (id !== runId) return;
+  install(j);
+  job = null;
+  saveJob();
+  setState({ download: null });
+}
+
+/** Drops the job and its partial files; shows `error` if given. */
+function cleanUp(error?: unknown) {
   task = null;
-  kvStore.setJson(PAUSED_KEY, null);
-  for (const part of [partFile(region), graphPartFile(region)]) if (part.exists) part.delete();
+  if (job) {
+    for (const f of job.files) {
+      const part = new File(ROOT(), f.dest);
+      if (part.exists) part.delete();
+    }
+  }
+  const staging = new Directory(ROOT(), STAGING);
+  if (staging.exists) staging.delete();
+  job = null;
+  saveJob();
   const message = error == null ? null : error instanceof Error ? error.message : String(error);
   setState({ download: null, downloadError: message });
+}
+
+async function runGuarded(id: number) {
+  try {
+    await run(id);
+  } catch (e) {
+    if (id === runId) cleanUp(e);
+  }
 }
 
 export async function downloadRegion(region: string): Promise<void> {
@@ -325,54 +424,36 @@ export async function downloadRegion(region: string): Promise<void> {
   const entry = catalog?.regions.find((r) => r.region === region);
   if (!catalog || !entry || download) return;
   const id = ++runId;
-  try {
-    // Update of a region whose tiles didn't change: only the shared files and the graph are fetched.
-    const have = getState().installed.regions[region];
-    const tiles = tilesCurrent(have, entry) ? 0 : entry.size;
-    const graph = graphCurrent(have, entry) ? 0 : (entry.graph?.size ?? 0);
-    const needed = tiles + graph + catalog.common.reduce((sum, f) => sum + f.size, 0) + DISK_MARGIN;
-    if (Paths.availableDiskSpace < needed) {
-      throw new Error(`Not enough free space: ${Math.ceil(needed / 1e6)} MB needed`);
-    }
-    setState({ downloadError: null });
-    await ensureCommon(id, catalog, region);
-    if (id !== runId) return;
-    if (tiles > 0) {
-      const part = partFile(region);
-      if (part.exists) part.delete();
-      if (!(await runTiles(id, entry, catalog.osm_date, assetUrl(catalog, entry)))) return;
-    }
-    await ensureGraph(id, catalog.baseUrl, entry);
-    if (id === runId) setState({ download: null });
-  } catch (e) {
-    if (id === runId) cleanUp(region, e);
+  const planned = planJob(catalog, entry);
+  if (planned.files.length === 0) return;
+  const needed = planned.total + DISK_MARGIN;
+  if (Paths.availableDiskSpace < needed) {
+    setState({ downloadError: `Not enough free space: ${Math.ceil(needed / 1e6)} MB needed` });
+    return;
   }
+  const staging = new Directory(ROOT(), STAGING);
+  if (staging.exists) staging.delete();
+  job = planned;
+  saveJob();
+  setDownload("downloading", 0);
+  await runGuarded(id);
 }
 
-/** Only the tiles pause; the graph download is short. */
 export function pauseDownload(): void {
-  if (getState().download?.phase === "tiles" && task?.state === "active") task.pause();
+  if (getState().download?.phase !== "downloading") return;
+  pauseRequested = true;
+  if (task?.state === "active") task.pause();
 }
 
 export async function resumeDownload(): Promise<void> {
-  const paused = kvStore.getJson<PausedDownload>(PAUSED_KEY);
-  if (!paused) return;
-  const id = ++runId;
-  try {
-    if (!(await runTiles(id, paused.region, paused.osm_date, paused.url, paused.state))) return;
-    // The graph is an asset of the same release as the tiles.
-    await ensureGraph(id, paused.url.slice(0, paused.url.lastIndexOf("/") + 1), paused.region);
-    if (id === runId) setState({ download: null });
-  } catch (e) {
-    if (id === runId) cleanUp(paused.region.region, e);
-  }
+  if (!job || getState().download?.phase !== "paused") return;
+  await runGuarded(++runId);
 }
 
 export function cancelDownload(): void {
-  const region = getState().download?.region;
   runId++;
   task?.cancel();
-  if (region) cleanUp(region);
+  cleanUp();
 }
 
 export function removeRegion(region: string): void {

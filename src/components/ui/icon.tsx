@@ -26,6 +26,7 @@ const SF = {
   radio_button_checked: "largecircle.fill.circle",
   radio_button_unchecked: "circle",
   close: "xmark",
+  delete: "trash",
   arrow_back: "chevron.left",
   location_off: "location.slash.fill",
   location_on: "location.fill",
