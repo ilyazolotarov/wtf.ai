@@ -490,6 +490,24 @@ describe("map matching", () => {
     service.stop();
   });
 
+  test("the navigator version switch: the running navigator follows, and the drive's road corrections are noted", async () => {
+    const drive = syntheticDrive({ segments: JUNCTION_DRIVE, origin: GRAPH_ORIGIN, startHeadingRad: Math.PI / 2, gnss: "clean", obdScale: 0.99 });
+    const { service, play, notes, engine, now } = harness({ roadGraph: fixtureGraphSource() });
+    await service.start();
+    expect(service.getDebug().mapMatchLoop).toBe("open");
+    play(drive, { untilS: 30 });
+    service.setMapMatchLoop("closed");
+    expect(notes.at(-1)).toBe("nav map-match loop closed");
+    play(drive, { withoutGnssFromS: 100 });
+    const debug = service.getDebug();
+    expect(debug.mapMatchLoop).toBe("closed");
+    expect(debug.roadHeading!.accepted).toBeGreaterThan(10);
+    expect(debug.roadPosition!.accepted).toBeGreaterThanOrEqual(1);
+    engine.emit("engine-off", now());
+    expect(notes.find((n) => n.startsWith("mm loop closed:"))).toMatch(/^mm loop closed: road heading \d+ \(0 refused\), road position \d+ \(0 refused\)$/);
+    service.stop();
+  });
+
   test("without a graph nothing changes", async () => {
     const drive = syntheticDrive({ segments: JUNCTION_DRIVE, origin: GRAPH_ORIGIN, startHeadingRad: Math.PI / 2, gnss: "clean", obdScale: 0.99 });
     const { service, play, notes, loggedMapMatch } = harness();

@@ -89,6 +89,10 @@ export interface NavigatorDebug {
   compassOffDeg: number | null;
   /** Map matching: the region whose graph is set (null: none), the filter's state and cost. */
   mapMatchRegion: string | null;
+  /** How map matching feeds back into the navigator, and the road corrections it sent this drive. */
+  mapMatchLoop: MapMatchLoop;
+  roadHeading: { accepted: number; rejected: number } | null;
+  roadPosition: { accepted: number; rejected: number } | null;
   mapMatch: MapMatchEstimate | null;
   /** Every filter update this drive (since the last `mm timing` note), and its share of the time. */
   mapMatchTiming: (UpdateTimingSummary & { share: number }) | null;
@@ -100,6 +104,8 @@ export interface MapMatchOverlay {
   particles: [number, number, number, number][];
   clusters: MapMatchEstimate["clusters"];
 }
+
+export type MapMatchLoop = NavConfig["mapMatchLoop"];
 
 export interface NavigatorServiceDeps {
   sensors: Pick<SensorService, "gnss" | "imu" | "want">;
@@ -175,6 +181,10 @@ export class NavigatorService implements PositionSource {
   /** Test tool: GNSS withheld from the navigator. `hidden` is the newest fix withheld. */
   private outage: { startedAt: number; startDistanceM: number | null; hidden: GnssRecord | null; maxErrorM: number } | null = null;
   private overlay: MapMatchOverlay | null = null;
+  /** Developer setting: how map matching feeds back into the navigator (MAPMATCH-SPEC §9). */
+  private loop: MapMatchLoop = "open";
+  /** Road corrections already summarised in the trip log. */
+  private notedRoad = { heading: 0, position: 0 };
   private overlayStale = true;
   /** Filter update times: this drive's, and those since the last `nav_mapmatch` record. */
   private timing = new UpdateTiming();
@@ -186,6 +196,14 @@ export class NavigatorService implements PositionSource {
   }
 
   getSnapshot = (): PositionEstimate | null => this.position;
+
+  /** Switch the navigator version (developer setting); the running navigator follows at once. */
+  setMapMatchLoop(loop: MapMatchLoop): void {
+    if (loop === this.loop) return;
+    this.loop = loop;
+    this.nav?.setMapMatchLoop(loop);
+    this.note(`nav map-match loop ${loop}`);
+  }
 
   get simulatedOutage(): boolean {
     return this.outage !== null;
@@ -297,6 +315,9 @@ export class NavigatorService implements PositionSource {
       compassTrust: nav ? nav.compassTrust : "off",
       compassOffDeg: nav ? compassOff(nav) : null,
       mapMatchRegion: this.graph?.region ?? null,
+      mapMatchLoop: this.loop,
+      roadHeading: nav ? { accepted: nav.stats.roadHeadingAccepted, rejected: nav.stats.roadHeadingRejected } : null,
+      roadPosition: nav ? { accepted: nav.stats.roadPositionAccepted, rejected: nav.stats.roadPositionRejected } : null,
       mapMatch: e?.mapMatch ?? null,
       mapMatchTiming: this.timingSummary(),
     };
@@ -324,6 +345,7 @@ export class NavigatorService implements PositionSource {
         this.saveCalibration();
         this.noteCompassSummary();
         this.noteMapMatchTiming();
+        this.noteRoadCorrections();
       }),
     );
     this.lastSaveAt = Date.now();
@@ -335,6 +357,7 @@ export class NavigatorService implements PositionSource {
     this.saveCalibration();
     this.noteCompassSummary();
     this.noteMapMatchTiming();
+    this.noteRoadCorrections();
     this.unsubscribers.forEach((u) => u());
     this.unsubscribers = [];
     if (this.timer) clearInterval(this.timer);
@@ -349,7 +372,8 @@ export class NavigatorService implements PositionSource {
     const { calibration, link } = this.deps;
     this.drainUpdateTimes(); // from the navigator being replaced
     const lag = calibration.gnssLag();
-    const nav = new Navigator({ ...this.deps.nav, ...(lag ? { gnssLagS: lag.lagS } : {}) });
+    const nav = new Navigator({ ...this.deps.nav, mapMatchLoop: this.loop, ...(lag ? { gnssLagS: lag.lagS } : {}) });
+    this.notedRoad = { heading: 0, position: 0 };
     this.nav = nav;
     if (lag) this.note(`nav gnss lag ${lag.lagS} s from storage (${lag.windows} turn windows)`);
     this.fedUs = -Infinity;
@@ -671,6 +695,20 @@ export class NavigatorService implements PositionSource {
         `${(s.share * 100).toFixed(2)} % of the time, ${s.overBudget} over 5 ms`,
     );
     this.timing = new UpdateTiming();
+  }
+
+  /** At the end of a drive: the road corrections map matching sent the navigator, and how many it refused. */
+  private noteRoadCorrections(): void {
+    const s = this.nav?.stats;
+    if (!s || this.loop === "open") return;
+    const heading = s.roadHeadingAccepted + s.roadHeadingRejected;
+    const position = s.roadPositionAccepted + s.roadPositionRejected;
+    if (heading === this.notedRoad.heading && position === this.notedRoad.position) return;
+    this.notedRoad = { heading, position };
+    this.note(
+      `mm loop ${this.loop}: road heading ${s.roadHeadingAccepted} (${s.roadHeadingRejected} refused), ` +
+        `road position ${s.roadPositionAccepted} (${s.roadPositionRejected} refused)`,
+    );
   }
 
   private outageInfo(p: PositionEstimate): SimulatedOutage | undefined {

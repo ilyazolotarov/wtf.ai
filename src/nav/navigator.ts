@@ -390,6 +390,11 @@ export class Navigator {
     else this.startMapMatchAtAnchor();
   }
 
+  /** Switch how map matching feeds back into the EKF (MAPMATCH-SPEC §9); takes effect at the next odometry chunk. */
+  setMapMatchLoop(loop: NavConfig["mapMatchLoop"]): void {
+    this.config.mapMatchLoop = loop;
+  }
+
   /** How and when the EKF last started (null: not running). */
   get initialization(): { method: InitMethod; tUs: number } | null {
     return this.ekf ? this.started : null;

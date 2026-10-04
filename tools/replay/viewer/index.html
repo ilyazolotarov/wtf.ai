@@ -91,6 +91,7 @@
   <select id="file" aria-label="Drive"></select>
   <label title="The navigator the replay runs. Today = what the app runs now; the others close the loop from map matching (MAPMATCH-SPEC §9)">Navigator
     <select id="loop">
+      <option value="">As on the phone</option>
       <option value="open">Today</option>
       <option value="heading">Road heading</option>
       <option value="closed">Full correction</option>
@@ -467,6 +468,7 @@ function renderDrive() {
   $("drive").innerHTML = `<div class="drive-title">${esc(driveName(data.file))}</div><div class="facts">` +
     `<b>${fmtMin(data.durationS)}</b> · <b>${fmtKm(s.obdDistanceM)}</b> driven (OBD)<br>` +
     `GPS good <b>${Math.round(gpsGood)} %</b> of the time` + (appCuts ? ` · <b>${appCuts}</b>× Cut GPS in the app` : "") + `<br>` +
+    (data.phoneLoopLabel ? `Phone ran: ${esc(data.phoneLoopLabel)}<br>` : "") +
     `Replay: ${esc(data.loopLabel)} · GPS ${esc(scenario.toLowerCase())}` +
     (data.phone.length ? "" : `<br><span class="muted">This log predates recording what the phone showed: replay only.</span>`) + `</div>`;
   $("tracks").innerHTML = [

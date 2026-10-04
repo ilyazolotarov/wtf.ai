@@ -20,6 +20,7 @@ import { dash, fmt, fmtBytes, fmtDuration } from "@/components/vehicle/format";
 import { usePalette } from "@/constants/theme";
 import type { Strings } from "@/i18n/en";
 import { useT } from "@/i18n/provider";
+import type { MapMatchLoop } from "@/services/navigation/navigator-service";
 import type { DiscoveredDevice } from "@/obd/types";
 import {
   useDevSettings,
@@ -249,6 +250,16 @@ function PositionTab() {
 
       <ScreenSection title={t("mapMatching")}>
         <ScreenRow label="road graph" value={ekf.mapMatchRegion ?? dash} />
+        <ScreenRow label="feeds back" value={t(ekf.mapMatchLoop === "open" ? "loopToday" : ekf.mapMatchLoop === "heading" ? "loopHeading" : "loopClosed")} />
+        {ekf.mapMatchLoop !== "open" && (
+          <ScreenRow
+            label="road corrections"
+            value={ekf.roadHeading && ekf.roadPosition
+              ? `heading ${ekf.roadHeading.accepted} · position ${ekf.roadPosition.accepted}` +
+                (ekf.roadHeading.rejected + ekf.roadPosition.rejected ? ` · ${ekf.roadHeading.rejected + ekf.roadPosition.rejected} refused` : "")
+              : dash}
+          />
+        )}
         <ScreenRow
           label="state"
           value={ekf.mapMatch ? `${ekf.mapMatch.state} · ${ekf.mapMatch.particles} particles` : ekf.mapMatchRegion ? "off" : dash}
@@ -311,7 +322,7 @@ function RecorderTab() {
   );
 }
 
-function CycleRow<T extends number | null>({
+function CycleRow<T extends number | string | null>({
   labelKey,
   value,
   options,
@@ -405,6 +416,13 @@ function DeveloperTab() {
             setRpmPeriod(v);
             link.setRpmPeriods({ rpmPeriodRunningMs: v * 1000 });
           }}
+        />
+        <CycleRow
+          labelKey="mapMatchLoop"
+          value={dev.mapMatchLoop}
+          options={["open", "heading", "closed"] satisfies MapMatchLoop[]}
+          format={(v) => t(v === "open" ? "loopToday" : v === "heading" ? "loopHeading" : "loopClosed")}
+          onChange={(v) => setDevSettings({ mapMatchLoop: v })}
         />
         <CycleRow
           labelKey="parkedTimeout"

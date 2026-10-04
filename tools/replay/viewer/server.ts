@@ -96,7 +96,6 @@ const server = createServer((req, res) => {
       const start = Number(q("start") || 0);
       // GPS scenario: as in the app (its "Cut GPS" windows withheld), all of it, cut where asked, jammed, or none.
       const gps = q("gps") || "app";
-      const loop = LOOPS[q("loop")] ?? LOOPS.open;
       const compareLoop = LOOPS[q("compare")] ?? null;
       // Compass: off, or calibrated on the other logs, optionally turned (a wrong calibration).
       const compassArg = url.searchParams.get("compass") ?? "";
@@ -104,6 +103,9 @@ const server = createServer((req, res) => {
       const rotateDeg = Number(compassArg) || 0;
       const started = Date.now();
       const trip = loadTrip(file);
+      // The navigator version the phone ran (trip log header, from the app's developer setting); default open.
+      const phoneLoop = typeof trip.info.nav_mapmatch_loop === "string" ? trip.info.nav_mapmatch_loop : null;
+      const loop = LOOPS[q("loop") || phoneLoop || "open"] ?? LOOPS.open;
       // Map matching on the trip's road graph, when there is one.
       const first = trip.gnss.find((f) => f.hAccM <= 500);
       const graphFile = first ? (GRAPH ?? findGraph(first)) : null;
@@ -125,7 +127,7 @@ const server = createServer((req, res) => {
           ...(compareLoop ? { compare: { label: compareLoop.label, options: { ...common, nav: navFor(compareLoop.nav) } } } : {}),
         });
         const compassInfo = compassArg ? { logs: compass?.logs ?? 0, rotateDeg, trust: data.summary.compass.trust } : null;
-        send(res, 200, "application/json", JSON.stringify({ ...data, compassInfo, loopLabel: loop.label, appCuts: appCuts.length }));
+        send(res, 200, "application/json", JSON.stringify({ ...data, compassInfo, loopLabel: loop.label, phoneLoopLabel: phoneLoop ? (LOOPS[phoneLoop]?.label ?? phoneLoop) : null, appCuts: appCuts.length }));
       } finally {
         opened?.close();
       }

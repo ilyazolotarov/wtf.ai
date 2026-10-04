@@ -815,6 +815,11 @@ share of held-out fixes within the circle the map draws (1.5 σ, the ~68 % radiu
   update time. Developer settings → "Map matching on the map (particles)" draws the 200 heaviest particles (size
   by weight, amber off-road) and each hypothesis as a dashed ring of its spread labelled with its weight. They
   are the navigator's state ~300 ms back, not extrapolated like the puck.
+- **Navigator version** (Developer settings, `mapMatchLoop`, default *Today* = `open`): *Road heading* or *Full
+  correction* (§9) on the phone, applied to the running navigator at once. The trip log header records the
+  version a drive started with (`nav_mapmatch_loop`), a change is the note `nav map-match loop <v>`, and at engine off
+  `mm loop <v>: road heading N (k refused), road position M (k refused)`. The Vehicle sheet shows the counts live.
+  `replay:view` replays a drive with the phone's version by default.
 
 ## 12. Milestones
 

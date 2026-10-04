@@ -431,3 +431,6 @@ needed to check them (`replay:bench`).
     could be detected from OBD 0 + the gyro turning + the phone steady in the mount; its speed is still unknown.
 11. **Compass in shadow** (§7.6): built; collect how often the stored calibration is wrong on real drives
     (`replay:compass`) before switching it on.
+12. **Speed offset.** On the CX-5, GNSS − OBD fits a scale of 1.019 with a −0.23 km/h offset (§13.2), but the EKF
+    learns only the scale `k_s`: at low speed a few percent stay unexplained. With MAPMATCH-SPEC §9's closed loop the
+    error between turns grows ~1–3 m per km; an offset state is a candidate if city drives show more.

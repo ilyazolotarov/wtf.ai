@@ -48,8 +48,9 @@ The viewer answers "how did my drive go": where the dot was against where the ca
 
 - **Header:**
   - *Drive*: newest first.
-  - *Navigator*: the version the replay runs. *Today* is what the app runs; *Road heading* and *Full
-    correction* send map matching back into the navigator (MAPMATCH-SPEC §9).
+  - *Navigator*: the version the replay runs. *As on the phone* (default) is the one the drive was recorded with
+    (the app's developer setting, in the log header); *Today* is open loop; *Road heading* and *Full correction*
+    send map matching back into the navigator (MAPMATCH-SPEC §9).
   - *GPS*: what the replay gets. *As in the app* withholds your "Cut GPS" moments, as the phone did; *All of it*;
     *Cut at…* (`120:240`, several with commas); *Jammed* (Wi-Fi/cell-like fixes only, `0:inf` or a window;
     `src/nav/replay/jam.ts`); *None after the start* (pure dead reckoning once the heading is known).

@@ -12,7 +12,7 @@ import { VehicleLinkCore } from "@/obd/vehicle-link-core";
 
 import { kvStore } from "./kv-store";
 import { CalibrationStore } from "./navigation/calibration-store";
-import { NavigatorService } from "./navigation/navigator-service";
+import { NavigatorService, type MapMatchLoop } from "./navigation/navigator-service";
 import { activeRoadGraph } from "./offline-map/road-graph-file";
 import { SensorService } from "./sensor-capture/sensor-service";
 import { createTripFiles } from "./trip-recorder/trip-files";
@@ -27,6 +27,8 @@ export interface DevSettings {
   showParticles: boolean;
   /** A "Cut GPS" button on the map that simulates a GNSS outage. */
   outageButton: boolean;
+  /** How map matching feeds back into the navigator (MAPMATCH-SPEC §9): open (today), heading, closed. */
+  mapMatchLoop: MapMatchLoop;
 }
 
 const DEV_SETTINGS_KEY = "dev.settings";
@@ -47,7 +49,7 @@ let runtime: Runtime | null = null;
 export function getRuntime(): Runtime {
   if (runtime) return runtime;
 
-  let dev: DevSettings = { showEmulators: __DEV__, showParticles: false, outageButton: false, ...(kvStore.getJson<Partial<DevSettings>>(DEV_SETTINGS_KEY) ?? {}) };
+  let dev: DevSettings = { showEmulators: __DEV__, showParticles: false, outageButton: false, mapMatchLoop: "open", ...(kvStore.getJson<Partial<DevSettings>>(DEV_SETTINGS_KEY) ?? {}) };
   const devListeners = new Set<() => void>();
   const nowUs = () => VehicleLinkModule.nowUs();
   const clock = createClock(nowUs);
@@ -75,6 +77,8 @@ export function getRuntime(): Runtime {
       ver_sw: `${Constants.expoConfig?.version ?? "?"} (${Constants.nativeBuildVersion ?? "dev"})`,
       sys_hw: sysHw,
       sys_os_ver: sysOsVer,
+      // The navigator version this drive starts with (a change mid-drive is a note).
+      nav_mapmatch_loop: dev.mapMatchLoop,
     }),
   });
   recorder.start();
@@ -91,6 +95,7 @@ export function getRuntime(): Runtime {
     // Map matching on the active offline region's road graph (MAPMATCH-SPEC §11).
     roadGraph: activeRoadGraph,
   });
+  position.setMapMatchLoop(dev.mapMatchLoop);
   // During a trip the navigator keeps running with the map off screen, so dead reckoning
   // doesn't start over each time the app comes back.
   const syncKeepAlive = () => position.setKeepAlive(recorder.getSnapshot().state === "recording");
@@ -127,6 +132,7 @@ export function getRuntime(): Runtime {
       devListeners.forEach((listener) => listener());
       // Hiding the button ends a simulated outage, so it can't be left on unseen.
       if (patch.outageButton === false) position.setSimulatedOutage(false);
+      if (patch.mapMatchLoop) position.setMapMatchLoop(patch.mapMatchLoop);
     },
     subscribeDevSettings: (listener) => {
       devListeners.add(listener);
