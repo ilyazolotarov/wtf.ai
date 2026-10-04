@@ -16,6 +16,7 @@ import {
     formatEta,
     toDegrees,
 } from "@/components/status/format-geo";
+import { formatDurationS, PROBLEM_TEXT } from "@/components/route/guidance-text";
 import { Icon } from "@/components/ui/icon";
 import { T } from "@/components/ui/text";
 import { Font, Radius, usePalette } from "@/constants/theme";
@@ -31,8 +32,9 @@ export default function RouteScreen() {
   const { t, language } = useT();
   const palette = usePalette();
   const position = usePosition();
-  const { activeRoute, startRoute, stopRoute } = useRoute();
-  const [selectedId, setSelectedId] = useState<string | null>(activeRoute?.id ?? null);
+  const { route, startRoute, stopRoute } = useRoute();
+  const routeId = route?.destination.id ?? null;
+  const [selectedId, setSelectedId] = useState<string | null>(routeId);
   const [query, setQuery] = useState("");
   const selected = destinations.find(({ id }) => id === selectedId) ?? null;
   const origin = position ?? KYIV;
@@ -90,7 +92,7 @@ export default function RouteScreen() {
                       {`${formatDistance(distanceM, language)} · ${cardinal(bearing, language)}`}
                     </T>
                   </View>
-                  {activeRoute?.id === d.id && (
+                  {routeId === d.id && (
                     <View style={[styles.badge, { backgroundColor: palette.accentA }]}>
                       <T w="semibold" size={11} color={palette.accent}>
                         {t("activeRoute")}
@@ -111,22 +113,34 @@ export default function RouteScreen() {
             {selected.name[language]}
           </T>
           {!position && <ScreenNote>{t("currentPositionUnknown")}</ScreenNote>}
-          <View style={styles.metrics}>
-            <Metric label={t("distance")} value={formatDistance(summary(selected).distanceM, language)} />
-            <Metric
-              label={t("bearing")}
-              value={`${Math.round(summary(selected).bearing)}° ${cardinal(summary(selected).bearing, language)}`}
-            />
-            <Metric label={t("eta")} value={formatEta(summary(selected).distanceM, language)} />
-          </View>
-          {activeRoute?.id === selected.id ? (
+          {routeId === selected.id && route?.plan ? (
+            // The planned route: its road distance and time.
+            <View style={styles.metrics}>
+              <Metric label={t("distance")} value={formatDistance(route.plan.lengthM, language)} />
+              <Metric label={t("eta")} value={formatDurationS(route.plan.durationS, t)} />
+            </View>
+          ) : (
+            <View style={styles.metrics}>
+              <Metric label={t("distance")} value={formatDistance(summary(selected).distanceM, language)} />
+              <Metric
+                label={t("bearing")}
+                value={`${Math.round(summary(selected).bearing)}° ${cardinal(summary(selected).bearing, language)}`}
+              />
+              <Metric label={t("etaStraight")} value={formatEta(summary(selected).distanceM, language)} />
+            </View>
+          )}
+          {routeId === selected.id && route?.status === "planning" && <ScreenNote>{t("planningRoute")}</ScreenNote>}
+          {routeId === selected.id && route?.status === "failed" && (
+            <ScreenNote>{t(route.failure ? PROBLEM_TEXT[route.failure] : "routeCancelled")}</ScreenNote>
+          )}
+          {routeId === selected.id && route?.status !== "failed" ? (
             <ScreenAction labelKey="stopGuidance" secondary onPress={stopRoute} />
           ) : (
             <ScreenAction
               labelKey="startGuidance"
               icon="navigation"
               onPress={() => {
-                startRoute(selected, position);
+                startRoute({ lat: selected.lat, lon: selected.lon, name: selected.name[language], id: selected.id });
                 router.back();
               }}
             />
@@ -135,7 +149,7 @@ export default function RouteScreen() {
         </ScreenCard>
       )}
 
-      <ScreenNote>{t("offlineRoutingUnavailable")}</ScreenNote>
+      <ScreenNote>{`${t("routeTip")} ${t("routeOutsideRegion")}`}</ScreenNote>
     </ScreenContent>
   );
 }

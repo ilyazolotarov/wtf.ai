@@ -60,6 +60,8 @@ export interface GuidancePosition extends Coordinate {
   headingRad?: number;
   speedMps?: number;
   mapMatch?: MapMatchState;
+  /** False when the position can't be trusted to judge the route (phone GPS while it is spoofed or jammed). */
+  reliable?: boolean;
 }
 
 export interface GuidanceStep {
@@ -132,7 +134,7 @@ export class RouteGuidance {
     const remainingM = Math.max(0, (totalPoly - this.alongPoly) / this.scale);
 
     let state: GuidanceState;
-    const unsure = p.mapMatch === "multimodal" || p.mapMatch === "init";
+    const unsure = p.reliable === false || p.mapMatch === "multimodal" || p.mapMatch === "init";
     const end = this.plan.coordinates.at(-1)!;
     if ((remainingM <= c.arriveM && offM <= threshold) || haversineM(p, end) <= c.arriveM) {
       state = "arrived";

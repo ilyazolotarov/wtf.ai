@@ -19,7 +19,9 @@ Plan a drive to a destination offline and guide the driver along it, so that:
 - **R2 done:** the planner `src/nav/routing/` (§4–5) and `npm run route` (§7): city routes in 0.1 s or less, oblast
   routes up to 1 s, in Node.
 - **R3 done:** turn instructions (§6).
-- The app's `route` screen is still the UI-first mock (UI-SPEC §7.1): a list of cities and a straight line.
+- **R4 built, not yet driven:** guidance (`src/nav/routing/guidance.ts`), the route service
+  (`src/services/navigation/route-service.ts`), trip-log records, and the app: long press → Route here, the city list,
+  the banner and the route on the map (§8, UI-SPEC §6.3, §7.1).
 
 ## 3. Decisions
 
@@ -146,12 +148,55 @@ Node on the Windows PC, cold tile cache (2026-10-05):
 
 ## 8. App and the route hint (R4, R5)
 
-- **R4 App**: long press to set the destination, the route drawn on the map, the next-turn banner with distance,
-  progress along the route from the puck. Off the route: the map-matched position more than 40 m from it for 5 s,
-  or the filter tracking on an edge not on the route; then plan again from the puck. While the filter is
-  multimodal, wait.
-- **R5 Route hint**: at a junction the filter weights the route's exit higher (soft, e.g. 3×), measured in the
-  simulator (MAPMATCH-SPEC §9.4) with drivers who follow the route and drivers who leave it.
+### 8.1 Guidance (`src/nav/routing/guidance.ts`)
+
+`RouteGuidance` takes each published position (the puck: map-matched while dead-reckoning) and gives the state, the
+distance driven along the route, the distance off it, what's left (metres, and the plan's time scaled by it), the
+next maneuver and the distance to it, and the one after when it follows within 120 m.
+
+- **Matching:** the closest point of the route's polyline between 60 m behind the last progress and 300 m (plus
+  3 s at the current speed) ahead; moving faster than 3 m/s, only stretches within 75° of the heading. Too far from
+  that stretch, the whole route is tried (a shortcut, or the position jumping back after an outage).
+- **Off the route** beyond max(40 m, 1.5 × the position's accuracy): `leaving` at once, `off` after 4 s and 30 m
+  driven (from the speed, so a parked car or a jumping position never counts as leaving). `unsure` instead while
+  map matching is `multimodal` or `init`, or the position is phone GPS that isn't trusted (spoofing can put it
+  anywhere): neither on nor off is decided then. Driving the route the wrong way is off it.
+- **Arrived** within 30 m of the route's end (or of its last point), and it stays arrived.
+- A maneuver passed by less than 10 m is still the next one (the puck lags the turn).
+
+### 8.2 Route service (`src/services/navigation/route-service.ts`, `runtime.routes`)
+
+- `start(destination)` plans from the published position (with its heading and accuracy) on its own reader of the
+  active region's graph (2048 tiles), framed at the start. The search runs in slices of ~12 ms (the slice size
+  adapts to the phone's speed), yielding to the UI in between.
+- `off` (and not planning, and 10 s since the last plan) plans again from where the car is; the old route stays
+  drawn, faded. A failed re-plan keeps the old route and retries at the next `off` after the cooldown. A failed
+  first plan ends in `failed` with the reason.
+- Arrival ends the route a minute later; × ends it at once.
+- **Trip log** (TRIP-LOGGER-SPEC §6.3): every plan (`nav_route`, with its polyline `nav_route_point` and maneuvers
+  `nav_route_maneuver`), guidance at every published position (`nav_route_progress`), and notes: `route to …`,
+  `route plan #n (reason): length, minutes, maneuvers; states, tiles, ms in slices (wall ms)`, `route plan #n
+  failed: …`, `route off|on|unsure at <km>, <m> off, ±<accuracy>, <source>/<map match>`, `route arrived …:
+  <min> (planned <min>), driven <km> (planned <km>)`, `route stop at <km> of <km>`. A route planned before the trip
+  starts is logged again when it does (reason `resume`).
+
+### 8.3 What the first drives should answer (all from the trip log)
+
+1. **Planning time on the iPhone**: `plan_ms`, `wall_ms` and `slices` per plan, against Node's (§7) for the same
+   route (`npm run route -- --from … --to …` replans it on the PC).
+2. **ETA**: `route arrived` notes, planned minutes against real ones, and length against distance driven. Then the
+   speeds per road class and the junction cost (§4) can be fitted to the drives.
+3. **False "off route"**: `route off` notes while the car was on the route (GPS truth in the log), especially
+   while dead-reckoning; and late ones: the distance driven off the route before `off`.
+4. **Instruction timing**: `to_next_m` when the car actually turned (from the GPS track): is the next maneuver
+   still the right one through the turn, and does the puck's lag show?
+5. **Re-plans**: how often, where from (`nav_route` with reason `off-route`), and whether the new route started on
+   the road the car was on.
+
+### 8.4 Route hint (R5)
+
+At a junction the filter weights the route's exit higher (soft, e.g. 3×), measured in the simulator
+(MAPMATCH-SPEC §9.4) with drivers who follow the route and drivers who leave it.
 
 ## 9. Milestones
 

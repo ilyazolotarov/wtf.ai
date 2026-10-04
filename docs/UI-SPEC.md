@@ -161,14 +161,20 @@ One small component each. Touch targets ≥ 56 pt; high contrast; minimal text.
 | Top      | `SinceTrustedStrip` | Time and distance since last trusted fix (`—` for now)                                     |
 | Top      | `AdapterChip`       | Adapter status (mock: Disconnected); tap → `vehicle`                                       |
 | Top      | `LowAccuracyBadge`  | Shown when calibration is `not-calibrated`; tap → `calibration`                            |
-| Top      | `ManeuverBanner`    | Only with active route (see 7.1)                                                           |
+| Top      | `RouteBanner`       | Only with a route: next maneuver, distance, what is left (below, and 7.1)                  |
 | Bottom   | `SpeedReadout`      | Speed in km/h (GNSS speed)                                                                 |
 | Bottom   | `RecenterButton`    | Camera mode cycle                                                                          |
 | Bottom   | `MapToolbar`        | Route, Vehicle, menu → Downloads, Calibration, Debug, Settings (`Link` from `expo-router`) |
 | Center   | `PermissionCard`    | Location denied → explanation + "Open Settings" (`Linking.openURL('app-settings:')`)       |
 | Center   | `NoFixCard`         | "Waiting for GPS…" when no fix yet                                                         |
 
-- Long-press on map → placeholder alert "Manual position fix — coming later" (real implementation with EKF, SPEC §3.4).
+- Long-press on map → drops a pin; a card above the toolbar shows its distance and direction with **Route here**
+  and **Cancel** (ROUTING-SPEC §8). (The manual position fix, SPEC §3.4, needs another gesture when it comes.)
+- With a route (`src/components/route/route-banner.tsx`): the banner shows the next maneuver's icon, the distance
+  to it (10 m steps under 300 m, 50 m under 1 km), its instruction, "then …" when the next follows within 120 m,
+  and the distance, time and arrival clock left; or "Planning route…", "Off route, planning again…", "Position
+  uncertain: keeping the route", "No route" with the reason, "You've arrived". Its × ends the route. The map draws
+  the route (faded while planning again), its next maneuver and the destination.
 
 ## 7. Phase 4 — Mock screens
 
@@ -176,10 +182,12 @@ Parallel with Phase 3; each screen is independent. Use `@expo/ui` for settings-l
 
 ### 7.1 `route`
 
-- Search field filtering mock destinations (both EN and UK names).
-- Selected destination → summary card: **real** straight-line distance and bearing from current position, mock ETA at 60 km/h.
-- "Start" → sets `RouteContext` (`src/providers/route-provider.tsx`); map shows dashed straight line to destination + `ManeuverBanner` ("Head N toward Lviv · 12.3 km"). "Stop" clears it.
-- Footnote: "Offline routing not available yet".
+- Search field filtering a list of cities (both EN and UK names).
+- Selected city → summary card: straight-line distance, bearing and time at 60 km/h; once its route is planned, the
+  road distance and the planned time.
+- "Start guidance" plans a road route from the position (ROUTING-SPEC, `runtime.routes`, `useRoute()` in
+  `src/providers/route-provider.tsx`) and returns to the map; "Stop guidance" ends it. A failed plan says why.
+- Footnote: long-press the map to route anywhere; routes stay inside the downloaded region.
 
 ### 7.2 `vehicle`
 

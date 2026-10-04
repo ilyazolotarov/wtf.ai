@@ -3,7 +3,6 @@ import { BlurView } from "expo-blur";
 import { Link, router, useIsFocused } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
-    Alert,
     Animated,
     Linking,
     Pressable,
@@ -15,6 +14,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { MapSurface } from "@/components/map/map-surface";
+import { RouteBanner } from "@/components/route/route-banner";
 import {
     COURSE_MIN_SPEED_MPS,
     useCompassHeading,
@@ -33,7 +33,7 @@ import { Icon, type IconName } from "@/components/ui/icon";
 import { T } from "@/components/ui/text";
 import { Radius, usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
-import { bearingRad, haversineM } from "@/nav/geo";
+import { bearingRad, haversineM, type Coordinate } from "@/nav/geo";
 import { calibrationMock } from "@/mocks";
 import { usePositionPermission } from "@/providers/position-provider";
 import { useRoute } from "@/providers/route-provider";
@@ -59,7 +59,9 @@ export default function HomeScreen() {
   const nav = useNavStatus();
   const { position, trust } = nav;
   const { permission, requestPermission } = usePositionPermission();
-  const { activeRoute } = useRoute();
+  const { route, startRoute, stopRoute } = useRoute();
+  // A long press on the map drops a pin to route to (ROUTING-SPEC §8).
+  const [pin, setPin] = useState<Coordinate | null>(null);
   const [cameraMode, setCameraMode] = useState<CameraMode>("follow");
   const [ghostView, setGhostView] = useState(false);
   const [requesting, setRequesting] = useState(false);
@@ -148,20 +150,6 @@ export default function HomeScreen() {
       ? `${alertBody} ${t("alertPhoneOnly")}`
       : alertBody;
 
-  const routeInfo =
-    activeRoute && position
-      ? (() => {
-          const bearing = toDegrees(bearingRad(position, activeRoute));
-          const heading =
-            cameraMode === "follow-heading" ? toDegrees(headingUp) : 0;
-          return {
-            title: `${t("toward")} ${activeRoute.name[language]}`,
-            sub: `${formatDistance(haversineM(position, activeRoute), language)} · ${cardinal(bearing, language)} ${Math.round(bearing)}°`,
-            rotation: bearing - heading,
-          };
-        })()
-      : null;
-
   const panel = [
     styles.panel,
     { boxShadow: palette.shadow },
@@ -175,7 +163,8 @@ export default function HomeScreen() {
         compass={compass}
         headingUpRad={headingUp}
         onUserInteraction={() => pickCameraMode(() => "free")}
-        onLongPress={() => Alert.alert(t("manualFixTitle"), t("manualFixBody"))}
+        onLongPress={setPin}
+        pin={pin}
       />
       <View
         pointerEvents="box-none"
@@ -323,24 +312,7 @@ export default function HomeScreen() {
             </Link>
           )}
 
-          {routeInfo && (
-            <View style={[panel, styles.routeBanner]}>
-              <GlassFill radius={Radius.rL} />
-              <View style={[styles.routeIcon, { backgroundColor: palette.accent }]}>
-                <View style={{ transform: [{ rotate: `${routeInfo.rotation}deg` }] }}>
-                  <Icon name="navigation" size={22} color={palette.onAccent} />
-                </View>
-              </View>
-              <View style={styles.routeCopy}>
-                <T w="semibold" size={17} numberOfLines={1}>
-                  {routeInfo.title}
-                </T>
-                <T size={13} color={palette.text2} numberOfLines={1}>
-                  {routeInfo.sub}
-                </T>
-              </View>
-            </View>
-          )}
+          {route && <RouteBanner route={route} nowMs={position?.timestamp ?? 0} onStop={stopRoute} />}
         </View>
 
         {!position && (
@@ -390,6 +362,50 @@ export default function HomeScreen() {
         )}
 
         <View pointerEvents="box-none" style={styles.bottomStack}>
+          {pin && (
+            <View style={[panel, styles.pinCard]}>
+              <GlassFill radius={Radius.rL} />
+              <View style={styles.alertRow}>
+                <View style={[styles.alertIcon, { backgroundColor: palette.accentA }]}>
+                  <Icon name="place" size={20} color={palette.accent} />
+                </View>
+                <View style={styles.alertText}>
+                  <T w="semibold" size={15}>
+                    {t("droppedPin")}
+                  </T>
+                  <T size={13} color={palette.text2}>
+                    {position
+                      ? `${formatDistance(haversineM(position, pin), language)} · ${cardinal(toDegrees(bearingRad(position, pin)), language)}`
+                      : `${pin.lat.toFixed(5)}, ${pin.lon.toFixed(5)}`}
+                  </T>
+                </View>
+              </View>
+              <View style={styles.pinActions}>
+                <Pressable
+                  onPress={() => setPin(null)}
+                  accessibilityRole="button"
+                  style={({ pressed }) => [styles.pinButton, { backgroundColor: palette.surface }, pressed && styles.pressed]}
+                >
+                  <T w="semibold" size={15} color={palette.text}>
+                    {t("cancel")}
+                  </T>
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    startRoute({ lat: pin.lat, lon: pin.lon });
+                    setPin(null);
+                  }}
+                  accessibilityRole="button"
+                  style={({ pressed }) => [styles.pinButton, { backgroundColor: palette.accent }, pressed && styles.pressed]}
+                >
+                  <Icon name="alt_route" size={16} color={palette.onAccent} />
+                  <T w="semibold" size={15} color={palette.onAccent}>
+                    {t("routeHere")}
+                  </T>
+                </Pressable>
+              </View>
+            </View>
+          )}
           <Pressable
             style={({ pressed }) => [panel, styles.cameraButton, pressed && styles.pressed]}
             onPress={toggleCameraMode}
@@ -604,23 +620,17 @@ const styles = StyleSheet.create({
     borderRadius: Radius.pill,
   },
   calDot: { width: 8, height: 8, borderRadius: 4 },
-  routeBanner: {
+  pinCard: { gap: 12, padding: 16, borderRadius: Radius.rL },
+  pinActions: { flexDirection: "row", gap: 10 },
+  pinButton: {
+    flex: 1,
+    height: 44,
     flexDirection: "row",
     alignItems: "center",
-    gap: 14,
-    paddingVertical: 12,
-    paddingLeft: 12,
-    paddingRight: 18,
-    borderRadius: Radius.rL,
-  },
-  routeIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: "center",
     justifyContent: "center",
+    gap: 8,
+    borderRadius: Radius.pill,
   },
-  routeCopy: { flex: 1, gap: 2 },
   centerCard: {
     alignSelf: "center",
     alignItems: "center",

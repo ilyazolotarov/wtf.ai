@@ -17,7 +17,6 @@ import { initSentry, Sentry } from "@/config/sentry";
 import { Colors } from "@/constants/theme";
 import { I18nProvider, useT } from "@/i18n/provider";
 import { PositionProvider } from "@/providers/position-provider";
-import { RouteProvider } from "@/providers/route-provider";
 import { RuntimeProvider } from "@/providers/runtime-provider";
 import { applyAppearance, loadAppearance } from "@/services/preferences";
 
@@ -47,9 +46,7 @@ function RootLayout() {
       <I18nProvider>
         <PositionProvider>
           <RuntimeProvider>
-            <RouteProvider>
-              <AppStack />
-            </RouteProvider>
+            <AppStack />
           </RuntimeProvider>
         </PositionProvider>
         {!splashDone && <AnimatedSplash onDone={() => setSplashDone(true)} />}

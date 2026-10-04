@@ -13,7 +13,8 @@ import { VehicleLinkCore } from "@/obd/vehicle-link-core";
 import { kvStore } from "./kv-store";
 import { CalibrationStore } from "./navigation/calibration-store";
 import { NavigatorService, type MapMatchLoop } from "./navigation/navigator-service";
-import { activeRoadGraph } from "./offline-map/road-graph-file";
+import { ROUTER_CACHE_TILES, RouteService } from "./navigation/route-service";
+import { activeRoadGraph, openActiveRoadGraph } from "./offline-map/road-graph-file";
 import { SensorService } from "./sensor-capture/sensor-service";
 import { createTripFiles } from "./trip-recorder/trip-files";
 import { TripRecorder } from "./trip-recorder/trip-recorder";
@@ -39,6 +40,8 @@ export interface Runtime {
   recorder: TripRecorder;
   /** The map's position: the navigator (NAVIGATOR-SPEC §9), or phone GNSS without an OBD adapter. */
   position: NavigatorService;
+  /** Route planning and guidance (ROUTING-SPEC §8). */
+  routes: RouteService;
   getDevSettings(): DevSettings;
   setDevSettings(patch: Partial<DevSettings>): void;
   subscribeDevSettings(listener: () => void): () => void;
@@ -112,6 +115,27 @@ export function getRuntime(): Runtime {
     recorder.note(`gnss trust ${p.trust} (±${Math.round(p.accuracyM)} m)`);
   });
 
+  // Routing on the active region's road graph, from the published position (ROUTING-SPEC §8).
+  const routes = new RouteService({
+    position,
+    openGraph: () => openActiveRoadGraph(ROUTER_CACHE_TILES),
+    nowUs,
+    note: (text) => recorder.note(text),
+    log: {
+      route: (r) => recorder.navRoute(r),
+      point: (r) => recorder.navRoutePoint(r),
+      maneuver: (r) => recorder.navRouteManeuver(r),
+      progress: (r) => recorder.navRouteProgress(r),
+    },
+  });
+  // A route planned before the trip started (engine off) goes into the trip's log when it starts.
+  let wasRecording = recorder.getSnapshot().state === "recording";
+  recorder.subscribe(() => {
+    const recording = recorder.getSnapshot().state === "recording";
+    if (recording && !wasRecording) routes.logActiveRoute();
+    wasRecording = recording;
+  });
+
   // Breadcrumbs give crash reports context; scrubbing removes VINs/coordinates (src/config/sentry-scrub.ts).
   link.onLinkEvent((e) => {
     Sentry.addBreadcrumb({ category: "vehicle-link", message: e.detail ? `${e.type}: ${e.detail}` : e.type, level: e.type === "error" ? "error" : "info" });
@@ -127,6 +151,7 @@ export function getRuntime(): Runtime {
     sensors,
     recorder,
     position,
+    routes,
     getDevSettings: () => dev,
     setDevSettings: (patch) => {
       dev = { ...dev, ...patch };

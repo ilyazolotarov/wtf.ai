@@ -15,6 +15,10 @@ import {
   type GnssRecord,
   type NavEstimateRecord,
   type NavMapMatchRecord,
+  type NavRouteManeuverRecord,
+  type NavRoutePointRecord,
+  type NavRouteProgressRecord,
+  type NavRouteRecord,
 } from "@/triplog/schema";
 import {
   DEFAULT_TRIP_CONFIG,
@@ -219,6 +223,23 @@ export class TripRecorder {
   /** Map matching at that position (MAPMATCH-SPEC §11); dropped when not recording. */
   navMapMatch(r: NavMapMatchRecord): void {
     this.record(r.timestampUs, (w) => w.navMapMatch(r));
+  }
+
+  /** Routing (ROUTING-SPEC §8): plans, their polylines and maneuvers, guidance; dropped when not recording. */
+  navRoute(r: NavRouteRecord): void {
+    this.record(r.timestampUs, (w) => w.navRoute(r));
+  }
+
+  navRoutePoint(r: NavRoutePointRecord): void {
+    this.record(r.timestampUs, (w) => w.navRoutePoint(r));
+  }
+
+  navRouteManeuver(r: NavRouteManeuverRecord): void {
+    this.record(r.timestampUs, (w) => w.navRouteManeuver(r));
+  }
+
+  navRouteProgress(r: NavRouteProgressRecord): void {
+    this.record(r.timestampUs, (w) => w.navRouteProgress(r));
   }
 
   /** App-side event worth seeing in the log (no marker); dropped when not recording. */

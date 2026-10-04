@@ -4,6 +4,7 @@ import {
   Layer,
   Map,
   type CameraRef,
+  type PressEvent,
 } from "@maplibre/maplibre-react-native";
 import type {
   Feature,
@@ -17,7 +18,7 @@ import { useColorScheme, View, type NativeSyntheticEvent } from "react-native";
 
 import { useMapStyle } from "@/config/map";
 import { Colors } from "@/constants/theme";
-import { circlePolygon, destinationAtBearing } from "@/nav/geo";
+import { circlePolygon, destinationAtBearing, type Coordinate } from "@/nav/geo";
 import type { PositionEstimate } from "@/nav/position/types";
 import { usePosition } from "@/providers/position-provider";
 import { useDevSettings, useRuntime } from "@/providers/runtime-provider";
@@ -36,7 +37,10 @@ interface MapSurfaceProps {
   /** Map bearing in follow-heading (see `useHeadingUp`). */
   headingUpRad: number;
   onUserInteraction(): void;
-  onLongPress(): void;
+  /** Long press: where on the map. */
+  onLongPress(at: Coordinate): void;
+  /** A dropped pin, before routing to it. */
+  pin: Coordinate | null;
 }
 
 const CONE_RADIUS_M = 45;
@@ -65,12 +69,13 @@ export function MapSurface({
   headingUpRad,
   onUserInteraction,
   onLongPress,
+  pin,
 }: MapSurfaceProps) {
   const scheme = useColorScheme() === "dark" ? "dark" : "light";
   const palette = Colors[scheme];
   const mapStyle = useMapStyle(scheme);
   const position = usePosition();
-  const { activeRoute } = useRoute();
+  const { route } = useRoute();
   const { showParticles } = useDevSettings();
   const { position: navigator } = useRuntime();
   const cameraRef = useRef<CameraRef | null>(null);
@@ -211,9 +216,15 @@ export function MapSurface({
     ? pointFeatures(position.simulatedOutage.gnss)
     : emptyPoints();
   const ghostPoint = ghost ? pointFeatures(ghost) : emptyPoints();
-  const route = activeRoute
-    ? routeFeatures(activeRoute.coordinates)
-    : emptyLines();
+  // The route (ROUTING-SPEC §8): faded while planning again, its next maneuver, the destination; a dropped pin.
+  const routeLine = route?.plan ? routeFeatures(route.plan.coordinates.map((c) => [c.lon, c.lat])) : emptyLines();
+  const nextManeuver =
+    route?.maneuvers && route.guidance && route.guidance.state !== "arrived"
+      ? route.maneuvers[route.guidance.nextIndex]
+      : undefined;
+  const maneuverPoint = nextManeuver && nextManeuver.kind !== "arrive" ? pointFeatures(nextManeuver) : emptyPoints();
+  const destination = route ? pointFeatures(route.destination) : emptyPoints();
+  const pinPoint = pin ? pointFeatures(pin) : emptyPoints();
 
   // Dark style is still being tinted: hold a plain dark canvas instead of flashing light tiles.
   if (mapStyle == null)
@@ -231,7 +242,10 @@ export function MapSurface({
       // Two-finger rotation fires during pinch zoom and can't be given a threshold; the map
       // still turns in heading-up mode.
       touchRotate={false}
-      onLongPress={onLongPress}
+      onLongPress={(event: NativeSyntheticEvent<PressEvent>) => {
+        const [lon, lat] = event.nativeEvent.lngLat;
+        onLongPress({ lat, lon });
+      }}
       onRegionIsChanging={handleRegionChange}
       onRegionDidChange={handleRegionDidChange}
     >
@@ -244,16 +258,44 @@ export function MapSurface({
           bearing: 0,
         }}
       />
-      <GeoJSONSource id="active-route" data={route}>
+      <GeoJSONSource id="active-route" data={routeLine}>
+        <Layer
+          id="active-route-casing"
+          type="line"
+          layout={{ "line-cap": "round", "line-join": "round" }}
+          paint={{ "line-color": palette.bg, "line-width": 9, "line-opacity": route?.replanning ? 0.4 : 0.9 }}
+        />
         <Layer
           id="active-route-line"
           type="line"
-          layout={{ "line-cap": "round" }}
-          paint={{
-            "line-color": palette.route,
-            "line-width": 4,
-            "line-dasharray": [2, 1.5],
-          }}
+          layout={{ "line-cap": "round", "line-join": "round" }}
+          paint={{ "line-color": palette.route, "line-width": 6, "line-opacity": route?.replanning ? 0.4 : 1 }}
+        />
+      </GeoJSONSource>
+      <GeoJSONSource id="route-next-maneuver" data={maneuverPoint}>
+        <Layer
+          id="route-next-maneuver-dot"
+          type="circle"
+          paint={{ "circle-radius": 5, "circle-color": palette.bg, "circle-stroke-color": palette.route, "circle-stroke-width": 3 }}
+        />
+      </GeoJSONSource>
+      <GeoJSONSource id="route-destination" data={destination}>
+        <Layer
+          id="route-destination-dot"
+          type="circle"
+          paint={{ "circle-radius": 8, "circle-color": palette.route, "circle-stroke-color": palette.bg, "circle-stroke-width": 3 }}
+        />
+      </GeoJSONSource>
+      <GeoJSONSource id="dropped-pin" data={pinPoint}>
+        <Layer
+          id="dropped-pin-halo"
+          type="circle"
+          paint={{ "circle-radius": 16, "circle-color": palette.accent, "circle-opacity": 0.18 }}
+        />
+        <Layer
+          id="dropped-pin-dot"
+          type="circle"
+          paint={{ "circle-radius": 7, "circle-color": palette.accent, "circle-stroke-color": palette.bg, "circle-stroke-width": 3 }}
         />
       </GeoJSONSource>
       <GeoJSONSource id="position-accuracy" data={accuracy}>

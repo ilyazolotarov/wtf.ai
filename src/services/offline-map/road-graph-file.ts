@@ -66,3 +66,24 @@ function current(): ActiveRoadGraph | null {
 }
 
 export const activeRoadGraph: RoadGraphSource = { current, subscribe: subscribeMapPacks };
+
+/** The active region's graph file, opened again: the route planner's own reader, with its own tile cache. */
+export interface OpenRoadGraph extends ActiveRoadGraph {
+  close(): void;
+}
+
+/** A new reader on the active region's graph (null: none, or it can't be opened); the caller closes it. */
+export function openActiveRoadGraph(cacheTiles: number): OpenRoadGraph | null {
+  const { installed } = getMapPacks();
+  const active = activeGraphFile(installed);
+  if (!active) return null;
+  try {
+    const source = fileHandleByteSource(active.file);
+    const [w, s, e, n] = installed.regions[active.region].bounds;
+    const graph = new TiledRoadGraph(source, new LocalFrame({ lat: (s + n) / 2, lon: (w + e) / 2 }), { cacheTiles });
+    return { key: `${active.region}:${active.md5}`, region: active.region, graph, close: source.close };
+  } catch (e) {
+    console.warn(`road graph ${active.region}: ${e instanceof Error ? e.message : String(e)}`);
+    return null;
+  }
+}

@@ -30,6 +30,20 @@ const SF = {
   arrow_back: "chevron.left",
   location_off: "location.slash.fill",
   location_on: "location.fill",
+  // Route guidance (ROUTING-SPEC §8).
+  straight: "arrow.up",
+  turn_right: "arrow.turn.up.right",
+  turn_left: "arrow.turn.up.left",
+  turn_slight_right: "arrow.up.right",
+  turn_slight_left: "arrow.up.left",
+  turn_sharp_right: "arrow.down.right",
+  turn_sharp_left: "arrow.down.left",
+  fork_right: "arrow.triangle.branch",
+  fork_left: "arrow.triangle.branch",
+  u_turn_left: "arrow.uturn.down",
+  roundabout_left: "arrow.counterclockwise",
+  flag: "flag.checkered",
+  place: "mappin.and.ellipse",
 } as const satisfies Record<string, SFSymbol>;
 
 export type IconName = keyof typeof SF;
