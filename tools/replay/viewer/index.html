@@ -11,6 +11,7 @@
     --bg: #f6f7f9; --panel: #ffffff; --text: #16181d; --text2: #5b6270; --line: #e3e6eb;
     --pred: #2563eb; --gps: #16a34a; --coarse: #d97706; --rej: #dc2626; --cut: #8b93a1;
     --obd: #2563eb; --engine: #7c3aed; --accent: #2563eb;
+    --road: #a21caf; --road-end: #ea580c;
     color-scheme: light;
   }
   @media (prefers-color-scheme: dark) {
@@ -18,6 +19,7 @@
       --bg: #0f1115; --panel: #171a21; --text: #e8eaee; --text2: #9aa2b1; --line: #2a2f3a;
       --pred: #60a5fa; --gps: #4ade80; --coarse: #fbbf24; --rej: #f87171; --cut: #8b93a1;
       --obd: #60a5fa; --engine: #a78bfa; --accent: #60a5fa;
+      --road: #e879f9; --road-end: #fb923c;
       color-scheme: dark;
     }
   }
@@ -125,6 +127,7 @@
   <button id="split" aria-pressed="false">Side by side</button>
   <label><input id="showFixes" type="checkbox" checked /> all fixes</label>
   <label><input id="showErr" type="checkbox" checked /> error line</label>
+  <label title="Road graph used for map matching (tools/tiles graph): lines by class, arrows on one-ways; at zoom ≥ 15 junctions, dead ends (orange) and region-boundary ends (red)"><input id="showRoads" type="checkbox" checked /> roads</label>
   <span class="muted">Map: OpenFreeMap (online)</span>
 </div>
 
@@ -143,6 +146,7 @@ let playing = false;
 let lastFrame = 0;
 let split = false;
 let follow = true;
+let roads = null;
 
 // ---------- geometry ----------
 const R = 6371000;
@@ -200,9 +204,10 @@ function fixColorExpr() {
 function addLayers(map, role) {
   const gps = role !== "pred", pred = role !== "gps";
   const empty = fc([]);
-  for (const id of ["fixes", "gpsTrack", "predTrack", "predNow", "predAcc", "predHdg", "gpsNow", "gpsAcc", "errLine", "cuts"]) {
+  for (const id of ["roads", "roadNodes", "fixes", "gpsTrack", "predTrack", "predNow", "predAcc", "predHdg", "gpsNow", "gpsAcc", "errLine", "cuts"]) {
     map.addSource(id, { type: "geojson", data: empty });
   }
+  addRoadLayers(map);
   if (gps) {
     map.addLayer({ id: "gpsTrack", type: "line", source: "gpsTrack",
       paint: { "line-color": css("--gps"), "line-width": 2, "line-opacity": 0.55 } });
@@ -255,6 +260,69 @@ function addLayers(map, role) {
     map.on("mouseleave", "fixes", () => { map.getCanvas().style.cursor = ""; popup.remove(); });
     map.on("click", "fixes", (e) => seek(+e.features[0].properties.t));
   }
+}
+
+const ROAD_CLASSES = ["motorway", "trunk", "primary", "secondary", "tertiary", "unclassified", "residential",
+  "living_street", "service", "track", "road"];
+const EDGE_FLAGS = [[1, "link"], [2, "roundabout"], [4, "tunnel"], [8, "bridge"], [16, "private"], [32, "minor service"]];
+
+function addRoadLayers(map) {
+  const major = ["<=", ["get", "cls"], 4];
+  const minor = ["any", ["==", ["get", "cls"], 8], ["==", ["get", "cls"], 9]];
+  // A zoom interpolation must be the outermost expression: data cases go inside its stops.
+  const width = (w) => ["interpolate", ["linear"], ["zoom"], 12, w * 0.5, 17, w * 2];
+  map.addLayer({ id: "roads", type: "line", source: "roads", filter: ["!", minor],
+    layout: { "line-cap": "round" },
+    paint: { "line-color": css("--road"), "line-opacity": ["case", major, 0.75, 0.5],
+      "line-width": ["interpolate", ["linear"], ["zoom"], 12, ["case", major, 1.5, 1], 17, ["case", major, 6, 4]] } });
+  map.addLayer({ id: "roadsMinor", type: "line", source: "roads", filter: minor,
+    paint: { "line-color": css("--road"), "line-opacity": 0.45, "line-width": width(1.5), "line-dasharray": [2, 1.5] } });
+  map.addLayer({ id: "roadsOneway", type: "symbol", source: "roads", filter: ["==", ["get", "ow"], 1], minzoom: 14,
+    layout: { "symbol-placement": "line", "symbol-spacing": 70, "text-field": "→", "text-font": ["Noto Sans Regular"],
+      "text-size": 14, "text-keep-upright": false, "text-allow-overlap": true },
+    paint: { "text-color": css("--road"), "text-halo-color": css("--panel"), "text-halo-width": 1 } });
+  map.addLayer({ id: "roadNodes", type: "circle", source: "roadNodes", minzoom: 15,
+    paint: { "circle-radius": ["case", [">", ["get", "fl"], 0], 4, 2.5],
+      "circle-color": ["case", ["==", ["%", ["get", "fl"], 2], 1], css("--rej"), [">", ["get", "fl"], 0], css("--road-end"), css("--road")],
+      "circle-stroke-width": 1, "circle-stroke-color": css("--panel") } });
+  const popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false });
+  for (const id of ["roads", "roadsMinor"]) {
+    map.on("mousemove", id, (e) => {
+      const p = e.features[0].properties;
+      const flags = EDGE_FLAGS.filter(([bit]) => p.fl & bit).map(([, name]) => name);
+      popup.setLngLat(e.lngLat).setHTML(
+        `<b>${ROAD_CLASSES[p.cls] ?? p.cls}</b> · way ${p.way}<br>${p.len} m` + (p.ow ? " · one-way" : "") +
+        (flags.length ? `<br>${flags.join(", ")}` : "")).addTo(map);
+    });
+    map.on("mouseleave", id, () => popup.remove());
+  }
+  map.on("mousemove", "roadNodes", (e) => {
+    const p = e.features[0].properties;
+    const kind = p.fl & 1 ? "region boundary" : p.fl & 2 ? "dead end" : "junction";
+    popup.setLngLat(e.lngLat).setHTML(`<b>${kind}</b> · ${p.deg} edge${p.deg === 1 ? "" : "s"}`).addTo(map);
+  });
+  map.on("mouseleave", "roadNodes", () => popup.remove());
+}
+
+async function setRoads(map) {
+  await map.ready;
+  const on = roads && $("showRoads").checked;
+  map.getSource("roads")?.setData(on ? roads.roads : fc([]));
+  map.getSource("roadNodes")?.setData(on ? roads.nodes : fc([]));
+}
+
+async function loadRoads(file) {
+  roads = null;
+  const res = await fetch(`/api/roads?${new URLSearchParams({ file })}`);
+  if (!res.ok) { showError(`roads: ${await res.text()}`); return; }
+  const payload = await res.json();
+  if ($("file").value !== file) return;
+  roads = payload;
+  $("showRoads").parentElement.title = payload.graph
+    ? `${payload.graph} (OSM ${payload.osmDate}): ${payload.roads.features.length} edges in ${payload.tiles} tiles`
+    : "No road graph covers this trip: build one with `python -m tiles.cli graph <region>` (tools/tiles)";
+  await setRoads(mapA);
+  if (mapB) await setRoads(mapB);
 }
 
 function newMap(container, role) {
@@ -503,6 +571,7 @@ $("fwd").onclick = () => seek(t + 5);
 $("follow").onclick = () => { setFollow(!follow); updateDynamic(); };
 $("showFixes").onchange = () => { setStatic(mapA); if (mapB) setStatic(mapB); };
 $("showErr").onchange = () => setLayerVisibility(mapA, split ? "gps" : "both");
+$("showRoads").onchange = () => { setRoads(mapA); if (mapB) setRoads(mapB); };
 $("split").onclick = async () => {
   split = !split;
   $("split").setAttribute("aria-pressed", String(split));
@@ -519,6 +588,7 @@ $("split").onclick = async () => {
     await mapB.ready;
     mapB.jumpTo({ center: mapA.getCenter(), zoom: mapA.getZoom() });
     if (data) await setStatic(mapB);
+    await setRoads(mapB);
   }
   await mapA.ready;
   setLayerVisibility(mapA, split ? "gps" : "both");
@@ -574,6 +644,7 @@ async function run() {
   const ol = data.options.cuts.find((c) => c.openLoop);
   $("labelB").textContent = ol ? `Prediction · no GPS after ${fmtT(ol.fromS)}` : "Prediction";
   renderStatic();
+  loadRoads(file);
   await setStatic(mapA);
   if (mapB) await setStatic(mapB);
   const pts = [...data.track, ...data.fixes.filter((f) => f.acc < 500)];

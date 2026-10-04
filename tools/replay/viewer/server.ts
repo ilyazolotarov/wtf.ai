@@ -1,5 +1,6 @@
 // Local trip replay viewer: `npm run replay:view` → http://127.0.0.1:5174
-// Serves index.html, lists tools/triplog/logs/*.ulg, and replays one on request.
+// Serves index.html, lists tools/triplog/logs/*.ulg, replays one on request, and serves the
+// road graph around it (tools/tiles/out/release/*.graph.bin, or --graph <file>).
 // Bound to localhost only: the logs hold the VIN and GPS tracks.
 
 import { exec } from "node:child_process";
@@ -9,7 +10,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { buildViewerData } from "../../../src/nav/replay/viewer-data";
-import { readTripLog } from "../../../src/triplog/trip-log-reader";
+import { readTripLog, type TripLog } from "../../../src/triplog/trip-log-reader";
+import { findGraph, roadsAround } from "../graph-file";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -19,6 +21,14 @@ const flag = (name: string) => {
 };
 const LOG_DIR = path.resolve(flag("--logs") ?? path.join(HERE, "../../triplog/logs"));
 const PORT = Number(flag("--port") ?? 5174);
+const GRAPH = flag("--graph");
+
+// The last log read: /api/roads follows /api/replay for the same file.
+let lastTrip: { file: string; trip: TripLog } | null = null;
+function loadTrip(file: string): TripLog {
+  if (lastTrip?.file !== file) lastTrip = { file, trip: readTripLog(new Uint8Array(readFileSync(path.join(LOG_DIR, file)))) };
+  return lastTrip.trip;
+}
 
 function send(res: ServerResponse, status: number, type: string, body: string | Buffer): void {
   res.writeHead(status, { "content-type": type, "cache-control": "no-store" });
@@ -57,7 +67,7 @@ const server = createServer((req, res) => {
       const lag = url.searchParams.get("lag");
       const openLoop = url.searchParams.get("openLoop");
       const started = Date.now();
-      const trip = readTripLog(new Uint8Array(readFileSync(path.join(LOG_DIR, file))));
+      const trip = loadTrip(file);
       const data = buildViewerData(file, trip, {
         cuts: parseCuts(url.searchParams.get("cuts")),
         nav: lag ? { gnssLagS: Number(lag), estimateGnssLag: false } : {},
@@ -65,6 +75,17 @@ const server = createServer((req, res) => {
       });
       send(res, 200, "application/json", JSON.stringify(data));
       console.log(`replayed ${file} in ${Date.now() - started} ms`);
+    } else if (url.pathname === "/api/roads") {
+      const file = path.basename(url.searchParams.get("file") ?? "");
+      if (!file.endsWith(".ulg")) return send(res, 400, "text/plain", "file must be a .ulg in the logs folder");
+      const started = Date.now();
+      const points = loadTrip(file).gnss.filter((f) => f.hAccM <= 500);
+      const graphFile = points.length ? (GRAPH ?? findGraph(points[0])) : null;
+      const payload = graphFile
+        ? roadsAround(graphFile, points)
+        : { graph: null, osmDate: null, tiles: 0, roads: { type: "FeatureCollection", features: [] }, nodes: { type: "FeatureCollection", features: [] } };
+      send(res, 200, "application/json", JSON.stringify(payload));
+      console.log(`roads for ${file}: ${payload.graph ?? "no graph"}, ${payload.roads.features.length} edges in ${Date.now() - started} ms`);
     } else {
       send(res, 404, "text/plain", "not found");
     }

@@ -69,6 +69,26 @@ npm run replay:view -- --logs D:/trips --port 5180
 The server only listens on localhost. The basemap is the online OpenFreeMap Liberty style, so your browser
 sends the map viewport to OpenFreeMap.
 
+## Road graph
+
+Map matching runs on the road graph built by `tools/tiles` (`python -m tiles.cli graph chernihiv`, see its
+README; MAPMATCH-SPEC §4–5). Tools pick the smallest `tools/tiles/out/release/*.graph.bin` with roads at the
+trip's first fix, so the oblast rather than Ukraine; `--graph <file>` overrides.
+
+```bash
+npm run replay:graph -- tools/triplog/logs/*.ulg                       # graph vs clean fixes, reader timing
+npm run replay:graph -- --graph tools/tiles/out/release/ukraine.graph.bin trip.ulg
+npm run replay:view -- --graph tools/tiles/out/release/kyiv.graph.bin  # viewer with a given graph
+```
+
+- **`replay:graph`:** for each clean moving satellite fix (≤ 10 m, ≥ 3 m/s): the distance to the nearest road,
+  the share farther than 15 m (missing roads, parking lots), and the GNSS course against the road heading.
+  Then the reader's cost: open time, tiles loaded, `edgesNear` from cache and with tile loads.
+- **Viewer:** the *roads* checkbox draws the graph around the trip's fixes, under the tracks: major roads thick,
+  service roads and tracks dashed, arrows on one-ways (zoom ≥ 14). At zoom ≥ 15 it adds junctions, dead ends
+  (orange) and region-boundary ends (red). Hover for the OSM way id, class, length and flags. Its tooltip says
+  which graph file is in use.
+
 ## Reading the summary
 
 - **init**: how the EKF got its heading.
