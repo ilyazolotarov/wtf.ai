@@ -21,7 +21,9 @@ Place the car on the offline road network, so that:
   Measured in §4.7.
 - **M2 done:** the TS reader `src/nav/mapmatch/graph/` (§5), `npm run replay:graph`, and a roads layer in
   `replay:view`. Measured in §5.1.
-- Next: M3 (odometry output + ground truth). Order of work in §12.
+- **M3 done:** the navigator's odometry output (§6.1), the ground-truth HMM (§10.1), `npm run replay:truth`, and
+  a truth layer in `replay:view`. Measured in §10.4.
+- Next: M4 (particle filter, open loop). Order of work in §12.
 
 ## 3. Decisions
 
@@ -213,23 +215,32 @@ On the 5 drives with clean moving satellite fixes (≤ 10 m, ≥ 3 m/s; 30–276
 
 ## 6. Navigator interface
 
-### 6.1 Odometry output (navigator → PF)
+### 6.1 Odometry output (navigator → PF, `src/nav/odometry/odometry-output.ts`)
 
-`ekf.predict` uses the speed and turn of each IMU step, then discards them. The navigator gains an odometry output:
+`ekf.predict` used the speed and turn of each IMU step, then discarded them. `Navigator.subscribeOdometry(listener)`
+now hands them out (computed only while someone listens; `flushOdometry()` at the end of input; replay option
+`odometry`):
 
-- **Contents:** per IMU step, `Δs` and `Δψ`, summed into chunks of 2 m or 0.2 s (whichever comes first). Each chunk
-  carries:
-  - `dsM`, `dpsiRad` and their variances;
-  - flags: `standstill`, `yawUnknown` (gyro invalid while moving), `speedUnknown` (OBD stale);
-  - time span.
+- **Chunks** (`OdometryStep`): each integration step's `Δs` and `Δψ`, summed into chunks of 2 m or 0.2 s
+  (whichever comes first; a change of source closes one early). Each chunk carries:
+  - `t0Us`, `t1Us`; `dsM` (≥ 0), `dpsiRad` (clockwise positive, like the heading) and their variances;
+  - `distanceM` and `turnRad`: cumulative distance and unwrapped cumulative turn since the navigator started. The
+    PF reads windows from them (§7.4);
+  - flags: `stopped` (the whole chunk at standstill or zero speed), `yawUnknown` (gyro invalid while moving:
+    `Δψ` = 0 with handling noise), `speedUnknown` (OBD stale);
+  - `source`.
 - **Source:**
-  - In `dr` mode: the EKF. `Δs = v·dt`, with `v` ≈ `k_s · s_OBD`. `Δψ = −k_ω (ω − b_ω) dt`. Variances come from
-    `k_s`, `b_ω` and the gyro noise.
-  - In `anchored` mode, which has no EKF yet: the relative track the navigator already integrates (`rel`), with
-    the stored `k_s` (NAVIGATOR-SPEC §7.4) and the learned bias. This is what makes §8 possible.
-- **Cumulative turn:** the navigator also keeps a cumulative unwrapped measured turn `Ψ` and cumulative distance
-  `S`. The PF reads windows from them (§7.4).
+  - `ekf` (mode `dr`): computed from the state before each prediction, so it is exactly the EKF's own motion:
+    `Δs = max(0, v)·dt` (v ≈ `k_s · s_OBD`), `Δψ = −k_ω (ω − b_ω) dt`, 0 while holding at standstill.
+  - `relative` (before the EKF starts): OBD × the stored `k_s` (NAVIGATOR-SPEC §7.4, default 1), and the gyro
+    minus the bias learned at stops, `k_ω` = 1. This is what makes §8 possible.
+- **Variances:** `dsVar = (σ_ks/k_s · Δs)² + (0.1 m/s · T)²` (scale error correlated over the chunk, plus OBD
+  resolution); `dpsiVar` = gyro white noise (`(gyroNoise·k_ω)²·T`, or the handling noise while the gyro is
+  invalid) + `(σ_bω·T)²` + `(σ_kω·Δψ)²`. Calibration σ come from the EKF, or its priors in `relative`.
 - No raw sensor data crosses this interface. Stage 2/3 odometry sources feed the same output (SPEC §2.1).
+- **Tests** (`src/nav/__tests__/odometry.test.ts`, synthetic city drive): chunks of ≤ 2 m / 0.2 s; during a GNSS
+  cut, Σ`Δψ` over 50 s including a 90° turn equals the EKF heading change to < 0.05°, and Σ`Δs` its path to 1 %;
+  totals match the true distance to 1 % and the true turn up to the gyro bias the EKF hasn't learned yet.
 
 ### 6.2 PF output (PF → navigator → map)
 
@@ -379,12 +390,26 @@ odometry, which doesn't depend on the absolute heading.
 
 - Offline Viterbi HMM over satellite fixes ≤ 10 m (the same truth rule as NAVIGATOR-SPEC §10). An HMM is right here:
   clean GNSS has independent, bounded errors, and the matcher sees the whole drive.
-  - States: edge projections within 30 m.
-  - Emission: N(distance; 5 m).
-  - Transition: exp(−|route distance − straight distance| / β), with route distance from a bounded Dijkstra.
-- Gives the true edge and direction at each fix, interpolated along the route between fixes.
-- Breaks in the HMM (no route between consecutive fixes) are reported. They point at missing or wrong OSM roads.
-- **Same road:** the same edge, or an adjacent edge within 15 m of their shared node (junction tolerance).
+  - **States:** the 8 nearest edges within 30 m, each in both directions, at the fix's projection.
+  - **Emission:** N(distance; 5 m), times N(course − travel direction; 20°) when the fix moves at ≥ 3 m/s.
+  - **Transition:** exp(−(|route − OBD distance| + penalty) / β), β = 5 m + 5 % of the OBD distance. The **OBD
+    distance** driven between the fixes, not the straight line, so curves don't count against a route. Routes come
+    from a Dijkstra over the graph's exits, bounded to 1.5 × OBD + 50 m.
+  - **Penalties** (m): against a one-way 200, restricted turn 100, U-turn 100 (free at a dead end). Soft, so a
+    wrong OSM tag can't break the truth; a penalised leg is reported.
+  - Projection up to 10 m back along the same edge is fix jitter, not a reversal.
+- **Output:** the true edge, direction and position along the edge at each fix; the route between consecutive
+  fixes; `at(t)` interpolates along it by OBD distance.
+- **Breaks** end a chain:
+  - `no candidates`: no road within 30 m. Consecutive ones form one break: the car is off the graph (yard,
+    parking area, unmapped road).
+  - `gap`: more than 30 s between clean fixes. The report counts the fixes in it that aren't clean (degraded GNSS
+    rather than none).
+  - `no route`: no route fits the OBD distance. Points at missing or wrong OSM roads.
+- **Same road** (`isSameRoad`): the same edge, or an edge sharing a node with the truth edge while the truth position
+  is within 15 m of that node (junction tolerance).
+- **Tests** (`src/nav/replay/__tests__/truth-match.test.ts`, fixture graph): a right turn at a junction, a turn
+  against a one-way (matched, penalised), an off-graph stretch as one break, a gap, the junction tolerance.
 
 ### 10.2 Metrics
 
@@ -400,6 +425,9 @@ odometry, which doesn't depend on the absolute heading.
 
 ### 10.3 Tooling (`tools/replay`)
 
+- `npm run replay:truth -- [--graph <file>] [--json <out>] <logs>` (M3): chains, breaks with their reason and place,
+  moving-fix distance to the road, route vs OBD vs navigator odometry, legs that don't fit, penalised legs.
+
 - `npm run replay:graph -- [--graph <file>] <logs>` (M2): fix-to-road distance, course vs road heading, reader
   timing (§5.1).
 - Graph choice: `--graph <file>`, else the smallest `tools/tiles/out/release/*.graph.bin` with roads at the trip's
@@ -414,11 +442,28 @@ odometry, which doesn't depend on the absolute heading.
 - **Viewer layers:**
   - graph edges, colored by class, one-ways marked (done in M2: roads around the trip's fixes, junction, dead-end
     and boundary nodes at zoom ≥ 15, hover for way id, class, length, flags; `replay:view -- --graph <file>`);
-  - truth edge;
+  - truth route (done in M3: the matched route, the leg at the cursor thick, breaks as × with their reason on hover);
   - the particle cloud at the cursor time;
   - clusters with their weights.
 - **Logs:** all 7 current logs are from Slavutych, a small planned town. Parallel-road and dense-grid cases (SPEC §7.5)
   need drives elsewhere: Kyiv, or Chernihiv's ring roads. Record some before calling M5 done.
+
+### 10.4 Measured (M3, `npm run replay:truth`)
+
+| Drive | Clean fixes matched | Moving fix → road (median / p95) | Route / OBD / odometry | Breaks |
+| --- | --- | --- | --- | --- |
+| q8tfjs | 402 of 422 | 2.1 / 6.0 m | 2.98 / 2.87 / 2.94 km | 1: off the graph (yard at the end, 20 fixes) |
+| 5mn7ai | 656 of 672 | 3.2 / 6.4 m | 3.32 / 3.27 / 3.34 km | 1: off the graph (yard, 16 fixes) |
+| 6vccgr | 196 of 196 | 2.2 / 7.5 m | 1.18 / 1.12 / 1.14 km | 2: gaps of 30 and 38 s, fixes 11–27 m |
+| s4fkdm | 308 of 308 | 1.8 / 4.8 m | 1.05 / 1.01 / 1.01 km | none |
+| 79xky3 | 45 of 45 | 2.0 / 2.7 m | 0.51 / 0.47 / 0.48 km | none |
+
+- No `no route` break on any drive. Every break was checked on a map: two are the car driving off the graph into
+  an unmapped yard, two are stretches of degraded GNSS.
+- Routes are 1–7 % longer than OBD: OBD reads ~2 % low on the CX-5 (NAVIGATOR-SPEC §5.2), and the centre line is
+  not the driven line. The navigator's odometry (`k_s` learned) is 0.7 % above to 5.4 % below the route.
+- Of 725 moving legs, one doesn't fit its OBD distance (a 1 s fix jump). No leg needed a penalty.
+- 7–64 ms per drive in Node.
 
 ## 11. App
 
@@ -446,7 +491,7 @@ odometry, which doesn't depend on the absolute heading.
 | --- | --- | --- |
 | M1 | Graph builder (§4) | `chernihiv` and `ukraine` built; size, build time and peak memory recorded here; pytest green. **Done** (§4.7) |
 | M2 | Reader + viewer layer (§5, §10.3) | TS round-trip tests on a fixture; graph drawn over the drives in `replay:view` and checked by eye; tile load time in Node. **Done** (§5.1) |
-| M3 | Odometry output + ground truth (§6.1, §10.1) | odometry chunks sum to the EKF's distance and heading change; truth edge sequences for the 4 clean drives with no unexplained breaks |
+| M3 | Odometry output + ground truth (§6.1, §10.1) | odometry chunks sum to the EKF's distance and heading change; truth edge sequences for the 4 clean drives with no unexplained breaks. **Done** (§10.4) |
 | M4 | PF open loop, known heading (§7) | §10.2 metrics on all drives; dominant-cluster max error on 240 s cuts better than the EKF's 37 m median; truth survival 100 % |
 | M5 | Heading init from the map (§8) | EKF starts sooner than alignment on the jammed drives and on `--jam-start`, with no start > 10° off |
 | M6 | Closed loop (§9) | `replay:bench` better at 120 / 240 s; max error ÷ σ stays within 0.5–2 (NAVIGATOR-SPEC §12.1) |

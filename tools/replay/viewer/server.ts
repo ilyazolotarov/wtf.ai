@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 
 import { buildViewerData } from "../../../src/nav/replay/viewer-data";
 import { readTripLog, type TripLog } from "../../../src/triplog/trip-log-reader";
-import { findGraph, roadsAround } from "../graph-file";
+import { findGraph, roadsAround, truthRoute } from "../graph-file";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -86,6 +86,18 @@ const server = createServer((req, res) => {
         : { graph: null, osmDate: null, tiles: 0, roads: { type: "FeatureCollection", features: [] }, nodes: { type: "FeatureCollection", features: [] } };
       send(res, 200, "application/json", JSON.stringify(payload));
       console.log(`roads for ${file}: ${payload.graph ?? "no graph"}, ${payload.roads.features.length} edges in ${Date.now() - started} ms`);
+    } else if (url.pathname === "/api/truth") {
+      const file = path.basename(url.searchParams.get("file") ?? "");
+      if (!file.endsWith(".ulg")) return send(res, 400, "text/plain", "file must be a .ulg in the logs folder");
+      const started = Date.now();
+      const trip = loadTrip(file);
+      const first = trip.gnss.find((f) => f.hAccM <= 10);
+      const graphFile = first ? (GRAPH ?? findGraph(first)) : null;
+      const empty = { type: "FeatureCollection", features: [] };
+      const payload = graphFile ? truthRoute(graphFile, trip) : { graph: null, legs: empty, breaks: empty, summary: { fixes: 0, matched: 0, breaks: 0 } };
+      send(res, 200, "application/json", JSON.stringify(payload));
+      const s = payload.summary;
+      console.log(`truth for ${file}: ${s.matched} of ${s.fixes} clean fixes matched, ${s.breaks} breaks, ${Date.now() - started} ms`);
     } else {
       send(res, 404, "text/plain", "not found");
     }

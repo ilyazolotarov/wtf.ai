@@ -8,6 +8,8 @@ import type { Coordinate } from "../../src/nav/geo";
 import { LocalFrame } from "../../src/nav/geo/local-frame";
 import type { ByteSource } from "../../src/nav/mapmatch/graph/byte-source";
 import { TiledRoadGraph } from "../../src/nav/mapmatch/graph/road-graph";
+import { legCoordinates, matchTruth } from "../../src/nav/replay/truth-match";
+import type { TripLog } from "../../src/triplog/trip-log-reader";
 
 export const RELEASE_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../tiles/out/release");
 
@@ -110,4 +112,44 @@ function roadsPayload(graph: TiledRoadGraph, graphFile: string, points: Coordina
     roads: { type: "FeatureCollection", features: roads },
     nodes: { type: "FeatureCollection", features: nodes },
   };
+}
+
+export interface TruthPayload {
+  graph: string | null;
+  /** Legs as GeoJSON lines with `t0` / `t1` (s since log start); breaks as points with `reason`. */
+  legs: { type: "FeatureCollection"; features: object[] };
+  breaks: { type: "FeatureCollection"; features: object[] };
+  summary: { fixes: number; matched: number; breaks: number };
+}
+
+/** Ground-truth route for the replay viewer (MAPMATCH-SPEC §10.1). */
+export function truthRoute(graphFile: string, trip: TripLog): TruthPayload {
+  const first = trip.gnss.find((f) => f.hAccM <= 10) ?? trip.gnss[0];
+  const { graph, close } = openGraph(graphFile, first);
+  try {
+    const truth = matchTruth(trip, graph);
+    const tS = (tUs: number) => Math.round(((tUs - trip.startUs) / 1e6) * 100) / 100;
+    const r6 = (v: number) => Math.round(v * 1e6) / 1e6;
+    const legs = truth.legs.map((leg) => ({
+      type: "Feature",
+      properties: { t0: tS(truth.points[leg.from].tUs), t1: tS(truth.points[leg.to].tUs), len: Math.round(leg.lengthM), obd: Math.round(leg.obdM), pen: leg.penaltyM },
+      geometry: {
+        type: "LineString",
+        coordinates: legCoordinates(graph, leg, truth.points[leg.from], truth.points[leg.to]).map(([x, y]) => [r6(x), r6(y)]),
+      },
+    }));
+    const breaks = truth.breaks.map((b) => ({
+      type: "Feature",
+      properties: { t0: tS(b.t0Us), t1: tS(b.t1Us), reason: b.reason, fixes: b.fixes, degraded: b.degradedFixes ?? 0 },
+      geometry: { type: "Point", coordinates: [r6(b.lon), r6(b.lat)] },
+    }));
+    return {
+      graph: path.basename(graphFile),
+      legs: { type: "FeatureCollection", features: legs },
+      breaks: { type: "FeatureCollection", features: breaks },
+      summary: { fixes: truth.fixes, matched: truth.points.length, breaks: truth.breaks.length },
+    };
+  } finally {
+    close();
+  }
 }

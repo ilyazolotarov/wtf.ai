@@ -77,6 +77,7 @@ trip's first fix, so the oblast rather than Ukraine; `--graph <file>` overrides.
 
 ```bash
 npm run replay:graph -- tools/triplog/logs/*.ulg                       # graph vs clean fixes, reader timing
+npm run replay:truth -- tools/triplog/logs/*.ulg                       # ground truth: which road, breaks
 npm run replay:graph -- --graph tools/tiles/out/release/ukraine.graph.bin trip.ulg
 npm run replay:view -- --graph tools/tiles/out/release/kyiv.graph.bin  # viewer with a given graph
 ```
@@ -84,10 +85,16 @@ npm run replay:view -- --graph tools/tiles/out/release/kyiv.graph.bin  # viewer 
 - **`replay:graph`:** for each clean moving satellite fix (≤ 10 m, ≥ 3 m/s): the distance to the nearest road,
   the share farther than 15 m (missing roads, parking lots), and the GNSS course against the road heading.
   Then the reader's cost: open time, tiles loaded, `edgesNear` from cache and with tile loads.
+- **`replay:truth`:** ground truth for map matching (MAPMATCH-SPEC §10.1): an offline HMM matches the clean
+  satellite fixes (≤ 10 m) to roads, scoring routes against the OBD distance. It prints the chains and every
+  break (off the graph, gap, no route) with time and place, how far moving fixes are from the road, the route vs
+  OBD vs navigator odometry distance, and any legs that don't fit or needed a one-way/restriction/U-turn penalty.
+  `--json <out>` saves the matched points, legs and breaks.
 - **Viewer:** the *roads* checkbox draws the graph around the trip's fixes, under the tracks: major roads thick,
   service roads and tracks dashed, arrows on one-ways (zoom ≥ 14). At zoom ≥ 15 it adds junctions, dead ends
   (orange) and region-boundary ends (red). Hover for the OSM way id, class, length and flags. Its tooltip says
-  which graph file is in use.
+  which graph file is in use. The *truth* checkbox draws the matched route in teal, the leg at the cursor thick,
+  and breaks as red × (hover for the reason).
 
 ## Reading the summary
 

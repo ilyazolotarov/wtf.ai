@@ -11,7 +11,7 @@
     --bg: #f6f7f9; --panel: #ffffff; --text: #16181d; --text2: #5b6270; --line: #e3e6eb;
     --pred: #2563eb; --gps: #16a34a; --coarse: #d97706; --rej: #dc2626; --cut: #8b93a1;
     --obd: #2563eb; --engine: #7c3aed; --accent: #2563eb;
-    --road: #a21caf; --road-end: #ea580c;
+    --road: #a21caf; --road-end: #ea580c; --truth: #0f766e;
     color-scheme: light;
   }
   @media (prefers-color-scheme: dark) {
@@ -19,7 +19,7 @@
       --bg: #0f1115; --panel: #171a21; --text: #e8eaee; --text2: #9aa2b1; --line: #2a2f3a;
       --pred: #60a5fa; --gps: #4ade80; --coarse: #fbbf24; --rej: #f87171; --cut: #8b93a1;
       --obd: #60a5fa; --engine: #a78bfa; --accent: #60a5fa;
-      --road: #e879f9; --road-end: #fb923c;
+      --road: #e879f9; --road-end: #fb923c; --truth: #2dd4bf;
       color-scheme: dark;
     }
   }
@@ -128,6 +128,7 @@
   <label><input id="showFixes" type="checkbox" checked /> all fixes</label>
   <label><input id="showErr" type="checkbox" checked /> error line</label>
   <label title="Road graph used for map matching (tools/tiles graph): lines by class, arrows on one-ways; at zoom ≥ 15 junctions, dead ends (orange) and region-boundary ends (red)"><input id="showRoads" type="checkbox" checked /> roads</label>
+  <label title="Ground truth (MAPMATCH-SPEC §10.1): the road the car was on, from an offline HMM over clean satellite fixes. The leg at the cursor is thick; × marks breaks (hover for why)"><input id="showTruth" type="checkbox" checked /> truth</label>
   <span class="muted">Map: OpenFreeMap (online)</span>
 </div>
 
@@ -147,6 +148,7 @@ let lastFrame = 0;
 let split = false;
 let follow = true;
 let roads = null;
+let truth = null;
 
 // ---------- geometry ----------
 const R = 6371000;
@@ -204,7 +206,7 @@ function fixColorExpr() {
 function addLayers(map, role) {
   const gps = role !== "pred", pred = role !== "gps";
   const empty = fc([]);
-  for (const id of ["roads", "roadNodes", "fixes", "gpsTrack", "predTrack", "predNow", "predAcc", "predHdg", "gpsNow", "gpsAcc", "errLine", "cuts"]) {
+  for (const id of ["roads", "roadNodes", "truth", "truthBreaks", "fixes", "gpsTrack", "predTrack", "predNow", "predAcc", "predHdg", "gpsNow", "gpsAcc", "errLine", "cuts"]) {
     map.addSource(id, { type: "geojson", data: empty });
   }
   addRoadLayers(map);
@@ -281,6 +283,13 @@ function addRoadLayers(map) {
     layout: { "symbol-placement": "line", "symbol-spacing": 70, "text-field": "→", "text-font": ["Noto Sans Regular"],
       "text-size": 14, "text-keep-upright": false, "text-allow-overlap": true },
     paint: { "text-color": css("--road"), "text-halo-color": css("--panel"), "text-halo-width": 1 } });
+  map.addLayer({ id: "truth", type: "line", source: "truth", layout: { "line-cap": "round" },
+    paint: { "line-color": css("--truth"), "line-opacity": 0.55, "line-width": ["interpolate", ["linear"], ["zoom"], 12, 2, 17, 5] } });
+  map.addLayer({ id: "truthNow", type: "line", source: "truth", filter: ["==", ["get", "t0"], -1], layout: { "line-cap": "round" },
+    paint: { "line-color": css("--truth"), "line-opacity": 0.9, "line-width": ["interpolate", ["linear"], ["zoom"], 12, 5, 17, 12] } });
+  map.addLayer({ id: "truthBreaks", type: "symbol", source: "truthBreaks",
+    layout: { "text-field": "×", "text-font": ["Noto Sans Bold"], "text-size": 26, "text-allow-overlap": true },
+    paint: { "text-color": css("--rej"), "text-halo-color": css("--panel"), "text-halo-width": 1.5 } });
   map.addLayer({ id: "roadNodes", type: "circle", source: "roadNodes", minzoom: 15,
     paint: { "circle-radius": ["case", [">", ["get", "fl"], 0], 4, 2.5],
       "circle-color": ["case", ["==", ["%", ["get", "fl"], 2], 1], css("--rej"), [">", ["get", "fl"], 0], css("--road-end"), css("--road")],
@@ -302,6 +311,14 @@ function addRoadLayers(map) {
     popup.setLngLat(e.lngLat).setHTML(`<b>${kind}</b> · ${p.deg} edge${p.deg === 1 ? "" : "s"}`).addTo(map);
   });
   map.on("mouseleave", "roadNodes", () => popup.remove());
+  map.on("mousemove", "truthBreaks", (e) => {
+    const p = e.features[0].properties;
+    const why = p.reason === "no candidates" ? `no road within 30 m (${p.fixes} fixes): off the graph`
+      : p.reason === "gap" ? `no clean fix for ${Math.round(p.t1 - p.t0)} s (${p.degraded} fixes that aren't clean)`
+      : "no route fits the OBD distance";
+    popup.setLngLat(e.lngLat).setHTML(`<b>truth break</b> ${fmtT(p.t0)}–${fmtT(p.t1)}<br>${why}`).addTo(map);
+  });
+  map.on("mouseleave", "truthBreaks", () => popup.remove());
 }
 
 async function setRoads(map) {
@@ -309,6 +326,34 @@ async function setRoads(map) {
   const on = roads && $("showRoads").checked;
   map.getSource("roads")?.setData(on ? roads.roads : fc([]));
   map.getSource("roadNodes")?.setData(on ? roads.nodes : fc([]));
+}
+
+async function setTruth(map) {
+  await map.ready;
+  const on = truth && $("showTruth").checked;
+  map.getSource("truth")?.setData(on ? truth.legs : fc([]));
+  map.getSource("truthBreaks")?.setData(on ? truth.breaks : fc([]));
+}
+
+/** Thick line on the truth leg under the time cursor. */
+function updateTruthNow(map) {
+  if (!map?.getLayer("truthNow")) return;
+  map.setFilter("truthNow", ["all", ["<=", ["get", "t0"], t], [">=", ["get", "t1"], t]]);
+}
+
+async function loadTruth(file) {
+  truth = null;
+  const res = await fetch(`/api/truth?${new URLSearchParams({ file })}`);
+  if (!res.ok) { showError(`truth: ${await res.text()}`); return; }
+  const payload = await res.json();
+  if ($("file").value !== file) return;
+  truth = payload;
+  const s = payload.summary;
+  $("showTruth").parentElement.title = payload.graph
+    ? `Ground truth on ${payload.graph}: ${s.matched} of ${s.fixes} clean fixes matched, ${s.breaks} break${s.breaks === 1 ? "" : "s"}`
+    : "No ground truth: no clean satellite fixes, or no road graph covers this trip";
+  await setTruth(mapA);
+  if (mapB) await setTruth(mapB);
 }
 
 async function loadRoads(file) {
@@ -374,6 +419,8 @@ function setLayerVisibility(map, role) {
 
 function updateDynamic() {
   if (!data) return;
+  updateTruthNow(mapA);
+  updateTruthNow(mapB);
   const p = predAt(t);
   const f = fixAt(t);
   const age = f ? t - f.t : Infinity;
@@ -572,6 +619,7 @@ $("follow").onclick = () => { setFollow(!follow); updateDynamic(); };
 $("showFixes").onchange = () => { setStatic(mapA); if (mapB) setStatic(mapB); };
 $("showErr").onchange = () => setLayerVisibility(mapA, split ? "gps" : "both");
 $("showRoads").onchange = () => { setRoads(mapA); if (mapB) setRoads(mapB); };
+$("showTruth").onchange = () => { setTruth(mapA); if (mapB) setTruth(mapB); };
 $("split").onclick = async () => {
   split = !split;
   $("split").setAttribute("aria-pressed", String(split));
@@ -589,6 +637,7 @@ $("split").onclick = async () => {
     mapB.jumpTo({ center: mapA.getCenter(), zoom: mapA.getZoom() });
     if (data) await setStatic(mapB);
     await setRoads(mapB);
+    await setTruth(mapB);
   }
   await mapA.ready;
   setLayerVisibility(mapA, split ? "gps" : "both");
@@ -645,6 +694,7 @@ async function run() {
   $("labelB").textContent = ol ? `Prediction · no GPS after ${fmtT(ol.fromS)}` : "Prediction";
   renderStatic();
   loadRoads(file);
+  loadTruth(file);
   await setStatic(mapA);
   if (mapB) await setStatic(mapB);
   const pts = [...data.track, ...data.fixes.filter((f) => f.acc < 500)];
