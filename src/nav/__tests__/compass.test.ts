@@ -71,6 +71,28 @@ describe("Compass", () => {
     expect(compass.trust).toBe("confirmed");
   });
 
+  test("a calibration the last drive never checked is checked, but not handed out until it passes", () => {
+    // A drive that never knew its heading keeps the stored calibration unconfirmed.
+    const unchecked = new Compass();
+    unchecked.setCalibration(syntheticCompassCalibration());
+    hold(unchecked, 0, 0);
+    expect(unchecked.heading()).not.toBeNull();
+    const kept = unchecked.calibration!;
+    expect(kept.confirmed).toBe(false);
+    // The next drive: no heading for the particle filter, yet the check runs and confirms it.
+    const next = new Compass();
+    next.setCalibration(kept);
+    let t = hold(next, 0, 300 * DEG);
+    expect(next.heading()).toBeNull();
+    for (let i = 0; i < 10; i++) {
+      t = hold(next, t, 300 * DEG);
+      next.observe(300 * DEG);
+    }
+    expect(next.trust).toBe("confirmed");
+    expect(angleDeg(next.heading()!.psi, 300 * DEG)).toBeLessThan(1);
+    expect(next.calibration!.confirmed).toBe(true);
+  });
+
   test("no heading while the phone is tilted away from its mounting, or handled", () => {
     const compass = new Compass();
     compass.setCalibration(syntheticCompassCalibration());

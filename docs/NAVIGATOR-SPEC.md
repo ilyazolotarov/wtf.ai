@@ -220,8 +220,13 @@ Measured on the 7 drives of 2026-10-04 (`mag_raw`, 19.4 Hz):
   calibrations from the other drives were confirmed on all 6 drives that could check (median 3–20° off);
   turned 90° or 180°, rejected within the first 10 checks on 4 of 6. On the other two the turned calibration
   was never used before the drive learned its own.
+- **Kept for the next drive** with `confirmed`: everything in it was learned or confirmed on this drive. A drive that
+  never checked its stored calibration (no known heading while driving straight) keeps it unconfirmed; the next
+  drive still checks it, but hands out no heading until it passes.
 - **Use:** only the particle filter's jammed start (MAPMATCH-SPEC §8.2). A jammed drive can't check the compass
-  before it has a heading from elsewhere, so the use is bounded, not trusted.
+  before it has a heading from elsewhere: the calibration is trusted on the last drive's word. Not covered: the
+  phone turned in its mount at the same tilt (the tilt check doesn't see it); a 90° turn then gave one 93° wrong
+  start in the benchmark.
 - **Not yet:** a heading prior for alignment (§6), re-fitting the offset from gyro turns after the phone is
   re-seated, wiring into the app (`NavigatorService` feeding `mag_raw` and persisting the calibration per VIN).
 

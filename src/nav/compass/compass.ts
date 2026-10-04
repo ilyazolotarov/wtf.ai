@@ -59,6 +59,11 @@ export interface CompassCalibration {
   samples: number;
   /** Bit k set: a sample with a heading in sector k (45° each). */
   sectors: number;
+  /**
+   * Everything in it was learned or confirmed on the drive that kept it. A stored calibration without
+   * this is still checked, but not handed out until it passes.
+   */
+  confirmed: boolean;
 }
 
 export type CompassTrust = "none" | "unverified" | "confirmed" | "rejected";
@@ -80,7 +85,7 @@ const popcount = (x: number) => {
 };
 
 function emptyCalibration(refAxis: 0 | 1 | 2, up: Vec3): CompassCalibration {
-  return { refAxis, up: [up[0], up[1], up[2]], xtx: new Array<number>(16).fill(0), xty: [0, 0, 0, 0], yty: 0, samples: 0, sectors: 0 };
+  return { refAxis, up: [up[0], up[1], up[2]], xtx: new Array<number>(16).fill(0), xty: [0, 0, 0, 0], yty: 0, samples: 0, sectors: 0, confirmed: true };
 }
 
 /** The sum of two calibrations' normal equations (the first one's frame). */
@@ -93,6 +98,7 @@ export function mergeCalibrations(a: CompassCalibration, b: CompassCalibration):
     yty: a.yty + b.yty,
     samples: a.samples + b.samples,
     sectors: a.sectors | b.sectors,
+    confirmed: a.confirmed && b.confirmed,
   };
 }
 
@@ -178,10 +184,13 @@ export class Compass {
     this.refit();
   }
 
-  /** Stored and learned together, to keep for the next drive (null: nothing learned). */
+  /**
+   * Stored and learned together, to keep for the next drive (null: nothing learned). Confirmed unless
+   * it holds a stored calibration this drive never checked.
+   */
   get calibration(): CompassCalibration | null {
-    if (this.stored && this.session) return mergeCalibrations(this.stored, this.session);
-    return this.stored ?? this.session;
+    const cal = this.stored && this.session ? mergeCalibrations(this.stored, this.session) : (this.stored ?? this.session);
+    return cal && { ...cal, confirmed: !(this.stored && this.trustState === "unverified") };
   }
 
   get trust(): CompassTrust {
@@ -231,6 +240,13 @@ export class Compass {
    * calibration, after a rejection, with the phone handled or tilted away from its mounting.
    */
   heading(): { psi: number; sigma: number } | null {
+    // Not confirmed on the drive that kept it (never checked there): checked here, not handed out.
+    if (this.trustState === "unverified" && !this.stored?.confirmed) return null;
+    return this.estimate();
+  }
+
+  /** The heading from the current fit, before the gate on unconfirmed calibrations. */
+  private estimate(): { psi: number; sigma: number } | null {
     if (!this.fit || this.trustState === "rejected" || this.handled || !this.mounted()) return null;
     const m = this.mean();
     if (!m) return null;
@@ -250,7 +266,7 @@ export class Compass {
     const m = this.mean();
     const up = this.up;
     if (!m || !up) return;
-    const own = this.heading();
+    const own = this.estimate();
     if (own && this.trustState === "unverified") {
       const d = wrap(own.psi - psi);
       this.checkDiffs.push(d);

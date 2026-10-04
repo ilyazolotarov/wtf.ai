@@ -526,27 +526,36 @@ NAVIGATOR-SPEC §4, §5.1):
 
 ### 8.2 Compass at a jammed start (replay only; NAVIGATOR-SPEC §7.6)
 
-- **Rule:** while the heading is unknown (state `init`), once per filter start, at the first straight moment, each
-  particle is weighted by `inlier · N(travel direction − compass; 25°) + (1 − inlier)`, `inlier` = 0.85.
-  - Once, because the compass error is a bias that lasts the drive: applying it every 50 m stacked the same
-    error, and a compass turned 180° left the true direction ~1/280 of the weight.
-  - Bounded: the best and worst directions differ by at most 1 / (1 − inlier) = 6.7:1. The compass alone can't
-    reach the 0.9 of one direction a map start needs; other evidence must agree.
+- **Rule:** while the heading is unknown (state `init`), a standing look: at each straight moment each particle's
+  compass factor `inlier · N(travel direction − compass; 25°) + (1 − inlier)`, `inlier` = 0.85, replaces the one
+  already in its weight (only the change is applied). It stays in force through resampling and follows particles
+  that turn; a re-seeded particle starts without it.
+  - Not added up, because the compass error is a bias that lasts the drive: applying it every 50 m stacked the
+    same error, and a compass turned 180° left the true direction ~1/280 of the weight.
+  - Bounded: the best and worst directions differ by at most 1 / (1 − inlier) = 6.7:1.
+  - Only from a calibration confirmed on the drive that kept it (NAVIGATOR-SPEC §7.6).
+- **Map-start guard:** the start's travel direction (±45°) must also hold ≥ 0.5 of the weight with each particle's
+  compass factor divided back out. It never fired in the benchmark (below): by the time a wrong compass has won,
+  the particles of the true direction are gone, so the weights without the compass agree with it. Kept as a cheap
+  check; the protection is the calibration's validity, not the weight's cap.
 - **Measured** (`replay:bench --jam-start --compass`): the 7 drives of 2026-10-04 (30 simulated sessions), each
   with the calibration pooled from the other drives, right and turned 90° / 180°:
 
-| | Map starts | Distance to start, median | Position error median | Starts > 10° off |
-| --- | --- | --- | --- | --- |
-| Map, no compass | 10 | 0.61 km | 38 m | 7 (alignment) |
-| + compass | 11 | 0.57 km | 30 m | 7 (alignment) |
-| + compass turned 90° | 5 | 0.61 km | 41 m | 9 (alignment) |
-| + compass turned 180° | 8 | 0.61 km | 39 m | 9 (alignment) |
+| | Map starts | Distance to start, median | Position error median | Starts > 10° off | Truth survival min (< 100 %) |
+| --- | --- | --- | --- | --- | --- |
+| Map, no compass | 10 | 0.61 km | 38 m | 7 (alignment) | 73 % (21) |
+| + compass | 15 | 0.54 km | 25 m | 4 (alignment) | 76 % (18) |
+| + compass turned 90° | 11 | 0.60 km | 36 m | 7 (one map start 93° off) | 15 % (23) |
+| + compass turned 180° | 7 | 0.61 km | 41 m | 9 (alignment) | 74 % (23) |
 
-  - With the right compass the EKF starts sooner in 6 sessions and later in 5: a small gain. On these drives
-    the start waits for the position along the road and for straight road, rather than for the direction.
-  - A wrong compass costs map starts (to alignment), never a wrong start.
-  - Stronger: at 20:1 (`inlier` 0.95) sooner in 8, later in 4, and a 180° compass gave one start at 3.5σ; at 100:1
-    (0.99) a 180° compass started the EKF 179° wrong, 612 m off. 6.7:1 stays until more drives.
+  - With the right compass the EKF starts sooner in 12 sessions and later in 1.
+  - Turned 90°: 94zf2q from 0 s started 93° wrong and 258 m off (25.8σ); the true road's particles were gone by
+    then. A compass 90° off is perpendicular to the road, so it favours a crossing road; turned 180° it only
+    reorders the two directions of the same road, which the map then corrects.
+  - Tried and dropped: one look per filter start (sooner in 6, later in 5, never a wrong start: little gain);
+    the compass in the start decision only, not in the weights (the gain gone, and a 180° compass still gave a
+    98° wrong start, 216 m off, on 9qw8wn). Stronger looks in the one-look version: with a 180° compass, `inlier`
+    0.95 gave a start at 3.5σ, 0.99 one 179° wrong and 612 m off.
 - Unit tests (`particle-filter.test.ts`): mid-road on the fixture graph, the right compass gives the true
   direction > 0.7 of the weight (without it, even); turned 180°, the true direction keeps > 0.1.
 

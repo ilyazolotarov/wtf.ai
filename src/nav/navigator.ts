@@ -131,6 +131,8 @@ export interface MapMatchEstimate {
 /** The road graph as the navigator needs it: the filter's view plus the shared local frame. */
 export type MapMatchGraph = RoadGraph & { setFrame(frame: LocalFrame): void };
 
+/** A travel direction, for the map-start checks: particles within this of the start's heading. */
+const MAP_START_DIRECTION_RAD = Math.PI / 4;
 /** Off-road this long (m, filter weight mostly off the graph) restarts the filter around the EKF. */
 const MAP_MATCH_REINIT_OFFROAD_M = 300;
 /** Odometry below this speed counts as stopped: the EKF speed decays towards 0 without reaching it. */
@@ -733,7 +735,9 @@ export class Navigator {
     if (!ekf && step.distanceM >= this.nextMapStartCheckM) {
       // Heading unknown: a heading settled over `mapStartTrackingM` starts the EKF.
       this.nextMapStartCheckM = step.distanceM + pf.config.evalIntervalM;
-      if (this.mapPose()) {
+      const settled = this.mapPose();
+      // The roads alone must lean this way too: a wrong compass may delay a start, never make one.
+      if (settled && pf.directionShare(settled.headingRad, MAP_START_DIRECTION_RAD, true) >= pf.config.mapStartCompassFreeShare) {
         this.trackingFromM ??= step.distanceM;
         // Mid-turn, or near a bend of the road polyline, the road heading is not the car's: start on a
         // straight road, driving straight. The car is somewhere within the cloud's spread along it.

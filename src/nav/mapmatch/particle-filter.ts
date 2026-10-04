@@ -31,6 +31,11 @@ export interface MapMatchConfig {
    */
   mapStartTrackingM: number;
   mapStartHeadingSpreadRad: number;
+  /**
+   * A map start also needs the start's travel direction to hold this share of the weight without the
+   * compass (§8.2): the compass may tip a contest the roads already lean on, never overturn it.
+   */
+  mapStartCompassFreeShare: number;
   mapStartSpreadM: number;
   mapStartMinPosSigmaM: number;
   mapStartMinHeadingSigmaRad: number;
@@ -91,11 +96,11 @@ export interface MapMatchConfig {
   absHeadingInflation: number;
   absHeadingScale: number;
   /**
-   * Compass (§8.2), only while the heading is unknown: once per filter start, at the first straight
-   * moment, each particle is weighted by inlier · Gaussian(travel direction − compass, σ) + (1 − inlier).
-   * Once, because its error is a bias that lasts the drive: repeating it would count the same error
-   * again. The best and the worst direction differ by at most 1 / (1 − inlier), so the compass alone
-   * never gives one direction the weight a map start needs (`trackingWeight`); a wrong one costs time.
+   * Compass (§8.2), only while the heading is unknown: one standing look. At each straight moment a
+   * particle's compass factor, inlier · Gaussian(travel direction − compass, σ) + (1 − inlier), replaces
+   * the one already in its weight (only the change is applied). Its error is a bias that lasts the drive,
+   * so it must not add up; but it stays in force through resampling and follows particles that turn.
+   * The best and the worst direction differ by at most 1 / (1 − inlier).
    */
   compassInlier: number;
   /** Lane offset: distance from the centre line up to this costs on-road particles nothing at a fix, m. */
@@ -166,6 +171,7 @@ export const DEFAULT_MAP_MATCH: MapMatchConfig = {
   initReinjectShare: 0.05,
   mapStartTrackingM: 100,
   mapStartHeadingSpreadRad: 10 * DEG,
+  mapStartCompassFreeShare: 0.5,
   mapStartSpreadM: 150,
   mapStartMinPosSigmaM: 10,
   mapStartMinHeadingSigmaRad: 3 * DEG,
@@ -350,6 +356,8 @@ class Particles {
   readonly roadTurn: Float64Array;
   /** `roadTurn` at the last comparison (the anchor of the relative-heading term). */
   readonly anchorTurn: Float64Array;
+  /** The compass log-likelihood in this particle's weight (§8.2): replaced at each look, never added twice. */
+  readonly compassLog: Float64Array;
   readonly logw: Float64Array;
 
   constructor(readonly size: number) {
@@ -363,6 +371,7 @@ class Particles {
     this.dks = new Float64Array(size);
     this.roadTurn = new Float64Array(size);
     this.anchorTurn = new Float64Array(size);
+    this.compassLog = new Float64Array(size);
     this.logw = new Float64Array(size);
   }
 
@@ -377,6 +386,7 @@ class Particles {
     this.dks[dst] = from.dks[src];
     this.roadTurn[dst] = from.roadTurn[src];
     this.anchorTurn[dst] = from.anchorTurn[src];
+    this.compassLog[dst] = from.compassLog[src];
     this.logw[dst] = from.logw[src];
   }
 }
@@ -408,7 +418,6 @@ export class ParticleFilter {
   private nextWorkingSetM = 0;
   private lastCoarseM = -Infinity;
   private lastFixM = -Infinity;
-  private compassUsed = false;
   private compass: { psi: number; sigma: number } | null = null;
   /** The car moved since the last weighting: a stop then closes the turn comparison. */
   private movedSinceEval = false;
@@ -615,7 +624,7 @@ export class ParticleFilter {
     this.recentTurns = [];
     this.lastFixM = -Infinity;
     this.lastCoarseM = -Infinity;
-    this.compassUsed = false;
+    this.p.compassLog.fill(0);
     this.movedSinceEval = false;
     this.setAnchor();
   }
@@ -846,12 +855,20 @@ export class ParticleFilter {
   }
 
   /** Particle positions and weights, heaviest first (viewer). */
-  /** Share of the weight travelling within `toleranceRad` of a heading (tests, diagnostics). */
-  directionShare(headingRad: number, toleranceRad: number): number {
+  /**
+   * Share of the weight travelling within `toleranceRad` of a heading. `withoutCompass`: as if there were
+   * no compass, each particle's compass factor divided back out (§8.2).
+   */
+  directionShare(headingRad: number, toleranceRad: number, withoutCompass = false): number {
     const p = this.p;
     let share = 0;
-    for (let i = 0; i < p.size; i++) if (Math.abs(wrap(p.psi[i] - headingRad)) <= toleranceRad) share += Math.exp(p.logw[i]);
-    return share;
+    let total = 0;
+    for (let i = 0; i < p.size; i++) {
+      const w = Math.exp(p.logw[i] - (withoutCompass ? p.compassLog[i] : 0));
+      total += w;
+      if (Math.abs(wrap(p.psi[i] - headingRad)) <= toleranceRad) share += w;
+    }
+    return total > 0 ? share / total : 0;
   }
 
   particles(max = Infinity): { e: number; n: number; w: number; offRoad: boolean }[] {
@@ -1017,8 +1034,7 @@ export class ParticleFilter {
     const relVar = Math.max(0, this.turnVarSum - this.anchorVar) + c.roadSigmaRad ** 2 + (share * Math.abs(measured)) ** 2;
     const absVar = heading ? (c.absHeadingInflation * heading.psiSigma) ** 2 + c.roadSigmaRad ** 2 : 0;
     const posVar = heading ? Math.max(c.ekfPositionInflation * heading.posSigma, c.ekfPositionFloorM) ** 2 : 0;
-    const compass = !this.resolved && !this.compassUsed && straight ? this.compass : null;
-    if (compass) this.compassUsed = true;
+    const compass = !this.resolved && straight ? this.compass : null;
     for (let i = 0; i < p.size; i++) {
       if (p.offRoad[i]) {
         p.logw[i] += c.offRoadLogPenalty;
@@ -1032,7 +1048,9 @@ export class ParticleFilter {
       }
       if (compass) {
         const d = wrap(p.psi[i] - compass.psi);
-        p.logw[i] += Math.log(c.compassInlier * Math.exp((-0.5 * d * d) / (compass.sigma * compass.sigma)) + 1 - c.compassInlier);
+        const f = Math.log(c.compassInlier * Math.exp((-0.5 * d * d) / (compass.sigma * compass.sigma)) + 1 - c.compassInlier);
+        p.logw[i] += f - p.compassLog[i];
+        p.compassLog[i] = f;
       }
       if (heading && c.ekfPositionScale > 0) {
         const de = p.e[i] - heading.e;
@@ -1064,6 +1082,7 @@ export class ParticleFilter {
   private neutralHistory(i: number): void {
     const p = this.p;
     p.anchorTurn[i] = p.roadTurn[i] - (this.turnRad - this.anchorTurnRad);
+    p.compassLog[i] = 0;
   }
 
   /** Shift log-weights so they sum to 1 (as weights). */

@@ -88,6 +88,7 @@
   <label>lag <input id="lag" type="number" step="0.1" value="0.4" style="width:60px" /> s</label>
   <label title="Start the session this far into the log, as if the app started then">start <input id="start" type="number" step="10" min="0" placeholder="0" style="width:60px" /> s</label>
   <label title="Simulated jamming: satellite fixes become Wi-Fi/cell-like ones (±tens of m, every 5–10 s). start:length or start:inf">jam <input id="jam" placeholder="e.g. 0:inf" size="9" /></label>
+  <label title="Compass at a jammed start (MAPMATCH-SPEC §8.2), calibrated on the other logs in the folder; turned = a wrong calibration">compass <select id="compass"><option value="">off</option><option value="on">other logs</option><option value="90">turned 90°</option><option value="180">turned 180°</option></select></label>
   <button id="run" class="primary">Replay</button>
   <span id="status"></span>
 </header>
@@ -732,6 +733,7 @@ async function loadList() {
   if (params.has("openLoop")) $("openLoop").value = params.get("openLoop");
   if (params.get("start")) $("start").value = params.get("start");
   if (params.get("jam")) $("jam").value = params.get("jam");
+  if (params.get("compass")) $("compass").value = params.get("compass");
   if (!logs.length) return;
   if (params.get("split") === "1") await $("split").onclick();
   await run();
@@ -751,18 +753,21 @@ async function run() {
   const openLoop = $("openLoop").value;
   const start = $("start").value;
   const jam = $("jam").value.replace(/\s+/g, "");
-  history.replaceState(null, "", "#" + new URLSearchParams({ file, cuts, lag, openLoop, start, jam }).toString());
+  const compass = $("compass").value;
+  history.replaceState(null, "", "#" + new URLSearchParams({ file, cuts, lag, openLoop, start, jam, compass }).toString());
   setPlaying(false);
   $("status").textContent = "replaying…";
   const started = performance.now();
-  const res = await fetch(`/api/replay?${new URLSearchParams({ file, cuts, lag, openLoop, start, jam })}`);
+  const res = await fetch(`/api/replay?${new URLSearchParams({ file, cuts, lag, openLoop, start, jam, compass })}`);
   if (!res.ok) { $("status").textContent = await res.text(); return; }
   data = await res.json();
   if (!("openLoopDelayS" in data.options)) {
     $("status").textContent = "The viewer server is older than this page: stop it and run npm run replay:view again.";
     return;
   }
-  $("status").textContent = `${data.track.length} track points, ${data.fixes.length} fixes · ${Math.round(performance.now() - started)} ms`;
+  const ci = data.compassInfo;
+  const compassText = !ci ? "" : ci.logs ? ` · compass from ${ci.logs} other logs${ci.rotateDeg ? `, turned ${ci.rotateDeg}°` : ""}: ${ci.trust}` : " · compass: no other log learned a calibration";
+  $("status").textContent = `${data.track.length} track points, ${data.fixes.length} fixes · ${Math.round(performance.now() - started)} ms${compassText}`;
   const ol = data.options.cuts.find((c) => c.openLoop);
   $("labelB").textContent = ol ? `Prediction · no GPS after ${fmtT(ol.fromS)}` : "Prediction";
   renderStatic();
@@ -783,6 +788,7 @@ $("file").onchange = run;
 $("openLoop").onchange = run;
 $("cuts").addEventListener("keydown", (e) => e.key === "Enter" && run());
 $("jam").addEventListener("keydown", (e) => e.key === "Enter" && run());
+$("compass").addEventListener("change", () => run());
 $("start").addEventListener("keydown", (e) => e.key === "Enter" && run());
 loadList();
 </script>

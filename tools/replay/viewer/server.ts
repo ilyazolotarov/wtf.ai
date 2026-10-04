@@ -9,6 +9,8 @@ import { createServer, type ServerResponse } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { mergeCalibrations, type CompassCalibration } from "../../../src/nav/compass/compass";
+import { replayTrip } from "../../../src/nav/replay/replay";
 import { buildViewerData } from "../../../src/nav/replay/viewer-data";
 import { readTripLog, type TripLog } from "../../../src/triplog/trip-log-reader";
 import { findGraph, openGraph, roadsAround, truthRoute } from "../graph-file";
@@ -28,6 +30,23 @@ let lastTrip: { file: string; trip: TripLog } | null = null;
 function loadTrip(file: string): TripLog {
   if (lastTrip?.file !== file) lastTrip = { file, trip: readTripLog(new Uint8Array(readFileSync(path.join(LOG_DIR, file)))) };
   return lastTrip.trip;
+}
+
+// What each log's compass learns on its own (NAVIGATOR-SPEC §7.6), replayed once per log and kept.
+const learned = new Map<string, CompassCalibration | null>();
+/** The compass calibration for a log: pooled from every other log in the folder (null: none learned). */
+function compassFromOtherLogs(file: string): { calibration: CompassCalibration; logs: number } | null {
+  const cals: CompassCalibration[] = [];
+  for (const { file: other } of listLogs()) {
+    if (other === file) continue;
+    if (!learned.has(other)) {
+      const trip = readTripLog(new Uint8Array(readFileSync(path.join(LOG_DIR, other))));
+      learned.set(other, trip.mag?.length ? replayTrip(trip).summary.compass.calibration : null);
+    }
+    const cal = learned.get(other);
+    if (cal) cals.push(cal);
+  }
+  return cals.length ? { calibration: cals.reduce((a, b) => mergeCalibrations(a, b)), logs: cals.length } : null;
 }
 
 function send(res: ServerResponse, status: number, type: string, body: string | Buffer): void {
@@ -68,6 +87,10 @@ const server = createServer((req, res) => {
       const openLoop = url.searchParams.get("openLoop");
       const start = Number(url.searchParams.get("start") || 0);
       const jam = parseCuts(url.searchParams.get("jam"));
+      // Compass: off, or calibrated on the other logs, optionally turned (a wrong calibration).
+      const compassArg = url.searchParams.get("compass") ?? "";
+      const compass = compassArg ? compassFromOtherLogs(file) : null;
+      const rotateDeg = Number(compassArg) || 0;
       const started = Date.now();
       const trip = loadTrip(file);
       // Map matching on the trip's road graph, when there is one.
@@ -82,8 +105,10 @@ const server = createServer((req, res) => {
           ...(opened ? { mapMatch: { graph: opened.graph } } : {}),
           ...(start > 0 ? { startAtS: start } : {}),
           ...(jam.length ? { jam } : {}),
+          ...(compass ? { compass: { calibration: compass.calibration, rotateRad: (rotateDeg * Math.PI) / 180 } } : {}),
         });
-        send(res, 200, "application/json", JSON.stringify(data));
+        const compassInfo = compassArg ? { logs: compass?.logs ?? 0, rotateDeg, trust: data.summary.compass.trust } : null;
+        send(res, 200, "application/json", JSON.stringify({ ...data, compassInfo }));
       } finally {
         opened?.close();
       }
