@@ -2,7 +2,7 @@
 
 Status: draft v8 (2026-10-04). Source of truth for coding agents. Update this file when decisions change.
 
-Companion specs: [UI-SPEC.md](UI-SPEC.md) (UI-first milestone), [VEHICLE-LINK-SPEC.md](VEHICLE-LINK-SPEC.md) (Bluetooth ELM327 communication), [TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md) (trip detection, logging, export — Phase 1), [NAVIGATOR-SPEC.md](NAVIGATOR-SPEC.md) (Stage 1 EKF, online calibration, replay — Phase 2), [MAPMATCH-SPEC.md](MAPMATCH-SPEC.md) (road graph, particle filter — Phase 5).
+Companion specs: [UI-SPEC.md](UI-SPEC.md) (UI-first milestone), [VEHICLE-LINK-SPEC.md](VEHICLE-LINK-SPEC.md) (Bluetooth ELM327 communication), [TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md) (trip detection, logging, export — Phase 1), [NAVIGATOR-SPEC.md](NAVIGATOR-SPEC.md) (Stage 1 EKF, online calibration, replay — Phase 2), [MAPMATCH-SPEC.md](MAPMATCH-SPEC.md) (road graph, particle filter — Phase 5), [ROUTING-SPEC.md](ROUTING-SPEC.md) (A\* routing on the road graph — Phase 6).
 
 ## 1. Problem & goal
 
@@ -26,7 +26,7 @@ Odometry is built up in stages (§2.1). Stage 1 uses the minimum that works on a
 | Sensor capture              | Own native module `modules/sensor-capture` (CoreLocation + CoreMotion, batched) for logging, estimation and the map's position, sharing one monotonic clock with the adapter timestamps. `expo-location` is used only for permissions and the walking compass (its position watcher stopped for good after jamming). |
 | First vehicle               | **Mazda CX-5 KF (2017–2021)**.                                                                                                                                                                                            |
 | Map display                 | **MapLibre** (`@maplibre/maplibre-react-native`) with **offline** OSM vector tiles. Not Google Maps.                                                                                                                      |
-| Routing                     | **valhalla-mobile** (Rallista, MIT) — `route` only, offline tiles built from OSM Ukraine extract.                                                                                                                         |
+| Routing                     | **A\* in TS on our own road graph** (`src/nav/routing/`, the map-matching graph of §3.8), see [ROUTING-SPEC.md](ROUTING-SPEC.md). Valhalla dropped (2026-10-05): its native packaging was never solved, its tiles were a second download, and its roads differed from the filter's. |
 | Map matching                | **Custom road-constrained particle filter** in TS (`src/nav/mapmatch/`) over **our own compact road graph** (§3.8). Valhalla `trace_attributes` is **not** used: its HMM assumes independent, bounded GNSS-like errors, while DR error is correlated and grows, so it locks onto parallel roads and returns a single answer. |
 | Estimator location          | **TypeScript** (`src/nav/`), not native. Reason: Windows-only dev; logic must hot-reload and be unit-testable/replayable on Windows. Native code stays thin.                                                              |
 | GNSS integrity              | Only two checks: **outside-Ukraine polygon** and **teleport vs odometry/DR**. Do **not** use raw GNSS data. Do **not** implement slow drag-off detection.                                                                 |
@@ -69,7 +69,7 @@ CoreLocation + CoreMotion ───▶ src/nav (TypeScript)
                                    ├─ calibration      (initial + online)
                                    ├─ mapmatch         (particle filter on road graph)
                                    │    └─ RoadGraph interface ◀─ graph tiles (device: file/SQLite reader; replay: Node fs)
-                                   └─ routing client ─▶ modules/valhalla (Swift, thin)
+                                   └─ routing          (A* on the same road graph)
                                            │
                                            ▼
                                  src/app screens (MapLibre, routing, wizard)
@@ -242,9 +242,9 @@ Detailed in [MAPMATCH-SPEC.md](MAPMATCH-SPEC.md). Reference approach: Gustafsson
 
 - Source: Geofabrik Ukraine PBF.
 - Outputs:
-  1. Valhalla routing tiles tarball (routing only).
+  1. (Dropped 2026-10-05: Valhalla routing tiles. Routing runs on item 3, ROUTING-SPEC.)
   2. Vector map tiles (PMTiles/MBTiles) + MapLibre style.
-  3. **Road graph for map matching**: drivable OSM ways (no footway/path/cycleway/steps; `service`/`private` kept but flagged), split at intersections. Per edge: simplified polyline (≤ ~1 m deviation), length, road class, one-way, connectivity, turn restrictions (OSM relations). One file per region (`<region>.graph.bin`, `ukraine` included; no cross-region navigation), tiled internally at z14 with a directory and per-tile spatial lists, read by random access: the device decodes only tiles around the active hypotheses, so the Ukraine graph costs about what an oblast's does. Built with pyosmium. Size to be measured in Phase 0. Format: MAPMATCH-SPEC §4.
+  3. **Road graph for map matching and routing**: drivable OSM ways (no footway/path/cycleway/steps; `service`/`private` kept but flagged), split at intersections. Per edge: simplified polyline (≤ ~1 m deviation), length, road class, one-way, connectivity, turn restrictions (OSM relations). One file per region (`<region>.graph.bin`, `ukraine` included; no cross-region navigation), tiled internally at z14 with a directory and per-tile spatial lists, read by random access: the device decodes only tiles around the active hypotheses, so the Ukraine graph costs about what an oblast's does. Built with pyosmium. Size to be measured in Phase 0. Format: MAPMATCH-SPEC §4.
 - Hosted as versioned, checksummed downloads. In-app download manager: resumable, checksum-verified, update check.
 
 ### 3.9 App (`src/app/`, Expo Router)
@@ -258,7 +258,7 @@ UI-first milestone (map with live GNSS + mock screens): see [UI-SPEC.md](UI-SPEC
 - `calibration` — first-run wizard.
 - `vehicle` — adapter discovery list and connection (transport, ELM version, protocol, poll rate), VIN, engine state, active odometry stage.
 - `downloads` — offline data manager.
-- `route` — offline routing (Valhalla `route`), reroute on deviation, next maneuver + distance.
+- `route` — offline routing (A\* on the road graph, ROUTING-SPEC), reroute on deviation, next maneuver + distance.
 - `debug` — live signals, EKF state, particle cloud overlay + cluster weights, trip recorder controls; `debug-terminal` (ELM terminal); `trips` (log list, share, delete).
 - Background (from Phase 1): iOS `UIBackgroundModes` = `location`, plus `external-accessory` (EA) and `bluetooth-central` (BLE) (config plugins, never hand-edit `ios/`). Location stays **When In Use**: a session started in the foreground continues in the background. "Always" is needed only for the later auto-wake (VEHICLE-LINK-SPEC §11).
 
@@ -277,7 +277,7 @@ UI-first milestone (map with live GNSS + mock screens): see [UI-SPEC.md](UI-SPEC
 ```
 src/app/                 Expo Router screens only
 src/nav/                 pure TS core (no React Native imports)
-  odometry/{obd,imu,can}/ ekf/ integrity/ calibration/ mapmatch/ geo/ replay/
+  odometry/{obd,imu,can}/ ekf/ integrity/ calibration/ mapmatch/ routing/ geo/ replay/
   navigator.ts           Stage 1 sensor fusion entry point (live services and replay feed it)
 src/obd/                 pure TS: adapter catalog, ELM327 session/probe/parser, PIDs, poller, engine state, emulator
 src/triplog/             pure TS: ULog encoder (+ reader for replay), trip log schemas
@@ -285,12 +285,11 @@ src/services/            RN glue: position, vehicle-link, sensor-capture, trip-r
 src/components/          UI components
 modules/vehicle-link/    Expo module (Swift) — BLE + EA (MFi) transports; STN monitor in Stage 2
 modules/sensor-capture/  Expo module (Swift) — CoreLocation + CoreMotion capture, batched
-modules/valhalla/        Expo module (Swift) — valhalla-mobile wrapper (routing only)
 assets/profiles/         vehicle JSON profiles (Stage 2+)
 assets/geo/              Ukraine border polygon
 tools/re-yaw/            yaw reverse-engineering script (Stage 3)
 tools/replay/            replay CLI, viewer and benchmark over src/nav/replay; loads the road graph via Node fs later
-tools/tiles/             build pipeline: Valhalla tiles, vector tiles, road graph
+tools/tiles/             build pipeline: vector tiles, road graph
 tools/triplog/           Python: ULog trip log reader, CSV/Parquet export, plots, checks; logs/ (git-ignored)
 ```
 
@@ -300,13 +299,13 @@ tools/triplog/           Python: ULog trip log reader, CSV/Parquet export, plots
 
 | #   | Phase                       | Depends on | Key output                                                                                                                                                                                               |
 | --- | --------------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0   | Setup & spikes              | —          | CI unsigned build sideloaded with AltStore on iPhone; MX+ EA + one BLE clone connect, ELM327 init + `010D1` poll rate measured on CX-5 (MX+ EA session over `com.obdlink` verified); DeviceMotion rate measured; valhalla-mobile inside Expo module (SPM vs CocoaPods); MapLibre offline tiles; Ukraine road graph built, size and tile-load time measured |
+| 0   | Setup & spikes              | —          | CI unsigned build sideloaded with AltStore on iPhone; MX+ EA + one BLE clone connect, ELM327 init + `010D1` poll rate measured on CX-5 (MX+ EA session over `com.obdlink` verified); DeviceMotion rate measured; ~~valhalla-mobile inside Expo module~~ (dropped, ROUTING-SPEC); MapLibre offline tiles; Ukraine road graph built, size and tile-load time measured |
 | 1   | Trip logger                 | 0          | [TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md): BLE + MFi vehicle link, adapter verification, speed/RPM poller, automatic trip start/end, ULog trip logs (OBD + GNSS + IMU) exportable, Python reader, dev UI |
 | 2   | TS EKF + replay             | 1          | `src/nav/odometry` (obd, imu), `src/nav/ekf`, replay metrics                                                                                                                                             |
 | 3   | Integrity                   | 2          | `src/nav/integrity`                                                                                                                                                                                      |
 | 4   | Calibration                 | 2, 3       | wizard + online estimation, per-VIN storage                                                                                                                                                              |
 | 5   | Map matching (particle filter) | 0, 2    | road-graph pipeline + `RoadGraph` reader (device + Node), `src/nav/mapmatch` PF, heading init from the map under jamming, EKF pseudo-measurements, replay map-matching metrics (§3.10); see MAPMATCH-SPEC §12 |
-| 6   | App UI, routing, background | 2–5        | screens, download manager                                                                                                                                                                                |
+| 6   | App UI, routing, background | 2–5        | screens, download manager, routing ([ROUTING-SPEC.md](ROUTING-SPEC.md))|
 | 7   | Field test (Stage 1)        | 6          | real outage drives; baseline DR error numbers                                                                                                                                                            |
 | 7b  | Adapter coverage            | 1          | more BLE clones, OBDLink CX, vLinker; grow the GATT catalog and the tested-adapter list with measured poll rates (VEHICLE-LINK-SPEC §13)                                                                  |
 
@@ -317,7 +316,7 @@ Status (2026-10-04):
     DeviceMotion at 100 Hz, MapLibre offline tiles (per-region packs).
   - Road graph built (MAPMATCH-SPEC §4.7): Ukraine 452 MB, 4.3 M edges, 2–3 min and 2.9 GB to build; Chernihiv
     15 MB.
-  - Open: a BLE clone, valhalla-mobile.
+  - Open: a BLE clone. (valhalla-mobile dropped 2026-10-05: routing runs on the road graph, ROUTING-SPEC.)
 - **Phase 1:** done and field-tested (14 drives, TRIP-LOGGER-SPEC §11).
 - **Phase 2:** the navigator and replay are implemented. It drives the map through `NavigatorService` and saves its
   calibration. Field-tested on 7 drives (NAVIGATOR-SPEC §9.1): 26 m off after 2.7 km jammed throughout.
@@ -390,8 +389,8 @@ Google Maps; Android; raw GNSS analysis; slow drag-off spoofing detection; Wi-Fi
 5. **BLE in background**: verify that polling survives screen lock / background with `bluetooth-central` while background location keeps the app alive (TRIP-LOGGER-SPEC §4.3). Auto-wake of a non-running app is deferred (VEHICLE-LINK-SPEC §11).
 6. **CAN visibility at OBD port** on CX-5 KF (Stage 2) — verify in Phase 8; fallback MS-CAN pins 3/11.
 7. **No Mac, no paid Apple account**: native iteration only via CI macOS builds (slow; macOS runner minutes cost more on private repos); free-account sideloading expires after 7 days and limits the device to 3 sideloaded apps. Mitigation: thin native layer; protocol logic in TS, tested on Windows with the emulator.
-8. **valhalla-mobile packaging**: ships as Swift Package; Expo modules use CocoaPods → may need vendored xcframework. Valhalla is now routing-only; if packaging proves too costly, offline routing (A\*) on our own road graph is an alternative that removes the native dependency.
-9. **Data sizes** (Valhalla tiles, vector tiles, road graph for Ukraine) and Valhalla routing CPU/latency on device — measure in Phase 0.
+8. **Routing time on the phone**: Valhalla was dropped (2026-10-05) for A\* on our own road graph in TS (ROUTING-SPEC), which removes the native dependency. The risk moves to planning time on the JS thread for long routes: measured in ROUTING-SPEC §7, searched in slices so the map never freezes.
+9. **Data sizes** (vector tiles, road graph for Ukraine) — measure in Phase 0.
 10. **Particle filter robustness**: particle depletion (correct hypothesis pruned), tuning of noise/penalties, and CPU budget. Mitigations: off-road share, re-injection near clusters, replay metrics on hard segments before field tests.
 11. **OSM completeness**: missing or outdated roads, wrong one-way/turn-restriction tags → on-road hypotheses die. Mitigations: off-road particles, soft (not hard) restriction penalties if replay shows false pruning.
 12. MFi protocol strings are known (`com.obdlink`, `com.vgatemall`; VEHICLE-LINK-SPEC §3.4). Verified: an `EASession` opens on the MX+. Still to verify: vLinker FS/MS over EA once one is available.

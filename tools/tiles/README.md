@@ -1,7 +1,7 @@
 # tiles — wtf.ai offline map data
 
 Builds the offline map release from the Geofabrik Ukraine extract (SPEC §3.8): display maps
-(vector tiles + style) and the road graph for map matching. Next: Valhalla routing tiles.
+(vector tiles + style) and the road graph for map matching and routing.
 
 Needs Python ≥ 3.11, Java ≥ 21 (Planetiler) and `osmium` (osmium-tool). Without `osmium` on
 PATH (Windows) the build runs it in Docker, building `docker/osmium.Dockerfile` on first use.
