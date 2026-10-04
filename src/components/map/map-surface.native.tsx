@@ -228,6 +228,9 @@ export function MapSurface({
       compass={false}
       logo={false}
       scaleBar={false}
+      // Two-finger rotation fires during pinch zoom and can't be given a threshold; the map
+      // still turns in heading-up mode.
+      touchRotate={false}
       onLongPress={onLongPress}
       onRegionIsChanging={handleRegionChange}
       onRegionDidChange={handleRegionDidChange}
