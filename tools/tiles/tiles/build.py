@@ -13,6 +13,7 @@ any number of regions:
     out/release/
       index.json                 catalog: OSM date, shared files, regions (size, md5, sha256)
       <region>.pmtiles           OpenMapTiles-schema vector tiles, one per region
+      <region>.graph.bin         road graph for map matching (graph.py, MAPMATCH-SPEC §4)
       style.json                 Liberty with `{common}` / `{tiles}` placeholders (style.py)
       sprite-ofm{,@2x}.{json,png}
       font-<slug>-<range>.pbf
@@ -36,6 +37,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .graph import build_region_graph
 from .region import load_registry, read_poly
 from .style import SPRITE_NAME, collect_fonts, font_slug, offline_style
 
@@ -225,6 +227,13 @@ def build_region(region: str, clipped: Path, heap: str = "4g", release: Path = R
     return output
 
 
+def build_graph(region: str, clipped: Path, release: Path = RELEASE) -> Path:
+    """Road graph from the region's clipped extract → out/release/<region>.graph.bin."""
+    output = release / f"{region}.graph.bin"
+    build_region_graph(clipped, REGIONS / f"{region}.poly", output, osm_date())
+    return output
+
+
 def hashes(path: Path) -> dict[str, str | int]:
     md5, sha256 = hashlib.md5(), hashlib.sha256()
     with open(path, "rb") as f:
@@ -243,14 +252,18 @@ def write_index(common: list[dict[str, str]], release: Path = RELEASE) -> dict:
         if not tiles.exists():
             continue
         minx, miny, maxx, maxy = read_poly(REGIONS / f"{name}.poly").bounds
-        regions.append({
+        entry = {
             "region": name,
             "iso": info["iso"],
             "name": {"en": info["name_en"], "uk": info["name_uk"]},
             "bounds": [round(v, 5) for v in (minx, miny, maxx, maxy)],
             "asset": tiles.name,
             **hashes(tiles),
-        })
+        }
+        graph = release / f"{name}.graph.bin"
+        if graph.exists():
+            entry["graph"] = {"asset": graph.name, **hashes(graph)}
+        regions.append(entry)
     index = {
         "format": INDEX_FORMAT,
         "osm_date": osm_date(),
@@ -274,4 +287,21 @@ def build_all(regions: list[str] | None = None, refresh_osm: bool = False, heap:
     pbf, _ = ensure_osm(refresh_osm)
     for name, clipped in clip_regions(pbf, names).items():
         build_region(name, clipped, heap=heap)
+        build_graph(name, clipped)
+    return write_index(build_common())
+
+
+def build_graphs(regions: list[str] | None = None, refresh_osm: bool = False) -> dict:
+    """Road graphs only (clipping regions whose extract is missing), then index.json."""
+    registry = load_registry(REGIONS)
+    names = regions or list(registry)
+    unknown = [n for n in names if n not in registry]
+    if unknown:
+        raise FileNotFoundError(f"unknown regions: {unknown}")
+    pbf, _ = ensure_osm(refresh_osm)
+    missing = [n for n in names if refresh_osm or not (CACHE / "extracts" / f"{n}.osm.pbf").exists()]
+    if missing:
+        clip_regions(pbf, missing)
+    for name in names:
+        build_graph(name, CACHE / "extracts" / f"{name}.osm.pbf")
     return write_index(build_common())

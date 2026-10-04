@@ -5,9 +5,9 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "wtf-tiles"
 version = "0.1.0"
-description = "Offline map data pipeline for wtf.ai (vector tiles, style, glyphs)"
+description = "Offline map data pipeline for wtf.ai (vector tiles, style, glyphs, road graph)"
 requires-python = ">=3.11"
-dependencies = ["shapely>=2"]
+dependencies = ["shapely>=2", "numpy>=2", "osmium>=4.3"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]

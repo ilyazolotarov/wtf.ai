@@ -1,7 +1,7 @@
 # tiles — wtf.ai offline map data
 
-Builds the offline map release from the Geofabrik Ukraine extract (SPEC §3.8). Today: display
-maps (vector tiles + style). Next: the map-matching road graph, then Valhalla routing tiles.
+Builds the offline map release from the Geofabrik Ukraine extract (SPEC §3.8): display maps
+(vector tiles + style) and the road graph for map matching. Next: Valhalla routing tiles.
 
 Needs Python ≥ 3.11, Java ≥ 21 (Planetiler) and `osmium` (osmium-tool). Without `osmium` on
 PATH (Windows) the build runs it in Docker, building `docker/osmium.Dockerfile` on first use.
@@ -12,6 +12,8 @@ cd tools/tiles
 python -m tiles.cli regions                    # (re)write regions/*.poly from regions/regions.json
 python -m tiles.cli build-all --heap 8g        # out/release/: ukraine, every region, index.json
 python -m tiles.cli build-region chernihiv     # one region (+ index.json)
+python -m tiles.cli graph chernihiv            # road graph only, from the cached extract (+ index.json)
+python -m tiles.cli graph-check out/release/chernihiv.graph.bin
 python -m tiles.cli index                      # shared files + index.json
 python -m tiles.cli serve                      # http://<PC IP>:8765/ — app: Downloads → Map source
 python -m tiles.cli osm-date                   # date of the current Geofabrik extract
@@ -44,6 +46,7 @@ folders):
 | Asset | |
 |---|---|
 | `index.json` | catalog: `format`, `osm_date`, `common[]` (asset, path, size, md5, sha256), `regions[]` (region, iso, name en/uk, bounds, asset, size, md5, sha256) |
+| `<region>.graph.bin` | road graph for map matching (below); listed as the region's `graph` entry in index.json |
 | `<region>.pmtiles` | OpenMapTiles-schema vector tiles, clipped to the region polygon (Ukraine 1.2 GB, oblasts 36–89 MB) |
 | `style.json` | OpenFreeMap Liberty (`style/liberty.json`, pinned snapshot); URLs use `{common}` (shared files directory) and `{tiles}` (region file), substituted by the app |
 | `sprite-ofm*`, `font-<slug>-<range>.pbf` | Liberty sprite and Noto Sans glyphs (every range below U+3000: all alphabets and symbols, no CJK; plus variation selectors and full-width forms); `path` in index.json says where the app stores each |
@@ -55,6 +58,18 @@ app's dark re-tint (`src/config/map-dark.ts`).
 *force* to rebuild). If Geofabrik's extract is newer than the newest `maps-*` release it runs
 `build-all` and publishes `out/release/` as release `maps-<osm_date>`, keeping the last 3.
 Adding a region = an entry in `regions.json` + its `.poly`.
+
+## Road graph (`tiles/graph.py`)
+
+The map-matching particle filter's road network ([MAPMATCH-SPEC.md](../../docs/MAPMATCH-SPEC.md) §4):
+drivable OSM ways split at junctions into edges, simplified to 1 m, with class, one-way, flags and
+turn restrictions. pyosmium reads the region's clipped extract in two passes (ways and
+restrictions, then locations of only the nodes those ways use), so Ukraine builds in ~2–3 min
+with a ~3 GB peak.
+
+The file is tiled at z14 with a directory, so the app reads only the tiles near its position
+hypotheses: the 452 MB Ukraine graph costs about what a 15 MB oblast does. Byte layout:
+MAPMATCH-SPEC §4.5; sizes: §4.7.
 
 ## In the app
 
