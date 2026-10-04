@@ -92,11 +92,14 @@ modules/sensor-capture ─▶ src/services/sensor-capture ──(SensorStream)�
 
 - `CMDeviceMotion` at **100 Hz**, reference frame `xArbitraryZVertical` (no magnetometer). Fields: `rotationRate` (rad/s, bias-corrected), `userAcceleration` and `gravity` (converted from g to m/s², × 9.80665), `attitude.quaternion`. Timestamp = `CMLogItem.timestamp` (uptime).
 - Optional raw streams, **off by default** (dev toggle): `CMGyroData` and `CMAccelerometerData` at 100 Hz.
+- Raw magnetometer, **always on** with the IMU: `CMMagnetometerData` at 20 Hz, µT in the device frame, uncalibrated
+  (includes the phone's own and the car's fields; calibrate offline, e.g. from turns measured by the gyro). Logged
+  only, not used for navigation (SPEC §2). It doesn't change the `CMDeviceMotion` reference frame.
 - Device frame: Apple's (x right, y toward the top of the screen, z out of the screen).
 
 ### 5.3 Bridge
 
-- Functions: `startGnss()`, `stopGnss()`, `startImu({ rateHz, raw })`, `stopImu()`, `getPermissions()` / `requestPermissions()` (location When In Use, motion), `nowUs()`.
+- Functions: `startGnss()`, `stopGnss()`, `startImu({ rateHz, raw, batchMs, magRateHz })`, `stopImu()`, `getPermissions()` / `requestPermissions()` (location When In Use, motion), `nowUs()`.
 - Events: `onGnss` (per fix, ~1 Hz), `onImuBatch` every 100 ms with columnar arrays (`t[]`, `gx[]`, …). Use typed arrays if Expo Modules events support them in SDK 57, else plain number arrays (verify in Phase 0).
 - Config plugin: `NSMotionUsageDescription`, `NSLocationWhenInUseUsageDescription` (already set via `expo-location`), `UIBackgroundModes: location` (set via `expo-location` `isIosBackgroundLocationEnabled: true`).
 
@@ -136,6 +139,7 @@ modules/sensor-capture ─▶ src/services/sensor-capture ──(SensorStream)�
 | `imu_motion`   | `float[3] gyro_rad_s`, `float[3] user_accel_m_s2`, `float[3] gravity_m_s2`, `float[4] attitude_q` (w, x, y, z)                                                                                             | 100 Hz          | 60 B    |
 | `gyro_raw`     | `float[3] gyro_rad_s`                                                                                                                                                                                        | 100 Hz, optional | 20 B   |
 | `accel_raw`    | `float[3] accel_m_s2`                                                                                                                                                                                        | 100 Hz, optional | 20 B   |
+| `mag_raw`      | `float[3] mag_ut` (raw magnetic field, µT, device frame)                                                                                                                                                     | 20 Hz           | 20 B    |
 | `engine_state` | `uint8_t state` (0 unknown, 1 ignition_off, 2 engine_off, 3 engine_running)                                                                                                                                  | on change       | 9 B     |
 | `trip_event`   | `uint8_t event` (0 start, 1 end, 2 link_lost, 3 link_restored, 4 marker, 5 preroll_end), `uint8_t reason` (end: 0 ignition_off, 1 parked_timeout, 2 link_timeout, 3 manual)               | on event        | 10 B    |
 | `link_stats`   | `float speed_hz`, `float latency_p50_ms`, `float latency_p95_ms`, `uint16_t errors`, `uint8_t link_state`, `float battery_v` (NaN if not read)                                                                | 1 Hz            | 27 B    |
@@ -168,8 +172,9 @@ modules/sensor-capture ─▶ src/services/sensor-capture ──(SensorStream)�
 | `imu_motion` @ 100 Hz  | 6,500                          |
 | `obd_pid` @ 20 Hz      | 620                            |
 | `gnss` @ 1 Hz          | 74                             |
+| `mag_raw` @ 20 Hz      | 500                            |
 | other                  | < 100                          |
-| **Total**              | **≈ 7.3 KB/s ≈ 26 MB/h**       |
+| **Total**              | **≈ 7.8 KB/s ≈ 28 MB/h**       |
 | + raw IMU (optional)   | + 5 KB/s → ≈ 44 MB/h           |
 
 The trip list shows free space; recording refuses to start below 200 MB free.

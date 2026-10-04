@@ -177,6 +177,7 @@ export class TripRecorder {
         for (const m of batch.motion) this.record(m.timestampUs, (w) => w.imuMotion(m));
         for (const g of batch.gyro) this.record(g.timestampUs, (w) => w.gyroRaw(g));
         for (const a of batch.accel) this.record(a.timestampUs, (w) => w.accelRaw(a));
+        for (const f of batch.mag) this.record(f.timestampUs, (w) => w.magRaw(f));
       }),
     );
     this.timer = setInterval(() => this.tick(), 1000);

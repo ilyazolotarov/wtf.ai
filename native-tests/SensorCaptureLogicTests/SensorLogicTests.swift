@@ -65,6 +65,7 @@ final class RowTests: XCTestCase {
     let a = SensorLogic.accelRow(timestamp: 2, xG: 0, yG: 0, zG: 1)
     XCTAssertEqual(a.count, 4)
     XCTAssertEqual(a[3], 9.80665, accuracy: 1e-12)
+    XCTAssertEqual(SensorLogic.magRow(timestamp: 3, x: 20, y: -5, z: -45), [3_000_000, 20, -5, -45])
   }
 
   func testRateClamp() {
@@ -92,6 +93,8 @@ final class ImuBatcherTests: XCTestCase {
     XCTAssertNil(b.flush(nowUs: 10))
     _ = b.append("a", [1, 2, 3, 4], nowUs: 20)
     XCTAssertEqual(b.flush(nowUs: 30)?["a"], [1, 2, 3, 4])
+    _ = b.append("f", [5, 6, 7, 8], nowUs: 40)
+    XCTAssertEqual(b.flush(nowUs: 50)?["f"], [5, 6, 7, 8])
   }
 
   func testMinimumInterval() {
@@ -99,9 +102,10 @@ final class ImuBatcherTests: XCTestCase {
   }
 
   func testPayloadKeysMatchJs() {
-    let p = ImuBatcher.payload(["m": [1], "g": [2], "a": [3]])
+    let p = ImuBatcher.payload(["m": [1], "g": [2], "a": [3], "f": [4]])
     XCTAssertEqual(p["motion"] as? [Double], [1])
     XCTAssertEqual(p["gyro"] as? [Double], [2])
     XCTAssertEqual(p["accel"] as? [Double], [3])
+    XCTAssertEqual(p["mag"] as? [Double], [4])
   }
 }

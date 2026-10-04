@@ -30,12 +30,14 @@ export interface NativeGnssFix {
 
 /**
  * Flat rows. `motion`: 14 values per sample (tUs, gyro xyz rad/s, user accel xyz m/s²,
- * gravity xyz m/s², attitude quaternion w x y z). `gyro`/`accel`: 4 per sample (tUs, x, y, z).
+ * gravity xyz m/s², attitude quaternion w x y z). `gyro`/`accel`/`mag`: 4 per sample (tUs, x, y, z);
+ * `mag` is the raw magnetic field in µT.
  */
 export interface NativeImuBatch {
   motion: number[];
   gyro: number[];
   accel: number[];
+  mag: number[];
 }
 
 export const MOTION_ROW = 14;
@@ -54,7 +56,7 @@ declare class SensorCaptureNativeModule extends NativeModule<SensorCaptureEvents
   requestLocationPermission(): Promise<LocationPermission>;
   startGnss(): Promise<boolean>;
   stopGnss(): Promise<void>;
-  startImu(options: { rateHz: number; raw: boolean; batchMs: number }): Promise<boolean>;
+  startImu(options: { rateHz: number; raw: boolean; batchMs: number; magRateHz: number }): Promise<boolean>;
   stopImu(): Promise<void>;
 }
 

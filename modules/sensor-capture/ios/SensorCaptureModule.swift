@@ -9,6 +9,8 @@ struct ImuOptions: Record {
   @Field var rateHz: Double = 100
   @Field var raw: Bool = false
   @Field var batchMs: Double = 100
+  /** Raw magnetometer rate; 0 = off. Logged only, never used for navigation (SPEC §2). */
+  @Field var magRateHz: Double = 20
 }
 
 public class SensorCaptureModule: Module {
@@ -234,6 +236,13 @@ final class SensorCapture: NSObject, CLLocationManagerDelegate {
         }
       }
     }
+    if options.magRateHz > 0 && motion.isMagnetometerAvailable {
+      motion.magnetometerUpdateInterval = 1.0 / SensorLogic.clampRateHz(options.magRateHz)
+      motion.startMagnetometerUpdates(to: motionQueue) { [weak self] data, _ in
+        guard let self = self, let d = data else { return }
+        self.append("f", SensorLogic.magRow(timestamp: d.timestamp, x: d.magneticField.x, y: d.magneticField.y, z: d.magneticField.z))
+      }
+    }
     return true
   }
 
@@ -243,6 +252,7 @@ final class SensorCapture: NSObject, CLLocationManagerDelegate {
     motion.stopDeviceMotionUpdates()
     motion.stopGyroUpdates()
     motion.stopAccelerometerUpdates()
+    motion.stopMagnetometerUpdates()
     motionQueue.addOperation { self.flushBatch() }
   }
 

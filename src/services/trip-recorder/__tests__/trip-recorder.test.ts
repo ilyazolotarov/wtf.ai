@@ -49,7 +49,7 @@ function memoryFiles() {
 
 function fakeSensors() {
   const gnss = new Emitter<[GnssRecord]>();
-  const imu = new Emitter<[{ motion: never[]; gyro: never[]; accel: never[] }]>();
+  const imu = new Emitter<[{ motion: never[]; gyro: never[]; accel: never[]; mag: never[] }]>();
   const wanted = { gnss: false, imu: false };
   const sensors = {
     gnss,

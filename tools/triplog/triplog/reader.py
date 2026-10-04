@@ -68,6 +68,8 @@ class Trip:
     imu: pd.DataFrame
     gyro_raw: pd.DataFrame
     accel_raw: pd.DataFrame
+    # Raw magnetic field, µT, phone frame; empty in logs from before it was recorded.
+    mag: pd.DataFrame
     engine: pd.DataFrame
     trip_events: pd.DataFrame
     link_stats: pd.DataFrame
@@ -107,6 +109,7 @@ class Trip:
             "imu": self.imu,
             "gyro_raw": self.gyro_raw,
             "accel_raw": self.accel_raw,
+            "mag": self.mag,
             "engine": self.engine,
             "trip_events": self.trip_events,
             "link_stats": self.link_stats,
@@ -239,6 +242,7 @@ def load(path: str | Path) -> Trip:
 
     gyro_raw = vec3("gyro_raw", "gyro_rad_s", "gyro")
     accel_raw = vec3("accel_raw", "accel_m_s2", "accel")
+    mag = vec3("mag_raw", "mag_ut", "mag")
 
     # --- events ---
     d = _dataset(ulog, "engine_state")
@@ -334,6 +338,7 @@ def load(path: str | Path) -> Trip:
         imu=imu,
         gyro_raw=gyro_raw,
         accel_raw=accel_raw,
+        mag=mag,
         engine=engine,
         trip_events=trip_events,
         link_stats=link_stats,

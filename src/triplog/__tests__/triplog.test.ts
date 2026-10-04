@@ -75,6 +75,8 @@ describe("TripLogWriter", () => {
     expect(f.data.obd_pid[5]).toMatchObject({ status: 1, n_bytes: 0 });
     expect(f.data.gnss[2]).toMatchObject({ lat_deg: 50.4502, speed_mps: 12 });
     expect(f.data.imu_motion).toHaveLength(100);
+    expect(f.data.mag_raw).toHaveLength(20);
+    expect(readTripLog(buildFixture()).mag[0]).toEqual({ tUs: FIXTURE_START_US, field: [20, 0, -45] });
     expect(f.data.time_sync[0].utc_us).toBe(1_791_000_000_000_000);
     expect(f.data.trip_event.map((e) => e.event)).toEqual([0, 1]);
     expect(f.logs[0].tag).toBe(1);

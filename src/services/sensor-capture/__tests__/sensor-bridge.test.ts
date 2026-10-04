@@ -59,12 +59,13 @@ describe("payload decoding (row layouts shared with SensorLogic.swift)", () => {
     expect(r.courseRad).toBeNaN();
   });
 
-  test("IMU: 14-value motion rows, 4-value raw rows, partial rows ignored", () => {
+  test("IMU: 14-value motion rows, 4-value raw and magnetometer rows, partial rows ignored", () => {
     const motionRow = [12_500_000, 0.1, 0.2, 0.3, 9.8, 0, 0, 0, 0, -9.8, 1, 0, 0, 0];
     const decoded = decodeImuBatch({
       motion: [...motionRow, ...motionRow.map((v, i) => (i === 0 ? v + 10_000 : v)), 1, 2, 3],
       gyro: [1, 0.1, 0.2, 0.3],
       accel: [2, 0, 0, 9.8, 99],
+      mag: [3, 20, -5, -45],
     });
     expect(decoded.motion).toHaveLength(2);
     expect(decoded.motion[0]).toEqual({
@@ -77,6 +78,7 @@ describe("payload decoding (row layouts shared with SensorLogic.swift)", () => {
     expect(decoded.motion[1].timestampUs).toBe(12_510_000);
     expect(decoded.gyro).toEqual([{ timestampUs: 1, v: [0.1, 0.2, 0.3] }]);
     expect(decoded.accel).toEqual([{ timestampUs: 2, v: [0, 0, 9.8] }]);
+    expect(decoded.mag).toEqual([{ timestampUs: 3, v: [20, -5, -45] }]);
   });
 });
 
@@ -95,7 +97,7 @@ describe("SensorService", () => {
     s.want(true, true);
     await flush();
     expect(mockNative.startGnss).toHaveBeenCalledTimes(1);
-    expect(mockNative.startImu).toHaveBeenCalledWith({ rateHz: 100, raw: false, batchMs: 100 });
+    expect(mockNative.startImu).toHaveBeenCalledWith({ rateHz: 100, raw: false, batchMs: 100, magRateHz: 20 });
     expect(s.getSnapshot()).toMatchObject({ gnssRunning: true, imuRunning: true });
 
     s.want(true, false);
@@ -146,7 +148,7 @@ describe("SensorService", () => {
     s.gnss.on((f) => fixes.push(f));
     s.imu.on((b) => batches.push(b));
     mockEmit("onGnss", { tUs: 5, utcUs: 6, deliveryDelayUs: 0, lat: 1, lon: 2, simulated: true, fromAccessory: false });
-    mockEmit("onImuBatch", { motion: [1, 0, 0, 0.1, 0, 0, 0, 0, 0, -9.8, 1, 0, 0, 0], gyro: [], accel: [] });
+    mockEmit("onImuBatch", { motion: [1, 0, 0, 0.1, 0, 0, 0, 0, 0, -9.8, 1, 0, 0, 0], gyro: [], accel: [], mag: [] });
     mockEmit("onGnssError", { message: "denied", code: 1 });
     expect(fixes).toHaveLength(1);
     expect((fixes[0] as { flags: number }).flags).toBe(1);
@@ -161,6 +163,6 @@ describe("SensorService", () => {
     s.setImuSettings({ rateHz: 50, raw: true });
     await flush();
     expect(mockNative.stopImu).toHaveBeenCalledTimes(1);
-    expect(mockNative.startImu).toHaveBeenLastCalledWith({ rateHz: 50, raw: true, batchMs: 100 });
+    expect(mockNative.startImu).toHaveBeenLastCalledWith({ rateHz: 50, raw: true, batchMs: 100, magRateHz: 20 });
   });
 });

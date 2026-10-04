@@ -69,6 +69,13 @@ def test_imu(trip):
     assert imu["t_s"].diff().iloc[1:].round(6).unique().tolist() == [0.01]
 
 
+def test_mag(trip):
+    mag = trip.mag
+    assert len(mag) == 20
+    assert mag.iloc[0][["mag_x", "mag_y", "mag_z"]].tolist() == pytest.approx([20, 0, -45])
+    assert mag["t_s"].diff().iloc[1:].round(6).unique().tolist() == [0.05]
+
+
 def test_events_and_time(trip):
     assert trip.engine["state"].tolist() == ["engine-running"]
     assert trip.trip_events["event"].tolist() == ["start", "end"]

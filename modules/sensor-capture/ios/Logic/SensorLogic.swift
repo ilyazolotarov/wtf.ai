@@ -86,17 +86,22 @@ enum SensorLogic {
     return [timestamp * 1_000_000, xG * g, yG * g, zG * g]
   }
 
+  /** Raw magnetometer row (4 values): t µs, x, y, z µT (uncalibrated: includes the phone's own field). */
+  static func magRow(timestamp: Double, x: Double, y: Double, z: Double) -> [Double] {
+    return [timestamp * 1_000_000, x, y, z]
+  }
+
   static func clampRateHz(_ hz: Double) -> Double {
     return Swift.max(1, Swift.min(200, hz))
   }
 }
 
-/** Collects flat IMU rows per stream ("m", "g", "a") and emits a batch every `intervalUs`. */
+/** Collects flat IMU rows per stream ("m", "g", "a", "f" magnetic field) and emits a batch every `intervalUs`. */
 struct ImuBatcher {
-  static let streams = ["m", "g", "a"]
+  static let streams = ["m", "g", "a", "f"]
 
   var intervalUs: Double
-  private(set) var rows: [String: [Double]] = ["m": [], "g": [], "a": []]
+  private(set) var rows: [String: [Double]] = ["m": [], "g": [], "a": [], "f": []]
   private(set) var startUs: Double
 
   init(intervalMs: Double, nowUs: Double) {
@@ -113,14 +118,14 @@ struct ImuBatcher {
   /** Returns the pending rows (nil if empty) and starts a new batch. */
   mutating func flush(nowUs: Double) -> [String: [Double]]? {
     let out = rows
-    rows = ["m": [], "g": [], "a": []]
+    rows = ["m": [], "g": [], "a": [], "f": []]
     startUs = nowUs
     if ImuBatcher.streams.allSatisfy({ (out[$0] ?? []).isEmpty }) { return nil }
     return out
   }
 
-  /** Event payload keys used by JS (`motion`, `gyro`, `accel`). */
+  /** Event payload keys used by JS (`motion`, `gyro`, `accel`, `mag`). */
   static func payload(_ batch: [String: [Double]]) -> [String: Any] {
-    return ["motion": batch["m"] ?? [], "gyro": batch["g"] ?? [], "accel": batch["a"] ?? []]
+    return ["motion": batch["m"] ?? [], "gyro": batch["g"] ?? [], "accel": batch["a"] ?? [], "mag": batch["f"] ?? []]
   }
 }

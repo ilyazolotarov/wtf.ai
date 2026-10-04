@@ -116,7 +116,7 @@ function harness(options: { vin?: string | null; store?: ReturnType<typeof memor
         const f = trip.gnss[g++];
         if (opts.withoutGnssFromS === undefined || f.tUs < trip.startUs + opts.withoutGnssFromS * 1e6) gnss.emit(record(f));
       }
-      imu.emit({ motion: batch, gyro: [], accel: [] });
+      imu.emit({ motion: batch, gyro: [], accel: [], mag: [] });
       jest.advanceTimersByTime(100);
       opts.onStep?.(nowUs);
     }

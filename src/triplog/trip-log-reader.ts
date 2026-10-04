@@ -24,6 +24,8 @@ export interface TripLog {
   startUs: number;
   info: Record<string, RecordValue>;
   imu: ImuSample[];
+  /** Raw magnetic field, µT, phone frame (absent in logs before it was recorded). */
+  mag: { tUs: number; field: Vec3 }[];
   obdSpeed: ObdSpeedSample[];
   gnss: GnssFix[];
   engine: { tUs: number; state: string }[];
@@ -59,6 +61,8 @@ export function readTripLog(bytes: Uint8Array): TripLog {
     gravity: vec3(r, "gravity_m_s2"),
     userAccel: vec3(r, "user_accel_m_s2"),
   }));
+
+  const mag = rows("mag_raw").map((r) => ({ tUs: num(r, "timestamp"), field: vec3(r, "mag_ut") }));
 
   const obdSpeed = rows("obd_pid")
     .filter((r) => num(r, "mode") === 1 && num(r, "pid") === PID_SPEED && num(r, "status") === STATUS_OK)
@@ -127,6 +131,7 @@ export function readTripLog(bytes: Uint8Array): TripLog {
     startUs: log.startUs,
     info: log.info,
     imu,
+    mag,
     obdSpeed,
     gnss,
     engine,

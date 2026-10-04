@@ -18,6 +18,7 @@ trip = load("20261003-081500_k3x9qa.ulg")
 trip.obd_speed   # t_s (tx/rx midpoint), speed_mps, raw_kph, latency_ms, status
 trip.gnss        # t_s, utc, lat, lon, h_acc, speed, speed_acc, course, …
 trip.imu         # t_s, gyro_*, ua_*, g_*, q_*, yaw_rate_up (CCW+ seen from above)
+trip.mag         # t_s, mag_x/y/z: raw magnetic field, µT, phone frame (uncalibrated)
 trip.to_utc(trip.imu["t_s"])
 ```
 

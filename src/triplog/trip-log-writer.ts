@@ -3,6 +3,7 @@
 
 import {
   ACCEL_RAW,
+  MAG_RAW,
   ALL_FORMATS,
   ENGINE_STATE,
   GNSS,
@@ -136,6 +137,11 @@ export class TripLogWriter {
   accelRaw(r: Vec3Record): void {
     if (this.overBudget(r.timestampUs)) return;
     this.enc.data(ACCEL_RAW.name, [r.timestampUs, r.v]);
+  }
+
+  magRaw(r: Vec3Record): void {
+    if (this.overBudget(r.timestampUs)) return;
+    this.enc.data(MAG_RAW.name, [r.timestampUs, r.v]);
   }
 
   engineState(timestampUs: number, code: number): void {

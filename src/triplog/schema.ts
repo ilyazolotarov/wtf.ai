@@ -63,6 +63,12 @@ export const ACCEL_RAW: ULogFormat = {
   fields: [ts, { type: "float", name: "accel_m_s2", count: 3 }],
 };
 
+/** Raw (uncalibrated) magnetic field, µT, phone frame. Logged only (SPEC §2). */
+export const MAG_RAW: ULogFormat = {
+  name: "mag_raw",
+  fields: [ts, { type: "float", name: "mag_ut", count: 3 }],
+};
+
 export const ENGINE_STATE: ULogFormat = {
   name: "engine_state",
   fields: [ts, { type: "uint8_t", name: "state" }],
@@ -123,6 +129,7 @@ export const ALL_FORMATS: readonly ULogFormat[] = [
   LINK_STATS,
   TIME_SYNC,
   NAV_ESTIMATE,
+  MAG_RAW,
 ];
 
 export const ENGINE_STATE_CODES = ["unknown", "ignition-off", "engine-off", "engine-running"] as const;
