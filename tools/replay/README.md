@@ -102,6 +102,22 @@ the error by time without GPS (`--every` minutes). Graphs: `--graph`, else the s
 (`gh release download maps-<date> -p <region>.graph.bin -D tools/tiles/out/release` fetches a published one).
 It is optimistic: no parking, reversing, yards, unmapped roads or traffic jams.
 
+## Routes
+
+The app's route planner (ROUTING-SPEC, `src/nav/routing/`) on a region's road graph: one route, or the planning
+time of many random ones.
+
+```bash
+npm run route -- --from 51.4939,31.2947 --to 51.5100,31.3300            # one route; --from lat,lon,headingDeg
+npm run route -- --from 51.4939,31.2947 --to 50.5956,32.3873 --geojson route.geojson
+npm run route -- --bench 50                                              # random routes in the region
+npm run route -- --bench 50 --at 51.4939,31.2947 --radius 8             # ... within 8 km of a point
+```
+
+One route: length, time, edges, how far its ends are from the points, states settled, tiles read and planning
+time. The bench prints planning time, states and the route's length over the straight line by distance, and the
+`--from`/`--to` of every route that failed.
+
 ## Road graph
 
 Map matching runs on the road graph built by `tools/tiles` (`python -m tiles.cli graph chernihiv`, see its

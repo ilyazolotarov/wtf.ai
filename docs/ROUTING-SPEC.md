@@ -15,7 +15,9 @@ Plan a drive to a destination offline and guide the driver along it, so that:
 
 ## 2. Status (2026-10-05)
 
-- **R1 (this spec) and R2 (the planner, §4–5)** in progress.
+- **R1 done:** this spec; SPEC.md moved routing here from Valhalla.
+- **R2 done:** the planner `src/nav/routing/` (§4–5) and `npm run route` (§7): city routes in 0.1 s or less, oblast
+  routes up to 1 s, in Node.
 - The app's `route` screen is still the UI-first mock (UI-SPEC §7.1): a list of cities and a straight line.
 
 ## 3. Decisions
@@ -57,12 +59,20 @@ drives (trip logs give the real time per edge class).
 ### 5.1 Start and destination
 
 - **Start**: the car's position and, when known, heading (the puck: map-matched while dead-reckoning). Candidate
-  edges within `max(25 m, accuracy)` of it, nearest first, plus any within 10 m of the nearest. Each allowed
-  direction is a start state costing the rest of the edge from the projected point. With the heading known, the
-  direction more than 90° off it costs the 60 s turnaround.
+  edges: the nearest, plus any within `max(25 m, accuracy)` and within 10 m of the nearest (a parallel road), but
+  not those that only meet the nearest at its end node (a junction just ahead or behind). Each allowed direction is
+  a start state costing the rest of the edge from the projected point. With the heading known, the direction more
+  than 90° off it costs the 60 s turnaround.
 - **Destination**: the nearest edge to the point within 500 m, preferring a public road (not private, not minor
   service) when one is within 50 m of the nearest. Reached in either allowed direction, at the projected point.
 - Start and destination on the same edge with the destination ahead: the route is that stretch.
+- **Road islands.** OSM has car parks, yards and track networks connected to nothing (by footways, or not at all).
+  So every other edge within 500 m of either end is a fallback end, costing 3600 s plus 1 s per metre off (twice
+  that at the start: better to end away from the pin than to start away from the car). They only win when the
+  main end can't be reached; the plan reports how far its ends are from the points (`offRoadM`), and its duration
+  leaves the penalties out. Before searching, each end's roads are followed regardless of direction up to 3000
+  edges: if that runs out without meeting the other end's roads, there is no route, found in ~10 ms instead of a
+  search through the whole region.
 
 ### 5.2 Search
 
@@ -94,9 +104,32 @@ distance from the start. Details in R3.
 
 ## 7. Measurements (`npm run route`)
 
-`npm run route -- --from lat,lon --to lat,lon [--graph <file>]` prints the route; `--bench <n>` plans `n` random
-routes in the region and prints planning time and states by distance. Targets on the iPhone (to confirm from Node
-first): a city route (≤ 15 km) under 0.5 s, an oblast route under 3 s.
+`npm run route -- --from lat,lon --to lat,lon [--graph <file>] [--geojson <out>]` prints the route; `--bench <n>
+[--at lat,lon --radius km]` plans `n` random routes between road points (in the region, or within the radius) and
+prints planning time and states by straight-line distance. Targets on the iPhone: a city route (≤ 15 km) under
+0.5 s, an oblast route under 3 s. The router's own graph keeps 2048 decoded tiles (~20 MB held).
+
+Node on the Windows PC, cold tile cache (2026-10-05):
+
+| Graph, routes | Straight line | ms p50 / p90 / max | States p50 / max | Route ÷ line |
+| --- | --- | --- | --- | --- |
+| Chernihiv, within 8 km of the centre | 0–5 km | 19 / 44 / 79 | 3 323 / 29 721 | 1.73 |
+| | 5–15 km | 47 / 106 / 112 | 17 265 / 47 319 | 1.45 |
+| Kyiv city, within 15 km of the centre | 0–5 km | 11 / 29 / 29 | 6 220 / 12 978 | 1.75 |
+| | 5–15 km | 95 / 360 / 602 | 41 027 / 211 749 | 1.46 |
+| | 15–50 km | 352 / 535 / 622 | 121 822 / 211 041 | 1.45 |
+| Chernihiv oblast | 15–50 km | 28 / 181 / 181 | 6 343 / 34 211 | 1.30 |
+| | 50–100 km | 304 / 461 / 619 | 56 955 / 164 864 | 1.44 |
+| | 100+ km | 530 / 949 / 964 | 141 499 / 241 588 | 1.37 |
+
+- A 172 km route across the oblast (Chernihiv → Pryluky area) settles 148 k states; it reads 81 k tiles with the
+  filter's 128-tile cache (1.1 s), 5.2 k with 2048 (0.57 s, 20 MB held), 4.5 k with 4096 (0.51 s, 79 MB).
+- Of 130 random routes, 4 had no road route: 3 ended on track networks or yards connected to nothing, now refused
+  in ~10 ms (island check); one start on a source-only stretch found its route once fallbacks were added.
+- On the phone: unknown. The filter's updates ran about as fast on the iPhone as in Node (MAPMATCH-SPEC §15.9), but
+  tile reads go through the file system there. The app logs every plan's time (§8); if oblast routes are slow,
+  the candidates are a routing-only tile decode (no geometry arrays) and skipping minor roads far from both ends.
+- ETA: the model's 50 min for 32 km across Kyiv and 162 min for 172 km are guesses until calibrated (§4).
 
 ## 8. App and the route hint (R4, R5)
 
