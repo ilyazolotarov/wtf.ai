@@ -426,9 +426,14 @@ describe("map matching", () => {
     expect(timing.count).toBeGreaterThanOrEqual(logged);
     expect(timing.p99Ms).toBeLessThanOrEqual(timing.maxMs);
     expect(timing.share).toBeGreaterThanOrEqual(0); // fake timers stop performance.now: updates take 0 ms here
+    // The filter's starts are counted apart from its updates.
+    expect(service.getDebug().mapMatchStarts).toEqual({ count: expect.any(Number), maxMs: expect.any(Number) });
+    expect(service.getDebug().mapMatchStarts!.count).toBeGreaterThanOrEqual(1);
     engine.emit("engine-off", now());
-    expect(notes.at(-1)).toMatch(/^mm timing: \d+ updates, p50 [\d.]+ ms, p99 [\d.]+ ms, max [\d.]+ ms, [\d.]+ % of the time, \d+ over 5 ms$/);
-    expect(service.getDebug().mapMatchTiming).toBeNull(); // counting afresh for the next drive
+    expect(notes.at(-1)).toMatch(
+      /^mm timing: \d+ updates, p50 [\d.]+ ms, p99 [\d.]+ ms, max [\d.]+ ms, [\d.]+ % of the time, \d+ over 5 ms; \d+ starts?, slowest [\d.]+ ms$/,
+    );
+    expect(service.getDebug()).toMatchObject({ mapMatchTiming: null, mapMatchStarts: null }); // counting afresh for the next drive
     service.stop();
   });
 

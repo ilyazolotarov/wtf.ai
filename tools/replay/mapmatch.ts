@@ -93,7 +93,10 @@ for (const file of args.files) {
   if (s.relock.count) {
     console.log(`  re-lock: ${s.relock.count}×, median ${s.relock.medianS!.toFixed(1)} s / ${m(s.relock.medianM)}, max ${s.relock.maxS!.toFixed(1)} s / ${m(s.relock.maxM)}`);
   }
-  if (s.updateMs) console.log(`  update: p50 ${s.updateMs.p50.toFixed(2)} ms, p99 ${s.updateMs.p99.toFixed(2)} ms, max ${s.updateMs.max.toFixed(1)} ms`);
+  if (s.updateMs) {
+    const starts = s.startMs ? `; ${s.startMs.count} start${s.startMs.count === 1 ? "" : "s"}, slowest ${s.startMs.max.toFixed(1)} ms` : "";
+    console.log(`  update: p50 ${s.updateMs.p50.toFixed(2)} ms, p99 ${s.updateMs.p99.toFixed(2)} ms, max ${s.updateMs.max.toFixed(1)} ms${starts}`);
+  }
   if (s.wrongRoad.length) console.log(`  wrong road at (s): ${spans(s.wrongRoad)}`);
   if (s.lost.length) console.log(`  no particle on the true road at (s): ${spans(s.lost)}`);
   for (const c of r.summary.cuts) {

@@ -429,6 +429,11 @@ export class ParticleFilter {
   private lastUpdateMs = 0;
   /** Durations of every update, ms (replay statistics). */
   readonly updateTimes: number[] = [];
+  /**
+   * Durations of every start (`init`, `initUnknown`), ms, apart from the updates: a start lays particles on every
+   * road around the car, and the first one reads those roads from storage (several times an update's cost).
+   */
+  readonly startTimes: number[] = [];
 
   constructor(
     private readonly graph: RoadGraph,
@@ -502,7 +507,7 @@ export class ParticleFilter {
     }
     this.normalize();
     this.updateWorkingSet();
-    this.record(now() - t0);
+    this.startTimes.push(now() - t0);
   }
 
   /**
@@ -546,7 +551,7 @@ export class ParticleFilter {
     }
     this.normalize();
     this.updateWorkingSet();
-    this.record(now() - t0);
+    this.startTimes.push(now() - t0);
     return true;
   }
 

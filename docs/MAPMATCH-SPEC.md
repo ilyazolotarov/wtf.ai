@@ -423,8 +423,11 @@ count only for survival, §10.2):
 | 79xky3 | 28 (+21) | 0 % | 100 % | 7.1 % | 0 % |
 
 - In M4 the one survival miss was the 2 s after 5mn7ai leaves the unmapped yard (§10.4); now there is none.
-- Update time (Node): p50 0.06–0.12 ms, p99 0.4–1.1 ms; single updates up to 8 ms (not yet broken down: starts,
-  tile loads and GC are candidates).
+- Update time (Node): p50 0.06–0.12 ms, p99 0.4–1.1 ms; single updates up to 8 ms. Starts are counted apart since
+  2026-10-05 and weren't the cause: without them the slowest update per drive is still 2.7–8.2 ms (tile loads and
+  GC remain the candidates). Starts take 0.3–2.6 ms, up to 10–19 ms for a wide unknown-heading start (vwaz7t,
+  3afby6). 3afby6 (no GPS from the start, the filter in `init` with up to 4000 particles for 1.7 km) is the heaviest
+  drive: p50 0.53 ms, p99 4.8 ms.
 
 Outages (`npm run replay:bench -- --mm`, same windows as NAVIGATOR-SPEC §10; filter open loop). M4, then after
 M5 (with the map, q8tfjs and s4fkdm start their EKF from it, so the EKF columns move too):
@@ -880,8 +883,11 @@ hundred metres stops matching the twin's.
     a second and a record goes out 2–3 times, so the last update's time alone would miss the spikes.
 - **Update time on the phone** (§14.5): `NavigatorService` drains the filter's update times at each published
   position into a per-drive histogram (`src/nav/mapmatch/update-timing.ts`, buckets 5 % apart). The Vehicle
-  sheet shows p50 / p99, the slowest, how many exceeded 5 ms and the share of the time spent; at engine off a note
-  `mm timing: <n> updates, p50 … ms, p99 … ms, max … ms, … % of the time, <k> over 5 ms` closes the drive.
+  sheet shows p50 / p99, the slowest, how many exceeded 5 ms (red once 100 updates make p99 meaningful), the
+  filter's starts and the share of the time spent; at engine off a note `mm timing: <n> updates, p50 … ms, p99 …
+  ms, max … ms, … % of the time, <k> over 5 ms; <s> starts, slowest … ms` closes the drive. Starts are kept apart
+  from updates (`ParticleFilter.startTimes`): a start lays particles on every road around the car, and the first
+  one reads those roads from storage, so it would otherwise stand as the drive's slowest update.
   `tools/triplog` sums the records (`summary()["map_match_timing"]`).
 
   Read by `readTripLog` (`navMapMatch`) and `tools/triplog` (`Trip.map_match`). App notes: `mm graph …`, `mm
@@ -974,7 +980,9 @@ M1–M3 can partly overlap. M4 needs M1–M3. M5 and M6 are independent of each 
 8. **Low-speed manoeuvring** decides road vs off-road 20–30 m late; the 120 s p90 is worse than the EKF's because
    of it. More drives with parking and yards are needed before tuning further.
 9. **Device timing:** 500 particles take < 1 ms p99 in Node; measure on the iPhone (M7). An unknown-heading start
-   with a large anchor uses up to 4000 particles until it tracks.
+   with a large anchor uses up to 4000 particles until it tracks. First reading (2026-10-05, parked at home):
+   the first start took 48 ms (reading the roads from storage; 2–5 ms cold in Node), the one fix update 0.28 ms,
+   as in Node (0.34 ms for the same step). Still needed: a drive, and one that starts without GPS (3afby6's case).
 10. **The EKF-position prior after a map start** is the filter's own mean, fed back to it (the same issue as §9 in
     open loop). Decide in M6.
 11. **Flip-flopping starts** (ng2n9z): a filter alternating between `tracking` and `multimodal` never holds 100 m.

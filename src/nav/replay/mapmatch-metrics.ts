@@ -20,6 +20,8 @@ export interface MapMatchSummary {
   relock: { count: number; medianS: number | null; maxS: number | null; medianM: number | null; maxM: number | null };
   /** Filter update durations (odometry chunk or fix), ms. */
   updateMs: { p50: number; p99: number; max: number } | null;
+  /** Filter starts (on a pose or with the heading unknown): how many, and the slowest, ms. */
+  startMs: { count: number; max: number } | null;
   /** Samples whose dominant cluster was on a wrong road, as [start, end] stretches in seconds since log start. */
   wrongRoad: [number, number][];
   /** Samples with no particle on the true road. */
@@ -83,7 +85,7 @@ export class MapMatchMetrics {
     }
   }
 
-  summary(updateTimes: number[]): MapMatchSummary {
+  summary(updateTimes: number[], startTimes: number[] = []): MapMatchSummary {
     const n = this.samples;
     const share = (k: number) => (n ? k / n : null);
     const all = n + this.initSamples;
@@ -104,6 +106,7 @@ export class MapMatchMetrics {
         maxM: m.length ? Math.max(...m) : null,
       },
       updateMs: updateTimes.length ? { p50: quantile(updateTimes, 0.5), p99: quantile(updateTimes, 0.99), max: Math.max(...updateTimes) } : null,
+      startMs: startTimes.length ? { count: startTimes.length, max: Math.max(...startTimes) } : null,
       wrongRoad: this.wrongSpans,
       lost: this.lostSpans,
     };

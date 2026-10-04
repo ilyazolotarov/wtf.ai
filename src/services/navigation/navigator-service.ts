@@ -94,8 +94,10 @@ export interface NavigatorDebug {
   roadHeading: { accepted: number; rejected: number } | null;
   roadPosition: { accepted: number; rejected: number } | null;
   mapMatch: MapMatchEstimate | null;
-  /** Every filter update this drive (since the last `mm timing` note), and its share of the time. */
+  /** Every filter update this drive (since the last `mm timing` note), and its share of the time (starts included). */
   mapMatchTiming: (UpdateTimingSummary & { share: number }) | null;
+  /** The filter's starts this drive, apart from its updates: the first reads the roads around the car from storage. */
+  mapMatchStarts: { count: number; maxMs: number } | null;
 }
 
 /** The particle filter's state for the map's debug overlay (MAPMATCH-SPEC §11). */
@@ -186,8 +188,9 @@ export class NavigatorService implements PositionSource {
   /** Road corrections already summarised in the trip log. */
   private notedRoad = { heading: 0, position: 0 };
   private overlayStale = true;
-  /** Filter update times: this drive's, and those since the last `nav_mapmatch` record. */
+  /** Filter update times: this drive's, and those since the last `nav_mapmatch` record; its starts, apart. */
   private timing = new UpdateTiming();
+  private starts = { count: 0, totalMs: 0, maxMs: 0 };
   private timingSince = 0;
   private interval = { count: 0, totalMs: 0, maxMs: 0 };
 
@@ -320,6 +323,7 @@ export class NavigatorService implements PositionSource {
       roadPosition: nav ? { accepted: nav.stats.roadPositionAccepted, rejected: nav.stats.roadPositionRejected } : null,
       mapMatch: e?.mapMatch ?? null,
       mapMatchTiming: this.timingSummary(),
+      mapMatchStarts: this.starts.count ? { count: this.starts.count, maxMs: this.starts.maxMs } : null,
     };
   }
 
@@ -665,12 +669,17 @@ export class NavigatorService implements PositionSource {
 
   // ---- map-matching speed (MAPMATCH-SPEC §11) ----
 
-  /** Every filter update since the last drain, out of the filter (whose list would grow all drive). */
+  /** Every filter start and update since the last drain, out of the filter (whose lists would grow all drive). */
   private drainUpdateTimes(): void {
-    const times = this.nav?.mapMatcher?.updateTimes;
-    if (!times?.length) return;
-    if (!this.timing.count) this.timingSince = Date.now();
-    for (const ms of times.splice(0)) {
+    const pf = this.nav?.mapMatcher;
+    if (!pf || (!pf.updateTimes.length && !pf.startTimes.length)) return;
+    if (!this.timing.count && !this.starts.count) this.timingSince = Date.now();
+    for (const ms of pf.startTimes.splice(0)) {
+      this.starts.count++;
+      this.starts.totalMs += ms;
+      this.starts.maxMs = Math.max(this.starts.maxMs, ms);
+    }
+    for (const ms of pf.updateTimes.splice(0)) {
       this.timing.add(ms);
       this.interval.count++;
       this.interval.totalMs += ms;
@@ -682,19 +691,22 @@ export class NavigatorService implements PositionSource {
     this.drainUpdateTimes();
     const s = this.timing.summary();
     if (!s) return null;
-    return { ...s, share: s.totalMs / Math.max(1, Date.now() - this.timingSince) };
+    return { ...s, share: (s.totalMs + this.starts.totalMs) / Math.max(1, Date.now() - this.timingSince) };
   }
 
   /** At the end of a drive: how long the filter's updates took, then start counting afresh. */
   private noteMapMatchTiming(): void {
     const s = this.timingSummary();
+    const starts = this.starts;
+    this.timing = new UpdateTiming();
+    this.starts = { count: 0, totalMs: 0, maxMs: 0 };
     if (!s) return;
     const ms = (v: number) => (v < 10 ? v.toFixed(2) : v.toFixed(0));
     this.note(
       `mm timing: ${s.count} updates, p50 ${ms(s.p50Ms)} ms, p99 ${ms(s.p99Ms)} ms, max ${ms(s.maxMs)} ms, ` +
-        `${(s.share * 100).toFixed(2)} % of the time, ${s.overBudget} over 5 ms`,
+        `${(s.share * 100).toFixed(2)} % of the time, ${s.overBudget} over 5 ms` +
+        (starts.count ? `; ${starts.count} start${starts.count === 1 ? "" : "s"}, slowest ${ms(starts.maxMs)} ms` : ""),
     );
-    this.timing = new UpdateTiming();
   }
 
   /** At the end of a drive: the road corrections map matching sent the navigator, and how many it refused. */

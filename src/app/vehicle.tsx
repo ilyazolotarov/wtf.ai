@@ -293,8 +293,9 @@ function PositionTab() {
           label="hypotheses"
           value={ekf.mapMatch?.clusters.length ? ekf.mapMatch.clusters.map((c) => `${Math.round(c.weight * 100)}%`).join(" · ") : dash}
         />
-        <ScreenRow label="update (last)" value={ekf.mapMatch ? `${ekf.mapMatch.updateMs.toFixed(2)} ms` : dash} />
-        {/* Every update this drive; the target is under 5 ms at p99 (MAPMATCH-SPEC §14). */}
+        <ScreenRow label="update (last)" value={ekf.mapMatch && ekf.mapMatchTiming ? `${ekf.mapMatch.updateMs.toFixed(2)} ms` : dash} />
+        {/* Every update this drive; the target is under 5 ms at p99 (MAPMATCH-SPEC §14), judged from 100 updates on
+            (fewer make p99 the slowest one). */}
         <ScreenRow
           label="update p50 / p99"
           value={ekf.mapMatchTiming ? `${ekf.mapMatchTiming.p50Ms.toFixed(2)} / ${ekf.mapMatchTiming.p99Ms.toFixed(2)} ms` : dash}
@@ -302,7 +303,12 @@ function PositionTab() {
         <ScreenRow
           label="slowest · over 5 ms"
           value={ekf.mapMatchTiming ? `${ekf.mapMatchTiming.maxMs.toFixed(1)} ms · ${ekf.mapMatchTiming.overBudget} of ${ekf.mapMatchTiming.count}` : dash}
-          valueColor={ekf.mapMatchTiming && ekf.mapMatchTiming.p99Ms > 5 ? palette.bad.c : undefined}
+          valueColor={ekf.mapMatchTiming && ekf.mapMatchTiming.count >= 100 && ekf.mapMatchTiming.p99Ms > 5 ? palette.bad.c : undefined}
+        />
+        {/* Starts apart: the first reads the roads around the car from storage, once a drive. */}
+        <ScreenRow
+          label="starts · slowest"
+          value={ekf.mapMatchStarts ? `${ekf.mapMatchStarts.count} · ${ekf.mapMatchStarts.maxMs.toFixed(1)} ms` : dash}
         />
         <ScreenRow
           label="share of time"

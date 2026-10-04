@@ -323,7 +323,7 @@ export function replayTrip(trip: TripLog, options: ReplayOptions = {}): ReplayRe
       resets: nav.stats.resets,
       roadHeading: { accepted: nav.stats.roadHeadingAccepted, rejected: nav.stats.roadHeadingRejected },
       roadPosition: { accepted: nav.stats.roadPositionAccepted, rejected: nav.stats.roadPositionRejected },
-      mapMatch: metrics?.summary(nav.mapMatcher?.updateTimes ?? []) ?? null,
+      mapMatch: metrics?.summary(nav.mapMatcher?.updateTimes ?? [], nav.mapMatcher?.startTimes) ?? null,
       compass: { trust: nav.compassTrust, calibration: nav.compassCalibration, checkDiffsRad: [...nav.compassCheckDiffs] },
       cuts: cuts.map((c, k) => {
         const truth = fixes.filter(
