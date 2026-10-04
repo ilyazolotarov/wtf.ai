@@ -10,7 +10,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { mergeCalibrations, type CompassCalibration } from "../../../src/nav/compass/compass";
-import { replayTrip } from "../../../src/nav/replay/replay";
+import type { NavConfig } from "../../../src/nav/navigator";
+import { appOutageCuts, replayTrip, type ReplayOptions } from "../../../src/nav/replay/replay";
 import { buildViewerData } from "../../../src/nav/replay/viewer-data";
 import { readTripLog, type TripLog } from "../../../src/triplog/trip-log-reader";
 import { findGraph, openGraph, roadsAround, truthRoute } from "../graph-file";
@@ -64,6 +65,13 @@ function listLogs() {
     .sort((a, b) => b.file.localeCompare(a.file));
 }
 
+/** Navigator versions (MAPMATCH-SPEC §9): what the app runs today, and the closed-loop steps. */
+const LOOPS: Record<string, { label: string; nav: Partial<NavConfig> }> = {
+  open: { label: "Today", nav: { mapMatchLoop: "open" } },
+  heading: { label: "Road heading", nav: { mapMatchLoop: "heading" } },
+  closed: { label: "Full correction", nav: { mapMatchLoop: "closed" } },
+};
+
 function parseCuts(s: string | null): { fromS: number; toS: number }[] {
   if (!s) return [];
   return s
@@ -83,10 +91,13 @@ const server = createServer((req, res) => {
     } else if (url.pathname === "/api/replay") {
       const file = path.basename(url.searchParams.get("file") ?? "");
       if (!file.endsWith(".ulg")) return send(res, 400, "text/plain", "file must be a .ulg in the logs folder");
-      const lag = url.searchParams.get("lag");
-      const openLoop = url.searchParams.get("openLoop");
-      const start = Number(url.searchParams.get("start") || 0);
-      const jam = parseCuts(url.searchParams.get("jam"));
+      const q = (name: string) => url.searchParams.get(name) ?? "";
+      const lag = q("lag");
+      const start = Number(q("start") || 0);
+      // GPS scenario: as in the app (its "Cut GPS" windows withheld), all of it, cut where asked, jammed, or none.
+      const gps = q("gps") || "app";
+      const loop = LOOPS[q("loop")] ?? LOOPS.open;
+      const compareLoop = LOOPS[q("compare")] ?? null;
       // Compass: off, or calibrated on the other logs, optionally turned (a wrong calibration).
       const compassArg = url.searchParams.get("compass") ?? "";
       const compass = compassArg ? compassFromOtherLogs(file) : null;
@@ -98,17 +109,23 @@ const server = createServer((req, res) => {
       const graphFile = first ? (GRAPH ?? findGraph(first)) : null;
       const opened = graphFile && first ? openGraph(graphFile, first) : null;
       try {
-        const data = buildViewerData(file, trip, {
-          cuts: parseCuts(url.searchParams.get("cuts")),
-          nav: lag ? { gnssLagS: Number(lag), estimateGnssLag: false } : {},
-          openLoop: openLoop ? { delayS: Number(openLoop) } : undefined,
+        const appCuts = appOutageCuts(trip);
+        const asked = parseCuts(q("cut"));
+        const common: ReplayOptions = {
+          cuts: gps === "app" ? appCuts : gps === "cut" ? asked : [],
+          ...(gps === "nogps" ? { openLoop: { delayS: 0 } } : {}),
+          ...(gps === "jam" ? { jam: asked.length ? asked : [{ fromS: 0, toS: Infinity }] } : {}),
           ...(opened ? { mapMatch: { graph: opened.graph } } : {}),
           ...(start > 0 ? { startAtS: start } : {}),
-          ...(jam.length ? { jam } : {}),
           ...(compass ? { compass: { calibration: compass.calibration, rotateRad: (rotateDeg * Math.PI) / 180 } } : {}),
+        };
+        const navFor = (nav: Partial<NavConfig>): Partial<NavConfig> => ({ ...nav, ...(lag ? { gnssLagS: Number(lag), estimateGnssLag: false } : {}) });
+        const data = buildViewerData(file, trip, { ...common, nav: navFor(loop.nav) }, {
+          appCuts,
+          ...(compareLoop ? { compare: { label: compareLoop.label, options: { ...common, nav: navFor(compareLoop.nav) } } } : {}),
         });
         const compassInfo = compassArg ? { logs: compass?.logs ?? 0, rotateDeg, trust: data.summary.compass.trust } : null;
-        send(res, 200, "application/json", JSON.stringify({ ...data, compassInfo }));
+        send(res, 200, "application/json", JSON.stringify({ ...data, compassInfo, loopLabel: loop.label, appCuts: appCuts.length }));
       } finally {
         opened?.close();
       }

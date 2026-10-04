@@ -44,32 +44,37 @@ npm run replay:view                 # http://127.0.0.1:5174 (add -- --open to op
 npm run replay:view -- --logs D:/trips --port 5180
 ```
 
-- **Header:** pick a log, enter GPS cuts (`100:240, 600:60`) and the lag, then press Replay. It replays the same
-  way as the CLI, in about 1 s.
-- **Open loop:** with good GPS the prediction is corrected every second, so it hugs the GPS track. Open loop
-  withholds every fix once the heading is known (optionally 30–120 s later, so the speed scale and gyro bias
-  can settle). From then on the right-hand map is pure OBD + gyro dead reckoning, and every later fix is scored
-  against it.
-- **Map:**
-  - Satellite fixes are green, Wi-Fi/cell fixes amber, rejected fixes red, and fixes withheld by a cut grey.
-  - The predicted track is blue: solid while dead-reckoning, dashed while anchored.
-  - The current prediction shows with its accuracy circle and heading. A red dashed line joins it to the latest
-    GPS fix.
-  - **Side by side** splits it into two synchronized maps: GPS only on the left, prediction only on the right.
-  - Hover a fix for details; click it to jump there.
-- **Now panel:** GPS and prediction compared: source, age, accuracy, position gap, speed and heading. Below that,
-  OBD speed, RPM, engine state and the events list (click to seek).
+The viewer answers "how did my drive go": where the dot was against where the car really was.
+
+- **Header:**
+  - *Drive*: newest first.
+  - *Navigator*: the version the replay runs. *Today* is what the app runs; *Road heading* and *Full
+    correction* send map matching back into the navigator (MAPMATCH-SPEC §9).
+  - *GPS*: what the replay gets. *As in the app* withholds your "Cut GPS" moments, as the phone did; *All of it*;
+    *Cut at…* (`120:240`, several with commas); *Jammed* (Wi-Fi/cell-like fixes only, `0:inf` or a window;
+    `src/nav/replay/jam.ts`); *None after the start* (pure dead reckoning once the heading is known).
+  - *Compare*: a second navigator version, drawn in orange.
+  - *More*: GPS lag (empty = learned on the drive, as in the app), start the session later, compass at a jammed
+    start (MAPMATCH-SPEC §8.2).
+- **Tracks** (side panel, each can be hidden): GPS in green (where the car really was), what the phone showed in
+  purple (from the log's `nav_estimate`; older logs don't have it), the replay in blue, the compare replay in
+  orange. A replay track is what the app would have shown: the map-matched position while dead-reckoning.
+- **Without GPS:** every stretch without good GPS:
+  - *No GPS*: no clean satellite fix for over 15 s (jamming, tunnels) while the car moved at least 30 m; scored by
+    how far off each dot was when GPS came back, and whether that was inside its circle.
+  - *Cut GPS (app)* and *Cut in replay*: GPS was there but withheld, so each dot is scored all through: at the end,
+    at worst, and how often the real position was inside its circle (honest ≈ 68 %).
+  - Click one to zoom to it and jump to its end. Code: `src/nav/replay/drive-report.ts`.
+- **At the cursor:** the GPS state, and each dot's distance from the newest clean GPS fix, inside its circle or not.
+- **Map:** dots with their circles and dashed distance lines to the GPS fix. *Layers* adds every GPS fix, the
+  road graph, the true path (the road matched offline from clean GPS) and the replay's map-matching particles.
+  Hover a fix for details; click it to jump there.
 - **Timeline:** click or drag to seek; Space plays and pauses; ← and → step 5 s (Shift: 30 s).
-  - Speed: OBD line, GPS dots.
-  - Error: distance from prediction to each fix before the update, on a log scale. Red dots are fixes inside a
-    cut, the honest held-out error. The blue band is the predicted accuracy.
-  - Bands: GPS quality, prediction mode, engine state, events (markers in red).
-- **Session start and jamming:** *start* replays from that many seconds into the log, as if the app started
-  then. *jam* (`0:inf`, `300:240`) turns the satellite fixes in that window into Wi-Fi/cell-like ones (no speed or
-  course, ±tens of metres, every 5–10 s, some repeated; `src/nav/replay/jam.ts`). Together they show a jammed start
-  on a clean drive: alignment, or the map (MAPMATCH-SPEC §8).
-- **Links:** the URL keeps the log, cuts, open loop, lag, start, jam, `t` (seconds) and `split=1`, so a link
-  reopens the same moment.
+  - *Off by*: each dot's distance from every clean GPS fix (log scale, 1–300 m); dots on a line mark moments
+    outside its circle. Shaded: stretches without GPS (grey no GPS, amber Cut GPS, blue cut in the replay).
+  - Speed (OBD), and GPS quality (green good, pale weak, amber Wi-Fi/cell only; red ticks are your markers).
+- **Events** and **Replay details** are folded at the bottom of the side panel.
+- **Links:** the URL keeps the drive, every setting and `t` (seconds), so a link reopens the same view.
 - The server runs under `node --watch`, so it restarts itself when `src/nav` or the viewer code changes; reload
   the page afterwards. A server started before this change has to be stopped by hand once.
 

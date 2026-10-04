@@ -2,7 +2,31 @@
 // since log start; coordinates rounded to ~1 cm, the rest to what a viewer can show.
 
 import type { TripLog } from "../../triplog/trip-log-reader";
-import { replayTrip, type ReplayOptions, type ReplaySummary } from "./replay";
+import { haversineM } from "../geo";
+import {
+  driveOutages,
+  noGpsWindows,
+  phoneTrack,
+  replayShownTrack,
+  trackAt,
+  truthFixes,
+  type DriveOutage,
+  type OutageWindow,
+  type ShownPoint,
+} from "./drive-report";
+import { replayTrip, type ReplayCut, type ReplayOptions, type ReplaySummary } from "./replay";
+
+/** [t, lat, lon, ~68 % radius m] */
+export type ViewerShown = [number, number, number, number];
+/** At each clean satellite fix: [t, distance from the track m, inside its circle 1/0]. */
+export type ViewerErrors = [number, number, 0 | 1][];
+
+export interface ViewerExtras {
+  /** GNSS outages the app simulated ("Cut GPS"): listed and scored even when the replay keeps GNSS there. */
+  appCuts?: ReplayCut[];
+  /** A second replay to compare with (another navigator version). */
+  compare?: { label: string; options: ReplayOptions };
+}
 
 export interface ViewerTrackPoint {
   t: number;
@@ -39,7 +63,8 @@ export interface ViewerData {
   /** UTC ms at t = 0, from the log's time sync (null when absent). */
   startUtcMs: number | null;
   /** Cut windows actually applied, including the open-loop one. */
-  options: { cuts: { fromS: number; toS: number; openLoop?: boolean }[]; gnssLagS: number; openLoopDelayS: number | null };
+  /** `gnssLagS`: null when the navigator learned it on the drive, as in the app. */
+  options: { cuts: { fromS: number; toS: number; openLoop?: boolean }[]; gnssLagS: number | null; openLoopDelayS: number | null };
   summary: ReplaySummary;
   track: ViewerTrackPoint[];
   fixes: ViewerFix[];
@@ -50,6 +75,17 @@ export interface ViewerData {
   events: { t: number; kind: string; text: string }[];
   /** Map-matching particles once a second: [t, [lat, lon, weight, off-road 1/0][]] (heaviest first). */
   particles: [number, [number, number, number, number][]][];
+  /** The replay as the app would show it (the map-matched position while dead-reckoning). */
+  shown: ViewerShown[];
+  /** What the phone showed, from the log (empty in logs before it was recorded). */
+  phone: ViewerShown[];
+  compare: { label: string; shown: ViewerShown[] } | null;
+  /** Stretches without GNSS (real, simulated in the app, or in this replay), scored per track. */
+  outages: DriveOutage[];
+  /** Per track (`phone`, `replay`, `compare`), its distance from every clean satellite fix. */
+  errors: Record<string, ViewerErrors>;
+  /** Time without a clean satellite fix for over 15 s, s. */
+  noGpsS: number;
 }
 
 const r = (v: number, digits: number) => {
@@ -58,8 +94,12 @@ const r = (v: number, digits: number) => {
 };
 const deg = (rad: number) => (rad * 180) / Math.PI;
 
-export function buildViewerData(file: string, trip: TripLog, options: ReplayOptions = {}): ViewerData {
-  const result = replayTrip(trip, { trackStepS: 0.2, ...options, ...(options.mapMatch ? { mapMatch: { particlesEveryS: 1, ...options.mapMatch } } : {}) });
+const packShown = (track: ShownPoint[]): ViewerShown[] => track.map((p) => [r(p.t, 2), r(p.lat, 7), r(p.lon, 7), r(p.acc, 1)]);
+
+export function buildViewerData(file: string, trip: TripLog, options: ReplayOptions = {}, extras: ViewerExtras = {}): ViewerData {
+  const withParticles = (o: ReplayOptions): ReplayOptions => ({ trackStepS: 0.2, ...o, ...(o.mapMatch ? { mapMatch: { particlesEveryS: 1, ...o.mapMatch } } : {}) });
+  const result = replayTrip(trip, withParticles(options));
+  const compareResult = extras.compare ? replayTrip(trip, { trackStepS: 0.2, ...extras.compare.options }) : null;
   const tS = (tUs: number) => r((tUs - trip.startUs) / 1e6, 2);
 
   const info: Record<string, string | number> = {};
@@ -79,6 +119,31 @@ export function buildViewerData(file: string, trip: TripLog, options: ReplayOpti
     ...trip.messages.filter((m) => m.tag !== "trip").map((m) => ({ t: tS(m.tUs), kind: m.tag || "log", text: m.text })),
   ].sort((a, b) => a.t - b.t);
 
+  // The stretches without GNSS, and how far off each track was.
+  const shown = replayShownTrack(result);
+  const phone = phoneTrack(trip);
+  const compareShown = compareResult ? replayShownTrack(compareResult) : null;
+  const tracks: Record<string, ShownPoint[]> = { replay: shown, ...(phone.length ? { phone } : {}), ...(compareShown ? { compare: compareShown } : {}) };
+  const appCuts = extras.appCuts ?? [];
+  const sameWindow = (a: { fromS: number; toS: number }, b: { fromS: number; toS: number }) =>
+    Math.abs(a.fromS - b.fromS) < 0.5 && Math.abs(Math.min(a.toS, result.summary.durationS) - Math.min(b.toS, result.summary.durationS)) < 0.5;
+  const windows: OutageWindow[] = [
+    ...appCuts.map((c) => ({ kind: "app-cut" as const, fromS: c.fromS, toS: c.toS })),
+    ...result.summary.cuts.filter((c) => !appCuts.some((a) => sameWindow(a, c))).map((c) => ({ kind: "replay-cut" as const, fromS: c.fromS, toS: c.toS })),
+    ...(options.jam ?? []).map((j) => ({ kind: "replay-cut" as const, fromS: j.fromS, toS: j.toS })),
+  ];
+  const truth = truthFixes(trip);
+  const errors: Record<string, ViewerErrors> = {};
+  for (const [key, track] of Object.entries(tracks)) {
+    errors[key] = [];
+    for (const f of truth) {
+      const p = trackAt(track, f.t);
+      if (!p) continue;
+      const e = haversineM(p, f);
+      errors[key].push([r(f.t, 2), r(e, 1), e <= p.acc ? 1 : 0]);
+    }
+  }
+
   const sync = trip.timeSync[0];
   return {
     file,
@@ -87,7 +152,7 @@ export function buildViewerData(file: string, trip: TripLog, options: ReplayOpti
     startUtcMs: sync ? (sync.utcUs - (sync.tUs - trip.startUs)) / 1000 : null,
     options: {
       cuts: result.summary.cuts.map((c) => ({ fromS: c.fromS, toS: c.toS, ...(c.openLoop ? { openLoop: true } : {}) })),
-      gnssLagS: options.nav?.gnssLagS ?? 0.4,
+      gnssLagS: options.nav?.estimateGnssLag === false ? (options.nav.gnssLagS ?? null) : null,
       openLoopDelayS: options.openLoop?.delayS ?? null,
     },
     summary: result.summary,
@@ -131,5 +196,11 @@ export function buildViewerData(file: string, trip: TripLog, options: ReplayOpti
       r(s.tS, 2),
       s.particles.map(([lat, lon, w, off]): [number, number, number, number] => [r(lat, 6), r(lon, 6), Number(w.toPrecision(3)), off]),
     ]),
+    shown: packShown(shown),
+    phone: packShown(phone),
+    compare: compareShown && extras.compare ? { label: extras.compare.label, shown: packShown(compareShown) } : null,
+    outages: driveOutages(trip, result.summary.durationS, windows, tracks),
+    errors,
+    noGpsS: r(noGpsWindows(truth, result.summary.durationS).reduce((s, w) => s + w.toS - w.fromS, 0), 0),
   };
 }

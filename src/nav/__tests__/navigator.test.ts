@@ -182,6 +182,28 @@ describe("buildViewerData", () => {
     expect(d.obd.length).toBeLessThanOrEqual(5 * d.durationS + 1);
     expect(d.events).toEqual([{ t: 2, kind: "marker", text: "marker" }]);
     expect(d.options.cuts).toEqual([{ fromS: 30, toS: 40 }]);
+    expect(d.options.gnssLagS).toBeNull(); // learned on the drive, as in the app
+    // The drive report: the cut is scored on the fixes it withheld; no phone track in a synthetic log.
+    expect(d.shown).toHaveLength(d.track.length);
+    expect(d.phone).toEqual([]);
+    expect(d.compare).toBeNull();
+    expect(d.outages).toHaveLength(1);
+    expect(d.outages[0]).toMatchObject({ kind: "replay-cut", fromS: 30, toS: 40 });
+    expect(d.outages[0].scores.replay!.truthFixes).toBeGreaterThanOrEqual(9);
+    expect(d.outages[0].scores.replay!.maxErrorM).toBeLessThan(20);
+    expect(d.errors.replay.length).toBeGreaterThan(d.durationS / 2);
+    expect(d.noGpsS).toBe(0);
+  });
+
+  test("lists the app's Cut GPS windows and scores a compare replay", () => {
+    const { buildViewerData } = jest.requireActual<typeof import("@/nav/replay/viewer-data")>("@/nav/replay/viewer-data");
+    const drive = syntheticDrive({ segments: CITY.slice(0, 5), gnss: "clean", startHeadingRad: 1 });
+    const d = buildViewerData("trip.ulg", drive.trip, {}, { appCuts: [{ fromS: 20, toS: 35 }], compare: { label: "B", options: { cuts: [{ fromS: 20, toS: 35 }] } } });
+    expect(d.outages.map((o) => o.kind)).toEqual(["app-cut"]);
+    expect(d.compare?.label).toBe("B");
+    // The compare replay had the cut, this one GPS: its dot stays on GPS, the other drifts a little.
+    const { replay, compare } = d.outages[0].scores;
+    expect(compare!.maxErrorM!).toBeGreaterThan(replay!.maxErrorM!);
   });
 });
 
