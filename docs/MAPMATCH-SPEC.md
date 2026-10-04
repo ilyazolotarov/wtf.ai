@@ -758,4 +758,14 @@ M1–M3 can partly overlap. M4 needs M1–M3. M5 and M6 are independent of each 
 11. **Flip-flopping starts** (ng2n9z): a filter alternating between `tracking` and `multimodal` never holds 100 m.
     A start criterion on the share of the last 100 m, rather than all of it, may help; needs more jammed drives.
 12. **Truth lost at jammed starts:** in 21 of 30 simulated sessions on the 2026-10-04 drives the true road had no
-    particle for a while (§8.1). Re-seeding brings it back, but where it goes missing hasn't been looked at.
+    particle for a while (§8.1). Looked at (sessions every 60 s, `--trace`):
+    - Most are 1–8 s gaps at junctions, where the particles are a few metres behind the truth edge (the 15 m
+      junction tolerance of `isSameRoad` doesn't cover a turn taken early): harmless, the filter recovers.
+    - The real losses (94zf2q from 0 s and 120 s: 25–30 s, survival 73–80 %; j5m8tq from 300 s: 19 s) start after an
+      alignment start whose position is 40–80 m off: the EKF-position prior (§7.4, scale 0.3) then pulls the filter
+      onto the wrong road. 94zf2q from 120 s: survival 73 → 94 % with the prior off.
+    - Gating the prior on the EKF's σ (≤ 15 m) fixed those but made others worse (j5m8tq from 60 s: 99 → 79 %: with
+      the prior off, a wrong road wins by a turn-sequence alias and the filter tracks it at 100 % until a fix says
+      otherwise), so overall it is a wash (outage benchmark 240 s p90 77 → 72 m; sessions below 100 %: 21 → 23 of
+      30). Not kept. Same cause as item 10; it needs a better position prior after a start from coarse fixes, or
+      fixes that can unseat a confident wrong lock.
