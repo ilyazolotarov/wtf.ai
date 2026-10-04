@@ -174,3 +174,44 @@ describe("ParticleFilter in the navigator (synthetic drives on the fixture graph
     expect(plain.track.every((p) => p.mapMatch === undefined)).toBe(true);
   });
 });
+
+// MAPMATCH-SPEC §9: the road's direction back into the EKF heading.
+describe("road heading into the EKF", () => {
+  // East along the fixture's long road, GNSS cut after 40 s, with a gyro bias the EKF hasn't learned
+  // (one 3 s stop): open loop the heading drifts with it, the road holds it.
+  const straightDrive = () =>
+    syntheticDrive({
+      segments: [
+        { durationS: 3, speedMps: 0, yawRateDegS: 0 },
+        { durationS: 130, speedMps: 12, yawRateDegS: 0 },
+      ],
+      origin: ORIGIN,
+      startHeadingRad: Math.PI / 2,
+      gnss: "clean",
+      obdScale: 0.99,
+      gyroBiasRadS: (0.05 * Math.PI) / 180,
+    });
+  const headingErrorDeg = (loop: "open" | "heading") => {
+    const result = replayTrip(straightDrive().trip, {
+      nav: { mapMatchLoop: loop },
+      mapMatch: { graph: graph() },
+      cuts: [{ fromS: 40, toS: 1e9 }],
+    });
+    const end = result.track.at(-1)!;
+    return { errorDeg: Math.abs(end.headingRad! - Math.PI / 2) * (180 / Math.PI), roadHeading: result.summary.roadHeading };
+  };
+
+  test("open loop sends nothing and the heading drifts with the gyro bias", () => {
+    const open = headingErrorDeg("open");
+    expect(open.roadHeading).toEqual({ accepted: 0, rejected: 0 });
+    expect(open.errorDeg).toBeGreaterThan(2);
+  });
+
+  test("on a straight road it holds the heading, about every 25 m", () => {
+    const closed = headingErrorDeg("heading");
+    // ~1.5 km of straight road: one update per 25 m once the filter tracks, minus the junction margins.
+    expect(closed.roadHeading.accepted).toBeGreaterThan(20);
+    expect(closed.roadHeading.rejected).toBe(0);
+    expect(closed.errorDeg).toBeLessThan(1);
+  });
+});

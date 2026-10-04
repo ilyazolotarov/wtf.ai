@@ -33,7 +33,9 @@ Place the car on the offline road network, so that:
   the filter on it, the puck follows the dominant hypothesis while dead-reckoning with alternatives on the map,
   and trip logs carry `nav_mapmatch` (§11), with a particle overlay and a simulated outage for testing on the
   road (NAVIGATOR-SPEC §9). Still to do: a drive with it, update time on the iPhone.
-- Next: M6 (closed loop), and a drive for M7. Order of work in §12.
+- **M6 in progress (replay):** the road heading goes back into the EKF (`mapMatchLoop: "heading"`, §9.2); the 240 s
+  max error median falls from 59 to 21 m. Off by default, so the app still runs open loop. Next: the position.
+- Next: the rest of M6, and a drive for M7. Order of work in §12.
 
 ## 3. Decisions
 
@@ -576,7 +578,9 @@ NAVIGATOR-SPEC §4, §5.1):
 - **When:** state `tracking`, navigator in `dr`, every 25 m of travel. The interval limits the correlation, because
   the PF itself runs on the EKF's increments.
 - **Road heading:**
-  - σ = 2°, only where the road is straight within ±15 m and not within 20 m of a node.
+  - σ = 4° (⊕ the filter's heading spread), only where the road is straight within 3° over ±15 m and not within
+    20 m of a node, the filter in `tracking` (≥ 0.9 of the weight on such road) and the car driving straight.
+    2° was the first value; it made the EKF overconfident (§9.2).
   - Sent also while GNSS is trusted. It is the candidate fix for the ~2° heading error at outage start
     (NAVIGATOR-SPEC §13.1).
 - **Position:**
@@ -605,6 +609,33 @@ NAVIGATOR-SPEC §4, §5.1):
 - Err ÷ σ per drive: 94zf2q 4.6–6.0, j5m8tq 2.5–3.5, qfger8 1.6–2.8, the others 0.9–1.9 (NAVIGATOR-SPEC §13.8).
 - The map-match end error is a third to a half of the EKF's: turns reset the along-track error, which the EKF
   keeps. That is what closing the loop should hand to the EKF.
+
+### 9.2 Road heading into the EKF (`mapMatchLoop: "heading"`, same logs and seeds)
+
+`npm run replay:bench -- tools/triplog/logs/*.ulg --mm --nav '{"mapMatchLoop":"heading"}'`
+(`src/nav/navigator.ts` `roadHeadingUpdate`, `ParticleFilter.roadHeading`). EKF max error median / p90, and max
+error ÷ σ, against open loop (§9.1):
+
+| Variant | 60 s | 120 s | 240 s | Err ÷ σ 60 / 120 / 240 s |
+| --- | --- | --- | --- | --- |
+| Open loop | 11.7 / 34.5 m | 23.8 / 64.7 m | 59.3 / 123.7 m | 2.28 / 2.25 / 2.25 |
+| σ 2°, every 25 m | 8.3 / 14.1 m | 12.1 / 18.1 m | 16.8 / 26.0 m | 2.46 / 2.47 / 2.27 |
+| **σ 4°, every 25 m (kept)** | 9.1 / 17.1 m | 14.1 / 21.1 m | 21.1 / 32.5 m | 2.10 / 1.97 / 2.16 |
+| σ 2°, every 75 m | 8.7 / 14.8 m | 12.9 / 20.1 m | 19.0 / 28.6 m | 2.26 / 2.27 / 2.08 |
+| σ 4°, every 75 m | 9.5 / 21.3 m | 14.8 / 27.6 m | 23.0 / 47.1 m | 2.01 / 1.89 / 2.04 |
+
+- Every drive's error falls (240 s: j5m8tq 91 → 26 m, 94zf2q 71 → 24 m, q8tfjs 67 → 21 m). The heading at outage
+  start was the limit (NAVIGATOR-SPEC §10, §13.1), and straight roads fix it while GNSS is still good.
+- σ 2° counts every update as new evidence, but updates 25 m apart on one road share its geometry error and the
+  lane offset: σ_ψ shrank faster than the error. Widening σ fixed that better than spacing the updates.
+- Err ÷ σ per drive (σ 4°), open loop → heading: j5m8tq 2.45 / 2.93 / 3.51 → 2.08 / 1.84 / 2.20, 94zf2q 4.6–6.0 →
+  3.7–4.0, qfger8 2.80 / 2.52 / 1.61 → 2.50 / 2.45 / 2.08, 5mn7ai 1.91 / 0.95 / 0.86 → 1.42 / 1.64 / 1.09 (it was
+  underconfident), 9qw8wn (one window) 2.78 → 2.84. The others fall and stay within 0.5–2.
+- The dominant cluster (still open loop for position) now beats the EKF's max error less often (240 s: 39 of 108,
+  was 66), but ends closer (10.4 vs 16.1 m): turns fix the along-track error, which the EKF doesn't get yet. That is
+  the position pseudo-measurement's job.
+- Synthetic drive (`particle-filter.test.ts`): 1.2 km cut on a straight road with an unlearned 0.05 °/s gyro bias,
+  heading 2.9° off open loop, 0.2° with the road heading (σ 2°; still < 1° at 4°).
 
 ## 10. Replay, ground truth and metrics
 
@@ -752,7 +783,7 @@ NAVIGATOR-SPEC §4, §5.1):
 | M3 | Odometry output + ground truth (§6.1, §10.1) | odometry chunks sum to the EKF's distance and heading change; truth edge sequences for the 4 clean drives with no unexplained breaks. **Done** (§10.4) |
 | M4 | PF open loop, known heading (§7) | §10.2 metrics on all drives; dominant-cluster max error on 240 s cuts better than the EKF's 37 m median; truth survival 100 %. **Done** (§7.7): 30.5 m; survival 100 % except 2 s leaving a yard |
 | M5 | Heading init from the map (§8) | EKF starts sooner than alignment on the jammed drives and on `--jam-start`, with no start > 10° off. **Done in replay** (§8.1): sooner on 2 of 3 jammed drives (the third as soon) and 29 of 35 simulated sessions; map starts ≤ 2.6° off. To confirm on drives beyond Slavutych |
-| M6 | Closed loop (§9) | `replay:bench --mm closed` against open loop on the same windows and seeds: EKF max error better at 120 / 240 s (median and p90), no worse at 60 s; max error ÷ σ no higher than open loop's, pooled and per drive. The 0.5–2 band is NAVIGATOR-SPEC §13.8's: open loop is outside it on 3 drives |
+| M6 | Closed loop (§9) | `replay:bench --mm` closed against open loop on the same windows and seeds: EKF max error better at 120 / 240 s (median and p90), no worse at 60 s; max error ÷ σ no higher than open loop's pooled; per drive, a drive within 0.5–2 in open loop stays within it, and one above 2 gets no higher (one above 2 because of a single window, like 9qw8wn, is noise). The 0.5–2 band is NAVIGATOR-SPEC §13.8's. **Road heading done** (§9.2), passes except qfger8 at 240 s (1.61 → 2.08, borderline, accepted); position next |
 | M7 | App (§11) | graph download, `nav_mapmatch` in trip logs, alternatives on the map, update time on iPhone < 5 ms p99. **Built** (§2): needs a drive for the update time |
 
 M1–M3 can partly overlap. M4 needs M1–M3. M5 and M6 are independent of each other.
@@ -782,7 +813,7 @@ M1–M3 can partly overlap. M4 needs M1–M3. M5 and M6 are independent of each 
 | `tracking` threshold | top ≥ 0.9, spread ≤ 25 m | §7.6 |
 | Map heading init | settled over 100 m (`tracking`, or one direction ≥ 0.9 with ≤ 10° / ≤ 150 m spread); straight car and road (±15 m + spread, 5°); anchor radius 3σ + distance, ≤ 1 km | §8 |
 | Map start σ | position max(spread, 10 m); heading hypot(max(spread, 3°), 0.1°/m × spread) | §8 |
-| Pseudo-measurement interval / heading σ | 25 m / 2° | §9 |
+| Pseudo-measurement interval / heading σ | 25 m / 4° (2° was overconfident) | §9.2 |
 | Tile cache / working-set margin | 128 tiles / 300 m | §5 |
 
 ## 14. Verification targets

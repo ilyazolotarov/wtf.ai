@@ -80,6 +80,28 @@ export interface NavConfig {
   compassLearnSigmaRad: number;
   compassMinSpeedMps: number;
   align: Partial<AlignConfig>;
+  /**
+   * Map matching back into the EKF (MAPMATCH-SPEC §9). `open`: the filter only watches (its output
+   * is reported, nothing goes back). `heading`: on straight roads the road's direction corrects the
+   * EKF heading, also while GNSS is trusted.
+   */
+  mapMatchLoop: "open" | "heading";
+  roadHeading: Partial<RoadHeadingConfig>;
+}
+
+/** The road-heading pseudo-measurement (MAPMATCH-SPEC §9). */
+export interface RoadHeadingConfig {
+  /** At most one per this much travel: the filter runs on the EKF's own odometry, so updates correlate. */
+  intervalM: number;
+  /** Measurement σ (added to the filter's heading spread): OSM geometry, lane changes. */
+  sigmaRad: number;
+  /** The road must be straight within `toleranceRad` over ±`windowM` around each particle… */
+  windowM: number;
+  toleranceRad: number;
+  /** …and the particle this far from both ends of its edge (the next road may turn). */
+  nodeMarginM: number;
+  /** Particles that qualify must hold this share of the weight. */
+  minShare: number;
 }
 
 export const DEFAULT_NAV_CONFIG: NavConfig = {
@@ -111,6 +133,19 @@ export const DEFAULT_NAV_CONFIG: NavConfig = {
   compassLearnSigmaRad: (3 * Math.PI) / 180,
   compassMinSpeedMps: 4,
   align: {},
+  mapMatchLoop: "open",
+  roadHeading: {},
+};
+
+export const DEFAULT_ROAD_HEADING_CONFIG: RoadHeadingConfig = {
+  intervalM: 25,
+  // 2° made the EKF overconfident: an update every 25 m on one road repeats the same geometry and
+  // lane offset, not fresh evidence. 4° keeps most of the gain with an honest σ (MAPMATCH-SPEC §9.2).
+  sigmaRad: (4 * Math.PI) / 180,
+  windowM: 15,
+  toleranceRad: (3 * Math.PI) / 180,
+  nodeMarginM: 20,
+  minShare: 0.9,
 };
 
 export interface NavEstimate {
@@ -218,6 +253,9 @@ export interface NavStats {
   standstillS: number;
   obdDistanceM: number;
   resets: number;
+  /** Road-heading pseudo-measurements (MAPMATCH-SPEC §9): accepted by the EKF, and rejected by its gate. */
+  roadHeadingAccepted: number;
+  roadHeadingRejected: number;
 }
 
 export class Navigator {
@@ -267,11 +305,15 @@ export class Navigator {
   /** Start the EKF from the map at the end of the current step. */
   private mapStartDue = false;
   private started: { method: InitMethod; tUs: number } | null = null;
-  readonly stats: NavStats = { imuInvalidS: 0, standstillS: 0, obdDistanceM: 0, resets: 0 };
+  readonly stats: NavStats = { imuInvalidS: 0, standstillS: 0, obdDistanceM: 0, resets: 0, roadHeadingAccepted: 0, roadHeadingRejected: 0 };
+  /** Travel (odometry distance) at which the next road-heading update may go out. */
+  private nextRoadHeadingM = 0;
+  private readonly roadHeadingConfig: RoadHeadingConfig;
 
   constructor(config: Partial<NavConfig> = {}) {
     this.config = { ...DEFAULT_NAV_CONFIG, ...config };
     this.ekfConfig = { ...DEFAULT_EKF_CONFIG, ...this.config.ekf };
+    this.roadHeadingConfig = { ...DEFAULT_ROAD_HEADING_CONFIG, ...this.config.roadHeading };
     this.imu = new ImuProcessor(this.config.imu);
     this.lagEstimator = new GnssLagEstimator(this.config.gnssLag);
     this.compass = new Compass(this.config.compass);
@@ -754,6 +796,7 @@ export class Navigator {
     pf.setCompass(pf.initializing && this.config.compassUse === "on" ? this.compass.heading() : null);
     pf.onOdometry(step, ekf ? { psi: ekf.psi, psiSigma: ekf.psiSigma, e: ekf.east, n: ekf.north, posSigma: ekf.positionSigma } : null);
     if (step.stopped) return;
+    if (ekf && this.config.mapMatchLoop !== "open" && step.distanceM >= this.nextRoadHeadingM) this.roadHeadingUpdate(step.distanceM);
     if (!ekf && step.distanceM >= this.nextMapStartCheckM) {
       // Heading unknown: a heading settled over `mapStartTrackingM` starts the EKF.
       this.nextMapStartCheckM = step.distanceM + pf.config.evalIntervalM;
@@ -786,6 +829,26 @@ export class Navigator {
     } else {
       this.offRoadFromM = null;
     }
+  }
+
+  /**
+   * The road's direction into the EKF heading (MAPMATCH-SPEC §9): while the filter tracks one road,
+   * the car drives straight, and the road is straight around the hypothesis and away from junctions.
+   * Odometry chunks end at the state before the next prediction, so the EKF is at the chunk's time.
+   */
+  private roadHeadingUpdate(distanceM: number): void {
+    const pf = this.pf!;
+    const ekf = this.ekf!;
+    const c = this.roadHeadingConfig;
+    const out = pf.output();
+    const top = out.clusters[0];
+    if (out.state !== "tracking" || !top || top.edge === null || !pf.isStraight) return;
+    const road = pf.roadHeading(top.e, top.n, pf.config.clusterRadiusM, c.windowM, c.toleranceRad, c.nodeMarginM);
+    if (!road || road.share < c.minShare) return;
+    this.nextRoadHeadingM = distanceM + c.intervalM;
+    const r = ekf.updateHeading(road.headingRad - ekf.psi, Math.hypot(c.sigmaRad, road.spreadRad), this.config.gate);
+    if (r.accepted) this.stats.roadHeadingAccepted++;
+    else this.stats.roadHeadingRejected++;
   }
 
   private mapMatchEstimate(frame: LocalFrame): MapMatchEstimate {

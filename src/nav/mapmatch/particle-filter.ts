@@ -839,6 +839,53 @@ export class ParticleFilter {
     return share;
   }
 
+  /**
+   * The road's travel direction under the particles near (`e`, `n`) (within `radiusM`), for the EKF
+   * (MAPMATCH-SPEC §9): only on-road particles whose road is straight (within `toleranceRad` over
+   * ±`windowM`) and at least `nodeMarginM` from both ends of their edge, where the next road may turn.
+   * `share`: their part of all the weight. Null when none qualifies.
+   */
+  roadHeading(
+    e: number,
+    n: number,
+    radiusM: number,
+    windowM: number,
+    toleranceRad: number,
+    nodeMarginM: number,
+  ): { headingRad: number; spreadRad: number; share: number } | null {
+    const p = this.p;
+    let total = 0;
+    let weight = 0;
+    let sx = 0;
+    let sy = 0;
+    for (let i = 0; i < p.size; i++) {
+      const w = Math.exp(p.logw[i]);
+      total += w;
+      if (p.offRoad[i] || Math.hypot(p.e[i] - e, p.n[i] - n) > radiusM) continue;
+      const { cum, xy } = this.graph.edge(p.edge[i]);
+      const length = cum[cum.length - 1];
+      if (p.offset[i] < nodeMarginM || p.offset[i] > length - nodeMarginM) continue;
+      const geometryHeading = p.dir[i] === 1 ? p.psi[i] : p.psi[i] + Math.PI;
+      let straight = true;
+      for (let s = 0; s + 1 < cum.length && straight; s++) {
+        if (cum[s + 1] <= cum[s] || cum[s + 1] < p.offset[i] - windowM || cum[s] > p.offset[i] + windowM) continue;
+        const h = Math.atan2(xy[2 * s + 2] - xy[2 * s], xy[2 * s + 3] - xy[2 * s + 1]);
+        straight = Math.abs(wrap(h - geometryHeading)) <= toleranceRad;
+      }
+      if (!straight) continue;
+      weight += w;
+      sx += w * Math.sin(p.psi[i]);
+      sy += w * Math.cos(p.psi[i]);
+    }
+    if (weight <= 0 || total <= 0) return null;
+    const resultant = Math.min(1, Math.hypot(sx, sy) / weight);
+    return {
+      headingRad: wrap(Math.atan2(sx, sy)),
+      spreadRad: Math.sqrt(-2 * Math.log(Math.max(resultant, 1e-12))),
+      share: weight / total,
+    };
+  }
+
   /** Weight held by off-road particles (cheap; `output()` clusters). */
   offRoadWeight(): number {
     const p = this.p;

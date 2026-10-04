@@ -143,6 +143,8 @@ export interface ReplaySummary {
   imuInvalidS: number;
   standstillS: number;
   resets: number;
+  /** Road-heading pseudo-measurements into the EKF (`mapMatchLoop: "heading"`, MAPMATCH-SPEC §9). */
+  roadHeading: { accepted: number; rejected: number };
   cuts: CutResult[];
   /** Map-matching metrics (with `mapMatch.truth`). */
   mapMatch: MapMatchSummary | null;
@@ -305,6 +307,7 @@ export function replayTrip(trip: TripLog, options: ReplayOptions = {}): ReplayRe
       imuInvalidS: nav.stats.imuInvalidS,
       standstillS: nav.stats.standstillS,
       resets: nav.stats.resets,
+      roadHeading: { accepted: nav.stats.roadHeadingAccepted, rejected: nav.stats.roadHeadingRejected },
       mapMatch: metrics?.summary(nav.mapMatcher?.updateTimes ?? []) ?? null,
       compass: { trust: nav.compassTrust, calibration: nav.compassCalibration, checkDiffsRad: [...nav.compassCheckDiffs] },
       cuts: cuts.map((c, k) => {
