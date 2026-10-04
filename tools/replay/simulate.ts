@@ -25,6 +25,8 @@ function parseArgs(argv: string[]) {
   let gpsMin = 3;
   let imuHz = 100;
   let bucketMin = 10;
+  let route: "city" | "arterial" = "city";
+  let trace = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--at") {
@@ -37,12 +39,14 @@ function parseArgs(argv: string[]) {
     else if (a === "--gps-min") gpsMin = Number(argv[++i]);
     else if (a === "--imu-hz") imuHz = Number(argv[++i]);
     else if (a === "--every") bucketMin = Number(argv[++i]);
+    else if (a === "--route") route = argv[++i] as "city" | "arterial";
+    else if (a === "--trace") trace = true;
     else if (a === "-h" || a === "--help") {
-      console.log("replay:sim [--at lat,lon] [--graph <file>] [--minutes 60] [--seeds 3] [--loops open,heading,closed] [--gps-min 3] [--imu-hz 100] [--every 10]");
+      console.log("replay:sim [--at lat,lon] [--graph <file>] [--minutes 60] [--seeds 3] [--loops open,heading,closed] [--gps-min 3] [--imu-hz 100] [--every 10] [--route city|arterial] [--trace]");
       process.exit(0);
     }
   }
-  return { at, graph, minutes, seeds, loops, gpsMin, imuHz, bucketMin };
+  return { at, graph, minutes, seeds, loops, gpsMin, imuHz, bucketMin, route, trace };
 }
 
 const quantile = (v: number[], q: number) => {
@@ -56,7 +60,7 @@ const graphFile = args.graph ?? findGraph(args.at);
 if (!graphFile) throw new Error("no road graph covers --at: build one with `tiles graph <region>`, or pass --graph");
 console.log(
   `${path.basename(graphFile)} at ${args.at.lat},${args.at.lon}: ${args.minutes} min drives, seeds 1–${args.seeds}, ` +
-    `GPS for the first ${args.gpsMin} min, then none; IMU ${args.imuHz} Hz`,
+    `GPS for the first ${args.gpsMin} min, then none; IMU ${args.imuHz} Hz; ${args.route} routes`,
 );
 
 /** Per loop: [minutes since the cut, dot error m][] pooled over seeds, and per-seed summaries. */
@@ -65,11 +69,12 @@ for (let seed = 1; seed <= args.seeds; seed++) {
   const frame = new LocalFrame(args.at);
   const simGraph = openGraph(graphFile, args.at);
   const started = performance.now();
-  const drive = cityDrive({ graph: simGraph.graph, frame, durationS: args.minutes * 60, seed, imuHz: args.imuHz });
+  const drive = cityDrive({ graph: simGraph.graph, frame, durationS: args.minutes * 60, seed, imuHz: args.imuHz, route: args.route });
   simGraph.close();
   const cutS = 20 + args.gpsMin * 60;
   console.log(
-    `\nseed ${seed}: ${(drive.distanceM / 1000).toFixed(1)} km, ${drive.junctions} junctions, ${drive.stopsMade} stops ` +
+    `\nseed ${seed}: ${(drive.distanceM / 1000).toFixed(1)} km, ${drive.junctions} junctions, ${drive.turns} turns ` +
+      `(one per ${(drive.distanceM / Math.max(1, drive.turns) / 1000).toFixed(1)} km), ${drive.stopsMade} stops ` +
       `(generated in ${((performance.now() - started) / 1000).toFixed(1)} s)`,
   );
   for (const loop of args.loops) {
@@ -83,12 +88,23 @@ for (let seed = 1; seed <= args.seeds; seed++) {
     });
     navGraph.close();
     const shown = replayShownTrack(result);
-    const rows: { t: number; dot: number; ekf: number }[] = [];
+    const rows: { t: number; dot: number; ekf: number; along: number; across: number; kph: number }[] = [];
     for (let i = 0; i < result.track.length; i++) {
       const p = result.track[i];
       if (p.tS < cutS) continue;
       const truth = drive.truthAt(drive.trip.startUs + p.tS * 1e6);
-      rows.push({ t: (p.tS - cutS) / 60, dot: haversineM(shown[i], truth), ekf: haversineM(p, truth) });
+      // The dot's error along the car's direction (ahead +) and across it (right +).
+      const [de, dn] = frame.toEnu(shown[i]);
+      const [te, tn] = frame.toEnu(truth);
+      const along = (de - te) * Math.sin(truth.psi) + (dn - tn) * Math.cos(truth.psi);
+      const across = (de - te) * Math.cos(truth.psi) - (dn - tn) * Math.sin(truth.psi);
+      rows.push({ t: (p.tS - cutS) / 60, dot: haversineM(shown[i], truth), ekf: haversineM(p, truth), along, across, kph: truth.speedMps * 3.6 });
+    }
+    if (args.trace) {
+      for (let k = 0; k < rows.length; k += 300) {
+        const r = rows[k];
+        console.log(`    ${loop} ${r.t.toFixed(0).padStart(4)} min: dot ${m(r.dot)} (along ${r.along.toFixed(0)} m, across ${r.across.toFixed(0)} m), navigator ${m(r.ekf)}, ${r.kph.toFixed(0)} km/h`);
+      }
     }
     pooled.get(loop)!.push(...rows);
     // Lost: the dot more than 50 m off; the longest such stretch, and the share of time.
@@ -102,6 +118,8 @@ for (let seed = 1; seed <= args.seeds; seed++) {
     const s = result.summary;
     console.log(
       `  ${loop.padEnd(7)} dot median ${m(quantile(dots, 0.5))}, p90 ${m(quantile(dots, 0.9))}, max ${m(Math.max(...dots))}, ` +
+        `along / across median ${m(quantile(rows.map((r) => Math.abs(r.along)), 0.5))} / ${m(quantile(rows.map((r) => Math.abs(r.across)), 0.5))}` +
+        ` (across > 15 m ${((100 * rows.filter((r) => Math.abs(r.across) > 15).length) / Math.max(1, rows.length)).toFixed(1)} %), ` +
         `navigator median ${m(quantile(rows.map((r) => r.ekf), 0.5))}, ` +
         `end ${m(dots.at(-1) ?? NaN)}; > 50 m ${((100 * dots.filter((d) => d > 50).length) / Math.max(1, dots.length)).toFixed(1)} % ` +
         `(longest ${Math.round(longest / 60)} min); road corrections ${s.roadHeading.accepted} + ${s.roadPosition.accepted}` +

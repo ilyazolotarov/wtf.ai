@@ -93,6 +93,7 @@ npm run replay:sim                                       # Chernihiv, 60 min, se
 npm run replay:sim -- --minutes 180 --imu-hz 50 --every 30
 npm run replay:sim -- --at 50.4501,30.5234 --graph tools/tiles/out/release/kyiv-city.graph.bin
 npm run replay:sim -- --loops open,heading,closed --gps-min 5
+npm run replay:sim -- --route arterial --trace               # main roads, straight on: few turns; a line per 5 min
 ```
 
 Per drive: distance, junctions, stops; per version the dot's error (median, p90, max, at the end), the share of

@@ -704,6 +704,18 @@ Three 3-hour drives per city (seeds 1–3, IMU 50 Hz):
   then pulls the filter onto wrong roads, and nothing brings it back without GNSS.
 - About 1 road-heading correction per 50 m and 1 road position per 200 m; 2–10 of ~1400 per drive refused by the gate.
 - 30 min drives replay in ~4 s, 3 h in ~20 s (Node, Windows PC).
+- **Long roads, few turns** (`--route arterial`: secondary and up, straight on nearly always). Kyiv city (44–87 km
+  per drive): closed loop median 3.4–4.5 m, max 23–47 m, never lost. Chernihiv oblast (78–141 km; the route leaves
+  the city on intercity roads, one turn per 3–10 km): closed loop fine on one drive, but 100–280 m off for 38–72 min
+  on the other two; open loop lost on two of three (up to 53 km).
+  - Traced (`--trace`): the error is along the road (across median 2.2 m; across > 15 m 1.7 % of the time). The dot
+    falls behind ~0.2 % of the distance at 70 km/h (0 → 134 m over ~80 km), then a turn is matched to the next
+    junction and it is 125 m ahead with no turn left to correct it. Not a wrong road.
+  - Cause: the simulated OBD has the CX-5's offset (−0.23 km/h); the EKF learns only a scale (NAVIGATOR-SPEC
+    §13.12), from 3 min of GNSS mostly in town, so at 70 km/h it is a few tenths of a percent off.
+  - Candidates: a speed offset state; Wi-Fi/cell fixes during jamming (the simulator gives none; even ±100 m ones
+    bound along-track drift); longer GNSS before the outage. A second, map-free EKF (to keep map errors out of the
+    odometry and to detect wrong-road locks) doesn't help here: it shares the speed error.
 - **Optimistic:** the map is the road network the car drives (topology exact, only the geometry wanders), and there
   is no parking, reversing, yard, unmapped road, traffic jam, tunnel or phone handling. Real long drives with Cut GPS
   (NAVIGATOR-SPEC §9) are the check.

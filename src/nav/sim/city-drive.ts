@@ -27,6 +27,11 @@ export interface CityDriveOptions {
   sensors?: Partial<SensorErrors>;
   /** Share of junctions where the car stops (lights, give way), and for how long (s). */
   stops?: { share: number; minS: number; maxS: number };
+  /**
+   * `city`: any drivable road, straight on three times as often as turning. `arterial`: main roads (secondary
+   * and up) whenever there is one, straight on nearly always: long avenues and ring roads, few turns.
+   */
+  route?: "city" | "arterial";
 }
 
 export interface SensorErrors {
@@ -81,9 +86,10 @@ export interface CityDrive {
   /** At 10 Hz. */
   truth: CityTruth[];
   truthAt(tUs: number): CityTruth;
-  /** Route length driven, m; junctions passed; stops made. */
+  /** Route length driven, m; junctions passed, and those where the car turned (> 25°); stops made. */
   distanceM: number;
   junctions: number;
+  turns: number;
   stopsMade: number;
 }
 
@@ -125,8 +131,12 @@ interface RoutePoint {
 }
 
 /** A random route over the graph, as points every ~1 m, at least `lengthM` long. */
-function buildRoute(graph: RoadGraph, start: { e: number; n: number }, lengthM: number, r: ReturnType<typeof rng>) {
-  const near = graph.edgesNear(start.e, start.n, 500).find((x) => drivable(x.edge.cls, x.edge.flags));
+const STRAIGHT_RAD = (25 * Math.PI) / 180;
+
+function buildRoute(graph: RoadGraph, start: { e: number; n: number }, lengthM: number, r: ReturnType<typeof rng>, style: "city" | "arterial") {
+  const near = graph
+    .edgesNear(start.e, start.n, style === "arterial" ? 2000 : 500)
+    .find((x) => drivable(x.edge.cls, x.edge.flags) && (style === "city" || x.edge.cls <= RoadClass.secondary));
   if (!near) throw new Error("no drivable road within 500 m of the start");
   let edge = near.edge;
   // Start along the geometry unless that is against a one-way.
@@ -149,10 +159,15 @@ function buildRoute(graph: RoadGraph, start: { e: number; n: number }, lengthM: 
       const ex = graph.edge(x.edge);
       return !x.againstOneway && !x.restricted && !x.uTurn && drivable(ex.cls, ex.flags);
     });
-    const choices = ok.length ? ok : exits.filter((x) => !x.againstOneway && x.uTurn);
+    const main = style === "arterial" ? ok.filter((x) => graph.edge(x.edge).cls <= RoadClass.secondary) : [];
+    const choices = main.length ? main : ok.length ? ok : exits.filter((x) => !x.againstOneway && x.uTurn);
     if (!choices.length) break;
-    // Straight on more often than turning, as on a real drive; a turn somewhere every few junctions.
-    const weights = choices.map((x) => (Math.abs(x.turnRad) < (25 * Math.PI) / 180 ? 3 : 1.5));
+    // City: straight on more often than turning, a turn somewhere every few junctions. Arterial: the road ahead
+    // nearly always, the straightest exit when it ends.
+    const weights = choices.map((x) => {
+      const straight = Math.abs(x.turnRad) < STRAIGHT_RAD;
+      return style === "arterial" ? (straight ? 40 : 1) / (1 + Math.abs(x.turnRad)) : straight ? 3 : 1.5;
+    });
     let pick = r.uniform() * weights.reduce((a, b) => a + b, 0);
     let k = 0;
     while (k < choices.length - 1 && (pick -= weights[k]) > 0) k++;
@@ -195,7 +210,7 @@ export function cityDrive(o: CityDriveOptions): CityDrive {
 
   // The route, longer than the car can drive in the time; then the line the car aims for: the
   // road's centre line, a lane to the right on two-way roads, and a slow wander for map error.
-  const route = buildRoute(o.graph, o.start ?? { e: 0, n: 0 }, o.durationS * 20 + 2000, r);
+  const route = buildRoute(o.graph, o.start ?? { e: 0, n: 0 }, o.durationS * 25 + 2000, r, o.route ?? "city");
   const path = resample(route.pts, RESAMPLE_M);
   const count = path.e.length;
   const heading = new Float64Array(count);
@@ -377,6 +392,7 @@ export function cityDrive(o: CityDriveOptions): CityDrive {
     truthAt,
     distanceM: distance,
     junctions: junctions.filter((j) => j.k <= idx).length,
+    turns: junctions.filter((j) => j.k <= idx && Math.abs(j.turnRad) >= STRAIGHT_RAD).length,
     stopsMade,
   };
 }
