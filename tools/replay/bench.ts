@@ -89,6 +89,12 @@ const median = (v: number[]) => {
   const s = [...v].sort((a, b) => a - b);
   return s.length ? s[Math.floor(s.length / 2)] : NaN;
 };
+/** Share of held-out fixes inside the map's circle, over all windows (honest ≈ 68 %). */
+const insidePct = (cuts: CutResult[]) => {
+  const scored = cuts.filter((c) => c.insideCircle !== null);
+  const fixes = scored.reduce((n, c) => n + c.truthFixes, 0);
+  return fixes ? `${Math.round((100 * scored.reduce((n, c) => n + c.insideCircle! * c.truthFixes, 0)) / fixes)} %` : "—";
+};
 const pct = (v: number[], p: number) => {
   const s = [...v].sort((a, b) => a - b);
   return s.length ? s[Math.min(s.length - 1, Math.floor(p * s.length))] : NaN;
@@ -146,7 +152,7 @@ function main() {
   }
 
   if (runSeeds.length > 1) console.log(`${runSeeds.length} seeds (${runSeeds.join(", ")}) pooled: windows × seeds`);
-  console.log("outage  windows  km/win   max err: median  p90   end err: median  p90   err per km  err/σ");
+  console.log("outage  windows  km/win   max err: median  p90   end err: median  p90   err per km  err/σ  inside circle");
   for (const [d, cuts] of byDuration) {
     if (!cuts.length) continue;
     const max = cuts.map((c) => c.maxErrorM!);
@@ -157,19 +163,19 @@ function main() {
       `${String(d).padStart(4)} s  ${String(cuts.length).padStart(7)}  ${median(cuts.map((c) => c.distanceM / 1000)).toFixed(2).padStart(6)}` +
         `   ${median(max).toFixed(1).padStart(13)} ${pct(max, 0.9).toFixed(1).padStart(5)}` +
         `   ${median(end).toFixed(1).padStart(13)} ${pct(end, 0.9).toFixed(1).padStart(5)}` +
-        `   ${median(perKm).toFixed(1).padStart(10)} ${median(ratio).toFixed(2).padStart(6)}`,
+        `   ${median(perKm).toFixed(1).padStart(10)} ${median(ratio).toFixed(2).padStart(6)}  ${insidePct(cuts).padStart(13)}`,
     );
   }
   // Per drive, so one drive can't hide behind (or dominate) the pooled numbers.
   const drives = [...new Set([...byDuration.values()].flat().map((c) => c.file))].sort();
-  console.log("\nper drive: windows, max err median (m), err/σ median, per outage length");
-  console.log(`${"drive".padEnd(28)}${DURATIONS_S.map((d) => `${String(d).padStart(4)} s: win  max err/σ`).join("  ")}`);
+  console.log("\nper drive: windows, max err median (m), err/σ median, inside circle, per outage length");
+  console.log(`${"drive".padEnd(28)}${DURATIONS_S.map((d) => `${String(d).padStart(4)} s: win  max err/σ    in`).join("  ")}`);
   for (const file of drives) {
     const cols = DURATIONS_S.map((d) => {
       const cuts = byDuration.get(d)!.filter((c) => c.file === file);
-      if (!cuts.length) return "—".padStart(23);
+      if (!cuts.length) return "—".padStart(29);
       const ratio = cuts.map((c) => c.maxErrorM! / Math.max(1, c.meanSigmaM!));
-      return `${String(cuts.length).padStart(11)} ${median(cuts.map((c) => c.maxErrorM!)).toFixed(0).padStart(4)} ${median(ratio).toFixed(2).padStart(5)}`;
+      return `${String(cuts.length).padStart(11)} ${median(cuts.map((c) => c.maxErrorM!)).toFixed(0).padStart(4)} ${median(ratio).toFixed(2).padStart(5)} ${insidePct(cuts).padStart(5)}`;
     });
     console.log(`${file.padEnd(28)}${cols.join("  ")}`);
   }

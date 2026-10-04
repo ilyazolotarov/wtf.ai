@@ -248,6 +248,8 @@ export interface MapMatchCluster {
   headingSpreadRad: number;
   /** Weighted RMS distance from the mean, m. */
   spreadM: number;
+  /** Weighted position covariance [EE, EN, NN], m² (the closed loop's position measurement, §9). */
+  covariance: [number, number, number];
   /** Edge holding the most weight (null: off-road cluster). */
   edge: EdgeId | null;
   particles: number;
@@ -1298,8 +1300,18 @@ export class ParticleFilter {
       assigned += w;
       e /= w;
       n /= w;
-      let spread = 0;
-      for (const j of members) spread += Math.exp(p.logw[j]) * ((p.e[j] - e) ** 2 + (p.n[j] - n) ** 2);
+      let cee = 0;
+      let cen = 0;
+      let cnn = 0;
+      for (const j of members) {
+        const wj = Math.exp(p.logw[j]);
+        const de = p.e[j] - e;
+        const dn = p.n[j] - n;
+        cee += wj * de * de;
+        cen += wj * de * dn;
+        cnn += wj * dn * dn;
+      }
+      const spread = cee + cnn;
       let edge: EdgeId | null = null;
       let best = 0;
       for (const [id, we] of edgeWeight) if (we > best) [edge, best] = [id, we];
@@ -1311,6 +1323,7 @@ export class ParticleFilter {
         headingRad: wrap(Math.atan2(sx, sy)),
         headingSpreadRad: Math.sqrt(-2 * Math.log(Math.max(resultant, 1e-12))),
         spreadM: Math.sqrt(spread / w),
+        covariance: [cee / w, cen / w, cnn / w],
         edge,
         particles: members.length,
       });

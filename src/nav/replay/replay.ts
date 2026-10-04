@@ -6,7 +6,7 @@ import { rotateCalibration, type CompassCalibration, type CompassTrust } from ".
 import type { TripLog } from "../../triplog/trip-log-reader";
 import { haversineM } from "../geo";
 import type { MapMatchConfig } from "../mapmatch/particle-filter";
-import { Navigator, type FixOutcome, type InitMethod, type MapMatchGraph, type NavConfig, type NavEstimate, type ParkedPose } from "../navigator";
+import { Navigator, SQRT_68, type FixOutcome, type InitMethod, type MapMatchGraph, type NavConfig, type NavEstimate, type ParkedPose } from "../navigator";
 import type { OdometryStep } from "../odometry/odometry-output";
 import { jamFixes, type JamOptions, type JamWindow } from "./jam";
 import { MapMatchMetrics, type MapMatchSummary } from "./mapmatch-metrics";
@@ -108,6 +108,12 @@ export interface CutResult extends ReplayCut {
   lastErrorM: number | null;
   /** Mean predicted 1σ at the truth fixes, m (is the uncertainty honest?). */
   meanSigmaM: number | null;
+  /**
+   * Truth fixes inside the circle the map draws (1.5 σ, the ~68 % radius): about 0.68 when the
+   * uncertainty is honest, lower when overconfident. Unlike max error ÷ σ, it doesn't penalise an
+   * error that stays bounded (corrected by the map) for peaking now and then.
+   */
+  insideCircle: number | null;
   /** The same for the dominant map-matching cluster (with `mapMatch`), off-road clusters included. */
   mapMatchMaxErrorM: number | null;
   mapMatchLastErrorM: number | null;
@@ -145,6 +151,8 @@ export interface ReplaySummary {
   resets: number;
   /** Road-heading pseudo-measurements into the EKF (`mapMatchLoop: "heading"`, MAPMATCH-SPEC §9). */
   roadHeading: { accepted: number; rejected: number };
+  /** Road-position pseudo-measurements (`mapMatchLoop: "closed"`). */
+  roadPosition: { accepted: number; rejected: number };
   cuts: CutResult[];
   /** Map-matching metrics (with `mapMatch.truth`). */
   mapMatch: MapMatchSummary | null;
@@ -308,6 +316,7 @@ export function replayTrip(trip: TripLog, options: ReplayOptions = {}): ReplayRe
       standstillS: nav.stats.standstillS,
       resets: nav.stats.resets,
       roadHeading: { accepted: nav.stats.roadHeadingAccepted, rejected: nav.stats.roadHeadingRejected },
+      roadPosition: { accepted: nav.stats.roadPositionAccepted, rejected: nav.stats.roadPositionRejected },
       mapMatch: metrics?.summary(nav.mapMatcher?.updateTimes ?? []) ?? null,
       compass: { trust: nav.compassTrust, calibration: nav.compassCalibration, checkDiffsRad: [...nav.compassCheckDiffs] },
       cuts: cuts.map((c, k) => {
@@ -323,6 +332,7 @@ export function replayTrip(trip: TripLog, options: ReplayOptions = {}): ReplayRe
           maxErrorM: truth.length ? Math.max(...truth.map((f) => f.errorM!)) : null,
           lastErrorM: truth.length ? truth[truth.length - 1].errorM! : null,
           meanSigmaM: truth.length ? truth.reduce((s, f) => s + (f.predictedSigmaM ?? 0), 0) / truth.length : null,
+          insideCircle: truth.length ? truth.filter((f) => f.errorM! <= SQRT_68 * (f.predictedSigmaM ?? 0)).length / truth.length : null,
           mapMatchMaxErrorM: mmErrors.length ? Math.max(...mmErrors) : null,
           mapMatchLastErrorM: mmErrors.length ? mmErrors[mmErrors.length - 1] : null,
         };

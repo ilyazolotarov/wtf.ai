@@ -177,6 +177,17 @@ export class DrEkf {
     ], gate);
   }
 
+  /** Position with a full covariance [EE, EN, NN] (m²): the road position, tight across the road (MAPMATCH-SPEC §9). */
+  updatePositionCovariance(residualE: number, residualN: number, cov: readonly [number, number, number], gate: number): UpdateResult {
+    const H = zeros(2, DIM);
+    H[0][IX.E] = 1;
+    H[1][IX.N] = 1;
+    return this.update(H, [residualE, residualN], [
+      [cov[0], cov[1]],
+      [cov[1], cov[2]],
+    ], gate);
+  }
+
   updateSpeed(residual: number, sigma: number, gate: number): UpdateResult {
     const H = zeros(1, DIM);
     H[0][IX.V] = 1;

@@ -83,10 +83,28 @@ export interface NavConfig {
   /**
    * Map matching back into the EKF (MAPMATCH-SPEC §9). `open`: the filter only watches (its output
    * is reported, nothing goes back). `heading`: on straight roads the road's direction corrects the
-   * EKF heading, also while GNSS is trusted.
+   * EKF heading, also while GNSS is trusted. `closed`: that, and while GNSS isn't trusted the road
+   * position corrects the EKF position.
    */
-  mapMatchLoop: "open" | "heading";
+  mapMatchLoop: "open" | "heading" | "closed";
   roadHeading: Partial<RoadHeadingConfig>;
+  roadPosition: Partial<RoadPositionConfig>;
+}
+
+/** The road-position pseudo-measurement (MAPMATCH-SPEC §9). */
+export interface RoadPositionConfig {
+  /** At most one per this much travel (the filter runs on the EKF's own odometry). */
+  intervalM: number;
+  /** The cluster's covariance is floored at these σ along and across the road (lane, OSM geometry). */
+  minAlongSigmaM: number;
+  minAcrossSigmaM: number;
+  /** And its σ multiplied by this (updates on one road share its errors). */
+  inflation: number;
+  /**
+   * GNSS counts as trusted while a satellite fix was accepted this recently: the filter weighs the
+   * same fixes, so the road position would count them twice. Stand-in until integrity (SPEC §3.3).
+   */
+  trustedWindowUs: number;
 }
 
 /** The road-heading pseudo-measurement (MAPMATCH-SPEC §9). */
@@ -135,6 +153,17 @@ export const DEFAULT_NAV_CONFIG: NavConfig = {
   align: {},
   mapMatchLoop: "open",
   roadHeading: {},
+  roadPosition: {},
+};
+
+// Every 25 m with 5 / 3 m floors put the truth inside the circle 22 % of the time: each update
+// repeated the same road information. Every 200 m and 12 / 5 m: 61–65 % (MAPMATCH-SPEC §9.3).
+export const DEFAULT_ROAD_POSITION_CONFIG: RoadPositionConfig = {
+  intervalM: 200,
+  minAlongSigmaM: 12,
+  minAcrossSigmaM: 5,
+  inflation: 1,
+  trustedWindowUs: 3_000_000,
 };
 
 export const DEFAULT_ROAD_HEADING_CONFIG: RoadHeadingConfig = {
@@ -245,7 +274,8 @@ class History {
   }
 }
 
-const SQRT_68 = 1.5;
+/** The ~68 % radius of a 2D error in σ (the circle the map draws is this × the EKF σ). */
+export const SQRT_68 = 1.5;
 const fixSigma = (f: GnssFix) => (isSatelliteFix(f) ? f.hAccM / SQRT_68 : f.hAccM);
 
 export interface NavStats {
@@ -256,6 +286,9 @@ export interface NavStats {
   /** Road-heading pseudo-measurements (MAPMATCH-SPEC §9): accepted by the EKF, and rejected by its gate. */
   roadHeadingAccepted: number;
   roadHeadingRejected: number;
+  /** Road-position pseudo-measurements (`mapMatchLoop: "closed"`). */
+  roadPositionAccepted: number;
+  roadPositionRejected: number;
 }
 
 export class Navigator {
@@ -305,15 +338,20 @@ export class Navigator {
   /** Start the EKF from the map at the end of the current step. */
   private mapStartDue = false;
   private started: { method: InitMethod; tUs: number } | null = null;
-  readonly stats: NavStats = { imuInvalidS: 0, standstillS: 0, obdDistanceM: 0, resets: 0, roadHeadingAccepted: 0, roadHeadingRejected: 0 };
+  readonly stats: NavStats = { imuInvalidS: 0, standstillS: 0, obdDistanceM: 0, resets: 0, roadHeadingAccepted: 0, roadHeadingRejected: 0, roadPositionAccepted: 0, roadPositionRejected: 0 };
   /** Travel (odometry distance) at which the next road-heading update may go out. */
   private nextRoadHeadingM = 0;
   private readonly roadHeadingConfig: RoadHeadingConfig;
+  private nextRoadPositionM = 0;
+  private readonly roadPositionConfig: RoadPositionConfig;
+  /** Time of the last satellite fix the EKF accepted (GNSS trusted, for the road position). */
+  private lastSatAcceptedUs = -Infinity;
 
   constructor(config: Partial<NavConfig> = {}) {
     this.config = { ...DEFAULT_NAV_CONFIG, ...config };
     this.ekfConfig = { ...DEFAULT_EKF_CONFIG, ...this.config.ekf };
     this.roadHeadingConfig = { ...DEFAULT_ROAD_HEADING_CONFIG, ...this.config.roadHeading };
+    this.roadPositionConfig = { ...DEFAULT_ROAD_POSITION_CONFIG, ...this.config.roadPosition };
     this.imu = new ImuProcessor(this.config.imu);
     this.lagEstimator = new GnssLagEstimator(this.config.gnssLag);
     this.compass = new Compass(this.config.compass);
@@ -797,6 +835,7 @@ export class Navigator {
     pf.onOdometry(step, ekf ? { psi: ekf.psi, psiSigma: ekf.psiSigma, e: ekf.east, n: ekf.north, posSigma: ekf.positionSigma } : null);
     if (step.stopped) return;
     if (ekf && this.config.mapMatchLoop !== "open" && step.distanceM >= this.nextRoadHeadingM) this.roadHeadingUpdate(step.distanceM);
+    if (ekf && this.config.mapMatchLoop === "closed" && step.distanceM >= this.nextRoadPositionM) this.roadPositionUpdate(step);
     if (!ekf && step.distanceM >= this.nextMapStartCheckM) {
       // Heading unknown: a heading settled over `mapStartTrackingM` starts the EKF.
       this.nextMapStartCheckM = step.distanceM + pf.config.evalIntervalM;
@@ -851,6 +890,39 @@ export class Navigator {
     else this.stats.roadHeadingRejected++;
   }
 
+  /**
+   * The road position into the EKF position (MAPMATCH-SPEC §9), while GNSS isn't trusted and the
+   * filter tracks one road: the dominant cluster's mean, with its covariance floored along and
+   * across the road. That is what turns give the filter and the EKF can't get: where along the road.
+   */
+  private roadPositionUpdate(step: OdometryStep): void {
+    const pf = this.pf!;
+    const ekf = this.ekf!;
+    const c = this.roadPositionConfig;
+    if (step.t1Us - this.lastSatAcceptedUs < c.trustedWindowUs) return;
+    const out = pf.output();
+    const top = out.clusters[0];
+    if (out.state !== "tracking" || !top || top.edge === null) return;
+    this.nextRoadPositionM = step.distanceM + c.intervalM;
+    // Into the road frame (along the travel heading, across it), floor, and back.
+    const sa = Math.sin(top.headingRad);
+    const ca = Math.cos(top.headingRad);
+    const [ee, en, nn] = top.covariance;
+    const k = c.inflation * c.inflation;
+    const along = Math.max(k * (sa * sa * ee + 2 * sa * ca * en + ca * ca * nn), c.minAlongSigmaM ** 2);
+    const across = Math.max(k * (ca * ca * ee - 2 * sa * ca * en + sa * sa * nn), c.minAcrossSigmaM ** 2);
+    const cross = k * (sa * ca * (ee - nn) + (ca * ca - sa * sa) * en);
+    // along = (sin, cos), across = (cos, −sin) in (E, N).
+    const cov: [number, number, number] = [
+      sa * sa * along + 2 * sa * ca * cross + ca * ca * across,
+      sa * ca * along + (ca * ca - sa * sa) * cross - sa * ca * across,
+      ca * ca * along - 2 * sa * ca * cross + sa * sa * across,
+    ];
+    const r = ekf.updatePositionCovariance(top.e - ekf.east, top.n - ekf.north, cov, this.config.gate);
+    if (r.accepted) this.stats.roadPositionAccepted++;
+    else this.stats.roadPositionRejected++;
+  }
+
   private mapMatchEstimate(frame: LocalFrame): MapMatchEstimate {
     const out = this.pf!.output();
     return {
@@ -877,6 +949,8 @@ export class Navigator {
       const cs = Math.cos(theta);
       const sn = Math.sin(theta);
       this.initEkf(theta, fE - (cs * relThen[0] - sn * relThen[1]), fN - (sn * relThen[0] + cs * relThen[1]), sigma, Math.max(fix.courseAccRad ?? 0, (3 * Math.PI) / 180), "course");
+      // A satellite fix started it: GNSS is trusted from here (the road position waits).
+      this.lastSatAcceptedUs = fix.tUs;
       return { status: "init", initMethod: "course" };
     }
 
@@ -957,7 +1031,10 @@ export class Navigator {
       if (sat && ++this.rejectedSat >= c.resetAfterRejected) this.reset(fix, sigma);
       return outcome;
     }
-    if (sat) this.rejectedSat = 0;
+    if (sat) {
+      this.rejectedSat = 0;
+      this.lastSatAcceptedUs = fix.tUs;
+    }
     if (sat && fix.speedMps !== undefined) {
       ekf.updateSpeed(fix.speedMps - hv[3], Math.max(fix.speedAccMps ?? 0.5, 0.2), c.gate);
       if (fix.courseRad !== undefined && fix.speedMps >= c.courseUpdateMinSpeedMps && fix.courseAccRad !== undefined) {

@@ -329,7 +329,9 @@ Until `src/nav/integrity` (SPEC Phase 3), the map's trust state comes from `Gnss
     with the driver (q8tfjs, 9qw8wn, qfger8). A reverse makes 3–5 such fixes, so far never inside a window.
   - The grid is fixed so that a change that moves the EKF start by a few seconds still scores the same windows.
     With the grid relative to the start, an 8 s shift moved the 120 s median by 5 m.
-  - Reports max and end error (median, p90), error per km, and max error ÷ predicted σ.
+  - Reports max and end error (median, p90), error per km, max error ÷ predicted σ, and the share of held-out fixes
+    inside the drawn circle (honest ≈ 68 %; the fairer check once map matching bounds the error, MAPMATCH-SPEC §9.3),
+    pooled and per drive.
   - Windows overlap, so small differences are noise.
 - **First 7 drives** (2026-10-03, 56 windows; window grid relative to the EKF start):
 
@@ -359,8 +361,8 @@ Until `src/nav/integrity` (SPEC Phase 3), the map's trust state comes from `Gnss
   - Gyro drift is not the limit.
 - **Tried with no effect:** fixed `k_ω`, course updates only on straight road, and lower gyro noise. Gyro noise
   ≤ 0.001 makes the filter overconfident; 0.003 is kept.
-- **Viewer:** `npm run replay:view` is a local map with timeline, cuts and side-by-side GNSS vs prediction; see
-  `tools/replay/README.md`.
+- **Viewer:** `npm run replay:view` shows how a drive went: what the phone showed and a replay (any navigator
+  version, any GPS scenario) against GPS, with every stretch without GPS scored; see `tools/replay/README.md`.
 
 ## 11. Tuning values and what they depend on
 

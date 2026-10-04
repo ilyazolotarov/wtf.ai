@@ -215,3 +215,39 @@ describe("road heading into the EKF", () => {
     expect(closed.errorDeg).toBeLessThan(1);
   });
 });
+
+describe("road position into the EKF", () => {
+  // The junction drive with GNSS cut 50 s before the turn, a gyro bias the EKF hasn't learned and OBD
+  // reading 3 % low: the EKF drifts off the road; the filter knows where it is once the car has turned.
+  const run = (loop: "open" | "closed", cut = true) => {
+    const drive = syntheticDrive({
+      segments: junctionDrive(20),
+      origin: ORIGIN,
+      startHeadingRad: Math.PI / 2,
+      gnss: "clean",
+      obdScale: 0.97,
+      gyroBiasRadS: (0.05 * Math.PI) / 180,
+    });
+    const result = replayTrip(drive.trip, { nav: { mapMatchLoop: loop }, mapMatch: { graph: graph() }, cuts: cut ? [{ fromS: 100, toS: 1e9 }] : [] });
+    const end = result.track.at(-1)!;
+    const truth = drive.truthAt(drive.trip.imu.at(-1)!.tUs);
+    const dN = (end.lat - truth.lat) * 111_195;
+    const dE = (end.lon - truth.lon) * 111_195 * Math.cos((truth.lat * Math.PI) / 180);
+    return { errorM: Math.hypot(dE, dN), sigmaM: end.accuracyM, summary: result.summary };
+  };
+
+  test("only while GNSS is cut, and it brings the EKF back to the road the car turned onto", () => {
+    const open = run("open");
+    const closed = run("closed");
+    expect(open.summary.roadPosition).toEqual({ accepted: 0, rejected: 0 });
+    // ~0.9 km without GNSS, one every 200 m.
+    expect(closed.summary.roadPosition.accepted).toBeGreaterThanOrEqual(3);
+    expect(closed.summary.roadPosition.rejected).toBe(0);
+    expect(closed.errorM).toBeLessThan(open.errorM);
+    // Its radius shrinks with it, and still covers the error.
+    expect(closed.sigmaM).toBeLessThan(open.sigmaM);
+    expect(closed.errorM).toBeLessThan(2 * closed.sigmaM);
+    // With GNSS throughout, the filter weighs the same fixes: no road position.
+    expect(run("closed", false).summary.roadPosition).toEqual({ accepted: 0, rejected: 0 });
+  });
+});
