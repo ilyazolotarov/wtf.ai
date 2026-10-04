@@ -582,11 +582,29 @@ NAVIGATOR-SPEC §4, §5.1):
 - **Position:**
   - From the cluster's weighted covariance, floored at 3 m across the road and 5 m along it.
   - **Not sent while GNSS is trusted.** The PF already weighs the same fixes, so sending it would count them twice.
+  - **"Trusted" until integrity exists** (SPEC Phase 3): a satellite fix was accepted by the EKF in the last 3 s,
+    the rule that makes the app's source `fused` rather than `dr` (NAVIGATOR-SPEC §9). Integrity replaces it.
 - Both use the EKF χ² gate (16). A rejection is an app note, not a reset.
 - **The EKF-position term of the filter (§7.4)** feeds the EKF back into the filter. With the loop closed, the
-  filter would partly confirm its own corrections: turn it off, or weaken it, while pseudo-measurements are sent,
-  and check max error ÷ σ in replay.
+  filter would partly confirm its own corrections. Measured, not decided upfront: off, weakened and as now, while
+  pseudo-measurements are sent; keep the best by error and max error ÷ σ. The same choice settles §15.10 and §15.12.
+- **Order:** road heading alone first (it targets the heading at outage start, NAVIGATOR-SPEC §13.1, §13.8, and
+  adds little double counting: the filter weighs GNSS positions, not courses), then position, then the term above.
 - Replay switch: `--mm off | open | closed`. Open loop = PF runs and is scored but sends nothing.
+
+### 9.1 Baseline: open loop (2026-10-04, 14 logs, seeds 1–3 pooled)
+
+`npm run replay:bench -- tools/triplog/logs/*.ulg --mm`; what M6 has to beat (§12). Windows × seeds.
+
+| Outage | Windows | EKF max error median / p90 | EKF end error median / p90 | EKF err ÷ σ | Map match max error median / p90 | Map match end error median / p90 | Map match max better |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 60 s | 177 | 11.7 / 34.5 m | 8.8 / 27.0 m | 2.28 | 13.4 / 28.6 m | 6.2 / 13.3 m | 75 of 177 |
+| 120 s | 150 | 23.8 / 64.7 m | 19.5 / 56.0 m | 2.25 | 20.6 / 42.0 m | 7.6 / 18.6 m | 92 of 150 |
+| 240 s | 108 | 59.3 / 123.7 m | 35.9 / 107.6 m | 2.25 | 40.2 / 77.7 m | 14.1 / 63.9 m | 66 of 108 |
+
+- Err ÷ σ per drive: 94zf2q 4.6–6.0, j5m8tq 2.5–3.5, qfger8 1.6–2.8, the others 0.9–1.9 (NAVIGATOR-SPEC §13.8).
+- The map-match end error is a third to a half of the EKF's: turns reset the along-track error, which the EKF
+  keeps. That is what closing the loop should hand to the EKF.
 
 ## 10. Replay, ground truth and metrics
 
@@ -734,7 +752,7 @@ NAVIGATOR-SPEC §4, §5.1):
 | M3 | Odometry output + ground truth (§6.1, §10.1) | odometry chunks sum to the EKF's distance and heading change; truth edge sequences for the 4 clean drives with no unexplained breaks. **Done** (§10.4) |
 | M4 | PF open loop, known heading (§7) | §10.2 metrics on all drives; dominant-cluster max error on 240 s cuts better than the EKF's 37 m median; truth survival 100 %. **Done** (§7.7): 30.5 m; survival 100 % except 2 s leaving a yard |
 | M5 | Heading init from the map (§8) | EKF starts sooner than alignment on the jammed drives and on `--jam-start`, with no start > 10° off. **Done in replay** (§8.1): sooner on 2 of 3 jammed drives (the third as soon) and 29 of 35 simulated sessions; map starts ≤ 2.6° off. To confirm on drives beyond Slavutych |
-| M6 | Closed loop (§9) | `replay:bench` better at 120 / 240 s; max error ÷ σ stays within 0.5–2 (NAVIGATOR-SPEC §12.1) |
+| M6 | Closed loop (§9) | `replay:bench --mm closed` against open loop on the same windows and seeds: EKF max error better at 120 / 240 s (median and p90), no worse at 60 s; max error ÷ σ no higher than open loop's, pooled and per drive. The 0.5–2 band is NAVIGATOR-SPEC §13.8's: open loop is outside it on 3 drives |
 | M7 | App (§11) | graph download, `nav_mapmatch` in trip logs, alternatives on the map, update time on iPhone < 5 ms p99. **Built** (§2): needs a drive for the update time |
 
 M1–M3 can partly overlap. M4 needs M1–M3. M5 and M6 are independent of each other.
@@ -771,7 +789,8 @@ M1–M3 can partly overlap. M4 needs M1–M3. M5 and M6 are independent of each 
 
 1. Wrong-road rate, truth survival, re-lock time and update time are reported for every drive (§10.2). Pass/fail
    thresholds are set after M4's first numbers. Truth survival is 100 % from the start.
-2. `replay:bench` with `--mm closed` is no worse than NAVIGATOR-SPEC §10 at 60 s, and better at 120 / 240 s.
+2. `replay:bench` with `--mm closed` is no worse than open loop at 60 s and better at 120 / 240 s, without raising
+   max error ÷ σ (§12, M6).
 3. Jammed start: EKF start from the map before alignment, heading error ≤ 10°, on the real jammed drives and on
    `--jam-start`.
 4. Ukraine graph: opening it reads only the header and directory; tracking a drive decodes about as many tiles as

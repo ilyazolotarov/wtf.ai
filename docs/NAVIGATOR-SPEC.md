@@ -378,7 +378,8 @@ needed to check them (`replay:bench`).
 
 ## 12. Verification targets
 
-1. `replay:bench` after any navigator change: no worse than §10 at 60/120 s. Max error ÷ σ stays between 0.5 and 2.
+1. `replay:bench` after any navigator change: no worse than §10 at 60/120 s. Max error ÷ σ stays between 0.5 and 2
+   (not met yet on the 2026-10-04 drives, §13.8; `replay:bench` prints it per drive).
 2. Jammed drives: the EKF starts by alignment once distinct coarse fixes span ≥ 150 m; ≥ 75 % of later coarse fixes
    fall inside their own radius.
 3. Standstill: heading change < 0.5° over a 60 s stop, including handling the phone while parked.
@@ -403,9 +404,25 @@ needed to check them (`replay:bench`).
 7. Replay doesn't load the stored calibration or parked pose a live session started from. `nav_estimate` and the
    `nav …` notes record them; use `--lag` and `--chain` to come close. Nor can it carry the navigator over from
    the previous drive, as the app did on the jammed drive of §9.1.
-8. **Overconfident heading at speed** (j5m8tq, §10): 2–3° off at the outage start against σ_ψ 0.6–1°, and
-   growing through curves at ~70 km/h. Candidates: the phone slipping in the mount at speed, gyro scale in sharp
-   turns, GNSS course lag at speed. Max error ÷ σ is 2.3 over 14 drives (target 0.5–2, §12.1).
+8. **Overconfident on the 2026-10-04 drives** (§10). Max error ÷ σ is ~2.2 pooled (target 0.5–2, §12.1), but
+   per drive (`replay:bench`, median per outage length 60 / 120 / 240 s):
+
+   | Drive | Windows (60 s) | Err ÷ σ |
+   | --- | --- | --- |
+   | 94zf2q | 14 | 4.6 / 5.4 / 6.0 |
+   | j5m8tq | 18 | 2.5 / 3.1 / 3.5 |
+   | qfger8 | 5 | 2.7 / 2.4 / 1.6 |
+   | the 6 others | 1–9 each | 0.9–1.9 (9qw8wn: 2.8 on its one window) |
+
+   j5m8tq and 94zf2q hold 32 of the 59 60-s windows, so they set the pooled median. j5m8tq: 2–3° off at the
+   outage start against σ_ψ 0.6–1°, growing through curves at ~70 km/h. Candidates, cheapest test first:
+   1. Course updates counted as independent: about one a second at ≥ 4 m/s, each with σ = max(course accuracy,
+      2°), while at speed their errors last from fix to fix (lag, curves, multipath). Test in replay: rate-limit or
+      inflate them at speed; σ_ψ should stop shrinking to 0.6° without the errors growing on the other drives.
+   2. The phone shifting in the mount at speed (gravity moving in the phone frame; the IMU log shows it).
+   3. Gyro scale in sharp turns.
+
+   Not a blocker for MAPMATCH-SPEC M6, whose exit compares with the open loop (MAPMATCH-SPEC §12).
 9. **Alignment is overconfident** on the new drives (simulated jams, MAPMATCH-SPEC §8.1): 9 of 28 alignment
    starts are over 10° off, the worst 43° at 4.9σ.
 10. **Reversing reads OBD 0** on the CX-5 (VEHICLE-LINK-SPEC §10.4), so the car turns in place in the model. It

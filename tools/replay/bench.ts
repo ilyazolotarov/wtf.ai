@@ -160,6 +160,20 @@ function main() {
         `   ${median(perKm).toFixed(1).padStart(10)} ${median(ratio).toFixed(2).padStart(6)}`,
     );
   }
+  // Per drive, so one drive can't hide behind (or dominate) the pooled numbers.
+  const drives = [...new Set([...byDuration.values()].flat().map((c) => c.file))].sort();
+  console.log("\nper drive: windows, max err median (m), err/σ median, per outage length");
+  console.log(`${"drive".padEnd(28)}${DURATIONS_S.map((d) => `${String(d).padStart(4)} s: win  max err/σ`).join("  ")}`);
+  for (const file of drives) {
+    const cols = DURATIONS_S.map((d) => {
+      const cuts = byDuration.get(d)!.filter((c) => c.file === file);
+      if (!cuts.length) return "—".padStart(23);
+      const ratio = cuts.map((c) => c.maxErrorM! / Math.max(1, c.meanSigmaM!));
+      return `${String(cuts.length).padStart(11)} ${median(cuts.map((c) => c.maxErrorM!)).toFixed(0).padStart(4)} ${median(ratio).toFixed(2).padStart(5)}`;
+    });
+    console.log(`${file.padEnd(28)}${cols.join("  ")}`);
+  }
+
   if (!mm) return;
   console.log("\nmap match (dominant cluster, open loop)");
   console.log("outage  windows   max err: median  p90   end err: median  p90   better than EKF (max)");
