@@ -49,8 +49,8 @@ function parseCuts(s: string | null): { fromS: number; toS: number }[] {
   if (!s) return [];
   return s
     .split(",")
-    .map((c) => c.split(":").map(Number))
-    .filter(([a, b]) => Number.isFinite(a) && Number.isFinite(b) && b > 0)
+    .map((c) => c.split(":").map((v) => (v === "inf" ? Infinity : Number(v))))
+    .filter(([a, b]) => Number.isFinite(a) && b > 0)
     .map(([a, b]) => ({ fromS: a, toS: a + b }));
 }
 
@@ -66,6 +66,8 @@ const server = createServer((req, res) => {
       if (!file.endsWith(".ulg")) return send(res, 400, "text/plain", "file must be a .ulg in the logs folder");
       const lag = url.searchParams.get("lag");
       const openLoop = url.searchParams.get("openLoop");
+      const start = Number(url.searchParams.get("start") || 0);
+      const jam = parseCuts(url.searchParams.get("jam"));
       const started = Date.now();
       const trip = loadTrip(file);
       // Map matching on the trip's road graph, when there is one.
@@ -78,6 +80,8 @@ const server = createServer((req, res) => {
           nav: lag ? { gnssLagS: Number(lag), estimateGnssLag: false } : {},
           openLoop: openLoop ? { delayS: Number(openLoop) } : undefined,
           ...(opened ? { mapMatch: { graph: opened.graph } } : {}),
+          ...(start > 0 ? { startAtS: start } : {}),
+          ...(jam.length ? { jam } : {}),
         });
         send(res, 200, "application/json", JSON.stringify(data));
       } finally {

@@ -6,11 +6,13 @@ import type { MapMatchEstimate } from "../navigator";
 import { isSameRoad, type TruthMatch } from "./truth-match";
 
 export interface MapMatchSummary {
-  /** Moving samples (at the replay's track step) where the truth knows the road and the filter runs. */
+  /** Moving samples (at the replay's track step) where the truth knows the road and the filter runs, past `init`. */
   samples: number;
+  /** Samples in state `init` (heading unknown, not tracked yet): only truth survival counts them. */
+  initSamples: number;
   /** Share of samples whose dominant cluster is not on the true road. */
   wrongRoadRate: number | null;
-  /** Share of samples with at least one particle on the true road. */
+  /** Share of samples, `init` included, with at least one particle on the true road. */
   truthSurvival: number | null;
   multimodalShare: number | null;
   offRoadShare: number | null;
@@ -32,6 +34,7 @@ const quantile = (xs: number[], q: number) => {
 
 export class MapMatchMetrics {
   private samples = 0;
+  private initSamples = 0;
   private wrong = 0;
   private survived = 0;
   private multimodal = 0;
@@ -52,16 +55,22 @@ export class MapMatchMetrics {
     if (!estimate || estimate.state === "off" || !pf) return;
     const truth = this.truth.at(tUs);
     if (!truth) return;
-    this.samples++;
     const tS = (tUs - this.startUs) / 1e6;
+    const survived = pf.someParticle((edge) => isSameRoad(this.graph, truth, edge));
+    if (survived) this.survived++;
+    else extend(this.lostSpans, tS);
+    if (estimate.state === "init") {
+      // The start is still ambiguous by design (MAPMATCH-SPEC §8): only survival is scored.
+      this.initSamples++;
+      return;
+    }
+    this.samples++;
     const top = estimate.clusters[0];
     const onTruth = !!top?.edge && isSameRoad(this.graph, truth, top.edge);
     if (!onTruth) {
       this.wrong++;
       extend(this.wrongSpans, tS);
     }
-    if (pf.someParticle((edge) => isSameRoad(this.graph, truth, edge))) this.survived++;
-    else extend(this.lostSpans, tS);
     if (estimate.state === "multimodal") {
       this.multimodal++;
       this.multimodalSince ??= { tUs, distanceM };
@@ -77,12 +86,14 @@ export class MapMatchMetrics {
   summary(updateTimes: number[]): MapMatchSummary {
     const n = this.samples;
     const share = (k: number) => (n ? k / n : null);
+    const all = n + this.initSamples;
     const s = this.relocks.map((r) => r.s);
     const m = this.relocks.map((r) => r.m);
     return {
       samples: n,
+      initSamples: this.initSamples,
       wrongRoadRate: share(this.wrong),
-      truthSurvival: share(this.survived),
+      truthSurvival: all ? this.survived / all : null,
       multimodalShare: share(this.multimodal),
       offRoadShare: share(this.offRoad),
       relock: {

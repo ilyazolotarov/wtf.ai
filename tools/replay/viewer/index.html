@@ -86,6 +86,8 @@
       <option value="120">120 s after</option>
     </select></label>
   <label>lag <input id="lag" type="number" step="0.1" value="0.4" style="width:60px" /> s</label>
+  <label title="Start the session this far into the log, as if the app started then">start <input id="start" type="number" step="10" min="0" placeholder="0" style="width:60px" /> s</label>
+  <label title="Simulated jamming: satellite fixes become Wi-Fi/cell-like ones (±tens of m, every 5–10 s). start:length or start:inf">jam <input id="jam" placeholder="e.g. 0:inf" size="9" /></label>
   <button id="run" class="primary">Replay</button>
   <span id="status"></span>
 </header>
@@ -705,6 +707,8 @@ async function loadList() {
   if (params.get("cuts")) $("cuts").value = params.get("cuts");
   if (params.get("lag")) $("lag").value = params.get("lag");
   if (params.has("openLoop")) $("openLoop").value = params.get("openLoop");
+  if (params.get("start")) $("start").value = params.get("start");
+  if (params.get("jam")) $("jam").value = params.get("jam");
   if (!logs.length) return;
   if (params.get("split") === "1") await $("split").onclick();
   await run();
@@ -722,11 +726,13 @@ async function run() {
   const cuts = $("cuts").value.replace(/\s+/g, "");
   const lag = $("lag").value;
   const openLoop = $("openLoop").value;
-  history.replaceState(null, "", "#" + new URLSearchParams({ file, cuts, lag, openLoop }).toString());
+  const start = $("start").value;
+  const jam = $("jam").value.replace(/\s+/g, "");
+  history.replaceState(null, "", "#" + new URLSearchParams({ file, cuts, lag, openLoop, start, jam }).toString());
   setPlaying(false);
   $("status").textContent = "replaying…";
   const started = performance.now();
-  const res = await fetch(`/api/replay?${new URLSearchParams({ file, cuts, lag, openLoop })}`);
+  const res = await fetch(`/api/replay?${new URLSearchParams({ file, cuts, lag, openLoop, start, jam })}`);
   if (!res.ok) { $("status").textContent = await res.text(); return; }
   data = await res.json();
   if (!("openLoopDelayS" in data.options)) {
@@ -753,6 +759,8 @@ $("run").onclick = run;
 $("file").onchange = run;
 $("openLoop").onchange = run;
 $("cuts").addEventListener("keydown", (e) => e.key === "Enter" && run());
+$("jam").addEventListener("keydown", (e) => e.key === "Enter" && run());
+$("start").addEventListener("keydown", (e) => e.key === "Enter" && run());
 loadList();
 </script>
 </body>

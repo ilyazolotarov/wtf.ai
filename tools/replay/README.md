@@ -61,8 +61,12 @@ npm run replay:view -- --logs D:/trips --port 5180
   - Error: distance from prediction to each fix before the update, on a log scale. Red dots are fixes inside a
     cut, the honest held-out error. The blue band is the predicted accuracy.
   - Bands: GPS quality, prediction mode, engine state, events (markers in red).
-- **Links:** the URL keeps the log, cuts, open loop, lag, `t` (seconds) and `split=1`, so a link reopens the
-  same moment.
+- **Session start and jamming:** *start* replays from that many seconds into the log, as if the app started
+  then. *jam* (`0:inf`, `300:240`) turns the satellite fixes in that window into Wi-Fi/cell-like ones (no speed or
+  course, ±tens of metres, every 5–10 s, some repeated; `src/nav/replay/jam.ts`). Together they show a jammed start
+  on a clean drive: alignment, or the map (MAPMATCH-SPEC §8).
+- **Links:** the URL keeps the log, cuts, open loop, lag, start, jam, `t` (seconds) and `split=1`, so a link
+  reopens the same moment.
 - The server runs under `node --watch`, so it restarts itself when `src/nav` or the viewer code changes; reload
   the page afterwards. A server started before this change has to be stopped by hand once.
 
@@ -81,6 +85,8 @@ npm run replay:truth -- tools/triplog/logs/*.ulg                       # ground 
 npm run replay:mm -- tools/triplog/logs/*.ulg                          # map matching vs the ground truth
 npm run replay:mm -- trip.ulg --cut 241:240 --trace 330:360            # one outage, second by second
 npm run replay:bench -- tools/triplog/logs/*.ulg --mm                  # outage benchmark with map matching
+npm run replay:bench -- tools/triplog/logs/*.ulg --jam-start --verbose # heading init under jamming, with and without the map
+npm run replay:mm -- trip.ulg --start 300 --jam 300:inf --trace 300:420 # one jammed start, second by second
 npm run replay:graph -- --graph tools/tiles/out/release/ukraine.graph.bin trip.ulg
 npm run replay:view -- --graph tools/tiles/out/release/kyiv.graph.bin  # viewer with a given graph
 ```
@@ -94,12 +100,21 @@ npm run replay:view -- --graph tools/tiles/out/release/kyiv.graph.bin  # viewer 
   OBD vs navigator odometry distance, and any legs that don't fit or needed a one-way/restriction/U-turn penalty.
   `--json <out>` saves the matched points, legs and breaks.
 - **`replay:mm`:** runs the particle filter (MAPMATCH-SPEC §7, open loop) in the replay and scores it against
-  the ground truth: wrong-road rate, truth survival, multimodal and off-road shares, re-lock time, update time,
-  and the stretches where it was on a wrong road or lost the true one. With `--cut`, the filter's and the EKF's
-  error at the held-out fixes. `--trace from:to` prints, per second, the state, the top clusters (OSM way, weight,
-  spread), the true way and both errors. `--mm '<json>'` overrides the filter's config.
+  the ground truth: how the EKF started, wrong-road rate, truth survival, multimodal and off-road shares, re-lock
+  time, update time, and the stretches where it was on a wrong road or lost the true one. Samples in state `init`
+  (heading unknown, MAPMATCH-SPEC §8) count only for truth survival. With `--cut`, the filter's and the EKF's
+  error at the held-out fixes. `--trace from:to` prints, per second, the navigator mode, the filter state and
+  particle count, the top clusters (OSM way, weight, spread), the true way and both errors. `--mm '<json>'`
+  overrides the filter's config; `--start <s>` and `--jam <start:len|inf>` as in the viewer.
 - **`replay:bench --mm`:** the outage benchmark with the filter's error next to the EKF's (dominant cluster,
-  off-road clusters included).
+  off-road clusters included). With the map the EKF can start earlier (from the map), so its own columns differ
+  a little from a run without `--mm`.
+- **`replay:bench --jam-start`:** the heading-init benchmark (MAPMATCH-SPEC §8). Every log runs as recorded, and
+  clean ones also as sessions starting every 60 s (`--every`) with jamming from the session start to the end. Each
+  session runs without and with the map. Per session: how the EKF started, when, after how much driving, and the
+  heading and position error at the start, also ÷ the σ it started with. The reference is the ground truth, else a
+  clean replay's EKF, else (heading only, marked `gyro`) the clean replay's later heading taken back by the
+  gyro. `--verbose` prints every session.
 - **Viewer:** the *roads* checkbox draws the graph around the trip's fixes, under the tracks: major roads thick,
   service roads and tracks dashed, arrows on one-ways (zoom ≥ 14). At zoom ≥ 15 it adds junctions, dead ends
   (orange) and region-boundary ends (red). Hover for the OSM way id, class, length and flags. Its tooltip says

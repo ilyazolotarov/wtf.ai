@@ -4,9 +4,11 @@
 //   npm run replay:bench -- tools/triplog/logs/*.ulg
 //   npm run replay:bench -- tools/triplog/logs/*.ulg --nav '{"ekf":{"initYawScaleSigma":0}}'
 //   npm run replay:bench -- tools/triplog/logs/*.ulg --mm [--mm-config '{"particles":1000}'] [--graph <file>]
+//   npm run replay:bench -- tools/triplog/logs/*.ulg --jam-start [--every 60] [--mm-config '<json>'] [--graph <file>]
 //
 // With --mm the particle filter runs in every window (open loop) and its dominant cluster is
-// scored against the same held-out fixes as the EKF (MAPMATCH-SPEC §10.2).
+// scored against the same held-out fixes as the EKF (MAPMATCH-SPEC §10.2). --jam-start runs the
+// heading-init benchmark instead (init-bench.ts, MAPMATCH-SPEC §8).
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -17,6 +19,7 @@ import { replayTrip, type CutResult, type ReplayOptions } from "../../src/nav/re
 import { isSatelliteFix } from "../../src/nav/types";
 import { readTripLog } from "../../src/triplog/trip-log-reader";
 import { findGraph, openGraph } from "./graph-file";
+import { runInitBench } from "./init-bench";
 
 const DURATIONS_S = [60, 120, 240];
 const STEP_S = 30;
@@ -32,15 +35,19 @@ function parseArgs(argv: string[]) {
   let mm = false;
   let mmConfig: Partial<MapMatchConfig> = {};
   let graph: string | undefined;
+  let jamStart = false;
+  let everyS = 60;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--nav") nav = JSON.parse(argv[++i]) as Partial<NavConfig>;
     else if (argv[i] === "--verbose") verbose = true;
     else if (argv[i] === "--mm") mm = true;
     else if (argv[i] === "--mm-config") mmConfig = JSON.parse(argv[++i]) as Partial<MapMatchConfig>;
     else if (argv[i] === "--graph") graph = argv[++i];
+    else if (argv[i] === "--jam-start") jamStart = true;
+    else if (argv[i] === "--every") everyS = Number(argv[++i]);
     else files.push(argv[i]);
   }
-  return { files, nav, verbose, mm, mmConfig, graph };
+  return { files, nav, verbose, mm, mmConfig, graph, jamStart, everyS };
 }
 
 const median = (v: number[]) => {
@@ -53,7 +60,11 @@ const pct = (v: number[], p: number) => {
 };
 
 function main() {
-  const { files, nav, verbose, mm, mmConfig, graph: graphArg } = parseArgs(process.argv.slice(2));
+  const { files, nav, verbose, mm, mmConfig, graph: graphArg, jamStart, everyS } = parseArgs(process.argv.slice(2));
+  if (jamStart) {
+    runInitBench(files, { nav, mmConfig, graph: graphArg, everyS, verbose });
+    return;
+  }
   const byDuration = new Map<number, (CutResult & { file: string })[]>(DURATIONS_S.map((d) => [d, []]));
 
   for (const file of files) {

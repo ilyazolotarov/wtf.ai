@@ -5,8 +5,9 @@ import type { GnssLagEstimate } from "../calibration/gnss-lag";
 import type { TripLog } from "../../triplog/trip-log-reader";
 import { haversineM } from "../geo";
 import type { MapMatchConfig } from "../mapmatch/particle-filter";
-import { Navigator, type FixOutcome, type MapMatchGraph, type NavConfig, type NavEstimate, type ParkedPose } from "../navigator";
+import { Navigator, type FixOutcome, type InitMethod, type MapMatchGraph, type NavConfig, type NavEstimate, type ParkedPose } from "../navigator";
 import type { OdometryStep } from "../odometry/odometry-output";
+import { jamFixes, type JamOptions, type JamWindow } from "./jam";
 import { MapMatchMetrics, type MapMatchSummary } from "./mapmatch-metrics";
 import type { TruthMatch } from "./truth-match";
 import { isSatelliteFix, type GnssFix } from "../types";
@@ -36,6 +37,11 @@ export interface ReplayOptions {
   openLoop?: { delayS: number };
   /** Start from the pose saved at the end of the previous drive (as the app does after parking). */
   startPose?: ParkedPose;
+  /** Start the session this many seconds into the log (as if the app started then); times stay log-relative. */
+  startAtS?: number;
+  /** Simulated jamming (jam.ts): satellite fixes in these windows become coarse ones. */
+  jam?: JamWindow[];
+  jamOptions?: Partial<JamOptions>;
   /** Receives the navigator's odometry chunks (MAPMATCH-SPEC §6.1). */
   odometry?: (step: OdometryStep) => void;
   /**
@@ -82,10 +88,21 @@ export interface CutResult extends ReplayCut {
   mapMatchLastErrorM: number | null;
 }
 
+/** The first EKF start: when, how, after how much driving, and the pose it started with. */
+export interface ReplayInit {
+  tS: number;
+  method: string;
+  /** OBD distance driven since the session start, m. */
+  distanceM: number;
+  estimate: NavEstimate | null;
+}
+
+const INIT_NAMES: Record<InitMethod, string> = { course: "course", alignment: "alignment", pose: "parked pose", map: "map" };
+
 export interface ReplaySummary {
   durationS: number;
   obdDistanceM: number;
-  init: { tS: number; method: string } | null;
+  init: ReplayInit | null;
   /** What became of `startPose`: refused at start, confirmed or rejected by a fix (time since log start). */
   startPose: { status: "refused" | "unverified" | "confirmed" | "rejected"; tS: number } | null;
   /** Pose to start the next drive from (null: not parked in mode dr at the end). */
@@ -130,6 +147,7 @@ export function replayTrip(trip: TripLog, options: ReplayOptions = {}): ReplayRe
   let nextParticlesUs = -Infinity;
   const cuts: ReplayCut[] = [...(options.cuts ?? [])];
   const stepUs = (options.trackStepS ?? 1) * 1e6;
+  const sessionUs = trip.startUs + (options.startAtS ?? 0) * 1e6;
   const truthAcc = options.truthAccuracyM ?? 10;
   const tS = (tUs: number) => (tUs - trip.startUs) / 1e6;
   const inCut = (t: number) => cuts.find((c) => t >= c.fromS && t < c.toS);
@@ -143,12 +161,21 @@ export function replayTrip(trip: TripLog, options: ReplayOptions = {}): ReplayRe
   let startPose: ReplaySummary["startPose"] = null;
   if (options.startPose) {
     const ok = nav.startFromPose(options.startPose);
-    startPose = { status: ok ? "unverified" : "refused", tS: 0 };
-    if (ok) init = { tS: 0, method: "parked pose" };
+    startPose = { status: ok ? "unverified" : "refused", tS: tS(sessionUs) };
+    if (ok) init = { tS: tS(sessionUs), method: "parked pose", distanceM: 0, estimate: null };
   }
 
   const afterEvent = (tUs: number) => {
     const d = nav.stats.obdDistanceM;
+    const started = nav.initialization;
+    if (started && !init) {
+      const t = tS(started.tUs);
+      init = { tS: t, method: INIT_NAMES[started.method], distanceM: d, estimate: nav.estimate() };
+      if (options.openLoop) {
+        cuts.push({ fromS: t + options.openLoop.delayS, toS: Infinity, openLoop: true });
+        cutDistance.push(0);
+      }
+    }
     const cutIndex = cuts.findIndex((c) => tS(tUs) >= c.fromS && tS(tUs) < c.toS);
     if (cutIndex >= 0) cutDistance[cutIndex] += d - lastDistance;
     lastDistance = d;
@@ -163,8 +190,11 @@ export function replayTrip(trip: TripLog, options: ReplayOptions = {}): ReplayRe
     if (metrics && e && !nav.isStandstill && (e.speedMps ?? 0) >= 2) metrics.sample(tUs, e.mapMatch, nav.mapMatcher, d);
   };
 
-  // Merge the three time-sorted streams.
-  const { imu, obdSpeed, gnss } = trip;
+  // Merge the three time-sorted streams (from the session start).
+  const from = <T extends { tUs: number }>(xs: T[]) => (options.startAtS ? xs.filter((x) => x.tUs >= sessionUs) : xs);
+  const imu = from(trip.imu);
+  const obdSpeed = from(trip.obdSpeed);
+  const gnss = from(options.jam?.length ? jamFixes(trip.gnss, trip.startUs, options.jam, options.jamOptions) : trip.gnss);
   let i = 0;
   let o = 0;
   let g = 0;
@@ -198,13 +228,6 @@ export function replayTrip(trip: TripLog, options: ReplayOptions = {}): ReplayRe
         const out = nav.onGnss(fix);
         fixes.push({ tS: t, fix, satellite, ...out });
         if (out.pose) startPose = { status: out.pose, tS: t };
-        if (out.status === "init" && !init) {
-          init = { tS: t, method: out.initMethod ?? "?" };
-          if (options.openLoop) {
-            cuts.push({ fromS: t + options.openLoop.delayS, toS: Infinity, openLoop: true });
-            cutDistance.push(0);
-          }
-        }
       }
       afterEvent(fix.tUs);
     }

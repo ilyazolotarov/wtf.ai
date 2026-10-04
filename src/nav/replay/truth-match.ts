@@ -359,6 +359,20 @@ export function isSameRoad(graph: Pick<RoadGraph, "edge">, truth: { edge: EdgeId
   );
 }
 
+/** Position and travel heading (clockwise from north) of a truth position on its edge. */
+export function truthPose(graph: Pick<RoadGraph, "edge">, at: { edge: EdgeId; dir: 1 | -1; alongM: number }): { lat: number; lon: number; headingRad: number } {
+  const { cum, lonLat, xy } = graph.edge(at.edge);
+  let i = 0;
+  while (i < cum.length - 2 && (cum[i + 1] < at.alongM || cum[i + 1] <= cum[i])) i++;
+  const f = cum[i + 1] > cum[i] ? Math.max(0, Math.min(1, (at.alongM - cum[i]) / (cum[i + 1] - cum[i]))) : 0;
+  const heading = Math.atan2(xy[2 * i + 2] - xy[2 * i], xy[2 * i + 3] - xy[2 * i + 1]) + (at.dir === 1 ? 0 : Math.PI);
+  return {
+    lon: lonLat[2 * i] + f * (lonLat[2 * i + 2] - lonLat[2 * i]),
+    lat: lonLat[2 * i + 1] + f * (lonLat[2 * i + 3] - lonLat[2 * i + 1]),
+    headingRad: Math.atan2(Math.sin(heading), Math.cos(heading)),
+  };
+}
+
 /** Geometry of a leg's route as [lon, lat] pairs (for GeoJSON). */
 export function legCoordinates(graph: TiledRoadGraph, leg: TruthLeg, a: TruthPoint, b: TruthPoint): [number, number][] {
   const out: [number, number][] = [];

@@ -57,12 +57,80 @@ describe("ParticleFilter in the navigator (synthetic drives on the fixture graph
     expect(end.clusters[0].edge).toBeNull();
   });
 
-  test("starts with the EKF, reports cheap updates, and stays off without a graph", () => {
+  // Jammed start (MAPMATCH-SPEC §8): Wi-Fi-like fixes (±60 m) only while parked, then nothing. No
+  // course, and no fix spread for alignment: only the map can give the heading.
+  test("jammed start at the dead end: the map gives the heading", () => {
+    const g = graph();
+    const drive = syntheticDrive({ segments: junctionDrive(20), origin: ORIGIN, startHeadingRad: Math.PI / 2, gnss: "coarse", obdScale: 0.99 });
+    const cuts = [{ fromS: 3.5, toS: 1e9 }];
+    expect(replayTrip(drive.trip, { cuts }).summary.init).toBeNull();
+    const result = replayTrip(drive.trip, { mapMatch: { graph: g }, cuts });
+    const init = result.summary.init!;
+    expect(init.method).toBe("map");
+    // Driving east from the dead end: the westbound hypotheses turn round there, which the gyro
+    // didn't see. Then one hypothesis tracked over 100 m.
+    expect(init.distanceM).toBeLessThan(400);
+    const truth = drive.truthAt(drive.trip.startUs + init.tS * 1e6);
+    expect(Math.abs(init.estimate!.headingRad! - Math.PI / 2)).toBeLessThan((5 * Math.PI) / 180);
+    // The position along the road is still open (no turn yet): the EKF starts with that spread.
+    const dN = (init.estimate!.lat - truth.lat) * 111_195;
+    const dE = (init.estimate!.lon - truth.lon) * 111_195 * Math.cos((truth.lat * Math.PI) / 180);
+    expect(init.estimate!.accuracyM).toBeLessThan(150);
+    expect(Math.hypot(dE, dN)).toBeLessThan(2 * init.estimate!.accuracyM);
+    // Before the start: state init.
+    const first = result.track.find((p) => p.mapMatch)!;
+    expect(first.mode).toBe("anchored");
+    expect(first.mapMatch!.state).toBe("init");
+    // Then the filter carries on and takes the turn onto 162.
+    const end = result.track.at(-1)!;
+    expect(end.mode).toBe("dr");
+    expect(wayOf(g, end.mapMatch!.clusters[0].edge)).toBe(162);
+  });
+
+  test("jammed start mid-road: both directions stay alive, so no start", () => {
+    const g = graph();
+    // 800 m east of the dead end, 400 m straight: neither direction reaches a node.
+    const origin = { lat: ORIGIN.lat, lon: ORIGIN.lon + 800 / (111_195 * Math.cos((ORIGIN.lat * Math.PI) / 180)) };
+    const segments = [
+      { durationS: 3, speedMps: 0, yawRateDegS: 0 },
+      { durationS: 10, speedMps: 12, yawRateDegS: 0 },
+      { durationS: 28, speedMps: 12, yawRateDegS: 0 },
+    ];
+    const drive = syntheticDrive({ segments, origin, startHeadingRad: Math.PI / 2, gnss: "coarse" });
+    const result = replayTrip(drive.trip, { mapMatch: { graph: g }, cuts: [{ fromS: 3.5, toS: 1e9 }] });
+    expect(result.summary.init).toBeNull();
+    const end = result.track.at(-1)!;
+    expect(end.mode).toBe("anchored");
+    expect(end.mapMatch!.state).toBe("init");
+    // The top hypotheses are both directions of road 160 (each spread along it: the position along
+    // the road is still open, so neither holds enough weight to track).
+    const top = end.mapMatch!.clusters;
+    const facing = (heading: number) =>
+      top.some((c) => wayOf(g, c.edge) === 160 && Math.abs(Math.atan2(Math.sin(c.headingRad - heading), Math.cos(c.headingRad - heading))) < 0.3);
+    expect(facing(Math.PI / 2)).toBe(true);
+    expect(facing(-Math.PI / 2)).toBe(true);
+    expect(top[0].weight).toBeLessThan(0.9);
+  });
+
+  test("waits while the anchor is too coarse", () => {
+    const g = graph();
+    const drive = syntheticDrive({ segments: junctionDrive(20).slice(0, 2), origin: ORIGIN, startHeadingRad: Math.PI / 2, gnss: "coarse", gnssSigmaM: 400 });
+    const result = replayTrip(drive.trip, { mapMatch: { graph: g } });
+    expect(result.track.every((p) => p.mapMatch === undefined)).toBe(true);
+  });
+
+  test("starts at the first fix, carries on through the course start, and stays off without a graph", () => {
     const g = graph();
     const drive = syntheticDrive({ segments: junctionDrive(20), origin: ORIGIN, startHeadingRad: Math.PI / 2, gnss: "clean" });
     const result = replayTrip(drive.trip, { mapMatch: { graph: g } });
     const initS = result.summary.init!.tS;
-    expect(result.track.filter((p) => p.tS < initS - 0.5).every((p) => p.mapMatch === undefined)).toBe(true);
+    expect(result.summary.init!.method).toBe("course");
+    // Anchored, the filter runs with the heading unknown.
+    const before = result.track.filter((p) => p.tS >= 1.5 && p.tS < initS - 0.5);
+    expect(before.length).toBeGreaterThan(0);
+    expect(before.every((p) => p.mode === "anchored" && p.mapMatch && ["init", "tracking"].includes(p.mapMatch.state))).toBe(true);
+    // It tracks the road when the course arrives, so the EKF keeps it.
+    expect(result.summary.init!.estimate!.mapMatch!.state).toBe("tracking");
     const after = result.track.filter((p) => p.tS > initS + 1);
     expect(after.every((p) => p.mapMatch && p.mapMatch.particles === 500)).toBe(true);
     // With clean GNSS the whole drive is on the right roads.

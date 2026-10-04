@@ -321,6 +321,8 @@ Status (2026-10-04):
 - **Phase 1:** done and field-tested (7 drives, TRIP-LOGGER-SPEC §11).
 - **Phase 2:** the navigator and replay are implemented and measured on replay. It drives the map through
   `NavigatorService` and saves its calibration. A field drive is still needed (NAVIGATOR-SPEC §2, §9).
+- **Phase 5:** in progress, measured on replay only (MAPMATCH-SPEC §2): road graph, particle filter (open loop),
+  heading init from the map under jamming. Next: closed loop (M6) and the app (M7).
 
 ### Stage 2 & 3 — vehicle-specific improvements
 

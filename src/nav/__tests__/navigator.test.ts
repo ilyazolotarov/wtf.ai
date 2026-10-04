@@ -191,7 +191,7 @@ describe("Navigator from a parked pose", () => {
   test("dead-reckons from the start under jamming; a fix after some driving confirms it", () => {
     const plain = replayTrip(drive.trip).summary;
     const r = replayTrip(drive.trip, { startPose: pose });
-    expect(r.summary.init).toEqual({ tS: 0, method: "parked pose" });
+    expect(r.summary.init).toMatchObject({ tS: 0, method: "parked pose" });
     expect(r.summary.startPose?.status).toBe("confirmed");
     // Confirmed only after driving: a fix while parked says nothing about the heading.
     expect(r.summary.startPose!.tS).toBeGreaterThan(20);

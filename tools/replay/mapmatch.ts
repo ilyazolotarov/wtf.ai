@@ -1,11 +1,13 @@
 // Map matching on trip logs (MAPMATCH-SPEC §10.2, M4): runs the particle filter in a replay and
 // scores it against the ground truth (truth-match.ts).
-// Usage: npm run replay:mm -- [--graph <file>] [--cut <startS>:<lenS>]... [--open-loop [delayS]] [--mm '<json config>'] <logs>
+// Usage: npm run replay:mm -- [--graph <file>] [--cut <startS>:<lenS>]... [--open-loop [delayS]] [--mm '<json config>']
+//          [--start <s>] [--jam <startS>:<lenS|inf>]... [--trace <fromS>:<toS>] <logs>
 
 import { readFileSync } from "node:fs";
 import { basename } from "node:path";
 
 import type { MapMatchConfig } from "../../src/nav/mapmatch/particle-filter";
+import type { JamWindow } from "../../src/nav/replay/jam";
 import { replayTrip, type ReplayCut } from "../../src/nav/replay/replay";
 import { matchTruth } from "../../src/nav/replay/truth-match";
 import { isSatelliteFix } from "../../src/nav/types";
@@ -19,6 +21,8 @@ function parseArgs(argv: string[]) {
   let config: Partial<MapMatchConfig> = {};
   let openLoopDelayS: number | undefined;
   let trace: [number, number] | undefined;
+  const jam: JamWindow[] = [];
+  let startAtS: number | undefined;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--graph") graph = argv[++i];
@@ -27,6 +31,10 @@ function parseArgs(argv: string[]) {
       const [from, to] = argv[++i].split(":").map(Number);
       trace = [from, to];
     }
+    else if (a === "--jam") {
+      const [from, len] = argv[++i].split(":");
+      jam.push({ fromS: Number(from), toS: len === "inf" ? Infinity : Number(from) + Number(len) });
+    } else if (a === "--start") startAtS = Number(argv[++i]);
     else if (a === "--cut") {
       const [from, len] = argv[++i].split(":").map(Number);
       cuts.push({ fromS: from, toS: from + len });
@@ -34,12 +42,14 @@ function parseArgs(argv: string[]) {
       const next = argv[i + 1];
       openLoopDelayS = next !== undefined && /^\d+(\.\d+)?$/.test(next) ? Number(argv[++i]) : 0;
     } else if (a === "-h" || a === "--help") {
-      console.log("replay:mm [--graph <file>] [--cut <startS>:<lenS>]... [--open-loop [delayS]] [--mm '<json>'] [--trace <fromS>:<toS>] <trip.ulg...>");
+      console.log(
+        "replay:mm [--graph <file>] [--cut <startS>:<lenS>]... [--open-loop [delayS]] [--mm '<json>'] [--start <s>] [--jam <startS>:<lenS|inf>]... [--trace <fromS>:<toS>] <trip.ulg...>",
+      );
       process.exit(0);
     } else files.push(a);
   }
   if (!files.length) throw new Error("no trip log given (see --help)");
-  return { files, cuts, graph, config, openLoopDelayS, trace };
+  return { files, cuts, graph, config, openLoopDelayS, trace, jam, startAtS };
 }
 
 const pct = (v: number | null) => (v === null ? "—" : `${(v * 100).toFixed(1)} %`);
@@ -65,13 +75,18 @@ for (const file of args.files) {
     cuts: args.cuts,
     openLoop: args.openLoopDelayS === undefined ? undefined : { delayS: args.openLoopDelayS },
     mapMatch: { graph: navGraph.graph, truth, config: args.config },
+    jam: args.jam,
+    startAtS: args.startAtS,
   });
   const ms = performance.now() - started;
   const s = r.summary.mapMatch!;
   console.log(`== ${basename(file)}  (${r.summary.durationS.toFixed(0)} s, ${(r.summary.obdDistanceM / 1000).toFixed(2)} km, graph ${basename(graphFile)}, replay ${(ms / 1000).toFixed(1)} s)`);
-  console.log(`  init: ${r.summary.init ? `${r.summary.init.method} at ${r.summary.init.tS.toFixed(0)} s` : "never"}; truth: ${truth.points.length} fixes matched`);
+  const init = r.summary.init;
   console.log(
-    `  samples ${s.samples}: wrong road ${pct(s.wrongRoadRate)}, truth survival ${pct(s.truthSurvival)}, multimodal ${pct(s.multimodalShare)}, off-road ${pct(s.offRoadShare)}`,
+    `  init: ${init ? `${init.method} at ${init.tS.toFixed(0)} s after ${(init.distanceM / 1000).toFixed(2)} km` + (init.estimate ? ` (±${init.estimate.accuracyM.toFixed(0)} m, ±${(((init.estimate.headingSigmaRad ?? 0) * 180) / Math.PI).toFixed(1)}°)` : "") : "never"}; truth: ${truth.points.length} fixes matched`,
+  );
+  console.log(
+    `  samples ${s.samples} (+${s.initSamples} init): wrong road ${pct(s.wrongRoadRate)}, truth survival ${pct(s.truthSurvival)}, multimodal ${pct(s.multimodalShare)}, off-road ${pct(s.offRoadShare)}`,
   );
   if (s.relock.count) {
     console.log(`  re-lock: ${s.relock.count}×, median ${s.relock.medianS!.toFixed(1)} s / ${m(s.relock.medianM)}, max ${s.relock.maxS!.toFixed(1)} s / ${m(s.relock.maxM)}`);
@@ -95,7 +110,7 @@ for (const file of args.files) {
       const t = truth.at(trip.startUs + p.tS * 1e6);
       const cl = p.mapMatch.clusters.slice(0, 3).map((c) => `${way(c.edge)} ${(c.weight * 100).toFixed(0)}% ±${c.spreadM.toFixed(0)}`).join(" | ");
       const err = fix ? `pf ${m(fix.mapMatchErrorM ?? null)} ekf ${m(fix.errorM ?? null)}` : "";
-      console.log(`  ${p.tS.toFixed(0).padStart(5)} ${p.mapMatch.state.padEnd(10)} truth ${t ? truthGraph.graph.edge(t.edge).wayId : "—"}  ${cl}  ${err}`);
+      console.log(`  ${p.tS.toFixed(0).padStart(5)} ${p.mode.padEnd(8)} ${p.mapMatch.state.padEnd(10)} ${String(p.mapMatch.particles).padStart(4)} truth ${t ? truthGraph.graph.edge(t.edge).wayId : "—"}  ${cl}  ${err}`);
     }
   }
   truthGraph.close();
