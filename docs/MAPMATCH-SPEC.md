@@ -35,7 +35,8 @@ Place the car on the offline road network, so that:
   road (NAVIGATOR-SPEC §9). Still to do: a drive with it, update time on the iPhone.
 - **M6 done in replay:** the road heading and position go back into the EKF (`mapMatchLoop: "closed"`, §9.2,
   §9.3); the 240 s max error median falls from 59 to 17 m, its p90 from 124 to 20 m, with the truth inside the drawn
-  circle 61–65 % of the time. Off by default, so the app still runs open loop.
+  circle 61–65 % of the time. Simulated 3 h city drives without GPS (§9.4): dot median 4–6 m, never lost. A developer
+  setting switches it on in the app (§11); off by default until a real drive confirms it.
 - Next: an app switch to compare the loops on a drive, and a drive for M7. Order of work in §12.
 
 ## 3. Decisions
@@ -677,6 +678,35 @@ share of held-out fixes within the circle the map draws (1.5 σ, the ~68 % radiu
 - Synthetic drive (`particle-filter.test.ts`): GNSS cut 50 s before a junction, unlearned gyro bias, OBD 3 % low; no
   road position with GNSS throughout; with the cut, the EKF ends closer to the truth than open loop, with a smaller
   radius that still covers it.
+
+### 9.4 Hours without GPS: simulated city drives (`npm run replay:sim`)
+
+The logs are 4–12 min of driving in a small town. `src/nav/sim/city-drive.ts` drives a random route on a real road
+graph for hours: drivable roads only (not service or private), straight on three times as often as turning, cruise
+speed by road class, slowing for turns (2.5 m/s² lateral), stopping at a quarter of the junctions for 5–45 s, pure
+pursuit on a line 1.5–3.5 m right of the centre line on two-way roads (±2 m on one-ways) with a slow lateral wander
+for map error (σ 1.5 m over 150 m). The phone's sensors come from the truth with the errors measured on the CX-5 and
+iPhone 13: gyro bias 0.05 °/s with a random walk of 0.03 °/s per √h, scale 1.007, noise 0.003 rad/s; OBD × 0.981
+− 0.23 km/h, rounded, 0 below 2.5 km/h; GNSS errors σ 2.5 m correlated over 30 s. The truth is exact, scored every
+second. `tools/replay/simulate.ts` runs it: GPS for the first 3 minutes, then none to the end.
+
+Three 3-hour drives per city (seeds 1–3, IMU 50 Hz):
+
+| City | Loop | Dot error median | p90 | Max over 3 h | > 50 m | Navigator (EKF) median |
+| --- | --- | --- | --- | --- | --- | --- |
+| Chernihiv (64 km, 660 junctions per drive) | open | 5.6 / 7.8 / 541 m | 248 / 333 / 2847 m | 2.4 / 1.9 / 5.3 km | 16 / 26 / 61 % | 467 / 88 / 668 m |
+| | closed | 5.1 / 4.6 / 5.8 m | 10 / 9.3 / 14 m | 44 / 34 / 86 m | 0 / 0 / 0.3 % | 5.1 / 4.3 / 5.0 m |
+| Kyiv city centre (58 km, 990 junctions) | open | 1176 / 6.5 / 354 m | 3727 / 18 / 2386 m | 8.9 / 0.6 / 3.8 km | 68 / 2 / 58 % | 911 / 63 / 426 m |
+| | closed | 4.4 / 4.8 / 4.3 m | 9.1 / 11 / 9.6 m | 34 / 41 / 38 m | 0 % | 3.9 / 5.3 / 4.4 m |
+
+- Closed loop, every 30 min of the 3 h: dot error median 3.9–5.6 m, p90 8–18 m. It doesn't grow with time.
+- Open loop gets lost on every run sooner or later: the EKF drifts hundreds of metres, its position prior (§7.4)
+  then pulls the filter onto wrong roads, and nothing brings it back without GNSS.
+- About 1 road-heading correction per 50 m and 1 road position per 200 m; 2–10 of ~1400 per drive refused by the gate.
+- 30 min drives replay in ~4 s, 3 h in ~20 s (Node, Windows PC).
+- **Optimistic:** the map is the road network the car drives (topology exact, only the geometry wanders), and there
+  is no parking, reversing, yard, unmapped road, traffic jam, tunnel or phone handling. Real long drives with Cut GPS
+  (NAVIGATOR-SPEC §9) are the check.
 
 ## 10. Replay, ground truth and metrics
 

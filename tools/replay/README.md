@@ -82,6 +82,25 @@ The viewer answers "how did my drive go": where the dot was against where the ca
 The server only listens on localhost. The basemap is the online OpenFreeMap Liberty style, so your browser
 sends the map viewport to OpenFreeMap.
 
+## Simulated city drives
+
+Hours of driving without GPS, on a real road graph (MAPMATCH-SPEC §9.4): random routes, a car that drives them
+like a driver, and the phone's sensors with measured errors (`src/nav/sim/city-drive.ts`). GPS for the first
+minutes, then none; each navigator version is scored against the exact truth every second.
+
+```bash
+npm run replay:sim                                       # Chernihiv, 60 min, seeds 1–3, open vs closed loop
+npm run replay:sim -- --minutes 180 --imu-hz 50 --every 30
+npm run replay:sim -- --at 50.4501,30.5234 --graph tools/tiles/out/release/kyiv-city.graph.bin
+npm run replay:sim -- --loops open,heading,closed --gps-min 5
+```
+
+Per drive: distance, junctions, stops; per version the dot's error (median, p90, max, at the end), the share of
+time more than 50 m off and the longest such stretch, the navigator's own error, and the road corrections sent. Then
+the error by time without GPS (`--every` minutes). Graphs: `--graph`, else the smallest built one covering `--at`
+(`gh release download maps-<date> -p <region>.graph.bin -D tools/tiles/out/release` fetches a published one).
+It is optimistic: no parking, reversing, yards, unmapped roads or traffic jams.
+
 ## Road graph
 
 Map matching runs on the road graph built by `tools/tiles` (`python -m tiles.cli graph chernihiv`, see its
