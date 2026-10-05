@@ -51,9 +51,10 @@ jobs:
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       # Compiler cache for the C/C++/Objective-C of the pods (React Native core and Expo modules
-      # come prebuilt; Swift is not cached). The Podfile turns it on with USE_CCACHE=1. Xcode
-      # doesn't pass CCACHE_* variables to the compiler, so the settings go into React Native's
-      # ccache.conf, which its compiler wrapper always reads.
+      # come prebuilt; Swift is not cached). The Podfile turns it on with USE_CCACHE=1, which points
+      # CC/CXX at React Native's ccache-clang(++).sh. Xcode runs compiles without the job's
+      # environment or the CCACHE_BINARY build setting those wrappers expect, so "Install ccache"
+      # writes the ccache path into the wrappers and the settings into their ccache.conf.
       USE_CCACHE: "1"
       CCACHE_CONFIGPATH: ${{ github.workspace }}/node_modules/react-native/scripts/xcode/ccache.conf
       # Caches are saved by main only and restored everywhere: branches start from main's,
@@ -81,8 +82,12 @@ jobs:
       - name: Install ccache
         run: |
           command -v ccache || brew install ccache
-          # Read by every compile (node_modules/react-native/scripts/xcode/ccache-clang.sh) and by
-          # the statistics step (CCACHE_CONFIGPATH above).
+          CCACHE_BIN=$(command -v ccache)
+          WRAPPERS=node_modules/react-native/scripts/xcode
+          sed -i '' "s|^exec \$CCACHE_BINARY |exec $CCACHE_BIN |" "$WRAPPERS/ccache-clang.sh" "$WRAPPERS/ccache-clang++.sh"
+          grep -q "exec $CCACHE_BIN clang " "$WRAPPERS/ccache-clang.sh"
+          grep -q "exec $CCACHE_BIN clang++ " "$WRAPPERS/ccache-clang++.sh"
+          # Read by every compile through the wrappers and by the statistics step (CCACHE_CONFIGPATH above).
           {
             echo "cache_dir = $HOME/ccache"
             echo "max_size = 2G"
