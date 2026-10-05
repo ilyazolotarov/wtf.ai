@@ -225,10 +225,25 @@ left" (50 m steps); and at it, at max(40 m, 4 s), "Turn left", with "then turn r
 "You've arrived". Nothing about the current plan's maneuvers while off it. The banner's speaker button mutes it
 (kept across launches). iPhone speech is silent while the ring/silent switch is on (Expo docs).
 
-### 8.6 Route hint (R5)
+### 8.6 Route hint (R5, built, off)
 
-At a junction the filter weights the route's exit higher (soft, e.g. 3×), measured in the simulator
-(MAPMATCH-SPEC §9.4) with drivers who follow the route and drivers who leave it.
+`Navigator.setRouteHint(edges)` (`NavConfig.routeHintFactor`, 3): at a junction the particle filter sends that many
+times more particles onto an exit along the route. Only the proposal at junctions changes, never the weights, so
+the turns still decide (a test drives a 10:1 hint the wrong way and the filter follows the car). In the app it is a
+developer switch, **off by default** ("Tell map matching the route"; trip-log info `nav_route_hint`, note
+`nav route hint …`). `npm run route:sim -- --hint <factor>`, same drives as §8.4 (Chernihiv / Kyiv):
+
+| Hint | Dot off the truth p50 / p90 / max | Progress error max | Top hypothesis on the car's edge | Departures: median, worst | False "off" before leaving |
+| --- | --- | --- | --- | --- | --- |
+| off | 5 / 9 / 48 m; 4 / 8 / 33 m | 90 m; 123 m | 81.3 %; 82.0 % | 5 s / 51 m, 59 s / 173 m; 6 s / 50 m, 43 s / 177 m | 0; 0 |
+| 3× | 4 / 9 / 43 m; 4 / 8 / 31 m | 46 m; 20 m | 80.9 %; 82.1 % | 5 s / 53 m, 59 s / 173 m; 6 s / 52 m, 43 s / 177 m | 0; 0 |
+| 10× | 4 / 9 / 55 m; 4 / 9 / 28 m | 46 m; 18 m | 83.8 %; 82.6 % | 9 s / 71 m, 117 s / 925 m; 6 s / 62 m, 10 s / 105 m | 1; 0 |
+
+- 3× changes little: the simulated filter already holds the road (dot median 4–5 m), so a prior adds almost nothing
+  but trims the worst progress errors. 10× starts to hide real departures (925 m before Chernihiv's slowest was
+  noticed). Hence off, 3× when on.
+- Worth trying on the road only where map matching struggles without it (multimodal for long stretches, MAPMATCH-SPEC
+  §9.4's long arterials); the simulator is optimistic there.
 
 ## 9. Milestones
 
@@ -238,7 +253,7 @@ At a junction the filter weights the route's exit higher (soft, e.g. 3×), measu
 | R2 | Planner (§4–5), `npm run route` with timings on Chernihiv and Kyiv |
 | R3 | Turn instructions (§6) |
 | R4 | App: destination, route line, banner, re-plan |
-| R5 | The route as a map-matching hint, measured in the simulator |
+| R5 | The route as a map-matching hint, measured in the simulator (built, off: §8.6) |
 
 ## 10. Open items
 
