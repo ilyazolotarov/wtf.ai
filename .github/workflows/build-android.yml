@@ -69,7 +69,7 @@ jobs:
         run: npx expo prebuild --platform android --clean
 
       - name: Restore signing key
-        # Without the secrets the release APK is signed with the debug key (see plugins/android-signing.js).
+        # Without the secrets the release APK is signed with the debug key (see plugins/android-build.js).
         # Such an APK installs fine but cannot be updated over a build signed with the real key.
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}

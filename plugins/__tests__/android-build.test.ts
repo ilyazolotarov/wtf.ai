@@ -1,11 +1,11 @@
-// Config plugin: stable release signing key for sideloaded APKs, debug-key fallback.
+// Config plugin: stable release signing key for sideloaded APKs (debug-key fallback) and the lint setting.
 
 jest.mock("expo/config-plugins", () => ({
   withAppBuildGradle: (config: any, mod: (c: any) => any) => mod(config),
 }));
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { patchGradle } = require("../android-signing.js");
+const { patchGradle } = require("../android-build.js");
 
 // The relevant part of the SDK 57 prebuild template (android/app/build.gradle).
 const TEMPLATE = `android {
@@ -30,7 +30,7 @@ const TEMPLATE = `android {
 }
 `;
 
-describe("android-signing plugin", () => {
+describe("android-build plugin", () => {
   test("adds a release signing config fed by environment variables and uses it for release", () => {
     const out = patchGradle(TEMPLATE);
     expect(out).toContain("System.getenv('ANDROID_KEYSTORE_PATH')");
@@ -46,6 +46,10 @@ describe("android-signing plugin", () => {
   test("is idempotent", () => {
     const once = patchGradle(TEMPLATE);
     expect(patchGradle(once)).toBe(once);
+  });
+
+  test("turns off the ExtraTranslation lint check (iOS plist strings in locales/)", () => {
+    expect(patchGradle(TEMPLATE)).toMatch(/lint \{\s*disable 'ExtraTranslation'\s*\}/);
   });
 
   test("fails loudly when the template changes shape", () => {

@@ -35,7 +35,7 @@
     },
     "plugins": [
       "expo-router",
-      "./plugins/android-signing.js",
+      "./plugins/android-build.js",
       [
         "expo-build-properties",
         {
