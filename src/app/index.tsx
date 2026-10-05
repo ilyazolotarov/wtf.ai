@@ -632,6 +632,31 @@ function formatDuration(ms: number): string {
 
 const LINK_BADGE_LABEL = { ok: "badgeOk", busy: "badgeBusy", bad: "badgeBad" } as const;
 
+/** The vehicle button's connection dot; `pulse` (connecting) scales it up and down a little. */
+function BadgeDot({ color, border, pulse, label }: { color: string; border: string; pulse: boolean; label?: string }) {
+  const [scale] = useState(() => new Animated.Value(1));
+  useEffect(() => {
+    if (!pulse) {
+      scale.setValue(1);
+      return;
+    }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(scale, { toValue: 1.35, duration: 500, useNativeDriver: true }),
+        Animated.timing(scale, { toValue: 1, duration: 500, useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [pulse, scale]);
+  return (
+    <Animated.View
+      style={[styles.recDot, { backgroundColor: color, borderColor: border, transform: [{ scale }] }]}
+      accessibilityLabel={label}
+    />
+  );
+}
+
 function HudAction({
   icon,
   label,
@@ -663,12 +688,7 @@ function HudAction({
             ]}
           >
             <Icon name={icon} size={24} color={palette.text} />
-            {badge && (
-              <View
-                style={[styles.recDot, { backgroundColor: badgeColor, borderColor: palette.groupBg }]}
-                accessibilityLabel={badgeLabel}
-              />
-            )}
+            {badge && <BadgeDot color={badgeColor} border={palette.groupBg} pulse={badge === "busy"} label={badgeLabel} />}
             <T w="medium" size={12} color={highlight ? palette.accent : undefined}>
               {label}
             </T>

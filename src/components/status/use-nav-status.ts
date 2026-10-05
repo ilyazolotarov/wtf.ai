@@ -1,9 +1,12 @@
+import { useEffect, useState } from "react";
+
 import type { IconName } from "@/components/ui/icon";
 import { usePalette, type StatusColor } from "@/constants/theme";
 import type { Strings } from "@/i18n/en";
 import { useT } from "@/i18n/provider";
 import type { TrustState } from "@/nav/position/types";
 import { usePosition } from "@/providers/position-provider";
+import type { VehicleLinkSnapshot } from "@/obd/types";
 import { useVehicleLinkValue } from "@/providers/runtime-provider";
 
 export type AdapterStatus = "on" | "searching" | "off";
@@ -11,17 +14,35 @@ export type AdapterStatus = "on" | "searching" | "off";
 /**
  * The vehicle button's badge (UI-SPEC): ok = the car answers and is known (VIN read or remembered); busy =
  * connecting, searching the protocol, the car off or not answering yet, the VIN still being asked; bad = no adapter,
- * an error, or a car whose VIN never came (nothing learned about it can be kept).
+ * an error, a car whose VIN never came, or busy for longer than `BADGE_BUSY_MAX_MS` all together.
  */
 export type LinkBadge = "ok" | "busy" | "bad";
 
+/** Adapter, car and VIN together get this long before the badge says something is wrong. */
+export const BADGE_BUSY_MAX_MS = 25_000;
+
+function linkBadge(s: VehicleLinkSnapshot): LinkBadge {
+  if (s.protocolSearch) return "busy";
+  if (s.link === "polling") return s.vehicle?.vin ? "ok" : s.vehicle?.vinSource === "missing" ? "bad" : "busy";
+  if (s.link === "idle" || s.link === "error") return "bad";
+  return "busy";
+}
+
 export function useLinkBadge(): LinkBadge {
-  return useVehicleLinkValue((s) => {
-    if (s.protocolSearch) return "busy";
-    if (s.link === "polling") return s.vehicle?.vin ? "ok" : s.vehicle?.vinSource === "missing" ? "bad" : "busy";
-    if (s.link === "idle" || s.link === "error") return "bad";
-    return "busy";
-  });
+  const badge = useVehicleLinkValue(linkBadge);
+  // Busy since it last was ok or bad, whatever it waits for meanwhile (adapter, car, VIN).
+  const [expired, setExpired] = useState(false);
+  const [seen, setSeen] = useState(badge);
+  if (badge !== seen) {
+    setSeen(badge);
+    setExpired(false);
+  }
+  useEffect(() => {
+    if (badge !== "busy") return;
+    const timer = setTimeout(() => setExpired(true), BADGE_BUSY_MAX_MS);
+    return () => clearTimeout(timer);
+  }, [badge]);
+  return badge === "busy" && expired ? "bad" : badge;
 }
 
 const TRUST: Record<
