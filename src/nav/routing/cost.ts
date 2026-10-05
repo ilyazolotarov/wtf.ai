@@ -33,17 +33,19 @@ export interface RouteCosts {
 }
 
 export const DEFAULT_ROUTE_COSTS: RouteCosts = {
+  // Minor roads near OSRM's car profile: residential 25, service 12. At 30 / 20 km/h with 5–10 s turns, routes cut
+  // through residential blocks on their service lanes instead of the main street (2026-10-05, ROUTING-SPEC §4).
   //         motorway trunk primary secondary tertiary unclassified residential living service track road
-  speedKph: [110, 90, 60, 50, 45, 40, 30, 10, 20, 15, 25],
+  speedKph: [110, 90, 60, 50, 45, 35, 25, 8, 12, 10, 20],
   linkFactor: 0.6,
   roundaboutMaxKph: 30,
   junctionS: 2,
   straightRad: 30 * DEG,
   sharpRad: 120 * DEG,
-  rightS: 5,
-  leftS: 10,
-  sharpRightS: 10,
-  sharpLeftS: 15,
+  rightS: 8,
+  leftS: 15,
+  sharpRightS: 15,
+  sharpLeftS: 20,
   uTurnS: 30,
   turnaroundS: 60,
   privateS: 600,

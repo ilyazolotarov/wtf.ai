@@ -45,12 +45,18 @@ Time to drive an edge = OSM length ÷ speed. Speeds (km/h) by class (MAPMATCH-SP
 
 | motorway | trunk | primary | secondary | tertiary | unclassified | residential | living_street | service | track | road |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 110 | 90 | 60 | 50 | 45 | 40 | 30 | 10 | 20 | 15 | 25 |
+| 110 | 90 | 60 | 50 | 45 | 35 | 25 | 8 | 12 | 10 | 20 |
+
+- Minor roads first were 40 / 30 / 10 / 20 / 15 / 25 km/h with turns 5 / 10 / 10 / 15 s. On 2026-10-05 a test route across town
+  in Chernihiv went 316 m along a service lane through the blocks and 215 m of residential street (1.47 km), where
+  the driver takes the main street (tertiary, 1.84 km, 123 m residential). Now near OSRM's car profile (residential
+  25, service 15) with turns 8 / 15 / 15 / 20 s, which picks the main street. 40 random routes within 8 km of the
+  city: no failures, 16 / 32 ms p90. Still to calibrate: the logs have each plan's time and the time driven.
 
 - Links (`link` flag): 0.6 × the class speed. Roundabouts: at most 30 km/h.
 - **Junction** (a node with 3 or more edges): 2 s for passing it, plus the turn by the angle between arrival and
-  departure (clockwise positive): straight (< 30°) 0 s; right 5 s; left 10 s (crossing oncoming traffic); sharp
-  (> 120°) right 10 s, left 15 s. A node with 2 edges is a bend in one road: no cost.
+  departure (clockwise positive): straight (< 30°) 0 s; right 8 s; left 15 s (crossing oncoming traffic); sharp
+  (> 120°) right 15 s, left 20 s. A node with 2 edges is a bend in one road: no cost.
 - **U-turn**: 30 s, only at a dead end (no other legal exit). Starting against the car's heading counts as a U-turn
   on the road: 60 s.
 - **Entry penalties** (on entering the edge, not for the start or destination edge): private access 600 s, minor
