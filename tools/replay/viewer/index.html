@@ -877,7 +877,8 @@ async function run() {
   data = payload;
   const pf = data.parkedFrom;
   const parkedNote = !pf ? "" : !pf.file ? " · no parked pose for this car before it: cold start" : ` · started where it parked after ${driveName(pf.file)}${pf.status ? ` (${pf.status})` : ""}`;
-  $("status").textContent = `replayed in ${((performance.now() - started) / 1000).toFixed(1)} s${parkedNote}`;
+  const pathNote = data.inApp === false ? " · navigator alone (a research option is set), not the app" : "";
+  $("status").textContent = `replayed in ${((performance.now() - started) / 1000).toFixed(1)} s${parkedNote}${pathNote}`;
   renderDrive();
   renderOutages();
   renderEvents();

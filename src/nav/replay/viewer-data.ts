@@ -5,6 +5,7 @@ import type { TripLog } from "../../triplog/trip-log-reader";
 import { haversineM } from "../geo";
 import {
   driveOutages,
+  estimateTrack,
   noGpsWindows,
   phoneTrack,
   replayShownTrack,
@@ -14,7 +15,7 @@ import {
   type OutageWindow,
   type ShownPoint,
 } from "./drive-report";
-import { replayTrip, type ReplayCut, type ReplayOptions, type ReplaySummary } from "./replay";
+import { replayTrip, type ReplayCut, type ReplayOptions, type ReplayResult, type ReplaySummary } from "./replay";
 
 /** [t, lat, lon, ~68 % radius m] */
 export type ViewerShown = [number, number, number, number];
@@ -26,6 +27,11 @@ export interface ViewerExtras {
   appCuts?: ReplayCut[];
   /** A second replay to compare with (another navigator version). */
   compare?: { label: string; options: ReplayOptions };
+  /**
+   * How to replay (default `replayTrip`). The viewer replays through the app (app-replay.ts): its result carries
+   * what the service published, which is then the track as shown.
+   */
+  replay?: (options: ReplayOptions) => ReplayResult & { published?: { timestampUs: number; latDeg: number; lonDeg: number; accuracyM: number }[] };
 }
 
 export interface ViewerTrackPoint {
@@ -117,8 +123,11 @@ const packShown = (track: ShownPoint[]): ViewerShown[] => track.map((p) => [r(p.
 
 export function buildViewerData(file: string, trip: TripLog, options: ReplayOptions = {}, extras: ViewerExtras = {}): ViewerData {
   const withParticles = (o: ReplayOptions): ReplayOptions => ({ trackStepS: 0.2, ...o, ...(o.mapMatch ? { mapMatch: { particlesEveryS: 1, ...o.mapMatch } } : {}) });
-  const result = replayTrip(trip, withParticles(options));
-  const compareResult = extras.compare ? replayTrip(trip, { trackStepS: 0.2, ...extras.compare.options }) : null;
+  const replay: NonNullable<ViewerExtras["replay"]> = extras.replay ?? ((o: ReplayOptions) => replayTrip(trip, o));
+  const result = replay(withParticles(options));
+  const compareResult = extras.compare ? replay({ trackStepS: 0.2, ...extras.compare.options }) : null;
+  const shownOf = (res: ReturnType<typeof replay>) =>
+    res.published ? estimateTrack(res.published.map((p) => ({ ...p, tUs: p.timestampUs })), trip.startUs) : replayShownTrack(res);
   const tS = (tUs: number) => r((tUs - trip.startUs) / 1e6, 2);
 
   const info: Record<string, string | number> = {};
@@ -139,9 +148,9 @@ export function buildViewerData(file: string, trip: TripLog, options: ReplayOpti
   ].sort((a, b) => a.t - b.t);
 
   // The stretches without GNSS, and how far off each track was.
-  const shown = replayShownTrack(result);
+  const shown = shownOf(result);
   const phone = phoneTrack(trip);
-  const compareShown = compareResult ? replayShownTrack(compareResult) : null;
+  const compareShown = compareResult ? shownOf(compareResult) : null;
   const tracks: Record<string, ShownPoint[]> = { replay: shown, ...(phone.length ? { phone } : {}), ...(compareShown ? { compare: compareShown } : {}) };
   const appCuts = extras.appCuts ?? [];
   const sameWindow = (a: { fromS: number; toS: number }, b: { fromS: number; toS: number }) =>

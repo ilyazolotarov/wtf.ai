@@ -145,6 +145,8 @@ export interface NavigatorObserver {
   navigator?(nav: Navigator): void;
   fix?(fix: GnssFix, outcome: FixOutcome): void;
   withheld?(record: GnssRecord): void;
+  /** The navigator took an input of this time (IMU, OBD speed or a fix). */
+  fed?(tUs: number): void;
 }
 
 const SYSTEM_CLOCK: ServiceClock = {
@@ -615,6 +617,7 @@ export class NavigatorService implements PositionSource {
         nav.onObdSpeed(input.obd);
       }
       this.fedUs = Math.max(this.fedUs, input.tUs);
+      if (!("mag" in input)) this.deps.observer?.fed?.(input.tUs);
     }
   }
 

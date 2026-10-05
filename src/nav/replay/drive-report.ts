@@ -70,9 +70,14 @@ export function truthFixes(trip: TripLog): TruthFix[] {
     .map((f) => ({ t: (f.tUs - trip.startUs) / 1e6, lat: f.lat, lon: f.lon }));
 }
 
+/** Published positions (the trip log's `nav_estimate`, or an app replay's) as a track. */
+export function estimateTrack(records: { tUs: number; latDeg: number; lonDeg: number; accuracyM: number }[], startUs: number): ShownPoint[] {
+  return records.map((p) => ({ t: (p.tUs - startUs) / 1e6, lat: p.latDeg, lon: p.lonDeg, acc: p.accuracyM }));
+}
+
 /** What the phone showed, from the log's `nav_estimate` (empty in logs before it was recorded). */
 export function phoneTrack(trip: TripLog): ShownPoint[] {
-  return trip.navEstimate.map((p) => ({ t: (p.tUs - trip.startUs) / 1e6, lat: p.latDeg, lon: p.lonDeg, acc: p.accuracyM }));
+  return estimateTrack(trip.navEstimate, trip.startUs);
 }
 
 /**

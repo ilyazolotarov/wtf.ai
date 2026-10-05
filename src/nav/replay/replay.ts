@@ -291,7 +291,8 @@ export class ReplayRecorder {
     const d = this.distanceM();
     const started = nav.initialization;
     if (started && !this.init) {
-      const t = this.tS(started.tUs);
+      // A start from a parked pose before any input (the app's service) has no time of its own: the session start.
+      const t = Math.max(this.tS(started.tUs), this.tS(this.sessionUs));
       this.init = { tS: t, method: INIT_NAMES[started.method], distanceM: d, estimate: nav.estimate() };
       if (started.method === "pose" && !this.startPose) this.startPose = { status: "unverified", tS: t };
       if (this.options.openLoop) {

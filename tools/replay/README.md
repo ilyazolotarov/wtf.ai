@@ -46,6 +46,15 @@ npm run replay:view -- --logs D:/trips --port 5180
 
 The viewer answers "how did my drive go": where the dot was against where the car really was.
 
+It replays a drive through the app's own `NavigatorService` (`src/services/navigation/app-replay.ts`), not a
+navigator alone: inputs arrive as on the phone (IMU in 100 ms batches, OBD when its reply came, fixes after
+CoreLocation's delivery delay) on a virtual clock, and the blue track is what the service publishes, the record the
+phone writes as `nav_estimate`. So the replay can't drift from the app: the reorder window, the parked pose per car
+(started from, confirmed, saved every 30 s, dropped once the car moves), the speed scale, GNSS lag and compass from
+storage, and the "Cut GPS" outages are the app's code. *More*'s research options (a later start, a fixed GPS lag, the
+compass at a jammed start) replay the navigator alone (`replayTrip`), as the benchmarks do; the status line then
+says so.
+
 - **Header:**
   - *Drive*: newest first.
   - *Navigator*: the version the replay runs. *As on the phone* (default) is the one the drive was recorded with
@@ -54,18 +63,18 @@ The viewer answers "how did my drive go": where the dot was against where the ca
   - *GPS*: what the replay gets. *As in the app* withholds your "Cut GPS" moments, as the phone did; *All of it*;
     *Cut at…* (`120:240`, several with commas); *Jammed* (Wi-Fi/cell-like fixes only, `0:inf` or a window;
     `src/nav/replay/jam.ts`); *None after the start* (pure dead reckoning once the heading is known).
-  - *Start*: *Where it parked last* (default) starts the drive from the car's parked pose, as the app does now
-    (NAVIGATOR-SPEC §6.1): every earlier log is replayed in order with the same navigator, each car's parked pose
-    carried from drive to drive (one that drives and ends without a pose drops it, as the app does), the car by its VIN, else the car last
-    seen on the same OBD protocol. The first load replays them all (~25 s). *Cold*: no position or heading, as
-    after a fresh install or a lost pose (and as the phone started some drives before the per-car parked poses).
-    The status line says which drive the pose came from and what the first fixes made of it.
+  - *Start*: *Where it parked last* (default) starts with the app's storage as it was before this drive: every
+    earlier log replayed in order through the app with the same navigator version and one storage across them, so
+    the parked pose, speed scale, compass and GNSS lag are what the phone would have had (NAVIGATOR-SPEC §6.1). The
+    car is its VIN, else the car last seen on the same OBD protocol, as the app identifies it. The first load
+    replays them all (~25 s). *Cold*: empty storage, as after a fresh install. The status line says which drive
+    the parked pose came from and what the first fixes made of it.
   - *Compare*: a second navigator version, drawn in orange.
   - *More*: GPS lag (empty = learned on the drive, as in the app), start the session later, compass at a jammed
     start (MAPMATCH-SPEC §8.2).
 - **Tracks** (side panel, each can be hidden): GPS in green (where the car really was), what the phone showed in
   purple (from the log's `nav_estimate`; older logs don't have it), the replay in blue, the compare replay in
-  orange. A replay track is what the app would have shown: the map-matched position while dead-reckoning. Where
+  orange. A replay track is what the app would have shown (what its service published). Where
   the dot jumped (farther between two samples than 45 m/s + 10 m: a new Wi-Fi fix while the heading is unknown, a
   fix's correction, the map match switching roads) the line breaks and both ends get a hollow circle: where it went
   in between is unknown, and a straight line would read as a path through the buildings. The server's replay shows

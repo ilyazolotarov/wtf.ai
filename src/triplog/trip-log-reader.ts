@@ -17,6 +17,7 @@ import {
   ROUTE_STATUS_CODES,
   TRIP_EVENTS,
   type NavEstimateRecord,
+  type GnssRecord,
   type NavMapMatchRecord,
   type NavRouteManeuverRecord,
   type NavRoutePointRecord,
@@ -36,8 +37,11 @@ export interface TripLog {
   imu: ImuSample[];
   /** Raw magnetic field, µT, phone frame (absent in logs before it was recorded). */
   mag: { tUs: number; field: Vec3 }[];
-  obdSpeed: ObdSpeedSample[];
+  /** `rxUs`: when the reply arrived (the record's time; `tUs` is the midpoint of request and reply). */
+  obdSpeed: (ObdSpeedSample & { rxUs?: number })[];
   gnss: GnssFix[];
+  /** The GNSS records as CoreLocation delivered them, simulated ones included (the app replay feeds these). */
+  gnssRecords?: GnssRecord[];
   engine: { tUs: number; state: string }[];
   rpm: { tUs: number; rpm: number }[];
   /** Trip events; `reason` only on `end`. */
@@ -86,7 +90,7 @@ export function readTripLog(bytes: Uint8Array): TripLog {
     .map((r) => {
       const rawKph = (r.data as number[])[0];
       // Sample time = midpoint of tx and rx; the record timestamp is rx (TRIP-LOGGER-SPEC §6).
-      return { tUs: num(r, "timestamp") - num(r, "latency_us") / 2, speedMps: rawKph / 3.6, rawKph };
+      return { tUs: num(r, "timestamp") - num(r, "latency_us") / 2, speedMps: rawKph / 3.6, rawKph, rxUs: num(r, "timestamp") };
     })
     .sort((a, b) => a.tUs - b.tUs);
 
@@ -106,6 +110,27 @@ export function readTripLog(bytes: Uint8Array): TripLog {
       };
     })
     .sort((a, b) => a.tUs - b.tUs);
+
+  const gnssRecords = rows("gnss")
+    .map(
+      (r): GnssRecord => ({
+        timestampUs: num(r, "timestamp"),
+        utcUs: num(r, "utc_us"),
+        latDeg: num(r, "lat_deg"),
+        lonDeg: num(r, "lon_deg"),
+        altMslM: num(r, "alt_msl_m"),
+        altEllipsoidM: num(r, "alt_ellipsoid_m"),
+        hAccM: num(r, "h_acc_m"),
+        vAccM: num(r, "v_acc_m"),
+        speedMps: num(r, "speed_mps"),
+        speedAccMps: num(r, "speed_acc_mps"),
+        courseRad: num(r, "course_rad"),
+        courseAccRad: num(r, "course_acc_rad"),
+        deliveryDelayUs: num(r, "delivery_delay_us"),
+        flags: num(r, "flags"),
+      }),
+    )
+    .sort((a, b) => a.timestampUs - b.timestampUs);
 
   const engine = rows("engine_state").map((r) => ({
     tUs: num(r, "timestamp"),
@@ -224,6 +249,7 @@ export function readTripLog(bytes: Uint8Array): TripLog {
     mag,
     obdSpeed,
     gnss,
+    gnssRecords,
     engine,
     rpm,
     events,

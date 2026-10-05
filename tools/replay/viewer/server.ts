@@ -10,9 +10,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { mergeCalibrations, type CompassCalibration } from "../../../src/nav/compass/compass";
-import type { NavConfig, ParkedPose } from "../../../src/nav/navigator";
+import type { NavConfig } from "../../../src/nav/navigator";
 import { appOutageCuts, replayTrip, type ReplayOptions } from "../../../src/nav/replay/replay";
 import { buildViewerData } from "../../../src/nav/replay/viewer-data";
+import { replayTripInApp, MemoryKeyValueStore, phoneOf } from "../../../src/services/navigation/app-replay";
+import { CalibrationStore } from "../../../src/services/navigation/calibration-store";
+import type { MapMatchLoop } from "../../../src/services/navigation/navigator-service";
+import type { ActiveRoadGraph } from "../../../src/services/offline-map/road-graph-file";
 import { readTripLog, type TripLog } from "../../../src/triplog/trip-log-reader";
 import { findGraph, openGraph, roadsAround, truthRoute } from "../graph-file";
 
@@ -50,45 +54,63 @@ function compassFromOtherLogs(file: string): { calibration: CompassCalibration; 
   return cals.length ? { calibration: cals.reduce((a, b) => mergeCalibrations(a, b)), logs: cals.length } : null;
 }
 
+/** The road graph a log's region has (null: none), opened for one replay. */
+function graphFor(trip: TripLog): { active: ActiveRoadGraph; close(): void } | null {
+  const first = trip.gnss.find((f) => f.hAccM <= 500);
+  const graphFile = first ? (GRAPH ?? findGraph(first)) : null;
+  if (!first || !graphFile) return null;
+  const opened = openGraph(graphFile, first);
+  return { active: { key: graphFile, region: path.basename(graphFile, ".graph.bin"), graph: opened.graph }, close: opened.close };
+}
+
+/** The car as the app identifies it (vehicle-link-core): its VIN, else the car last seen on the same OBD protocol. */
+function carOf(trip: TripLog, byProtocol: Map<string, string>): string | null {
+  const vin = typeof trip.info.vehicle_vin === "string" && trip.info.vehicle_vin ? trip.info.vehicle_vin : null;
+  const protocol = String(trip.info.obd_protocol ?? "").replace(/^A/, "");
+  if (vin && protocol) byProtocol.set(protocol, vin);
+  return vin ?? (protocol ? (byProtocol.get(protocol) ?? null) : null);
+}
+
+interface AppState {
+  /** The app's storage before the log: parked poses, speed scales, compass calibrations, GNSS lag. */
+  store: MemoryKeyValueStore;
+  /** The car (VIN) the app takes the log's to be. */
+  vin: string | null;
+  /** The drive whose end saved the car's parked pose (null: none stored). */
+  parkedAfter: string | null;
+}
+
 /**
- * Where the car parked before this log, as the app would have it (NAVIGATOR-SPEC §6.1): every earlier log replayed
- * in order with this navigator version, each car's parked pose carried from drive to drive (a drive that ends
- * without one drops it, a session that never moved keeps it). The car is the VIN, else the car last seen on the same OBD protocol, as the app
- * identifies it. Kept per navigator version.
+ * The app's state before a log (NAVIGATOR-SPEC §6.1): every earlier log replayed in order through the app's own
+ * NavigatorService (app-replay.ts) with this navigator version and one storage across them, as on the phone. Kept
+ * per navigator version; each log's state is a copy.
  */
-const parkedChains = new Map<string, Map<string, { pose: ParkedPose | null; after: string | null }>>();
-function previousParkedPose(file: string, nav: Partial<NavConfig>, loopKey: string): { pose: ParkedPose | null; after: string | null } {
-  const chain = parkedChains.get(loopKey) ?? parkedChains.set(loopKey, new Map()).get(loopKey)!;
-  if (chain.has(file)) return chain.get(file)!;
-  const poses = new Map<string, { pose: ParkedPose; after: string }>();
+const appStates = new Map<string, Map<string, AppState>>();
+function appStateBefore(file: string, loop: MapMatchLoop): AppState {
+  const states = appStates.get(loop) ?? appStates.set(loop, new Map()).get(loop)!;
+  if (states.has(file)) return states.get(file)!;
+  const store = new MemoryKeyValueStore();
   const byProtocol = new Map<string, string>();
-  const carOf = (trip: TripLog): string | null => {
-    const vin = typeof trip.info.vehicle_vin === "string" && trip.info.vehicle_vin ? trip.info.vehicle_vin : null;
-    const protocol = String(trip.info.obd_protocol ?? "").replace(/^A/, "");
-    if (vin && protocol) byProtocol.set(protocol, vin);
-    return vin ?? (protocol ? (byProtocol.get(protocol) ?? `protocol ${protocol}`) : null);
-  };
+  const parkedAfter = new Map<string, string>();
   for (const { file: log } of [...listLogs()].reverse()) {
     if (log > file) break;
     const trip = readTripLog(new Uint8Array(readFileSync(path.join(LOG_DIR, log))));
-    const car = carOf(trip);
-    const before = car ? poses.get(car) : undefined;
-    chain.set(log, { pose: before?.pose ?? null, after: before?.after ?? null });
-    if (log === file || !car) continue;
-    const first = trip.gnss.find((f) => f.hAccM <= 500);
-    const graphFile = first ? (GRAPH ?? findGraph(first)) : null;
-    const opened = graphFile && first ? openGraph(graphFile, first) : null;
+    const vin = carOf(trip, byProtocol);
+    states.set(log, { store: store.copy(), vin, parkedAfter: vin ? (parkedAfter.get(vin) ?? null) : null });
+    if (log === file) break;
+    const graph = graphFor(trip);
     try {
-      const options: ReplayOptions = { nav, ...(before ? { startPose: before.pose } : {}), ...(opened ? { mapMatch: { graph: opened.graph } } : {}) };
-      const { endPose, obdDistanceM } = replayTrip(trip, options).summary;
-      // As the app: a drive drops the stored pose (NavigatorService.onSpeed), and only a new stop sets one.
-      if (endPose) poses.set(car, { pose: endPose, after: log });
-      else if (obdDistanceM > 0) poses.delete(car);
+      const calibration = new CalibrationStore(store, phoneOf(trip));
+      const before = vin ? calibration.parkedPose(vin)?.savedAt : undefined;
+      replayTripInApp(trip, { calibration, loop, roadGraph: graph?.active, vin });
+      const after = vin ? calibration.parkedPose(vin)?.savedAt : undefined;
+      if (vin && after === undefined) parkedAfter.delete(vin);
+      else if (vin && after !== before) parkedAfter.set(vin, log);
     } finally {
-      opened?.close();
+      graph?.close();
     }
   }
-  return chain.get(file) ?? { pose: null, after: null };
+  return states.get(file) ?? { store: new MemoryKeyValueStore(), vin: null, parkedAfter: null };
 }
 
 function send(res: ServerResponse, status: number, type: string, body: string | Buffer): void {
@@ -150,7 +172,10 @@ const server = createServer((req, res) => {
       const phoneLoop = typeof trip.info.nav_mapmatch_loop === "string" ? trip.info.nav_mapmatch_loop : null;
       const loopKey = q("loop") || phoneLoop || "open";
       const loop = LOOPS[loopKey] ?? LOOPS.open;
-      const parked = startFrom === "parked" && !(start > 0) ? previousParkedPose(file, loop.nav, loopKey) : null;
+      // The app replay unless a research option asks for the navigator alone (a later start, a fixed GNSS lag, a compass).
+      const inApp = !(start > 0) && !lag && !compassArg;
+      const appLoop = (loop.nav.mapMatchLoop ?? "open") as MapMatchLoop;
+      const state = inApp ? (startFrom === "parked" ? appStateBefore(file, appLoop) : { store: new MemoryKeyValueStore(), vin: carOf(trip, new Map()), parkedAfter: null }) : null;
       // Map matching on the trip's road graph, when there is one.
       const first = trip.gnss.find((f) => f.hAccM <= 500);
       const graphFile = first ? (GRAPH ?? findGraph(first)) : null;
@@ -164,16 +189,29 @@ const server = createServer((req, res) => {
           ...(gps === "jam" ? { jam: asked.length ? asked : [{ fromS: 0, toS: Infinity }] } : {}),
           ...(opened ? { mapMatch: { graph: opened.graph } } : {}),
           ...(start > 0 ? { startAtS: start } : {}),
-          ...(parked?.pose ? { startPose: parked.pose } : {}),
           ...(compass ? { compass: { calibration: compass.calibration, rotateRad: (rotateDeg * Math.PI) / 180 } } : {}),
         };
         const navFor = (nav: Partial<NavConfig>): Partial<NavConfig> => ({ ...nav, ...(lag ? { gnssLagS: Number(lag), estimateGnssLag: false } : {}) });
+        // Through the app: the service publishes the dot, starts from the stored parked pose, and runs the outages.
+        const replay = (o: ReplayOptions) =>
+          replayTripInApp(trip, {
+            calibration: new CalibrationStore(state!.store.copy(), phoneOf(trip)),
+            loop: (o.nav?.mapMatchLoop ?? appLoop) as MapMatchLoop,
+            roadGraph: opened ? { key: graphFile!, region: path.basename(graphFile!, ".graph.bin"), graph: opened.graph } : null,
+            vin: state!.vin,
+            cuts: o.cuts ?? [],
+            jam: o.jam,
+            openLoop: o.openLoop,
+            trackStepS: o.trackStepS,
+            mapMatch: { particlesEveryS: o.mapMatch?.particlesEveryS },
+          });
         const data = buildViewerData(file, trip, { ...common, nav: navFor(loop.nav) }, {
           appCuts,
+          ...(inApp ? { replay } : {}),
           ...(compareLoop ? { compare: { label: compareLoop.label, options: { ...common, nav: navFor(compareLoop.nav) } } } : {}),
         });
         const compassInfo = compassArg ? { logs: compass?.logs ?? 0, rotateDeg, trust: data.summary.compass.trust } : null;
-        send(res, 200, "application/json", JSON.stringify({ ...data, compassInfo, loopLabel: loop.label, phoneLoopLabel: phoneLoop ? (LOOPS[phoneLoop]?.label ?? phoneLoop) : null, appCuts: appCuts.length, parkedFrom: parked ? { file: parked.after, status: data.summary.startPose?.status ?? null } : null }));
+        send(res, 200, "application/json", JSON.stringify({ ...data, compassInfo, loopLabel: loop.label, phoneLoopLabel: phoneLoop ? (LOOPS[phoneLoop]?.label ?? phoneLoop) : null, appCuts: appCuts.length, parkedFrom: state && startFrom === "parked" ? { file: state.parkedAfter, status: data.summary.startPose?.status ?? null } : null, inApp }));
       } finally {
         opened?.close();
       }
