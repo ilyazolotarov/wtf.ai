@@ -373,6 +373,11 @@ export class Navigator {
   private poseUnverifiedFromM: number | null = null;
   /** Parked pose taken when the phone was first handled while parked: it may leave the car after that. */
   private frozenPose: ParkedPose | null = null;
+  /**
+   * The pose at the last OBD reading of 0 km/h, until one says the car moves: with the engine off OBD falls
+   * silent, and the stale reading alone no longer says parked, though nothing has moved the car since.
+   */
+  private stoppedPose: ParkedPose | null = null;
   private lagEstimator: GnssLagEstimator;
   private readonly compass: Compass;
   private nextCompassUs = -Infinity;
@@ -598,13 +603,17 @@ export class Navigator {
   onObdSpeed(s: ObdSpeedSample): void {
     this.advance(s.tUs, this.heldYaw(s.tUs));
     this.lastObd = s;
-    if (s.rawKph > 0) this.frozenPose = null;
+    if (s.rawKph > 0) {
+      this.frozenPose = null;
+      this.stoppedPose = null;
+    }
     if (!this.ekf) return;
     const obdSigma = s.rawKph === 0 ? this.config.obdZeroSigmaMps : this.config.obdSigmaMps;
     for (const ekf of this.twin ? [this.ekf, this.twin] : [this.ekf]) {
       if (this.standstill) ekf.updateZeroSpeed(0.02);
       else ekf.updateObdSpeed(s.speedMps, obdSigma);
     }
+    if (s.rawKph === 0) this.stoppedPose = this.currentParkedPose();
   }
 
   onGnss(fix: GnssFix): FixOutcome {
@@ -676,7 +685,7 @@ export class Navigator {
    * the car, and the fixes then follow the driver.
    */
   get parkedPose(): ParkedPose | null {
-    return this.frozenPose ?? this.currentParkedPose();
+    return this.frozenPose ?? this.currentParkedPose() ?? this.stoppedPose;
   }
 
   private currentParkedPose(): ParkedPose | null {
@@ -724,6 +733,7 @@ export class Navigator {
       this.speedScale = { ks, ksVar, so, soVar };
     }
     this.ekf = null;
+    this.stoppedPose = null;
     this.ekfHistory.clear();
     this.twin = null;
     this.twinHistory.clear();
@@ -1244,6 +1254,7 @@ export class Navigator {
     this.speedScale = { ks, ksVar, so, soVar };
     this.anchor = { coord: { lat: fix.lat, lon: fix.lon }, sigma, distanceM: 0, sat: isSatelliteFix(fix) };
     this.ekf = null;
+    this.stoppedPose = null;
     this.ekfHistory.clear();
     this.twin = null;
     this.twinHistory.clear();

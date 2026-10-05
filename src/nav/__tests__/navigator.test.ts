@@ -260,6 +260,17 @@ describe("Navigator from a parked pose", () => {
     expect(angleDiffDeg(end.headingRad, truth.psi)).toBeLessThan(5);
   });
 
+  test("engine off: OBD falls silent, the phone stays in the mount, the pose stays where the car stopped", () => {
+    const stopped = syntheticDrive({ segments: [...DRIVE, { durationS: 80, speedMps: 0, yawRateDegS: 0 }], gnss: "coarse", startHeadingRad: 2, seed: 4 });
+    // OBD ends 60 s before the log (the phone logs on in the mount).
+    const lastObdUs = stopped.trip.obdSpeed.at(-1)!.tUs - 60e6;
+    stopped.trip.obdSpeed = stopped.trip.obdSpeed.filter((o) => o.tUs <= lastObdUs);
+    expect(stopped.trip.obdSpeed.at(-1)!.rawKph).toBe(0);
+    const end = replayTrip(stopped.trip, { startPose: pose }).summary.endPose!;
+    expect(end).not.toBeNull();
+    expect(haversineM(end, stopped.truth.at(-1)!)).toBeLessThan(20);
+  });
+
   test("no pose while moving", () => {
     const moving = syntheticDrive({ segments: DRIVE.slice(0, 4), gnss: "clean", seed: 4 });
     expect(replayTrip(moving.trip).summary.endPose).toBeNull();

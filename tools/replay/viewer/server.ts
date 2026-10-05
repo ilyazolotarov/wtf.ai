@@ -53,7 +53,7 @@ function compassFromOtherLogs(file: string): { calibration: CompassCalibration; 
 /**
  * Where the car parked before this log, as the app would have it (NAVIGATOR-SPEC §6.1): every earlier log replayed
  * in order with this navigator version, each car's parked pose carried from drive to drive (a drive that ends
- * without one keeps the old). The car is the VIN, else the car last seen on the same OBD protocol, as the app
+ * without one drops it, a session that never moved keeps it). The car is the VIN, else the car last seen on the same OBD protocol, as the app
  * identifies it. Kept per navigator version.
  */
 const parkedChains = new Map<string, Map<string, { pose: ParkedPose | null; after: string | null }>>();
@@ -80,8 +80,10 @@ function previousParkedPose(file: string, nav: Partial<NavConfig>, loopKey: stri
     const opened = graphFile && first ? openGraph(graphFile, first) : null;
     try {
       const options: ReplayOptions = { nav, ...(before ? { startPose: before.pose } : {}), ...(opened ? { mapMatch: { graph: opened.graph } } : {}) };
-      const end = replayTrip(trip, options).summary.endPose;
-      if (end) poses.set(car, { pose: end, after: log });
+      const { endPose, obdDistanceM } = replayTrip(trip, options).summary;
+      // As the app: a drive drops the stored pose (NavigatorService.onSpeed), and only a new stop sets one.
+      if (endPose) poses.set(car, { pose: endPose, after: log });
+      else if (obdDistanceM > 0) poses.delete(car);
     } finally {
       opened?.close();
     }

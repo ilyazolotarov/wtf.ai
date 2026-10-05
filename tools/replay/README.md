@@ -56,7 +56,7 @@ The viewer answers "how did my drive go": where the dot was against where the ca
     `src/nav/replay/jam.ts`); *None after the start* (pure dead reckoning once the heading is known).
   - *Start*: *Where it parked last* (default) starts the drive from the car's parked pose, as the app does now
     (NAVIGATOR-SPEC §6.1): every earlier log is replayed in order with the same navigator, each car's parked pose
-    carried from drive to drive (one that ends without a pose keeps the old), the car by its VIN, else the car last
+    carried from drive to drive (one that drives and ends without a pose drops it, as the app does), the car by its VIN, else the car last
     seen on the same OBD protocol. The first load replays them all (~25 s). *Cold*: no position or heading, as
     after a fresh install or a lost pose (and as the phone started some drives before the per-car parked poses).
     The status line says which drive the pose came from and what the first fixes made of it.
