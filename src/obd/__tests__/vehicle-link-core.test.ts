@@ -318,6 +318,28 @@ describe("VehicleLinkCore", () => {
       await t.core.disconnect();
     });
 
+    test("trying since: kept across the turns, cleared when ready or stopped", async () => {
+      let now = 1_000;
+      const t = twoAdapters({ ble: false, mfi: false });
+      // The setup's nowMs is fixed: give this core a moving wall clock through the store-free path.
+      (t.core as unknown as { deps: { nowMs: () => number } }).deps.nowMs = () => now;
+      void t.core.autoConnect();
+      await until(() => t.core.getSnapshot().link === "connecting");
+      const since = t.core.getSnapshot().tryingSinceMs;
+      expect(since).toBe(1_000);
+      now = 60_000;
+      await until(() => t.events.filter((e) => e.type === "auto-connect").length === 2 && t.core.getSnapshot().link === "connecting");
+      expect(t.core.getSnapshot().tryingSinceMs).toBe(since);
+      await t.core.disconnect();
+      expect(t.core.getSnapshot().tryingSinceMs).toBeNull();
+
+      const ready = twoAdapters({ ble: true, mfi: false });
+      await ready.core.autoConnect();
+      await until(() => ready.core.getSnapshot().link === "polling" && ready.core.getSnapshot().vehicle?.vin != null);
+      expect(ready.core.getSnapshot().tryingSinceMs).toBeNull();
+      await ready.core.disconnect();
+    });
+
     test("disconnect stops the rounds", async () => {
       const { core, events } = twoAdapters({ ble: false, mfi: false });
       void core.autoConnect();

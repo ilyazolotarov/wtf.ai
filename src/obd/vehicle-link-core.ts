@@ -112,6 +112,7 @@ export class VehicleLinkCore implements VehicleLink {
     adapter: null,
     vehicle: null,
     protocolSearch: false,
+    tryingSinceMs: null,
     engine: "unknown",
     lastSpeed: null,
     lastRpm: null,
@@ -223,6 +224,7 @@ export class VehicleLinkCore implements VehicleLink {
   async disconnect(): Promise<void> {
     this.autoRun++;
     await this.close();
+    this.update({ tryingSinceMs: null });
   }
 
   /** `windowMs`: give up (and return "unreachable") if the transport doesn't connect within it. */
@@ -769,7 +771,14 @@ export class VehicleLinkCore implements VehicleLink {
   }
 
   private update(patch: Partial<VehicleLinkSnapshot>): void {
-    this.snapshot = { ...this.snapshot, ...patch };
+    const next = { ...this.snapshot, ...patch };
+    // Ready ends the try; a link that starts trying (from ready or from nothing) starts it. Idle between auto-connect's
+    // turns keeps it, so the UI's timeout counts the whole wait.
+    const ready = next.link === "polling" && !!next.vehicle?.vin;
+    const trying = next.link !== "idle" && next.link !== "error";
+    if (ready) next.tryingSinceMs = null;
+    else if (!("tryingSinceMs" in patch) && next.tryingSinceMs === null && trying) next.tryingSinceMs = (this.deps.nowMs ?? Date.now)();
+    this.snapshot = next;
     this.listeners.forEach((l) => l());
   }
 }

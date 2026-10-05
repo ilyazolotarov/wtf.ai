@@ -229,6 +229,11 @@ export interface VehicleLinkSnapshot {
   lastSpeed: SpeedSample | null;
   lastRpm: RpmSample | null;
   stats: PollStats | null;
+  /**
+   * Wall-clock ms since the link has been trying to get ready (adapter, car, VIN), across auto-connect's turns and
+   * reconnects; null when ready (polling, VIN known) or stopped by the user. The UI badge times out on it.
+   */
+  tryingSinceMs: number | null;
 }
 
 export type SendFn = (

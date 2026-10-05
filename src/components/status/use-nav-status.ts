@@ -30,19 +30,16 @@ function linkBadge(s: VehicleLinkSnapshot): LinkBadge {
 
 export function useLinkBadge(): LinkBadge {
   const badge = useVehicleLinkValue(linkBadge);
-  // Busy since it last was ok or bad, whatever it waits for meanwhile (adapter, car, VIN).
-  const [expired, setExpired] = useState(false);
-  const [seen, setSeen] = useState(badge);
-  if (badge !== seen) {
-    setSeen(badge);
-    setExpired(false);
-  }
+  // Timed from when the link started trying (it spans auto-connect's turns, whose brief idles would restart a
+  // timer kept here: the dot stayed yellow at home for minutes).
+  const since = useVehicleLinkValue((s) => s.tryingSinceMs);
+  const [expiredFor, setExpiredFor] = useState<number | null>(null);
   useEffect(() => {
-    if (badge !== "busy") return;
-    const timer = setTimeout(() => setExpired(true), BADGE_BUSY_MAX_MS);
+    if (since === null) return;
+    const timer = setTimeout(() => setExpiredFor(since), Math.max(0, since + BADGE_BUSY_MAX_MS - Date.now()));
     return () => clearTimeout(timer);
-  }, [badge]);
-  return badge === "busy" && expired ? "bad" : badge;
+  }, [since]);
+  return badge === "busy" && since !== null && expiredFor === since ? "bad" : badge;
 }
 
 const TRUST: Record<
