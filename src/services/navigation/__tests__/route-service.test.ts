@@ -76,6 +76,8 @@ describe("RouteService", () => {
     expect(h.routes).toEqual([expect.objectContaining({ planId: 1, reason: "new", status: "done", maneuvers: 3 })]);
     expect(h.counts()).toMatchObject({ points: s.plan!.coordinates.length, maneuvers: 3 });
     expect(h.notes.find((n) => n.startsWith("route plan #1 (new)"))).toMatch(/1 maneuvers; \d+ states, \d+ tiles, \d+ ms in \d+ slices/);
+    // The developer screen's numbers.
+    expect(h.service.getDebug()).toMatchObject({ plans: 1, last: { id: 1, reason: "new", outcome: "done", slices: expect.any(Number) } });
     // Each published position: guidance, and a progress record.
     h.tick(1000);
     h.move(0.8, 0);
@@ -107,6 +109,7 @@ describe("RouteService", () => {
     h.flush();
     expect(h.service.getSnapshot()).toMatchObject({ status: "failed", failure: "no-route" });
     expect(h.routes).toEqual([expect.objectContaining({ status: "no-route" })]);
+    expect(h.service.getDebug().last).toMatchObject({ outcome: "no-route", lengthM: null });
   });
 
   test("without a downloaded road graph, or a position, the route can't be planned", () => {

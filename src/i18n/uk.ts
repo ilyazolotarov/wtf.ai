@@ -100,6 +100,7 @@ export const uk = {
   updateRate: "Частота оновлення",
   integrity: "Стан цілісності",
   ekfState: "Стан EKF",
+  routing: "Маршрути",
   mapMatching: "Прив’язка до доріг",
   ekfEast: "E",
   ekfNorth: "N",

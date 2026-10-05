@@ -98,6 +98,7 @@ export const en = {
   updateRate: "Update rate",
   integrity: "Integrity state",
   ekfState: "EKF state",
+  routing: "Routing",
   mapMatching: "Map matching",
   ekfEast: "E",
   ekfNorth: "N",

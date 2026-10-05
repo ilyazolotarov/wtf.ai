@@ -51,6 +51,29 @@ export interface RouteSnapshot {
   replanFailure?: RouteProblem;
 }
 
+/** The last plan's cost on this phone, for the developer screen (trip logs only record while driving). */
+export interface RoutePlanStats {
+  id: number;
+  reason: Reason;
+  /** `done`, or why it failed. */
+  outcome: "done" | RouteProblem;
+  lengthM: number | null;
+  states: number;
+  tiles: number;
+  /** In the search, and from the request to the result. */
+  planMs: number;
+  wallMs: number;
+  slices: number;
+}
+
+export interface RouteDebug {
+  /** Plans made this session (re-plans included). */
+  plans: number;
+  last: RoutePlanStats | null;
+  /** Settled states per slice now (adapts to ~12 ms). */
+  sliceStates: number;
+}
+
 export interface RoutingGraph {
   key: string;
   graph: RoadGraph & { stats?: GraphStats; setFrame(frame: LocalFrame): void; info?: { builtAt: number } };
@@ -104,12 +127,18 @@ export class RouteService {
   private trip: { startedAt: number; plannedS: number; plannedM: number; drivenM: number; lastAt: number | null } | null = null;
   private arrivedTimer: (() => void) | null = null;
   private sliceStates = FIRST_SLICE_STATES;
+  private planCount = 0;
+  private lastStats: RoutePlanStats | null = null;
 
   constructor(deps: RouteServiceDeps) {
     this.deps = deps;
   }
 
   getSnapshot = (): RouteSnapshot | null => this.snapshot;
+
+  getDebug(): RouteDebug {
+    return { plans: this.planCount, last: this.lastStats, sliceStates: this.sliceStates };
+  }
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
@@ -233,6 +262,8 @@ export class RouteService {
     stats = { states: 0, tiles: 0, planMs: 0, slices: 0 },
   ): void {
     const s = this.snapshot!;
+    this.planCount++;
+    this.lastStats = { id, reason, outcome: problem, lengthM: null, states: stats.states, tiles: stats.tiles, planMs: stats.planMs, wallMs, slices: stats.slices };
     this.note(`route plan #${id} (${reason}) failed: ${problem}${stats.states ? `, ${stats.states} states, ${Math.round(stats.planMs)} ms` : ""}`);
     this.deps.log?.route({
       timestampUs: this.deps.nowUs(),
@@ -274,6 +305,8 @@ export class RouteService {
     const t = this.deps.nowUs();
     const start = plan.coordinates[0];
     if (stats) {
+      this.planCount++;
+      this.lastStats = { id, reason, outcome: "done", lengthM: plan.lengthM, ...stats };
       this.note(
         `route plan #${id} (${reason}): ${km(plan.lengthM)}, ${Math.round(plan.durationS / 60)} min, ${maneuvers.length - 2} maneuvers; ` +
           `${stats.states} states, ${stats.tiles} tiles, ${Math.round(stats.planMs)} ms in ${stats.slices} slices (${Math.round(stats.wallMs)} ms wall)` +

@@ -218,7 +218,7 @@ function PositionTab() {
   const palette = usePalette();
   const nav = useNavStatus();
   const { position } = nav;
-  const { sensors, position: navigator } = useRuntime();
+  const { sensors, position: navigator, routes } = useRuntime();
   const sensor = useSensorSnapshot();
   // Ticks every second while this tab is up; also re-reads the EKF below.
   const [clock, setClock] = useState(() => Date.now());
@@ -231,6 +231,8 @@ function PositionTab() {
   const heading =
     position?.headingRad == null ? dash : `${Math.round((position.headingRad * 180) / Math.PI)}°`;
   const ekf = navigator.getDebug();
+  const routing = routes.getDebug();
+  const route = routes.getSnapshot();
   const num = (v: number | null, digits: number, unit = "") => (v === null ? dash : `${v.toFixed(digits)}${unit}`);
 
   return (
@@ -313,6 +315,29 @@ function PositionTab() {
         <ScreenRow
           label="share of time"
           value={ekf.mapMatchTiming ? `${(ekf.mapMatchTiming.share * 100).toFixed(2)} %` : dash}
+        />
+      </ScreenSection>
+
+      {/* Routing on this phone (ROUTING-SPEC §8.2): the last plan's cost, and guidance now. */}
+      <ScreenSection title={t("routing")}>
+        <ScreenRow label="plans" value={routing.plans ? String(routing.plans) : dash} />
+        <ScreenRow
+          label="last plan"
+          value={routing.last ? `#${routing.last.id} ${routing.last.reason} · ${routing.last.outcome === "done" ? `${((routing.last.lengthM ?? 0) / 1000).toFixed(1)} km` : routing.last.outcome}` : dash}
+          valueColor={routing.last && routing.last.outcome !== "done" ? palette.bad.c : undefined}
+        />
+        <ScreenRow
+          label="planning · wall"
+          value={routing.last ? `${Math.round(routing.last.planMs)} ms · ${Math.round(routing.last.wallMs)} ms` : dash}
+        />
+        <ScreenRow
+          label="states · tiles · slices"
+          value={routing.last ? `${routing.last.states} · ${routing.last.tiles} · ${routing.last.slices}` : dash}
+        />
+        <ScreenRow label="slice size" value={`${routing.sliceStates} states`} />
+        <ScreenRow
+          label="guidance"
+          value={route?.guidance ? `${route.guidance.state} · ${Number.isFinite(route.guidance.offM) ? `${Math.round(route.guidance.offM)} m off` : "no match"}` : route ? route.status : dash}
         />
       </ScreenSection>
     </>
