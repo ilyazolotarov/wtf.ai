@@ -1,6 +1,7 @@
 // App-lifetime services (vehicle link, sensors, trip recorder). Created once, independent of
 // screens, so recording keeps running while the UI is backgrounded (TRIP-LOGGER-SPEC §4.3).
 
+import * as Location from "expo-location";
 import Constants from "expo-constants";
 import * as Device from "expo-device";
 import { Platform } from "react-native";
@@ -103,6 +104,7 @@ export function getRuntime(): Runtime {
     logMapMatch: (record) => recorder.navMapMatch(record),
     // Map matching on the active offline region's road graph (MAPMATCH-SPEC §11).
     roadGraph: activeRoadGraph,
+    permission: { get: Location.getForegroundPermissionsAsync, request: Location.requestForegroundPermissionsAsync },
   });
   position.setMapMatchLoop(dev.mapMatchLoop);
   // During a trip the navigator keeps running with the map off screen, so dead reckoning

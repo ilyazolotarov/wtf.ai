@@ -2,11 +2,11 @@
 // OBD speed from the vehicle link, fused by `Navigator` into the map's position. Without OBD
 // speed it shows phone GNSS as before, because dead reckoning needs the car's speed.
 
-import * as Location from "expo-location";
+import type { LocationPermissionResponse } from "expo-location";
 
 import type { MapMatchState } from "@/nav/mapmatch/particle-filter";
 import { UpdateTiming, type UpdateTimingSummary } from "@/nav/mapmatch/update-timing";
-import type { MapMatchEstimate, NavConfig, NavMode, ParkedPose } from "@/nav/navigator";
+import type { FixOutcome, MapMatchEstimate, NavConfig, NavMode, ParkedPose } from "@/nav/navigator";
 import { Navigator } from "@/nav/navigator";
 import { haversineM } from "@/nav/geo";
 import type { PositionEstimate, PositionSourceKind, SimulatedOutage } from "@/nav/position/types";
@@ -127,7 +127,32 @@ export interface NavigatorServiceDeps {
   /** The active region's road graph; map matching is off without it. */
   roadGraph?: RoadGraphSource;
   nav?: Partial<NavConfig>;
+  /** Wall clock and the tick timer: the real ones in the app, a trip log's in a replay (app-replay.ts). */
+  clock?: ServiceClock;
+  /** Location permission (expo-location in the app); without it, granted. */
+  permission?: { get(): Promise<LocationPermissionResponse>; request(): Promise<LocationPermissionResponse> };
+  /** A replay looking in: each navigator as it is made, each fix's outcome, the fixes a simulated outage withholds. */
+  observer?: NavigatorObserver;
 }
+
+export interface ServiceClock {
+  nowMs(): number;
+  setInterval(fn: () => void, ms: number): unknown;
+  clearInterval(handle: unknown): void;
+}
+
+export interface NavigatorObserver {
+  navigator?(nav: Navigator): void;
+  fix?(fix: GnssFix, outcome: FixOutcome): void;
+  withheld?(record: GnssRecord): void;
+}
+
+const SYSTEM_CLOCK: ServiceClock = {
+  nowMs: () => Date.now(),
+  setInterval: (fn, ms) => setInterval(fn, ms),
+  clearInterval: (handle) => clearInterval(handle as ReturnType<typeof setInterval>),
+};
+const GRANTED = { granted: true, status: "granted", canAskAgain: true, expires: "never" } as LocationPermissionResponse;
 
 type Input =
   | { tUs: number; imu: ImuSample }
@@ -156,7 +181,7 @@ export class NavigatorService implements PositionSource {
   private position: PositionEstimate | null = null;
   private listeners = new Set<() => void>();
   private unsubscribers: (() => void)[] = [];
-  private timer: ReturnType<typeof setInterval> | null = null;
+  private timer: unknown = null;
   private foreground = false;
   private keepAlive = false;
 
@@ -201,8 +226,11 @@ export class NavigatorService implements PositionSource {
   private timingSince = 0;
   private interval = { count: 0, totalMs: 0, maxMs: 0 };
 
+  private readonly clock: ServiceClock;
+
   constructor(deps: NavigatorServiceDeps) {
     this.deps = deps;
+    this.clock = deps.clock ?? SYSTEM_CLOCK;
   }
 
   getSnapshot = (): PositionEstimate | null => this.position;
@@ -270,11 +298,11 @@ export class NavigatorService implements PositionSource {
   setSimulatedOutage(on: boolean): void {
     if (on === (this.outage !== null)) return;
     if (on) {
-      this.outage = { startedAt: Date.now(), startDistanceM: this.nav?.stats.obdDistanceM ?? null, hidden: null, maxErrorM: 0 };
+      this.outage = { startedAt: this.clock.nowMs(), startDistanceM: this.nav?.stats.obdDistanceM ?? null, hidden: null, maxErrorM: 0 };
       this.note("sim gnss outage on");
     } else {
       const o = this.position?.simulatedOutage;
-      const parts = [`${Math.round((Date.now() - this.outage!.startedAt) / 1000)} s`];
+      const parts = [`${Math.round((this.clock.nowMs() - this.outage!.startedAt) / 1000)} s`];
       if (o?.distanceM !== undefined) parts.push(`${(o.distanceM / 1000).toFixed(2)} km`);
       if (o?.errorM !== undefined) parts.push(`dot ${Math.round(o.errorM)} m from GPS (max ${Math.round(o.maxErrorM ?? 0)} m)`);
       this.note(`sim gnss outage off: ${parts.join(", ")}`);
@@ -304,9 +332,9 @@ export class NavigatorService implements PositionSource {
     return () => this.listeners.delete(listener);
   };
 
-  getPermission = (): Promise<Location.LocationPermissionResponse> => Location.getForegroundPermissionsAsync();
+  getPermission = (): Promise<LocationPermissionResponse> => this.deps.permission?.get() ?? Promise.resolve(GRANTED);
 
-  requestPermission = (): Promise<Location.LocationPermissionResponse> => Location.requestForegroundPermissionsAsync();
+  requestPermission = (): Promise<LocationPermissionResponse> => this.deps.permission?.request() ?? Promise.resolve(GRANTED);
 
   /** Map on screen. Idempotent; also retries native capture that couldn't start (e.g. before permission). */
   async start(): Promise<void> {
@@ -332,19 +360,19 @@ export class NavigatorService implements PositionSource {
   saveCalibration(): void {
     const nav = this.nav;
     if (!nav) return;
-    this.lastSaveAt = Date.now();
+    this.lastSaveAt = this.clock.nowMs();
     const pose = nav.parkedPose;
     if (pose && this.vin) {
-      this.deps.calibration.saveParkedPose(this.vin, pose);
+      this.deps.calibration.saveParkedPose(this.vin, pose, this.clock.nowMs());
       if (!this.poseStored) this.note(`nav parked pose saved (heading ±${((pose.headingSigmaRad * 180) / Math.PI).toFixed(1)}°)`);
       this.poseStored = true;
     }
     const lag = nav.gnssLagEstimate;
-    if (lag && this.deps.calibration.saveGnssLag(lag)) this.note(`nav gnss lag saved ${lag.lagS} s (${lag.windows} turn windows)`);
+    if (lag && this.deps.calibration.saveGnssLag(lag, this.clock.nowMs())) this.note(`nav gnss lag saved ${lag.lagS} s (${lag.windows} turn windows)`);
     const compass = nav.compassCalibrations;
-    if (compass.length && this.vin) this.deps.calibration.saveCompassCalibrations(this.vin, compass);
+    if (compass.length && this.vin) this.deps.calibration.saveCompassCalibrations(this.vin, compass, this.clock.nowMs());
     const params = nav.params;
-    if (!params || !this.vin || !this.deps.calibration.saveSpeedScale(this.vin, params.ks, params.ksVar)) return;
+    if (!params || !this.vin || !this.deps.calibration.saveSpeedScale(this.vin, params.ks, params.ksVar, this.clock.nowMs())) return;
     if (this.notedSpeedScale === null || Math.abs(params.ks - this.notedSpeedScale) >= SPEED_SCALE_NOTE_STEP) {
       this.notedSpeedScale = params.ks;
       this.note(`nav speed scale saved ${params.ks.toFixed(4)} ±${Math.sqrt(params.ksVar).toFixed(4)}`);
@@ -403,8 +431,8 @@ export class NavigatorService implements PositionSource {
         this.noteRoadCorrections();
       }),
     );
-    this.lastSaveAt = Date.now();
-    this.timer = setInterval(() => this.tick(), TICK_MS);
+    this.lastSaveAt = this.clock.nowMs();
+    this.timer = this.clock.setInterval(() => this.tick(), TICK_MS);
   }
 
   private detach(): void {
@@ -415,7 +443,7 @@ export class NavigatorService implements PositionSource {
     this.noteRoadCorrections();
     this.unsubscribers.forEach((u) => u());
     this.unsubscribers = [];
-    if (this.timer) clearInterval(this.timer);
+    if (this.timer) this.clock.clearInterval(this.timer);
     this.timer = null;
     // A later start begins afresh: the car may have moved meanwhile.
     this.nav = null;
@@ -430,6 +458,7 @@ export class NavigatorService implements PositionSource {
     const nav = new Navigator({ ...this.deps.nav, mapMatchLoop: this.loop, ...(lag ? { gnssLagS: lag.lagS } : {}) });
     this.notedRoad = { heading: 0, position: 0 };
     this.nav = nav;
+    this.deps.observer?.navigator?.(nav);
     if (lag) this.note(`nav gnss lag ${lag.lagS} s from storage (${lag.windows} turn windows)`);
     this.fedUs = -Infinity;
     this.lastAcceptedSatUs = -Infinity;
@@ -458,7 +487,7 @@ export class NavigatorService implements PositionSource {
     this.poseStored = pose !== null;
     if (pose && this.nav?.startFromPose(widen(pose))) {
       this.poseStatus = "unverified";
-      this.note(`nav mode dr (parked pose, ${Math.round((Date.now() - pose.savedAt) / 60_000)} min old${late ? ", VIN known late" : ""})`);
+      this.note(`nav mode dr (parked pose, ${Math.round((this.clock.nowMs() - pose.savedAt) / 60_000)} min old${late ? ", VIN known late" : ""})`);
     }
   }
 
@@ -511,6 +540,7 @@ export class NavigatorService implements PositionSource {
   private onGnss(r: GnssRecord): void {
     if (!Number.isFinite(r.latDeg) || !Number.isFinite(r.lonDeg)) return;
     if (this.outage) {
+      this.deps.observer?.withheld?.(r);
       this.outage.hidden = r;
       this.publish();
       return;
@@ -558,6 +588,7 @@ export class NavigatorService implements PositionSource {
         // A fix delivered late can still update from the navigator's state history.
         if (late && this.fedUs - input.tUs > LATE_FIX_MAX_US) continue;
         const out = nav.onGnss(input.fix);
+        this.deps.observer?.fix?.(input.fix, out);
         if (out.status === "accepted" && input.fix.speedMps !== undefined) this.lastAcceptedSatUs = input.tUs;
         if (out.status === "init") this.note(`nav mode dr (${out.initMethod})`);
         if (out.pose && out.pose !== "doubted") {
@@ -592,7 +623,7 @@ export class NavigatorService implements PositionSource {
     this.flush(this.deps.nowUs() - REORDER_US);
     this.publish();
     this.noteCompassTrust();
-    if (Date.now() - this.lastSaveAt >= SAVE_EVERY_MS) this.saveCalibration();
+    if (this.clock.nowMs() - this.lastSaveAt >= SAVE_EVERY_MS) this.saveCalibration();
   }
 
   // ---- compass in shadow (NAVIGATOR-SPEC §7.6): logged, never navigated with ----
@@ -632,7 +663,7 @@ export class NavigatorService implements PositionSource {
   // ---- output ----
 
   private publish(): void {
-    const now = Date.now();
+    const now = this.clock.nowMs();
     const nowUs = this.deps.nowUs();
     const trust = this.trust.check(now);
     const fix = this.lastFix;
@@ -742,7 +773,7 @@ export class NavigatorService implements PositionSource {
   private drainUpdateTimes(): void {
     const pf = this.nav?.mapMatcher;
     if (!pf || (!pf.updateTimes.length && !pf.startTimes.length)) return;
-    if (!this.timing.count && !this.starts.count) this.timingSince = Date.now();
+    if (!this.timing.count && !this.starts.count) this.timingSince = this.clock.nowMs();
     for (const ms of pf.startTimes.splice(0)) {
       this.starts.count++;
       this.starts.totalMs += ms;
@@ -760,7 +791,7 @@ export class NavigatorService implements PositionSource {
     this.drainUpdateTimes();
     const s = this.timing.summary();
     if (!s) return null;
-    return { ...s, share: (s.totalMs + this.starts.totalMs) / Math.max(1, Date.now() - this.timingSince) };
+    return { ...s, share: (s.totalMs + this.starts.totalMs) / Math.max(1, this.clock.nowMs() - this.timingSince) };
   }
 
   /** At the end of a drive: how long the filter's updates took, then start counting afresh. */
@@ -797,7 +828,7 @@ export class NavigatorService implements PositionSource {
     if (!o) return undefined;
     const h = o.hidden;
     const truth =
-      h && isSatelliteRecord(h) && h.hAccM <= OUTAGE_TRUTH_MAX_ACC_M && Date.now() - h.utcUs / 1000 <= OUTAGE_TRUTH_MAX_AGE_MS
+      h && isSatelliteRecord(h) && h.hAccM <= OUTAGE_TRUTH_MAX_ACC_M && this.clock.nowMs() - h.utcUs / 1000 <= OUTAGE_TRUTH_MAX_AGE_MS
         ? { lat: h.latDeg, lon: h.lonDeg, accuracyM: h.hAccM, timestamp: h.utcUs / 1000 }
         : undefined;
     const errorM = truth ? haversineM(p, truth) : undefined;

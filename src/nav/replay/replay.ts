@@ -183,6 +183,208 @@ const median = (v: number[]) => {
   return s[Math.floor(s.length / 2)];
 };
 
+/** What a recorder needs of the replay options: everything but how the inputs reach the navigator. */
+export type RecorderOptions = Pick<ReplayOptions, "cuts" | "trackStepS" | "truthAccuracyM" | "truthLagS" | "openLoop" | "startAtS"> & {
+  mapMatch?: Pick<NonNullable<ReplayOptions["mapMatch"]>, "graph" | "truth" | "particlesEveryS">;
+};
+
+/**
+ * What a replay records about the navigator as it runs: the track, every fix and its outcome, the fixes withheld in
+ * cuts (scored against the dead reckoning), particle snapshots, map-matching metrics, and the summary. Shared by
+ * `replayTrip` (inputs straight into a Navigator) and the app replay (inputs through the app's NavigatorService,
+ * which owns its navigators: `use` follows a new one).
+ */
+export class ReplayRecorder {
+  private nav: Navigator | null = null;
+  /** OBD distance of the navigators replaced so far. */
+  private distanceOffsetM = 0;
+  private readonly metrics: MapMatchMetrics | null;
+  private readonly particles: ParticleSnapshot[] = [];
+  private nextParticlesUs = -Infinity;
+  readonly cuts: ReplayCut[];
+  private readonly stepUs: number;
+  private readonly sessionUs: number;
+  private readonly truthAcc: number;
+  private readonly track: TrackPoint[] = [];
+  private readonly fixes: FixRecord[] = [];
+  private readonly cutDistance: number[];
+  /** Withheld fixes, scored once the navigator reaches their time. */
+  private readonly heldOut: GnssFix[] = [];
+  private lastDistance = 0;
+  private nextTrackUs = -Infinity;
+  private init: ReplaySummary["init"] = null;
+  private startPose: ReplaySummary["startPose"] = null;
+
+  constructor(
+    private readonly trip: TripLog,
+    private readonly options: RecorderOptions = {},
+  ) {
+    const mm = options.mapMatch;
+    this.metrics = mm?.truth ? new MapMatchMetrics(mm.graph, mm.truth, trip.startUs) : null;
+    this.cuts = [...(options.cuts ?? [])];
+    this.cutDistance = this.cuts.map(() => 0);
+    this.stepUs = (options.trackStepS ?? 1) * 1e6;
+    this.sessionUs = trip.startUs + (options.startAtS ?? 0) * 1e6;
+    this.truthAcc = options.truthAccuracyM ?? 10;
+  }
+
+  private tS(tUs: number): number {
+    return (tUs - this.trip.startUs) / 1e6;
+  }
+
+  /** The navigator from now on (a new one carries on the OBD distance). */
+  use(nav: Navigator): void {
+    if (this.nav && this.nav !== nav) this.distanceOffsetM += this.nav.stats.obdDistanceM;
+    this.nav = nav;
+  }
+
+  private distanceM(): number {
+    return this.distanceOffsetM + (this.nav?.stats.obdDistanceM ?? 0);
+  }
+
+  /** Inside a cut at this log time (s): its fixes are withheld. */
+  inCut(t: number): boolean {
+    return this.cuts.some((c) => t >= c.fromS && t < c.toS);
+  }
+
+  /** A parked pose given to the navigator at the session start (`ok`: it took it). */
+  startedFromPose(ok: boolean): void {
+    this.startPose = { status: ok ? "unverified" : "refused", tS: this.tS(this.sessionUs) };
+    if (ok) this.init = { tS: this.tS(this.sessionUs), method: "parked pose", distanceM: 0, estimate: null };
+  }
+
+  /** A fix the navigator took, and what it made of it. */
+  fixOutcome(fix: GnssFix, out: FixOutcome): void {
+    const t = this.tS(fix.tUs);
+    this.fixes.push({ tS: t, fix, satellite: isSatelliteFix(fix), ...out });
+    if (out.pose && out.pose !== "doubted") this.startPose = { status: out.pose, tS: t };
+  }
+
+  /** A fix withheld (a cut): scored against the navigator at its time. */
+  withheld(fix: GnssFix): void {
+    this.heldOut.push(fix);
+  }
+
+  private scoreHeldOut(untilUs: number): void {
+    const nav = this.nav;
+    while (this.heldOut.length && this.heldOut[0].tUs <= untilUs) {
+      const fix = this.heldOut.shift()!;
+      const p = nav?.positionAt(fix.tUs - (this.options.truthLagS ?? 0) * 1e6) ?? null;
+      const top = this.options.mapMatch ? nav?.estimate()?.mapMatch?.clusters[0] : undefined;
+      this.fixes.push({
+        tS: this.tS(fix.tUs),
+        fix,
+        satellite: isSatelliteFix(fix),
+        status: "cut",
+        errorM: p ? haversineM(p.coord, fix) : undefined,
+        predictedSigmaM: p?.sigmaM,
+        mapMatchErrorM: top ? haversineM(top, fix) : undefined,
+      });
+    }
+  }
+
+  /** After each input the navigator took (its time). */
+  afterEvent(tUs: number): void {
+    const nav = this.nav;
+    if (!nav) return;
+    this.scoreHeldOut(tUs);
+    const d = this.distanceM();
+    const started = nav.initialization;
+    if (started && !this.init) {
+      const t = this.tS(started.tUs);
+      this.init = { tS: t, method: INIT_NAMES[started.method], distanceM: d, estimate: nav.estimate() };
+      if (started.method === "pose" && !this.startPose) this.startPose = { status: "unverified", tS: t };
+      if (this.options.openLoop) {
+        this.cuts.push({ fromS: t + this.options.openLoop.delayS, toS: Infinity, openLoop: true });
+        this.cutDistance.push(0);
+      }
+    }
+    const cutIndex = this.cuts.findIndex((c) => this.tS(tUs) >= c.fromS && this.tS(tUs) < c.toS);
+    if (cutIndex >= 0) this.cutDistance[cutIndex] += d - this.lastDistance;
+    this.lastDistance = d;
+    const mm = this.options.mapMatch;
+    if (mm?.particlesEveryS && tUs >= this.nextParticlesUs && nav.mapMatcher?.isActive) {
+      this.nextParticlesUs = tUs + mm.particlesEveryS * 1e6;
+      this.particles.push({ tS: this.tS(tUs), particles: nav.mapMatchParticles(200) });
+    }
+    if (tUs < this.nextTrackUs) return;
+    this.nextTrackUs = tUs + this.stepUs;
+    const e = nav.estimate();
+    const p = nav.params;
+    if (e) this.track.push({ ...e, tS: this.tS(tUs), standstill: nav.isStandstill, ...(p ? { ks: p.ks, so: p.so } : {}) });
+    if (this.metrics && e && !nav.isStandstill && (e.speedMps ?? 0) >= 2) this.metrics.sample(tUs, e.mapMatch, nav.mapMatcher, d);
+  }
+
+  /** The result; `durationS`: the log's length as replayed. */
+  finish(durationS: number): ReplayResult {
+    const nav = this.nav ?? new Navigator();
+    this.scoreHeldOut(Infinity);
+    nav.flushOdometry();
+    const { track, fixes, cuts, cutDistance, truthAcc } = this;
+    // An app replay scores a withheld fix when its navigator gets there, after later fixes' outcomes.
+    fixes.sort((a, b) => a.tS - b.tS);
+    const end = nav.estimate();
+    if (end && end.tUs > (track.at(-1)?.tUs ?? -Infinity)) track.push({ ...end, tS: this.tS(end.tUs), standstill: nav.isStandstill });
+
+    const counts = { init: 0, accepted: 0, rejected: 0, anchored: 0, skipped: 0, cut: 0 };
+    for (const f of fixes) counts[f.status]++;
+    const compared = fixes.filter((f) => (f.status === "accepted" || f.status === "rejected") && f.errorM !== undefined);
+    const coarse = compared.filter((f) => !f.satellite);
+    const params = nav.params;
+
+    return {
+      track,
+      fixes,
+      particles: this.particles,
+      summary: {
+        durationS,
+        obdDistanceM: this.distanceM(),
+        init: this.init,
+        startPose: this.startPose,
+        endPose: nav.parkedPose,
+        fixes: { ...counts, total: fixes.length, satellite: fixes.filter((f) => f.satellite).length },
+        medianErrorM: {
+          satellite: median(compared.filter((f) => f.satellite).map((f) => f.errorM!)),
+          coarse: median(coarse.map((f) => f.errorM!)),
+        },
+        coarseInsideAccuracy: coarse.length ? coarse.filter((f) => f.errorM! <= f.fix.hAccM).length / coarse.length : null,
+        params: params && {
+          speedScale: params.ks,
+          speedOffsetKph: params.so * 3.6,
+          gyroBiasDegS: (params.bw * 180) / Math.PI,
+          gyroScale: params.kw,
+        },
+        gnssLag: nav.gnssLagEstimate,
+        imuInvalidS: nav.stats.imuInvalidS,
+        standstillS: nav.stats.standstillS,
+        resets: nav.stats.resets,
+        roadHeading: { accepted: nav.stats.roadHeadingAccepted, rejected: nav.stats.roadHeadingRejected },
+        roadPosition: { accepted: nav.stats.roadPositionAccepted, rejected: nav.stats.roadPositionRejected },
+        mapMatch: this.metrics?.summary(nav.mapMatcher?.updateTimes ?? [], nav.mapMatcher?.startTimes) ?? null,
+        compass: { trust: nav.compassTrust, calibration: nav.compassCalibration, checkDiffsRad: [...nav.compassCheckDiffs] },
+        cuts: cuts.map((c, k) => {
+          const truth = fixes.filter(
+            (f) => f.status === "cut" && f.tS >= c.fromS && f.tS < c.toS && f.satellite && f.fix.hAccM <= truthAcc && f.errorM !== undefined,
+          );
+          const mmErrors = truth.map((f) => f.mapMatchErrorM).filter((v): v is number => v !== undefined);
+          return {
+            ...c,
+            toS: Math.min(c.toS, durationS),
+            distanceM: cutDistance[k],
+            truthFixes: truth.length,
+            maxErrorM: truth.length ? Math.max(...truth.map((f) => f.errorM!)) : null,
+            lastErrorM: truth.length ? truth[truth.length - 1].errorM! : null,
+            meanSigmaM: truth.length ? truth.reduce((s, f) => s + (f.predictedSigmaM ?? 0), 0) / truth.length : null,
+            insideCircle: truth.length ? truth.filter((f) => f.errorM! <= SQRT_68 * (f.predictedSigmaM ?? 0)).length / truth.length : null,
+            mapMatchMaxErrorM: mmErrors.length ? Math.max(...mmErrors) : null,
+            mapMatchLastErrorM: mmErrors.length ? mmErrors[mmErrors.length - 1] : null,
+          };
+        }),
+      },
+    };
+  }
+}
+
 export function replayTrip(trip: TripLog, options: ReplayOptions = {}): ReplayResult {
   // With a compass option the particle filter uses it (`on`); otherwise it runs in shadow, as in the app.
   const nav = new Navigator({ ...(options.compass ? { compassUse: "on" as const } : {}), ...options.nav });
@@ -191,54 +393,11 @@ export function replayTrip(trip: TripLog, options: ReplayOptions = {}): ReplayRe
   if (options.odometry) nav.subscribeOdometry(options.odometry);
   const mm = options.mapMatch;
   if (mm) nav.setRoadGraph(mm.graph, mm.config);
-  const metrics = mm?.truth ? new MapMatchMetrics(mm.graph, mm.truth, trip.startUs) : null;
-  const particles: ParticleSnapshot[] = [];
-  let nextParticlesUs = -Infinity;
-  const cuts: ReplayCut[] = [...(options.cuts ?? [])];
-  const stepUs = (options.trackStepS ?? 1) * 1e6;
+  const rec = new ReplayRecorder(trip, options);
+  rec.use(nav);
   const sessionUs = trip.startUs + (options.startAtS ?? 0) * 1e6;
-  const truthAcc = options.truthAccuracyM ?? 10;
   const tS = (tUs: number) => (tUs - trip.startUs) / 1e6;
-  const inCut = (t: number) => cuts.find((c) => t >= c.fromS && t < c.toS);
-
-  const track: TrackPoint[] = [];
-  const fixes: FixRecord[] = [];
-  const cutDistance = cuts.map(() => 0);
-  let lastDistance = 0;
-  let nextTrackUs = -Infinity;
-  let init: ReplaySummary["init"] = null;
-  let startPose: ReplaySummary["startPose"] = null;
-  if (options.startPose) {
-    const ok = nav.startFromPose(options.startPose);
-    startPose = { status: ok ? "unverified" : "refused", tS: tS(sessionUs) };
-    if (ok) init = { tS: tS(sessionUs), method: "parked pose", distanceM: 0, estimate: null };
-  }
-
-  const afterEvent = (tUs: number) => {
-    const d = nav.stats.obdDistanceM;
-    const started = nav.initialization;
-    if (started && !init) {
-      const t = tS(started.tUs);
-      init = { tS: t, method: INIT_NAMES[started.method], distanceM: d, estimate: nav.estimate() };
-      if (options.openLoop) {
-        cuts.push({ fromS: t + options.openLoop.delayS, toS: Infinity, openLoop: true });
-        cutDistance.push(0);
-      }
-    }
-    const cutIndex = cuts.findIndex((c) => tS(tUs) >= c.fromS && tS(tUs) < c.toS);
-    if (cutIndex >= 0) cutDistance[cutIndex] += d - lastDistance;
-    lastDistance = d;
-    if (mm?.particlesEveryS && tUs >= nextParticlesUs && nav.mapMatcher?.isActive) {
-      nextParticlesUs = tUs + mm.particlesEveryS * 1e6;
-      particles.push({ tS: tS(tUs), particles: nav.mapMatchParticles(200) });
-    }
-    if (tUs < nextTrackUs) return;
-    nextTrackUs = tUs + stepUs;
-    const e = nav.estimate();
-    const p = nav.params;
-    if (e) track.push({ ...e, tS: tS(tUs), standstill: nav.isStandstill, ...(p ? { ks: p.ks, so: p.so } : {}) });
-    if (metrics && e && !nav.isStandstill && (e.speedMps ?? 0) >= 2) metrics.sample(tUs, e.mapMatch, nav.mapMatcher, d);
-  };
+  if (options.startPose) rec.startedFromPose(nav.startFromPose(options.startPose));
 
   // Merge the three time-sorted streams (from the session start).
   const from = <T extends { tUs: number }>(xs: T[]) => (options.startAtS ? xs.filter((x) => x.tUs >= sessionUs) : xs);
@@ -264,95 +423,18 @@ export function replayTrip(trip: TripLog, options: ReplayOptions = {}): ReplayRe
       nav.onMag(mag[k++]);
     } else if (ti <= to && ti <= tg) {
       nav.onImu(imu[i++]);
-      afterEvent(ti);
+      rec.afterEvent(ti);
     } else if (to <= tg) {
       nav.onObdSpeed(obdSpeed[o++]);
-      afterEvent(to);
+      rec.afterEvent(to);
     } else {
       const fix = gnss[g++];
-      const t = tS(fix.tUs);
-      const satellite = isSatelliteFix(fix);
-      if (inCut(t)) {
-        const p = nav.positionAt(fix.tUs - (options.truthLagS ?? 0) * 1e6);
-        const top = mm ? nav.estimate()?.mapMatch?.clusters[0] : undefined;
-        fixes.push({
-          tS: t,
-          fix,
-          satellite,
-          status: "cut",
-          errorM: p ? haversineM(p.coord, fix) : undefined,
-          predictedSigmaM: p?.sigmaM,
-          mapMatchErrorM: top ? haversineM(top, fix) : undefined,
-        });
-      } else {
-        const out = nav.onGnss(fix);
-        fixes.push({ tS: t, fix, satellite, ...out });
-        if (out.pose && out.pose !== "doubted") startPose = { status: out.pose, tS: t };
-      }
-      afterEvent(fix.tUs);
+      if (rec.inCut(tS(fix.tUs))) rec.withheld(fix);
+      else rec.fixOutcome(fix, nav.onGnss(fix));
+      rec.afterEvent(fix.tUs);
     }
   }
 
-  nav.flushOdometry();
-  const end = nav.estimate();
-  if (end && end.tUs > (track.at(-1)?.tUs ?? -Infinity)) track.push({ ...end, tS: tS(end.tUs), standstill: nav.isStandstill });
-
-  const counts = { init: 0, accepted: 0, rejected: 0, anchored: 0, skipped: 0, cut: 0 };
-  for (const f of fixes) counts[f.status]++;
-  const compared = fixes.filter((f) => (f.status === "accepted" || f.status === "rejected") && f.errorM !== undefined);
-  const coarse = compared.filter((f) => !f.satellite);
-  const params = nav.params;
   const ends = [imu.at(-1)?.tUs, obdSpeed.at(-1)?.tUs, gnss.at(-1)?.tUs].filter((t): t is number => t !== undefined);
-  const durationS = ends.length ? tS(Math.max(...ends)) : 0;
-
-  return {
-    track,
-    fixes,
-    particles,
-    summary: {
-      durationS,
-      obdDistanceM: nav.stats.obdDistanceM,
-      init,
-      startPose,
-      endPose: nav.parkedPose,
-      fixes: { ...counts, total: fixes.length, satellite: fixes.filter((f) => f.satellite).length },
-      medianErrorM: {
-        satellite: median(compared.filter((f) => f.satellite).map((f) => f.errorM!)),
-        coarse: median(coarse.map((f) => f.errorM!)),
-      },
-      coarseInsideAccuracy: coarse.length ? coarse.filter((f) => f.errorM! <= f.fix.hAccM).length / coarse.length : null,
-      params: params && {
-        speedScale: params.ks,
-        speedOffsetKph: params.so * 3.6,
-        gyroBiasDegS: (params.bw * 180) / Math.PI,
-        gyroScale: params.kw,
-      },
-      gnssLag: nav.gnssLagEstimate,
-      imuInvalidS: nav.stats.imuInvalidS,
-      standstillS: nav.stats.standstillS,
-      resets: nav.stats.resets,
-      roadHeading: { accepted: nav.stats.roadHeadingAccepted, rejected: nav.stats.roadHeadingRejected },
-      roadPosition: { accepted: nav.stats.roadPositionAccepted, rejected: nav.stats.roadPositionRejected },
-      mapMatch: metrics?.summary(nav.mapMatcher?.updateTimes ?? [], nav.mapMatcher?.startTimes) ?? null,
-      compass: { trust: nav.compassTrust, calibration: nav.compassCalibration, checkDiffsRad: [...nav.compassCheckDiffs] },
-      cuts: cuts.map((c, k) => {
-        const truth = fixes.filter(
-          (f) => f.status === "cut" && f.tS >= c.fromS && f.tS < c.toS && f.satellite && f.fix.hAccM <= truthAcc && f.errorM !== undefined,
-        );
-        const mmErrors = truth.map((f) => f.mapMatchErrorM).filter((v): v is number => v !== undefined);
-        return {
-          ...c,
-          toS: Math.min(c.toS, durationS),
-          distanceM: cutDistance[k],
-          truthFixes: truth.length,
-          maxErrorM: truth.length ? Math.max(...truth.map((f) => f.errorM!)) : null,
-          lastErrorM: truth.length ? truth[truth.length - 1].errorM! : null,
-          meanSigmaM: truth.length ? truth.reduce((s, f) => s + (f.predictedSigmaM ?? 0), 0) / truth.length : null,
-          insideCircle: truth.length ? truth.filter((f) => f.errorM! <= SQRT_68 * (f.predictedSigmaM ?? 0)).length / truth.length : null,
-          mapMatchMaxErrorM: mmErrors.length ? Math.max(...mmErrors) : null,
-          mapMatchLastErrorM: mmErrors.length ? mmErrors[mmErrors.length - 1] : null,
-        };
-      }),
-    },
-  };
+  return rec.finish(ends.length ? tS(Math.max(...ends)) : 0);
 }
