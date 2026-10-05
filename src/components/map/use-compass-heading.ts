@@ -92,22 +92,32 @@ export function travelHeadingRad(
   return (position.speedMps ?? 0) > COURSE_MIN_SPEED_MPS ? position.headingRad : undefined;
 }
 
-/** Map bearing for heading-up: walking compass first, then travel heading, else the last one held. */
+/**
+ * Map bearing for heading-up: walking compass first, then travel heading, else the last one held.
+ * Null: no direction to turn to (none yet, or moving without one: the navigator anchored under jamming).
+ */
 export function headingUpRad(
   position: PositionEstimate | null | undefined,
   compass: CompassHeading | null,
-  heldRad = 0,
-): number {
+  heldRad: number | null = null,
+): number | null {
   return compass?.headingRad ?? travelHeadingRad(position) ?? heldRad;
+}
+
+/** The heading held after `position`: its travel heading; kept through a stop, dropped when moving without one. */
+export function holdHeading(position: PositionEstimate | null | undefined, heldRad: number | null): number | null {
+  const travel = travelHeadingRad(position);
+  if (travel !== undefined) return travel;
+  return (position?.speedMps ?? 0) > COURSE_MIN_SPEED_MPS ? null : heldRad;
 }
 
 /** `headingUpRad` that keeps the last travel heading through a stop instead of snapping north. */
 export function useHeadingUp(
   position: PositionEstimate | null | undefined,
   compass: CompassHeading | null,
-): number {
-  const travel = travelHeadingRad(position);
-  const [held, setHeld] = useState(0);
-  if (travel !== undefined && travel !== held) setHeld(travel);
-  return headingUpRad(position, compass, held);
+): number | null {
+  const [held, setHeld] = useState<number | null>(null);
+  const next = holdHeading(position, held);
+  if (next !== held) setHeld(next);
+  return headingUpRad(position, compass, next);
 }

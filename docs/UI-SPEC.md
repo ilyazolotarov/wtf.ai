@@ -145,7 +145,7 @@ Depends on Phase 2.
 
 `follow` → `follow-heading` → `free`. User pan/zoom gesture switches to `free`. `RecenterButton` cycles modes and shows the current one.
 
-Heading-up bearing: the walking compass beam when shown; else the navigator heading (`dr`/`fused` source, valid while stopped); else GNSS course when speed > ~2 m/s; else the last of these held, so the map does not snap north at a stop (north-up only before any heading is known).
+Heading-up bearing: the walking compass beam when shown; else the navigator heading (`dr`/`fused` source, valid while stopped); else GNSS course when speed > ~2 m/s; else the last of these held, so the map does not snap north at a stop. No direction known (none yet, or moving without one: the navigator anchored under GNSS jamming, 2026-10-05): heading-up shows the `follow` camera (zoom 16, flat, north up) until there is one, so it never looks like a heading-up view pointing the wrong way.
 
 Auto heading-up: once per trip, when a trip is recording and speed stays > ~2 m/s for 2 s, `follow` switches to `follow-heading` (any other mode is left alone). When the trip ends (recorder leaves `recording`/`lingering`) it goes back to `follow`, unless the driver changed the mode by button or gesture in between.
 

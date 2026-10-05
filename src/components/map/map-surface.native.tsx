@@ -34,8 +34,8 @@ interface MapSurfaceProps {
   ghostView: boolean;
   /** Walking compass (see `walkingCompass`): beam replaces the course cone and drives heading-up. */
   compass: CompassHeading | null;
-  /** Map bearing in follow-heading (see `useHeadingUp`). */
-  headingUpRad: number;
+  /** Map bearing in follow-heading (see `useHeadingUp`); null: no direction known, the follow camera instead. */
+  headingUpRad: number | null;
   onUserInteraction(): void;
   /** Long press: where on the map. */
   onLongPress(at: Coordinate): void;
@@ -85,10 +85,12 @@ export function MapSurface({
       : null;
   const deadReckoning = position != null && position.trust !== "TRUSTED";
   const tint = deadReckoning ? palette.warn.c : palette.accent;
-  const follow = mode === "free" ? null : FOLLOW_CAMERA[mode];
+  // Heading-up with no direction known (anchored under jamming): the follow camera, north up, until there is one.
+  const camera = mode === "follow-heading" && headingUpRad === null ? "follow" : mode;
+  const follow = camera === "free" ? null : FOLLOW_CAMERA[camera];
 
   const followBearing =
-    mode === "follow-heading" && position
+    camera === "follow-heading" && position && headingUpRad !== null
       ? (headingUpRad * 180) / Math.PI
       : 0;
 
