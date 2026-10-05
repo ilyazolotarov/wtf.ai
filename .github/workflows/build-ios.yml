@@ -1,7 +1,7 @@
 name: Build Unsigned iOS App
 
 # Unsigned IPA for sideloading with AltStore (no paid Apple account, no EAS).
-# Runs on demand, and from ci.yml after the checks pass on every commit.
+# Runs on demand, and from ci.yml when a commit needs a build (docs/CI.md).
 on:
   workflow_dispatch:
     inputs:
@@ -10,11 +10,22 @@ on:
         type: choice
         options: [Release, Debug]
         default: Release
+      notify:
+        description: "Send the IPA to Telegram"
+        type: boolean
+        default: true
   workflow_call:
     inputs:
       configuration:
         type: string
         default: Release
+      notify:
+        # false for compile checks of branch pushes: the IPA is only uploaded as an artifact.
+        type: boolean
+        default: false
+      retention-days:
+        type: number
+        default: 14
     secrets:
       SENTRY_AUTH_TOKEN:
         required: false
@@ -39,6 +50,15 @@ jobs:
       # Optional: the IPA is also sent to a Telegram chat when both secrets are set (README).
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      # Compiler cache for the C/C++/Objective-C of the pods (React Native core and Expo modules
+      # come prebuilt; Swift is not cached). The Podfile turns it on with USE_CCACHE=1.
+      USE_CCACHE: "1"
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_MAXSIZE: 2G
+      # Caches are saved by main only and restored everywhere: branches start from main's,
+      # and their own builds don't evict it.
+      SAVE_CACHES: ${{ github.ref == 'refs/heads/main' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -57,6 +77,26 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Install ccache
+        run: command -v ccache || brew install ccache
+
+      - name: Restore CocoaPods download cache
+        # Pod sources and the prebuilt React Native / Hermes tarballs.
+        id: pods-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/Library/Caches/CocoaPods
+          key: ios-pods-${{ hashFiles('package-lock.json', 'patches/**', 'modules/*/ios/*.podspec') }}
+          restore-keys: ios-pods-
+
+      - name: Restore ccache
+        id: ccache
+        uses: actions/cache/restore@v6
+        with:
+          path: .ccache
+          key: ios-ccache-${{ inputs.configuration }}-${{ github.sha }}
+          restore-keys: ios-ccache-${{ inputs.configuration }}-
 
       - name: Run Expo Prebuild
         # Prebuild runs `pod install` itself on macOS
@@ -93,6 +133,24 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             build
 
+      - name: ccache statistics
+        if: ${{ !cancelled() }}
+        run: ccache --show-stats || true
+
+      - name: Save CocoaPods download cache
+        if: ${{ env.SAVE_CACHES == 'true' && steps.pods-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: ~/Library/Caches/CocoaPods
+          key: ${{ steps.pods-cache.outputs.cache-primary-key }}
+
+      - name: Save ccache
+        if: ${{ env.SAVE_CACHES == 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: .ccache
+          key: ${{ steps.ccache.outputs.cache-primary-key }}
+
       - name: Package into IPA
         run: |
           APP=$(ls -d build/Build/Products/${CONFIGURATION}-iphoneos/*.app | head -n 1)
@@ -106,10 +164,10 @@ jobs:
           # Upload the .ipa as-is (no zip wrapper); artifact is named after the file
           archive: false
           path: wtfai-${{ inputs.configuration }}-unsigned.ipa
-          retention-days: 14
+          retention-days: ${{ inputs.retention-days || 14 }}
 
       - name: Send IPA to Telegram
-        if: ${{ env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != '' }}
+        if: ${{ inputs.notify && env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != '' }}
         # A delivery problem must not fail the build: the artifact above is the source of truth.
         continue-on-error: true
         run: |
