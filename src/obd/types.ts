@@ -111,7 +111,13 @@ export interface VehicleInfo {
   /** ATDPN answer, e.g. "A6". */
   protocol: string | null;
   supportedPids01: string[];
+  /** Null: a car not seen before on this protocol, its VIN not read (yet). */
   vin: string | null;
+  /**
+   * "read" from the car (`0902`); "remembered": the read missed, so the last car seen on this protocol is assumed
+   * until a retry reads it (VEHICLE-LINK-SPEC §9.1).
+   */
+  vinSource?: "read" | "remembered";
   speedEcu: string | null;
 }
 

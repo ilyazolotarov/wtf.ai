@@ -1,7 +1,14 @@
 import { VirtualClock, yieldMacrotask } from "@/obd/clock";
-import { Elm327Emulator, type EmulatorProfile } from "@/obd/emulator";
-import { VehicleLinkCore, type DiscoveryBackend, type KeyValueStore, type ScannedDevice } from "@/obd/vehicle-link-core";
-import type { ExchangeEvent, LinkState } from "@/obd/types";
+import { Elm327Emulator, KLINE_PROFILE, STN_PROFILE, type EmulatorProfile } from "@/obd/emulator";
+import {
+  VehicleLinkCore,
+  type DiscoveryBackend,
+  type KeyValueStore,
+  type KnownCar,
+  type RememberedAdapter,
+  type ScannedDevice,
+} from "@/obd/vehicle-link-core";
+import type { ExchangeEvent, LinkEvent, LinkState } from "@/obd/types";
 
 jest.setTimeout(60_000);
 
@@ -18,10 +25,35 @@ class MemoryStore implements KeyValueStore {
 
 class FakeDiscovery implements DiscoveryBackend {
   devices: ScannedDevice[] = [];
+  mfi: string[] = [];
+  private mfiListeners = new Set<(ids: string[]) => void>();
   start(onUpdate: (d: ScannedDevice[]) => void) {
     onUpdate(this.devices);
   }
   stop() {}
+  mfiPresent() {
+    return this.mfi;
+  }
+  onMfiChange(listener: (ids: string[]) => void) {
+    this.mfiListeners.add(listener);
+    return () => void this.mfiListeners.delete(listener);
+  }
+  /** iOS connects (or drops) MFi accessories. */
+  setMfi(ids: string[]) {
+    this.mfi = ids;
+    [...this.mfiListeners].forEach((l) => l(ids));
+  }
+}
+
+const CX5_VIN = "JM3KFBDM1J0123456";
+/** The store of an app that has seen the CX-5 (VIN read) through adapter emu-1 on CAN (protocol 6). */
+function storeWithCx5(): MemoryStore {
+  const store = new MemoryStore();
+  store.setJson("vehicleLink.adapters", [
+    { id: "emu-1", transport: "emulator", name: "OBDII", protocolNumber: 6, lastVerifiedAt: 500 },
+  ] satisfies RememberedAdapter[]);
+  store.setJson("vehicleLink.cars", [{ vin: CX5_VIN, protocolNumber: 6, seenAt: 500 }] satisfies KnownCar[]);
+  return store;
 }
 
 async function until(cond: () => boolean, maxTicks = 200_000) {
@@ -56,7 +88,9 @@ function setup(profile: Partial<EmulatorProfile> = {}, store = new MemoryStore()
     const s = core.getSnapshot().link;
     if (states[states.length - 1] !== s) states.push(s);
   });
-  return { clock, core, emulators, store, states };
+  const events: LinkEvent[] = [];
+  core.onLinkEvent((e) => events.push(e));
+  return { clock, core, emulators, store, states, discovery, events };
 }
 
 describe("VehicleLinkCore", () => {
@@ -153,6 +187,112 @@ describe("VehicleLinkCore", () => {
     emulators.get("emu-1")!.dropLink();
     await until(() => states.includes("reconnecting") && core.getSnapshot().link === "polling");
     await core.disconnect();
+  });
+
+  test("another car on the adapter (K-line after CAN): the cached protocol's bus errors start a search", async () => {
+    const { core, store, events } = setup(KLINE_PROFILE, storeWithCx5());
+    core.startDiscovery();
+    void core.connect("emu-1");
+    await until(() => core.getSnapshot().link === "polling" && core.getSnapshot().lastSpeed !== null);
+    expect(events.map((e) => e.type)).toContain("protocol-search");
+    expect(core.getSnapshot().vehicle).toMatchObject({ protocol: "A5", vin: "VF1LSRAEH12345678", vinSource: "read" });
+    expect(store.getJson<RememberedAdapter[]>("vehicleLink.adapters")?.[0].protocolNumber).toBe(5);
+    // Both cars stay known, the last one first.
+    expect(store.getJson<KnownCar[]>("vehicleLink.cars")?.map((c) => [c.vin, c.protocolNumber])).toEqual([
+      ["VF1LSRAEH12345678", 5],
+      [CX5_VIN, 6],
+    ]);
+    await core.disconnect();
+  });
+
+  test("another car found from standby: every few bus errors, all protocols are searched", async () => {
+    const { core, emulators } = setup(KLINE_PROFILE, storeWithCx5());
+    core.startDiscovery();
+    void core.connect("emu-1");
+    await until(() => emulators.has("emu-1"));
+    emulators.get("emu-1")!.setVehicle({ ignition: false, rpm: 0 });
+    await until(() => core.getSnapshot().link === "standby");
+    emulators.get("emu-1")!.setVehicle({ ignition: true, rpm: 800 });
+    await until(() => core.getSnapshot().link === "polling");
+    expect(core.getSnapshot().vehicle?.protocol).toBe("A5");
+    await core.disconnect();
+  });
+
+  test("a VIN read that misses at init: the last car on the protocol is assumed, a retry reads it", async () => {
+    const { core, clock, store, events } = setup({ ...STN_PROFILE, vinMisses: 1 }, storeWithCx5());
+    core.startDiscovery();
+    void core.connect("emu-1");
+    await until(() => core.getSnapshot().link === "polling");
+    expect(core.getSnapshot().vehicle).toMatchObject({ vin: CX5_VIN, vinSource: "remembered" });
+    expect(core.expectedVin()).toBe(CX5_VIN);
+    await until(() => core.getSnapshot().engine === "engine-running");
+    const runningAt = clock.nowUs();
+    await until(() => core.getSnapshot().vehicle?.vinSource === "read");
+    expect(core.getSnapshot().vehicle?.vin).toBe(CX5_VIN);
+    expect(clock.nowUs() - runningAt).toBeLessThan(6e6);
+    expect(events.filter((e) => e.type === "vin").map((e) => e.detail)).toEqual([
+      `not read; the last car on protocol 6: ${CX5_VIN}`,
+      "read on retry 1",
+    ]);
+    // The car list never loses the VIN to a missed read.
+    expect(store.getJson<KnownCar[]>("vehicleLink.cars")).toEqual([{ vin: CX5_VIN, protocolNumber: 6, seenAt: 1_000 }]);
+    await core.disconnect();
+  });
+
+  test("a car not seen on its protocol, its VIN never read: unknown, the CX-5 kept for later", async () => {
+    const { core, clock, store, events } = setup({ ...KLINE_PROFILE, vinMisses: 99 }, storeWithCx5());
+    core.startDiscovery();
+    void core.connect("emu-1");
+    await until(() => core.getSnapshot().link === "polling");
+    expect(core.getSnapshot().vehicle?.vin).toBeNull();
+    expect(core.expectedVin()).toBeNull();
+    const t0 = clock.nowUs();
+    await until(() => clock.nowUs() - t0 > 300e6);
+    expect(events.filter((e) => e.type === "vin").map((e) => e.detail)).toEqual([
+      "not read; a car not seen on this protocol",
+      "not read after 6 retries",
+    ]);
+    await core.disconnect();
+    expect(store.getJson<KnownCar[]>("vehicleLink.cars")?.map((c) => c.vin)).toEqual([null, CX5_VIN]);
+    // Back in the CX-5 with a missed read: its VIN again.
+    const back = setup({ ...STN_PROFILE, vinMisses: 99 }, store);
+    back.core.startDiscovery();
+    void back.core.connect("emu-1");
+    await until(() => back.core.getSnapshot().link === "polling");
+    expect(back.core.getSnapshot().vehicle).toMatchObject({ protocol: "A6", vin: CX5_VIN, vinSource: "remembered" });
+    await back.core.disconnect();
+  });
+
+  test("auto-connect: a known MFi adapter iOS has wins over a more recent BLE one, or takes over when it joins", async () => {
+    const store = new MemoryStore();
+    store.setJson("vehicleLink.adapters", [
+      { id: "ble-1", transport: "ble", name: "vLinker FD", protocolNumber: 6, lastVerifiedAt: 900 },
+      { id: "mfi-1", transport: "mfi", name: "OBDLink MX+", protocolNumber: 6, lastVerifiedAt: 500 },
+    ] satisfies RememberedAdapter[]);
+    const present = setup({}, store);
+    present.discovery.mfi = ["mfi-1"];
+    await present.core.autoConnect();
+    await until(() => present.core.getSnapshot().link === "polling");
+    expect(present.core.getSnapshot().activeDeviceId).toBe("mfi-1");
+    await present.core.disconnect();
+
+    // The MFi adapter joins iOS while auto-connect waits for the BLE one, which isn't in the car.
+    store.setJson("vehicleLink.adapters", [
+      { id: "ble-1", transport: "ble", name: "vLinker FD", protocolNumber: 6, lastVerifiedAt: 900 },
+      { id: "mfi-1", transport: "mfi", name: "OBDLink MX+", protocolNumber: 6, lastVerifiedAt: 500 },
+    ] satisfies RememberedAdapter[]);
+    const joining = setup({}, store);
+    const ble = new Elm327Emulator(joining.clock);
+    jest.spyOn(ble, "connect").mockImplementation(() => new Promise(() => undefined));
+    joining.emulators.set("ble-1", ble);
+    void joining.core.autoConnect();
+    await until(() => joining.core.getSnapshot().link === "connecting");
+    expect(joining.core.getSnapshot().activeDeviceId).toBe("ble-1");
+    joining.discovery.setMfi(["mfi-1"]);
+    await until(() => joining.core.getSnapshot().link === "polling");
+    expect(joining.core.getSnapshot().activeDeviceId).toBe("mfi-1");
+    expect(joining.events.find((e) => e.type === "auto-connect")?.detail).toBe("OBDLink MX+ joined iOS while waiting for vLinker FD");
+    await joining.core.disconnect();
   });
 
   test("raw send and exclusive work while polling", async () => {

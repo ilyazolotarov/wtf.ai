@@ -30,6 +30,10 @@ export interface EmulatorProfile {
   noDataWaitMs: number;
   searchMs: number;
   vin: string;
+  /** The car's OBD protocol (ATSP number): 6 = CAN 11-bit 500k, 5 = ISO 14230 KWP fast init (K-line). */
+  carProtocol: number;
+  /** The first this many `0902` requests get NO DATA (the VIN read missing at init on the CX-5). */
+  vinMisses: number;
 }
 
 export interface VehicleState {
@@ -58,6 +62,8 @@ export const GENUINE_PROFILE: EmulatorProfile = {
   noDataWaitMs: 200,
   searchMs: 1500,
   vin: "JM3KFBDM1J0123456",
+  carProtocol: 6,
+  vinMisses: 0,
 };
 
 export const CLONE_PROFILE: EmulatorProfile = {
@@ -82,7 +88,17 @@ export const STN_PROFILE: EmulatorProfile = {
   obdLatencyMs: 25,
 };
 
+/** A K-line car (a Renault Logan: KWP2000 fast init, the engine ECU at 7A) on an OBDLink. */
+export const KLINE_PROFILE: Partial<EmulatorProfile> = {
+  ...STN_PROFILE,
+  carProtocol: 5,
+  ecus: [0x7a],
+  obdLatencyMs: 60,
+  vin: "VF1LSRAEH12345678",
+};
+
 const SUPPORTED_01 = ["01", "04", "05", "0C", "0D", "0F", "11", "1C", "20"];
+const isCan = (protocol: number) => protocol >= 6 && protocol <= 9;
 
 function bitmap(pids: string[]): number[] {
   const bytes = [0, 0, 0, 0];
@@ -120,6 +136,7 @@ export class Elm327Emulator implements Transport {
   private searched = false;
   private header = 0x7df;
   private receiveFilter: number | null = null;
+  private vinRequests = 0;
 
   constructor(
     private readonly clock: Clock,
@@ -253,7 +270,7 @@ export class Elm327Emulator implements Transport {
       const v = !this.vehicle.ignition ? 12.4 : this.vehicle.rpm > 300 ? 14.2 : 12.2;
       return [`${v.toFixed(1)}V`];
     }
-    if (c === "DPN") return [this.protocol === 0 ? (this.searched ? "A6" : "0") : String(this.protocol)];
+    if (c === "DPN") return [this.protocol === 0 ? (this.searched ? `A${this.profile.carProtocol}` : "0") : String(this.protocol)];
     if (c.startsWith("SP")) {
       const n = c.slice(2).replace("A", "");
       this.protocol = parseInt(n, 16) || 0;
@@ -288,6 +305,10 @@ export class Elm327Emulator implements Transport {
       this.searched = true;
       searchDelay = p.searchMs;
     }
+    // Another car's protocol: nothing on the CAN pins acknowledges, or nobody answers the K-line init.
+    if (this.protocol !== 0 && this.protocol !== p.carProtocol) {
+      return { body: [isCan(this.protocol) ? "CAN ERROR" : "BUS INIT: ...ERROR"], delayMs: p.noDataWaitMs };
+    }
     if (!this.vehicle.ignition) return { body: ["NO DATA"], delayMs: p.noDataWaitMs };
 
     let countDigit: number | null = null;
@@ -319,7 +340,9 @@ export class Elm327Emulator implements Transport {
     } else if (mode === "09" && pid === "02") {
       // Only the engine ECU has the VIN; another one addressed physically refuses (seen on a CX-5 TCM).
       if (this.header !== 0x7df && this.header + 8 !== engine) return { body: ["7F0912"], delayMs: searchDelay + p.obdLatencyMs };
-      return { body: this.vinFrames(engine), delayMs: searchDelay + p.obdLatencyMs + p.multiResponseWaitMs };
+      if (this.vinRequests++ < p.vinMisses) return { body: ["NO DATA"], delayMs: searchDelay + p.noDataWaitMs };
+      const frames = isCan(p.carProtocol) ? this.vinFrames(engine) : this.vinLines(engine);
+      return { body: frames, delayMs: searchDelay + p.obdLatencyMs + p.multiResponseWaitMs };
     } else {
       return { body: ["NO DATA"], delayMs: searchDelay + p.noDataWaitMs };
     }
@@ -333,14 +356,25 @@ export class Elm327Emulator implements Transport {
     if (countDigit !== null) answers = answers.slice(0, countDigit);
     else delayMs += p.multiResponseWaitMs;
 
-    const body = answers.map(({ ecu, data }) => {
-      const bytes = this.headers ? [data.length, ...data] : data;
-      const parts = bytes.map(hex2);
-      const head = this.headers ? ecu.toString(16).toUpperCase() : null;
-      const sep = this.spaces ? " " : "";
-      return (head ? head + sep : "") + parts.join(sep);
-    });
+    const body = answers.map(({ ecu, data }) => this.frame(ecu, data));
     return { body: [...(searchDelay > 0 ? ["SEARCHING..."] : []), ...body], delayMs };
+  }
+
+  /** One answer as the adapter prints it: CAN id + PCI, or a K-line header (format, target, source) + checksum. */
+  private frame(ecu: number, data: number[]): string {
+    const sep = this.spaces ? " " : "";
+    if (!this.headers) return data.map(hex2).join(sep);
+    if (isCan(this.profile.carProtocol)) return [ecu.toString(16).toUpperCase(), ...[data.length, ...data].map(hex2)].join(sep);
+    const bytes = [0x80 | data.length, 0xf1, ecu, ...data];
+    return [...bytes, bytes.reduce((a, b) => a + b, 0) & 0xff].map(hex2).join(sep);
+  }
+
+  /** K-line VIN: five `49 02 n` messages of four bytes, the first padded with zeros. */
+  private vinLines(ecu: number): string[] {
+    const bytes = [0, 0, 0, ...[...this.profile.vin].map((c) => c.charCodeAt(0))];
+    const lines: string[] = [];
+    for (let i = 0, n = 1; i < bytes.length; i += 4, n++) lines.push(this.frame(ecu, [0x49, 0x02, n, ...bytes.slice(i, i + 4)]));
+    return lines;
   }
 
   private vinFrames(ecu: number): string[] {
