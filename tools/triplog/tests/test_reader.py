@@ -130,6 +130,10 @@ def test_route(trip):
     progress = trip.route_progress.iloc[0]
     assert (progress["state"], progress["next_index"]) == ("leaving", 1)
     assert (progress["off_m"], progress["to_next_m"]) == (pytest.approx(45), pytest.approx(600))
+    r = summary(trip)["routing"]
+    assert (r["plans"], r["failed"], r["went_off"], r["first_km"]) == (1, [], 0, 1.5)
+    assert r["plan_ms_max"] == pytest.approx(12.5)
+    assert r["share_by_state"] == {"leaving": 1.0}
 
 
 def test_summary_and_check(trip):

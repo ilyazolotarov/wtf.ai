@@ -68,6 +68,7 @@ def summary(trip: Trip) -> dict:
         "imu_max_gap_s": float(trip.imu["t_s"].diff().max()) if len(trip.imu) > 1 else None,
         "dropouts_ms": trip.dropouts_ms,
         "map_match_timing": map_match_timing(trip),
+        "routing": routing(trip),
     }
 
 
@@ -91,6 +92,31 @@ def map_match_timing(trip: Trip, budget_ms: float = 5.0) -> dict | None:
         "max_ms": round(float(rows["updates_max_ms"].max()), 3),
         "rows_over_budget": int((rows["updates_max_ms"] > budget_ms).sum()),
         "share_of_time": round(total_ms / (span_s * 1000), 5) if span_s > 0 else None,
+    }
+
+
+def routing(trip: Trip) -> dict | None:
+    """Routes the app planned on the drive and how guidance went (ROUTING-SPEC §8.3), from the `nav_route*` records."""
+    plans = trip.route
+    if not len(plans):
+        return None
+    made = plans[plans["reason"] != "resume"]
+    done = made[made["status"] == "done"]
+    progress = trip.route_progress
+    states = progress["state"].tolist() if len(progress) else []
+    went_off = sum(1 for i, st in enumerate(states) if st == "off" and (i == 0 or states[i - 1] != "off"))
+    arrived = trip.transcript[trip.transcript["text"].str.startswith("route arrived")]
+    return {
+        "plans": int(len(made)),
+        "reasons": made["reason"].value_counts().to_dict(),
+        "failed": made[made["status"] != "done"]["status"].tolist(),
+        "plan_ms_max": round(float(done["plan_ms"].max()), 1) if len(done) else None,
+        "wall_ms_max": round(float(done["wall_ms"].max()), 1) if len(done) else None,
+        "first_km": round(float(done["length_m"].iloc[0]) / 1000, 2) if len(done) else None,
+        "first_planned_min": round(float(done["duration_s"].iloc[0]) / 60, 1) if len(done) else None,
+        "share_by_state": {k: round(v / len(states), 4) for k, v in pd.Series(states).value_counts().items()} if states else {},
+        "went_off": went_off,
+        "arrived": arrived["text"].iloc[0] if len(arrived) else None,
     }
 
 
