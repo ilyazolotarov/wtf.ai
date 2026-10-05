@@ -19,14 +19,15 @@ export interface GuidanceConfig {
   /** Off for this long and this far driven before planning again. */
   offHoldS: number;
   offHoldM: number;
-  /** The route is matched within this behind the last progress, and this (or more when fast) ahead. */
+  /** The route is matched within this behind the last progress, and this ahead (more when fast, or after driving off it). */
   backM: number;
   aheadM: number;
   /** Moving faster than this, a route stretch more than `headingTolRad` off the heading doesn't match. */
   headingMinSpeedMps: number;
   headingTolRad: number;
-  /** Within this of the route's end: arrived. */
+  /** Within this of the route's end: arrived. Near its last point counts only this close to the end along it. */
   arriveM: number;
+  arriveNearEndM: number;
   /** A maneuver passed by less than this is still the next one (the position lags the turn). */
   passedM: number;
   /** The maneuver after the next is shown with it when this close to it ("then turn left"). */
@@ -38,11 +39,12 @@ export const DEFAULT_GUIDANCE: GuidanceConfig = {
   offAccuracyFactor: 1.5,
   offHoldS: 4,
   offHoldM: 30,
-  backM: 60,
+  backM: 100,
   aheadM: 300,
   headingMinSpeedMps: 3,
   headingTolRad: 75 * DEG,
   arriveM: 30,
+  arriveNearEndM: 300,
   passedM: 10,
   thenM: 120,
 };
@@ -91,6 +93,8 @@ export class RouteGuidance {
   private last: GuidanceStep | null = null;
   private offSince: { tMs: number; drivenM: number } | null = null;
   private lastPosition: GuidancePosition | null = null;
+  /** Driven since the position last matched the route, m. */
+  private drivenSinceMatch = 0;
 
   constructor(
     readonly plan: RoutePlan,
@@ -119,16 +123,16 @@ export class RouteGuidance {
     this.lastPosition = p;
     const threshold = Math.max(c.offMinM, c.offAccuracyFactor * p.accuracyM);
     const fast = (p.speedMps ?? 0) >= c.headingMinSpeedMps && p.headingRad !== undefined;
-    const ahead = c.aheadM + 3 * (p.speedMps ?? 0) * dtS;
-    let match = this.match(p, this.alongPoly - c.backM, this.alongPoly + ahead, fast);
-    // Far from the expected stretch: the car may have rejoined the route elsewhere (a shortcut, a jump after an
-    // outage). Taken only when it fits there.
-    if (!match || match.offM > threshold) {
-      const anywhere = this.match(p, 0, Infinity, fast);
-      if (anywhere && anywhere.offM <= threshold && (!match || anywhere.offM < match.offM)) match = anywhere;
-    }
+    // Ahead of the last match by up to what the car could have driven since (×1.5): after a detour it rejoins the
+    // route further on, but never jumps to a later pass over the same road.
+    this.drivenSinceMatch += drivenM;
+    const ahead = c.aheadM + 3 * (p.speedMps ?? 0) * dtS + 1.5 * this.drivenSinceMatch;
+    const match = this.match(p, this.alongPoly - c.backM, this.alongPoly + ahead, fast);
     const totalPoly = this.cum.at(-1)!;
-    if (match && match.offM <= threshold) this.alongPoly = match.alongPoly;
+    if (match && match.offM <= threshold) {
+      this.alongPoly = match.alongPoly;
+      this.drivenSinceMatch = 0;
+    }
     const offM = match?.offM ?? Infinity;
     const alongM = this.alongPoly / this.scale;
     const remainingM = Math.max(0, (totalPoly - this.alongPoly) / this.scale);
@@ -136,7 +140,8 @@ export class RouteGuidance {
     let state: GuidanceState;
     const unsure = p.reliable === false || p.mapMatch === "multimodal" || p.mapMatch === "init";
     const end = this.plan.coordinates.at(-1)!;
-    if ((remainingM <= c.arriveM && offM <= threshold) || haversineM(p, end) <= c.arriveM) {
+    // At the end along the route, or at its last point when nearly there (a route may pass its end earlier).
+    if ((remainingM <= c.arriveM && offM <= threshold) || (haversineM(p, end) <= c.arriveM && remainingM <= c.arriveNearEndM)) {
       state = "arrived";
     } else if (offM <= threshold) {
       state = "on";

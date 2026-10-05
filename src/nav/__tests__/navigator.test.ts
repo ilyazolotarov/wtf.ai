@@ -193,6 +193,28 @@ describe("buildViewerData", () => {
     expect(d.outages[0].scores.replay!.maxErrorM).toBeLessThan(20);
     expect(d.errors.replay.length).toBeGreaterThan(d.durationS / 2);
     expect(d.noGpsS).toBe(0);
+    expect(d.routes).toEqual({ plans: [], progress: [] });
+  });
+
+  test("routes the phone planned: each plan with its own polyline and maneuvers, and guidance", () => {
+    const { buildViewerData } = jest.requireActual<typeof import("@/nav/replay/viewer-data")>("@/nav/replay/viewer-data");
+    const drive = syntheticDrive({ segments: CITY.slice(0, 3), gnss: "clean", startHeadingRad: 1 });
+    const t0 = drive.trip.startUs;
+    const plan = (tUs: number, planId: number, reason: "new" | "resume") => ({
+      tUs, planId, reason, status: "done" as const, fromLatDeg: 50, fromLonDeg: 30, fromHeadingRad: NaN, toLatDeg: 50.01, toLonDeg: 30.01,
+      lengthM: 1500, durationS: 150, offStartM: 1, offEndM: 2, states: 100, tiles: 3, planMs: 4.2, wallMs: 9, slices: 1, points: 2, maneuvers: 2, graphBuilt: 1,
+    });
+    drive.trip.navRoute = [plan(t0 + 5e6, 1, "new"), plan(t0 + 9e6, 1, "resume")];
+    drive.trip.navRoutePoints = [
+      { tUs: t0 + 5e6, planId: 1, index: 0, latDeg: 50, lonDeg: 30 },
+      { tUs: t0 + 5e6, planId: 1, index: 1, latDeg: 50.01, lonDeg: 30.01 },
+      { tUs: t0 + 9e6, planId: 1, index: 0, latDeg: 50, lonDeg: 30 },
+    ];
+    drive.trip.navRouteManeuvers = [{ tUs: t0 + 5e6, planId: 1, index: 0, kind: "depart", exit: 0, latDeg: 50, lonDeg: 30, atM: 0, turnRad: 0 }];
+    drive.trip.navRouteProgress = [{ tUs: t0 + 6e6, planId: 1, state: "on", nextIndex: 1, alongM: 50, offM: NaN, remainingM: 1450, remainingS: 145, toNextM: 1450 }];
+    const d = buildViewerData("trip.ulg", drive.trip);
+    expect(d.routes.plans.map((p) => [p.t, p.reason, p.points.length, p.maneuvers.length])).toEqual([[5, "new", 2, 1], [9, "resume", 1, 0]]);
+    expect(d.routes.progress).toEqual([[6, 1, "on", 50, null, 1450, 1]]);
   });
 
   test("lists the app's Cut GPS windows and scores a compare replay", () => {

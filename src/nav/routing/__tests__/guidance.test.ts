@@ -17,6 +17,11 @@ const maneuver = (kind: Maneuver["kind"], atM: number, e: number, n: number): Ma
 const MANEUVERS = [maneuver("depart", 0, 0, 0), maneuver("left", 1000, 1000, 0), maneuver("arrive", 1500, 1000, 500)];
 
 const EAST = Math.PI / 2;
+/** Along the route at 10 m/s: east 1000 m, then north (3 m right of the line). */
+const drive = (tS: number): GuidancePosition => {
+  const d = 10 * tS;
+  return d <= 1000 ? at(tS, d, -3) : at(tS, 1003, d - 1000, { headingRad: 0 });
+};
 const at = (tS: number, e: number, n: number, more: Partial<GuidancePosition> = {}): GuidancePosition => ({
   ...pt(e, n),
   tMs: tS * 1000,
@@ -38,9 +43,10 @@ describe("RouteGuidance", () => {
     expect(s.toNextM).toBeCloseTo(400, -1);
     expect(s.remainingM).toBeCloseTo(900, -1);
     expect(s.remainingS).toBeCloseTo(90, -1);
-    // Past the turn by more than a few metres: the next is the arrival.
-    const after = g.update(at(61, 1003, 30, { headingRad: 0 }));
-    expect(MANEUVERS[after.nextIndex].kind).toBe("arrive");
+    // On through the turn: past it by more than a few metres, the next is the arrival.
+    for (let t = 61; t <= 104; t++) g.update(drive(t));
+    expect(MANEUVERS[g.step!.nextIndex].kind).toBe("arrive");
+    expect(g.step!.alongM).toBeCloseTo(1040, -1);
   });
 
   test("leaving the route: 'leaving' at once, 'off' after 4 s and 30 m", () => {
@@ -82,9 +88,31 @@ describe("RouteGuidance", () => {
 
   test("arrives at the end and stays arrived", () => {
     const g = new RouteGuidance(PLAN, MANEUVERS);
-    g.update(at(0, 1000, 400, { headingRad: 0 }));
-    expect(g.update(at(10, 1000, 480, { headingRad: 0 })).state).toBe("arrived");
-    expect(g.update(at(20, 1300, 480, { headingRad: EAST })).state).toBe("arrived");
+    for (let t = 0; t <= 147; t++) expect(g.update(drive(t)).state).toBe("on");
+    expect(g.update(drive(148)).state).toBe("arrived");
+    expect(g.update(at(170, 1300, 480, { headingRad: EAST })).state).toBe("arrived");
+  });
+
+  test("never jumps ahead to a later pass over the same road", () => {
+    // Out east 500 m and back west on the same road, then 500 m north from the start.
+    const there: RoutePlan = { ...PLAN, lengthM: 1500, coordinates: [pt(0, 0), pt(500, 0), pt(500, 2), pt(0, 2), pt(0, 500)] };
+    const g = new RouteGuidance(there, [MANEUVERS[0], { ...MANEUVERS[2], atM: 1500, ...pt(0, 500) }]);
+    for (let t = 0; t <= 20; t++) g.update(at(t, 10 * t, 0));
+    // Stopped for a while, heading unknown: still the first pass, not the way back.
+    for (let t = 21; t <= 40; t++) expect(g.update(at(t, 200, 1, { speedMps: 0, headingRad: undefined })).alongM).toBeLessThan(300);
+  });
+
+  test("passing near the end early (a route that loops back) isn't arriving", () => {
+    // East 1000 m, north 300 m, west 1000 m, south 280 m: the end is 20 m north of the start.
+    const loop: RoutePlan = {
+      ...PLAN,
+      lengthM: 2580,
+      coordinates: [pt(0, 0), pt(1000, 0), pt(1000, 300), pt(0, 300), pt(0, 20)],
+    };
+    const g = new RouteGuidance(loop, [MANEUVERS[0], { ...MANEUVERS[2], atM: 2580, ...pt(0, 20) }]);
+    expect(g.update(at(0, 5, 0)).state).toBe("on");
+    expect(g.update(at(1, 15, 0)).state).toBe("on");
+    expect(g.update(at(250, 0, 30, { headingRad: Math.PI })).state).toBe("arrived");
   });
 
   test("a maneuver close after the next comes with it ('then')", () => {

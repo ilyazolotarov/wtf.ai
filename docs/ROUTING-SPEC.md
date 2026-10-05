@@ -154,14 +154,16 @@ Node on the Windows PC, cold tile cache (2026-10-05):
 distance driven along the route, the distance off it, what's left (metres, and the plan's time scaled by it), the
 next maneuver and the distance to it, and the one after when it follows within 120 m.
 
-- **Matching:** the closest point of the route's polyline between 60 m behind the last progress and 300 m (plus
-  3 s at the current speed) ahead; moving faster than 3 m/s, only stretches within 75° of the heading. Too far from
-  that stretch, the whole route is tried (a shortcut, or the position jumping back after an outage).
+- **Matching:** the closest point of the route's polyline between 100 m behind the last progress and 300 m ahead,
+  plus 3 s at the current speed, plus 1.5 × the distance driven since the position last matched (after a detour the
+  car rejoins further on); moving faster than 3 m/s, only stretches within 75° of the heading. Never the whole route:
+  a route that passes the same street twice would make progress jump to the later pass.
 - **Off the route** beyond max(40 m, 1.5 × the position's accuracy): `leaving` at once, `off` after 4 s and 30 m
   driven (from the speed, so a parked car or a jumping position never counts as leaving). `unsure` instead while
   map matching is `multimodal` or `init`, or the position is phone GPS that isn't trusted (spoofing can put it
   anywhere): neither on nor off is decided then. Driving the route the wrong way is off it.
-- **Arrived** within 30 m of the route's end (or of its last point), and it stays arrived.
+- **Arrived** within 30 m of the route's end along it, or of its last point once less than 300 m is left (a route
+  may pass near its end earlier), and it stays arrived.
 - A maneuver passed by less than 10 m is still the next one (the puck lags the turn).
 
 ### 8.2 Route service (`src/services/navigation/route-service.ts`, `runtime.routes`)
@@ -193,7 +195,22 @@ next maneuver and the distance to it, and the one after when it follows within 1
 5. **Re-plans**: how often, where from (`nav_route` with reason `off-route`), and whether the new route started on
    the road the car was on.
 
-### 8.4 Route hint (R5)
+### 8.4 Simulated (`npm run route:sim`, 2026-10-05)
+
+City drives from the simulator (MAPMATCH-SPEC §9.4), 60 min × seeds 1–3, GPS for the first 3 min, then none; the
+replay's puck (`replayPuck`, what NavigatorService publishes) fed to guidance as the app does.
+
+- **Following the route** (routes along the car's own path, cut where it loops back: every "off" is false):
+  Chernihiv 30 routes / 2.7 h and Kyiv 26 / 2.7 h: **no false "off"**; `unsure` 0.2 % of the time; progress along
+  the route off by 5 / 4 m median, 13 / 10 m p90, 90 / 123 m at most.
+- **Leaving the route** (a route planned every 6 min to a point 2–4 km away; the car keeps to its own way): all 28
+  departures noticed, 5–6 s and ~50 m (median) after the car was 25 m off the route; at most 59 s / 173 m (slow
+  traffic); no "off" before the car left. With GPS all along, the same.
+- Two fixes came from it: an early `arrived` where a route passed near its end, and progress jumping to a later
+  pass over the same street (the whole-route search, now gone). It is optimistic as the simulator is (§9.4 there):
+  no parking, reversing or unmapped roads.
+
+### 8.5 Route hint (R5)
 
 At a junction the filter weights the route's exit higher (soft, e.g. 3×), measured in the simulator
 (MAPMATCH-SPEC §9.4) with drivers who follow the route and drivers who leave it.

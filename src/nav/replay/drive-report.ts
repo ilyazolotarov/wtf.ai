@@ -3,6 +3,7 @@
 
 import type { TripLog } from "../../triplog/trip-log-reader";
 import { haversineM } from "../geo";
+import type { MapMatchState } from "../mapmatch/particle-filter";
 import { isSatelliteFix } from "../types";
 import type { ReplayResult } from "./replay";
 
@@ -80,6 +81,20 @@ export function phoneTrack(trip: TripLog): ShownPoint[] {
  * (MAPMATCH-SPEC §11, NavigatorService.publish).
  */
 export function replayShownTrack(result: ReplayResult): ShownPoint[] {
+  return replayPuck(result).map(({ t, lat, lon, acc }) => ({ t, lat, lon, acc }));
+}
+
+/** The published position for a replay, as route guidance gets it: the dot, plus its heading, speed and map match. */
+export interface PuckPoint extends ShownPoint {
+  headingRad?: number;
+  speedMps?: number;
+  mapMatch?: MapMatchState;
+  /** Dead-reckoning (no satellite fix accepted in the last 3 s). */
+  dr: boolean;
+}
+
+/** `replayShownTrack` with the rest of what NavigatorService publishes. */
+export function replayPuck(result: ReplayResult): PuckPoint[] {
   const accepted = result.fixes.filter((f) => f.status === "accepted" && f.satellite).map((f) => f.tS);
   let k = -1;
   return result.track.map((p) => {
@@ -87,9 +102,10 @@ export function replayShownTrack(result: ReplayResult): ShownPoint[] {
     const dr = p.mode === "dr" && (k < 0 || p.tS - accepted[k] >= FUSED_WINDOW_S);
     const mm = p.mapMatch;
     const top = dr && mm && MAP_MATCH_PUCK.has(mm.state) ? mm.clusters[0] : undefined;
+    const common = { t: p.tS, speedMps: p.speedMps, mapMatch: mm?.state, dr };
     return top
-      ? { t: p.tS, lat: top.lat, lon: top.lon, acc: Math.max(top.spreadM, MAP_MATCH_MIN_ACCURACY_M) }
-      : { t: p.tS, lat: p.lat, lon: p.lon, acc: p.accuracyM };
+      ? { ...common, lat: top.lat, lon: top.lon, acc: Math.max(top.spreadM, MAP_MATCH_MIN_ACCURACY_M), headingRad: top.headingRad }
+      : { ...common, lat: p.lat, lon: p.lon, acc: p.accuracyM, headingRad: p.headingRad };
   });
 }
 

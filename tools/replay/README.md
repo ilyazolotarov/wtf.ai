@@ -114,9 +114,22 @@ npm run route -- --bench 50                                              # rando
 npm run route -- --bench 50 --at 51.4939,31.2947 --radius 8             # ... within 8 km of a point
 ```
 
-One route: length, time, edges, how far its ends are from the points, states settled, tiles read and planning
-time. The bench prints planning time, states and the route's length over the straight line by distance, and the
-`--from`/`--to` of every route that failed.
+One route: length, time, edges, its turn instructions, how far its ends are from the points, states settled, tiles
+read and planning time (`--geojson` writes the line and the maneuvers). The bench prints planning time, states and
+the route's length over the straight line by distance, and the `--from`/`--to` of every route that failed.
+
+Guidance on simulated drives (ROUTING-SPEC §8.4): false "off route" while the car follows its route without GPS,
+and how soon guidance notices when it leaves one.
+
+```bash
+npm run route:sim                                        # Chernihiv, 60 min, seeds 1–3, GPS for the first 3 min
+npm run route:sim -- --at 50.4501,30.5234 --graph tools/tiles/out/release/kyiv-city.graph.bin
+npm run route:sim -- --gps                               # GPS all along
+```
+
+In `replay:view`, a drive with a route shows it in pink (the plan in force at the cursor; replaced plans grey and
+dashed), its maneuvers, a Route panel (each plan, its planning time, "off route" count, arrival) and a "route" strip
+on the timeline: pink on the route, amber leaving it, red off it, grey unsure; ticks mark plans.
 
 ## Road graph
 

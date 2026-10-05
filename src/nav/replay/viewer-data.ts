@@ -56,6 +56,23 @@ export interface ViewerFix {
   err: number | null;
 }
 
+/** A route the app planned on the drive (ROUTING-SPEC §8), from the log. */
+export interface ViewerRoutePlan {
+  t: number;
+  id: number;
+  reason: string;
+  status: string;
+  lengthM: number | null;
+  durationS: number | null;
+  planMs: number;
+  wallMs: number;
+  states: number;
+  slices: number;
+  /** [lat, lon] */
+  points: [number, number][];
+  maneuvers: { kind: string; exit: number; lat: number; lon: number; atM: number }[];
+}
+
 export interface ViewerData {
   file: string;
   info: Record<string, string | number>;
@@ -86,6 +103,8 @@ export interface ViewerData {
   errors: Record<string, ViewerErrors>;
   /** Time without a clean satellite fix for over 15 s, s. */
   noGpsS: number;
+  /** Routes planned in the app, and guidance at each published position: [t, plan, state, along m, off m, to next m, next]. */
+  routes: { plans: ViewerRoutePlan[]; progress: [number, number, string, number, number | null, number, number][] };
 }
 
 const r = (v: number, digits: number) => {
@@ -143,6 +162,34 @@ export function buildViewerData(file: string, trip: TripLog, options: ReplayOpti
       errors[key].push([r(f.t, 2), r(e, 1), e <= p.acc ? 1 : 0]);
     }
   }
+
+  // Routes: a plan's polyline and maneuvers carry its record's timestamp (a `resume` logs the same plan again).
+  const num = (v: number) => (Number.isFinite(v) ? v : null);
+  const plans: ViewerRoutePlan[] = trip.navRoute.map((p) => ({
+    t: tS(p.tUs),
+    id: p.planId,
+    reason: p.reason,
+    status: p.status,
+    lengthM: num(p.lengthM),
+    durationS: num(p.durationS),
+    planMs: r(p.planMs, 1),
+    wallMs: r(p.wallMs, 1),
+    states: p.states,
+    slices: p.slices,
+    points: trip.navRoutePoints.filter((q) => q.planId === p.planId && q.tUs === p.tUs).map((q): [number, number] => [r(q.latDeg, 6), r(q.lonDeg, 6)]),
+    maneuvers: trip.navRouteManeuvers
+      .filter((m) => m.planId === p.planId && m.tUs === p.tUs)
+      .map((m) => ({ kind: m.kind, exit: m.exit, lat: r(m.latDeg, 6), lon: r(m.lonDeg, 6), atM: r(m.atM, 1) })),
+  }));
+  const progress = trip.navRouteProgress.map((g): [number, number, string, number, number | null, number, number] => [
+    tS(g.tUs),
+    g.planId,
+    g.state,
+    r(g.alongM, 1),
+    Number.isFinite(g.offM) ? r(g.offM, 1) : null,
+    r(g.toNextM, 1),
+    g.nextIndex,
+  ]);
 
   const sync = trip.timeSync[0];
   return {
@@ -202,5 +249,6 @@ export function buildViewerData(file: string, trip: TripLog, options: ReplayOpti
     outages: driveOutages(trip, result.summary.durationS, windows, tracks),
     errors,
     noGpsS: r(noGpsWindows(truth, result.summary.durationS).reduce((s, w) => s + w.toS - w.fromS, 0), 0),
+    routes: { plans, progress },
   };
 }

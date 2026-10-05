@@ -12,7 +12,7 @@
     --gps: #16a34a; --phone: #7c3aed; --pred: #2563eb; --cmp: #ea580c;
     --coarse: #d97706; --rej: #dc2626; --cut: #8b93a1; --ok: #16a34a; --warn: #d97706; --bad: #dc2626;
     --road: #a21caf; --road-end: #ea580c; --truth: #0f766e; --mm: #111827; --accent: #2563eb;
-    --nogps: #8b93a1; --appcut: #d97706; --replaycut: #2563eb;
+    --nogps: #8b93a1; --appcut: #d97706; --replaycut: #2563eb; --route: #db2777;
     color-scheme: light;
   }
   @media (prefers-color-scheme: dark) {
@@ -21,7 +21,7 @@
       --gps: #4ade80; --phone: #c4b5fd; --pred: #60a5fa; --cmp: #fb923c;
       --coarse: #fbbf24; --rej: #f87171; --cut: #8b93a1; --ok: #4ade80; --warn: #fbbf24; --bad: #f87171;
       --road: #e879f9; --road-end: #fb923c; --truth: #2dd4bf; --mm: #fde047; --accent: #60a5fa;
-      --nogps: #8b93a1; --appcut: #fbbf24; --replaycut: #60a5fa;
+      --nogps: #8b93a1; --appcut: #fbbf24; --replaycut: #60a5fa; --route: #f472b6;
       color-scheme: dark;
     }
   }
@@ -79,7 +79,7 @@
   #events li.marker { font-weight: 600; }
   #events li span:first-child { font-variant-numeric: tabular-nums; text-align: right; }
   #summary { white-space: pre-wrap; font-size: 12px; color: var(--text2); margin-top: 6px; }
-  #timeline { width: 100%; height: 160px; display: block; background: var(--panel); cursor: crosshair; touch-action: none;
+  #timeline { width: 100%; height: 174px; display: block; background: var(--panel); cursor: crosshair; touch-action: none;
     border-top: 1px solid var(--line); }
   #time { font-variant-numeric: tabular-nums; min-width: 190px; }
   @media (max-width: 860px) { main { grid-template-columns: 1fr; } aside { display: none; } }
@@ -133,12 +133,17 @@
       <label title="Road graph used for map matching: lines by class, arrows on one-ways"><input id="showRoads" type="checkbox" /> roads (map matching)</label>
       <label title="The road the car was on, matched offline from clean GPS (MAPMATCH-SPEC §10.1); × marks breaks"><input id="showTruth" type="checkbox" /> true path</label>
       <label title="Map matching inside the replay: particles (size by weight; hollow = off-road) and its hypotheses (ring = spread, label = weight)"><input id="showMm" type="checkbox" /> map-matching particles</label>
+      <label title="The route the phone planned (pink), its maneuvers, and the routes it replaced (grey)"><input id="showRoute" type="checkbox" checked /> planned route</label>
     </details>
   </div>
   <aside>
     <div id="drive"></div>
     <h2>Tracks</h2>
     <div class="tracks" id="tracks"></div>
+    <div id="routeBox" hidden>
+      <h2>Route</h2>
+      <div id="route"></div>
+    </div>
     <h2>Without GPS</h2>
     <div id="outages"></div>
     <h2>At the cursor</h2>
@@ -275,10 +280,20 @@ map.on("error", (e) => showError(`map: ${e.error?.message ?? e.error}`));
 
 function addLayers() {
   const empty = fc([]);
-  const sources = ["roads", "roadNodes", "truth", "truthBreaks", "particles", "clusters", "fixes", "gpsTrack", "gpsNow", "gpsAcc"];
+  const sources = ["roads", "roadNodes", "truth", "truthBreaks", "particles", "clusters", "fixes", "gpsTrack", "gpsNow", "gpsAcc", "routeOld", "routeLine", "routeManeuvers"];
   for (const tr of TRACKS) sources.push(`${tr.key}Line`, `${tr.key}Now`, `${tr.key}Acc`, `${tr.key}Err`);
   for (const id of sources) map.addSource(id, { type: "geojson", data: empty });
   addRoadLayers();
+  // The phone's planned route (ROUTING-SPEC §8): the one in force at the cursor, and those it replaced.
+  map.addLayer({ id: "routeOld", type: "line", source: "routeOld", layout: { "line-cap": "round", "line-join": "round" },
+    paint: { "line-color": css("--text2"), "line-width": 3, "line-opacity": 0.35, "line-dasharray": [2, 2] } });
+  map.addLayer({ id: "routeLine", type: "line", source: "routeLine", layout: { "line-cap": "round", "line-join": "round" },
+    paint: { "line-color": css("--route"), "line-width": 6, "line-opacity": 0.45 } });
+  map.addLayer({ id: "routeManeuvers", type: "circle", source: "routeManeuvers",
+    paint: { "circle-radius": ["case", ["get", "next"], 6, 4], "circle-color": css("--panel"), "circle-stroke-color": css("--route"), "circle-stroke-width": 2.5 } });
+  map.addLayer({ id: "routeManeuverLabels", type: "symbol", source: "routeManeuvers", minzoom: 14,
+    layout: { "text-field": ["get", "label"], "text-size": 11, "text-offset": [0, 1.1], "text-anchor": "top", "text-font": ["Noto Sans Regular"] },
+    paint: { "text-color": css("--route"), "text-halo-color": css("--panel"), "text-halo-width": 1.5 } });
   map.addLayer({ id: "gpsTrack", type: "line", source: "gpsTrack", paint: { "line-color": css("--gps"), "line-width": 2, "line-opacity": 0.5 } });
   map.addLayer({ id: "fixes", type: "circle", source: "fixes",
     paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 12, 1.8, 17, 4],
@@ -442,9 +457,58 @@ function updateMap() {
   map.getSource("gpsNow").setData(fc(fix ? [pt(fix, { opacity: age < 3 ? 1 : age < 15 ? 0.5 : 0.2 })] : []));
   map.getSource("gpsAcc").setData(fc(fix && age < 3 ? [circle(fix, Math.max(1, fix.acc))] : []));
   updateMapMatch();
+  updateRoute();
   const lead = visible()[0];
   const p = lead ? shownAt(lead.points(), t) : null;
   if (follow && p) map.jumpTo({ center: [p.lon, p.lat] });
+}
+
+/** The plan in force at `time` (the last one made by then that succeeded), and the guidance then. */
+function routeAt(time) {
+  const plans = data.routes?.plans ?? [];
+  let plan = null;
+  for (const p of plans) if (p.t <= time && p.status === "done") plan = p;
+  const g = lastBefore(data.routes?.progress ?? [], time);
+  return { plan, g: g && time - g[0] < 3 ? g : null };
+}
+
+function updateRoute() {
+  const on = $("showRoute").checked && data.routes?.plans.length;
+  const { plan, g } = on ? routeAt(t) : { plan: null, g: null };
+  const old = on ? data.routes.plans.filter((p) => p !== plan && p.t <= t && p.status === "done" && p.reason !== "resume") : [];
+  map.getSource("routeOld").setData(fc(old.filter((p) => p.points.length > 1).map((p) => line(p.points.map(([la, lo]) => [lo, la])))));
+  map.getSource("routeLine").setData(fc(plan && plan.points.length > 1 ? [line(plan.points.map(([la, lo]) => [lo, la]))] : []));
+  const next = g && plan && g[1] === plan.id ? g[6] : -1;
+  map.getSource("routeManeuvers").setData(fc(plan ? plan.maneuvers.map((m, i) =>
+    pt(m, { next: i === next, label: m.kind === "roundabout" ? `roundabout ${m.exit}` : m.kind })) : []));
+}
+
+function renderRoute() {
+  const plans = data.routes?.plans ?? [];
+  $("routeBox").hidden = !plans.length;
+  if (!plans.length) return;
+  const arrived = data.events.find((e) => e.text.startsWith("route arrived"));
+  const offs = data.routes.progress.filter((g, i, a) => g[2] === "off" && a[i - 1]?.[2] !== "off").length;
+  $("route").innerHTML = `<div class="facts">` +
+    plans.map((p) => `<div class="route-plan" data-t="${p.t}"><b>${fmtT(p.t)}</b> ${esc(p.reason)}: ` +
+      (p.status === "done" ? `<b>${fmtKm(p.lengthM)}</b>, ${Math.round(p.durationS / 60)} min planned` : `<span class="bad">${esc(p.status)}</span>`) +
+      (p.reason === "resume" ? "" : ` · planned in <b>${Math.round(p.planMs)} ms</b>${p.slices > 1 ? ` (${p.slices} slices, ${Math.round(p.wallMs)} ms wall)` : ""}`) + `</div>`).join("") +
+    `<div class="muted" style="margin-top:4px">${offs ? `${offs}× off the route` : "never off the route"}` +
+    (arrived ? ` · ${esc(arrived.text.replace(/^route arrived [^:]*: /, "arrived: "))}` : "") + `</div></div>` +
+    `<div id="routeNow" class="muted" style="margin-top:6px"></div>`;
+  for (const el of $("route").querySelectorAll(".route-plan")) { el.style.cursor = "pointer"; el.onclick = () => seek(+el.dataset.t); }
+}
+
+/** Guidance at the cursor, under the route's plans. */
+function renderRouteNow() {
+  const el = $("routeNow");
+  if (!el) return;
+  const { plan, g } = routeAt(t);
+  if (!plan || !g) { el.textContent = plan ? "guidance: not running at the cursor" : "no route yet at the cursor"; return; }
+  const [, , state, along, off, toNext, nextIndex] = g;
+  const next = plan.maneuvers[nextIndex];
+  el.innerHTML = `guidance: <b>${esc(state)}</b>${off === null ? ", nothing matched" : `, ${Math.round(off)} m off the route`} · ` +
+    `${fmtKm(along)} of ${fmtKm(plan.lengthM)}` + (next ? ` · next <b>${esc(next.kind === "roundabout" ? `roundabout exit ${next.exit}` : next.kind)}</b> in ${fmtM(toNext)}` : "");
 }
 
 function updateMapMatch() {
@@ -558,10 +622,11 @@ function renderNow() {
     `<div class="now-row"><span class="swatch" style="background:var(--gps)"></span><span>GPS: ${gpsText}</span></div>` + rows +
     `<div class="muted" style="margin-top:4px">Speed ${obd ? `${obd[1]} km/h (OBD)` : "—"}</div>`;
   for (const li of $("events").children) li.classList.toggle("past", +li.dataset.t <= t);
+  renderRouteNow();
 }
 
 // Events worth seeing by default: markers, trip start/end, Cut GPS, navigator and map-matching changes, GPS trust.
-const KEY_EVENT = /^(sim gnss outage|nav mode|nav reset|mm (?!graph)|gnss trust|nav parked pose (confirmed|rejected))/;
+const KEY_EVENT = /^(sim gnss outage|nav mode|nav reset|mm (?!graph)|gnss trust|nav parked pose (confirmed|rejected)|route )/;
 function renderEvents() {
   const all = $("allEvents").checked;
   const list = data.events.filter((e) => !e.text.startsWith("unsolicited") &&
@@ -587,7 +652,8 @@ function renderSummary() {
 // ---------- timeline ----------
 const tl = $("timeline");
 const PAD_L = 52, PAD_R = 12;
-const ROWS = { err: [8, 96], speed: [106, 134], gps: [142, 154] };
+const ROWS = { err: [8, 96], speed: [106, 134], gps: [142, 154], route: [158, 168] };
+const ROUTE_STATE_COLOR = { on: "--route", leaving: "--warn", off: "--bad", unsure: "--nogps", arrived: "--ok" };
 const ERR_MAX = 300;
 function x(time) { return PAD_L + (time / data.durationS) * (tl.clientWidth - PAD_L - PAD_R); }
 function tAtX(px) { return Math.max(0, Math.min(data.durationS, ((px - PAD_L) / (tl.clientWidth - PAD_L - PAD_R)) * data.durationS)); }
@@ -654,6 +720,20 @@ function drawTimeline() {
     g.fillStyle = css("--rej"); g.fillRect(x(e.t) - 1, b0 - 4, 2, b1 - b0 + 4);
   }
 
+  // Route guidance: pink = on the route, amber = leaving it, red = off (plans again), grey = unsure; ticks = plans.
+  const progress = data.routes?.progress ?? [];
+  if (progress.length) {
+    const [r0, r1] = ROWS.route;
+    g.fillStyle = text2; g.fillText("route", 4, r1 - 1);
+    for (let i = 0; i < progress.length; i++) {
+      const p = progress[i], next = progress[i + 1];
+      const end = Math.min(next ? next[0] : p[0] + 1, p[0] + 3);
+      g.fillStyle = css(ROUTE_STATE_COLOR[p[2]] ?? "--text2") + (p[2] === "on" ? "88" : "");
+      g.fillRect(x(p[0]), r0, Math.max(1, x(end) - x(p[0])), r1 - r0);
+    }
+    for (const plan of data.routes.plans) { g.fillStyle = css("--route"); g.fillRect(x(plan.t) - 1, r0 - 3, 2, r1 - r0 + 3); }
+  }
+
   // Playhead.
   g.strokeStyle = css("--text"); g.lineWidth = 1.5;
   g.beginPath(); g.moveTo(x(t), 0); g.lineTo(x(t), h); g.stroke();
@@ -701,6 +781,7 @@ $("showErr").onchange = () => updateDynamic();
 $("showRoads").onchange = () => setRoads();
 $("showTruth").onchange = () => setTruth();
 $("showMm").onchange = () => updateDynamic();
+$("showRoute").onchange = () => updateDynamic();
 $("allEvents").onchange = () => data && renderEvents();
 document.addEventListener("keydown", (e) => {
   if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
@@ -749,6 +830,7 @@ async function run() {
   renderDrive();
   renderOutages();
   renderEvents();
+  renderRoute();
   renderSummary();
   loadRoads(file);
   loadTruth(file);
