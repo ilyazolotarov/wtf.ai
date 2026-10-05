@@ -496,7 +496,7 @@ export class NavigatorService implements PositionSource {
     this.lastObdUs = s.tUs;
     if (s.raw > 0 && this.poseStored) {
       // Driving: the stored pose is stale until the next stop.
-      this.deps.calibration.clearParkedPose();
+      if (this.vin) this.deps.calibration.clearParkedPose(this.vin);
       this.poseStored = false;
     }
     this.pending.push({ tUs: s.tUs, obd: { tUs: s.tUs, speedMps: s.speedMps, rawKph: s.raw } });
@@ -522,7 +522,7 @@ export class NavigatorService implements PositionSource {
         if (out.pose === "confirmed") this.note("nav parked pose confirmed");
         if (out.pose === "rejected") {
           this.note(`nav parked pose rejected: fix ${Math.round(out.errorM ?? 0)} m away (±${Math.round(input.fix.hAccM)} m)`);
-          this.deps.calibration.clearParkedPose();
+          if (this.vin) this.deps.calibration.clearParkedPose(this.vin);
           this.poseStored = false;
         }
       } else if (late) {

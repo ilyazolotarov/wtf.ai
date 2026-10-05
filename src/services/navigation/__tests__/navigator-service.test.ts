@@ -10,7 +10,7 @@ import type { GnssFix } from "@/nav/types";
 import { Emitter } from "@/obd/emitter";
 import type { EngineState, SpeedSample } from "@/obd/types";
 import type { KeyValueStore } from "@/obd/vehicle-link-core";
-import { CALIBRATION_KEY, CalibrationStore, PARKED_POSE_KEY, type StoredPose } from "@/services/navigation/calibration-store";
+import { CALIBRATION_KEY, CalibrationStore, PARKED_POSES_KEY, type StoredPose } from "@/services/navigation/calibration-store";
 import { NavigatorService } from "@/services/navigation/navigator-service";
 import type { ActiveRoadGraph, RoadGraphSource } from "@/services/offline-map/road-graph-file";
 import type { decodeImuBatch } from "@/services/sensor-capture/sensor-service";
@@ -256,6 +256,9 @@ describe("NavigatorService", () => {
   });
 });
 
+/** The parked pose stored for a car. */
+const storedPose = (store: KeyValueStore, vin = VIN) => store.getJson<Record<string, StoredPose>>(PARKED_POSES_KEY)?.[vin] ?? null;
+
 describe("parked pose", () => {
   // Drive with clean GNSS, then stop and stand.
   const PARK: DriveSegment[] = [...cityDrive(2), { durationS: 8, speedMps: 0, yawRateDegS: 0 }, { durationS: 10, speedMps: 0, yawRateDegS: 0 }];
@@ -273,7 +276,7 @@ describe("parked pose", () => {
     await first.service.start();
     first.play(drive);
     first.engine.emit("engine-off", first.now());
-    const pose = store.getJson<StoredPose>(PARKED_POSE_KEY)!;
+    const pose = storedPose(store)!;
     const truth = drive.truthAt(drive.trip.imu.at(-1)!.tUs);
     first.service.stop();
     return { store, pose, truth };
@@ -295,7 +298,7 @@ describe("parked pose", () => {
     next.play(drive, { untilS: 5 });
     expect(next.service.getSnapshot()).toMatchObject({ source: "dr" });
     next.play(drive);
-    expect(store.getJson(PARKED_POSE_KEY)).toBeNull();
+    expect(storedPose(store)).toBeNull();
     expect(next.notes).toContain("nav parked pose confirmed");
     // ~600 m on coarse fixes only: without the pose, alignment would still be waiting for spread.
     const p = next.service.getSnapshot()!;
@@ -312,8 +315,32 @@ describe("parked pose", () => {
     await next.service.start();
     next.play(drive, { untilS: 5 });
     expect(next.notes.some((n) => n.startsWith("nav parked pose rejected"))).toBe(true);
-    expect(store.getJson(PARKED_POSE_KEY)).toBeNull();
+    expect(storedPose(store)).toBeNull();
     expect(next.service.getSnapshot()?.source).toBe("gnss");
+    next.service.stop();
+  });
+
+  test("one Wi-Fi fix far off doesn't drop it (jamming), three in a row do", async () => {
+    const { store, pose } = await parkFirst();
+    // Standing where it parked, no fixes of its own: the bogus ones are added by hand.
+    const drive = syntheticDrive({ segments: [{ durationS: 40, speedMps: 0, yawRateDegS: 0 }], gnss: "none", origin: pose, startHeadingRad: pose.headingRad, seed: 7 });
+    const next = harness({ store });
+    await next.service.start();
+    // Each a little apart: iOS repeats a Wi-Fi fix with tiny jitter, and a repeat counts once.
+    let k = 0;
+    const far = (tUs: number) => record({ tUs, lat: pose.lat + 0.0027 + 0.0004 * k, lon: pose.lon + 0.011 - 0.0006 * k++, hAccM: 55 });
+    next.play(drive, { untilS: 2 });
+    next.gnss.emit(far(next.now()));
+    next.play(drive, { untilS: 10 });
+    expect(next.notes.some((n) => n.startsWith("nav parked pose rejected"))).toBe(false);
+    expect(next.service.getSnapshot()?.source).toBe("dr");
+    expect(storedPose(store)).not.toBeNull();
+    for (const s of [12, 20]) {
+      next.gnss.emit(far(next.now()));
+      next.play(drive, { untilS: s + 2 });
+    }
+    expect(next.notes.some((n) => n.startsWith("nav parked pose rejected"))).toBe(true);
+    expect(storedPose(store)).toBeNull();
     next.service.stop();
   });
 
@@ -352,7 +379,7 @@ describe("parked pose", () => {
     expect(next.notes.filter((n) => n.startsWith("nav vehicle"))).toEqual(["nav vehicle unknown, not the one expected: restart"]);
     expect(next.service.getDebug().parkedPose).toBe("none");
     // The stored pose stays for the car it belongs to.
-    expect(store.getJson(PARKED_POSE_KEY)).not.toBeNull();
+    expect(storedPose(store)).not.toBeNull();
     next.service.stop();
   });
 });
@@ -568,6 +595,20 @@ describe("CalibrationStore", () => {
     expect(new CalibrationStore(store, { ...PHONE, os: "ios 26.1" }).gnssLag()).toBeNull();
     // Dropped for good, not only hidden.
     expect(new CalibrationStore(store, PHONE).gnssLag()).toBeNull();
+  });
+
+  test("a parked pose per car; the single pose of older versions still loads", () => {
+    const store = memoryStore();
+    const calibration = new CalibrationStore(store, PHONE);
+    const pose = { lat: 51.5, lon: 30.7, headingRad: 1, posSigmaM: 5, headingSigmaRad: 0.05 };
+    store.setJson("nav.parkedPose", { ...pose, vin: VIN, savedAt: 1 });
+    expect(calibration.parkedPose(VIN)?.lat).toBe(51.5);
+    calibration.saveParkedPose("LOGAN", { ...pose, lat: 51.6 });
+    expect(calibration.parkedPose(VIN)?.lat).toBe(51.5);
+    expect(calibration.parkedPose("LOGAN")?.lat).toBe(51.6);
+    calibration.clearParkedPose("LOGAN");
+    expect(calibration.parkedPose("LOGAN")).toBeNull();
+    expect(calibration.parkedPose(VIN)?.lat).toBe(51.5);
   });
 
   test("stores a speed scale only once it is learned, and reloads it with room to move", () => {

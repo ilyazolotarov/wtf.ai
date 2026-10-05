@@ -4,7 +4,8 @@
 //   value stored under another model or version is dropped.
 // - OBD speed scale k_s, per VIN: a property of the car and its tyres.
 // - the pose while parked, per VIN: the next session starts dead reckoning from it at once
-//   instead of waiting for a GNSS course, or for ~500 m of alignment under jamming.
+//   instead of waiting for a GNSS course, or for ~500 m of alignment under jamming. One per car: with a
+//   single slot, a second car's pose replaced the first's (2026-10-05).
 // - the compass calibrations, per VIN (§7.6): the car's own magnetic field and the phone's angle in
 //   the mount, learned against known headings over earlier drives, one per mounting (the phone's
 //   tilt), most recent first. This phone only (the store is local).
@@ -50,7 +51,9 @@ interface Stored {
 }
 
 export const CALIBRATION_KEY = "nav.calibration";
+/** Before poses were kept per car: one pose, with its VIN. */
 export const PARKED_POSE_KEY = "nav.parkedPose";
+export const PARKED_POSES_KEY = "nav.parkedPoses";
 
 /** Save k_s only once it is learned this well (1σ). The EKF prior is 0.03. */
 const SPEED_SCALE_SAVE_SIGMA = 0.01;
@@ -113,17 +116,25 @@ export class CalibrationStore {
 
   /** Pose saved when this car was last parked. */
   parkedPose(vin: string): StoredPose | null {
-    const pose = this.store.getJson<StoredPose>(PARKED_POSE_KEY);
-    return pose && pose.vin === vin && Number.isFinite(pose.lat) && Number.isFinite(pose.headingRad) ? pose : null;
+    const pose = this.parkedPoses()[vin];
+    return pose && Number.isFinite(pose.lat) && Number.isFinite(pose.headingRad) ? pose : null;
   }
 
   saveParkedPose(vin: string, pose: ParkedPose, now = Date.now()): void {
-    this.store.setJson(PARKED_POSE_KEY, { ...pose, vin, savedAt: now } satisfies StoredPose);
+    this.store.setJson(PARKED_POSES_KEY, { ...this.parkedPoses(), [vin]: { ...pose, vin, savedAt: now } satisfies StoredPose });
   }
 
-  /** The car moved, or a fix showed the pose is wrong. */
-  clearParkedPose(): void {
-    this.store.setJson(PARKED_POSE_KEY, null);
+  /** This car moved, or a fix showed its pose is wrong. */
+  clearParkedPose(vin: string): void {
+    const { [vin]: _dropped, ...rest } = this.parkedPoses();
+    this.store.setJson(PARKED_POSES_KEY, rest);
+  }
+
+  private parkedPoses(): Record<string, StoredPose> {
+    const poses = this.store.getJson<Record<string, StoredPose>>(PARKED_POSES_KEY);
+    if (poses) return poses;
+    const old = this.store.getJson<StoredPose>(PARKED_POSE_KEY);
+    return old?.vin ? { [old.vin]: old } : {};
   }
 
   private read(): Stored {

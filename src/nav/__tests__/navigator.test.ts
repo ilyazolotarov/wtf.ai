@@ -296,10 +296,13 @@ describe("Navigator from a parked pose", () => {
     expect(haversineM(end, parked.truth.at(-1)!)).toBeLessThan(10);
   });
 
-  test("refused when the fixes so far disagree", () => {
+  test("refused when a satellite fix so far disagrees, not a Wi-Fi one alone (jamming)", () => {
     const nav = new Navigator();
-    nav.onGnss({ tUs: 1, lat: pose.lat + 0.01, lon: pose.lon, hAccM: 20 });
+    nav.onGnss({ tUs: 1, lat: pose.lat + 0.01, lon: pose.lon, hAccM: 20, speedMps: 0 });
     expect(nav.startFromPose(pose)).toBe(false);
     expect(nav.mode).toBe("anchored");
+    const wifi = new Navigator();
+    wifi.onGnss({ tUs: 1, lat: pose.lat + 0.01, lon: pose.lon, hAccM: 20 });
+    expect(wifi.startFromPose(pose)).toBe(true);
   });
 });

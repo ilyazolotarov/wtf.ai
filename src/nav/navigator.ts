@@ -64,6 +64,11 @@ export interface NavConfig {
   reanchorM: number;
   /** A parked pose is confirmed by a fix at least this accurate that agrees with it… */
   poseConfirmAccuracyM: number;
+  /**
+   * Consecutive Wi-Fi/cell fixes failing the gate that drop an unconfirmed parked pose (a satellite fix: one). Under
+   * jamming one can claim ±55 m and be 850 m off (2026-10-05): alone it threw away a pose that was right.
+   */
+  poseRejectCoarse: number;
   /** …after driving this far: a fix taken while parked says nothing about the heading. */
   poseConfirmDistanceM: number;
   ekf: Partial<EkfConfig>;
@@ -159,6 +164,7 @@ export const DEFAULT_NAV_CONFIG: NavConfig = {
   reanchorM: 5000,
   poseConfirmAccuracyM: 100,
   poseConfirmDistanceM: 150,
+  poseRejectCoarse: 3,
   ekf: {},
   gnssLag: {},
   imu: {},
@@ -341,7 +347,10 @@ export class Navigator {
   private relHistory = new History(3_000_000);
   private alignPoints: (AlignPoint & { tUs: number })[] = [];
 
-  private anchor: { coord: Coordinate; sigma: number; distanceM: number } | null = null;
+  /** `sat`: from a satellite fix; one from Wi-Fi/cell alone doesn't refuse a parked pose. */
+  private anchor: { coord: Coordinate; sigma: number; distanceM: number; sat: boolean } | null = null;
+  /** Wi-Fi/cell fixes in a row that disagreed with an unconfirmed parked pose. */
+  private poseCoarseRejected = 0;
   private lastFix: GnssFix | null = null;
   private rejectedSat = 0;
   /** Speed scale for the next EKF start: a stored per-car value, or the one learned before a reset. */
@@ -672,7 +681,7 @@ export class Navigator {
    */
   startFromPose(pose: ParkedPose): boolean {
     if (this.ekf) return false;
-    if (this.anchor) {
+    if (this.anchor?.sat) {
       const d = this.frame!.toEnu(pose);
       const a = this.frame!.toEnu(this.anchor.coord);
       const sigma = Math.hypot(this.anchor.sigma + this.anchor.distanceM, pose.posSigmaM);
@@ -685,6 +694,7 @@ export class Navigator {
     const sn = Math.sin(theta);
     this.initEkf(theta, e - (cs * this.rel.e - sn * this.rel.n), n - (sn * this.rel.e + cs * this.rel.n), pose.posSigmaM, pose.headingSigmaRad, "pose");
     this.poseUnverifiedFromM = this.stats.obdDistanceM;
+    this.poseCoarseRejected = 0;
     return true;
   }
 
@@ -1026,7 +1036,7 @@ export class Navigator {
   private updateBeforeInit(fix: GnssFix, fE: number, fN: number, tRef: number, sigma: number): FixOutcome {
     const c = this.config;
     if (!this.anchor || SQRT_68 * sigma < SQRT_68 * this.anchor.sigma + this.anchor.distanceM) {
-      this.anchor = { coord: { lat: fix.lat, lon: fix.lon }, sigma, distanceM: 0 };
+      this.anchor = { coord: { lat: fix.lat, lon: fix.lon }, sigma, distanceM: 0, sat: isSatelliteFix(fix) };
     }
     const relThen = this.relHistory.at(tRef, 2) ?? [this.rel.e, this.rel.n, this.rel.psi];
 
@@ -1111,12 +1121,14 @@ export class Navigator {
     const outcome: FixOutcome = { status: pos.accepted ? "accepted" : "rejected", errorM: Math.hypot(rE, rN), predictedSigmaM, nis: pos.nis };
     const sat = isSatelliteFix(fix);
     if (this.poseUnverifiedFromM !== null) {
-      if (!pos.accepted) {
+      if (!pos.accepted && (sat || ++this.poseCoarseRejected >= c.poseRejectCoarse)) {
         // The car isn't where it was parked: a pose frozen from it would be wrong too.
         this.frozenPose = null;
         this.reset(fix, sigma);
         return { ...outcome, pose: "rejected" };
       }
+      if (!pos.accepted) return outcome;
+      this.poseCoarseRejected = 0;
       if (fix.hAccM <= c.poseConfirmAccuracyM && this.stats.obdDistanceM - this.poseUnverifiedFromM >= c.poseConfirmDistanceM) {
         this.poseUnverifiedFromM = null;
         outcome.pose = "confirmed";
@@ -1158,7 +1170,7 @@ export class Navigator {
     // The speed scale is a property of the car, not of the diverged track: keep it.
     const { ks, ksVar, so, soVar } = this.ekf!.params();
     this.speedScale = { ks, ksVar, so, soVar };
-    this.anchor = { coord: { lat: fix.lat, lon: fix.lon }, sigma, distanceM: 0 };
+    this.anchor = { coord: { lat: fix.lat, lon: fix.lon }, sigma, distanceM: 0, sat: isSatelliteFix(fix) };
     this.ekf = null;
     this.ekfHistory.clear();
     this.twin = null;

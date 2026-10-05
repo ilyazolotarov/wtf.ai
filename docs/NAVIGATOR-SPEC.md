@@ -134,10 +134,15 @@ jammed:
 - **Used** (`Navigator.startFromPose`): when the app starts and the VIN matches, the car of the adapter auto-connect
   will use, known before it connects. The EKF starts at once with σ widened by 5 m and 2°. Refused if the fixes so
   far disagree with it.
-- **Checked:** until confirmed, any fix that fails the EKF gate drops it (the car was moved or turned): reset to
-  `anchored` at that fix, and the stored pose is deleted. It is confirmed by an agreeing fix ≤ 100 m after 150 m of
-  driving, because a fix while parked says nothing about the heading. A live VIN other than the expected one
-  restarts the navigator without it.
+- **Checked:** until confirmed, a satellite fix that fails the EKF gate drops it (the car was moved or turned), and
+  so do 3 Wi-Fi/cell fixes in a row that fail it (`poseRejectCoarse`): reset to `anchored` at that fix, and the stored
+  pose is deleted. One Wi-Fi fix isn't enough: on 2026-10-05 a single one claiming ±55 m, 850 m from where the Logan
+  really stood, threw away its correct pose, and the drive never found the road after. Likewise a Wi-Fi anchor
+  doesn't refuse a pose at `startFromPose`, a satellite one does. It is confirmed by an agreeing fix ≤ 100 m after
+  150 m of driving, because a fix while parked says nothing about the heading. A live VIN other than the expected
+  one restarts the navigator without it.
+- **One per car** (`nav.parkedPoses`, by VIN): with one slot, the Logan's pose replaced the CX-5's on 2026-10-05,
+  and the CX-5 drove home anchored with no heading for 5 min.
 - **Not checked:** with no fix at all, nothing can tell that the car was moved while the app was off.
 - **Measured** (`replay --chain`, 3 consecutive pairs of the real drives):
   - q8tfjs, jammed for its first 10 min: DR from 0 s instead of alignment at 613 s; coarse fixes median 9 m from
