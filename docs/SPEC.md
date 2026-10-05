@@ -2,7 +2,7 @@
 
 Status: draft v8 (2026-10-04). Source of truth for coding agents. Update this file when decisions change.
 
-Companion specs: [UI-SPEC.md](UI-SPEC.md) (UI-first milestone), [VEHICLE-LINK-SPEC.md](VEHICLE-LINK-SPEC.md) (Bluetooth ELM327 communication), [TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md) (trip detection, logging, export — Phase 1), [NAVIGATOR-SPEC.md](NAVIGATOR-SPEC.md) (Stage 1 EKF, online calibration, replay — Phase 2), [MAPMATCH-SPEC.md](MAPMATCH-SPEC.md) (road graph, particle filter — Phase 5), [ROUTING-SPEC.md](ROUTING-SPEC.md) (A\* routing on the road graph — Phase 6).
+Companion specs: [UI-SPEC.md](UI-SPEC.md) (UI-first milestone), [VEHICLE-LINK-SPEC.md](VEHICLE-LINK-SPEC.md) (Bluetooth ELM327 communication), [TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md) (trip detection, logging, export — Phase 1), [NAVIGATOR-SPEC.md](NAVIGATOR-SPEC.md) (Stage 1 EKF, online calibration, replay — Phase 2), [MAPMATCH-SPEC.md](MAPMATCH-SPEC.md) (road graph, particle filter — Phase 5), [ROUTING-SPEC.md](ROUTING-SPEC.md) (A\* routing on the road graph — Phase 6), [SEARCH-SPEC.md](SEARCH-SPEC.md) (offline address search — Phase 6).
 
 ## 1. Problem & goal
 

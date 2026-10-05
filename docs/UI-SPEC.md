@@ -191,8 +191,10 @@ Parallel with Phase 3; each screen is independent. Use `@expo/ui` for settings-l
 
 ### 7.1 `route`
 
-- Search field filtering a list of cities (both EN and UK names).
-- Selected city → summary card: straight-line distance, bearing and time at 60 km/h; once its route is planned, the
+- Search field: with the active region's search index (SEARCH-SPEC §6), places, streets, house numbers and POIs
+  from it, each with what it is, its settlement, distance and direction; without one, a list of cities filtered by
+  their EN and UK names, and a note to download the region.
+- Selected result or city → summary card: straight-line distance, bearing and time at 60 km/h; once its route is planned, the
   road distance and the planned time.
 - "Start guidance" plans a road route from the position (ROUTING-SPEC, `runtime.routes`, `useRoute()` in
   `src/providers/route-provider.tsx`) and returns to the map; "Stop guidance" ends it. A failed plan says why.

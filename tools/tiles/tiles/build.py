@@ -14,6 +14,7 @@ any number of regions:
       index.json                 catalog: OSM date, shared files, regions (size, md5, sha256)
       <region>.pmtiles           OpenMapTiles-schema vector tiles, one per region
       <region>.graph.bin         road graph for map matching (graph.py, MAPMATCH-SPEC §4)
+      <region>.search.bin        address search index (search.py, SEARCH-SPEC)
       style.json                 Liberty with `{common}` / `{tiles}` placeholders (style.py)
       sprite-ofm{,@2x}.{json,png}
       font-<slug>-<range>.pbf
@@ -39,6 +40,7 @@ from pathlib import Path
 
 from .graph import build_region_graph
 from .region import load_registry, read_poly
+from .search import build_region_search
 from .style import SPRITE_NAME, collect_fonts, font_slug, offline_style
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -234,6 +236,13 @@ def build_graph(region: str, clipped: Path, release: Path = RELEASE) -> Path:
     return output
 
 
+def build_search(region: str, clipped: Path, release: Path = RELEASE) -> Path:
+    """Search index from the region's clipped extract → out/release/<region>.search.bin."""
+    output = release / f"{region}.search.bin"
+    build_region_search(clipped, output, osm_date())
+    return output
+
+
 def hashes(path: Path) -> dict[str, str | int]:
     md5, sha256 = hashlib.md5(), hashlib.sha256()
     with open(path, "rb") as f:
@@ -263,6 +272,9 @@ def write_index(common: list[dict[str, str]], release: Path = RELEASE) -> dict:
         graph = release / f"{name}.graph.bin"
         if graph.exists():
             entry["graph"] = {"asset": graph.name, **hashes(graph)}
+        search = release / f"{name}.search.bin"
+        if search.exists():
+            entry["search"] = {"asset": search.name, **hashes(search)}
         regions.append(entry)
     index = {
         "format": INDEX_FORMAT,
@@ -288,6 +300,23 @@ def build_all(regions: list[str] | None = None, refresh_osm: bool = False, heap:
     for name, clipped in clip_regions(pbf, names).items():
         build_region(name, clipped, heap=heap)
         build_graph(name, clipped)
+        build_search(name, clipped)
+    return write_index(build_common())
+
+
+def build_searches(regions: list[str] | None = None, refresh_osm: bool = False) -> dict:
+    """Search indexes only (clipping regions whose extract is missing), then index.json."""
+    registry = load_registry(REGIONS)
+    names = regions or list(registry)
+    unknown = [n for n in names if n not in registry]
+    if unknown:
+        raise FileNotFoundError(f"unknown regions: {unknown}")
+    pbf, _ = ensure_osm(refresh_osm)
+    missing = [n for n in names if refresh_osm or not (CACHE / "extracts" / f"{n}.osm.pbf").exists()]
+    if missing:
+        clip_regions(pbf, missing)
+    for name in names:
+        build_search(name, CACHE / "extracts" / f"{name}.osm.pbf")
     return write_index(build_common())
 
 

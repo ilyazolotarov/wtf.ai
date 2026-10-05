@@ -1,0 +1,30 @@
+{
+  "tokens": [
+    ["Вулиця Шевченка", ["vulytsia", "shevchenka"]],
+    ["Київ", ["kyiv"]],
+    ["KYIV", ["kyiv"]],
+    ["Запоріжжя", ["zaporizhzhia"]],
+    ["Zaporizhzhya", ["zaporizhzhia"]],
+    ["Южна", ["iuzhna"]],
+    ["Yuzhna", ["iuzhna"]],
+    ["ЄВРО", ["ievro"]],
+    ["Yevro", ["ievro"]],
+    ["П'ятихатки", ["piatykhatky"]],
+    ["Пʼятихатки", ["piatykhatky"]],
+    ["Ґудзик", ["gudzyk"]],
+    ["Хмельницький", ["khmelnytskyi"]],
+    ["Щорса", ["shchorsa"]],
+    ["Ёлка Ы Э", ["elka", "y", "e"]],
+    ["Café Über", ["cafe", "uber"]],
+    ["Школа №5, просп. Миру", ["shkola", "5", "prosp", "myru"]],
+    ["Шосе 12/2-А", ["shose", "12", "2", "a"]],
+    ["名古屋 Nagoya", ["nagoia"]]
+  ],
+  "houses": [
+    ["10", "10"],
+    ["10-А", "10a"],
+    ["10а", "10a"],
+    ["12/2", "12/2"],
+    ["5 к2", "5k2"]
+  ]
+}

@@ -28,6 +28,8 @@ export interface CatalogRegion extends CatalogFile {
   bounds: [number, number, number, number];
   /** Road graph for map matching (MAPMATCH-SPEC §4.6); absent: the region is display-only. */
   graph?: CatalogFile;
+  /** Address search index (SEARCH-SPEC); absent in releases built before it. */
+  search?: CatalogFile;
 }
 
 export interface MapCatalog {
