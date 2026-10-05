@@ -238,6 +238,9 @@ export class NavigatorService implements PositionSource {
     this.poseQuestion = null;
     this.poseStatus = "none";
     this.flush(this.deps.nowUs() - REORDER_US);
+    // The car's parked pose now (with a heading, its VIN known): kept at once, not at the next 30 s save, so an app
+    // closed right after starts from it.
+    if (headingRad !== undefined) this.saveCalibration();
     this.publish();
     return true;
   }

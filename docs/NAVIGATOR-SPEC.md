@@ -171,6 +171,9 @@ jammed:
   heading the EKF starts there (σ 10 m, 15°, init method `user`), confirmed: later fixes only pass its gate, so Wi-Fi
   can't move it, five rejected satellite fixes still reset it. Without one: anchored there (σ 10 m), the filter
   starting with the heading unknown. Note `nav position set by the driver: lat,lon N m from the dot, heading …`.
+- **Kept as the parked pose:** with a heading and the VIN known, the placing is saved as the car's parked pose (§6.1)
+  at once, not at the next 30 s save: an app closed right after starts from it, and a moved-on drive clears it as
+  usual. Without a heading nothing is saved (a parked pose needs one).
 
 ## 7. Calibration (online)
 

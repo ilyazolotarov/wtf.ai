@@ -446,6 +446,19 @@ describe("the driver puts the car on the map", () => {
     h.service.stop();
   });
 
+  test("placed with a heading while standing: it becomes the car's parked pose at once", async () => {
+    const store = memoryStore();
+    const drive = syntheticDrive({ segments: SEGMENTS, gnss: "none", origin, startHeadingRad: 0.8, seed: 3 });
+    const h = harness({ store });
+    await h.service.start();
+    h.play(drive, { untilS: 3 });
+    h.service.setUserPosition(origin, 0.8);
+    const pose = storedPose(store);
+    expect(pose && haversineM(pose, origin)).toBeLessThan(2);
+    expect(pose?.headingRad).toBeCloseTo(0.8, 2);
+    h.service.stop();
+  });
+
   test("without a heading: anchored there", async () => {
     const drive = syntheticDrive({ segments: SEGMENTS, gnss: "none", origin, startHeadingRad: 0.8, seed: 3 });
     const h = harness({ vin: null });
