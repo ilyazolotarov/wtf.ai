@@ -40,6 +40,15 @@
   label { color: var(--text2); display: flex; gap: 5px; align-items: center; }
   #file { max-width: 300px; }
   #status { color: var(--text2); margin-left: auto; }
+  #loading { position: absolute; inset: 0; z-index: 4; display: grid; place-items: center; background: color-mix(in srgb, var(--bg) 55%, transparent); }
+  #loading[hidden] { display: none; }
+  #loading > div { display: flex; gap: 12px; align-items: center; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 14px 18px; box-shadow: 0 6px 24px #0003; color: var(--text); max-width: 360px; }
+  #loading small { display: block; color: var(--text2); margin-top: 2px; }
+  .spinner { width: 22px; height: 22px; flex: none; border-radius: 50%; border: 3px solid var(--line); border-top-color: var(--accent);
+    animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 3s; } }
   details.more { position: relative; }
   details.more > summary { cursor: pointer; color: var(--text2); list-style: none; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; }
   details.more > div { position: absolute; z-index: 5; top: 32px; right: 0; background: var(--panel); border: 1px solid var(--line);
@@ -131,6 +140,8 @@
 <main>
   <div class="mapwrap">
     <div id="map"></div>
+    <div id="loading" hidden role="status" aria-live="polite"><div><span class="spinner" aria-hidden="true"></span>
+      <span>Building the replay… <span id="loadingTime"></span><small id="loadingNote"></small></span></div></div>
     <details class="layers">
       <summary>Layers</summary>
       <label><input id="showFixes" type="checkbox" checked /> every GPS fix</label>
@@ -286,7 +297,7 @@ map.on("error", (e) => showError(`map: ${e.error?.message ?? e.error}`));
 function addLayers() {
   const empty = fc([]);
   const sources = ["roads", "roadNodes", "truth", "truthBreaks", "particles", "clusters", "fixes", "gpsTrack", "gpsNow", "gpsAcc", "routeOld", "routeLine", "routeManeuvers"];
-  for (const tr of TRACKS) sources.push(`${tr.key}Line`, `${tr.key}Now`, `${tr.key}Acc`, `${tr.key}Err`);
+  for (const tr of TRACKS) sources.push(`${tr.key}Line`, `${tr.key}Jumps`, `${tr.key}Now`, `${tr.key}Acc`, `${tr.key}Err`);
   for (const id of sources) map.addSource(id, { type: "geojson", data: empty });
   addRoadLayers();
   // The phone's planned route (ROUTING-SPEC §8): the one in force at the cursor, and those it replaced.
@@ -309,6 +320,10 @@ function addLayers() {
     const c = css(tr.color);
     map.addLayer({ id: `${tr.key}Line`, type: "line", source: `${tr.key}Line`, layout: { "line-cap": "round", "line-join": "round" },
       paint: { "line-color": c, "line-width": tr.key === "phone" ? 4 : 3, "line-opacity": 0.85 } });
+    // Where the dot jumped (a new Wi-Fi fix, a correction, another road): the positions, not a path between them.
+    map.addLayer({ id: `${tr.key}Jumps`, type: "circle", source: `${tr.key}Jumps`,
+      paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 12, 2.5, 17, 5], "circle-color": "transparent",
+        "circle-stroke-color": c, "circle-stroke-width": 1.8, "circle-stroke-opacity": 0.9 } });
   }
   map.addLayer({ id: "gpsAcc", type: "fill", source: "gpsAcc", paint: { "fill-color": css("--gps"), "fill-opacity": 0.1 } });
   for (const tr of TRACKS) {
@@ -429,19 +444,29 @@ async function loadTruth(file) {
   await setTruth();
 }
 
+/** Faster than a car (45 m/s, plus 10 m for a fix's correction): the dot jumped, and where it went between is unknown. */
+const JUMP_MPS = 45;
+const JUMP_SLACK_M = 10;
+const metres = (a, b) => Math.hypot((a[1] - b[1]) * 111195, (a[2] - b[2]) * 111195 * Math.cos((a[1] * Math.PI) / 180));
+
 /** Lines and GPS fixes: change only with the data or the layer switches. */
 async function setStatic() {
   await map.ready;
   for (const tr of TRACKS) {
     const on = present(tr) && trackOn[tr.key];
     const segs = [];
+    const jumps = [];
     let cur = null, prev = null;
     if (on) for (const p of tr.points()) {
-      if (!cur || p[0] - prev[0] > 3) { cur = []; segs.push(cur); }
+      const gap = prev && p[0] - prev[0] > 3;
+      const jump = prev && !gap && metres(prev, p) > JUMP_MPS * (p[0] - prev[0]) + JUMP_SLACK_M;
+      if (jump) jumps.push(pt({ lat: prev[1], lon: prev[2] }), pt({ lat: p[1], lon: p[2] }));
+      if (!cur || gap || jump) { cur = []; segs.push(cur); }
       cur.push([p[2], p[1]]);
       prev = p;
     }
     map.getSource(`${tr.key}Line`).setData(fc(segs.filter((s) => s.length > 1).map((s) => line(s))));
+    map.getSource(`${tr.key}Jumps`).setData(fc(jumps));
   }
   const sats = data.fixes.filter((f) => f.sat && f.acc <= 50);
   map.getSource("gpsTrack").setData(fc(sats.length > 1 ? [line(sats.map((f) => [f.lon, f.lat]))] : []));
@@ -815,6 +840,19 @@ async function loadList() {
   if (params.get("t")) seek(Number(params.get("t")));
 }
 
+/** The overlay over the map while the server replays (the first parked-pose start replays every earlier log). */
+let loadingRun = 0;
+function showLoading(chained) {
+  const id = ++loadingRun;
+  const started = performance.now();
+  $("loadingNote").textContent = chained ? "The first replay of a session also replays the earlier drives for the parked pose." : "";
+  const tick = () => { $("loadingTime").textContent = `${Math.floor((performance.now() - started) / 1000)} s`; };
+  tick();
+  $("loading").hidden = false;
+  const timer = setInterval(tick, 500);
+  return { done() { clearInterval(timer); if (id === loadingRun) $("loading").hidden = true; } };
+}
+
 async function run() {
   const file = $("file").value;
   if (!file) return;
@@ -825,7 +863,13 @@ async function run() {
   activeOutage = -1;
   $("status").textContent = "replaying…";
   const started = performance.now();
-  const res = await fetch(`/api/replay?${new URLSearchParams(q)}`);
+  const loading = showLoading(q.from !== "cold" && !(Number(q.start) > 0));
+  let res;
+  try {
+    res = await fetch(`/api/replay?${new URLSearchParams(q)}`);
+  } finally {
+    loading.done();
+  }
   if (!res.ok) { $("status").textContent = await res.text(); return; }
   const payload = await res.json();
   if (!payload.outages) { $("status").textContent = "The viewer server is older than this page: stop it and run npm run replay:view again."; return; }

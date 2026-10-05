@@ -65,7 +65,11 @@ The viewer answers "how did my drive go": where the dot was against where the ca
     start (MAPMATCH-SPEC §8.2).
 - **Tracks** (side panel, each can be hidden): GPS in green (where the car really was), what the phone showed in
   purple (from the log's `nav_estimate`; older logs don't have it), the replay in blue, the compare replay in
-  orange. A replay track is what the app would have shown: the map-matched position while dead-reckoning.
+  orange. A replay track is what the app would have shown: the map-matched position while dead-reckoning. Where
+  the dot jumped (farther between two samples than 45 m/s + 10 m: a new Wi-Fi fix while the heading is unknown, a
+  fix's correction, the map match switching roads) the line breaks and both ends get a hollow circle: where it went
+  in between is unknown, and a straight line would read as a path through the buildings. The server's replay shows
+  a spinner over the map (the first parked-pose start of a session replays the earlier drives, ~25 s).
 - **Without GPS:** every stretch without good GPS:
   - *No GPS*: no clean satellite fix for over 15 s (jamming, tunnels) while the car moved at least 30 m; scored by
     how far off each dot was when GPS came back, and whether that was inside its circle.
