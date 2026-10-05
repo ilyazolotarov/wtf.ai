@@ -1,7 +1,7 @@
 // Jammed drives scored by where they end (MAPMATCH-SPEC §15.13): with no GPS there is no truth along the way, but
 // drives start and end at places known to a few metres (home, a parking spot). Each drive is replayed from its start
 // (a parked pose: the known place and heading) and scored by the app's dot at the end against the end place, and by
-// the off-road share while moving.
+// the off-road share while moving, and the roads the off-road cluster drove straight across (crossings.ts).
 // The particle filter is random and one run flips between roads on a single event, so each drive runs with `--seeds`
 // seeds (default 5): per drive the median end error and the share of runs ending > 50 m off; totals over drives.
 // Usage: npm run replay:places -- [--file <places.json>] [--nav '<json>'] [--mm '<json>'] [--seeds <n>] [--name <label>] [--threads <n>]
@@ -15,10 +15,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { haversineM, type Coordinate } from "../../src/nav/geo";
+import { LocalFrame } from "../../src/nav/geo/local-frame";
 import type { MapMatchConfig } from "../../src/nav/mapmatch/particle-filter";
 import type { NavConfig } from "../../src/nav/navigator";
 import { replayTrip } from "../../src/nav/replay/replay";
 import { readTripLog } from "../../src/triplog/trip-log-reader";
+import { roadCrossings, type PathPoint } from "./crossings";
 import { findGraph, openGraph } from "./graph-file";
 import { isMainThread, Pool, serveJobs, threadsArg } from "./pool";
 
@@ -40,18 +42,34 @@ interface Job {
   start: { lat: number; lon: number; headingRad: number; posSigmaM: number; headingSigmaRad: number } | undefined;
   end: Coordinate;
 }
-type Run = { endM: number; off: number };
+type Run = { endM: number; off: number; crossings: number };
 
 function runJob(j: Job): Run {
   const trip = readTripLog(new Uint8Array(readFileSync(path.join(LOGS, j.log))));
-  const g = openGraph(j.graphFile, trip.gnss.find((f) => f.hAccM < 2000)!);
+  const origin = trip.gnss.find((f) => f.hAccM < 2000)!;
+  const g = openGraph(j.graphFile, origin);
+  const frame = new LocalFrame(origin);
   try {
     const r = replayTrip(trip, { nav: j.nav, startPose: j.start, mapMatch: { graph: g.graph, config: { ...j.mm, seed: j.seed } } });
     const moving = r.track.filter((p) => p.mapMatch && (p.speedMps ?? 0) > 2);
     // The app's dot: the dominant cluster while it holds a road, else the EKF.
     const last = r.track.at(-1)!;
     const top = last.mapMatch && (last.mapMatch.state === "tracking" || last.mapMatch.state === "multimodal") ? last.mapMatch.clusters[0] : null;
-    return { endM: haversineM(top ?? last, j.end), off: moving.filter((p) => p.mapMatch!.state === "offroad").length / (moving.length || 1) };
+    // Roads the off-road cluster drove straight across (crossings.ts), in its unbroken runs as the top cluster.
+    const runs: PathPoint[][] = [[]];
+    for (const p of r.track) {
+      const c = p.mapMatch?.clusters[0];
+      const prev = runs.at(-1)!.at(-1);
+      if (!c || c.edge !== null) {
+        if (runs.at(-1)!.length) runs.push([]);
+        continue;
+      }
+      const [e, n] = frame.toEnu(c);
+      if (prev && Math.hypot(e - prev.e, n - prev.n) > 2 * (p.speedMps ?? 0) * (p.tS - prev.tS) + 15) runs.push([]);
+      runs.at(-1)!.push({ tS: p.tS, e, n });
+    }
+    const crossings = runs.reduce((k, run) => k + roadCrossings(g.graph, run).length, 0);
+    return { endM: haversineM(top ?? last, j.end), off: moving.filter((p) => p.mapMatch!.state === "offroad").length / (moving.length || 1), crossings };
   } finally {
     g.close();
   }
@@ -103,18 +121,21 @@ async function main() {
   const offs: number[] = [];
   let far = 0;
   let total = 0;
+  let crossings = 0;
   const median = (v: number[]) => [...v].sort((a, b) => a - b)[Math.floor(v.length / 2)];
   for (const d of drives) {
     const driveEnds = d.jobs.map((k) => runs[k].endM);
     const endM = median(driveEnds);
     const off = d.jobs.reduce((a, k) => a + runs[k].off, 0) / d.jobs.length;
     const driveFar = driveEnds.filter((e) => e > FAR_M).length;
+    const driveCrossings = d.jobs.map((k) => runs[k].crossings);
+    crossings += driveCrossings.reduce((a, b) => a + b, 0);
     far += driveFar;
     total += driveEnds.length;
     ends.push(endM);
     offs.push(off);
     rows.push(
-      `${d.log.slice(0, 22).padEnd(23)} end median ${endM.toFixed(0).padStart(4)} m (${driveEnds.map((e) => e.toFixed(0)).join(" ")})  > ${FAR_M} m ${driveFar}/${driveEnds.length}  off-road ${(off * 100).toFixed(0).padStart(3)} %`,
+      `${d.log.slice(0, 22).padEnd(23)} end median ${endM.toFixed(0).padStart(4)} m (${driveEnds.map((e) => e.toFixed(0)).join(" ")})  > ${FAR_M} m ${driveFar}/${driveEnds.length}  off-road ${(off * 100).toFixed(0).padStart(3)} %  crossings ${driveCrossings.join(" ")}`,
     );
   }
   const sorted = [...ends].sort((a, b) => a - b);
@@ -122,7 +143,8 @@ async function main() {
   for (const r of rows) console.log("  " + r);
   console.log(
     `  total: runs > ${FAR_M} m off ${far}/${total}; drive medians: median ${sorted[Math.floor(sorted.length / 2)]?.toFixed(0)} m, max ${sorted.at(-1)?.toFixed(0)} m, sum ${ends.reduce((a, b) => a + b, 0).toFixed(0)} m; ` +
-      `off-road mean ${((100 * offs.reduce((a, b) => a + b, 0)) / (offs.length || 1)).toFixed(0)} %`,
+      `off-road mean ${((100 * offs.reduce((a, b) => a + b, 0)) / (offs.length || 1)).toFixed(0)} %; ` +
+      `road crossings ${crossings}`,
   );
 }
 

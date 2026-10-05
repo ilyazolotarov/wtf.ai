@@ -148,6 +148,7 @@ npm run replay:bench -- tools/triplog/logs/*.ulg --jam-start --compass   # …an
 npm run replay:compass -- tools/triplog/logs/*.ulg                        # what the app logged about the compass in shadow (NAVIGATOR-SPEC §7.6)
 npm run replay:mm -- trip.ulg --start 300 --jam 300:inf --trace 300:420 # one jammed start, second by second
 npm run replay:places -- --mm '{"particles":1000}'                    # jammed drives scored by where they end (places.json)
+npm run replay:crossings -- tools/triplog/logs/*.ulg                   # roads the true path crossed away from junctions
 npm run replay:graph -- --graph tools/tiles/out/release/ukraine.graph.bin trip.ulg
 npm run replay:view -- --graph tools/tiles/out/release/kyiv.graph.bin  # viewer with a given graph
 ```
@@ -185,7 +186,12 @@ npm run replay:view -- --graph tools/tiles/out/release/kyiv.graph.bin  # viewer 
   metres (home, a parking spot). `tools/triplog/logs/places.json` (git-ignored with the logs: it says where people
   live) lists the places and, per drive, its log, start pose and end place (format at the top of `places.ts`). Each
   drive replays from its start pose with 5 seeds (`--seeds`); per drive the median end error, the runs ending
-  > 50 m off and the off-road share while moving. `--nav` / `--mm` as above, `--name` labels the run.
+  > 50 m off, the off-road share while moving, and the roads the off-road cluster drove straight across away from
+  junctions (`replay:crossings`). `--nav` / `--mm` as above, `--name` labels the run.
+- **`replay:crossings`:** a car crosses a road only at a junction (`src/nav/mapmatch/road-crossing.ts`: from clear
+  of it on one side to clear of it on the other, ≥ 25 m from an edge's end, no bridge or tunnel near, driveways and
+  parking aisles left out). Run on the clean satellite fixes it shows how often a real path seems to (GPS noise,
+  OSM geometry): 0 on the 12 clean drives so far.
 - **Threads:** `replay:bench` (both modes), `replay:mm` and `replay:places` replay their windows, sessions, drives
   and seeds on worker threads (`tools/replay/pool.ts`), all cores but one; `--threads N` to change that. Results
   are gathered in order, so the output is the same as on one thread. An outage window's replay stops 5 s after the
