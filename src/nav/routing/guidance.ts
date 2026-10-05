@@ -181,7 +181,7 @@ export class RouteGuidance {
   /** The first maneuver not yet passed (by more than `passedM`); `arrive` at the end. */
   private nextManeuver(alongM: number): number {
     const list = this.maneuvers;
-    for (let i = 1; i < list.length; i++) if (list[i].atM > alongM - this.config.passedM && list[i].atM > 0) return i;
+    for (let i = 1; i < list.length; i++) if (list[i].atM > alongM - this.config.passedM) return i;
     return list.length - 1;
   }
 

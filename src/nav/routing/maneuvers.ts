@@ -74,6 +74,8 @@ export function routeManeuvers(graph: RoadGraph, plan: RoutePlan): Maneuver[] {
   const first = coordinates[0];
   const last = coordinates.at(-1)!;
   const out: Maneuver[] = [{ kind: "depart", atM: 0, lat: first.lat, lon: first.lon, turnRad: 0 }];
+  // The car faces away from the route's start: turning around comes first.
+  if (plan.startTurnaround) out.push({ kind: "u-turn", atM: 0, lat: first.lat, lon: first.lon, turnRad: Math.PI });
   let atM = 0;
   /** Inside a roundabout: where the route entered it, the heading change so far and the legal exits passed. */
   let roundabout: { atM: number; lat: number; lon: number; turnRad: number; exits: number } | null = null;

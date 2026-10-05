@@ -123,6 +123,13 @@ describe("RouteGuidance", () => {
     expect(g.update(at(250, 0, 30, { headingRad: Math.PI })).state).toBe("arrived");
   });
 
+  test("a U-turn at the start is the first instruction until the car has driven off", () => {
+    const uTurnFirst = [MANEUVERS[0], maneuver("u-turn", 0, 0, 0), MANEUVERS[1], MANEUVERS[2]];
+    const g = new RouteGuidance(PLAN, uTurnFirst);
+    expect(uTurnFirst[g.update(at(0, 0, 0, { speedMps: 0 })).nextIndex].kind).toBe("u-turn");
+    expect(uTurnFirst[g.update(at(3, 30, 0)).nextIndex].kind).toBe("left");
+  });
+
   test("a maneuver close after the next comes with it ('then')", () => {
     const close = [MANEUVERS[0], MANEUVERS[1], maneuver("right", 1080, 1000, 80), MANEUVERS[2]];
     const g = new RouteGuidance(PLAN, close);

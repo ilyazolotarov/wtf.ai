@@ -37,6 +37,8 @@ export interface RoutePlan {
   coordinates: Coordinate[];
   /** How far the route's ends are from the requested start and destination, m. */
   offRoadM: { start: number; end: number };
+  /** The route starts against the car's heading: turn around first. */
+  startTurnaround?: boolean;
 }
 
 export interface RouteStats {
@@ -250,14 +252,19 @@ export class RouteSearch {
     return seen;
   }
 
+  /** Leaving in direction `dir` along a road heading `roadHeadingRad` turns the car around. */
+  private againstHeading(roadHeadingRad: number, dir: 1 | -1): boolean {
+    const heading = this.from.headingRad;
+    const travel = dir === 1 ? roadHeadingRad : roadHeadingRad + Math.PI;
+    return heading !== undefined && Math.abs(wrap(travel - heading)) > Math.PI / 2;
+  }
+
   private addStart(start: End): void {
     const c = this.costs;
     const { edge, alongM, headingRad } = start.near;
-    const heading = this.from.headingRad;
     for (const dir of [1, -1] as const) {
       if (!allowed(edge, dir)) continue;
-      const travel = dir === 1 ? headingRad : headingRad + Math.PI;
-      const turnaround = heading !== undefined && Math.abs(wrap(travel - heading)) > Math.PI / 2 ? c.turnaroundS : 0;
+      const turnaround = this.againstHeading(headingRad, dir) ? c.turnaroundS : 0;
       const g0 = start.extraS + turnaround;
       // Straight to a destination ahead on the same edge.
       const dest = this.dests.get(edge.id);
@@ -344,7 +351,14 @@ export class RouteSearch {
         if (!last || last.lat !== p.lat || last.lon !== p.lon) coordinates.push(p);
       }
     }
-    return { legs, lengthM, durationS: goal.cost - penaltyS, coordinates, offRoadM: { start: start!.near.distanceM, end: goal.dest.near.distanceM } };
+    return {
+      legs,
+      lengthM,
+      durationS: goal.cost - penaltyS,
+      coordinates,
+      offRoadM: { start: start!.near.distanceM, end: goal.dest.near.distanceM },
+      ...(this.againstHeading(start!.near.headingRad, legs[0].dir) ? { startTurnaround: true } : {}),
+    };
   }
 }
 

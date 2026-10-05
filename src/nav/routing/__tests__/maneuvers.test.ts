@@ -49,6 +49,19 @@ describe("routeManeuvers", () => {
     expect(list.map((m) => m.kind)).toContain("u-turn");
   });
 
+  test("a destination behind, best reached by turning around on the spot: a U-turn first", () => {
+    // East on 101 to a point 12 m behind. Turning on the spot made cheap: the fixture's node 4 offers a quick U-turn.
+    const graph = new TiledRoadGraph(bufferByteSource(new Uint8Array(FIXTURE)), frame);
+    const r = planRoute(graph, frame, at(0.5, 0, 90), at(0.2, 0), { costs: { turnaroundS: 5 } });
+    if (r.status !== "done") throw new Error(r.reason);
+    expect(r.plan.startTurnaround).toBe(true);
+    const list = routeManeuvers(graph, r.plan);
+    expect(list.map((m) => m.kind)).toEqual(["depart", "u-turn", "arrive"]);
+    expect(list[1].atM).toBe(0);
+    // Ahead of the car: no U-turn.
+    expect(maneuvers(at(0.2, 0, 90), at(0.5, 0)).plan.startTurnaround).toBeUndefined();
+  });
+
   test("a roundabout is one maneuver at its entry, with the exit to take", () => {
     // On 107 heading west, to a point behind: round the roundabout and back out the way in (its only exit).
     const { plan, list } = maneuvers(at(6.6, 0, 270), at(6.8, 0));

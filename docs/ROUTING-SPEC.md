@@ -114,6 +114,8 @@ slices between frames and shows progress. `planRoute()` runs it to the end (tool
   back along the same road (a dead end).
 - **Roundabouts:** one `roundabout` maneuver at the entry, with the exit to take: the legal ways off it passed on
   the way, plus one.
+- **Turning around at the start:** when the route leaves against the car's heading (`plan.startTurnaround`), a
+  `u-turn` at 0 m comes first.
 
 Checked by eye on Chernihiv and Kyiv routes (`npm run route` prints them): 5 instructions on 4.2 km across
 Chernihiv, 12 on 13 km across Kyiv, 12 on 172 km across the oblast.
