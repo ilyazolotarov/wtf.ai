@@ -5,6 +5,10 @@ name: CI
 
 on:
   push:
+    # TEMPORARY: address search is built on this branch without a CI/iOS build per commit.
+    # Remove before merging.
+    branches-ignore:
+      - claude/magical-gates-dd1zm4
   pull_request:
   workflow_dispatch:
 

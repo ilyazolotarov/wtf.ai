@@ -5,9 +5,11 @@ import functools
 import http.server
 from pathlib import Path
 
-from .build import RELEASE, REGIONS, build_all, build_common, build_graphs, remote_osm_date, write_index
+from .build import RELEASE, REGIONS, build_all, build_common, build_graphs, build_searches, remote_osm_date, write_index
 from .graph import read_graph, validate
 from .region import write_regions
+from .search import build_region_search, read_search
+from .search import validate as validate_search
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -30,7 +32,18 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("graph-check", help="validate graph files")
     p.add_argument("paths", nargs="+")
 
-    p = sub.add_parser("build-region", help="build out/release/<region>.pmtiles + .graph.bin and refresh index.json")
+    p = sub.add_parser("search", help="build out/release/<region>.search.bin (all regions by default) and refresh index.json")
+    p.add_argument("names", nargs="*")
+    p.add_argument("--refresh-osm", action="store_true")
+
+    p = sub.add_parser("search-file", help="build a search index from any .osm.pbf (no index.json)")
+    p.add_argument("pbf")
+    p.add_argument("output")
+
+    p = sub.add_parser("search-check", help="validate search files")
+    p.add_argument("paths", nargs="+")
+
+    p = sub.add_parser("build-region", help="build out/release/<region>.pmtiles + .graph.bin + .search.bin and refresh index.json")
     p.add_argument("region")
     p.add_argument("--refresh-osm", action="store_true")
     p.add_argument("--heap", default="4g")
@@ -53,6 +66,19 @@ def main(argv: list[str] | None = None) -> None:
         failed = False
         for path in args.paths:
             problems = validate(read_graph(Path(path)))
+            print(f"{path}: {'ok' if not problems else f'{len(problems)} problems'}")
+            for problem in problems[:20]:
+                print(f"  {problem}")
+            failed |= bool(problems)
+        raise SystemExit(1 if failed else 0)
+    elif args.cmd == "search":
+        build_searches(args.names or None, refresh_osm=args.refresh_osm)
+    elif args.cmd == "search-file":
+        build_region_search(Path(args.pbf), Path(args.output), "unknown")
+    elif args.cmd == "search-check":
+        failed = False
+        for path in args.paths:
+            problems = validate_search(read_search(Path(path)))
             print(f"{path}: {'ok' if not problems else f'{len(problems)} problems'}")
             for problem in problems[:20]:
                 print(f"  {problem}")
