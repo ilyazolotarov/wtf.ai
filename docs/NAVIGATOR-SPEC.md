@@ -156,6 +156,20 @@ jammed:
   - Wrong poses: 300 m off is dropped by the first fix; a heading turned 180° is dropped on all 3; 90° on 2 of 3
     (on the jammed one, coarse fixes pulled the heading round instead).
 
+### 6.2 Placed by the driver
+
+- **Why:** under jamming nothing else may say where the car is: no parked pose (a new car, or it was moved), Wi-Fi
+  fixes hundreds of metres off. The driver knows.
+- **Offered** only while the car stands (speed < 1 m/s): a chip "Set your position on the map" when there is no GPS and
+  the position is rougher than 75 m or has no direction; and after answering "No" to "Is the car where the dot is?"
+  (§6.1). Driving off cancels it. Never offered while moving.
+- **Placing:** the map zooms in (18, flat, north up) on the dot with a pin fixed at the screen centre; the driver drags
+  the map until the pin is on the car, "Here". Then "tap where the front of the car points" (or "Skip").
+- **Applied** (`Navigator.setPosition`): everything about the old track is dropped except the speed scale. With a
+  heading the EKF starts there (σ 10 m, 15°, init method `user`), confirmed: later fixes only pass its gate, so Wi-Fi
+  can't move it, five rejected satellite fixes still reset it. Without one: anchored there (σ 10 m), the filter
+  starting with the heading unknown. Note `nav position set by the driver: lat,lon N m from the dot, heading …`.
+
 ## 7. Calibration (online)
 
 ### 7.1 Gyro bias

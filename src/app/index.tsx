@@ -49,6 +49,11 @@ const CAMERA: Record<CameraMode, { icon: IconName; label: "follow" | "followHead
   free: { icon: "location_searching", label: "free" },
 };
 
+/** Below this the car stands: the driver may put it on the map. */
+const STANDING_MPS = 1;
+/** Offer putting the car on the map when the position is rougher than this (or has no direction), without GPS. */
+const PLACE_OFFER_ACCURACY_M = 75;
+
 /** Driving this long on a trip turns follow into heading-up (UI-SPEC §6.2). */
 const AUTO_HEADING_UP_MS = 2000;
 
@@ -166,6 +171,47 @@ export default function HomeScreen() {
     { boxShadow: palette.shadow },
   ];
 
+  // Putting the car on the map (NAVIGATOR-SPEC §6.2): only while it stands; moving off cancels.
+  const [placing, setPlacing] = useState<"position" | "heading" | null>(null);
+  const [placeAt, setPlaceAt] = useState<Coordinate | null>(null);
+  const placeCenter = useRef<Coordinate | null>(null);
+  const [placeFrom, setPlaceFrom] = useState<Coordinate | null>(null);
+  const standing = position != null && (position.speedMps ?? 0) < STANDING_MPS;
+  // Lost enough to offer it: no GPS, and a rough position or no direction.
+  const lost =
+    position != null &&
+    trust !== "TRUSTED" &&
+    (position.accuracyM > PLACE_OFFER_ACCURACY_M || position.headingRad == null);
+  const startPlacing = () => {
+    const from = position ? { lat: position.lat, lon: position.lon } : null;
+    placeCenter.current = from;
+    setPlaceFrom(from);
+    setPlaceAt(null);
+    setPlacing("position");
+    pickCameraMode(() => "free");
+  };
+  const stopPlacing = () => {
+    setPlacing(null);
+    setPlaceAt(null);
+    pickCameraMode(() => "follow");
+  };
+  const placeHere = () => {
+    const at = placeCenter.current;
+    if (!at) return;
+    setPlaceAt(at);
+    setPlacing("heading");
+  };
+  const finishPlacing = (towards?: Coordinate) => {
+    if (placeAt) navigator.setUserPosition(placeAt, towards ? bearingRad(placeAt, towards) : undefined);
+    stopPlacing();
+  };
+  // Moving off cancels (state adjusted during render, not in an effect).
+  if (placing && !standing) {
+    setPlacing(null);
+    setPlaceAt(null);
+    setCameraMode("follow");
+  }
+
   return (
     <View style={[styles.root, { backgroundColor: palette.bg }]}>
       <MapSurface
@@ -175,9 +221,18 @@ export default function HomeScreen() {
         headingUpRad={headingUp}
         onUserInteraction={() => pickCameraMode(() => "free")}
         onLongPress={setPin}
-        pin={pin}
+        pin={placing ? placeAt : pin}
         logCamera={(text) => runtime.recorder.note(text)}
+        placing={placing}
+        placeFrom={placeFrom}
+        onCenter={(at) => (placeCenter.current = at)}
+        onTap={finishPlacing}
       />
+      {placing === "position" && (
+        <View pointerEvents="none" style={styles.placeTarget}>
+          <Icon name="location_on" size={44} color={palette.accent} />
+        </View>
+      )}
       <View
         pointerEvents="box-none"
         style={[
@@ -269,7 +324,60 @@ export default function HomeScreen() {
             </View>
           )}
 
-          {position?.poseQuestion && (
+          {placing && (
+            <View style={[panel, styles.alertCard]}>
+              <GlassFill radius={Radius.rL} />
+              <View style={styles.alertRow}>
+                <View style={[styles.alertIcon, { backgroundColor: palette.accent + "22" }]}>
+                  <Icon name={placing === "position" ? "location_on" : "navigation"} size={20} color={palette.accent} />
+                </View>
+                <View style={styles.alertText}>
+                  <T w="semibold" size={15}>
+                    {t(placing === "position" ? "placeTitle" : "placeHeadingTitle")}
+                  </T>
+                  <T size={13} color={palette.text2}>
+                    {t(placing === "position" ? "placeHint" : "placeHeadingHint")}
+                  </T>
+                </View>
+              </View>
+              <View style={styles.answerRow}>
+                <Pressable
+                  onPress={stopPlacing}
+                  accessibilityRole="button"
+                  style={({ pressed }) => [styles.ghostButton, styles.answerButton, { backgroundColor: palette.surface }, pressed && styles.pressed]}
+                >
+                  <T w="semibold" size={14} color={palette.text2}>
+                    {t("placeCancel")}
+                  </T>
+                </Pressable>
+                <Pressable
+                  onPress={placing === "position" ? placeHere : () => finishPlacing()}
+                  accessibilityRole="button"
+                  style={({ pressed }) => [styles.ghostButton, styles.answerButton, { backgroundColor: palette.surface }, pressed && styles.pressed]}
+                >
+                  <T w="semibold" size={14} color={palette.accent}>
+                    {t(placing === "position" ? "placeHere" : "placeSkipHeading")}
+                  </T>
+                </Pressable>
+              </View>
+            </View>
+          )}
+
+          {!placing && !position?.poseQuestion && standing && lost && (
+            <Pressable
+              onPress={startPlacing}
+              style={({ pressed }) => [panel, styles.calChip, pressed && styles.pressed]}
+              accessibilityRole="button"
+            >
+              <GlassFill radius={Radius.pill} />
+              <Icon name="location_on" size={16} color={palette.accent} />
+              <T w="semibold" size={13} color={palette.accent}>
+                {t("placeOffer")}
+              </T>
+            </Pressable>
+          )}
+
+          {!placing && position?.poseQuestion && (
             <View style={[panel, styles.alertCard]}>
               <GlassFill radius={Radius.rL} />
               <View style={styles.alertRow}>
@@ -289,7 +397,11 @@ export default function HomeScreen() {
                 {([true, false] as const).map((here) => (
                   <Pressable
                     key={String(here)}
-                    onPress={() => navigator.answerPose(here)}
+                    onPress={() => {
+                      navigator.answerPose(here);
+                      // Not there: show where it is instead, if it stands.
+                      if (!here && standing) startPlacing();
+                    }}
                     accessibilityRole="button"
                     style={({ pressed }) => [styles.ghostButton, styles.answerButton, { backgroundColor: palette.surface }, pressed && styles.pressed]}
                   >
@@ -672,6 +784,8 @@ const styles = StyleSheet.create({
   },
   alertText: { flex: 1, lineHeight: 20 },
   answerRow: { flexDirection: "row", gap: 8 },
+  // The pin's tip on the map centre: the icon is 44 high, its tip at the bottom.
+  placeTarget: { position: "absolute", left: "50%", top: "50%", marginLeft: -22, marginTop: -40 },
   answerButton: { flex: 1, alignItems: "center" },
   ghostButton: {
     gap: 2,

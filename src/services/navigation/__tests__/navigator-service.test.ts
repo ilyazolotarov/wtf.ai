@@ -422,6 +422,43 @@ describe("parked pose", () => {
   });
 });
 
+describe("the driver puts the car on the map", () => {
+  // Standing 10 s, then driving off north-east under jamming (coarse fixes only).
+  const SEGMENTS: DriveSegment[] = [
+    { durationS: 10, speedMps: 0, yawRateDegS: 0 },
+    { durationS: 30, speedMps: 10, yawRateDegS: 0 },
+  ];
+  const origin = { lat: 51.5184, lon: 30.7465 };
+
+  test("with a heading: dead reckoning from there at once, a far Wi-Fi fix doesn't move it", async () => {
+    const drive = syntheticDrive({ segments: SEGMENTS, gnss: "none", origin, startHeadingRad: 0.8, seed: 3 });
+    const h = harness({ vin: null });
+    await h.service.start();
+    h.play(drive, { untilS: 3 });
+    expect(h.service.setUserPosition(origin, 0.8)).toBe(true);
+    expect(h.notes.some((n) => n.startsWith("nav position set by the driver: 51.518400,30.746500") && n.endsWith("heading 46°"))).toBe(true);
+    h.play(drive, { untilS: 8 });
+    h.gnss.emit(record({ tUs: h.now(), lat: origin.lat + 0.008, lon: origin.lon, hAccM: 55 }));
+    h.play(drive);
+    const p = h.service.getSnapshot()!;
+    expect(p.source).toBe("dr");
+    expect(haversineM(p, drive.truthAt(drive.trip.imu.at(-1)!.tUs))).toBeLessThan(25);
+    h.service.stop();
+  });
+
+  test("without a heading: anchored there", async () => {
+    const drive = syntheticDrive({ segments: SEGMENTS, gnss: "none", origin, startHeadingRad: 0.8, seed: 3 });
+    const h = harness({ vin: null });
+    await h.service.start();
+    h.play(drive, { untilS: 3 });
+    h.service.setUserPosition(origin);
+    h.play(drive, { untilS: 5 });
+    expect(h.notes.some((n) => n.endsWith("heading skipped"))).toBe(true);
+    expect(h.service.getDebug().mode).toBe("anchored");
+    h.service.stop();
+  });
+});
+
 describe("compass in shadow", () => {
   // Turning right 45° at a time: every heading sector, enough for a drive to learn the compass alone.
   const ROUND: DriveSegment[] = [{ durationS: 5, speedMps: 0, yawRateDegS: 0 }];

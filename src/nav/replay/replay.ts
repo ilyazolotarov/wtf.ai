@@ -136,7 +136,7 @@ export interface ReplayInit {
   estimate: NavEstimate | null;
 }
 
-const INIT_NAMES: Record<InitMethod, string> = { course: "course", alignment: "alignment", pose: "parked pose", map: "map" };
+const INIT_NAMES: Record<InitMethod, string> = { course: "course", alignment: "alignment", pose: "parked pose", map: "map", user: "driver" };
 
 export interface ReplaySummary {
   durationS: number;

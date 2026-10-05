@@ -46,6 +46,9 @@ const SAVE_EVERY_MS = 30_000;
 /** Note a saved speed scale in the trip log when it moved this much. */
 const SPEED_SCALE_NOTE_STEP = 0.002;
 const EARTH_RADIUS_M = 6_371_000;
+/** The driver's placing on the map: a car's length or so, and the heading of a tap (NAVIGATOR-SPEC §6.2). */
+const USER_POSITION_SIGMA_M = 10;
+const USER_HEADING_SIGMA_RAD = (15 * Math.PI) / 180;
 /** Added to a stored parked pose's 1σ: the car settles, the phone may sit differently in the mount. */
 const POSE_POSITION_SLACK_M = 5;
 const POSE_HEADING_SLACK_RAD = (2 * Math.PI) / 180;
@@ -218,6 +221,25 @@ export class NavigatorService implements PositionSource {
     this.routeHint = edges;
     this.nav?.setRouteHint(edges);
     this.note(edges ? `nav route hint: ${edges.length} edges` : "nav route hint off");
+  }
+
+  /**
+   * The driver put the car on the map while it stood (NAVIGATOR-SPEC §6.2); `headingRad` undefined: skipped. False
+   * when there is no navigator.
+   */
+  setUserPosition(at: { lat: number; lon: number }, headingRad?: number): boolean {
+    const nav = this.nav;
+    if (!nav) return false;
+    nav.setPosition({ ...at, headingRad, posSigmaM: USER_POSITION_SIGMA_M, headingSigmaRad: USER_HEADING_SIGMA_RAD });
+    const was = this.position;
+    const moved = was ? ` ${Math.round(haversineM(was, at))} m from the dot` : "";
+    const heading = headingRad === undefined ? "heading skipped" : `heading ${Math.round((((headingRad * 180) / Math.PI) % 360 + 360) % 360)}°`;
+    this.note(`nav position set by the driver: ${at.lat.toFixed(6)},${at.lon.toFixed(6)}${moved}, ${heading}`);
+    this.poseQuestion = null;
+    this.poseStatus = "none";
+    this.flush(this.deps.nowUs() - REORDER_US);
+    this.publish();
+    return true;
   }
 
   /** The driver's answer to `poseQuestion`: the car is (not) where the dot is. */

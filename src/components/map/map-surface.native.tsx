@@ -43,7 +43,18 @@ interface MapSurfaceProps {
   pin: Coordinate | null;
   /** Camera lines for the trip log: the mode shown, and in heading-up the bearing asked vs the map's. */
   logCamera?(text: string): void;
+  /**
+   * The driver puts the car on the map (NAVIGATOR-SPEC §6.2): "position" zooms in on `placeFrom` and reports the
+   * map centre as it settles (`onCenter`); "heading" reports taps (`onTap`).
+   */
+  placing?: "position" | "heading" | null;
+  placeFrom?: Coordinate | null;
+  onCenter?(at: Coordinate): void;
+  onTap?(at: Coordinate): void;
 }
+
+/** Placing the car: close enough to see the yard and the street. */
+const PLACE_ZOOM = 18;
 
 /** Heading-up: the map's bearing against the one asked for, this often (sooner when they differ). */
 const CAMERA_LOG_EVERY_MS = 15_000;
@@ -77,6 +88,10 @@ export function MapSurface({
   onLongPress,
   pin,
   logCamera,
+  placing = null,
+  placeFrom = null,
+  onCenter,
+  onTap,
 }: MapSurfaceProps) {
   const scheme = useColorScheme() === "dark" ? "dark" : "light";
   const palette = Colors[scheme];
@@ -106,6 +121,21 @@ export function MapSurface({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, camera]);
   const lastCameraLog = useRef(0);
+
+  // Placing starts at the dot (or wherever the map was), flat and north up, close in.
+  useEffect(() => {
+    if (placing !== "position") return;
+    void cameraRef.current?.setStop({
+      ...(placeFrom ? { center: [placeFrom.lon, placeFrom.lat] as [number, number] } : {}),
+      zoom: PLACE_ZOOM,
+      pitch: 0,
+      bearing: 0,
+      duration: 500,
+      easing: "ease",
+    });
+    // Once per placing, not on every position update.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [placing]);
 
   // A gesture that drops follow keeps the zoom the finger chose; only the button zooms out.
   const leftByGesture = useRef(false);
@@ -178,9 +208,10 @@ export function MapSurface({
     onUserInteraction();
   };
   const handleRegionDidChange = (
-    event: NativeSyntheticEvent<{ pitch: number; bearing?: number }>,
+    event: NativeSyntheticEvent<{ pitch: number; bearing?: number; center?: [number, number] }>,
   ) => {
-    const { bearing } = event.nativeEvent;
+    const { bearing, center } = event.nativeEvent;
+    if (placing === "position" && center) onCenter?.({ lat: center[1], lon: center[0] });
     if (logCamera && camera === "follow-heading" && bearing !== undefined) {
       const off = Math.abs(((bearing - followBearing + 540) % 360) - 180);
       const now = Date.now();
@@ -269,8 +300,14 @@ export function MapSurface({
       // still turns in heading-up mode.
       touchRotate={false}
       onLongPress={(event: NativeSyntheticEvent<PressEvent>) => {
+        if (placing) return;
         const [lon, lat] = event.nativeEvent.lngLat;
         onLongPress({ lat, lon });
+      }}
+      onPress={(event: NativeSyntheticEvent<PressEvent>) => {
+        if (placing !== "heading") return;
+        const [lon, lat] = event.nativeEvent.lngLat;
+        onTap?.({ lat, lon });
       }}
       onRegionIsChanging={handleRegionChange}
       onRegionDidChange={handleRegionDidChange}

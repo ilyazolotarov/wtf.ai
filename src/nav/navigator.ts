@@ -23,8 +23,17 @@ import { isSatelliteFix, type GnssFix, type ImuSample, type MagSample, type ObdS
 
 export type NavMode = "none" | "anchored" | "dr";
 
-/** How the EKF got its heading: GNSS course, alignment to coarse fixes, parked pose, or the road map. */
-export type InitMethod = "course" | "alignment" | "pose" | "map";
+/** How the EKF got its heading: GNSS course, alignment to coarse fixes, parked pose, the road map, or the driver. */
+export type InitMethod = "course" | "alignment" | "pose" | "map" | "user";
+
+/** Where the driver put the car on the map; no heading: they skipped it. */
+export interface UserPosition {
+  lat: number;
+  lon: number;
+  headingRad?: number;
+  posSigmaM: number;
+  headingSigmaRad: number;
+}
 
 export interface NavConfig {
   /** CoreLocation position/course lag behind OBD/IMU until the online estimate is ready (or always,
@@ -701,6 +710,42 @@ export class Navigator {
     this.poseCoarseRejected = 0;
     this.poseDoubt = null;
     return true;
+  }
+
+  /**
+   * The driver put the car on the map (while it stands): start over from there, the driver's word over Wi-Fi.
+   * With a heading the EKF starts at once, confirmed (later fixes only pass its gate); without one the navigator
+   * anchors there and the filter starts with the heading unknown.
+   */
+  setPosition(p: UserPosition): void {
+    if (this.ekf) {
+      // The speed scale is the car's, not the lost track's.
+      const { ks, ksVar, so, soVar } = this.ekf.params();
+      this.speedScale = { ks, ksVar, so, soVar };
+    }
+    this.ekf = null;
+    this.ekfHistory.clear();
+    this.twin = null;
+    this.twinHistory.clear();
+    this.alignPoints = [];
+    this.rejectedSat = 0;
+    this.poseUnverifiedFromM = null;
+    this.poseCoarseRejected = 0;
+    this.poseDoubt = null;
+    this.frozenPose = null;
+    this.pf?.stop();
+    const frame = this.frame ?? this.setFrame(new LocalFrame(p));
+    if (p.headingRad === undefined) {
+      this.anchor = { coord: { lat: p.lat, lon: p.lon }, sigma: p.posSigmaM, distanceM: 0, sat: true };
+      this.startMapMatchAtAnchor();
+      return;
+    }
+    this.anchor = null;
+    const [e, n] = frame.toEnu(p);
+    const theta = wrapAngle(this.rel.psi - p.headingRad);
+    const cs = Math.cos(theta);
+    const sn = Math.sin(theta);
+    this.initEkf(theta, e - (cs * this.rel.e - sn * this.rel.n), n - (sn * this.rel.e + cs * this.rel.n), p.posSigmaM, p.headingSigmaRad, "user");
   }
 
   /** Predicted position at a past time (within ~3 s), for evaluating held-out fixes. */
