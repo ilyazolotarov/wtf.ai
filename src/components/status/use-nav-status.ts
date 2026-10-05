@@ -22,7 +22,9 @@ const APPROX = { color: "warn", label: "approxFix", sentence: "sApprox", icon: "
 
 export function useAdapterStatus(): AdapterStatus {
   return useVehicleLinkValue((s) =>
-    s.link === "polling" || s.link === "standby"
+    s.protocolSearch
+      ? "searching"
+      : s.link === "polling" || s.link === "standby"
       ? "on"
       : s.link === "connecting" ||
           s.link === "probing" ||
@@ -39,6 +41,7 @@ export function useNavStatus() {
   const palette = usePalette();
   const position = usePosition();
   const adapter = useAdapterStatus();
+  const protocolSearch = useVehicleLinkValue((s) => s.protocolSearch);
   const trust: TrustState = position?.trust ?? "NO_FIX";
   // Wi-Fi/cell fixes (no speed) never earn trust, but the position is still a real, if coarse, one.
   const approximate =
@@ -69,8 +72,15 @@ export function useNavStatus() {
     adapter,
     adapterColor: adapterColor?.c ?? palette.text2,
     adapterTint: adapterColor?.a ?? palette.surface,
+    protocolSearch,
     adapterLabel: t(
-      adapter === "on" ? "obdConnected" : adapter === "searching" ? "obdSearching" : "obdNotConnected",
+      protocolSearch
+        ? "obdFindingProtocol"
+        : adapter === "on"
+          ? "obdConnected"
+          : adapter === "searching"
+            ? "obdSearching"
+            : "obdNotConnected",
     ),
   };
 }

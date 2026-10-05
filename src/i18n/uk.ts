@@ -236,6 +236,7 @@ export const uk = {
   obdConnected: "Підключено",
   obdNotConnected: "Не підключено",
   obdSearching: "Пошук…",
+  obdFindingProtocol: "Шукаю протокол авто…",
   more: "Ще",
   toward: "Напрямок:",
   waitingBody: "Шукаємо супутники. Позиція з’явиться, щойно буде фіксація.",

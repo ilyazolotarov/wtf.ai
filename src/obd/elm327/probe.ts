@@ -1,7 +1,7 @@
 // Verification on connect (docs/VEHICLE-LINK-SPEC.md §8.1).
 
 import type { ElmResponse, ElmStatus } from "../types";
-import { parseElmVersion, parseMode01, parseVoltage } from "./parser";
+import { parseElmVersion, parseMode01, parseProtocolNumber, parseVoltage } from "./parser";
 
 type Send = (command: string, opts?: { timeoutMs?: number }) => Promise<ElmResponse>;
 
@@ -16,8 +16,8 @@ export interface ProbeResult {
   batteryV: number | null;
   /** Vehicle answered `0100`. */
   vehiclePresent: boolean;
-  /** The vehicle was found by a protocol search after the cached protocol failed: init must not lock the cached one. */
-  searched: boolean;
+  /** The protocol a search found after the cached one failed (0: found, number unknown); init must use it. */
+  foundProtocol: number | null;
   warnings: string[];
 }
 
@@ -45,6 +45,8 @@ export interface ProbeOptions {
   protocol?: number | null;
   /** Skip the vehicle check (reconnect fast path decides itself). */
   skipVehicleCheck?: boolean;
+  /** A protocol search starts (true) and ends (false): it takes seconds, worth showing. */
+  onSearch?(active: boolean): void;
 }
 
 export async function probeAdapter(send: Send, opts: ProbeOptions = {}): Promise<ProbeResult> {
@@ -56,7 +58,7 @@ export async function probeAdapter(send: Send, opts: ProbeOptions = {}): Promise
     suspectedClone: false,
     batteryV: null,
     vehiclePresent: false,
-    searched: false,
+    foundProtocol: null,
     warnings: [],
   };
 
@@ -117,8 +119,10 @@ export async function probeAdapter(send: Send, opts: ProbeOptions = {}): Promise
   result.vehiclePresent = answersPids(pids);
   if (!result.vehiclePresent && cached !== 0 && wrongBus(pids.status)) {
     // Another car on this adapter (a K-line one after a CAN one): search, then back to the cached protocol for standby.
-    result.vehiclePresent = await searchProtocols(send);
-    result.searched = result.vehiclePresent;
+    opts.onSearch?.(true);
+    result.foundProtocol = await searchProtocols(send);
+    opts.onSearch?.(false);
+    result.vehiclePresent = result.foundProtocol !== null;
     if (!result.vehiclePresent) await send(`ATSP${cached.toString(16).toUpperCase()}`, { timeoutMs: 1000 });
   }
   return result;
@@ -134,8 +138,12 @@ export function wrongBus(status: ElmStatus): boolean {
   return status === "bus-error" || status === "unable-to-connect";
 }
 
-/** Auto search (`ATSP0`) for whichever protocol answers `0100`; K-line inits make it take seconds (§8.1). */
-export async function searchProtocols(send: Send): Promise<boolean> {
+/**
+ * Auto search (`ATSP0`) for whichever protocol answers `0100`; K-line inits make it take seconds (§8.1).
+ * The protocol found (`ATDPN`; 0 if unreadable), null if none answered.
+ */
+export async function searchProtocols(send: Send): Promise<number | null> {
   await send("ATSP0", { timeoutMs: 1000 });
-  return answersPids(await send("0100", { timeoutMs: 20000 }));
+  if (!answersPids(await send("0100", { timeoutMs: 20000 }))) return null;
+  return parseProtocolNumber((await send("ATDPN", { timeoutMs: 1000 })).lines) ?? 0;
 }

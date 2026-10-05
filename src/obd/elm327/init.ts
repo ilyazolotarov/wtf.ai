@@ -107,6 +107,8 @@ export async function initVehicle(send: Send, opts: InitOptions = {}): Promise<I
   const cached = opts.cachedProtocol ?? 0;
   await send(`ATSP${hex(cached)}`, { timeoutMs: 1000 });
   let supported = await send("0100", { timeoutMs: 10000 });
+  // An "OK" or other text without the bitmap: a reply arriving one command late. The next one answers.
+  if (supported.status === "ok" && parseMode01(supported.lines, 0x00, 4).length === 0) supported = await send("0100", { timeoutMs: 10000 });
   if (supported.status !== "ok" && cached !== 0) {
     await send("ATSP0", { timeoutMs: 1000 });
     supported = await send("0100", { timeoutMs: 10000 });

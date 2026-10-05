@@ -182,12 +182,17 @@ describe("VehicleLinkCore", () => {
   });
 
   test("another car on the adapter (K-line after CAN): the cached protocol's bus errors start a search", async () => {
-    const { core, store, events } = setup(KLINE_PROFILE, storeWithCx5());
+    const { core, store, events, emulators } = setup(KLINE_PROFILE, storeWithCx5());
     core.startDiscovery();
+    const searching: boolean[] = [];
+    core.subscribe(() => searching.at(-1) !== core.getSnapshot().protocolSearch && searching.push(core.getSnapshot().protocolSearch));
     void core.connect("emu-1");
     await until(() => core.getSnapshot().link === "polling" && core.getSnapshot().lastSpeed !== null);
-    expect(events.map((e) => e.type)).toContain("protocol-search");
-    expect(core.getSnapshot().vehicle).toMatchObject({ protocol: "A5", vin: "VF1LSRAEH12345678", vinSource: "read" });
+    expect(events.find((e) => e.type === "protocol-search")?.detail).toBe("protocol 6 failed; 5 answered");
+    expect(searching).toEqual([false, true, false]);
+    // One search: the init uses what it found instead of trying the CX-5's protocol and searching again.
+    expect(emulators.get("emu-1")!.log.filter((c) => c === "ATSP0")).toHaveLength(1);
+    expect(core.getSnapshot().vehicle).toMatchObject({ protocol: "5", vin: "VF1LSRAEH12345678", vinSource: "read" });
     expect(store.getJson<RememberedAdapter[]>("vehicleLink.adapters")?.[0].protocolNumber).toBe(5);
     // Both cars stay known, the last one first.
     expect(store.getJson<KnownCar[]>("vehicleLink.cars")?.map((c) => [c.vin, c.protocolNumber])).toEqual([
@@ -206,7 +211,7 @@ describe("VehicleLinkCore", () => {
     await until(() => core.getSnapshot().link === "standby");
     emulators.get("emu-1")!.setVehicle({ ignition: true, rpm: 800 });
     await until(() => core.getSnapshot().link === "polling");
-    expect(core.getSnapshot().vehicle?.protocol).toBe("A5");
+    expect(core.getSnapshot().vehicle?.protocol).toBe("5");
     await core.disconnect();
   });
 
@@ -251,7 +256,7 @@ describe("VehicleLinkCore", () => {
     back.core.startDiscovery();
     void back.core.connect("emu-1");
     await until(() => back.core.getSnapshot().link === "polling");
-    expect(back.core.getSnapshot().vehicle).toMatchObject({ protocol: "A6", vin: CX5_VIN, vinSource: "remembered" });
+    expect(back.core.getSnapshot().vehicle).toMatchObject({ protocol: "6", vin: CX5_VIN, vinSource: "remembered" });
     await back.core.disconnect();
   });
 

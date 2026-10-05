@@ -353,6 +353,11 @@ Rules:
   the MX+ went from the CX-5 (CAN, 6) to a Renault Logan (K-line, ISO 14230 KWP), and `ATSP6` + `0100` answered
   `CAN ERROR` every 5 s until the user gave up, while the OBDLink app (auto search) read the car. `NO DATA` doesn't start
   a search: the bus is there and the ECUs are asleep.
+- The protocol a search finds (`ATDPN` after its `0100`) is cached at once (link event `protocol-search: protocol 6
+  failed; 5 answered`): the init then locks it instead of trying the old one and searching again, which breaks a K-line
+  session that just came up. `protocolSearch` in the snapshot is true while a search runs; the vehicle screen and the
+  map show "Finding the car's protocol…" (UI-SPEC).
+- An `0100` answered with text but no bitmap at init is a reply one command late: it is sent once more.
 
 ### 8.2 UART selection (BLE)
 
@@ -496,7 +501,7 @@ The same contract with two transports: BLE (same GATT catalog) and Classic SPP (
 | Adapter | Transport | Chip / ELM version | Profile | Car / protocol | Speed rate (Hz) | Latency p50 / p95 | Notes |
 | ------- | --------- | ------------------ | ------- | -------------- | --------------- | ----------------- | ----- |
 | OBDLink MX+ | MFi (`com.obdlink`) | STN2255 v5.10.3 / ELM327 v1.4b | — | Mazda CX-5 KF / 6 (CAN 11-bit 500k) | 25–32 moving, 20 on one drive (`010D1`, `ATSH7E0` or `7E1`, `ATAT1`) | 16–19 / 49–65 ms; 30–49 / 70–86 ms on 4 drives (cause unknown) | 18 drives. Rare stalls: replies arrive one command late, then `STOPPED` → re-init (2–6 s gap). The VIN was missed with `7E1` pinned, and still on 3 of 4 drives with `7E0` (§9.1). |
-| OBDLink MX+ | MFi (`com.obdlink`) | STN2255 v5.10.3 / ELM327 v1.4b | — | Renault Logan / ISO 14230 KWP (K-line) | — | — | Not read: the cached `ATSP6` gave `CAN ERROR` (§8.1, now searched). A leftover reply `83 F1 7A 41 0D 00 3C` shows the format: ECU `7A`, checksum last. The OBDLink app reads it. |
+| OBDLink MX+ | MFi (`com.obdlink`) | STN2255 v5.10.3 / ELM327 v1.4b | — | Renault Logan / ISO 14230 KWP (K-line, `A5`) | 7–9 (`010D1`) | — | 3 drives. Found by the protocol search (§8.1); VIN read (5-line K-line format). First connect took 77 s: the init tried `ATSP6` again and searched again, which broke the fresh K-line session four times; the protocol found is now cached at once. |
 | vLinker FD-IOS | BLE | STN1151 v4.3.2 / ELM327 v2.2 | — | Mazda CX-5 KF / A6 | 21 standing | 31 ms | One short drive; VIN not read. |
 
 ## 14. Verification targets

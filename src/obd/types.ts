@@ -223,6 +223,8 @@ export interface VehicleLinkSnapshot {
   activeDeviceId: string | null;
   adapter: AdapterInfo | null;
   vehicle: VehicleInfo | null;
+  /** All protocols are being searched for (another car on this adapter): seconds, up to ~20 (§8.1). */
+  protocolSearch: boolean;
   engine: EngineState;
   lastSpeed: SpeedSample | null;
   lastRpm: RpmSample | null;

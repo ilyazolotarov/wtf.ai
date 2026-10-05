@@ -234,6 +234,7 @@ export const en = {
   obdConnected: "Connected",
   obdNotConnected: "Not connected",
   obdSearching: "Searching…",
+  obdFindingProtocol: "Finding the car's protocol…",
   more: "More",
   toward: "Toward",
   waitingBody: "Looking for satellites. Your position appears as soon as there is a fix.",

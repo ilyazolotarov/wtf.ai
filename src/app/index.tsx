@@ -267,6 +267,16 @@ export default function HomeScreen() {
             </View>
           )}
 
+          {nav.protocolSearch && (
+            <View style={[panel, styles.calChip]}>
+              <GlassFill radius={Radius.pill} />
+              <Icon name="bluetooth" size={16} color={palette.warn.c} />
+              <T w="semibold" size={13} color={palette.warn.c}>
+                {t("obdFindingProtocol")}
+              </T>
+            </View>
+          )}
+
           {showCutGps && detailsOpen && (
             <Pressable
               onPress={() => navigator.setSimulatedOutage(true)}

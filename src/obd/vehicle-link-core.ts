@@ -111,6 +111,7 @@ export class VehicleLinkCore implements VehicleLink {
     activeDeviceId: null,
     adapter: null,
     vehicle: null,
+    protocolSearch: false,
     engine: "unknown",
     lastSpeed: null,
     lastRpm: null,
@@ -378,7 +379,10 @@ export class VehicleLinkCore implements VehicleLink {
     this.unsubscribers.push(session.exchanges.on((r) => this.onSessionExchange(r)));
 
     this.update({ link: "probing" });
-    const probe = await probeAdapter((c, o) => session.send(c, o), { protocol: remembered?.protocolNumber });
+    const probe = await probeAdapter((c, o) => session.send(c, o), {
+      protocol: remembered?.protocolNumber,
+      onSearch: (active) => this.update({ protocolSearch: active }),
+    });
     this.check(gen);
     if (!probe.ok) {
       this.event("probe-failed", probe.failedStep);
@@ -407,8 +411,8 @@ export class VehicleLinkCore implements VehicleLink {
     this.remember(device, adapter, info);
     this.event("verified", probe.elmVersion ?? undefined);
 
-    if (probe.searched) this.event("protocol-search", "the cached protocol failed; another one answered");
-    if (probe.vehiclePresent) await this.initAndPoll(gen, probe.searched);
+    if (probe.foundProtocol !== null) this.adoptProtocol(remembered?.protocolNumber ?? 0, probe.foundProtocol);
+    if (probe.vehiclePresent) await this.initAndPoll(gen);
     else await this.standby(gen, remembered?.protocolNumber ?? 0);
   }
 
@@ -428,7 +432,10 @@ export class VehicleLinkCore implements VehicleLink {
       const search = cachedProtocol !== 0 && wrong % SEARCH_EVERY === SEARCH_EVERY - 1;
       let found: boolean;
       if (search) {
-        found = await searchProtocols(send);
+        this.update({ protocolSearch: true });
+        const protocol = await searchProtocols(send).finally(() => this.update({ protocolSearch: false }));
+        found = protocol !== null;
+        if (protocol !== null) this.adoptProtocol(cachedProtocol, protocol);
         wrong++;
       } else {
         const r = await send("0100", { timeoutMs: 10000 });
@@ -437,30 +444,36 @@ export class VehicleLinkCore implements VehicleLink {
       }
       this.check(gen);
       if (found) {
-        if (search) this.event("protocol-search", "the cached protocol failed; another one answered");
-        await this.initAndPoll(gen, search);
+        await this.initAndPoll(gen);
         return;
       }
       if (search) await send(`ATSP${cachedProtocol.toString(16).toUpperCase()}`, { timeoutMs: 1000 });
     }
   }
 
-  /** `searched`: a protocol search found the car, so the cached protocol is another car's. */
-  private async initAndPoll(gen: number, searched = false): Promise<void> {
+  /**
+   * A search found the car on another protocol than the cached one: cache it now, so the init and any later check
+   * use it. Searching again (or trying the old one first) breaks a K-line session that has just come up: on the
+   * Logan (2026-10-05) init went CAN ERROR → search → UNABLE TO CONNECT four times, 77 s to the first poll.
+   */
+  private adoptProtocol(cached: number, found: number): void {
+    this.event("protocol-search", `protocol ${cached.toString(16).toUpperCase()} failed; ${found ? found.toString(16).toUpperCase() : "another"} answered`);
+    this.patchRemembered({ protocolNumber: found || null });
+  }
+
+  private async initAndPoll(gen: number): Promise<void> {
     const session = this.requireSession();
     this.update({ link: "initializing" });
     const remembered = this.remembered().find((a) => a.id === this.snapshot.activeDeviceId);
     const seq = ++this.initSeq;
-    const init = await session.exclusive((send) =>
-      initVehicle(send, { cachedProtocol: searched ? null : (remembered?.protocolNumber ?? null) }),
-    );
+    const init = await session.exclusive((send) => initVehicle(send, { cachedProtocol: remembered?.protocolNumber ?? null }));
     this.check(gen);
     if (!init.ok) {
       if (init.error === "no-speed-pid") {
         this.update({ link: "error", error: { code: "no-speed-pid", message: "vehicle doesn't report speed (PID 0D)" } });
         return;
       }
-      await this.standby(gen);
+      await this.standby(gen, remembered?.protocolNumber ?? 0);
       return;
     }
     const adapter = this.snapshot.adapter ? { ...this.snapshot.adapter, capabilities: init.capabilities } : null;
