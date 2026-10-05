@@ -285,6 +285,7 @@ export const uk = {
   routeNoRoadAtStart: "Поруч із вами немає дороги.",
   routeNoRoadAtDestination: "Біля цієї точки немає дороги.",
   routeNoRoute: "На карті цього регіону туди не веде жодна дорога.",
+  routeOutsideRegionFailed: "Це поза завантаженим регіоном: маршрути прокладаються лише в його межах.",
   routeTooFar: "Задалеко, щоб прокласти на телефоні.",
   routeCancelled: "Прокладання зупинено.",
   arrived: "Ви прибули",

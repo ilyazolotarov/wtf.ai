@@ -283,6 +283,7 @@ export const en = {
   routeNoRoadAtStart: "There's no road near you.",
   routeNoRoadAtDestination: "There's no road near that point.",
   routeNoRoute: "No road leads there in this region's map.",
+  routeOutsideRegionFailed: "That's outside the downloaded region: routes stay inside it.",
   routeTooFar: "Too far to plan on the phone.",
   routeCancelled: "Planning stopped.",
   arrived: "You've arrived",

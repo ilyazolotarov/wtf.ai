@@ -112,6 +112,13 @@ describe("RouteService", () => {
     expect(h.service.getDebug().last).toMatchObject({ outcome: "no-route", lengthM: null });
   });
 
+  test("a destination outside the region's map is said to be so", () => {
+    const h = harness();
+    h.move(0.5, 0);
+    h.service.start({ lat: 49.84, lon: 24.03 }); // Lviv
+    expect(h.service.getSnapshot()).toMatchObject({ status: "failed", failure: "outside-region" });
+  });
+
   test("without a downloaded road graph, or a position, the route can't be planned", () => {
     const noGraph = harness({ graph: false });
     noGraph.move(0.5, 0);

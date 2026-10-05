@@ -34,7 +34,7 @@ export interface RouteDestination extends Coordinate {
   id?: string;
 }
 
-export type RouteProblem = RouteFailure | "no-road-graph" | "no-position";
+export type RouteProblem = RouteFailure | "no-road-graph" | "no-position" | "outside-region";
 
 export interface RouteSnapshot {
   destination: RouteDestination;
@@ -76,7 +76,13 @@ export interface RouteDebug {
 
 export interface RoutingGraph {
   key: string;
-  graph: RoadGraph & { stats?: GraphStats; setFrame(frame: LocalFrame): void; info?: { builtAt: number } };
+  graph: RoadGraph & {
+    stats?: GraphStats;
+    setFrame(frame: LocalFrame): void;
+    info?: { builtAt: number };
+    /** The graph's tile at a point, −1 outside the region's tiles. */
+    tileAt?(c: Coordinate): number;
+  };
   close(): void;
 }
 
@@ -210,7 +216,14 @@ export class RouteService {
     const position = this.deps.position.getSnapshot();
     const graph = position ? this.openGraph() : null;
     const id = this.nextPlanId++;
-    const problem: RouteProblem | null = !position ? "no-position" : !graph ? "no-road-graph" : null;
+    const outside = (c: Coordinate) => (graph?.graph.tileAt?.(c) ?? 0) < 0;
+    const problem: RouteProblem | null = !position
+      ? "no-position"
+      : !graph
+        ? "no-road-graph"
+        : outside(s.destination) || outside(position)
+          ? "outside-region"
+          : null;
     if (problem || !position || !graph) {
       this.failed(id, reason, problem ?? "no-position", position, 0);
       return;
@@ -269,7 +282,7 @@ export class RouteService {
       timestampUs: this.deps.nowUs(),
       planId: id,
       reason,
-      status: problem === "no-road-graph" || problem === "no-position" ? "cancelled" : problem,
+      status: problem === "no-road-graph" || problem === "no-position" || problem === "outside-region" ? "cancelled" : problem,
       fromLatDeg: position?.lat ?? NaN,
       fromLonDeg: position?.lon ?? NaN,
       fromHeadingRad: position?.headingRad ?? NaN,

@@ -42,6 +42,7 @@ export const PROBLEM_TEXT: Record<RouteProblem, keyof Strings> = {
   "no-road-at-destination": "routeNoRoadAtDestination",
   "no-route": "routeNoRoute",
   "too-far": "routeTooFar",
+  "outside-region": "routeOutsideRegionFailed",
 };
 
 /** Distance to a maneuver, in the steps a driver reads: 10 m under 300 m, 50 m under 1 km, then 0.1 km. */
