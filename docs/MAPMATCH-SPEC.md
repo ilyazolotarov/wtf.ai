@@ -999,3 +999,12 @@ M1–M3 can partly overlap. M4 needs M1–M3. M5 and M6 are independent of each 
       otherwise), so overall it is a wash (outage benchmark 240 s p90 77 → 72 m; sessions below 100 %: 21 → 23 of
       30). Not kept. Same cause as item 10; it needs a better position prior after a start from coarse fixes, or
       fixes that can unseat a confident wrong lock.
+14. **Jammed from the start, the EKF pull locks the filter off-road** (2026-10-05, CX-5 across town from the
+    parked pose, Wi-Fi fixes only). Replayed with the app's closed loop: off-road 73 % of the moving time, end 86 m
+    from where the car stopped; with `ekfPositionScale` 0: 4 %, 20 m. Without the Wi-Fi fixes the closed loop holds
+    the road (6 %) and ends at the house. Wi-Fi fixes (often hundreds of metres off) move the EKF, and the pull drags
+    the filter after it. But the pull is worth keeping where GPS was good before a cut (`replay:bench --mm`, 14 logs:
+    240 s max error median 22 → 29 m, p90 37 → 49 m without it), and on 6 jammed drives scored by where they ended
+    (two places known within ~5 m) no variant won everywhere (sums 114–149 m; one drive 2 → 84 m). Next: weaken
+    the pull, or keep Wi-Fi out of the EKF, only while no satellite fix has been accepted since the start. The
+    parked-pose and driver-placing changes (NAVIGATOR-SPEC §6.1–6.2) cover the starts that went wrong that day.
