@@ -31,6 +31,9 @@ export interface RoadEdge {
   readonly xy: Float64Array;
   /** Distance along the geometry at each vertex (m); the last is the geometry's length. */
   readonly cum: Float64Array;
+  /** Memoised `startHeading` / `endHeading` (routing asks for them at every junction it passes). */
+  startHeadingRad?: number;
+  endHeadingRad?: number;
 }
 
 export interface RoadNode {
@@ -396,17 +399,18 @@ export class TiledRoadGraph implements RoadGraph {
     const nodeId = dir === 1 ? arrival.to : arrival.from;
     const node = this.node(nodeId);
     const headingIn = dir === 1 ? endHeading(arrival) : wrap(startHeading(arrival) + Math.PI);
-    const restrictions = this.tileOrThrow(idTile(nodeId))
-      .restrictionsAt(idIndex(nodeId))
-      .filter((r) => r.from === via);
-    const only = restrictions.filter((r) => r.kind === RestrictionKind.only);
+    const all = this.tileOrThrow(idTile(nodeId)).restrictionsAt(idIndex(nodeId));
+    const restrictions = all.length ? all.filter((r) => r.from === via) : all;
+    const only = restrictions.length ? restrictions.filter((r) => r.kind === RestrictionKind.only) : restrictions;
     return node.edges.map(({ edge: id, end }) => {
       const out = this.edge(id);
       const exitDir: 1 | -1 = end === 0 ? 1 : -1;
       const headingOut = exitDir === 1 ? startHeading(out) : wrap(endHeading(out) + Math.PI);
-      const restricted = only.length
-        ? !only.some((r) => r.to === id)
-        : restrictions.some((r) => r.kind === RestrictionKind.no && r.to === id);
+      const restricted = restrictions.length
+        ? only.length
+          ? !only.some((r) => r.to === id)
+          : restrictions.some((r) => r.kind === RestrictionKind.no && r.to === id)
+        : false;
       return {
         edge: id,
         dir: exitDir,
@@ -468,15 +472,29 @@ function segmentHeading(xy: Float64Array, i: number): number {
 
 /** Heading of the first non-degenerate segment, in geometry direction. */
 function startHeading(edge: RoadEdge): number {
+  if (edge.startHeadingRad !== undefined) return edge.startHeadingRad;
   const segs = edge.cum.length - 1;
-  for (let i = 0; i < segs; i++) if (edge.cum[i + 1] > edge.cum[i]) return segmentHeading(edge.xy, i);
-  return 0;
+  let heading = 0;
+  for (let i = 0; i < segs; i++) {
+    if (edge.cum[i + 1] > edge.cum[i]) {
+      heading = segmentHeading(edge.xy, i);
+      break;
+    }
+  }
+  return (edge.startHeadingRad = heading);
 }
 
 /** Heading of the last non-degenerate segment, in geometry direction. */
 function endHeading(edge: RoadEdge): number {
-  for (let i = edge.cum.length - 2; i >= 0; i--) if (edge.cum[i + 1] > edge.cum[i]) return segmentHeading(edge.xy, i);
-  return 0;
+  if (edge.endHeadingRad !== undefined) return edge.endHeadingRad;
+  let heading = 0;
+  for (let i = edge.cum.length - 2; i >= 0; i--) {
+    if (edge.cum[i + 1] > edge.cum[i]) {
+      heading = segmentHeading(edge.xy, i);
+      break;
+    }
+  }
+  return (edge.endHeadingRad = heading);
 }
 
 export function closestPoint(edge: RoadEdge, e: number, n: number): NearEdge {
