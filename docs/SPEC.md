@@ -17,7 +17,7 @@ Odometry is built up in stages (§2.1). Stage 1 uses the minimum that works on a
 | Topic                       | Decision                                                                                                                                                                                                                  |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Platform                    | **iOS first**. Android is nice-to-have later (no test device).                                                                                                                                                            |
-| Dev environment             | Windows only, no Mac, **no paid Apple Developer account**. iOS builds: **GitHub Actions** macOS runner, `expo prebuild` + `xcodebuild` with signing disabled → unsigned IPA, sideloaded with **AltStore** (free Apple ID, 7-day refresh). **No EAS** (Build/Submit/Update). CI runs checks + this build on every commit (§6). |
+| Dev environment             | Windows only, no Mac, **no paid Apple Developer account**. iOS builds: **GitHub Actions** macOS runner, `expo prebuild` + `xcodebuild` with signing disabled → unsigned IPA, sideloaded with **AltStore** (free Apple ID, 7-day refresh). **No EAS** (Build/Submit/Update). CI runs checks, and this build when needed ([CI.md](CI.md), §6). |
 | Framework                   | Expo SDK 57, Expo Router, TypeScript. Dev builds only (no Expo Go).                                                                                                                                                       |
 | Odometry roadmap            | **Staged** (§2.1): Stage 1 OBD-II speed + phone gyro → Stage 2 CAN wheel speeds → Stage 3 CAN yaw rate. Each stage is a drop-in odometry source; the EKF, integrity, and map matching don't change between stages.           |
 | Adapter protocol            | Stage 1: **plain ELM327 command subset only** (§3.1), for broad dongle compatibility. No STN/OBDLink-specific commands until Stage 2.                                                                                        |
@@ -352,7 +352,7 @@ Status (2026-10-05):
 - Units internally: SI (m, s, rad, m/s, rad/s). Convert at boundaries. Exception: engine speed in rev/min, with the unit in the field name (`rpm`).
 - Time base: every sensor/adapter/log timestamp is monotonic uptime in µs (`ProcessInfo.systemUptime`, the CoreMotion clock). Wall-clock time only through explicit sync records.
 - Minimize native changes — each one needs a CI macOS build (~20–40 min) and a re-sideload. Never rely on EAS.
-- CI (`.github/workflows/ci.yml`) runs lint, typecheck, Jest, `tools/triplog` pytest, `expo-doctor`, and the unsigned iOS build on every push/PR. The macOS build is the only Swift compiler available: keep it green.
+- CI (`.github/workflows/ci.yml`) runs lint, typecheck, Jest, `tools/triplog` pytest, `expo-doctor`, and the unsigned iOS build, each only when what it covers changed ([CI.md](CI.md)): native changes are always compiled, JS-only branch pushes get an IPA with `[build]` in the commit message. The macOS build is the only Swift compiler available: keep it green.
 - Before declaring done: `npx expo lint`, `npx tsc --noEmit`, and unit tests for `src/nav`, `src/obd`, `src/triplog` (plus `tools/triplog` Python tests when touched).
 
 ## 7. Verification targets

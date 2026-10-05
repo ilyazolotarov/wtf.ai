@@ -20,9 +20,9 @@ You need Node.js with npm. Expo Go is not supported because the app uses native 
    npm install
    ```
 
-2. Get an unsigned iOS build from GitHub Actions: every push runs the **CI** workflow, whose `build-ios` job uploads `wtfai-Debug-unsigned.ipa` (a dev client with the JS bundle embedded) as an artifact. For a Release build (production JS, no dev client), run **Build Unsigned iOS App** by hand with `Release`.
+2. Get an unsigned iOS build from GitHub Actions: the **CI** workflow's `build-ios` job uploads `wtfai-Debug-unsigned.ipa` (a dev client with the JS bundle embedded) as an artifact for every push to `main` that changes the app, for branch pushes with `[build]` in a commit message, and when you run **CI** by hand ([docs/CI.md](docs/CI.md)). For a Release build (production JS, no dev client), run **Build Unsigned iOS App** by hand with `Release`.
 
-   Optional: get each IPA in Telegram as soon as it's built.
+   Optional: get these IPAs in Telegram as soon as they're built (branch compile checks are not sent).
    1. In Telegram, create a bot with [@BotFather](https://t.me/BotFather) (`/newbot`) and copy its token.
    2. Send the bot any message, then open `https://api.telegram.org/bot<token>/getUpdates` and copy `"chat":{"id":…}`.
    3. Add both as repository secrets: `gh secret set TELEGRAM_BOT_TOKEN`, then `gh secret set TELEGRAM_CHAT_ID` (each prompts for the value).
@@ -49,7 +49,7 @@ swift test                              # Swift logic of the native modules; on 
 docker run --rm -v "$PWD:/src" -w /src swift:6.1 swift test --scratch-path /tmp/build
 ```
 
-CI runs all of these plus `expo-doctor` and the unsigned iOS build on every push.
+CI runs these plus `expo-doctor` and the unsigned iOS build, each when what it covers changed ([docs/CI.md](docs/CI.md)).
 
 ## Privacy
 
