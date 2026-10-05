@@ -30,6 +30,8 @@ export interface DevSettings {
   outageButton: boolean;
   /** How map matching feeds back into the navigator (MAPMATCH-SPEC §9): open, heading, closed. */
   mapMatchLoop: MapMatchLoop;
+  /** Map matching told the route (ROUTING-SPEC §8.6): at junctions it favours the route's exit. */
+  routeHint: boolean;
 }
 
 const DEV_SETTINGS_KEY = "dev.settings";
@@ -54,7 +56,7 @@ export function getRuntime(): Runtime {
 
   // Full correction by default (MAPMATCH-SPEC §9): replay and simulation beat the open loop everywhere; the open loop
   // stays one tap away in the developer settings for comparing on the road.
-  let dev: DevSettings = { showEmulators: __DEV__, showParticles: false, outageButton: false, mapMatchLoop: "closed", ...(kvStore.getJson<Partial<DevSettings>>(DEV_SETTINGS_KEY) ?? {}) };
+  let dev: DevSettings = { showEmulators: __DEV__, showParticles: false, outageButton: false, mapMatchLoop: "closed", routeHint: false, ...(kvStore.getJson<Partial<DevSettings>>(DEV_SETTINGS_KEY) ?? {}) };
   const devListeners = new Set<() => void>();
   const nowUs = () => VehicleLinkModule.nowUs();
   const clock = createClock(nowUs);
@@ -84,6 +86,7 @@ export function getRuntime(): Runtime {
       sys_os_ver: sysOsVer,
       // The navigator version this drive starts with (a change mid-drive is a note).
       nav_mapmatch_loop: dev.mapMatchLoop,
+      nav_route_hint: dev.routeHint ? "on" : "off",
     }),
   });
   recorder.start();
@@ -121,6 +124,7 @@ export function getRuntime(): Runtime {
     openGraph: () => openActiveRoadGraph(ROUTER_CACHE_TILES),
     nowUs,
     store: kvStore,
+    onRoute: (legs) => position.setRouteHint(dev.routeHint && legs ? legs.map((l) => l.edge) : null),
     note: (text) => recorder.note(text),
     log: {
       route: (r) => recorder.navRoute(r),
@@ -162,6 +166,10 @@ export function getRuntime(): Runtime {
       // Hiding the button ends a simulated outage, so it can't be left on unseen.
       if (patch.outageButton === false) position.setSimulatedOutage(false);
       if (patch.mapMatchLoop) position.setMapMatchLoop(patch.mapMatchLoop);
+      if (patch.routeHint !== undefined) {
+        const plan = routes.getSnapshot()?.plan;
+        position.setRouteHint(patch.routeHint && plan ? plan.legs.map((l) => l.edge) : null);
+      }
     },
     subscribeDevSettings: (listener) => {
       devListeners.add(listener);

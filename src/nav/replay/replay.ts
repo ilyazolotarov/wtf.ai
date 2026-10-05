@@ -5,6 +5,7 @@ import type { GnssLagEstimate } from "../calibration/gnss-lag";
 import { rotateCalibration, type CompassCalibration, type CompassTrust } from "../compass/compass";
 import type { TripLog } from "../../triplog/trip-log-reader";
 import { haversineM } from "../geo";
+import type { EdgeId } from "../mapmatch/graph/road-graph";
 import type { MapMatchConfig } from "../mapmatch/particle-filter";
 import { Navigator, SQRT_68, type FixOutcome, type InitMethod, type MapMatchGraph, type NavConfig, type NavEstimate, type ParkedPose } from "../navigator";
 import type { OdometryStep } from "../odometry/odometry-output";
@@ -74,6 +75,10 @@ export interface ReplayOptions {
    * the §10.2 metrics; `particlesEveryS` keeps particle snapshots for the viewer.
    */
   mapMatch?: { graph: MapMatchGraph; truth?: TruthMatch; config?: Partial<MapMatchConfig>; particlesEveryS?: number };
+  /** Route hints for the filter (ROUTING-SPEC §8.6) from these times on (log-relative s, ascending); null clears. */
+  routeHints?: { fromS: number; edges: EdgeId[] | null }[];
+  /** Stop the replay at this time (log-relative s). */
+  untilS?: number;
 }
 
 /** Particle positions at one moment: [lat, lon, weight, off-road 1/0] heaviest first. */
@@ -245,11 +250,16 @@ export function replayTrip(trip: TripLog, options: ReplayOptions = {}): ReplayRe
   let o = 0;
   let g = 0;
   let k = 0;
+  const hints = options.routeHints ?? [];
+  let h = 0;
   while (i < imu.length || o < obdSpeed.length || g < gnss.length || k < mag.length) {
     const ti = i < imu.length ? imu[i].tUs : Infinity;
     const to = o < obdSpeed.length ? obdSpeed[o].tUs : Infinity;
     const tg = g < gnss.length ? gnss[g].tUs : Infinity;
     const tm = k < mag.length ? mag[k].tUs : Infinity;
+    const tNext = tS(Math.min(ti, to, tg, tm));
+    if (options.untilS !== undefined && tNext > options.untilS) break;
+    while (h < hints.length && hints[h].fromS <= tNext) nav.setRouteHint(hints[h++].edges);
     if (tm < ti && tm < to && tm < tg) {
       nav.onMag(mag[k++]);
     } else if (ti <= to && ti <= tg) {

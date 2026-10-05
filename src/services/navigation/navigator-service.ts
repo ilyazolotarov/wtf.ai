@@ -185,6 +185,8 @@ export class NavigatorService implements PositionSource {
   private overlay: MapMatchOverlay | null = null;
   /** Developer setting: how map matching feeds back into the navigator (MAPMATCH-SPEC §9). */
   private loop: MapMatchLoop = "open";
+  /** The route's edges for the filter (ROUTING-SPEC §8.6), or null. */
+  private routeHint: number[] | null = null;
   /** Road corrections already summarised in the trip log. */
   private notedRoad = { heading: 0, position: 0 };
   private overlayStale = true;
@@ -206,6 +208,14 @@ export class NavigatorService implements PositionSource {
     this.loop = loop;
     this.nav?.setMapMatchLoop(loop);
     this.note(`nav map-match loop ${loop}`);
+  }
+
+  /** The route the driver follows, for map matching (ROUTING-SPEC §8.6); null: none. Kept for a new navigator. */
+  setRouteHint(edges: number[] | null): void {
+    if (edges === this.routeHint || (!edges && !this.routeHint)) return;
+    this.routeHint = edges;
+    this.nav?.setRouteHint(edges);
+    this.note(edges ? `nav route hint: ${edges.length} edges` : "nav route hint off");
   }
 
   get simulatedOutage(): boolean {
@@ -392,6 +402,7 @@ export class NavigatorService implements PositionSource {
     this.notedMapMatch = "off";
     this.interval = { count: 0, totalMs: 0, maxMs: 0 };
     this.applyRoadGraph();
+    nav.setRouteHint(this.routeHint);
     // Known before the adapter connects: the car of the adapter auto-connect will use.
     const vin = link.expectedVin();
     if (!vin) return;

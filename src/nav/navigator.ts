@@ -95,6 +95,8 @@ export interface NavConfig {
   mapMatchTwin: { prior?: boolean; odometry?: boolean };
   roadHeading: Partial<RoadHeadingConfig>;
   roadPosition: Partial<RoadPositionConfig>;
+  /** With a route hint set (`setRouteHint`), how much likelier the filter takes the route's exit at a junction. */
+  routeHintFactor: number;
 }
 
 /** The road-position pseudo-measurement (MAPMATCH-SPEC §9). */
@@ -169,6 +171,7 @@ export const DEFAULT_NAV_CONFIG: NavConfig = {
   mapMatchTwin: {},
   roadHeading: {},
   roadPosition: {},
+  routeHintFactor: 3,
 };
 
 // Every 25 m with 5 / 3 m floors put the truth inside the circle 22 % of the time: each update
@@ -358,6 +361,8 @@ export class Navigator {
   });
   private mapGraph: MapMatchGraph | null = null;
   private pf: ParticleFilter | null = null;
+  /** The route the driver follows, for the filter (`setRouteHint`). */
+  private routeHint: EdgeId[] | null = null;
   private mapMatchListening = false;
   /** Odometry distance where the filter's weight went mostly off-road (null: on the roads). */
   private offRoadFromM: number | null = null;
@@ -410,6 +415,7 @@ export class Navigator {
   setRoadGraph(graph: MapMatchGraph | null, config: Partial<MapMatchConfig> = {}): void {
     this.mapGraph = graph;
     this.pf = graph ? new ParticleFilter(graph, config) : null;
+    this.pf?.setRouteHint(this.routeHint, this.config.routeHintFactor);
     this.offRoadFromM = null;
     this.trackingFromM = null;
     if (!graph) return;
@@ -423,6 +429,15 @@ export class Navigator {
   }
 
   /** Switch how map matching feeds back into the EKF (MAPMATCH-SPEC §9); takes effect at the next odometry chunk. */
+  /**
+   * The route the driver follows (ROUTING-SPEC §8.6): the edges of the graph the filter runs on (null: none). At a
+   * junction the filter then sends more particles onto the route's exit; turns still decide.
+   */
+  setRouteHint(edges: EdgeId[] | null): void {
+    this.routeHint = edges;
+    this.pf?.setRouteHint(edges, this.config.routeHintFactor);
+  }
+
   setMapMatchLoop(loop: NavConfig["mapMatchLoop"]): void {
     this.config.mapMatchLoop = loop;
     this.syncTwin();

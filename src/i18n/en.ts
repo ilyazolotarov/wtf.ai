@@ -187,6 +187,7 @@ export const en = {
   showEmulators: "Show emulated adapters",
   showParticles: "Map matching on the map (particles)",
   outageButton: "GPS outage button on the map",
+  routeHintSetting: "Tell map matching the route",
   mapMatchLoop: "Navigator version",
   loopOpen: "Open loop (map matching only watches)",
   loopHeading: "Road heading",

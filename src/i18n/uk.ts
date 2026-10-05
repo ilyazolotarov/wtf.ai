@@ -189,6 +189,7 @@ export const uk = {
   showEmulators: "Показувати емульовані адаптери",
   showParticles: "Прив’язка до доріг на мапі (частинки)",
   outageButton: "Кнопка втрати GPS на мапі",
+  routeHintSetting: "Підказувати маршрут прив’язці до доріг",
   mapMatchLoop: "Версія навігатора",
   loopOpen: "Розімкнена (прив’язка лише спостерігає)",
   loopHeading: "Напрям дороги",

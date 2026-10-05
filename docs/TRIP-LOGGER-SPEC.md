@@ -130,6 +130,7 @@ modules/sensor-capture ─▶ src/services/sensor-capture ──(SensorStream)�
 | `char[] vehicle_vin`              | VIN or empty; repeated in the data section if read later |
 | `char[] imu_frame`                | `xArbitraryZVertical`                                  |
 | `char[] nav_mapmatch_loop`        | navigator version at trip start: `open` / `heading` / `closed` (MAPMATCH-SPEC §9); a change mid-drive is the note `nav map-match loop <v>` |
+| `char[] nav_route_hint`           | `on` / `off`: map matching told the active route (ROUTING-SPEC §8.6, developer setting); a change is the note `nav route hint …` |
 
 ### 6.3 Data messages (`F` + `D`)
 

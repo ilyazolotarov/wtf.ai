@@ -458,6 +458,11 @@ function DeveloperTab() {
           onValueChange={(v) => setDevSettings({ outageButton: v })}
           label={t("outageButton")}
         />
+        <SwitchRow
+          value={dev.routeHint}
+          onValueChange={(v) => setDevSettings({ routeHint: v })}
+          label={t("routeHintSetting")}
+        />
         <CycleRow
           labelKey="speedCap"
           value={speedCap}

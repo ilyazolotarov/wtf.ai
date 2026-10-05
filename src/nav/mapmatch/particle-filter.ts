@@ -405,6 +405,8 @@ export class ParticleFilter {
   private region: { e: number; n: number; radiusM: number; atM: number } | null = null;
   private regionSpans: { e: number; n: number; radiusM: number; spans: Span[]; starts: number[]; total: number } | null = null;
   private readonly exitCache = new Map<string, ExitChoice>();
+  /** The route the driver follows (ROUTING-SPEC §8.6): at a junction, exits onto its edges are `factor` times likelier. */
+  private routeHint: { edges: Set<EdgeId>; factor: number } | null = null;
 
   /** Odometry totals at the last chunk (from the navigator: distance, turn, and a running sum of turn variance). */
   private distanceM = 0;
@@ -659,6 +661,12 @@ export class ParticleFilter {
       }
     }
     this.cached = null;
+  }
+
+  /** The route's edges, or null: none. Only the choice at junctions changes (a prior, never the weights). */
+  setRouteHint(edges: Iterable<EdgeId> | null, factor: number): void {
+    this.routeHint = edges && factor !== 1 ? { edges: new Set(edges), factor } : null;
+    this.exitCache.clear();
   }
 
   /** The compass heading for the next weightings (null: none, or not trusted). Used only in state `init`. */
@@ -1055,6 +1063,7 @@ export class ParticleFilter {
         if (x.uTurn && !deadEnd) f *= c.uTurnFactor;
         if (to.flags & EdgeFlag.private) f *= c.privateFactor;
         if (to.cls === RoadClass.service) f *= c.serviceFactor;
+        if (this.routeHint?.edges.has(x.edge) && !x.uTurn) f *= this.routeHint.factor;
         total += f;
         cum.push(total);
       }

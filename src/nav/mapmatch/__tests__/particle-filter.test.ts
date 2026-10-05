@@ -50,6 +50,22 @@ describe("ParticleFilter in the navigator (synthetic drives on the fixture graph
     expect(Math.hypot(dE, dN)).toBeLessThan(25);
   });
 
+  test("a route hint the driver doesn't follow never overrides the turn (ROUTING-SPEC §8.6)", () => {
+    const g = graph();
+    const drive = syntheticDrive({ segments: junctionDrive(20), origin: ORIGIN, startHeadingRad: Math.PI / 2, gnss: "clean", obdScale: 0.99 });
+    // The route goes straight on along 161; the car turns onto 162.
+    const straightOn = g.edgesInTiles(g.tilesInBounds(-180, -85, 180, 85)).filter((e) => e.wayId === 160 || e.wayId === 161).map((e) => e.id);
+    const result = replayTrip(drive.trip, {
+      nav: { routeHintFactor: 10 },
+      mapMatch: { graph: g },
+      cuts: [{ fromS: 100, toS: 1e9 }],
+      routeHints: [{ fromS: 0, edges: straightOn }],
+    });
+    const end = result.track.at(-1)!.mapMatch!;
+    expect(wayOf(g, end.clusters[0].edge)).toBe(162);
+    expect(end.clusters[0].weight).toBeGreaterThan(0.8);
+  });
+
   test("a turn into open country hands over to the off-road particles", () => {
     const g = graph();
     const drive = syntheticDrive({ segments: junctionDrive(-20), origin: ORIGIN, startHeadingRad: Math.PI / 2, gnss: "clean", obdScale: 0.99 });

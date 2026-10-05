@@ -6,6 +6,7 @@
 //   npm run route:sim -- --minutes 120 --seeds 2
 //   npm run route:sim -- --at 50.4501,30.5234 --graph tools/tiles/out/release/kyiv-city.graph.bin
 //   npm run route:sim -- --gps                            # with GPS all along (the baseline)
+//   npm run route:sim -- --hint 3                         # map matching told the route (ROUTING-SPEC §8.6), factor 3
 //
 // Follow: the route is the car's own path from the cut on, so every "off" is false. Divert: every few minutes a route
 // is planned from where the car is to a point 2–4 km away; the car keeps driving its own way, so it leaves the route
@@ -33,6 +34,7 @@ function parseArgs(argv: string[]) {
   let gpsMin = 3;
   let gps = false;
   let divertEveryMin = 6;
+  let hint = 1;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--at") {
@@ -44,12 +46,13 @@ function parseArgs(argv: string[]) {
     else if (a === "--gps-min") gpsMin = Number(argv[++i]);
     else if (a === "--gps") gps = true;
     else if (a === "--divert-every") divertEveryMin = Number(argv[++i]);
+    else if (a === "--hint") hint = Number(argv[++i]);
     else if (a === "-h" || a === "--help") {
-      console.log("route:sim [--at lat,lon] [--graph <file>] [--minutes 60] [--seeds 3] [--gps-min 3] [--gps] [--divert-every 6]");
+      console.log("route:sim [--at lat,lon] [--graph <file>] [--minutes 60] [--seeds 3] [--gps-min 3] [--gps] [--divert-every 6] [--hint <factor>]");
       process.exit(0);
     }
   }
-  return { at, graph, minutes, seeds, gpsMin, gps, divertEveryMin };
+  return { at, graph, minutes, seeds, gpsMin, gps, divertEveryMin, hint };
 }
 
 const quantile = (v: number[], q: number) => {
@@ -138,10 +141,23 @@ if (!graphFile) throw new Error("no road graph covers --at: build one with `tile
 console.log(
   `${path.basename(graphFile)}: ${args.minutes} min drives, seeds 1–${args.seeds}, ` +
     (args.gps ? "GPS all along" : `GPS for the first ${args.gpsMin} min, then none`) +
-    `; a diversion every ${args.divertEveryMin} min`,
+    `; a diversion every ${args.divertEveryMin} min` +
+    (args.hint !== 1 ? `; map matching told the route (factor ${args.hint})` : ""),
 );
 
-const follow = { samples: 0, states: new Map<GuidanceState, number>(), falseOff: 0, falseAt: [] as string[], hours: 0, plans: 0, progressErr: [] as number[] };
+const follow = {
+  samples: 0,
+  states: new Map<GuidanceState, number>(),
+  falseOff: 0,
+  falseAt: [] as string[],
+  hours: 0,
+  plans: 0,
+  progressErr: [] as number[],
+  /** The puck's distance from the truth, and whether map matching's top hypothesis was on the car's edge. */
+  dotErr: [] as number[],
+  rightEdge: 0,
+  edgeSamples: 0,
+};
 const divert = { planned: 0, diverged: 0, detected: 0, delayS: [] as number[], delayM: [] as number[], falseOffBefore: 0, followedToEnd: 0, missed: [] as string[] };
 
 for (let seed = 1; seed <= args.seeds; seed++) {
@@ -150,17 +166,34 @@ for (let seed = 1; seed <= args.seeds; seed++) {
   const drive = cityDrive({ graph: simGraph.graph, frame, durationS: args.minutes * 60, seed });
   simGraph.close();
   const cutS = 20 + args.gpsMin * 60;
-  const navGraph = openGraph(graphFile, args.at);
-  const t0 = performance.now();
-  const result = replayTrip(drive.trip, {
-    nav: { mapMatchLoop: "closed" },
-    mapMatch: { graph: navGraph.graph },
-    cuts: args.gps ? [] : [{ fromS: cutS, toS: Infinity }],
-    trackStepS: 1,
-  });
-  navGraph.close();
-  const puck = replayPuck(result).filter((p) => p.t >= cutS);
   const startUs = drive.trip.startUs;
+  const t0 = performance.now();
+  /** A replay of the drive, map matching told `hints` (with `--hint`). */
+  const replay = (hints: { fromS: number; edges: number[] | null }[], untilS?: number) => {
+    const navGraph = openGraph(graphFile, args.at);
+    const result = replayTrip(drive.trip, {
+      nav: { mapMatchLoop: "closed", routeHintFactor: args.hint },
+      mapMatch: { graph: navGraph.graph },
+      cuts: args.gps ? [] : [{ fromS: cutS, toS: Infinity }],
+      trackStepS: 1,
+      ...(args.hint !== 1 ? { routeHints: hints } : {}),
+      ...(untilS !== undefined ? { untilS } : {}),
+    });
+    navGraph.close();
+    return result;
+  };
+  // Following: the hint is the car's own way from the cut on.
+  const ownEdges = [...new Set(drive.truth.filter((p) => (p.tUs - startUs) / 1e6 >= cutS).map((p) => p.edge))];
+  const result = replay([{ fromS: cutS, edges: ownEdges }]);
+  const puck = replayPuck(result).filter((p) => p.t >= cutS);
+  for (const p of result.track) {
+    if (p.tS < cutS) continue;
+    const top = p.mapMatch?.clusters[0];
+    if (!top || top.edge === null) continue;
+    follow.edgeSamples++;
+    if (top.edge === drive.truthAt(startUs + p.tS * 1e6).edge) follow.rightEdge++;
+  }
+  for (const p of puck) follow.dotErr.push(haversineM(p, drive.truthAt(startUs + p.t * 1e6)));
   const truthAtS = (tS: number) => drive.truthAt(startUs + tS * 1e6);
   // Distance driven by a time (the truth at 10 Hz).
   const driven: number[] = [0];
@@ -210,6 +243,10 @@ for (let seed = 1; seed <= args.seeds; seed++) {
     if (r.status !== "done") continue;
     divert.planned++;
     const maneuvers = routeManeuvers(routeGraph.graph, r.plan);
+    // With a hint, map matching is told this route from now on (a replay of its own, to the end of the window).
+    const divertPuck = args.hint !== 1
+      ? replayPuck(replay([{ fromS: tS, edges: r.plan.legs.map((l) => l.edge) }], tS + 600)).filter((p) => p.t >= tS)
+      : puck;
     // Where the car really left it: the true position more than 25 m off the route, by guidance on the truth.
     const onTruth = new RouteGuidance(r.plan, maneuvers, { offMinM: 25, offHoldS: 0, offHoldM: 0 });
     const onPuck = new RouteGuidance(r.plan, maneuvers);
@@ -217,7 +254,7 @@ for (let seed = 1; seed <= args.seeds; seed++) {
     let detectedAt: number | null = null;
     let arrived = false;
     let lastPuckState: GuidanceState | null = null;
-    for (const p of puck) {
+    for (const p of divertPuck) {
       if (p.t < tS) continue;
       if (p.t > tS + 600) break;
       const tr = truthAtS(p.t);
@@ -257,7 +294,9 @@ const share = (s: GuidanceState) => pct(follow.states.get(s) ?? 0, n);
 console.log(
   `\nFollow (the car on its route: ${follow.plans} routes, ${follow.hours.toFixed(1)} h): false "off" ${follow.falseOff} (${(follow.falseOff / Math.max(0.01, follow.hours)).toFixed(1)} per hour); ` +
     `on ${share("on")}, leaving ${share("leaving")}, unsure ${share("unsure")}, off ${share("off")}; ` +
-    `progress error p50 / p90 / max ${f0(quantile(follow.progressErr, 0.5))} / ${f0(quantile(follow.progressErr, 0.9))} / ${f0(Math.max(...follow.progressErr))} m` +
+    `progress error p50 / p90 / max ${f0(quantile(follow.progressErr, 0.5))} / ${f0(quantile(follow.progressErr, 0.9))} / ${f0(Math.max(...follow.progressErr))} m; ` +
+    `dot off the truth p50 / p90 / max ${f0(quantile(follow.dotErr, 0.5))} / ${f0(quantile(follow.dotErr, 0.9))} / ${f0(Math.max(...follow.dotErr))} m, ` +
+    `top hypothesis on the car's edge ${pct(follow.rightEdge, follow.edgeSamples)}` +
     (follow.falseAt.length ? `; false "off" at ${follow.falseAt.join(", ")}` : ""),
 );
 console.log(

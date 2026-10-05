@@ -108,6 +108,8 @@ export interface RouteServiceDeps {
   log?: RouteLog;
   /** Runs `fn` later (between frames); tests pass their own. */
   defer?(fn: () => void, ms: number): () => void;
+  /** The route in force changed (a plan, a re-plan, the end): its legs, or null. */
+  onRoute?(legs: RoutePlan["legs"] | null): void;
   /** Keeps the active destination across app restarts. */
   store?: { getJson<T>(key: string): T | null; setJson(key: string, value: unknown): void };
 }
@@ -202,6 +204,7 @@ export class RouteService {
     this.notedState = null;
     this.graph?.close();
     this.graph = null;
+    this.deps.onRoute?.(null);
     this.set(null);
   }
 
@@ -289,6 +292,7 @@ export class RouteService {
       const cur = this.snapshot!;
       this.set({ ...cur, status: "active", failure: undefined, replanFailure: undefined, planId: id, plan: r.plan, maneuvers, guidance: undefined, replanning: false });
       this.logPlan(id, reason, r.plan, maneuvers, { states: r.stats.states, tiles: r.stats.tilesRead, planMs: r.stats.ms, wallMs, slices }, position);
+      this.deps.onRoute?.(r.plan.legs);
       this.onPosition();
     };
     this.planning = { id, cancel: this.defer(step, 0) };
