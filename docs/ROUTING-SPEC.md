@@ -162,7 +162,8 @@ next maneuver and the distance to it, and the one after when it follows within 1
 - **Off the route** beyond max(40 m, 1.5 × the position's accuracy): `leaving` at once, `off` after 4 s and 30 m
   driven (from the speed, so a parked car or a jumping position never counts as leaving). `unsure` instead while
   map matching is `multimodal` or `init`, or the position is phone GPS that isn't trusted (spoofing can put it
-  anywhere): neither on nor off is decided then. Driving the route the wrong way is off it.
+  anywhere): neither on nor off is decided then. Driving the route the wrong way is off it. Until the car has
+  been on the route once (it may start in a car park or a yard), `off` takes 200 m of driving instead of 30 m.
 - **Arrived** within 30 m of the route's end along it, or of its last point once less than 300 m is left (a route
   may pass near its end earlier), and it stays arrived.
 - A maneuver passed by less than 10 m is still the next one (the puck lags the turn).

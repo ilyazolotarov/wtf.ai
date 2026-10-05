@@ -19,6 +19,8 @@ export interface GuidanceConfig {
   /** Off for this long and this far driven before planning again. */
   offHoldS: number;
   offHoldM: number;
+  /** Before the car first reaches the route (from a car park or a yard), off it only after driving this far. */
+  joinHoldM: number;
   /** The route is matched within this behind the last progress, and this ahead (more when fast, or after driving off it). */
   backM: number;
   aheadM: number;
@@ -39,6 +41,7 @@ export const DEFAULT_GUIDANCE: GuidanceConfig = {
   offAccuracyFactor: 1.5,
   offHoldS: 4,
   offHoldM: 30,
+  joinHoldM: 200,
   backM: 100,
   aheadM: 300,
   headingMinSpeedMps: 3,
@@ -95,6 +98,8 @@ export class RouteGuidance {
   private lastPosition: GuidancePosition | null = null;
   /** Driven since the position last matched the route, m. */
   private drivenSinceMatch = 0;
+  /** The car has been on the route (it may start away from it). */
+  private joined = false;
 
   constructor(
     readonly plan: RoutePlan,
@@ -146,13 +151,14 @@ export class RouteGuidance {
     } else if (offM <= threshold) {
       state = "on";
       this.offSince = null;
+      this.joined = true;
     } else if (unsure) {
       state = "unsure";
       this.offSince = null;
     } else {
       this.offSince ??= { tMs: p.tMs, drivenM: 0 };
       this.offSince.drivenM += drivenM;
-      const held = p.tMs - this.offSince.tMs >= c.offHoldS * 1000 && this.offSince.drivenM >= c.offHoldM;
+      const held = p.tMs - this.offSince.tMs >= c.offHoldS * 1000 && this.offSince.drivenM >= (this.joined ? c.offHoldM : c.joinHoldM);
       state = held ? "off" : "leaving";
     }
 

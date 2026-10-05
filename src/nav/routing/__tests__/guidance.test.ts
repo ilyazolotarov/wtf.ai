@@ -60,6 +60,14 @@ describe("RouteGuidance", () => {
     expect(g.update(at(60, 400, 2)).state).toBe("on");
   });
 
+  test("starting away from the route (a car park), it takes 200 m of driving away from it to be 'off'", () => {
+    const g = new RouteGuidance(PLAN, MANEUVERS);
+    // 60 m south of the start, driving east in a car park for 150 m: still on the way to the route.
+    for (let t = 0; t <= 15; t++) expect(g.update(at(t, 10 * t, -60)).state).toBe("leaving");
+    for (let t = 16; t <= 25; t++) g.update(at(t, 10 * t, -60));
+    expect(g.step!.state).toBe("off");
+  });
+
   test("stopped next to the route is never 'off' (no distance driven)", () => {
     const g = new RouteGuidance(PLAN, MANEUVERS);
     g.update(at(0, 100, 0));
