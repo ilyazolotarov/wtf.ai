@@ -51,11 +51,10 @@ jobs:
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       # Compiler cache for the C/C++/Objective-C of the pods (React Native core and Expo modules
-      # come prebuilt; Swift is not cached). The Podfile turns it on with USE_CCACHE=1.
+      # come prebuilt; Swift is not cached). The Podfile turns it on with USE_CCACHE=1. Xcode
+      # doesn't pass CCACHE_* variables to the compiler, so ccache keeps its default directory
+      # (~/Library/Caches/ccache) and React Native's ccache.conf.
       USE_CCACHE: "1"
-      CCACHE_DIR: ${{ github.workspace }}/.ccache
-      CCACHE_BASEDIR: ${{ github.workspace }}
-      CCACHE_MAXSIZE: 2G
       # Caches are saved by main only and restored everywhere: branches start from main's,
       # and their own builds don't evict it.
       SAVE_CACHES: ${{ github.ref == 'refs/heads/main' }}
@@ -94,7 +93,7 @@ jobs:
         id: ccache
         uses: actions/cache/restore@v6
         with:
-          path: .ccache
+          path: ~/Library/Caches/ccache
           key: ios-ccache-${{ inputs.configuration }}-${{ github.sha }}
           restore-keys: ios-ccache-${{ inputs.configuration }}-
 
@@ -135,7 +134,7 @@ jobs:
 
       - name: ccache statistics
         if: ${{ !cancelled() }}
-        run: ccache --show-stats || true
+        run: ccache --show-stats --verbose || true
 
       - name: Save CocoaPods download cache
         if: ${{ env.SAVE_CACHES == 'true' && steps.pods-cache.outputs.cache-hit != 'true' }}
@@ -148,7 +147,7 @@ jobs:
         if: ${{ env.SAVE_CACHES == 'true' }}
         uses: actions/cache/save@v6
         with:
-          path: .ccache
+          path: ~/Library/Caches/ccache
           key: ${{ steps.ccache.outputs.cache-primary-key }}
 
       - name: Package into IPA

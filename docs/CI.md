@@ -47,7 +47,7 @@ Pull requests from branches of this repo don't run CI again: their branch pushes
 - npm (`setup-node`).
 - CocoaPods download cache (`~/Library/Caches/CocoaPods`: pod sources, prebuilt React Native and
   Hermes tarballs), keyed on `package-lock.json`, `patches/` and module podspecs.
-- ccache for the C/C++/Objective-C of the pods (`USE_CCACHE=1`, read by the Expo Podfile). React Native
+- ccache (`~/Library/Caches/ccache`) for the C/C++/Objective-C of the pods (`USE_CCACHE=1`, read by the Expo Podfile). React Native
   core and Expo modules come precompiled; Swift is not cached. The build log prints the hit rate
   (`ccache statistics`).
 
