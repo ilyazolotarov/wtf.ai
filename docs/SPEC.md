@@ -309,7 +309,7 @@ tools/triplog/           Python: ULog trip log reader, CSV/Parquet export, plots
 | 7   | Field test (Stage 1)        | 6          | real outage drives; baseline DR error numbers                                                                                                                                                            |
 | 7b  | Adapter coverage            | 1          | more BLE clones, OBDLink CX, vLinker; grow the GATT catalog and the tested-adapter list with measured poll rates (VEHICLE-LINK-SPEC §13)                                                                  |
 
-Status (2026-10-04):
+Status (2026-10-05):
 
 - **Phase 0:**
   - Done: CI unsigned build + AltStore, MX+ EA session over `com.obdlink`, `010D1` at ~27 Hz on the CX-5,
@@ -320,9 +320,13 @@ Status (2026-10-04):
 - **Phase 1:** done and field-tested (14 drives, TRIP-LOGGER-SPEC §11).
 - **Phase 2:** the navigator and replay are implemented. It drives the map through `NavigatorService` and saves its
   calibration. Field-tested on 7 drives (NAVIGATOR-SPEC §9.1): 26 m off after 2.7 km jammed throughout.
-- **Phase 5:** in progress, measured on replay only (MAPMATCH-SPEC §2): road graph, particle filter (open loop),
-  heading init from the map under jamming. The app (M7) is built: graph download, map matching on the phone, the
-  puck on the road while dead-reckoning, `nav_mapmatch` in trip logs; not yet driven. Next: closed loop (M6).
+- **Phase 6 (routing):** built, not yet driven (ROUTING-SPEC §2): A\* on the road graph (city routes ≤ 0.1 s, oblast
+  routes ≤ 1 s in Node), turn instructions, guidance that works without GPS (no false "off route" in 5.4 simulated
+  hours), spoken maneuvers, long press → Route here, routes and guidance in trip logs and `replay:view`.
+- **Phase 5:** in progress, measured on replay and simulation (MAPMATCH-SPEC §2): road graph, particle filter,
+  heading init from the map under jamming, the closed loop (M6: road heading and position back into the EKF, the
+  app's default). The app (M7) is built: graph download, map matching on the phone, the puck on the road while
+  dead-reckoning, `nav_mapmatch` in trip logs; not yet driven with it.
 
 ### Stage 2 & 3 — vehicle-specific improvements
 
