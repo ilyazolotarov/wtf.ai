@@ -58,6 +58,9 @@ def summary(trip: Trip) -> dict:
             "protocol": trip.info.get("obd_protocol"),
         },
         "vin": trip.info.get("vehicle_vin"),
+        # "read" from the car, "remembered": the read missed and the last car on the protocol is assumed (older logs: none).
+        "vin_source": trip.info.get("vehicle_vin_source") or None,
+        "link_notes": link_notes(trip),
         "rates_hz": {
             "obd_speed": round(_rate_hz(ok_speed["t_s"]), 2),
             "gnss": round(_rate_hz(trip.gnss["t_s"]), 2),
@@ -70,6 +73,15 @@ def summary(trip: Trip) -> dict:
         "map_match_timing": map_match_timing(trip),
         "routing": routing(trip),
     }
+
+
+def link_notes(trip: Trip) -> list[str]:
+    """How the car was identified: VIN reads and retries, protocol searches, auto-connect switches (VEHICLE-LINK-SPEC §9.1)."""
+    t = trip.transcript
+    if not len(t):
+        return []
+    hit = t["text"].str.contains(r"^(?:\d+\.\d s before the log: )?(?:vin|protocol-search|auto-connect): ", regex=True)
+    return t[(t["tag"] == "link") & hit]["text"].tolist()
 
 
 def map_match_timing(trip: Trip, budget_ms: float = 5.0) -> dict | None:

@@ -93,6 +93,12 @@ export interface TripRecorderDeps {
 const INDEX_KEY = "trips.index";
 const SETTINGS_KEY = "trips.settings";
 const PREROLL_US = 30_000_000;
+/**
+ * Link traffic kept outside the pre-roll (which waits for the engine state): the adapter setup and VIN read of the
+ * coming trip, written at its start.
+ */
+const LINK_HISTORY_MAX = 200;
+const LINK_HISTORY_US = 10 * 60_000_000;
 const MIN_FREE_BYTES = 200 * 1024 * 1024;
 const LINK_UP: readonly LinkState[] = ["standby", "initializing", "polling"];
 
@@ -115,6 +121,13 @@ const isSatelliteFix = (f: GnssRecord) => f.speedMps >= 0 && f.hAccM < 50;
 
 const escapeRaw = (s: string) => s.replace(/\r/g, "\\r").replace(/\n/g, "\\n").replace(/\0/g, "");
 
+interface LinkLine {
+  tUs: number;
+  level: "info" | "warning" | "error";
+  tag: number;
+  text: string;
+}
+
 export class TripRecorder {
   readonly events = new Emitter<[string]>();
 
@@ -124,6 +137,7 @@ export class TripRecorder {
   private writer: TripLogWriter | null = null;
   private current: CurrentTrip | null = null;
   private preroll: Pending[] = [];
+  private linkHistory: LinkLine[] = [];
   private lastFix: GnssRecord | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private unsubscribers: (() => void)[] = [];
@@ -171,8 +185,11 @@ export class TripRecorder {
       link.onSpeed((s) => this.detector.onSpeed(s.raw, s.tUs)),
       link.onExchange((e) => this.onExchange(e)),
       link.onLinkEvent((e) => {
+        const level = e.type === "error" || e.type === "probe-failed" ? "error" : "info";
+        const text = `${e.type}${e.detail ? `: ${e.detail}` : ""}`;
+        this.keepLinkLine({ tUs: e.tUs, level, tag: LOG_TAGS.link, text });
         this.record(e.tUs, (w) => {
-          w.log(e.type === "error" || e.type === "probe-failed" ? "error" : "info", LOG_TAGS.link, e.tUs, `${e.type}${e.detail ? `: ${e.detail}` : ""}`);
+          w.log(level, LOG_TAGS.link, e.tUs, text);
           if (e.type === "link-lost") w.tripEvent(e.tUs, TRIP_EVENTS.linkLost);
           if (e.type === "link-restored") w.tripEvent(e.tUs, TRIP_EVENTS.linkRestored);
         });
@@ -291,10 +308,14 @@ export class TripRecorder {
   private onLinkSnapshot(): void {
     const snap = this.deps.link.getSnapshot();
     const vin = snap.vehicle?.vin;
-    if (this.writer && vin && vin !== this.loggedVin) {
-      // Read after the header was written (e.g. on reinit): later info messages override it.
-      this.loggedVin = vin;
-      this.record(this.deps.nowUs(), (w) => w.info("vehicle_vin", vin));
+    const source = snap.vehicle?.vinSource ?? "";
+    if (this.writer && vin && `${vin} ${source}` !== this.loggedVin) {
+      // Read after the header was written (a retry, a reinit): later info messages override it.
+      this.loggedVin = `${vin} ${source}`;
+      this.record(this.deps.nowUs(), (w) => {
+        w.info("vehicle_vin", vin);
+        w.info("vehicle_vin_source", source);
+      });
     }
     const up = LINK_UP.includes(snap.link);
     if (up !== this.lastLinkUp) {
@@ -314,6 +335,11 @@ export class TripRecorder {
 
   private onExchange(e: ExchangeEvent): void {
     const status = Math.max(0, ELM_STATUS_CODES.indexOf(e.status));
+    // Setup and vehicle checks (0100), and anything that failed: the polls themselves would crowd them out.
+    if (e.pollPid === undefined || e.pollPid === 0x00 || e.status !== "ok") {
+      const text = `tx=${Math.round(e.txUs)} ${e.command} | ${escapeRaw(e.raw)}`;
+      this.keepLinkLine({ tUs: e.rxUs, level: e.status === "ok" ? "info" : "warning", tag: LOG_TAGS.elm, text });
+    }
     if (e.pollPid !== undefined) {
       const bytes = e.pollBytes ?? [];
       this.record(e.rxUs, (w) => {
@@ -349,6 +375,13 @@ export class TripRecorder {
 
   // ---- recording ----
 
+  private keepLinkLine(line: LinkLine): void {
+    if (this.writer) return;
+    this.linkHistory.push(line);
+    const cutoff = line.tUs - LINK_HISTORY_US;
+    while (this.linkHistory.length > LINK_HISTORY_MAX || (this.linkHistory.length > 0 && this.linkHistory[0].tUs < cutoff)) this.linkHistory.shift();
+  }
+
   /** Write now when recording, else keep in the pre-roll ring while the ECU is awake. */
   private record(tUs: number, write: (w: TripLogWriter) => void): void {
     if (this.writer) {
@@ -371,10 +404,10 @@ export class TripRecorder {
     const start = new Date();
     const fileName = `${fileStamp(start)}_${id}${reason === "manual" ? "_manual" : ""}.ulg`;
     const link = this.deps.link.getSnapshot();
+    let firstUs = tUs;
     try {
       const sink = this.deps.files.create(fileName);
       const cutoffUs = tUs - PREROLL_US;
-      let firstUs = tUs;
       for (const p of this.preroll) if (p.tUs >= cutoffUs && p.tUs < firstUs) firstUs = p.tUs;
       this.writer = new TripLogWriter(sink, {
         startUs: Math.round(firstUs),
@@ -389,6 +422,7 @@ export class TripRecorder {
           adapter_chip: link.adapter?.chip ?? "",
           obd_protocol: link.vehicle?.protocol ?? "",
           vehicle_vin: link.vehicle?.vin ?? "",
+          vehicle_vin_source: link.vehicle?.vinSource ?? "",
           imu_frame: "xArbitraryZVertical",
         },
       });
@@ -396,12 +430,18 @@ export class TripRecorder {
       this.fail(error);
       return;
     }
+    // The link's setup before the pre-roll (TRIP-LOGGER-SPEC §6.4), at the log's start with its age in the text.
+    const firstUsRounded = Math.round(firstUs);
+    for (const l of this.linkHistory) {
+      if (l.tUs < firstUs) this.writer.log(l.level, l.tag, firstUsRounded, `${((firstUs - l.tUs) / 1e6).toFixed(1)} s before the log: ${l.text}`);
+    }
+    this.linkHistory = [];
     const cutoff = tUs - PREROLL_US;
     for (const p of this.preroll) if (p.tUs >= cutoff) p.write(this.writer);
     this.preroll = [];
     this.writer.tripEvent(Math.round(tUs), TRIP_EVENTS.start);
     this.writer.engineState(Math.round(tUs), ENGINE_STATE_CODES.indexOf(this.engine));
-    this.loggedVin = link.vehicle?.vin ?? "";
+    this.loggedVin = `${link.vehicle?.vin ?? ""} ${link.vehicle?.vinSource ?? ""}`;
     this.current = { id, fileName, startedUs: tUs, startReason: reason, bytes: 0, distanceM: 0, durationS: 0 };
     const entry: TripIndexEntry = {
       id,

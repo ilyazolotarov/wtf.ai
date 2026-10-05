@@ -128,6 +128,7 @@ modules/sensor-capture ─▶ src/services/sensor-capture ──(SensorStream)�
 | `char[] adapter_chip`             | `STI` answer or empty                                  |
 | `char[] obd_protocol`             | `ATDPN` answer                                         |
 | `char[] vehicle_vin`              | VIN or empty; repeated in the data section if read later |
+| `char[] vehicle_vin_source`       | `read` (from the car), `remembered` (the read missed: the last car seen on this protocol, VEHICLE-LINK-SPEC §9.1), empty with no VIN; repeated with `vehicle_vin` |
 | `char[] imu_frame`                | `xArbitraryZVertical`                                  |
 | `char[] nav_mapmatch_loop`        | navigator version at trip start: `open` / `heading` / `closed` (MAPMATCH-SPEC §9); a change mid-drive is the note `nav map-match loop <v>` |
 | `char[] nav_route_hint`           | `on` / `off`: map matching told the active route (ROUTING-SPEC §8.6, developer setting); a change is the note `nav route hint …` |
@@ -160,6 +161,10 @@ modules/sensor-capture ─▶ src/services/sensor-capture ──(SensorStream)�
 
 - Tags: `1` ELM transcript, `2` link events, `3` trip recorder, `4` sensors, `5` app (markers, and map GNSS trust changes: `gnss trust <state> (±N m)`).
 - ELM transcript (tag 1): every non-poll exchange (probe, init, VIN, `ATRV`, terminal commands) and every poll with a non-`ok` status or unexpected text. Format: `tx=<txUs> <command> | <raw response, CR→\r escaped>`; the message timestamp is `rxUs`.
+- **Before the log**: the pre-roll (§4.2) waits for the engine state, which the adapter setup comes before. So the recorder
+  also keeps the link lines (non-poll exchanges, `0100` checks, failed polls, link events; 200 at most, 10 min) and
+  writes those older than the log's start at that start, as `<age> s before the log: <line>` (the `tx=` value still
+  gives the exact time). That is where the probe, protocol search, init and VIN read of a trip are.
 - Levels: `'6'` info, `'4'` warning, `'3'` error, `'7'` debug.
 
 ### 6.5 `obd_pid.status`
