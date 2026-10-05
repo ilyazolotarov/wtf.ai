@@ -176,6 +176,8 @@ next maneuver and the distance to it, and the one after when it follows within 1
   drawn, faded. A failed re-plan keeps the old route and retries at the next `off` after the cooldown. A failed
   first plan ends in `failed` with the reason.
 - Arrival ends the route a minute later; × ends it at once.
+- The active destination is kept (kv-store `route.active`): an app restarted within 12 h (iOS may end it mid-drive)
+  plans it again from the first position, noted `route resumed after an app restart, to …`.
 - **Trip log** (TRIP-LOGGER-SPEC §6.3): every plan (`nav_route`, with its polyline `nav_route_point` and maneuvers
   `nav_route_maneuver`), guidance at every published position (`nav_route_progress`), and notes: `route to …`,
   `route plan #n (reason): length, minutes, maneuvers; states, tiles, ms in slices (wall ms)`, `route plan #n

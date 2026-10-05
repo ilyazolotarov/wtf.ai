@@ -26,6 +26,9 @@ const FIRST_SLICE_STATES = 1000;
 const REPLAN_COOLDOWN_MS = 10_000;
 /** "Arrived" stays on the map this long, then the route ends. */
 const ARRIVED_LINGER_MS = 60_000;
+/** The active route's destination, kept so a restarted app (iOS may end it mid-drive) picks the route up again. */
+const ACTIVE_KEY = "route.active";
+const RESUME_MAX_AGE_MS = 12 * 3600_000;
 
 export interface RouteDestination extends Coordinate {
   /** A name to show (a city from the list); a point on the map has none. */
@@ -105,6 +108,8 @@ export interface RouteServiceDeps {
   log?: RouteLog;
   /** Runs `fn` later (between frames); tests pass their own. */
   defer?(fn: () => void, ms: number): () => void;
+  /** Keeps the active destination across app restarts. */
+  store?: { getJson<T>(key: string): T | null; setJson(key: string, value: unknown): void };
 }
 
 type Reason = (typeof ROUTE_REASON_CODES)[number];
@@ -152,15 +157,38 @@ export class RouteService {
   };
 
   /** Plan to `destination` from where the car is now and guide along it. */
-  start(destination: RouteDestination): void {
+  start(destination: RouteDestination, resumed = false): void {
     this.stop(false);
-    this.note(`route to ${destination.lat.toFixed(5)},${destination.lon.toFixed(5)}${destination.name ? ` (${destination.name})` : ""}`);
+    this.deps.store?.setJson(ACTIVE_KEY, { destination, savedAt: this.now() });
+    this.note(
+      `route ${resumed ? "resumed after an app restart, " : ""}to ${destination.lat.toFixed(5)},${destination.lon.toFixed(5)}` +
+        (destination.name ? ` (${destination.name})` : ""),
+    );
     this.set({ destination, status: "planning", planId: 0, replanning: false });
     this.unsubscribe = this.deps.position.subscribe(this.onPosition);
     this.plan("new");
   }
 
+  /**
+   * After an app start: the route that was active when the app last ran (within 12 h), planned again from where
+   * the car is once there is a position.
+   */
+  resume(): void {
+    const saved = this.deps.store?.getJson<{ destination: RouteDestination; savedAt: number }>(ACTIVE_KEY);
+    if (!saved || this.snapshot || !(this.now() - saved.savedAt < RESUME_MAX_AGE_MS)) return;
+    if (this.deps.position.getSnapshot()) {
+      this.start(saved.destination, true);
+      return;
+    }
+    const unsubscribe = this.deps.position.subscribe(() => {
+      if (!this.deps.position.getSnapshot()) return;
+      unsubscribe();
+      if (!this.snapshot) this.start(saved.destination, true);
+    });
+  }
+
   stop(note = true): void {
+    if (note) this.deps.store?.setJson(ACTIVE_KEY, null);
     if (!this.snapshot) return;
     if (note) this.note(`route stop${this.guidance?.step ? ` at ${km(this.guidance.step.alongM)} of ${km(this.guidance.plan.lengthM)}` : ""}`);
     this.planning?.cancel();

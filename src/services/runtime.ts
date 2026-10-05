@@ -120,6 +120,7 @@ export function getRuntime(): Runtime {
     position,
     openGraph: () => openActiveRoadGraph(ROUTER_CACHE_TILES),
     nowUs,
+    store: kvStore,
     note: (text) => recorder.note(text),
     log: {
       route: (r) => recorder.navRoute(r),
@@ -128,6 +129,7 @@ export function getRuntime(): Runtime {
       progress: (r) => recorder.navRouteProgress(r),
     },
   });
+  routes.resume();
   // A route planned before the trip started (engine off) goes into the trip's log when it starts.
   let wasRecording = recorder.getSnapshot().state === "recording";
   recorder.subscribe(() => {

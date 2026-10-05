@@ -16,7 +16,7 @@ const LAT0 = 51.52;
 const D = 0.0006;
 const at = (x: number, y: number) => ({ lat: LAT0 + y * D, lon: LON0 + x * D });
 
-function harness(options: { graph?: boolean } = {}) {
+function harness(options: { graph?: boolean; store?: Map<string, unknown> } = {}) {
   let position: PositionEstimate | null = null;
   const listeners = new Set<() => void>();
   let clock = 1_000_000;
@@ -44,6 +44,10 @@ function harness(options: { graph?: boolean } = {}) {
       point: () => points++,
       maneuver: () => maneuvers++,
       progress: (r) => progress.push(r),
+    },
+    store: options.store && {
+      getJson: <T,>(key: string) => (options.store!.get(key) ?? null) as T | null,
+      setJson: (key: string, value: unknown) => void options.store!.set(key, value),
     },
     defer: (fn) => {
       deferred.push(fn);
@@ -140,6 +144,27 @@ describe("RouteService", () => {
     expect(h.service.getSnapshot()).toBeNull();
     expect(h.counts()).toMatchObject({ opened: 1, closed: 1 });
     expect(h.notes.at(-1)).toMatch(/^route stop/);
+  });
+
+  test("a restarted app picks the active route up again once it has a position; a stopped route stays stopped", () => {
+    const store = new Map<string, unknown>();
+    const before = harness({ store });
+    before.move(0.5, 0);
+    before.service.start({ ...at(2, 0), name: "east" });
+    before.flush();
+    // The app restarts: a new service, no position yet.
+    const after = harness({ store });
+    after.service.resume();
+    expect(after.service.getSnapshot()).toBeNull();
+    after.move(0.6, 0);
+    after.flush();
+    expect(after.service.getSnapshot()).toMatchObject({ status: "active", destination: { name: "east" } });
+    expect(after.notes[0]).toMatch(/^route resumed after an app restart, to /);
+    after.service.stop();
+    const again = harness({ store });
+    again.move(0.6, 0);
+    again.service.resume();
+    expect(again.service.getSnapshot()).toBeNull();
   });
 
   test("arrival is noted with the planned and the real time and distance", () => {
