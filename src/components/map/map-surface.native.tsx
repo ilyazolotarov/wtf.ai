@@ -13,7 +13,7 @@ import type {
   Point,
   Polygon,
 } from "geojson";
-import { useEffect, useRef, type ComponentProps } from "react";
+import { useEffect, useMemo, useRef, type ComponentProps } from "react";
 import { useColorScheme, View, type NativeSyntheticEvent } from "react-native";
 
 import { useMapStyle } from "@/config/map";
@@ -217,7 +217,9 @@ export function MapSurface({
     : emptyPoints();
   const ghostPoint = ghost ? pointFeatures(ghost) : emptyPoints();
   // The route (ROUTING-SPEC §8): faded while planning again, its next maneuver, the destination; a dropped pin.
-  const routeLine = route?.plan ? routeFeatures(route.plan.coordinates.map((c) => [c.lon, c.lat])) : emptyLines();
+  // Built once per plan: a long route has thousands of points, and the position updates several times a second.
+  const plan = route?.plan;
+  const routeLine = useMemo(() => (plan ? routeFeatures(plan.coordinates.map((c) => [c.lon, c.lat])) : emptyLines()), [plan]);
   const nextManeuver =
     route?.maneuvers && route.guidance && route.guidance.state !== "arrived"
       ? route.maneuvers[route.guidance.nextIndex]
