@@ -105,6 +105,11 @@
       <option value="nogps">None after the start</option>
     </select></label>
   <input id="cut" placeholder="start:length s, e.g. 120:240" size="20" hidden />
+  <label title="Where the replay starts. Parked = from where this car parked before (every earlier log replayed in order, the car by its VIN, else its OBD protocol), as the app does now; the first load replays them all; cold = no position or heading, as after a fresh install or a lost pose">Start
+    <select id="from">
+      <option value="parked">Where it parked last</option>
+      <option value="cold">Cold</option>
+    </select></label>
   <label title="Run a second navigator version and draw it in orange">Compare
     <select id="compare">
       <option value="">—</option>
@@ -792,7 +797,7 @@ document.addEventListener("keydown", (e) => {
 window.addEventListener("resize", drawTimeline);
 
 // ---------- loading ----------
-const PARAMS = ["file", "loop", "gps", "cut", "compare", "lag", "start", "compass"];
+const PARAMS = ["file", "loop", "gps", "cut", "from", "compare", "lag", "start", "compass"];
 function syncCutInput() {
   const g = $("gps").value;
   $("cut").hidden = g !== "cut" && g !== "jam";
@@ -826,7 +831,9 @@ async function run() {
   if (!payload.outages) { $("status").textContent = "The viewer server is older than this page: stop it and run npm run replay:view again."; return; }
   if ($("file").value !== file) return;
   data = payload;
-  $("status").textContent = `replayed in ${((performance.now() - started) / 1000).toFixed(1)} s`;
+  const pf = data.parkedFrom;
+  const parkedNote = !pf ? "" : !pf.file ? " · no parked pose for this car before it: cold start" : ` · started where it parked after ${driveName(pf.file)}${pf.status ? ` (${pf.status})` : ""}`;
+  $("status").textContent = `replayed in ${((performance.now() - started) / 1000).toFixed(1)} s${parkedNote}`;
   renderDrive();
   renderOutages();
   renderEvents();
@@ -842,7 +849,7 @@ async function run() {
   }
   seek(0);
 }
-for (const id of ["file", "loop", "compare", "compass"]) $(id).onchange = run;
+for (const id of ["file", "loop", "from", "compare", "compass"]) $(id).onchange = run;
 $("gps").onchange = () => { syncCutInput(); if ($("gps").value !== "cut") run(); else $("cut").focus(); };
 for (const id of ["cut", "lag", "start"]) $(id).addEventListener("keydown", (e) => e.key === "Enter" && run());
 loadList();

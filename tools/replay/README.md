@@ -54,6 +54,12 @@ The viewer answers "how did my drive go": where the dot was against where the ca
   - *GPS*: what the replay gets. *As in the app* withholds your "Cut GPS" moments, as the phone did; *All of it*;
     *Cut at…* (`120:240`, several with commas); *Jammed* (Wi-Fi/cell-like fixes only, `0:inf` or a window;
     `src/nav/replay/jam.ts`); *None after the start* (pure dead reckoning once the heading is known).
+  - *Start*: *Where it parked last* (default) starts the drive from the car's parked pose, as the app does now
+    (NAVIGATOR-SPEC §6.1): every earlier log is replayed in order with the same navigator, each car's parked pose
+    carried from drive to drive (one that ends without a pose keeps the old), the car by its VIN, else the car last
+    seen on the same OBD protocol. The first load replays them all (~25 s). *Cold*: no position or heading, as
+    after a fresh install or a lost pose (and as the phone started some drives before the per-car parked poses).
+    The status line says which drive the pose came from and what the first fixes made of it.
   - *Compare*: a second navigator version, drawn in orange.
   - *More*: GPS lag (empty = learned on the drive, as in the app), start the session later, compass at a jammed
     start (MAPMATCH-SPEC §8.2).

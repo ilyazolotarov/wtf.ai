@@ -10,7 +10,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { mergeCalibrations, type CompassCalibration } from "../../../src/nav/compass/compass";
-import type { NavConfig } from "../../../src/nav/navigator";
+import type { NavConfig, ParkedPose } from "../../../src/nav/navigator";
 import { appOutageCuts, replayTrip, type ReplayOptions } from "../../../src/nav/replay/replay";
 import { buildViewerData } from "../../../src/nav/replay/viewer-data";
 import { readTripLog, type TripLog } from "../../../src/triplog/trip-log-reader";
@@ -48,6 +48,45 @@ function compassFromOtherLogs(file: string): { calibration: CompassCalibration; 
     if (cal) cals.push(cal);
   }
   return cals.length ? { calibration: cals.reduce((a, b) => mergeCalibrations(a, b)), logs: cals.length } : null;
+}
+
+/**
+ * Where the car parked before this log, as the app would have it (NAVIGATOR-SPEC §6.1): every earlier log replayed
+ * in order with this navigator version, each car's parked pose carried from drive to drive (a drive that ends
+ * without one keeps the old). The car is the VIN, else the car last seen on the same OBD protocol, as the app
+ * identifies it. Kept per navigator version.
+ */
+const parkedChains = new Map<string, Map<string, { pose: ParkedPose | null; after: string | null }>>();
+function previousParkedPose(file: string, nav: Partial<NavConfig>, loopKey: string): { pose: ParkedPose | null; after: string | null } {
+  const chain = parkedChains.get(loopKey) ?? parkedChains.set(loopKey, new Map()).get(loopKey)!;
+  if (chain.has(file)) return chain.get(file)!;
+  const poses = new Map<string, { pose: ParkedPose; after: string }>();
+  const byProtocol = new Map<string, string>();
+  const carOf = (trip: TripLog): string | null => {
+    const vin = typeof trip.info.vehicle_vin === "string" && trip.info.vehicle_vin ? trip.info.vehicle_vin : null;
+    const protocol = String(trip.info.obd_protocol ?? "").replace(/^A/, "");
+    if (vin && protocol) byProtocol.set(protocol, vin);
+    return vin ?? (protocol ? (byProtocol.get(protocol) ?? `protocol ${protocol}`) : null);
+  };
+  for (const { file: log } of [...listLogs()].reverse()) {
+    if (log > file) break;
+    const trip = readTripLog(new Uint8Array(readFileSync(path.join(LOG_DIR, log))));
+    const car = carOf(trip);
+    const before = car ? poses.get(car) : undefined;
+    chain.set(log, { pose: before?.pose ?? null, after: before?.after ?? null });
+    if (log === file || !car) continue;
+    const first = trip.gnss.find((f) => f.hAccM <= 500);
+    const graphFile = first ? (GRAPH ?? findGraph(first)) : null;
+    const opened = graphFile && first ? openGraph(graphFile, first) : null;
+    try {
+      const options: ReplayOptions = { nav, ...(before ? { startPose: before.pose } : {}), ...(opened ? { mapMatch: { graph: opened.graph } } : {}) };
+      const end = replayTrip(trip, options).summary.endPose;
+      if (end) poses.set(car, { pose: end, after: log });
+    } finally {
+      opened?.close();
+    }
+  }
+  return chain.get(file) ?? { pose: null, after: null };
 }
 
 function send(res: ServerResponse, status: number, type: string, body: string | Buffer): void {
@@ -96,6 +135,8 @@ const server = createServer((req, res) => {
       const start = Number(q("start") || 0);
       // GPS scenario: as in the app (its "Cut GPS" windows withheld), all of it, cut where asked, jammed, or none.
       const gps = q("gps") || "app";
+      // Start: from where the car parked after its previous drive (as the app does now), or cold.
+      const startFrom = q("from") || "parked";
       const compareLoop = LOOPS[q("compare")] ?? null;
       // Compass: off, or calibrated on the other logs, optionally turned (a wrong calibration).
       const compassArg = url.searchParams.get("compass") ?? "";
@@ -105,7 +146,9 @@ const server = createServer((req, res) => {
       const trip = loadTrip(file);
       // The navigator version the phone ran (trip log header, from the app's developer setting); default open.
       const phoneLoop = typeof trip.info.nav_mapmatch_loop === "string" ? trip.info.nav_mapmatch_loop : null;
-      const loop = LOOPS[q("loop") || phoneLoop || "open"] ?? LOOPS.open;
+      const loopKey = q("loop") || phoneLoop || "open";
+      const loop = LOOPS[loopKey] ?? LOOPS.open;
+      const parked = startFrom === "parked" && !(start > 0) ? previousParkedPose(file, loop.nav, loopKey) : null;
       // Map matching on the trip's road graph, when there is one.
       const first = trip.gnss.find((f) => f.hAccM <= 500);
       const graphFile = first ? (GRAPH ?? findGraph(first)) : null;
@@ -119,6 +162,7 @@ const server = createServer((req, res) => {
           ...(gps === "jam" ? { jam: asked.length ? asked : [{ fromS: 0, toS: Infinity }] } : {}),
           ...(opened ? { mapMatch: { graph: opened.graph } } : {}),
           ...(start > 0 ? { startAtS: start } : {}),
+          ...(parked?.pose ? { startPose: parked.pose } : {}),
           ...(compass ? { compass: { calibration: compass.calibration, rotateRad: (rotateDeg * Math.PI) / 180 } } : {}),
         };
         const navFor = (nav: Partial<NavConfig>): Partial<NavConfig> => ({ ...nav, ...(lag ? { gnssLagS: Number(lag), estimateGnssLag: false } : {}) });
@@ -127,7 +171,7 @@ const server = createServer((req, res) => {
           ...(compareLoop ? { compare: { label: compareLoop.label, options: { ...common, nav: navFor(compareLoop.nav) } } } : {}),
         });
         const compassInfo = compassArg ? { logs: compass?.logs ?? 0, rotateDeg, trust: data.summary.compass.trust } : null;
-        send(res, 200, "application/json", JSON.stringify({ ...data, compassInfo, loopLabel: loop.label, phoneLoopLabel: phoneLoop ? (LOOPS[phoneLoop]?.label ?? phoneLoop) : null, appCuts: appCuts.length }));
+        send(res, 200, "application/json", JSON.stringify({ ...data, compassInfo, loopLabel: loop.label, phoneLoopLabel: phoneLoop ? (LOOPS[phoneLoop]?.label ?? phoneLoop) : null, appCuts: appCuts.length, parkedFrom: parked ? { file: parked.after, status: data.summary.startPose?.status ?? null } : null }));
       } finally {
         opened?.close();
       }
