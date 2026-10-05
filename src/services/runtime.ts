@@ -57,7 +57,7 @@ export function getRuntime(): Runtime {
 
   // Full correction by default (MAPMATCH-SPEC §9): replay and simulation beat the open loop everywhere; the open loop
   // stays one tap away in the developer settings for comparing on the road.
-  let dev: DevSettings = { showEmulators: __DEV__, showParticles: false, outageButton: false, mapMatchLoop: "closed", routeHint: false, ...(kvStore.getJson<Partial<DevSettings>>(DEV_SETTINGS_KEY) ?? {}) };
+  let dev: DevSettings = { showEmulators: __DEV__ || process.env.EXPO_PUBLIC_E2E === "1", showParticles: false, outageButton: false, mapMatchLoop: "closed", routeHint: false, ...(kvStore.getJson<Partial<DevSettings>>(DEV_SETTINGS_KEY) ?? {}) };
   const devListeners = new Set<() => void>();
   const nowUs = () => VehicleLinkModule.nowUs();
   const clock = createClock(nowUs);
@@ -187,7 +187,7 @@ export async function autoConnect(): Promise<void> {
   const { link } = getRuntime();
   const { activeDeviceId, link: state } = link.getSnapshot();
   if (activeDeviceId && state !== "error") return;
-  if (Platform.OS !== "ios") return;
+  if (Platform.OS === "web") return;
   if (VehicleLinkModule.getBluetoothState() === "notDetermined") return;
   await VehicleLinkModule.initialize(null);
   await link.autoConnect();

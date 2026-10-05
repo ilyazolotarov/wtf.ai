@@ -82,3 +82,11 @@ jobs:
     with:
       configuration: Debug
     secrets: inherit
+
+  build-android:
+    # Signed release APK + emulator smoke test (docs/ANDROID-SPEC.md §4).
+    needs: [checks]
+    uses: ./.github/workflows/build-android.yml
+    with:
+      variant: ci
+    secrets: inherit

@@ -1,1 +1,2 @@
 *.ulg binary
+*.sh text eol=lf

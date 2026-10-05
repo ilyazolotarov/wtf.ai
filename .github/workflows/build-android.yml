@@ -1,0 +1,185 @@
+name: Build Android APK
+
+# Signed release APK for sideloading (no Play Store account, no EAS), plus an emulator smoke test on every CI build.
+# Plan: docs/ANDROID-SPEC.md. `ci` variant = what the emulator tests (simulated adapters on); `tester` = what testers get.
+on:
+  workflow_dispatch:
+    inputs:
+      variant:
+        description: "tester = APK for testers (arm64 + armeabi-v7a). ci = emulator build (x86_64 + arm64)."
+        type: choice
+        options: [tester, ci]
+        default: tester
+  workflow_call:
+    inputs:
+      variant:
+        type: string
+        default: ci
+    secrets:
+      SENTRY_AUTH_TOKEN:
+        required: false
+      ANDROID_KEYSTORE_BASE64:
+        required: false
+      ANDROID_KEYSTORE_PASSWORD:
+        required: false
+      ANDROID_KEY_ALIAS:
+        required: false
+      ANDROID_KEY_PASSWORD:
+        required: false
+      TELEGRAM_BOT_TOKEN:
+        required: false
+      TELEGRAM_CHAT_ID:
+        required: false
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      VARIANT: ${{ inputs.variant }}
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+      SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+      SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
+      SENTRY_DISABLE_AUTO_UPLOAD: ${{ secrets.SENTRY_AUTH_TOKEN == '' && 'true' || 'false' }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: "npm"
+
+      - name: Setup Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Expo Prebuild
+        run: npx expo prebuild --platform android --clean
+
+      - name: Restore signing key
+        # Without the secrets the release APK is signed with the debug key (see plugins/android-signing.js).
+        # Such an APK installs fine but cannot be updated over a build signed with the real key.
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            {
+              echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/release.keystore"
+              echo "ANDROID_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
+              echo "ANDROID_KEY_ALIAS=$KEY_ALIAS"
+              echo "ANDROID_KEY_PASSWORD=$KEY_PASSWORD"
+            } >> "$GITHUB_ENV"
+          else
+            echo "::notice::No ANDROID_KEYSTORE_BASE64 secret: signing with the debug key"
+          fi
+
+      - name: Build release APK
+        env:
+          EXPO_PUBLIC_BUILD_SHA: ${{ github.sha }}
+          # CI variant: simulated OBD adapters are listed by default, so the emulator can run a whole drive.
+          EXPO_PUBLIC_E2E: ${{ inputs.variant == 'ci' && '1' || '0' }}
+        run: |
+          if [ "$VARIANT" = "ci" ]; then ABIS="arm64-v8a,x86_64"; else ABIS="arm64-v8a,armeabi-v7a"; fi
+          cd android
+          ./gradlew assembleRelease -PreactNativeArchitectures="$ABIS" --no-daemon
+
+      - name: Name the APK
+        run: |
+          cp android/app/build/outputs/apk/release/app-release.apk "wtfai-${VARIANT}.apk"
+          ls -l "wtfai-${VARIANT}.apk"
+          "$ANDROID_HOME"/build-tools/*/apksigner verify --print-certs "wtfai-${VARIANT}.apk" | head -3
+
+      - name: Upload APK (zipped, for the emulator job)
+        if: ${{ inputs.variant == 'ci' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: wtfai-ci-apk
+          path: wtfai-ci.apk
+          retention-days: 3
+
+      - name: Upload APK for testers
+        if: ${{ inputs.variant != 'ci' }}
+        uses: actions/upload-artifact@v7
+        with:
+          archive: false
+          path: wtfai-tester.apk
+          retention-days: 14
+
+      - name: Send APK to Telegram
+        if: ${{ inputs.variant != 'ci' && env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != '' }}
+        # A delivery problem must not fail the build: the artifact above is the source of truth.
+        continue-on-error: true
+        run: |
+          APK="wtfai-tester.apk"
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          CAPTION="wtf.ai Android · ${GITHUB_REF_NAME} @ ${GITHUB_SHA:0:7}
+          $(git log -1 --format=%s)
+          ${RUN_URL}"
+          API="https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}"
+          # Bot API uploads are limited to 50 MB; past that, send the link to the run instead.
+          if [ "$(stat -c%s "$APK")" -lt 49000000 ]; then
+            curl -sS --fail-with-body -o /dev/null -F chat_id="$TELEGRAM_CHAT_ID" -F caption="$CAPTION" -F document=@"$APK" "$API/sendDocument"
+          else
+            curl -sS --fail-with-body -o /dev/null --data-urlencode chat_id="$TELEGRAM_CHAT_ID" --data-urlencode text="$CAPTION (APK over 50 MB: download it from the run)" "$API/sendMessage"
+          fi
+
+  smoke:
+    # Installs the CI APK on an emulator and checks the app starts and stays up (scripts/android-smoke.sh).
+    if: ${{ inputs.variant == 'ci' }}
+    needs: build-android
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # 26 = our minimum (Android 8), 34 = what most testers run. API 26 only on main to save minutes.
+        api-level: ${{ github.ref == 'refs/heads/main' && fromJSON('[26, 34]') || fromJSON('[34]') }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Download APK
+        uses: actions/download-artifact@v8
+        with:
+          name: wtfai-ci-apk
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Smoke test on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api-level }}
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          disable-animations: true
+          emulator-boot-timeout: 600
+          script: bash scripts/android-smoke.sh wtfai-ci.apk smoke-out
+
+      - name: Upload screenshots and logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-smoke-api${{ matrix.api-level }}
+          path: smoke-out
+          retention-days: 7

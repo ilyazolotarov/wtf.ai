@@ -1,5 +1,4 @@
 import { useKeepAwake } from "expo-keep-awake";
-import { BlurView } from "expo-blur";
 import { Link, router, useIsFocused } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -7,7 +6,6 @@ import {
     Linking,
     Pressable,
     StyleSheet,
-    useColorScheme,
     View,
     type ViewStyle,
 } from "react-native";
@@ -29,7 +27,7 @@ import {
 } from "@/components/status/format-geo";
 import { useSheetClosing } from "@/components/map/sheet-closing";
 import { useLinkBadge, useNavStatus, type LinkBadge } from "@/components/status/use-nav-status";
-import { GlassFill } from "@/components/ui/glass-fill";
+import { BlurTarget, GlassFill, MapBlur } from "@/components/ui/glass-fill";
 import { Icon, type IconName } from "@/components/ui/icon";
 import { T } from "@/components/ui/text";
 import { Radius, usePalette } from "@/constants/theme";
@@ -232,27 +230,29 @@ export default function HomeScreen() {
 
   return (
     <View style={[styles.root, { backgroundColor: palette.bg }]}>
-      <MapSurface
-        mode={cameraMode}
-        ghostView={showingGhost}
-        compass={compass}
-        headingUpRad={headingUp}
-        onUserInteraction={() => pickCameraMode(() => "free")}
-        onLongPress={setPin}
-        pin={placing ? null : pin}
-        logCamera={(text) => runtime.recorder.note(text)}
-        placing={placing}
-        placeFrom={placeFrom}
-        onCenter={(at) => (placeCenter.current = at)}
-        onTap={aimPlacing}
-        placedMark={
-          placing === "heading" && placeAt
-            ? { at: placeAt, headingRad: placeHeading, draft: true }
-            : placed && !placing
-              ? { ...placed, draft: false }
-              : null
-        }
-      />
+      <BlurTarget>
+        <MapSurface
+          mode={cameraMode}
+          ghostView={showingGhost}
+          compass={compass}
+          headingUpRad={headingUp}
+          onUserInteraction={() => pickCameraMode(() => "free")}
+          onLongPress={setPin}
+          pin={placing ? null : pin}
+          logCamera={(text) => runtime.recorder.note(text)}
+          placing={placing}
+          placeFrom={placeFrom}
+          onCenter={(at) => (placeCenter.current = at)}
+          onTap={aimPlacing}
+          placedMark={
+            placing === "heading" && placeAt
+              ? { at: placeAt, headingRad: placeHeading, draft: true }
+              : placed && !placing
+                ? { ...placed, draft: false }
+                : null
+          }
+        />
+      </BlurTarget>
       {placing === "position" && (
         <View pointerEvents="none" style={styles.placeTarget}>
           <Icon name="location_on" size={44} color={palette.accent} />
@@ -729,7 +729,6 @@ function SheetBlur() {
   const isFocused = useIsFocused();
   const closing = useSheetClosing();
   const focused = isFocused || closing;
-  const dark = useColorScheme() === "dark";
   const [opacity] = useState(() => new Animated.Value(0));
   useEffect(() => {
     Animated.timing(opacity, {
@@ -740,7 +739,7 @@ function SheetBlur() {
   }, [focused, opacity]);
   return (
     <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { opacity }]}>
-      <BlurView intensity={40} tint={dark ? "dark" : "light"} style={StyleSheet.absoluteFill} />
+      <MapBlur intensity={40} />
     </Animated.View>
   );
 }
