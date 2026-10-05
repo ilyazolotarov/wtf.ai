@@ -185,9 +185,11 @@ tags and one metric reach `environment=ci`.
 
 ## 6.1 Status
 
-- M1 written, **not yet run in CI**: Android config (package, `minSdk` 26, permissions plugin, release-signing plugin),
-  blur target, stub Kotlin modules, `build-android.yml` (APK + emulator smoke), `scripts/android-smoke.sh`, `EXPO_PUBLIC_E2E`.
-  Local gates (lint, tsc, 310 Jest tests, expo-doctor) pass; the Kotlin and Gradle build is first compiled by CI.
+- **M1 done** (2026-10-06, CI run on the `android` branch): the release APK builds and is signed, and the Android 14
+  emulator job installs it, grants permissions and sees the onboarding screen with no crash, ANR or JS error.
+  Plugged into the CI plan of `docs/CI.md` (merged from `ci/run-what-changed`). Not yet exercised: Android 8 image
+  (runs on `main` only), the stable signing key (secrets not set), Telegram delivery.
+- Next: M2 (sensors).
 
 ## 7. Decisions and open items
 
