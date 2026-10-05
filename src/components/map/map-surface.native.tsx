@@ -41,7 +41,13 @@ interface MapSurfaceProps {
   onLongPress(at: Coordinate): void;
   /** A dropped pin, before routing to it. */
   pin: Coordinate | null;
+  /** Camera lines for the trip log: the mode shown, and in heading-up the bearing asked vs the map's. */
+  logCamera?(text: string): void;
 }
+
+/** Heading-up: the map's bearing against the one asked for, this often (sooner when they differ). */
+const CAMERA_LOG_EVERY_MS = 15_000;
+const CAMERA_LOG_OFF_DEG = 20;
 
 const CONE_RADIUS_M = 45;
 const CONE_HALF_ANGLE_RAD = (28 * Math.PI) / 180;
@@ -70,6 +76,7 @@ export function MapSurface({
   onUserInteraction,
   onLongPress,
   pin,
+  logCamera,
 }: MapSurfaceProps) {
   const scheme = useColorScheme() === "dark" ? "dark" : "light";
   const palette = Colors[scheme];
@@ -93,6 +100,12 @@ export function MapSurface({
     camera === "follow-heading" && position && headingUpRad !== null
       ? (headingUpRad * 180) / Math.PI
       : 0;
+
+  useEffect(() => {
+    logCamera?.(`camera ${mode}${camera !== mode ? ` shown as ${camera}: no direction known` : ""}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, camera]);
+  const lastCameraLog = useRef(0);
 
   // A gesture that drops follow keeps the zoom the finger chose; only the button zooms out.
   const leftByGesture = useRef(false);
@@ -165,8 +178,17 @@ export function MapSurface({
     onUserInteraction();
   };
   const handleRegionDidChange = (
-    event: NativeSyntheticEvent<{ pitch: number }>,
+    event: NativeSyntheticEvent<{ pitch: number; bearing?: number }>,
   ) => {
+    const { bearing } = event.nativeEvent;
+    if (logCamera && camera === "follow-heading" && bearing !== undefined) {
+      const off = Math.abs(((bearing - followBearing + 540) % 360) - 180);
+      const now = Date.now();
+      if (now - lastCameraLog.current >= (off > CAMERA_LOG_OFF_DEG ? 3000 : CAMERA_LOG_EVERY_MS)) {
+        lastCameraLog.current = now;
+        logCamera(`camera heading-up: map bearing ${Math.round(bearing)}°, asked ${Math.round(followBearing)}°`);
+      }
+    }
     const from = flattenFrom.current;
     if (from == null) return;
     const { pitch } = event.nativeEvent;

@@ -73,6 +73,9 @@ jobs:
         run: echo "unset SKIP_BUNDLING" > ios/.xcode.env.updates
 
       - name: Build unsigned .app
+        env:
+          # Inlined into the JS bundle by Metro: trip logs say which commit they came from (ver_sw).
+          EXPO_PUBLIC_BUILD_SHA: ${{ github.sha }}
         run: |
           WORKSPACE=$(ls -d ios/*.xcworkspace | head -n 1)
           SCHEME=$(basename "$WORKSPACE" .xcworkspace)

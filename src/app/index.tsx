@@ -69,7 +69,8 @@ export default function HomeScreen() {
   const [requesting, setRequesting] = useState(false);
   const recorderState = useRecorderSnapshot().state;
   const { outageButton } = useDevSettings();
-  const { position: navigator } = useRuntime();
+  const runtime = useRuntime();
+  const { position: navigator } = runtime;
   const outage = position?.simulatedOutage;
   const recording = recorderState === "recording";
   // A linger after engine off is still the same drive for the camera.
@@ -175,6 +176,7 @@ export default function HomeScreen() {
         onUserInteraction={() => pickCameraMode(() => "free")}
         onLongPress={setPin}
         pin={pin}
+        logCamera={(text) => runtime.recorder.note(text)}
       />
       <View
         pointerEvents="box-none"

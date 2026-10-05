@@ -81,7 +81,8 @@ export function getRuntime(): Runtime {
     nowUs,
     appInfo: () => ({
       sys_name: "wtf.ai",
-      ver_sw: `${Constants.expoConfig?.version ?? "?"} (${Constants.nativeBuildVersion ?? "dev"})`,
+      // The commit CI built (EXPO_PUBLIC_BUILD_SHA, inlined by Metro): which build a log came from.
+      ver_sw: `${Constants.expoConfig?.version ?? "?"} (${Constants.nativeBuildVersion ?? "dev"}${process.env.EXPO_PUBLIC_BUILD_SHA ? ` ${process.env.EXPO_PUBLIC_BUILD_SHA.slice(0, 7)}` : ""})`,
       sys_hw: sysHw,
       sys_os_ver: sysOsVer,
       // The navigator version this drive starts with (a change mid-drive is a note).
