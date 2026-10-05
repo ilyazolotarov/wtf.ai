@@ -35,7 +35,7 @@ Plan a drive to a destination offline and guide the driver along it, so that:
 | Cost | **Time** (s): length at a speed per road class, plus junction and turn costs and penalties for private, minor service and track roads (§4). No traffic, no time of day. |
 | OSM rules | **Hard** for planning: never against a one-way, never a restricted turn, U-turns only at dead ends or at the start. (The filter keeps them soft, MAPMATCH-SPEC §3: a route must be legal, a position must survive wrong tags.) |
 | Extent | One region, as for map matching: no cross-region routes. |
-| Destination | A point on the map (long press), or a city from the list. Search by address comes later (§10.2). |
+| Destination | A point on the map (long press), a city from the list, or an address search result ([SEARCH-SPEC.md](SEARCH-SPEC.md)). |
 | Instructions | From the route's geometry and the graph (turn angle, roundabouts); **no street names in v1** (not in the graph, MAPMATCH-SPEC §15.4). The map shows names. |
 | Thread | The JS thread, in slices (§5.4): a long search must not freeze the map. |
 
@@ -266,7 +266,7 @@ developer switch, **off by default** ("Tell map matching the route"; trip-log in
 ## 10. Open items
 
 1. Street names in instructions: add a name table to the graph (format change, MAPMATCH-SPEC §4.5).
-2. **Address search.** The map tiles (Planetiler, OpenMapTiles layers) hold places, named POIs, street names
+2. **Address search** — built: [SEARCH-SPEC.md](SEARCH-SPEC.md). Background: the map tiles (Planetiler, OpenMapTiles layers) hold places, named POIs, street names
    (`transportation_name`) and house numbers (`housenumber`), but a house number there has no street: it would be
    guessed from the nearest named road, which fails at corners and for buildings set back inside a block. And
    searching them means decoding every z14 tile of the region, so it would need an index built on the phone after

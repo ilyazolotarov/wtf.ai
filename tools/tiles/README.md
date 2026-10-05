@@ -14,6 +14,8 @@ python -m tiles.cli build-all --heap 8g        # out/release/: ukraine, every re
 python -m tiles.cli build-region chernihiv     # one region (+ index.json)
 python -m tiles.cli graph chernihiv            # road graph only, from the cached extract (+ index.json)
 python -m tiles.cli graph-check out/release/chernihiv.graph.bin
+python -m tiles.cli search chernihiv            # address search index only (+ index.json)
+python -m tiles.cli search-check out/release/chernihiv.search.bin
 python -m tiles.cli index                      # shared files + index.json
 python -m tiles.cli serve                      # http://<PC IP>:8765/ — app: Downloads → Map source
 python -m tiles.cli osm-date                   # date of the current Geofabrik extract
@@ -47,6 +49,7 @@ folders):
 |---|---|
 | `index.json` | catalog: `format`, `osm_date`, `common[]` (asset, path, size, md5, sha256), `regions[]` (region, iso, name en/uk, bounds, asset, size, md5, sha256) |
 | `<region>.graph.bin` | road graph for map matching (below); listed as the region's `graph` entry in index.json |
+| `<region>.search.bin` | address search index ([SEARCH-SPEC.md](../../docs/SEARCH-SPEC.md)); the region's `search` entry |
 | `<region>.pmtiles` | OpenMapTiles-schema vector tiles, clipped to the region polygon (Ukraine 1.2 GB, oblasts 36–89 MB) |
 | `style.json` | OpenFreeMap Liberty (`style/liberty.json`, pinned snapshot); URLs use `{common}` (shared files directory) and `{tiles}` (region file), substituted by the app |
 | `sprite-ofm*`, `font-<slug>-<range>.pbf` | Liberty sprite and Noto Sans glyphs (every range below U+3000: all alphabets and symbols, no CJK; plus variation selectors and full-width forms); `path` in index.json says where the app stores each |

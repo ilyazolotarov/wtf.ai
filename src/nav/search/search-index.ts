@@ -49,9 +49,10 @@ interface Entity {
   rank: number;
   lat: number;
   lon: number;
-  name: string;
-  nameEn: string | null;
-  tag: string;
+  /** String offsets: decoded only for the entities that are scored in full. */
+  nameAt: number;
+  nameEnAt: number;
+  tagAt: number;
   parent: number;
   addr: number;
   naddr: number;
@@ -68,6 +69,16 @@ interface TokenSet {
   cost: number;
 }
 
+interface House {
+  /** Index in the file's address table. */
+  index: number;
+  house: string;
+  lat: number;
+  lon: number;
+  /** Score added for the number: exact or a start of it. */
+  bonus: number;
+}
+
 interface Match {
   id: number;
   /** Bit i: token i matched the entity's own names / its settlement's. */
@@ -77,8 +88,14 @@ interface Match {
 
 /** Postings read for one query word at most (a two-letter prefix in the whole country). */
 const MAX_POSTINGS = 60_000;
-/** Entities scored per query at most. */
+/** Entities matched per query at most; all get a cheap score from ids, rank and distance … */
 const MAX_MATCHES = 3_000;
+/** … and the best this many a full one, by their names (decoded and folded). */
+const FULL_SCORED = 250;
+/** Streets (and settlements) whose house numbers are read, with a number in the query. */
+const HOUSE_OWNERS = 60;
+/** Entities read from the file at once. */
+const ENTITY_BLOCK = 32;
 const MAX_TOKENS = 8;
 /** Address results per street. */
 const HOUSES_PER_STREET = 5;
@@ -88,6 +105,12 @@ const toU32 = (bytes: Uint8Array) => {
   const copy = bytes.slice();
   return new Uint32Array(copy.buffer, 0, copy.byteLength >> 2);
 };
+
+function bits(mask: number): number {
+  let n = 0;
+  for (let m = mask; m; m &= m - 1) n++;
+  return n;
+}
 
 function contains(ids: Uint32Array, id: number): boolean {
   let lo = 0;
@@ -117,6 +140,7 @@ export class SearchIndex {
   private tokenBlob: Uint8Array | null = null;
   private postingStarts: Uint32Array | null = null;
   private readonly entities = new Map<number, Entity>();
+  private readonly entityBlocks = new Map<number, DataView>();
   private readonly strings = new Map<number, string>();
 
   constructor(private readonly source: ByteSource) {
@@ -142,7 +166,10 @@ export class SearchIndex {
       keep(this.run(tokens.filter((t) => !t.house), parsed.house, options.near ?? null));
     }
     keep(this.run(tokens, null, options.near ?? null));
-    if (this.entities.size > CACHE_LIMIT) this.entities.clear();
+    if (this.entities.size > CACHE_LIMIT) {
+      this.entities.clear();
+      this.entityBlocks.clear();
+    }
     if (this.strings.size > CACHE_LIMIT) this.strings.clear();
     return [...best.values()]
       .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name) || a.key.localeCompare(b.key))
@@ -153,13 +180,16 @@ export class SearchIndex {
     // Street kinds ("вул.", "вули…" while typing) and single letters never decide a match.
     const use = tokens.filter((t) => !t.optional);
     if (use.length === 0) return [];
-    const matches = this.match(use);
-    const out: SearchResult[] = [];
-    for (const m of matches) {
+    let ranked = this.match(use).map((m) => {
       const e = this.entity(m.id);
+      return { m, e, coarse: this.coarseScore(e, m, near) };
+    });
+    if (house) ranked = ranked.filter(({ e }) => e.naddr > 0 || e.kind === EntityKind.street);
+    ranked.sort((a, b) => b.coarse - a.coarse);
+    const out: SearchResult[] = [];
+    for (const { m, e } of ranked.slice(0, house ? HOUSE_OWNERS : FULL_SCORED)) {
       const score = this.score(e, m, use, tokens, near);
       if (house) {
-        if (e.kind === EntityKind.poi || (e.kind === EntityKind.place && e.naddr === 0)) continue;
         const houses = this.houses(e, house);
         for (const h of houses) out.push(this.addressResult(e, h, score + h.bonus, near));
         // The street itself, below its houses: the number may be unmapped.
@@ -218,8 +248,23 @@ export class SearchIndex {
     return out;
   }
 
+  /** From what the ids and the record tell, before any name is decoded. */
+  private coarseScore(e: Entity, m: Match, near: Coordinate | null): number {
+    let score = 8 * bits(m.direct) + 5 * bits(m.via) + this.kindScore(e);
+    if (near) score -= 7 * Math.log10(1 + haversineM(near, e) / 1000);
+    return score;
+  }
+
+  private kindScore(e: Entity): number {
+    if (e.kind === EntityKind.place) return 4 + (e.rank / 65_535) * 24;
+    if (e.kind === EntityKind.street) return 6 + (Math.min(e.rank, 30_000) / 30_000) * 4;
+    return 3;
+  }
+
   private score(e: Entity, m: Match, use: QueryToken[], all: QueryToken[], near: Coordinate | null): number {
-    const words = new Set([...fold(e.name), ...(e.nameEn ? fold(e.nameEn) : [])]);
+    const name = this.string(e.nameAt);
+    const nameEn = e.nameEnAt === NONE ? null : this.string(e.nameEnAt);
+    const words = new Set([...fold(name), ...(nameEn ? fold(nameEn) : [])]);
     let score = 0;
     use.forEach((t, i) => {
       if (m.direct & (1 << i)) {
@@ -232,27 +277,25 @@ export class SearchIndex {
     });
     // Words of its name the query left out; the whole name typed scores more.
     const typed = (w: string) => all.some((t) => t.text === w || (t.prefix && w.startsWith(t.text)));
-    const missing = fold(e.name).filter((w) => !STOPWORDS.has(w) && !typed(w)).length;
+    const missing = fold(name).filter((w) => !STOPWORDS.has(w) && !typed(w)).length;
     score += missing === 0 ? 6 : -0.5 * missing;
-    if (e.kind === EntityKind.place) score += 4 + (e.rank / 65_535) * 24;
-    else if (e.kind === EntityKind.street) score += 6 + (Math.min(e.rank, 30_000) / 30_000) * 4;
-    else score += 3;
+    score += this.kindScore(e);
     if (near) score -= 7 * Math.log10(1 + haversineM(near, e) / 1000);
     return score;
   }
 
   /** House numbers of a street (or a settlement's `addr:place` ones) that the query's number matches. */
-  private houses(e: Entity, house: string): { index: number; house: string; lat: number; lon: number; bonus: number }[] {
+  private houses(e: Entity, house: string): House[] {
     if (e.naddr === 0) return [];
     const bytes = this.source.read(this.header.addressesAt + e.addr * ADDRESS_BYTES, e.naddr * ADDRESS_BYTES);
     const v = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    const exact = [];
-    const starts = [];
+    const exact: House[] = [];
+    const starts: House[] = [];
     for (let i = 0; i < e.naddr; i++) {
       const raw = this.string(v.getUint32(i * ADDRESS_BYTES, true));
       const folded = foldHouse(raw);
       if (!folded.startsWith(house)) continue;
-      const rec = {
+      const rec: House = {
         index: e.addr + i,
         house: raw,
         lat: v.getInt32(i * ADDRESS_BYTES + 4, true) * COORD_SCALE,
@@ -267,7 +310,7 @@ export class SearchIndex {
   private settlementOf(e: Entity): SearchResult["settlement"] {
     if (e.parent === NONE) return null;
     const p = this.entity(e.parent);
-    return { name: p.name, nameEn: p.nameEn };
+    return { name: this.string(p.nameAt), nameEn: p.nameEnAt === NONE ? null : this.string(p.nameEnAt) };
   }
 
   private result(e: Entity, score: number): SearchResult {
@@ -275,10 +318,10 @@ export class SearchIndex {
     return {
       key: `e${e.id}`,
       kind,
-      name: e.name,
-      nameEn: e.nameEn,
+      name: this.string(e.nameAt),
+      nameEn: e.nameEnAt === NONE ? null : this.string(e.nameEnAt),
       house: null,
-      tag: e.tag,
+      tag: this.string(e.tagAt),
       settlement: this.settlementOf(e),
       lat: e.lat,
       lon: e.lon,
@@ -288,7 +331,7 @@ export class SearchIndex {
 
   private addressResult(
     owner: Entity,
-    h: { index: number; house: string; lat: number; lon: number },
+    h: House,
     score: number,
     near: Coordinate | null,
   ): SearchResult {
@@ -297,10 +340,10 @@ export class SearchIndex {
     return {
       key: `a${h.index}`,
       kind: "address",
-      name: owner.name,
-      nameEn: owner.nameEn,
+      name: this.string(owner.nameAt),
+      nameEn: owner.nameEnAt === NONE ? null : this.string(owner.nameEnAt),
       house: h.house,
-      tag: owner.tag,
+      tag: this.string(owner.tagAt),
       settlement: owner.kind === EntityKind.place ? null : this.settlementOf(owner),
       lat: h.lat,
       lon: h.lon,
@@ -367,19 +410,26 @@ export class SearchIndex {
   private entity(id: number): Entity {
     const cached = this.entities.get(id);
     if (cached) return cached;
-    const b = this.source.read(this.header.entitiesAt + id * ENTITY_BYTES, ENTITY_BYTES);
-    const v = new DataView(b.buffer, b.byteOffset, ENTITY_BYTES);
-    const u32 = (at: number) => v.getUint32(at, true);
-    const nameEn = u32(16);
+    const block = Math.floor(id / ENTITY_BLOCK);
+    let v = this.entityBlocks.get(block);
+    if (!v) {
+      const first = block * ENTITY_BLOCK;
+      const n = Math.min(ENTITY_BLOCK, this.header.entities - first);
+      const b = this.source.read(this.header.entitiesAt + first * ENTITY_BYTES, n * ENTITY_BYTES);
+      v = new DataView(b.buffer, b.byteOffset, b.byteLength);
+      this.entityBlocks.set(block, v);
+    }
+    const at = (id % ENTITY_BLOCK) * ENTITY_BYTES;
+    const u32 = (k: number) => v.getUint32(at + k, true);
     const e: Entity = {
       id,
-      kind: b[0],
-      rank: v.getUint16(2, true),
-      lat: v.getInt32(4, true) * COORD_SCALE,
-      lon: v.getInt32(8, true) * COORD_SCALE,
-      name: this.string(u32(12)),
-      nameEn: nameEn === NONE ? null : this.string(nameEn),
-      tag: this.string(u32(20)),
+      kind: v.getUint8(at),
+      rank: v.getUint16(at + 2, true),
+      lat: v.getInt32(at + 4, true) * COORD_SCALE,
+      lon: v.getInt32(at + 8, true) * COORD_SCALE,
+      nameAt: u32(12),
+      nameEnAt: u32(16),
+      tagAt: u32(20),
       parent: u32(24),
       addr: u32(28),
       naddr: u32(32),
