@@ -552,7 +552,7 @@ describe("map matching", () => {
     await service.start();
     play(drive, { withoutGnssFromS: 100 });
 
-    expect(notes[0]).toMatch(/^mm graph net \(OSM /);
+    expect(notes.find((n) => n.startsWith("mm graph"))).toMatch(/^mm graph net \(OSM /);
     expect(notes.some((n) => n.startsWith("mm tracking"))).toBe(true);
     const p = service.getSnapshot()!;
     expect(p).toMatchObject({ source: "dr", mapMatch: "tracking" });

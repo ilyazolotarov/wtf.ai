@@ -351,6 +351,18 @@ Until `src/nav/integrity` (SPEC Phase 3), the map's trust state comes from `Gnss
 
 ## 10. Replay and benchmark (`src/nav/replay`, `tools/replay`)
 
+- **Two replays:** `replayTrip` runs the navigator alone, for the benchmarks (they measure the navigator).
+  `replayTripInApp` (`src/services/navigation/app-replay.ts`) runs the app's own `NavigatorService`, fed as on the
+  phone (IMU in 100 ms batches, OBD at its reply, fixes after CoreLocation's delivery delay) on a virtual clock: its
+  dot is what the service publishes (`nav_estimate`), and the parked pose, stored calibration and simulated outages
+  are the app's code. The viewer uses it, so a fix in the app needs no copy in the replay. Both record through one
+  `ReplayRecorder`; the dot's rule is `src/nav/position/puck.ts`.
+- **Starting as the phone did:** when a navigator starts, and when it learns the car, the service notes what is
+  stored (`nav storage {json}`: the GNSS lag; per car the parked pose, speed scale and compass, raw). A replay seeds
+  its storage from these notes (`seedFromLog`), and `npm run replay:parity` compares its dot with the phone's. With
+  the navigation code unchanged since the log's build (`ver_sw` carries the commit) they must agree (p90 ≤ 3 m), else
+  the replay doesn't reproduce the app. A test replays a synthetic drive's notes and requires the same dots.
+
 - **Replay:** merges the three streams in time order and runs the navigator. It scores each fix before its update
   (pre-fix error) and can withhold GNSS: `--cut start:len`, or `--open-loop` from the heading fix to the end.
 - **Held-out fixes:**

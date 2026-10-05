@@ -168,6 +168,7 @@ npm run replay:compass -- tools/triplog/logs/*.ulg                        # what
 npm run replay:mm -- trip.ulg --start 300 --jam 300:inf --trace 300:420 # one jammed start, second by second
 npm run replay:places -- --mm '{"particles":1000}'                    # jammed drives scored by where they end (places.json)
 npm run replay:crossings -- tools/triplog/logs/*.ulg                   # roads the true path crossed away from junctions
+npm run replay:parity -- tools/triplog/logs/*.ulg                      # does the app replay reproduce the phone's dot?
 npm run replay:graph -- --graph tools/tiles/out/release/ukraine.graph.bin trip.ulg
 npm run replay:view -- --graph tools/tiles/out/release/kyiv.graph.bin  # viewer with a given graph
 ```
@@ -207,6 +208,11 @@ npm run replay:view -- --graph tools/tiles/out/release/kyiv.graph.bin  # viewer 
   drive replays from its start pose with 5 seeds (`--seeds`); per drive the median end error, the runs ending
   > 50 m off, the off-road share while moving, and the roads the off-road cluster drove straight across away from
   junctions (`replay:crossings`). `--nav` / `--mm` as above, `--name` labels the run.
+- **`replay:parity`:** each log replayed through the app (`app-replay.ts`) from what the app had stored (the log's
+  `nav storage` notes) with the navigator version the phone ran, its dot against the phone's `nav_estimate`
+  (median, p90, max and where). With no navigation commit since the log's build (`ver_sw`) a p90 over 3 m is
+  flagged: the replay doesn't reproduce the app (exit code 1). Logs before 2026-10-06 have neither the build nor the
+  notes; on them clean-GPS drives still agree to ~0.1 m, jammed ones show what changed since.
 - **`replay:crossings`:** a car crosses a road only at a junction (`src/nav/mapmatch/road-crossing.ts`: from clear
   of it on one side to clear of it on the other, ≥ 25 m from an edge's end, no bridge or tunnel near, driveways and
   parking aisles left out). Run on the clean satellite fixes it shows how often a real path seems to (GPS noise,

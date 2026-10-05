@@ -32,6 +32,8 @@ import {
 import type { CalibrationStore } from "./calibration-store";
 
 const OWNER = "navigator";
+/** Trip-log note with what is stored for the phone or the car as a navigator starts: JSON of a StoredSnapshot. */
+export const STORAGE_NOTE = "nav storage ";
 const TICK_MS = 500;
 /** Inputs are held this long and fed in time order: IMU arrives in 100 ms batches, fixes ~50 ms late. */
 export const REORDER_US = 300_000;
@@ -452,6 +454,8 @@ export class NavigatorService implements PositionSource {
     const { calibration, link } = this.deps;
     this.drainUpdateTimes(); // from the navigator being replaced
     const lag = calibration.gnssLag();
+    // What this navigator starts from, raw, so a replay can start from the same (app-replay.ts).
+    this.note(`${STORAGE_NOTE}${JSON.stringify(calibration.snapshot(null))}`);
     const nav = new Navigator({ ...this.deps.nav, mapMatchLoop: this.loop, ...(lag ? { gnssLagS: lag.lagS } : {}) });
     this.notedRoad = { heading: 0, position: 0 };
     this.nav = nav;
@@ -519,6 +523,7 @@ export class NavigatorService implements PositionSource {
 
   private setVehicle(vin: string): void {
     this.vin = vin;
+    this.note(`${STORAGE_NOTE}${JSON.stringify(this.deps.calibration.snapshot(vin))}`);
     const ks = this.deps.calibration.speedScale(vin);
     if (ks && this.nav) {
       this.nav.setSpeedScalePrior(ks.ks, ks.ksVar);

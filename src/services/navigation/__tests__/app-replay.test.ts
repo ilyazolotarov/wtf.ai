@@ -2,7 +2,7 @@ import { syntheticDrive, type DriveSegment } from "@/nav/__fixtures__/synthetic-
 import { haversineM } from "@/nav/geo";
 import { replayShownTrack, trackAt } from "@/nav/replay/drive-report";
 import { replayTrip } from "@/nav/replay/replay";
-import { MemoryKeyValueStore, replayTripInApp } from "@/services/navigation/app-replay";
+import { MemoryKeyValueStore, replayTripInApp, seedFromLog } from "@/services/navigation/app-replay";
 import { CalibrationStore } from "@/services/navigation/calibration-store";
 
 const PHONE = { model: "iPhone14,5", os: "ios 26.0" };
@@ -43,5 +43,26 @@ describe("replayTripInApp", () => {
     // Another car's drive doesn't get it.
     const other = replayTripInApp(next.trip, { calibration: new CalibrationStore(store.copy(), PHONE), vin: "OTHERVIN000000000" });
     expect(other.summary.init?.method).not.toBe("parked pose");
+  });
+
+  test("a log's storage notes start a replay as the phone started: the same dots", () => {
+    const store = new MemoryKeyValueStore();
+    const first = syntheticDrive({ segments: DRIVE, gnss: "clean", seed: 3 });
+    replayTripInApp(first.trip, { calibration: new CalibrationStore(store, PHONE), vin: VIN });
+    const end = first.truth.at(-1)!;
+    const next = syntheticDrive({ segments: DRIVE, gnss: "coarse", seed: 4, origin: end, startHeadingRad: end.psi });
+    // "The phone": the next drive with what the first one stored. Its trip log keeps the notes and the dots.
+    const phone = replayTripInApp(next.trip, { calibration: new CalibrationStore(store.copy(), PHONE), vin: VIN });
+    const log = {
+      ...next.trip,
+      info: { ...next.trip.info, vehicle_vin: VIN, sys_hw: PHONE.model, sys_os_ver: PHONE.os },
+      messages: phone.notes.map((n) => ({ tUs: n.tUs, tag: "app", text: n.text })),
+    };
+    const seeded = new CalibrationStore(new MemoryKeyValueStore(), PHONE);
+    expect(seedFromLog(log, seeded)).toBe(2);
+    expect(seeded.parkedPose(VIN)).not.toBeNull();
+    const replay = replayTripInApp(log, { calibration: seeded });
+    expect(replay.summary.init?.method).toBe("parked pose");
+    expect(replay.published).toEqual(phone.published);
   });
 });

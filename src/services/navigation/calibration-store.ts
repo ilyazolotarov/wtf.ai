@@ -24,11 +24,11 @@ export interface PhoneKey {
   os: string;
 }
 
-interface StoredLag extends GnssLagEstimate, PhoneKey {
+export interface StoredLag extends GnssLagEstimate, PhoneKey {
   savedAt: number;
 }
 
-interface StoredSpeedScale {
+export interface StoredSpeedScale {
   ks: number;
   ksVar: number;
   savedAt: number;
@@ -39,7 +39,7 @@ export interface StoredPose extends ParkedPose {
   savedAt: number;
 }
 
-interface StoredCompass {
+export interface StoredCompass {
   calibrations: CompassCalibration[];
   savedAt: number;
 }
@@ -49,6 +49,14 @@ interface Stored {
   speedScaleByVin?: Record<string, StoredSpeedScale>;
   compassByVin?: Record<string, StoredCompass>;
 }
+
+/**
+ * What is stored, raw, for the phone (`vin` absent: its GNSS lag) or for one car. The service writes it to the trip
+ * log when a navigator starts, so a replay can start from what the app had (app-replay.ts).
+ */
+export type StoredSnapshot =
+  | { gnssLag: StoredLag | null }
+  | { vin: string; parkedPose: StoredPose | null; speedScale: StoredSpeedScale | null; compass: StoredCompass | null };
 
 export const CALIBRATION_KEY = "nav.calibration";
 /** Before poses were kept per car: one pose, with its VIN. */
@@ -128,6 +136,30 @@ export class CalibrationStore {
   clearParkedPose(vin: string): void {
     const { [vin]: _dropped, ...rest } = this.parkedPoses();
     this.store.setJson(PARKED_POSES_KEY, rest);
+  }
+
+  /** What is stored for the phone (`vin` null) or this car, as it is. */
+  snapshot(vin: string | null): StoredSnapshot {
+    const s = this.read();
+    if (vin === null) return { gnssLag: s.gnssLag ?? null };
+    return { vin, parkedPose: this.parkedPoses()[vin] ?? null, speedScale: s.speedScaleByVin?.[vin] ?? null, compass: s.compassByVin?.[vin] ?? null };
+  }
+
+  /** Writes a snapshot back (a replay starting from what the app had); an absent item is cleared. */
+  restore(snap: StoredSnapshot): void {
+    if (!("vin" in snap)) {
+      this.write((s) => (snap.gnssLag ? (s.gnssLag = snap.gnssLag) : delete s.gnssLag));
+      return;
+    }
+    const { vin } = snap;
+    this.write((s) => {
+      const { [vin]: _scale, ...scales } = s.speedScaleByVin ?? {};
+      const { [vin]: _compass, ...compasses } = s.compassByVin ?? {};
+      s.speedScaleByVin = snap.speedScale ? { ...scales, [vin]: snap.speedScale } : scales;
+      s.compassByVin = snap.compass ? { ...compasses, [vin]: snap.compass } : compasses;
+    });
+    const { [vin]: _pose, ...poses } = this.parkedPoses();
+    this.store.setJson(PARKED_POSES_KEY, snap.parkedPose ? { ...poses, [vin]: snap.parkedPose } : poses);
   }
 
   private parkedPoses(): Record<string, StoredPose> {

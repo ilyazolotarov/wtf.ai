@@ -18,8 +18,8 @@ import { ENGINE_STATE_CODES, type GnssRecord, type ImuMotionRecord, type NavEsti
 
 import type { KeyValueStore } from "@/obd/vehicle-link-core";
 
-import type { CalibrationStore, PhoneKey } from "./calibration-store";
-import { NavigatorService, toNavFix, type MapMatchLoop, type ServiceClock } from "./navigator-service";
+import type { CalibrationStore, PhoneKey, StoredSnapshot } from "./calibration-store";
+import { NavigatorService, STORAGE_NOTE, toNavFix, type MapMatchLoop, type ServiceClock } from "./navigator-service";
 
 /** The app's key-value storage in memory: one carried through drives replayed in order, copied to try variants. */
 export class MemoryKeyValueStore implements KeyValueStore {
@@ -34,6 +34,28 @@ export class MemoryKeyValueStore implements KeyValueStore {
   copy(): MemoryKeyValueStore {
     return new MemoryKeyValueStore(new Map(this.data));
   }
+}
+
+/**
+ * Puts into `calibration` what the app had stored when the log's navigator started (its `nav storage` notes, the
+ * first for the phone and for each car). Returns how many it found (0: an older log, which doesn't have them).
+ */
+export function seedFromLog(trip: TripLog, calibration: CalibrationStore): number {
+  const seen = new Set<string>();
+  for (const m of trip.messages) {
+    if (!m.text.startsWith(STORAGE_NOTE)) continue;
+    let snap: StoredSnapshot;
+    try {
+      snap = JSON.parse(m.text.slice(STORAGE_NOTE.length)) as StoredSnapshot;
+    } catch {
+      continue; // cut at the log's 4000-character limit
+    }
+    const key = "vin" in snap ? snap.vin : "";
+    if (seen.has(key)) continue;
+    seen.add(key);
+    calibration.restore(snap);
+  }
+  return seen.size;
 }
 
 /** The phone a log was recorded on (the GNSS lag is stored per model and iOS version). */
