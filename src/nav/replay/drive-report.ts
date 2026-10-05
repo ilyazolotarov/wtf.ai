@@ -4,6 +4,7 @@
 import type { TripLog } from "../../triplog/trip-log-reader";
 import { haversineM } from "../geo";
 import type { MapMatchState } from "../mapmatch/particle-filter";
+import { FUSED_WINDOW_US, puckAccuracyM, puckHypothesis } from "../position/puck";
 import { isSatelliteFix } from "../types";
 import type { ReplayResult } from "./replay";
 
@@ -59,10 +60,6 @@ export const NO_GPS_MIN_DISTANCE_M = 30;
 const AFTER_MAX_S = 10;
 /** A track sample farther than this from the asked time doesn't count (the track wasn't running). */
 const TRACK_GAP_S = 2;
-/** The app shows the dominant hypothesis while no satellite fix was accepted for this long (NavigatorService). */
-const FUSED_WINDOW_S = 3;
-const MAP_MATCH_PUCK = new Set(["tracking", "multimodal", "offroad"]);
-const MAP_MATCH_MIN_ACCURACY_M = 5;
 
 export function truthFixes(trip: TripLog): TruthFix[] {
   return trip.gnss
@@ -104,13 +101,13 @@ export function replayPuck(result: ReplayResult): PuckPoint[] {
   let k = -1;
   return result.track.map((p) => {
     while (k + 1 < accepted.length && accepted[k + 1] <= p.tS) k++;
-    const dr = p.mode === "dr" && (k < 0 || p.tS - accepted[k] >= FUSED_WINDOW_S);
-    const mm = p.mapMatch;
-    const top = dr && mm && MAP_MATCH_PUCK.has(mm.state) ? mm.clusters[0] : undefined;
-    const common = { t: p.tS, speedMps: p.speedMps, mapMatch: mm?.state, dr };
+    // The app also needs GPS trust for "fused" (its GnssTrustTracker); a navigator-only replay goes by the fixes.
+    const dr = p.mode === "dr" && (k < 0 || (p.tS - accepted[k]) * 1e6 >= FUSED_WINDOW_US);
+    const top = puckHypothesis(p, dr);
+    const common = { t: p.tS, speedMps: p.speedMps, mapMatch: p.mapMatch?.state, dr };
     return top
-      ? { ...common, lat: top.lat, lon: top.lon, acc: Math.max(top.spreadM, MAP_MATCH_MIN_ACCURACY_M), headingRad: top.headingRad }
-      : { ...common, lat: p.lat, lon: p.lon, acc: p.accuracyM, headingRad: p.headingRad };
+      ? { ...common, lat: top.lat, lon: top.lon, acc: puckAccuracyM(p, top), headingRad: top.headingRad }
+      : { ...common, lat: p.lat, lon: p.lon, acc: puckAccuracyM(p, top), headingRad: p.headingRad };
   });
 }
 

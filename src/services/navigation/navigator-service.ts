@@ -9,6 +9,7 @@ import { UpdateTiming, type UpdateTimingSummary } from "@/nav/mapmatch/update-ti
 import type { FixOutcome, MapMatchEstimate, NavConfig, NavMode, ParkedPose } from "@/nav/navigator";
 import { Navigator } from "@/nav/navigator";
 import { haversineM } from "@/nav/geo";
+import { FUSED_WINDOW_US, puckAccuracyM, puckHypothesis } from "@/nav/position/puck";
 import type { PositionEstimate, PositionSourceKind, SimulatedOutage } from "@/nav/position/types";
 import type { CompassTrust } from "@/nav/compass/compass";
 import type { GnssFix, ImuSample, MagSample, ObdSpeedSample } from "@/nav/types";
@@ -38,8 +39,6 @@ export const REORDER_US = 300_000;
 const LATE_FIX_MAX_US = 2_000_000;
 /** Without OBD speed for this long the map falls back to phone GNSS (the EKF's speed has drifted). */
 const OBD_TIMEOUT_US = 10_000_000;
-/** A satellite fix accepted this recently makes the position "fused" rather than "dr". */
-const FUSED_WINDOW_US = 3_000_000;
 /** Draw the position up to this far ahead of the navigator, which runs `REORDER_US` behind. */
 const MAX_EXTRAPOLATE_S = 1;
 const SAVE_EVERY_MS = 30_000;
@@ -53,12 +52,8 @@ const USER_HEADING_SIGMA_RAD = (15 * Math.PI) / 180;
 const POSE_POSITION_SLACK_M = 5;
 const POSE_HEADING_SLACK_RAD = (2 * Math.PI) / 180;
 const DEG = 180 / Math.PI;
-/** Map-match states in which the dominant hypothesis is the puck while dead-reckoning (MAPMATCH-SPEC §6.2). */
-const MAP_MATCH_PUCK: ReadonlySet<MapMatchState> = new Set(["tracking", "multimodal", "offroad"]);
 /** Alternatives lighter than this aren't drawn. */
 const ALTERNATIVE_MIN_WEIGHT = 0.05;
-/** The puck's radius from a hypothesis' spread is at least this (a tight cluster isn't a perfect one). */
-const MAP_MATCH_MIN_ACCURACY_M = 5;
 /** In a simulated outage, a withheld fix is the truth when it is a satellite fix this accurate and recent. */
 const OUTAGE_TRUTH_MAX_ACC_M = 10;
 const OUTAGE_TRUTH_MAX_AGE_MS = 3000;
@@ -694,7 +689,7 @@ export class NavigatorService implements PositionSource {
     this.noteMapMatch(mm?.state ?? "off");
     // Dead-reckoning on the map: the dominant hypothesis is the puck, the others its alternatives
     // (MAPMATCH-SPEC §6.2). With GNSS the EKF stays the puck: it is within a few metres there.
-    const top = source === "dr" && mm && MAP_MATCH_PUCK.has(mm.state) ? mm.clusters[0] : undefined;
+    const top = puckHypothesis(estimate, source === "dr");
     const speed = estimate.speedMps;
     const heading = top
       ? top.headingRad
@@ -719,7 +714,7 @@ export class NavigatorService implements PositionSource {
       lon,
       headingRad: heading,
       speedMps: speed,
-      accuracyM: top ? Math.max(top.spreadM, MAP_MATCH_MIN_ACCURACY_M) : estimate.accuracyM,
+      accuracyM: puckAccuracyM(estimate, top),
       ...(mm ? { mapMatch: mm.state } : {}),
       ...(alternatives?.length ? { alternatives } : {}),
       source,
