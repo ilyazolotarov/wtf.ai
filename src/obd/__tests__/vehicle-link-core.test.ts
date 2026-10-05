@@ -330,6 +330,11 @@ describe("VehicleLinkCore", () => {
       now = 60_000;
       await until(() => t.events.filter((e) => e.type === "auto-connect").length === 2 && t.core.getSnapshot().link === "connecting");
       expect(t.core.getSnapshot().tryingSinceMs).toBe(since);
+      // The MX+ shows up: a step forward, a fresh window for reaching the car.
+      jest.spyOn(t.emulators.get("mfi-1")!, "connect").mockImplementation(() => Elm327Emulator.prototype.connect.call(t.emulators.get("mfi-1")!));
+      t.discovery.mfi = ["mfi-1"];
+      await until(() => t.core.getSnapshot().link === "probing");
+      expect(t.core.getSnapshot().tryingSinceMs).toBe(60_000);
       await t.core.disconnect();
       expect(t.core.getSnapshot().tryingSinceMs).toBeNull();
 

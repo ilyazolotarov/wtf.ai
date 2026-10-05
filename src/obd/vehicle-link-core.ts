@@ -204,7 +204,10 @@ export class VehicleLinkCore implements VehicleLink {
     const list = [...this.remembered()].sort((a, b) => b.lastVerifiedAt - a.lastVerifiedAt);
     if (list.length === 0) return false;
     if (list.length === 1) await this.connect(list[0].id, { wait: true });
-    else await this.inTurn(list);
+    else {
+      this.update({ tryingSinceMs: (this.deps.nowMs ?? Date.now)() });
+      await this.inTurn(list);
+    }
     return true;
   }
 
@@ -218,6 +221,8 @@ export class VehicleLinkCore implements VehicleLink {
 
   async connect(deviceId: string, options?: { wait?: boolean }): Promise<void> {
     this.autoRun++;
+    // A new attempt (the user's Connect, auto-connect starting over): its own time to get ready.
+    this.update({ tryingSinceMs: (this.deps.nowMs ?? Date.now)() });
     await this.open(deviceId, options);
   }
 
@@ -774,10 +779,12 @@ export class VehicleLinkCore implements VehicleLink {
     const next = { ...this.snapshot, ...patch };
     // Ready ends the try; a link that starts trying (from ready or from nothing) starts it. Idle between auto-connect's
     // turns keeps it, so the UI's timeout counts the whole wait.
+    // A step forward restarts it: the adapter answers (probing), the car answers (initializing).
     const ready = next.link === "polling" && !!next.vehicle?.vin;
     const trying = next.link !== "idle" && next.link !== "error";
+    const stepped = next.link !== this.snapshot.link && (next.link === "probing" || next.link === "initializing");
     if (ready) next.tryingSinceMs = null;
-    else if (!("tryingSinceMs" in patch) && next.tryingSinceMs === null && trying) next.tryingSinceMs = (this.deps.nowMs ?? Date.now)();
+    else if (!("tryingSinceMs" in patch) && trying && (next.tryingSinceMs === null || stepped)) next.tryingSinceMs = (this.deps.nowMs ?? Date.now)();
     this.snapshot = next;
     this.listeners.forEach((l) => l());
   }
