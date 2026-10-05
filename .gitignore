@@ -57,3 +57,8 @@ __pycache__/
 
 # Real trip logs (tools/triplog): VIN and GPS tracks, keep them local
 /tools/triplog/logs/
+
+# Kotlin logic tests (native-tests-android/)
+native-tests-android/.gradle/
+native-tests-android/build/
+native-tests-android/.kotlin/
