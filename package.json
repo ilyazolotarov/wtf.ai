@@ -65,6 +65,7 @@
     "replay:graph": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/graph.ts",
     "replay:truth": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/truth.ts",
     "replay:mm": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/mapmatch.ts",
+    "replay:places": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/places.ts",
     "replay:compass": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/compass-report.ts",
     "replay:sim": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/simulate.ts",
     "route": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/route.ts",

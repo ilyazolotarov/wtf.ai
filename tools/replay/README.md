@@ -147,6 +147,7 @@ npm run replay:bench -- tools/triplog/logs/*.ulg --jam-start --verbose # heading
 npm run replay:bench -- tools/triplog/logs/*.ulg --jam-start --compass   # …and with a compass calibrated on the other drives (right, turned 90°/180°)
 npm run replay:compass -- tools/triplog/logs/*.ulg                        # what the app logged about the compass in shadow (NAVIGATOR-SPEC §7.6)
 npm run replay:mm -- trip.ulg --start 300 --jam 300:inf --trace 300:420 # one jammed start, second by second
+npm run replay:places -- --mm '{"particles":1000}'                    # jammed drives scored by where they end (places.json)
 npm run replay:graph -- --graph tools/tiles/out/release/ukraine.graph.bin trip.ulg
 npm run replay:view -- --graph tools/tiles/out/release/kyiv.graph.bin  # viewer with a given graph
 ```
@@ -180,6 +181,16 @@ npm run replay:view -- --graph tools/tiles/out/release/kyiv.graph.bin  # viewer 
   and pool the results (counts are over windows or sessions × seeds; slower by as much). `--seeds N` changes the
   number, `--seeds 1` for a quick look; the first seed is `--mm-config`'s `seed`, else 1. Without the map nothing
   is random and it runs once.
+- **`replay:places`:** jammed drives have no truth on the way, but they start and end at places known to a few
+  metres (home, a parking spot). `tools/triplog/logs/places.json` (git-ignored with the logs: it says where people
+  live) lists the places and, per drive, its log, start pose and end place (format at the top of `places.ts`). Each
+  drive replays from its start pose with 5 seeds (`--seeds`); per drive the median end error, the runs ending
+  > 50 m off and the off-road share while moving. `--nav` / `--mm` as above, `--name` labels the run.
+- **Threads:** `replay:bench` (both modes), `replay:mm` and `replay:places` replay their windows, sessions, drives
+  and seeds on worker threads (`tools/replay/pool.ts`), all cores but one; `--threads N` to change that. Results
+  are gathered in order, so the output is the same as on one thread. An outage window's replay stops 5 s after the
+  window instead of running to the end of the drive. The full `--mm` outage benchmark takes about a minute and a
+  half on 32 cores (over 30 minutes before).
 - **Viewer:** the *roads* checkbox draws the graph around the trip's fixes, under the tracks: major roads thick,
   service roads and tracks dashed, arrows on one-ways (zoom ≥ 14). At zoom ≥ 15 it adds junctions, dead ends
   (orange) and region-boundary ends (red). Hover for the OSM way id, class, length and flags. Its tooltip says
