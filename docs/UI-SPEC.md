@@ -173,8 +173,9 @@ One small component each. Touch targets ≥ 56 pt; high contrast; minimal text.
 - With a route (`src/components/route/route-banner.tsx`): the banner shows the next maneuver's icon, the distance
   to it (10 m steps under 300 m, 50 m under 1 km), its instruction, "then …" when the next follows within 120 m,
   and the distance, time and arrival clock left; or "Planning route…", "Off route, planning again…", "Position
-  uncertain: keeping the route", "No route" with the reason, "You've arrived". Its × ends the route. The map draws
-  the route (faded while planning again), its next maneuver and the destination.
+  uncertain: keeping the route", "No route" with the reason, "You've arrived". Its × ends the route; its speaker
+  button mutes the spoken maneuvers (ROUTING-SPEC §8.5). The map draws the route (faded while planning again), its
+  next maneuver and the destination.
 
 ## 7. Phase 4 — Mock screens
 

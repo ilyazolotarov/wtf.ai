@@ -44,6 +44,8 @@ const SF = {
   roundabout_left: "arrow.counterclockwise",
   flag: "flag.checkered",
   place: "mappin.and.ellipse",
+  volume_up: "speaker.wave.2.fill",
+  volume_off: "speaker.slash.fill",
 } as const satisfies Record<string, SFSymbol>;
 
 export type IconName = keyof typeof SF;

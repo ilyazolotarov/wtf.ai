@@ -22,7 +22,19 @@ import {
  * The route at the top of the map (ROUTING-SPEC §8): the next maneuver and the distance to it, the one after when
  * close, and what's left; or planning, failure, arrival. `nowMs` is the position's time (for the arrival clock).
  */
-export function RouteBanner({ route, nowMs, onStop }: { route: RouteSnapshot; nowMs: number; onStop(): void }) {
+export function RouteBanner({
+  route,
+  nowMs,
+  onStop,
+  muted,
+  onToggleVoice,
+}: {
+  route: RouteSnapshot;
+  nowMs: number;
+  onStop(): void;
+  muted: boolean;
+  onToggleVoice(): void;
+}) {
   const { t, language } = useT();
   const palette = usePalette();
   const instruction = (m: Maneuver) => t(MANEUVER_TEXT[m.kind]).replace("{n}", String(m.exit ?? 1));
@@ -104,15 +116,28 @@ export function RouteBanner({ route, nowMs, onStop }: { route: RouteSnapshot; no
           </T>
         )}
       </View>
-      <Pressable
-        onPress={onStop}
-        accessibilityRole="button"
-        accessibilityLabel={t("stopGuidance")}
-        hitSlop={10}
-        style={({ pressed }) => [styles.stop, { backgroundColor: palette.surface }, pressed && styles.pressed]}
-      >
-        <Icon name="close" size={16} color={palette.text2} />
-      </Pressable>
+      <View style={styles.buttons}>
+        <Pressable
+          onPress={onStop}
+          accessibilityRole="button"
+          accessibilityLabel={t("stopGuidance")}
+          hitSlop={10}
+          style={({ pressed }) => [styles.stop, { backgroundColor: palette.surface }, pressed && styles.pressed]}
+        >
+          <Icon name="close" size={16} color={palette.text2} />
+        </Pressable>
+        {route.status === "active" && (
+          <Pressable
+            onPress={onToggleVoice}
+            accessibilityRole="button"
+            accessibilityLabel={t(muted ? "voiceOff" : "voiceOn")}
+            hitSlop={10}
+            style={({ pressed }) => [styles.stop, { backgroundColor: palette.surface }, pressed && styles.pressed]}
+          >
+            <Icon name={muted ? "volume_off" : "volume_up"} size={15} color={muted ? palette.text2 : palette.accent} />
+          </Pressable>
+        )}
+      </View>
     </View>
   );
 }
@@ -138,13 +163,13 @@ const styles = StyleSheet.create({
   copy: { flex: 1, gap: 2 },
   distance: { fontVariant: ["tabular-nums"], letterSpacing: -0.4 },
   then: { flexDirection: "row", alignItems: "center", gap: 5 },
+  buttons: { gap: 8, alignSelf: "flex-start" },
   stop: {
     width: 32,
     height: 32,
     borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
-    alignSelf: "flex-start",
   },
   pressed: { opacity: 0.7 },
 });

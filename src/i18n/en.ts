@@ -303,6 +303,11 @@ export const en = {
   routeOutsideRegion: "Routes reach only places inside the downloaded region.",
   minutesShort: "min",
   hoursShort: "h",
+  sayIn: "In {d}",
+  sayMetres: "{n} metres",
+  sayReplanned: "Route recalculated",
+  voiceOn: "Voice guidance on",
+  voiceOff: "Voice guidance off",
 } as const;
 
 export type Strings = { [Key in keyof typeof en]: string };

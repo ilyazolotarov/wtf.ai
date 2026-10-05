@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { MapSurface } from "@/components/map/map-surface";
 import { RouteBanner } from "@/components/route/route-banner";
+import { useVoiceGuidance, useVoiceMuted } from "@/components/route/use-voice-guidance";
 import {
     COURSE_MIN_SPEED_MPS,
     useCompassHeading,
@@ -62,6 +63,7 @@ export default function HomeScreen() {
   const { route, startRoute, stopRoute } = useRoute();
   // A long press on the map drops a pin to route to (ROUTING-SPEC §8).
   const [pin, setPin] = useState<Coordinate | null>(null);
+  const [voiceMuted, toggleVoice] = useVoiceMuted();
   const [cameraMode, setCameraMode] = useState<CameraMode>("follow");
   const [ghostView, setGhostView] = useState(false);
   const [requesting, setRequesting] = useState(false);
@@ -78,6 +80,7 @@ export default function HomeScreen() {
     useCompassHeading(!recording && nav.adapter !== "on" && position != null),
   );
   const headingUp = useHeadingUp(position, compass);
+  useVoiceGuidance(route, position?.speedMps, voiceMuted);
 
   // Once per trip: follow becomes heading-up when the car first drives off, and goes back
   // to follow when the trip ends unless the driver has picked a mode since.
@@ -312,7 +315,9 @@ export default function HomeScreen() {
             </Link>
           )}
 
-          {route && <RouteBanner route={route} nowMs={position?.timestamp ?? 0} onStop={stopRoute} />}
+          {route && (
+            <RouteBanner route={route} nowMs={position?.timestamp ?? 0} onStop={stopRoute} muted={voiceMuted} onToggleVoice={toggleVoice} />
+          )}
         </View>
 
         {!position && (

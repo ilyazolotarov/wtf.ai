@@ -305,4 +305,9 @@ export const uk = {
   routeOutsideRegion: "Маршрути ведуть лише до місць у межах завантаженого регіону.",
   minutesShort: "хв",
   hoursShort: "год",
+  sayIn: "Через {d}",
+  sayMetres: "{n} метрів",
+  sayReplanned: "Маршрут перебудовано",
+  voiceOn: "Голосові підказки увімкнено",
+  voiceOff: "Голосові підказки вимкнено",
 } satisfies Strings;

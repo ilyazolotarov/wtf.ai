@@ -21,7 +21,8 @@ Plan a drive to a destination offline and guide the driver along it, so that:
 - **R3 done:** turn instructions (§6).
 - **R4 built, not yet driven:** guidance (`src/nav/routing/guidance.ts`), the route service
   (`src/services/navigation/route-service.ts`), trip-log records, and the app: long press → Route here, the city list,
-  the banner and the route on the map (§8, UI-SPEC §6.3, §7.1).
+  the banner and the route on the map, spoken maneuvers (§8, UI-SPEC §6.3, §7.1). Checked on simulated drives
+  (§8.4); routes and guidance show in `replay:view`.
 
 ## 3. Decisions
 
@@ -210,7 +211,16 @@ replay's puck (`replayPuck`, what NavigatorService publishes) fed to guidance as
   pass over the same street (the whole-route search, now gone). It is optimistic as the simulator is (§9.4 there):
   no parking, reversing or unmapped roads.
 
-### 8.5 Route hint (R5)
+### 8.5 Voice (`src/nav/routing/announcer.ts`, `src/components/route/use-voice-guidance.ts`)
+
+`expo-speech`, in the app's language (`uk-UA` / `en-US`), ducking other audio (`useApplicationAudioSession:
+false`). Each maneuver is said twice: ahead of it, at max(250 m, 15 s at the current speed), "In 300 metres, turn
+left" (50 m steps); and at it, at max(40 m, 4 s), "Turn left", with "then turn right" when the next follows within
+120 m. "Ahead" is skipped when "at it" would follow within 6 s. Also "Route recalculated" for a re-plan and
+"You've arrived". Nothing about the current plan's maneuvers while off it. The banner's speaker button mutes it
+(kept across launches). iPhone speech is silent while the ring/silent switch is on (Expo docs).
+
+### 8.6 Route hint (R5)
 
 At a junction the filter weights the route's exit higher (soft, e.g. 3×), measured in the simulator
 (MAPMATCH-SPEC §9.4) with drivers who follow the route and drivers who leave it.
