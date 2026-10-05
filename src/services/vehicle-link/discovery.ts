@@ -48,11 +48,6 @@ export class NativeDiscovery implements DiscoveryBackend {
   mfiPresent(): string[] {
     return VehicleLinkModule.getMfiAccessories().map((a) => a.id);
   }
-
-  onMfiChange(listener: (ids: string[]) => void): () => void {
-    const subscription = VehicleLinkModule.addListener("onMfiChange", (e) => listener(e.accessories.map((a) => a.id)));
-    return () => subscription.remove();
-  }
 }
 
 function bleDevice(d: NativeScanResult): ScannedDevice {

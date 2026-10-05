@@ -321,9 +321,12 @@ Rules:
   3. **MFi accessories** already paired, plus a "Pair MFi adapter" action (`showMfiPicker`).
 - List UI: sections *Remembered*, *OBD adapters* (known-profile + known-name + MFi), *Other Bluetooth devices* (collapsed; "Try anyway"). Unnamed devices hidden behind a toggle. Show RSSI bars and brand hint.
 - **Auto-connect**: on app start and when the app returns to the foreground, connect to the most recently verified adapter with a pending connect that waits for it to become reachable (BLE: connect via identifier; MFi: wait for the accessory to connect to iOS, which takes a few seconds after the car wakes the adapter). A previous attempt that ended in `error` is retried. The user doesn't pick from the list again.
-  - A remembered MFi adapter that iOS has connected right now is in this car: it wins over a more recent BLE one. One that
-    joins iOS while the connect waits for a BLE adapter takes over (link event `auto-connect`). Seen on 2026-10-05: a
-    vLinker FD tried once became the most recent adapter, and the next drive would have waited for it instead of the MX+.
+  - Several adapters remembered: the most recently verified first, each given 8 s to become reachable, then the next,
+    round after round until one connects (link event `auto-connect: <name> not reachable in 8 s`, first round only).
+    After a round nobody answered in, a remembered MFi adapter iOS reports connected goes next: everyone before it had
+    a turn, and a car has one OBD port. One adapter remembered: its pending connect waits, as before. A user's connect
+    or disconnect ends the rounds. Seen on 2026-10-05: a vLinker FD tried once became the most recent adapter, and the
+    next drive would have waited for it forever instead of the MX+ in the car.
 - Persist per adapter (`expo-sqlite/kv-store`): id, transport, name, chosen GATT profile + characteristic UUIDs, `AdapterInfo`, capabilities, last protocol (`ATSPn`), measured poll rate, `lastVerifiedAt`.
 - Persist the cars seen by any adapter (`vehicleLink.cars`, most recent first, 8 at most): VIN (null when never read) and
   protocol number. `expectedVin()` before connecting is the first one's VIN (§9.1).

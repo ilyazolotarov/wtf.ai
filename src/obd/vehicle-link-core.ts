@@ -45,8 +45,6 @@ export interface DiscoveryBackend {
   pairMfi?(): Promise<void>;
   /** Ids of the MFi adapters iOS has connected right now (no scan, no prompt). */
   mfiPresent?(): string[];
-  /** Calls `listener` with those ids whenever an MFi accessory connects or disconnects; returns unsubscribe. */
-  onMfiChange?(listener: (ids: string[]) => void): () => void;
 }
 
 export interface RememberedAdapter {
@@ -97,6 +95,10 @@ const MAX_CARS = 8;
 const VIN_RETRY_MS = [5_000, 10_000, 15_000, 30_000, 60_000, 120_000];
 /** Standby on a cached protocol whose bus isn't there: search all protocols on every this many checks (§10.3). */
 const SEARCH_EVERY = 4;
+/** Auto-connect with several adapters remembered: each gets this long to become reachable, most recent first (§7). */
+export const AUTO_CONNECT_WINDOW_MS = 8_000;
+
+type OpenOutcome = "connected" | "unreachable" | "stopped";
 
 class Cancelled extends Error {}
 
@@ -134,7 +136,9 @@ export class VehicleLinkCore implements VehicleLink {
   private rpmPeriods: Partial<PollerConfig> = {};
   /** Bumped by every init: a VIN retry belongs to the init that started it. */
   private initSeq = 0;
-  private stopMfiWatch: (() => void) | null = null;
+  /** Bumped by a user's connect/disconnect and by each auto-connect round: an older round stops. */
+  private autoRun = 0;
+  private roundRun: number | null = null;
 
   constructor(private readonly deps: VehicleLinkDeps) {
     this.engine = new EngineStateMachine((state, tUs) => this.onEngineChange(state, tUs));
@@ -186,20 +190,19 @@ export class VehicleLinkCore implements VehicleLink {
   }
 
   /**
-   * Connect to the most recently verified adapter, if any (§7 auto-connect). The connect
-   * waits for the adapter to become reachable: an MFi adapter joins iOS only a few seconds
-   * after the car wakes it, often after the app is opened. A failed attempt is retried.
-   * A known MFi adapter iOS has connected is in this car: it wins over a more recent BLE one,
-   * and one joining while a BLE connect waits takes over (a second adapter tried once, then unplugged).
+   * Connect to a remembered adapter, if any (§7 auto-connect). The connect waits for the adapter
+   * to become reachable: an MFi adapter joins iOS only a few seconds after the car wakes it, often
+   * after the app is opened. A failed attempt is retried. With one adapter remembered it waits for
+   * it; with several, the most recently verified goes first and each gets `AUTO_CONNECT_WINDOW_MS`,
+   * round after round, until one is reachable.
    */
   async autoConnect(): Promise<boolean> {
+    if (this.roundRun === this.autoRun) return true;
     if (this.snapshot.activeDeviceId && this.snapshot.link !== "error") return true;
     const list = [...this.remembered()].sort((a, b) => b.lastVerifiedAt - a.lastVerifiedAt);
     if (list.length === 0) return false;
-    const present = this.deps.discovery.mfiPresent?.() ?? [];
-    const target = list.find((a) => a.transport === "mfi" && present.includes(a.id)) ?? list[0];
-    if (target.transport !== "mfi") this.watchMfiWhileWaiting(target, list.filter((a) => a.transport === "mfi"));
-    await this.connect(target.id, { wait: true });
+    if (list.length === 1) await this.connect(list[0].id, { wait: true });
+    else await this.inTurn(list);
     return true;
   }
 
@@ -212,14 +215,25 @@ export class VehicleLinkCore implements VehicleLink {
   // ---- VehicleLink: connection ----
 
   async connect(deviceId: string, options?: { wait?: boolean }): Promise<void> {
-    await this.disconnect();
+    this.autoRun++;
+    await this.open(deviceId, options);
+  }
+
+  async disconnect(): Promise<void> {
+    this.autoRun++;
+    await this.close();
+  }
+
+  /** `windowMs`: give up (and return "unreachable") if the transport doesn't connect within it. */
+  private async open(deviceId: string, options?: { wait?: boolean; windowMs?: number }): Promise<OpenOutcome> {
+    await this.close();
     const gen = ++this.gen;
     const remembered = this.remembered().find((a) => a.id === deviceId);
     const scanned = this.scanned.get(deviceId);
     const device = scanned ?? remembered;
     if (!device) {
       this.update({ link: "error", error: { code: "device-not-found" } });
-      return;
+      return "stopped";
     }
     this.update({
       link: "connecting",
@@ -241,16 +255,62 @@ export class VehicleLinkCore implements VehicleLink {
     this.unsubscribers.push(
       transport.onUnsolicited((text, rxUs) => this.linkEvents.emit({ type: "unsolicited", tUs: rxUs, detail: text })),
     );
+    let info: ConnectedInfo | null;
     try {
-      const info = await transport.connect(options);
-      this.check(gen);
+      const connecting = transport.connect({ wait: options?.wait });
+      if (options?.windowMs === undefined) {
+        info = await connecting;
+      } else {
+        connecting.catch(() => undefined); // rejected as cancelled when the window closes first
+        info = await Promise.race([connecting, this.deps.clock.sleep(options.windowMs).then(() => null)]);
+      }
+    } catch (error) {
+      if (options?.windowMs === undefined || gen !== this.gen) {
+        this.handleFailure(gen, error);
+        return "stopped";
+      }
+      info = null; // e.g. unknown to iOS right now: the next adapter's turn
+    }
+    if (gen !== this.gen) return "stopped";
+    if (info === null) {
+      await this.close();
+      return "unreachable";
+    }
+    try {
       await this.runSession(gen, info, { id: device.id, transport: device.transport, name: device.name }, remembered);
     } catch (error) {
       this.handleFailure(gen, error);
     }
+    return "connected";
   }
 
-  async disconnect(): Promise<void> {
+  /**
+   * Several adapters remembered: the most recent first, each for one window, round after round. After a round
+   * nobody answered in, a remembered MFi adapter iOS reports connected goes next: everyone before it had a turn.
+   */
+  private async inTurn(list: RememberedAdapter[]): Promise<void> {
+    const run = ++this.autoRun;
+    this.roundRun = run;
+    try {
+      for (let round = 0; run === this.autoRun; round++) {
+        for (let i = 0; i < list.length && run === this.autoRun; i++) {
+          const present = round > 0 ? (this.deps.discovery.mfiPresent?.() ?? []) : [];
+          const next = list.find((a) => a.transport === "mfi" && present.includes(a.id)) ?? list[i];
+          const startedUs = this.deps.clock.nowUs();
+          const outcome = await this.open(next.id, { wait: true, windowMs: AUTO_CONNECT_WINDOW_MS });
+          if (outcome !== "unreachable" || run !== this.autoRun) return;
+          if (round === 0) this.event("auto-connect", `${next.name ?? next.id} not reachable in ${AUTO_CONNECT_WINDOW_MS / 1000} s`);
+          // A quick failure still takes its window: no busy loop.
+          const leftMs = AUTO_CONNECT_WINDOW_MS - (this.deps.clock.nowUs() - startedUs) / 1000;
+          if (leftMs > 0) await this.deps.clock.sleep(leftMs);
+        }
+      }
+    } finally {
+      if (this.roundRun === run) this.roundRun = null;
+    }
+  }
+
+  private async close(): Promise<void> {
     this.gen++;
     const transport = this.transport;
     if (!transport && !this.session && this.snapshot.activeDeviceId === null) return;
@@ -299,7 +359,6 @@ export class VehicleLinkCore implements VehicleLink {
   }
 
   async dispose(): Promise<void> {
-    this.stopMfiWatch?.();
     this.stopDiscovery();
     await this.disconnect();
     this.listeners.clear();
@@ -307,23 +366,6 @@ export class VehicleLinkCore implements VehicleLink {
 
   // ---- internals ----
 
-  private watchMfiWhileWaiting(waiting: RememberedAdapter, mfi: RememberedAdapter[]): void {
-    this.stopMfiWatch?.();
-    this.stopMfiWatch = null;
-    if (mfi.length === 0 || !this.deps.discovery.onMfiChange) return;
-    const stop = this.deps.discovery.onMfiChange((ids) => {
-      if (this.snapshot.activeDeviceId !== waiting.id || this.snapshot.link !== "connecting") {
-        stop();
-        return;
-      }
-      const joined = mfi.find((a) => ids.includes(a.id));
-      if (!joined) return;
-      stop();
-      this.event("auto-connect", `${joined.name ?? joined.id} joined iOS while waiting for ${waiting.name ?? waiting.id}`);
-      void this.connect(joined.id, { wait: true });
-    });
-    this.stopMfiWatch = stop;
-  }
 
   private async runSession(
     gen: number,

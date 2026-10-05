@@ -1,6 +1,7 @@
 import { VirtualClock, yieldMacrotask } from "@/obd/clock";
 import { Elm327Emulator, KLINE_PROFILE, STN_PROFILE, type EmulatorProfile } from "@/obd/emulator";
 import {
+  AUTO_CONNECT_WINDOW_MS,
   VehicleLinkCore,
   type DiscoveryBackend,
   type KeyValueStore,
@@ -25,23 +26,14 @@ class MemoryStore implements KeyValueStore {
 
 class FakeDiscovery implements DiscoveryBackend {
   devices: ScannedDevice[] = [];
+  /** MFi accessories iOS has connected. */
   mfi: string[] = [];
-  private mfiListeners = new Set<(ids: string[]) => void>();
   start(onUpdate: (d: ScannedDevice[]) => void) {
     onUpdate(this.devices);
   }
   stop() {}
   mfiPresent() {
     return this.mfi;
-  }
-  onMfiChange(listener: (ids: string[]) => void) {
-    this.mfiListeners.add(listener);
-    return () => void this.mfiListeners.delete(listener);
-  }
-  /** iOS connects (or drops) MFi accessories. */
-  setMfi(ids: string[]) {
-    this.mfi = ids;
-    [...this.mfiListeners].forEach((l) => l(ids));
   }
 }
 
@@ -263,36 +255,73 @@ describe("VehicleLinkCore", () => {
     await back.core.disconnect();
   });
 
-  test("auto-connect: a known MFi adapter iOS has wins over a more recent BLE one, or takes over when it joins", async () => {
-    const store = new MemoryStore();
-    store.setJson("vehicleLink.adapters", [
-      { id: "ble-1", transport: "ble", name: "vLinker FD", protocolNumber: 6, lastVerifiedAt: 900 },
-      { id: "mfi-1", transport: "mfi", name: "OBDLink MX+", protocolNumber: 6, lastVerifiedAt: 500 },
-    ] satisfies RememberedAdapter[]);
-    const present = setup({}, store);
-    present.discovery.mfi = ["mfi-1"];
-    await present.core.autoConnect();
-    await until(() => present.core.getSnapshot().link === "polling");
-    expect(present.core.getSnapshot().activeDeviceId).toBe("mfi-1");
-    await present.core.disconnect();
+  describe("auto-connect with two adapters remembered", () => {
+    /** vLinker (BLE) verified last, then the MX+ (MFi); `reachable` says which can connect now. */
+    function twoAdapters(reachable: { ble: boolean; mfi: boolean }) {
+      const store = new MemoryStore();
+      store.setJson("vehicleLink.adapters", [
+        { id: "ble-1", transport: "ble", name: "vLinker FD", protocolNumber: 6, lastVerifiedAt: 900 },
+        { id: "mfi-1", transport: "mfi", name: "OBDLink MX+", protocolNumber: 6, lastVerifiedAt: 500 },
+      ] satisfies RememberedAdapter[]);
+      const t = setup({}, store);
+      for (const id of ["ble-1", "mfi-1"] as const) {
+        const emu = new Elm327Emulator(t.clock);
+        const connect = emu.connect.bind(emu);
+        // Not reachable: the pending connect never completes (iOS waits for the adapter).
+        jest.spyOn(emu, "connect").mockImplementation(() => (reachable[id === "ble-1" ? "ble" : "mfi"] ? connect() : new Promise(() => undefined)));
+        t.emulators.set(id, emu);
+      }
+      t.discovery.mfi = reachable.mfi ? ["mfi-1"] : [];
+      return t;
+    }
+    const notReachable = (events: LinkEvent[]) => events.filter((e) => e.type === "auto-connect").map((e) => e.detail);
 
-    // The MFi adapter joins iOS while auto-connect waits for the BLE one, which isn't in the car.
-    store.setJson("vehicleLink.adapters", [
-      { id: "ble-1", transport: "ble", name: "vLinker FD", protocolNumber: 6, lastVerifiedAt: 900 },
-      { id: "mfi-1", transport: "mfi", name: "OBDLink MX+", protocolNumber: 6, lastVerifiedAt: 500 },
-    ] satisfies RememberedAdapter[]);
-    const joining = setup({}, store);
-    const ble = new Elm327Emulator(joining.clock);
-    jest.spyOn(ble, "connect").mockImplementation(() => new Promise(() => undefined));
-    joining.emulators.set("ble-1", ble);
-    void joining.core.autoConnect();
-    await until(() => joining.core.getSnapshot().link === "connecting");
-    expect(joining.core.getSnapshot().activeDeviceId).toBe("ble-1");
-    joining.discovery.setMfi(["mfi-1"]);
-    await until(() => joining.core.getSnapshot().link === "polling");
-    expect(joining.core.getSnapshot().activeDeviceId).toBe("mfi-1");
-    expect(joining.events.find((e) => e.type === "auto-connect")?.detail).toBe("OBDLink MX+ joined iOS while waiting for vLinker FD");
-    await joining.core.disconnect();
+    test("the most recent one wins when it answers", async () => {
+      const { core, events } = twoAdapters({ ble: true, mfi: true });
+      await core.autoConnect();
+      await until(() => core.getSnapshot().link === "polling");
+      expect(core.getSnapshot().activeDeviceId).toBe("ble-1");
+      expect(notReachable(events)).toEqual([]);
+      await core.disconnect();
+    });
+
+    test("one not reachable in its window: the next one", async () => {
+      const { core, events } = twoAdapters({ ble: false, mfi: true });
+      void core.autoConnect();
+      await until(() => core.getSnapshot().link === "polling");
+      expect(core.getSnapshot().activeDeviceId).toBe("mfi-1");
+      expect(notReachable(events)).toEqual([`vLinker FD not reachable in ${AUTO_CONNECT_WINDOW_MS / 1000} s`]);
+      // A foreground return meanwhile doesn't start a second round; connected now, the MX+ goes first next time.
+      expect(await core.autoConnect()).toBe(true);
+      await core.disconnect();
+    });
+
+    test("nobody there yet: rounds until one joins; an MFi adapter iOS reports goes next once all had a turn", async () => {
+      const t = twoAdapters({ ble: false, mfi: false });
+      void t.core.autoConnect();
+      await until(() => notReachable(t.events).length === 2);
+      expect(t.core.getSnapshot().link).toBe("connecting");
+      // The car wakes the MX+ (it joins iOS) while the vLinker has its second window.
+      const mfi = t.emulators.get("mfi-1")!;
+      const connect = Object.getPrototypeOf(mfi).connect.bind(mfi);
+      jest.spyOn(mfi, "connect").mockImplementation(() => connect());
+      t.discovery.mfi = ["mfi-1"];
+      await until(() => t.core.getSnapshot().link === "polling");
+      expect(t.core.getSnapshot().activeDeviceId).toBe("mfi-1");
+      expect(notReachable(t.events)).toHaveLength(2); // logged on the first round only
+      await t.core.disconnect();
+    });
+
+    test("disconnect stops the rounds", async () => {
+      const { core, events } = twoAdapters({ ble: false, mfi: false });
+      void core.autoConnect();
+      await until(() => core.getSnapshot().link === "connecting");
+      await core.disconnect();
+      const after = events.length;
+      for (let i = 0; i < 2000; i++) await new Promise<void>((r) => yieldMacrotask(r));
+      expect(events.slice(after).filter((e) => e.type === "connect")).toEqual([]);
+      expect(core.getSnapshot()).toMatchObject({ link: "idle", activeDeviceId: null });
+    });
   });
 
   test("raw send and exclusive work while polling", async () => {
