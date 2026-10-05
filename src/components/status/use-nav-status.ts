@@ -8,6 +8,22 @@ import { useVehicleLinkValue } from "@/providers/runtime-provider";
 
 export type AdapterStatus = "on" | "searching" | "off";
 
+/**
+ * The vehicle button's badge (UI-SPEC): ok = the car answers and is known (VIN read or remembered); busy =
+ * connecting, searching the protocol, the car off or not answering yet, the VIN still being asked; bad = no adapter,
+ * an error, or a car whose VIN never came (nothing learned about it can be kept).
+ */
+export type LinkBadge = "ok" | "busy" | "bad";
+
+export function useLinkBadge(): LinkBadge {
+  return useVehicleLinkValue((s) => {
+    if (s.protocolSearch) return "busy";
+    if (s.link === "polling") return s.vehicle?.vin ? "ok" : s.vehicle?.vinSource === "missing" ? "bad" : "busy";
+    if (s.link === "idle" || s.link === "error") return "bad";
+    return "busy";
+  });
+}
+
 const TRUST: Record<
   TrustState,
   { color: "ok" | "bad" | "warn" | "idle"; label: keyof Strings; sentence: keyof Strings; icon: IconName }

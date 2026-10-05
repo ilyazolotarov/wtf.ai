@@ -28,7 +28,7 @@ import {
     toDegrees,
 } from "@/components/status/format-geo";
 import { useSheetClosing } from "@/components/map/sheet-closing";
-import { useNavStatus } from "@/components/status/use-nav-status";
+import { useLinkBadge, useNavStatus, type LinkBadge } from "@/components/status/use-nav-status";
 import { GlassFill } from "@/components/ui/glass-fill";
 import { Icon, type IconName } from "@/components/ui/icon";
 import { T } from "@/components/ui/text";
@@ -63,6 +63,7 @@ export default function HomeScreen() {
   const { t, language } = useT();
   const palette = usePalette();
   const nav = useNavStatus();
+  const linkBadge = useLinkBadge();
   const { position, trust } = nav;
   const { permission, requestPermission } = usePositionPermission();
   const { route, startRoute, stopRoute } = useRoute();
@@ -608,10 +609,11 @@ export default function HomeScreen() {
             <HudAction icon="alt_route" label={t("route")} href="/route" />
             <HudAction
               icon="directions_car"
-              label={t("vehicle")}
+              label={recording ? t("recording") : t("vehicle")}
               href="/vehicle"
-              recording={recording}
-              recordingLabel={t("recording")}
+              badge={linkBadge}
+              badgeLabel={t(LINK_BADGE_LABEL[linkBadge])}
+              highlight={recording}
             />
             <HudAction icon="more_horiz" label={t("more")} href="/more" />
           </View>
@@ -628,20 +630,27 @@ function formatDuration(ms: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
+const LINK_BADGE_LABEL = { ok: "badgeOk", busy: "badgeBusy", bad: "badgeBad" } as const;
+
 function HudAction({
   icon,
   label,
   href,
-  recording,
-  recordingLabel,
+  badge,
+  badgeLabel,
+  highlight,
 }: {
   icon: IconName;
   label: string;
   href: "/route" | "/vehicle" | "/more";
-  recording?: boolean;
-  recordingLabel?: string;
+  /** Connection state dot: green ready, yellow connecting, red not connected. */
+  badge?: LinkBadge;
+  badgeLabel?: string;
+  /** The label in the accent colour (a trip is recording). */
+  highlight?: boolean;
 }) {
   const palette = usePalette();
+  const badgeColor = badge === "ok" ? palette.ok.c : badge === "busy" ? palette.warn.c : palette.bad.c;
   return (
     // Link asChild drops function styles, so press feedback lives on the content.
     <Link href={href} asChild>
@@ -654,13 +663,13 @@ function HudAction({
             ]}
           >
             <Icon name={icon} size={24} color={palette.text} />
-            {recording && (
+            {badge && (
               <View
-                style={[styles.recDot, { backgroundColor: palette.bad.c, borderColor: palette.groupBg }]}
-                accessibilityLabel={recordingLabel}
+                style={[styles.recDot, { backgroundColor: badgeColor, borderColor: palette.groupBg }]}
+                accessibilityLabel={badgeLabel}
               />
             )}
-            <T w="medium" size={12}>
+            <T w="medium" size={12} color={highlight ? palette.accent : undefined}>
               {label}
             </T>
           </View>

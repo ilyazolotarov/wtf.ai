@@ -129,7 +129,13 @@ function CarTab() {
             </T>
           </View>
           {snap.activeDeviceId ? (
-            <ScreenAction labelKey="disconnect" secondary compact onPress={() => void link.disconnect()} />
+            <ScreenAction
+              // Still waiting for the adapter to show up (auto-connect, a reconnect): stopping that isn't a disconnect.
+              labelKey={snap.link === "connecting" || snap.link === "reconnecting" ? "stopSearching" : "disconnect"}
+              secondary
+              compact
+              onPress={() => void link.disconnect()}
+            />
           ) : remembered ? (
             <ScreenAction
               labelKey="connect"

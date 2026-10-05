@@ -249,6 +249,7 @@ describe("VehicleLinkCore", () => {
       "not read; a car not seen on this protocol",
       "not read after 6 retries",
     ]);
+    expect(core.getSnapshot().vehicle?.vinSource).toBe("missing");
     await core.disconnect();
     expect(store.getJson<KnownCar[]>("vehicleLink.cars")?.map((c) => c.vin)).toEqual([null, CX5_VIN]);
     // Back in the CX-5 with a missed read: its VIN again.

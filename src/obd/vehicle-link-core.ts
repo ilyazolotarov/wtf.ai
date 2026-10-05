@@ -547,7 +547,10 @@ export class VehicleLinkCore implements VehicleLink {
       this.update({ vehicle });
       return;
     }
-    if (!stale()) this.event("vin", `not read after ${VIN_RETRY_MS.length} retries`);
+    if (stale()) return;
+    this.event("vin", `not read after ${VIN_RETRY_MS.length} retries`);
+    const vehicle = this.snapshot.vehicle;
+    if (vehicle && !vehicle.vin) this.update({ vehicle: { ...vehicle, vinSource: "missing" } });
   }
 
   private async reinit(gen: number, reason: string): Promise<void> {

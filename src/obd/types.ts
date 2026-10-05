@@ -115,9 +115,9 @@ export interface VehicleInfo {
   vin: string | null;
   /**
    * "read" from the car (`0902`); "remembered": the read missed, so the last car seen on this protocol is assumed
-   * until a retry reads it (VEHICLE-LINK-SPEC §9.1).
+   * until a retry reads it; "missing": no VIN after every retry, a car not known (VEHICLE-LINK-SPEC §9.1).
    */
-  vinSource?: "read" | "remembered";
+  vinSource?: "read" | "remembered" | "missing";
   speedEcu: string | null;
 }
 
