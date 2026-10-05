@@ -1,19 +1,81 @@
 name: CI
 
-# Every commit: lint, typecheck, unit tests (TS, Swift logic, Python), expo-doctor, then an unsigned iOS build.
-# No EAS: the unsigned IPA is sideloaded with AltStore (docs/SPEC.md §2).
+# Lint, typecheck, unit tests (TS, Swift logic, Python), expo-doctor and the unsigned iOS build,
+# each only when what it covers changed (docs/CI.md). No EAS: the unsigned IPA is sideloaded with
+# AltStore (docs/SPEC.md §2).
+#
+# - Branch pushes: checks for what changed; a native change is also compiled (CI is the only
+#   Xcode). `[build]`, `[build ios]` or `[build android]` in a commit message also builds and
+#   sends the result to Telegram.
+# - Pushes to main: checks, and a Debug build sent to Telegram when app code changed.
+# - Pull requests: from forks only (branches of this repo are covered by their pushes).
+# - Manual run (Actions → CI → Run workflow): all checks, builds as chosen.
 
 on:
   push:
+    branches: ["**"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      ios:
+        description: "iOS build. Debug = dev client with the JS bundle embedded; Release = standalone."
+        type: choice
+        options: [Debug, Release, none]
+        default: Debug
+      android:
+        description: "Android build. tester = APK for testers; ci = emulator build (simulated adapters listed)."
+        type: choice
+        options: [none, tester, ci]
+        default: none
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  # Newer pushes to a branch replace older runs; main finishes every run.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+  actions: read # ci-plan.sh looks up the last green run
 
 jobs:
+  plan:
+    # Pull requests from branches of this repo already ran on push.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      checks: ${{ steps.plan.outputs.checks }}
+      python: ${{ steps.plan.outputs.python }}
+      swift: ${{ steps.plan.outputs.swift }}
+      build_ios: ${{ steps.plan.outputs.build_ios }}
+      build_android: ${{ steps.plan.outputs.build_android }}
+      notify: ${{ steps.plan.outputs.notify }}
+      retention: ${{ steps.plan.outputs.retention }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Self-test the plan script
+        run: .github/scripts/ci-plan.sh --test
+
+      - name: Decide which jobs run
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          BEFORE: ${{ github.event.before }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          DISPATCH_IOS: ${{ inputs.ios }}
+          DISPATCH_ANDROID: ${{ inputs.android }}
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/ci-plan.sh
+
   checks:
+    needs: plan
+    if: ${{ needs.plan.outputs.checks == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -45,6 +107,15 @@ jobs:
       - name: Expo doctor
         run: npx expo-doctor
 
+  python:
+    needs: plan
+    if: ${{ needs.plan.outputs.python == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
@@ -66,6 +137,8 @@ jobs:
 
   native-logic:
     # Swift unit tests for the Foundation-only logic of the local Expo modules (Package.swift, native-tests/).
+    needs: plan
+    if: ${{ needs.plan.outputs.swift == 'true' }}
     runs-on: ubuntu-latest
     container: swift:6.1
     timeout-minutes: 15
@@ -77,18 +150,23 @@ jobs:
         run: swift test
 
   build-ios:
-    # TEMPORARY: skipped on the android branch to save macOS minutes while Android CI is brought up. Remove before merging.
-    if: ${{ github.ref != 'refs/heads/android' }}
-    needs: [checks, native-logic]
+    needs: [plan, checks, native-logic]
+    # Skipped native-logic is fine; failed or cancelled is not.
+    if: ${{ !cancelled() && needs.plan.outputs.build_ios != '' && needs.checks.result == 'success' && needs.native-logic.result != 'failure' }}
     uses: ./.github/workflows/build-ios.yml
     with:
-      configuration: Debug
+      configuration: ${{ needs.plan.outputs.build_ios }}
+      notify: ${{ needs.plan.outputs.notify == 'true' }}
+      retention-days: ${{ fromJSON(needs.plan.outputs.retention) }}
     secrets: inherit
 
   build-android:
     # Signed release APK + emulator smoke test (docs/ANDROID-SPEC.md §4).
-    needs: [checks]
+    needs: [plan, checks]
+    if: ${{ !cancelled() && needs.plan.outputs.build_android != '' && needs.checks.result == 'success' }}
     uses: ./.github/workflows/build-android.yml
     with:
-      variant: ci
+      variant: ${{ needs.plan.outputs.build_android }}
+      notify: ${{ needs.plan.outputs.notify == 'true' }}
+      retention-days: ${{ fromJSON(needs.plan.outputs.retention) }}
     secrets: inherit

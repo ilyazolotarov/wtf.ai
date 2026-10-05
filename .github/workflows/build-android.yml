@@ -10,11 +10,22 @@ on:
         type: choice
         options: [tester, ci]
         default: tester
+      notify:
+        description: "Send the APK to Telegram"
+        type: boolean
+        default: true
   workflow_call:
     inputs:
       variant:
         type: string
         default: ci
+      notify:
+        # false for compile checks of branch pushes: the APK is only uploaded as an artifact.
+        type: boolean
+        default: false
+      retention-days:
+        type: number
+        default: 14
     secrets:
       SENTRY_AUTH_TOKEN:
         required: false
@@ -113,20 +124,21 @@ jobs:
           path: wtfai-ci.apk
           retention-days: 3
 
-      - name: Upload APK for testers
-        if: ${{ inputs.variant != 'ci' }}
+      - name: Upload APK to install
+        # The tester build always; the CI build when the plan wants it delivered (notify).
+        if: ${{ inputs.variant != 'ci' || inputs.notify }}
         uses: actions/upload-artifact@v7
         with:
           archive: false
-          path: wtfai-tester.apk
-          retention-days: 14
+          path: wtfai-${{ inputs.variant }}.apk
+          retention-days: ${{ inputs.retention-days || 14 }}
 
       - name: Send APK to Telegram
-        if: ${{ inputs.variant != 'ci' && env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != '' }}
+        if: ${{ inputs.notify && env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != '' }}
         # A delivery problem must not fail the build: the artifact above is the source of truth.
         continue-on-error: true
         run: |
-          APK="wtfai-tester.apk"
+          APK="wtfai-${VARIANT}.apk"
           RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           CAPTION="wtf.ai Android · ${GITHUB_REF_NAME} @ ${GITHUB_SHA:0:7}
           $(git log -1 --format=%s)
