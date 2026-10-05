@@ -164,7 +164,9 @@ jammed:
   the position is rougher than 75 m or has no direction; and after answering "No" to "Is the car where the dot is?"
   (§6.1). Driving off cancels it. Never offered while moving.
 - **Placing:** the map zooms in (18, flat, north up) on the dot with a pin fixed at the screen centre; the driver drags
-  the map until the pin is on the car, "Here". Then "tap where the front of the car points" (or "Skip").
+  the map until the pin is on the car, "Here". Then "tap where the front of the car points": an arrow from the pin
+  shows the heading, another tap turns it, "Confirm" applies it ("Skip" while none is chosen). The confirmed spot and
+  arrow stay drawn, fainter, until the dot is 50 m from them (the car drove off) or the car is placed again.
 - **Applied** (`Navigator.setPosition`): everything about the old track is dropped except the speed scale. With a
   heading the EKF starts there (σ 10 m, 15°, init method `user`), confirmed: later fixes only pass its gate, so Wi-Fi
   can't move it, five rejected satellite fixes still reset it. Without one: anchored there (σ 10 m), the filter

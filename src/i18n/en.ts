@@ -250,6 +250,8 @@ export const en = {
   placeHeadingTitle: "Which way does it face?",
   placeHeadingHint: "Tap the map where the front of the car points.",
   placeSkipHeading: "Skip",
+  placeHeadingConfirm: "Does the arrow point where the car faces? Tap again to turn it.",
+  placeConfirm: "Confirm",
   placeCancel: "Cancel",
   more: "More",
   toward: "Toward",

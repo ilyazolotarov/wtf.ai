@@ -252,6 +252,8 @@ export const uk = {
   placeHeadingTitle: "Куди воно дивиться?",
   placeHeadingHint: "Торкніться мапи там, куди дивиться перед авто.",
   placeSkipHeading: "Пропустити",
+  placeHeadingConfirm: "Стрілка показує, куди дивиться авто? Торкніться ще раз, щоб повернути.",
+  placeConfirm: "Підтвердити",
   placeCancel: "Скасувати",
   more: "Ще",
   toward: "Напрямок:",

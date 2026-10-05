@@ -51,7 +51,16 @@ interface MapSurfaceProps {
   placeFrom?: Coordinate | null;
   onCenter?(at: Coordinate): void;
   onTap?(at: Coordinate): void;
+  /**
+   * Where the driver put the car, with an arrow the way it faces (null: skipped): `draft` while choosing, else the
+   * confirmed one, fainter, kept until the car has driven away from it.
+   */
+  placedMark?: { at: Coordinate; headingRad: number | null; draft: boolean } | null;
 }
+
+/** The placed car's arrow: narrow and long enough to read at zoom 18. */
+const PLACED_ARROW_HALF_ANGLE_RAD = (14 * Math.PI) / 180;
+const PLACED_ARROW_M = 28;
 
 /** Placing the car: close enough to see the yard and the street. */
 const PLACE_ZOOM = 18;
@@ -92,6 +101,7 @@ export function MapSurface({
   placeFrom = null,
   onCenter,
   onTap,
+  placedMark = null,
 }: MapSurfaceProps) {
   const scheme = useColorScheme() === "dark" ? "dark" : "light";
   const palette = Colors[scheme];
@@ -282,6 +292,12 @@ export function MapSurface({
   const maneuverPoint = nextManeuver && nextManeuver.kind !== "arrive" ? pointFeatures(nextManeuver) : emptyPoints();
   const destination = route ? pointFeatures(route.destination) : emptyPoints();
   const pinPoint = pin ? pointFeatures(pin) : emptyPoints();
+  const placedPoint = placedMark ? pointFeatures(placedMark.at) : emptyPoints();
+  const placedArrow =
+    placedMark && placedMark.headingRad !== null
+      ? sectorFeatures(placedMark.at, placedMark.headingRad, PLACED_ARROW_HALF_ANGLE_RAD, PLACED_ARROW_M)
+      : emptyPolygons();
+  const placedOpacity = placedMark?.draft ? 1 : 0.45;
 
   // Dark style is still being tinted: hold a plain dark canvas instead of flashing light tiles.
   if (mapStyle == null)
@@ -359,6 +375,27 @@ export function MapSurface({
           id="dropped-pin-dot"
           type="circle"
           paint={{ "circle-radius": 7, "circle-color": palette.accent, "circle-stroke-color": palette.bg, "circle-stroke-width": 3 }}
+        />
+      </GeoJSONSource>
+      <GeoJSONSource id="placed-arrow" data={placedArrow}>
+        <Layer
+          id="placed-arrow-fill"
+          type="fill"
+          paint={{ "fill-color": palette.accent, "fill-opacity": 0.55 * placedOpacity }}
+        />
+      </GeoJSONSource>
+      <GeoJSONSource id="placed-point" data={placedPoint}>
+        <Layer
+          id="placed-point-dot"
+          type="circle"
+          paint={{
+            "circle-radius": 7,
+            "circle-color": palette.accent,
+            "circle-opacity": placedOpacity,
+            "circle-stroke-color": palette.bg,
+            "circle-stroke-width": 3,
+            "circle-stroke-opacity": placedOpacity,
+          }}
         />
       </GeoJSONSource>
       <GeoJSONSource id="position-accuracy" data={accuracy}>
@@ -552,7 +589,7 @@ function accuracyFeatures(
 
 /** Sector ahead of the puck: the course cone or the compass beam. */
 function sectorFeatures(
-  position: PositionEstimate,
+  position: { lat: number; lon: number },
   headingRad: number,
   halfAngleRad: number,
   radiusM: number,

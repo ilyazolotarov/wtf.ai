@@ -53,6 +53,8 @@ const CAMERA: Record<CameraMode, { icon: IconName; label: "follow" | "followHead
 const STANDING_MPS = 1;
 /** Offer putting the car on the map when the position is rougher than this (or has no direction), without GPS. */
 const PLACE_OFFER_ACCURACY_M = 75;
+/** The confirmed placing stays drawn until the dot is this far from it (the car drove off). */
+const PLACED_SHOWN_M = 50;
 
 /** Driving this long on a trip turns follow into heading-up (UI-SPEC §6.2). */
 const AUTO_HEADING_UP_MS = 2000;
@@ -175,6 +177,10 @@ export default function HomeScreen() {
   // Putting the car on the map (NAVIGATOR-SPEC §6.2): only while it stands; moving off cancels.
   const [placing, setPlacing] = useState<"position" | "heading" | null>(null);
   const [placeAt, setPlaceAt] = useState<Coordinate | null>(null);
+  const [placeHeading, setPlaceHeading] = useState<number | null>(null);
+  // The confirmed placing stays on the map until the car has driven away from it.
+  const [placed, setPlaced] = useState<{ at: Coordinate; headingRad: number | null } | null>(null);
+  if (placed && position && haversineM(position, placed.at) > PLACED_SHOWN_M) setPlaced(null);
   const placeCenter = useRef<Coordinate | null>(null);
   const [placeFrom, setPlaceFrom] = useState<Coordinate | null>(null);
   const standing = position != null && (position.speedMps ?? 0) < STANDING_MPS;
@@ -188,12 +194,15 @@ export default function HomeScreen() {
     placeCenter.current = from;
     setPlaceFrom(from);
     setPlaceAt(null);
+    setPlaceHeading(null);
+    setPlaced(null);
     setPlacing("position");
     pickCameraMode(() => "free");
   };
   const stopPlacing = () => {
     setPlacing(null);
     setPlaceAt(null);
+    setPlaceHeading(null);
     pickCameraMode(() => "follow");
   };
   const placeHere = () => {
@@ -202,14 +211,22 @@ export default function HomeScreen() {
     setPlaceAt(at);
     setPlacing("heading");
   };
-  const finishPlacing = (towards?: Coordinate) => {
-    if (placeAt) navigator.setUserPosition(placeAt, towards ? bearingRad(placeAt, towards) : undefined);
+  // A tap aims the arrow (again and again); Confirm applies it, Skip goes without a heading.
+  const aimPlacing = (towards: Coordinate) => {
+    if (placeAt) setPlaceHeading(bearingRad(placeAt, towards));
+  };
+  const finishPlacing = () => {
+    if (placeAt) {
+      navigator.setUserPosition(placeAt, placeHeading ?? undefined);
+      setPlaced({ at: placeAt, headingRad: placeHeading });
+    }
     stopPlacing();
   };
   // Moving off cancels (state adjusted during render, not in an effect).
   if (placing && !standing) {
     setPlacing(null);
     setPlaceAt(null);
+    setPlaceHeading(null);
     setCameraMode("follow");
   }
 
@@ -222,12 +239,19 @@ export default function HomeScreen() {
         headingUpRad={headingUp}
         onUserInteraction={() => pickCameraMode(() => "free")}
         onLongPress={setPin}
-        pin={placing ? placeAt : pin}
+        pin={placing ? null : pin}
         logCamera={(text) => runtime.recorder.note(text)}
         placing={placing}
         placeFrom={placeFrom}
         onCenter={(at) => (placeCenter.current = at)}
-        onTap={finishPlacing}
+        onTap={aimPlacing}
+        placedMark={
+          placing === "heading" && placeAt
+            ? { at: placeAt, headingRad: placeHeading, draft: true }
+            : placed && !placing
+              ? { ...placed, draft: false }
+              : null
+        }
       />
       {placing === "position" && (
         <View pointerEvents="none" style={styles.placeTarget}>
@@ -337,7 +361,7 @@ export default function HomeScreen() {
                     {t(placing === "position" ? "placeTitle" : "placeHeadingTitle")}
                   </T>
                   <T size={13} color={palette.text2}>
-                    {t(placing === "position" ? "placeHint" : "placeHeadingHint")}
+                    {t(placing === "position" ? "placeHint" : placeHeading === null ? "placeHeadingHint" : "placeHeadingConfirm")}
                   </T>
                 </View>
               </View>
@@ -357,7 +381,7 @@ export default function HomeScreen() {
                   style={({ pressed }) => [styles.ghostButton, styles.answerButton, { backgroundColor: palette.surface }, pressed && styles.pressed]}
                 >
                   <T w="semibold" size={14} color={palette.accent}>
-                    {t(placing === "position" ? "placeHere" : "placeSkipHeading")}
+                    {t(placing === "position" ? "placeHere" : placeHeading === null ? "placeSkipHeading" : "placeConfirm")}
                   </T>
                 </Pressable>
               </View>
