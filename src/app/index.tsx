@@ -153,6 +153,13 @@ export default function HomeScreen() {
       ? `${alertBody} ${t("alertPhoneOnly")}`
       : alertBody;
 
+  // The explanation under the status pill stays folded to leave room for the map; a tap on the
+  // pill opens it.
+  const showCutGps = outageButton && position != null && !outage;
+  const hasDetails = outage != null || alertText != null || showCutGps;
+  const [detailsToggled, setDetailsOpen] = useState(false);
+  const detailsOpen = detailsToggled && hasDetails;
+
   const panel = [
     styles.panel,
     { boxShadow: palette.shadow },
@@ -181,7 +188,13 @@ export default function HomeScreen() {
       >
         <View pointerEvents="box-none" style={styles.topStack}>
           <View style={styles.topRow}>
-            <View style={[panel, styles.statusPill]}>
+            <Pressable
+              onPress={() => setDetailsOpen((open) => !open)}
+              disabled={!hasDetails}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: detailsOpen }}
+              style={[panel, styles.statusPill]}
+            >
               <GlassFill radius={Radius.pill} />
               <View style={[styles.statusHalo, { backgroundColor: nav.color.a }]}>
                 <View style={[styles.statusDot, { backgroundColor: nav.color.c }]} />
@@ -200,7 +213,12 @@ export default function HomeScreen() {
                   )}
                 </T>
               </View>
-            </View>
+              {hasDetails && (
+                <View style={{ transform: [{ rotate: detailsOpen ? "-90deg" : "90deg" }] }}>
+                  <Icon name="chevron_right" size={16} color={palette.text2} />
+                </View>
+              )}
+            </Pressable>
             <View style={[panel, styles.speedPanel]}>
               <GlassFill radius={28} />
               <T w="light" size={28} style={styles.speedNumber}>
@@ -212,7 +230,7 @@ export default function HomeScreen() {
             </View>
           </View>
 
-          {outage && (
+          {outage && detailsOpen && (
             <View style={[panel, styles.alertCard]}>
               <GlassFill radius={Radius.rL} />
               <View style={styles.alertRow}>
@@ -249,7 +267,7 @@ export default function HomeScreen() {
             </View>
           )}
 
-          {outageButton && position && !outage && (
+          {showCutGps && detailsOpen && (
             <Pressable
               onPress={() => navigator.setSimulatedOutage(true)}
               style={({ pressed }) => [panel, styles.calChip, pressed && styles.pressed]}
@@ -263,7 +281,7 @@ export default function HomeScreen() {
             </Pressable>
           )}
 
-          {alertText && !outage && (
+          {alertText && !outage && detailsOpen && (
             <View style={[panel, styles.alertCard]}>
               <GlassFill radius={Radius.rL} />
               <View style={styles.alertRow}>
