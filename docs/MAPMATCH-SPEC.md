@@ -360,7 +360,20 @@ Every 10 m of travel, plus each accepted fix. All terms are log-likelihoods, sum
   - Compared at fix time, shifted back along the particle's travel direction by GNSS lag × speed.
   - A fix more than 5σ + 3 m from every particle means the filter lost the car: it restarts around the EKF.
   - Until integrity exists, the navigator's acceptance decides which fixes count.
-- **Off-road:** a fixed penalty (×0.5) per 10 m, instead of the relative-heading term.
+- **Off-road:** a penalty (×0.5) per 10 m, instead of the relative-heading term. It grows with speed: off-road is
+  for yards, parking lots and private-sector lanes, driven at walking pace to ~20 km/h, and hardly anyone drives
+  one at 40. From 20 km/h the exponent grows linearly to ×12 at 40 km/h and beyond (×0.5¹² per 10 m), so at road
+  speed the filter keeps to the roads unless a turn no road explains says otherwise. Not while the heading is
+  unknown (state `init`, §8): the off-road particles would fall below the stale threshold every few weightings,
+  and each resampling re-seeds the region, so the filter never settled on a heading. Measured (2026-10-05, the
+  app's closed loop): on 6 jammed drives scored by where they ended (`replay:places`, 5 seeds each) runs ending
+  > 50 m off 3/30 → 1/30, off-road share 18 → 8 %, and the off-road cluster no longer crossed roads (4 → 0,
+  `replay:crossings`); jammed from the start on the 14 clean drives (`replay:mm --jam 0:inf`, 3 seeds) wrong road
+  24.4 → 10.3 % of samples, off-road 28 → 12 %. The cost, on outages after good GPS (`replay:bench --mm`, 6 seeds):
+  240 s max error p90 37 → 43 m (median 22.5 → 24.1 m; 60 s and 120 s unchanged), mostly where the car braked
+  from 40 km/h and turned into a parking spot: the filter kept to the road ~10 s longer. A gentler ramp
+  (30 → 50 km/h, ×6) kept that at 38 m but left wrong road at 16.5 %. A dot a little late in a yard is far less
+  bothersome than one driving through buildings beside the road the car is on.
 
 ### 7.5 Resampling and particle count
 
@@ -934,7 +947,7 @@ M1–M3 can partly overlap. M4 needs M1–M3. M5 and M6 are independent of each 
 | Coarse-fix σ inflation | × 2 | correlated errors |
 | Absolute heading | EKF σ_ψ × 3, scale 0.3 | §7.4 |
 | EKF position prior | σ = max(2σ, 10 m), scale 0.3 | open loop only (§9) |
-| Off-road penalty | × 0.5 per 10 m | §7.4 |
+| Off-road penalty | × 0.5 per 10 m, exponent × 1 → 12 from 20 to 40 km/h (not in `init`) | §7.4 |
 | On-road floor while off-road | 10 %, projection ≤ 15 m, ≤ 30° | §7.5 |
 | `dks` prior / jitter | 0.02 / 0.002 | per-particle distance scale |
 | Off-road share / re-injection | 5 % / 2 % | §7.5 |
@@ -1001,10 +1014,24 @@ M1–M3 can partly overlap. M4 needs M1–M3. M5 and M6 are independent of each 
       fixes that can unseat a confident wrong lock.
 13. **Jammed from the start, the EKF pull locks the filter off-road** (2026-10-05, CX-5 across town from the
     parked pose, Wi-Fi fixes only). Replayed with the app's closed loop: off-road 73 % of the moving time, end 86 m
-    from where the car stopped; with `ekfPositionScale` 0: 4 %, 20 m. Without the Wi-Fi fixes the closed loop holds
-    the road (6 %) and ends at the house. Wi-Fi fixes (often hundreds of metres off) move the EKF, and the pull drags
-    the filter after it. But the pull is worth keeping where GPS was good before a cut (`replay:bench --mm`, 14 logs:
-    240 s max error median 22 → 29 m, p90 37 → 49 m without it), and on 6 jammed drives scored by where they ended
-    (two places known within ~5 m) no variant won everywhere (sums 114–149 m; one drive 2 → 84 m). Next: weaken
-    the pull, or keep Wi-Fi out of the EKF, only while no satellite fix has been accepted since the start. The
-    parked-pose and driver-placing changes (NAVIGATOR-SPEC §6.1–6.2) cover the starts that went wrong that day.
+    from where the car stopped; with `ekfPositionScale` 0: 4 %, 20 m. Wi-Fi fixes (often hundreds of metres off)
+    move the EKF, and the pull drags the filter after it; on the phone the off-road dot crossed five streets away
+    from junctions on that drive. The pull is worth keeping where GPS was good before a cut (`replay:bench --mm`,
+    14 logs: 240 s max error median 22 → 29 m, p90 37 → 49 m without it), and weakening it only while no satellite
+    fix has come since the start was worse on the jammed drives (`replay:places`: up to 845 m off). **Mitigated by
+    the off-road speed rule (§7.4):** the drives that went off-road did so at road speed, which no yard sees. Tried
+    and not kept:
+    - *A penalty for off-road particles crossing a road away from a junction* (`road-crossing.ts`): no real path
+      does it (`replay:crossings`, 4,176 clean fixes on 12 drives: 0 crossings once bridges are excluded), but on
+      top of the speed rule it didn't pay. ×0.1 per crossing: jammed from the start wrong road 10.3 → 17.4 %;
+      ×0.01: 8.8 %, but one jammed drive ended 852 m off (runs > 50 m 1/30 → 5/30). Particles crushed by it fall
+      below the stale off-road threshold, and the resampling that follows reshuffles the hypotheses. It also checks
+      every off-road particle's step against the roads around it: update p99 7.9 → 93–178 ms. The speed rule
+      already took the off-road cluster's crossings on the jammed drives from 4 to 0.
+    - *Road class by speed* (the speed limit, which the graph doesn't hold; most city streets are 50 km/h anyway).
+      Real speeds on the clean drives' matched roads (OBD, 1 h of driving): service p99 25 / max 26 km/h,
+      unclassified max 30, residential p99 47 / max 51, tertiary max 73, primary max 77. So only "faster than this
+      class ever sees" could work (service above ~35, residential above ~60), like the off-road rule. With the
+      speed rule, the wrong guesses jammed from the start are on a service road at ≥ 30 km/h 0.5 % of the moving
+      time, a residential one at ≥ 45 km/h 0.02 %; nearly all the rest are below 30 km/h, where speed tells
+      nothing. Revisit if a drive shows the dot on a yard lane at road speed.

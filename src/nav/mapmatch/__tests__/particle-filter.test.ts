@@ -19,14 +19,14 @@ const wayOf = (g: TiledRoadGraph, edge: number | null) => (edge === null ? null 
 // Node 61 is 1732 m east of 60. A 20 °/s turn at 5 m/s has a 14 m radius (a real junction turn;
 // a wider arc is much shorter than the road via the node), so it starts 14 m before the junction
 // and ends on 162 (or, turning right, in open country).
-function junctionDrive(turnDegS: number): DriveSegment[] {
+function junctionDrive(turnDegS: number, exitMps = 10): DriveSegment[] {
   return [
     { durationS: 3, speedMps: 0, yawRateDegS: 0 },
     { durationS: 10, speedMps: 12, yawRateDegS: 0 }, // 60 m
     { durationS: 133.9, speedMps: 12, yawRateDegS: 0 }, // 1607 m
     { durationS: 6, speedMps: 5, yawRateDegS: 0 }, // 51 m
     { durationS: 4.5, speedMps: 5, yawRateDegS: turnDegS }, // quarter circle
-    { durationS: 20, speedMps: 10, yawRateDegS: 0 },
+    { durationS: 200 / exitMps, speedMps: exitMps, yawRateDegS: 0 }, // 200 m
   ];
 }
 
@@ -66,13 +66,36 @@ describe("ParticleFilter in the navigator (synthetic drives on the fixture graph
     expect(end.clusters[0].weight).toBeGreaterThan(0.8);
   });
 
-  test("a turn into open country hands over to the off-road particles", () => {
+  // Off the map at a yard's pace (a parking lot, a lane the map lacks): the off-road particles take over.
+  test("a turn into open country at 18 km/h hands over to the off-road particles", () => {
     const g = graph();
-    const drive = syntheticDrive({ segments: junctionDrive(-20), origin: ORIGIN, startHeadingRad: Math.PI / 2, gnss: "clean", obdScale: 0.99 });
+    const drive = syntheticDrive({ segments: junctionDrive(-20, 5), origin: ORIGIN, startHeadingRad: Math.PI / 2, gnss: "clean", obdScale: 0.99 });
     const result = replayTrip(drive.trip, { mapMatch: { graph: g }, cuts: [{ fromS: 100, toS: 1e9 }] });
     const end = result.track.at(-1)!.mapMatch!;
     expect(end.state).toBe("offroad");
     expect(end.clusters[0].edge).toBeNull();
+  });
+
+  // Nobody drives a yard at 50 km/h (`offRoadSpeed`): a heading slowly drifting off a road at that speed is far
+  // likelier dead reckoning (the EKF under jamming) than the car leaving the map, so the filter keeps to the roads.
+  // A sharp turn no road explains still hands over (the open-country test above).
+  test("veering gently off the map at 50 km/h, the filter keeps to the roads", () => {
+    const segments: DriveSegment[] = [
+      { durationS: 3, speedMps: 0, yawRateDegS: 0 },
+      { durationS: 10, speedMps: 12, yawRateDegS: 0 },
+      { durationS: 90, speedMps: 14, yawRateDegS: 0 }, // 1.4 km east, short of the junction
+      { durationS: 10, speedMps: 14, yawRateDegS: -3 }, // 30° off the road, gently
+      { durationS: 20, speedMps: 14, yawRateDegS: 0 },
+    ];
+    const drive = syntheticDrive({ segments, origin: ORIGIN, startHeadingRad: Math.PI / 2, gnss: "clean", obdScale: 0.99 });
+    const handOver = (factor?: number) => {
+      const config = factor === undefined ? {} : { offRoadSpeed: { freeMps: 20 / 3.6, fullMps: 40 / 3.6, factor } };
+      const result = replayTrip(drive.trip, { mapMatch: { graph: graph(), config }, cuts: [{ fromS: 50, toS: 1e9 }] });
+      return result.track.find((p) => p.tS > 100 && p.mapMatch?.state === "offroad")?.tS ?? Infinity;
+    };
+    // Without the speed rule it hands over within a few seconds of the veer (at ~117 s).
+    expect(handOver(1)).toBeLessThan(125);
+    expect(handOver()).toBe(Infinity);
   });
 
   // Jammed start (MAPMATCH-SPEC §8): Wi-Fi-like fixes (±60 m) only while parked, then nothing. No

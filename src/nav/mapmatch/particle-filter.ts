@@ -129,6 +129,12 @@ export interface MapMatchConfig {
   offRoadHeadingNoise: number;
   /** Log-likelihood added to off-road particles at each weighting instead of the relative-heading term. */
   offRoadLogPenalty: number;
+  /**
+   * Off-road is for yards, parking lots and private-sector lanes, driven at walking pace to ~20 km/h: above
+   * `freeMps` the penalty grows linearly to `factor` times at `fullMps` (40 km/h) and beyond (MAPMATCH-SPEC §7.4).
+   * Factor 1: off.
+   */
+  offRoadSpeed: { freeMps: number; fullMps: number; factor: number };
   /** An off-road particle this close to an edge and this aligned with it may snap onto it, with this chance per step. */
   snapRadiusM: number;
   snapHeadingRad: number;
@@ -209,6 +215,7 @@ export const DEFAULT_MAP_MATCH: MapMatchConfig = {
   alongNoise: 0.03,
   offRoadHeadingNoise: 0.01,
   offRoadLogPenalty: Math.log(0.5),
+  offRoadSpeed: { freeMps: 20 / 3.6, fullMps: 40 / 3.6, factor: 12 },
   snapRadiusM: 5,
   snapHeadingRad: 20 * DEG,
   snapProbability: 0.02,
@@ -1098,9 +1105,14 @@ export class ParticleFilter {
     const absVar = heading ? (c.absHeadingInflation * heading.psiSigma) ** 2 + c.roadSigmaRad ** 2 : 0;
     const posVar = heading ? Math.max(c.ekfPositionInflation * heading.posSigma, c.ekfPositionFloorM) ** 2 : 0;
     const compass = !this.resolved && straight ? this.compass : null;
+    // Not while the heading is unknown: the off-road particles would fall below `offRoadMinWeight` every few
+    // evaluations, and each resampling re-seeds the region, so the filter never settles on a heading (§8).
+    const fast = c.offRoadSpeed;
+    const fastShare = this.resolved ? Math.min(1, Math.max(0, (this.speedMps - fast.freeMps) / (fast.fullMps - fast.freeMps))) : 0;
+    const offRoadPenalty = c.offRoadLogPenalty * (1 + (fast.factor - 1) * fastShare);
     for (let i = 0; i < p.size; i++) {
       if (p.offRoad[i]) {
-        p.logw[i] += c.offRoadLogPenalty;
+        p.logw[i] += offRoadPenalty;
       } else if (compare && gyroValid) {
         const d = wrap(measured - (p.roadTurn[i] - p.anchorTurn[i]));
         p.logw[i] += (-0.5 * d * d) / relVar;
