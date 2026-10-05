@@ -67,7 +67,8 @@ jobs:
         # `export SKIP_BUNDLING=1` for Debug (FORCE_BUNDLING can't override it; it only applies to
         # simulator builds). The phase then sources ios/.xcode.env.updates, the hook meant for
         # unsetting it. With main.jsbundle embedded and `embeddedBundle: true` on expo-dev-client
-        # (app.json), the dev launcher shows "Load embedded bundle" next to the Metro servers.
+        # (app.json), patches/expo-dev-launcher+*.patch makes the app open it on launch instead of
+        # showing the launcher. The tools button is off (app.json); shake the phone for the dev menu.
         if: ${{ inputs.configuration == 'Debug' }}
         run: echo "unset SKIP_BUNDLING" > ios/.xcode.env.updates
 

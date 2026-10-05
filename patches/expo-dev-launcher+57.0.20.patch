@@ -1,0 +1,19 @@
+diff --git a/node_modules/expo-dev-launcher/ios/EXDevLauncherController.m b/node_modules/expo-dev-launcher/ios/EXDevLauncherController.m
+index 20e5b15..6dad4a2 100644
+--- a/node_modules/expo-dev-launcher/ios/EXDevLauncherController.m
++++ b/node_modules/expo-dev-launcher/ios/EXDevLauncherController.m
+@@ -225,7 +225,13 @@ static const NSTimeInterval EXDevLauncherDefaultRequestTimeout = 10.0;
+   // Without this guard, loadApp's error handler would call navigateToLauncher and
+   // invalidate the bridge that loadLocalBundle created, causing a JSI crash.
+   if ([[NSBundle mainBundle] URLForResource:@"main" withExtension:@"jsbundle"] != nil) {
+-    [self navigateToLauncher];
++    // wtf.ai patch: open the embedded bundle by default; the launcher is the fallback.
++    // A deep link or the launcher screen can still start a Metro session.
++    if ([launchOptions objectForKey:@"UIApplicationLaunchOptionsURLKey"] == nil) {
++      [self loadLocalBundleOnSuccess:nil onError:navigateToLauncher];
++    } else {
++      [self navigateToLauncher];
++    }
+     return;
+   }
+ 
