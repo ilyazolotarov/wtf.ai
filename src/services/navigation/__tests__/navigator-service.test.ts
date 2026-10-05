@@ -81,6 +81,8 @@ function harness(options: { vin?: string | null; store?: ReturnType<typeof memor
   const logged: NavEstimateRecord[] = [];
   const loggedMapMatch: NavMapMatchRecord[] = [];
   const store = options.store ?? memoryStore();
+  // The link's car: null before an adapter initialises (then the expected VIN is `options.vin`); a VIN of null is a car it doesn't know.
+  let vehicle: { vin: string | null } | null = options.vin === null ? null : { vin: options.vin ?? VIN };
   let nowUs = 1_000_000_000;
   jest.setSystemTime((nowUs + UTC_OFFSET_US) / 1000);
   const service = new NavigatorService({
@@ -88,8 +90,8 @@ function harness(options: { vin?: string | null; store?: ReturnType<typeof memor
     link: {
       onSpeed: (l) => speed.on(l),
       onEngineState: (l) => engine.on(l),
-      getSnapshot: () => ({ vehicle: options.vin === null ? null : ({ vin: options.vin ?? VIN } as never) }),
-      expectedVin: () => (options.vin === undefined ? VIN : options.vin),
+      getSnapshot: () => ({ vehicle: vehicle as never }),
+      expectedVin: () => (vehicle ? vehicle.vin : null),
     },
     calibration: new CalibrationStore(store, PHONE),
     nowUs: () => nowUs,
@@ -139,7 +141,8 @@ function harness(options: { vin?: string | null; store?: ReturnType<typeof memor
     }
   }
 
-  return { service, gnss, engine, want, notes, logged, loggedMapMatch, store, play, now: () => nowUs };
+  const setVehicle = (v: { vin: string | null } | null) => (vehicle = v);
+  return { service, gnss, engine, want, notes, logged, loggedMapMatch, store, play, setVehicle, now: () => nowUs };
 }
 
 beforeEach(() => jest.useFakeTimers());
@@ -320,6 +323,37 @@ describe("parked pose", () => {
     await other.service.start();
     expect(other.notes.some((n) => n.includes("parked pose"))).toBe(false);
     other.service.stop();
+  });
+
+  test("a VIN known only after the start (read on a retry) still starts from it", async () => {
+    const { store, pose } = await parkFirst();
+    const drive = syntheticDrive({ segments: DRIVE_OFF, gnss: "coarse", origin: pose, startHeadingRad: pose.headingRad, seed: 7 });
+    const next = harness({ store, vin: null });
+    await next.service.start();
+    next.play(drive, { untilS: 3 });
+    expect(next.notes.some((n) => n.includes("parked pose"))).toBe(false);
+    next.setVehicle({ vin: VIN });
+    next.play(drive, { untilS: 5 });
+    expect(next.notes.some((n) => n.startsWith("nav mode dr (parked pose") && n.endsWith(", VIN known late)"))).toBe(true);
+    expect(next.notes.some((n) => n.startsWith("nav speed scale") && n.endsWith("from storage"))).toBe(true);
+    next.play(drive);
+    expect(next.notes).toContain("nav parked pose confirmed");
+    expect(haversineM(next.service.getSnapshot()!, drive.truthAt(drive.trip.imu.at(-1)!.tUs))).toBeLessThan(30);
+    next.service.stop();
+  });
+
+  test("a car the link doesn't know (another protocol) drops the expected car's pose", async () => {
+    const { store } = await parkFirst();
+    const next = harness({ store });
+    await next.service.start();
+    expect(next.notes.some((n) => n.startsWith("nav mode dr (parked pose"))).toBe(true);
+    next.setVehicle({ vin: null });
+    jest.advanceTimersByTime(2000);
+    expect(next.notes.filter((n) => n.startsWith("nav vehicle"))).toEqual(["nav vehicle unknown, not the one expected: restart"]);
+    expect(next.service.getDebug().parkedPose).toBe("none");
+    // The stored pose stays for the car it belongs to.
+    expect(store.getJson(PARKED_POSE_KEY)).not.toBeNull();
+    next.service.stop();
   });
 });
 

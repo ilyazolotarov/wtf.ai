@@ -119,9 +119,16 @@ jammed:
 - **Frozen** at the first handling while parked. The driver often takes the phone out and walks off with it while
   the ECU is still awake (2 of 7 drives on 2026-10-04). The fixes then follow the driver, and without the freeze
   the saved pose would follow them too. A fix that rejects an unverified pose also drops the frozen one.
-- **Needs the VIN.** On 2026-10-04 it was never used: the VIN was read on 1 of 7 drives (VEHICLE-LINK-SPEC §9.1,
-  now fixed). Every drive started anchored for 72–264 s, though the car always stood within 3–9 m of where the
-  last one ended.
+- **Needs the VIN.** On 2026-10-04 it was never used: the VIN was read on 1 of 7 drives (VEHICLE-LINK-SPEC §9.1).
+  Every drive started anchored for 72–264 s, though the car always stood within 3–9 m of where the last one ended.
+  On 2026-10-05 again 1 of 4: a missed read erased the remembered VIN, so the drive home (jammed, Wi-Fi fixes
+  ±300–1400 m) stood anchored for 2 min / 1.2 km of driving, heading-up pointing north. Now a missed read assumes the
+  last car on the protocol and retries (VEHICLE-LINK-SPEC §9.1); `npm run replay -- --chain` of the two drives starts
+  the second from its parked pose at 0 s (confirmed by a Wi-Fi fix at 357 s) where the recorded one aligned at 486 s.
+- **VIN known late** (read on a retry): the service then starts from the pose if the navigator has no position yet
+  or the fixes agree (`startFromPose` accounts for the motion since the start); note `… VIN known late)`. A car the
+  link doesn't know (VIN null: another protocol than the last car's) restarts the navigator without the expected
+  car's pose and calibration (note `nav vehicle unknown, not the one expected: restart`).
 - **Reversing:** the CX-5 reads OBD 0 while reversing (VEHICLE-LINK-SPEC §10.4). Reversing into a parking space
   turns the saved heading in place without moving the position (5–15 m).
 - **Used** (`Navigator.startFromPose`): when the app starts and the VIN matches, the car of the adapter auto-connect
@@ -274,7 +281,7 @@ Until `src/nav/integrity` (SPEC Phase 3), the map's trust state comes from `Gnss
   - **Display:** the DR position is extrapolated along the heading to "now" (≤ 1 s), since the navigator runs
     300 ms behind.
   - A new VIN starts a new navigator. At start the VIN is `VehicleLinkCore.expectedVin()`: the connected car's,
-    else the last verified adapter's car, so the parked pose (§6.1) applies before the adapter connects.
+    else the last car seen (VEHICLE-LINK-SPEC §7), so the parked pose (§6.1) applies before the adapter connects.
 - **Mapping to `PositionEstimate`:**
   - mode `dr` → `source: 'fused'` while trust is `TRUSTED` and a satellite fix was accepted in the last 3 s, else
     `'dr'`;

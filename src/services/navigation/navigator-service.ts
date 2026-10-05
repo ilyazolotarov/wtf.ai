@@ -66,7 +66,7 @@ export interface NavigatorLink {
   onSpeed(listener: (s: SpeedSample) => void): () => void;
   onEngineState(listener: (e: EngineState, tUs: number) => void): () => void;
   getSnapshot(): Pick<VehicleLinkSnapshot, "vehicle">;
-  /** The connected car's VIN, else the one auto-connect expects (known before the adapter connects). */
+  /** The connected car's VIN (null: a car not known), else the last car's (known before the adapter connects). */
   expectedVin(): string | null;
 }
 
@@ -403,15 +403,20 @@ export class NavigatorService implements PositionSource {
     this.interval = { count: 0, totalMs: 0, maxMs: 0 };
     this.applyRoadGraph();
     nav.setRouteHint(this.routeHint);
-    // Known before the adapter connects: the car of the adapter auto-connect will use.
+    // Known before the adapter connects: the last car seen.
     const vin = link.expectedVin();
     if (!vin) return;
     this.setVehicle(vin);
-    const pose = calibration.parkedPose(vin);
+    this.startFromParkedPose(vin, false);
+  }
+
+  /** The pose saved when this car was parked, if the navigator has no better start; `late`: the VIN came after the start. */
+  private startFromParkedPose(vin: string, late: boolean): void {
+    const pose = this.deps.calibration.parkedPose(vin);
     this.poseStored = pose !== null;
-    if (pose && nav.startFromPose(widen(pose))) {
+    if (pose && this.nav?.startFromPose(widen(pose))) {
       this.poseStatus = "unverified";
-      this.note(`nav mode dr (parked pose, ${Math.round((Date.now() - pose.savedAt) / 60_000)} min old)`);
+      this.note(`nav mode dr (parked pose, ${Math.round((Date.now() - pose.savedAt) / 60_000)} min old${late ? ", VIN known late" : ""})`);
     }
   }
 
@@ -427,16 +432,20 @@ export class NavigatorService implements PositionSource {
     this.note(active ? `mm graph ${active.region} (OSM ${active.graph.info.osmDate})` : "mm graph none");
   }
 
-  /** The connected car's VIN: the first one applies its speed scale; another car starts a new navigator. */
+  /**
+   * The connected car's VIN: the first one applies its speed scale and parked pose; another car (or one the link
+   * doesn't know: VIN null) starts a new navigator.
+   */
   private checkVehicle(): void {
-    const vin = this.deps.link.getSnapshot().vehicle?.vin ?? null;
-    if (!vin || vin === this.vin) return;
+    const vehicle = this.deps.link.getSnapshot().vehicle;
+    if (!vehicle || vehicle.vin === this.vin) return;
     if (this.vin) {
-      // Not the car expected (or another car): what this navigator learned may belong to either.
-      this.note("nav vehicle changed: restart");
+      // Not the car expected: what this navigator learned (and the pose it started from) may belong to either.
+      this.note(vehicle.vin ? "nav vehicle changed: restart" : "nav vehicle unknown, not the one expected: restart");
       this.createNavigator();
-    } else {
-      this.setVehicle(vin);
+    } else if (vehicle.vin) {
+      this.setVehicle(vehicle.vin);
+      this.startFromParkedPose(vehicle.vin, true);
     }
   }
 
