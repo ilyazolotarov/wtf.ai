@@ -77,6 +77,8 @@ jobs:
         run: swift test
 
   build-ios:
+    # TEMPORARY: skipped on the android branch to save macOS minutes while Android CI is brought up. Remove before merging.
+    if: ${{ github.ref != 'refs/heads/android' }}
     needs: [checks, native-logic]
     uses: ./.github/workflows/build-ios.yml
     with:
