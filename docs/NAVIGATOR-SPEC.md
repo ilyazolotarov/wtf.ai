@@ -138,7 +138,11 @@ jammed:
   so do 3 Wi-Fi/cell fixes in a row that fail it (`poseRejectCoarse`): reset to `anchored` at that fix, and the stored
   pose is deleted. One Wi-Fi fix isn't enough: on 2026-10-05 a single one claiming ±55 m, 850 m from where the Logan
   really stood, threw away its correct pose, and the drive never found the road after. Likewise a Wi-Fi anchor
-  doesn't refuse a pose at `startFromPose`, a satellite one does. It is confirmed by an agreeing fix ≤ 100 m after
+  doesn't refuse a pose at `startFromPose`, a satellite one does.
+- **Asked:** the first Wi-Fi fix that disagrees (`pose: "doubted"`) makes the map ask "Is the car where the dot
+  is?" (`PositionEstimate.poseQuestion`, with how far the fix is). Yes confirms the pose (`Navigator.answerPose`), and
+  later Wi-Fi fixes only go through the EKF gate; no drops it and anchors at that fix. Unanswered, the 3-in-a-row
+  rule applies. Notes `nav parked pose doubted …`, `… confirmed / rejected by the driver`. It is confirmed by an agreeing fix ≤ 100 m after
   150 m of driving, because a fix while parked says nothing about the heading. A live VIN other than the expected
   one restarts the navigator without it.
 - **One per car** (`nav.parkedPoses`, by VIN): with one slot, the Logan's pose replaced the CX-5's on 2026-10-05,

@@ -145,6 +145,8 @@ Depends on Phase 2.
 
 `follow` → `follow-heading` → `free`. User pan/zoom gesture switches to `free`. `RecenterButton` cycles modes and shows the current one.
 
+When the navigator started from where the car was parked and a Wi-Fi fix puts it elsewhere (NAVIGATOR-SPEC §6.1), a card under the status pill asks "Is the car where the dot is?", with how far Wi-Fi puts it: "Yes, it's here" keeps the dot, "No" moves it to the Wi-Fi position. It stays until answered or settled by the fixes; it never blocks the map.
+
 While the OBD adapter searches all protocols (`protocolSearch`, another car on it: up to ~20 s), a chip under the status pill says "Finding the car's protocol…", and the vehicle screen's adapter tile says the same.
 
 Heading-up bearing: the walking compass beam when shown; else the navigator heading (`dr`/`fused` source, valid while stopped); else GNSS course when speed > ~2 m/s; else the last of these held, so the map does not snap north at a stop. No direction known (none yet, or moving without one: the navigator anchored under GNSS jamming, 2026-10-05): heading-up shows the `follow` camera (zoom 16, flat, north up) until there is one, so it never looks like a heading-up view pointing the wrong way.

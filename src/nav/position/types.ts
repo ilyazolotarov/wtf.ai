@@ -41,4 +41,9 @@ export interface PositionEstimate {
   /** Other roads the car may be on while map matching is ambiguous, heaviest first. */
   alternatives?: { lat: number; lon: number; weight: number }[];
   simulatedOutage?: SimulatedOutage;
+  /**
+   * The car started from where it was parked and a Wi-Fi/cell fix puts it elsewhere: ask the driver "is the car
+   * here?" (NAVIGATOR-SPEC §6.1). `distanceM`: how far that fix is.
+   */
+  poseQuestion?: { distanceM: number };
 }

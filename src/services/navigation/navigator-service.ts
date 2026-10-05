@@ -174,6 +174,8 @@ export class NavigatorService implements PositionSource {
   /** A parked pose is in storage: cleared once the car moves. */
   private poseStored = false;
   private poseStatus: NavigatorDebug["parkedPose"] = "none";
+  /** A Wi-Fi fix doubts the parked pose the navigator started from: the driver is asked. */
+  private poseQuestion: { distanceM: number } | null = null;
   /** Compass shadow notes: the trust last noted, and the trust checks already summarised. */
   private notedCompassTrust: CompassTrust = "none";
   private summarisedChecks = 0;
@@ -216,6 +218,20 @@ export class NavigatorService implements PositionSource {
     this.routeHint = edges;
     this.nav?.setRouteHint(edges);
     this.note(edges ? `nav route hint: ${edges.length} edges` : "nav route hint off");
+  }
+
+  /** The driver's answer to `poseQuestion`: the car is (not) where the dot is. */
+  answerPose(here: boolean): void {
+    if (!this.poseQuestion || !this.nav) return;
+    const answered = this.nav.answerPose(here);
+    this.note(`nav parked pose ${here ? "confirmed" : "rejected"} by the driver (Wi-Fi ${Math.round(this.poseQuestion.distanceM)} m away)${answered ? "" : ", too late"}`);
+    this.poseQuestion = null;
+    if (answered) {
+      this.poseStatus = here ? "confirmed" : "rejected";
+      if (!here && this.vin) this.deps.calibration.clearParkedPose(this.vin);
+      if (!here) this.poseStored = false;
+    }
+    this.publish();
   }
 
   get simulatedOutage(): boolean {
@@ -395,6 +411,7 @@ export class NavigatorService implements PositionSource {
     this.trustedDistanceM = null;
     this.vin = null;
     this.poseStatus = "none";
+    this.poseQuestion = null;
     this.notedCompassTrust = "none";
     this.summarisedChecks = 0;
     // Before the parked pose: the filter then starts around it.
@@ -518,7 +535,14 @@ export class NavigatorService implements PositionSource {
         const out = nav.onGnss(input.fix);
         if (out.status === "accepted" && input.fix.speedMps !== undefined) this.lastAcceptedSatUs = input.tUs;
         if (out.status === "init") this.note(`nav mode dr (${out.initMethod})`);
-        if (out.pose) this.poseStatus = out.pose;
+        if (out.pose && out.pose !== "doubted") {
+          this.poseStatus = out.pose;
+          this.poseQuestion = null;
+        }
+        if (out.pose === "doubted") {
+          if (!this.poseQuestion) this.note(`nav parked pose doubted: Wi-Fi fix ${Math.round(out.errorM ?? 0)} m away (±${Math.round(input.fix.hAccM)} m), asking the driver`);
+          this.poseQuestion = { distanceM: out.errorM ?? 0 };
+        }
         if (out.pose === "confirmed") this.note("nav parked pose confirmed");
         if (out.pose === "rejected") {
           this.note(`nav parked pose rejected: fix ${Math.round(out.errorM ?? 0)} m away (±${Math.round(input.fix.hAccM)} m)`);
@@ -679,9 +703,9 @@ export class NavigatorService implements PositionSource {
   /** `behindUs`: how far the navigator's state lags now (the drawn position is extrapolated over it). */
   private set(position: PositionEstimate, behindUs = 0): void {
     this.drainUpdateTimes();
-    const { simulatedOutage: _, ...rest } = position;
+    const { simulatedOutage: _, poseQuestion: _q, ...rest } = position;
     const outage = this.outageInfo(rest);
-    this.position = outage ? { ...rest, simulatedOutage: outage } : rest;
+    this.position = { ...rest, ...(outage ? { simulatedOutage: outage } : {}), ...(this.poseQuestion ? { poseQuestion: this.poseQuestion } : {}) };
     this.overlayStale = true;
     this.logPosition(position, behindUs);
     this.listeners.forEach((listener) => listener());

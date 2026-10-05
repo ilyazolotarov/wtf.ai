@@ -287,7 +287,7 @@ export function replayTrip(trip: TripLog, options: ReplayOptions = {}): ReplayRe
       } else {
         const out = nav.onGnss(fix);
         fixes.push({ tS: t, fix, satellite, ...out });
-        if (out.pose) startPose = { status: out.pose, tS: t };
+        if (out.pose && out.pose !== "doubted") startPose = { status: out.pose, tS: t };
       }
       afterEvent(fix.tUs);
     }

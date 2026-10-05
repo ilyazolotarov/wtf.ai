@@ -259,8 +259,11 @@ export interface FixOutcome {
   predictedSigmaM?: number;
   nis?: number;
   initMethod?: "course" | "alignment";
-  /** A pose from `startFromPose`: the first good fix that agrees confirms it; one that disagrees drops it. */
-  pose?: "confirmed" | "rejected";
+  /**
+   * A pose from `startFromPose`: a good fix that agrees confirms it; a satellite fix that disagrees drops it, a
+   * Wi-Fi/cell one doubts it (the driver can answer, `answerPose`) until `poseRejectCoarse` in a row drop it.
+   */
+  pose?: "confirmed" | "rejected" | "doubted";
 }
 
 /** Short state history for lag-corrected GNSS updates. */
@@ -349,8 +352,9 @@ export class Navigator {
 
   /** `sat`: from a satellite fix; one from Wi-Fi/cell alone doesn't refuse a parked pose. */
   private anchor: { coord: Coordinate; sigma: number; distanceM: number; sat: boolean } | null = null;
-  /** Wi-Fi/cell fixes in a row that disagreed with an unconfirmed parked pose. */
+  /** Wi-Fi/cell fixes in a row that disagreed with an unconfirmed parked pose; the last of them. */
   private poseCoarseRejected = 0;
+  private poseDoubt: { fix: GnssFix; sigma: number } | null = null;
   private lastFix: GnssFix | null = null;
   private rejectedSat = 0;
   /** Speed scale for the next EKF start: a stored per-car value, or the one learned before a reset. */
@@ -695,6 +699,7 @@ export class Navigator {
     this.initEkf(theta, e - (cs * this.rel.e - sn * this.rel.n), n - (sn * this.rel.e + cs * this.rel.n), pose.posSigmaM, pose.headingSigmaRad, "pose");
     this.poseUnverifiedFromM = this.stats.obdDistanceM;
     this.poseCoarseRejected = 0;
+    this.poseDoubt = null;
     return true;
   }
 
@@ -1127,7 +1132,10 @@ export class Navigator {
         this.reset(fix, sigma);
         return { ...outcome, pose: "rejected" };
       }
-      if (!pos.accepted) return outcome;
+      if (!pos.accepted) {
+        this.poseDoubt = { fix, sigma };
+        return { ...outcome, pose: "doubted" };
+      }
       this.poseCoarseRejected = 0;
       if (fix.hAccM <= c.poseConfirmAccuracyM && this.stats.obdDistanceM - this.poseUnverifiedFromM >= c.poseConfirmDistanceM) {
         this.poseUnverifiedFromM = null;
@@ -1163,6 +1171,25 @@ export class Navigator {
     if (fix.courseRad !== undefined && fix.speedMps >= c.courseUpdateMinSpeedMps && fix.courseAccRad !== undefined) {
       twin.updateHeading(fix.courseRad - h[2], Math.max(fix.courseAccRad, (2 * Math.PI) / 180), c.gate);
     }
+  }
+
+  /**
+   * The driver answers "is the car here?" about an unconfirmed parked pose a Wi-Fi fix doubted: yes confirms it
+   * (later Wi-Fi fixes go through the gate as usual), no drops it and anchors at that fix. False: nothing to answer.
+   */
+  answerPose(here: boolean): boolean {
+    if (this.poseUnverifiedFromM === null) return false;
+    if (here) {
+      this.poseUnverifiedFromM = null;
+      this.poseCoarseRejected = 0;
+      this.poseDoubt = null;
+      return true;
+    }
+    const doubt = this.poseDoubt;
+    if (!doubt) return false;
+    this.frozenPose = null;
+    this.reset(doubt.fix, doubt.sigma);
+    return true;
   }
 
   /** The EKF disagrees with good fixes: start over, anchored at the latest one. */

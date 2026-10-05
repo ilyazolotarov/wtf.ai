@@ -269,6 +269,39 @@ export default function HomeScreen() {
             </View>
           )}
 
+          {position?.poseQuestion && (
+            <View style={[panel, styles.alertCard]}>
+              <GlassFill radius={Radius.rL} />
+              <View style={styles.alertRow}>
+                <View style={[styles.alertIcon, { backgroundColor: palette.warn.a }]}>
+                  <Icon name="directions_car" size={20} color={palette.warn.c} />
+                </View>
+                <View style={styles.alertText}>
+                  <T w="semibold" size={15}>
+                    {t("poseQuestion")}
+                  </T>
+                  <T size={13} color={palette.text2}>
+                    {t("poseQuestionWhy").replace("{d}", formatDistance(position.poseQuestion.distanceM, language))}
+                  </T>
+                </View>
+              </View>
+              <View style={styles.answerRow}>
+                {([true, false] as const).map((here) => (
+                  <Pressable
+                    key={String(here)}
+                    onPress={() => navigator.answerPose(here)}
+                    accessibilityRole="button"
+                    style={({ pressed }) => [styles.ghostButton, styles.answerButton, { backgroundColor: palette.surface }, pressed && styles.pressed]}
+                  >
+                    <T w="semibold" size={14} color={palette.accent}>
+                      {t(here ? "poseYes" : "poseNo")}
+                    </T>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          )}
+
           {nav.protocolSearch && (
             <View style={[panel, styles.calChip]}>
               <GlassFill radius={Radius.pill} />
@@ -638,6 +671,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   alertText: { flex: 1, lineHeight: 20 },
+  answerRow: { flexDirection: "row", gap: 8 },
+  answerButton: { flex: 1, alignItems: "center" },
   ghostButton: {
     gap: 2,
     paddingHorizontal: 16,

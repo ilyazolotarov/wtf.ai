@@ -344,6 +344,44 @@ describe("parked pose", () => {
     next.service.stop();
   });
 
+  test("a Wi-Fi fix far off asks the driver; yes keeps the pose through more of them, no drops it", async () => {
+    const { store, pose } = await parkFirst();
+    const drive = syntheticDrive({ segments: [{ durationS: 40, speedMps: 0, yawRateDegS: 0 }], gnss: "none", origin: pose, startHeadingRad: pose.headingRad, seed: 7 });
+    let k = 0;
+    const far = (tUs: number) => record({ tUs, lat: pose.lat + 0.0027 + 0.0004 * k, lon: pose.lon + 0.011 - 0.0006 * k++, hAccM: 55 });
+
+    const yes = harness({ store });
+    await yes.service.start();
+    yes.play(drive, { untilS: 2 });
+    expect(yes.service.getSnapshot()?.poseQuestion).toBeUndefined();
+    yes.gnss.emit(far(yes.now()));
+    yes.play(drive, { untilS: 4 });
+    expect(yes.service.getSnapshot()?.poseQuestion?.distanceM).toBeGreaterThan(700);
+    expect(yes.notes.some((n) => n.startsWith("nav parked pose doubted: Wi-Fi fix"))).toBe(true);
+    yes.service.answerPose(true);
+    expect(yes.service.getSnapshot()?.poseQuestion).toBeUndefined();
+    for (const s of [6, 10, 14]) {
+      yes.gnss.emit(far(yes.now()));
+      yes.play(drive, { untilS: s + 2 });
+    }
+    expect(yes.notes.some((n) => n.startsWith("nav parked pose rejected"))).toBe(false);
+    expect(yes.service.getSnapshot()).toMatchObject({ source: "dr" });
+    expect(yes.service.getDebug().parkedPose).toBe("confirmed");
+    expect(yes.notes.some((n) => n.startsWith("nav parked pose confirmed by the driver"))).toBe(true);
+    yes.service.stop();
+
+    const no = harness({ store });
+    await no.service.start();
+    no.play(drive, { untilS: 2 });
+    no.gnss.emit(far(no.now()));
+    no.play(drive, { untilS: 4 });
+    no.service.answerPose(false);
+    no.play(drive, { untilS: 6 });
+    expect(no.service.getSnapshot()?.source).toBe("gnss");
+    expect(storedPose(store)).toBeNull();
+    no.service.stop();
+  });
+
   test("another car doesn't use it", async () => {
     const { store } = await parkFirst();
     const other = harness({ store, vin: "OTHERVIN000000000" });
