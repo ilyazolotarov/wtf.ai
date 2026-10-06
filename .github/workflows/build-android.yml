@@ -54,6 +54,14 @@ jobs:
       SENTRY_DISABLE_AUTO_UPLOAD: ${{ secrets.SENTRY_AUTH_TOKEN == '' && 'true' || 'false' }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      # Caches are saved by main (and by android while it is the integration branch for Android:
+      # main has no Android builds before the merge) and restored everywhere, so branch builds
+      # don't evict them.
+      SAVE_CACHES: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/android' }}
+      # Compiler cache for the C/C++ of React Native's CMake builds (app codegen, Reanimated,
+      # Worklets, …). CMake reads the launcher from the environment when it configures.
+      CMAKE_C_COMPILER_LAUNCHER: ccache
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -71,10 +79,33 @@ jobs:
           java-version: 17
 
       - name: Setup Gradle
+        # Dependencies, wrapper and the Gradle build cache (--build-cache below).
         uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: ${{ env.SAVE_CACHES != 'true' }}
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Install ccache
+        run: |
+          command -v ccache || { sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ccache; }
+          {
+            echo "CCACHE_DIR=$HOME/.ccache"
+            echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE"
+            echo "CCACHE_MAXSIZE=2G"
+            # The NDK's mtime changes with runner images; its content is what matters.
+            echo "CCACHE_COMPILERCHECK=content"
+            echo "CCACHE_LOGFILE=$RUNNER_TEMP/ccache.log"
+          } >> "$GITHUB_ENV"
+
+      - name: Restore ccache
+        id: ccache
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.ccache
+          key: android-ccache-${{ inputs.variant }}-${{ github.sha }}
+          restore-keys: android-ccache-${{ inputs.variant }}-
 
       - name: Run Expo Prebuild
         run: npx expo prebuild --platform android --clean
@@ -108,7 +139,21 @@ jobs:
         run: |
           if [ "$VARIANT" = "ci" ]; then ABIS="arm64-v8a,x86_64"; else ABIS="arm64-v8a,armeabi-v7a"; fi
           cd android
-          ./gradlew assembleRelease -PreactNativeArchitectures="$ABIS" --no-daemon
+          ./gradlew assembleRelease -PreactNativeArchitectures="$ABIS" --no-daemon --build-cache
+
+      - name: ccache statistics
+        if: ${{ !cancelled() }}
+        run: |
+          ccache --show-stats --verbose || true
+          # Did the CMake builds go through ccache at all?
+          echo "ccache log: $(grep -c 'Command line' "$RUNNER_TEMP/ccache.log" 2>/dev/null || true) invocations"
+
+      - name: Save ccache
+        if: ${{ env.SAVE_CACHES == 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.ccache
+          key: ${{ steps.ccache.outputs.cache-primary-key }}
 
       - name: Name the APK
         run: |
@@ -157,6 +202,10 @@ jobs:
     needs: build-android
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      SAVE_CACHES: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/android' }}
+      # Same for the snapshot run and the test run, or the snapshot doesn't match the AVD.
+      EMULATOR_OPTIONS: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
     strategy:
       fail-fast: false
       matrix:
@@ -177,6 +226,40 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
+      - name: Restore AVD snapshot
+        # A booted emulator snapshot: the test run starts from it instead of a cold boot.
+        id: avd
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+          key: avd-${{ matrix.api-level }}-x86_64-google_apis-pixel_6-v1
+
+      - name: Create AVD snapshot
+        # Only where it is saved: elsewhere a miss just cold-boots in the test run.
+        if: ${{ steps.avd.outputs.cache-hit != 'true' && env.SAVE_CACHES == 'true' }}
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api-level }}
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          force-avd-creation: false
+          emulator-options: ${{ env.EMULATOR_OPTIONS }}
+          disable-animations: false
+          emulator-boot-timeout: 600
+          script: echo "AVD snapshot created"
+
+      - name: Save AVD snapshot
+        if: ${{ steps.avd.outputs.cache-hit != 'true' && env.SAVE_CACHES == 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+          key: ${{ steps.avd.outputs.cache-primary-key }}
+
       - name: Smoke test on emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -184,6 +267,9 @@ jobs:
           arch: x86_64
           target: google_apis
           profile: pixel_6
+          force-avd-creation: false
+          # Boot from the snapshot, and don't write the test's state back into it.
+          emulator-options: -no-snapshot-save ${{ env.EMULATOR_OPTIONS }}
           disable-animations: true
           emulator-boot-timeout: 600
           script: bash scripts/android-smoke.sh wtfai-ci.apk smoke-out

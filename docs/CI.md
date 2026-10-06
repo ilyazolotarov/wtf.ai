@@ -42,7 +42,7 @@ GitHub's own `[skip ci]` skips the run entirely.
 
 Pull requests from branches of this repo don't run CI again: their branch pushes already did.
 
-## Caches (iOS build)
+## Caches (iOS build; Android: see below)
 
 - npm (`setup-node`).
 - CocoaPods download cache (`~/Library/Caches/CocoaPods`: pod sources, prebuilt React Native and
@@ -69,7 +69,14 @@ runs `.github/workflows/build-android.yml` with it.
   can also be started on its own.
 - Signed with the stable key from the `ANDROID_KEYSTORE_*` secrets when present, else the debug key
   (docs/ANDROID-SPEC.md §4).
-- Gradle caches are written only from `main` (`setup-gradle` default) and read everywhere.
+- Caches, saved by `main` and, until Android is merged into `main`, by `android` (a branch reads only its own
+  and `main`'s caches, so a branch made from `android` starts cold until then):
+  - Gradle (`setup-gradle`): dependencies, wrapper and the Gradle build cache (`--build-cache`: Kotlin/Java
+    compiles, dexing).
+  - ccache (`~/.ccache`) for the C/C++ of React Native's CMake builds, through `CMAKE_C(XX)_COMPILER_LAUNCHER`.
+    `ccache statistics` in the log shows invocations and hit rate.
+  - Smoke test: a booted AVD snapshot per API level (`avd-<api>-…`); the test boots from it and doesn't save
+    back. A branch without the cache cold-boots and creates no snapshot.
 
 ## Changing the rules
 
