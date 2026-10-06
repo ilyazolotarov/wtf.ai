@@ -17,6 +17,7 @@ import {
     toDegrees,
 } from "@/components/status/format-geo";
 import { formatDurationS, PROBLEM_TEXT } from "@/components/route/guidance-text";
+import { Flash, SaveConfirmation } from "@/components/route/save-feedback";
 import { resultDetail, resultTitle } from "@/components/route/search-text";
 import { Icon, type IconName } from "@/components/ui/icon";
 import { T } from "@/components/ui/text";
@@ -28,7 +29,7 @@ import type { SearchResult } from "@/nav/search/search-index";
 import { inBounds, places, usePlaces } from "@/providers/places";
 import { usePosition } from "@/providers/position-provider";
 import { destinations, useRoute } from "@/providers/route-provider";
-import type { Place, SavedKind } from "@/services/navigation/places-store";
+import type { Place, SavedKind, SavedPlace } from "@/services/navigation/places-store";
 import { useMapPacks } from "@/services/offline-map/map-packs";
 import { activeSearchIndex } from "@/services/offline-map/search-file";
 
@@ -133,18 +134,52 @@ export default function RouteScreen() {
   const savedHere = reachable(saved);
   const recentHere = reachable(recent);
   const selectedSaved = selected ? places.savedAt(selected) : null;
+  // What the last save or removal on the card did, with what Undo puts back.
+  const [feedback, setFeedback] = useState<{ placeId: string; kind: SavedKind | null; replaced: string | null; undo: SavedPlace[] } | null>(null);
+  // The saved row that glows once when the list comes back.
+  const [flashId, setFlashId] = useState<string | null>(null);
+  const select = (d: Place | null) => {
+    setSelected(d);
+    setFeedback(null);
+  };
+  const save = (place: Place, kind: SavedKind) => {
+    const before = places.getSnapshot().saved;
+    const was = places.savedAt(place);
+    const replaced = kind === "favorite" ? null : (before.find((s) => s.kind === kind && s !== was)?.title ?? null);
+    places.save(place, kind);
+    setFeedback({ placeId: place.id, kind, replaced, undo: before });
+    setFlashId(place.id);
+  };
+  const unsave = (place: Place) => {
+    const before = places.getSnapshot().saved;
+    places.unsave(place);
+    setFeedback({ placeId: place.id, kind: null, replaced: null, undo: before });
+    setFlashId(null);
+  };
+  const undo = () => {
+    if (feedback) places.restoreSaved(feedback.undo);
+    setFeedback(null);
+    setFlashId(null);
+  };
 
-  const row = (d: Place, key: string, options: { icon?: IconName; title?: string; detail?: string | null } = {}) => {
+  const row = (
+    d: Place,
+    key: string,
+    options: { icon?: IconName; title?: string; detail?: string | null; flash?: boolean } = {},
+  ) => {
     const { distanceM, bearing } = summary(d);
+    // Elsewhere than the Saved section, a saved place shows its kind's icon at the end.
+    const savedKind = options.icon ? null : (places.savedAt(d)?.kind ?? null);
     const where = `${formatDistance(distanceM, language)} · ${cardinal(bearing, language)}`;
     const detail = options.detail === undefined ? d.detail : options.detail;
     return (
       <Pressable
         key={key}
-        onPress={() => setSelected(d)}
+        onPress={() => select(d)}
         accessibilityRole="button"
         style={({ pressed }) => [styles.destination, pressed && styles.pressed]}
       >
+        {options.flash && <Flash onDone={() => setFlashId(null)} />}
         {options.icon && (
           <View style={[styles.rowIcon, { backgroundColor: palette.accentA }]}>
             <Icon name={options.icon} size={15} color={palette.accent} />
@@ -165,6 +200,9 @@ export default function RouteScreen() {
             </T>
           </View>
         )}
+        {savedKind && (
+          <Icon name={SAVED_ICON[savedKind]} size={14} color={palette.accent} />
+        )}
         <Icon name="chevron_right" size={14} color={palette.text2} />
       </Pressable>
     );
@@ -178,7 +216,7 @@ export default function RouteScreen() {
           value={query}
           onChangeText={(text) => {
             setQuery(text);
-            setSelected(null);
+            select(null);
           }}
           placeholder={t(searched ? "searchPlaces" : "routeSearch")}
           placeholderTextColor={palette.text2}
@@ -210,6 +248,7 @@ export default function RouteScreen() {
                 const title = SAVED_TITLE[p.kind];
                 return row(p, `saved:${p.id}`, {
                   icon: SAVED_ICON[p.kind],
+                  flash: flashId === p.id,
                   ...(title ? { title: t(title), detail: p.title } : {}),
                 });
               })}
@@ -281,22 +320,30 @@ export default function RouteScreen() {
               }}
             />
           )}
+          {feedback?.placeId === selected.id && (
+            <SaveConfirmation
+              key={`${feedback.kind}:${feedback.undo.length}`}
+              kind={feedback.kind}
+              replaced={feedback.replaced}
+              onUndo={undo}
+            />
+          )}
           {selectedSaved ? (
             <View style={styles.saveRow}>
               <Icon name={SAVED_ICON[selectedSaved.kind]} size={16} color={palette.accent} />
               <T size={14} color={palette.text2} style={styles.flex}>
                 {t(selectedSaved.kind === "home" ? "savedAsHome" : selectedSaved.kind === "work" ? "savedAsWork" : "savedPlace")}
               </T>
-              <ScreenLink label={t("removeSaved")} onPress={() => places.unsave(selected)} />
+              <ScreenLink label={t("removeSaved")} onPress={() => unsave(selected)} />
             </View>
           ) : (
             <View style={styles.saveRow}>
-              <ScreenAction labelKey="placeHome" icon="home" compact secondary onPress={() => places.save(selected, "home")} />
-              <ScreenAction labelKey="placeWork" icon="work" compact secondary onPress={() => places.save(selected, "work")} />
-              <ScreenAction labelKey="savePlace" icon="star_border" compact secondary onPress={() => places.save(selected, "favorite")} />
+              <ScreenAction labelKey="placeHome" icon="home" compact secondary onPress={() => save(selected, "home")} />
+              <ScreenAction labelKey="placeWork" icon="work" compact secondary onPress={() => save(selected, "work")} />
+              <ScreenAction labelKey="savePlace" icon="star_border" compact secondary onPress={() => save(selected, "favorite")} />
             </View>
           )}
-          <ScreenLink label={t("chooseAnotherCity")} onPress={() => setSelected(null)} />
+          <ScreenLink label={t("chooseAnotherCity")} onPress={() => select(null)} />
         </ScreenCard>
       )}
 

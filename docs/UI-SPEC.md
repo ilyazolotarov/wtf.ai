@@ -208,7 +208,10 @@ Parallel with Phase 3; each screen is independent. Use `@expo/ui` for settings-l
   note to download the region again.
 - Selected result or city → summary card: straight-line distance, bearing and time at 60 km/h; once its route is planned, the
   road distance and the planned time. Under it: **Home**, **Work**, **Save** (a place is saved under one kind;
-  setting Home or Work replaces the old one), or "Saved as Home · Remove" once saved.
+  setting Home or Work replaces the old one), or "Saved as Home · Remove" once saved. Saving or removing shows a
+  confirmation strip that springs in ("Added to quick picks as Home", "Replaces <old Home>", "Removed from quick
+  picks") with **Undo**; back in the list, the saved row glows once. Saved places show their kind's icon in search
+  results and recents.
 - "Start guidance" plans a road route from the position (ROUTING-SPEC, `runtime.routes`, `useRoute()` in
   `src/providers/route-provider.tsx`) and returns to the map; "Stop guidance" ends it. A failed plan says why.
 - Footnote: long-press the map to route anywhere; routes stay inside the downloaded region.
