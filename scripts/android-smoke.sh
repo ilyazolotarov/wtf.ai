@@ -60,6 +60,7 @@ wait_log() {
 # our UI and break the UI dumps. Our own crashes and ANRs are still caught through logcat and pidof below.
 adb shell settings put global hide_error_dialogs 1
 
+adb logcat -G 16M || true # a bigger log ring: the app and the system are chatty on a slow emulator
 adb logcat -c
 adb install -r "$APK" || fail "install"
 
@@ -113,14 +114,16 @@ wait_log "WtfSensorCapture: imu batch" 30 || fail "IMU started but delivered no 
 # 4b. Screen off during the trip: the foreground service must keep the IMU delivering. (An emulator does not doze like
 # a phone, so this proves the path, not the phone makers' battery rules: that is what testers are for.)
 wait_log "WtfTripService: running" 30 || fail "trip foreground service did not start while recording"
-before=$(adb logcat -d | grep -c "WtfSensorCapture: imu batch")
+before=$(adb logcat -d | grep "WtfSensorCapture: imu batch" | tail -1)
 adb shell input keyevent KEYCODE_SLEEP
 sleep 35
 adb shell input keyevent KEYCODE_WAKEUP
 sleep 3
-after=$(adb logcat -d | grep -c "WtfSensorCapture: imu batch")
+after=$(adb logcat -d | grep "WtfSensorCapture: imu batch" | tail -1)
 adb exec-out screencap -p > "$OUT/4b-after-screen-off.png"
-[ "$after" -gt "$before" ] || fail "IMU delivered nothing during 35 s of screen off (before=$before after=$after)"
+# The last batch line carries a timestamp and a counter: a new one means data kept flowing (counting lines is not
+# reliable, the log buffer is a ring and drops old lines).
+[ -n "$after" ] && [ "$after" != "$before" ] || fail "IMU delivered nothing during 35 s of screen off (last batch line: $before)"
 
 # 5. Stay up for a while: crashes and ANRs often come a few seconds after the first frame.
 sleep 20
