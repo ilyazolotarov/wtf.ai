@@ -85,6 +85,11 @@ export class PlacesStore {
     return this.snapshot.saved.find((s) => samePlace(s, place)) ?? null;
   }
 
+  /** Puts back an earlier list of saved places (undo of a save or a removal). */
+  restoreSaved(saved: SavedPlace[]): void {
+    this.set({ saved: sortSaved([...saved]) });
+  }
+
   unsave(place: Place): void {
     this.set({ saved: this.snapshot.saved.filter((s) => !samePlace(s, place)) });
   }

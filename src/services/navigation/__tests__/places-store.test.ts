@@ -57,4 +57,14 @@ describe("PlacesStore", () => {
     again.clearRecent();
     expect(new PlacesStore(kv).getSnapshot().recent).toEqual([]);
   });
+
+  it("undoes a save that replaced Home", () => {
+    const store = new PlacesStore(memoryStore());
+    store.save(A, "home");
+    const before = store.getSnapshot().saved;
+    store.save(B, "home");
+    store.restoreSaved(before);
+    expect(store.getSnapshot().saved.map((s) => [s.id, s.kind])).toEqual([["a", "home"]]);
+    expect(store.savedAt(B)).toBeNull();
+  });
 });
