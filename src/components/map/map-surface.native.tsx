@@ -16,6 +16,7 @@ import type {
 import { useEffect, useMemo, useRef, type ComponentProps } from "react";
 import { useColorScheme, View, type NativeSyntheticEvent } from "react-native";
 
+import { ANDROID_BLURS } from "@/components/ui/glass-fill";
 import { useMapStyle } from "@/config/map";
 import { Colors } from "@/constants/theme";
 import { circlePolygon, destinationAtBearing, type Coordinate } from "@/nav/geo";
@@ -326,6 +327,9 @@ export function MapSurface({
     <Map
       mapStyle={mapStyle as ComponentProps<typeof Map>["mapStyle"]}
       style={{ flex: 1 }}
+      // The panels' blur redraws the views under it, and a GLSurfaceView (the default) isn't part of that drawing:
+      // the blur came out empty. A TextureView is, so use it wherever blur runs (Android 12+).
+      androidView={ANDROID_BLURS ? "texture" : "surface"}
       attribution
       attributionPosition={{ bottom: 8, left: 8 }}
       compass={false}

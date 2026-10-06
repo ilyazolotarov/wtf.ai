@@ -26,7 +26,7 @@ Status: draft v1 (2026-10-05). Companion to [SPEC.md](SPEC.md); when decisions h
 | Permissions | `ACCESS_FINE_LOCATION`, `BLUETOOTH_SCAN` (`neverForLocation`) + `BLUETOOTH_CONNECT` (Android 12+; legacy `BLUETOOTH`/`BLUETOOTH_ADMIN` ≤ 11), `POST_NOTIFICATIONS` (13+), `FOREGROUND_SERVICE_LOCATION`, `FOREGROUND_SERVICE_CONNECTED_DEVICE`, `WAKE_LOCK`, `HIGH_SAMPLING_RATE_SENSORS`. All from config plugins, never by hand in `android/`. |
 | Pairing | Classic adapters must be bonded (PIN 1234/0000). The Vehicle screen lists bonded devices plus discovery results; tapping an unbonded one calls `createBond()` and the system PIN dialog does the rest. |
 | Icons | `expo-symbols` already renders Material Symbols on Android, and the `Icon` map keys are Material names: add `android: <key>` to each entry. |
-| Blur | `BlurView` on Android needs a `BlurTargetView` and `blurMethod`. Panels use `dimezisBlurViewSdk31Plus`; older Android gets the plain translucent tint (already the `GlassFill` second layer). |
+| Blur | `BlurView` on Android needs a `BlurTargetView` and `blurMethod`. Panels use `dimezisBlurViewSdk31Plus`, and on Android 12+ the map renders into a `TextureView` (`androidView="texture"`): the default `GLSurfaceView` is not part of the view drawing the blur samples, so the blur came out empty. Android 10–11 get no blur (too slow over a moving map) and `GlassFill` swaps the 35 % tint for a dense one (`panelSolid`, 86 %) so text stays readable. |
 | Offline maps | MapLibre RN supports Android offline packs. The dev map source on the LAN is cleartext HTTP, so debug builds allow cleartext traffic (`expo-build-properties`); release does not. |
 | Vendor battery killers | Xiaomi, Samsung, Huawei kill foreground services. Onboarding links testers to the battery-optimization exemption screen; the tester guide (§7) names the per-vendor steps. |
 
@@ -187,7 +187,7 @@ tags and one metric reach `environment=ci`.
 
 - **M1 done** (2026-10-06, CI run on the `android` branch): the release APK builds and is signed, and the Android 14
   emulator job installs it, grants permissions and sees the onboarding screen with no crash, ANR or JS error.
-  Plugged into the CI plan of `docs/CI.md` (merged from `ci/run-what-changed`). Not yet exercised: Android 8 image
+  Plugged into the CI plan of `docs/CI.md` (merged from `ci/run-what-changed`). Not yet exercised: Android 10 image
   (runs on `main` only), the stable signing key (its secrets are set since 2026-10-06), Telegram delivery.
 - **M2 and M3 verified on the emulator** (2026-10-06): GNSS fixes from the emulator's `gps` provider and IMU batches
   reach the TS side; the simulated ELM327 connects on the Vehicle screen; the trip foreground service starts with a
@@ -207,7 +207,8 @@ tags and one metric reach `environment=ci`.
 
 ## 7. Decisions and open items
 
-- Decided: `minSdk` 26 (Android 8). Emulator matrix: API 26 on `main`, API 34 on every push.
+- Decided: `minSdk` 29 (Android 10; raised from 26 on 2026-10-06). Android 8–9 are a few percent of phones, we cannot
+  test on them, and 29 is where foreground service types start. Emulator matrix: API 29 on `main`, API 34 on every push.
 - Decided: first test adapters are a Vgate vLinker FD+ and a cheap ELM327 clone. Which transport each uses (BLE or Classic
   SPP) is confirmed from the first trip log; both are implemented in M3.
 - No developer program is needed: the APK is sideloaded. Google Play would need a $25 account and a 14-day closed test

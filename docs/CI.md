@@ -64,7 +64,7 @@ runs `.github/workflows/build-android.yml` with it.
   `ci` / `tester` variant only names the file; the APK the emulator tests is the APK testers get. The simulated
   adapters are hidden unless switched on (Developer → Show emulated adapters, or `wtfai://vehicle?emulators=1`, which
   the smoke test uses).
-- Every Android build is followed by the emulator smoke test (`scripts/android-smoke.sh`): Android 14 always, Android 8
+- Every Android build is followed by the emulator smoke test (`scripts/android-smoke.sh`): Android 14 always, Android 10
   also on `main`. Screenshots and logcat are uploaded as an artifact.
 - Delivery: like iOS. The APK is uploaded unzipped and sent to Telegram only when the plan says `notify`.
 - Manual: Actions → **CI** → Run workflow has an `android` choice (`none` / `tester` / `ci`); **Build Android APK**

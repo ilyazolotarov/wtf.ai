@@ -249,7 +249,7 @@ class LinkCore(private val context: Context, private val emit: (String, Map<Stri
         }
       }
       val name = record?.deviceName ?: safeName(result.device)
-      val connectable = if (Build.VERSION.SDK_INT >= 26) result.isConnectable else true
+      val connectable = result.isConnectable
       handler.post {
         scanBuffer[result.device.address] = scanEntry(result.device.address, name, result.rssi, "ble", false, services, connectable, mfrHex)
       }

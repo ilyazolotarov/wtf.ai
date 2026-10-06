@@ -35,7 +35,6 @@ class TripService : Service() {
 
     /** The foreground service types this phone and the current permissions allow; 0 = cannot start. */
     fun allowedTypes(context: Context): Int {
-      if (Build.VERSION.SDK_INT < 29) return 0
       fun granted(p: String) = ContextCompat.checkSelfPermission(context, p) == PackageManager.PERMISSION_GRANTED
       var types = 0
       if (granted(Manifest.permission.ACCESS_FINE_LOCATION) || granted(Manifest.permission.ACCESS_COARSE_LOCATION)) {
@@ -47,8 +46,8 @@ class TripService : Service() {
       return types
     }
 
-    /** Before Android 10 there are no service types; from then on at least one must be allowed or the start throws. */
-    fun canStart(context: Context): Boolean = Build.VERSION.SDK_INT < 29 || allowedTypes(context) != 0
+    /** At least one service type must be allowed, or the start throws. */
+    fun canStart(context: Context): Boolean = allowedTypes(context) != 0
 
     /** Starts the service; false (with a log line) when Android refuses, e.g. from the background or without permission. */
     fun start(context: Context, title: String, text: String, channelName: String): Boolean {
@@ -81,7 +80,7 @@ class TripService : Service() {
     val types = allowedTypes(this)
     try {
       val notification = buildNotification(title, text, channelName)
-      if (Build.VERSION.SDK_INT >= 29 && types != 0) {
+      if (types != 0) {
         startForeground(NOTIFICATION_ID, notification, types)
       } else {
         startForeground(NOTIFICATION_ID, notification)
@@ -112,7 +111,7 @@ class TripService : Service() {
 
   private fun buildNotification(title: String, text: String, channelName: String): Notification {
     val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-    if (Build.VERSION.SDK_INT >= 26 && manager.getNotificationChannel(CHANNEL_ID) == null) {
+    if (manager.getNotificationChannel(CHANNEL_ID) == null) {
       manager.createNotificationChannel(NotificationChannel(CHANNEL_ID, channelName, NotificationManager.IMPORTANCE_LOW))
     }
     val launch = packageManager.getLaunchIntentForPackage(packageName)

@@ -25,6 +25,8 @@ export const Colors = {
     groupBg: "#FFFFFF",
     surface: "#EDEBE6",
     panel: "rgba(255,255,255,0.35)",
+    /** Panel tint where the map behind can't be blurred (Android before 12): dense enough to read on. */
+    panelSolid: "rgba(255,255,255,0.86)",
     line: "rgba(0,0,0,0.07)",
     text: "#1D1C1A",
     text2: "#6B675F",
@@ -52,6 +54,7 @@ export const Colors = {
     groupBg: "#232220",
     surface: "#2C2B29",
     panel: "rgba(30,29,28,0.35)",
+    panelSolid: "rgba(30,29,28,0.86)",
     line: "rgba(255,255,255,0.08)",
     text: "#F2F0EC",
     text2: "#A6A29B",

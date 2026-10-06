@@ -1,7 +1,7 @@
 # wtf.ai on Android: guide for testers
 
 Thank you for testing. wtf.ai is an early test build of a navigator that keeps a position when GPS is jammed or
-spoofed. **Do not rely on it for real navigation.** It runs on Android 8 or newer. You need an OBD-II Bluetooth
+spoofed. **Do not rely on it for real navigation.** It runs on Android 10 or newer. You need an OBD-II Bluetooth
 adapter (ELM327 type) plugged into the car to try the full thing; without one the map still works from the phone's GPS.
 
 ## 1. Install
