@@ -143,6 +143,8 @@ class Tile {
   readonly spatialCount: number;
   edgeCache: (RoadEdge | undefined)[] = [];
   nodeCache: (RoadNode | undefined)[] = [];
+  /** When the tile was last used (the cache's clock), for least-recently-used eviction. */
+  used = 0;
   private restrictions: Map<number, Restriction[]> | null = null;
 
   constructor(
@@ -249,6 +251,9 @@ export class TiledRoadGraph implements RoadGraph {
   private readonly cache = new Map<number, Tile>();
   private readonly cacheTiles: number;
   private pinned = new Set<number>();
+  private clock = 0;
+  /** The tile asked for last: most lookups ask for it again (an edge, then its nodes). */
+  private last: Tile | null = null;
   private frame: LocalFrame;
   readonly stats: GraphStats = { tileLoads: 0, bytesRead: 0, cachedTiles: 0 };
 
@@ -369,11 +374,11 @@ export class TiledRoadGraph implements RoadGraph {
     const nv = r.lonLat.length / 2;
     const xy = new Float64Array(2 * nv);
     const cum = new Float64Array(nv);
-    for (let j = 0; j < nv; j++) {
-      const [x, y] = this.frame.toEnu({ lon: r.lonLat[2 * j], lat: r.lonLat[2 * j + 1] });
-      xy[2 * j] = x;
-      xy[2 * j + 1] = y;
-      if (j > 0) cum[j] = cum[j - 1] + Math.hypot(x - xy[2 * j - 2], y - xy[2 * j - 1]);
+    this.frame.toEnuArray(r.lonLat, xy);
+    for (let j = 1; j < nv; j++) {
+      const dx = xy[2 * j] - xy[2 * j - 2];
+      const dy = xy[2 * j + 1] - xy[2 * j - 1];
+      cum[j] = cum[j - 1] + Math.sqrt(dx * dx + dy * dy);
     }
     const edge: RoadEdge = { id, ...r, xy, cum };
     tile.edgeCache[k] = edge;
@@ -429,10 +434,15 @@ export class TiledRoadGraph implements RoadGraph {
   }
 
   private tile(index: number): Tile | null {
+    const last = this.last;
+    if (last?.index === index) {
+      last.used = ++this.clock;
+      return last;
+    }
     const hit = this.cache.get(index);
     if (hit) {
-      this.cache.delete(index);
-      this.cache.set(index, hit);
+      hit.used = ++this.clock;
+      this.last = hit;
       return hit;
     }
     if (index < 0 || index >= this.directory.length - 1) return null;
@@ -442,15 +452,23 @@ export class TiledRoadGraph implements RoadGraph {
     const tile = new Tile(index, aligned(this.source.read(this.dataOffset + start, length)));
     this.stats.tileLoads++;
     this.stats.bytesRead += length;
+    tile.used = ++this.clock;
     this.cache.set(index, tile);
-    if (this.cache.size > this.cacheTiles) {
-      for (const key of this.cache.keys()) {
-        if (this.cache.size <= this.cacheTiles) break;
-        if (key !== index && !this.pinned.has(key)) this.cache.delete(key);
-      }
-    }
+    this.last = tile;
+    if (this.cache.size > this.cacheTiles) this.evict();
     this.stats.cachedTiles = this.cache.size;
     return tile;
+  }
+
+  /** Drop the least recently used unpinned tiles, an eighth of the cache at a time (a scan per eviction, not per use). */
+  private evict(): void {
+    const target = Math.max(1, this.cacheTiles - (this.cacheTiles >> 3));
+    const candidates = [...this.cache.values()].filter((t) => t !== this.last && !this.pinned.has(t.index));
+    candidates.sort((a, b) => a.used - b.used);
+    for (const t of candidates) {
+      if (this.cache.size <= target) break;
+      this.cache.delete(t.index);
+    }
   }
 }
 

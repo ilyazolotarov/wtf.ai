@@ -4,6 +4,8 @@
 //   npm run route:bench -- --width 600 --height 400 --spacing 700 --routes 5
 //   npm run route:bench -- --graph tools/tiles/out/release/ukraine.graph.bin --at 50.45,30.52 --radius 400
 //   npm run route:bench -- --json out.json               # per-route results, to diff two runs (--compare a.json)
+//   npm run route:bench -- --exact                       # also the exact search: how much slower the routes come out
+//   npm run route:bench -- --options '{"heuristicWeight":1.2}'   # RouteOptions for the timed runs
 //
 // Each route runs twice: with a cold tile cache (decoding included, what the phone pays on a first plan) and with a
 // warm one (the search alone). `sum` is a checksum of the plan: a speed-up that keeps routes the same keeps it.
@@ -14,7 +16,7 @@ import type { Coordinate } from "../../src/nav/geo";
 import { LocalFrame } from "../../src/nav/geo/local-frame";
 import { bufferByteSource } from "../../src/nav/mapmatch/graph/byte-source";
 import { TiledRoadGraph } from "../../src/nav/mapmatch/graph/road-graph";
-import { planRoute, type RouteStatus } from "../../src/nav/routing/router";
+import { planRoute, type RouteOptions, type RouteStatus } from "../../src/nav/routing/router";
 import { fileByteSource } from "./graph-file";
 import { buildSyntheticGraph } from "./synthetic-graph";
 
@@ -28,6 +30,8 @@ const cacheTiles = Number(arg("cache-tiles", "2048"));
 const jsonOut = arg("json");
 const compare = arg("compare");
 const graphFile = arg("graph");
+const options: RouteOptions = JSON.parse(arg("options", "{}") as string);
+const exact = argv.includes("--exact");
 
 let source: ReturnType<typeof bufferByteSource>;
 let pick: (rand: () => number) => [Coordinate, Coordinate];
@@ -84,15 +88,25 @@ function checksum(r: Exclude<RouteStatus, { status: "more" }>): string {
   return `${(h >>> 0).toString(16)}/${Math.round(r.plan.lengthM)}m/${Math.round(r.plan.durationS)}s`;
 }
 
-interface Row { line: number; coldMs: number; warmMs: number; states: number; tiles: number; sum: string }
+interface Row { line: number; coldMs: number; warmMs: number; states: number; tiles: number; sum: string; durationS?: number; exactS?: number; exactStates?: number }
 const rows: Row[] = [];
 const warmGraph = new TiledRoadGraph(source, frame, { cacheTiles });
 for (let i = 0; i < routes; i++) {
   const [a, b] = pick(rand);
-  const cold = planRoute(new TiledRoadGraph(source, frame, { cacheTiles }), frame, a, b);
-  const warm = planRoute(warmGraph, frame, a, b);
-  const w2 = planRoute(warmGraph, frame, a, b);
-  rows.push({ line: lineKm(a, b), coldMs: cold.stats.ms, warmMs: Math.min(warm.stats.ms, w2.stats.ms), states: cold.stats.states, tiles: cold.stats.tilesRead, sum: checksum(cold) });
+  const cold = planRoute(new TiledRoadGraph(source, frame, { cacheTiles }), frame, a, b, options);
+  const warm = planRoute(warmGraph, frame, a, b, options);
+  const w2 = planRoute(warmGraph, frame, a, b, options);
+  const ref = exact ? planRoute(warmGraph, frame, a, b, { hierarchy: false, heuristicWeight: 1, maxStates: 1e8 }) : null;
+  rows.push({
+    line: lineKm(a, b),
+    coldMs: cold.stats.ms,
+    warmMs: Math.min(warm.stats.ms, w2.stats.ms),
+    states: cold.stats.states,
+    tiles: cold.stats.tilesRead,
+    sum: checksum(cold),
+    ...(cold.status === "done" ? { durationS: cold.plan.durationS } : {}),
+    ...(ref?.status === "done" ? { exactS: ref.plan.durationS, exactStates: ref.stats.states } : {}),
+  });
 }
 rows.sort((x, y) => x.line - y.line);
 const base: Row[] | null = compare ? JSON.parse(readFileSync(compare, "utf8")) : null;
@@ -102,7 +116,8 @@ for (const [i, r] of rows.entries()) {
   const diff = b ? (b.sum === r.sum ? `  same, ${(b.coldMs / r.coldMs).toFixed(1)}× faster` : `  DIFFERS from ${b.sum}, ${(b.coldMs / r.coldMs).toFixed(1)}×`) : "";
   console.log(
     `${r.line.toFixed(0).padStart(8)}${r.coldMs.toFixed(0).padStart(10)}${r.warmMs.toFixed(0).padStart(10)}${String(r.states).padStart(10)}${String(r.tiles).padStart(8)}` +
-      `${((r.warmMs * 1000) / Math.max(1, r.states)).toFixed(2).padStart(10)}  ${r.sum}${diff}`,
+      `${((r.warmMs * 1000) / Math.max(1, r.states)).toFixed(2).padStart(10)}  ${r.sum}${diff}` +
+      (r.exactS && r.durationS ? `  vs exact: +${((100 * (r.durationS - r.exactS)) / r.exactS).toFixed(2)} % time, ${r.exactStates} states` : ""),
   );
 }
 const total = (f: (r: Row) => number) => rows.reduce((s, r) => s + f(r), 0);

@@ -19,8 +19,11 @@ import type {
 
 /** Decoded tiles the planner keeps (ROUTING-SPEC §7: ~20 MB, 0.57 s for 172 km in Node). */
 export const ROUTER_CACHE_TILES = 2048;
-/** Each slice settles states for about this long, then yields to the UI. */
-const SLICE_MS = 12;
+/**
+ * Each slice settles states for about this long, then yields to the UI. The map draws on its own thread; a yield
+ * waits for the next timer tick (about a frame), so short slices spent most of a long plan's wall time waiting.
+ */
+const SLICE_MS = 32;
 const FIRST_SLICE_STATES = 1000;
 /** After a plan, the next one for leaving the route waits at least this long. */
 const REPLAN_COOLDOWN_MS = 10_000;

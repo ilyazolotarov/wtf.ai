@@ -1,7 +1,7 @@
 // A synthetic road graph file (format 1, src/nav/mapmatch/graph/format.ts), in memory: a lat/lon grid of two-way
-// roads with a hierarchy (a motorway every 40 lines, primary every 10, tertiary every 5, residential between,
-// with some service lanes, one-ways and gaps). Its size is configurable, so route benchmarks run on a country-sized
-// graph without one on disk (`npm run route:bench`).
+// roads with a hierarchy (trunk every 60 km, primary every 30, secondary every 10, tertiary every 3, residential
+// between, with some service lanes, one-ways and gaps). Its size is configurable, so route benchmarks run on a
+// country-sized graph without one on disk (`npm run route:bench`).
 
 import {
   COORD_SCALE, EDGE_BYTES, GRAPH_FORMAT, GRAPH_MAGIC, HEADER_BYTES, NODE_BYTES, Oneway, REF_BYTES, RoadClass,
@@ -94,10 +94,14 @@ export function buildSyntheticGraph(options: SyntheticOptions = {}): SyntheticGr
 
   // Edges: east and north of each node, owned by the tile of their `from` node.
   const edges: GEdge[] = [];
+  // Spacing of each class's lines, like Ukraine's: M roads (trunk) far apart, H (primary), P (secondary), T (tertiary).
+  const every = (km: number) => Math.max(1, Math.round((km * 1000) / spacingM));
   const classOf = (line: number, along: number): number => {
-    if (line % 40 === 0) return RoadClass.motorway;
-    if (line % 10 === 0) return RoadClass.primary;
-    if (line % 5 === 0) return RoadClass.tertiary;
+    const l = line % 100_000;
+    if (l % every(60) === 0) return RoadClass.trunk;
+    if (l % every(30) === 0) return RoadClass.primary;
+    if (l % every(10) === 0) return RoadClass.secondary;
+    if (l % every(3) === 0) return RoadClass.tertiary;
     const h = hash(line, along, seed);
     return h < 0.08 ? RoadClass.service : h < 0.2 ? RoadClass.unclassified : RoadClass.residential;
   };
@@ -114,13 +118,13 @@ export function buildSyntheticGraph(options: SyntheticOptions = {}): SyntheticGr
     const vertices = [e6(lon1), e6(lat1), e6(mid[0]), e6(mid[1]), e6(lon2), e6(lat2)];
     const lengthM = spacingM * (1 + Math.abs(bend) * 0.3);
     const oneway = cls >= RoadClass.residential && h > 0.96 ? Oneway.forward : Oneway.none;
-    edges.push({ from: a, to: b, cls, oneway, flags: 0, lengthM, vertices, wayId: line * 100_000 + along });
+    edges.push({ from: a, to: b, cls, oneway, flags: 0, lengthM, vertices, wayId: (line % 100_000) * 4096 + (line >= 100_000 ? 2048 : 0) + (along % 2048) });
   };
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const i = r * cols + c;
       if (c + 1 < cols) addEdge(i, i + 1, r, c, true);
-      if (r + 1 < rows) addEdge(i, i + cols, c + 1000, r, false);
+      if (r + 1 < rows) addEdge(i, i + cols, c + 100_000, r, false);
     }
   }
 

@@ -152,14 +152,24 @@ Node on the Windows PC, cold tile cache (2026-10-05):
   filter's 128-tile cache (1.1 s), 5.2 k with 2048 (0.57 s, 20 MB held), 4.5 k with 4096 (0.51 s, 79 MB).
 - Of 130 random routes, 4 had no road route: 3 ended on track networks or yards connected to nothing, now refused
   in ~10 ms (island check); one start on a source-only stretch found its route once fallbacks were added.
-- **Speed-up (2026-10-05, `npm run route:bench`).** The phone hit `too-far` (1 M states) on long routes: with the
-  straight-line heuristic at the fastest speed (110 km/h) the search floods most of the grid. Now (a) states live in
-  typed arrays behind one map lookup, the heap is typed arrays, headings are memoised and `exits` skips restriction
-  work at nodes without any: ~5–8 µs per state instead of ~8–12; (b) hierarchy pruning: 20 km or more from both
-  ends only roads up to tertiary are searched (kept at a node whose only legal exits are minor roads), the state cap
-  is 2 M. On the synthetic 250 × 150 km grid (`route:bench`, 107–198 km routes) the routes were identical, with 3.4×
-  fewer states and 4× less time (24 s → 5.6 s for 10 routes). `route:bench --graph <file> --at lat,lon --radius km`
-  runs the same on a real graph; `--json` / `--compare` diff two runs (checksum of each plan).
+- **Speed-up (2026-10-06, `npm run route:bench`).** The phone hit `too-far` on long routes: with the straight-line
+  heuristic at the fastest speed (110 km/h) an exact search floods the country (Slavutych → Lviv-like routes on the
+  synthetic grid: over 1 M states). Now:
+  - **Hierarchy pruning** (`HIERARCHY` in router.ts): from 12 km off the nearer end only roads up to tertiary are
+    searched, from 35 km up to secondary, from 80 km up to primary. A node whose legal exits are all smaller roads
+    keeps them; a pruned search that finds no route searches again with every road.
+  - **Weighted heuristic** (`HEURISTIC_WEIGHT` 1.5): routes at most 1.5× the fastest in theory, within 0.25 % of it
+    on the benchmark. Weight 2 settles 10× fewer states again but routes came out up to 3.8 % slower.
+  - **Per state**: states in typed arrays behind one map lookup, a typed-array heap, memoised headings, `exits`
+    skips restriction work where there is none, the tile cache stamps its last use instead of reordering a map on
+    every lookup (and evicts an eighth at a time), edge decoding projects without allocating. ~2.5 µs per state in
+    Node, from ~8–12.
+  - **Slices of 32 ms** instead of 12 (route-service.ts): every yield waits about a frame for the next timer tick.
+
+  Synthetic 600 × 300 km grid (Ukraine-like hierarchy), 240–470 km routes: 350 k → 50 k states, 13.0 s → 1.3 s
+  cold for 4 routes (warm 0.56 s), routes within 0.2 % of the exact search's time. Default 250 × 150 km grid,
+  107–198 km: 24 s → 1.9 s for 6 routes. `--exact` prints each route against the exact search, `--options '<json>'`
+  passes `RouteOptions` (`hierarchy`, `heuristicWeight`), `--graph <file> --at lat,lon --radius km` uses a real graph.
 - On the phone: unknown. The filter's updates ran about as fast on the iPhone as in Node (MAPMATCH-SPEC §15.9), but
   tile reads go through the file system there. The app logs every plan's time (§8); if oblast routes are slow,
   the candidates are a routing-only tile decode (no geometry arrays) and skipping minor roads far from both ends.
