@@ -1,4 +1,10 @@
-import { adviseRegion, regionContains, smallestRegionAt, type RegionShape } from "@/services/offline-map/region-check";
+import {
+  adviseRegion,
+  regionCheckPoint,
+  regionContains,
+  smallestRegionAt,
+  type RegionShape,
+} from "@/services/offline-map/region-check";
 
 // Two neighbouring "oblasts" whose bounds overlap: an L-shaped west one and a square east one,
 // and "ukraine" around both.
@@ -44,5 +50,21 @@ describe("region check", () => {
     expect(adviseRegion(west, [west], [ukraine, west, east], IN_EAST)).toEqual({ kind: "download", region: east });
     expect(adviseRegion(west, [west], [], IN_EAST)).toEqual({ kind: "outside" });
     expect(adviseRegion(west, [west], [west, east], { lat: 47, lon: 35 })).toEqual({ kind: "outside" });
+  });
+
+  it("checks Wi-Fi and cell fixes too (indoors: APPROXIMATE, trust NO_FIX), never a spoofed one", () => {
+    // Bug 2026-10-06: Volyn active at home in Chernihiv oblast on Wi-Fi only, and no prompt: only
+    // TRUSTED (satellite) positions were checked.
+    const wifi = { lat: IN_EAST.lat, lon: IN_EAST.lon, accuracyM: 65, trust: "NO_FIX" };
+    const check = regionCheckPoint(wifi);
+    expect(check).toEqual({ at: IN_EAST, marginM: 1_000 });
+    expect(adviseRegion(west, [west], [ukraine, west, east], check!.at, check!.marginM)).toEqual({
+      kind: "download",
+      region: east,
+    });
+    expect(regionCheckPoint({ ...wifi, trust: "REACQUIRING" })).not.toBeNull();
+    expect(regionCheckPoint({ ...wifi, trust: "UNTRUSTED" })).toBeNull();
+    expect(regionCheckPoint({ ...wifi, accuracyM: 8_000 })).toBeNull(); // can't tell an oblast
+    expect(regionCheckPoint({ ...wifi, accuracyM: 2_500 })?.marginM).toBe(2_500);
   });
 });

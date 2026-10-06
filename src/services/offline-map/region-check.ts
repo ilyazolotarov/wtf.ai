@@ -14,6 +14,25 @@ export interface RegionShape {
 
 /** Outside by less than this (m) still counts as inside: no prompt at a border crossing's first metres. */
 export const OUTSIDE_MARGIN_M = 1_000;
+/** Coarser fixes than this can't place the car in a region. */
+export const REGION_CHECK_MAX_ACCURACY_M = 5_000;
+
+/**
+ * The point to check and the margin to allow, from the published position; null when it can't
+ * tell. Telling an oblast needs far less than navigation does: a Wi-Fi or cell fix indoors
+ * ("APPROXIMATE", trust NO_FIX) or dead reckoning is enough. Only a position suspected of
+ * spoofing (UNTRUSTED) is ignored: it may be anywhere.
+ */
+export function regionCheckPoint(position: {
+  lat: number;
+  lon: number;
+  accuracyM: number;
+  trust: string;
+}): { at: Coordinate; marginM: number } | null {
+  if (position.trust === "UNTRUSTED") return null;
+  if (!Number.isFinite(position.accuracyM) || position.accuracyM > REGION_CHECK_MAX_ACCURACY_M) return null;
+  return { at: { lat: position.lat, lon: position.lon }, marginM: Math.max(OUTSIDE_MARGIN_M, position.accuracyM) };
+}
 
 const M_PER_DEG = 111_195;
 
@@ -90,8 +109,9 @@ export function adviseRegion<R extends RegionShape>(
   installed: R[],
   catalog: R[],
   p: Coordinate,
+  marginM = OUTSIDE_MARGIN_M,
 ): RegionAdvice<R> {
-  if (regionContains(active, p, OUTSIDE_MARGIN_M)) return { kind: "inside" };
+  if (regionContains(active, p, marginM)) return { kind: "inside" };
   const have = smallestRegionAt(
     installed.filter((r) => r.region !== active.region),
     p,
