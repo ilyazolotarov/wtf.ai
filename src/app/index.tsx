@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { MapSurface } from "@/components/map/map-surface";
 import { useHasUsableMap } from "@/config/map";
+import { RegionPrompt } from "@/components/map/region-prompt";
 import { RouteBanner } from "@/components/route/route-banner";
 import { useVoiceGuidance, useVoiceMuted } from "@/components/route/use-voice-guidance";
 import {
@@ -366,6 +367,8 @@ export default function HomeScreen() {
               </Pressable>
             </View>
           )}
+
+          {!placing && <RegionPrompt panelStyle={panel} />}
 
           {placing && (
             <View style={[panel, styles.alertCard]}>

@@ -39,7 +39,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .graph import build_region_graph
-from .region import load_registry, read_poly
+from .region import load_registry, read_poly, region_outline
 from .search import build_region_search
 from .style import SPRITE_NAME, collect_fonts, font_slug, offline_style
 
@@ -260,12 +260,14 @@ def write_index(common: list[dict[str, str]], release: Path = RELEASE) -> dict:
         tiles = release / f"{name}.pmtiles"
         if not tiles.exists():
             continue
-        minx, miny, maxx, maxy = read_poly(REGIONS / f"{name}.poly").bounds
+        poly = read_poly(REGIONS / f"{name}.poly")
+        minx, miny, maxx, maxy = poly.bounds
         entry = {
             "region": name,
             "iso": info["iso"],
             "name": {"en": info["name_en"], "uk": info["name_uk"]},
             "bounds": [round(v, 5) for v in (minx, miny, maxx, maxy)],
+            "outline": region_outline(poly),
             "asset": tiles.name,
             **hashes(tiles),
         }

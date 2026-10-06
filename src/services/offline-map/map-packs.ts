@@ -26,6 +26,8 @@ export interface InstalledRegion {
   iso: string;
   name: { en: string; uk: string };
   bounds: [number, number, number, number];
+  /** From the catalog at install (absent for installs made before outlines). */
+  outline?: [number, number][][];
   osm_date: string;
   size: number;
   /** Tiles checksum; absent on installs made before it was recorded. */

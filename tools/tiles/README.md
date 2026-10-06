@@ -47,7 +47,7 @@ folders):
 
 | Asset | |
 |---|---|
-| `index.json` | catalog: `format`, `osm_date`, `common[]` (asset, path, size, md5, sha256), `regions[]` (region, iso, name en/uk, bounds, asset, size, md5, sha256) |
+| `index.json` | catalog: `format`, `osm_date`, `common[]` (asset, path, size, md5, sha256), `regions[]` (region, iso, name en/uk, bounds, outline: outer rings simplified to ~1 km, asset, size, md5, sha256) |
 | `<region>.graph.bin` | road graph for map matching (below); listed as the region's `graph` entry in index.json |
 | `<region>.search.bin` | address search index ([SEARCH-SPEC.md](../../docs/SEARCH-SPEC.md)); the region's `search` entry |
 | `<region>.pmtiles` | OpenMapTiles-schema vector tiles, clipped to the region polygon (Ukraine 1.2 GB, oblasts 36–89 MB) |

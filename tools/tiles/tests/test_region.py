@@ -2,7 +2,7 @@ from pathlib import Path
 
 from shapely.geometry import Point, Polygon
 
-from tiles.region import buffer_simplify, load_registry, read_poly, to_poly
+from tiles.region import buffer_simplify, load_registry, read_poly, region_outline, to_poly
 
 SQUARE = Polygon([(31.0, 51.0), (31.1, 51.0), (31.1, 51.1), (31.0, 51.1)])
 
@@ -44,3 +44,20 @@ def test_enclaves_stay_in_their_region():
     assert read_poly(regions / "chernihiv.poly").contains(slavutych)
     kyiv = read_poly(regions / "kyiv.poly")
     assert len(kyiv.geoms) == 2 and kyiv.contains(slavutych)
+
+
+def test_outline_is_simplified_and_rounded():
+    wiggly = Polygon([(31.0, 51.0), (31.05, 51.0001), (31.1, 51.0), (31.1, 51.1), (31.0, 51.1)])
+    (ring,) = region_outline(wiggly)
+    assert ring[0] == ring[-1] and len(ring) == 5  # the 10 m wiggle is gone
+    assert all(round(v, 3) == v for point in ring for v in point)
+
+
+def test_real_outlines_are_small(tmp_path: Path):
+    import json
+
+    from tiles.build import REGIONS
+
+    outline = region_outline(read_poly(REGIONS / "chernihiv.poly"))
+    assert 20 < sum(map(len, outline)) < 2000
+    assert len(json.dumps(outline)) < 40_000

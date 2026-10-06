@@ -26,6 +26,8 @@ export interface CatalogRegion extends CatalogFile {
   name: { en: string; uk: string };
   /** [minLon, minLat, maxLon, maxLat] */
   bounds: [number, number, number, number];
+  /** Simplified outer rings of [lon, lat] (~1 km); absent in releases built before it. */
+  outline?: [number, number][][];
   /** Road graph for map matching (MAPMATCH-SPEC §4.6); absent: the region is display-only. */
   graph?: CatalogFile;
   /** Address search index (SEARCH-SPEC); absent in releases built before it. */
