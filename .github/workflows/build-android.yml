@@ -160,8 +160,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 26 = our minimum (Android 8), 34 = what most testers run. API 26 only on main to save minutes.
-        api-level: ${{ github.ref == 'refs/heads/main' && fromJSON('[26, 34]') || fromJSON('[34]') }}
+        # 26 = our minimum (Android 8), 34 = what most testers run. API 26 only on main and the android branch.
+        api-level: ${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/android') && fromJSON('[26, 34]') || fromJSON('[34]') }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7

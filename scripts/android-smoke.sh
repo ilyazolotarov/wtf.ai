@@ -110,6 +110,18 @@ adb exec-out screencap -p > "$OUT/4-connected.png"
 wait_log "WtfSensorCapture: startImu" 30 || fail "IMU never started"
 wait_log "WtfSensorCapture: imu batch" 30 || fail "IMU started but delivered no batches"
 
+# 4b. Screen off during the trip: the foreground service must keep the IMU delivering. (An emulator does not doze like
+# a phone, so this proves the path, not the phone makers' battery rules: that is what testers are for.)
+wait_log "WtfTripService: running" 30 || fail "trip foreground service did not start while recording"
+before=$(adb logcat -d | grep -c "WtfSensorCapture: imu batch")
+adb shell input keyevent KEYCODE_SLEEP
+sleep 35
+adb shell input keyevent KEYCODE_WAKEUP
+sleep 3
+after=$(adb logcat -d | grep -c "WtfSensorCapture: imu batch")
+adb exec-out screencap -p > "$OUT/4b-after-screen-off.png"
+[ "$after" -gt "$before" ] || fail "IMU delivered nothing during 35 s of screen off (before=$before after=$after)"
+
 # 5. Stay up for a while: crashes and ANRs often come a few seconds after the first frame.
 sleep 20
 alive || fail "app process died after start"

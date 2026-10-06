@@ -189,7 +189,21 @@ tags and one metric reach `environment=ci`.
   emulator job installs it, grants permissions and sees the onboarding screen with no crash, ANR or JS error.
   Plugged into the CI plan of `docs/CI.md` (merged from `ci/run-what-changed`). Not yet exercised: Android 8 image
   (runs on `main` only), the stable signing key (secrets not set), Telegram delivery.
-- Next: M2 (sensors).
+- **M2 and M3 verified on the emulator** (2026-10-06): GNSS fixes from the emulator's `gps` provider and IMU batches
+  reach the TS side; the simulated ELM327 connects on the Vehicle screen; the trip foreground service starts with a
+  recording (types location + connected device); the app survives a 35 s screen-off. Kotlin logic tests
+  (`native-tests-android/`, 40 cases) mirror the Swift vectors. BLE (GATT with MTU and retry) and Classic SPP (bonding,
+  secure/insecure/channel-1 sockets) are written but **only compile-checked**: the emulator has no Bluetooth, so the
+  first real run is a tester with an adapter.
+- Differences from the plan: classic devices get the id `spp:<MAC>` (BLE keeps the bare MAC) so a dual-mode adapter
+  does not collide; phones without gravity/linear-acceleration sensors (and some emulators) derive them from the
+  accelerometer; the Bluetooth permission dialog is shown at most once per process and never on devices without an
+  adapter (a restart loop on the emulator taught us that); iOS-only fields stay iOS-only.
+- Telemetry (§4.1) is in: tags (device, Android version, build, install id shown as "Support code" in Settings),
+  connect time and failures by reason, poll rate and latency, GNSS/IMU rates, satellite share, longest IMU gap while
+  recording, `ci` environment for emulator runs. Not done: native `onNativeError` events, trip size/duration metrics,
+  Sentry alert rules (set up in the Sentry UI).
+- Next: M4 (tester build: signing key secrets, first staged round).
 
 ## 7. Decisions and open items
 

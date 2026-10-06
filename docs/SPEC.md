@@ -16,7 +16,7 @@ Odometry is built up in stages (§2.1). Stage 1 uses the minimum that works on a
 
 | Topic                       | Decision                                                                                                                                                                                                                  |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Platform                    | **iOS first**. Android is nice-to-have later (no test device).                                                                                                                                                            |
+| Platform                    | **iOS first**. **Android** is built for volunteer testers, sideloaded as an APK from CI and tested on emulators (no Android device on hand): [ANDROID-SPEC.md](ANDROID-SPEC.md), tester guide [ANDROID-TESTING.md](ANDROID-TESTING.md).                                                                                                                                                            |
 | Dev environment             | Windows only, no Mac, **no paid Apple Developer account**. iOS builds: **GitHub Actions** macOS runner, `expo prebuild` + `xcodebuild` with signing disabled → unsigned IPA, sideloaded with **AltStore** (free Apple ID, 7-day refresh). **No EAS** (Build/Submit/Update). CI runs checks, and this build when needed ([CI.md](CI.md), §6). |
 | Framework                   | Expo SDK 57, Expo Router, TypeScript. Dev builds only (no Expo Go).                                                                                                                                                       |
 | Odometry roadmap            | **Staged** (§2.1): Stage 1 OBD-II speed + phone gyro → Stage 2 CAN wheel speeds → Stage 3 CAN yaw rate. Each stage is a drop-in odometry source; the EKF, integrity, and map matching don't change between stages.           |
@@ -283,8 +283,8 @@ src/obd/                 pure TS: adapter catalog, ELM327 session/probe/parser, 
 src/triplog/             pure TS: ULog encoder (+ reader for replay), trip log schemas
 src/services/            RN glue: position, vehicle-link, sensor-capture, trip-recorder
 src/components/          UI components
-modules/vehicle-link/    Expo module (Swift) — BLE + EA (MFi) transports; STN monitor in Stage 2
-modules/sensor-capture/  Expo module (Swift) — CoreLocation + CoreMotion capture, batched
+modules/vehicle-link/    Expo module (Swift, Kotlin) — BLE + EA (MFi) on iOS, BLE + Classic SPP on Android; STN monitor in Stage 2
+modules/sensor-capture/  Expo module (Swift, Kotlin) — CoreLocation/CoreMotion or LocationManager/SensorManager capture, batched; Android trip foreground service
 assets/profiles/         vehicle JSON profiles (Stage 2+)
 assets/geo/              Ukraine border polygon
 tools/re-yaw/            yaw reverse-engineering script (Stage 3)
@@ -335,7 +335,7 @@ Status (2026-10-05):
 | 8     | CAN wheel speeds (Stage 2)    | 7                 | STN monitor mode, `odometry/can` + Mazda profile, raw CAN in logger, wheel-differential yaw |
 | 9     | Yaw RE (Stage 3)              | 8                 | CAN yaw signal in Mazda profile                                                             |
 | 10    | Stage comparison field test   | 9                 | DR error per stage on the same drives (§3.10)                                               |
-| later | App Store, Android            | BLE or MFi        | —                                                                                           |
+| later | App Store                     | BLE or MFi        | — (Android: [ANDROID-SPEC.md](ANDROID-SPEC.md))                                             |
 
 ### Phase 9 method (yaw RE)
 
@@ -347,6 +347,7 @@ Status (2026-10-05):
 
 - Follow [AGENTS.md](../AGENTS.md) (Expo rules, `npx expo install`, no hand-editing `ios/`/`android/`).
 - `src/nav/**`, `src/obd/**`, and `src/triplog/**` must stay pure TypeScript with no React Native / Expo imports.
+- Android mirrors this: Android-free logic goes in `modules/*/android/**/logic/` (plain Kotlin, no `android.*` imports) with JUnit tests in `native-tests-android/` (plain JVM, CI runs `gradle test`; locally `docker run --rm -v "$PWD:/src" -w /src/native-tests-android gradle:8.14-jdk17 gradle test`). Payloads use the iOS conventions, so the TypeScript is the same on both platforms.
 - Native modules stay thin: I/O and bridging only; no estimation or protocol logic in Swift. Any non-trivial Swift logic goes in `modules/*/ios/Logic/` (Foundation only) with XCTest coverage in `native-tests/` (`Package.swift` at the repo root; CI runs `swift test` on Linux). The JS side of each module is tested in Jest with the native module mocked.
 - Batch high-rate data across the native→JS bridge (IMU samples, CAN frames); never emit one event per CAN frame or IMU sample.
 - Units internally: SI (m, s, rad, m/s, rad/s). Convert at boundaries. Exception: engine speed in rev/min, with the unit in the field name (`rpm`).
@@ -379,7 +380,7 @@ Status (2026-10-05):
 
 ## 8. Out of scope (v1)
 
-Google Maps; Android; raw GNSS analysis; slow drag-off spoofing detection; Wi-Fi ELM327 adapters; magnetometer heading for navigation; STN/OBDLink-specific commands in Stage 1 (read-only `STI` identification excepted); Classic Bluetooth adapters without MFi on iOS (impossible); lane-level accuracy; any cloud services; feeding corrected location to other apps.
+Google Maps; Google Play distribution; raw GNSS analysis; slow drag-off spoofing detection; Wi-Fi ELM327 adapters; magnetometer heading for navigation; STN/OBDLink-specific commands in Stage 1 (read-only `STI` identification excepted); Classic Bluetooth adapters without MFi on iOS (impossible); lane-level accuracy; any cloud services; feeding corrected location to other apps.
 
 ## 9. Risks & open items
 
