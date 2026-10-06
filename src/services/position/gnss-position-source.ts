@@ -11,11 +11,8 @@ const finite = (v: number) => (Number.isFinite(v) ? v : undefined);
 /** Satellite fix vs Wi-Fi/cell fallback: only satellite fixes carry a speed (0 when standing). */
 export const isSatelliteRecord = (fix: GnssRecord) => Number.isFinite(fix.speedMps) && fix.speedMps >= 0;
 
-export function mapFixToPosition(
-  fix: GnssRecord,
-  trust: TrustState = "TRUSTED",
-  lastTrustedFixAt: number | undefined = fix.utcUs / 1000,
-): PositionEstimate {
+/** `lastTrustedFixAt`: integrity's, undefined while no fix has been trusted (never this fix's own time). */
+export function mapFixToPosition(fix: GnssRecord, trust: TrustState = "TRUSTED", lastTrustedFixAt?: number): PositionEstimate {
   const speed = finite(fix.speedMps);
   return {
     lat: fix.latDeg,
