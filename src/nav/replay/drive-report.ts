@@ -101,8 +101,8 @@ export function replayPuck(result: ReplayResult): PuckPoint[] {
   let k = -1;
   return result.track.map((p) => {
     while (k + 1 < accepted.length && accepted[k + 1] <= p.tS) k++;
-    // The app also needs GPS trust for "fused" (its GnssTrustTracker); a navigator-only replay goes by the fixes.
-    const dr = p.mode === "dr" && (k < 0 || (p.tS - accepted[k]) * 1e6 >= FUSED_WINDOW_US);
+    // "fused" as the app has it: GPS trusted (integrity) and a satellite fix accepted within the window.
+    const dr = p.mode === "dr" && (p.trust !== "TRUSTED" || k < 0 || (p.tS - accepted[k]) * 1e6 >= FUSED_WINDOW_US);
     const top = puckHypothesis(p, dr);
     const common = { t: p.tS, speedMps: p.speedMps, mapMatch: p.mapMatch?.state, dr };
     return top

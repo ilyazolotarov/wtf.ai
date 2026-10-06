@@ -14,7 +14,26 @@ npm run replay -- trip.ulg --sweep-lag                           # pre-fix error
 npm run replay -- trip.ulg --json                                # summary as JSON
 npm run replay -- --chain a.ulg b.ulg c.ulg                      # each log starts from the pose the previous one parked in
 npm run replay -- --app-cuts trip.ulg                            # cut where "Cut GPS" was on in the app (also replay:mm)
+npm run replay -- trip.ulg --spoof 300:60                        # simulated spoofing: from 300 s for 60 s, a static fix 5 km east
+npm run replay -- trip.ulg --spoof 300:60:static:300:0           # … 300 m north (kind:distanceM:bearingDeg)
+npm run replay -- trip.ulg --spoof 300:inf:outside               # … abroad (Minsk) to the end; offset: the real fixes moved
 ```
+
+On PowerShell, `npm run x -- --flag` loses the `--`; run `node --experimental-transform-types --no-warnings --import
+./tools/replay/register.mjs tools/replay/cli.ts …` (the script's command) instead.
+
+## Spoofing benchmark
+
+```bash
+npm run replay:spoof -- tools/triplog/logs/*.ulg                # GNSS integrity against simulated spoofing
+npm run replay:spoof -- tools/triplog/logs/*.ulg --any-start    # also before the heading is known
+```
+
+Every clean drive gets 60 s windows (every 120 s, from 30 s after the EKF starts) of each kind of spoofing
+(`src/nav/replay/spoof.ts`), and the same windows cut as a control. Per kind: is the first spoofed fix refused, how
+many spoofed fixes the navigator used, when trust came back, how far off the dot was when real GPS returned
+(against the cut), and any real fix refused or untrusted time away from the spoofing. Windows with a problem are
+listed (`--verbose`: all). The summary of `npm run replay` has an `integrity` line too.
 
 Keep outputs in `tools/triplog/logs/` (git-ignored). They contain coordinates.
 
@@ -242,6 +261,8 @@ npm run replay:view -- --graph tools/tiles/out/release/kyiv.graph.bin  # viewer 
   - `accepted` / `rejected`: EKF updates; rejected fixes failed the innovation gate.
   - `anchored`: the fix arrived before the EKF started.
   - `skipped`: a repeated identical fix, or accuracy worse than 2 km.
+  - `untrusted`: refused by GNSS integrity (abroad, a jump, not moving like the car, held after a gap); nothing
+    used it. The `integrity` line counts them by verdict.
   - `cut`: withheld by `--cut`.
 - **pre-fix error**: distance from the predicted position to each fix, measured before the update.
   - For coarse fixes, "within their accuracy" is the share that lands inside their own reported radius. It

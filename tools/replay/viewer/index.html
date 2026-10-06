@@ -344,7 +344,8 @@ function addLayers() {
     map.getCanvas().style.cursor = "pointer";
     const p = e.features[0].properties;
     popup.setLngLat(e.lngLat).setHTML(`<b>${fmtT(+p.t)}</b> ${p.sat ? "satellite" : "Wi-Fi/cell"} ±${p.acc} m` +
-      (p.status === "cut" ? "<br>withheld from the replay" : p.status === "rejected" ? "<br>rejected by the replay" : "")).addTo(map);
+      (p.status === "cut" ? "<br>withheld from the replay" : p.status === "rejected" ? "<br>rejected by the replay"
+        : p.status === "untrusted" ? "<br>refused by integrity (looks spoofed)" : "")).addTo(map);
   });
   map.on("mouseleave", "fixes", () => { map.getCanvas().style.cursor = ""; popup.remove(); });
   map.on("click", "fixes", (e) => seek(+e.features[0].properties.t));

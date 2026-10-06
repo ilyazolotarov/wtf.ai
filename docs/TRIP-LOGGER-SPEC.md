@@ -159,7 +159,7 @@ modules/sensor-capture ─▶ src/services/sensor-capture ──(SensorStream)�
 
 ### 6.4 Text (`C` tagged logged strings)
 
-- Tags: `1` ELM transcript, `2` link events, `3` trip recorder, `4` sensors, `5` app (markers, and map GNSS trust changes: `gnss trust <state> (±N m)`).
+- Tags: `1` ELM transcript, `2` link events, `3` trip recorder, `4` sensors, `5` app (markers, map GNSS trust changes: `gnss trust <state> (±N m)`, and GNSS integrity verdict changes: `gnss integrity <verdict>: <why> (fix ±N m…)`, NAVIGATOR-SPEC §8).
 - ELM transcript (tag 1): every non-poll exchange (probe, init, VIN, `ATRV`, terminal commands) and every poll with a non-`ok` status or unexpected text. Format: `tx=<txUs> <command> | <raw response, CR→\r escaped>`; the message timestamp is `rxUs`.
 - **Before the log**: the pre-roll (§4.2) waits for the engine state, which the adapter setup comes before. So the recorder
   also keeps the link lines (non-poll exchanges, `0100` checks, failed polls, link events; 200 at most, 10 min) and

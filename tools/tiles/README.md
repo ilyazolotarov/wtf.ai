@@ -10,6 +10,7 @@ PATH (Windows) the build runs it in Docker, building `docker/osmium.Dockerfile` 
 pip install -e "tools/tiles[dev]"
 cd tools/tiles
 python -m tiles.cli regions                    # (re)write regions/*.poly from regions/regions.json
+python -m tiles.cli border                     # the app's Ukraine border for GNSS integrity (src/nav/integrity/ukraine-border.ts)
 python -m tiles.cli build-all --heap 8g        # out/release/: ukraine, every region, index.json
 python -m tiles.cli build-region chernihiv     # one region (+ index.json)
 python -m tiles.cli graph chernihiv            # road graph only, from the cached extract (+ index.json)

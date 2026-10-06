@@ -53,6 +53,28 @@ def test_outline_is_simplified_and_rounded():
     assert all(round(v, 3) == v for point in ring for v in point)
 
 
+def test_border_covers_ukraine_and_is_committed():
+    import re
+
+    from shapely.geometry import MultiPolygon
+
+    from tiles.cli import APP_BORDER
+    from tiles.region import border_ts
+
+    regions = Path(__file__).parent.parent / "regions"
+    text = border_ts(regions / "ukraine.poly")
+    # The app's copy is this command's output: regenerate with `python -m tiles.cli border`.
+    assert APP_BORDER.read_text(encoding="utf-8") == text
+    rings = [list(map(float, r.split(","))) for r in re.findall(r"\[([-\d., ]+)\]", text)]
+    border = MultiPolygon([Polygon(list(zip(r[0::2], r[1::2]))) for r in rings])
+    assert border.is_valid
+    # Every vertex of Ukraine's outline is inside, ≥ ~0.5 km from the border's edge (buffer 1.5 km − tolerance 0.5 km).
+    ukraine = read_poly(regions / "ukraine.poly")
+    for poly in ukraine.geoms:
+        for x, y in poly.exterior.coords:
+            assert border.contains(Point(x, y).buffer(0.005)), (x, y)
+
+
 def test_real_outlines_are_small(tmp_path: Path):
     import json
 

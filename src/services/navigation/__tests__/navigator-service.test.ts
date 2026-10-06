@@ -25,6 +25,8 @@ const PHONE = { model: "iPhone14,5", os: "ios 26.0" };
 const VIN = "JMZKF0000TEST0001";
 /** Wall clock = uptime + this (µs). */
 const UTC_OFFSET_US = 1_800_000_000_000_000;
+/** A fix taken this long ago: past the service's reorder window, so the navigator (and integrity) takes it at once. */
+const LATE_US = 400_000;
 
 // Straights and 90° turns, alternating left and right: enough turns to measure the GNSS lag.
 function cityDrive(turns: number): DriveSegment[] {
@@ -142,7 +144,12 @@ function harness(options: { vin?: string | null; store?: ReturnType<typeof memor
   }
 
   const setVehicle = (v: { vin: string | null } | null) => (vehicle = v);
-  return { service, gnss, engine, want, notes, logged, loggedMapMatch, store, play, setVehicle, now: () => nowUs };
+  /** Let time pass with no sensor input (the service's ticks run). */
+  const advance = (us: number) => {
+    nowUs += us;
+    jest.advanceTimersByTime(us / 1000);
+  };
+  return { service, gnss, engine, want, notes, logged, loggedMapMatch, store, play, setVehicle, advance, now: () => nowUs };
 }
 
 beforeEach(() => jest.useFakeTimers());
@@ -164,7 +171,7 @@ describe("NavigatorService", () => {
     await service.start();
     await service.start();
     expect(want).toHaveBeenCalledTimes(2);
-    gnss.emit(record({ tUs: now(), lat: 50.45, lon: 30.52, speedMps: 0 }));
+    gnss.emit(record({ tUs: now() - LATE_US, lat: 50.45, lon: 30.52, speedMps: 0 }));
     expect(seen).toHaveBeenCalledTimes(1);
     service.stop();
   });
@@ -180,12 +187,33 @@ describe("NavigatorService", () => {
   });
 
   test("without an OBD adapter it shows phone GNSS; a Wi-Fi fix isn't trusted", async () => {
-    const { service, gnss, now } = harness({ vin: null });
+    const { service, gnss, now, advance } = harness({ vin: null });
     await service.start();
-    gnss.emit(record({ tUs: now(), lat: 50.45, lon: 30.52, hAccM: 12 }));
+    gnss.emit(record({ tUs: now() - LATE_US, lat: 50.45, lon: 30.52, hAccM: 12 }));
     expect(service.getSnapshot()).toMatchObject({ lat: 50.45, accuracyM: 12, source: "gnss", trust: "NO_FIX" });
-    gnss.emit(record({ tUs: now() + 1_000_000, lat: 50.45, lon: 30.52, hAccM: 5, speedMps: 0 }));
+    advance(1_000_000);
+    gnss.emit(record({ tUs: now() - LATE_US, lat: 50.45, lon: 30.52, hAccM: 5, speedMps: 0 }));
     expect(service.getSnapshot()?.trust).toBe("TRUSTED");
+    service.stop();
+  });
+
+  test("without an OBD adapter a spoofed fix isn't shown: the map holds the last good one, the spoof is the ghost", async () => {
+    const { service, gnss, now, advance, notes } = harness({ vin: null });
+    await service.start();
+    for (let i = 0; i < 3; i++) {
+      advance(1_000_000);
+      gnss.emit(record({ tUs: now() - LATE_US, lat: 50.45, lon: 30.52, hAccM: 5, speedMps: 0 }));
+    }
+    expect(service.getSnapshot()).toMatchObject({ lat: 50.45, trust: "TRUSTED" });
+    // Minsk, a second later.
+    advance(1_000_000);
+    gnss.emit(record({ tUs: now() - LATE_US, lat: 53.9, lon: 27.56, hAccM: 5, speedMps: 0 }));
+    advance(2_000_000);
+    const p = service.getSnapshot()!;
+    expect(p).toMatchObject({ lat: 50.45, lon: 30.52, source: "gnss", trust: "UNTRUSTED", rawGnss: { lat: 53.9 } });
+    // Held: its circle grows (15 m/s) while nothing says where the phone went.
+    expect(p.accuracyM).toBeGreaterThan(40);
+    expect(notes).toContain("gnss integrity outside: outside Ukraine (fix ±5 m)");
     service.stop();
   });
 
@@ -471,7 +499,7 @@ describe("the manual position (NAVIGATOR-SPEC §6.3)", () => {
   async function placedWithoutCar(store = memoryStore()) {
     const h = harness({ vin: null, store });
     await h.service.start();
-    h.gnss.emit(record({ tUs: h.now(), ...wifi, hAccM: 65 }));
+    h.gnss.emit(record({ tUs: h.now() - LATE_US, ...wifi, hAccM: 65 }));
     expect(h.service.getSnapshot()).toMatchObject({ source: "gnss", lat: wifi.lat });
     expect(h.service.setUserPosition(origin, 0.8)).toBe(true);
     return h;
@@ -484,7 +512,8 @@ describe("the manual position (NAVIGATOR-SPEC §6.3)", () => {
 
   test("without a car the map shows it instead of the Wi-Fi fix, which doesn't move it", async () => {
     const h = await placedWithoutCar();
-    h.gnss.emit(record({ tUs: h.now() + 1_000_000, lat: wifi.lat + 0.001, lon: wifi.lon, hAccM: 65 }));
+    h.advance(1_000_000);
+    h.gnss.emit(record({ tUs: h.now() - LATE_US, lat: wifi.lat + 0.001, lon: wifi.lon, hAccM: 65 }));
     const p = h.service.getSnapshot()!;
     expect(p).toMatchObject({ source: "manual", lat: origin.lat, lon: origin.lon, headingRad: 0.8, accuracyM: 10 });
     expect(p.rawGnss?.lat).toBeCloseTo(wifi.lat + 0.001, 6);
@@ -524,7 +553,8 @@ describe("the manual position (NAVIGATOR-SPEC §6.3)", () => {
 
   test("a trusted satellite fix that agrees releases it to GPS", async () => {
     const h = await placedWithoutCar();
-    h.gnss.emit(record({ tUs: h.now() + 1_000_000, lat: origin.lat + 0.0001, lon: origin.lon, hAccM: 5, speedMps: 0 }));
+    h.advance(1_000_000);
+    h.gnss.emit(record({ tUs: h.now() - LATE_US, lat: origin.lat + 0.0001, lon: origin.lon, hAccM: 5, speedMps: 0 }));
     expect(h.service.getSnapshot()).toMatchObject({ source: "gnss", trust: "TRUSTED" });
     expect(h.notes.some((n) => n.startsWith("nav manual position released: GPS trusted, fix 11 m away"))).toBe(true);
     h.service.stop();
@@ -534,7 +564,8 @@ describe("the manual position (NAVIGATOR-SPEC §6.3)", () => {
     const h = await placedWithoutCar();
     for (let i = 1; i <= 5; i++) {
       expect(h.service.getSnapshot()?.source).toBe("manual");
-      h.gnss.emit(record({ tUs: h.now() + i * 1_000_000, lat: origin.lat + 0.005, lon: origin.lon, hAccM: 5, speedMps: 0 }));
+      h.advance(1_000_000);
+      h.gnss.emit(record({ tUs: h.now() - LATE_US, lat: origin.lat + 0.005, lon: origin.lon, hAccM: 5, speedMps: 0 }));
     }
     expect(h.service.getSnapshot()).toMatchObject({ source: "gnss", lat: origin.lat + 0.005 });
     h.service.stop();

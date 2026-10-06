@@ -88,7 +88,7 @@ jammed:
 
 - **State:** `E, N, ψ` (clockwise from north), `v`, `k_s`, `b_ω`, `k_ω`.
 - **Prediction:** at the IMU rate, `ψ̇ = −k_ω (ω − b_ω)`, with `v` as a random walk. Joseph-form updates are used.
-- **GNSS updates** (no integrity module yet, SPEC Phase 3):
+- **GNSS updates** (satellite fixes only once integrity passes them, §8):
   - **Position:** σ = `h_acc / 1.5` for satellite fixes and `h_acc` for coarse ones, with a χ² gate of 16.
   - **Speed** (satellite only): compared with the state 1.0 s earlier (Doppler smoothing).
   - **Course** (satellite only): when ≥ 4 m/s, with σ = max(course accuracy, 2°).
@@ -325,15 +325,52 @@ Measured on the 7 drives of 2026-10-04 (`mag_raw`, 19.4 Hz):
 - **Not yet:** a heading prior for alignment (§6), re-fitting the offset from gyro turns after the phone is
   re-seated.
 
-## 8. Trust (interim, `src/services/position/gnss-trust.ts`)
+## 8. Integrity and trust (`integrity/integrity.ts`, SPEC §3.3)
 
-Until `src/nav/integrity` (SPEC Phase 3), the map's trust state comes from `GnssTrustTracker`:
+`Navigator.onGnss` asks `GnssIntegrity.check` about every satellite fix first. A fix it refuses comes back as
+`status: "untrusted"` with the verdict (`integrity`: `outside`, `jump`, `shape`, `far`, `untrusted`,
+`reacquiring`) and the distance to the nearest hypothesis, and nothing uses it. The map's trust is
+`Navigator.trustAt(t)`.
 
-- **Good fix:** a satellite fix (has a speed) with accuracy ≤ 50 m. Wi-Fi/cell fixes never count, however
-  accurate they claim to be. Counting them used to flip trust on 8 times on a jammed drive.
-- **Losing trust:** no good fix for 8 s → `NO_FIX`.
-- **Regaining trust:** satellite fixes ≤ 30 m arriving steadily for 5 s.
-- Trust changes are written to the trip log (app tag: `gnss trust <state> (±N m)`).
+- **What the navigator gives it:** the OBD distance and the time without OBD speed so far, the relative OBD + gyro
+  track at the fix time (its piece changes at every break: handled phone, stale OBD), and the dead-reckoning
+  hypotheses: the EKF at the lag-corrected fix time, the map-matching clusters ≥ 5 %, or the anchor (σ + distance
+  driven). Hypotheses only while OBD speed came in the last 10 s, or for 30 s after a start from a parked pose
+  before any OBD speed; otherwise the phone may be anywhere.
+- **Checks** (thresholds in `DEFAULT_INTEGRITY_CONFIG`, set from the logs):
+  - Border, then the reach from the last trusted fix. Real steps between satellite fixes exceed the OBD distance by
+    ≤ 19 m (p99 6.5 m) on 14 drives; the reach allows 3σ + 20 m on top of OBD × 1.05 and 3 m/s.
+  - Shape, within one segment (below). Static spoofs fail it once the car drives 50 m.
+  - After a gap > 10 s: max(8σ, 150 m) from every hypothesis. The first fix after 1–8 min cuts on the clean drives
+    lands up to 4.5σ and 188 m off the EKF (overconfident, §13.8).
+- **Segments:** a jump or a gap > 10 s between two satellite fixes starts a new one. A spoof is a segment; when it
+  ends, real fixes start another. Refused fixes that continue their segment come back only on a hypothesis with
+  σ ≤ 30 m; a fix after a jump or gap back on the dead reckoning counts toward the 5 that re-trust. A shape failure
+  in a trusted segment also untrusts that segment's earlier fixes: the jump test then measures from the last
+  trusted fix before it.
+- **Moved like the car:** a held or refused stream whose fixes kept the car's shape for 200 m (≥ 3 tests) is
+  trusted again when the dead reckoning may be wrong: after a gap (`far`), or when the EKF didn't agree with the
+  last trusted fix as the spoofing began. When it did agree, only after 2 km: a stream that jumped away from a
+  dead reckoning that agreed with it is a spoof, however it moves.
+- **Divergence without a jump** (the phone walking off with the driver, wrong dead reckoning) passes: it continues
+  a trusted stream. The EKF's rule (5 rejected satellite fixes reset it, §4) acts on such fixes only, so a spoofed
+  stream can no longer reset the navigator onto itself. On the logs, the resets of q8tfjs and 9qw8wn (walking off)
+  still happen.
+- **Shown trust** over time, as the interim tracker had it (now its home):
+  - Good fix: a satellite fix integrity passed, ≤ 50 m. Wi-Fi/cell fixes never count, however accurate they claim
+    to be (counting them used to flip trust on 8 times on a jammed drive).
+  - Lost: no good fix for 8 s → `NO_FIX`. Regained: passed fixes ≤ 30 m arriving steadily for 5 s.
+  - While integrity refuses: `UNTRUSTED`, `REACQUIRING` once fixes come back to the dead reckoning (or while held
+    after a gap), `NO_FIX` once no satellite fix came for 8 s. The 5 re-trusting fixes count as the regain.
+  - Leaked satellite fixes under jamming pass to the EKF while the shown state stays `NO_FIX`.
+- **Trip log:** trust changes (app tag: `gnss trust <state> (±N m)`), and integrity's verdict when it changes:
+  `gnss integrity <verdict>: <why> (fix ±N m, N m from the dead reckoning)`, e.g. `gnss integrity jump: 4.6 km from
+  the last trusted fix 1 s before, the car could reach 52 m`, and `gnss integrity ok: back on the dead reckoning
+  after 64 s`.
+- **Not caught:** see SPEC §3.3 (without OBD speed only the border and 200 km/h; slow drag-off; spoofs that follow
+  the car). The driver placing the car (§6.2) is the way out of a dead reckoning that went wrong.
+- **Replay:** `--spoof` and `npm run replay:spoof` (§10); the summary's `integrity` counts refusals, spoofed fixes
+  used, real fixes refused and untrusted time away from the spoofing.
 
 ## 9. Wiring into the app (`src/services/navigation/navigator-service.ts`)
 
@@ -353,10 +390,12 @@ Until `src/nav/integrity` (SPEC Phase 3), the map's trust state comes from `Gnss
   - mode `dr` → `source: 'fused'` while trust is `TRUSTED` and a satellite fix was accepted in the last 3 s, else
     `'dr'`;
   - `anchored` → `source: 'gnss'` with the grown radius;
-  - trust from §8;
+  - trust from §8 (`Navigator.trustAt`, at the navigator's time: 300 ms behind);
   - `rawGnss` = the latest fix, for the ghost marker; `distanceSinceTrustedM` from OBD.
-- **Without OBD speed** (no adapter, or none for 10 s): phone GNSS only, as before. The navigator needs OBD speed
-  for DR.
+- **Without OBD speed** (no adapter, or none for 10 s): phone GNSS only. The navigator needs OBD speed for DR. The
+  map shows the latest fix the navigator took, once it has (300 ms after delivery, so a spoofed fix never flashes on
+  the map); while integrity refuses the fixes it holds the last one it passed, its circle growing at 15 m/s, the
+  spoofed fix as the ghost.
 - **Trip log:**
   - `nav_estimate` (TRIP-LOGGER-SPEC §6.3): every position the map was given (~2–3 Hz). It holds the drawn
     position and radius, mode, source, trust, heading and its σ, `k_s`, the GNSS lag in use, the parked-pose status,
@@ -447,6 +486,12 @@ Until `src/nav/integrity` (SPEC Phase 3), the map's trust state comes from `Gnss
   - Gyro drift is not the limit.
 - **Tried with no effect:** fixed `k_ω`, course updates only on straight road, and lower gyro noise. Gyro noise
   ≤ 0.001 makes the filter overconfident; 0.003 is kept.
+- **`npm run replay:spoof`** (integrity, §8): on each clean drive, 60 s windows every 120 s from 30 s after the
+  EKF start (satellite fixes covering ≥ 80 %), replayed once per spoof kind (`src/nav/replay/spoof.ts`: static
+  5 km and 300 m, abroad, following the car 1 km and 150 m off, static 5 km and 300 m after 60 s of jamming) and
+  once cut (the control). Per kind: first spoofed fix refused, spoofed fixes used, time until trust is back, the dot's
+  error when GPS returns (and how much more than with the cut), real fixes refused and untrusted time away from the
+  spoofing. `--any-start` also spoofs before the heading is known. Results: SPEC §7 target 7.
 - **Viewer:** `npm run replay:view` shows how a drive went: what the phone showed and a replay (any navigator
   version, any GPS scenario) against GPS, with every stretch without GPS scored; see `tools/replay/README.md`.
 
@@ -487,8 +532,8 @@ needed to check them (`replay:bench`).
    1.005–1.022 even back to back; `k_s` learns it per drive.
 3. Longer outages (5 / 15 min, SPEC §7) need longer clean drives than the current logs.
 4. Second phone and mount, to check the tuning values (§11).
-5. Integrity (SPEC Phase 3) replaces the interim trust tracker and the EKF gate as the GNSS acceptance rule.
-6. Spoofing replay: offsetting fixes in clean logs (SPEC §3.10) isn't implemented yet.
+5. ~~Integrity (SPEC Phase 3)~~: implemented (§8). It needs a real spoofed drive: none is logged yet.
+6. ~~Spoofing replay~~: `--spoof`, `replay:spoof` (§10).
 7. Replay doesn't load the stored calibration or parked pose a live session started from. `nav_estimate` and the
    `nav …` notes record them; use `--lag` and `--chain` to come close. Nor can it carry the navigator over from
    the previous drive, as the app did on the jammed drive of §9.1.
