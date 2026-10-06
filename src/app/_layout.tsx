@@ -99,6 +99,15 @@ function AppStack() {
         }}
       />
       <Stack.Screen
+        name="map-setup"
+        options={{
+          headerShown: false,
+          presentation: "fullScreenModal",
+          gestureEnabled: false,
+          contentStyle: { backgroundColor: palette.bg },
+        }}
+      />
+      <Stack.Screen
         name="debug-terminal"
         options={{ title: t("elmTerminal"), presentation: "modal" }}
       />

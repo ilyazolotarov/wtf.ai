@@ -150,6 +150,21 @@ export class SearchIndex {
     }
   }
 
+  /**
+   * The region's largest settlements: cities, then towns, by population (the file keeps its
+   * settlements first, by rank). For the route screen's quick picks.
+   */
+  majorSettlements(limit = 8): SearchResult[] {
+    const out: SearchResult[] = [];
+    for (let id = 0; id < this.header.settlements && out.length < limit; id++) {
+      const e = this.entity(id);
+      const tag = this.string(e.tagAt);
+      if (tag !== "place=city" && tag !== "place=town") break; // villages follow
+      out.push(this.result(e, 0));
+    }
+    return out;
+  }
+
   search(query: string, options: SearchOptions = {}): SearchResult[] {
     const limit = options.limit ?? 20;
     const parsed = parseQuery(query);

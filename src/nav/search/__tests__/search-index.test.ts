@@ -49,6 +49,12 @@ describe("SearchIndex", () => {
     expect(index.header.settlements).toBe(2);
   });
 
+  it("lists the region's cities and towns, largest first", () => {
+    // The village isn't a major settlement.
+    expect(open().majorSettlements().map(label)).toEqual(["place:Чернігів"]);
+    expect(open().majorSettlements(0)).toEqual([]);
+  });
+
   it("finds a city by name in either script, while typing", () => {
     expect(search("Чернігів")[0]).toBe("place:Чернігів");
     expect(search("cherniHIV")[0]).toBe("place:Чернігів");

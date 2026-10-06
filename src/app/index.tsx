@@ -14,6 +14,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { MapSurface } from "@/components/map/map-surface";
+import { useHasUsableMap } from "@/config/map";
 import { RouteBanner } from "@/components/route/route-banner";
 import { useVoiceGuidance, useVoiceMuted } from "@/components/route/use-voice-guidance";
 import {
@@ -121,9 +122,15 @@ export default function HomeScreen() {
     setCameraMode(next);
   };
 
+  // First run: onboarding, then a map to download. Each time the map is back on top (the
+  // last region deleted, say), it asks again: the app has no online map.
+  const screenFocused = useIsFocused();
+  const mapReady = useHasUsableMap();
   useEffect(() => {
+    if (!screenFocused) return;
     if (!isOnboardingDone()) router.push("/onboarding");
-  }, []);
+    else if (!mapReady) router.push("/map-setup");
+  }, [screenFocused, mapReady]);
 
   // Tap never enters free (only map gestures do); from free it returns to follow.
   const toggleCameraMode = () => {

@@ -53,7 +53,7 @@ CI runs these plus `expo-doctor` and the unsigned iOS build, each when what it c
 
 ## Privacy
 
-Position data stays on the device; there is no position upload. Standalone (Release) builds send crash reports to Sentry with personal data, coordinates, and VINs removed. During development, the online OpenFreeMap style requests reveal the map area being viewed. This temporary exception must be removed before non-development distribution by switching to offline map tiles.
+Position data stays on the device; there is no position upload. Standalone (Release) builds send crash reports to Sentry with personal data, coordinates, and VINs removed. The map is offline only: a region is downloaded once from GitHub releases, and the app asks for one before it can be used.
 
 ## Project documents
 
