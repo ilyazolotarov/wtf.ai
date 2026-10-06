@@ -73,7 +73,7 @@ function runFile({ file, args }: { file: string; args: Args }): string[] {
   const first = trip.gnss.find((f) => isSatelliteFix(f) && f.hAccM <= 10) ?? trip.gnss.find((f) => f.hAccM < 500);
   if (!first) return [`== ${basename(file)}: no usable fixes`];
   const graphFile = args.graph ?? findGraph(first);
-  if (!graphFile) throw new Error("no graph covers this trip: build one with `tiles graph <region>` or pass --graph");
+  if (!graphFile) return [`== ${basename(file)}: no road graph covers it (tiles graph <region>, or --graph)`];
   // Truth and the replay each get their own reader: the truth matcher moves the graph's frame.
   const truthGraph = openGraph(graphFile, first);
   const truth = matchTruth(trip, truthGraph.graph);
@@ -89,7 +89,10 @@ function runFile({ file, args }: { file: string; args: Args }): string[] {
   });
   const ms = performance.now() - started;
   const s = r.summary.mapMatch!;
-  log(`== ${basename(file)}  (${r.summary.durationS.toFixed(0)} s, ${(r.summary.obdDistanceM / 1000).toFixed(2)} km, graph ${basename(graphFile)}, replay ${(ms / 1000).toFixed(1)} s)`);
+  log(
+    `== ${basename(file)}  (${r.summary.durationS.toFixed(0)} s, ${(r.summary.obdDistanceM / 1000).toFixed(2)} km, ` +
+      `graph ${basename(graphFile)}, ${r.summary.nav.mapMatchLoop} loop, replay ${(ms / 1000).toFixed(1)} s)`,
+  );
   const init = r.summary.init;
   log(
     `  init: ${init ? `${init.method} at ${init.tS.toFixed(0)} s after ${(init.distanceM / 1000).toFixed(2)} km` + (init.estimate ? ` (±${init.estimate.accuracyM.toFixed(0)} m, ±${(((init.estimate.headingSigmaRad ?? 0) * 180) / Math.PI).toFixed(1)}°)` : "") : "never"}; truth: ${truth.points.length} fixes matched`,

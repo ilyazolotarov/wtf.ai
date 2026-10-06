@@ -816,6 +816,16 @@ hundred metres stops matching the twin's.
 
 ### 10.3 Tooling (`tools/replay`)
 
+> **A replay runs what the app runs.** The settings the app ships that differ from the library defaults live in
+> `src/nav/app-defaults.ts`, `replayTrip` starts from them, and `services/runtime.ts` reads the same constant, so
+> the two cannot drift; `app-defaults.test.ts` fails if a listed default stops differing (it would then be dead)
+> or if a replay stops taking them. `--nav '<json>'` still overrides one for an experiment, and `replay:mm` prints
+> which loop it ran. This exists because they did drift: `DEFAULT_NAV_CONFIG.mapMatchLoop` is `open` and the app
+> has shipped `closed` since the switch was added, so every replay measured a different filter from the one in the
+> car — on 2026-10-06 the phone's dot drove through a field for 52 s at 130 km/h while the open-loop replay of
+> that same log never left the road, which made the bug look unreproducible and its fix look
+> worthless. Anything else the app turns on by default belongs in that file.
+
 - `npm run replay:mm -- [--graph <file>] [--cut s:len]… [--open-loop] [--mm '<json config>'] [--trace from:to] <logs>`
   (M4): the §10.2 metrics per drive, wrong-road and lost stretches, update time, filter vs EKF error in cuts;
   `--trace` prints per second the state, top clusters (OSM way, weight, spread), the true way, both errors.

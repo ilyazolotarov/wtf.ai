@@ -17,6 +17,7 @@ import { NavigatorService, type MapMatchLoop } from "./navigation/navigator-serv
 import { ROUTER_CACHE_TILES, RouteService } from "./navigation/route-service";
 import { activeRoadGraph, openActiveRoadGraph } from "./offline-map/road-graph-file";
 import { SensorService } from "./sensor-capture/sensor-service";
+import { APP_NAV_DEFAULTS, APP_ROUTE_HINT } from "@/nav/app-defaults";
 import { createTripFiles } from "./trip-recorder/trip-files";
 import { TripRecorder } from "./trip-recorder/trip-recorder";
 import { NativeDiscovery } from "./vehicle-link/discovery";
@@ -58,8 +59,16 @@ export function getRuntime(): Runtime {
   if (runtime) return runtime;
 
   // Full correction by default (MAPMATCH-SPEC §9): replay and simulation beat the open loop everywhere; the open loop
-  // stays one tap away in the developer settings for comparing on the road.
-  let dev: DevSettings = { showEmulators: __DEV__, showParticles: false, outageButton: false, mapMatchLoop: "closed", routeHint: false, ...(kvStore.getJson<Partial<DevSettings>>(DEV_SETTINGS_KEY) ?? {}) };
+  // stays one tap away in the developer settings for comparing on the road. The navigator's share of these lives in
+  // `nav/app-defaults.ts`, which the replay tools start from, so a replay runs the system the phone does.
+  let dev: DevSettings = {
+    showEmulators: __DEV__,
+    showParticles: false,
+    outageButton: false,
+    mapMatchLoop: APP_NAV_DEFAULTS.mapMatchLoop!,
+    routeHint: APP_ROUTE_HINT,
+    ...(kvStore.getJson<Partial<DevSettings>>(DEV_SETTINGS_KEY) ?? {}),
+  };
   const devListeners = new Set<() => void>();
   const nowUs = () => VehicleLinkModule.nowUs();
   const clock = createClock(nowUs);

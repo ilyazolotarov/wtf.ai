@@ -2,10 +2,20 @@
 // [E, N, ψ (heading, clockwise from north), v, k_s, b_ω (gyro yaw bias), k_ω (gyro yaw scale), o_s], with the OBD
 // speed v = k_s·s_OBD + o_s while it reads above zero (NAVIGATOR-SPEC §5.2: the CX-5 fits 1.019 and −0.23 km/h).
 
-import { identity, inverse, maxEigen2, mul, symmetrize, transpose, zeros, type Mat } from "./matrix";
+import { inverse, maxEigen2, mul, mulInto, setIdentity, symmetrize, transposeInto, zeros, type Mat } from "./matrix";
 
 export const IX = { E: 0, N: 1, PSI: 2, V: 3, KS: 4, BW: 5, KW: 6, SO: 7 } as const;
 const DIM = 8;
+
+/** Scratch DIM × DIM matrices for predict and update (matrix.ts `mulInto`); every EKF uses them in turn. */
+const M = { a: zeros(DIM, DIM), b: zeros(DIM, DIM), c: zeros(DIM, DIM), d: zeros(DIM, DIM), next: zeros(DIM, DIM) };
+/** Scratch for an update with `rows` measurements. */
+const byRows = new Map<number, { Ht: Mat; PHt: Mat; K: Mat; KR: Mat; Kt: Mat }>();
+function measurementScratch(rows: number) {
+  let s = byRows.get(rows);
+  if (!s) byRows.set(rows, (s = { Ht: zeros(DIM, rows), PHt: zeros(DIM, rows), K: zeros(DIM, rows), KR: zeros(DIM, rows), Kt: zeros(rows, DIM) }));
+  return s;
+}
 
 export interface EkfConfig {
   /** Speed random walk (acceleration), m/s². */
@@ -140,7 +150,7 @@ export class DrEkf {
     this.x[IX.N] += v * co * dt;
     this.x[IX.PSI] = wrapAngle(psi - kw * omega * dt);
 
-    const F = identity(DIM);
+    const F = setIdentity(M.a);
     F[IX.E][IX.PSI] = v * co * dt;
     F[IX.E][IX.V] = s * dt;
     F[IX.N][IX.PSI] = -v * s * dt;
@@ -150,7 +160,7 @@ export class DrEkf {
       F[IX.PSI][IX.KW] = -omega * dt;
     }
 
-    const next = mul(mul(F, this.P), transpose(F));
+    const next = mulInto(M.next, mulInto(M.b, F, this.P), transposeInto(M.c, F));
     const yawNoise = yawRate === null ? c.handlingYawNoise : c.gyroNoise * kw;
     next[IX.E][IX.E] += c.positionNoise ** 2 * dt;
     next[IX.N][IX.N] += c.positionNoise ** 2 * dt;
@@ -161,7 +171,16 @@ export class DrEkf {
     next[IX.KW][IX.KW] += c.yawScaleWalk ** 2 * dt;
     if (c.initSpeedOffsetSigma > 0) next[IX.SO][IX.SO] += c.speedOffsetWalk ** 2 * dt;
     symmetrize(next);
-    for (let i = 0; i < DIM; i++) this.P[i] = next[i];
+    this.takeP(next);
+  }
+
+  /** P becomes `next` (scratch `M.next`): their rows swap, so the scratch gets P's old rows to write over. */
+  private takeP(next: Mat): void {
+    for (let i = 0; i < DIM; i++) {
+      const row = this.P[i];
+      this.P[i] = next[i];
+      next[i] = row;
+    }
   }
 
   /**
@@ -248,8 +267,8 @@ export class DrEkf {
   }
 
   private update(H: Mat, y: number[], R: Mat, gate = Infinity): UpdateResult {
-    const Ht = transpose(H);
-    const PHt = mul(this.P, Ht);
+    const m = measurementScratch(H.length);
+    const PHt = mulInto(m.PHt, this.P, transposeInto(m.Ht, H));
     const S = mul(H, PHt);
     for (let i = 0; i < S.length; i++) for (let j = 0; j < S.length; j++) S[i][j] += R[i][j];
     const Si = inverse(S);
@@ -257,19 +276,19 @@ export class DrEkf {
     const nis = ySi.reduce((acc, v, i) => acc + v * y[i], 0);
     if (!(nis <= gate)) return { accepted: false, nis };
 
-    const K = mul(PHt, Si);
+    const K = mulInto(m.K, PHt, Si);
     for (let i = 0; i < DIM; i++) this.x[i] += K[i].reduce((acc, k, j) => acc + k * y[j], 0);
     this.x[IX.PSI] = wrapAngle(this.x[IX.PSI]);
 
     // Joseph form keeps P symmetric positive-definite.
-    const IKH = identity(DIM);
-    const KH = mul(K, H);
+    const IKH = setIdentity(M.a);
+    const KH = mulInto(M.b, K, H);
     for (let i = 0; i < DIM; i++) for (let j = 0; j < DIM; j++) IKH[i][j] -= KH[i][j];
-    const next = mul(mul(IKH, this.P), transpose(IKH));
-    const KRKt = mul(mul(K, R), transpose(K));
+    const next = mulInto(M.next, mulInto(M.c, IKH, this.P), transposeInto(M.d, IKH));
+    const KRKt = mulInto(M.b, mulInto(m.KR, K, R), transposeInto(m.Kt, K));
     for (let i = 0; i < DIM; i++) for (let j = 0; j < DIM; j++) next[i][j] += KRKt[i][j];
     symmetrize(next);
-    for (let i = 0; i < DIM; i++) this.P[i] = next[i];
+    this.takeP(next);
     return { accepted: true, nis };
   }
 }

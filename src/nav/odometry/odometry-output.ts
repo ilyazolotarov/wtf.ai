@@ -58,22 +58,25 @@ export interface OdometryChunkConfig {
 
 export const DEFAULT_ODOMETRY_CHUNK: OdometryChunkConfig = { maxDistanceM: 2, maxDurationS: 0.2, speedNoiseMps: 0.1 };
 
-/** Sums increments into chunks of ≤ 2 m or ≤ 0.2 s (whichever first) and hands them out. */
+const NO_STEPS: readonly OdometryStep[] = [];
+
+/**
+ * Sums increments into chunks of ≤ 2 m or ≤ 0.2 s (whichever first) and hands them out: `add` and `flush` return the
+ * chunks they close (returned, not called back, so a forked navigator's chunker holds no closure).
+ */
 export class OdometryChunker {
   private readonly config: OdometryChunkConfig;
   private pending: (OdometryIncrement & { t0Us: number; durationS: number; whiteVar: number; calibration: OdometryCalibration }) | null = null;
   private distanceM = 0;
   private turnRad = 0;
 
-  constructor(
-    private readonly emit: (step: OdometryStep) => void,
-    config: Partial<OdometryChunkConfig> = {},
-  ) {
+  constructor(config: Partial<OdometryChunkConfig> = {}) {
     this.config = { ...DEFAULT_ODOMETRY_CHUNK, ...config };
   }
 
-  add(inc: OdometryIncrement, calibration: OdometryCalibration): void {
-    if (this.pending && this.pending.source !== inc.source) this.flush();
+  /** The chunks this closes: none, one, or two (a source change closes the one before). */
+  add(inc: OdometryIncrement, calibration: OdometryCalibration): readonly OdometryStep[] {
+    const before = this.pending && this.pending.source !== inc.source ? this.flush() : null;
     const p = this.pending;
     if (!p) {
       this.pending = { ...inc, t0Us: inc.tUs - inc.dtS * 1e6, durationS: inc.dtS, whiteVar: inc.dpsiWhiteVar, calibration };
@@ -89,7 +92,14 @@ export class OdometryChunker {
       p.calibration = calibration;
     }
     const q = this.pending!;
-    if (q.dsM >= this.config.maxDistanceM || q.durationS >= this.config.maxDurationS) this.flush();
+    const closed = q.dsM >= this.config.maxDistanceM || q.durationS >= this.config.maxDurationS ? this.flush() : null;
+    if (before) return closed ? [before, closed] : [before];
+    return closed ? [closed] : NO_STEPS;
+  }
+
+  /** The source of the chunk being summed (null: none). */
+  get pendingSource(): OdometryIncrement["source"] | null {
+    return this.pending?.source ?? null;
   }
 
   /** Cumulative distance and turn of the chunks emitted so far. */
@@ -97,15 +107,15 @@ export class OdometryChunker {
     return { distanceM: this.distanceM, turnRad: this.turnRad };
   }
 
-  /** Emit what has been summed so far (source change, reset, end of input). */
-  flush(): void {
+  /** Close what has been summed so far (source change, reset, end of input); null: nothing was. */
+  flush(): OdometryStep | null {
     const p = this.pending;
-    if (!p) return;
+    if (!p) return null;
     this.pending = null;
     const c = p.calibration;
     this.distanceM += p.dsM;
     this.turnRad += p.dpsiRad;
-    this.emit({
+    return {
       t0Us: p.t0Us,
       t1Us: p.tUs,
       dsM: p.dsM,
@@ -119,6 +129,6 @@ export class OdometryChunker {
       yawUnknown: p.yawUnknown,
       speedUnknown: p.speedUnknown,
       source: p.source,
-    });
+    };
   }
 }

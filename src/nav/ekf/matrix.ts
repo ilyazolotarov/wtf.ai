@@ -28,6 +28,41 @@ export function transpose(a: Mat): Mat {
   return a[0].map((_, j) => a.map((row) => row[j]));
 }
 
+// In place, into matrices made once (zeros): the EKF predicts at the IMU rate, and allocating every product was most
+// of its cost. The same sums in the same order as `mul`, `transpose`, `identity`, so the results are identical.
+
+/** `out` (a.length × b[0].length, neither `a` nor `b`) = a·b. */
+export function mulInto(out: Mat, a: Mat, b: Mat): Mat {
+  const cols = b[0].length;
+  for (let i = 0; i < a.length; i++) {
+    const row = out[i];
+    row.fill(0);
+    const ai = a[i];
+    for (let k = 0; k < b.length; k++) {
+      const aik = ai[k];
+      if (aik === 0) continue;
+      const bk = b[k];
+      for (let j = 0; j < cols; j++) row[j] += aik * bk[j];
+    }
+  }
+  return out;
+}
+
+/** `out` (a[0].length × a.length) = aᵀ. */
+export function transposeInto(out: Mat, a: Mat): Mat {
+  for (let i = 0; i < a.length; i++) for (let j = 0; j < a[i].length; j++) out[j][i] = a[i][j];
+  return out;
+}
+
+/** `m` (square) = I. */
+export function setIdentity(m: Mat): Mat {
+  for (let i = 0; i < m.length; i++) {
+    m[i].fill(0);
+    m[i][i] = 1;
+  }
+  return m;
+}
+
 /** Inverse of a small symmetric positive-definite matrix (Gauss-Jordan). */
 export function inverse(a: Mat): Mat {
   const n = a.length;

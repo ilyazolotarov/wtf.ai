@@ -13,10 +13,11 @@ describe("OdometryChunker", () => {
 
   test("closes a chunk at 2 m or 0.2 s, and keeps cumulative totals", () => {
     const steps: OdometryStep[] = [];
-    const c = new OdometryChunker((s) => steps.push(s));
-    for (let k = 1; k <= 40; k++) c.add(inc(k * 10_000, { dsM: 0.15 }), cal); // 2 m every 14 steps
-    for (let k = 41; k <= 80; k++) c.add(inc(k * 10_000, { dsM: 0, dpsiRad: 0, stopped: true }), cal); // 0.2 s every 20
-    c.flush();
+    const c = new OdometryChunker();
+    for (let k = 1; k <= 40; k++) steps.push(...c.add(inc(k * 10_000, { dsM: 0.15 }), cal)); // 2 m every 14 steps
+    for (let k = 41; k <= 80; k++) steps.push(...c.add(inc(k * 10_000, { dsM: 0, dpsiRad: 0, stopped: true }), cal)); // 0.2 s every 20
+    const last = c.flush();
+    if (last) steps.push(last);
     expect(steps.map((s) => s.dsM.toFixed(2))).toEqual(["2.10", "2.10", "1.80", "0.00", "0.00"]);
     // The third chunk (12 moving steps) runs on into the stopped ones until 0.2 s.
     expect(steps[2]).toMatchObject({ stopped: false, t0Us: 280_000, t1Us: 480_000 });
@@ -27,11 +28,12 @@ describe("OdometryChunker", () => {
 
   test("a source change closes the chunk; flags combine; variances", () => {
     const steps: OdometryStep[] = [];
-    const c = new OdometryChunker((s) => steps.push(s));
-    c.add(inc(10_000, { source: "relative", yawUnknown: true }), cal);
-    c.add(inc(20_000, { source: "relative", speedUnknown: true }), cal);
-    c.add(inc(30_000), cal);
-    c.flush();
+    const c = new OdometryChunker();
+    steps.push(...c.add(inc(10_000, { source: "relative", yawUnknown: true }), cal));
+    steps.push(...c.add(inc(20_000, { source: "relative", speedUnknown: true }), cal));
+    steps.push(...c.add(inc(30_000), cal));
+    const last = c.flush();
+    if (last) steps.push(last);
     expect(steps).toHaveLength(2);
     expect(steps[0]).toMatchObject({ source: "relative", yawUnknown: true, speedUnknown: true });
     expect(steps[1]).toMatchObject({ source: "ekf", yawUnknown: false, speedUnknown: false });

@@ -11,6 +11,7 @@
 
 import { Compass, type CompassCalibration, type CompassConfig, type CompassTrust } from "./compass/compass";
 import { GnssLagEstimator, type GnssLagConfig, type GnssLagEstimate } from "./calibration/gnss-lag";
+import { deepCopy } from "./deep-copy";
 import { DEFAULT_EKF_CONFIG, DrEkf, wrapAngle, type EkfConfig } from "./ekf/dr-ekf";
 import { alignHeading, type AlignConfig, type AlignPoint } from "./ekf/heading-align";
 import { haversineM, type Coordinate } from "./geo";
@@ -425,9 +426,7 @@ export class Navigator {
   private nextCompassUs = -Infinity;
   private readonly ekfConfig: EkfConfig;
   private odometryListeners: ((step: OdometryStep) => void)[] = [];
-  private readonly odometry = new OdometryChunker((step) => {
-    for (const listener of this.odometryListeners) listener(step);
-  });
+  private readonly odometry = new OdometryChunker();
   private mapGraph: MapMatchGraph | null = null;
   private pf: ParticleFilter | null = null;
   /** The route the driver follows, for the filter (`setRouteHint`). */
@@ -519,10 +518,7 @@ export class Navigator {
     this.trackingFromM = null;
     if (!graph) return;
     if (this.frame) graph.setFrame(this.frame);
-    if (!this.mapMatchListening) {
-      this.mapMatchListening = true;
-      this.odometryListeners.push((step) => this.mapMatchOdometry(step));
-    }
+    this.mapMatchListening = true;
     if (this.ekf) this.startMapMatch();
     else this.startMapMatchAtAnchor();
   }
@@ -577,7 +573,28 @@ export class Navigator {
 
   /** Hand out the odometry summed since the last chunk (end of input). */
   flushOdometry(): void {
-    this.odometry.flush();
+    const step = this.odometry.flush();
+    if (step) this.emitOdometry(step);
+  }
+
+  private emitOdometry(step: OdometryStep): void {
+    for (const listener of this.odometryListeners) listener(step);
+    if (this.mapMatchListening) this.mapMatchOdometry(step);
+  }
+
+  /**
+   * An independent copy of this navigator as it is now, sharing only the road graph (a replay continues a drive
+   * from here in several ways, replay.ts). Without odometry listeners: they couldn't follow the copy. A copy, or
+   * this navigator after a copy ran, calls `resume` before its next input.
+   */
+  fork(): Navigator {
+    if (this.odometryListeners.length) throw new Error("Navigator.fork: odometry listeners can't follow a copy");
+    return deepCopy(this, new Map(this.mapGraph ? [[this.mapGraph, this.mapGraph]] : []));
+  }
+
+  /** Takes back the shared road graph for this navigator's frame (after another copy, `fork`, used it). */
+  resume(): void {
+    if (this.mapGraph && this.frame) this.mapGraph.setFrame(this.frame);
   }
 
   get mode(): NavMode {
@@ -717,7 +734,7 @@ export class Navigator {
     this.lagEstimator.onFix(fix.tUs, fix, fix.hAccM, isSatelliteFix(fix));
     const sigma = fixSigma(fix);
     // The filter must be at the fix time before it weighs the fix.
-    if (this.pf) this.odometry.flush();
+    if (this.pf) this.flushOdometry();
     const outcome = this.ekf ? this.updateEkf(fix, fE, fN, tRef, sigma) : this.updateBeforeInit(fix, fE, fN, tRef, sigma);
     if (verdict.integrity) this.integrity.onUsed(outcome.status === "accepted" || outcome.status === "init");
     const pf = this.pf;
@@ -955,7 +972,7 @@ export class Navigator {
       this.lagEstimator.onTrack(tUs, this.rel.e, this.rel.n, this.rel.psi, speed);
     }
 
-    if (this.odometryListeners.length) this.addOdometry(tUs, dt, speed, yaw, hold, obdFresh);
+    if (this.mapMatchListening || this.odometryListeners.length) this.addOdometry(tUs, dt, speed, yaw, hold, obdFresh);
 
     if (this.ekf) {
       // Standing: hold the heading (yaw input = bias → no rotation).
@@ -1007,10 +1024,14 @@ export class Navigator {
       };
     }
     const white = yawUnknown ? c.handlingYawNoise ** 2 * dt : hold ? 0 : (c.gyroNoise * kw) ** 2 * dt;
-    this.odometry.add(
-      { tUs, dtS: dt, dsM: ds, dpsiRad: dpsi, dpsiWhiteVar: white, stopped: hold || ds < STOPPED_SPEED_MPS * dt, yawUnknown, speedUnknown: !obdFresh, source: this.ekf ? "ekf" : "relative" },
+    const source = this.ekf ? "ekf" : "relative";
+    // A source change closes the chunk before this increment joins the next one: handed out first.
+    if (this.odometry.pendingSource !== null && this.odometry.pendingSource !== source) this.flushOdometry();
+    const steps = this.odometry.add(
+      { tUs, dtS: dt, dsM: ds, dpsiRad: dpsi, dpsiWhiteVar: white, stopped: hold || ds < STOPPED_SPEED_MPS * dt, yawUnknown, speedUnknown: !obdFresh, source },
       calibration,
     );
+    for (const step of steps) this.emitOdometry(step);
   }
 
   private reanchor(): void {
@@ -1035,7 +1056,7 @@ export class Navigator {
   private startMapMatch(): void {
     const ekf = this.ekf;
     if (!this.pf || !ekf) return;
-    this.odometry.flush();
+    this.flushOdometry();
     this.offRoadFromM = null;
     this.trackingFromM = null;
     this.pf.init(ekf.east, ekf.north, ekf.positionSigma, ekf.psi, ekf.psiSigma, this.odometry.totals);
@@ -1049,7 +1070,7 @@ export class Navigator {
     const pf = this.pf;
     const anchor = this.anchor;
     if (!pf || !anchor || !this.frame || this.ekf) return;
-    this.odometry.flush();
+    this.flushOdometry();
     this.offRoadFromM = null;
     this.trackingFromM = null;
     this.nextMapStartCheckM = 0;

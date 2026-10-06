@@ -469,6 +469,12 @@ Measured on the 7 drives of 2026-10-04 (`mag_raw`, 19.4 Hz):
   dot is what the service publishes (`nav_estimate`), and the parked pose, stored calibration and simulated outages
   are the app's code. The viewer uses it, so a fix in the app needs no copy in the replay. Both record through one
   `ReplayRecorder`; the dot's rule is `src/nav/position/puck.ts`.
+- **Forks:** `TripReplay` (behind `replayTrip`) feeds a drive in steps and forks: an independent copy of the
+  navigator and recorder from that moment (`Navigator.fork`, a deep copy sharing only the road graph), which can
+  then take an outage of its own. A fork's result must equal a replay with the same cuts from the start
+  (`fork.test.ts`); so navigator state keeps no closures (`deep-copy.ts` refuses them). `replay:bench` replays each
+  drive once per seed up to each window and goes on from forks, and leaves out before any replay the windows whose
+  satellite fixes couldn't reach the truth share.
 - **Starting as the phone did:** when a navigator starts, and when it learns the car, the service notes what is
   stored (`nav storage {json}`: the GNSS lag; per car the parked pose, speed scale and compass, raw). A replay seeds
   its storage from these notes (`seedFromLog`), and `npm run replay:parity` compares its dot with the phone's. With

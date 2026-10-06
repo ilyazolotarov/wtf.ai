@@ -14,14 +14,16 @@
 // The particle filter is random and one run of it is noisy, so whatever uses it runs with `--seeds`
 // seeds (default 3, from `--mm-config`'s `seed`, else 1) and the results are pooled. With the map the
 // EKF varies by seed too (a map start sets its pose); without it, it is deterministic and runs once.
-// `--seeds 1` for a quick look. Windows run on worker threads (`--threads <n>`, default all cores but one).
+// `--seeds 1` for a quick look. Windows run on worker threads (`--threads <n>`, default all cores but one); a drive is
+// replayed once per seed up to each window, which goes on from a copy there (TripReplay forks). Windows that can't have
+// enough held-out truth (jammed GNSS) are left out before any replay; with --mm, so are drives no road graph covers.
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
 import type { MapMatchConfig } from "../../src/nav/mapmatch/particle-filter";
 import type { NavConfig } from "../../src/nav/navigator";
-import { replayTrip, type CutResult, type ReplayOptions } from "../../src/nav/replay/replay";
+import { replayTrip, TripReplay, type CutResult, type ReplayOptions } from "../../src/nav/replay/replay";
 import { isSatelliteFix } from "../../src/nav/types";
 import { readTripLog, type TripLog } from "../../src/triplog/trip-log-reader";
 import { findGraph, openGraph } from "./graph-file";
@@ -106,6 +108,8 @@ const pct = (v: number[], p: number) => {
 
 /** Replays a window runs to a little past its end (held-out fixes are scored with the GNSS lag), not to the drive's end. */
 const WINDOW_TAIL_S = 5;
+/** Satellite fixes this accurate are the held-out truth (ReplayOptions.truthAccuracyM's default). */
+const TRUTH_ACCURACY_M = 10;
 
 interface Options {
   nav: Partial<NavConfig>;
@@ -115,67 +119,116 @@ interface Options {
   seeds: number[];
   durationsS: number[];
 }
-type Job = { kind: "plan"; file: string; o: Options } | { kind: "window"; file: string; o: Options; fromS: number; lenS: number };
-/** A drive's windows: outage starts per length (none when the EKF never starts). */
-type Plan = { durationS: number; starts: Map<number, number[]> } | null;
-/** One window's runs, one per seed (empty when the window doesn't qualify). */
-type WindowRuns = { cut: CutResult; verbose: string }[];
+/** The windows starting at one time: their lengths, shortest first. */
+type Start = { fromS: number; lensS: number[] };
+type Job = { kind: "plan"; file: string; o: Options } | { kind: "windows"; file: string; o: Options; seed: number; starts: Start[] };
+/** A drive's windows: outage starts per length (none when the EKF never starts), or why it is left out. */
+type Plan = { durationS: number; starts: Map<number, number[]> } | { skipped: string } | null;
+/** A window's run with one seed (cut null: the window doesn't qualify). */
+type WindowRun = { fromS: number; lenS: number; cut: CutResult | null };
 
-// Per worker: a drive and its graph stay open across the windows it gets (jobs come in drive order).
-let cached: { file: string; trip: TripLog; graph: ReturnType<typeof openGraph> | null } | null = null;
+// Per worker: a drive and its graph stay open across the jobs it gets.
+let cached: { file: string; trip: TripLog; graph: ReturnType<typeof openGraph> | null; skipped?: string } | null = null;
 function load(file: string, o: Options) {
   if (cached?.file === file) return cached;
   cached?.graph?.close();
   const trip = readTripLog(new Uint8Array(readFileSync(file)));
-  let graph: ReturnType<typeof openGraph> | null = null;
+  cached = { file, trip, graph: null };
   if (o.mm) {
     const first = trip.gnss.find((f) => isSatelliteFix(f) && f.hAccM <= 10) ?? trip.gnss.find((f) => f.hAccM < 500);
-    const graphFile = o.graph ?? (first ? findGraph(first) : null);
-    if (!graphFile) throw new Error(`${path.basename(file)}: no road graph covers it (tiles graph <region>, or --graph)`);
-    graph = openGraph(graphFile, first!);
+    const graphFile = first && (o.graph ?? findGraph(first));
+    if (!first) cached.skipped = "no fix to place the road graph";
+    else if (!graphFile) cached.skipped = "no road graph covers it (tiles graph <region>, or --graph)";
+    else cached.graph = openGraph(graphFile, first);
   }
-  cached = { file, trip, graph };
   return cached;
 }
 
 function plan(file: string, o: Options): Plan {
-  const { trip } = load(file, o);
+  const { trip, skipped } = load(file, o);
+  if (skipped) return { skipped };
   const base = replayTrip(trip, { nav: o.nav });
   if (!base.summary.init) return null;
   // On a fixed grid of log time: a change that moves the EKF start by a few seconds then still
   // scores the same windows (a shifted grid samples other outages and moved the medians by 5 m).
   const from = Math.ceil((base.summary.init.tS + 10) / STEP_S) * STEP_S;
   const away = phoneAwayTimes(trip);
+  // The held-out truth a window can have at most: the satellite fixes this accurate inside it. Windows that would
+  // fall short of MIN_TRUTH_SHARE (jammed drives) are left out without replaying them.
+  const truth = trip.gnss.filter((f) => isSatelliteFix(f) && f.hAccM <= TRUTH_ACCURACY_M).map((f) => (f.tUs - trip.startUs) / 1e6);
+  const count = (times: number[], t: number, d: number) => times.filter((a) => a >= t && a < t + d).length;
   const starts = new Map<number, number[]>();
   for (const d of o.durationsS) {
     const list: number[] = [];
     for (let t = from; t + d <= base.summary.durationS; t += STEP_S) {
-      if (away.filter((a) => a >= t && a < t + d).length < MAX_PHONE_AWAY_FIXES) list.push(t);
+      if (count(away, t, d) < MAX_PHONE_AWAY_FIXES && count(truth, t, d) >= MIN_TRUTH_SHARE * d) list.push(t);
     }
     starts.set(d, list);
   }
   return { durationS: base.summary.durationS, starts };
 }
 
-function runWindow(file: string, o: Options, t: number, d: number): WindowRuns {
+/**
+ * One seed's windows on a drive, starts in order. The drive is replayed once up to each start and every window goes
+ * on from a fork there (TripReplay): the longest with its cut, and each shorter one forked off it at its own end —
+ * up to then they withhold the same fixes. The same results as a replay per window from the drive's start.
+ */
+function runWindows(file: string, o: Options, seed: number, starts: Start[]): WindowRun[] {
   const { trip, graph } = load(file, o);
-  const out: WindowRuns = [];
   // With the map the EKF depends on the seed too: a map start sets the pose everything after carries.
-  for (const seed of o.mm ? o.seeds : [o.seeds[0]]) {
-    const options: ReplayOptions = { nav: o.nav, ...(graph ? { mapMatch: { graph: graph.graph, config: { ...o.mmConfig, seed } } } : {}) };
-    const cut = replayTrip(trip, { ...options, cuts: [{ fromS: t, toS: t + d }], untilS: t + d + WINDOW_TAIL_S }).summary.cuts[0];
-    if (cut.truthFixes < MIN_TRUTH_SHARE * d || cut.distanceM < MIN_DISTANCE_M || cut.maxErrorM === null) break;
-    const verbose =
-      `  ${path.basename(file)} ${t}+${d}s${o.mm && o.seeds.length > 1 ? ` #${seed}` : ""} ${(cut.distanceM / 1000).toFixed(2)} km: ` +
-      `max ${cut.maxErrorM.toFixed(0)} m, end ${cut.lastErrorM!.toFixed(0)} m, σ ${cut.meanSigmaM!.toFixed(0)} m` +
-      (o.mm ? ` | map match max ${cut.mapMatchMaxErrorM?.toFixed(0) ?? "—"} m, end ${cut.mapMatchLastErrorM?.toFixed(0) ?? "—"} m` : "");
-    out.push({ cut, verbose });
+  const options: ReplayOptions = { nav: o.nav, ...(graph ? { mapMatch: { graph: graph.graph, config: { ...o.mmConfig, seed } } } : {}) };
+  const drive = TripReplay.start(trip, options);
+  const out: WindowRun[] = [];
+  const score = (r: TripReplay, t: number, d: number) => {
+    r.runTo(t + d + WINDOW_TAIL_S);
+    const cut = r.finish().summary.cuts[0];
+    const qualifies = cut.truthFixes >= MIN_TRUTH_SHARE * d && cut.distanceM >= MIN_DISTANCE_M && cut.maxErrorM !== null;
+    out.push({ fromS: t, lenS: d, cut: qualifies ? cut : null });
+  };
+  for (const { fromS: t, lensS } of starts) {
+    drive.runBefore(t);
+    const longest = drive.fork();
+    longest.addCut({ fromS: t, toS: t + lensS[lensS.length - 1] });
+    for (const d of lensS.slice(0, -1)) {
+      longest.runBefore(t + d);
+      const shorter = longest.fork();
+      shorter.endLastCut(t + d);
+      score(shorter, t, d);
+    }
+    score(longest, t, lensS[lensS.length - 1]);
   }
   return out;
 }
 
-function runJob(job: Job): Plan | WindowRuns {
-  return job.kind === "plan" ? plan(job.file, job.o) : runWindow(job.file, job.o, job.fromS, job.lenS);
+/**
+ * A drive's windows for one seed, split into jobs of consecutive starts. A job replays the drive up to its first
+ * start, so fewer jobs replay less; more spread a long drive over more cores. Each takes about three drives'
+ * worth of window replay.
+ */
+function windowJobs(file: string, o: Options, seed: number, plan: { durationS: number; starts: Map<number, number[]> }): (Job & { cost: number })[] {
+  const byStart = new Map<number, number[]>();
+  for (const [d, list] of plan.starts) for (const t of list) byStart.set(t, [...(byStart.get(t) ?? []), d]);
+  const starts = [...byStart].sort((a, b) => a[0] - b[0]).map(([fromS, lens]) => ({ fromS, lensS: lens.sort((a, b) => a - b) }));
+  const work = (s: Start) => s.lensS[s.lensS.length - 1] + s.lensS.length * WINDOW_TAIL_S;
+  const total = starts.reduce((sum, s) => sum + work(s), 0);
+  const per = total / Math.max(1, Math.ceil(total / (3 * plan.durationS)));
+  const jobs: (Job & { cost: number })[] = [];
+  let group: Start[] = [];
+  let sum = 0;
+  for (const s of starts) {
+    group.push(s);
+    sum += work(s);
+    if (sum >= per - 1e-9 || s === starts[starts.length - 1]) {
+      jobs.push({ kind: "windows", file, o, seed, starts: group, cost: group[group.length - 1].fromS + sum });
+      group = [];
+      sum = 0;
+    }
+  }
+  return jobs;
+}
+
+function runJob(job: Job): Plan | WindowRun[] {
+  return job.kind === "plan" ? plan(job.file, job.o) : runWindows(job.file, job.o, job.seed, job.starts);
 }
 
 async function main() {
@@ -195,19 +248,42 @@ async function main() {
   const pool = new Pool(import.meta.url, threads);
   try {
     const plans = await pool.map<Job, Plan>(files.map((file) => ({ kind: "plan", file, o })));
-    const jobs: Job[] = [];
+    const jobs: (Job & { cost: number })[] = [];
     files.forEach((file, k) => {
-      for (const [d, starts] of plans[k]?.starts ?? []) for (const t of starts) jobs.push({ kind: "window", file, o, fromS: t, lenS: d });
+      const p = plans[k];
+      if (p && "skipped" in p) console.log(`skipped ${path.basename(file)}: ${p.skipped}`);
+      else if (p) for (const seed of runSeeds) jobs.push(...windowJobs(file, o, seed, p));
     });
-    const runs = await pool.map<Job, WindowRuns>(jobs);
+    // The longest first, so no core is left with a long one at the end.
+    jobs.sort((a, b) => b.cost - a.cost);
+    const runs = await pool.map<Job, WindowRun[]>(jobs.map(({ cost: _, ...job }) => job));
+    const results = new Map<string, CutResult | null>();
+    const key = (file: string, d: number, t: number, seed: number) => `${file}\n${d}\n${t}\n${seed}`;
     jobs.forEach((job, k) => {
-      if (job.kind !== "window") return;
-      for (const { cut, verbose: line } of runs[k]) {
-        byDuration.get(job.lenS)!.push({ ...cut, file: path.basename(job.file) });
-        if (cut.mapMatchMaxErrorM !== null && cut.mapMatchMaxErrorM !== undefined) {
-          mmByDuration.get(job.lenS)!.push({ maxM: cut.mapMatchMaxErrorM, endM: cut.mapMatchLastErrorM!, ekfMaxM: cut.maxErrorM! });
+      if (job.kind === "windows") for (const r of runs[k]) results.set(key(job.file, r.lenS, r.fromS, job.seed), r.cut);
+    });
+    // In drive, length, start order; a window's seeds until the first that doesn't qualify.
+    files.forEach((file, k) => {
+      const p = plans[k];
+      if (!p || "skipped" in p) return;
+      for (const [d, starts] of p.starts) {
+        for (const t of starts) {
+          for (const seed of runSeeds) {
+            const cut = results.get(key(file, d, t, seed));
+            if (!cut) break;
+            byDuration.get(d)!.push({ ...cut, file: path.basename(file) });
+            if (cut.mapMatchMaxErrorM !== null && cut.mapMatchMaxErrorM !== undefined) {
+              mmByDuration.get(d)!.push({ maxM: cut.mapMatchMaxErrorM, endM: cut.mapMatchLastErrorM!, ekfMaxM: cut.maxErrorM! });
+            }
+            if (verbose) {
+              console.log(
+                `  ${path.basename(file)} ${t}+${d}s${mm && seeds.length > 1 ? ` #${seed}` : ""} ${(cut.distanceM / 1000).toFixed(2)} km: ` +
+                  `max ${cut.maxErrorM!.toFixed(0)} m, end ${cut.lastErrorM!.toFixed(0)} m, σ ${cut.meanSigmaM!.toFixed(0)} m` +
+                  (mm ? ` | map match max ${cut.mapMatchMaxErrorM?.toFixed(0) ?? "—"} m, end ${cut.mapMatchLastErrorM?.toFixed(0) ?? "—"} m` : ""),
+              );
+            }
+          }
         }
-        if (verbose) console.log(line);
       }
     });
   } finally {

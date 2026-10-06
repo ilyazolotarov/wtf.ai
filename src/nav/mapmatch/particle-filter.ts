@@ -6,6 +6,7 @@
 import type { OdometryStep } from "../odometry/odometry-output";
 import { EdgeFlag, NodeFlag, Oneway, RoadClass } from "./graph/format";
 import type { EdgeId, Exit, NearEdge, RoadEdge, RoadGraph } from "./graph/road-graph";
+import { heaviestFirst } from "./weight-order";
 
 export interface MapMatchConfig {
   /** Particle count while tracking (N_track). */
@@ -285,17 +286,25 @@ const wrap = (a: number) => a - TWO_PI * Math.floor((a + Math.PI) / TWO_PI);
 const edgeLength = (e: RoadEdge) => e.cum[e.cum.length - 1];
 const now = () => globalThis.performance?.now() ?? Date.now();
 
-function rng(seed: number) {
-  let a = seed >>> 0;
-  const uniform = () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
+/** Mulberry32. A class, not a closure, so a forked filter (Navigator.fork) carries on the same sequence. */
+class Rng {
+  private a: number;
+
+  constructor(seed: number) {
+    this.a = seed >>> 0;
+  }
+
+  uniform(): number {
+    this.a = (this.a + 0x6d2b79f5) >>> 0;
+    let t = this.a;
     t = Math.imul(t ^ (t >>> 15), t | 1);
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-  const gauss = () => Math.sqrt(-2 * Math.log(1 - uniform())) * Math.cos(TWO_PI * uniform());
-  return { uniform, gauss };
+  }
+
+  gauss(): number {
+    return Math.sqrt(-2 * Math.log(1 - this.uniform())) * Math.cos(TWO_PI * this.uniform());
+  }
 }
 
 interface ExitChoice {
@@ -404,7 +413,7 @@ export class ParticleFilter {
   readonly config: MapMatchConfig;
   private p: Particles;
   private spare: Particles;
-  private readonly random: ReturnType<typeof rng>;
+  private readonly random: Rng;
   private active = false;
   /** False after an unknown-heading start until the filter first tracks (state `init`, §7.6). */
   private resolved = true;
@@ -451,7 +460,7 @@ export class ParticleFilter {
     this.config = { ...DEFAULT_MAP_MATCH, ...config };
     this.p = new Particles(this.config.particles);
     this.spare = new Particles(this.config.particles);
-    this.random = rng(this.config.seed);
+    this.random = new Rng(this.config.seed);
   }
 
   get isActive(): boolean {
@@ -1287,7 +1296,7 @@ export class ParticleFilter {
   private clusters(): MapMatchCluster[] {
     const c = this.config;
     const p = this.p;
-    const order = Array.from({ length: p.size }, (_, i) => i).sort((a, b) => p.logw[b] - p.logw[a]);
+    const order = heaviestFirst(p.logw, p.size);
     let left = order;
     const out: MapMatchCluster[] = [];
     const r2 = c.clusterRadiusM * c.clusterRadiusM;

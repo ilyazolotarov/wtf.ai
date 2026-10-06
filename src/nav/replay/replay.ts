@@ -7,6 +7,8 @@ import type { TripLog } from "../../triplog/trip-log-reader";
 import { haversineM } from "../geo";
 import type { EdgeId } from "../mapmatch/graph/road-graph";
 import type { MapMatchConfig } from "../mapmatch/particle-filter";
+import { APP_NAV_DEFAULTS } from "../app-defaults";
+import { deepCopy } from "../deep-copy";
 import { Navigator, SQRT_68, type FixOutcome, type InitMethod, type MapMatchGraph, type NavConfig, type NavEstimate, type ParkedPose } from "../navigator";
 import type { OdometryStep } from "../odometry/odometry-output";
 import type { IntegrityVerdict } from "../integrity/integrity";
@@ -15,7 +17,7 @@ import { jamFixes, type JamOptions, type JamWindow } from "./jam";
 import { MapMatchMetrics, type MapMatchSummary } from "./mapmatch-metrics";
 import { spoofFixes, type SpoofWindow } from "./spoof";
 import type { TruthMatch } from "./truth-match";
-import { isSatelliteFix, type GnssFix } from "../types";
+import { isSatelliteFix, type GnssFix, type MagSample } from "../types";
 
 export interface ReplayCut {
   /** Seconds since log start. */
@@ -150,6 +152,8 @@ export interface ReplayInit {
 const INIT_NAMES: Record<InitMethod, string> = { course: "course", alignment: "alignment", pose: "parked pose", map: "map", user: "driver" };
 
 export interface ReplaySummary {
+  /** The settings the replay ran, so a tool can show that it matched the app's (app-defaults.ts). */
+  nav: Pick<NavConfig, "mapMatchLoop">;
   durationS: number;
   obdDistanceM: number;
   init: ReplayInit | null;
@@ -270,6 +274,33 @@ export class ReplayRecorder {
     return this.distanceOffsetM + (this.nav?.stats.obdDistanceM ?? 0);
   }
 
+  /** A copy that records `nav` (a fork of this one's navigator) from here on. Records already made are shared. */
+  fork(nav: Navigator): ReplayRecorder {
+    const known = new Map<object, unknown>([
+      [this.trip, this.trip],
+      [this.options, this.options],
+      [nav, nav],
+    ]);
+    if (this.nav) known.set(this.nav, nav);
+    const mm = this.options.mapMatch;
+    if (mm) known.set(mm.graph, mm.graph);
+    if (mm?.truth) known.set(mm.truth, mm.truth);
+    for (const record of this.track) known.set(record, record);
+    for (const record of this.fixes) known.set(record, record);
+    return deepCopy(this, known);
+  }
+
+  /** Withhold the fixes in `cut` too (it must start after every input recorded so far). */
+  addCut(cut: ReplayCut): void {
+    this.cuts.push({ ...cut });
+    this.cutDistance.push(0);
+  }
+
+  /** Move the end of the last cut (neither the old end nor the new one may have been reached yet). */
+  endLastCut(toS: number): void {
+    this.cuts[this.cuts.length - 1].toS = toS;
+  }
+
   /** Inside a cut at this log time (s): its fixes are withheld. */
   inCut(t: number): boolean {
     return this.cuts.some((c) => t >= c.fromS && t < c.toS);
@@ -366,6 +397,7 @@ export class ReplayRecorder {
       fixes,
       particles: this.particles,
       summary: {
+        nav: { mapMatchLoop: nav.config.mapMatchLoop },
         durationS,
         obdDistanceM: this.distanceM(),
         init: this.init,
@@ -441,57 +473,148 @@ function integritySummary(fixes: FixRecord[], track: TrackPoint[], spoof: SpoofW
 }
 
 export function replayTrip(trip: TripLog, options: ReplayOptions = {}): ReplayResult {
-  // With a compass option the particle filter uses it (`on`); otherwise it runs in shadow, as in the app.
-  const nav = new Navigator({ ...(options.compass ? { compassUse: "on" as const } : {}), ...options.nav });
-  const cal = options.compass?.calibration;
-  if (cal) nav.setCompassCalibration(options.compass?.rotateRad ? rotateCalibration(cal, options.compass.rotateRad) : cal);
-  if (options.odometry) nav.subscribeOdometry(options.odometry);
-  const mm = options.mapMatch;
-  if (mm) nav.setRoadGraph(mm.graph, mm.config);
-  const jammed = options.jam?.length ? jamFixes(trip.gnss, trip.startUs, options.jam, options.jamOptions) : trip.gnss;
-  const { fixes: spoofed, spoofed: spoofedSet } = spoofFixes(jammed, trip.startUs, options.spoof ?? []);
-  const rec = new ReplayRecorder(trip, { ...options, spoofed: spoofedSet });
-  rec.use(nav);
-  const sessionUs = trip.startUs + (options.startAtS ?? 0) * 1e6;
-  const tS = (tUs: number) => (tUs - trip.startUs) / 1e6;
-  if (options.startPose) rec.startedFromPose(nav.startFromPose(options.startPose));
+  const replay = TripReplay.start(trip, options);
+  replay.runTo(options.untilS ?? Infinity);
+  return replay.finish();
+}
 
-  // Merge the three time-sorted streams (from the session start).
-  const from = <T extends { tUs: number }>(xs: T[]) => (options.startAtS ? xs.filter((x) => x.tUs >= sessionUs) : xs);
-  const imu = from(trip.imu);
-  const obdSpeed = from(trip.obdSpeed);
-  const gnss = from(spoofed);
-  const mag = from(trip.mag ?? []);
-  let i = 0;
-  let o = 0;
-  let g = 0;
-  let k = 0;
-  const hints = options.routeHints ?? [];
-  let h = 0;
-  while (i < imu.length || o < obdSpeed.length || g < gnss.length || k < mag.length) {
-    const ti = i < imu.length ? imu[i].tUs : Infinity;
-    const to = o < obdSpeed.length ? obdSpeed[o].tUs : Infinity;
-    const tg = g < gnss.length ? gnss[g].tUs : Infinity;
-    const tm = k < mag.length ? mag[k].tUs : Infinity;
-    const tNext = tS(Math.min(ti, to, tg, tm));
-    if (options.untilS !== undefined && tNext > options.untilS) break;
-    while (h < hints.length && hints[h].fromS <= tNext) nav.setRouteHint(hints[h++].edges);
-    if (tm < ti && tm < to && tm < tg) {
-      nav.onMag(mag[k++]);
-    } else if (ti <= to && ti <= tg) {
-      nav.onImu(imu[i++]);
-      rec.afterEvent(ti);
-    } else if (to <= tg) {
-      nav.onObdSpeed(obdSpeed[o++]);
-      rec.afterEvent(to);
-    } else {
-      const fix = gnss[g++];
-      if (rec.inCut(tS(fix.tUs))) rec.withheld(fix);
-      else rec.fixOutcome(fix, nav.onGnss(fix));
-      rec.afterEvent(fix.tUs);
-    }
+/** The inputs of one replay, merged in time order by `TripReplay`; shared by its forks. */
+interface ReplayInputs {
+  trip: TripLog;
+  options: ReplayOptions;
+  imu: TripLog["imu"];
+  obdSpeed: TripLog["obdSpeed"];
+  gnss: GnssFix[];
+  mag: MagSample[];
+  hints: NonNullable<ReplayOptions["routeHints"]>;
+  /** The navigator that last used the road graph (forks share it, each in its own frame). */
+  graphUser: Navigator | null;
+}
+
+/**
+ * `replayTrip` in steps: feed the inputs up to a time (`runTo`, `runBefore`), then `finish`. A replay can fork — an
+ * independent copy from the same moment (Navigator.fork) — and a fork can take a cut of its own (`addCut`), so the
+ * benchmarks replay a drive up to each outage window once and continue each window on a fork. Its result equals
+ * `replayTrip` with the same cuts from the start: before a cut starts its fixes are fed either way.
+ */
+export class TripReplay {
+  private constructor(
+    private readonly inputs: ReplayInputs,
+    private readonly nav: Navigator,
+    private readonly rec: ReplayRecorder,
+    /** Next input of each stream; route hints applied; log time (s) of the last input fed. */
+    private readonly at: { i: number; o: number; g: number; k: number; h: number; fedS: number },
+  ) {}
+
+  static start(trip: TripLog, options: ReplayOptions = {}): TripReplay {
+    // With a compass option the particle filter uses it (`on`); otherwise it runs in shadow, as in the app.
+    // The app's settings first, so a replay measures the system the phone runs (app-defaults.ts); `nav` overrides
+    // them for an experiment.
+    const nav = new Navigator({ ...APP_NAV_DEFAULTS, ...(options.compass ? { compassUse: "on" as const } : {}), ...options.nav });
+    const cal = options.compass?.calibration;
+    if (cal) nav.setCompassCalibration(options.compass?.rotateRad ? rotateCalibration(cal, options.compass.rotateRad) : cal);
+    if (options.odometry) nav.subscribeOdometry(options.odometry);
+    const mm = options.mapMatch;
+    if (mm) nav.setRoadGraph(mm.graph, mm.config);
+    const jammed = options.jam?.length ? jamFixes(trip.gnss, trip.startUs, options.jam, options.jamOptions) : trip.gnss;
+    const { fixes: spoofed, spoofed: spoofedSet } = spoofFixes(jammed, trip.startUs, options.spoof ?? []);
+    const rec = new ReplayRecorder(trip, { ...options, spoofed: spoofedSet });
+    rec.use(nav);
+    const sessionUs = trip.startUs + (options.startAtS ?? 0) * 1e6;
+    if (options.startPose) rec.startedFromPose(nav.startFromPose(options.startPose));
+
+    // The time-sorted streams, from the session start.
+    const from = <T extends { tUs: number }>(xs: T[]) => (options.startAtS ? xs.filter((x) => x.tUs >= sessionUs) : xs);
+    const inputs: ReplayInputs = {
+      trip,
+      options,
+      imu: from(trip.imu),
+      obdSpeed: from(trip.obdSpeed),
+      gnss: from(spoofed),
+      mag: from(trip.mag ?? []),
+      hints: options.routeHints ?? [],
+      graphUser: nav,
+    };
+    return new TripReplay(inputs, nav, rec, { i: 0, o: 0, g: 0, k: 0, h: 0, fedS: -Infinity });
   }
 
-  const ends = [imu.at(-1)?.tUs, obdSpeed.at(-1)?.tUs, gnss.at(-1)?.tUs].filter((t): t is number => t !== undefined);
-  return rec.finish(ends.length ? tS(Math.max(...ends)) : 0);
+  /** Feed the inputs up to log time `untilS` (s), inclusive (as `ReplayOptions.untilS`). */
+  runTo(untilS: number): void {
+    this.feed((t) => t > untilS);
+  }
+
+  /** Feed the inputs before log time `tS` (s): a cut from `tS` can still be added. */
+  runBefore(tS: number): void {
+    this.feed((t) => t >= tS);
+  }
+
+  /** An independent copy of this replay as it is now. */
+  fork(): TripReplay {
+    const nav = this.nav.fork();
+    return new TripReplay(this.inputs, nav, this.rec.fork(nav), { ...this.at });
+  }
+
+  /** Withhold the fixes in `cut` from here on: it must start after the inputs fed so far. */
+  addCut(cut: ReplayCut): void {
+    // An open-loop cut joins the list at the EKF start: one added later would come before it, unlike a cut given at the start.
+    if (this.inputs.options.openLoop) throw new Error("TripReplay.addCut: not with openLoop");
+    if (!(cut.fromS > this.at.fedS)) throw new Error(`TripReplay.addCut: the replay is past ${cut.fromS} s`);
+    this.rec.addCut(cut);
+  }
+
+  /** End the last cut added at `toS` instead (the replay must not have reached either end yet). */
+  endLastCut(toS: number): void {
+    const cut = this.rec.cuts.at(-1);
+    if (!cut || !(cut.toS > this.at.fedS && toS > this.at.fedS)) throw new Error(`TripReplay.endLastCut: the replay is past the cut's end`);
+    this.rec.endLastCut(toS);
+  }
+
+  finish(): ReplayResult {
+    this.useGraph();
+    const { imu, obdSpeed, gnss } = this.inputs;
+    const ends = [imu.at(-1)?.tUs, obdSpeed.at(-1)?.tUs, gnss.at(-1)?.tUs].filter((t): t is number => t !== undefined);
+    return this.rec.finish(ends.length ? this.tS(Math.max(...ends)) : 0);
+  }
+
+  private tS(tUs: number): number {
+    return (tUs - this.inputs.trip.startUs) / 1e6;
+  }
+
+  /** Forks share the road graph: this replay's navigator takes it back before it runs. */
+  private useGraph(): void {
+    if (this.inputs.graphUser === this.nav) return;
+    this.nav.resume();
+    this.inputs.graphUser = this.nav;
+  }
+
+  /** Merge the streams in time order until `stop` (at the next input's log time, s). */
+  private feed(stop: (tS: number) => boolean): void {
+    this.useGraph();
+    const { imu, obdSpeed, gnss, mag, hints } = this.inputs;
+    const { nav, rec, at } = this;
+    while (at.i < imu.length || at.o < obdSpeed.length || at.g < gnss.length || at.k < mag.length) {
+      const ti = at.i < imu.length ? imu[at.i].tUs : Infinity;
+      const to = at.o < obdSpeed.length ? obdSpeed[at.o].tUs : Infinity;
+      const tg = at.g < gnss.length ? gnss[at.g].tUs : Infinity;
+      const tm = at.k < mag.length ? mag[at.k].tUs : Infinity;
+      const tNext = this.tS(Math.min(ti, to, tg, tm));
+      if (stop(tNext)) break;
+      at.fedS = tNext;
+      while (at.h < hints.length && hints[at.h].fromS <= tNext) nav.setRouteHint(hints[at.h++].edges);
+      if (tm < ti && tm < to && tm < tg) {
+        nav.onMag(mag[at.k++]);
+      } else if (ti <= to && ti <= tg) {
+        nav.onImu(imu[at.i++]);
+        rec.afterEvent(ti);
+      } else if (to <= tg) {
+        nav.onObdSpeed(obdSpeed[at.o++]);
+        rec.afterEvent(to);
+      } else {
+        const fix = gnss[at.g++];
+        if (rec.inCut(this.tS(fix.tUs))) rec.withheld(fix);
+        else rec.fixOutcome(fix, nav.onGnss(fix));
+        rec.afterEvent(fix.tUs);
+      }
+    }
+  }
 }

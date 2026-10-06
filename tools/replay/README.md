@@ -238,9 +238,15 @@ npm run replay:view -- --graph tools/tiles/out/release/kyiv.graph.bin  # viewer 
   OSM geometry): 0 on the 12 clean drives so far.
 - **Threads:** `replay:bench` (both modes), `replay:mm` and `replay:places` replay their windows, sessions, drives
   and seeds on worker threads (`tools/replay/pool.ts`), all cores but one; `--threads N` to change that. Results
-  are gathered in order, so the output is the same as on one thread. An outage window's replay stops 5 s after the
-  window instead of running to the end of the drive. The full `--mm` outage benchmark takes about a minute and a
-  half on 32 cores (over 30 minutes before).
+  are gathered in order, so the output is the same as on one thread. Every tool runs at low OS priority
+  (`register.mjs`; the viewer below normal), so it takes the whole CPU only while nothing else wants it and several
+  can run at once without freezing the desktop.
+- **Outage windows:** `replay:bench` replays each drive once per seed up to each window start and runs the window
+  on a fork from there (`TripReplay`, NAVIGATOR-SPEC §10): the longest window from a start, the shorter ones forked
+  off it at their own end, each stopping 5 s after its end. Windows whose satellite fixes can't reach the truth
+  share (jammed drives) are left out before any replay, and with `--mm` so are logs with no fix to place a graph
+  or no graph covering them (`skipped …`). The results are the same as a replay per window from the drive's
+  start. On 32 cores and the 27 drives of 2026-10-07: `--mm` 33 s (354 s before the forks), without it 12 s (177 s).
 - **Viewer:** the *roads* checkbox draws the graph around the trip's fixes, under the tracks: major roads thick,
   service roads and tracks dashed, arrows on one-ways (zoom ≥ 14). At zoom ≥ 15 it adds junctions, dead ends
   (orange) and region-boundary ends (red). Hover for the OSM way id, class, length and flags. Its tooltip says

@@ -54,9 +54,21 @@ function compassFromOtherLogs(file: string): { calibration: CompassCalibration; 
   return cals.length ? { calibration: cals.reduce((a, b) => mergeCalibrations(a, b)), logs: cals.length } : null;
 }
 
+/**
+ * Where a log's region is, to pick its road graph: the first fix within 500 m, else any fix, else the first
+ * position the app published. The app has its region's graph whatever the fixes, so a jammed log without one good
+ * fix must still get it here, or its replay runs without map matching and drives through the blocks.
+ */
+function regionPoint(trip: TripLog): { lat: number; lon: number } | null {
+  const fix = trip.gnss.find((f) => f.hAccM <= 500) ?? trip.gnss[0];
+  if (fix) return fix;
+  const shown = trip.navEstimate.find((r) => Number.isFinite(r.latDeg) && Number.isFinite(r.lonDeg));
+  return shown ? { lat: shown.latDeg, lon: shown.lonDeg } : null;
+}
+
 /** The road graph a log's region has (null: none), opened for one replay. */
 function graphFor(trip: TripLog): { active: ActiveRoadGraph; close(): void } | null {
-  const first = trip.gnss.find((f) => f.hAccM <= 500);
+  const first = regionPoint(trip);
   const graphFile = first ? (GRAPH ?? findGraph(first)) : null;
   if (!first || !graphFile) return null;
   const opened = openGraph(graphFile, first);
@@ -177,7 +189,7 @@ const server = createServer((req, res) => {
       const appLoop = (loop.nav.mapMatchLoop ?? "open") as MapMatchLoop;
       const state = inApp ? (startFrom === "parked" ? appStateBefore(file, appLoop) : { store: new MemoryKeyValueStore(), vin: carOf(trip, new Map()), parkedAfter: null }) : null;
       // Map matching on the trip's road graph, when there is one.
-      const first = trip.gnss.find((f) => f.hAccM <= 500);
+      const first = regionPoint(trip);
       const graphFile = first ? (GRAPH ?? findGraph(first)) : null;
       const opened = graphFile && first ? openGraph(graphFile, first) : null;
       try {
@@ -220,7 +232,10 @@ const server = createServer((req, res) => {
       const file = path.basename(url.searchParams.get("file") ?? "");
       if (!file.endsWith(".ulg")) return send(res, 400, "text/plain", "file must be a .ulg in the logs folder");
       const started = Date.now();
-      const points = loadTrip(file).gnss.filter((f) => f.hAccM <= 500);
+      const trip = loadTrip(file);
+      const fixes = trip.gnss.filter((f) => f.hAccM <= 500);
+      // Without one good fix, around where the app drew the car.
+      const points = fixes.length ? fixes : trip.navEstimate.filter((_, i) => i % 10 === 0).map((r) => ({ lat: r.latDeg, lon: r.lonDeg }));
       const graphFile = points.length ? (GRAPH ?? findGraph(points[0])) : null;
       const payload = graphFile
         ? roadsAround(graphFile, points)
