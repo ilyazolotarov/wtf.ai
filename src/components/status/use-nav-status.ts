@@ -85,13 +85,15 @@ export function useNavStatus() {
   const meta = approximate ? APPROX : TRUST[trust];
   const color: StatusColor = palette[meta.color];
   const source =
-    trust === "TRUSTED"
-      ? t("srcGnss")
-      : trust === "REACQUIRING"
-        ? t("srcVerify")
-        : adapter === "on"
-          ? t("srcDR")
-          : t("srcPhone");
+    position?.source === "manual"
+      ? t("srcManual")
+      : trust === "TRUSTED"
+        ? t("srcGnss")
+        : trust === "REACQUIRING"
+          ? t("srcVerify")
+          : adapter === "on"
+            ? t("srcDR")
+            : t("srcPhone");
   const adapterColor =
     adapter === "on" ? palette.ok : adapter === "searching" ? palette.warn : null;
   return {

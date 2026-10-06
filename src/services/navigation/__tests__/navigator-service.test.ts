@@ -258,6 +258,7 @@ describe("NavigatorService", () => {
 
 /** The parked pose stored for a car. */
 const storedPose = (store: KeyValueStore, vin = VIN) => store.getJson<Record<string, StoredPose>>(PARKED_POSES_KEY)?.[vin] ?? null;
+const storedManual = (store: KeyValueStore) => new CalibrationStore(store, PHONE).manualPosition();
 
 describe("parked pose", () => {
   // Drive with clean GNSS, then stop and stand.
@@ -446,28 +447,159 @@ describe("the driver puts the car on the map", () => {
     h.service.stop();
   });
 
-  test("placed with a heading while standing: it becomes the car's parked pose at once", async () => {
+  test("not saved as the car's parked pose: it is held as the manual position", async () => {
     const store = memoryStore();
     const drive = syntheticDrive({ segments: SEGMENTS, gnss: "none", origin, startHeadingRad: 0.8, seed: 3 });
     const h = harness({ store });
     await h.service.start();
     h.play(drive, { untilS: 3 });
     h.service.setUserPosition(origin, 0.8);
-    const pose = storedPose(store);
-    expect(pose && haversineM(pose, origin)).toBeLessThan(2);
-    expect(pose?.headingRad).toBeCloseTo(0.8, 2);
+    expect(storedPose(store)).toBeNull();
+    expect(storedManual(store)).toMatchObject({ lat: origin.lat, lon: origin.lon, headingRad: 0.8 });
+    h.service.stop();
+  });
+});
+
+describe("the manual position (NAVIGATOR-SPEC §6.3)", () => {
+  const origin = { lat: 51.5184, lon: 30.7465 };
+  /** A Wi-Fi fix (no speed) 890 m north. */
+  const wifi = { lat: origin.lat + 0.008, lon: origin.lon };
+  const STAND: DriveSegment[] = [{ durationS: 10, speedMps: 0, yawRateDegS: 0 }];
+  const DRIVE_OFF: DriveSegment[] = [...STAND, { durationS: 30, speedMps: 10, yawRateDegS: 0 }];
+
+  /** Placed with no car connected, at home with only Wi-Fi. */
+  async function placedWithoutCar(store = memoryStore()) {
+    const h = harness({ vin: null, store });
+    await h.service.start();
+    h.gnss.emit(record({ tUs: h.now(), ...wifi, hAccM: 65 }));
+    expect(h.service.getSnapshot()).toMatchObject({ source: "gnss", lat: wifi.lat });
+    expect(h.service.setUserPosition(origin, 0.8)).toBe(true);
+    return h;
+  }
+
+  const minutesLater = (min: number) => {
+    jest.setSystemTime(Date.now() + min * 60_000);
+    jest.advanceTimersByTime(500);
+  };
+
+  test("without a car the map shows it instead of the Wi-Fi fix, which doesn't move it", async () => {
+    const h = await placedWithoutCar();
+    h.gnss.emit(record({ tUs: h.now() + 1_000_000, lat: wifi.lat + 0.001, lon: wifi.lon, hAccM: 65 }));
+    const p = h.service.getSnapshot()!;
+    expect(p).toMatchObject({ source: "manual", lat: origin.lat, lon: origin.lon, headingRad: 0.8, accuracyM: 10 });
+    expect(p.rawGnss?.lat).toBeCloseTo(wifi.lat + 0.001, 6);
+    expect(p.manual).toMatchObject({ asking: false });
     h.service.stop();
   });
 
-  test("without a heading: anchored there", async () => {
-    const drive = syntheticDrive({ segments: SEGMENTS, gnss: "none", origin, startHeadingRad: 0.8, seed: 3 });
+  test("15 min on it asks: yes holds it 15 min more, no goes back to the fixes", async () => {
+    const h = await placedWithoutCar();
+    minutesLater(14);
+    expect(h.service.getSnapshot()?.manual?.asking).toBe(false);
+    minutesLater(1);
+    expect(h.service.getSnapshot()?.manual?.asking).toBe(true);
+    expect(h.notes).toContain("nav manual position 15 min old: asking the driver if they are still there");
+    h.service.answerManual(true);
+    expect(h.service.getSnapshot()).toMatchObject({ source: "manual", manual: { asking: false, confirmedAt: Date.now() } });
+    minutesLater(15);
+    expect(h.service.getSnapshot()?.manual?.asking).toBe(true);
+    h.service.answerManual(false);
+    const p = h.service.getSnapshot()!;
+    expect(p).toMatchObject({ source: "gnss", lat: wifi.lat });
+    expect(p.manual).toBeUndefined();
+    expect(storedManual(h.store)).toBeNull();
+    h.service.stop();
+  });
+
+  test("the chip's ✕ forgets it; with no fix yet there is no position", async () => {
     const h = harness({ vin: null });
     await h.service.start();
-    h.play(drive, { untilS: 3 });
-    h.service.setUserPosition(origin);
-    h.play(drive, { untilS: 5 });
-    expect(h.notes.some((n) => n.endsWith("heading skipped"))).toBe(true);
-    expect(h.service.getDebug().mode).toBe("anchored");
+    h.service.setUserPosition(origin, 0.8);
+    expect(h.service.getSnapshot()?.source).toBe("manual");
+    h.service.discardManualPosition();
+    expect(h.service.getSnapshot()).toBeNull();
+    expect(h.notes).toContain("nav manual position discarded by the driver");
+    h.service.stop();
+  });
+
+  test("a trusted satellite fix that agrees releases it to GPS", async () => {
+    const h = await placedWithoutCar();
+    h.gnss.emit(record({ tUs: h.now() + 1_000_000, lat: origin.lat + 0.0001, lon: origin.lon, hAccM: 5, speedMps: 0 }));
+    expect(h.service.getSnapshot()).toMatchObject({ source: "gnss", trust: "TRUSTED" });
+    expect(h.notes.some((n) => n.startsWith("nav manual position released: GPS trusted, fix 11 m away"))).toBe(true);
+    h.service.stop();
+  });
+
+  test("trusted satellite fixes elsewhere release it only 5 in a row", async () => {
+    const h = await placedWithoutCar();
+    for (let i = 1; i <= 5; i++) {
+      expect(h.service.getSnapshot()?.source).toBe("manual");
+      h.gnss.emit(record({ tUs: h.now() + i * 1_000_000, lat: origin.lat + 0.005, lon: origin.lon, hAccM: 5, speedMps: 0 }));
+    }
+    expect(h.service.getSnapshot()).toMatchObject({ source: "gnss", lat: origin.lat + 0.005 });
+    h.service.stop();
+  });
+
+  test("a later start within 15 min starts from it, over an older parked pose; driving releases it", async () => {
+    const store = memoryStore();
+    const placed = await placedWithoutCar(store);
+    placed.service.stop();
+    // The car's pose from an hour ago, elsewhere.
+    new CalibrationStore(store, PHONE).saveParkedPose(VIN, { ...wifi, headingRad: 2, posSigmaM: 3, headingSigmaRad: 0.05 }, Date.now() - 3_600_000);
+    const drive = syntheticDrive({ segments: DRIVE_OFF, gnss: "none", origin, startHeadingRad: 0.8, seed: 3 });
+    const next = harness({ store });
+    jest.setSystemTime(Date.now() + 5 * 60_000);
+    await next.service.start();
+    expect(next.notes).toContain("nav mode dr (manual position, 5 min old)");
+    next.play(drive);
+    const p = next.service.getSnapshot()!;
+    expect(p.source).toBe("dr");
+    expect(haversineM(p, drive.truthAt(drive.trip.imu.at(-1)!.tUs))).toBeLessThan(25);
+    expect(next.notes).toContain("nav manual position released: the car drives");
+    expect(storedManual(store)).toBeNull();
+    next.service.stop();
+  });
+
+  test("a newer parked pose elsewhere wins at the start", async () => {
+    const store = memoryStore();
+    (await placedWithoutCar(store)).service.stop();
+    new CalibrationStore(store, PHONE).saveParkedPose(VIN, { ...wifi, headingRad: 2, posSigmaM: 3, headingSigmaRad: 0.05 }, Date.now() + 60_000);
+    const next = harness({ store });
+    jest.setSystemTime(Date.now() + 2 * 60_000);
+    await next.service.start();
+    expect(next.notes).toContain("nav manual position older than the parked pose (890 m apart): parked pose");
+    expect(next.notes.some((n) => n.startsWith("nav mode dr (parked pose"))).toBe(true);
+    next.service.stop();
+  });
+
+  test("an older one isn't started from: the driver is asked first, and yes starts from it", async () => {
+    const store = memoryStore();
+    (await placedWithoutCar(store)).service.stop();
+    const next = harness({ vin: null, store });
+    jest.setSystemTime(Date.now() + 20 * 60_000);
+    await next.service.start();
+    expect(next.notes.some((n) => n.startsWith("nav mode dr (manual position"))).toBe(false);
+    expect(next.service.getDebug().mode).toBe("none");
+    jest.advanceTimersByTime(500);
+    expect(next.service.getSnapshot()).toMatchObject({ source: "manual", manual: { asking: true } });
+    next.service.answerManual(true);
+    expect(next.service.getDebug().mode).toBe("dr");
+    next.service.stop();
+  });
+
+  test("forgotten while the car stands: the navigator starts over, without the parked pose saved from it", async () => {
+    const store = memoryStore();
+    const drive = syntheticDrive({ segments: STAND, gnss: "none", origin, startHeadingRad: 0.8, seed: 3 });
+    const h = harness({ store });
+    await h.service.start();
+    h.play(drive, { untilS: 2 });
+    h.service.setUserPosition(origin, 0.8);
+    h.play(drive);
+    h.service.saveCalibration();
+    expect(storedPose(store) && haversineM(storedPose(store)!, origin)).toBeLessThan(2);
+    h.service.discardManualPosition();
+    expect(storedPose(store)).toBeNull();
+    expect(h.service.getDebug().mode).toBe("none");
     h.service.stop();
   });
 });

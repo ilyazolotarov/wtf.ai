@@ -10,7 +10,7 @@ import type { FixOutcome, MapMatchEstimate, NavConfig, NavMode, ParkedPose } fro
 import { Navigator } from "@/nav/navigator";
 import { haversineM } from "@/nav/geo";
 import { FUSED_WINDOW_US, puckAccuracyM, puckHypothesis } from "@/nav/position/puck";
-import type { PositionEstimate, PositionSourceKind, SimulatedOutage } from "@/nav/position/types";
+import type { PositionEstimate, PositionSourceKind, RawGnssFix, SimulatedOutage } from "@/nav/position/types";
 import type { CompassTrust } from "@/nav/compass/compass";
 import type { GnssFix, ImuSample, MagSample, ObdSpeedSample } from "@/nav/types";
 import type { EngineState, SpeedSample, VehicleLinkSnapshot } from "@/obd/types";
@@ -29,7 +29,7 @@ import {
   type Vec3Record,
 } from "@/triplog/schema";
 
-import type { CalibrationStore } from "./calibration-store";
+import type { CalibrationStore, StoredManualPosition } from "./calibration-store";
 
 const OWNER = "navigator";
 /** Trip-log note with what is stored for the phone or the car as a navigator starts: JSON of a StoredSnapshot. */
@@ -50,6 +50,12 @@ const EARTH_RADIUS_M = 6_371_000;
 /** The driver's placing on the map: a car's length or so, and the heading of a tap (NAVIGATOR-SPEC §6.2). */
 const USER_POSITION_SIGMA_M = 10;
 const USER_HEADING_SIGMA_RAD = (15 * Math.PI) / 180;
+/** A position set on the map is asked about ("are you still here?") this long after it was confirmed (§6.3). */
+export const MANUAL_ASK_AFTER_MS = 15 * 60_000;
+/** A parked pose newer than the placing but this close to it was saved from it: the placing still starts the navigator. */
+const MANUAL_SAME_POSE_M = 15;
+/** Trusted satellite fixes in a row that disagree with the placing before GPS takes over (the EKF's rule too). */
+const MANUAL_REJECTED_FIXES = 5;
 /** Added to a stored parked pose's 1σ: the car settles, the phone may sit differently in the mount. */
 const POSE_POSITION_SLACK_M = 5;
 const POSE_HEADING_SLACK_RAD = (2 * Math.PI) / 180;
@@ -203,6 +209,13 @@ export class NavigatorService implements PositionSource {
   private poseStatus: NavigatorDebug["parkedPose"] = "none";
   /** A Wi-Fi fix doubts the parked pose the navigator started from: the driver is asked. */
   private poseQuestion: { distanceM: number } | null = null;
+  /** Where the driver set the car on the map (§6.3), until released or discarded; stored, so it outlives the session. */
+  private manual: StoredManualPosition | null;
+  /** The running navigator started from `manual`. */
+  private manualApplied = false;
+  /** Trusted satellite fixes in a row that disagree with `manual`. */
+  private manualRejected = 0;
+  private notedManualAsk = false;
   /** Compass shadow notes: the trust last noted, and the trust checks already summarised. */
   private notedCompassTrust: CompassTrust = "none";
   private summarisedChecks = 0;
@@ -230,6 +243,7 @@ export class NavigatorService implements PositionSource {
   constructor(deps: NavigatorServiceDeps) {
     this.deps = deps;
     this.clock = deps.clock ?? SYSTEM_CLOCK;
+    this.manual = deps.calibration.manualPosition();
   }
 
   getSnapshot = (): PositionEstimate | null => this.position;
@@ -251,25 +265,55 @@ export class NavigatorService implements PositionSource {
   }
 
   /**
-   * The driver put the car on the map while it stood (NAVIGATOR-SPEC §6.2); `headingRad` undefined: skipped. False
-   * when there is no navigator.
+   * The driver put the car on the map while it stood (NAVIGATOR-SPEC §6.2), always with a heading. It is held as the
+   * manual position (§6.3) whether or not a car is connected. False when there is no navigator.
    */
-  setUserPosition(at: { lat: number; lon: number }, headingRad?: number): boolean {
+  setUserPosition(at: { lat: number; lon: number }, headingRad: number): boolean {
     const nav = this.nav;
     if (!nav) return false;
-    nav.setPosition({ ...at, headingRad, posSigmaM: USER_POSITION_SIGMA_M, headingSigmaRad: USER_HEADING_SIGMA_RAD });
+    const now = this.clock.nowMs();
     const was = this.position;
     const moved = was ? ` ${Math.round(haversineM(was, at))} m from the dot` : "";
-    const heading = headingRad === undefined ? "heading skipped" : `heading ${Math.round((((headingRad * 180) / Math.PI) % 360 + 360) % 360)}°`;
-    this.note(`nav position set by the driver: ${at.lat.toFixed(6)},${at.lon.toFixed(6)}${moved}, ${heading}`);
-    this.poseQuestion = null;
-    this.poseStatus = "none";
+    this.note(`nav position set by the driver: ${at.lat.toFixed(6)},${at.lon.toFixed(6)}${moved}, heading ${Math.round(degrees360(headingRad))}°`);
+    this.holdManual({ lat: at.lat, lon: at.lon, headingRad, placedAt: now, confirmedAt: now });
+    this.applyManual();
     this.flush(this.deps.nowUs() - REORDER_US);
-    // The car's parked pose now (with a heading, its VIN known): kept at once, not at the next 30 s save, so an app
-    // closed right after starts from it.
-    if (headingRad !== undefined) this.saveCalibration();
     this.publish();
     return true;
+  }
+
+  /** The driver's answer to "are you still here?" (§6.3): yes holds the manual position 15 min more, no discards it. */
+  answerManual(here: boolean): void {
+    const m = this.manual;
+    if (!m) return;
+    if (!here) {
+      this.discardManualPosition("the driver isn't there any more");
+      return;
+    }
+    const minutes = Math.round((this.clock.nowMs() - m.confirmedAt) / 60_000);
+    this.note(`nav manual position confirmed by the driver (${minutes} min since the last time)`);
+    this.holdManual({ ...m, confirmedAt: this.clock.nowMs() });
+    // Asked at a start: the navigator didn't start from it.
+    if (!this.manualApplied) this.applyManual();
+    this.publish();
+  }
+
+  /**
+   * Forget the manual position (the chip's ✕, or "no" to "still here?"). A navigator that started from it starts
+   * over, with the parked pose it saved from it gone too, so fixes and the car's own pose decide again.
+   */
+  discardManualPosition(why = "discarded by the driver"): void {
+    const m = this.manual;
+    if (!m) return;
+    this.note(`nav manual position ${why}`);
+    const applied = this.manualApplied;
+    this.dropManual();
+    if (applied && this.nav) {
+      const pose = this.vin ? this.deps.calibration.parkedPose(this.vin) : null;
+      if (pose && pose.savedAt >= m.placedAt && this.vin) this.deps.calibration.clearParkedPose(this.vin);
+      this.createNavigator();
+    }
+    this.publish();
   }
 
   /** The driver's answer to `poseQuestion`: the car is (not) where the dot is. */
@@ -475,11 +519,75 @@ export class NavigatorService implements PositionSource {
     this.interval = { count: 0, totalMs: 0, maxMs: 0 };
     this.applyRoadGraph();
     nav.setRouteHint(this.routeHint);
+    this.manualApplied = false;
+    this.manualRejected = 0;
     // Known before the adapter connects: the last car seen.
     const vin = link.expectedVin();
-    if (!vin) return;
-    this.setVehicle(vin);
-    this.startFromParkedPose(vin, false);
+    if (vin) this.setVehicle(vin);
+    if (this.startFromManual(vin)) return;
+    if (vin) this.startFromParkedPose(vin, false);
+  }
+
+  /**
+   * Start from the manual position (§6.3) when it is the newest word on where the car is: confirmed within 15 min,
+   * and the car's parked pose isn't newer from somewhere else.
+   */
+  private startFromManual(vin: string | null): boolean {
+    const m = this.manual;
+    if (!m || this.manualAsking()) return false;
+    const pose = vin ? this.deps.calibration.parkedPose(vin) : null;
+    if (pose && pose.savedAt > m.confirmedAt && haversineM(pose, m) > MANUAL_SAME_POSE_M) {
+      this.note(`nav manual position older than the parked pose (${Math.round(haversineM(pose, m))} m apart): parked pose`);
+      return false;
+    }
+    this.applyManual();
+    this.note(`nav mode dr (manual position, ${Math.round((this.clock.nowMs() - m.confirmedAt) / 60_000)} min old)`);
+    return true;
+  }
+
+  /** The manual position into the navigator: the driver's word over Wi-Fi (§6.2). */
+  private applyManual(): void {
+    const m = this.manual;
+    if (!m || !this.nav) return;
+    this.nav.setPosition({ lat: m.lat, lon: m.lon, headingRad: m.headingRad, posSigmaM: USER_POSITION_SIGMA_M, headingSigmaRad: USER_HEADING_SIGMA_RAD });
+    this.manualApplied = true;
+    this.manualRejected = 0;
+    this.poseQuestion = null;
+    this.poseStatus = "none";
+  }
+
+  private holdManual(m: StoredManualPosition): void {
+    this.manual = m;
+    this.notedManualAsk = false;
+    this.deps.calibration.saveManualPosition(m);
+  }
+
+  /** The manual position is no longer held; a navigator started from it carries on. */
+  private dropManual(): void {
+    this.manual = null;
+    this.manualApplied = false;
+    this.manualRejected = 0;
+    this.deps.calibration.saveManualPosition(null);
+  }
+
+  /** It is 15 min since the driver confirmed the manual position: "are you still here?". */
+  private manualAsking(): boolean {
+    return this.manual !== null && this.clock.nowMs() - this.manual.confirmedAt >= MANUAL_ASK_AFTER_MS;
+  }
+
+  /** A trusted satellite fix that agrees releases the manual position to GPS; so do 5 in a row that disagree. */
+  private checkManualAgainst(r: GnssRecord): void {
+    const m = this.manual;
+    if (!m) return;
+    const d = haversineM(m, { lat: r.latDeg, lon: r.lonDeg });
+    const accM = Number.isFinite(r.hAccM) ? r.hAccM : 9999;
+    if (d <= 3 * Math.hypot(accM, USER_POSITION_SIGMA_M)) {
+      this.note(`nav manual position released: GPS trusted, fix ${Math.round(d)} m away (±${Math.round(accM)} m)`);
+      this.dropManual();
+    } else if (++this.manualRejected >= MANUAL_REJECTED_FIXES) {
+      this.note(`nav manual position released: ${this.manualRejected} trusted GPS fixes disagree, the last ${Math.round(d)} m away`);
+      this.dropManual();
+    }
   }
 
   /** The pose saved when this car was parked, if the navigator has no better start; `late`: the VIN came after the start. */
@@ -549,7 +657,8 @@ export class NavigatorService implements PositionSource {
     }
     this.lastFix = r;
     const satellite = isSatelliteRecord(r);
-    this.trust.onFix(Number.isFinite(r.hAccM) ? r.hAccM : 9999, r.utcUs / 1000, satellite);
+    const trust = this.trust.onFix(Number.isFinite(r.hAccM) ? r.hAccM : 9999, r.utcUs / 1000, satellite);
+    if (satellite && trust === "TRUSTED") this.checkManualAgainst(r);
     const fix = toNavFix(r);
     if (fix) this.pending.push({ tUs: fix.tUs, fix });
     // Process now, so the map doesn't wait for the next tick.
@@ -568,6 +677,11 @@ export class NavigatorService implements PositionSource {
 
   private onSpeed(s: SpeedSample): void {
     this.lastObdUs = s.tUs;
+    if (s.raw > 0 && this.manual) {
+      // Driving: the navigator carries the placing on (it started from it, or from something newer).
+      this.note("nav manual position released: the car drives");
+      this.dropManual();
+    }
     if (s.raw > 0 && this.poseStored) {
       // Driving: the stored pose is stale until the next stop.
       if (this.vin) this.deps.calibration.clearParkedPose(this.vin);
@@ -623,6 +737,10 @@ export class NavigatorService implements PositionSource {
 
   private tick(): void {
     this.checkVehicle();
+    if (this.manualAsking() && !this.notedManualAsk) {
+      this.notedManualAsk = true;
+      this.note("nav manual position 15 min old: asking the driver if they are still there");
+    }
     this.flush(this.deps.nowUs() - REORDER_US);
     this.publish();
     this.noteCompassTrust();
@@ -675,12 +793,39 @@ export class NavigatorService implements PositionSource {
     if (nav) this.setMode(nav.mode);
 
     const withObd = nowUs - this.lastObdUs < OBD_TIMEOUT_US;
+    const m = this.manual;
+    if (m && (!nav || !estimate || !withObd)) {
+      // No car speed, so the navigator can't follow the car: the driver's placing stands in for the fixes (§6.3).
+      const p = this.position;
+      const raw = fix ? rawOf(fix) : undefined;
+      const same =
+        p?.source === "manual" && p.trust === trust && p.rawGnss?.timestamp === raw?.timestamp &&
+        p.manual?.confirmedAt === m.confirmedAt && p.manual.asking === this.manualAsking();
+      if (!same) {
+        this.set({
+          lat: m.lat,
+          lon: m.lon,
+          headingRad: m.headingRad,
+          accuracyM: USER_POSITION_SIGMA_M,
+          source: "manual",
+          trust,
+          timestamp: now,
+          lastTrustedFixAt: this.trust.lastTrustedFixAt,
+          rawGnss: raw,
+        });
+      }
+      return;
+    }
     if (!nav || !estimate || !withObd) {
       // Phone GNSS only, as without the navigator: a new snapshot only for a new fix or trust.
       const p = this.position;
       const same = p && fix && p.source === "gnss" && p.timestamp === fix.utcUs / 1000 && p.trust === trust;
       if (fix && !same) this.set(mapFixToPosition(fix, trust, this.trust.lastTrustedFixAt));
-      else if (this.position && this.position.trust !== trust) this.set({ ...this.position, trust });
+      else if (p?.source === "manual") {
+        // The manual position is gone and no fix has come yet: no position.
+        this.position = null;
+        this.listeners.forEach((listener) => listener());
+      } else if (p && (p.trust !== trust || p.manual)) this.set({ ...p, trust });
       return;
     }
 
@@ -727,9 +872,7 @@ export class NavigatorService implements PositionSource {
       timestamp: now,
       lastTrustedFixAt: this.trust.lastTrustedFixAt,
       distanceSinceTrustedM: this.trustedDistanceM === null ? undefined : nav.stats.obdDistanceM - this.trustedDistanceM,
-      rawGnss: fix
-        ? { lat: fix.latDeg, lon: fix.lonDeg, accuracyM: Number.isFinite(fix.hAccM) ? fix.hAccM : 9999, timestamp: fix.utcUs / 1000 }
-        : undefined,
+      rawGnss: fix ? rawOf(fix) : undefined,
       },
       nowUs - estimate.tUs,
     );
@@ -762,9 +905,15 @@ export class NavigatorService implements PositionSource {
   /** `behindUs`: how far the navigator's state lags now (the drawn position is extrapolated over it). */
   private set(position: PositionEstimate, behindUs = 0): void {
     this.drainUpdateTimes();
-    const { simulatedOutage: _, poseQuestion: _q, ...rest } = position;
+    const { simulatedOutage: _, poseQuestion: _q, manual: _m, ...rest } = position;
     const outage = this.outageInfo(rest);
-    this.position = { ...rest, ...(outage ? { simulatedOutage: outage } : {}), ...(this.poseQuestion ? { poseQuestion: this.poseQuestion } : {}) };
+    const m = this.manual;
+    this.position = {
+      ...rest,
+      ...(outage ? { simulatedOutage: outage } : {}),
+      ...(this.poseQuestion ? { poseQuestion: this.poseQuestion } : {}),
+      ...(m ? { manual: { placedAt: m.placedAt, confirmedAt: m.confirmedAt, asking: this.manualAsking() } } : {}),
+    };
     this.overlayStale = true;
     this.logPosition(position, behindUs);
     this.listeners.forEach((listener) => listener());
@@ -914,4 +1063,13 @@ function widen(p: ParkedPose): ParkedPose {
     posSigmaM: Math.hypot(p.posSigmaM, POSE_POSITION_SLACK_M),
     headingSigmaRad: Math.hypot(p.headingSigmaRad, POSE_HEADING_SLACK_RAD),
   };
+}
+
+function rawOf(fix: GnssRecord): RawGnssFix {
+  return { lat: fix.latDeg, lon: fix.lonDeg, accuracyM: Number.isFinite(fix.hAccM) ? fix.hAccM : 9999, timestamp: fix.utcUs / 1000 };
+}
+
+/** rad → degrees in [0, 360). */
+function degrees360(rad: number): number {
+  return (((rad * 180) / Math.PI) % 360 + 360) % 360;
 }

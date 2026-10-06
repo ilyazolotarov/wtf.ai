@@ -165,15 +165,54 @@ jammed:
   (§6.1). Driving off cancels it. Never offered while moving.
 - **Placing:** the map zooms in (18, flat, north up) on the dot with a pin fixed at the screen centre; the driver drags
   the map until the pin is on the car, "Here". Then "tap where the front of the car points": an arrow from the pin
-  shows the heading, another tap turns it, "Confirm" applies it ("Skip" while none is chosen). The confirmed spot and
-  arrow stay drawn, fainter, until the dot is 50 m from them (the car drove off) or the car is placed again.
-- **Applied** (`Navigator.setPosition`): everything about the old track is dropped except the speed scale. With a
-  heading the EKF starts there (σ 10 m, 15°, init method `user`), confirmed: later fixes only pass its gate, so Wi-Fi
-  can't move it, five rejected satellite fixes still reset it. Without one: anchored there (σ 10 m), the filter
-  starting with the heading unknown. Note `nav position set by the driver: lat,lon N m from the dot, heading …`.
-- **Kept as the parked pose:** with a heading and the VIN known, the placing is saved as the car's parked pose (§6.1)
-  at once, not at the next 30 s save: an app closed right after starts from it, and a moved-on drive clears it as
-  usual. Without a heading nothing is saved (a parked pose needs one).
+  shows the heading, another tap turns it, "Confirm" applies it. A placing always has a heading: Confirm is disabled
+  until the first tap (there used to be a "Skip", which left the car anchored with no direction, and a route start
+  without one). The confirmed spot and arrow stay drawn, fainter, until the dot is 50 m from them (the car drove off)
+  or the car is placed again.
+- **Applied** (`Navigator.setPosition`): everything about the old track is dropped except the speed scale. The EKF
+  starts there (σ 10 m, 15°, init method `user`), confirmed: later fixes only pass its gate, so Wi-Fi can't move it,
+  five rejected satellite fixes still reset it. (`Navigator.setPosition` still takes no heading, anchoring there
+  with the filter starting with the heading unknown, but the app no longer places without one.) Note
+  `nav position set by the driver: lat,lon N m from the dot, heading …`.
+- **Held as the manual position** (§6.3), with or without a car connected, separately from the car's parked pose.
+  It used to be saved as the parked pose at once, which needed the VIN and the car reading 0 km/h: placed without
+  the car, it was lost, and the map and routing kept the Wi-Fi fix. With a car standing, the 30 s save still keeps
+  the navigator's pose (started from the placing) as the parked pose, as for any stop.
+
+### 6.3 The manual position
+
+- **Why:** placed with no car connected (the driver at home with only Wi-Fi, often hundreds of metres off), the navigator
+  took the placing but the map showed phone GNSS: without OBD speed the service publishes the fixes, not the
+  navigator. The dot and the route start stayed on the Wi-Fi fix.
+- **Held** (`NavigatorService`, stored under `nav.manualPosition`: for the phone, not a car): lat, lon, heading, when
+  placed, when last confirmed. It outlives the session, so an app closed right after starts from it.
+- **Shown:** with no OBD speed for 10 s, the service publishes it instead of the fixes: `source: "manual"`, ±10 m,
+  its heading, no speed, the latest fix still as `rawGnss`. Routing takes it as a reliable start, with its heading.
+  With OBD speed the navigator is published as usual (it started from the placing). While held, the snapshot carries
+  `manual: { placedAt, confirmedAt, asking }`; the map shows a chip "Position set manually · 12 min ago" with ✕ to
+  forget it; a tap on the chip places the car again (while it stands).
+- **Asked:** 15 min after it was placed or last confirmed, the map asks "Are you still here?". Yes confirms it again
+  (15 min more, and a navigator started without it starts from it now); No forgets it. Until answered it is still
+  shown. Note `nav manual position 15 min old: asking …`, `… confirmed by the driver`.
+- **Released** (no longer held; a navigator started from it carries on):
+  - the car drives (OBD speed above 0): the navigator carries the placing on. Note `… released: the car drives`.
+  - a trusted satellite fix within 3σ (σ = √(fix accuracy² + 10²)): GPS takes over.
+  - 5 trusted satellite fixes in a row that disagree: the EKF's rule for a placing (§6.2). One spoofed or wrong fix
+    isn't enough.
+  - Wi-Fi/cell fixes never release it: that is the point of it.
+- **Forgotten** (✕, or No to "still here?"): no longer held, and a navigator started from it starts over without it
+  (with the parked pose saved since the placing deleted, being the placing itself), so the fixes and the car's own
+  pose decide again. Note `… discarded by the driver` / `… the driver isn't there any more`.
+- **At a start** (a navigator is created: app to the foreground, another car), the newest word on where the car is
+  wins: the manual position, confirmed within 15 min, unless the car's parked pose was saved after it and more than
+  15 m from it (closer, the pose was saved from the placing, and the placing is the stronger start: Wi-Fi can't move
+  it). Older than 15 min it isn't started from: the map asks first. Notes `nav mode dr (manual position, N min old)`,
+  `nav manual position older than the parked pose (N m apart): parked pose`. A VIN known late (§6.1) doesn't replace a
+  navigator already started from the manual position.
+- **Is it the phone or the car?** The placing means the car (§6.2), but it can be made without one, to test at home.
+  Placed at home, then walking to a car parked elsewhere within 15 min, the car starts at home: forget it with ✕.
+- **Not in replays:** `npm run replay` doesn't reproduce driver placings (neither §6.2 nor this); its notes are in the
+  log.
 
 ## 7. Calibration (online)
 
