@@ -71,6 +71,7 @@
     "replay:compass": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/compass-report.ts",
     "replay:sim": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/simulate.ts",
     "route": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/route.ts",
+    "route:bench": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/route-bench.ts",
     "route:sim": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/guidance-sim.ts",
     "search": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/search.ts"
   },

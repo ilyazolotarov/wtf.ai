@@ -1,18 +1,21 @@
-/** Binary min-heap of (priority, value) pairs; duplicates allowed (the search skips stale entries). */
+/**
+ * Binary min-heap of (priority, value) pairs; duplicates allowed (the search skips stale entries). Typed arrays
+ * that grow by doubling: a long search pushes millions of entries, and plain arrays cost an allocation each.
+ */
 export class MinHeap {
-  private readonly keys: number[] = [];
-  private readonly values: number[] = [];
+  private keys = new Float64Array(1024);
+  private values = new Int32Array(1024);
+  private n = 0;
 
   get size(): number {
-    return this.keys.length;
+    return this.n;
   }
 
   push(key: number, value: number): void {
+    if (this.n === this.keys.length) this.grow();
     const keys = this.keys;
     const values = this.values;
-    let i = keys.length;
-    keys.push(key);
-    values.push(value);
+    let i = this.n++;
     while (i > 0) {
       const parent = (i - 1) >> 1;
       if (keys[parent] <= key) break;
@@ -26,19 +29,19 @@ export class MinHeap {
 
   /** The smallest key now (Infinity when empty). */
   peekKey(): number {
-    return this.keys.length ? this.keys[0] : Infinity;
+    return this.n ? this.keys[0] : Infinity;
   }
 
   /** Removes the entry with the smallest key and returns its value (undefined when empty). */
   pop(): number | undefined {
+    if (!this.n) return undefined;
     const keys = this.keys;
     const values = this.values;
-    if (!keys.length) return undefined;
     const top = values[0];
-    const lastKey = keys.pop()!;
-    const lastValue = values.pop()!;
-    const n = keys.length;
+    const n = --this.n;
     if (n) {
+      const lastKey = keys[n];
+      const lastValue = values[n];
       let i = 0;
       for (;;) {
         const l = 2 * i + 1;
@@ -54,5 +57,14 @@ export class MinHeap {
       values[i] = lastValue;
     }
     return top;
+  }
+
+  private grow(): void {
+    const keys = new Float64Array(this.keys.length * 2);
+    keys.set(this.keys);
+    const values = new Int32Array(this.values.length * 2);
+    values.set(this.values);
+    this.keys = keys;
+    this.values = values;
   }
 }

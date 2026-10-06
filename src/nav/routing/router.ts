@@ -3,7 +3,7 @@
 
 import type { Coordinate } from "../geo";
 import type { LocalFrame } from "../geo/local-frame";
-import { EdgeFlag, Oneway } from "../mapmatch/graph/format";
+import { EdgeFlag, Oneway, RoadClass } from "../mapmatch/graph/format";
 import type { EdgeId, GraphStats, NearEdge, RoadEdge, RoadGraph } from "../mapmatch/graph/road-graph";
 import { DEFAULT_ROUTE_COSTS, edgeSpeedMps, entrySeconds, maxSpeedMps, turnSeconds, type RouteCosts } from "./cost";
 import { MinHeap } from "./min-heap";
@@ -82,13 +82,64 @@ const FALLBACK_START_FACTOR = 2;
 const ISLAND_EDGES = 3000;
 /** Keeps the straight-line heuristic under the true time despite rounding in the lengths. */
 const HEURISTIC_SAFETY = 0.995;
-export const DEFAULT_MAX_STATES = 1_000_000;
+/**
+ * Hierarchy pruning: this far from both ends, only roads up to `PRUNE_CLASS` are searched (a trip across the
+ * country drives motorways, trunk and primary roads between the towns, never the side streets of villages in
+ * between). Near either end every road stays: that is where the route leaves or enters the hierarchy. A node whose
+ * only legal exits are minor roads keeps them, so the pruning never makes a dead end.
+ */
+const PRUNE_RADIUS_M = 20_000;
+const PRUNE_CLASS = RoadClass.tertiary;
+export const DEFAULT_MAX_STATES = 2_000_000;
 
 const EARTH_RADIUS_M = 6_371_000;
 const DEG = Math.PI / 180;
 const TWO_PI = 2 * Math.PI;
 const wrap = (a: number) => a - TWO_PI * Math.floor((a + Math.PI) / TWO_PI);
 const now = () => globalThis.performance?.now() ?? Date.now();
+
+/** Search states (directed edges settled or queued) in growable typed arrays, found by key through one map. */
+class StateTable {
+  private readonly index = new Map<number, number>();
+  keys = new Float64Array(4096);
+  /** Time to the end of the directed edge. */
+  g = new Float64Array(4096);
+  /** Heuristic at its end (it depends on the edge only: computed once). */
+  h = new Float64Array(4096);
+  /** Index of the previous state; −1 for a start. */
+  parent = new Int32Array(4096);
+  closed = new Uint8Array(4096);
+  size = 0;
+
+  find(key: number): number {
+    return this.index.get(key) ?? -1;
+  }
+
+  add(key: number, g: number, h: number, parent: number): number {
+    if (this.size === this.keys.length) this.grow();
+    const i = this.size++;
+    this.index.set(key, i);
+    this.keys[i] = key;
+    this.g[i] = g;
+    this.h[i] = h;
+    this.parent[i] = parent;
+    return i;
+  }
+
+  private grow(): void {
+    const n = this.keys.length * 2;
+    const copy = <T extends Float64Array | Int32Array | Uint8Array>(a: T): T => {
+      const b = new (a.constructor as new (n: number) => T)(n);
+      b.set(a);
+      return b;
+    };
+    this.keys = copy(this.keys);
+    this.g = copy(this.g);
+    this.h = copy(this.h);
+    this.parent = copy(this.parent);
+    this.closed = copy(this.closed);
+  }
+}
 
 /** Directed edge → search state key, and back. */
 const keyOf = (edge: EdgeId, dir: 1 | -1) => 2 * edge + (dir === 1 ? 0 : 1);
@@ -111,7 +162,7 @@ function stretchM(edge: RoadEdge, a: number, b: number): number {
 function distanceM(a: Coordinate, b: Coordinate): number {
   const x = (b.lon - a.lon) * DEG * Math.cos(((a.lat + b.lat) / 2) * DEG);
   const y = (b.lat - a.lat) * DEG;
-  return EARTH_RADIUS_M * Math.hypot(x, y);
+  return EARTH_RADIUS_M * Math.sqrt(x * x + y * y);
 }
 
 /** Where the route may start or end: an edge near the point (and how far off), and the cost of using it. */
@@ -129,21 +180,21 @@ export class RouteSearch {
   readonly costs: RouteCosts;
   private readonly maxStates: number;
   private readonly heap = new MinHeap();
-  private readonly best = new Map<number, number>();
-  /** Parent state of each state; −1 for a start. */
-  private readonly parent = new Map<number, number>();
-  /** Start states: the start they come from. */
+  private readonly states = new StateTable();
+  /** Start states (by state index): the start they come from. */
   private readonly starts = new Map<number, End>();
-  private readonly closed = new Set<number>();
   /**
-   * Goal entries (queued as −(index + 1)): the destination end, the parent state (−1: straight from `start` on the
-   * same edge), and where the last leg enters the destination's edge.
+   * Goal entries (queued as −(index + 1)): the destination end, the parent state index (−1: straight from `start`
+   * on the same edge), and where the last leg enters the destination's edge.
    */
   private readonly goals: { cost: number; dest: End; parent: number; start?: End; dir: 1 | -1; fromM: number }[] = [];
   /** Destination ends by edge. */
   private readonly dests = new Map<EdgeId, End>();
   /** The heuristic aims at the destination point less this: the main destination end's distance from it. */
   private destSlackM = 0;
+  /** Metres per degree of longitude and latitude at the start, and the same at the destination (pruning). */
+  private readonly startKm = { x: 0, y: 0 };
+  private readonly destKm = { x: 0, y: 0 };
   private readonly vmax: number;
   private started = false;
   private finished: RouteStatus | null = null;
@@ -177,8 +228,8 @@ export class RouteSearch {
         const value = this.heap.pop();
         if (value === undefined) return this.finish({ status: "failed", reason: "no-route", stats: this.stats });
         if (value < 0) return this.finish({ status: "done", plan: this.plan(-value - 1), stats: this.stats });
-        if (this.closed.has(value)) continue;
-        this.closed.add(value);
+        if (this.states.closed[value]) continue;
+        this.states.closed[value] = 1;
         if (++this.stats.states > this.maxStates) return this.finish({ status: "failed", reason: "too-far", stats: this.stats });
         this.expand(value);
       }
@@ -204,6 +255,10 @@ export class RouteSearch {
       ? first
       : (nearDest.find((x) => isPublic(x.edge) && x.distanceM <= first.distanceM + DEST_PUBLIC_M) ?? first);
     this.destSlackM = main.distanceM;
+    this.destKm.x = DEG * EARTH_RADIUS_M * Math.cos(this.to.lat * DEG);
+    this.destKm.y = DEG * EARTH_RADIUS_M;
+    this.startKm.x = DEG * EARTH_RADIUS_M * Math.cos(this.from.lat * DEG);
+    this.startKm.y = DEG * EARTH_RADIUS_M;
     this.dests.set(main.edge.id, { near: main, extraS: 0 });
     for (const near of nearDest.filter((x) => x !== main)) {
       this.dests.set(near.edge.id, { near, extraS: FALLBACK_S + Math.max(0, near.distanceM - main.distanceM) / FALLBACK_MPS });
@@ -273,42 +328,78 @@ export class RouteSearch {
       }
       const key = keyOf(edge.id, dir);
       const g = g0 + stretchM(edge, alongM, dir === 1 ? geometryLength(edge) : 0) / edgeSpeedMps(edge, c);
-      if (g >= (this.best.get(key) ?? Infinity)) continue;
-      this.best.set(key, g);
-      this.parent.set(key, -1);
-      this.starts.set(key, start);
-      this.heap.push(g + this.heuristic(edge, dir), key);
+      const known = this.states.find(key);
+      let i: number;
+      if (known < 0) {
+        i = this.states.add(key, g, this.heuristic(edge, dir), -1);
+      } else {
+        if (g >= this.states.g[known]) continue;
+        i = known;
+        this.states.g[i] = g;
+        this.states.parent[i] = -1;
+      }
+      this.starts.set(i, start);
+      this.heap.push(g + this.states.h[i], i);
     }
   }
 
-  private expand(key: number): void {
+  private expand(index: number): void {
     const c = this.costs;
-    const g = this.best.get(key)!;
+    const states = this.states;
+    const key = states.keys[index];
+    const g = states.g[index];
     const edge = this.graph.edge(edgeOf(key));
     const dir = dirOf(key);
     const node = this.graph.node(dir === 1 ? edge.to : edge.from);
     const junction = node.edges.length >= 3;
     const exits = this.graph.exits(edge.id, dir);
-    let legal = exits.filter((x) => !x.uTurn && !x.againstOneway && !x.restricted);
+    // Far from both ends only the main roads are searched, unless nothing else is legal there (see PRUNE_RADIUS_M).
+    const prune = this.farFromEnds(node.lat, node.lon);
+    let legal = 0;
+    let kept = 0;
+    for (const x of exits) {
+      if (x.uTurn || x.againstOneway || x.restricted) continue;
+      legal++;
+      if (!prune || this.graph.edge(x.edge).cls <= PRUNE_CLASS) kept++;
+    }
+    const pruneNow = prune && kept > 0;
     // A dead end (or a one-way trap): turning back is the only way on.
-    if (!legal.length) legal = exits.filter((x) => x.uTurn && !x.againstOneway);
-    for (const x of legal) {
+    const uTurns = legal === 0;
+    for (const x of exits) {
+      if (x.againstOneway || (uTurns ? !x.uTurn : x.uTurn || x.restricted)) continue;
       const out = this.graph.edge(x.edge);
+      if (pruneNow && out.cls > PRUNE_CLASS) continue;
       const pass = x.uTurn ? c.uTurnS : junction ? c.junctionS + turnSeconds(x.turnRad, c) : 0;
       const speed = edgeSpeedMps(out, c);
       const dest = this.dests.get(out.id);
       if (dest) {
         const entry = x.dir === 1 ? 0 : geometryLength(out);
-        this.offerGoal(g + pass + dest.extraS + stretchM(out, entry, dest.near.alongM) / speed, dest, key, x.dir, entry);
+        this.offerGoal(g + pass + dest.extraS + stretchM(out, entry, dest.near.alongM) / speed, dest, index, x.dir, entry);
       }
-      const next = keyOf(out.id, x.dir);
-      if (this.closed.has(next)) continue;
+      const nextKey = keyOf(out.id, x.dir);
+      const known = states.find(nextKey);
+      if (known >= 0 && states.closed[known]) continue;
       const ng = g + pass + entrySeconds(out, c) + out.lengthM / speed;
-      if (ng >= (this.best.get(next) ?? Infinity)) continue;
-      this.best.set(next, ng);
-      this.parent.set(next, key);
-      this.heap.push(ng + this.heuristic(out, x.dir), next);
+      if (known < 0) {
+        const next = states.add(nextKey, ng, this.heuristic(out, x.dir), index);
+        this.heap.push(ng + states.h[next], next);
+      } else if (ng < states.g[known]) {
+        states.g[known] = ng;
+        states.parent[known] = index;
+        this.heap.push(ng + states.h[known], known);
+      }
     }
+  }
+
+  /** The point is beyond `PRUNE_RADIUS_M` from the start and from the destination (flat-earth distance). */
+  private farFromEnds(lat: number, lon: number): boolean {
+    const r2 = PRUNE_RADIUS_M * PRUNE_RADIUS_M;
+    let dx = (lon - this.from.lon) * this.startKm.x;
+    let dy = (lat - this.from.lat) * this.startKm.y;
+    if (dx * dx + dy * dy <= r2) return false;
+    dx = (lon - this.to.lon) * this.destKm.x;
+    dy = (lat - this.to.lat) * this.destKm.y;
+    return dx * dx + dy * dy > r2;
   }
 
   private offerGoal(cost: number, dest: End, parent: number, dir: 1 | -1, fromM: number, start?: End): void {
@@ -329,12 +420,13 @@ export class RouteSearch {
     const goal = this.goals[goalIndex];
     const legs: RouteLeg[] = [{ edge: goal.dest.near.edge.id, dir: goal.dir, fromM: goal.fromM, toM: goal.dest.near.alongM }];
     let start = goal.start;
-    for (let key = goal.parent; key !== -1; key = this.parent.get(key)!) {
+    for (let i = goal.parent; i !== -1; i = this.states.parent[i]) {
+      const key = this.states.keys[i];
       const edge = this.graph.edge(edgeOf(key));
       const dir = dirOf(key);
       const length = geometryLength(edge);
-      const first = this.parent.get(key) === -1;
-      if (first) start = this.starts.get(key);
+      const first = this.states.parent[i] === -1;
+      if (first) start = this.starts.get(i);
       legs.unshift({ edge: edge.id, dir, fromM: first ? start!.near.alongM : dir === 1 ? 0 : length, toM: dir === 1 ? length : 0 });
     }
     const coordinates: Coordinate[] = [];

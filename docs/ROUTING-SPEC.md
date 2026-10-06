@@ -152,6 +152,14 @@ Node on the Windows PC, cold tile cache (2026-10-05):
   filter's 128-tile cache (1.1 s), 5.2 k with 2048 (0.57 s, 20 MB held), 4.5 k with 4096 (0.51 s, 79 MB).
 - Of 130 random routes, 4 had no road route: 3 ended on track networks or yards connected to nothing, now refused
   in ~10 ms (island check); one start on a source-only stretch found its route once fallbacks were added.
+- **Speed-up (2026-10-05, `npm run route:bench`).** The phone hit `too-far` (1 M states) on long routes: with the
+  straight-line heuristic at the fastest speed (110 km/h) the search floods most of the grid. Now (a) states live in
+  typed arrays behind one map lookup, the heap is typed arrays, headings are memoised and `exits` skips restriction
+  work at nodes without any: ~5–8 µs per state instead of ~8–12; (b) hierarchy pruning: 20 km or more from both
+  ends only roads up to tertiary are searched (kept at a node whose only legal exits are minor roads), the state cap
+  is 2 M. On the synthetic 250 × 150 km grid (`route:bench`, 107–198 km routes) the routes were identical, with 3.4×
+  fewer states and 4× less time (24 s → 5.6 s for 10 routes). `route:bench --graph <file> --at lat,lon --radius km`
+  runs the same on a real graph; `--json` / `--compare` diff two runs (checksum of each plan).
 - On the phone: unknown. The filter's updates ran about as fast on the iPhone as in Node (MAPMATCH-SPEC §15.9), but
   tile reads go through the file system there. The app logs every plan's time (§8); if oblast routes are slow,
   the candidates are a routing-only tile decode (no geometry arrays) and skipping minor roads far from both ends.
