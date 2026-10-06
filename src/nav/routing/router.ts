@@ -19,6 +19,10 @@ export interface RouteOptions {
   costs?: Partial<RouteCosts>;
   /** States settled before giving up ("too far"). */
   maxStates?: number;
+  /** Hierarchy pruning far from the ends (`HIERARCHY`); false: every road everywhere (exact, slow on long routes). */
+  hierarchy?: boolean;
+  /** The heuristic times this (`HEURISTIC_WEIGHT`); 1: A*, the fastest route under the cost model. */
+  heuristicWeight?: number;
 }
 
 /** A directed stretch of an edge, from `fromM` to `toM` along its geometry (`fromM > toM`: against it). */
@@ -83,13 +87,23 @@ const ISLAND_EDGES = 3000;
 /** Keeps the straight-line heuristic under the true time despite rounding in the lengths. */
 const HEURISTIC_SAFETY = 0.995;
 /**
- * Hierarchy pruning: this far from both ends, only roads up to `PRUNE_CLASS` are searched (a trip across the
- * country drives motorways, trunk and primary roads between the towns, never the side streets of villages in
- * between). Near either end every road stays: that is where the route leaves or enters the hierarchy. A node whose
- * only legal exits are minor roads keeps them, so the pruning never makes a dead end.
+ * Hierarchy pruning: away from both ends, only the main roads are searched, more so the farther (a trip across the
+ * country drives trunk and primary roads between the towns, never the side streets of the villages in between).
+ * Near either end every road stays: that is where the route leaves or enters the hierarchy. Each entry: from this
+ * far from the nearer end (m), roads up to this class. A node whose legal exits are all smaller roads keeps them,
+ * so the pruning never makes a dead end; a pruned search that finds no route searches again without it.
  */
-const PRUNE_RADIUS_M = 20_000;
-const PRUNE_CLASS = RoadClass.tertiary;
+const HIERARCHY: readonly (readonly [number, number])[] = [
+  [80_000, RoadClass.primary],
+  [35_000, RoadClass.secondary],
+  [12_000, RoadClass.tertiary],
+];
+/**
+ * The heuristic assumes the fastest road (motorway) all the way, which long routes never drive: weighted, the search
+ * heads for the destination instead of flooding every road around the start. Routes may come out at most this much
+ * slower than the fastest; in practice (`npm run route:bench`) they are within about a percent.
+ */
+const HEURISTIC_WEIGHT = 1.5;
 export const DEFAULT_MAX_STATES = 2_000_000;
 
 const EARTH_RADIUS_M = 6_371_000;
@@ -179,15 +193,19 @@ interface End {
 export class RouteSearch {
   readonly costs: RouteCosts;
   private readonly maxStates: number;
-  private readonly heap = new MinHeap();
-  private readonly states = new StateTable();
+  private heap = new MinHeap();
+  private states = new StateTable();
   /** Start states (by state index): the start they come from. */
-  private readonly starts = new Map<number, End>();
+  private starts = new Map<number, End>();
+  /** Every start end, to search again without pruning. */
+  private readonly startEnds: End[] = [];
+  private pruning: boolean;
+  private readonly weight: number;
   /**
    * Goal entries (queued as −(index + 1)): the destination end, the parent state index (−1: straight from `start`
    * on the same edge), and where the last leg enters the destination's edge.
    */
-  private readonly goals: { cost: number; dest: End; parent: number; start?: End; dir: 1 | -1; fromM: number }[] = [];
+  private goals: { cost: number; dest: End; parent: number; start?: End; dir: 1 | -1; fromM: number }[] = [];
   /** Destination ends by edge. */
   private readonly dests = new Map<EdgeId, End>();
   /** The heuristic aims at the destination point less this: the main destination end's distance from it. */
@@ -210,6 +228,8 @@ export class RouteSearch {
   ) {
     this.costs = { ...DEFAULT_ROUTE_COSTS, ...options.costs };
     this.maxStates = options.maxStates ?? DEFAULT_MAX_STATES;
+    this.pruning = options.hierarchy ?? true;
+    this.weight = options.heuristicWeight ?? HEURISTIC_WEIGHT;
     this.vmax = maxSpeedMps(this.costs);
     this.tilesAtStart = graph.stats?.tileLoads ?? 0;
   }
@@ -226,7 +246,11 @@ export class RouteSearch {
       }
       for (let n = 0; n < maxStates; n++) {
         const value = this.heap.pop();
-        if (value === undefined) return this.finish({ status: "failed", reason: "no-route", stats: this.stats });
+        if (value === undefined) {
+          if (!this.pruning) return this.finish({ status: "failed", reason: "no-route", stats: this.stats });
+          this.searchAgainUnpruned();
+          continue;
+        }
         if (value < 0) return this.finish({ status: "done", plan: this.plan(-value - 1), stats: this.stats });
         if (this.states.closed[value]) continue;
         this.states.closed[value] = 1;
@@ -238,6 +262,16 @@ export class RouteSearch {
       this.stats.ms += now() - t0;
       this.stats.tilesRead = (this.graph.stats?.tileLoads ?? 0) - this.tilesAtStart;
     }
+  }
+
+  /** The pruned search ran out of roads (the route needs a minor road far from both ends): every road, from scratch. */
+  private searchAgainUnpruned(): void {
+    this.pruning = false;
+    this.states = new StateTable();
+    this.starts = new Map();
+    this.goals = [];
+    this.heap = new MinHeap();
+    for (const start of this.startEnds) this.addStart(start);
   }
 
   private finish(status: RouteStatus): RouteStatus {
@@ -315,6 +349,7 @@ export class RouteSearch {
   }
 
   private addStart(start: End): void {
+    if (!this.startEnds.includes(start)) this.startEnds.push(start);
     const c = this.costs;
     const { edge, alongM, headingRad } = start.near;
     for (const dir of [1, -1] as const) {
@@ -353,22 +388,22 @@ export class RouteSearch {
     const node = this.graph.node(dir === 1 ? edge.to : edge.from);
     const junction = node.edges.length >= 3;
     const exits = this.graph.exits(edge.id, dir);
-    // Far from both ends only the main roads are searched, unless nothing else is legal there (see PRUNE_RADIUS_M).
-    const prune = this.farFromEnds(node.lat, node.lon);
+    // Away from both ends only the main roads are searched, unless nothing else is legal there (see HIERARCHY).
+    let maxClass = this.pruning ? this.maxClassAt(node.lat, node.lon) : Infinity;
     let legal = 0;
     let kept = 0;
     for (const x of exits) {
       if (x.uTurn || x.againstOneway || x.restricted) continue;
       legal++;
-      if (!prune || this.graph.edge(x.edge).cls <= PRUNE_CLASS) kept++;
+      if (this.graph.edge(x.edge).cls <= maxClass) kept++;
     }
-    const pruneNow = prune && kept > 0;
+    if (!kept) maxClass = Infinity;
     // A dead end (or a one-way trap): turning back is the only way on.
     const uTurns = legal === 0;
     for (const x of exits) {
       if (x.againstOneway || (uTurns ? !x.uTurn : x.uTurn || x.restricted)) continue;
       const out = this.graph.edge(x.edge);
-      if (pruneNow && out.cls > PRUNE_CLASS) continue;
+      if (out.cls > maxClass) continue;
       const pass = x.uTurn ? c.uTurnS : junction ? c.junctionS + turnSeconds(x.turnRad, c) : 0;
       const speed = edgeSpeedMps(out, c);
       const dest = this.dests.get(out.id);
@@ -391,15 +426,16 @@ export class RouteSearch {
     }
   }
 
-  /** The point is beyond `PRUNE_RADIUS_M` from the start and from the destination (flat-earth distance). */
-  private farFromEnds(lat: number, lon: number): boolean {
-    const r2 = PRUNE_RADIUS_M * PRUNE_RADIUS_M;
+  /** The largest road class searched at this point (see HIERARCHY); flat-earth distances to the ends. */
+  private maxClassAt(lat: number, lon: number): number {
     let dx = (lon - this.from.lon) * this.startKm.x;
     let dy = (lat - this.from.lat) * this.startKm.y;
-    if (dx * dx + dy * dy <= r2) return false;
+    const fromStart2 = dx * dx + dy * dy;
     dx = (lon - this.to.lon) * this.destKm.x;
     dy = (lat - this.to.lat) * this.destKm.y;
-    return dx * dx + dy * dy > r2;
+    const d2 = Math.min(fromStart2, dx * dx + dy * dy);
+    for (const [m, cls] of HIERARCHY) if (d2 > m * m) return cls;
+    return Infinity;
   }
 
   private offerGoal(cost: number, dest: End, parent: number, dir: 1 | -1, fromM: number, start?: End): void {
@@ -408,12 +444,13 @@ export class RouteSearch {
   }
 
   /**
-   * Time to the destination at the fastest speed, from the end of a directed edge. Never more than the true time:
-   * the main destination end is `destSlackM` from the point, and a fallback end nearer still costs `FALLBACK_S`.
+   * Time to the destination at the fastest speed, from the end of a directed edge, times `weight`. Unweighted never
+   * more than the true time: the main destination end is `destSlackM` from the point, and a fallback end nearer
+   * still costs `FALLBACK_S`.
    */
   private heuristic(edge: RoadEdge, dir: 1 | -1): number {
     const end = this.graph.node(dir === 1 ? edge.to : edge.from);
-    return (HEURISTIC_SAFETY * Math.max(0, distanceM(end, this.to) - this.destSlackM)) / this.vmax;
+    return (this.weight * HEURISTIC_SAFETY * Math.max(0, distanceM(end, this.to) - this.destSlackM)) / this.vmax;
   }
 
   private plan(goalIndex: number): RoutePlan {
