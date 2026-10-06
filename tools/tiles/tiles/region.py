@@ -107,3 +107,14 @@ def write_regions(regions_dir: Path, names: list[str] | None = None, buffer_m: f
         paths.append(write_region(name, registry[name]["relation"], regions_dir, buffer_m=buffer_m))
     return paths
 
+
+
+OUTLINE_TOLERANCE_DEG = 0.01  # ~1 km: enough to tell which region a car is in
+
+
+def region_outline(geom: Polygon | MultiPolygon, tolerance_deg: float = OUTLINE_TOLERANCE_DEG) -> list[list[list[float]]]:
+    """The region's outer rings, simplified and rounded, for index.json: the app checks
+    whether the car is inside the active region and which region it is in otherwise."""
+    simple = geom.simplify(tolerance_deg, preserve_topology=True)
+    polys = list(simple.geoms) if isinstance(simple, MultiPolygon) else [simple]
+    return [[[round(x, 3), round(y, 3)] for x, y in p.exterior.coords] for p in polys if not p.is_empty]
