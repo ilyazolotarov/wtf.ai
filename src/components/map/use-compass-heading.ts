@@ -82,13 +82,13 @@ export function walkingCompass(
 
 /**
  * Direction of travel worth turning the map to, or undefined. The navigator's heading
- * (dr/fused) holds through stops; a GNSS course is noise unless moving.
+ * (dr/fused) holds through stops, as does a heading set on the map; a GNSS course is noise unless moving.
  */
 export function travelHeadingRad(
   position: PositionEstimate | null | undefined,
 ): number | undefined {
   if (position?.headingRad == null) return undefined;
-  if (position.source === "dr" || position.source === "fused") return position.headingRad;
+  if (position.source === "dr" || position.source === "fused" || position.source === "manual") return position.headingRad;
   return (position.speedMps ?? 0) > COURSE_MIN_SPEED_MPS ? position.headingRad : undefined;
 }
 

@@ -55,6 +55,8 @@ const STANDING_MPS = 1;
 const PLACE_OFFER_ACCURACY_M = 75;
 /** The confirmed placing stays drawn until the dot is this far from it (the car drove off). */
 const PLACED_SHOWN_M = 50;
+/** How often the manual position's age ("12 min ago") is redrawn. */
+const MANUAL_AGE_REFRESH_MS = 15_000;
 
 /** Driving this long on a trip turns follow into heading-up (UI-SPEC §6.2). */
 const AUTO_HEADING_UP_MS = 2000;
@@ -211,16 +213,25 @@ export default function HomeScreen() {
     setPlaceAt(at);
     setPlacing("heading");
   };
-  // A tap aims the arrow (again and again); Confirm applies it, Skip goes without a heading.
+  // A tap aims the arrow (again and again); Confirm applies it, only once there is a heading.
   const aimPlacing = (towards: Coordinate) => {
     if (placeAt) setPlaceHeading(bearingRad(placeAt, towards));
   };
   const finishPlacing = () => {
-    if (placeAt) {
-      navigator.setUserPosition(placeAt, placeHeading ?? undefined);
-      setPlaced({ at: placeAt, headingRad: placeHeading });
-    }
+    if (!placeAt || placeHeading === null) return;
+    navigator.setUserPosition(placeAt, placeHeading);
+    setPlaced({ at: placeAt, headingRad: placeHeading });
     stopPlacing();
+  };
+  // A position set on the map (NAVIGATOR-SPEC §6.3): its age on the chip, "still here?" after 15 min.
+  const manual = position?.manual;
+  const manualNow = useNowMs(manual != null, MANUAL_AGE_REFRESH_MS);
+  const manualAge = manual ? formatAge(manualNow - manual.confirmedAt, t) : "";
+  // Forgetting it (✕, or "no" to "still here?") also takes the placing's mark off the map.
+  const forgetManual = (notHere = false) => {
+    if (notHere) navigator.answerManual(false);
+    else navigator.discardManualPosition();
+    setPlaced(null);
   };
   // Moving off cancels (state adjusted during render, not in an effect).
   if (placing && !standing) {
@@ -376,19 +387,28 @@ export default function HomeScreen() {
                   </T>
                 </Pressable>
                 <Pressable
-                  onPress={placing === "position" ? placeHere : () => finishPlacing()}
+                  onPress={placing === "position" ? placeHere : finishPlacing}
+                  // A placing always has a heading: Confirm waits for the first tap.
+                  disabled={placing === "heading" && placeHeading === null}
                   accessibilityRole="button"
-                  style={({ pressed }) => [styles.ghostButton, styles.answerButton, { backgroundColor: palette.surface }, pressed && styles.pressed]}
+                  accessibilityState={{ disabled: placing === "heading" && placeHeading === null }}
+                  style={({ pressed }) => [
+                    styles.ghostButton,
+                    styles.answerButton,
+                    { backgroundColor: palette.surface },
+                    placing === "heading" && placeHeading === null && styles.disabled,
+                    pressed && styles.pressed,
+                  ]}
                 >
                   <T w="semibold" size={14} color={palette.accent}>
-                    {t(placing === "position" ? "placeHere" : placeHeading === null ? "placeSkipHeading" : "placeConfirm")}
+                    {t(placing === "position" ? "placeHere" : "placeConfirm")}
                   </T>
                 </Pressable>
               </View>
             </View>
           )}
 
-          {!placing && !position?.poseQuestion && standing && lost && (
+          {!placing && !position?.poseQuestion && !manual && standing && lost && (
             <Pressable
               onPress={startPlacing}
               style={({ pressed }) => [panel, styles.calChip, pressed && styles.pressed]}
@@ -400,6 +420,66 @@ export default function HomeScreen() {
                 {t("placeOffer")}
               </T>
             </Pressable>
+          )}
+
+          {!placing && manual && !manual.asking && (
+            <View style={[panel, styles.calChip, styles.manualChip]}>
+              <GlassFill radius={Radius.pill} />
+              <Pressable
+                // Placing it again: only while the car stands, as the first time.
+                onPress={standing ? startPlacing : undefined}
+                disabled={!standing}
+                accessibilityRole="button"
+                style={({ pressed }) => [styles.manualChipBody, pressed && styles.pressed]}
+              >
+                <Icon name="location_on" size={16} color={palette.accent} />
+                <T w="semibold" size={13} color={palette.accent} numberOfLines={1}>
+                  {t("manualChip").replace("{age}", manualAge)}
+                </T>
+              </Pressable>
+              <Pressable
+                onPress={() => forgetManual()}
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel={t("manualForget")}
+                style={({ pressed }) => pressed && styles.pressed}
+              >
+                <Icon name="close" size={16} color={palette.text2} />
+              </Pressable>
+            </View>
+          )}
+
+          {!placing && manual?.asking && (
+            <View style={[panel, styles.alertCard]}>
+              <GlassFill radius={Radius.rL} />
+              <View style={styles.alertRow}>
+                <View style={[styles.alertIcon, { backgroundColor: palette.warn.a }]}>
+                  <Icon name="location_on" size={20} color={palette.warn.c} />
+                </View>
+                <View style={styles.alertText}>
+                  <T w="semibold" size={15}>
+                    {t("manualQuestion")}
+                  </T>
+                  <T size={13} color={palette.text2}>
+                    {t("manualQuestionWhy").replace("{age}", manualAge)}
+                  </T>
+                </View>
+              </View>
+              <View style={styles.answerRow}>
+                {([true, false] as const).map((here) => (
+                  <Pressable
+                    key={String(here)}
+                    onPress={() => (here ? navigator.answerManual(true) : forgetManual(true))}
+                    accessibilityRole="button"
+                    style={({ pressed }) => [styles.ghostButton, styles.answerButton, { backgroundColor: palette.surface }, pressed && styles.pressed]}
+                  >
+                    <T w="semibold" size={14} color={palette.accent}>
+                      {t(here ? "manualYes" : "poseNo")}
+                    </T>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
           )}
 
           {!placing && position?.poseQuestion && (
@@ -654,6 +734,25 @@ function formatDuration(ms: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
+/** "just now", "12 min ago", "1 h 5 min ago". */
+function formatAge(ms: number, t: ReturnType<typeof useT>["t"]): string {
+  const min = Math.floor(Math.max(0, ms) / 60_000);
+  if (min < 1) return t("ageJustNow");
+  if (min < 60) return t("ageMinutes").replace("{m}", String(min));
+  return t("ageHours").replace("{h}", String(Math.floor(min / 60))).replace("{m}", String(min % 60));
+}
+
+/** Wall clock, ms, redrawn every `everyMs` while `on`. */
+function useNowMs(on: boolean, everyMs: number): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!on) return;
+    const timer = setInterval(() => setNow(Date.now()), everyMs);
+    return () => clearInterval(timer);
+  }, [on, everyMs]);
+  return now;
+}
+
 const LINK_BADGE_LABEL = { ok: "badgeOk", busy: "badgeBusy", bad: "badgeBad" } as const;
 
 /** The vehicle button's connection dot; `pulse` (connecting) scales it up and down a little. */
@@ -783,6 +882,7 @@ const styles = StyleSheet.create({
   },
   panel: { borderCurve: "continuous" },
   pressed: { opacity: 0.75 },
+  disabled: { opacity: 0.4 },
   topStack: { gap: 10 },
   topRow: { flexDirection: "row", alignItems: "stretch", gap: 10 },
   statusPill: {
@@ -846,6 +946,8 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 18,
   },
+  manualChip: { maxWidth: "100%", paddingRight: 12, gap: 10 },
+  manualChipBody: { flexShrink: 1, flexDirection: "row", alignItems: "center", gap: 8 },
   calChip: {
     alignSelf: "flex-start",
     height: 36,

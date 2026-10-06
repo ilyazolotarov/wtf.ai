@@ -46,4 +46,9 @@ export interface PositionEstimate {
    * here?" (NAVIGATOR-SPEC §6.1). `distanceM`: how far that fix is.
    */
   poseQuestion?: { distanceM: number };
+  /**
+   * A position the driver set on the map is held (NAVIGATOR-SPEC §6.3): shown instead of the phone's fixes while no
+   * car speed comes. Wall clock, ms. `asking`: it is 15 min since it was confirmed, ask "are you still here?".
+   */
+  manual?: { placedAt: number; confirmedAt: number; asking: boolean };
 }

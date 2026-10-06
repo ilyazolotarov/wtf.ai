@@ -9,6 +9,8 @@
 // - the compass calibrations, per VIN (§7.6): the car's own magnetic field and the phone's angle in
 //   the mount, learned against known headings over earlier drives, one per mounting (the phone's
 //   tilt), most recent first. This phone only (the store is local).
+// - the position the driver set on the map (§6.3): for this phone, not a car, so it outlives the session (and a
+//   placing made without a car connected) until it is released or discarded.
 // The gyro bias and scale are not stored: CoreMotion corrects the bias itself and it drifts
 // with temperature, and the learned k_ω mostly absorbs GNSS timing (§7.2), not the gyro.
 
@@ -39,6 +41,16 @@ export interface StoredPose extends ParkedPose {
   savedAt: number;
 }
 
+/** The driver's placing on the map (NAVIGATOR-SPEC §6.3); times wall clock, ms. */
+export interface StoredManualPosition {
+  lat: number;
+  lon: number;
+  headingRad: number;
+  placedAt: number;
+  /** When it was placed, or last answered "still here". */
+  confirmedAt: number;
+}
+
 export interface StoredCompass {
   calibrations: CompassCalibration[];
   savedAt: number;
@@ -62,6 +74,7 @@ export const CALIBRATION_KEY = "nav.calibration";
 /** Before poses were kept per car: one pose, with its VIN. */
 export const PARKED_POSE_KEY = "nav.parkedPose";
 export const PARKED_POSES_KEY = "nav.parkedPoses";
+export const MANUAL_POSITION_KEY = "nav.manualPosition";
 
 /** Save k_s only once it is learned this well (1σ). The EKF prior is 0.03. */
 const SPEED_SCALE_SAVE_SIGMA = 0.01;
@@ -136,6 +149,17 @@ export class CalibrationStore {
   clearParkedPose(vin: string): void {
     const { [vin]: _dropped, ...rest } = this.parkedPoses();
     this.store.setJson(PARKED_POSES_KEY, rest);
+  }
+
+  /** The position the driver set on the map, if one is held. */
+  manualPosition(): StoredManualPosition | null {
+    const m = this.store.getJson<StoredManualPosition>(MANUAL_POSITION_KEY);
+    return m && [m.lat, m.lon, m.headingRad, m.placedAt, m.confirmedAt].every(Number.isFinite) ? m : null;
+  }
+
+  /** `null`: released or discarded. */
+  saveManualPosition(m: StoredManualPosition | null): void {
+    this.store.setJson(MANUAL_POSITION_KEY, m);
   }
 
   /** What is stored for the phone (`vin` null) or this car, as it is. */
