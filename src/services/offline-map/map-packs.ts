@@ -13,8 +13,9 @@ import { assetUrl, fetchCatalog, type CatalogRegion, type MapCatalog } from "@/s
  *     common/               style.json, sprites/, fonts/ — shared by all regions
  *     <region>.pmtiles      one per installed region; `.part` while downloading
  *     <region>.graph.bin    its road graph for map matching (MAPMATCH-SPEC §11); `.part` too
+ *     <region>.search.bin   its address search index (SEARCH-SPEC); `.part` too
  *
- * One download at a time, shown as one: the shared files (when changed), tiles and graph are
+ * One download at a time, shown as one: the shared files (when changed), tiles, graph and search index are
  * fetched in turn in an iOS background session into `common.staging/` and `.part` files, with
  * one byte count and pause/resume on whichever file is current. The job (with the current
  * file's DownloadTask.savable()) is kept in kv-store, so it survives app restarts. Only when
@@ -31,6 +32,8 @@ export interface InstalledRegion {
   md5?: string;
   /** Road graph; absent until downloaded (regions installed before graphs get it as an update). */
   graph?: { size: number; md5: string };
+  /** Search index; absent until downloaded (an update for regions installed before it). */
+  search?: { size: number; md5: string };
 }
 
 export interface InstalledState {
@@ -78,6 +81,8 @@ interface DownloadJob {
   common: { osm_date: string; fingerprint: string } | null;
   tiles: boolean;
   graph: boolean;
+  /** Absent in jobs saved before search indexes. */
+  search?: boolean;
   files: JobFile[];
   /** Next file to fetch; bytes of the files before it. */
   index: number;
@@ -94,6 +99,8 @@ const tilesFile = (region: string) => new File(ROOT(), `${region}.pmtiles`);
 const tilesPart = (region: string) => `${region}.pmtiles.part`;
 const graphFile = (region: string) => new File(ROOT(), `${region}.graph.bin`);
 const graphPart = (region: string) => `${region}.graph.bin.part`;
+const searchFile = (region: string) => new File(ROOT(), `${region}.search.bin`);
+const searchPart = (region: string) => `${region}.search.bin.part`;
 const INSTALLED = () => new File(ROOT(), "installed.json");
 const JOB_KEY = "map-download-job";
 /** Key of the earlier tiles-only pause state; dropped on start. */
@@ -217,12 +224,21 @@ const tilesCurrent = (have: InstalledRegion | undefined, entry: CatalogRegion) =
 const graphCurrent = (have: InstalledRegion | undefined, entry: CatalogRegion) =>
   !entry.graph || (have?.graph?.md5 === entry.graph.md5 && graphFile(entry.region).exists);
 
-/** An installed region whose tiles, graph or shared files differ from the catalog's. */
+/** True also when the catalog has no search index for the region. */
+const searchCurrent = (have: InstalledRegion | undefined, entry: CatalogRegion) =>
+  !entry.search || (have?.search?.md5 === entry.search.md5 && searchFile(entry.region).exists);
+
+/** An installed region whose tiles, graph, search index or shared files differ from the catalog's. */
 export function regionNeedsUpdate(installed: InstalledState, catalog: MapCatalog, region: string): boolean {
   const have = installed.regions[region];
   const entry = catalog.regions.find((r) => r.region === region);
   if (!have || !entry) return false;
-  return !tilesCurrent(have, entry) || !graphCurrent(have, entry) || !commonCurrent(installed, catalog);
+  return (
+    !tilesCurrent(have, entry) ||
+    !graphCurrent(have, entry) ||
+    !searchCurrent(have, entry) ||
+    !commonCurrent(installed, catalog)
+  );
 }
 
 /** The active region's road graph file; null when it has none (display-only, or not downloaded yet). */
@@ -234,7 +250,16 @@ export function activeGraphFile(installed: InstalledState): { region: string; fi
   return file.exists ? { region, file, md5: graph.md5 } : null;
 }
 
-/** What `region` still lacks: shared files (if changed), tiles and graph (if changed). */
+/** The active region's search index file; null when it has none. */
+export function activeSearchFile(installed: InstalledState): { region: string; file: File; md5: string } | null {
+  const region = installed.active;
+  const search = region ? installed.regions[region]?.search : undefined;
+  if (!region || !search) return null;
+  const file = searchFile(region);
+  return file.exists ? { region, file, md5: search.md5 } : null;
+}
+
+/** What `region` still lacks: shared files (if changed), tiles, graph and search index (if changed). */
 function planJob(catalog: MapCatalog, entry: CatalogRegion): DownloadJob {
   const { installed } = getState();
   const have = installed.regions[entry.region];
@@ -253,12 +278,17 @@ function planJob(catalog: MapCatalog, entry: CatalogRegion): DownloadJob {
   if (graph) {
     files.push({ url: assetUrl(catalog, graph), dest: graphPart(entry.region), size: graph.size, md5: graph.md5, label: graph.asset });
   }
+  const search = !searchCurrent(have, entry) && entry.search ? entry.search : null;
+  if (search) {
+    files.push({ url: assetUrl(catalog, search), dest: searchPart(entry.region), size: search.size, md5: search.md5, label: search.asset });
+  }
   return {
     region: entry,
     osm_date: catalog.osm_date,
     common: common ? { osm_date: catalog.osm_date, fingerprint: commonFingerprint(catalog) } : null,
     tiles,
     graph: !!graph,
+    search: !!search,
     files,
     index: 0,
     done: 0,
@@ -279,6 +309,7 @@ function install(j: DownloadJob) {
   for (const [want, part, dest] of [
     [j.tiles, tilesPart(region), tilesFile(region)],
     [j.graph, graphPart(region), graphFile(region)],
+    [!!j.search, searchPart(region), searchFile(region)],
   ] as const) {
     if (!want) continue;
     if (dest.exists) dest.delete();
@@ -286,8 +317,9 @@ function install(j: DownloadJob) {
   }
   const { installed } = getState();
   const have = installed.regions[region];
-  const { asset: _asset, md5, sha256: _sha256, graph, size, ...info } = j.region;
+  const { asset: _asset, md5, sha256: _sha256, graph, search, size, ...info } = j.region;
   const regionGraph = j.graph && graph ? { size: graph.size, md5: graph.md5 } : have?.graph;
+  const regionSearch = j.search && search ? { size: search.size, md5: search.md5 } : have?.search;
   saveInstalled({
     ...installed,
     common: j.common ?? installed.common,
@@ -299,6 +331,7 @@ function install(j: DownloadJob) {
         size: j.tiles ? size : (have?.size ?? size),
         md5: j.tiles ? md5 : have?.md5,
         ...(regionGraph ? { graph: regionGraph } : {}),
+        ...(regionSearch ? { search: regionSearch } : {}),
       },
     },
     active: installed.active && installed.regions[installed.active] ? installed.active : region,
@@ -457,7 +490,7 @@ export function cancelDownload(): void {
 }
 
 export function removeRegion(region: string): void {
-  for (const file of [tilesFile(region), graphFile(region)]) if (file.exists) file.delete();
+  for (const file of [tilesFile(region), graphFile(region), searchFile(region)]) if (file.exists) file.delete();
   const { installed } = getState();
   const { [region]: _removed, ...regions } = installed.regions;
   const active = installed.active === region ? (Object.keys(regions)[0] ?? null) : installed.active;

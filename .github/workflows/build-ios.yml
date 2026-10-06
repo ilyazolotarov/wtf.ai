@@ -51,11 +51,12 @@ jobs:
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       # Compiler cache for the C/C++/Objective-C of the pods (React Native core and Expo modules
-      # come prebuilt; Swift is not cached). The Podfile turns it on with USE_CCACHE=1.
+      # come prebuilt; Swift is not cached). The Podfile turns it on with USE_CCACHE=1, which points
+      # CC/CXX at React Native's ccache-clang(++).sh. Xcode runs compiles without the job's
+      # environment or the CCACHE_BINARY build setting those wrappers expect, so "Install ccache"
+      # writes the ccache path into the wrappers and the settings into their ccache.conf.
       USE_CCACHE: "1"
-      CCACHE_DIR: ${{ github.workspace }}/.ccache
-      CCACHE_BASEDIR: ${{ github.workspace }}
-      CCACHE_MAXSIZE: 2G
+      CCACHE_CONFIGPATH: ${{ github.workspace }}/node_modules/react-native/scripts/xcode/ccache.conf
       # Caches are saved by main only and restored everywhere: branches start from main's,
       # and their own builds don't evict it.
       SAVE_CACHES: ${{ github.ref == 'refs/heads/main' }}
@@ -79,7 +80,20 @@ jobs:
         run: npm ci
 
       - name: Install ccache
-        run: command -v ccache || brew install ccache
+        run: |
+          command -v ccache || brew install ccache
+          CCACHE_BIN=$(command -v ccache)
+          WRAPPERS=node_modules/react-native/scripts/xcode
+          sed -i '' "s|^exec \$CCACHE_BINARY |exec $CCACHE_BIN |" "$WRAPPERS/ccache-clang.sh" "$WRAPPERS/ccache-clang++.sh"
+          grep -q "exec $CCACHE_BIN clang " "$WRAPPERS/ccache-clang.sh"
+          grep -q "exec $CCACHE_BIN clang++ " "$WRAPPERS/ccache-clang++.sh"
+          # Read by every compile through the wrappers and by the statistics step (CCACHE_CONFIGPATH above).
+          {
+            echo "cache_dir = $HOME/ccache"
+            echo "max_size = 2G"
+            echo "log_file = $RUNNER_TEMP/ccache.log"
+          } >> "$CCACHE_CONFIGPATH"
+          cat "$CCACHE_CONFIGPATH"
 
       - name: Restore CocoaPods download cache
         # Pod sources and the prebuilt React Native / Hermes tarballs.
@@ -94,7 +108,7 @@ jobs:
         id: ccache
         uses: actions/cache/restore@v6
         with:
-          path: .ccache
+          path: ~/ccache
           key: ios-ccache-${{ inputs.configuration }}-${{ github.sha }}
           restore-keys: ios-ccache-${{ inputs.configuration }}-
 
@@ -135,7 +149,11 @@ jobs:
 
       - name: ccache statistics
         if: ${{ !cancelled() }}
-        run: ccache --show-stats || true
+        run: |
+          ccache --show-stats --verbose || true
+          # Did the compiles go through ccache at all?
+          echo "ccache log: $(grep -c 'Command line' "$RUNNER_TEMP/ccache.log" 2>/dev/null || true) invocations"
+          grep -m 5 -E 'Result:|Failed|disabled' "$RUNNER_TEMP/ccache.log" 2>/dev/null || true
 
       - name: Save CocoaPods download cache
         if: ${{ env.SAVE_CACHES == 'true' && steps.pods-cache.outputs.cache-hit != 'true' }}
@@ -148,7 +166,7 @@ jobs:
         if: ${{ env.SAVE_CACHES == 'true' }}
         uses: actions/cache/save@v6
         with:
-          path: .ccache
+          path: ~/ccache
           key: ${{ steps.ccache.outputs.cache-primary-key }}
 
       - name: Package into IPA
