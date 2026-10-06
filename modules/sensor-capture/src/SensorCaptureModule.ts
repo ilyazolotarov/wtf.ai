@@ -58,6 +58,10 @@ declare class SensorCaptureNativeModule extends NativeModule<SensorCaptureEvents
   stopGnss(): Promise<void>;
   startImu(options: { rateHz: number; raw: boolean; batchMs: number; magRateHz: number }): Promise<boolean>;
   stopImu(): Promise<void>;
+  /** Android only (foreground service so a trip survives the screen turning off); undefined on iOS and web. */
+  startTripService?(title: string, text: string, channelName: string): Promise<boolean>;
+  stopTripService?(): Promise<void>;
+  isTripServiceRunning?(): boolean;
 }
 
 export default requireNativeModule<SensorCaptureNativeModule>("SensorCapture");

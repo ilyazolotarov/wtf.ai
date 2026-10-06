@@ -67,6 +67,13 @@ is_swift_logic() {
   return 1
 }
 
+is_kotlin_logic() {
+  case "$1" in
+    modules/*/android/* | native-tests-android/*) return 0 ;;
+  esac
+  return 1
+}
+
 is_python() {
   case "$1" in
     tools/triplog/* | tools/tiles/*) return 0 ;;
@@ -74,15 +81,16 @@ is_python() {
   return 1
 }
 
-# classify <files on stdin> → sets CHECKS PYTHON SWIFT IOS_NATIVE ANDROID_NATIVE APP (true/false)
+# classify <files on stdin> → sets CHECKS PYTHON SWIFT KOTLIN IOS_NATIVE ANDROID_NATIVE APP (true/false)
 classify() {
-  CHECKS=false PYTHON=false SWIFT=false IOS_NATIVE=false ANDROID_NATIVE=false APP=false
+  CHECKS=false PYTHON=false SWIFT=false KOTLIN=false IOS_NATIVE=false ANDROID_NATIVE=false APP=false
   local f
   while IFS= read -r f; do
     [ -z "$f" ] && continue
     is_docs "$f" || CHECKS=true
     is_python "$f" && PYTHON=true
     is_swift_logic "$f" && SWIFT=true
+    is_kotlin_logic "$f" && KOTLIN=true
     is_ios_native "$f" && IOS_NATIVE=true
     is_android_native "$f" && ANDROID_NATIVE=true
     is_app "$f" && APP=true
@@ -166,6 +174,7 @@ plan() {
   echo "checks=$CHECKS"
   echo "python=$PYTHON"
   echo "swift=$SWIFT"
+  echo "kotlin=$KOTLIN"
   echo "build_ios=$BUILD_IOS"
   echo "build_android=$BUILD_ANDROID"
   echo "notify=$NOTIFY"
@@ -175,7 +184,7 @@ plan() {
 main() {
   if [ "$EVENT" = workflow_dispatch ]; then
     # Manual run: everything checked, builds as chosen.
-    CHECKS=true PYTHON=true SWIFT=true IOS_NATIVE=false ANDROID_NATIVE=false APP=false MESSAGES=''
+    CHECKS=true PYTHON=true SWIFT=true KOTLIN=true IOS_NATIVE=false ANDROID_NATIVE=false APP=false MESSAGES=''
     echo "Manual run: all checks"
   else
     local base
@@ -233,6 +242,13 @@ self_test() {
   expect "Python on main: no build" "true true false - - false" push main "" tools/triplog/x.py
   expect "native on a fork PR" "true false true Debug - false" pull_request x "[build]" modules/a/ios/A.swift
   expect "JS on a fork PR: keyword ignored" "true false false - - false" pull_request x "[build]" src/a.ts
+  # Kotlin logic tests run for Android module/test changes only (expect_kotlin <description> <true|false> <file>).
+  local kt
+  for kt in "true modules/sensor-capture/android/src/main/java/A.kt" "true native-tests-android/build.gradle.kts" "false modules/sensor-capture/ios/A.swift" "false src/a.ts"; do
+    classify < <(printf '%s
+' "${kt#* }")
+    if [ "$KOTLIN" = "${kt%% *}" ]; then echo "ok   kotlin=$KOTLIN for ${kt#* }"; else echo "FAIL kotlin for ${kt#* }: want ${kt%% *}"; fails=$((fails + 1)); fi
+  done
   DISPATCH_IOS=Release DISPATCH_ANDROID=none
   expect "manual Release" "true false false Release - true" workflow_dispatch b ""
   if [ "$fails" -ne 0 ]; then

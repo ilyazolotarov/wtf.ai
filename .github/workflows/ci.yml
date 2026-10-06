@@ -22,6 +22,11 @@ on:
         type: choice
         options: [Debug, Release, none]
         default: Debug
+      android:
+        description: "Android build. tester = APK for testers; ci = emulator build (simulated adapters listed)."
+        type: choice
+        options: [none, tester, ci]
+        default: none
 
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
@@ -42,6 +47,7 @@ jobs:
       checks: ${{ steps.plan.outputs.checks }}
       python: ${{ steps.plan.outputs.python }}
       swift: ${{ steps.plan.outputs.swift }}
+      kotlin: ${{ steps.plan.outputs.kotlin }}
       build_ios: ${{ steps.plan.outputs.build_ios }}
       build_android: ${{ steps.plan.outputs.build_android }}
       notify: ${{ steps.plan.outputs.notify }}
@@ -64,6 +70,7 @@ jobs:
           BEFORE: ${{ github.event.before }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           DISPATCH_IOS: ${{ inputs.ios }}
+          DISPATCH_ANDROID: ${{ inputs.android }}
           GH_TOKEN: ${{ github.token }}
         run: .github/scripts/ci-plan.sh
 
@@ -143,6 +150,31 @@ jobs:
       - name: Swift tests
         run: swift test
 
+  native-logic-android:
+    # Kotlin unit tests for the Android-free logic of the local Expo modules (native-tests-android/), plain JVM.
+    needs: plan
+    if: ${{ needs.plan.outputs.kotlin == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: "8.14"
+
+      - name: Kotlin tests
+        working-directory: native-tests-android
+        run: gradle test --console=plain
+
   build-ios:
     needs: [plan, checks, native-logic]
     # Skipped native-logic is fine; failed or cancelled is not.
@@ -150,6 +182,18 @@ jobs:
     uses: ./.github/workflows/build-ios.yml
     with:
       configuration: ${{ needs.plan.outputs.build_ios }}
+      notify: ${{ needs.plan.outputs.notify == 'true' }}
+      retention-days: ${{ fromJSON(needs.plan.outputs.retention) }}
+    secrets: inherit
+
+  build-android:
+    # Signed release APK + emulator smoke test (docs/ANDROID-SPEC.md §4).
+    needs: [plan, checks, native-logic-android]
+    # Skipped native-logic-android is fine; failed or cancelled is not.
+    if: ${{ !cancelled() && needs.plan.outputs.build_android != '' && needs.checks.result == 'success' && needs.native-logic-android.result != 'failure' }}
+    uses: ./.github/workflows/build-android.yml
+    with:
+      variant: ${{ needs.plan.outputs.build_android }}
       notify: ${{ needs.plan.outputs.notify == 'true' }}
       retention-days: ${{ fromJSON(needs.plan.outputs.retention) }}
     secrets: inherit

@@ -1,7 +1,7 @@
 import { Host, Switch } from "@expo/ui";
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
-import { Alert, Pressable, Share, StyleSheet, View } from "react-native";
+import { Alert, Linking, Platform, Pressable, Share, StyleSheet, View } from "react-native";
 
 import {
   ScreenAction,
@@ -35,7 +35,13 @@ const TABS: Tab[] = ["car", "position", "recorder", "developer"];
 
 export default function VehicleScreen() {
   const { t } = useT();
-  const params = useLocalSearchParams<{ tab?: string }>();
+  const params = useLocalSearchParams<{ tab?: string; emulators?: string }>();
+  const { setDevSettings: setDev } = useRuntime();
+  // `wtfai://vehicle?emulators=1` lists the simulated adapters: the emulator smoke test (scripts/android-smoke.sh)
+  // has no Bluetooth and drives the real app against them. Same switch as Developer → Show emulated adapters.
+  useEffect(() => {
+    if (params.emulators === "1") setDev({ showEmulators: true });
+  }, [params.emulators, setDev]);
   const [tab, setTab] = useState<Tab>(TABS.find((x) => x === params.tab) ?? "car");
 
   return (
@@ -98,8 +104,9 @@ function CarTab() {
     }
   };
 
+  // Android has no MFi picker: new adapters are paired in the system Bluetooth settings and then show up bonded.
   const pairMfi = () =>
-    link.pairMfi().catch((e: { code?: string; message?: string }) =>
+    (Platform.OS === "android" ? Linking.sendIntent("android.settings.BLUETOOTH_SETTINGS") : link.pairMfi()).catch((e: { code?: string; message?: string }) =>
       Alert.alert(t("pairMfi"), e.code === "mfi-not-found" ? t("mfiNotFound") : (e.message ?? String(e))),
     );
 
@@ -196,7 +203,7 @@ function CarTab() {
               <ScreenAction labelKey="pairMfi" secondary compact onPress={pairMfi} />
             </View>
           </View>
-          <ScreenNote>{t("pairHint")}</ScreenNote>
+          <ScreenNote>{t(Platform.OS === "android" ? "pairHintAndroid" : "pairHint")}</ScreenNote>
         </>
       )}
 

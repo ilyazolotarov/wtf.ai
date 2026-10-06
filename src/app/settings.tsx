@@ -11,6 +11,7 @@ import {
     Segmented,
 } from "@/components/screens/screen-ui";
 import { Icon } from "@/components/ui/icon";
+import { installId } from "@/services/telemetry";
 import { T } from "@/components/ui/text";
 import { usePalette } from "@/constants/theme";
 import { useT, type LanguagePreference } from "@/i18n/provider";
@@ -68,6 +69,7 @@ export default function SettingsScreen() {
           labelKey="appVersion"
           value={Constants.expoConfig?.version ?? t("unavailableValue")}
         />
+        <ScreenRow labelKey="supportCode" value={installId()} />
         <ScreenRow labelKey="mapData" value="© OpenStreetMap · OpenFreeMap" />
       </ScreenSection>
     </ScreenContent>

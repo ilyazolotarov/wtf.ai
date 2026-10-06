@@ -7,7 +7,7 @@ import * as Device from "expo-device";
 import { Platform } from "react-native";
 
 import VehicleLinkModule from "../../modules/vehicle-link/src/VehicleLinkModule";
-import { Sentry } from "@/config/sentry";
+import { Sentry, sentryMetricSink } from "@/config/sentry";
 import { createClock } from "@/obd/clock";
 import { VehicleLinkCore } from "@/obd/vehicle-link-core";
 
@@ -20,6 +20,8 @@ import { SensorService } from "./sensor-capture/sensor-service";
 import { createTripFiles } from "./trip-recorder/trip-files";
 import { TripRecorder } from "./trip-recorder/trip-recorder";
 import { NativeDiscovery } from "./vehicle-link/discovery";
+import { TelemetryReporter } from "./telemetry";
+import { setTripService } from "./trip-service";
 import { DrivingEmulator } from "./vehicle-link/driving-emulator";
 import { NativeTransport } from "./vehicle-link/native-transport";
 
@@ -142,8 +144,22 @@ export function getRuntime(): Runtime {
   recorder.subscribe(() => {
     const recording = recorder.getSnapshot().state === "recording";
     if (recording && !wasRecording) routes.logActiveRoute();
+    // Android keeps sensors and the adapter alive with the screen off only while a foreground service runs.
+    if (recording !== wasRecording) {
+      void setTripService(recording).then((running) => {
+        if (recording) recorder.note(`android trip service ${running ? "running" : "not started"}`);
+      });
+    }
     wasRecording = recording;
   });
+
+  // Health metrics for field testers (docs/ANDROID-SPEC.md §4.1).
+  const telemetry = new TelemetryReporter(sentryMetricSink, () => Date.now());
+  const isRecording = () => recorder.getSnapshot().state === "recording";
+  link.subscribe(() => telemetry.onLink(link.getSnapshot()));
+  sensors.gnss.on((rec) => telemetry.onGnssFix(Number.isFinite(rec.speedMps)));
+  sensors.imu.on(() => telemetry.onImuBatch(isRecording()));
+  sensors.subscribe(() => telemetry.onSensors(sensors.getSnapshot(), isRecording()));
 
   // Breadcrumbs give crash reports context; scrubbing removes VINs/coordinates (src/config/sentry-scrub.ts).
   link.onLinkEvent((e) => {
@@ -187,7 +203,7 @@ export async function autoConnect(): Promise<void> {
   const { link } = getRuntime();
   const { activeDeviceId, link: state } = link.getSnapshot();
   if (activeDeviceId && state !== "error") return;
-  if (Platform.OS !== "ios") return;
+  if (Platform.OS === "web") return;
   if (VehicleLinkModule.getBluetoothState() === "notDetermined") return;
   await VehicleLinkModule.initialize(null);
   await link.autoConnect();

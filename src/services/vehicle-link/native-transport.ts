@@ -9,9 +9,9 @@ import type { RememberedAdapter } from "@/obd/vehicle-link-core";
 const FIRST_CONNECT_TIMEOUT_MS = 15000;
 const LINK_ERRORS = new Set(["link-lost", "not-connected"]);
 
-/** BLE / MFi transport over modules/vehicle-link. Only one is active at a time. */
+/** BLE / MFi (iOS) / Classic SPP (Android) transport over modules/vehicle-link. Only one is active at a time. */
 export class NativeTransport implements Transport {
-  readonly kind: "ble" | "mfi";
+  readonly kind: "ble" | "mfi" | "spp";
   private linkLost = new Emitter<[string]>();
   private unsolicited = new Emitter<[string, number]>();
   private subscriptions: EventSubscription[] = [];
@@ -20,7 +20,7 @@ export class NativeTransport implements Transport {
 
   constructor(
     private readonly deviceId: string,
-    kind: "ble" | "mfi",
+    kind: "ble" | "mfi" | "spp",
     private readonly remembered?: RememberedAdapter,
   ) {
     this.kind = kind;

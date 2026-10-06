@@ -1,0 +1,280 @@
+name: Build Android APK
+
+# Signed release APK for sideloading (no Play Store account, no EAS), plus an emulator smoke test of that same APK.
+# Plan: docs/ANDROID-SPEC.md. One build for everyone: the APK the emulator tests is the APK testers get. `variant` only
+# names the file (and the manual-run default); the build does not differ.
+on:
+  workflow_dispatch:
+    inputs:
+      variant:
+        description: "Names the APK file; tester and ci are the same build (arm64, armeabi-v7a, x86_64)."
+        type: choice
+        options: [tester, ci]
+        default: tester
+      notify:
+        description: "Send the APK to Telegram"
+        type: boolean
+        default: true
+  workflow_call:
+    inputs:
+      variant:
+        type: string
+        default: ci
+      notify:
+        # false for compile checks of branch pushes: the APK is only uploaded as an artifact.
+        type: boolean
+        default: false
+      retention-days:
+        type: number
+        default: 14
+    secrets:
+      SENTRY_AUTH_TOKEN:
+        required: false
+      ANDROID_KEYSTORE_BASE64:
+        required: false
+      ANDROID_KEYSTORE_PASSWORD:
+        required: false
+      ANDROID_KEY_ALIAS:
+        required: false
+      ANDROID_KEY_PASSWORD:
+        required: false
+      TELEGRAM_BOT_TOKEN:
+        required: false
+      TELEGRAM_CHAT_ID:
+        required: false
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      VARIANT: ${{ inputs.variant }}
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+      SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+      SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
+      SENTRY_DISABLE_AUTO_UPLOAD: ${{ secrets.SENTRY_AUTH_TOKEN == '' && 'true' || 'false' }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      # Caches are saved by main (and by android while it is the integration branch for Android:
+      # main has no Android builds before the merge) and restored everywhere, so branch builds
+      # don't evict them.
+      SAVE_CACHES: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/android' }}
+      # Compiler cache for the C/C++ of React Native's CMake builds (app codegen, Reanimated,
+      # Worklets, …). CMake reads the launcher from the environment when it configures.
+      CMAKE_C_COMPILER_LAUNCHER: ccache
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: "npm"
+
+      - name: Setup Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Gradle
+        # Dependencies, wrapper and the Gradle build cache (--build-cache below).
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: ${{ env.SAVE_CACHES != 'true' }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install ccache
+        run: |
+          command -v ccache || { sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ccache; }
+          {
+            echo "CCACHE_DIR=$HOME/.ccache"
+            echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE"
+            echo "CCACHE_MAXSIZE=2G"
+            # The NDK's mtime changes with runner images; its content is what matters.
+            echo "CCACHE_COMPILERCHECK=content"
+            echo "CCACHE_LOGFILE=$RUNNER_TEMP/ccache.log"
+          } >> "$GITHUB_ENV"
+
+      - name: Restore ccache
+        id: ccache
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.ccache
+          key: android-ccache-${{ inputs.variant }}-${{ github.sha }}
+          restore-keys: android-ccache-${{ inputs.variant }}-
+
+      - name: Run Expo Prebuild
+        run: npx expo prebuild --platform android --clean
+
+      - name: Restore signing key
+        # Without the secrets the release APK is signed with the debug key (see plugins/android-build.js).
+        # Such an APK installs fine but cannot be updated over a build signed with the real key.
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            {
+              echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/release.keystore"
+              echo "ANDROID_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
+              echo "ANDROID_KEY_ALIAS=$KEY_ALIAS"
+              echo "ANDROID_KEY_PASSWORD=$KEY_PASSWORD"
+            } >> "$GITHUB_ENV"
+          else
+            echo "::notice::No ANDROID_KEYSTORE_BASE64 secret: signing with the debug key"
+          fi
+
+      - name: Build release APK
+        env:
+          EXPO_PUBLIC_BUILD_SHA: ${{ github.sha }}
+        run: |
+          # arm64 = nearly every phone, armeabi-v7a = older and cheap 32-bit phones, x86_64 = the CI emulator.
+          cd android
+          ./gradlew assembleRelease -PreactNativeArchitectures="arm64-v8a,armeabi-v7a,x86_64" --no-daemon --build-cache
+
+      - name: ccache statistics
+        if: ${{ !cancelled() }}
+        run: |
+          ccache --show-stats --verbose || true
+          # Did the CMake builds go through ccache at all?
+          echo "ccache log: $(grep -c 'Command line' "$RUNNER_TEMP/ccache.log" 2>/dev/null || true) invocations"
+
+      - name: Save ccache
+        if: ${{ env.SAVE_CACHES == 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.ccache
+          key: ${{ steps.ccache.outputs.cache-primary-key }}
+
+      - name: Name the APK
+        run: |
+          cp android/app/build/outputs/apk/release/app-release.apk "wtfai-${VARIANT}.apk"
+          ls -l "wtfai-${VARIANT}.apk"
+          "$ANDROID_HOME"/build-tools/*/apksigner verify --print-certs "wtfai-${VARIANT}.apk" | head -3
+
+      - name: Upload APK (zipped, for the emulator job)
+        uses: actions/upload-artifact@v7
+        with:
+          name: wtfai-apk
+          path: wtfai-${{ inputs.variant }}.apk
+          retention-days: 3
+
+      - name: Upload APK to install
+        # The tester build always; the CI build when the plan wants it delivered (notify).
+        if: ${{ inputs.variant != 'ci' || inputs.notify }}
+        uses: actions/upload-artifact@v7
+        with:
+          archive: false
+          path: wtfai-${{ inputs.variant }}.apk
+          retention-days: ${{ inputs.retention-days || 14 }}
+
+      - name: Send APK to Telegram
+        if: ${{ inputs.notify && env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != '' }}
+        # A delivery problem must not fail the build: the artifact above is the source of truth.
+        continue-on-error: true
+        run: |
+          APK="wtfai-${VARIANT}.apk"
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          CAPTION="wtf.ai Android · ${GITHUB_REF_NAME} @ ${GITHUB_SHA:0:7}
+          $(git log -1 --format=%s)
+          ${RUN_URL}"
+          API="https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}"
+          # Bot API uploads are limited to 50 MB; past that, send the link to the run instead.
+          if [ "$(stat -c%s "$APK")" -lt 49000000 ]; then
+            curl -sS --fail-with-body -o /dev/null -F chat_id="$TELEGRAM_CHAT_ID" -F caption="$CAPTION" -F document=@"$APK" "$API/sendDocument"
+          else
+            curl -sS --fail-with-body -o /dev/null --data-urlencode chat_id="$TELEGRAM_CHAT_ID" --data-urlencode text="$CAPTION (APK over 50 MB: download it from the run)" "$API/sendMessage"
+          fi
+
+  smoke:
+    # Installs the APK on an emulator and checks the app starts and stays up (scripts/android-smoke.sh).
+    needs: build-android
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SAVE_CACHES: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/android' }}
+      # Same for the snapshot run and the test run, or the snapshot doesn't match the AVD.
+      EMULATOR_OPTIONS: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+    strategy:
+      fail-fast: false
+      matrix:
+        # 26 = our minimum (Android 8), 34 = what most testers run. API 26 only on main and the android branch.
+        api-level: ${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/android') && fromJSON('[26, 34]') || fromJSON('[34]') }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Download APK
+        uses: actions/download-artifact@v8
+        with:
+          name: wtfai-apk
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Restore AVD snapshot
+        # A booted emulator snapshot: the test run starts from it instead of a cold boot.
+        id: avd
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+          key: avd-${{ matrix.api-level }}-x86_64-google_apis-pixel_6-v1
+
+      - name: Create AVD snapshot
+        # Only where it is saved: elsewhere a miss just cold-boots in the test run.
+        if: ${{ steps.avd.outputs.cache-hit != 'true' && env.SAVE_CACHES == 'true' }}
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api-level }}
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          force-avd-creation: false
+          emulator-options: ${{ env.EMULATOR_OPTIONS }}
+          disable-animations: false
+          emulator-boot-timeout: 600
+          script: echo "AVD snapshot created"
+
+      - name: Save AVD snapshot
+        if: ${{ steps.avd.outputs.cache-hit != 'true' && env.SAVE_CACHES == 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+          key: ${{ steps.avd.outputs.cache-primary-key }}
+
+      - name: Smoke test on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api-level }}
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          force-avd-creation: false
+          # Boot from the snapshot, and don't write the test's state back into it.
+          emulator-options: -no-snapshot-save ${{ env.EMULATOR_OPTIONS }}
+          disable-animations: true
+          emulator-boot-timeout: 600
+          script: bash scripts/android-smoke.sh wtfai-${{ inputs.variant }}.apk smoke-out
+
+      - name: Upload screenshots and logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-smoke-api${{ matrix.api-level }}
+          path: smoke-out
+          retention-days: 7

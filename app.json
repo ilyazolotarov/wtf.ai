@@ -26,7 +26,8 @@
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION"
-      ]
+      ],
+      "package": "ai.wtf.navigator"
     },
     "web": {
       "output": "static",
@@ -34,6 +35,15 @@
     },
     "plugins": [
       "expo-router",
+      "./plugins/android-build.js",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 26
+          }
+        }
+      ],
       [
         "expo-dev-client",
         {

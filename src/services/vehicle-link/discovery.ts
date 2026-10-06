@@ -15,7 +15,7 @@ export const EMULATOR_DEVICES: ScannedDevice[] = [
 
 const SCAN_LIMIT_MS = 60_000;
 
-/** BLE scan + paired MFi accessories (+ emulators in dev) (VEHICLE-LINK-SPEC §7). */
+/** BLE scan + Classic (Android) + paired MFi accessories (+ emulators in dev) (VEHICLE-LINK-SPEC §7). */
 export class NativeDiscovery implements DiscoveryBackend {
   private subscriptions: EventSubscription[] = [];
   private stopTimer: ReturnType<typeof setTimeout> | null = null;
@@ -26,7 +26,7 @@ export class NativeDiscovery implements DiscoveryBackend {
     if (this.includeEmulators()) onUpdate(EMULATOR_DEVICES.map((d) => ({ ...d, lastSeenUs: VehicleLinkModule.nowUs() })));
     onUpdate(mfiDevices(VehicleLinkModule.getMfiAccessories()));
     this.subscriptions.push(
-      VehicleLinkModule.addListener("onScanBatch", (e) => onUpdate(e.devices.map(bleDevice))),
+      VehicleLinkModule.addListener("onScanBatch", (e) => onUpdate(e.devices.map(scannedDevice))),
       VehicleLinkModule.addListener("onMfiChange", (e) => onUpdate(mfiDevices(e.accessories))),
     );
     void VehicleLinkModule.initialize(null).then(() => VehicleLinkModule.startScan(GATT_PROFILES.map((p) => p.service)));
@@ -50,10 +50,10 @@ export class NativeDiscovery implements DiscoveryBackend {
   }
 }
 
-function bleDevice(d: NativeScanResult): ScannedDevice {
+function scannedDevice(d: NativeScanResult): ScannedDevice {
   return {
     id: d.id,
-    transport: "ble",
+    transport: d.transport ?? "ble",
     name: d.name ?? null,
     rssi: d.rssi,
     serviceUuids: d.serviceUuids,

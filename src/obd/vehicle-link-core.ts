@@ -625,7 +625,7 @@ export class VehicleLinkCore implements VehicleLink {
     const linkError: LinkError =
       code === "bluetooth-off" || code === "bluetooth-unauthorized" || code === "no-uart-service" || code === "device-not-found"
         ? { code, message }
-        : { code: "other", message };
+        : { code: "other", message, ...(code ? { nativeCode: code } : {}) };
     this.event("error", message);
     this.update({ link: "error", error: linkError });
   }
