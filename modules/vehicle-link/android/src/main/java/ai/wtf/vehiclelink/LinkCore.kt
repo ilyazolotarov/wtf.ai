@@ -429,7 +429,7 @@ class LinkCore(private val context: Context, private val emit: (String, Map<Stri
         } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
           if (connectPromise != null) {
             val request = connectRequest
-            // Status 133 (and friends) on a first attempt is the stack's way of saying "try again".
+            // A failure status such as 133 on a first attempt is the stack's way of saying "try again".
             if (request != null && gattRetries < MAX_GATT_RETRIES && status != BluetoothGatt.GATT_SUCCESS) {
               gattRetries++
               Log.w(TAG, "gatt connect status $status, retry $gattRetries")

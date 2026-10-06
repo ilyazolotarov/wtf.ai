@@ -42,8 +42,15 @@ class VehicleLinkModule : Module() {
     return LinkCore(context) { name, body -> sendEvent(name, body) }.also { core = it }
   }
 
+  /** The system dialog is shown at most once per process: a denial must not turn into a prompt on every foreground. */
+  private var askedForPermissions = false
+
   /** Android 12+ asks for the two Bluetooth permissions; before that scanning needs location. */
   private fun ensurePermissions(done: (Boolean) -> Unit) {
+    val core = core()
+    if (core.hasConnectPermission() && core.hasScanPermission()) return done(true)
+    if (askedForPermissions) return done(false)
+    askedForPermissions = true
     val manager = appContext.permissions ?: return done(false)
     val wanted = if (Build.VERSION.SDK_INT >= 31) {
       arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
@@ -69,8 +76,12 @@ class VehicleLinkModule : Module() {
 
     // The first call on Android shows the Bluetooth permission dialog; auto-connect checks the state first and skips it.
     AsyncFunction("initialize") { _: String?, promise: Promise ->
-      ensurePermissions { granted ->
-        if (!granted) promise.resolve("unauthorized") else core().initialize(promise)
+      if (core().bluetoothState() == "unsupported") {
+        promise.resolve("unsupported") // no adapter (an emulator, a tablet): nothing to ask permission for
+      } else {
+        ensurePermissions { granted ->
+          if (!granted) promise.resolve("unauthorized") else core().initialize(promise)
+        }
       }
     }
 

@@ -118,4 +118,8 @@ adb exec-out screencap -p > "$OUT/5-after-20s.png"
 adb logcat -d > "$OUT/logcat.txt" 2>&1
 if grep -E "FATAL EXCEPTION|ANR in $PKG|Process $PKG .* has died" "$OUT/logcat.txt" > /dev/null; then fail "crash or ANR in logcat"; fi
 if grep -E "ReactNativeJS.*(Error|Unhandled)" "$OUT/logcat.txt" | grep . > /dev/null; then fail "JS error in logcat"; fi
+# Sensors must start once and stay on: a permission dialog or a lifecycle bug that makes the app stop and restart
+# capture over and over shows up as many start lines (it once did, 1000+ in 7 minutes).
+starts=$(grep -c "WtfSensorCapture: startGnss" "$OUT/logcat.txt")
+[ "$starts" -le 4 ] || fail "GNSS capture restarted $starts times (a start/stop loop)"
 echo "SMOKE OK"
