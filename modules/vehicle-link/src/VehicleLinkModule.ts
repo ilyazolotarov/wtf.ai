@@ -21,6 +21,10 @@ export interface NativeScanResult {
   manufacturerDataHex?: string;
   connectable: boolean;
   seenUs: number;
+  /** Android only: `spp` for Classic Bluetooth serial devices (id `spp:<MAC>`); iOS and Android BLE leave it out. */
+  transport?: "ble" | "spp";
+  /** Android only: paired with this phone already. */
+  bonded?: boolean;
 }
 
 export interface NativeMfiAccessory {
@@ -44,7 +48,7 @@ export interface NativeGattProfile {
 
 export interface NativeConnectOptions {
   id: string;
-  transport: "ble" | "mfi";
+  transport: "ble" | "mfi" | "spp";
   profiles: NativeGattProfile[];
   preferred?: [string, string, string];
   /** 0 = pending connect without timeout (reconnect). */

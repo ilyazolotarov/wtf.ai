@@ -56,6 +56,10 @@ wait_log() {
   return 1
 }
 
+# The first boot of a CI emulator is slow enough for system apps (the launcher) to ANR; their dialogs would cover
+# our UI and break the UI dumps. Our own crashes and ANRs are still caught through logcat and pidof below.
+adb shell settings put global hide_error_dialogs 1
+
 adb logcat -c
 adb install -r "$APK" || fail "install"
 
@@ -93,11 +97,17 @@ for i in $(seq 1 15); do
   sleep 2
 done
 [ "$tapped" = 1 ] || fail "simulated adapter not listed on the vehicle screen"
-sleep 8
+# Connected = the screen offers "Disconnect" (while connecting it says "Stop searching").
+connected=0
+for i in $(seq 1 30); do
+  if ui_dump | grep -q 'text="Disconnect"'; then connected=1; break; fi
+  sleep 2
+done
 adb exec-out screencap -p > "$OUT/4-connected.png"
+[ "$connected" = 1 ] || fail "simulated adapter did not connect within 60 s"
 
-# 4. A trip starts with the simulated engine: the IMU must come up and deliver batches.
-wait_log "WtfSensorCapture: startImu" 60 || fail "IMU never started after connecting the simulated adapter"
+# 4. The IMU comes up with the app and must deliver batches.
+wait_log "WtfSensorCapture: startImu" 30 || fail "IMU never started"
 wait_log "WtfSensorCapture: imu batch" 30 || fail "IMU started but delivered no batches"
 
 # 5. Stay up for a while: crashes and ANRs often come a few seconds after the first frame.

@@ -1,7 +1,8 @@
 // Public and internal types of the vehicle link (docs/VEHICLE-LINK-SPEC.md §6).
 // Pure TS: no React Native / Expo imports.
 
-export type TransportKind = "ble" | "mfi" | "emulator";
+/** `spp` = Classic Bluetooth serial (RFCOMM), Android only; `mfi` = iOS ExternalAccessory. */
+export type TransportKind = "ble" | "mfi" | "spp" | "emulator";
 
 /** One request/response at the transport level (native `transact`). */
 export interface RawExchange {
@@ -77,7 +78,7 @@ export type DeviceRank =
   | "non-elm";
 
 export interface DiscoveredDevice {
-  /** CBPeripheral.identifier, "mfi:<serial>:<protocol>", or "emulator:<id>". */
+  /** CBPeripheral.identifier / Android BLE MAC, "mfi:<serial>:<protocol>", "spp:<MAC>", or "emulator:<id>". */
   id: string;
   transport: TransportKind;
   name: string | null;
@@ -207,6 +208,8 @@ export type LinkErrorCode =
 export interface LinkError {
   code: LinkErrorCode;
   message?: string;
+  /** The native rejection code behind an `other` error (timeout, connect-failed, bond-failed, ...), for metrics. */
+  nativeCode?: string;
 }
 
 export interface LinkEvent {

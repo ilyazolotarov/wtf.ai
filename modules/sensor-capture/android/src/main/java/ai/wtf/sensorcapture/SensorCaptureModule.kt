@@ -83,5 +83,17 @@ class SensorCaptureModule : Module() {
     }
 
     AsyncFunction("stopImu") { capture?.stopImu() }
+
+    // Foreground service for a trip in progress (TripService); Android only, absent on iOS.
+    AsyncFunction("startTripService") { title: String, text: String, channelName: String ->
+      val context = appContext.reactContext ?: throw Exceptions.ReactContextLost()
+      TripService.canStart(context) && TripService.start(context, title, text, channelName)
+    }
+
+    AsyncFunction("stopTripService") {
+      appContext.reactContext?.let { TripService.stop(it) }
+    }
+
+    Function("isTripServiceRunning") { TripService.running }
   }
 }

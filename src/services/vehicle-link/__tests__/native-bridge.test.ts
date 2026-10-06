@@ -118,6 +118,30 @@ describe("NativeTransport", () => {
   });
 });
 
+describe("NativeDiscovery on Android", () => {
+  test("Classic Bluetooth devices arrive as spp transport and keep their prefixed id", async () => {
+    const updates: any[][] = [];
+    const d = new NativeDiscovery(() => false);
+    d.start((devices) => updates.push(devices));
+    mockEmit("onScanBatch", {
+      devices: [
+        { id: "spp:AA:BB:CC:DD:EE:FF", name: "OBDII", serviceUuids: [], connectable: true, seenUs: 5, transport: "spp", bonded: true },
+        { id: "11:22:33:44:55:66", name: "V-LINK", rssi: -55, serviceUuids: ["18F0"], connectable: true, seenUs: 6, transport: "ble" },
+      ],
+    });
+    const batch = updates[updates.length - 1];
+    expect(batch[0]).toMatchObject({ id: "spp:AA:BB:CC:DD:EE:FF", transport: "spp", name: "OBDII" });
+    expect(batch[1]).toMatchObject({ id: "11:22:33:44:55:66", transport: "ble" });
+    d.stop();
+  });
+
+  test("a spp device connects with the spp transport and the first-connect timeout", async () => {
+    const t = new NativeTransport("spp:AA:BB:CC:DD:EE:FF", "spp");
+    await t.connect();
+    expect(mockNative.connect.mock.calls[0][0]).toMatchObject({ id: "spp:AA:BB:CC:DD:EE:FF", transport: "spp", timeoutMs: 15000 });
+  });
+});
+
 describe("NativeDiscovery", () => {
   test("maps BLE scan batches and MFi accessories; includes emulators when enabled", async () => {
     mockNative.getMfiAccessories.mockReturnValueOnce([
