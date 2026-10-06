@@ -106,7 +106,7 @@ updates install over the previous one and keep app data. Without the secrets the
 - **IMU path**: the emulator's virtual accelerometer/gyroscope (`adb emu sensor set`) feed `startImu`; assertion: motion
   rows in the trip log, gravity sign matches the iOS convention.
 - **Adapter path**: no Bluetooth on the CI emulator, so the existing TS **driving emulator** (the web fallback adapter)
-  is selectable in debug/CI builds (`EXPO_PUBLIC_E2E=1`). This runs the real ELM session, poller, navigator and
+  is switched on by the deep link `wtfai://vehicle?emulators=1` (the same switch as Developer → Show emulated adapters). This runs the real ELM session, poller, navigator and
   recorder end to end with simulated OBD. Native BLE/SPP are covered by logic tests plus the tester round (below).
 - **Background**: `adb shell input keyevent KEYCODE_SLEEP`, wait, wake, assert the trip log kept growing (foreground
   service holds).

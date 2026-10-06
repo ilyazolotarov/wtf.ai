@@ -1,12 +1,13 @@
 name: Build Android APK
 
-# Signed release APK for sideloading (no Play Store account, no EAS), plus an emulator smoke test on every CI build.
-# Plan: docs/ANDROID-SPEC.md. `ci` variant = what the emulator tests (simulated adapters on); `tester` = what testers get.
+# Signed release APK for sideloading (no Play Store account, no EAS), plus an emulator smoke test of that same APK.
+# Plan: docs/ANDROID-SPEC.md. One build for everyone: the APK the emulator tests is the APK testers get. `variant` only
+# names the file (and the manual-run default); the build does not differ.
 on:
   workflow_dispatch:
     inputs:
       variant:
-        description: "tester = APK for testers (arm64 + armeabi-v7a). ci = emulator build (x86_64 + arm64)."
+        description: "Names the APK file; tester and ci are the same build (arm64, armeabi-v7a, x86_64)."
         type: choice
         options: [tester, ci]
         default: tester
@@ -134,12 +135,10 @@ jobs:
       - name: Build release APK
         env:
           EXPO_PUBLIC_BUILD_SHA: ${{ github.sha }}
-          # CI variant: simulated OBD adapters are listed by default, so the emulator can run a whole drive.
-          EXPO_PUBLIC_E2E: ${{ inputs.variant == 'ci' && '1' || '0' }}
         run: |
-          if [ "$VARIANT" = "ci" ]; then ABIS="arm64-v8a,x86_64"; else ABIS="arm64-v8a,armeabi-v7a"; fi
+          # arm64 = nearly every phone, armeabi-v7a = older and cheap 32-bit phones, x86_64 = the CI emulator.
           cd android
-          ./gradlew assembleRelease -PreactNativeArchitectures="$ABIS" --no-daemon --build-cache
+          ./gradlew assembleRelease -PreactNativeArchitectures="arm64-v8a,armeabi-v7a,x86_64" --no-daemon --build-cache
 
       - name: ccache statistics
         if: ${{ !cancelled() }}
@@ -162,11 +161,10 @@ jobs:
           "$ANDROID_HOME"/build-tools/*/apksigner verify --print-certs "wtfai-${VARIANT}.apk" | head -3
 
       - name: Upload APK (zipped, for the emulator job)
-        if: ${{ inputs.variant == 'ci' }}
         uses: actions/upload-artifact@v7
         with:
-          name: wtfai-ci-apk
-          path: wtfai-ci.apk
+          name: wtfai-apk
+          path: wtfai-${{ inputs.variant }}.apk
           retention-days: 3
 
       - name: Upload APK to install
@@ -197,8 +195,7 @@ jobs:
           fi
 
   smoke:
-    # Installs the CI APK on an emulator and checks the app starts and stays up (scripts/android-smoke.sh).
-    if: ${{ inputs.variant == 'ci' }}
+    # Installs the APK on an emulator and checks the app starts and stays up (scripts/android-smoke.sh).
     needs: build-android
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -218,7 +215,7 @@ jobs:
       - name: Download APK
         uses: actions/download-artifact@v8
         with:
-          name: wtfai-ci-apk
+          name: wtfai-apk
 
       - name: Enable KVM
         run: |
@@ -272,7 +269,7 @@ jobs:
           emulator-options: -no-snapshot-save ${{ env.EMULATOR_OPTIONS }}
           disable-animations: true
           emulator-boot-timeout: 600
-          script: bash scripts/android-smoke.sh wtfai-ci.apk smoke-out
+          script: bash scripts/android-smoke.sh wtfai-${{ inputs.variant }}.apk smoke-out
 
       - name: Upload screenshots and logs
         if: always()

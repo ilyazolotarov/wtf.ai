@@ -131,8 +131,8 @@ export function deviceTags(): Record<string, string> {
   };
 }
 
-/** Sentry's environment: emulator runs (CI) never mix with testers' phones. */
+/** Sentry's environment: release builds running on an emulator (the CI smoke test) never mix with testers' phones. */
 export function sentryEnvironment(): string {
-  if (!Device.isDevice && process.env.EXPO_PUBLIC_E2E === "1") return "ci";
+  if (!Device.isDevice && !__DEV__) return "ci";
   return __DEV__ ? "development" : "production";
 }

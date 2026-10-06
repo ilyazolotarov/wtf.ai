@@ -35,7 +35,13 @@ const TABS: Tab[] = ["car", "position", "recorder", "developer"];
 
 export default function VehicleScreen() {
   const { t } = useT();
-  const params = useLocalSearchParams<{ tab?: string }>();
+  const params = useLocalSearchParams<{ tab?: string; emulators?: string }>();
+  const { setDevSettings: setDev } = useRuntime();
+  // `wtfai://vehicle?emulators=1` lists the simulated adapters: the emulator smoke test (scripts/android-smoke.sh)
+  // has no Bluetooth and drives the real app against them. Same switch as Developer → Show emulated adapters.
+  useEffect(() => {
+    if (params.emulators === "1") setDev({ showEmulators: true });
+  }, [params.emulators, setDev]);
   const [tab, setTab] = useState<Tab>(TABS.find((x) => x === params.tab) ?? "car");
 
   return (

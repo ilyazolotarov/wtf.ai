@@ -88,7 +88,7 @@ wait_log "WtfSensorCapture: gnss fix" 30 || fail "no GNSS fix reached the native
 adb exec-out screencap -p > "$OUT/2-after-fix.png"
 
 # 3. Simulated OBD adapter: open the vehicle screen by deep link and connect the emulated ELM327.
-adb shell am start -a android.intent.action.VIEW -d "wtfai://vehicle" "$PKG" > /dev/null
+adb shell am start -a android.intent.action.VIEW -d "wtfai://vehicle?emulators=1" "$PKG" > /dev/null
 sleep 5
 adb exec-out screencap -p > "$OUT/3-vehicle.png"
 tapped=0

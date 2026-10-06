@@ -60,9 +60,11 @@ Android (docs/ANDROID-SPEC.md) uses the same plan: `ci-plan.sh` outputs `build_a
 Android-native changes or `[build android]` on branches; empty otherwise), and the `build-android` job of `ci.yml`
 runs `.github/workflows/build-android.yml` with it.
 
-- Variants: `ci` = release APK for the x86_64 emulator and arm64 phones, simulated adapters listed by default
-  (`EXPO_PUBLIC_E2E=1`); `tester` = release APK for arm64 + armeabi-v7a, no simulated adapters (manual runs).
-- A `ci` build is followed by the emulator smoke test (`scripts/android-smoke.sh`): Android 14 always, Android 8
+- One build for everyone: a signed release APK with arm64, armeabi-v7a (32-bit phones) and x86_64 (the emulator). The
+  `ci` / `tester` variant only names the file; the APK the emulator tests is the APK testers get. The simulated
+  adapters are hidden unless switched on (Developer → Show emulated adapters, or `wtfai://vehicle?emulators=1`, which
+  the smoke test uses).
+- Every Android build is followed by the emulator smoke test (`scripts/android-smoke.sh`): Android 14 always, Android 8
   also on `main`. Screenshots and logcat are uploaded as an artifact.
 - Delivery: like iOS. The APK is uploaded unzipped and sent to Telegram only when the plan says `notify`.
 - Manual: Actions → **CI** → Run workflow has an `android` choice (`none` / `tester` / `ci`); **Build Android APK**
