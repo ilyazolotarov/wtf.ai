@@ -15,7 +15,6 @@ import type { CompassTrust } from "@/nav/compass/compass";
 import type { GnssFix, ImuSample, MagSample, ObdSpeedSample } from "@/nav/types";
 import type { EngineState, SpeedSample, VehicleLinkSnapshot } from "@/obd/types";
 import { isSatelliteRecord, mapFixToPosition } from "@/services/position/gnss-position-source";
-import { GnssTrustTracker } from "@/services/position/gnss-trust";
 import type { RoadGraphSource } from "@/services/offline-map/road-graph-file";
 import type { PositionSource } from "@/services/position/position-source";
 import type { SensorService } from "@/services/sensor-capture/sensor-service";
@@ -67,6 +66,11 @@ const OUTAGE_TRUTH_MAX_ACC_M = 10;
 const OUTAGE_TRUTH_MAX_AGE_MS = 3000;
 /** Particles in the debug overlay, heaviest first. */
 const OVERLAY_PARTICLES = 200;
+/**
+ * Phone GNSS only, while integrity refuses the fixes (spoofing): the map holds the last fix it passed, its circle
+ * growing at town driving speed, since without OBD speed nothing says how far the car went.
+ */
+const HELD_FIX_GROWTH_MPS = 15;
 
 export interface NavigatorLink {
   onSpeed(listener: (s: SpeedSample) => void): () => void;
@@ -163,7 +167,7 @@ type Input =
   | { tUs: number; imu: ImuSample }
   | { tUs: number; mag: MagSample }
   | { tUs: number; obd: ObdSpeedSample }
-  | { tUs: number; fix: GnssFix };
+  | { tUs: number; fix: GnssFix; record: GnssRecord };
 
 /** CoreLocation record → navigator fix (as the trip-log reader does); null for unusable fixes. */
 export function toNavFix(r: GnssRecord): GnssFix | null {
@@ -194,12 +198,15 @@ export class NavigatorService implements PositionSource {
   private pending: Input[] = [];
   /** Time of the last input fed to the navigator. */
   private fedUs = -Infinity;
-  private trust = new GnssTrustTracker();
+  /** The latest fix (the ghost marker), and the latest the navigator took (phone GNSS shows it: not a refused one). */
   private lastFix: GnssRecord | null = null;
+  private lastShownFix: GnssRecord | null = null;
+  /** `lastShownFix` changed since the last publish: phone GNSS shows it at the next IMU batch, not the next tick. */
+  private shownChanged = false;
+  /** The latest integrity verdict noted in the trip log (notes on changes only). */
+  private notedIntegrity: string = "ok";
   private lastObdUs = -Infinity;
   private lastAcceptedSatUs = -Infinity;
-  /** OBD distance (navigator stats) at the last trusted fix. */
-  private trustedDistanceM: number | null = null;
   private mode: NavMode = "none";
   private vin: string | null = null;
   private lastSaveAt = 0;
@@ -507,7 +514,8 @@ export class NavigatorService implements PositionSource {
     if (lag) this.note(`nav gnss lag ${lag.lagS} s from storage (${lag.windows} turn windows)`);
     this.fedUs = -Infinity;
     this.lastAcceptedSatUs = -Infinity;
-    this.trustedDistanceM = null;
+    // `lastShownFix` stays: the navigator before checked it, and phone GNSS goes on showing it.
+    this.notedIntegrity = "ok";
     this.vin = null;
     this.poseStatus = "none";
     this.poseQuestion = null;
@@ -575,12 +583,15 @@ export class NavigatorService implements PositionSource {
     return this.manual !== null && this.clock.nowMs() - this.manual.confirmedAt >= MANUAL_ASK_AFTER_MS;
   }
 
-  /** A trusted satellite fix that agrees releases the manual position to GPS; so do 5 in a row that disagree. */
-  private checkManualAgainst(r: GnssRecord): void {
+  /**
+   * A trusted satellite fix (integrity passed it, GNSS trusted) that agrees releases the manual position to GPS; so
+   * do 5 in a row that disagree.
+   */
+  private checkManualAgainst(fix: GnssFix): void {
     const m = this.manual;
     if (!m) return;
-    const d = haversineM(m, { lat: r.latDeg, lon: r.lonDeg });
-    const accM = Number.isFinite(r.hAccM) ? r.hAccM : 9999;
+    const d = haversineM(m, fix);
+    const accM = fix.hAccM;
     if (d <= 3 * Math.hypot(accM, USER_POSITION_SIGMA_M)) {
       this.note(`nav manual position released: GPS trusted, fix ${Math.round(d)} m away (±${Math.round(accM)} m)`);
       this.dropManual();
@@ -656,14 +667,12 @@ export class NavigatorService implements PositionSource {
       return;
     }
     this.lastFix = r;
-    const satellite = isSatelliteRecord(r);
-    const trust = this.trust.onFix(Number.isFinite(r.hAccM) ? r.hAccM : 9999, r.utcUs / 1000, satellite);
-    if (satellite && trust === "TRUSTED") this.checkManualAgainst(r);
     const fix = toNavFix(r);
-    if (fix) this.pending.push({ tUs: fix.tUs, fix });
+    if (fix) this.pending.push({ tUs: fix.tUs, fix, record: r });
+    // One the navigator never gets (a simulated location, no accuracy) is shown as it was before integrity.
+    else this.lastShownFix = r;
     // Process now, so the map doesn't wait for the next tick.
     this.flush(this.deps.nowUs() - REORDER_US);
-    if (this.nav && this.trust.lastTrustedFixAt === r.utcUs / 1000) this.trustedDistanceM = this.nav.stats.obdDistanceM;
     this.publish();
   }
 
@@ -673,6 +682,8 @@ export class NavigatorService implements PositionSource {
     }
     for (const f of mag) this.pending.push({ tUs: f.timestampUs, mag: { tUs: f.timestampUs, field: [f.v[0], f.v[1], f.v[2]] } });
     this.flush(this.deps.nowUs() - REORDER_US);
+    // A fix the navigator just took: phone GNSS shows it now rather than at the next tick.
+    if (this.shownChanged && this.deps.nowUs() - this.lastObdUs >= OBD_TIMEOUT_US) this.publish();
   }
 
   private onSpeed(s: SpeedSample): void {
@@ -705,6 +716,12 @@ export class NavigatorService implements PositionSource {
         if (late && this.fedUs - input.tUs > LATE_FIX_MAX_US) continue;
         const out = nav.onGnss(input.fix);
         this.deps.observer?.fix?.(input.fix, out);
+        this.noteIntegrity(out, input.fix);
+        if (out.status !== "untrusted") {
+          this.lastShownFix = input.record;
+          this.shownChanged = true;
+        }
+        if (out.integrity === "ok" && nav.trustAt(input.tUs) === "TRUSTED") this.checkManualAgainst(input.fix);
         if (out.status === "accepted" && input.fix.speedMps !== undefined) this.lastAcceptedSatUs = input.tUs;
         if (out.status === "init") this.note(`nav mode dr (${out.initMethod})`);
         if (out.pose && out.pose !== "doubted") {
@@ -784,11 +801,15 @@ export class NavigatorService implements PositionSource {
   // ---- output ----
 
   private publish(): void {
+    this.shownChanged = false;
     const now = this.clock.nowMs();
     const nowUs = this.deps.nowUs();
-    const trust = this.trust.check(now);
     const fix = this.lastFix;
     const nav = this.nav;
+    // Integrity's trust (SPEC §3.3), at the navigator's time: it runs `REORDER_US` behind.
+    const trust = nav ? nav.trustAt(nowUs - REORDER_US) : "NO_FIX";
+    const trustedUs = nav?.lastTrustedFixUs;
+    const lastTrustedFixAt = trustedUs === undefined ? undefined : now - (nowUs - trustedUs) / 1000;
     const estimate = nav?.estimate() ?? null;
     if (nav) this.setMode(nav.mode);
 
@@ -810,18 +831,24 @@ export class NavigatorService implements PositionSource {
           source: "manual",
           trust,
           timestamp: now,
-          lastTrustedFixAt: this.trust.lastTrustedFixAt,
+          lastTrustedFixAt,
           rawGnss: raw,
         });
       }
       return;
     }
     if (!nav || !estimate || !withObd) {
-      // Phone GNSS only, as without the navigator: a new snapshot only for a new fix or trust.
+      // Phone GNSS only, as without the navigator: the latest fix the navigator took (never a refused one), a new
+      // snapshot only for a new fix or trust. While integrity refuses the fixes it is held, with a growing circle.
       const p = this.position;
-      const same = p && fix && p.source === "gnss" && p.timestamp === fix.utcUs / 1000 && p.trust === trust;
-      if (fix && !same) this.set(mapFixToPosition(fix, trust, this.trust.lastTrustedFixAt));
-      else if (p?.source === "manual") {
+      const shown = this.lastShownFix;
+      const held = trust === "UNTRUSTED" || trust === "REACQUIRING";
+      const same = p && shown && p.source === "gnss" && p.timestamp === shown.utcUs / 1000 && p.trust === trust && !held;
+      if (shown && !same) {
+        const q = mapFixToPosition(shown, trust, lastTrustedFixAt);
+        const ageS = Math.max(0, (nowUs - shown.timestampUs) / 1e6);
+        this.set(held ? { ...q, accuracyM: q.accuracyM + HELD_FIX_GROWTH_MPS * ageS, speedMps: undefined, rawGnss: fix ? rawOf(fix) : undefined } : q);
+      } else if (p?.source === "manual") {
         // The manual position is gone and no fix has come yet: no position.
         this.position = null;
         this.listeners.forEach((listener) => listener());
@@ -870,8 +897,8 @@ export class NavigatorService implements PositionSource {
       source,
       trust,
       timestamp: now,
-      lastTrustedFixAt: this.trust.lastTrustedFixAt,
-      distanceSinceTrustedM: this.trustedDistanceM === null ? undefined : nav.stats.obdDistanceM - this.trustedDistanceM,
+      lastTrustedFixAt,
+      distanceSinceTrustedM: nav.distanceSinceTrustedM,
       rawGnss: fix ? rawOf(fix) : undefined,
       },
       nowUs - estimate.tUs,
@@ -900,6 +927,23 @@ export class NavigatorService implements PositionSource {
 
   private note(text: string): void {
     this.deps.note?.(text);
+  }
+
+  /**
+   * Integrity's verdict into the trip log when it changes (SPEC §3.3): `gnss integrity <verdict>: <why>` with the
+   * fix's accuracy; back to `ok` with how trust came back.
+   */
+  private noteIntegrity(out: FixOutcome, fix: GnssFix): void {
+    const v = out.integrity;
+    if (!v || v === this.notedIntegrity) return;
+    // A refusal's follow-ups (still refused, reacquiring) aren't news unless they carry a reason.
+    if ((v === "untrusted" || v === "reacquiring") && !out.integrityDetail && this.notedIntegrity !== "ok") {
+      this.notedIntegrity = v;
+      return;
+    }
+    this.notedIntegrity = v;
+    const off = out.errorM === undefined ? "" : `, ${Math.round(out.errorM)} m from the dead reckoning`;
+    this.note(`gnss integrity ${v}${out.integrityDetail ? `: ${out.integrityDetail}` : ""} (fix ±${Math.round(fix.hAccM)} m${v === "ok" ? "" : off})`);
   }
 
   /** `behindUs`: how far the navigator's state lags now (the drawn position is extrapolated over it). */

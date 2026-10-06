@@ -76,12 +76,16 @@ Can run in parallel with Phase 0 once deps are installed.
     `NavigatorService` registers as capture owner `navigator` while the map is on screen or a trip records.
   - **Mapping:** `GnssRecord` → `PositionEstimate` with `source: 'gnss'`; course → `headingRad`. Invalid
     speed/course (NaN) → undefined.
-  - **Trust:** decided over time by `GnssTrustTracker` (`src/services/position/gnss-trust.ts`), not per fix, so
-    intermittent jamming doesn't flicker it.
-    - Only **satellite fixes** (they have a speed) count as good. Wi-Fi/cell fallback fixes never do, however
-      accurate they claim to be (±7 m is common).
-    - `'TRUSTED'` → `'NO_FIX'` when no satellite fix ≤ 50 m has arrived for 8 s.
-    - `'NO_FIX'` → `'TRUSTED'` after satellite fixes ≤ 30 m have kept arriving for 5 s with no gap.
+  - **Trust:** GNSS integrity's (SPEC §3.3, NAVIGATOR-SPEC §8, `src/nav/integrity/integrity.ts`), the same with or
+    without an adapter. Decided over time, not per fix, so intermittent jamming doesn't flicker it.
+    - Only **satellite fixes** (they have a speed) that integrity passed count as good. Wi-Fi/cell fallback fixes
+      never do, however accurate they claim to be (±7 m is common).
+    - `'TRUSTED'` → `'NO_FIX'` when no good satellite fix ≤ 50 m has arrived for 8 s.
+    - `'NO_FIX'` → `'TRUSTED'` after good satellite fixes ≤ 30 m have kept arriving for 5 s with no gap.
+    - `'UNTRUSTED'` while integrity refuses the fixes (abroad, a jump, not moving like the car), `'REACQUIRING'`
+      once they come back to the dead reckoning or while a fix after a gap is being checked.
+    - The map shows a fix once the navigator has taken it (300 ms after delivery); a refused one only as the ghost,
+      while the last good fix is held with a growing circle.
     - Coarse fixes are still shown and don't advance `lastTrustedFixAt`. Transient location errors don't change
       trust.
   - **Logging:** trust changes go into the trip log (TRIP-LOGGER-SPEC §6.4).

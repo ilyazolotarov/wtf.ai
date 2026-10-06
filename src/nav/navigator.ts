@@ -15,10 +15,12 @@ import { DEFAULT_EKF_CONFIG, DrEkf, wrapAngle, type EkfConfig } from "./ekf/dr-e
 import { alignHeading, type AlignConfig, type AlignPoint } from "./ekf/heading-align";
 import { haversineM, type Coordinate } from "./geo";
 import { LocalFrame } from "./geo/local-frame";
+import { GnssIntegrity, type IntegrityConfig, type IntegrityContext, type IntegrityVerdict } from "./integrity/integrity";
 import type { EdgeId, RoadGraph } from "./mapmatch/graph/road-graph";
 import { ParticleFilter, type MapMatchConfig, type MapMatchState } from "./mapmatch/particle-filter";
 import { ImuProcessor, type ImuConfig } from "./odometry/imu/imu-processor";
 import { OdometryChunker, type OdometryStep } from "./odometry/odometry-output";
+import type { TrustState } from "./position/types";
 import { isSatelliteFix, type GnssFix, type ImuSample, type MagSample, type ObdSpeedSample } from "./types";
 
 export type NavMode = "none" | "anchored" | "dr";
@@ -111,6 +113,8 @@ export interface NavConfig {
   roadPosition: Partial<RoadPositionConfig>;
   /** With a route hint set (`setRouteHint`), how much likelier the filter takes the route's exit at a junction. */
   routeHintFactor: number;
+  /** GNSS integrity (SPEC §3.3): which satellite fixes the navigator may use. */
+  integrity: Partial<IntegrityConfig>;
 }
 
 /** The road-position pseudo-measurement (MAPMATCH-SPEC §9). */
@@ -187,6 +191,7 @@ export const DEFAULT_NAV_CONFIG: NavConfig = {
   roadHeading: {},
   roadPosition: {},
   routeHintFactor: 3,
+  integrity: {},
 };
 
 // Every 25 m with 5 / 3 m floors put the truth inside the circle 22 % of the time: each update
@@ -246,6 +251,15 @@ const MAP_START_DIRECTION_RAD = Math.PI / 4;
 const MAP_MATCH_REINIT_OFFROAD_M = 300;
 /** Odometry below this speed counts as stopped: the EKF speed decays towards 0 without reaching it. */
 const STOPPED_SPEED_MPS = 0.2;
+/**
+ * The dead reckoning follows the car while OBD speed came this recently (the map shows it as long, NAVIGATOR-SPEC
+ * §9), or, before the first OBD speed, this long after starting from a parked pose (the adapter connecting).
+ * Otherwise integrity can't compare a fix with it: the phone may be anywhere.
+ */
+const DR_FOLLOWS_OBD_US = 10_000_000;
+const DR_FOLLOWS_POSE_US = 30_000_000;
+/** Map-matching clusters lighter than this aren't dead-reckoning hypotheses for integrity. */
+const INTEGRITY_CLUSTER_MIN_WEIGHT = 0.05;
 
 /** Vehicle pose while parked: the next session starts from it (SPEC §3.3 startup). */
 export interface ParkedPose {
@@ -258,10 +272,14 @@ export interface ParkedPose {
   headingSigmaRad: number;
 }
 
-export type FixStatus = "init" | "accepted" | "rejected" | "anchored" | "skipped";
+/** `untrusted`: a satellite fix integrity refused (`integrity` says why); nothing used it. */
+export type FixStatus = "init" | "accepted" | "rejected" | "anchored" | "skipped" | "untrusted";
 
 export interface FixOutcome {
   status: FixStatus;
+  /** Satellite fixes: integrity's verdict (SPEC §3.3), and what decided it on a change. */
+  integrity?: IntegrityVerdict;
+  integrityDetail?: string;
   /** Distance from the predicted position at the fix time, before the update (mode dr). */
   errorM?: number;
   /** Predicted 1σ at the fix time, m. */
@@ -328,6 +346,8 @@ export interface NavStats {
   imuInvalidS: number;
   standstillS: number;
   obdDistanceM: number;
+  /** Time without fresh OBD speed (link lost, or none yet), s. */
+  unknownSpeedS: number;
   resets: number;
   /** Road-heading pseudo-measurements (MAPMATCH-SPEC §9): accepted by the EKF, and rejected by its gate. */
   roadHeadingAccepted: number;
@@ -399,7 +419,12 @@ export class Navigator {
   /** Start the EKF from the map at the end of the current step. */
   private mapStartDue = false;
   private started: { method: InitMethod; tUs: number } | null = null;
-  readonly stats: NavStats = { imuInvalidS: 0, standstillS: 0, obdDistanceM: 0, resets: 0, roadHeadingAccepted: 0, roadHeadingRejected: 0, roadPositionAccepted: 0, roadPositionRejected: 0 };
+  readonly stats: NavStats = { imuInvalidS: 0, standstillS: 0, obdDistanceM: 0, unknownSpeedS: 0, resets: 0, roadHeadingAccepted: 0, roadHeadingRejected: 0, roadPositionAccepted: 0, roadPositionRejected: 0 };
+  private readonly integrity: GnssIntegrity;
+  /** The relative track's piece (a break starts the next), and whether it is broken now (integrity's shape test). */
+  private trackEpoch = 0;
+  private trackBroken = true;
+  private firstTUs: number | null = null;
   /** Travel (odometry distance) at which the next road-heading update may go out. */
   private nextRoadHeadingM = 0;
   private readonly roadHeadingConfig: RoadHeadingConfig;
@@ -419,6 +444,22 @@ export class Navigator {
     this.imu = new ImuProcessor(this.config.imu);
     this.lagEstimator = new GnssLagEstimator(this.config.gnssLag);
     this.compass = new Compass(this.config.compass);
+    this.integrity = new GnssIntegrity(this.config.integrity);
+  }
+
+  /** GNSS trust to show at this time (monotonic µs): integrity's state (SPEC §3.3). */
+  trustAt(tUs: number): TrustState {
+    return this.integrity.state(tUs);
+  }
+
+  /** The last satellite fix that arrived while GNSS was trusted (µs), and the OBD distance driven since (m). */
+  get lastTrustedFixUs(): number | undefined {
+    return this.integrity.lastTrustedFixUs;
+  }
+
+  get distanceSinceTrustedM(): number | undefined {
+    const d = this.integrity.lastTrustedDistanceM;
+    return d === undefined ? undefined : this.stats.obdDistanceM - d;
   }
 
   /**
@@ -628,12 +669,26 @@ export class Navigator {
     this.advance(fix.tUs, this.heldYaw(fix.tUs));
     const frame = this.frame ?? this.setFrame(new LocalFrame(fix));
     const [fE, fN] = frame.toEnu(fix);
-    this.lagEstimator.onFix(fix.tUs, fix, fix.hAccM, isSatelliteFix(fix));
     const tRef = fix.tUs - this.gnssLagS * 1e6;
+    // Integrity first (SPEC §3.3): a refused satellite fix moves nothing, not even the lag estimate.
+    let verdict: Pick<FixOutcome, "integrity" | "integrityDetail"> = {};
+    if (isSatelliteFix(fix)) {
+      const ctx = this.integrityContext(fE, fN, tRef);
+      const check = this.integrity.check(fix, ctx);
+      verdict = { integrity: check.verdict, ...(check.detail ? { integrityDetail: check.detail } : {}) };
+      if (check.verdict !== "ok") {
+        const nearest = ctx.hypotheses?.length ? Math.min(...ctx.hypotheses.map((h) => h.distanceM)) : undefined;
+        return { status: "untrusted", ...verdict, ...(nearest === undefined ? {} : { errorM: nearest }) };
+      }
+    } else {
+      this.integrity.onCoarse(fix);
+    }
+    this.lagEstimator.onFix(fix.tUs, fix, fix.hAccM, isSatelliteFix(fix));
     const sigma = fixSigma(fix);
     // The filter must be at the fix time before it weighs the fix.
     if (this.pf) this.odometry.flush();
     const outcome = this.ekf ? this.updateEkf(fix, fE, fN, tRef, sigma) : this.updateBeforeInit(fix, fE, fN, tRef, sigma);
+    if (verdict.integrity) this.integrity.onUsed(outcome.status === "accepted" || outcome.status === "init");
     const pf = this.pf;
     if (pf && outcome.status === "anchored") {
       // Heading unknown: every fix counts (there is no gate yet).
@@ -647,7 +702,46 @@ export class Navigator {
       // The fix agrees with the EKF but not with any particle: the filter lost the car.
       this.startMapMatch();
     }
-    return outcome;
+    return { ...outcome, ...verdict };
+  }
+
+  /**
+   * What integrity needs at a satellite fix: odometry, the relative track (for the shape test), and the
+   * dead-reckoning hypotheses at the fix time, while the dead reckoning follows the car.
+   */
+  private integrityContext(fE: number, fN: number, tRef: number): IntegrityContext {
+    const rel = this.trackBroken ? null : this.relHistory.at(tRef, 2);
+    return {
+      distanceM: this.stats.obdDistanceM,
+      unknownSpeedS: this.stats.unknownSpeedS,
+      track: rel ? { e: rel[0], n: rel[1], epoch: this.trackEpoch } : null,
+      hypotheses: this.drFollowsCar() ? this.hypotheses(fE, fN, tRef) : null,
+    };
+  }
+
+  private drFollowsCar(): boolean {
+    const now = this.lastTUs ?? 0;
+    const o = this.lastObd;
+    if (o) return now - o.tUs < DR_FOLLOWS_OBD_US;
+    return !!this.ekf && this.started?.method === "pose" && this.firstTUs !== null && now - this.firstTUs < DR_FOLLOWS_POSE_US;
+  }
+
+  /** The EKF (at the fix time), the map-matching clusters, or the anchor: distance from the fix and 1σ. Null: none. */
+  private hypotheses(fE: number, fN: number, tRef: number): { distanceM: number; sigmaM: number }[] | null {
+    const out: { distanceM: number; sigmaM: number }[] = [];
+    if (this.ekf) {
+      const h = this.ekfHistory.at(tRef, 2) ?? [this.ekf.east, this.ekf.north];
+      out.push({ distanceM: Math.hypot(fE - h[0], fN - h[1]), sigmaM: this.ekf.positionSigma });
+    } else if (this.anchor && this.frame) {
+      const [aE, aN] = this.frame.toEnu(this.anchor.coord);
+      out.push({ distanceM: Math.hypot(fE - aE, fN - aN), sigmaM: this.anchor.sigma + this.anchor.distanceM });
+    }
+    if (this.pf?.isActive) {
+      for (const c of this.pf.output().clusters) {
+        if (c.weight >= INTEGRITY_CLUSTER_MIN_WEIGHT) out.push({ distanceM: Math.hypot(fE - c.e, fN - c.n), sigmaM: Math.max(c.spreadM, 5) });
+      }
+    }
+    return out.length ? out : null;
   }
 
   estimate(): NavEstimate | null {
@@ -793,6 +887,7 @@ export class Navigator {
   private advance(tUs: number, yawRate: number | null): void {
     if (this.lastTUs === null) {
       this.lastTUs = tUs;
+      this.firstTUs = tUs;
       return;
     }
     const dt = (tUs - this.lastTUs) / 1e6;
@@ -808,6 +903,7 @@ export class Navigator {
     if (yaw === null && !parked) this.stats.imuInvalidS += dt;
     if (this.standstill) this.stats.standstillS += dt;
     this.stats.obdDistanceM += speed * dt;
+    if (!obdFresh) this.stats.unknownSpeedS += dt;
     // Without speed the car may still move: grow the radius at the last known speed.
     if (this.anchor) this.anchor.distanceM += (this.lastObd?.speedMps ?? 0) * dt;
 
@@ -820,7 +916,10 @@ export class Navigator {
       // Track shape broken (rotation or distance unknown): start over.
       if (!this.ekf) this.alignPoints = [];
       this.lagEstimator.breakTrack();
+      if (!this.trackBroken) this.trackEpoch++;
+      this.trackBroken = true;
     } else {
+      this.trackBroken = false;
       this.lagEstimator.onTrack(tUs, this.rel.e, this.rel.n, this.rel.psi, speed);
     }
 

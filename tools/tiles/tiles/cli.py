@@ -5,11 +5,13 @@ import functools
 import http.server
 from pathlib import Path
 
-from .build import RELEASE, REGIONS, build_all, build_common, build_graphs, build_searches, remote_osm_date, write_index
+from .build import RELEASE, REGIONS, ROOT, build_all, build_common, build_graphs, build_searches, remote_osm_date, write_index
 from .graph import read_graph, validate
-from .region import write_regions
+from .region import border_ts, write_regions
 from .search import build_region_search, read_search
 from .search import validate as validate_search
+
+APP_BORDER = ROOT.parent.parent / "src" / "nav" / "integrity" / "ukraine-border.ts"
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -19,6 +21,9 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("regions", help="(re)write regions/<slug>.poly from regions.json (all by default)")
     p.add_argument("names", nargs="*")
     p.add_argument("--buffer-m", type=float, default=500)
+
+    p = sub.add_parser("border", help="write the app's Ukraine border polygon (src/nav/integrity/ukraine-border.ts)")
+    p.add_argument("--out", type=Path, default=APP_BORDER)
 
     p = sub.add_parser("build-all", help="build out/release/: ukraine, every region (or the given ones), index.json")
     p.add_argument("names", nargs="*")
@@ -58,6 +63,9 @@ def main(argv: list[str] | None = None) -> None:
     if args.cmd == "regions":
         for path in write_regions(REGIONS, args.names or None, buffer_m=args.buffer_m):
             print(path)
+    elif args.cmd == "border":
+        args.out.write_text(border_ts(REGIONS / "ukraine.poly"), encoding="utf-8", newline="\n")
+        print(args.out)
     elif args.cmd == "build-all":
         build_all(args.names or None, refresh_osm=args.refresh_osm, heap=args.heap)
     elif args.cmd == "graph":

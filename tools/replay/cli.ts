@@ -5,6 +5,7 @@ import { basename } from "node:path";
 
 import { replayToGeoJson } from "../../src/nav/replay/geojson";
 import { appOutageCuts, replayTrip, type ReplayCut, type ReplayResult } from "../../src/nav/replay/replay";
+import { parseSpoof, type SpoofWindow } from "../../src/nav/replay/spoof";
 import { readTripLog, type TripLog } from "../../src/triplog/trip-log-reader";
 
 interface Args {
@@ -18,16 +19,18 @@ interface Args {
   chain: boolean;
   /** Also cut where the app simulated outages. */
   appCuts: boolean;
+  spoof: SpoofWindow[];
 }
 
 function parseArgs(argv: string[]): Args {
-  const args: Args = { files: [], cuts: [], sweepLag: false, json: false, chain: false, appCuts: false };
+  const args: Args = { files: [], cuts: [], sweepLag: false, json: false, chain: false, appCuts: false, spoof: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--cut") {
       const [from, len] = argv[++i].split(":").map(Number);
       args.cuts.push({ fromS: from, toS: from + len });
-    } else if (a === "--lag") args.lagS = Number(argv[++i]);
+    } else if (a === "--spoof") args.spoof.push(parseSpoof(argv[++i]));
+    else if (a === "--lag") args.lagS = Number(argv[++i]);
     else if (a === "--sweep-lag") args.sweepLag = true;
     else if (a === "--geojson") args.geojson = argv[++i];
     else if (a === "--json") args.json = true;
@@ -40,7 +43,8 @@ function parseArgs(argv: string[]): Args {
     }
     else if (a === "-h" || a === "--help") {
       console.log(
-        "replay <trip.ulg...> [--cut <startS>:<lengthS>]... [--open-loop [delayS]] [--lag <s>] [--app-cuts] [--sweep-lag] [--chain] [--geojson <out>] [--json]",
+        "replay <trip.ulg...> [--cut <startS>:<lengthS>]... [--spoof <startS>:<lengthS|inf>[:static|outside|offset[:distanceM[:bearingDeg]]]]... " +
+          "[--open-loop [delayS]] [--lag <s>] [--app-cuts] [--sweep-lag] [--chain] [--geojson <out>] [--json]",
       );
       process.exit(0);
     } else args.files.push(a);
@@ -59,8 +63,16 @@ function print(name: string, trip: TripLog, r: ReplayResult): void {
     `  init:     ${s.init ? `${s.init.method} at ${s.init.tS.toFixed(0)} s` : "never (no course and not enough spread in coarse fixes)"}`,
   );
   console.log(
-    `  fixes:    ${f.total} (${f.satellite} satellite) — accepted ${f.accepted}, rejected ${f.rejected}, anchored ${f.anchored}, skipped ${f.skipped}, cut ${f.cut}`,
+    `  fixes:    ${f.total} (${f.satellite} satellite) — accepted ${f.accepted}, rejected ${f.rejected}, anchored ${f.anchored}, skipped ${f.skipped}, untrusted ${f.untrusted}, cut ${f.cut}`,
   );
+  const i = s.integrity;
+  const refused = Object.entries(i.refused).map(([v, n]) => `${v} ${n}`).join(", ");
+  console.log(
+    `  integrity: ${refused || "nothing refused"}` +
+      (i.spoofed ? `; spoofed ${i.spoofed}, used ${i.spoofedUsed}` : "") +
+      `; real fixes refused ${i.realRefused}, untrusted shown ${i.falseAlarmS.toFixed(0)} s${i.spoofed ? " away from the spoofing" : ""}`,
+  );
+  for (const x of i.realRefusedAt) console.log(`    ${x.tS.toFixed(0)} s ${x.verdict}${x.detail ? `: ${x.detail}` : ""}`);
   console.log(
     `  pre-fix error (median): satellite ${m(s.medianErrorM.satellite)}, coarse ${m(s.medianErrorM.coarse)}` +
       (s.coarseInsideAccuracy === null ? "" : `; coarse fixes within their accuracy: ${(s.coarseInsideAccuracy * 100).toFixed(0)} %`),
@@ -106,6 +118,7 @@ function main(): void {
     const result = replayTrip(trip, {
       nav: args.lagS === undefined ? {} : { gnssLagS: args.lagS, estimateGnssLag: false },
       cuts,
+      spoof: args.spoof,
       openLoop: args.openLoopDelayS === undefined ? undefined : { delayS: args.openLoopDelayS },
       startPose: args.chain ? (pose ?? undefined) : undefined,
     });

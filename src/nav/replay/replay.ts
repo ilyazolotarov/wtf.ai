@@ -9,8 +9,11 @@ import type { EdgeId } from "../mapmatch/graph/road-graph";
 import type { MapMatchConfig } from "../mapmatch/particle-filter";
 import { Navigator, SQRT_68, type FixOutcome, type InitMethod, type MapMatchGraph, type NavConfig, type NavEstimate, type ParkedPose } from "../navigator";
 import type { OdometryStep } from "../odometry/odometry-output";
+import type { IntegrityVerdict } from "../integrity/integrity";
+import type { TrustState } from "../position/types";
 import { jamFixes, type JamOptions, type JamWindow } from "./jam";
 import { MapMatchMetrics, type MapMatchSummary } from "./mapmatch-metrics";
+import { spoofFixes, type SpoofWindow } from "./spoof";
 import type { TruthMatch } from "./truth-match";
 import { isSatelliteFix, type GnssFix } from "../types";
 
@@ -63,6 +66,8 @@ export interface ReplayOptions {
   /** Simulated jamming (jam.ts): satellite fixes in these windows become coarse ones. */
   jam?: JamWindow[];
   jamOptions?: Partial<JamOptions>;
+  /** Simulated spoofing (spoof.ts): satellite fixes in these windows are replaced by a spoofed position. */
+  spoof?: SpoofWindow[];
   /**
    * A compass calibration from other drives (NAVIGATOR-SPEC §7.6); `rotateRad` turns it to simulate a
    * wrong one (the phone turned in its mount, another car).
@@ -90,6 +95,8 @@ export interface ParticleSnapshot {
 export interface TrackPoint extends NavEstimate {
   tS: number;
   standstill: boolean;
+  /** GNSS trust the app would show (integrity, SPEC §3.3). */
+  trust: TrustState;
   /** The OBD speed calibration then (v = k_s·s_OBD + o_s, o_s in m/s), while the EKF runs. */
   ks?: number;
   so?: number;
@@ -104,6 +111,10 @@ export interface FixRecord {
   errorM?: number;
   predictedSigmaM?: number;
   initMethod?: FixOutcome["initMethod"];
+  integrity?: IntegrityVerdict;
+  integrityDetail?: string;
+  /** Made up by `spoof`: not where the car was. */
+  spoofed?: boolean;
   /** Map matching: distance from the dominant cluster to the fix (held-out fixes in cuts). */
   mapMatchErrorM?: number;
 }
@@ -167,6 +178,21 @@ export interface ReplaySummary {
   mapMatch: MapMatchSummary | null;
   /** The compass at the end: its trust, what it learned (stored + this drive), and its trust checks. */
   compass: { trust: CompassTrust; calibration: CompassCalibration | null; checkDiffsRad: number[] };
+  integrity: IntegritySummary;
+}
+
+/** GNSS integrity over the replay (SPEC §3.3, §7 target 7). */
+export interface IntegritySummary {
+  /** Satellite fixes refused, by verdict. */
+  refused: Partial<Record<IntegrityVerdict, number>>;
+  /** Spoofed fixes (`spoof`), and those the navigator used anyway. */
+  spoofed: number;
+  spoofedUsed: number;
+  /** Real satellite fixes refused away from the spoof windows (false refusals), and the first few with why. */
+  realRefused: number;
+  realRefusedAt: { tS: number; verdict: IntegrityVerdict; detail?: string }[];
+  /** Track time showing UNTRUSTED or REACQUIRING outside the spoof windows, s (false alarm). */
+  falseAlarmS: number;
 }
 
 export interface ReplayResult {
@@ -184,8 +210,10 @@ const median = (v: number[]) => {
 };
 
 /** What a recorder needs of the replay options: everything but how the inputs reach the navigator. */
-export type RecorderOptions = Pick<ReplayOptions, "cuts" | "trackStepS" | "truthAccuracyM" | "truthLagS" | "openLoop" | "startAtS"> & {
+export type RecorderOptions = Pick<ReplayOptions, "cuts" | "trackStepS" | "truthAccuracyM" | "truthLagS" | "openLoop" | "startAtS" | "spoof"> & {
   mapMatch?: Pick<NonNullable<ReplayOptions["mapMatch"]>, "graph" | "truth" | "particlesEveryS">;
+  /** The fixes `spoof` made up (spoofFixes). */
+  spoofed?: ReadonlySet<GnssFix>;
 };
 
 /**
@@ -256,7 +284,7 @@ export class ReplayRecorder {
   /** A fix the navigator took, and what it made of it. */
   fixOutcome(fix: GnssFix, out: FixOutcome): void {
     const t = this.tS(fix.tUs);
-    this.fixes.push({ tS: t, fix, satellite: isSatelliteFix(fix), ...out });
+    this.fixes.push({ tS: t, fix, satellite: isSatelliteFix(fix), ...out, ...(this.options.spoofed?.has(fix) ? { spoofed: true } : {}) });
     if (out.pose && out.pose !== "doubted") this.startPose = { status: out.pose, tS: t };
   }
 
@@ -312,7 +340,7 @@ export class ReplayRecorder {
     this.nextTrackUs = tUs + this.stepUs;
     const e = nav.estimate();
     const p = nav.params;
-    if (e) this.track.push({ ...e, tS: this.tS(tUs), standstill: nav.isStandstill, ...(p ? { ks: p.ks, so: p.so } : {}) });
+    if (e) this.track.push({ ...e, tS: this.tS(tUs), standstill: nav.isStandstill, trust: nav.trustAt(tUs), ...(p ? { ks: p.ks, so: p.so } : {}) });
     if (this.metrics && e && !nav.isStandstill && (e.speedMps ?? 0) >= 2) this.metrics.sample(tUs, e.mapMatch, nav.mapMatcher, d);
   }
 
@@ -325,9 +353,9 @@ export class ReplayRecorder {
     // An app replay scores a withheld fix when its navigator gets there, after later fixes' outcomes.
     fixes.sort((a, b) => a.tS - b.tS);
     const end = nav.estimate();
-    if (end && end.tUs > (track.at(-1)?.tUs ?? -Infinity)) track.push({ ...end, tS: this.tS(end.tUs), standstill: nav.isStandstill });
+    if (end && end.tUs > (track.at(-1)?.tUs ?? -Infinity)) track.push({ ...end, tS: this.tS(end.tUs), standstill: nav.isStandstill, trust: nav.trustAt(end.tUs) });
 
-    const counts = { init: 0, accepted: 0, rejected: 0, anchored: 0, skipped: 0, cut: 0 };
+    const counts = { init: 0, accepted: 0, rejected: 0, anchored: 0, skipped: 0, untrusted: 0, cut: 0 };
     for (const f of fixes) counts[f.status]++;
     const compared = fixes.filter((f) => (f.status === "accepted" || f.status === "rejected") && f.errorM !== undefined);
     const coarse = compared.filter((f) => !f.satellite);
@@ -363,6 +391,7 @@ export class ReplayRecorder {
         roadPosition: { accepted: nav.stats.roadPositionAccepted, rejected: nav.stats.roadPositionRejected },
         mapMatch: this.metrics?.summary(nav.mapMatcher?.updateTimes ?? [], nav.mapMatcher?.startTimes) ?? null,
         compass: { trust: nav.compassTrust, calibration: nav.compassCalibration, checkDiffsRad: [...nav.compassCheckDiffs] },
+        integrity: integritySummary(fixes, track, this.options.spoof ?? []),
         cuts: cuts.map((c, k) => {
           const truth = fixes.filter(
             (f) => f.status === "cut" && f.tS >= c.fromS && f.tS < c.toS && f.satellite && f.fix.hAccM <= truthAcc && f.errorM !== undefined,
@@ -386,6 +415,31 @@ export class ReplayRecorder {
   }
 }
 
+/** After a spoof window ends, the trust may take this long to come back without counting as a false alarm. */
+const SPOOF_RECOVERY_S = 60;
+
+function integritySummary(fixes: FixRecord[], track: TrackPoint[], spoof: SpoofWindow[]): IntegritySummary {
+  const refused: IntegritySummary["refused"] = {};
+  for (const f of fixes) if (f.status === "untrusted" && f.integrity) refused[f.integrity] = (refused[f.integrity] ?? 0) + 1;
+  const spoofedFixes = fixes.filter((f) => f.spoofed);
+  // Real fixes refused while trust comes back after a spoof window are the point, not false refusals.
+  const spoofing = (t: number) => spoof.some((w) => t >= w.fromS && t < w.toS + SPOOF_RECOVERY_S);
+  const real = fixes.filter((f) => f.status === "untrusted" && !f.spoofed && !spoofing(f.tS));
+  let falseAlarmS = 0;
+  for (let i = 1; i < track.length; i++) {
+    const p = track[i - 1];
+    if ((p.trust === "UNTRUSTED" || p.trust === "REACQUIRING") && !spoofing(p.tS)) falseAlarmS += track[i].tS - p.tS;
+  }
+  return {
+    refused,
+    spoofed: spoofedFixes.length,
+    spoofedUsed: spoofedFixes.filter((f) => f.status !== "untrusted" && f.status !== "cut" && f.status !== "skipped").length,
+    realRefused: real.length,
+    realRefusedAt: real.slice(0, 5).map((f) => ({ tS: f.tS, verdict: f.integrity!, ...(f.integrityDetail ? { detail: f.integrityDetail } : {}) })),
+    falseAlarmS,
+  };
+}
+
 export function replayTrip(trip: TripLog, options: ReplayOptions = {}): ReplayResult {
   // With a compass option the particle filter uses it (`on`); otherwise it runs in shadow, as in the app.
   const nav = new Navigator({ ...(options.compass ? { compassUse: "on" as const } : {}), ...options.nav });
@@ -394,7 +448,9 @@ export function replayTrip(trip: TripLog, options: ReplayOptions = {}): ReplayRe
   if (options.odometry) nav.subscribeOdometry(options.odometry);
   const mm = options.mapMatch;
   if (mm) nav.setRoadGraph(mm.graph, mm.config);
-  const rec = new ReplayRecorder(trip, options);
+  const jammed = options.jam?.length ? jamFixes(trip.gnss, trip.startUs, options.jam, options.jamOptions) : trip.gnss;
+  const { fixes: spoofed, spoofed: spoofedSet } = spoofFixes(jammed, trip.startUs, options.spoof ?? []);
+  const rec = new ReplayRecorder(trip, { ...options, spoofed: spoofedSet });
   rec.use(nav);
   const sessionUs = trip.startUs + (options.startAtS ?? 0) * 1e6;
   const tS = (tUs: number) => (tUs - trip.startUs) / 1e6;
@@ -404,7 +460,7 @@ export function replayTrip(trip: TripLog, options: ReplayOptions = {}): ReplayRe
   const from = <T extends { tUs: number }>(xs: T[]) => (options.startAtS ? xs.filter((x) => x.tUs >= sessionUs) : xs);
   const imu = from(trip.imu);
   const obdSpeed = from(trip.obdSpeed);
-  const gnss = from(options.jam?.length ? jamFixes(trip.gnss, trip.startUs, options.jam, options.jamOptions) : trip.gnss);
+  const gnss = from(spoofed);
   const mag = from(trip.mag ?? []);
   let i = 0;
   let o = 0;
