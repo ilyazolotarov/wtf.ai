@@ -75,6 +75,15 @@ export interface MapMatchConfig {
   onRoadShare: number;
   onRoadProjectM: number;
   onRoadProjectHeadingRad: number;
+  /**
+   * At or above `offRoadSpeed.fullMps` the off-road hypothesis is not a hypothesis at all — no yard, parking area
+   * or private lane is driven that fast (§7.4) — so instead of only out-weighing it, every off-road particle is
+   * put back on the nearest aligned road within this reach and no off-road population is kept. The penalty alone
+   * cannot do that: it moves weight from the off-road particles onto on-road ones, and when the cloud has drifted
+   * beyond `onRoadProjectM` from every road there are none for the weight to go to, so it spreads over the
+   * off-road particles and normalisation cancels it.
+   */
+  onRoadRecoverProjectM: number;
   /** Share re-injected near the clusters at each resampling (recovers a pruned hypothesis). */
   reinjectShare: number;
   /** Weighting interval, m of travel. */
@@ -192,6 +201,7 @@ export const DEFAULT_MAP_MATCH: MapMatchConfig = {
   onRoadShare: 0.1,
   onRoadProjectM: 15,
   onRoadProjectHeadingRad: 30 * DEG,
+  onRoadRecoverProjectM: 45,
   reinjectShare: 0.02,
   evalIntervalM: 10,
   straightTurnRad: 8 * DEG,
@@ -790,6 +800,21 @@ export class ParticleFilter {
   }
 
   /**
+   * The nearest point on a road within `reachM` that a car heading `psi` could be driving along: within `headingRad`
+   * of it, not against a one-way (§11: where an off-road hypothesis is drawn while the car drives).
+   */
+  nearestRoad(e: number, n: number, psi: number, reachM: number, headingRad: number): { e: number; n: number; headingRad: number } | null {
+    for (const near of this.graph.edgesNear(e, n, reachM)) {
+      const dir: 1 | -1 = Math.abs(wrap(near.headingRad - psi)) <= Math.PI / 2 ? 1 : -1;
+      if ((dir === 1 && near.edge.oneway === Oneway.backward) || (dir === -1 && near.edge.oneway === Oneway.forward)) continue;
+      const h = dir === 1 ? near.headingRad : near.headingRad + Math.PI;
+      if (Math.abs(wrap(h - psi)) > headingRad) continue;
+      return { e: near.e, n: near.n, headingRad: wrap(h) };
+    }
+    return null;
+  }
+
+  /**
    * The dominant travel direction: particles within `clusterHeadingRad` of the circular-mean heading
    * (iterated once), with their weight, weighted mean position and RMS distance, and their heading
    * mean and circular spread. On one road in one direction the position along it may still be open.
@@ -1228,7 +1253,10 @@ export class ParticleFilter {
 
     let offRoad = 0;
     for (let i = 0; i < size; i++) offRoad += p.offRoad[i];
-    const wantOffRoad = Math.ceil(c.offRoadShare * size);
+    // Driving too fast for any off-road surface: keep no off-road particles, and reach further to find the road.
+    // `offRoadSpeed.factor` 1 turns the speed evidence off altogether, this rule with it.
+    const atRoadSpeed = this.resolved && c.offRoadSpeed.factor > 1 && this.speedMps >= c.offRoadSpeed.fullMps;
+    const wantOffRoad = atRoadSpeed ? 0 : Math.ceil(c.offRoadShare * size);
     for (let k = 0; offRoad < wantOffRoad && k < 4 * size; k++) {
       const i = Math.floor(this.random.uniform() * size);
       if (!p.offRoad[i]) {
@@ -1236,21 +1264,21 @@ export class ParticleFilter {
         offRoad++;
       }
     }
-    this.keepOnRoad(size - offRoad);
+    this.keepOnRoad(size - offRoad, atRoadSpeed ? 1 : c.onRoadShare, atRoadSpeed ? c.onRoadRecoverProjectM : c.onRoadProjectM);
     this.reinject();
     if (!this.resolved) this.reinjectInRegion();
     this.cached = null;
   }
 
-  /** Project off-road particles onto the nearest aligned edge until `onRoadShare` of them are on a road. */
-  private keepOnRoad(onRoad: number): void {
+  /** Project off-road particles onto the nearest aligned edge within `reachM` until `share` of them are on a road. */
+  private keepOnRoad(onRoad: number, share: number, reachM: number): void {
     const c = this.config;
     const p = this.p;
-    const want = Math.ceil(c.onRoadShare * p.size);
+    const want = Math.ceil(share * p.size);
     for (let k = 0; onRoad < want && k < 2 * want; k++) {
       const i = Math.floor(this.random.uniform() * p.size);
       if (!p.offRoad[i]) continue;
-      for (const near of this.graph.edgesNear(p.e[i], p.n[i], c.onRoadProjectM).slice(0, 4)) {
+      for (const near of this.graph.edgesNear(p.e[i], p.n[i], reachM).slice(0, 4)) {
         const dir: 1 | -1 = Math.abs(wrap(near.headingRad - p.psi[i])) <= Math.PI / 2 ? 1 : -1;
         const heading = dir === 1 ? near.headingRad : near.headingRad + Math.PI;
         if (Math.abs(wrap(heading - p.psi[i])) > c.onRoadProjectHeadingRad) continue;

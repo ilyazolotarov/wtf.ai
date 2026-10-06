@@ -8,13 +8,24 @@ import type { MapMatchEstimate, NavEstimate } from "../navigator";
 export const FUSED_WINDOW_US = 3_000_000;
 /** Map-match states in which the dominant hypothesis is the dot while dead-reckoning. */
 export const MAP_MATCH_PUCK: ReadonlySet<MapMatchState> = new Set(["tracking", "multimodal", "offroad"]);
+/**
+ * From this speed an off-road top hypothesis is drawn on the road it could be on (`road`, MAPMATCH-SPEC §11): off
+ * the roads the car only parks, and no parking manoeuvre is driven at 15 km/h.
+ */
+export const DRAW_ON_ROAD_MPS = 15 / 3.6;
 /** The dot's radius from a hypothesis' spread is at least this (a tight cluster isn't a perfect one). */
 export const MAP_MATCH_MIN_ACCURACY_M = 5;
 
 /** While dead-reckoning: the dominant map-matching hypothesis when it places the car (undefined: the EKF is the dot). */
 export function puckHypothesis(estimate: NavEstimate, deadReckoning: boolean): MapMatchEstimate["clusters"][number] | undefined {
   const mm = estimate.mapMatch;
-  return deadReckoning && mm && MAP_MATCH_PUCK.has(mm.state) ? mm.clusters[0] : undefined;
+  if (!deadReckoning || !mm || !MAP_MATCH_PUCK.has(mm.state)) return undefined;
+  const top = mm.clusters[0];
+  // The filter keeps its off-road hypothesis (it is how it finds the road again), but a car at speed is drawn on a road.
+  if (top?.road && mm.state === "offroad" && (estimate.speedMps ?? 0) >= DRAW_ON_ROAD_MPS) {
+    return { ...top, lat: top.road.lat, lon: top.road.lon, headingRad: top.road.headingRad };
+  }
+  return top;
 }
 
 /**

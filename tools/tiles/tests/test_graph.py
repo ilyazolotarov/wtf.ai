@@ -284,11 +284,56 @@ FAR_WAYS = [
     (162, [61, 62], {"highway": "secondary", "oneway": "yes"}),
 ]
 
+# A junction with the density of a real one, for MAPMATCH-SPEC §15, item 14: shaped on the one 16 km into the
+# 2026-10-06 jammed intercity drive (`replay:junction`), where the car turned 95° left off a southbound primary and
+# the filter went off-road for 43 s. What the graph holds there, within 150 m of the node: the approach, **two**
+# eastbound primaries that both leave the node heading 86° and only diverge further along, a service road at 133°,
+# and a service lane 17–27 m to the side at 85–87°. So a 95° left turn is explained equally well by two roads,
+# with three more candidates within 30 m — the fixture's other junctions offer one exit per direction, which is
+# why they survive along-track errors that the real one did not.
+# West of the rest of the fixture, so its region can hold a 2 km approach without reaching the other clusters
+# (it used to end just past node 4, which `test_nodes` needs to stay a boundary node).
+JUN_LAT, JUN_LON = LAT0 - 0.02, LON0 - 0.05
+M_LAT = 1 / 111_195
+M_LON = 1 / (111_195 * np.cos(np.radians(JUN_LAT)))
+
+
+def _jn(east_m: float, north_m: float) -> tuple[float, float]:
+    """Metres east/north of the junction node, as (lon, lat)."""
+    return (JUN_LON + east_m * M_LON, JUN_LAT + north_m * M_LAT)
+
+
+# 70: the junction. 71–72: a 2 km approach from the north, long enough to dead reckon down as the real
+# drive's 1.7 km straight was. 73: on past the junction.
+# 74–75 and 76–77: the two eastbound primaries. 78: the service road at 133°. 79–80: the service lane alongside.
+JUNCTION_NODES = {
+    70: _jn(0, 0),
+    71: _jn(0, 1000),
+    72: _jn(0, 2000),
+    73: _jn(0, 2200),
+    74: _jn(120, 4),
+    75: _jn(360, 8),
+    76: _jn(120, -6),
+    77: _jn(360, -20),
+    78: _jn(20, -19),
+    79: _jn(40, -20),
+    80: _jn(110, -20),
+}
+JUNCTION_WAYS = [
+    (170, [72, 71, 70], {"highway": "primary"}),          # the approach, driven southbound
+    (171, [70, 73], {"highway": "unclassified"}),         # on past the junction, as the real one continues
+    (172, [70, 74, 75], {"highway": "primary"}),          # eastbound, heading 86° at the node
+    (173, [70, 76, 77], {"highway": "primary"}),          # the other eastbound, same heading at the node
+    (174, [70, 78], {"highway": "service"}),              # the service road at 133°
+    (175, [79, 80], {"highway": "service"}),              # the lane alongside, 20 m off
+]
+
 
 def ts_fixture_bytes(tmp: Path) -> bytes:
     xml = osm_xml().replace("</osm>", "")
-    xml += "".join(f'<node id="{i}" version="1" lat="{lat:.7f}" lon="{lon:.7f}"/>' for i, (lon, lat) in FAR_NODES.items())
-    for wid, refs, t in FAR_WAYS:
+    extra_nodes = {**FAR_NODES, **JUNCTION_NODES}
+    xml += "".join(f'<node id="{i}" version="1" lat="{lat:.7f}" lon="{lon:.7f}"/>' for i, (lon, lat) in extra_nodes.items())
+    for wid, refs, t in [*FAR_WAYS, *JUNCTION_WAYS]:
         xml += f'<way id="{wid}" version="1">' + "".join(f'<nd ref="{r}"/>' for r in refs)
         xml += "".join(f'<tag k="{k}" v="{v}"/>' for k, v in t.items()) + "</way>"
     xml += "</osm>"
@@ -296,6 +341,7 @@ def ts_fixture_bytes(tmp: Path) -> bytes:
     pbf.write_text(xml, encoding="utf-8")
     roads = read_roads(pbf)
     region = REGION.union(Polygon([(LON0 - 0.01, LAT0 + 0.005), (LON0 + 0.06, LAT0 + 0.005), (LON0 + 0.06, LAT0 + 0.02), (LON0 - 0.01, LAT0 + 0.02)]))
+    region = region.union(Polygon([(JUN_LON - 0.004, JUN_LAT - 0.004), (JUN_LON + 0.01, JUN_LAT - 0.004), (JUN_LON + 0.01, JUN_LAT + 0.025), (JUN_LON - 0.004, JUN_LAT + 0.025)]))
     graph = build_graph(roads, read_locations(pbf, np.unique(roads.refs)), region)
     out = tmp / "fixture.graph.bin"
     write_graph(graph, out, "2026-10-01", built_at=1_790_000_000)

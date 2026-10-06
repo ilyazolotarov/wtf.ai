@@ -257,7 +257,17 @@ export interface NavEstimate {
 export interface MapMatchEstimate {
   state: MapMatchState;
   /** Up to 5 hypotheses, heaviest first. */
-  clusters: { weight: number; lat: number; lon: number; headingRad: number; spreadM: number; edge: EdgeId | null; particles: number }[];
+  clusters: {
+    weight: number;
+    lat: number;
+    lon: number;
+    headingRad: number;
+    spreadM: number;
+    edge: EdgeId | null;
+    particles: number;
+    /** The top cluster while `offroad`: the nearest road it could be driving along (position/puck.ts draws it there). */
+    road?: { lat: number; lon: number; headingRad: number };
+  }[];
   particles: number;
   updateMs: number;
 }
@@ -266,6 +276,10 @@ export interface MapMatchEstimate {
 export type MapMatchGraph = RoadGraph & { setFrame(frame: LocalFrame): void };
 
 /** A travel direction, for the map-start checks: particles within this of the start's heading. */
+/** How far, and how far off its heading, an off-road top hypothesis looks for the road it could be on (MAPMATCH-SPEC §11). */
+const ROAD_SNAP_REACH_M = 80;
+const ROAD_SNAP_HEADING_RAD = (60 * Math.PI) / 180;
+
 const MAP_START_DIRECTION_RAD = Math.PI / 4;
 /** Off-road this long (m, filter weight mostly off the graph) restarts the filter around the EKF. */
 const MAP_MATCH_REINIT_OFFROAD_M = 300;
@@ -1238,10 +1252,14 @@ export class Navigator {
   }
 
   private mapMatchEstimate(frame: LocalFrame): MapMatchEstimate {
-    const out = this.pf!.output();
+    const pf = this.pf!;
+    const out = pf.output();
     return {
       ...out,
-      clusters: out.clusters.map(({ e, n, ...c }) => ({ ...c, ...frame.toCoordinate(e, n) })),
+      clusters: out.clusters.map(({ e, n, ...c }, k) => {
+        const road = k === 0 && out.state === "offroad" ? pf.nearestRoad(e, n, c.headingRad, ROAD_SNAP_REACH_M, ROAD_SNAP_HEADING_RAD) : null;
+        return { ...c, ...frame.toCoordinate(e, n), ...(road ? { road: { ...frame.toCoordinate(road.e, road.n), headingRad: road.headingRad } } : {}) };
+      }),
     };
   }
 

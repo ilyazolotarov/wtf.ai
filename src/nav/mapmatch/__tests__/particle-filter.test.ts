@@ -7,6 +7,7 @@ import { bufferByteSource } from "@/nav/mapmatch/graph/byte-source";
 import { TiledRoadGraph } from "@/nav/mapmatch/graph/road-graph";
 import { replayTrip } from "@/nav/replay/replay";
 import { rotateCalibration } from "@/nav/compass/compass";
+import { ParticleFilter } from "@/nav/mapmatch/particle-filter";
 import { Navigator } from "@/nav/navigator";
 
 // The fixture's long road (tools/tiles tests/test_graph.py): 60 —160— 61 —161— 63 due east at
@@ -303,3 +304,106 @@ describe("road position into the EKF", () => {
     expect(result.summary.roadPosition.accepted).toBeGreaterThan(0);
   });
 });
+
+// The dense junction (tools/tiles tests/test_graph.py, shaped on a real one with `replay:junction`): a 2 km
+// primary from the north into node 70, where **two** primaries leave eastbound only a few degrees apart, with a
+// service road at 134° and a service lane 45 m to the side. The fixture's other junctions offer one exit per
+// direction, which is why they survive along-track errors this one does not.
+describe("a 95° turn at a junction as dense as a real one (MAPMATCH-SPEC §15, item 14)", () => {
+  const JUNCTION = { lat: 51.52 - 0.02, lon: 30.75 - 0.05 };
+  // What the drive below really covers before the turn, and when the turn starts: the speeds ramp between
+  // segments, so neither is the nominal sum.
+  const APPROACH_M = 1497;
+  const TURN_S = 71.3;
+  const dense = () => new TiledRoadGraph(bufferByteSource(new Uint8Array(FIXTURE)), new LocalFrame(JUNCTION));
+  const START = { lat: JUNCTION.lat + APPROACH_M / 111_195, lon: JUNCTION.lon };
+  // The drive: 126 km/h down the approach, brake to ~30, a 95° left over 4.5 s, then away to the east.
+  const DRIVE: DriveSegment[] = [
+    { durationS: 3, speedMps: 0, yawRateDegS: 0 },
+    { durationS: 20, speedMps: 20, yawRateDegS: 0 },
+    { durationS: 40, speedMps: 35, yawRateDegS: 0 },
+    { durationS: 8.3, speedMps: 8, yawRateDegS: 0 },
+    { durationS: 4.5, speedMps: 5, yawRateDegS: 21 },
+    { durationS: 20, speedMps: 20, yawRateDegS: 0 },
+  ];
+
+  /**
+   * The drive with the filter started `offsetM` short of where the car really is, as 16 km of dead reckoning left
+   * it on 2026-10-06, and no fix ever arriving to correct it. `obdScale` cannot stand in for the offset: the
+   * navigator learns the speed scale and calibrates it away.
+   */
+  function run(offsetM: number) {
+    const g = dense();
+    const drive = syntheticDrive({ segments: DRIVE, origin: START, startHeadingRad: Math.PI, gnss: "clean", obdScale: 1 });
+    const truth0 = drive.truth[0];
+    const result = replayTrip(drive.trip, {
+      mapMatch: { graph: g },
+      cuts: [{ fromS: 0, toS: 1e9 }],
+      startPose: { lat: truth0.lat + offsetM / 111_195, lon: truth0.lon, headingRad: truth0.psi, posSigmaM: 5, headingSigmaRad: 0.04 },
+    });
+    const frame = new LocalFrame(JUNCTION);
+    const atTurn = result.track.find((p) => p.tS >= TURN_S)!;
+    const after = result.track.filter((p) => p.tS >= TURN_S + 2);
+    const end = result.track.at(-1)!.mapMatch!;
+    return {
+      // + means the filter thinks it is still short of the junction.
+      alongM: frame.toEnu(atTurn)[1] - frame.toEnu(drive.truthAt(drive.trip.imu[0].tUs + TURN_S * 1e6))[1],
+      offRoad: after.filter((p) => p.mapMatch?.state === "offroad").length / after.length,
+      endWay: wayOf(g, end.clusters[0].edge),
+      end,
+    };
+  }
+
+  test("knowing where it is, it takes the turn onto one of the two eastbound roads", () => {
+    for (const offsetM of [0, 20, 40]) {
+      const r = run(offsetM);
+      expect(r.alongM).toBeLessThan(50);
+      expect(r.endWay).toBe(172);
+      expect(r.offRoad).toBeLessThan(0.2);
+    }
+  });
+
+  // The failure of 2026-10-06, 16 km into the drive out: the car turned 62 m before the filter's idea of the
+  // junction, so no road there explains a 95° turn and the dot leaves the map — on the phone it drove through the
+  // field beside the road for 52 s at 130 km/h. The off-road speed rule (§7.4) does not save it, even now that
+  // the particles are put back on a road rather than only out-weighed: `onRoadRecoverProjectM` reaches 45 m and
+  // the cloud is 63 m out. Reaching far enough (80–120 m) does fix this case, and costs far too much on the real
+  // drives — wrong road 8.5 → 25.6 %, truth survival 98.5 → 83.8 % on `replay:mm --jam 0:inf` — because that
+  // snaps particles onto roads the car was never on. What should fix it is the turn itself: a confident 95° where
+  // exactly one junction nearby turns that much is an absolute position fix, and re-seeding there is selective in
+  // a way that a wider reach is not.
+  test("62 m short of the junction, no road explains the turn and the dot leaves the map", () => {
+    const r = run(62);
+    expect(r.alongM).toBeGreaterThan(55);
+    expect(r.endWay).toBeNull();
+    expect(r.end.state).toBe("offroad");
+    expect(r.offRoad).toBeGreaterThan(0.5);
+  });
+});
+
+describe("the nearest road a car could be driving along (the dot at speed, MAPMATCH-SPEC §11)", () => {
+  const filterAt = (lat: number, lon: number) =>
+    new ParticleFilter(new TiledRoadGraph(bufferByteSource(new Uint8Array(FIXTURE)), new LocalFrame({ lat, lon })));
+  const DEG = Math.PI / 180;
+
+  test("30 m beside the long road, heading along it: on the road, its way", () => {
+    const pf = filterAt(51.53, 30.76);
+    const road = pf.nearestRoad(0, 30, 92 * DEG, 80, 60 * DEG)!;
+    expect(Math.abs(road.n)).toBeLessThan(1);
+    expect(Math.abs(road.e)).toBeLessThan(1);
+    expect(road.headingRad).toBeCloseTo(Math.PI / 2, 1);
+    // Heading the other way it is the same road, driven west.
+    expect(Math.abs(pf.nearestRoad(0, 30, -88 * DEG, 80, 60 * DEG)!.headingRad + Math.PI / 2)).toBeLessThan(0.1);
+  });
+
+  test("not across the road, not out of reach, not against a one-way", () => {
+    const pf = filterAt(51.53, 30.76);
+    expect(pf.nearestRoad(0, 30, 0, 80, 60 * DEG)).toBeNull();
+    expect(pf.nearestRoad(0, 120, 90 * DEG, 80, 60 * DEG)).toBeNull();
+    // The one-way 162 runs north: a car 20 m beside it heading north is on it, heading south it is not.
+    const oneway = filterAt(51.532, 30.775);
+    expect(oneway.nearestRoad(20, 0, 0, 80, 60 * DEG)).not.toBeNull();
+    expect(oneway.nearestRoad(20, 0, Math.PI, 80, 60 * DEG)).toBeNull();
+  });
+});
+

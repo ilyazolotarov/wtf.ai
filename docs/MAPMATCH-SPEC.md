@@ -320,6 +320,12 @@ Arrays of numbers, not objects (structure of arrays over typed arrays), for Herm
 
   - The measured turn isn't used to pick the branch. It isn't complete when the particle reaches the node.
     Weighting (§7.4) prunes the wrong branches over the next metres.
+  - Tried, not kept: *a preference for the bigger road* (× 0.5 onto residential, living street, track and `road`
+    edges), on the idea that drivers keep to the main roads. Over 10 seeds on the jammed corpus wrong road
+    10.4 → 14.1 % and truth survival 96.2 → 94.4 %; on real drives jammed after the start 4.0 → 7.0 % of the time
+    > 50 m off; on the nine trips of 2026-10-06 no better. These drives use residential streets, and where the
+    turns leave two roads open the prior picks the wrong one. A planned route is the prior that knows (the route
+    hint, ROUTING-SPEC §8.6).
   - Dead end: the particle turns around.
   - Boundary node: the particle becomes off-road.
 - **U-turn on an edge:** allowed when the measured turn over the last 20 m exceeds 135°. A small share of the
@@ -382,7 +388,11 @@ Every 10 m of travel, plus each accepted fix. All terms are log-likelihoods, sum
   penalty accumulates while the car follows a road, and without resampling they drift off it (heading noise):
   when the car then left the road, none was near it or heavy enough to take over (found by the M5 tests, where
   the filter now runs from the first fix). Resampling makes fresh off-road copies of the on-road particles.
-- Off-road share kept ≥ 5 %.
+- Off-road share kept ≥ 5 %, except **at road speed** (`offRoadSpeed.fullMps`, 40 km/h, and above): no yard is
+  driven that fast, so no off-road particles are kept and every off-road particle is put back on the nearest
+  aligned road within `onRoadRecoverProjectM` (45 m). The penalty alone (§7.4) could not do it: it moves weight
+  from off-road particles onto on-road ones, and with the cloud past 15 m from every road there are none, so it
+  spreads over the off-road particles and normalisation cancels it.
 - On-road share kept ≥ 10 %: off-road particles are projected onto the nearest edge within 15 m whose direction
   fits within 30°. While off-road dominates, on-road hypotheses stay where the car will come back onto a road.
 - 2 % of particles re-injected around the clusters: nearby edges, both directions when the cluster is new.
@@ -814,6 +824,18 @@ hundred metres stops matching the twin's.
 | Update time | PF update p50 / p99 (ms) in Node; on device from the `mm timing` note and `nav_mapmatch` (§11) |
 | Inside circle | Share of held-out fixes within the EKF's drawn circle (1.5 σ); honest ≈ 68 % (§9.3) |
 
+**Every one of these is one filter seed.** The particle filter is chaotic: a change that only shifts the random
+stream — even an extra draw that is then ignored — sends a 45-minute drive down a different path, and a single
+replay of a single drive measures mostly luck. Report a sweep (`--mm '{"seed":N}'`), per seed, not a mean: eight
+seeds for a metric aimed at one failure, three to ten for the corpus, three per simulated drive. On the drive of
+§15, item 14 one change read as 52 s → 3 s on seed 1 and as worse than before on seed 2.
+
+**And on every drive, not only the one a change is for.** Replay each drive through the app as the viewer does it,
+from a cold start and from the parked pose the earlier logs left, and compare drive by drive: an average hides one
+drive gone from 15 to 490 m off. Most jammed drives have no satellite fix at all, so every metric above, scored
+against GPS, skips exactly them. Two changes measured on their own drive and on these benchmarks were reverted
+for that (2026-10-07): §15, item 14, and NAVIGATOR-SPEC §6.1.
+
 ### 10.3 Tooling (`tools/replay`)
 
 > **A replay runs what the app runs.** The settings the app ships that differ from the library defaults live in
@@ -823,8 +845,8 @@ hundred metres stops matching the twin's.
 > which loop it ran. This exists because they did drift: `DEFAULT_NAV_CONFIG.mapMatchLoop` is `open` and the app
 > has shipped `closed` since the switch was added, so every replay measured a different filter from the one in the
 > car — on 2026-10-06 the phone's dot drove through a field for 52 s at 130 km/h while the open-loop replay of
-> that same log never left the road, which made the bug look unreproducible and its fix look
-> worthless. Anything else the app turns on by default belongs in that file.
+> that same log never left the road, which made the bug look unreproducible and its fix look worthless (§15,
+> item 14). Anything else the app turns on by default belongs in that file.
 
 - `npm run replay:mm -- [--graph <file>] [--cut s:len]… [--open-loop] [--mm '<json config>'] [--trace from:to] <logs>`
   (M4): the §10.2 metrics per drive, wrong-road and lost stretches, update time, filter vs EKF error in cuts;
@@ -898,6 +920,21 @@ hundred metres stops matching the twin's.
     with radius max(spread, 5 m). With GNSS the EKF stays the puck: it is within a few metres there (NAVIGATOR-SPEC
     §9.1), and the filter's position was measured only in outages (§7.7). This narrows §6.2. Alternatives (weight
     ≥ 0.05) are drawn in state `multimodal`.
+  - **On a road while it drives:** in state `offroad` at 15 km/h or more, the dominant hypothesis is drawn at the
+    nearest point of a road it could be driving along — within 80 m, its heading within 60°, not against a one-way
+    (`MapMatchEstimate.clusters[0].road`, `position/puck.ts`) — and as it is when there is none. Off the roads a car
+    only parks, and nobody parks at 15 km/h; a dot crossing a block at city speed is wrong whichever road is right.
+    The filter keeps its off-road hypothesis — following the car's own path off the map is how it finds the road
+    again — so only the drawing changes, and the trip log's `nav_mapmatch` still records the hypothesis itself.
+    Over the nine trips of 2026-10-06 replayed through the app (16 filter seeds), the drawn dot more than 15 m from
+    every road while the car drives over 15 km/h: median 16 → 2 s a day, none at all on 8 seeds (2 before), worst
+    227 → 149 s — the worst are the seeds where the filter has lost the car by more than the reach. On real drives
+    jammed after the start the dot is > 50 m off 4.0 → 3.4 % of the time; the simulated drives, which never leave a
+    road, are unchanged.
+    - Tried, not kept: *forbidding off-road from 10–20 km/h in the filter* instead of 20–40 km/h. It also kept the
+      dot on the roads of the real day, and lost the city simulations (time > 50 m off 0.1 → 5.5 %, one run in
+      twelve 30 % of its time): off-road particles are the filter's way back from a wrong road, and at 20 km/h it
+      snapped them onto parallel streets of the block.
 - **Trip log:** ULog message `nav_mapmatch` (TRIP-LOGGER-SPEC §6.3), published with each `nav_estimate` (~2–3
   Hz) while the filter runs:
   - state, particle count, cluster count;
@@ -960,6 +997,7 @@ M1–M3 can partly overlap. M4 needs M1–M3. M5 and M6 are independent of each 
 | EKF position prior | σ = max(2σ, 10 m), scale 0.3 | open loop only (§9) |
 | Off-road penalty | × 0.5 per 10 m, exponent × 1 → 12 from 20 to 40 km/h (not in `init`) | §7.4 |
 | On-road floor while off-road | 10 %, projection ≤ 15 m, ≤ 30° | §7.5 |
+| At road speed (≥ 40 km/h) | no off-road particles; all projected, ≤ 45 m (`onRoadRecoverProjectM`) | §7.5 |
 | `dks` prior / jitter | 0.02 / 0.002 | per-particle distance scale |
 | Off-road share / re-injection | 5 % / 2 % | §7.5 |
 | Stale off-road resampling | off-road weight < 10⁻⁵ | §7.5 |
@@ -1051,3 +1089,66 @@ M1–M3 can partly overlap. M4 needs M1–M3. M5 and M6 are independent of each 
       speed rule, the wrong guesses jammed from the start are on a service road at ≥ 30 km/h 0.5 % of the moving
       time, a residential one at ≥ 45 km/h 0.02 %; nearly all the rest are below 30 km/h, where speed tells
       nothing. Revisit if a drive shows the dot on a yard lane at road speed.
+14. **Off-road at road speed after a turn the filter can't place** (2026-10-06, 16 km into a jammed 58 km
+    intercity drive, gc6xib). The car slowed 126 → 13 km/h, turned 95° left (gyro 94.5°, peak 43 °/s — the route's own
+    manoeuvre #6, −95.1°) and accelerated back to 130 km/h. The filter was `on` the route at 15,891 m with the
+    junction 62 m ahead: 0.4 % along-track error over 16 km of pure dead reckoning, and still more than a junction
+    can absorb. The off-road hypothesis won at 37–40 km/h and held > 50 % of the weight for 43 s (`clusters` 1,
+    `weight_0` 1.00 for 6 s of it) while the car accelerated to 130 km/h, recovering only where the geometry
+    agreed again ~1 km along the new road. Guidance froze (`along_m` stuck at 15,891, `off_m` 82–95 m) and four
+    re-plans went out in 31 s (now stopped: ROUTING-SPEC §8.2).
+
+    Two causes, and only the first is about off-road. **The off-road penalty is relative:** `logw +=
+    offRoadPenalty` lands on off-road particles only, so it needs on-road particles within reach of a road for the
+    weight to move to. With the cloud 82–95 m out and `keepOnRoad` reaching `onRoadProjectM` (15 m) there were
+    none, the penalty spread over the off-road particles alone, and normalisation cancels a constant added to
+    every log-weight; whenever it did bite, the off-road weight fell below `offRoadMinWeight` and the resampling
+    that follows reset every weight to uniform. **Nothing could correct the position along the road:** a particle
+    turns only at the junction it is standing on, so with the whole cloud short of the junction there was no
+    particle at it to reward, and the turn contradicted every hypothesis at once.
+
+    It reproduces on the drive itself, but only with the replay running what the app runs (§10.3): under the open
+    loop the filter never leaves the road here and the failure is invisible. `replay:offroad` on that log shows 52
+    samples off-road above 40 km/h in one 52 s run — the only such stretch in every log kept (52 of 5 998 samples
+    above 40 km/h; every other drive is at 0).
+
+    **Fixed across the road** by §7.5: at or above `offRoadSpeed.fullMps` the off-road hypothesis is not a
+    hypothesis — no yard is driven at 40 km/h — so the filter keeps no off-road population there and `keepOnRoad`
+    puts every off-road particle back on the nearest aligned road within `onRoadRecoverProjectM` (45 m). The
+    penalty alone cannot do that, for the reason above. Off-road above 40 km/h on the drive: 52 s → **0 s**.
+    `offRoadSpeed.factor` 1 turns this off with the rest of the speed evidence.
+
+    **Still open: the position along the road,** and the junction test below holds that open. The dot stays on a
+    road and picks the wrong one: it takes 36 s to find the road the car turned onto, and at 62 m of along-track
+    error on the fixture it ends off the map, because no particle was at the junction when the car turned there,
+    and no reach *across* to a road can say where along it the car is.
+
+    Tried and not kept:
+    - *Weighing the EKF position along the road once instead of at every weighting, with clusters reaching 150 m
+      along the road and `tracking` judged on the spread across it.* Approaching the junction the cloud along the
+      road was ±9–14 m against the EKF's own ±25–28 m, so a junction 62 m off had no particle near it. It settled
+      this junction in 1–4 s on 8 of 8 seeds started from the parked pose (was 40–52 s on 5), and simulated
+      intercity drives spent 1.5 % of the time > 50 m off instead of 9.4 %. It broke the drives with no satellite
+      fix at all, which no benchmark scored (§10.2): this drive started cold left its road halfway on 2 of 3
+      seeds (the dot's median distance to the drive's Wi-Fi fixes ≈ 330 m, against ≈ 30 m), two jammed town drives
+      went 346 and 486 m off on one seed each, and off-road time above 20 km/h over those drives rose 991 →
+      1 623 s. Reverted 2026-10-07.
+    - *Moving particles to the junction a sharp turn names* (a ≥ 70° turn matched to the one junction within reach
+      that turns as much; half the contradicted particles moved there). It settled this junction in 1 s, and
+      elsewhere it fires on the wrong junction: replayed without a parked pose, 4 of 8 seeds of this drive ended
+      1–20 km off, and on the simulated drives it changed nothing.
+    - *A wider reach across to a road* (80–150 m). It fixes this case and costs wrong road 8.5 → 25.6 % on the real
+      drives: the reach is across to a road, the error was along one.
+    - *Re-injecting particles only in the cluster's own direction* (there were particles driving the approach
+      backwards, a U-turn at 130 km/h on the map). It removed the U-turn and nothing else.
+    - *Restarting the filter around the EKF when the EKF refuses its road position twice in a row.* It rescued a
+      simulated drive where the filter had followed a side road, and lost this real one twice in 8 seeds, where the
+      EKF was the one that was wrong. Re-seeding a fifth of the particles there instead was neutral.
+
+    The fixture junction the test uses is shaped on the real one, read off the region graph with
+    `replay:junction`: within 150 m of the node sit the approach, **two** primaries leaving eastbound within a few
+    degrees of each other, a service road at 134°, and a service lane 45 m to the side — five candidates for one
+    95° turn, where the fixture's other junctions offer one exit per direction and survive along-track errors this
+    one does not. The offset is injected as the drive had it, a parked-pose start displaced along the approach
+    with no fix ever arriving; `obdScale` cannot stand in for it, because the navigator learns the speed scale and
+    calibrates it away.

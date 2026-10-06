@@ -32,7 +32,7 @@ function byWay(graph: TiledRoadGraph): Map<number, RoadEdge[]> {
 describe("TiledRoadGraph", () => {
   test("opens by reading only the header and directory", () => {
     const g = open();
-    expect(g.info).toMatchObject({ format: 1, zoom: 14, nodes: 17, edges: 14, osmDate: "2026-10-01", builtAt: 1_790_000_000 });
+    expect(g.info).toMatchObject({ format: 1, zoom: 14, nodes: 25, edges: 20, osmDate: "2026-10-01", builtAt: 1_790_000_000 });
     expect(g.stats.tileLoads).toBe(0);
     expect(g.stats.bytesRead).toBe(64 + 4 * (g.info.nx * g.info.ny + 1));
   });
@@ -45,7 +45,7 @@ describe("TiledRoadGraph", () => {
 
   test("decodes edges: attributes, geometry, lengths", () => {
     const ways = byWay(open());
-    expect([...ways.keys()].sort((a, b) => a - b)).toEqual([101, 102, 103, 104, 105, 106, 107, 108, 109, 160, 161, 162]);
+    expect([...ways.keys()].sort((a, b) => a - b)).toEqual([101, 102, 103, 104, 105, 106, 107, 108, 109, 160, 161, 162, 170, 171, 172, 173, 174, 175]);
     const [e102] = ways.get(102)!;
     expect(e102).toMatchObject({ cls: RoadClass.primary, oneway: Oneway.none, flags: EdgeFlag.bridge });
     expect(e102.lonLat.length).toBe(4); // 2-3-4 is straight: simplified to its ends
