@@ -59,7 +59,6 @@ const SHEETS = [
   "route",
   "vehicle",
   "more",
-  "calibration",
   "downloads",
   "settings",
 ] as const;

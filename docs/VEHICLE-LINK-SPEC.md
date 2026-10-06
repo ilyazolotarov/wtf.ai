@@ -502,7 +502,7 @@ The same contract with two transports: BLE (same GATT catalog) and Classic SPP (
 | ------- | --------- | ------------------ | ------- | -------------- | --------------- | ----------------- | ----- |
 | OBDLink MX+ | MFi (`com.obdlink`) | STN2255 v5.10.3 / ELM327 v1.4b | — | Mazda CX-5 KF / 6 (CAN 11-bit 500k) | 25–32 moving, 20 on one drive (`010D1`, `ATSH7E0` or `7E1`, `ATAT1`) | 16–19 / 49–65 ms; 30–49 / 70–86 ms on 4 drives (cause unknown) | 18 drives. Rare stalls: replies arrive one command late, then `STOPPED` → re-init (2–6 s gap). The VIN was missed with `7E1` pinned, and still on 3 of 4 drives with `7E0` (§9.1). |
 | OBDLink MX+ | MFi (`com.obdlink`) | STN2255 v5.10.3 / ELM327 v1.4b | — | Renault Logan / ISO 14230 KWP (K-line, `A5`) | 7–9 (`010D1`) | — | 3 drives. Found by the protocol search (§8.1); VIN read (5-line K-line format). First connect took 77 s: the init tried `ATSP6` again and searched again, which broke the fresh K-line session four times; the protocol found is now cached at once. |
-| vLinker FD-IOS | BLE | STN1151 v4.3.2 / ELM327 v2.2 | — | Mazda CX-5 KF / A6 | 21 standing | 31 ms | One short drive; VIN not read. |
+| vLinker FD-IOS | BLE | STN1151 v4.3.2 / ELM327 v2.2 | — | Mazda CX-5 KF / A6 | 26–30 moving (p50 28), 21 standing | 29 / 45 ms | 2 sessions (2026-10-05), one a 1.75 km drive with a route; VIN read on the drive, not on the first short connect. |
 
 ## 14. Verification targets
 
@@ -517,7 +517,8 @@ The same contract with two transports: BLE (same GATT catalog) and Classic SPP (
 
 1. ~~Check on device that the MX+ reports `com.obdlink` and that an `EASession` opens (§3.4)~~ — verified on 7 drives.
 2. Test a vLinker FS/MS over `com.vgatemall` once one is available; until then their BLE+BT mode is the tested path.
-3. Measure real BLE connection intervals and poll rates (§3.5) and fill the tested-adapter table.
+3. BLE poll rate measured on the vLinker FD-IOS (26–30 Hz, tested-adapter table): no BLE ceiling at the CX-5's rate.
+   Still to measure: a cheap no-name clone, and the connection interval itself (§3.5).
 4. Verify Expo Modules event payload performance for scan batches; switch to typed arrays if needed.
 5. Decide whether a native "repeat mode" (SPEC §3.1) is needed — only if bridge overhead measurably limits the poll rate. With the MX+ the JS loop reaches 25–29 Hz, so not needed so far.
 6. The VIN (`0902`): missed on 3 of 4 CX-5 drives even when sent to the engine ECU. Now retried while polling, with

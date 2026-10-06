@@ -6,7 +6,6 @@ import { Icon, type IconName } from "@/components/ui/icon";
 import { T } from "@/components/ui/text";
 import { usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
-import { calibrationMock, downloadsMock } from "@/mocks";
 import { useMapPacks } from "@/services/offline-map/map-packs";
 
 export default function MoreScreen() {
@@ -14,27 +13,16 @@ export default function MoreScreen() {
   const palette = usePalette();
   const dark = useColorScheme() === "dark";
   const { installed } = useMapPacks();
-  const ready = downloadsMock.filter((pack) =>
-    pack.id === "map" ? installed.active != null : pack.status === "ready",
-  ).length;
-  const calibrated = calibrationMock.status === "calibrated";
+  // A region holds everything offline: the map, the road graph and the search index.
+  const ready = installed.active != null;
 
   const items: { icon: IconName; label: string; sub: string; subColor?: string; href: Href }[] = [
     {
       icon: "download",
       label: t("downloads"),
-      sub: ready
-        ? `${ready}/${downloadsMock.length} · ${t("readyOffline")}`
-        : t("notDownloaded"),
-      subColor: ready === downloadsMock.length ? palette.ok.c : undefined,
+      sub: ready ? t("readyOffline") : t("notDownloaded"),
+      subColor: ready ? palette.ok.c : undefined,
       href: "/downloads?from=more",
-    },
-    {
-      icon: "tune",
-      label: t("calibration"),
-      sub: calibrated ? t("calDone") : t("notCalibrated"),
-      subColor: calibrated ? palette.ok.c : palette.warn.c,
-      href: "/calibration?from=more",
     },
     {
       icon: "settings",

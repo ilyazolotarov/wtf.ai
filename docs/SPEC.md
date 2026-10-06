@@ -1,6 +1,6 @@
 # wtf.ai — Spoofing-Resilient Car Navigator: High-Level Specification
 
-Status: draft v9 (2026-10-06). Source of truth for coding agents. Update this file when decisions change.
+Status: draft v10 (2026-10-06). Source of truth for coding agents. Update this file when decisions change.
 
 Companion specs: [UI-SPEC.md](UI-SPEC.md) (UI-first milestone), [VEHICLE-LINK-SPEC.md](VEHICLE-LINK-SPEC.md) (Bluetooth ELM327 communication), [TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md) (trip detection, logging, export — Phase 1), [NAVIGATOR-SPEC.md](NAVIGATOR-SPEC.md) (Stage 1 EKF, online calibration, replay — Phase 2), [MAPMATCH-SPEC.md](MAPMATCH-SPEC.md) (road graph, particle filter — Phase 5), [ROUTING-SPEC.md](ROUTING-SPEC.md) (A\* routing on the road graph — Phase 6), [SEARCH-SPEC.md](SEARCH-SPEC.md) (offline address search — Phase 6).
 
@@ -211,12 +211,15 @@ after a gap, being checked), `NO_FIX` (no good satellite fix for 8 s).
   - Stage 1: PID `0D` = 0 AND gyro/accel variance below threshold → average yaw for 2–3 s for bias.
   - Stage 2+: all 4 wheel speeds = 0 AND (gear P OR brake).
   - Recursive refinement at every stop.
-- **Initial drive (first run per VIN)**: ~1–3 min with `TRUSTED` GNSS, including a straight segment (~300 m) and several turns → `k_s`, `k_ω`, `b_ω`, speed latency offset; plus `r_LR` in Stage 2. Skippable → defaults + "low accuracy" badge.
+- **No calibration drive** (decided 2026-10-06). A guided first drive (a stop, ~300 m straight, several turns) was
+  planned. It is dropped because the online estimation below learns the same values on any drive with `TRUSTED`
+  GNSS, and its result is kept for the next session. The app has no calibration screen, step or badge; the learned
+  values show in the vehicle screen's developer section.
 - **Online**: EKF continues estimating parameters while `TRUSTED`. Persist per VIN (and per phone mount for `k_ω`).
   Also the GNSS position lag, measured from turns and persisted per phone (NAVIGATOR-SPEC §7).
 - Implemented online today: gyro bias at stops, `k_s`, `k_ω` and the GNSS lag. The learned `k_ω` is a timing
   artifact (NAVIGATOR-SPEC §7.2). Persisted: `k_s` per VIN and the GNSS lag per phone model + iOS version
-  (NAVIGATOR-SPEC §7.4). The pose at ignition off starts the next session (NAVIGATOR-SPEC §6.1). Not yet: the initial-drive wizard.
+  (NAVIGATOR-SPEC §7.4). The pose at ignition off starts the next session (NAVIGATOR-SPEC §6.1).
 
 ### 3.7 Map matching — road-constrained particle filter (`src/nav/mapmatch/`)
 
@@ -272,10 +275,9 @@ Detailed in [MAPMATCH-SPEC.md](MAPMATCH-SPEC.md). Reference approach: Gustafsson
 UI-first milestone (map with live GNSS + mock screens): see [UI-SPEC.md](UI-SPEC.md). Phase 1 makes `vehicle` and `debug` real and adds dev-only `trips` and `debug-terminal` routes: see [TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md) §9.
 
 - Native launch splash — displays `wtf.ai` and **"Where the f\* am I?"**.
-- `index` — map. Today it shows the Stage 1 navigator (NAVIGATOR-SPEC §9), or phone GNSS from `modules/sensor-capture` without an OBD adapter, with integrity's trust (§3.3). Target: fused position puck + uncertainty circle (dominant hypothesis), alternative map-match hypotheses as secondary markers when ambiguous, raw GNSS ghost marker, trust badge (`GPS OK` / `UNTRUSTED` / `REACQUIRING`), time & distance since last trusted fix, adapter status.
-- `onboarding` — first-run flow (welcome, location permission, adapter, calibration).
-- `more` — sheet linking Offline data, Calibration, Diagnostics, Settings.
-- `calibration` — first-run wizard.
+- `index` — map. It shows the Stage 1 navigator (NAVIGATOR-SPEC §9), or phone GNSS from `modules/sensor-capture` without an OBD adapter, with integrity's trust (§3.3): position puck + uncertainty circle (dominant hypothesis), alternative map-match hypotheses as secondary markers when ambiguous, raw GNSS ghost when untrusted, trust status, time and distance since the last trusted fix while untrusted, adapter status.
+- `onboarding` — first-run flow (welcome, location permission, adapter). No calibration step (§3.6).
+- `more` — sheet linking Offline data and Settings. Diagnostics live in the vehicle screen's developer section.
 - `vehicle` — adapter discovery list and connection (transport, ELM version, protocol, poll rate), VIN, engine state, active odometry stage.
 - `downloads` — offline data manager.
 - `route` — offline routing (A\* on the road graph, ROUTING-SPEC), reroute on deviation, next maneuver + distance.
@@ -322,32 +324,37 @@ tools/triplog/           Python: ULog trip log reader, CSV/Parquet export, plots
 | 1   | Trip logger                 | 0          | [TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md): BLE + MFi vehicle link, adapter verification, speed/RPM poller, automatic trip start/end, ULog trip logs (OBD + GNSS + IMU) exportable, Python reader, dev UI |
 | 2   | TS EKF + replay             | 1          | `src/nav/odometry` (obd, imu), `src/nav/ekf`, replay metrics                                                                                                                                             |
 | 3   | Integrity                   | 2          | `src/nav/integrity`                                                                                                                                                                                      |
-| 4   | Calibration                 | 2, 3       | wizard + online estimation, per-VIN storage                                                                                                                                                              |
+| 4   | Calibration                 | 2, 3       | online estimation, per-VIN storage (no wizard, §3.6)                                                                                                                                                     |
 | 5   | Map matching (particle filter) | 0, 2    | road-graph pipeline + `RoadGraph` reader (device + Node), `src/nav/mapmatch` PF, heading init from the map under jamming, EKF pseudo-measurements, replay map-matching metrics (§3.10); see MAPMATCH-SPEC §12 |
 | 6   | App UI, routing, background | 2–5        | screens, download manager, routing ([ROUTING-SPEC.md](ROUTING-SPEC.md))|
 | 7   | Field test (Stage 1)        | 6          | real outage drives; baseline DR error numbers                                                                                                                                                            |
 | 7b  | Adapter coverage            | 1          | more BLE clones, OBDLink CX, vLinker; grow the GATT catalog and the tested-adapter list with measured poll rates (VEHICLE-LINK-SPEC §13)                                                                  |
 
-Status (2026-10-05):
+Status (2026-10-06):
 
 - **Phase 0:**
   - Done: CI unsigned build + AltStore, MX+ EA session over `com.obdlink`, `010D1` at ~27 Hz on the CX-5,
     DeviceMotion at 100 Hz, MapLibre offline tiles (per-region packs).
   - Road graph built (MAPMATCH-SPEC §4.7): Ukraine 452 MB, 4.3 M edges, 2–3 min and 2.9 GB to build; Chernihiv
     15 MB.
-  - Open: a BLE clone. (valhalla-mobile dropped 2026-10-05: routing runs on the road graph, ROUTING-SPEC.)
+  - BLE: vLinker FD-IOS on the CX-5 (2026-10-05), 26–30 Hz moving, the same as the MX+ (VEHICLE-LINK-SPEC §13).
+    A cheap no-name clone is still untested (Phase 7b). (valhalla-mobile dropped 2026-10-05: routing runs on the
+    road graph, ROUTING-SPEC.)
 - **Phase 1:** done and field-tested (14 drives, TRIP-LOGGER-SPEC §11).
 - **Phase 3:** integrity implemented (§3.3), measured on replay with simulated spoofing (§7 target 7); no real
   spoofed drive logged yet.
+- **Phase 4:** online only (§3.6), done: no wizard.
 - **Phase 2:** the navigator and replay are implemented. It drives the map through `NavigatorService` and saves its
   calibration. Field-tested on 7 drives (NAVIGATOR-SPEC §9.1): 26 m off after 2.7 km jammed throughout.
-- **Phase 6 (routing):** built, not yet driven (ROUTING-SPEC §2): A\* on the road graph (city routes ≤ 0.1 s, oblast
-  routes ≤ 1 s in Node), turn instructions, guidance that works without GPS (no false "off route" in 5.4 simulated
-  hours), spoken maneuvers, long press → Route here, routes and guidance in trip logs and `replay:view`.
-- **Phase 5:** in progress, measured on replay and simulation (MAPMATCH-SPEC §2): road graph, particle filter,
-  heading init from the map under jamming, the closed loop (M6: road heading and position back into the EKF, the
-  app's default). The app (M7) is built: graph download, map matching on the phone, the puck on the road while
-  dead-reckoning, `nav_mapmatch` in trip logs; not yet driven with it.
+- **Phase 6 (routing):** built and driven (2026-10-05, routes in 6 trip logs; ROUTING-SPEC §2): A\* on the road
+  graph (city routes ≤ 0.1 s, oblast routes ≤ 1 s in Node), turn instructions, guidance that works without GPS (no
+  false "off route" in 5.4 simulated hours), spoken maneuvers, long press → Route here, routes and guidance in trip
+  logs and `replay:view`. Address search (SEARCH-SPEC): indexes built for every region, tried on the phone.
+- **Phase 5:** measured on replay and simulation (MAPMATCH-SPEC §2): road graph, particle filter, heading init from
+  the map under jamming, the closed loop (M6: road heading and position back into the EKF, the app's default). The
+  app (M7) is driven (2026-10-05, 10 trip logs): graph download, map matching on the phone, the puck on the road
+  while dead-reckoning, `nav_mapmatch` in trip logs. Open: the update time on the iPhone is over budget (§7 target
+  6), and drives beyond Slavutych.
 
 ### Stage 2 & 3 — vehicle-specific improvements
 
@@ -390,6 +397,11 @@ Status (2026-10-05):
 4. Replay: GNSS cut for 1 / 5 / 15 min on clean logs — report DR error with and without map matching. Without map matching so far: median max error 11 / 20 / 37 m after 1 / 2 / 4 min (NAVIGATOR-SPEC §10). 5 / 15 min need longer clean drives.
 5. Map matching: on replay with GNSS cut, report wrong-road rate and re-lock time (§3.10), including dedicated parallel-road and dense-grid segments; after an ambiguity the correct hypothesis must survive (never fully pruned) until a turn resolves it.
 6. PF performance: update time within budget (§3.7) on iPhone with the target particle count.
+   - Result (2026-10-05, 8 drives with `nav_mapmatch`, 500 particles): **not met**. Per update a median of ~8 ms
+     (the per-second averages: median 8 ms, p99 41 ms), the slowest single update 143 ms; ~25 ms with the 2,000
+     particles of a start with the heading unknown. Node runs the same steps in < 1 ms (MAPMATCH-SPEC §15.9). At
+     2–3 updates a second it costs a few % of the JS thread, so the map stays smooth, but the spikes can drop
+     frames.
 7. Integrity: injected out-of-Ukraine fixes and teleports rejected within 1 fix; zero false rejections on clean logs.
    - Result (2026-10-06): zero real fixes refused on all 27 logs, no untrusted time shown. `replay:spoof`, 15 windows
      of 60 s on 7 clean drives with the EKF running, each spoof kind (static 5 km and 300 m, abroad, following the
@@ -429,7 +441,7 @@ Google Maps; Google Play distribution; raw GNSS analysis; slow drag-off spoofing
 9. **Data sizes** (vector tiles, road graph for Ukraine) — measure in Phase 0.
 10. **Particle filter robustness**: particle depletion (correct hypothesis pruned), tuning of noise/penalties, and CPU budget. Mitigations: off-road share, re-injection near clusters, replay metrics on hard segments before field tests.
 11. **OSM completeness**: missing or outdated roads, wrong one-way/turn-restriction tags → on-road hypotheses die. Mitigations: off-road particles, soft (not hard) restriction penalties if replay shows false pruning.
-12. MFi protocol strings are known (`com.obdlink`, `com.vgatemall`; VEHICLE-LINK-SPEC §3.4). Verified: an `EASession` opens on the MX+. Still to verify: vLinker FS/MS over EA once one is available.
+12. MFi protocol strings are known (`com.obdlink`, `com.vgatemall`; VEHICLE-LINK-SPEC §3.4). Verified: an `EASession` opens on the MX+. Still to verify: vLinker FS/MS over EA once one is available (none on hand; the vLinker FD-IOS is BLE and works).
 13. **Privacy exception closed (2026-10-06)**: the online OpenFreeMap style is gone. The map uses only the active offline region (regions built by `tools/tiles`, published as GitHub releases `maps-<osm_date>` by `.github/workflows/map-packs.yml`); without one, the app asks for a download first (`map-setup`, UI-SPEC §7.4). Fetching the catalog and maps contacts GitHub only from the download screens.
 14. **BLE throughput ceiling**: iOS connection intervals (15–30 ms) limit one adapter to roughly 15–30 polls/s at best; clones are lower. Measure per adapter (VEHICLE-LINK-SPEC §3.5).
 15. **BLE catalog completeness**: no-name adapters use varied GATT layouts and names, and many don't advertise services. Mitigations: unfiltered scan + name ranking + heuristic UART search + "Try anyway"; GATT dumps of unknown devices are logged to extend the catalog.
@@ -439,4 +451,4 @@ Google Maps; Google Play distribution; raw GNSS analysis; slow drag-off spoofing
     and speed against logs on every new car.
 17. **Tuning from one phone:** all navigator tuning comes from one iPhone 13, one mount and one car. GNSS timing is
     measured online; the rest needs logs from another phone and mount (NAVIGATOR-SPEC §11).
-18. **Sentry source maps**: uploads need the `SENTRY_AUTH_TOKEN` secret and `SENTRY_ORG` / `SENTRY_PROJECT` repo variables; without them builds skip the upload and JS stack traces are minified.
+18. **Sentry source maps**: uploads need the `SENTRY_AUTH_TOKEN` secret and `SENTRY_ORG` / `SENTRY_PROJECT` repo variables (all set since 2026-10-03); without them builds skip the upload and JS stack traces are minified.

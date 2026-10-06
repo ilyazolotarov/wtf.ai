@@ -3,7 +3,7 @@ import { useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { ScreenCard, ScreenSection } from "@/components/screens/screen-ui";
+import { ScreenCard } from "@/components/screens/screen-ui";
 import { useNavStatus } from "@/components/status/use-nav-status";
 import { Icon, type IconName } from "@/components/ui/icon";
 import { T } from "@/components/ui/text";
@@ -13,22 +13,15 @@ import { useT } from "@/i18n/provider";
 import { usePositionPermission } from "@/providers/position-provider";
 import { markOnboardingDone } from "@/services/preferences";
 
-type Step = 0 | 1 | 2 | 3;
+type Step = 0 | 1 | 2;
 
 const STEPS: { icon?: IconName; title: keyof Strings; body: keyof Strings }[] = [
   { title: "obWelcomeTitle", body: "obWelcomeBody" },
   { icon: "location_on", title: "obLocationTitle", body: "obLocationBody" },
   { icon: "directions_car", title: "obCarTitle", body: "obCarBody" },
-  { icon: "tune", title: "obCalTitle", body: "obCalBody" },
 ];
 
-const CAL_STEPS: (keyof Strings)[] = [
-  "calibrationStepOne",
-  "calibrationStepTwo",
-  "calibrationStepThree",
-];
-
-/** First-run flow: welcome → location → adapter → calibration. */
+/** First-run flow: welcome → location → adapter. The app calibrates itself while driving (NAVIGATOR-SPEC §7). */
 export default function OnboardingScreen() {
   const { t } = useT();
   const palette = usePalette();
@@ -39,10 +32,9 @@ export default function OnboardingScreen() {
   const [busy, setBusy] = useState(false);
   const meta = STEPS[step];
 
-  const finish = (calibrate: boolean) => {
+  const finish = () => {
     markOnboardingDone();
-    if (calibrate) router.replace("/calibration");
-    else router.back();
+    router.back();
   };
 
   const primary: { label: string; disabled?: boolean; onPress(): void } =
@@ -62,22 +54,18 @@ export default function OnboardingScreen() {
               }
             },
           }
-        : step === 2
-          ? nav.adapter === "on"
-            ? { label: t("continue"), onPress: () => setStep(3) }
-            : nav.adapter === "searching"
-              ? { label: t("obdSearching"), disabled: true, onPress: () => undefined }
-              : { label: t("connect"), onPress: () => router.push("/vehicle") }
-          : { label: t("calStart"), onPress: () => finish(true) };
+        : nav.adapter === "on"
+          ? { label: t("continue"), onPress: finish }
+          : nav.adapter === "searching"
+            ? { label: t("obdSearching"), disabled: true, onPress: () => undefined }
+            : { label: t("connect"), onPress: () => router.push("/vehicle") };
 
   const secondary: { label: string; onPress(): void } | null =
     step === 1
       ? { label: t("notNow"), onPress: () => setStep(2) }
       : step === 2 && nav.adapter !== "on"
-        ? { label: t("skipForNow"), onPress: () => setStep(3) }
-        : step === 3
-          ? { label: t("later"), onPress: () => finish(false) }
-          : null;
+        ? { label: t("skipForNow"), onPress: finish }
+        : null;
 
   return (
     <View
@@ -143,18 +131,6 @@ export default function OnboardingScreen() {
           </ScreenCard>
         )}
 
-        {step === 3 && (
-          <ScreenSection>
-            {CAL_STEPS.map((key, i) => (
-              <View key={key} style={styles.calStep}>
-                <T w="semibold" size={13} color={palette.accent} style={styles.tabular}>
-                  {String(i + 1).padStart(2, "0")}
-                </T>
-                <T size={15}>{t(key)}</T>
-              </View>
-            ))}
-          </ScreenSection>
-        )}
       </View>
 
       <View style={styles.buttons}>
@@ -211,8 +187,6 @@ const styles = StyleSheet.create({
   adapterCard: { flexDirection: "row", alignItems: "center", gap: 14 },
   flex: { flex: 1, gap: 3 },
   hint: { lineHeight: 18 },
-  calStep: { minHeight: 50, flexDirection: "row", alignItems: "center", gap: 12 },
-  tabular: { fontVariant: ["tabular-nums"] },
   buttons: { gap: 10 },
   button: {
     height: 54,

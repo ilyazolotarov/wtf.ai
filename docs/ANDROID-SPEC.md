@@ -188,7 +188,7 @@ tags and one metric reach `environment=ci`.
 - **M1 done** (2026-10-06, CI run on the `android` branch): the release APK builds and is signed, and the Android 14
   emulator job installs it, grants permissions and sees the onboarding screen with no crash, ANR or JS error.
   Plugged into the CI plan of `docs/CI.md` (merged from `ci/run-what-changed`). Not yet exercised: Android 8 image
-  (runs on `main` only), the stable signing key (secrets not set), Telegram delivery.
+  (runs on `main` only), the stable signing key (its secrets are set since 2026-10-06), Telegram delivery.
 - **M2 and M3 verified on the emulator** (2026-10-06): GNSS fixes from the emulator's `gps` provider and IMU batches
   reach the TS side; the simulated ELM327 connects on the Vehicle screen; the trip foreground service starts with a
   recording (types location + connected device); the app survives a 35 s screen-off. Kotlin logic tests
@@ -212,8 +212,8 @@ tags and one metric reach `environment=ci`.
   SPP) is confirmed from the first trip log; both are implemented in M3.
 - No developer program is needed: the APK is sideloaded. Google Play would need a $25 account and a 14-day closed test
   with 12 testers; not planned.
-- Open: generate the signing key and add the four secrets: `bash scripts/android-keystore.sh` creates the key outside the
-  repo and prints the `gh secret set` commands. Then Actions → CI → Run workflow with `android = tester` (Telegram
-  delivery if its secrets are set). The tester variant (arm64 + armeabi-v7a) is not exercised by branch CI, because
+- Done (2026-10-06): the signing key and its four secrets (`bash scripts/android-keystore.sh` creates the key outside
+  the repo and prints the `gh secret set` commands). Next: an emulator check of the signed build, then Actions → CI →
+  Run workflow with `android = tester` (Telegram delivery if its secrets are set). The tester variant (arm64 + armeabi-v7a) is not exercised by branch CI, because
   `workflow_dispatch` only runs workflows already on `main`; its first run happens after the merge.
 - Open: testers' phone models, once known, refine the matrix.

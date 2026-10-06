@@ -275,7 +275,8 @@ All native changes land in one CI build (`build-ios` job → unsigned IPA → Al
 
 L1 and L2 need no device and can start immediately.
 
-Status (2026-10-04): L0–L3 done. L4 started: 14 drives on the CX-5 with the MX+ (MFi); no BLE clone yet.
+Status (2026-10-06): L0–L3 done. L4 started: drives on the CX-5 with the MX+ (MFi) and the vLinker FD-IOS (BLE,
+2026-10-05); no cheap no-name clone yet.
 
 Field fixes:
 

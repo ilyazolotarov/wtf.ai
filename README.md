@@ -2,13 +2,25 @@
 
 ## Where the f\* am I?
 
-wtf.ai is an iOS-first navigation prototype for drivers in Ukraine. Its goal is to keep a useful, trustworthy vehicle position when GNSS is jammed or spoofed, with offline maps and routing planned.
+wtf.ai is an iOS-first navigation prototype for drivers in Ukraine. It keeps a useful, trustworthy vehicle position when GNSS is jammed or spoofed, with offline maps, routing and address search.
 
 ## Project status
 
-This is an early development build, not a production navigation system. The current map displays the phone's live GNSS position. Spoofing-resistant position fusion, the OBDLink vehicle connection, offline maps, and offline routing are not implemented yet. Do not rely on the app for real-world or emergency navigation.
+This is a development build, field-tested in one car, not a production navigation system. Do not rely on it for emergency navigation.
 
-The app is built with Expo SDK 57, React Native, TypeScript, and Expo Router. It targets iOS first; development happens on Windows, and unsigned iOS builds come from GitHub Actions macOS runners (sideloaded with AltStore).
+What works (Stage 1 of [the spec](docs/SPEC.md)):
+
+- **Vehicle link:** an OBD-II adapter over Bluetooth, either MFi (OBDLink MX+) or BLE ELM327 (tested: vLinker FD-IOS). Speed is polled at ~27 Hz on the test car.
+- **Position without GPS:** dead reckoning that fuses OBD speed and the phone gyro with GNSS, and calibrates itself while driving.
+- **Spoofing:** fixes outside Ukraine, or ones that jump away from where the car could be, are refused.
+- **Map matching:** the position is held on the road network while GPS is out.
+- **Offline data:** map, routing (spoken turn-by-turn) and address search, all from one downloaded region.
+- **Trip logs:** each drive is recorded automatically, and the logs can be replayed on a PC.
+- **Android:** an APK for volunteer testers.
+
+Not yet: CAN wheel speeds and yaw rate (Stages 2–3), and waking the app when the car starts.
+
+The app is built with Expo SDK 57, React Native, TypeScript, and Expo Router. It targets iOS first; development happens on Windows, and unsigned iOS builds come from GitHub Actions macOS runners (sideloaded with AltStore). Android APKs come from the same CI ([docs/ANDROID-TESTING.md](docs/ANDROID-TESTING.md)).
 
 ## Run the app
 
@@ -53,7 +65,7 @@ CI runs these plus `expo-doctor` and the unsigned iOS build, each when what it c
 
 ## Privacy
 
-Position data stays on the device; there is no position upload. Standalone (Release) builds send crash reports to Sentry with personal data, coordinates, and VINs removed. The map is offline only: a region is downloaded once from GitHub releases, and the app asks for one before it can be used.
+Position data stays on the device; there is no position upload. Crash and error reports go to Sentry with personal data, coordinates, and VINs removed. The map is offline only: a region is downloaded once from GitHub releases, and the app asks for one before it can be used.
 
 ## Project documents
 
@@ -62,4 +74,8 @@ Position data stays on the device; there is no position upload. Standalone (Rele
 - [Vehicle link (Bluetooth ELM327) specification](docs/VEHICLE-LINK-SPEC.md)
 - [Trip logger milestone specification](docs/TRIP-LOGGER-SPEC.md)
 - [Stage 1 navigator (EKF, calibration, replay) specification](docs/NAVIGATOR-SPEC.md)
+- [Map matching (road graph, particle filter) specification](docs/MAPMATCH-SPEC.md)
+- [Routing specification](docs/ROUTING-SPEC.md)
 - [Address search specification](docs/SEARCH-SPEC.md)
+- [Android specification](docs/ANDROID-SPEC.md) and [tester guide](docs/ANDROID-TESTING.md)
+- [CI](docs/CI.md)

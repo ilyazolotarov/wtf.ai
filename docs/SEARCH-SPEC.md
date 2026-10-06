@@ -16,8 +16,9 @@ street, house number or POI, offline, in the downloaded region. Source of truth 
   of every release build; the reader and ranking (`src/nav/search/`); download with the region;
   the route screen's search (UI-SPEC §7.1); `npm run search` on the PC. Tested on synthetic data
   only: no OSM extract could be fetched where it was written.
-- Next: build a real region (`tiles search chernihiv`, `tiles search-check`), try the queries of §8
-  with `npm run search`, tune ranking; then on the phone with the region downloaded again.
+- **S2 done (2026-10-06):** the index is built for every region of the map release and downloads with it;
+  tried briefly on the phone, it finds what was searched for.
+- Next: tune ranking from real use (the queries of §8 with `npm run search`); multipolygon relations (§4.2).
 
 ## 3. Decisions
 

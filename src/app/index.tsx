@@ -7,7 +7,6 @@ import {
     Pressable,
     StyleSheet,
     View,
-    type ViewStyle,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -35,7 +34,6 @@ import { T } from "@/components/ui/text";
 import { Radius, usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
 import { bearingRad, haversineM, type Coordinate } from "@/nav/geo";
-import { calibrationMock } from "@/mocks";
 import { usePositionPermission } from "@/providers/position-provider";
 import { useRoute } from "@/providers/route-provider";
 import { useDevSettings, useRecorderSnapshot, useRuntime } from "@/providers/runtime-provider";
@@ -55,7 +53,10 @@ const STANDING_MPS = 1;
 const PLACE_OFFER_ACCURACY_M = 75;
 /** The confirmed placing stays drawn until the dot is this far from it (the car drove off). */
 const PLACED_SHOWN_M = 50;
-/** How often the manual position's age ("12 min ago") is redrawn. */
+/** Driven less than this since the last trusted fix, the chip gives only its age. */
+const SINCE_TRUSTED_MIN_M = 50;
+
+/** How often the manual position's age ("12 min ago") is redrawn; also the last trusted fix's. */
 const MANUAL_AGE_REFRESH_MS = 15_000;
 
 /** Driving this long on a trip turns follow into heading-up (UI-SPEC §6.2). */
@@ -233,6 +234,19 @@ export default function HomeScreen() {
   const manual = position?.manual;
   const manualNow = useNowMs(manual != null, MANUAL_AGE_REFRESH_MS);
   const manualAge = manual ? formatAge(manualNow - manual.confirmedAt, t) : "";
+  // Without trusted GPS: how long ago, and how far back, the last trusted fix was (SPEC §3.9). The
+  // simulated outage's card and a manual position show their own.
+  const trustedAt = trust !== "TRUSTED" && !manual && !outage ? position?.lastTrustedFixAt : undefined;
+  const trustedNow = useNowMs(trustedAt !== undefined, MANUAL_AGE_REFRESH_MS);
+  const trustedBackM = position?.distanceSinceTrustedM;
+  const sinceTrusted =
+    trustedAt === undefined
+      ? null
+      : trustedBackM !== undefined && trustedBackM >= SINCE_TRUSTED_MIN_M
+        ? t("sinceTrustedBack")
+            .replace("{age}", formatAge(trustedNow - trustedAt, t))
+            .replace("{d}", formatDistance(trustedBackM, language))
+        : t("sinceTrusted").replace("{age}", formatAge(trustedNow - trustedAt, t));
   // Forgetting it (✕, or "no" to "still here?") also takes the placing's mark off the map.
   const forgetManual = (notHere = false) => {
     if (notHere) navigator.answerManual(false);
@@ -421,7 +435,7 @@ export default function HomeScreen() {
           {!placing && !position?.poseQuestion && !manual && standing && lost && (
             <Pressable
               onPress={startPlacing}
-              style={({ pressed }) => [panel, styles.calChip, pressed && styles.pressed]}
+              style={({ pressed }) => [panel, styles.chip, pressed && styles.pressed]}
               accessibilityRole="button"
             >
               <GlassFill radius={Radius.pill} />
@@ -433,7 +447,7 @@ export default function HomeScreen() {
           )}
 
           {!placing && manual && !manual.asking && (
-            <View style={[panel, styles.calChip, styles.manualChip]}>
+            <View style={[panel, styles.chip, styles.manualChip]}>
               <GlassFill radius={Radius.pill} />
               <Pressable
                 // Placing it again: only while the car stands, as the first time.
@@ -530,7 +544,7 @@ export default function HomeScreen() {
           )}
 
           {nav.protocolSearch && (
-            <View style={[panel, styles.calChip]}>
+            <View style={[panel, styles.chip]}>
               <GlassFill radius={Radius.pill} />
               <Icon name="bluetooth" size={16} color={palette.warn.c} />
               <T w="semibold" size={13} color={palette.warn.c}>
@@ -539,10 +553,20 @@ export default function HomeScreen() {
             </View>
           )}
 
+          {!placing && sinceTrusted && (
+            <View style={[panel, styles.chip]}>
+              <GlassFill radius={Radius.pill} />
+              <Icon name="history" size={16} color={palette.text2} />
+              <T w="medium" size={13} numberOfLines={1}>
+                {sinceTrusted}
+              </T>
+            </View>
+          )}
+
           {showCutGps && detailsOpen && (
             <Pressable
               onPress={() => navigator.setSimulatedOutage(true)}
-              style={({ pressed }) => [panel, styles.calChip, pressed && styles.pressed]}
+              style={({ pressed }) => [panel, styles.chip, pressed && styles.pressed]}
               accessibilityRole="button"
             >
               <GlassFill radius={Radius.pill} />
@@ -585,24 +609,6 @@ export default function HomeScreen() {
                 </Pressable>
               )}
             </View>
-          )}
-
-          {position && trust === "TRUSTED" && calibrationMock.status === "not-calibrated" && (
-            <Link href="/calibration" asChild>
-              <Pressable
-                style={StyleSheet.flatten<ViewStyle>([panel, styles.calChip])}
-                accessibilityRole="button"
-              >
-                <GlassFill radius={Radius.pill} />
-                <View style={[styles.calDot, { backgroundColor: palette.warn.c }]} />
-                <T w="medium" size={13}>
-                  {t("notCalibrated")}
-                </T>
-                <T w="semibold" size={13} color={palette.accent}>
-                  {t("calibrate")}
-                </T>
-              </Pressable>
-            </Link>
           )}
 
           {route && (
@@ -957,7 +963,7 @@ const styles = StyleSheet.create({
   },
   manualChip: { maxWidth: "100%", paddingRight: 12, gap: 10 },
   manualChipBody: { flexShrink: 1, flexDirection: "row", alignItems: "center", gap: 8 },
-  calChip: {
+  chip: {
     alignSelf: "flex-start",
     height: 36,
     flexDirection: "row",

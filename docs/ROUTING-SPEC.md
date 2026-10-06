@@ -19,12 +19,13 @@ Plan a drive to a destination offline and guide the driver along it, so that:
 - **R2 done:** the planner `src/nav/routing/` (§4–5) and `npm run route` (§7): city routes in 0.1 s or less, oblast
   routes up to 1 s, in Node.
 - **R3 done:** turn instructions (§6).
-- **R4 built, not yet driven:** guidance (`src/nav/routing/guidance.ts`), the route service
+- **R4 built and driven (2026-10-05, routes in 6 trip logs, both adapters):** guidance (`src/nav/routing/guidance.ts`), the route service
   (`src/services/navigation/route-service.ts`), trip-log records, and the app: long press → Route here, the city list,
   the banner and the route on the map, spoken maneuvers (§8, UI-SPEC §6.3, §7.1). Checked on simulated drives
   (§8.4); routes and guidance show in `replay:view`.
 - **R5 built, off:** the route as a hint for map matching, a developer switch; measured in §8.6.
-- Next: a drive with a route (§8.3 lists what it should answer), then the ETA speeds from the logs.
+- Next: read §8.3's questions from the 2026-10-05 logs (`nav_route`, `route …` notes), then the ETA speeds from
+  them.
 
 ## 3. Decisions
 

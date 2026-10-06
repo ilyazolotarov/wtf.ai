@@ -29,10 +29,11 @@ Place the car on the offline road network, so that:
 - **M5 done in replay:** the filter starts at the first fix with the heading unknown and can start the EKF (§8);
   simulated jamming (`--jam`, `--start`) and `replay:bench --jam-start`. Measured in §8.1. Still to do: drives
   beyond Slavutych (§10.3).
-- **M7 in the app, not yet on a drive (2026-10-04):** the graph downloads with the region, the navigator runs
-  the filter on it, the puck follows the dominant hypothesis while dead-reckoning with alternatives on the map,
-  and trip logs carry `nav_mapmatch` (§11), with a particle overlay and a simulated outage for testing on the
-  road (NAVIGATOR-SPEC §9). Still to do: a drive with it, update time on the iPhone.
+- **M7 in the app, driven (2026-10-05, 10 trip logs, both adapters):** the graph downloads with the region, the
+  navigator runs the filter on it, the puck follows the dominant hypothesis while dead-reckoning with alternatives
+  on the map, and trip logs carry `nav_mapmatch` (§11), with a particle overlay and a simulated outage for testing
+  on the road (NAVIGATOR-SPEC §9). It works on the road. Open: the update time on the iPhone is over the 5 ms
+  budget (§15.9).
 - **M6 done in replay:** the road heading and position go back into the EKF (`mapMatchLoop: "closed"`, §9.2,
   §9.3); the 240 s max error median falls from 59 to 17 m, its p90 from 124 to 20 m, with the truth inside the drawn
   circle 61–65 % of the time. Simulated 3 h city drives without GPS (§9.4): dot median 4–6 m, never lost. A developer
@@ -995,7 +996,12 @@ M1–M3 can partly overlap. M4 needs M1–M3. M5 and M6 are independent of each 
 9. **Device timing:** 500 particles take < 1 ms p99 in Node; measure on the iPhone (M7). An unknown-heading start
    with a large anchor uses up to 4000 particles until it tracks. First reading (2026-10-05, parked at home):
    the first start took 48 ms (reading the roads from storage; 2–5 ms cold in Node), the one fix update 0.28 ms,
-   as in Node (0.34 ms for the same step). Still needed: a drive, and one that starts without GPS (3afby6's case).
+   as in Node (0.34 ms for the same step). On the 2026-10-05 drives (8 logs with `nav_mapmatch`, 500 particles):
+   **~8 ms per update** (median of the per-second averages; p99 41 ms), the slowest single update 143 ms, ~25 ms
+   with 2,000 particles at an unknown-heading start. About 10× Node, so the < 1 ms from replay doesn't carry over to
+   the phone's JS engine. At 2–3 updates a second the map stays smooth, but the spikes can drop frames. Next:
+   profile one drive's updates on the phone (weighting vs resampling vs tile reads) before cutting particles. Still
+   needed: a drive that starts without GPS (3afby6's case).
 10. **The EKF-position prior after a map start** is the filter's own mean, fed back to it (the same issue as §9 in
     open loop). Decide in M6.
 11. **Flip-flopping starts** (ng2n9z): a filter alternating between `tracking` and `multimodal` never holds 100 m.
