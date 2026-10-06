@@ -80,6 +80,37 @@ describe("RouteGuidance", () => {
     for (let t = 31; t <= 40; t++) expect(g.update(at(t, 300, 10 * (t - 25), { headingRad: 0, mapMatch: "multimodal" })).state).toBe("unsure");
   });
 
+  test("map matching blips while leaving pause the count towards 'off', they don't restart it", () => {
+    const g = new RouteGuidance(PLAN, MANEUVERS);
+    for (let t = 0; t <= 30; t++) g.update(at(t, 10 * t, 0));
+    // North on a side road from 300 m at 10 m/s, multimodal every other second.
+    const states = [];
+    for (let t = 31; t <= 39; t++) {
+      states.push(g.update(at(t, 300, 50 + 10 * (t - 31), { headingRad: 0, mapMatch: t % 2 ? "tracking" : "multimodal" })).state);
+    }
+    expect(states).toContain("unsure");
+    expect(states.at(-1)).toBe("off");
+  });
+
+  test("a re-plan starts on the route: off it after 30 m like any route, not 200 m", () => {
+    const g = new RouteGuidance(PLAN, MANEUVERS, {}, { joined: true });
+    // Driving away from the start (the new route turns around there): off as soon as 4 s and 30 m are driven.
+    let state = "";
+    for (let t = 0; t <= 5; t++) state = g.update(at(t, -50 - 10 * t, 0, { headingRad: -EAST })).state;
+    expect(state).toBe("off");
+  });
+
+  test("the progress point: the vertex passed and the point on the route (the line behind it isn't drawn)", () => {
+    const g = new RouteGuidance(PLAN, MANEUVERS);
+    expect(g.update(at(0, 0, 3)).passedIndex).toBe(0);
+    for (let t = 1; t <= 70; t++) g.update(at(t, 10 * t, 3));
+    // 700 m east: past the vertex at 500 m, on the line 3 m south of the car.
+    const s = g.step!;
+    expect(s.passedIndex).toBe(1);
+    expect(frame.toEnu(s.progressAt)[0]).toBeCloseTo(700, -1);
+    expect(frame.toEnu(s.progressAt)[1]).toBeCloseTo(0, 0);
+  });
+
   test("the off-route distance grows with the position's uncertainty", () => {
     const g = new RouteGuidance(PLAN, MANEUVERS);
     g.update(at(0, 100, 0));

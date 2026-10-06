@@ -59,7 +59,9 @@ Time to drive an edge = OSM length ÷ speed. Speeds (km/h) by class (MAPMATCH-SP
   departure (clockwise positive): straight (< 30°) 0 s; right 8 s; left 15 s (crossing oncoming traffic); sharp
   (> 120°) right 15 s, left 20 s. A node with 2 edges is a bend in one road: no cost.
 - **U-turn**: 30 s, only at a dead end (no other legal exit). Starting against the car's heading counts as a U-turn
-  on the road: 60 s.
+  on the road: 60 s; 300 s while the car drives (over 3 m/s: a re-plan after a wrong turn), as turning mid-street
+  needs a gap and is often not allowed. On 2026-10-06 a re-plan at 40 km/h said "turn around" (131 s + 60 s) where
+  going round the block was 243 s: the route the driver then took.
 - **Entry penalties** (on entering the edge, not for the start or destination edge): private access 600 s, minor
   service (driveway, parking aisle) 60 s, track 120 s.
 - Forbidden: against a one-way, a restricted turn (`no_*`, or not the `only_*` exit).
@@ -75,7 +77,7 @@ drives (trip logs give the real time per edge class).
   edges: the nearest, plus any within `max(25 m, accuracy)` and within 10 m of the nearest (a parallel road), but
   not those that only meet the nearest at its end node (a junction just ahead or behind). Each allowed direction is
   a start state costing the rest of the edge from the projected point. With the heading known, the direction more
-  than 90° off it costs the 60 s turnaround.
+  than 90° off it costs the turnaround (60 s, 300 s while driving: §4).
 - **Destination**: the nearest edge to the point within 500 m, preferring a public road (not private, not minor
   service) when one is within 50 m of the nearest. Reached in either allowed direction, at the projected point.
 - Start and destination on the same edge with the destination ahead: the route is that stretch.
@@ -191,11 +193,16 @@ next maneuver and the distance to it, and the one after when it follows within 1
 - **Off the route** beyond max(40 m, 1.5 × the position's accuracy): `leaving` at once, `off` after 4 s and 30 m
   driven (from the speed, so a parked car or a jumping position never counts as leaving). `unsure` instead while
   map matching is `multimodal` or `init`, or the position is phone GPS that isn't trusted (spoofing can put it
-  anywhere): neither on nor off is decided then. Driving the route the wrong way is off it. Until the car has
-  been on the route once (it may start in a car park or a yard), `off` takes 200 m of driving instead of 30 m.
+  anywhere): neither on nor off is decided then, and the count towards `off` pauses (it used to restart: while
+  dead-reckoning map matching turns multimodal every 10–15 s, and on 2026-10-06 the car drove 700 m off a route
+  without `off`). Driving the route the wrong way is off it. Until the car has been on the route once (it may
+  start in a car park or a yard), `off` takes 200 m of driving instead of 30 m; a re-plan starts where the car
+  drives, so it is on its route from the start.
 - **Arrived** within 30 m of the route's end along it, or of its last point once less than 300 m is left (a route
   may pass near its end earlier), and it stays arrived.
 - A maneuver passed by less than 10 m is still the next one (the puck lags the turn).
+- **Progress point**: the last polyline vertex passed and the point on the route; the map draws the route from
+  there on (UI-SPEC §6.3).
 
 ### 8.2 Route service (`src/services/navigation/route-service.ts`, `runtime.routes`)
 
@@ -238,7 +245,9 @@ replay's puck (`replayPuck`, what NavigatorService publishes) fed to guidance as
   the route off by 5 / 4 m median, 13 / 10 m p90, 90 / 123 m at most.
 - **Leaving the route** (a route planned every 6 min to a point 2–4 km away; the car keeps to its own way): all 28
   departures noticed, 5–6 s and ~50 m (median) after the car was 25 m off the route; at most 59 s / 173 m (slow
-  traffic); no "off" before the car left. With GPS all along, the same.
+  traffic); no "off" before the car left. With GPS all along, the same. (2026-10-06, Chernihiv: the count restarting
+  at each `unsure` had made it 8 s / 67 m median, 129 s / 925 m at most; pausing it instead, 5 s / 45 m and
+  59 s / 173 m.)
 - Two fixes came from it: an early `arrived` where a route passed near its end, and progress jumping to a later
   pass over the same street (the whole-route search, now gone). It is optimistic as the simulator is (§9.4 there):
   no parking, reversing or unmapped roads.

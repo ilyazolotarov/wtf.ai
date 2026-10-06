@@ -159,7 +159,7 @@ The vehicle button in the footer carries the connection dot: green when the car 
 
 While the OBD adapter searches all protocols (`protocolSearch`, another car on it: up to ~20 s), a chip under the status pill says "Finding the car's protocol…", and the vehicle screen's adapter tile says the same.
 
-Heading-up bearing: the walking compass beam when shown; else the navigator heading (`dr`/`fused` source, valid while stopped); else GNSS course when speed > ~2 m/s; else the last of these held, so the map does not snap north at a stop. No direction known (none yet, or moving without one: the navigator anchored under GNSS jamming, 2026-10-05): heading-up shows the `follow` camera (zoom 16, flat, north up) until there is one, so it never looks like a heading-up view pointing the wrong way.
+Heading-up bearing: the walking compass beam when shown; else the navigator heading (`dr`/`fused` source, valid while stopped); else GNSS course when speed > ~2 m/s; else the last of these held, so the map does not snap north at a stop. No direction known (none yet, or moving without one: the navigator anchored under GNSS jamming, 2026-10-05): heading-up shows the `follow` camera (zoom 16, flat, north up) until there is one, so it never looks like a heading-up view pointing the wrong way. The bearing goes to the map in [0°, 360°): iOS MapLibre ignores a negative one, and the dead-reckoning heading is signed, so until 2026-10-06 the map stopped turning whenever the car drove west under jamming.
 
 Auto heading-up: once per trip, when a trip is recording and speed stays > ~2 m/s for 2 s, `follow` switches to `follow-heading` (any other mode is left alone). When the trip ends (recorder leaves `recording`/`lingering`) it goes back to `follow`, unless the driver changed the mode by button or gesture in between.
 
@@ -195,8 +195,9 @@ One small component each. Touch targets ≥ 56 pt; high contrast; minimal text.
   to it (10 m steps under 300 m, 50 m under 1 km), its instruction, "then …" when the next follows within 120 m,
   and the distance, time and arrival clock left; or "Planning route…", "Off route, planning again…", "Position
   uncertain: keeping the route", "No route" with the reason, "You've arrived". Its × ends the route; its speaker
-  button mutes the spoken maneuvers (ROUTING-SPEC §8.5). The map draws the route (faded while planning again), its
-  next maneuver and the destination.
+  button mutes the spoken maneuvers (ROUTING-SPEC §8.5). The map draws the route ahead of the car (from its
+  progress point, ROUTING-SPEC §8.1: what is driven disappears; faded while planning again), its next maneuver and
+  the destination.
 
 ## 7. Phase 4 — Mock screens
 

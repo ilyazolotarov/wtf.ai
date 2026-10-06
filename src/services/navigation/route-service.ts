@@ -119,9 +119,15 @@ export interface RouteServiceDeps {
 
 type Reason = (typeof ROUTE_REASON_CODES)[number];
 
-/** Route start from the published position: on the road while map-matched, with its heading when it has one. */
+/** Route start from the published position: on the road while map-matched, with its heading and speed when known. */
 function startOf(p: PositionEstimate) {
-  return { lat: p.lat, lon: p.lon, accuracyM: p.accuracyM, ...(p.headingRad !== undefined ? { headingRad: p.headingRad } : {}) };
+  return {
+    lat: p.lat,
+    lon: p.lon,
+    accuracyM: p.accuracyM,
+    ...(p.headingRad !== undefined ? { headingRad: p.headingRad } : {}),
+    ...(p.speedMps !== undefined ? { speedMps: p.speedMps } : {}),
+  };
 }
 
 /** Phone GPS while it isn't trusted can't judge the route (it may be anywhere). */
@@ -289,7 +295,8 @@ export class RouteService {
         return;
       }
       const maneuvers = routeManeuvers(graph.graph, r.plan);
-      this.guidance = new RouteGuidance(r.plan, maneuvers);
+      // A re-plan starts where the car drives: it is on the new route, not on its way to it from a car park.
+      this.guidance = new RouteGuidance(r.plan, maneuvers, {}, { joined: reason === "off-route" });
       this.notedState = null;
       this.trip ??= { startedAt, plannedS: r.plan.durationS, plannedM: r.plan.lengthM, drivenM: 0, lastAt: null };
       const cur = this.snapshot!;

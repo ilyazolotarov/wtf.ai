@@ -100,6 +100,19 @@ describe("planRoute", () => {
     expect(free.durationS).toBeLessThan(5);
   });
 
+  test("turning around at the start costs more while the car drives (a re-plan after a wrong turn)", () => {
+    const costs = { turnaroundS: 10, turnaroundMovingS: 300 };
+    const from = at(0.8, 0, 90);
+    const parked = planRoute(graph(), frame, { ...from, speedMps: 0 }, at(0.2, 0), { costs });
+    const driving = planRoute(graph(), frame, { ...from, speedMps: 10 }, at(0.2, 0), { costs });
+    if (parked.status !== "done" || driving.status !== "done") throw new Error("no route");
+    // Parked: turn on the spot, one leg west. Driving: on to the dead end at node 4 and back.
+    expect(parked.plan.startTurnaround).toBe(true);
+    expect(parked.plan.legs).toHaveLength(1);
+    expect(driving.plan.startTurnaround).toBeFalsy();
+    expect(driving.plan.legs.length).toBeGreaterThan(1);
+  });
+
   test("a destination on a road island ends on the nearest connected road, without the penalty in its time", () => {
     // The parking-aisle loop 108 isn't connected to anything; road 103 runs 2 → 5, ~70 m east of it.
     const p = plan(at(0.5, 0, 90), at(0, 3.5));

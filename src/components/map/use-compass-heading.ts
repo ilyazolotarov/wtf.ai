@@ -111,6 +111,15 @@ export function holdHeading(position: PositionEstimate | null | undefined, heldR
   return (position?.speedMps ?? 0) > COURSE_MIN_SPEED_MPS ? null : heldRad;
 }
 
+/**
+ * A heading as a map bearing, degrees in [0, 360). The dead-reckoning heading is signed (−180°…180°), and iOS MapLibre
+ * ignores a negative bearing (a negative heading means "none" there): the map stayed put whenever the car drove west.
+ */
+export function mapBearingDeg(headingRad: number): number {
+  const deg = ((headingRad * 180) / Math.PI) % 360;
+  return deg < 0 ? deg + 360 : deg;
+}
+
 /** `headingUpRad` that keeps the last travel heading through a stop instead of snapping north. */
 export function useHeadingUp(
   position: PositionEstimate | null | undefined,

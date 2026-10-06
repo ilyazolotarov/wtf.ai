@@ -83,6 +83,9 @@ export interface GuidanceStep {
   toNextM: number;
   /** The maneuver after the next, when it follows closely. */
   thenIndex: number | null;
+  /** Where progress is on the plan's polyline: the last vertex passed, and the point (the route ahead starts there). */
+  passedIndex: number;
+  progressAt: Coordinate;
 }
 
 /** Progress along one plan's polyline. */
@@ -101,12 +104,15 @@ export class RouteGuidance {
   /** The car has been on the route (it may start away from it). */
   private joined = false;
 
+  /** `joined`: the car is on the route from its start (a re-plan from where it drives), not on its way to it. */
   constructor(
     readonly plan: RoutePlan,
     readonly maneuvers: Maneuver[],
     config: Partial<GuidanceConfig> = {},
+    { joined = false }: { joined?: boolean } = {},
   ) {
     this.config = { ...DEFAULT_GUIDANCE, ...config };
+    this.joined = joined;
     const pts = plan.coordinates;
     this.cum = [0];
     for (let i = 1; i < pts.length; i++) this.cum.push(this.cum[i - 1] + haversineM(pts[i - 1], pts[i]));
@@ -153,8 +159,9 @@ export class RouteGuidance {
       this.offSince = null;
       this.joined = true;
     } else if (unsure) {
+      // Neither on nor off: the count towards `off` pauses. Restarting it would never reach `off` while dead
+      // reckoning, where map matching turns multimodal every few seconds.
       state = "unsure";
-      this.offSince = null;
     } else {
       this.offSince ??= { tMs: p.tMs, drivenM: 0 };
       this.offSince.drivenM += drivenM;
@@ -174,8 +181,27 @@ export class RouteGuidance {
       nextIndex,
       toNextM: Math.max(0, next.atM - alongM),
       thenIndex: following && following.atM - next.atM <= c.thenM ? nextIndex + 1 : null,
+      ...this.progressPoint(),
     };
     return this.last;
+  }
+
+  /** The polyline vertex at or before the progress, and the progress point between it and the next. */
+  private progressPoint(): { passedIndex: number; progressAt: Coordinate } {
+    const pts = this.plan.coordinates;
+    const cum = this.cum;
+    let lo = 0;
+    let hi = cum.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (cum[mid] <= this.alongPoly) lo = mid;
+      else hi = mid - 1;
+    }
+    const a = pts[lo];
+    const b = pts[Math.min(lo + 1, pts.length - 1)];
+    const len = (cum[lo + 1] ?? cum[lo]) - cum[lo];
+    const t = len > 0 ? Math.min(1, (this.alongPoly - cum[lo]) / len) : 0;
+    return { passedIndex: lo, progressAt: { lat: a.lat + t * (b.lat - a.lat), lon: a.lon + t * (b.lon - a.lon) } };
   }
 
   /** The first maneuver not yet passed (by more than `passedM`); `arrive` at the end. */

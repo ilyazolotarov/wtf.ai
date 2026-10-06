@@ -26,6 +26,11 @@ export interface RouteCosts {
   uTurnS: number;
   /** Starting in the direction more than 90° off the car's heading. */
   turnaroundS: number;
+  /**
+   * The same while the car drives (a re-plan after a wrong turn): turning around mid-street needs a gap and is often
+   * not allowed, so going round the block wins unless it is much longer.
+   */
+  turnaroundMovingS: number;
   /** Entering an edge (not the start or destination edge). */
   privateS: number;
   minorServiceS: number;
@@ -48,6 +53,7 @@ export const DEFAULT_ROUTE_COSTS: RouteCosts = {
   sharpLeftS: 20,
   uTurnS: 30,
   turnaroundS: 60,
+  turnaroundMovingS: 300,
   privateS: 600,
   minorServiceS: 60,
   trackS: 120,

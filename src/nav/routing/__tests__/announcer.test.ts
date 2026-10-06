@@ -23,6 +23,8 @@ function at(alongM: number, more: Partial<GuidanceStep> = {}, planId = 1): Annou
       nextIndex,
       toNextM: Math.max(0, next.atM - alongM),
       thenIndex: following && following.atM - next.atM <= 120 ? nextIndex + 1 : null,
+      passedIndex: 0,
+      progressAt: { lat: 51, lon: 31 },
       ...more,
     },
   };

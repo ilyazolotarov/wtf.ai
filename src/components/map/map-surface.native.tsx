@@ -24,7 +24,7 @@ import { usePosition } from "@/providers/position-provider";
 import { useDevSettings, useRuntime } from "@/providers/runtime-provider";
 import type { MapMatchOverlay } from "@/services/navigation/navigator-service";
 import { useRoute } from "@/providers/route-provider";
-import type { CompassHeading } from "./use-compass-heading";
+import { mapBearingDeg, type CompassHeading } from "./use-compass-heading";
 
 type CameraMode = "follow" | "follow-heading" | "free";
 
@@ -88,6 +88,8 @@ const FOLLOW_CAMERA: Record<
 /** Leaving follow by the button steps back to a flat overview. */
 const FREE_ZOOM = 15.5;
 
+const ROUTE_LAYOUT = { "line-cap": "round", "line-join": "round" } as const;
+
 export function MapSurface({
   mode,
   ghostView,
@@ -123,7 +125,7 @@ export function MapSurface({
 
   const followBearing =
     camera === "follow-heading" && position && headingUpRad !== null
-      ? (headingUpRad * 180) / Math.PI
+      ? mapBearingDeg(headingUpRad)
       : 0;
 
   useEffect(() => {
@@ -281,10 +283,27 @@ export function MapSurface({
     ? pointFeatures(position.simulatedOutage.gnss)
     : emptyPoints();
   const ghostPoint = ghost ? pointFeatures(ghost) : emptyPoints();
-  // The route (ROUTING-SPEC §8): faded while planning again, its next maneuver, the destination; a dropped pin.
-  // Built once per plan: a long route has thousands of points, and the position updates several times a second.
+  // The route (ROUTING-SPEC §8): only what is ahead of the car, faded while planning again, its next maneuver, the
+  // destination; a dropped pin. A long route has thousands of points and the position updates several times a
+  // second, so the line from the next vertex on is rebuilt only when a vertex is passed; the stretch from the
+  // car's progress to that vertex is a two-point line of its own.
   const plan = route?.plan;
-  const routeLine = useMemo(() => (plan ? routeFeatures(plan.coordinates.map((c) => [c.lon, c.lat])) : emptyLines()), [plan]);
+  const progress = route?.guidance;
+  const aheadFrom = progress ? progress.passedIndex + 1 : 0;
+  const routeAhead = useMemo(
+    () => (plan ? routeFeatures(plan.coordinates.slice(aheadFrom).map((c) => [c.lon, c.lat])) : emptyLines()),
+    [plan, aheadFrom],
+  );
+  const headTo = plan?.coordinates[aheadFrom];
+  const routeHead =
+    progress && headTo
+      ? routeFeatures([
+          [progress.progressAt.lon, progress.progressAt.lat],
+          [headTo.lon, headTo.lat],
+        ])
+      : emptyLines();
+  const routeCasing = { "line-color": palette.bg, "line-width": 9, "line-opacity": route?.replanning ? 0.4 : 0.9 };
+  const routePaint = { "line-color": palette.route, "line-width": 6, "line-opacity": route?.replanning ? 0.4 : 1 };
   const nextManeuver =
     route?.maneuvers && route.guidance && route.guidance.state !== "arrived"
       ? route.maneuvers[route.guidance.nextIndex]
@@ -337,19 +356,14 @@ export function MapSurface({
           bearing: 0,
         }}
       />
-      <GeoJSONSource id="active-route" data={routeLine}>
-        <Layer
-          id="active-route-casing"
-          type="line"
-          layout={{ "line-cap": "round", "line-join": "round" }}
-          paint={{ "line-color": palette.bg, "line-width": 9, "line-opacity": route?.replanning ? 0.4 : 0.9 }}
-        />
-        <Layer
-          id="active-route-line"
-          type="line"
-          layout={{ "line-cap": "round", "line-join": "round" }}
-          paint={{ "line-color": palette.route, "line-width": 6, "line-opacity": route?.replanning ? 0.4 : 1 }}
-        />
+      <GeoJSONSource id="active-route" data={routeAhead}>
+        <Layer id="active-route-casing" type="line" layout={ROUTE_LAYOUT} paint={routeCasing} />
+        <Layer id="active-route-line" type="line" layout={ROUTE_LAYOUT} paint={routePaint} />
+      </GeoJSONSource>
+      {/* Its casing goes under both lines, or its round end would cut a notch where the two meet. */}
+      <GeoJSONSource id="active-route-head" data={routeHead}>
+        <Layer id="active-route-head-casing" type="line" beforeId="active-route-line" layout={ROUTE_LAYOUT} paint={routeCasing} />
+        <Layer id="active-route-head-line" type="line" layout={ROUTE_LAYOUT} paint={routePaint} />
       </GeoJSONSource>
       <GeoJSONSource id="route-next-maneuver" data={maneuverPoint}>
         <Layer
@@ -677,6 +691,7 @@ function hypothesisFeatures(overlay: MapMatchOverlay | null): {
 function routeFeatures(
   coordinates: [number, number][],
 ): FeatureCollection<LineString> {
+  if (coordinates.length < 2) return emptyLines();
   const feature: Feature<LineString> = {
     type: "Feature",
     properties: {},

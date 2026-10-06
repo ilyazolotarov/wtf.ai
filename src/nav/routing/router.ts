@@ -13,6 +13,8 @@ export interface RouteStart extends Coordinate {
   headingRad?: number;
   /** How far off the position may be, m: start candidates within max(25 m, this). */
   accuracyM?: number;
+  /** The car's speed, m/s: driving (over `MOVING_MPS`), turning around costs `turnaroundMovingS`. */
+  speedMps?: number;
 }
 
 export interface RouteOptions {
@@ -61,6 +63,8 @@ export type RouteStatus =
   | { status: "failed"; reason: RouteFailure; stats: RouteStats };
 
 const START_RADIUS_M = 25;
+/** Faster than this the car is driving, not parked or creeping out of a space. */
+const MOVING_MPS = 3;
 /** Start candidates: the nearest edge and any within this of it. */
 const START_MARGIN_M = 10;
 /** A candidate's closest point this near its end is that end's node. */
@@ -354,7 +358,11 @@ export class RouteSearch {
     const { edge, alongM, headingRad } = start.near;
     for (const dir of [1, -1] as const) {
       if (!allowed(edge, dir)) continue;
-      const turnaround = this.againstHeading(headingRad, dir) ? c.turnaroundS : 0;
+      const turnaround = this.againstHeading(headingRad, dir)
+        ? (this.from.speedMps ?? 0) > MOVING_MPS
+          ? c.turnaroundMovingS
+          : c.turnaroundS
+        : 0;
       const g0 = start.extraS + turnaround;
       // Straight to a destination ahead on the same edge.
       const dest = this.dests.get(edge.id);

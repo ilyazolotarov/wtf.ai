@@ -1,4 +1,4 @@
-import { headingUpRad, holdHeading, travelHeadingRad } from "@/components/map/use-compass-heading";
+import { headingUpRad, holdHeading, mapBearingDeg, travelHeadingRad } from "@/components/map/use-compass-heading";
 import type { PositionEstimate } from "@/nav/position/types";
 
 jest.mock("expo-location", () => ({}));
@@ -37,5 +37,13 @@ describe("heading-up", () => {
     expect(holdHeading(at({ speedMps: 0 }), 1)).toBe(1);
     expect(holdHeading(at({ speedMps: 10 }), 1)).toBeNull();
     expect(headingUpRad(at({ speedMps: 10 }), null, holdHeading(at({ speedMps: 10 }), 1))).toBeNull();
+  });
+
+  test("map bearing is never negative (iOS ignores a negative one)", () => {
+    expect(mapBearingDeg(-Math.PI / 2)).toBeCloseTo(270);
+    expect(mapBearingDeg((-170 * Math.PI) / 180)).toBeCloseTo(190);
+    expect(mapBearingDeg(Math.PI / 2)).toBeCloseTo(90);
+    expect(mapBearingDeg(2 * Math.PI)).toBeCloseTo(0);
+    expect(mapBearingDeg(-0.000001)).toBeLessThan(360);
   });
 });
