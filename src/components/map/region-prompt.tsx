@@ -17,7 +17,12 @@ import {
   type InstalledState,
 } from "@/services/offline-map/map-packs";
 import type { MapCatalog } from "@/services/offline-map/catalog";
-import { adviseRegion, type RegionAdvice, type RegionShape } from "@/services/offline-map/region-check";
+import {
+  adviseRegion,
+  regionCheckPoint,
+  type RegionAdvice,
+  type RegionShape,
+} from "@/services/offline-map/region-check";
 
 interface Region extends RegionShape {
   name: { en: string; uk: string };
@@ -37,18 +42,26 @@ function downloadAndActivate(region: string) {
   void downloadRegion(region);
 }
 
-/** The car's position, rounded to ~100 m: the advice changes only as the car moves on. */
-function useCoarsePosition(): Coordinate | null {
+/** Where the car is, rounded to ~100 m (and its accuracy to 100 m): the advice changes only as it moves on. */
+function useCheckPoint(): { at: Coordinate; marginM: number } | null {
   const position = usePosition();
-  const trusted = position && position.trust === "TRUSTED" ? position : null;
-  const lat = trusted ? Math.round(trusted.lat * 1000) / 1000 : null;
-  const lon = trusted ? Math.round(trusted.lon * 1000) / 1000 : null;
-  return useMemo(() => (lat === null || lon === null ? null : { lat, lon }), [lat, lon]);
+  const check = position ? regionCheckPoint(position) : null;
+  const lat = check ? Math.round(check.at.lat * 1000) / 1000 : null;
+  const lon = check ? Math.round(check.at.lon * 1000) / 1000 : null;
+  const marginM = check ? Math.ceil(check.marginM / 100) * 100 : null;
+  return useMemo(
+    () => (lat === null || lon === null || marginM === null ? null : { at: { lat, lon }, marginM }),
+    [lat, lon, marginM],
+  );
 }
 
-function advise(installed: InstalledState, catalog: MapCatalog | null, p: Coordinate | null): RegionAdvice<Region> | null {
+function advise(
+  installed: InstalledState,
+  catalog: MapCatalog | null,
+  check: { at: Coordinate; marginM: number } | null,
+): RegionAdvice<Region> | null {
   const active = installed.active ? installed.regions[installed.active] : null;
-  if (!p || !active) return null;
+  if (!check || !active) return null;
   // Installs made before outlines borrow the catalog's.
   const shape = (r: Region): Region =>
     r.outline ? r : { ...r, outline: catalog?.regions.find((c) => c.region === r.region)?.outline };
@@ -57,11 +70,11 @@ function advise(installed: InstalledState, catalog: MapCatalog | null, p: Coordi
     ...r,
     size: r.size + (r.graph?.size ?? 0) + (r.search?.size ?? 0),
   }));
-  return adviseRegion(shape(active), mine, catalogRegions, p);
+  return adviseRegion(shape(active), mine, catalogRegions, check.at, check.marginM);
 }
 
 /**
- * Card on the map when the car (trusted GNSS) is more than 1 km outside the active offline
+ * Card on the map when the car (any fix but a spoofed one) is more than 1 km outside the active offline
  * region (UI-SPEC §6): switch to a downloaded region that has it, or download the one that
  * does. "Not now" hides it for that pair of regions until the app restarts.
  */
@@ -69,9 +82,9 @@ export function RegionPrompt({ panelStyle }: { panelStyle: StyleProp<ViewStyle> 
   const { t, language } = useT();
   const palette = usePalette();
   const { installed, catalog, catalogLoading, download } = useMapPacks();
-  const position = useCoarsePosition();
+  const check = useCheckPoint();
   const [, setDismissals] = useState(0);
-  const advice = useMemo(() => advise(installed, catalog, position), [installed, catalog, position]);
+  const advice = useMemo(() => advise(installed, catalog, check), [installed, catalog, check]);
   const outside = advice !== null && advice.kind !== "inside";
 
   useEffect(() => {
@@ -93,8 +106,8 @@ export function RegionPrompt({ panelStyle }: { panelStyle: StyleProp<ViewStyle> 
   const target = advice.kind === "outside" ? null : advice.region;
   const key = `${installed.active}→${target?.region ?? "?"}`;
   if (dismissed.has(key)) return null;
-  // A download of that region is under way: Offline data shows it.
-  if (download && (!target || download.region === target.region)) return null;
+  // That region is downloading (or paused): Offline data shows it. Any other download doesn't hide the card.
+  if (download && target && download.region === target.region) return null;
 
   const body =
     advice.kind === "switch"

@@ -176,12 +176,14 @@ One small component each. Touch targets ≥ 56 pt; high contrast; minimal text.
 | Center   | `PermissionCard`    | Location denied → explanation + "Open Settings" (`Linking.openURL('app-settings:')`)       |
 | Center   | `NoFixCard`         | "Waiting for GPS…" when no fix yet                                                         |
 
-- **Outside the region** (`src/components/map/region-prompt.tsx`, 2026-10-06): when the position is trusted
-  GNSS and more than 1 km outside the active region's outline (`region-check.ts`; bounds for releases without
+- **Outside the region** (`src/components/map/region-prompt.tsx`, 2026-10-06): when the position (any fix to
+  5 km, Wi-Fi and cell ones too, but not one suspected of spoofing) is more than max(1 km, its accuracy) outside
+  the active region's outline (`region-check.ts`; bounds for releases without
   outlines), a card "Outside <region>" offers **Switch map** to a downloaded region that has the car, else
   **Download** the smallest catalog region that has it (an oblast before Ukraine; the catalog is fetched once,
   then; the downloaded region becomes the map when installed), else Offline data. "Not now" hides it for that
-  pair of regions until the app restarts. Hidden while that region downloads.
+  pair of regions until the app restarts. Hidden while that region downloads. (First built for trusted GNSS
+  only, which never prompted indoors: a Wi-Fi fix is "APPROXIMATE", never trusted.)
 - Long-press on map → drops a pin; a card above the toolbar shows its distance and direction with **Route here**
   and **Cancel** (ROUTING-SPEC §8). (The manual position fix, SPEC §3.4, needs another gesture when it comes.)
 - With a route (`src/components/route/route-banner.tsx`): the banner shows the next maneuver's icon, the distance
