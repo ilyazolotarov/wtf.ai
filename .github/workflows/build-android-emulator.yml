@@ -1,0 +1,22 @@
+name: Build Android APK (emulator)
+
+# Manual only: the same signed release APK as build-android.yml, but x86_64 for an emulator (CI builds phone ABIs
+# only). The APK is uploaded as an artifact (wtfai-emulator.apk); install it with `adb install` or test it with
+# scripts/android-smoke.sh. Runs from any branch picked in "Use workflow from".
+on:
+  workflow_dispatch:
+    inputs:
+      notify:
+        description: "Send the APK to Telegram"
+        type: boolean
+        default: false
+
+jobs:
+  build:
+    uses: ./.github/workflows/build-android.yml
+    with:
+      variant: emulator
+      architectures: x86_64
+      notify: ${{ inputs.notify }}
+      retention-days: 7
+    secrets: inherit

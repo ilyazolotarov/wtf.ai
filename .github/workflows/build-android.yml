@@ -1,13 +1,14 @@
 name: Build Android APK
 
-# Signed release APK for sideloading (no Play Store account, no EAS), plus an emulator smoke test of that same APK.
-# Plan: docs/ANDROID-SPEC.md. One build for everyone: the APK the emulator tests is the APK testers get. `variant` only
-# names the file (and the manual-run default); the build does not differ.
+# Signed release APK for sideloading (no Play Store account, no EAS). Plan: docs/ANDROID-SPEC.md. One build for
+# everyone: `variant` only names the file (and the manual-run default); the build does not differ. Phone ABIs only:
+# the x86_64 build for emulators is build-android-emulator.yml, run by hand. No emulator test in CI (too slow);
+# scripts/android-smoke.sh runs one against a local emulator.
 on:
   workflow_dispatch:
     inputs:
       variant:
-        description: "Names the APK file; tester and ci are the same build (arm64, armeabi-v7a, x86_64)."
+        description: "Names the APK file; tester and ci are the same build (arm64, armeabi-v7a)."
         type: choice
         options: [tester, ci]
         default: tester
@@ -27,6 +28,10 @@ on:
       retention-days:
         type: number
         default: 14
+      architectures:
+        # build-android-emulator.yml passes x86_64.
+        type: string
+        default: arm64-v8a,armeabi-v7a
     secrets:
       SENTRY_AUTH_TOKEN:
         required: false
@@ -49,6 +54,8 @@ jobs:
     timeout-minutes: 45
     env:
       VARIANT: ${{ inputs.variant }}
+      # A manual run of this workflow has no such input: phone ABIs.
+      ARCHITECTURES: ${{ inputs.architectures || 'arm64-v8a,armeabi-v7a' }}
       SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
       SENTRY_ORG: ${{ vars.SENTRY_ORG }}
       SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
@@ -136,9 +143,9 @@ jobs:
         env:
           EXPO_PUBLIC_BUILD_SHA: ${{ github.sha }}
         run: |
-          # arm64 = nearly every phone, armeabi-v7a = older and cheap 32-bit phones, x86_64 = the CI emulator.
+          # arm64 = nearly every phone, armeabi-v7a = older and cheap 32-bit phones; x86_64 = emulators (manual build).
           cd android
-          ./gradlew assembleRelease -PreactNativeArchitectures="arm64-v8a,armeabi-v7a,x86_64" --no-daemon --build-cache
+          ./gradlew assembleRelease -PreactNativeArchitectures="$ARCHITECTURES" --no-daemon --build-cache
 
       - name: ccache statistics
         if: ${{ !cancelled() }}
@@ -159,13 +166,6 @@ jobs:
           cp android/app/build/outputs/apk/release/app-release.apk "wtfai-${VARIANT}.apk"
           ls -l "wtfai-${VARIANT}.apk"
           "$ANDROID_HOME"/build-tools/*/apksigner verify --print-certs "wtfai-${VARIANT}.apk" | head -3
-
-      - name: Upload APK (zipped, for the emulator job)
-        uses: actions/upload-artifact@v7
-        with:
-          name: wtfai-apk
-          path: wtfai-${{ inputs.variant }}.apk
-          retention-days: 3
 
       - name: Upload APK to install
         # The tester build always; the CI build when the plan wants it delivered (notify).
@@ -194,87 +194,3 @@ jobs:
             curl -sS --fail-with-body -o /dev/null --data-urlencode chat_id="$TELEGRAM_CHAT_ID" --data-urlencode text="$CAPTION (APK over 50 MB: download it from the run)" "$API/sendMessage"
           fi
 
-  smoke:
-    # Installs the APK on an emulator and checks the app starts and stays up (scripts/android-smoke.sh).
-    needs: build-android
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      SAVE_CACHES: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/android' }}
-      # Same for the snapshot run and the test run, or the snapshot doesn't match the AVD.
-      EMULATOR_OPTIONS: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-    strategy:
-      fail-fast: false
-      matrix:
-        # 29 = our minimum (Android 10), 34 = what most testers run. API 29 only on main and the android branch.
-        api-level: ${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/android') && fromJSON('[29, 34]') || fromJSON('[34]') }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Download APK
-        uses: actions/download-artifact@v8
-        with:
-          name: wtfai-apk
-
-      - name: Enable KVM
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-
-      - name: Restore AVD snapshot
-        # A booted emulator snapshot: the test run starts from it instead of a cold boot.
-        id: avd
-        uses: actions/cache/restore@v6
-        with:
-          path: |
-            ~/.android/avd/*
-            ~/.android/adb*
-          key: avd-${{ matrix.api-level }}-x86_64-google_apis-pixel_6-v1
-
-      - name: Create AVD snapshot
-        # Only where it is saved: elsewhere a miss just cold-boots in the test run.
-        if: ${{ steps.avd.outputs.cache-hit != 'true' && env.SAVE_CACHES == 'true' }}
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: ${{ matrix.api-level }}
-          arch: x86_64
-          target: google_apis
-          profile: pixel_6
-          force-avd-creation: false
-          emulator-options: ${{ env.EMULATOR_OPTIONS }}
-          disable-animations: false
-          emulator-boot-timeout: 600
-          script: echo "AVD snapshot created"
-
-      - name: Save AVD snapshot
-        if: ${{ steps.avd.outputs.cache-hit != 'true' && env.SAVE_CACHES == 'true' }}
-        uses: actions/cache/save@v6
-        with:
-          path: |
-            ~/.android/avd/*
-            ~/.android/adb*
-          key: ${{ steps.avd.outputs.cache-primary-key }}
-
-      - name: Smoke test on emulator
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: ${{ matrix.api-level }}
-          arch: x86_64
-          target: google_apis
-          profile: pixel_6
-          force-avd-creation: false
-          # Boot from the snapshot, and don't write the test's state back into it.
-          emulator-options: -no-snapshot-save ${{ env.EMULATOR_OPTIONS }}
-          disable-animations: true
-          emulator-boot-timeout: 600
-          script: bash scripts/android-smoke.sh wtfai-${{ inputs.variant }}.apk smoke-out
-
-      - name: Upload screenshots and logs
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: android-smoke-api${{ matrix.api-level }}
-          path: smoke-out
-          retention-days: 7

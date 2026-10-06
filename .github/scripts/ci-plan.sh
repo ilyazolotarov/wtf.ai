@@ -45,7 +45,7 @@ is_ios_native() {
 is_android_native() {
   is_native_shared "$1" && return 0
   case "$1" in
-    modules/*/android/* | native-tests-android/* | scripts/android-smoke.sh | \
+    modules/*/android/* | native-tests-android/* | \
       .github/workflows/build-android.yml) return 0 ;;
   esac
   return 1

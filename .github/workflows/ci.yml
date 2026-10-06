@@ -23,7 +23,7 @@ on:
         options: [Debug, Release, none]
         default: Debug
       android:
-        description: "Android build. tester = APK for testers; ci = emulator build (simulated adapters listed)."
+        description: "Android build. tester = APK for testers; ci = the same build, named for CI."
         type: choice
         options: [none, tester, ci]
         default: none
@@ -187,7 +187,7 @@ jobs:
     secrets: inherit
 
   build-android:
-    # Signed release APK + emulator smoke test (docs/ANDROID-SPEC.md §4).
+    # Signed release APK (docs/ANDROID-SPEC.md §4).
     needs: [plan, checks, native-logic-android]
     # Skipped native-logic-android is fine; failed or cancelled is not.
     if: ${{ !cancelled() && needs.plan.outputs.build_android != '' && needs.checks.result == 'success' && needs.native-logic-android.result != 'failure' }}

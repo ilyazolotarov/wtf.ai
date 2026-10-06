@@ -60,12 +60,13 @@ Android (docs/ANDROID-SPEC.md) uses the same plan: `ci-plan.sh` outputs `build_a
 Android-native changes or `[build android]` on branches; empty otherwise), and the `build-android` job of `ci.yml`
 runs `.github/workflows/build-android.yml` with it.
 
-- One build for everyone: a signed release APK with arm64, armeabi-v7a (32-bit phones) and x86_64 (the emulator). The
-  `ci` / `tester` variant only names the file; the APK the emulator tests is the APK testers get. The simulated
-  adapters are hidden unless switched on (Developer → Show emulated adapters, or `wtfai://vehicle?emulators=1`, which
-  the smoke test uses).
-- Every Android build is followed by the emulator smoke test (`scripts/android-smoke.sh`): Android 14 always, Android 10
-  also on `main`. Screenshots and logcat are uploaded as an artifact.
+- One build for everyone: a signed release APK with arm64 and armeabi-v7a (32-bit phones). The `ci` / `tester`
+  variant only names the file. The simulated adapters are hidden unless switched on (Developer → Show
+  emulated adapters, or `wtfai://vehicle?emulators=1`, which the smoke test uses).
+- Emulators: Actions → **Build Android APK (emulator)** → Run workflow builds an x86_64-only APK
+  (`wtfai-emulator.apk`, an artifact; Telegram if ticked). CI never builds x86_64.
+- No emulator test in CI: it took too long. The smoke test (`scripts/android-smoke.sh`) runs against a local
+  emulator: `bash scripts/android-smoke.sh path/to/app.apk out-dir`.
 - Delivery: like iOS. The APK is uploaded unzipped and sent to Telegram only when the plan says `notify`.
 - Manual: Actions → **CI** → Run workflow has an `android` choice (`none` / `tester` / `ci`); **Build Android APK**
   can also be started on its own.
@@ -77,8 +78,6 @@ runs `.github/workflows/build-android.yml` with it.
     compiles, dexing).
   - ccache (`~/.ccache`) for the C/C++ of React Native's CMake builds, through `CMAKE_C(XX)_COMPILER_LAUNCHER`.
     `ccache statistics` in the log shows invocations and hit rate.
-  - Smoke test: a booted AVD snapshot per API level (`avd-<api>-…`); the test boots from it and doesn't save
-    back. A branch without the cache cold-boots and creates no snapshot.
 
 ## Changing the rules
 

@@ -92,7 +92,9 @@ All on GitHub-hosted Ubuntu runners (free minutes; KVM gives a hardware-accelera
 | `checks` (existing) | lint, tsc, Jest (now also Android branches), pytest | every push |
 | `native-logic-android` | Kotlin logic unit tests on a plain JVM Gradle project (`native-tests-android/`, mirrors `Package.swift`): UUID/GATT selection, framer, chunking, GNSS/IMU payload mapping, batcher | every push |
 | `build-android` | `expo prebuild --platform android`, `./gradlew assembleRelease`, lint of the manifest; uploads the signed APK | every push, after checks |
-| `android-smoke` (emulator) | installs the release APK on API 34 x86_64 (and a minimum-API image on `main`), grants permissions, launches, runs the Maestro flow, fails on a crash or ANR in logcat, uploads screenshots + logcat | every push to `main` and PRs touching `modules/*/android`, `src/`, `app.json` |
+
+The emulator smoke test (`scripts/android-smoke.sh`) was a CI job (API 34 on every Android build, API 29 too on
+`main`); removed from CI on 2026-10-06 because it took too long. It now runs only against a local emulator.
 
 Signing: a keystore stored as secrets (`ANDROID_KEYSTORE_BASE64`, `_PASSWORD`, `_KEY_ALIAS`, `_KEY_PASSWORD`) so APK
 updates install over the previous one and keep app data. Without the secrets the job signs with an ephemeral debug key
@@ -208,7 +210,7 @@ tags and one metric reach `environment=ci`.
 ## 7. Decisions and open items
 
 - Decided: `minSdk` 29 (Android 10; raised from 26 on 2026-10-06). Android 8–9 are a few percent of phones, we cannot
-  test on them, and 29 is where foreground service types start. Emulator matrix: API 29 on `main`, API 34 on every push.
+  test on them, and 29 is where foreground service types start.
 - Decided: first test adapters are a Vgate vLinker FD+ and a cheap ELM327 clone. Which transport each uses (BLE or Classic
   SPP) is confirmed from the first trip log; both are implemented in M3.
 - No developer program is needed: the APK is sideloaded. Google Play would need a $25 account and a 14-day closed test
