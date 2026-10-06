@@ -205,6 +205,8 @@ export class NavigatorService implements PositionSource {
   private shownChanged = false;
   /** The latest integrity verdict noted in the trip log (notes on changes only). */
   private notedIntegrity: string = "ok";
+  /** The doubt last noted in the trip log (see `noteDoubt`). */
+  private notedDoubt: number | undefined;
   private lastObdUs = -Infinity;
   private lastAcceptedSatUs = -Infinity;
   private mode: NavMode = "none";
@@ -516,6 +518,7 @@ export class NavigatorService implements PositionSource {
     this.lastAcceptedSatUs = -Infinity;
     // `lastShownFix` stays: the navigator before checked it, and phone GNSS goes on showing it.
     this.notedIntegrity = "ok";
+    this.notedDoubt = undefined;
     this.vin = null;
     this.poseStatus = "none";
     this.poseQuestion = null;
@@ -717,7 +720,10 @@ export class NavigatorService implements PositionSource {
         const out = nav.onGnss(input.fix);
         this.deps.observer?.fix?.(input.fix, out);
         this.noteIntegrity(out, input.fix);
-        if (out.status !== "untrusted") {
+        // Only a fix the navigator took: phone GNSS shows this one when there is no car speed, and `skipped`
+        // means too coarse to weigh (over `maxFixAccuracyM`) or a repeat. Showing a skipped one threw the dot
+        // 1.4-10.7 km at each ignition-off of a jammed day (2026-10-06).
+        if (out.status !== "untrusted" && out.status !== "skipped") {
           this.lastShownFix = input.record;
           this.shownChanged = true;
         }
@@ -864,6 +870,7 @@ export class NavigatorService implements PositionSource {
         : "dr";
     const mm = estimate.mapMatch;
     this.noteMapMatch(mm?.state ?? "off");
+    this.noteDoubt(estimate.doubtM);
     // Dead-reckoning on the map: the dominant hypothesis is the puck, the others its alternatives
     // (MAPMATCH-SPEC §6.2). With GNSS the EKF stays the puck: it is within a few metres there.
     const top = puckHypothesis(estimate, source === "dr");
@@ -923,6 +930,18 @@ export class NavigatorService implements PositionSource {
     const mm = this.nav?.estimate()?.mapMatch;
     this.notedMapMatch = state;
     this.note(`mm ${state}${mm ? ` (${mm.particles} particles, ${mm.clusters.length} hypotheses)` : ""}`);
+  }
+
+  /** The coarse fixes agreeing the track is lost, and letting go of that doubt, both go in the trip log. */
+  private noteDoubt(doubtM: number | undefined): void {
+    const was = this.notedDoubt;
+    this.notedDoubt = doubtM;
+    if ((was === undefined) === (doubtM === undefined)) return;
+    this.note(
+      doubtM === undefined
+        ? "nav position doubt cleared: a fix agrees with the dead reckoning again"
+        : `nav position doubted: Wi-Fi/cell fixes put the car ${Math.round(doubtM)} m from the dead reckoning`,
+    );
   }
 
   private note(text: string): void {

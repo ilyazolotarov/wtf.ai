@@ -209,9 +209,21 @@ next maneuver and the distance to it, and the one after when it follows within 1
 - `start(destination)` plans from the published position (with its heading and accuracy) on its own reader of the
   active region's graph (2048 tiles), framed at the start. The search runs in slices of ~12 ms (the slice size
   adapts to the phone's speed), yielding to the UI in between.
-- `off` (and not planning, and 10 s since the last plan) plans again from where the car is; the old route stays
+- `off` (and not planning, and the wait below elapsed) plans again from where the car is; the old route stays
   drawn, faded. A failed re-plan keeps the old route and retries at the next `off` after the cooldown. A failed
   first plan ends in `failed` with the reason.
+- **Not while map matching is `offroad`**: the filter itself says the dot is on no road, so `off` means "the car is
+  lost", not "the car turned", and a plan from a dot beside the road starts off it and goes off again at once.
+- **The wait** starts at 10 s and doubles for each off-route plan whose route goes `off` again within a minute of
+  being made, up to 160 s; a route that stays on for a minute clears the streak. A plan that did not survive its
+  own first seconds did not fix anything: the route was never the problem, the position was. The minute is measured
+  from the plan to its route going off, never from one plan to the next: the waits from 80 s on would otherwise
+  end the streak themselves, and it would cycle 10 → 80 s without reaching the cap.
+  > Both rules come from 2026-10-06, 2 h 11 min of jamming: a flat 10 s cooldown re-planned a 62 km route 25 times
+  > in 12 min at 700–780 ms a plan, 86 off-route plans over six trips, every one from a dot kilometres from the
+  > car. 16 km into one drive, a 95° turn the route itself asked for landed 62 m short of the junction, the filter
+  > went off-road, and 4 plans went out in 31 s while it found the road again on its own (MAPMATCH-SPEC
+  > §15, item 14).
 - Arrival ends the route a minute later; × ends it at once.
 - The active destination is kept (kv-store `route.active`): an app restarted within 12 h (iOS may end it mid-drive)
   plans it again from the first position, noted `route resumed after an app restart, to …`.

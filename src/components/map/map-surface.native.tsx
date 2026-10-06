@@ -19,7 +19,7 @@ import { useColorScheme, View, type NativeSyntheticEvent } from "react-native";
 import { ANDROID_BLURS } from "@/components/ui/glass-fill";
 import { useMapStyle } from "@/config/map";
 import { Colors } from "@/constants/theme";
-import { circlePolygon, destinationAtBearing, type Coordinate } from "@/nav/geo";
+import { circlePolygon, destinationAtBearing, haversineM, type Coordinate } from "@/nav/geo";
 import type { PositionEstimate } from "@/nav/position/types";
 import { usePosition } from "@/providers/position-provider";
 import { useDevSettings, useRuntime } from "@/providers/runtime-provider";
@@ -69,6 +69,16 @@ const PLACE_ZOOM = 18;
 /** Heading-up: the map's bearing against the one asked for, this often (sooner when they differ). */
 const CAMERA_LOG_EVERY_MS = 15_000;
 const CAMERA_LOG_OFF_DEG = 20;
+
+/** The follow camera's ease between position updates. */
+const FOLLOW_EASE_MS = 450;
+/**
+ * Beyond this, the position did not drive there: it snapped (GNSS back after an outage, a reset, a placing).
+ * `easeTo` would pan the whole way at follow zoom, and the next update (2 Hz) restarts the ease from wherever
+ * the pan reached, so the camera crawls in asymptotically — 10 km took a visible age (2026-10-06).
+ * The camera jumps instead. At 140 km/h a car covers 19 m between two positions (2 Hz): 80 m is never driving.
+ */
+const FOLLOW_JUMP_M = 80;
 
 const CONE_RADIUS_M = 45;
 const CONE_HALF_ANGLE_RAD = (28 * Math.PI) / 180;
@@ -178,15 +188,25 @@ export function MapSurface({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
 
+  // Where the follow camera was last sent; cleared when it stops following, so coming back
+  // to follow still eases in from wherever the map was left.
+  const followCenter = useRef<Coordinate | null>(null);
   useEffect(() => {
-    if (!position || !follow || ghostView) return;
-    cameraRef.current?.easeTo({
-      center: [position.lon, position.lat],
+    if (!position || !follow || ghostView) {
+      followCenter.current = null;
+      return;
+    }
+    const was = followCenter.current;
+    const snapped = was !== null && haversineM(was, position) > FOLLOW_JUMP_M;
+    followCenter.current = { lat: position.lat, lon: position.lon };
+    const stop = {
+      center: [position.lon, position.lat] as [number, number],
       zoom: follow.zoom,
       bearing: followBearing,
       pitch: follow.pitch,
-      duration: 450,
-    });
+    };
+    if (snapped) cameraRef.current?.jumpTo(stop);
+    else cameraRef.current?.easeTo({ ...stop, duration: FOLLOW_EASE_MS });
   }, [follow, position, ghostView, followBearing]);
 
   const hasGhost = ghost != null;

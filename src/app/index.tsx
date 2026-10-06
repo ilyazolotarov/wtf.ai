@@ -51,6 +51,13 @@ const CAMERA: Record<CameraMode, { icon: IconName; label: "follow" | "followHead
 const STANDING_MPS = 1;
 /** Offer putting the car on the map when the position is rougher than this (or has no direction), without GPS. */
 const PLACE_OFFER_ACCURACY_M = 75;
+/**
+ * …and when nothing has vouched for the dot in this far of dead reckoning. `accuracyM` alone is not enough:
+ * the filter reports its own spread, which stays a few metres however wrong the dot is. On 2026-10-06 the car
+ * stood at a filling station 10 km from the dot for 12 min at ±5 m, so the chip was never offered — the one
+ * control that could have fixed it was hidden by the number that was broken.
+ */
+const PLACE_OFFER_DISTANCE_M = 5000;
 /** The confirmed placing stays drawn until the dot is this far from it (the car drove off). */
 const PLACED_SHOWN_M = 50;
 /** Driven less than this since the last trusted fix, the chip gives only its age. */
@@ -193,11 +200,15 @@ export default function HomeScreen() {
   const placeCenter = useRef<Coordinate | null>(null);
   const [placeFrom, setPlaceFrom] = useState<Coordinate | null>(null);
   const standing = position != null && (position.speedMps ?? 0) < STANDING_MPS;
-  // Lost enough to offer it: no GPS, and a rough position or no direction.
+  // Lost enough to offer it: no GPS, and nothing vouching for the dot — rough, no direction, off any road,
+  // or a long way on dead reckoning. A confident filter on the wrong road looks like none of the first three.
   const lost =
     position != null &&
     trust !== "TRUSTED" &&
-    (position.accuracyM > PLACE_OFFER_ACCURACY_M || position.headingRad == null);
+    (position.accuracyM > PLACE_OFFER_ACCURACY_M ||
+      position.headingRad == null ||
+      position.mapMatch === "offroad" ||
+      (position.distanceSinceTrustedM ?? 0) > PLACE_OFFER_DISTANCE_M);
   const startPlacing = () => {
     const from = position ? { lat: position.lat, lon: position.lon } : null;
     placeCenter.current = from;

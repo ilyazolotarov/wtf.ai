@@ -17,7 +17,13 @@ export function puckHypothesis(estimate: NavEstimate, deadReckoning: boolean): M
   return deadReckoning && mm && MAP_MATCH_PUCK.has(mm.state) ? mm.clusters[0] : undefined;
 }
 
-/** The dot's ~68 % radius: the hypothesis' spread, else the EKF's. */
+/**
+ * The dot's ~68 % radius: the hypothesis' spread, else the EKF's — but never smaller than how far the Wi-Fi/cell
+ * fixes put the car when they agree it is nowhere near this track (`Navigator.positionDoubtM`). Both of the first
+ * two are the filter's own spread, which stays a few metres however wrong the dot is: on 2026-10-06 the dot sat
+ * 10 km out at ±5 m for 12 min, which read as certainty and hid the control that would have fixed it.
+ */
 export function puckAccuracyM(estimate: NavEstimate, hypothesis: MapMatchEstimate["clusters"][number] | undefined): number {
-  return hypothesis ? Math.max(hypothesis.spreadM, MAP_MATCH_MIN_ACCURACY_M) : estimate.accuracyM;
+  const spread = hypothesis ? Math.max(hypothesis.spreadM, MAP_MATCH_MIN_ACCURACY_M) : estimate.accuracyM;
+  return Math.max(spread, estimate.doubtM ?? 0);
 }

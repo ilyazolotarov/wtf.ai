@@ -317,3 +317,55 @@ describe("Navigator from a parked pose", () => {
     expect(wifi.startFromPose(pose)).toBe(true);
   });
 });
+
+describe("the dead reckoning doubted by the coarse fixes", () => {
+  // Long enough for the parked pose to be confirmed (150 m) well before the fixes are moved away.
+  const DRIVE: DriveSegment[] = [
+    { durationS: 5, speedMps: 0, yawRateDegS: 0 },
+    { durationS: 15, speedMps: 12, yawRateDegS: 0 },
+    { durationS: 60, speedMps: 14, yawRateDegS: 0 },
+    { durationS: 5, speedMps: 0, yawRateDegS: 0 },
+  ];
+  const drive = syntheticDrive({ segments: DRIVE, gnss: "coarse", seed: 7 });
+  const start = drive.truth[0];
+  const pose = { lat: start.lat, lon: start.lon, headingRad: start.psi, posSigmaM: 5, headingSigmaRad: 0.04 };
+
+  /** The Wi-Fi/cell fixes between these seconds land `m` metres north of the car. */
+  const moveFixes = (fromS: number, toS: number, m: number) => ({
+    ...drive.trip,
+    gnss: drive.trip.gnss.map((f) => {
+      const tS = (f.tUs - drive.trip.startUs) / 1e6;
+      return tS >= fromS && tS < toS ? { ...f, lat: f.lat + m / 111_320 } : f;
+    }),
+  });
+
+  test("fixes that agree never raise it, however rough they are", () => {
+    const r = replayTrip(drive.trip, { startPose: pose });
+    expect(r.track.every((t) => t.doubtM === undefined)).toBe(true);
+    // The track is where it should be: the doubt would have been wrong.
+    expect(endError(drive, r).posM).toBeLessThan(30);
+  });
+
+  test("three fixes in a row far outside their own accuracy raise it, with how far they put the car", () => {
+    const r = replayTrip(moveFixes(40, 200, 600), { startPose: pose });
+    expect(r.track.filter((t) => t.tS < 40).every((t) => t.doubtM === undefined)).toBe(true);
+    const raised = r.track.find((t) => t.doubtM !== undefined);
+    expect(raised).toBeDefined();
+    // Three 1 Hz fixes after the move, and the doubt is their distance, not the filter's spread.
+    expect(raised!.tS).toBeGreaterThanOrEqual(42);
+    expect(raised!.tS).toBeLessThan(48);
+    expect(raised!.doubtM).toBeGreaterThan(400);
+    expect(raised!.accuracyM).toBeLessThan(100);
+  });
+
+  test("one far fix is not enough: coarse fixes jump about under jamming", () => {
+    const r = replayTrip(moveFixes(40, 41.5, 600), { startPose: pose });
+    expect(r.track.every((t) => t.doubtM === undefined)).toBe(true);
+  });
+
+  test("a fix that agrees again clears it", () => {
+    const r = replayTrip(moveFixes(40, 60, 600), { startPose: pose });
+    expect(r.track.some((t) => t.doubtM !== undefined)).toBe(true);
+    expect(r.track.filter((t) => t.tS > 63).every((t) => t.doubtM === undefined)).toBe(true);
+  });
+});

@@ -106,6 +106,57 @@ describe("RouteService", () => {
     expect(h.routes.map((r) => r.reason)).toEqual(["new", "off-route"]);
   });
 
+  test("map matching off-road: no new route while the filter says the dot is not on a road", () => {
+    const h = harness();
+    h.move(0.2, 0);
+    h.service.start(at(1, -0.6));
+    h.flush();
+    for (let i = 1; i <= 12; i++) {
+      h.tick(1000);
+      h.move(1 + 0.25 * i, 0, { mapMatch: "offroad" });
+    }
+    expect(h.notes.some((n) => n.startsWith("route off at"))).toBe(true);
+    expect(h.routes.map((r) => r.reason)).toEqual(["new"]);
+    // Back on a road, and leaving the route is news again.
+    h.tick(1000);
+    h.move(4, 0, { mapMatch: "tracking" });
+    h.flush();
+    expect(h.routes.map((r) => r.reason)).toEqual(["new", "off-route"]);
+  });
+
+  test("a plan that goes off route again at once doubles the wait, and a plan that lasts clears it", () => {
+    const h = harness();
+    h.move(0.2, 0);
+    h.service.start(at(1, -0.6));
+    h.flush();
+    /** Drive east off the route (or, with `beside`, creep along 84 m north of the road) until it re-plans, and say when. */
+    let x = 1;
+    const driveOff = (beside = false) => {
+      for (let i = 0; i < 400; i++) {
+        h.tick(1000);
+        x += beside ? 0.002 : 0.25;
+        h.move(x, beside ? 2 : 0);
+        if (h.service.getSnapshot()?.replanning) {
+          h.flush();
+          return i + 1;
+        }
+      }
+      return Infinity;
+    };
+    expect(driveOff()).toBeLessThanOrEqual(12);
+    const plans = h.routes.length;
+    // Each route that goes off within a minute of its plan doubles the wait: 10, 20, 40, 80 s, then 160 s at most.
+    // The waits themselves outlast a minute, and must not end the streak.
+    const waits = [10, 20, 40, 80, 160, 160].map(() => driveOff(true));
+    expect(waits.map((w, i) => w >= [10, 20, 40, 80, 160, 160][i])).toEqual([true, true, true, true, true, true]);
+    expect(waits[5]).toBeLessThan(175);
+    expect(h.routes.length).toBe(plans + 6);
+    // A route nobody leaves for over a minute: the streak is spent, and the wait is back to 10 s.
+    h.tick(90_000);
+    expect(driveOff()).toBeGreaterThanOrEqual(1);
+    expect(driveOff()).toBeLessThanOrEqual(12);
+  });
+
   test("a destination without a road route fails, and says why", () => {
     const h = harness();
     h.move(0.5, 0);

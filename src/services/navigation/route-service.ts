@@ -27,6 +27,14 @@ const SLICE_MS = 32;
 const FIRST_SLICE_STATES = 1000;
 /** After a plan, the next one for leaving the route waits at least this long. */
 const REPLAN_COOLDOWN_MS = 10_000;
+/**
+ * A plan whose route goes off again within this long of being made did not fix anything: the route was never the
+ * problem, the position was. Each such repeat doubles the wait, up to `REPLAN_COOLDOWN_MAX_MS`, and a route that
+ * stays on longer than this clears the streak. Under jamming on 2026-10-06 the flat 10 s cooldown re-planned a
+ * 62 km route 25 times in 12 min, each from a dot several kilometres from the car, at 700-780 ms a plan.
+ */
+const REPLAN_SETTLED_MS = 60_000;
+const REPLAN_COOLDOWN_MAX_MS = 160_000;
 /** "Arrived" stays on the map this long, then the route ends. */
 const ARRIVED_LINGER_MS = 60_000;
 /** The active route's destination, kept so a restarted app (iOS may end it mid-drive) picks the route up again. */
@@ -143,6 +151,10 @@ export class RouteService {
   /** The search in progress: its id and how to cancel the next slice. */
   private planning: { id: number; cancel: () => void } | null = null;
   private lastPlanAt = -Infinity;
+  /** Off-route plans in a row whose route went off again before `REPLAN_SETTLED_MS`; doubles the wait each time. */
+  private replanStreak = 0;
+  /** When the route of the last plan first went off (null: not yet). */
+  private offSincePlanAt: number | null = null;
   private unsubscribe: (() => void) | null = null;
   private notedState: GuidanceState | null = null;
   /** For the arrival note: when the route started, the first plan's time and length, and the distance driven. */
@@ -274,7 +286,11 @@ export class RouteService {
     const search = new RouteSearch(graph.graph, frame, from, s.destination);
     const startedAt = this.now();
     let slices = 0;
+    // Measured from when the last plan's route went off, not from this plan: the wait itself must not end the streak.
+    const quick = this.offSincePlanAt !== null && this.offSincePlanAt - this.lastPlanAt < REPLAN_SETTLED_MS;
+    this.replanStreak = reason === "off-route" && quick ? this.replanStreak + 1 : 0;
     this.lastPlanAt = startedAt;
+    this.offSincePlanAt = null;
     if (reason === "off-route") this.set({ ...s, replanning: true });
     const step = () => {
       if (this.planning?.id !== id) return;
@@ -432,9 +448,24 @@ export class RouteService {
     });
     this.noteState(step, p);
     this.set({ ...s, guidance: step });
-    if (step.state === "off" && !this.planning && this.now() - this.lastPlanAt >= REPLAN_COOLDOWN_MS) this.plan("off-route");
+    if (step.state === "off" && !this.planning) this.offSincePlanAt ??= this.now();
+    if (step.state === "off" && !this.planning && this.mayReplan(p)) this.plan("off-route");
     if (step.state === "arrived" && !this.arrivedTimer) this.arrivedTimer = this.defer(() => this.stop(), ARRIVED_LINGER_MS);
   };
+
+  /**
+   * Is leaving the route worth a new one? Only when the position is fit to say the car left it.
+   *
+   * While map matching is `offroad` the filter itself says the dot is not on any road, so "off route" means "I
+   * lost the car", not "the car turned" — and a plan from a dot beside the road starts off it and goes off again
+   * at once. On 2026-10-06, 16 km into a jammed drive, a 95° turn the route itself asked for landed 62 m short of
+   * the junction, the filter went off-road, and four plans went out in 31 s while it recovered on its own.
+   */
+  private mayReplan(p: PositionEstimate): boolean {
+    if (p.mapMatch === "offroad") return false;
+    const wait = Math.min(REPLAN_COOLDOWN_MS * 2 ** this.replanStreak, REPLAN_COOLDOWN_MAX_MS);
+    return this.now() - this.lastPlanAt >= wait;
+  }
 
   /** Guidance state changes into the trip log; `leaving` ↔ `on` flickers only as a count at the end. */
   private noteState(step: GuidanceStep, p: PositionEstimate): void {

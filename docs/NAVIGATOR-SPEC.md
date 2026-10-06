@@ -156,13 +156,47 @@ jammed:
   - Wrong poses: 300 m off is dropped by the first fix; a heading turned 180° is dropped on all 3; 90° on 2 of 3
     (on the jammed one, coarse fixes pulled the heading round instead).
 
+### 6.1a The track doubted
+
+- **Why:** the pose checks above stop at 150 m, and after that nothing asks whether the dot is still anywhere near
+  the car. `accuracyM` cannot: it is the filter's own spread (the EKF's σ, or the dominant hypothesis'), which stays
+  a few metres however wrong the dot is. On 2026-10-06 the dot ran away over one 12-minute drive (2.8 → 10.5 km from
+  the coarse fixes), then stood 10 km out at ±5 m for 12 min at a filling station, and nothing in the app — map,
+  routing, or the chip that would have let the driver fix it — had any reason to think otherwise.
+- **Raised** (`Navigator.positionDoubtM`): `coarseDoubtFixes` (3) Wi-Fi/cell fixes in a row land further from the
+  track than `coarseDoubtShare` (2) × their own accuracy. A coarse fix is a kilometre-wide blob under jamming, so a
+  dot inside one says nothing and a single one outside says little; three agreeing that the car is several blobs
+  away is the only evidence available that the track is lost. Satellite fixes are not counted (integrity and the EKF
+  gate judge those); one the EKF takes clears the doubt, as does a coarse fix that agrees, as does any restart of
+  the track.
+- **Published** as the dot's radius (`puckAccuracyM`, shared with the replay tools): the larger of the filter's
+  spread and the doubt. The circle then reads honestly, and the "Set your position on the map" chip is offered
+  (§6.2).
+- **Measured** (`replay:doubt`, every log kept: 36 drives, 35 833 published positions, 453 coarse fixes weighed,
+  20 of them jammed throughout) against the dot the app itself published, because a fresh single-trip replay
+  cannot reproduce an error carried in from earlier trips, which is how 2026-10-06's 10 km came about. A run of 3
+  at 2× fires on **one** drive — p7qgih, the one whose dot ran away, raised at 248 s already 8.1 km out, 8 min
+  before the car parked and 20 before GPS came back — and on no other, with no false positive anywhere. The longest
+  run elsewhere is 1, including the 58 km drive that dead reckoned the whole way with its dot inside the coarse
+  circles throughout (4 of 331 fixes outside, worst 3.8 km).
+- Notes `nav position doubted: Wi-Fi/cell fixes put the car N m from the dead reckoning`, `… doubt cleared: …`.
+
 ### 6.2 Placed by the driver
 
 - **Why:** under jamming nothing else may say where the car is: no parked pose (a new car, or it was moved), Wi-Fi
   fixes hundreds of metres off. The driver knows.
-- **Offered** only while the car stands (speed < 1 m/s): a chip "Set your position on the map" when there is no GPS and
-  the position is rougher than 75 m or has no direction; and after answering "No" to "Is the car where the dot is?"
-  (§6.1). Driving off cancels it. Never offered while moving.
+- **Offered** only while the car stands (speed < 1 m/s): a chip "Set your position on the map" when there is no GPS
+  and nothing vouches for the dot — it is rougher than 75 m, or has no direction, or map matching is `offroad`, or
+  more than 5 km have been driven since the last trusted fix; and after answering "No" to "Is the car where the dot
+  is?" (§6.1). Driving off cancels it. Never offered while moving.
+  > `accuracyM` alone was the whole rule until 2026-10-06, and it is the filter's own spread, which stays a few
+  > metres however wrong the dot is. Over that day's 2 h 11 min without a satellite fix — the dot up to 10 km out,
+  > 12 min of it standing at a filling station at ±5 m — the chip was offerable in 3 of 20 792 position samples,
+  > so the driver could not correct it and gave up on the app. `offroad` and the dead-reckoning distance are the
+  > honest signals. Over every log kept (`replay:doubt`, 36 drives, 35 833 published positions, 30 % of them
+  > standing) the offer goes from 3.4 % of positions to 14.6 %, and every bit of that is on a jammed drive: the
+  > clean ones are unchanged (0–2.3 %, and 0 % on the five with full satellite coverage), while the filling-station
+  > stop goes 0.1 → 97.5 %, the crawl before it 0 → 98.6 %, and the two long drives sit at 2.8 % and 5.4 %.
 - **Placing:** the map zooms in (18, flat, north up) on the dot with a pin fixed at the screen centre; the driver drags
   the map until the pin is on the car, "Here". Then "tap where the front of the car points": an arrow from the pin
   shows the heading, another tap turns it, "Confirm" applies it. A placing always has a heading: Confirm is disabled

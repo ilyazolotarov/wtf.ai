@@ -75,7 +75,8 @@
     "route": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/route.ts",
     "route:bench": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/route-bench.ts",
     "route:sim": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/guidance-sim.ts",
-    "search": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/search.ts"
+    "search": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/search.ts",
+    "replay:doubt": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/doubt-bench.ts"
   },
   "jest": {
     "preset": "jest-expo"

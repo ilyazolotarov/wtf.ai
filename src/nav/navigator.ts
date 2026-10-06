@@ -82,6 +82,15 @@ export interface NavConfig {
   poseRejectCoarse: number;
   /** …after driving this far: a fix taken while parked says nothing about the heading. */
   poseConfirmDistanceM: number;
+  /**
+   * The dead reckoning is in doubt once this many Wi-Fi/cell fixes in a row land further from it than
+   * `coarseDoubtShare` × their own accuracy (`positionDoubtM`). Coarse fixes are kilometre-wide blobs under
+   * jamming, so a dot inside one says nothing — but a dot several blobs away says the track is lost, and
+   * nothing else does: the EKF reports its own spread, which stays a few metres however wrong the dot is.
+   * Only the parked pose was ever checked this way, and only over its first 150 m (§6.1).
+   */
+  coarseDoubtShare: number;
+  coarseDoubtFixes: number;
   ekf: Partial<EkfConfig>;
   gnssLag: Partial<GnssLagConfig>;
   imu: Partial<ImuConfig>;
@@ -178,6 +187,11 @@ export const DEFAULT_NAV_CONFIG: NavConfig = {
   poseConfirmAccuracyM: 100,
   poseConfirmDistanceM: 150,
   poseRejectCoarse: 3,
+  // 2026-10-06, 2 h 11 min of jamming over nine trips: a run of 3 fires on the one trip whose dot ran away
+  // (2.8 → 10.5 km, raised 4.4 km out from a ±205 m fix) and on no other — the longest run elsewhere is 1,
+  // including the 58 km drive that dead reckoned correctly the whole way.
+  coarseDoubtShare: 2,
+  coarseDoubtFixes: 3,
   ekf: {},
   gnssLag: {},
   imu: {},
@@ -232,6 +246,11 @@ export interface NavEstimate {
   speedMps?: number;
   /** Map matching (MAPMATCH-SPEC §6.2), when a road graph is set and the filter runs. */
   mapMatch?: MapMatchEstimate;
+  /**
+   * The Wi-Fi/cell fixes agree the car is nowhere near this track, and this is how far they put it
+   * (`positionDoubtM`): the dot's radius instead of `accuracyM`, which only ever reports the filter's spread.
+   */
+  doubtM?: number;
 }
 
 export interface MapMatchEstimate {
@@ -386,6 +405,9 @@ export class Navigator {
   private poseDoubt: { fix: GnssFix; sigma: number } | null = null;
   private lastFix: GnssFix | null = null;
   private rejectedSat = 0;
+  /** Wi-Fi/cell fixes in a row that landed far outside their own accuracy from the track (`coarseDoubtShare`). */
+  private coarseDoubted = 0;
+  private doubtM: number | null = null;
   /** Speed scale for the next EKF start: a stored per-car value, or the one learned before a reset. */
   /** The OBD speed calibration the next EKF starts from (stored per car; carried over a reset). */
   private speedScale: { ks: number; ksVar: number; so?: number; soVar?: number } | null = null;
@@ -460,6 +482,15 @@ export class Navigator {
   get distanceSinceTrustedM(): number | undefined {
     const d = this.integrity.lastTrustedDistanceM;
     return d === undefined ? undefined : this.stats.obdDistanceM - d;
+  }
+
+  /**
+   * How far the Wi-Fi/cell fixes put the car from the track, once `coarseDoubtFixes` of them in a row agree it is
+   * nowhere near (null: no reason to doubt it). Published as the position's accuracy, because it is the honest one:
+   * the track is somewhere in a circle this wide, not within the EKF's few metres of spread.
+   */
+  get positionDoubtM(): number | null {
+    return this.doubtM;
   }
 
   /**
@@ -758,6 +789,7 @@ export class Navigator {
         headingSigmaRad: this.ekf.psiSigma,
         speedMps: Math.max(0, this.ekf.speed),
         ...(this.pf?.isActive ? { mapMatch: this.mapMatchEstimate(this.frame) } : {}),
+        ...(this.doubtM === null ? {} : { doubtM: this.doubtM }),
       };
     }
     if (this.anchor) {
@@ -1256,6 +1288,8 @@ export class Navigator {
     this.ekfHistory.clear();
     if (this.lastTUs !== null) this.ekfHistory.push(this.lastTUs, [this.ekf.east, this.ekf.north, this.ekf.psi, this.ekf.speed]);
     this.twin = null;
+    // A track that starts afresh is not the one the coarse fixes disagreed with.
+    this.clearDoubt();
     this.syncTwin();
     this.alignPoints = [];
     this.poseUnverifiedFromM = null;
@@ -1279,6 +1313,7 @@ export class Navigator {
     const pos = ekf.updatePosition(rE, rN, sigma, c.gate);
     const outcome: FixOutcome = { status: pos.accepted ? "accepted" : "rejected", errorM: Math.hypot(rE, rN), predictedSigmaM, nis: pos.nis };
     const sat = isSatelliteFix(fix);
+    this.noteCoarseDoubt(sat, pos.accepted, outcome.errorM!, fix.hAccM);
     if (this.poseUnverifiedFromM !== null) {
       if (!pos.accepted && (sat || ++this.poseCoarseRejected >= c.poseRejectCoarse)) {
         // The car isn't where it was parked: a pose frozen from it would be wrong too.
@@ -1311,6 +1346,30 @@ export class Navigator {
       }
     }
     return outcome;
+  }
+
+  /**
+   * Is the track still anywhere near where the phone thinks the car is? A satellite fix that the EKF took settles
+   * it. A Wi-Fi/cell fix is a kilometre-wide blob under jamming, so one landing outside it means little, but
+   * `coarseDoubtFixes` in a row mean the track is lost and nobody else will say so.
+   */
+  private noteCoarseDoubt(sat: boolean, accepted: boolean, errorM: number, hAccM: number): void {
+    const c = this.config;
+    // A satellite fix the EKF took is the answer; one it gated is left to `resetAfterRejected`, not to this.
+    if (sat) {
+      if (accepted) this.clearDoubt();
+      return;
+    }
+    if (errorM <= c.coarseDoubtShare * hAccM) {
+      this.clearDoubt();
+      return;
+    }
+    if (++this.coarseDoubted >= c.coarseDoubtFixes) this.doubtM = errorM;
+  }
+
+  private clearDoubt(): void {
+    this.coarseDoubted = 0;
+    this.doubtM = null;
   }
 
   /** The twin takes every fix the main EKF is offered, through its own gate; it never resets the navigator. */
@@ -1360,6 +1419,7 @@ export class Navigator {
     this.alignPoints = [];
     this.rejectedSat = 0;
     this.poseUnverifiedFromM = null;
+    this.clearDoubt();
     this.stats.resets++;
     this.pf?.stop();
     this.startMapMatchAtAnchor();
