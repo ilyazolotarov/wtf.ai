@@ -299,7 +299,7 @@ export function MapSurface({
       : emptyPolygons();
   const placedOpacity = placedMark?.draft ? 1 : 0.45;
 
-  // Dark style is still being tinted: hold a plain dark canvas instead of flashing light tiles.
+  // No offline region yet (the map-setup screen asks for one): a plain canvas, never online tiles.
   if (mapStyle == null)
     return <View style={{ flex: 1, backgroundColor: palette.bg }} />;
 

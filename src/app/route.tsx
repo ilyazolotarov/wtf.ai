@@ -1,5 +1,5 @@
 import { router } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, TextInput, View } from "react-native";
 
 import {
@@ -18,27 +18,24 @@ import {
 } from "@/components/status/format-geo";
 import { formatDurationS, PROBLEM_TEXT } from "@/components/route/guidance-text";
 import { resultDetail, resultTitle } from "@/components/route/search-text";
-import { Icon } from "@/components/ui/icon";
+import { Icon, type IconName } from "@/components/ui/icon";
 import { T } from "@/components/ui/text";
 import { Font, Radius, usePalette } from "@/constants/theme";
+import type { Strings } from "@/i18n/en";
 import { useT } from "@/i18n/provider";
 import { bearingRad, haversineM, type Coordinate } from "@/nav/geo";
 import type { SearchResult } from "@/nav/search/search-index";
+import { inBounds, places, usePlaces } from "@/providers/places";
 import { usePosition } from "@/providers/position-provider";
 import { destinations, useRoute } from "@/providers/route-provider";
+import type { Place, SavedKind } from "@/services/navigation/places-store";
 import { useMapPacks } from "@/services/offline-map/map-packs";
 import { activeSearchIndex } from "@/services/offline-map/search-file";
 
-const KYIV = { lat: 50.4501, lon: 30.5234 };
 /** Search after typing pauses this long (ms). */
 const SEARCH_DELAY_MS = 120;
-
-/** A list entry: a city from the built-in list or a search result. */
-interface Pick extends Coordinate {
-  id: string;
-  title: string;
-  detail: string | null;
-}
+const SAVED_ICON: Record<SavedKind, IconName> = { home: "home", work: "work", favorite: "star" };
+const SAVED_TITLE: Partial<Record<SavedKind, keyof Strings>> = { home: "placeHome", work: "placeWork" };
 
 /** Offline search of the active region as the query changes; null when the region has no index. */
 function useAddressSearch(query: string, near: Coordinate | null): SearchResult[] | null {
@@ -67,30 +64,64 @@ function useAddressSearch(query: string, near: Coordinate | null): SearchResult[
   return found.query === query ? found.results : [];
 }
 
+/** The active region's cities and towns from its search index; null without one (older releases). */
+function useMajorSettlements(region: string | null): Place[] | null {
+  const { language, t } = useT();
+  const index = activeSearchIndex();
+  return useMemo(() => {
+    if (!index) return null;
+    try {
+      return index.majorSettlements(8).map((r) => ({
+        id: `search:${r.key}`,
+        title: resultTitle(r, language),
+        detail: resultDetail(r, language, t),
+        lat: r.lat,
+        lon: r.lon,
+      }));
+    } catch (e) {
+      console.warn(`major settlements: ${e instanceof Error ? e.message : String(e)}`);
+      return null;
+    }
+    // `region` re-reads when the active region changes (the index is cached per file).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [index, region, language]);
+}
+
 export default function RouteScreen() {
   const { t, language } = useT();
   const palette = usePalette();
   const position = usePosition();
   const { route, startRoute, stopRoute } = useRoute();
+  const { installed } = useMapPacks();
+  const { saved, recent } = usePlaces();
   const routeId = route?.destination.id ?? null;
-  const [selected, setSelected] = useState<Pick | null>(() => {
+  const region = installed.active ? installed.regions[installed.active] : null;
+  const bounds = region?.bounds ?? null;
+  const [selected, setSelected] = useState<Place | null>(() => {
     const d = route?.destination;
-    if (!d?.id) return null;
-    const city = destinations.find(({ id }) => id === d.id);
-    return { id: d.id, title: city ? city.name[language] : (d.name ?? ""), detail: null, lat: d.lat, lon: d.lon };
+    return d?.id ? { id: d.id, title: d.name ?? "", detail: null, lat: d.lat, lon: d.lon } : null;
   });
   const [query, setQuery] = useState("");
-  const origin = position ?? KYIV;
+  // Distances from the car; without a fix, from the region's middle.
+  const origin: Coordinate =
+    position ?? (bounds ? { lat: (bounds[1] + bounds[3]) / 2, lon: (bounds[0] + bounds[2]) / 2 } : { lat: 50.45, lon: 30.52 });
   const searched = useAddressSearch(query, position);
+  const majors = useMajorSettlements(installed.active);
   const summary = (d: Coordinate) => {
     const distanceM = haversineM(origin, d);
     const bearing = toDegrees(bearingRad(origin, d));
     return { distanceM, bearing };
   };
   const q = query.trim().toLocaleLowerCase();
-  // With the region's index: what it finds (the city list while the field is empty).
-  const picks: Pick[] =
-    searched && q
+  // Only what a route can reach: places inside the active region.
+  const reachable = <P extends Coordinate>(list: P[]) => list.filter((p) => inBounds(bounds, p));
+  // The region's cities: from its search index, else the built-in list inside its bounds.
+  const cities: Place[] =
+    majors ??
+    reachable(destinations).map((d) => ({ id: d.id, title: d.name[language], detail: null, lat: d.lat, lon: d.lon }));
+  const results: Place[] | null = !q
+    ? null
+    : searched
       ? searched.map((r) => ({
           id: `search:${r.key}`,
           title: resultTitle(r, language),
@@ -98,9 +129,46 @@ export default function RouteScreen() {
           lat: r.lat,
           lon: r.lon,
         }))
-      : destinations
-          .filter(({ name }) => `${name.en} ${name.uk}`.toLocaleLowerCase().includes(q))
-          .map((d) => ({ id: d.id, title: d.name[language], detail: null, lat: d.lat, lon: d.lon }));
+      : cities.filter((c) => c.title.toLocaleLowerCase().includes(q));
+  const savedHere = reachable(saved);
+  const recentHere = reachable(recent);
+  const selectedSaved = selected ? places.savedAt(selected) : null;
+
+  const row = (d: Place, key: string, options: { icon?: IconName; title?: string; detail?: string | null } = {}) => {
+    const { distanceM, bearing } = summary(d);
+    const where = `${formatDistance(distanceM, language)} · ${cardinal(bearing, language)}`;
+    const detail = options.detail === undefined ? d.detail : options.detail;
+    return (
+      <Pressable
+        key={key}
+        onPress={() => setSelected(d)}
+        accessibilityRole="button"
+        style={({ pressed }) => [styles.destination, pressed && styles.pressed]}
+      >
+        {options.icon && (
+          <View style={[styles.rowIcon, { backgroundColor: palette.accentA }]}>
+            <Icon name={options.icon} size={15} color={palette.accent} />
+          </View>
+        )}
+        <View style={styles.destinationCopy}>
+          <T w="semibold" size={16} numberOfLines={2}>
+            {options.title ?? d.title}
+          </T>
+          <T size={12} color={palette.text2} numberOfLines={1}>
+            {detail ? `${detail} · ${where}` : where}
+          </T>
+        </View>
+        {routeId === d.id && (
+          <View style={[styles.badge, { backgroundColor: palette.accentA }]}>
+            <T w="semibold" size={11} color={palette.accent}>
+              {t("activeRoute")}
+            </T>
+          </View>
+        )}
+        <Icon name="chevron_right" size={14} color={palette.text2} />
+      </Pressable>
+    );
+  };
 
   return (
     <ScreenContent title={t("route")}>
@@ -120,46 +188,51 @@ export default function RouteScreen() {
         />
       </View>
 
-      {!selected && (
+      {!selected && results && (
         <ScreenSection>
-          {picks.length === 0 ? (
+          {results.length === 0 ? (
             <View style={styles.empty}>
               <T size={14} color={palette.text2}>
-                {t(searched && q ? "noSearchResults" : "noDestinations")}
+                {t(searched ? "noSearchResults" : "noDestinations")}
               </T>
             </View>
           ) : (
-            picks.map((d) => {
-              const { distanceM, bearing } = summary(d);
-              const where = `${formatDistance(distanceM, language)} · ${cardinal(bearing, language)}`;
-              return (
-                <Pressable
-                  key={d.id}
-                  onPress={() => setSelected(d)}
-                  accessibilityRole="button"
-                  style={({ pressed }) => [styles.destination, pressed && styles.pressed]}
-                >
-                  <View style={styles.destinationCopy}>
-                    <T w="semibold" size={16} numberOfLines={2}>
-                      {d.title}
-                    </T>
-                    <T size={12} color={palette.text2} numberOfLines={1}>
-                      {d.detail ? `${d.detail} · ${where}` : where}
-                    </T>
-                  </View>
-                  {routeId === d.id && (
-                    <View style={[styles.badge, { backgroundColor: palette.accentA }]}>
-                      <T w="semibold" size={11} color={palette.accent}>
-                        {t("activeRoute")}
-                      </T>
-                    </View>
-                  )}
-                  <Icon name="chevron_right" size={14} color={palette.text2} />
-                </Pressable>
-              );
-            })
+            results.map((d) => row(d, d.id))
           )}
         </ScreenSection>
+      )}
+
+      {!selected && !results && (
+        <>
+          {savedHere.length > 0 && (
+            <ScreenSection title={t("savedPlaces")}>
+              {savedHere.map((p) => {
+                const title = SAVED_TITLE[p.kind];
+                return row(p, `saved:${p.id}`, {
+                  icon: SAVED_ICON[p.kind],
+                  ...(title ? { title: t(title), detail: p.title } : {}),
+                });
+              })}
+            </ScreenSection>
+          )}
+          {recentHere.length > 0 && (
+            <ScreenSection title={t("recentPlaces")}>
+              {recentHere.map((p) => row(p, `recent:${p.id}`, { icon: "history" }))}
+            </ScreenSection>
+          )}
+          {recentHere.length > 0 && <ScreenLink label={t("clearRecent")} onPress={() => places.clearRecent()} />}
+          <ScreenSection title={region ? `${t("regionCities")} · ${region.name[language]}` : t("regionCities")}>
+            {cities.length === 0 ? (
+              <View style={styles.empty}>
+                <T size={14} color={palette.text2}>
+                  {t("noDestinations")}
+                </T>
+              </View>
+            ) : (
+              cities.map((d) => row(d, `city:${d.id}`))
+            )}
+          </ScreenSection>
+        </>
       )}
 
       {selected && (
@@ -202,10 +275,26 @@ export default function RouteScreen() {
               labelKey="startGuidance"
               icon="navigation"
               onPress={() => {
+                places.addRecent(selected);
                 startRoute({ lat: selected.lat, lon: selected.lon, name: selected.title, id: selected.id });
                 router.back();
               }}
             />
+          )}
+          {selectedSaved ? (
+            <View style={styles.saveRow}>
+              <Icon name={SAVED_ICON[selectedSaved.kind]} size={16} color={palette.accent} />
+              <T size={14} color={palette.text2} style={styles.flex}>
+                {t(selectedSaved.kind === "home" ? "savedAsHome" : selectedSaved.kind === "work" ? "savedAsWork" : "savedPlace")}
+              </T>
+              <ScreenLink label={t("removeSaved")} onPress={() => places.unsave(selected)} />
+            </View>
+          ) : (
+            <View style={styles.saveRow}>
+              <ScreenAction labelKey="placeHome" icon="home" compact secondary onPress={() => places.save(selected, "home")} />
+              <ScreenAction labelKey="placeWork" icon="work" compact secondary onPress={() => places.save(selected, "work")} />
+              <ScreenAction labelKey="savePlace" icon="star_border" compact secondary onPress={() => places.save(selected, "favorite")} />
+            </View>
           )}
           <ScreenLink label={t("chooseAnotherCity")} onPress={() => setSelected(null)} />
         </ScreenCard>
@@ -248,6 +337,9 @@ const styles = StyleSheet.create({
   badge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: Radius.pill },
   selected: { gap: 18, paddingTop: 18 },
   selectedHead: { gap: 4 },
+  saveRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 },
+  flex: { flex: 1 },
+  rowIcon: { width: 30, height: 30, borderRadius: 15, alignItems: "center", justifyContent: "center" },
   selectedName: { letterSpacing: -0.56 },
   metrics: { flexDirection: "row", gap: 10 },
   metric: { flex: 1, gap: 4 },

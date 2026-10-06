@@ -22,13 +22,13 @@ Get a visible, working app on the iPhone fast:
 | Topic      | Decision                                                                                                                                        |
 | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | Build      | No dev build yet → first step is an EAS dev build. MapLibre does not run in Expo Go.                                                            |
-| Map tiles  | **OpenFreeMap** online vector styles (no API key) for now. Style URLs live in one config file so offline PMTiles can replace them later.        |
+| Map tiles  | OpenFreeMap **Liberty** style on offline PMTiles of the downloaded region (SPEC §3.8); no online map since 2026-10-06.                      |
 | Navigation | **Map-first**: full-screen map with floating controls; other screens are stack routes presented as sheets/modals. Remove template `NativeTabs`. |
 | Mocks      | Static placeholder data only (no simulated scenarios).                                                                                          |
 | Language   | English + Ukrainian, i18n-ready. Default from device locale, user override in Settings.                                                         |
 | Theme      | Follow system light/dark; map style switches too.                                                                                               |
 | Units      | SI internally (m, s, rad, m/s). Convert to km/h, km/m, degrees only in UI.                                                                      |
-| Privacy    | OpenFreeMap leaks map viewport to a third party → **dev-only exception** to SPEC §2 privacy rule. Record in SPEC §9; remove with offline tiles. |
+| Privacy    | Offline map only: no map requests while driving or browsing. GitHub is contacted for the catalog and downloads only.                       |
 
 ## 3. Phase 0 — Dev build foundation
 
@@ -191,11 +191,18 @@ Parallel with Phase 3; each screen is independent. Use `@expo/ui` for settings-l
 
 ### 7.1 `route`
 
-- Search field: with the active region's search index (SEARCH-SPEC §6), places, streets, house numbers and POIs
-  from it, each with what it is, its settlement, distance and direction; without one, a list of cities filtered by
-  their EN and UK names, and a note to download the region.
+- Field empty (2026-10-06), only what a route can reach (inside the active region's bounds):
+  - **Saved**: Home, Work, then favourites (`src/services/navigation/places-store.ts`, kv-store `places.saved`).
+  - **Recent**: the last 10 destinations guided to from this screen, newest first, one per place (within 30 m);
+    "Clear recent" (kv-store `places.recent`).
+  - **Cities · <region>**: the region's 8 largest cities and towns from its search index
+    (`SearchIndex.majorSettlements`); without an index, the built-in city list inside the region's bounds.
+- Typing: with the region's search index (SEARCH-SPEC §6), places, streets, house numbers and POIs from it, each
+  with what it is, its settlement, distance and direction; without one, the cities above filtered by name, and a
+  note to download the region again.
 - Selected result or city → summary card: straight-line distance, bearing and time at 60 km/h; once its route is planned, the
-  road distance and the planned time.
+  road distance and the planned time. Under it: **Home**, **Work**, **Save** (a place is saved under one kind;
+  setting Home or Work replaces the old one), or "Saved as Home · Remove" once saved.
 - "Start guidance" plans a road route from the position (ROUTING-SPEC, `runtime.routes`, `useRoute()` in
   `src/providers/route-provider.tsx`) and returns to the map; "Stop guidance" ends it. A failed plan says why.
 - Footnote: long-press the map to route anywhere; routes stay inside the downloaded region.
@@ -215,8 +222,11 @@ Parallel with Phase 3; each screen is independent. Use `@expo/ui` for settings-l
 
 ### 7.4 `downloads`
 
-- Packs: "Map tiles — Ukraine", "Routing data — Ukraine" with mock size, version, status "Not downloaded"; Download disabled.
-- Note: "Using online map (development)".
+- Regions of the newest map release (README of `tools/tiles`): download, pause, resume, delete, switch the active
+  one, update; the catalog source (GitHub or a PC's `tiles serve`).
+- **No online map** (2026-10-06): the map draws only the active offline region. Until one is usable, the
+  `map-setup` screen (full-screen, no close or swipe; after onboarding) shows the same region list with "Download a
+  map" above it, and closes itself once the region is installed. Deleting the last region brings it back.
 
 ### 7.5 `debug`
 
@@ -228,7 +238,7 @@ Parallel with Phase 3; each screen is independent. Use `@expo/ui` for settings-l
 
 - Language: System / English / Українська (persisted).
 - Appearance: follows system (info only).
-- Privacy statement (all data on device; dev-only online map exception).
+- Privacy statement (all data on device; maps downloaded once, then offline).
 - About: app version (`expo-constants`).
 
 ## 8. Verification

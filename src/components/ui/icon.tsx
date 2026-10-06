@@ -44,6 +44,11 @@ const SF = {
   roundabout_left: "arrow.counterclockwise",
   flag: "flag.checkered",
   place: "mappin.and.ellipse",
+  home: "house.fill",
+  work: "briefcase.fill",
+  star: "star.fill",
+  star_border: "star",
+  history: "clock.arrow.circlepath",
   volume_up: "speaker.wave.2.fill",
   volume_off: "speaker.slash.fill",
 } as const satisfies Record<string, SFSymbol>;

@@ -129,6 +129,9 @@ expected several times slower; an oblast is about a 25th of this.
   address), what it is and its settlement, distance and direction. Picking one shows the
   destination card; Start guidance routes to it (`id` `search:<key>`, the name shown on the
   banner). Without one, the built-in city list and a note to download the region.
+- **Quick picks** (empty field): saved places, recent destinations and the region's largest cities
+  (`SearchIndex.majorSettlements`: the first settlements of the file, cities then towns by population),
+  all limited to the active region (UI-SPEC §7.1).
 
 ## 7. Tools
 
@@ -156,5 +159,5 @@ npm run search -- tools/tiles/out/release/chernihiv.search.bin "Шевченка
 1. Settlements from admin boundaries instead of the nearest place node.
 2. Relations: multipolygon buildings with addresses, place areas.
 3. Typo tolerance (one edit for words of 5+ letters).
-4. Recent destinations.
+4. ~~Recent destinations~~ (done 2026-10-06, with saved places: UI-SPEC §7.1).
 5. Show the result on the map before routing; search from the map screen.
