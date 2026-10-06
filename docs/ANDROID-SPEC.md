@@ -212,5 +212,8 @@ tags and one metric reach `environment=ci`.
   SPP) is confirmed from the first trip log; both are implemented in M3.
 - No developer program is needed: the APK is sideloaded. Google Play would need a $25 account and a 14-day closed test
   with 12 testers; not planned.
-- Open: generate the signing keystore and add the four secrets (we provide the exact commands at M4).
+- Open: generate the signing key and add the four secrets: `bash scripts/android-keystore.sh` creates the key outside the
+  repo and prints the `gh secret set` commands. Then Actions → CI → Run workflow with `android = tester` (Telegram
+  delivery if its secrets are set). The tester variant (arm64 + armeabi-v7a) is not exercised by branch CI, because
+  `workflow_dispatch` only runs workflows already on `main`; its first run happens after the merge.
 - Open: testers' phone models, once known, refine the matrix.
