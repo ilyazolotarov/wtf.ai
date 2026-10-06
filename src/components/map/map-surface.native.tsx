@@ -90,6 +90,8 @@ const FOLLOW_CAMERA: Record<
 const FREE_ZOOM = 15.5;
 
 const ROUTE_LAYOUT = { "line-cap": "round", "line-join": "round" } as const;
+/** Butt caps keep the dashes crisp (round caps would grow each dash into the next gap). */
+const ROUTE_HEAD_LAYOUT = { "line-cap": "butt", "line-join": "round" } as const;
 
 export function MapSurface({
   mode,
@@ -305,6 +307,12 @@ export function MapSurface({
       : emptyLines();
   const routeCasing = { "line-color": palette.bg, "line-width": 9, "line-opacity": route?.replanning ? 0.4 : 0.9 };
   const routePaint = { "line-color": palette.route, "line-width": 6, "line-opacity": route?.replanning ? 0.4 : 1 };
+  const routeHeadPaint = {
+    "line-color": palette.accent,
+    "line-width": 5,
+    "line-dasharray": [1.5, 1],
+    "line-opacity": route?.replanning ? 0.4 : 1,
+  };
   const nextManeuver =
     route?.maneuvers && route.guidance && route.guidance.state !== "arrived"
       ? route.maneuvers[route.guidance.nextIndex]
@@ -364,10 +372,9 @@ export function MapSurface({
         <Layer id="active-route-casing" type="line" layout={ROUTE_LAYOUT} paint={routeCasing} />
         <Layer id="active-route-line" type="line" layout={ROUTE_LAYOUT} paint={routePaint} />
       </GeoJSONSource>
-      {/* Its casing goes under both lines, or its round end would cut a notch where the two meet. */}
+      {/* The stretch the car is on: dashed accent, no casing (a casing reads as a grey or dark bar here). */}
       <GeoJSONSource id="active-route-head" data={routeHead}>
-        <Layer id="active-route-head-casing" type="line" beforeId="active-route-line" layout={ROUTE_LAYOUT} paint={routeCasing} />
-        <Layer id="active-route-head-line" type="line" layout={ROUTE_LAYOUT} paint={routePaint} />
+        <Layer id="active-route-head-line" type="line" layout={ROUTE_HEAD_LAYOUT} paint={routeHeadPaint} />
       </GeoJSONSource>
       <GeoJSONSource id="route-next-maneuver" data={maneuverPoint}>
         <Layer

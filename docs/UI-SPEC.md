@@ -196,8 +196,8 @@ One small component each. Touch targets ≥ 56 pt; high contrast; minimal text.
   and the distance, time and arrival clock left; or "Planning route…", "Off route, planning again…", "Position
   uncertain: keeping the route", "No route" with the reason, "You've arrived". Its × ends the route; its speaker
   button mutes the spoken maneuvers (ROUTING-SPEC §8.5). The map draws the route ahead of the car (from its
-  progress point, ROUTING-SPEC §8.1: what is driven disappears; faded while planning again), its next maneuver and
-  the destination.
+  progress point, ROUTING-SPEC §8.1: what is driven disappears; faded while planning again; the stretch from the
+  progress point to the next route vertex is dashed in the accent blue), its next maneuver and the destination.
 
 ## 7. Phase 4 — Mock screens
 
