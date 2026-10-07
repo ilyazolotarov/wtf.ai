@@ -4,20 +4,23 @@
 // Bound to localhost only: the logs hold the VIN and GPS tracks.
 
 import { exec } from "node:child_process";
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { createServer, type ServerResponse } from "node:http";
+import { existsSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { mergeCalibrations, type CompassCalibration } from "../../../src/nav/compass/compass";
+import { LocalFrame } from "../../../src/nav/geo/local-frame";
+import type { TiledRoadGraph } from "../../../src/nav/mapmatch/graph/road-graph";
 import type { NavConfig } from "../../../src/nav/navigator";
+import { drawnTruthTrack, drawPath, type DrawnPoint, type DrawnTruth } from "../../../src/nav/replay/drawn-truth";
 import { appOutageCuts, replayTrip, type ReplayOptions } from "../../../src/nav/replay/replay";
 import { buildViewerData } from "../../../src/nav/replay/viewer-data";
 import { replayTripInApp, MemoryKeyValueStore, phoneOf } from "../../../src/services/navigation/app-replay";
 import { CalibrationStore } from "../../../src/services/navigation/calibration-store";
 import type { MapMatchLoop } from "../../../src/services/navigation/navigator-service";
-import type { ActiveRoadGraph } from "../../../src/services/offline-map/road-graph-file";
 import { readTripLog, type TripLog } from "../../../src/triplog/trip-log-reader";
+import { carOf, graphFor as graphForTrip, regionPoint } from "../app-chain";
 import { findGraph, openGraph, roadsAround, truthRoute } from "../graph-file";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -54,34 +57,8 @@ function compassFromOtherLogs(file: string): { calibration: CompassCalibration; 
   return cals.length ? { calibration: cals.reduce((a, b) => mergeCalibrations(a, b)), logs: cals.length } : null;
 }
 
-/**
- * Where a log's region is, to pick its road graph: the first fix within 500 m, else any fix, else the first
- * position the app published. The app has its region's graph whatever the fixes, so a jammed log without one good
- * fix must still get it here, or its replay runs without map matching and drives through the blocks.
- */
-function regionPoint(trip: TripLog): { lat: number; lon: number } | null {
-  const fix = trip.gnss.find((f) => f.hAccM <= 500) ?? trip.gnss[0];
-  if (fix) return fix;
-  const shown = trip.navEstimate.find((r) => Number.isFinite(r.latDeg) && Number.isFinite(r.lonDeg));
-  return shown ? { lat: shown.latDeg, lon: shown.lonDeg } : null;
-}
-
-/** The road graph a log's region has (null: none), opened for one replay. */
-function graphFor(trip: TripLog): { active: ActiveRoadGraph; close(): void } | null {
-  const first = regionPoint(trip);
-  const graphFile = first ? (GRAPH ?? findGraph(first)) : null;
-  if (!first || !graphFile) return null;
-  const opened = openGraph(graphFile, first);
-  return { active: { key: graphFile, region: path.basename(graphFile, ".graph.bin"), graph: opened.graph }, close: opened.close };
-}
-
-/** The car as the app identifies it (vehicle-link-core): its VIN, else the car last seen on the same OBD protocol. */
-function carOf(trip: TripLog, byProtocol: Map<string, string>): string | null {
-  const vin = typeof trip.info.vehicle_vin === "string" && trip.info.vehicle_vin ? trip.info.vehicle_vin : null;
-  const protocol = String(trip.info.obd_protocol ?? "").replace(/^A/, "");
-  if (vin && protocol) byProtocol.set(protocol, vin);
-  return vin ?? (protocol ? (byProtocol.get(protocol) ?? null) : null);
-}
+/** The road graph a log's region has (`--graph` overrides), opened for one replay. */
+const graphFor = (trip: TripLog) => graphForTrip(trip, GRAPH);
 
 interface AppState {
   /** The app's storage before the log: parked poses, speed scales, compass calibrations, GNSS lag. */
@@ -123,6 +100,47 @@ function appStateBefore(file: string, loop: MapMatchLoop): AppState {
     }
   }
   return states.get(file) ?? { store: new MemoryKeyValueStore(), vin: null, parkedAfter: null };
+}
+
+/** Ground truth drawn in the viewer, next to its log (git-ignored with it): `<log>.truth.json`. */
+const drawnFile = (file: string) => path.join(LOG_DIR, file.replace(/\.ulg$/, ".truth.json"));
+function readDrawn(file: string): DrawnTruth | null {
+  const f = drawnFile(file);
+  return existsSync(f) ? (JSON.parse(readFileSync(f, "utf8")) as DrawnTruth) : null;
+}
+/** The drawn truth and where it puts the car every second (the odometer between the drive's ends and clean fixes). */
+function drawnPayload(trip: TripLog, truth: DrawnTruth | null) {
+  if (!truth || truth.path.length < 2) return { truth, timed: null };
+  const { points, cum, pathM, odometerM, anchors, doubtM } = drawnTruthTrack(trip, truth);
+  const round = (v: number, i: number) => (i === 1 || i === 2 ? Math.round(v * 1e6) / 1e6 : Math.round(v * 10) / 10);
+  return { truth, timed: { points: points.map((p) => p.map(round)), cum, pathM, odometerM, anchors, doubtM } };
+}
+/** One graph kept open for drawing, so a click doesn't reopen the file and reread its tiles. */
+let drawGraph: { file: string; graph: TiledRoadGraph; close(): void } | null = null;
+function graphForDrawing(trip: TripLog): { file: string; graph: TiledRoadGraph } | null {
+  const at = regionPoint(trip);
+  const file = at ? (GRAPH ?? findGraph(at)) : null;
+  if (!at || !file) return null;
+  if (drawGraph?.file !== file) {
+    drawGraph?.close();
+    drawGraph = { file, ...openGraph(file, at) };
+  }
+  return drawGraph;
+}
+const isPoint = (p: unknown): p is DrawnPoint =>
+  typeof p === "object" && p !== null && Number.isFinite((p as DrawnPoint).lat) && Number.isFinite((p as DrawnPoint).lon);
+
+function readBody(req: IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let body = "";
+    req.setEncoding("utf8");
+    req.on("data", (chunk: string) => {
+      body += chunk;
+      if (body.length > 2_000_000) reject(new Error("body too large"));
+    });
+    req.on("end", () => resolve(body));
+    req.on("error", reject);
+  });
 }
 
 function send(res: ServerResponse, status: number, type: string, body: string | Buffer): void {
@@ -254,6 +272,41 @@ const server = createServer((req, res) => {
       send(res, 200, "application/json", JSON.stringify(payload));
       const s = payload.summary;
       console.log(`truth for ${file}: ${s.matched} of ${s.fixes} clean fixes matched, ${s.breaks} breaks, ${Date.now() - started} ms`);
+    } else if (url.pathname === "/api/drawn") {
+      // Ground truth drawn by hand: GET it, POST the clicked points (the server lays the path on the roads and saves
+      // it), DELETE it.
+      const file = path.basename(url.searchParams.get("file") ?? "");
+      if (!file.endsWith(".ulg")) return send(res, 400, "text/plain", "file must be a .ulg in the logs folder");
+      const trip = loadTrip(file);
+      if (req.method === "GET") return send(res, 200, "application/json", JSON.stringify(drawnPayload(trip, readDrawn(file))));
+      if (req.method === "DELETE") {
+        if (existsSync(drawnFile(file))) unlinkSync(drawnFile(file));
+        return send(res, 200, "application/json", JSON.stringify(drawnPayload(trip, null)));
+      }
+      if (req.method !== "POST") return send(res, 405, "text/plain", "GET, POST or DELETE");
+      readBody(req)
+        .then((body) => {
+          const points = (JSON.parse(body) as { points?: unknown }).points;
+          if (!Array.isArray(points) || !points.every(isPoint) || points.length > 5000) return send(res, 400, "text/plain", "points: [{lat, lon, straight?}]");
+          const clean = points.map((p) => ({ lat: p.lat, lon: p.lon, ...(p.straight ? { straight: true } : {}) }));
+          if (!clean.length) {
+            if (existsSync(drawnFile(file))) unlinkSync(drawnFile(file));
+            return send(res, 200, "application/json", JSON.stringify(drawnPayload(trip, null)));
+          }
+          const started = Date.now();
+          const g = graphForDrawing(trip);
+          const frame = new LocalFrame(clean[0]);
+          g?.graph.setFrame(frame);
+          const drawn = drawPath(g?.graph ?? null, frame, clean);
+          const truth: DrawnTruth = { version: 1, file, points: clean, ...drawn, graph: g ? `${path.basename(g.file)} (OSM ${g.graph.info.osmDate})` : null, updatedAt: new Date().toISOString() };
+          writeFileSync(drawnFile(file), JSON.stringify(truth));
+          send(res, 200, "application/json", JSON.stringify(drawnPayload(trip, truth)));
+          console.log(`drawn truth for ${file}: ${clean.length} points, ${(truth.legs.reduce((m, l) => m + l.lengthM, 0) / 1000).toFixed(2)} km in ${Date.now() - started} ms`);
+        })
+        .catch((error: unknown) => {
+          console.error(error);
+          send(res, 500, "text/plain", String(error));
+        });
     } else {
       send(res, 404, "text/plain", "not found");
     }

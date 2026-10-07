@@ -22,6 +22,31 @@ npm run replay -- trip.ulg --spoof 300:inf:outside               # … abroad (M
 On PowerShell, `npm run x -- --flag` loses the `--`; run `node --experimental-transform-types --no-warnings --import
 ./tools/replay/register.mjs tools/replay/cli.ts …` (the script's command) instead.
 
+## Regression check
+
+Run it before and after any change to the navigator or map matching: every drive through the app as the viewer
+replays it, from a cold start and from the parked chain, with several filter seeds, scored drive by drive.
+
+```bash
+npm run replay:regress -- --save before          # keep this run (tools/triplog/logs/regress/before.json)
+npm run replay:regress -- --against before       # every drive against it: what got worse, what got better
+npm run replay:regress -- --seeds 5 --starts parked --logs 20261005 --nav '<json>' --mm '<json>'
+```
+
+- **Truth, per drive, best first:** the roads drawn for it in the viewer (*Ground truth*, below), else its clean
+  satellite fixes (the dot when GPS came back after each gap, and at its worst through the app's Cut GPS
+  stretches), else its Wi-Fi fixes (10–150 m; the dot just before each, a rough check). Most jammed drives have
+  only the last, so draw the ones that matter.
+- **On every drive, truth or not:** seconds the dot was more than 20 m from every road above 20 km/h, and its jumps
+  (the viewer's hollow circles), and from the parked chain how far each drive started from where the last one's dot
+  stopped.
+- **`--against`:** a drive is worse when the median over its seeds grows by half again plus a floor (20 m, 10 s, 2
+  jumps), or its worst seed by half again plus 2.5 floors (one seed in three lost is a finding). Each line shows
+  the seeds before → now. The totals come last: on 2026-10-07 they read fewer jumps overall for the two changes
+  that broke 8 drives.
+- About 90 s for every log on 32 cores, at low priority. It replays the app's settings (`app-defaults.ts`), not
+  the version a log was recorded with.
+
 ## Spoofing benchmark
 
 ```bash
@@ -104,7 +129,23 @@ says so.
   - *Cut GPS (app)* and *Cut in replay*: GPS was there but withheld, so each dot is scored all through: at the end,
     at worst, and how often the real position was inside its circle (honest ≈ 68 %).
   - Click one to zoom to it and jump to its end. Code: `src/nav/replay/drive-report.ts`.
-- **At the cursor:** the GPS state, and each dot's distance from the newest clean GPS fix, inside its circle or not.
+- **Ground truth:** draw the roads the car took, for a drive GPS can't score (MAPMATCH-SPEC §10.1).
+  - *Draw*, then click along the roads in order: the server lays the shortest way along the roads between two
+    clicks, one-ways ignored (the car went where it went, and OSM is sometimes wrong). Clicks more than 12 m from
+    the map's roads, two in a row or at the drive's start or end, are off them (a car park, a yard, a lane the map
+    lacks): the line goes straight between them and to the nearest road; a cloud of them marks a car park. One alone
+    on the way is on its road. Shift-click draws a straight stretch anyway, or toggles it on a point; drag a point
+    to move it, right-click to delete it, click the line to add one in between; Ctrl+Z undoes, Esc ends. Every
+    change is saved at once as `<log>.truth.json` beside the log (git-ignored with it).
+  - The car's place on it every second comes from the OBD odometer, pinned at the drive's ends (start where it was
+    parked, end where it parked) and at any clean fix. *Drawn* against *odometer* checks the drawing: they agree
+    within a few % when it is right. Where they don't, the straight stretches take most of it (their length is a
+    guess; a road's isn't). The timing's doubt grows by 3 % of the odometer distance to the nearest pin.
+  - Each track is scored against it while the car moves: seconds more than 30 m from the drawn road (near where the
+    car was, whatever the timing), the median distance from where the car was, and at the end. A ring on the map
+    and dashed lines on the timeline show where it puts the car. Code: `src/nav/replay/drawn-truth.ts`.
+- **At the cursor:** the GPS state, and each dot's distance from the newest clean GPS fix (or from the drawn truth
+  without one), inside its circle or not.
 - **Map:** dots with their circles and dashed distance lines to the GPS fix. *Layers* adds every GPS fix, the
   road graph, the true path (the road matched offline from clean GPS) and the replay's map-matching particles.
   Hover a fix for details; click it to jump there.

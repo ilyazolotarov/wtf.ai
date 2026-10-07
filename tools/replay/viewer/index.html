@@ -12,7 +12,7 @@
     --gps: #16a34a; --phone: #7c3aed; --pred: #2563eb; --cmp: #ea580c;
     --coarse: #d97706; --rej: #dc2626; --cut: #8b93a1; --ok: #16a34a; --warn: #d97706; --bad: #dc2626;
     --road: #a21caf; --road-end: #ea580c; --truth: #0f766e; --mm: #111827; --accent: #2563eb;
-    --nogps: #8b93a1; --appcut: #d97706; --replaycut: #2563eb; --route: #db2777;
+    --nogps: #8b93a1; --appcut: #d97706; --replaycut: #2563eb; --route: #db2777; --drawn: #111827;
     color-scheme: light;
   }
   @media (prefers-color-scheme: dark) {
@@ -21,7 +21,7 @@
       --gps: #4ade80; --phone: #c4b5fd; --pred: #60a5fa; --cmp: #fb923c;
       --coarse: #fbbf24; --rej: #f87171; --cut: #8b93a1; --ok: #4ade80; --warn: #fbbf24; --bad: #f87171;
       --road: #e879f9; --road-end: #fb923c; --truth: #2dd4bf; --mm: #fde047; --accent: #60a5fa;
-      --nogps: #8b93a1; --appcut: #fbbf24; --replaycut: #60a5fa; --route: #f472b6;
+      --nogps: #8b93a1; --appcut: #fbbf24; --replaycut: #60a5fa; --route: #f472b6; --drawn: #f8fafc;
       color-scheme: dark;
     }
   }
@@ -91,6 +91,8 @@
   #timeline { width: 100%; height: 174px; display: block; background: var(--panel); cursor: crosshair; touch-action: none;
     border-top: 1px solid var(--line); }
   #time { font-variant-numeric: tabular-nums; min-width: 190px; }
+  .drawn-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+  .hint { color: var(--text2); font-size: 12px; margin-bottom: 6px; }
   @media (max-width: 860px) { main { grid-template-columns: 1fr; } aside { display: none; } }
 </style>
 </head>
@@ -148,6 +150,7 @@
       <label title="From each dot to where GPS says the car is"><input id="showErr" type="checkbox" checked /> distance lines</label>
       <label title="Road graph used for map matching: lines by class, arrows on one-ways"><input id="showRoads" type="checkbox" /> roads (map matching)</label>
       <label title="The road the car was on, matched offline from clean GPS (MAPMATCH-SPEC §10.1); × marks breaks"><input id="showTruth" type="checkbox" /> true path</label>
+      <label title="The roads you drew in Ground truth, and where they put the car at the cursor (ring)"><input id="showDrawn" type="checkbox" checked /> ground truth (drawn)</label>
       <label title="Map matching inside the replay: particles (size by weight; hollow = off-road) and its hypotheses (ring = spread, label = weight)"><input id="showMm" type="checkbox" /> map-matching particles</label>
       <label title="The route the phone planned (pink), its maneuvers, and the routes it replaced (grey)"><input id="showRoute" type="checkbox" checked /> planned route</label>
     </details>
@@ -156,6 +159,8 @@
     <div id="drive"></div>
     <h2>Tracks</h2>
     <div class="tracks" id="tracks"></div>
+    <h2>Ground truth</h2>
+    <div id="drawn"></div>
     <div id="routeBox" hidden>
       <h2>Route</h2>
       <div id="route"></div>
@@ -206,6 +211,17 @@ let follow = true;
 let roads = null;
 let truth = null;
 let activeOutage = -1;
+// Ground truth drawn by hand (/api/drawn, src/nav/replay/drawn-truth.ts): the saved drawing and its timing, the
+// points being edited, and each track scored against it.
+let drawn = null;
+let drawnFor = null;
+let drawing = false;
+let draft = [];
+const undo = [];
+let drawnSeq = 0;
+let drawnStatus = "";
+let drawnScores = {};
+let drawnErrors = {};
 
 /** Clean satellite fixes are the truth (the replay's rule). */
 const TRUTH_ACC_M = 10;
@@ -296,7 +312,8 @@ map.on("error", (e) => showError(`map: ${e.error?.message ?? e.error}`));
 
 function addLayers() {
   const empty = fc([]);
-  const sources = ["roads", "roadNodes", "truth", "truthBreaks", "particles", "clusters", "fixes", "gpsTrack", "gpsNow", "gpsAcc", "routeOld", "routeLine", "routeManeuvers"];
+  const sources = ["roads", "roadNodes", "truth", "truthBreaks", "particles", "clusters", "fixes", "gpsTrack", "gpsNow", "gpsAcc", "routeOld", "routeLine", "routeManeuvers",
+    "drawnPath", "drawnStraight", "drawnPoints", "drawnNow"];
   for (const tr of TRACKS) sources.push(`${tr.key}Line`, `${tr.key}Jumps`, `${tr.key}Now`, `${tr.key}Acc`, `${tr.key}Err`);
   for (const id of sources) map.addSource(id, { type: "geojson", data: empty });
   addRoadLayers();
@@ -315,6 +332,13 @@ function addLayers() {
     paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 12, 1.8, 17, 4],
       "circle-color": ["case", ["==", ["get", "kind"], "truth"], css("--gps"), ["==", ["get", "kind"], "coarse"], css("--coarse"), css("--gps")],
       "circle-opacity": ["case", ["==", ["get", "kind"], "weak"], 0.35, 0.75] } });
+  // The drawn truth under the tracks: along the roads solid, straight stretches dashed (amber: no road route).
+  map.addLayer({ id: "drawnCasing", type: "line", source: "drawnPath", layout: { "line-cap": "round", "line-join": "round" },
+    paint: { "line-color": css("--panel"), "line-width": 8, "line-opacity": 0.8 } });
+  map.addLayer({ id: "drawnPath", type: "line", source: "drawnPath", layout: { "line-cap": "round", "line-join": "round" },
+    paint: { "line-color": css("--drawn"), "line-width": 4, "line-opacity": 0.75 } });
+  map.addLayer({ id: "drawnStraight", type: "line", source: "drawnStraight",
+    paint: { "line-color": ["case", ["get", "noRoute"], css("--warn"), css("--drawn")], "line-width": 3, "line-dasharray": [1.5, 1.2] } });
   addMapMatchLayers();
   for (const tr of TRACKS) {
     const c = css(tr.color);
@@ -339,6 +363,13 @@ function addLayers() {
     map.addLayer({ id: `${tr.key}Now`, type: "circle", source: `${tr.key}Now`,
       paint: { "circle-radius": 7, "circle-color": css(tr.color), "circle-stroke-width": 2.5, "circle-stroke-color": "#fff" } });
   }
+  // Where the drawing puts the car at the cursor (a ring to set the dots against), and the points while editing.
+  map.addLayer({ id: "drawnNow", type: "circle", source: "drawnNow",
+    paint: { "circle-radius": 9, "circle-color": "transparent", "circle-stroke-color": css("--drawn"), "circle-stroke-width": 3 } });
+  map.addLayer({ id: "drawnPoints", type: "circle", source: "drawnPoints",
+    paint: { "circle-radius": 6, "circle-color": ["case", ["get", "straight"], css("--warn"), css("--panel")],
+      "circle-stroke-color": css("--drawn"), "circle-stroke-width": 2.5 } });
+  addDrawingHandlers();
   const popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false });
   map.on("mouseenter", "fixes", (e) => {
     map.getCanvas().style.cursor = "pointer";
@@ -347,8 +378,8 @@ function addLayers() {
       (p.status === "cut" ? "<br>withheld from the replay" : p.status === "rejected" ? "<br>rejected by the replay"
         : p.status === "untrusted" ? "<br>refused by integrity (looks spoofed)" : "")).addTo(map);
   });
-  map.on("mouseleave", "fixes", () => { map.getCanvas().style.cursor = ""; popup.remove(); });
-  map.on("click", "fixes", (e) => seek(+e.features[0].properties.t));
+  map.on("mouseleave", "fixes", () => { map.getCanvas().style.cursor = drawing ? "crosshair" : ""; popup.remove(); });
+  map.on("click", "fixes", (e) => { if (!drawing) seek(+e.features[0].properties.t); });
 }
 
 const ROAD_CLASSES = ["motorway", "trunk", "primary", "secondary", "tertiary", "unclassified", "residential",
@@ -478,13 +509,16 @@ async function setStatic() {
 /** Dots, circles and distance lines at the cursor. */
 function updateMap() {
   const { fix, truthFix } = fixesAt(t);
+  const drawnNow = $("showDrawn").checked ? drawnAt(t) : null;
   const age = fix ? t - fix.t : Infinity;
   for (const tr of TRACKS) {
     const p = present(tr) && trackOn[tr.key] ? shownAt(tr.points(), t) : null;
     map.getSource(`${tr.key}Now`).setData(fc(p ? [pt(p)] : []));
     map.getSource(`${tr.key}Acc`).setData(fc(p ? [circle(p, Math.max(1, p.acc))] : []));
-    map.getSource(`${tr.key}Err`).setData(fc(p && truthFix && $("showErr").checked ? [line([[p.lon, p.lat], [truthFix.lon, truthFix.lat]])] : []));
+    const to = truthFix ?? drawnNow;
+    map.getSource(`${tr.key}Err`).setData(fc(p && to && $("showErr").checked ? [line([[p.lon, p.lat], [to.lon, to.lat]])] : []));
   }
+  map.getSource("drawnNow").setData(fc(drawnNow ? [pt(drawnNow)] : []));
   map.getSource("gpsNow").setData(fc(fix ? [pt(fix, { opacity: age < 3 ? 1 : age < 15 ? 0.5 : 0.2 })] : []));
   map.getSource("gpsAcc").setData(fc(fix && age < 3 ? [circle(fix, Math.max(1, fix.acc))] : []));
   updateMapMatch();
@@ -554,6 +588,293 @@ function updateMapMatch() {
     pt({ lat, lon }, { rank, spread: Math.max(spread, 2), label: `${Math.round(w * 100)}%${road ? "" : " off-road"}${rank === 0 ? ` · ${mm.s}` : ""}` })) : []));
 }
 
+// ---------- ground truth, drawn by hand ----------
+// The server lays the clicked points on the roads and saves them (/api/drawn); the drawing's timing comes from the
+// odometer (drawn-truth.ts). Here: the layers, the editing, and every track scored against it.
+const OFF_PATH_M = 30;
+const OFF_PATH_WINDOW_M = 300;
+
+/** Where the drawing puts the car at a time: { lat, lon, s } (m along the path), or null. */
+function drawnAt(time) {
+  const pts = drawn?.timed?.points;
+  if (!pts?.length) return null;
+  const i = indexAt(pts, time, (x) => x[0]);
+  if (i < 0) return null;
+  const a = pts[i], b = pts[i + 1];
+  if (!b) return { lat: a[1], lon: a[2], s: a[3] };
+  const f = (time - a[0]) / (b[0] - a[0]);
+  return { lat: a[1] + (b[1] - a[1]) * f, lon: a[2] + (b[2] - a[2]) * f, s: a[3] + (b[3] - a[3]) * f };
+}
+
+/** From p to the drawn path near s along it (300 m plus twice the timing's doubt), as drawn-truth.ts measures it. */
+function offPath(p, s, doubt) {
+  const path = drawn.truth.path, cum = drawn.timed.cum;
+  const fromM = s - OFF_PATH_WINDOW_M - 2 * doubt, toM = s + OFF_PATH_WINDOW_M + 2 * doubt;
+  const kx = 111195 * Math.cos(rad(p.lat)), ky = 111195;
+  let best = Infinity;
+  for (let i = Math.max(0, indexAt(cum, fromM, (c) => c)); i + 1 < path.length && cum[i] <= toM; i++) {
+    const ax = (path[i][1] - p.lon) * kx, ay = (path[i][0] - p.lat) * ky;
+    const dx = (path[i + 1][1] - p.lon) * kx - ax, dy = (path[i + 1][0] - p.lat) * ky - ay;
+    const len2 = dx * dx + dy * dy, seg = cum[i + 1] - cum[i];
+    let f = len2 > 0 ? -(ax * dx + ay * dy) / len2 : 0;
+    if (seg > 0) f = Math.max((fromM - cum[i]) / seg, Math.min((toM - cum[i]) / seg, f));
+    f = Math.max(0, Math.min(1, f));
+    best = Math.min(best, Math.hypot(ax + f * dx, ay + f * dy));
+  }
+  return best;
+}
+
+/** Each track against the drawing while the car moves: off the drawn road (> 30 m), and from where the car was. */
+function computeDrawnScores() {
+  drawnScores = {};
+  drawnErrors = {};
+  if (!data || !drawn?.timed) return;
+  const median = (v) => { if (!v.length) return null; const a = [...v].sort((x, y) => x - y); return a[Math.floor(a.length / 2)]; };
+  for (const tr of TRACKS) {
+    if (!present(tr)) continue;
+    const errs = [], offs = [];
+    let offS = 0, end = null;
+    for (const [tt, lat, lon, s, doubt] of drawn.timed.points) {
+      const p = shownAt(tr.points(), tt);
+      if (!p) continue;
+      const e = haversine(p, { lat, lon });
+      end = e;
+      const obd = lastBefore(data.obd, tt);
+      if (!obd || tt - obd[0] > 3 || obd[1] < 7.2) continue;
+      const d = offPath(p, s, doubt);
+      offs.push(d);
+      if (d > OFF_PATH_M) offS++;
+      errs.push([tt, e]);
+    }
+    drawnErrors[tr.key] = errs;
+    drawnScores[tr.key] = { movingS: offs.length, offS, errMedian: median(errs.map((x) => x[1])), end };
+  }
+}
+
+/** The saved drawing's stretches as map features: along the roads, and straight. */
+function legFeatures() {
+  const tr = drawn?.truth;
+  if (!tr?.path?.length || !$("showDrawn").checked) return { roads: [], straight: [] };
+  const roads = [], straight = [];
+  tr.legs.forEach((l, i) => {
+    const end = i + 1 < tr.legs.length ? tr.legs[i + 1].start : tr.path.length - 1;
+    const coords = tr.path.slice(l.start, end + 1).map(([la, lo]) => [lo, la]);
+    if (coords.length < 2) return;
+    if (l.kind === "road") roads.push(line(coords));
+    else straight.push(line(coords, { noRoute: l.reason === "no route" || l.reason === "detour" }));
+  });
+  return { roads, straight };
+}
+
+async function setDrawn() {
+  await map.ready;
+  const { roads, straight } = legFeatures();
+  map.getSource("drawnPath").setData(fc(roads));
+  map.getSource("drawnStraight").setData(fc(straight));
+  map.getSource("drawnPoints").setData(fc(drawing && $("showDrawn").checked
+    ? draft.map((p, i) => pt(p, { i, straight: !!p.straight && i > 0 })) : []));
+}
+
+function renderDrawn() {
+  const el = $("drawn");
+  if (!data) { el.innerHTML = ""; return; }
+  const timed = drawn?.timed;
+  let html = "";
+  if (drawing) {
+    html += `<div class="hint">Click along the roads you drove, in order: the path follows the roads between two clicks ` +
+      `(one-ways don't count). Clicks more than 12 m from the map's roads, two in a row or at the drive's start or end, ` +
+      `are off them (a car park, a yard): the line goes straight between them and to the nearest road. ` +
+      `<b>Shift-click</b>: straight from the last point anyway; on a point, it toggles that. ` +
+      `Drag a point to move it, <b>right-click</b> it to delete it, click the line to add a point in between. ` +
+      `Ctrl+Z undoes, Esc ends.</div>`;
+  }
+  if (timed) {
+    const diff = (timed.pathM / Math.max(1, timed.odometerM) - 1) * 100;
+    html += `<div class="facts">Drawn <b>${fmtKm(timed.pathM)}</b> · odometer <b>${fmtKm(timed.odometerM)}</b> ` +
+      `(${diff >= 0 ? "+" : ""}${diff.toFixed(1)} %) · timed by ${timed.anchors ? `the odometer and ${timed.anchors} clean fixes` : "the odometer"}, ` +
+      `±${fmtM(timed.doubtM)} at worst</div>`;
+    if (Math.abs(diff) > 8 && timed.odometerM > 300) {
+      html += `<div class="poor">The drawing and the odometer disagree by ${Math.abs(diff).toFixed(0)} %: a stretch is missing, doubled or cut short.</div>`;
+    }
+    const noRoute = drawn.truth.legs.filter((l) => l.reason === "no route").length;
+    if (noRoute) {
+      html += `<div class="meh">${noRoute} stretch${noRoute > 1 ? "es" : ""} drawn straight because the roads don't join their points (amber dashes): ` +
+        `add a point on the road between them, or shift-click it if straight is right.</div>`;
+    }
+    const detours = drawn.truth.legs.filter((l) => l.reason === "detour").length;
+    if (detours) {
+      html += `<div class="meh">${detours} stretch${detours > 1 ? "es" : ""} drawn straight because the roads join their points only the long way round (amber dashes): ` +
+        `a way the map lacks, as into a yard. If the car did go round, add a point on the way.</div>`;
+    }
+    html += TRACKS.filter((tr) => present(tr) && trackOn[tr.key]).map((tr) => {
+      const sc = drawnScores[tr.key];
+      if (!sc || !sc.movingS) return `<div class="now-row"><span class="swatch" style="background:var(${tr.color})"></span><span class="muted">no data</span></div>`;
+      const share = sc.offS / sc.movingS;
+      const cls = share < 0.02 ? "good" : share < 0.1 ? "meh" : "poor";
+      return `<div class="now-row"><span class="swatch" style="background:var(${tr.color})"></span><span>off the drawn road ` +
+        `<span class="num ${cls}">${fmtMin(sc.offS)}</span> of ${fmtMin(sc.movingS)} driving · ` +
+        `median <span class="num ${grade(sc.errMedian)}">${fmtM(sc.errMedian)}</span> from the car · end <span class="num ${grade(sc.end)}">${fmtM(sc.end)}</span></span></div>`;
+    }).join("");
+  } else if (!drawing) {
+    html += `<div class="muted">Not drawn. Draw the roads you drove, and every track is scored against them all along the drive, with or without GPS.</div>`;
+  }
+  html += `<div class="drawn-actions">` + (drawing
+    ? `<button id="drawnDone">Done</button><button id="drawnUndo" ${undo.length ? "" : "disabled"}>Undo</button>`
+    : `<button id="drawnEdit">${drawn?.truth ? "Edit" : "Draw"}</button>`) +
+    (drawn?.truth || draft.length ? `<button id="drawnClear">Delete</button>` : "") +
+    `<span class="muted">${esc(drawnStatus)}</span></div>`;
+  el.innerHTML = html;
+  if ($("drawnDone")) $("drawnDone").onclick = () => setDrawing(false);
+  if ($("drawnUndo")) $("drawnUndo").onclick = undoDrawn;
+  if ($("drawnEdit")) $("drawnEdit").onclick = () => setDrawing(true);
+  if ($("drawnClear")) $("drawnClear").onclick = clearDrawn;
+}
+
+function afterDrawn() {
+  computeDrawnScores();
+  setDrawn();
+  renderDrawn();
+  updateDynamic();
+}
+
+async function loadDrawn(file) {
+  const res = await fetch(`/api/drawn?${new URLSearchParams({ file })}`);
+  if (!res.ok || $("file").value !== file) return;
+  drawn = await res.json();
+  drawnFor = file;
+  if (!drawing) draft = drawn.truth?.points?.slice() ?? [];
+  afterDrawn();
+}
+
+/** Sends the points; the server lays them on the roads, saves, and answers with the drawing and its timing. */
+async function saveDrawn(points) {
+  const file = $("file").value;
+  const seq = ++drawnSeq;
+  drawnStatus = "saving…";
+  renderDrawn();
+  const res = await fetch(`/api/drawn?${new URLSearchParams({ file })}`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ points }),
+  });
+  if (seq !== drawnSeq || $("file").value !== file) return;
+  if (!res.ok) { drawnStatus = `not saved: ${await res.text()}`; renderDrawn(); return; }
+  drawn = await res.json();
+  drawnFor = file;
+  drawnStatus = "saved";
+  afterDrawn();
+}
+
+function commitDraft(points, before = draft) {
+  undo.push(before.map((p) => ({ ...p })));
+  if (undo.length > 100) undo.shift();
+  draft = points;
+  setDrawn();
+  saveDrawn(points);
+}
+
+function undoDrawn() {
+  if (!undo.length) return;
+  draft = undo.pop();
+  setDrawn();
+  saveDrawn(draft);
+}
+
+function setDrawing(on) {
+  drawing = on && !!data;
+  if (drawing) {
+    draft = drawn?.truth?.points?.slice() ?? [];
+    setPlaying(false);
+    setFollow(false);
+  }
+  drawnStatus = "";
+  map.getCanvas().style.cursor = drawing ? "crosshair" : "";
+  setDrawn();
+  renderDrawn();
+}
+
+async function clearDrawn() {
+  if (!confirm("Delete the ground truth drawn for this drive?")) return;
+  const file = $("file").value;
+  undo.push(draft.map((p) => ({ ...p })));
+  draft = [];
+  ++drawnSeq;
+  const res = await fetch(`/api/drawn?${new URLSearchParams({ file })}`, { method: "DELETE" });
+  if (res.ok && $("file").value === file) { drawn = await res.json(); drawnStatus = "deleted"; afterDrawn(); }
+}
+
+/** The stretch (index of its first point) whose line passes within 10 px of a screen point, or −1. */
+function legNear(point) {
+  const tr = drawn?.truth;
+  const legs = [];
+  if (tr && tr.points.length === draft.length && tr.legs.length) {
+    tr.legs.forEach((l, i) => {
+      const end = i + 1 < tr.legs.length ? tr.legs[i + 1].start : tr.path.length - 1;
+      legs.push(tr.path.slice(l.start, end + 1));
+    });
+  } else {
+    for (let i = 0; i + 1 < draft.length; i++) legs.push([[draft[i].lat, draft[i].lon], [draft[i + 1].lat, draft[i + 1].lon]]);
+  }
+  let best = -1, bestD = 10;
+  legs.forEach((coords, i) => {
+    const px = coords.map(([la, lo]) => map.project([lo, la]));
+    for (let k = 0; k + 1 < px.length; k++) {
+      const a = px[k], b = px[k + 1];
+      const dx = b.x - a.x, dy = b.y - a.y, len2 = dx * dx + dy * dy;
+      const f = len2 > 0 ? Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / len2)) : 0;
+      const d = Math.hypot(point.x - a.x - f * dx, point.y - a.y - f * dy);
+      if (d < bestD) { bestD = d; best = i; }
+    }
+  });
+  return best;
+}
+
+function addDrawingHandlers() {
+  let dragging = -1, moved = false, before = null, swallowClick = false;
+  map.on("click", (e) => {
+    if (!drawing) return;
+    if (swallowClick) { swallowClick = false; return; }
+    const hit = map.queryRenderedFeatures(e.point, { layers: ["drawnPoints"] })[0];
+    const shift = e.originalEvent.shiftKey;
+    if (hit) {
+      const i = +hit.properties.i;
+      if (shift && i > 0) commitDraft(draft.map((p, k) => (k === i ? { ...p, straight: !p.straight } : p)));
+      return;
+    }
+    const p = { lat: e.lngLat.lat, lon: e.lngLat.lng, ...(shift ? { straight: true } : {}) };
+    const leg = legNear(e.point);
+    const next = draft.slice();
+    if (leg >= 0) next.splice(leg + 1, 0, p); else next.push(p);
+    commitDraft(next);
+  });
+  map.on("contextmenu", "drawnPoints", (e) => {
+    if (!drawing) return;
+    e.preventDefault();
+    const i = +e.features[0].properties.i;
+    commitDraft(draft.filter((_, k) => k !== i));
+  });
+  map.on("mouseenter", "drawnPoints", () => { if (drawing) map.getCanvas().style.cursor = "grab"; });
+  map.on("mouseleave", "drawnPoints", () => { if (drawing && dragging < 0) map.getCanvas().style.cursor = "crosshair"; });
+  const onMove = (e) => {
+    moved = true;
+    draft = draft.map((p, k) => (k === dragging ? { ...p, lat: e.lngLat.lat, lon: e.lngLat.lng } : p));
+    setDrawn();
+  };
+  map.on("mousedown", "drawnPoints", (e) => {
+    if (!drawing || e.originalEvent.button !== 0) return;
+    e.preventDefault(); // this drags the point, not the map
+    dragging = +e.features[0].properties.i;
+    moved = false;
+    before = draft.map((p) => ({ ...p }));
+    map.getCanvas().style.cursor = "grabbing";
+    map.on("mousemove", onMove);
+    map.once("mouseup", () => {
+      map.off("mousemove", onMove);
+      map.getCanvas().style.cursor = "crosshair";
+      if (moved) { swallowClick = true; commitDraft(draft, before); }
+      dragging = -1;
+    });
+  });
+}
+
 // ---------- side panel ----------
 function renderDrive() {
   const s = data.summary;
@@ -575,7 +896,7 @@ function renderDrive() {
     box.onchange = () => {
       trackOn[box.dataset.track] = box.checked;
       try { localStorage.setItem("replay.tracks", JSON.stringify(trackOn)); } catch {}
-      setStatic(); renderOutages(); updateDynamic();
+      setStatic(); renderOutages(); renderDrawn(); updateDynamic();
     };
   }
 }
@@ -643,6 +964,12 @@ function renderNow() {
   const rows = visible().map((tr) => {
     const p = shownAt(tr.points(), t);
     if (!p) return `<div class="now-row"><span class="swatch" style="background:var(${tr.color})"></span><span class="muted">${esc(tr.label())}: not running</span></div>`;
+    const truthDrawn = truthFix ? null : drawnAt(t);
+    if (truthDrawn) {
+      const d = haversine(p, truthDrawn);
+      return `<div class="now-row"><span class="swatch" style="background:var(${tr.color})"></span><span>` +
+        `<span class="num big ${grade(d)}">${fmtM(d)}</span> from where you drew the car · ${d <= p.acc ? "inside" : "outside"} its circle (±${Math.round(p.acc)} m)</span></div>`;
+    }
     if (!truthFix) return `<div class="now-row"><span class="swatch" style="background:var(${tr.color})"></span><span>${esc(tr.label())}: ±${Math.round(p.acc)} m, nothing to compare with</span></div>`;
     const d = haversine(p, truthFix);
     return `<div class="now-row"><span class="swatch" style="background:var(${tr.color})"></span><span>` +
@@ -726,7 +1053,19 @@ function drawTimeline() {
     // Outside its circle: a dot on the line.
     g.fillStyle = css(tr.color);
     for (const [tt, e, inside] of errs) if (!inside && e > 3) { g.beginPath(); g.arc(x(tt), ye(e), 1.8, 0, 7); g.fill(); }
+    // Dashed: from where the drawing puts the car.
+    const derrs = $("showDrawn").checked ? drawnErrors[tr.key] ?? [] : [];
+    if (derrs.length) {
+      g.strokeStyle = css(tr.color); g.lineWidth = 1.4; g.setLineDash([4, 3]); g.beginPath();
+      let dprev = null;
+      for (const [tt, e] of derrs) {
+        if (!dprev || tt - dprev > 3) g.moveTo(x(tt), ye(e)); else g.lineTo(x(tt), ye(e));
+        dprev = tt;
+      }
+      g.stroke(); g.setLineDash([]);
+    }
   }
+  if (drawn?.timed && $("showDrawn").checked) { g.fillStyle = text2; g.textAlign = "right"; g.fillText("dashed: from your drawn truth", w - PAD_R, e0 + 9); g.textAlign = "left"; }
 
   // Speed (OBD).
   const [s0, s1] = ROWS.speed;
@@ -811,11 +1150,14 @@ $("showFixes").onchange = () => data && setStatic();
 $("showErr").onchange = () => updateDynamic();
 $("showRoads").onchange = () => setRoads();
 $("showTruth").onchange = () => setTruth();
+$("showDrawn").onchange = () => { setDrawn(); updateDynamic(); };
 $("showMm").onchange = () => updateDynamic();
 $("showRoute").onchange = () => updateDynamic();
 $("allEvents").onchange = () => data && renderEvents();
 document.addEventListener("keydown", (e) => {
   if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
+  if (drawing && (e.ctrlKey || e.metaKey) && e.code === "KeyZ") { e.preventDefault(); undoDrawn(); return; }
+  if (drawing && e.code === "Escape") { setDrawing(false); return; }
   if (e.code === "Space") { e.preventDefault(); setPlaying(!playing); }
   if (e.code === "ArrowLeft") seek(t - (e.shiftKey ? 30 : 5));
   if (e.code === "ArrowRight") seek(t + (e.shiftKey ? 30 : 5));
@@ -862,6 +1204,7 @@ async function run() {
   history.replaceState(null, "", "#" + new URLSearchParams(q).toString());
   setPlaying(false);
   activeOutage = -1;
+  if (drawnFor !== file) { drawn = null; drawnFor = null; undo.length = 0; setDrawing(false); }
   $("status").textContent = "replaying…";
   const started = performance.now();
   const loading = showLoading(q.from !== "cold" && !(Number(q.start) > 0));
@@ -887,6 +1230,7 @@ async function run() {
   renderSummary();
   loadRoads(file);
   loadTruth(file);
+  await loadDrawn(file);
   await setStatic();
   const pts = [...data.shown.map((p) => ({ lon: p[2], lat: p[1] })), ...data.fixes.filter((f) => f.sat && f.acc <= 50)];
   if (pts.length) {

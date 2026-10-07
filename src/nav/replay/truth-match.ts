@@ -120,7 +120,7 @@ const angleDiff = (a: number, b: number) => Math.abs(Math.atan2(Math.sin(a - b),
 const edgeLength = (e: RoadEdge) => e.cum[e.cum.length - 1];
 
 /** Cumulative OBD distance at any time (speed held up to 2.5 s, like the navigator). */
-function obdOdometer(trip: TripLog): (tUs: number) => number {
+export function obdOdometer(trip: TripLog): (tUs: number) => number {
   const t: number[] = [];
   const d: number[] = [];
   let total = 0;
@@ -391,7 +391,8 @@ export function legCoordinates(graph: TiledRoadGraph, leg: TruthLeg, a: TruthPoi
   return out;
 }
 
-function sliceAlong(edge: RoadEdge, from: number, to: number): [number, number][] {
+/** An edge's geometry from `from` to `to` m along it (from ≤ to), as [lon, lat] pairs. */
+export function sliceAlong(edge: RoadEdge, from: number, to: number): [number, number][] {
   const { cum, lonLat } = edge;
   const point = (d: number): [number, number] => {
     let i = 0;

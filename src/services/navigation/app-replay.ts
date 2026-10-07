@@ -7,9 +7,10 @@
 // result has the same track, fixes, particles and summary as `replayTrip`.
 // Drives replayed in order with one CalibrationStore carry what the app keeps from drive to drive.
 
+import type { MapMatchConfig } from "@/nav/mapmatch/particle-filter";
+import type { NavConfig } from "@/nav/navigator";
 import { jamFixes, type JamOptions, type JamWindow } from "@/nav/replay/jam";
 import { appOutageCuts, ReplayRecorder, type RecorderOptions, type ReplayCut, type ReplayResult } from "@/nav/replay/replay";
-import type { NavConfig } from "@/nav/navigator";
 import { isSatelliteFix, type GnssFix } from "@/nav/types";
 import type { EngineState, SpeedSample } from "@/obd/types";
 import type { ActiveRoadGraph } from "@/services/offline-map/road-graph-file";
@@ -75,6 +76,8 @@ export interface AppReplayOptions extends Pick<RecorderOptions, "trackStepS" | "
   nav?: Partial<NavConfig>;
   /** The active region's road graph (map matching off without it). */
   roadGraph?: ActiveRoadGraph | null;
+  /** Map-matching settings over the defaults, e.g. the filter's seed (MAPMATCH-SPEC §10.2). */
+  mapMatchConfig?: Partial<MapMatchConfig>;
   /** GNSS withheld (the service's simulated outage) in these windows; default: the log's own "Cut GPS" moments. */
   cuts?: ReplayCut[];
   /** Simulated jamming (jam.ts): satellite fixes in these windows become coarse ones. */
@@ -193,6 +196,7 @@ export function replayTripInApp(trip: TripLog, o: AppReplayOptions): AppReplayRe
     logMapMatch: (r) => publishedMapMatch.push(r),
     roadGraph: { current: () => graph, subscribe: () => () => {} },
     nav: o.nav,
+    mapMatch: o.mapMatchConfig,
     observer: {
       navigator: (nav) => rec.use(nav),
       fix: (fix, out) => rec.fixOutcome(fix, out),

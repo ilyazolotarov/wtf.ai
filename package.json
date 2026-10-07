@@ -78,7 +78,8 @@
     "search": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/search.ts",
     "replay:doubt": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/doubt-bench.ts",
     "replay:junction": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/junction.ts",
-    "replay:offroad": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/offroad.ts"
+    "replay:offroad": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/offroad.ts",
+    "replay:regress": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/regress.ts"
   },
   "jest": {
     "preset": "jest-expo"

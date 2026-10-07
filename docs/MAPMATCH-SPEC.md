@@ -810,6 +810,19 @@ hundred metres stops matching the twin's.
   is within 15 m of that node (junction tolerance).
 - **Tests** (`src/nav/replay/__tests__/truth-match.test.ts`, fixture graph): a right turn at a junction, a turn
   against a one-way (matched, penalised), an off-graph stretch as one break, a gap, the junction tolerance.
+- **Drawn by hand** (`src/nav/replay/drawn-truth.ts`, the viewer's *Ground truth*) where there is no clean fix: 13
+  of the 15 town drives of 2026-10-05/06 had none, and they are the drives map matching is for. The driver
+  clicks the roads taken; the path between two clicks is the shortest along the roads, ignoring one-ways and turn
+  restrictions. Clicks more than 12 m from the graph, two in a row or at a drive's end, are off it (car parks and
+  lanes OSM lacks, drawn as clouds of clicks): straight between them, and to the nearest road. So is a road route
+  over 3× the line between its clicks and 100 m longer (`isDetour`): two clicks on roads the map joins only the
+  long way round, as at a yard's entrance it lacks (gaz9bc: 12 m apart, 733 m round). The car's place on
+  the path comes from the OBD odometer, pinned at the log's ends and at clean fixes; where drawing and odometer
+  disagree, the straight stretches take most of it (a cloud zigzags; a road is drawn at its length to a few %).
+  Drawn right, clean drives timed by the odometer alone were 2–13 m off their fixes at the median, 18–42 m at
+  p90 over 1–3 km; drawn 6 % short, 100–300 m. So the score that counts is *off the drawn road*: the dot's distance
+  to the path within 300 m along it of the timed position, plus twice the timing's doubt (3 % of the odometer
+  distance to the nearest pin).
 
 ### 10.2 Metrics
 
@@ -830,11 +843,14 @@ replay of a single drive measures mostly luck. Report a sweep (`--mm '{"seed":N}
 seeds for a metric aimed at one failure, three to ten for the corpus, three per simulated drive. On the drive of
 §15, item 14 one change read as 52 s → 3 s on seed 1 and as worse than before on seed 2.
 
-**And on every drive, not only the one a change is for.** Replay each drive through the app as the viewer does it,
-from a cold start and from the parked pose the earlier logs left, and compare drive by drive: an average hides one
-drive gone from 15 to 490 m off. Most jammed drives have no satellite fix at all, so every metric above, scored
-against GPS, skips exactly them. Two changes measured on their own drive and on these benchmarks were reverted
-for that (2026-10-07): §15, item 14, and NAVIGATOR-SPEC §6.1.
+**And on every drive, not only the one a change is for.** `npm run replay:regress -- --against <saved run>`
+replays each drive through the app as the viewer does it, from a cold start and from the parked pose the earlier
+logs left, with three seeds, and lists every drive that got worse: against its drawn truth (§10.1), else its clean
+fixes, else its Wi-Fi fixes, and on every drive the dot off the roads at speed and its jumps. An average hides one
+drive gone from 15 to 490 m off, and most jammed drives have no satellite fix at all, so every metric above,
+scored against GPS, skips exactly them. Two changes measured on their own drive and on these benchmarks were
+reverted for that (2026-10-07): §15, item 14, and NAVIGATOR-SPEC §6.1. Run against the reverts, the check lists 8
+drives worse, the ones the viewer showed, and 3 better.
 
 ### 10.3 Tooling (`tools/replay`)
 

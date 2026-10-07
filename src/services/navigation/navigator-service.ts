@@ -4,7 +4,7 @@
 
 import type { LocationPermissionResponse } from "expo-location";
 
-import type { MapMatchState } from "@/nav/mapmatch/particle-filter";
+import type { MapMatchConfig, MapMatchState } from "@/nav/mapmatch/particle-filter";
 import { UpdateTiming, type UpdateTimingSummary } from "@/nav/mapmatch/update-timing";
 import type { FixOutcome, MapMatchEstimate, NavConfig, NavMode, ParkedPose } from "@/nav/navigator";
 import { Navigator } from "@/nav/navigator";
@@ -134,6 +134,8 @@ export interface NavigatorServiceDeps {
   /** The active region's road graph; map matching is off without it. */
   roadGraph?: RoadGraphSource;
   nav?: Partial<NavConfig>;
+  /** Map-matching settings over the filter's defaults: a replay's filter seed (the app passes none). */
+  mapMatch?: Partial<MapMatchConfig>;
   /** Wall clock and the tick timer: the real ones in the app, a trip log's in a replay (app-replay.ts). */
   clock?: ServiceClock;
   /** Location permission (expo-location in the app); without it, granted. */
@@ -621,7 +623,7 @@ export class NavigatorService implements PositionSource {
     const active = this.deps.roadGraph.current();
     if ((active?.key ?? null) === (this.graph?.key ?? null)) return;
     this.drainUpdateTimes(); // the filter is about to be replaced
-    nav.setRoadGraph(active?.graph ?? null);
+    nav.setRoadGraph(active?.graph ?? null, this.deps.mapMatch);
     this.graph = active ? { key: active.key, region: active.region, builtAt: active.graph.info.builtAt } : null;
     this.note(active ? `mm graph ${active.region} (OSM ${active.graph.info.osmDate})` : "mm graph none");
   }
