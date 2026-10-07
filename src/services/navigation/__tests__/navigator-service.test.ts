@@ -336,6 +336,30 @@ describe("parked pose", () => {
     next.service.stop();
   });
 
+  test("under jamming the engine off leaves the dot where the car stopped, not on the next Wi-Fi fix", async () => {
+    const { store, pose } = await parkFirst();
+    // Brake (a segment ramps to its speed), then stand.
+    const STOP: DriveSegment[] = [{ durationS: 5, speedMps: 0, yawRateDegS: 0 }, { durationS: 40, speedMps: 0, yawRateDegS: 0 }];
+    const drive = syntheticDrive({ segments: [...DRIVE_OFF, ...STOP], gnss: "coarse", origin: pose, startHeadingRad: pose.headingRad, seed: 7 });
+    const next = harness({ store });
+    await next.service.start();
+    const stoppedS = DRIVE_OFF.reduce((t, s) => t + s.durationS, 0) + 10;
+    next.play(drive, { untilS: stoppedS });
+    const stopped = next.service.getSnapshot()!;
+    expect(stopped.source).toBe("dr");
+    // The engine off; the car's link goes quiet, and once its speed is stale the navigator's output stops. The
+    // phone keeps getting Wi-Fi fixes: none of them is drawn as the car.
+    next.engine.emit("engine-off", next.now());
+    next.play(drive, { untilS: stoppedS + 15, withoutObd: true });
+    const held = next.service.getSnapshot()!;
+    next.play(drive, { withoutObd: true });
+    const later = next.service.getSnapshot()!;
+    expect(later.source).toBe("dr");
+    expect(haversineM(later, held)).toBeLessThan(0.1);
+    expect(haversineM(later, stopped)).toBeLessThan(20);
+    next.service.stop();
+  });
+
   test("a fix far from it drops it (the car was moved)", async () => {
     const { store, pose } = await parkFirst();
     const moved = { lat: pose.lat + 0.005, lon: pose.lon };

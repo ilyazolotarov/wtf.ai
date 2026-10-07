@@ -115,7 +115,12 @@ jammed:
   ~500 m. The car usually starts where it was parked, facing the same way.
 - **Saved** (`Navigator.parkedPose`): position, heading and their σ while the car stands (standstill, or OBD 0) in
   mode `dr`. The service stores it per VIN at engine/ignition off, every 30 s while parked, and when it stops.
-  The first OBD speed > 0 clears it, so a pose never outlives a drive.
+  The first OBD speed > 0 clears it, so a pose never outlives a drive. The pose is the EKF's, not the map's dot.
+  Tried and reverted (2026-10-07): saving where the map drew the car (the dominant map-matching hypothesis while
+  dead-reckoning). Over 2026-10-06's chain of trips it removed the jumps between them (≤ 13 m instead of up to
+  1.4 km), and where the dot was the one that was wrong it carried a wrong street into the next drive: replayed
+  through the app from the parked chain (3 filter seeds), one drive of 2026-10-05 started 700 m off, and two others
+  ended up 120 and 490 m from their Wi-Fi fixes at the median, against 10–17 m (MAPMATCH-SPEC §10.2).
 - **Frozen** at the first handling while parked. The driver often takes the phone out and walks off with it while
   the ECU is still awake (2 of 7 drives on 2026-10-04). The fixes then follow the driver, and without the freeze
   the saved pose would follow them too. A fix that rejects an unverified pose also drops the frozen one.
@@ -429,7 +434,10 @@ Measured on the 7 drives of 2026-10-04 (`mag_raw`, 19.4 Hz):
 - **Without OBD speed** (no adapter, or none for 10 s): phone GNSS only. The navigator needs OBD speed for DR. The
   map shows the latest fix the navigator took, once it has (300 ms after delivery, so a spoofed fix never flashes on
   the map); while integrity refuses the fixes it holds the last one it passed, its circle growing at 15 m/s, the
-  spoofed fix as the ghost.
+  spoofed fix as the ghost. **After the navigator's own dot** (the engine went off, the link dropped), only a
+  satellite fix replaces it: the dot is where the car stopped, and a Wi-Fi/cell fix is hundreds of metres to
+  kilometres wide under jamming — drawing it instead threw the car 1–10 km at the end of every trip of
+  2026-10-06.
 - **Trip log:**
   - `nav_estimate` (TRIP-LOGGER-SPEC §6.3): every position the map was given (~2–3 Hz). It holds the drawn
     position and radius, mode, source, trust, heading and its σ, `k_s`, the GNSS lag in use, the parked-pose status,

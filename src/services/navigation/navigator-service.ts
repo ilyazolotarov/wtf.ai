@@ -850,7 +850,12 @@ export class NavigatorService implements PositionSource {
       const shown = this.lastShownFix;
       const held = trust === "UNTRUSTED" || trust === "REACQUIRING";
       const same = p && shown && p.source === "gnss" && p.timestamp === shown.utcUs / 1000 && p.trust === trust && !held;
-      if (shown && !same) {
+      // The engine off ends the navigator, and the dot it last drew is where the car stopped: a Wi-Fi/cell fix is
+      // hundreds of metres to kilometres wide under jamming, and drawing it instead threw the car 1-10 km at the
+      // end of every trip of 2026-10-06. Only a satellite fix moves a dot the navigator drew.
+      if (p && (p.source === "dr" || p.source === "fused") && shown && !isSatelliteRecord(shown)) {
+        if (p.trust !== trust) this.set({ ...p, trust });
+      } else if (shown && !same) {
         const q = mapFixToPosition(shown, trust, lastTrustedFixAt);
         const ageS = Math.max(0, (nowUs - shown.timestampUs) / 1e6);
         this.set(held ? { ...q, accuracyM: q.accuracyM + HELD_FIX_GROWTH_MPS * ageS, speedMps: undefined, rawGnss: fix ? rawOf(fix) : undefined } : q);
