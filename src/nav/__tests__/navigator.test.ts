@@ -134,6 +134,50 @@ describe("Navigator on a synthetic drive", () => {
     expect(nav.params!.bw).toBeCloseTo(0.002, 3);
   });
 
+  test("turning while OBD reads 0 (reversing out of a space) widens the position; a stop at the lights doesn't", () => {
+    const SEGMENTS: DriveSegment[] = [
+      { durationS: 5, speedMps: 0, yawRateDegS: 0 },
+      { durationS: 30, speedMps: 14, yawRateDegS: 0 },
+      { durationS: 5, speedMps: 0, yawRateDegS: 0 },
+      { durationS: 14, speedMps: 0, yawRateDegS: 0 },
+      { durationS: 10, speedMps: 8, yawRateDegS: 0 },
+    ];
+    // 50–54 s, standing as OBD sees it: 20 °/s for 4 s is 80°, as out of a space ~90° to the road.
+    // The synthetic car can't turn standing (its gyro reads 0 at 0 m/s): the turn is put into the gyro, at OBD 0.
+    const run = (turnDegS: number) => {
+      const drive = syntheticDrive({ segments: SEGMENTS, gnss: "none" });
+      const nav = new Navigator();
+      const t0 = drive.trip.imu[0].tUs;
+      for (const s of drive.trip.imu) {
+        const t = (s.tUs - t0) / 1e6;
+        if (t >= 50 && t < 54) s.gyro = [s.gyro[0], s.gyro[1], s.gyro[2] + (turnDegS * Math.PI) / 180];
+      }
+      let oi = 0;
+      let fed = false;
+      let sigmaAtStop = 0;
+      let sigmaAfter = 0;
+      for (const s of drive.trip.imu) {
+        while (oi < drive.trip.obdSpeed.length && drive.trip.obdSpeed[oi].tUs <= s.tUs) nav.onObdSpeed(drive.trip.obdSpeed[oi++]);
+        nav.onImu(s);
+        const t = (s.tUs - t0) / 1e6;
+        if (!fed && t >= 20) {
+          fed = true;
+          const p = drive.truthAt(s.tUs - 0.4e6);
+          nav.onGnss({ tUs: s.tUs, lat: p.lat, lon: p.lon, hAccM: 5, speedMps: 14, speedAccMps: 0.3, courseRad: p.psi, courseAccRad: 0.03 });
+        }
+        if (t < 45) sigmaAtStop = nav.estimate()?.accuracyM ?? 0;
+        if (t < 56) sigmaAfter = nav.estimate()?.accuracyM ?? 0;
+      }
+      return { manoeuvres: nav.stats.manoeuvres, grewM: sigmaAfter - sigmaAtStop };
+    };
+    const reversed = run(20);
+    const lights = run(0);
+    expect(reversed.manoeuvres).toBe(1);
+    expect(lights.manoeuvres).toBe(0);
+    // 6 m per radian turned, ~8 m σ, added to what driving without GNSS had grown.
+    expect(reversed.grewM).toBeGreaterThan(lights.grewM + 3);
+  });
+
   test("handling the phone while parked doesn't lose the heading", () => {
     const drive = syntheticDrive({
       segments: [
@@ -330,12 +374,12 @@ describe("the dead reckoning doubted by the coarse fixes", () => {
   const start = drive.truth[0];
   const pose = { lat: start.lat, lon: start.lon, headingRad: start.psi, posSigmaM: 5, headingSigmaRad: 0.04 };
 
-  /** The Wi-Fi/cell fixes between these seconds land `m` metres north of the car. */
-  const moveFixes = (fromS: number, toS: number, m: number) => ({
+  /** The Wi-Fi/cell fixes between these seconds land `m` metres north of the car (claiming `hAccM` if given). */
+  const moveFixes = (fromS: number, toS: number, m: number, hAccM?: number) => ({
     ...drive.trip,
     gnss: drive.trip.gnss.map((f) => {
       const tS = (f.tUs - drive.trip.startUs) / 1e6;
-      return tS >= fromS && tS < toS ? { ...f, lat: f.lat + m / 111_320 } : f;
+      return tS >= fromS && tS < toS ? { ...f, lat: f.lat + m / 111_320, ...(hAccM ? { hAccM } : {}) } : f;
     }),
   });
 
@@ -346,16 +390,26 @@ describe("the dead reckoning doubted by the coarse fixes", () => {
     expect(endError(drive, r).posM).toBeLessThan(30);
   });
 
-  test("three fixes in a row far outside their own accuracy raise it, with how far they put the car", () => {
+  test("three Wi-Fi fixes in a row far from the track move it to them: the track was lost", () => {
     const r = replayTrip(moveFixes(40, 200, 600), { startPose: pose });
     expect(r.track.filter((t) => t.tS < 40).every((t) => t.doubtM === undefined)).toBe(true);
+    // Three 1 Hz fixes after the move, then the track is where they put the car (600 m north), not where it was.
+    const north = (t: { tS: number; lat: number }) => {
+      const tUs = drive.trip.startUs + t.tS * 1e6;
+      const car = drive.truth.reduce((a, b) => (Math.abs(b.tUs - tUs) < Math.abs(a.tUs - tUs) ? b : a));
+      return (t.lat - car.lat) * 111_320;
+    };
+    const moved = r.track.filter((t) => t.tS > 50 && t.tS < 85);
+    expect(moved.every((t) => Math.abs(north(t) - 600) < 150)).toBe(true);
+  });
+
+  test("cell fixes far from the track only doubt it: too wide to move it to", () => {
+    const r = replayTrip(moveFixes(40, 200, 6000, 1500), { startPose: pose });
     const raised = r.track.find((t) => t.doubtM !== undefined);
     expect(raised).toBeDefined();
-    // Three 1 Hz fixes after the move, and the doubt is their distance, not the filter's spread.
-    expect(raised!.tS).toBeGreaterThanOrEqual(42);
-    expect(raised!.tS).toBeLessThan(48);
-    expect(raised!.doubtM).toBeGreaterThan(400);
-    expect(raised!.accuracyM).toBeLessThan(100);
+    expect(raised!.doubtM).toBeGreaterThan(4000);
+    // Still where the car is, give or take what the wide fixes pulled.
+    expect(endError(drive, r).posM).toBeLessThan(60);
   });
 
   test("one far fix is not enough: coarse fixes jump about under jamming", () => {
@@ -364,7 +418,7 @@ describe("the dead reckoning doubted by the coarse fixes", () => {
   });
 
   test("a fix that agrees again clears it", () => {
-    const r = replayTrip(moveFixes(40, 60, 600), { startPose: pose });
+    const r = replayTrip(moveFixes(40, 60, 6000, 1500), { startPose: pose });
     expect(r.track.some((t) => t.doubtM !== undefined)).toBe(true);
     expect(r.track.filter((t) => t.tS > 63).every((t) => t.doubtM === undefined)).toBe(true);
   });

@@ -121,6 +121,11 @@ export interface MapMatchConfig {
   fixSpacingM: number;
   /** Coarse (Wi-Fi/cell) fixes: σ inflation, and their own spacing. */
   coarseInflation: number;
+  /**
+   * A coarse fix's likelihood never falls below this share: against the drawn truth (2026-10-03..06) Wi-Fi/cell fixes
+   * were within their claim about 6 times in 7 and up to 2-3× past it otherwise (with `coarseInflation` 1).
+   */
+  coarseOutlier: number;
   coarseSpacingM: number;
   /**
    * The EKF position as a weak prior at each weighting (open loop): σ = max(inflation × EKF σ, floor),
@@ -174,6 +179,14 @@ export interface MapMatchConfig {
   workingSetEveryM: number;
   /** A fix farther than this many σ from every particle means the filter lost the car. */
   lostSigmas: number;
+  /**
+   * So does a turn of at least `lostTurnRad` between two straight moments that on-road particles holding
+   * `lostTurnShare` of the weight did not follow within `lostTurnMatchRad`, driven faster than
+   * `offRoadSpeed.freeMps` after it (no yard). 0 switches it off.
+   */
+  lostTurnRad: number;
+  lostTurnMatchRad: number;
+  lostTurnShare: number;
   seed: number;
 }
 
@@ -216,7 +229,8 @@ export const DEFAULT_MAP_MATCH: MapMatchConfig = {
   laneHalfWidthM: 3,
   laneSigmaM: 2,
   fixSpacingM: 10,
-  coarseInflation: 2,
+  coarseInflation: 1,
+  coarseOutlier: 0.15,
   coarseSpacingM: 25,
   ekfPositionScale: 0.3,
   ekfPositionInflation: 2,
@@ -249,6 +263,9 @@ export const DEFAULT_MAP_MATCH: MapMatchConfig = {
   workingSetMarginM: 300,
   workingSetEveryM: 50,
   lostSigmas: 5,
+  lostTurnRad: 60 * DEG,
+  lostTurnMatchRad: 30 * DEG,
+  lostTurnShare: 0.05,
   seed: 1,
 };
 
@@ -384,6 +401,8 @@ class Particles {
   readonly roadTurn: Float64Array;
   /** `roadTurn` at the last comparison (the anchor of the relative-heading term). */
   readonly anchorTurn: Float64Array;
+  /** `roadTurn` at the last straight moment (the lost-turn test). */
+  readonly straightTurn: Float64Array;
   /** The compass log-likelihood in this particle's weight (§8.2): replaced at each look, never added twice. */
   readonly compassLog: Float64Array;
   readonly logw: Float64Array;
@@ -399,6 +418,7 @@ class Particles {
     this.dks = new Float64Array(size);
     this.roadTurn = new Float64Array(size);
     this.anchorTurn = new Float64Array(size);
+    this.straightTurn = new Float64Array(size);
     this.compassLog = new Float64Array(size);
     this.logw = new Float64Array(size);
   }
@@ -414,6 +434,7 @@ class Particles {
     this.dks[dst] = from.dks[src];
     this.roadTurn[dst] = from.roadTurn[src];
     this.anchorTurn[dst] = from.anchorTurn[src];
+    this.straightTurn[dst] = from.straightTurn[src];
     this.compassLog[dst] = from.compassLog[src];
     this.logw[dst] = from.logw[src];
   }
@@ -445,6 +466,10 @@ export class ParticleFilter {
   private anchorTurnRad = 0;
   private anchorVar = 0;
   private lastYawUnknownM = -Infinity;
+  /** The last straight moment (navigator distance, turn), and whether the road hypotheses missed a turn since. */
+  private straightM = 0;
+  private straightTurnRad = 0;
+  private lostTurn = false;
   private nextWorkingSetM = 0;
   private lastCoarseM = -Infinity;
   private lastFixM = -Infinity;
@@ -532,6 +557,7 @@ export class ParticleFilter {
         p.logw[i] += (-0.5 * dh * dh) / (psiSigma * psiSigma + c.roadSigmaRad * c.roadSigmaRad);
       }
       p.anchorTurn[i] = p.roadTurn[i];
+      p.straightTurn[i] = p.roadTurn[i];
     }
     this.normalize();
     this.updateWorkingSet();
@@ -576,6 +602,7 @@ export class ParticleFilter {
         u += step;
       }
       p.anchorTurn[i] = p.roadTurn[i];
+      p.straightTurn[i] = p.roadTurn[i];
     }
     this.normalize();
     this.updateWorkingSet();
@@ -662,6 +689,9 @@ export class ParticleFilter {
     this.p.compassLog.fill(0);
     this.movedSinceEval = false;
     this.setAnchor();
+    this.straightM = this.distanceM;
+    this.straightTurnRad = this.turnRad;
+    this.lostTurn = false;
   }
 
   /** Particle arrays of `size` (kept when the size doesn't change). */
@@ -753,6 +783,9 @@ export class ParticleFilter {
     const t0 = now();
     const s = coarse ? sigmaM * c.coarseInflation : Math.hypot(sigmaM, c.laneSigmaM);
     const s2 = s * s;
+    // A Wi-Fi/cell fix is mostly within its claim, now and then 2-3× past it: a fix far from a particle takes at
+    // most log(1/coarseOutlier) from it, so a wild one can't kill the right road, and three that agree do settle it.
+    const floor = coarse ? c.coarseOutlier : 0;
     const p = this.p;
     // The fix shows where the car was `lagS` ago.
     const back = this.speedMps * lagS;
@@ -764,7 +797,7 @@ export class ParticleFilter {
       if (d < nearest) nearest = d;
       // On a road the car drives in a lane, not on the centre line.
       const r = p.offRoad[i] ? d : Math.max(0, d - c.laneHalfWidthM);
-      p.logw[i] += (-0.5 * r * r) / s2;
+      p.logw[i] += floor > 0 ? Math.log(floor + (1 - floor) * Math.exp((-0.5 * r * r) / s2)) : (-0.5 * r * r) / s2;
     }
     if (nearest > c.lostSigmas * s + c.laneHalfWidthM) {
       this.record(now() - t0);
@@ -1144,6 +1177,7 @@ export class ParticleFilter {
     const fast = c.offRoadSpeed;
     const fastShare = this.resolved ? Math.min(1, Math.max(0, (this.speedMps - fast.freeMps) / (fast.fullMps - fast.freeMps))) : 0;
     const offRoadPenalty = c.offRoadLogPenalty * (1 + (fast.factor - 1) * fastShare);
+    if (straight && !halted) this.checkLostTurn();
     for (let i = 0; i < p.size; i++) {
       if (p.offRoad[i]) {
         p.logw[i] += offRoadPenalty;
@@ -1167,10 +1201,42 @@ export class ParticleFilter {
         p.logw[i] += (c.ekfPositionScale * -0.5 * (de * de + dn * dn)) / posVar;
       }
       if (compare) p.anchorTurn[i] = p.roadTurn[i];
+      if (straight) p.straightTurn[i] = p.roadTurn[i];
     }
     if (compare) this.setAnchor();
+    if (straight) {
+      this.straightM = this.distanceM;
+      this.straightTurnRad = this.turnRad;
+    }
     this.normalize();
     this.maybeResample();
+  }
+
+  /**
+   * At a straight moment: did the car turn `lostTurnRad` since the last one, at road speed, and almost no on-road
+   * particle turn with it? Then the road hypotheses missed the turn (the car was not where they were along the road).
+   */
+  private checkLostTurn(): void {
+    const c = this.config;
+    const turned = this.turnRad - this.straightTurnRad;
+    if (c.lostTurnRad <= 0 || !this.resolved || Math.abs(turned) < c.lostTurnRad) return;
+    if (this.lastYawUnknownM >= this.straightM || this.speedMps < c.offRoadSpeed.freeMps) return;
+    const p = this.p;
+    let followed = 0;
+    let total = 0;
+    for (let i = 0; i < p.size; i++) {
+      const w = Math.exp(p.logw[i]);
+      total += w;
+      if (!p.offRoad[i] && Math.abs(wrap(turned - (p.roadTurn[i] - p.straightTurn[i]))) <= c.lostTurnMatchRad) followed += w;
+    }
+    if (total > 0 && followed < c.lostTurnShare * total) this.lostTurn = true;
+  }
+
+  /** A turn the road hypotheses missed since the last call (`checkLostTurn`): the filter should start again. */
+  takeLostTurn(): boolean {
+    const lost = this.lostTurn;
+    this.lostTurn = false;
+    return lost;
   }
 
   private setAnchor(): void {
@@ -1191,6 +1257,7 @@ export class ParticleFilter {
   private neutralHistory(i: number): void {
     const p = this.p;
     p.anchorTurn[i] = p.roadTurn[i] - (this.turnRad - this.anchorTurnRad);
+    p.straightTurn[i] = p.roadTurn[i] - (this.turnRad - this.straightTurnRad);
     p.compassLog[i] = 0;
   }
 

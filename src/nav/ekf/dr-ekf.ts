@@ -247,6 +247,28 @@ export class DrEkf {
     return this.update(H, [wrapAngle(residual)], [[sigma * sigma]], gate);
   }
 
+  /**
+   * The position is (e, n) ±`sigmaM`, whatever the EKF thought: its correlations with the rest go, the heading, speed
+   * and calibration stay. For a track the fixes say is lost (Navigator.noteCoarseDoubt).
+   */
+  relocate(e: number, n: number, sigmaM: number): void {
+    this.x[IX.E] = e;
+    this.x[IX.N] = n;
+    for (const i of [IX.E, IX.N]) {
+      for (let j = 0; j < DIM; j++) {
+        this.P[i][j] = 0;
+        this.P[j][i] = 0;
+      }
+      this.P[i][i] = sigmaM * sigmaM;
+    }
+  }
+
+  /** The position grows uncertain by `sigmaM` in every direction (a move the odometry didn't see). */
+  inflatePosition(sigmaM: number): void {
+    this.P[IX.E][IX.E] += sigmaM * sigmaM;
+    this.P[IX.N][IX.N] += sigmaM * sigmaM;
+  }
+
   /** Move the frame origin: the state shifts by (-dE, -dN). */
   shift(dE: number, dN: number): void {
     this.x[IX.E] -= dE;

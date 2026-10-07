@@ -187,11 +187,14 @@ describe("ParticleFilter in the navigator (synthetic drives on the fixture graph
     expect(wrong).toBeGreaterThan(0.1);
   });
 
-  test("waits while the anchor is too coarse", () => {
+  test("waits while the anchor is too coarse: a cell fix searches its claim (they are within it), a Wi-Fi fix 3σ", () => {
     const g = graph();
-    const drive = syntheticDrive({ segments: junctionDrive(20).slice(0, 2), origin: ORIGIN, startHeadingRad: Math.PI / 2, gnss: "coarse", gnssSigmaM: 400 });
-    const result = replayTrip(drive.trip, { mapMatch: { graph: g } });
-    expect(result.track.every((p) => p.mapMatch === undefined)).toBe(true);
+    const run = (gnssSigmaM: number) =>
+      replayTrip(syntheticDrive({ segments: junctionDrive(20).slice(0, 2), origin: ORIGIN, startHeadingRad: Math.PI / 2, gnss: "coarse", gnssSigmaM }).trip, { mapMatch: { graph: g } });
+    // ±1.5 km: wider than the filter starts on.
+    expect(run(1500).track.every((p) => p.mapMatch === undefined)).toBe(true);
+    // ±400 m: 450 m around it (3σ was 1.2 km, too wide).
+    expect(run(400).track.some((p) => p.mapMatch !== undefined)).toBe(true);
   });
 
   test("starts at the first fix, carries on through the course start, and stays off without a graph", () => {
@@ -357,27 +360,30 @@ describe("a 95° turn at a junction as dense as a real one (MAPMATCH-SPEC §15, 
   test("knowing where it is, it takes the turn onto one of the two eastbound roads", () => {
     for (const offsetM of [0, 20, 40]) {
       const r = run(offsetM);
-      expect(r.alongM).toBeLessThan(50);
-      expect(r.endWay).toBe(172);
+      // Started up to 40 m short, and nothing says where along the 1.5 km approach it is (no turn, no fix): ~2 %
+      // of it may add to that.
+      expect(r.alongM).toBeLessThan(80);
+      // 172 is the one driven; 173 leaves the node at the same heading and is 28 m off it 360 m on. Since the road
+      // position stopped telling the EKF where along the road it is between turns, the filter can end on either.
+      expect([172, 173]).toContain(r.endWay);
       expect(r.offRoad).toBeLessThan(0.2);
     }
   });
 
   // The failure of 2026-10-06, 16 km into the drive out: the car turned 62 m before the filter's idea of the
-  // junction, so no road there explains a 95° turn and the dot leaves the map — on the phone it drove through the
-  // field beside the road for 52 s at 130 km/h. The off-road speed rule (§7.4) does not save it, even now that
-  // the particles are put back on a road rather than only out-weighed: `onRoadRecoverProjectM` reaches 45 m and
-  // the cloud is 63 m out. Reaching far enough (80–120 m) does fix this case, and costs far too much on the real
-  // drives — wrong road 8.5 → 25.6 %, truth survival 98.5 → 83.8 % on `replay:mm --jam 0:inf` — because that
-  // snaps particles onto roads the car was never on. What should fix it is the turn itself: a confident 95° where
-  // exactly one junction nearby turns that much is an absolute position fix, and re-seeding there is selective in
-  // a way that a wider reach is not.
-  test("62 m short of the junction, no road explains the turn and the dot leaves the map", () => {
-    const r = run(62);
-    expect(r.alongM).toBeGreaterThan(55);
-    expect(r.endWay).toBeNull();
-    expect(r.end.state).toBe("offroad");
-    expect(r.offRoad).toBeGreaterThan(0.5);
+  // junction (250 m on the same drive replayed without GPS), so no road there explains a 95° turn. The dot left the
+  // map, and on the phone it drove through the field beside the road for 52 s at 130 km/h. A wider reach to a road
+  // (80–120 m) fixed this case and snapped particles onto roads the car was never on elsewhere. The turn itself says
+  // the filter lost the car: almost none of it turned with it, and it starts again around the EKF, over twice its σ
+  // (the EKF's position along the road came from those particles). Here the EKF claims ±5 m from its start pose,
+  // so it reaches ~150 m; on the drive it claimed ±63 m and the junction 250 m on was within reach.
+  test("short of the junction, the turn no road explains starts it again, and it finds the road", () => {
+    for (const offsetM of [62, 150]) {
+      const r = run(offsetM);
+      expect(r.alongM).toBeGreaterThan(offsetM - 10);
+      expect([172, 173]).toContain(r.endWay);
+      expect(r.offRoad).toBeLessThan(0.2);
+    }
   });
 });
 

@@ -1,11 +1,13 @@
-// Every drive through the app as the viewer replays it, from a cold start and from the parked chain (each drive
-// starting from what the earlier ones left), with several filter seeds, scored drive by drive. With --against, each
+// Every drive through the app as the viewer replays it, from the parked chain (each drive starting from what the
+// earlier ones left), from that chain with each drawn drive parked where its drawing starts, and cold, with several
+// filter seeds, scored drive by drive. With --against, each
 // drive is set against a saved run, so a change that breaks one drive shows even when the averages improve
 // (MAPMATCH-SPEC §10.2). Run it before and after any navigator or map-matching change.
 //
 //   npm run replay:regress -- --save before          # keep this run (tools/triplog/logs/regress/before.json)
 //   npm run replay:regress -- --against before       # every drive against it: what got worse, what got better
 //   npm run replay:regress -- --seeds 5 --starts parked --logs 20261005 --nav '<json>' --mm '<json>' --threads 8
+//   npm run replay:regress -- --from after --against before   # two saved runs, nothing replayed
 //
 // Truth per drive, best first: the roads drawn for it in the viewer (`<log>.truth.json`, drawn-truth.ts), else its
 // clean satellite fixes (the dot when GPS came back after each gap, and through the app's Cut GPS stretches: the
@@ -18,18 +20,20 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { APP_NAV_DEFAULTS } from "../../src/nav/app-defaults";
-import { haversineM } from "../../src/nav/geo";
+import { bearingRad, haversineM } from "../../src/nav/geo";
 import { LocalFrame } from "../../src/nav/geo/local-frame";
 import type { MapMatchConfig } from "../../src/nav/mapmatch/particle-filter";
-import type { NavConfig } from "../../src/nav/navigator";
+import type { NavConfig, ParkedPose } from "../../src/nav/navigator";
 import { driveOutages, estimateTrack, obdDistanceM, type ShownPoint } from "../../src/nav/replay/drive-report";
 import { drawnTruthTrack, scoreDrawn, type DrawnTruth } from "../../src/nav/replay/drawn-truth";
 import { appOutageCuts } from "../../src/nav/replay/replay";
+import { obdOdometer } from "../../src/nav/replay/truth-match";
+import { wrapAngle } from "../../src/nav/ekf/dr-ekf";
 import { MemoryKeyValueStore, phoneOf, replayTripInApp } from "../../src/services/navigation/app-replay";
 import { CalibrationStore } from "../../src/services/navigation/calibration-store";
 import type { MapMatchLoop } from "../../src/services/navigation/navigator-service";
 import { readTripLog, type TripLog } from "../../src/triplog/trip-log-reader";
-import { carOf, graphFor } from "./app-chain";
+import { carOf, drawnStartPose, graphFor } from "./app-chain";
 import { isMainThread, Pool, serveJobs, threadsArg } from "./pool";
 
 const LOGS = path.join(path.dirname(fileURLToPath(import.meta.url)), "../triplog/logs");
@@ -37,15 +41,23 @@ const SAVED = path.join(LOGS, "regress");
 /** The dot farther than this from every road above `FAST_KPH` is drawn off the roads (no yard is driven that fast). */
 const OFF_ROAD_M = 20;
 const FAST_KPH = 20;
+/** A cold start is scored from its first fix claiming this or better: a Wi-Fi or satellite fix, not a cell's. */
+const COLD_FROM_FIX_M = 150;
 /** Faster than a car (45 m/s, plus 10 m for a correction): the dot jumped (the viewer's hollow circles). */
 const JUMP_MPS = 45;
 const JUMP_SLACK_M = 10;
 
-type Start = "cold" | "parked";
+/**
+ * cold: nothing stored. parked: every log in order on one storage, each drive starting from what the earlier ones
+ * left (the app's own chain). drawn: that chain, but each drawn drive starts parked where its drawing starts: the
+ * spot saved right, whatever the chain or the phone made of it (the drives of 2026-10-03..06 started cold more than
+ * once for bugs since fixed, and a fix judged on those starts is judged on a bug).
+ */
+type Start = "cold" | "parked" | "drawn";
 interface Job {
   start: Start;
   seed: number;
-  /** One log (cold), or every log in order (parked: one storage across them). */
+  /** One log (cold), or every log in order (parked, drawn: one storage across them). */
   logs: string[];
   nav: Partial<NavConfig>;
   mm: Partial<MapMatchConfig>;
@@ -69,6 +81,11 @@ export interface DriveResult {
   startGapM: number | null;
   /** What became of the parked pose the drive started from. */
   pose: string | null;
+  /**
+   * Cold: scored from this time on, the first fix that can place the car (`COLD_FROM_FIX_M`); before it the dot
+   * can't be right. Null: no such fix all drive, so nothing scored (only a coarse cell fix, kilometres wide).
+   */
+  fromS?: number | null;
   error?: string;
 }
 
@@ -141,11 +158,15 @@ function runJob(job: Job): DriveResult[] {
   const results: DriveResult[] = [];
   for (const log of job.logs) {
     const trip = readTripLog(new Uint8Array(readFileSync(path.join(LOGS, log))));
-    const vin = carOf(trip, job.start === "parked" ? byProtocol : new Map());
+    const chained = job.start !== "cold";
+    const vin = carOf(trip, chained ? byProtocol : new Map());
     const graph = graphFor(trip);
     try {
+      const calibration = new CalibrationStore(chained ? store : new MemoryKeyValueStore(), phoneOf(trip));
+      const pose = job.start === "drawn" && vin ? drawnStartPose(trip, readDrawn(log)) : null;
+      if (pose && vin) calibration.saveParkedPose(vin, pose);
       const r = replayTripInApp(trip, {
-        calibration: new CalibrationStore(job.start === "parked" ? store : new MemoryKeyValueStore(), phoneOf(trip)),
+        calibration,
         loop: (job.nav.mapMatchLoop ?? APP_NAV_DEFAULTS.mapMatchLoop ?? "closed") as MapMatchLoop,
         roadGraph: graph?.active,
         vin,
@@ -160,7 +181,14 @@ function runJob(job: Job): DriveResult[] {
       const before = vin ? lastDot.get(vin) : undefined;
       const startGapM = job.start === "parked" && before && track[0] ? Math.round(haversineM(before, track[0])) : null;
       if (vin && track.length) lastDot.set(vin, track.at(-1)!);
-      results.push({ ...score(trip, log, track, graph), start: job.start, seed: job.seed, startGapM, pose: r.summary.startPose?.status ?? null });
+      if (job.start === "cold") {
+        const first = trip.gnss.find((f) => f.hAccM <= COLD_FROM_FIX_M);
+        const fromS = first ? (first.tUs - trip.startUs) / 1e6 : null;
+        const scored = score(trip, log, fromS === null ? [] : track.filter((p) => p.t >= fromS), graph);
+        results.push({ ...scored, ...(fromS === null ? { truth: "none" as const, drawn: undefined, gps: undefined, wifi: undefined } : {}), start: job.start, seed: job.seed, startGapM, pose: r.summary.startPose?.status ?? null, fromS });
+      } else {
+        results.push({ ...score(trip, log, track, graph), start: job.start, seed: job.seed, startGapM, pose: r.summary.startPose?.status ?? null });
+      }
     } catch (e) {
       results.push({ log, start: job.start, seed: job.seed, km: 0, truth: "none", offRoadS: 0, fastS: 0, jumps: 0, startGapM: null, pose: null, error: String(e) });
     } finally {
@@ -180,6 +208,8 @@ interface Saved {
   options: { seeds: number; starts: Start[]; nav: Partial<NavConfig>; mm: Partial<MapMatchConfig> };
   results: DriveResult[];
 }
+
+const readSaved = (name: string) => JSON.parse(readFileSync(path.join(SAVED, `${name}.json`), "utf8")) as Saved;
 
 /** The number a drive is judged by, lower better: its best truth's main score. */
 function mainScore(r: DriveResult): { value: number | null; what: string; unit: "m" | "s" } {
@@ -249,8 +279,11 @@ async function main() {
     const i = argv.indexOf(flag);
     return i >= 0 ? argv[i + 1] : undefined;
   };
-  const seeds = Number(arg("--seeds") ?? 3);
-  const starts = (arg("--starts") ?? "cold,parked").split(",") as Start[];
+  // A saved run in place of a new one: compare two saved runs (`--from b --against a`).
+  const from = arg("--from");
+  const fromRun = from ? readSaved(from) : null;
+  const seeds = fromRun?.options.seeds ?? Number(arg("--seeds") ?? 3);
+  const starts = fromRun?.options.starts ?? ((arg("--starts") ?? "drawn,parked,cold").split(",") as Start[]);
   const only = arg("--logs");
   const nav = JSON.parse(arg("--nav") ?? "{}") as Partial<NavConfig>;
   const mm = JSON.parse(arg("--mm") ?? "{}") as Partial<MapMatchConfig>;
@@ -263,17 +296,20 @@ async function main() {
   // The parked chain replays every log up to the last one picked: those before it set its storage.
   const chain = all.filter((f) => f <= picked.at(-1)!);
   const jobs: Job[] = [];
-  for (let seed = 1; seed <= seeds; seed++) if (starts.includes("parked")) jobs.push({ start: "parked", seed, logs: chain, nav, mm });
+  for (let seed = 1; seed <= seeds; seed++) for (const start of ["drawn", "parked"] as const) if (starts.includes(start)) jobs.push({ start, seed, logs: chain, nav, mm });
   for (let seed = 1; seed <= seeds; seed++) if (starts.includes("cold")) for (const log of picked) jobs.push({ start: "cold", seed, logs: [log], nav, mm });
   const started = Date.now();
-  const pool = new Pool(import.meta.url, threads);
   let results: DriveResult[];
-  try {
-    results = (await pool.map<Job, DriveResult[]>(jobs)).flat().filter((r) => picked.includes(r.log));
-  } finally {
-    await pool.close();
+  if (fromRun) results = fromRun.results.filter((r) => picked.includes(r.log));
+  else {
+    const pool = new Pool(import.meta.url, threads);
+    try {
+      results = (await pool.map<Job, DriveResult[]>(jobs)).flat().filter((r) => picked.includes(r.log));
+    } finally {
+      await pool.close();
+    }
   }
-  const commit = (() => {
+  const commit = fromRun ? `${fromRun.commit}, saved as "${fromRun.name}"` : (() => {
     try {
       const head = execSync("git rev-parse --short HEAD", { encoding: "utf8" }).trim();
       return execSync("git status --porcelain -- src", { encoding: "utf8" }).trim() ? `${head}+changes` : head;
@@ -286,7 +322,7 @@ async function main() {
 
   const now = groups(results);
   if (against) {
-    const saved = JSON.parse(readFileSync(path.join(SAVED, `${against}.json`), "utf8")) as Saved;
+    const saved = readSaved(against);
     if (saved.options.seeds !== seeds || saved.options.starts.join() !== starts.join()) {
       console.log(`note: "${against}" ran ${saved.options.seeds} seeds × ${saved.options.starts.join(", ")}; this run ${seeds} × ${starts.join(", ")}`);
     }
@@ -307,23 +343,34 @@ async function main() {
     console.log(`worse (${worseRows.length}):${worseRows.length ? "\n" + worseRows.join("\n") : " none"}`);
     console.log(`better (${betterRows.length}):${betterRows.length ? "\n" + betterRows.join("\n") : " none"}`);
     console.log(`unchanged: ${same} of ${now.size}`);
-    const [ta, tb] = [totals(saved.results.filter((r) => picked.includes(r.log))), totals(results)];
-    console.log(
-      `totals (median over seeds, summed over drives): off the drawn road ${ta.drawnOffS} → ${tb.drawnOffS} s · GPS back / cut worst ${ta.gpsWorstM} → ${tb.gpsWorstM} m · ` +
-        `from Wi-Fi fixes ${ta.wifiM} → ${tb.wifiM} m · off the roads above 20 km/h ${ta.offRoadS} → ${tb.offRoadS} s · jumps ${ta.jumps} → ${tb.jumps}`,
-    );
+    console.log("totals (median over seeds, summed over drives):");
+    for (const start of starts) {
+      const [ta, tb] = [totals(saved.results.filter((r) => picked.includes(r.log) && r.start === start)), totals(results.filter((r) => r.start === start))];
+      if (!saved.results.some((r) => r.start === start)) continue;
+      console.log(
+        `  ${start.padEnd(6)} off the drawn road ${ta.drawnOffS} → ${tb.drawnOffS} s · GPS back / cut worst ${ta.gpsWorstM} → ${tb.gpsWorstM} m · ` +
+          `from Wi-Fi fixes ${ta.wifiM} → ${tb.wifiM} m · off the roads above 20 km/h ${ta.offRoadS} → ${tb.offRoadS} s · jumps ${ta.jumps} → ${tb.jumps}`,
+      );
+    }
   } else {
     console.log("drive                  start   km    truth: main score per seed          off the roads >20 km/h s   jumps   start gap m   pose");
     for (const g of now.values()) {
       const m = mainScore(g.runs[0]);
-      const truth = m.value === null ? "no truth" : `${g.runs[0].truth}: ${m.what} ${seedsOf(g, (r) => mainScore(r).value, m.unit)} ${m.unit}`;
+      const from = g.runs[0].fromS;
+      const truth =
+        from === null
+          ? "no fix ≤150 m: not scored"
+          : (m.value === null ? "no truth" : `${g.runs[0].truth}: ${m.what} ${seedsOf(g, (r) => mainScore(r).value, m.unit)} ${m.unit}`) + (from ? ` from ${Math.round(from)} s` : "");
       console.log(
         `  ${name(g.log)} ${g.start.padEnd(6)} ${g.runs[0].km.toFixed(1).padStart(5)}  ${truth.padEnd(46)} ${seedsOf(g, (r) => r.offRoadS, "s").padEnd(26)} ` +
           `${seedsOf(g, (r) => r.jumps, "").padEnd(7)} ${g.start === "parked" ? seedsOf(g, (r) => r.startGapM, "m").padEnd(13) : "".padEnd(13)} ${g.runs.map((r) => r.pose ?? "-").join("/")}`,
       );
     }
-    const t = totals(results);
-    console.log(`totals (median over seeds, summed over drives): off the drawn road ${t.drawnOffS} s · GPS back / cut worst ${t.gpsWorstM} m · from Wi-Fi fixes ${t.wifiM} m · off the roads above 20 km/h ${t.offRoadS} s · jumps ${t.jumps}`);
+    console.log("totals (median over seeds, summed over drives):");
+    for (const start of starts) {
+      const t = totals(results.filter((r) => r.start === start));
+      console.log(`  ${start.padEnd(6)} off the drawn road ${t.drawnOffS} s · GPS back / cut worst ${t.gpsWorstM} m · from Wi-Fi fixes ${t.wifiM} m · off the roads above 20 km/h ${t.offRoadS} s · jumps ${t.jumps}`);
+    }
   }
   if (saveAs) {
     mkdirSync(SAVED, { recursive: true });

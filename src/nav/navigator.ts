@@ -84,14 +84,13 @@ export interface NavConfig {
   /** …after driving this far: a fix taken while parked says nothing about the heading. */
   poseConfirmDistanceM: number;
   /**
-   * The dead reckoning is in doubt once this many Wi-Fi/cell fixes in a row land further from it than
-   * `coarseDoubtShare` × their own accuracy (`positionDoubtM`). Coarse fixes are kilometre-wide blobs under
-   * jamming, so a dot inside one says nothing — but a dot several blobs away says the track is lost, and
-   * nothing else does: the EKF reports its own spread, which stays a few metres however wrong the dot is.
-   * Only the parked pose was ever checked this way, and only over its first 150 m (§6.1).
+   * The dead reckoning is in doubt once this many Wi-Fi/cell fixes in a row land further from it than such fixes
+   * are from the car (`noteCoarseDoubt`, `positionDoubtM`): the EKF reports its own spread, which stays a few metres
+   * however wrong the dot is, and nothing else says so.
    */
-  coarseDoubtShare: number;
   coarseDoubtFixes: number;
+  /** The earlier doubt rule's share of a fix's own accuracy, which `replay:doubt` still measures. */
+  coarseDoubtShare: number;
   ekf: Partial<EkfConfig>;
   gnssLag: Partial<GnssLagConfig>;
   imu: Partial<ImuConfig>;
@@ -320,6 +319,8 @@ export interface FixOutcome {
   predictedSigmaM?: number;
   nis?: number;
   initMethod?: "course" | "alignment";
+  /** Wi-Fi/cell fixes kept saying the track was lost: it moved to this one (`noteCoarseDoubt`). */
+  relocated?: boolean;
   /**
    * A pose from `startFromPose`: a good fix that agrees confirms it; a satellite fix that disagrees drops it, a
    * Wi-Fi/cell one doubts it (the driver can answer, `answerPose`) until `poseRejectCoarse` in a row drop it.
@@ -375,6 +376,54 @@ class History {
 /** The ~68 % radius of a 2D error in σ (the circle the map draws is this × the EKF σ). */
 export const SQRT_68 = 1.5;
 const fixSigma = (f: GnssFix) => (isSatelliteFix(f) ? f.hAccM / SQRT_68 : f.hAccM);
+/**
+ * A parked pose dead-reckoned without a trusted satellite fix in the last `POSE_GPS_WITHIN_M` is at least this
+ * uncertain (1σ). Against the drawn truth, the jammed drives of 2026-10-06 ended 12-80 m from where the car parked
+ * while the EKF said 5-7 m; the next drive's map matching searched 3σ around it, missed the street 34 m away, and
+ * took a parallel one (pxpcgw, 3 seeds in 8).
+ */
+const JAMMED_POSE_SIGMA_M = 30;
+const POSE_GPS_WITHIN_M = 300;
+/** A road position update's σ along the road when it knows nothing new there (no turn since the last one), m. */
+const UNKNOWN_ALONG_M = 10_000;
+/** Hypotheses within this of the top one's heading travel its way (`oneWayAlong`). */
+const ONE_WAY_RAD = Math.PI / 4;
+/** ...and only this far past the last turn: before it, the turn just driven still places the car along the road. */
+const ONE_WAY_AFTER_M = 500;
+/** A Wi-Fi/cell fix claiming up to this is within `sigmas` × the claim; past it, within the larger of the claim and that. */
+const NETWORK_REACH_FLOOR_M = 150;
+/**
+ * How far from the anchor map matching looks for the car with the heading unknown, besides the distance driven
+ * since: `sigmas` σ of a satellite fix. For a Wi-Fi/cell fix (σ is its claim) what they did on the drives drawn by
+ * hand (2026-10-03..06, 1,500 fixes): claiming ±500 m or more, within 0.76 of the claim in town (on the highway
+ * rarely past it, once 1.5×); claiming ±150–260 m, up to 2.2×; under that, like Wi-Fi, within 3×.
+ */
+const anchorReachM = (a: { sigma: number; sat: boolean }, sigmas: number) => (a.sat ? sigmas * a.sigma : networkReachM(a.sigma, sigmas));
+/** How far from the car a Wi-Fi/cell fix claiming `hAccM` can be (`anchorReachM`). */
+const networkReachM = (hAccM: number, sigmas = 3) => Math.max(hAccM, sigmas * Math.min(hAccM, NETWORK_REACH_FLOOR_M));
+/**
+ * After a turn no road hypothesis followed, map matching starts again over this many times the EKF's position σ:
+ * its position along the road came from those hypotheses (gc6xib's T-junction: ±63 m claimed, 250 m off).
+ */
+const LOST_TURN_SIGMA_SCALE = 2;
+/**
+ * OBD reads 0 while reversing (and below ~3 km/h): a turn of this much while it does is the car manoeuvring, as out of
+ * a parking space, by an unknown distance in an unknown direction. When it drives on, the position widens by
+ * `MANOEUVRE_M_PER_RAD` per radian turned (a car's turning radius) and map matching starts again around it with the
+ * heading it now has (vwaz7t: out of a space ~90° to the road, reversing through 78°).
+ */
+const MANOEUVRE_TURN_RAD = (30 * Math.PI) / 180;
+const MANOEUVRE_M_PER_RAD = 6;
+/** A Wi-Fi/cell fix claiming up to this is narrow: it can doubt the track inside its reach, and move a lost one. */
+const NARROW_FIX_M = 450;
+/** …once farther than its claim and this. */
+const DOUBT_FLOOR_M = 150;
+/** No Wi-Fi/cell fix moves a track GPS placed within this distance. */
+const RELOCATE_GPS_WITHIN_M = 1000;
+/** The fixes that move a lost track lie within this share of their mean residual from it. */
+const RELOCATE_AGREE_SHARE = 0.5;
+/** Fixes don't move a track the driver confirmed or placed until the car has driven this far from there. */
+const DRIVER_WORD_M = 500;
 
 export interface NavStats {
   imuInvalidS: number;
@@ -389,6 +438,12 @@ export interface NavStats {
   /** Road-position pseudo-measurements (`mapMatchLoop: "closed"`). */
   roadPositionAccepted: number;
   roadPositionRejected: number;
+  /** Tracks moved to Wi-Fi/cell fixes that kept saying they were lost (`noteCoarseDoubt`). */
+  relocations: number;
+  /** Map matching started again around the EKF after a turn its road hypotheses missed. */
+  lostTurns: number;
+  /** Turns while OBD read 0 (reversing, manoeuvring): the position widened, map matching started again. */
+  manoeuvres: number;
 }
 
 export class Navigator {
@@ -405,6 +460,8 @@ export class Navigator {
   private lastYaw: { tUs: number; rate: number; valid: boolean } | null = null;
   private lastObd: ObdSpeedSample | null = null;
   private quietSinceUs: number | null = null;
+  /** Net gyro turn while OBD read 0 and the phone wasn't still, since the car last drove (a manoeuvre: reversing). */
+  private manoeuvreRad = 0;
   private lastBiasUpdateUs = -Infinity;
   private standstill = false;
 
@@ -420,9 +477,13 @@ export class Navigator {
   private poseDoubt: { fix: GnssFix; sigma: number } | null = null;
   private lastFix: GnssFix | null = null;
   private rejectedSat = 0;
-  /** Wi-Fi/cell fixes in a row that landed far outside their own accuracy from the track (`coarseDoubtShare`). */
+  /** Wi-Fi/cell fixes in a row that landed farther from the track than they are from the car (`noteCoarseDoubt`). */
   private coarseDoubted = 0;
   private doubtM: number | null = null;
+  /** OBD distance when the driver last confirmed the pose or placed the car (null: never this session). */
+  private driverSaidAtM: number | null = null;
+  /** The fixes counted in `coarseDoubted`: residual from the track, reach, and whether narrow. */
+  private doubting: { dE: number; dN: number; reachM: number; narrow: boolean }[] = [];
   /** Speed scale for the next EKF start: a stored per-car value, or the one learned before a reset. */
   /** The OBD speed calibration the next EKF starts from (stored per car; carried over a reset). */
   private speedScale: { ks: number; ksVar: number; so?: number; soVar?: number } | null = null;
@@ -454,7 +515,7 @@ export class Navigator {
   /** Start the EKF from the map at the end of the current step. */
   private mapStartDue = false;
   private started: { method: InitMethod; tUs: number } | null = null;
-  readonly stats: NavStats = { imuInvalidS: 0, standstillS: 0, obdDistanceM: 0, unknownSpeedS: 0, resets: 0, roadHeadingAccepted: 0, roadHeadingRejected: 0, roadPositionAccepted: 0, roadPositionRejected: 0 };
+  readonly stats: NavStats = { imuInvalidS: 0, standstillS: 0, obdDistanceM: 0, unknownSpeedS: 0, resets: 0, roadHeadingAccepted: 0, roadHeadingRejected: 0, roadPositionAccepted: 0, roadPositionRejected: 0, relocations: 0, lostTurns: 0, manoeuvres: 0 };
   private readonly integrity: GnssIntegrity;
   /** The relative track's piece (a break starts the next), and whether it is broken now (integrity's shape test). */
   private trackEpoch = 0;
@@ -467,6 +528,8 @@ export class Navigator {
   /** Recent odometry [distance, cumulative turn], to tell when the car last turned (road position, §9.3). */
   private turnLog: [number, number][] = [];
   private lastTurnM = 0;
+  /** `lastTurnM` when a road position update last told the EKF where along the road (null: not yet). */
+  private alongFromTurnM: number | null = null;
   private readonly roadPositionConfig: RoadPositionConfig;
   /** Time of the last satellite fix the EKF accepted (GNSS trusted, for the road position). */
   private lastSatAcceptedUs = -Infinity;
@@ -709,6 +772,14 @@ export class Navigator {
     if (s.rawKph > 0) {
       this.frozenPose = null;
       this.stoppedPose = null;
+      const turned = Math.abs(this.manoeuvreRad);
+      if (turned >= MANOEUVRE_TURN_RAD && this.ekf) {
+        this.ekf.inflatePosition(MANOEUVRE_M_PER_RAD * turned);
+        this.twin?.inflatePosition(MANOEUVRE_M_PER_RAD * turned);
+        this.stats.manoeuvres++;
+        if (this.pf?.isActive) this.startMapMatch();
+      }
+      this.manoeuvreRad = 0;
     }
     if (!this.ekf) return;
     const obdSigma = s.rawKph === 0 ? this.config.obdZeroSigmaMps : this.config.obdSigmaMps;
@@ -758,7 +829,7 @@ export class Navigator {
       if (pf.isActive && !pf.onFix(fE, fN, sigma, !isSatelliteFix(fix), this.gnssLagS)) this.startMapMatchAtAnchor();
       else if (pf.isActive && this.anchor) {
         const [aE, aN] = frame.toEnu(this.anchor.coord);
-        pf.setSearchRegion(aE, aN, pf.config.initSigmas * this.anchor.sigma + this.anchor.distanceM);
+        pf.setSearchRegion(aE, aN, anchorReachM(this.anchor, pf.config.initSigmas) + this.anchor.distanceM);
       }
     } else if (pf?.isActive && (outcome.status === "accepted" || outcome.status === "init") && !pf.onFix(fE, fN, sigma, !isSatelliteFix(fix), this.gnssLagS)) {
       // The fix agrees with the EKF but not with any particle: the filter lost the car.
@@ -850,7 +921,10 @@ export class Navigator {
     const parked = this.standstill || (o !== null && o.rawKph === 0 && this.lastTUs !== null && this.lastTUs - o.tUs < this.config.obdStaleUs);
     if (!parked || !this.ekf || !this.frame) return null;
     const psi = this.ekf.psi < 0 ? this.ekf.psi + 2 * Math.PI : this.ekf.psi;
-    return { ...this.frame.toCoordinate(this.ekf.east, this.ekf.north), headingRad: psi, posSigmaM: this.ekf.positionSigma, headingSigmaRad: this.ekf.psiSigma };
+    // Dead-reckoned to the spot without GPS, the EKF's own σ is what the road updates made of it, not how far off it is.
+    const sinceGps = this.distanceSinceTrustedM;
+    const posSigmaM = sinceGps === undefined || sinceGps > POSE_GPS_WITHIN_M ? Math.max(this.ekf.positionSigma, JAMMED_POSE_SIGMA_M) : this.ekf.positionSigma;
+    return { ...this.frame.toCoordinate(this.ekf.east, this.ekf.north), headingRad: psi, posSigmaM, headingSigmaRad: this.ekf.psiSigma };
   }
 
   /**
@@ -884,6 +958,7 @@ export class Navigator {
    * anchors there and the filter starts with the heading unknown.
    */
   setPosition(p: UserPosition): void {
+    this.driverSaidAtM = this.stats.obdDistanceM;
     if (this.ekf) {
       // The speed scale is the car's, not the lost track's.
       const { ks, ksVar, so, soVar } = this.ekf.params();
@@ -971,6 +1046,8 @@ export class Navigator {
     if (this.anchor) this.anchor.distanceM += (this.lastObd?.speedMps ?? 0) * dt;
 
     const relRate = hold || yaw === null ? 0 : yaw - this.rel.bias;
+    // Signed: idling, the gyro's noise averages out; a manoeuvre turns the car one way.
+    if (parked && obdFresh && !hold) this.manoeuvreRad -= relRate * dt;
     this.rel.psi = wrapAngle(this.rel.psi - relRate * dt);
     this.rel.e += speed * Math.sin(this.rel.psi) * dt;
     this.rel.n += speed * Math.cos(this.rel.psi) * dt;
@@ -1066,14 +1143,15 @@ export class Navigator {
     return frame;
   }
 
-  /** (Re)start the filter around the EKF pose (known heading, §7.2). */
-  private startMapMatch(): void {
+  /** (Re)start the filter around the EKF pose (known heading, §7.2), its position σ widened `sigmaScale` times. */
+  private startMapMatch(sigmaScale = 1): void {
     const ekf = this.ekf;
     if (!this.pf || !ekf) return;
     this.flushOdometry();
     this.offRoadFromM = null;
     this.trackingFromM = null;
-    this.pf.init(ekf.east, ekf.north, ekf.positionSigma, ekf.psi, ekf.psiSigma, this.odometry.totals);
+    this.alongFromTurnM = null;
+    this.pf.init(ekf.east, ekf.north, sigmaScale * ekf.positionSigma, ekf.psi, ekf.psiSigma, this.odometry.totals);
   }
 
   /**
@@ -1087,9 +1165,10 @@ export class Navigator {
     this.flushOdometry();
     this.offRoadFromM = null;
     this.trackingFromM = null;
+    this.alongFromTurnM = null;
     this.nextMapStartCheckM = 0;
     const [e, n] = this.frame.toEnu(anchor.coord);
-    if (!pf.initUnknown(e, n, pf.config.initSigmas * anchor.sigma + anchor.distanceM, this.odometry.totals)) pf.stop();
+    if (!pf.initUnknown(e, n, anchorReachM(anchor, pf.config.initSigmas) + anchor.distanceM, this.odometry.totals)) pf.stop();
   }
 
   /**
@@ -1151,6 +1230,13 @@ export class Navigator {
     // The position prior from the twin when asked: it hasn't taken the filter's own corrections (§9.5).
     const prior = this.config.mapMatchTwin.prior && this.twin ? this.twin : ekf;
     pf.onOdometry(step, prior ? { psi: prior.psi, psiSigma: prior.psiSigma, e: prior.east, n: prior.north, posSigma: prior.positionSigma } : null);
+    if (ekf && pf.takeLostTurn()) {
+      // The car turned where (almost) no road hypothesis could: it wasn't where they were along the road, and the EKF,
+      // which takes its position along the road from them, was as far off as they were.
+      this.stats.lostTurns++;
+      this.startMapMatch(LOST_TURN_SIGMA_SCALE);
+      return;
+    }
     if (step.stopped) return;
     this.noteTurn(step);
     if (ekf && this.config.mapMatchLoop !== "open" && step.distanceM >= this.nextRoadHeadingM) this.roadHeadingUpdate(step.distanceM);
@@ -1198,9 +1284,8 @@ export class Navigator {
     const pf = this.pf!;
     const ekf = this.ekf!;
     const c = this.roadHeadingConfig;
-    const out = pf.output();
-    const top = out.clusters[0];
-    if (out.state !== "tracking" || !top || top.edge === null || !pf.isStraight) return;
+    const top = this.oneWayAlong(distanceM) && pf.output().clusters[0];
+    if (!top || top.edge === null || !pf.isStraight) return;
     const road = pf.roadHeading(top.e, top.n, pf.config.clusterRadiusM, c.windowM, c.toleranceRad, c.nodeMarginM);
     if (!road || road.share < c.minShare) return;
     this.nextRoadHeadingM = distanceM + c.intervalM;
@@ -1223,13 +1308,11 @@ export class Navigator {
   }
 
   private roadPositionUpdate(step: OdometryStep): void {
-    const pf = this.pf!;
     const ekf = this.ekf!;
     const c = this.roadPositionConfig;
     if (step.t1Us - this.lastSatAcceptedUs < c.trustedWindowUs) return;
-    const out = pf.output();
-    const top = out.clusters[0];
-    if (out.state !== "tracking" || !top || top.edge === null) return;
+    const top = this.oneWayAlong(step.distanceM);
+    if (!top || top.edge === null) return;
     this.nextRoadPositionM = step.distanceM + c.intervalM;
     // Into the road frame (along the travel heading, across it), floor, and back.
     const sa = Math.sin(top.headingRad);
@@ -1237,7 +1320,13 @@ export class Navigator {
     const [ee, en, nn] = top.covariance;
     const k = c.inflation * c.inflation;
     const alongFloor = Math.max(c.minAlongSigmaM, c.alongPerM * (step.distanceM - this.lastTurnM));
-    const along = Math.max(k * (sa * sa * ee + 2 * sa * ca * en + ca * ca * nn), alongFloor ** 2);
+    // Where along the road comes from the last turn; since then the filter has it from the same odometry as the
+    // EKF. Taken at every update, it shrank the EKF's along-road σ by √(updates) to metres while 200 m off, the
+    // filter's EKF prior then pulled every hypothesis into that one place, and at the next T-junction none was
+    // near the junction (gc6xib, 2026-10-06). So along the road once per turn; across it, every time.
+    const alongKnown = this.alongFromTurnM !== this.lastTurnM;
+    if (alongKnown) this.alongFromTurnM = this.lastTurnM;
+    const along = alongKnown ? Math.max(k * (sa * sa * ee + 2 * sa * ca * en + ca * ca * nn), alongFloor ** 2) : UNKNOWN_ALONG_M ** 2;
     const across = Math.max(k * (ca * ca * ee - 2 * sa * ca * en + sa * sa * nn), c.minAcrossSigmaM ** 2);
     const cross = k * (sa * ca * (ee - nn) + (ca * ca - sa * sa) * en);
     // along = (sin, cos), across = (cos, −sin) in (E, N).
@@ -1249,6 +1338,34 @@ export class Navigator {
     const r = ekf.updatePositionCovariance(top.e - ekf.east, top.n - ekf.north, cov, this.config.gate);
     if (r.accepted) this.stats.roadPositionAccepted++;
     else this.stats.roadPositionRejected++;
+  }
+
+  /**
+   * The car on one road one way, for the road updates (§9): the filter tracks one hypothesis, or, past
+   * `ONE_WAY_AFTER_M` without a turn, the hypotheses travelling the top one's way (within `ONE_WAY_RAD`) hold
+   * `trackingWeight` together, and are taken as one, its covariance spanning them. On a long road without turns the filter knows the road and the direction for many
+   * kilometres before it knows where along it: on 2026-10-06 it stayed multimodal along one highway for 20 km, the
+   * EKF took no road update, and drifted 4 km off while the filter's hypotheses stayed within hundreds of metres. In
+   * town the next turn settles it within a few hundred metres, and taken there, two hypotheses split on one street
+   * set the speed scale off (2026-10-06, 1 drive in 3).
+   */
+  private oneWayAlong(distanceM: number): { e: number; n: number; headingRad: number; edge: number | null; covariance: [number, number, number] } | null {
+    const pf = this.pf!;
+    const out = pf.output();
+    const top = out.clusters[0];
+    if (!top || (out.state !== "tracking" && out.state !== "multimodal")) return null;
+    if (out.state === "tracking") return top;
+    if (distanceM - this.lastTurnM < ONE_WAY_AFTER_M) return null;
+    const same = out.clusters.filter((c) => Math.abs(wrapAngle(c.headingRad - top.headingRad)) <= ONE_WAY_RAD);
+    const w = same.reduce((s, c) => s + c.weight, 0);
+    if (w < pf.config.trackingWeight) return null;
+    const e = same.reduce((s, c) => s + c.weight * c.e, 0) / w;
+    const n = same.reduce((s, c) => s + c.weight * c.n, 0) / w;
+    const cov = same.reduce<[number, number, number]>(
+      ([ee, en, nn], c) => [ee + c.weight * (c.covariance[0] + (c.e - e) ** 2), en + c.weight * (c.covariance[1] + (c.e - e) * (c.n - n)), nn + c.weight * (c.covariance[2] + (c.n - n) ** 2)],
+      [0, 0, 0],
+    );
+    return { e, n, headingRad: top.headingRad, edge: top.edge, covariance: [cov[0] / w, cov[1] / w, cov[2] / w] };
   }
 
   private mapMatchEstimate(frame: LocalFrame): MapMatchEstimate {
@@ -1352,7 +1469,22 @@ export class Navigator {
     const pos = ekf.updatePosition(rE, rN, sigma, c.gate);
     const outcome: FixOutcome = { status: pos.accepted ? "accepted" : "rejected", errorM: Math.hypot(rE, rN), predictedSigmaM, nis: pos.nis };
     const sat = isSatelliteFix(fix);
-    this.noteCoarseDoubt(sat, pos.accepted, outcome.errorM!, fix.hAccM);
+    const lost = this.noteCoarseDoubt(sat, pos.accepted, outcome.errorM!, fix.hAccM, rE, rN);
+    // A parked pose not yet confirmed has its own answer: fixes that disagree drop it (below). The driver's word
+    // (a confirmed pose, a placing) stands over Wi-Fi until the car has driven `DRIVER_WORD_M` from it.
+    const driverWord = this.driverSaidAtM !== null && this.stats.obdDistanceM - this.driverSaidAtM < DRIVER_WORD_M;
+    // Nor a track GPS placed lately: then it is the Wi-Fi/cell fixes that are off (on the highway they can be).
+    const sinceGps = this.distanceSinceTrustedM;
+    const gpsLately = sinceGps !== undefined && sinceGps < RELOCATE_GPS_WITHIN_M;
+    if (lost && this.poseUnverifiedFromM === null && !driverWord && !gpsLately) {
+      // Lost: the car is near these fixes (their mean, residuals from the track at each one). Heading, speed and
+      // calibration stay; map matching starts over around it.
+      ekf.relocate(ekf.east + lost.dE, ekf.north + lost.dN, lost.sigmaM);
+      this.clearDoubt();
+      this.stats.relocations++;
+      if (this.pf) this.startMapMatch();
+      return { ...outcome, status: "accepted", relocated: true };
+    }
     if (this.poseUnverifiedFromM !== null) {
       if (!pos.accepted && (sat || ++this.poseCoarseRejected >= c.poseRejectCoarse)) {
         // The car isn't where it was parked: a pose frozen from it would be wrong too.
@@ -1389,25 +1521,41 @@ export class Navigator {
 
   /**
    * Is the track still anywhere near where the phone thinks the car is? A satellite fix that the EKF took settles
-   * it. A Wi-Fi/cell fix is a kilometre-wide blob under jamming, so one landing outside it means little, but
-   * `coarseDoubtFixes` in a row mean the track is lost and nobody else will say so.
+   * it. A Wi-Fi/cell fix farther from the track than it usually is from the car means little alone, but
+   * `coarseDoubtFixes` in a row mean the track is lost and nobody else will say so. Against the drawn truth
+   * (2026-10-03..06), fixes claiming up to `NARROW_FIX_M` were farther than their claim (and 150 m) about one time in
+   * seven; a wider one, a cell's, only past its reach (`networkReachM`), and inside it it says nothing either way.
+   * Returns where to move the track when the doubting fixes are all narrow: their mean residual, ±`sigmaM`.
    */
-  private noteCoarseDoubt(sat: boolean, accepted: boolean, errorM: number, hAccM: number): void {
+  private noteCoarseDoubt(sat: boolean, accepted: boolean, errorM: number, hAccM: number, rE: number, rN: number): { dE: number; dN: number; sigmaM: number } | null {
     const c = this.config;
     // A satellite fix the EKF took is the answer; one it gated is left to `resetAfterRejected`, not to this.
     if (sat) {
       if (accepted) this.clearDoubt();
-      return;
+      return null;
     }
-    if (errorM <= c.coarseDoubtShare * hAccM) {
-      this.clearDoubt();
-      return;
+    const narrow = hAccM <= NARROW_FIX_M;
+    if (narrow ? errorM <= Math.max(hAccM, DOUBT_FLOOR_M) : errorM <= networkReachM(hAccM)) {
+      if (narrow) this.clearDoubt();
+      return null;
     }
-    if (++this.coarseDoubted >= c.coarseDoubtFixes) this.doubtM = errorM;
+    this.doubting.push({ dE: rE, dN: rN, reachM: networkReachM(hAccM), narrow });
+    if (this.doubting.length > c.coarseDoubtFixes) this.doubting.shift();
+    if (++this.coarseDoubted < c.coarseDoubtFixes) return null;
+    this.doubtM = errorM;
+    const last = this.doubting;
+    if (!last.every((d) => d.narrow)) return null;
+    const k = last.length;
+    const dE = last.reduce((s, d) => s + d.dE, 0) / k;
+    const dN = last.reduce((s, d) => s + d.dN, 0) / k;
+    // They must say the same: the car that way, that far. Fixes scattered around the track are just bad ones.
+    if (last.some((d) => Math.hypot(d.dE - dE, d.dN - dN) > RELOCATE_AGREE_SHARE * Math.hypot(dE, dN))) return null;
+    return { dE, dN, sigmaM: Math.max(...last.map((d) => d.reachM)) / 2 };
   }
 
   private clearDoubt(): void {
     this.coarseDoubted = 0;
+    this.doubting = [];
     this.doubtM = null;
   }
 
@@ -1433,6 +1581,7 @@ export class Navigator {
     if (this.poseUnverifiedFromM === null) return false;
     if (here) {
       this.poseUnverifiedFromM = null;
+      this.driverSaidAtM = this.stats.obdDistanceM;
       this.poseCoarseRejected = 0;
       this.poseDoubt = null;
       return true;

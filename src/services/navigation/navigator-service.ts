@@ -732,6 +732,7 @@ export class NavigatorService implements PositionSource {
         if (out.integrity === "ok" && nav.trustAt(input.tUs) === "TRUSTED") this.checkManualAgainst(input.fix);
         if (out.status === "accepted" && input.fix.speedMps !== undefined) this.lastAcceptedSatUs = input.tUs;
         if (out.status === "init") this.note(`nav mode dr (${out.initMethod})`);
+        if (out.relocated) this.note(`nav track lost: moved to the Wi-Fi/cell fixes (${Math.round(out.errorM ?? 0)} m away, ±${Math.round(input.fix.hAccM)} m)`);
         if (out.pose && out.pose !== "doubted") {
           this.poseStatus = out.pose;
           this.poseQuestion = null;
@@ -869,18 +870,16 @@ export class NavigatorService implements PositionSource {
       return;
     }
 
-    const dr = estimate.mode === "dr";
-    const source: PositionSourceKind = !dr
-      ? "gnss"
-      : trust === "TRUSTED" && estimate.tUs - this.lastAcceptedSatUs < FUSED_WINDOW_US
-        ? "fused"
-        : "dr";
+    const fused = estimate.mode === "dr" && trust === "TRUSTED" && estimate.tUs - this.lastAcceptedSatUs < FUSED_WINDOW_US;
     const mm = estimate.mapMatch;
     this.noteMapMatch(mm?.state ?? "off");
     this.noteDoubt(estimate.doubtM);
-    // Dead-reckoning on the map: the dominant hypothesis is the puck, the others its alternatives
-    // (MAPMATCH-SPEC §6.2). With GNSS the EKF stays the puck: it is within a few metres there.
-    const top = puckHypothesis(estimate, source === "dr");
+    // Dead-reckoning on the map, or anchored once the filter found the road: the dominant hypothesis is the puck, the
+    // others its alternatives (MAPMATCH-SPEC §6.2). With GNSS the EKF stays the puck: it is within a few metres there.
+    const top = puckHypothesis(estimate, estimate.mode === "dr" && !fused);
+    // The map's guess is dead reckoning too: the engine off keeps it, as a dot the navigator drew.
+    const dr = estimate.mode === "dr" || !!top;
+    const source: PositionSourceKind = !dr ? "gnss" : fused ? "fused" : "dr";
     const speed = estimate.speedMps;
     const heading = top
       ? top.headingRad

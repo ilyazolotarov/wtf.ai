@@ -83,6 +83,15 @@ jammed:
 - OBD speed older than 2.5 s (link lost) is unknown: the relative track breaks (alignment and lag windows start
   over), and the anchored radius keeps growing at the last speed. The EKF's own speed random-walks meanwhile.
 - CX-5: OBD reads about 2 % below GNSS. Direct comparison gives 1.016–1.021; `k_s` learns 1.00–1.03 per drive.
+- **Manoeuvres:** speed is unsigned, and what an ECU reports in reverse is up to the car: the CX-5 reads 0 (and 0
+  below ~3 km/h). A net gyro turn of ≥ 30° while OBD reads 0 and the phone isn't quiet is the car manoeuvring, as
+  out of a parking space, by a distance and in a direction the odometry didn't see. When OBD reads > 0 again the
+  EKF position σ grows by 6 m per radian turned (a car's turning radius) and map matching starts again around it
+  with the heading the gyro now gives (`Navigator.stats.manoeuvres`). Net, not summed: idling, gyro noise averages
+  out. vwaz7t (out of a space ~90° to the road, 78° in reverse) took a road 55 m off on 1 of 8 seeds and showed it
+  for 115 s; now 0 s on 8 of 8 (`replay:regress`). Not handled: an ECU that reports reverse speed as positive moves
+  the dead reckoning forward instead of back (~2× the reverse distance) and the turn isn't a manoeuvre; it needs
+  reverse detected from the accelerometer along the car's axis, which nothing learns yet.
 
 ## 6. EKF (`ekf/dr-ekf.ts`) and heading initialization
 
@@ -116,6 +125,9 @@ jammed:
 - **Saved** (`Navigator.parkedPose`): position, heading and their σ while the car stands (standstill, or OBD 0) in
   mode `dr`. The service stores it per VIN at engine/ignition off, every 30 s while parked, and when it stops.
   The first OBD speed > 0 clears it, so a pose never outlives a drive. The pose is the EKF's, not the map's dot.
+  Dead-reckoned there without a trusted satellite fix in the last 300 m, its σ is at least 30 m: against the drawn
+  truth the jammed drives of 2026-10-06 ended 12–80 m from where the car parked while the EKF said 5–7 m, and the
+  next drive's map matching, searching 3σ around it, missed the street 34 m away and took a parallel one.
   Tried and reverted (2026-10-07): saving where the map drew the car (the dominant map-matching hypothesis while
   dead-reckoning). Over 2026-10-06's chain of trips it removed the jumps between them (≤ 13 m instead of up to
   1.4 km), and where the dot was the one that was wrong it carried a wrong street into the next drive: replayed
@@ -169,7 +181,16 @@ jammed:
   the coarse fixes), then stood 10 km out at ±5 m for 12 min at a filling station, and nothing in the app — map,
   routing, or the chip that would have let the driver fix it — had any reason to think otherwise.
 - **Raised** (`Navigator.positionDoubtM`): `coarseDoubtFixes` (3) Wi-Fi/cell fixes in a row land further from the
-  track than `coarseDoubtShare` (2) × their own accuracy. A coarse fix is a kilometre-wide blob under jamming, so a
+  track than such fixes usually are from the car: one claiming up to 450 m, farther than its claim and 150 m (about
+  one in seven by chance, against the drawn truth of 2026-10-03..06); a wider one, past its reach (its claim, the
+  most town cell fixes were off). A wide fix inside its reach neither counts nor clears.
+- **Acted on:** when the three are narrow and agree with each other (within half their mean distance), the track
+  moves to them: the EKF's position becomes their mean ± half their reach, heading, speed and calibration kept, and
+  map matching starts over there (`DrEkf.relocate`, note `nav track lost: moved to the Wi-Fi/cell fixes …`). Not
+  within 1 km of a trusted satellite fix (on the highway the Wi-Fi/cell fixes are the ones off), not while a parked
+  pose is unconfirmed (it has its own rule), not within 500 m of the driver confirming the pose or placing the car.
+  On 2026-10-06 four such fixes 28–92 m from the car said the dot 230–560 m away was lost, and nothing listened.
+- The original rule (2× the claim) is kept in spirit below. A coarse fix is a kilometre-wide blob under jamming, so a
   dot inside one says nothing and a single one outside says little; three agreeing that the car is several blobs
   away is the only evidence available that the track is lost. Satellite fixes are not counted (integrity and the EKF
   gate judge those); one the EKF takes clears the doubt, as does a coarse fix that agrees, as does any restart of

@@ -270,7 +270,11 @@ now hands them out (computed only while someone listens; `flushOdometry()` at th
     drawn as secondary markers (SPEC §3.9). An off-road cluster follows the car into yards and parking areas better
     than the EKF (measured in replay: showing the EKF instead doubled the 240 s end error, §7.7).
   - `off` or `init`: the EKF as today.
-- Also in mode `anchored` (heading unknown, §8): state `init` until the filter first tracks.
+- Also in mode `anchored` (heading unknown, §8): state `init` until the filter first tracks. From then on the
+  dominant cluster is the puck there too, not the anchor (`puckHypothesis`): the anchor is the latest Wi-Fi/cell
+  fix, hundreds of metres off under jamming and standing still while the car drives, and the EKF waits for a
+  settled heading over 100 m of straight road, which town driving under jamming may not give for minutes. On a
+  cold start of 2026-10-06 the filter held the road within 10 m while the anchor drifted 3 km from the car.
 - **Integrity** (SPEC §3.3), when it exists, uses all clusters.
 
 ## 7. Particle filter (`src/nav/mapmatch/`)
@@ -353,6 +357,11 @@ Every 10 m of travel, plus each accepted fix. All terms are log-likelihoods, sum
     the turn for a forced (curve) comparison. Skipped when the gyro was invalid since the last comparison.
   - It uses heading changes, so gyro drift and absolute heading error don't matter. Particles still before the
     vertex when the car has finished turning are pruned: turns correct the along-track error.
+  - **A turn the cloud missed:** at a straight moment after a turn of ≥ 60° since the previous one, driven at
+    ≥ 20 km/h (`offRoadSpeed.freeMps`: not into a yard), on-road particles holding < 5 % of the weight turned within
+    30° of the gyro. Then the filter lost the car along its road, and the navigator starts it again around the EKF
+    over twice its position σ (§15, item 14). Normalisation would otherwise hand the weight to whichever wrong
+    hypothesis was least wrong.
 - **Absolute heading (weak, `dr` mode, straight moments only):** EKF ψ versus the particle's travel heading, with
   the EKF σ_ψ widened ×3, the term scaled by 0.3. It mostly separates the two directions on a straight road.
 - **EKF position (weak, `dr` mode; added in M4):** distance to the EKF position, σ = max(2 × EKF σ, 10 m), term
@@ -480,10 +489,15 @@ GNSS course or alignment starts the EKF (NAVIGATOR-SPEC §6). The PF can resolve
 odometry, which doesn't depend on the absolute heading.
 
 - **Start:** in `anchored`, at the first fix with a graph and an anchor radius ≤ 1 km; PF init with unknown
-  heading (§7.2). The filter runs from the first fix even when GNSS is clean: a course start then usually finds it
+  heading (§7.2). The radius is the distance driven since the fix plus its reach: 3σ for a satellite fix; for a
+  Wi-Fi/cell fix (σ = its claimed accuracy) the larger of the claim and 3 × min(claim, 150 m). Against the drawn
+  truth (§10.1, 1,500 network fixes of 2026-10-03..06), those claiming ±500 m or more were within 0.76 of the claim
+  in town (on the highway rarely past it, once 1.5×), those claiming ±150–260 m within 2.2×, Wi-Fi within 3×. The filter runs from the first fix even when GNSS is clean: a course start then usually finds it
   already tracking.
 - **Inputs:** the odometry in `relative` mode (§6.1), the relative-heading weight, every fix (there is no gate yet:
-  coarse fixes at σ = `h_acc` × 2, 25 m of travel apart; satellite fixes as in §7.4), the off-road penalty, and
+  coarse fixes at σ = `h_acc` with a floor of 0.15 on their likelihood (`coarseOutlier`: within the claim about
+  6 times in 7 against the drawn truth, 2–3× past it otherwise, so a wild one costs a hypothesis at most ×6 and
+  three that agree settle a wrong road), 25 m of travel apart; satellite fixes as in §7.4), the off-road penalty, and
   re-seeding on the anchor's roads (§7.5). There is no absolute heading. After each fix the anchor circle (the
   re-seeding region) follows the navigator's anchor.
 - **EKF start** (`initialization.method` = `map`; app note `nav init map`), checked every 10 m of driving:
@@ -605,7 +619,10 @@ NAVIGATOR-SPEC §4, §5.1):
 
 ## 9. Closed loop (PF → EKF)
 
-- **When:** state `tracking`, navigator in `dr`, every 25 m of travel. The interval limits the correlation, because
+- **When:** state `tracking`, navigator in `dr`, every 25 m of travel. Past 500 m without a turn also when the
+  hypotheses travelling the top one's way (within 45°) hold 0.9 together, taken as one with a covariance spanning
+  them (`oneWayAlong`): on a long road the filter knows the road and the direction for kilometres before it knows
+  where along it, and the EKF otherwise took no road update for 20 km and drifted 4 km (gc6xib, 2026-10-06). The interval limits the correlation, because
   the PF itself runs on the EKF's increments.
 - **Road heading:**
   - σ = 4° (⊕ the filter's heading spread), only where the road is straight within 3° over ±15 m and not within
@@ -619,7 +636,10 @@ NAVIGATOR-SPEC §4, §5.1):
     full 2×2 measurement (`DrEkf.updatePositionCovariance`). 25 m with 5 / 3 m floors, the first values, made the
     EKF badly overconfident (§9.3).
   - Along the road the floor also grows with the distance since the car last turned (≥ 30° within 50 m): 1 % of it
-    (`roadPosition.alongPerM`). Only turns tell where along a road the car is; without this the EKF stayed confident
+    (`roadPosition.alongPerM`). And along the road it is sent once per turn: after that the filter has the position
+    along the road from the same odometry as the EKF, and taken at every update it shrank the EKF's along-road σ by
+    √(updates) to metres while 200 m off; the EKF-position term then gathered every hypothesis there, and at a
+    T-junction none was near the junction. Across the road it is sent every time. Only turns tell where along a road the car is; without this the EKF stayed confident
     on long straights, its prior held the filter's spread, and a turn was matched to the wrong junction (§9.4).
   - **Not sent while GNSS is trusted.** The PF already weighs the same fixes, so sending it would count them twice.
   - **"Trusted" until integrity exists** (SPEC Phase 3): a satellite fix was accepted by the EKF in the last 3 s,
@@ -844,8 +864,14 @@ seeds for a metric aimed at one failure, three to ten for the corpus, three per 
 §15, item 14 one change read as 52 s → 3 s on seed 1 and as worse than before on seed 2.
 
 **And on every drive, not only the one a change is for.** `npm run replay:regress -- --against <saved run>`
-replays each drive through the app as the viewer does it, from a cold start and from the parked pose the earlier
-logs left, with three seeds, and lists every drive that got worse: against its drawn truth (§10.1), else its clean
+replays each drive through the app as the viewer does it, with three seeds, from three starts: the parked pose
+the earlier logs left (the app's own chain); that chain with each drawn drive parked where its drawing starts (the
+spot the app should have saved: the drives of 2026-10-03..06 started cold more than once for bugs since fixed,
+and the chain's saved heading was 13–144° off on 7 of 13 drives with GPS at their start); and cold, scored only
+from the first fix claiming ≤ 150 m (before it the dot can't be right; a drive without one isn't scored). The
+drawn start's heading is the drawing's direction where the car first drives straight, less what the gyro turned
+since the log began: within 6° of the GPS course on all 13 drives with one. The check lists every drive that got
+worse: against its drawn truth (§10.1), else its clean
 fixes, else its Wi-Fi fixes, and on every drive the dot off the roads at speed and its jumps. An average hides one
 drive gone from 15 to 490 m off, and most jammed drives have no satellite fix at all, so every metric above,
 scored against GPS, skips exactly them. Two changes measured on their own drive and on these benchmarks were
@@ -1134,10 +1160,17 @@ M1–M3 can partly overlap. M4 needs M1–M3. M5 and M6 are independent of each 
     penalty alone cannot do that, for the reason above. Off-road above 40 km/h on the drive: 52 s → **0 s**.
     `offRoadSpeed.factor` 1 turns this off with the rest of the speed evidence.
 
-    **Still open: the position along the road,** and the junction test below holds that open. The dot stays on a
-    road and picks the wrong one: it takes 36 s to find the road the car turned onto, and at 62 m of along-track
-    error on the fixture it ends off the map, because no particle was at the junction when the car turned there,
-    and no reach *across* to a road can say where along it the car is.
+    **Fixed along the road** by the lost-turn restart (`lostTurnRad`, §7.4): at the first straight moment after a
+    turn of ≥ 60°, driven at ≥ `offRoadSpeed.freeMps`, if on-road particles holding < 5 % of the weight turned
+    within 30° of the gyro, the filter lost the car, and the navigator starts it again around the EKF over twice
+    its position σ (`LOST_TURN_SIGMA_SCALE`). Twice, because the EKF's position along the road came from those
+    particles: replayed cold (no GPS on the whole drive), it reached the junction 250 m short claiming ±63 m.
+    Started again there, the filter finds the road the car turned onto from its heading. Share, not "none": on the
+    drive a few particles had turned left onto a short link and then left again onto the approach driven the
+    other way, and that reversed cluster won. Against the drawn truth (`replay:regress`, 8 seeds), off the drawn
+    road on this drive: drawn start 16–1 273 → 0 s (47 on one seed), cold 10–783 → 10–16 s; over every drive:
+    drawn 153 → 82 s, parked 265 → 248 s, cold 636 → 623 s, off-road above 20 km/h drawn 59 → 6 s. The junction
+    test now takes the turn from 62 and 150 m short.
 
     Tried and not kept:
     - *Weighing the EKF position along the road once instead of at every weighting, with clusters reaching 150 m
@@ -1160,6 +1193,12 @@ M1–M3 can partly overlap. M4 needs M1–M3. M5 and M6 are independent of each 
     - *Restarting the filter around the EKF when the EKF refuses its road position twice in a row.* It rescued a
       simulated drive where the filter had followed a side road, and lost this real one twice in 8 seeds, where the
       EKF was the one that was wrong. Re-seeding a fifth of the particles there instead was neutral.
+    - *The EKF position prior across the road only, or along it once (a standing look, as the compass), or along it
+      at 0.1.* It is weighed every 10 m and carries the same odometry the particles integrate, so on a long road it
+      holds the cloud to the EKF's place along it: here 140–220 m short, the speed scale learned at 0.992 where the
+      drawing says 1.0075. Each fixed the cold start at this junction (783 → 13 s) and broke the drawn start: 2–4
+      of 8 seeds ended ~1 700 s off the road; across only, the Chernihiv end of the drive settled a block short.
+      Weighing it across at 0.1 instead of 0.3, with the lost-turn restart: drawn 82 → 138 s, more jumps.
 
     The fixture junction the test uses is shaped on the real one, read off the region graph with
     `replay:junction`: within 150 m of the node sit the approach, **two** primaries leaving eastbound within a few

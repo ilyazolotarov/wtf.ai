@@ -104,7 +104,7 @@ export function replayPuck(result: ReplayResult): PuckPoint[] {
     // "fused" as the app has it: GPS trusted (integrity) and a satellite fix accepted within the window.
     const dr = p.mode === "dr" && (p.trust !== "TRUSTED" || k < 0 || (p.tS - accepted[k]) * 1e6 >= FUSED_WINDOW_US);
     const top = puckHypothesis(p, dr);
-    const common = { t: p.tS, speedMps: p.speedMps, mapMatch: p.mapMatch?.state, dr };
+    const common = { t: p.tS, speedMps: p.speedMps, mapMatch: p.mapMatch?.state, dr: dr || !!top };
     return top
       ? { ...common, lat: top.lat, lon: top.lon, acc: puckAccuracyM(p, top), headingRad: top.headingRad }
       : { ...common, lat: p.lat, lon: p.lon, acc: puckAccuracyM(p, top), headingRad: p.headingRad };

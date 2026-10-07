@@ -25,12 +25,21 @@ On PowerShell, `npm run x -- --flag` loses the `--`; run `node --experimental-tr
 ## Regression check
 
 Run it before and after any change to the navigator or map matching: every drive through the app as the viewer
-replays it, from a cold start and from the parked chain, with several filter seeds, scored drive by drive.
+replays it, with several filter seeds, scored drive by drive, from three starts:
+
+- **parked:** every log in order on one storage, each drive starting from what the earlier ones left (the app's
+  own chain);
+- **drawn:** that chain, but each drawn drive starts parked where its drawing starts, heading from the drawing and
+  the gyro (MAPMATCH-SPEC §10.2): the spot saved right, whatever the chain or the phone made of it;
+- **cold:** nothing stored, scored only from the first fix claiming ≤ 150 m (a drive without one isn't scored).
+
+Judge a change by parked and drawn; cold shows how the app copes with nothing, and must not fall apart.
 
 ```bash
 npm run replay:regress -- --save before          # keep this run (tools/triplog/logs/regress/before.json)
 npm run replay:regress -- --against before       # every drive against it: what got worse, what got better
 npm run replay:regress -- --seeds 5 --starts parked --logs 20261005 --nav '<json>' --mm '<json>'
+npm run replay:regress -- --from after --against before   # two saved runs, nothing replayed
 ```
 
 - **Truth, per drive, best first:** the roads drawn for it in the viewer (*Ground truth*, below), else its clean
@@ -42,9 +51,11 @@ npm run replay:regress -- --seeds 5 --starts parked --logs 20261005 --nav '<json
   stopped.
 - **`--against`:** a drive is worse when the median over its seeds grows by half again plus a floor (20 m, 10 s, 2
   jumps), or its worst seed by half again plus 2.5 floors (one seed in three lost is a finding). Each line shows
-  the seeds before → now. The totals come last: on 2026-10-07 they read fewer jumps overall for the two changes
-  that broke 8 drives.
-- About 90 s for every log on 32 cores, at low priority. It replays the app's settings (`app-defaults.ts`), not
+  the seeds before → now. The totals come last, per start: on 2026-10-07 they read fewer jumps overall for the two
+  changes that broke 8 drives.
+- One seed in three going bad is often the filter's luck: before keeping or dropping a change on such lines, run
+  `--seeds 8` on both.
+- About 2 min for every log, three starts, three seeds on 32 cores, at low priority. It replays the app's settings (`app-defaults.ts`), not
   the version a log was recorded with.
 
 ## Spoofing benchmark

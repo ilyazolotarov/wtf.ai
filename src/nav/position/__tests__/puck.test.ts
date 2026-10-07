@@ -3,8 +3,8 @@ import { DRAW_ON_ROAD_MPS, puckHypothesis } from "@/nav/position/puck";
 
 type Cluster = MapMatchEstimate["clusters"][number];
 const field: Cluster = { weight: 0.9, lat: 51.5, lon: 31.3, headingRad: 1.6, spreadM: 8, edge: null, particles: 400, road: { lat: 51.5003, lon: 31.3, headingRad: 1.57 } };
-const estimate = (state: MapMatchEstimate["state"], speedMps: number, top: Cluster = field) =>
-  ({ speedMps, mapMatch: { state, clusters: [top], particles: 500, updateMs: 1 } }) as unknown as NavEstimate;
+const estimate = (state: MapMatchEstimate["state"], speedMps: number, top: Cluster = field, mode: NavEstimate["mode"] = "dr") =>
+  ({ mode, speedMps, mapMatch: { state, clusters: [top], particles: 500, updateMs: 1 } }) as unknown as NavEstimate;
 
 describe("the dot while dead-reckoning on the map", () => {
   test("an off-road hypothesis at driving speed is drawn on the road it could be on", () => {
@@ -23,5 +23,17 @@ describe("the dot while dead-reckoning on the map", () => {
 
   test("with GNSS the EKF is the dot", () => {
     expect(puckHypothesis(estimate("offroad", 12), false)).toBeUndefined();
+  });
+});
+
+describe("the dot while anchored (heading unknown)", () => {
+  const onRoad = { ...field, edge: 7 };
+  test("once the filter has found the road, its hypothesis is the dot, not the latest Wi-Fi/cell fix", () => {
+    expect(puckHypothesis(estimate("tracking", 8, onRoad, "anchored"), false)).toMatchObject({ lat: 51.5, lon: 31.3 });
+    expect(puckHypothesis(estimate("multimodal", 8, onRoad, "anchored"), false)).toMatchObject({ lat: 51.5, lon: 31.3 });
+  });
+
+  test("while it still searches every road around the fix, the fix stays the dot", () => {
+    expect(puckHypothesis(estimate("init", 8, onRoad, "anchored"), false)).toBeUndefined();
   });
 });
