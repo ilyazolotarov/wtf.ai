@@ -147,7 +147,8 @@ export function MapSurface({
   }, [mode, camera]);
   const lastCameraLog = useRef(0);
 
-  // Placing starts at the dot (or wherever the map was), flat and north up, close in.
+  // Placing starts at the dot, the pin or the search result it came from (or wherever the map was), flat and north
+  // up, close in.
   useEffect(() => {
     if (placing !== "position") return;
     void cameraRef.current?.setStop({
@@ -158,9 +159,8 @@ export function MapSurface({
       duration: 500,
       easing: "ease",
     });
-    // Once per placing, not on every position update.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [placing]);
+    // Once per placing (`placeFrom` is set when it starts), not on every position update.
+  }, [placing, placeFrom]);
 
   // A gesture that drops follow keeps the zoom the finger chose; only the button zooms out.
   const leftByGesture = useRef(false);

@@ -191,8 +191,9 @@ One small component each. Touch targets ≥ 56 pt; high contrast; minimal text.
   then; the downloaded region becomes the map when installed), else Offline data. "Not now" hides it for that
   pair of regions until the app restarts. Hidden while that region downloads. (First built for trusted GNSS
   only, which never prompted indoors: a Wi-Fi fix is "APPROXIMATE", never trusted.)
-- Long-press on map → drops a pin; a card above the toolbar shows its distance and direction with **Route here**
-  and **Cancel** (ROUTING-SPEC §8). (The manual position fix, SPEC §3.4, needs another gesture when it comes.)
+- Long-press on map → drops a pin; a card above the toolbar shows its distance and direction, a ✕ to cancel, and
+  **Route here** (ROUTING-SPEC §8). While the car stands (or there is no position yet) it also offers **I'm here**:
+  putting the car on the map (NAVIGATOR-SPEC §6.2), starting at the pin instead of the dot.
 - With a route (`src/components/route/route-banner.tsx`): the banner shows the next maneuver's icon, the distance
   to it (10 m steps under 300 m, 50 m under 1 km), its instruction, "then …" when the next follows within 120 m,
   and the distance, time and arrival clock left; or "Planning route…", "Off route, planning again…", "Position
@@ -224,7 +225,9 @@ Parallel with Phase 3; each screen is independent. Use `@expo/ui` for settings-l
   results and recents.
 - "Start guidance" plans a road route from the position (ROUTING-SPEC, `runtime.routes`, `useRoute()` in
   `src/providers/route-provider.tsx`) and returns to the map; "Stop guidance" ends it. A failed plan says why.
-- Footnote: long-press the map to route anywhere; routes stay inside the downloaded region.
+- **I'm here** on the summary card, while the car stands: back to the map, putting the car on the map
+  (NAVIGATOR-SPEC §6.2) starting at the place (`src/services/navigation/place-request.ts` hands it over).
+- Footnote: long-press the map to route anywhere, or to say the car is there; routes stay inside the downloaded region.
 
 ### 7.2 `vehicle`
 

@@ -1,6 +1,6 @@
 import { useKeepAwake } from "expo-keep-awake";
 import { Link, router, useIsFocused } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import {
     Animated,
     Linking,
@@ -37,6 +37,7 @@ import { bearingRad, haversineM, type Coordinate } from "@/nav/geo";
 import { usePositionPermission } from "@/providers/position-provider";
 import { useRoute } from "@/providers/route-provider";
 import { useDevSettings, useRecorderSnapshot, useRuntime } from "@/providers/runtime-provider";
+import { onPlacingRequest, STANDING_MPS, takePlacingRequest } from "@/services/navigation/place-request";
 import { isOnboardingDone } from "@/services/preferences";
 
 type CameraMode = "follow" | "follow-heading" | "free";
@@ -47,8 +48,6 @@ const CAMERA: Record<CameraMode, { icon: IconName; label: "follow" | "followHead
   free: { icon: "location_searching", label: "free" },
 };
 
-/** Below this the car stands: the driver may put it on the map. */
-const STANDING_MPS = 1;
 /** Offer putting the car on the map when the position is rougher than this (or has no direction), without GPS. */
 const PLACE_OFFER_ACCURACY_M = 75;
 /**
@@ -79,7 +78,7 @@ export default function HomeScreen() {
   const { position, trust } = nav;
   const { permission, requestPermission } = usePositionPermission();
   const { route, startRoute, stopRoute } = useRoute();
-  // A long press on the map drops a pin to route to (ROUTING-SPEC §8).
+  // A long press on the map drops a pin to route to (ROUTING-SPEC §8), or to say the car is there.
   const [pin, setPin] = useState<Coordinate | null>(null);
   const [voiceMuted, toggleVoice] = useVoiceMuted();
   const [cameraMode, setCameraMode] = useState<CameraMode>("follow");
@@ -200,6 +199,9 @@ export default function HomeScreen() {
   const placeCenter = useRef<Coordinate | null>(null);
   const [placeFrom, setPlaceFrom] = useState<Coordinate | null>(null);
   const standing = position != null && (position.speedMps ?? 0) < STANDING_MPS;
+  // The driver may say where the car is from a pin or a search result whenever it isn't moving, also before any
+  // fix at all (indoors, jammed): the manual position is shown without one (NAVIGATOR-SPEC §6.3).
+  const mayPlace = position == null || standing;
   // Lost enough to offer it: no GPS, and nothing vouching for the dot — rough, no direction, off any road,
   // or a long way on dead reckoning. A confident filter on the wrong road looks like none of the first three.
   const lost =
@@ -209,8 +211,10 @@ export default function HomeScreen() {
       position.headingRad == null ||
       position.mapMatch === "offroad" ||
       (position.distanceSinceTrustedM ?? 0) > PLACE_OFFER_DISTANCE_M);
-  const startPlacing = () => {
-    const from = position ? { lat: position.lat, lon: position.lon } : null;
+  // From the dot, or from where the driver says the car is (a dropped pin, a search result).
+  const startPlacing = (at?: Coordinate) => {
+    const from = at ?? (position ? { lat: position.lat, lon: position.lon } : null);
+    setPin(null);
     placeCenter.current = from;
     setPlaceFrom(from);
     setPlaceAt(null);
@@ -264,8 +268,15 @@ export default function HomeScreen() {
     else navigator.discardManualPosition();
     setPlaced(null);
   };
+  // "I'm here" on a search result (route screen): placing starts there.
+  const takePlacing = useEffectEvent(() => {
+    const at = takePlacingRequest();
+    if (at && mayPlace) startPlacing(at);
+  });
+  // The map stays mounted under the route sheet, so the request always comes while subscribed.
+  useEffect(() => onPlacingRequest(() => takePlacing()), []);
   // Moving off cancels (state adjusted during render, not in an effect).
-  if (placing && !standing) {
+  if (placing && !mayPlace) {
     setPlacing(null);
     setPlaceAt(null);
     setPlaceHeading(null);
@@ -445,7 +456,7 @@ export default function HomeScreen() {
 
           {!placing && !position?.poseQuestion && !manual && standing && lost && (
             <Pressable
-              onPress={startPlacing}
+              onPress={() => startPlacing()}
               style={({ pressed }) => [panel, styles.chip, pressed && styles.pressed]}
               accessibilityRole="button"
             >
@@ -462,7 +473,7 @@ export default function HomeScreen() {
               <GlassFill radius={Radius.pill} />
               <Pressable
                 // Placing it again: only while the car stands, as the first time.
-                onPress={standing ? startPlacing : undefined}
+                onPress={standing ? () => startPlacing() : undefined}
                 disabled={!standing}
                 accessibilityRole="button"
                 style={({ pressed }) => [styles.manualChipBody, pressed && styles.pressed]}
@@ -627,7 +638,7 @@ export default function HomeScreen() {
           )}
         </View>
 
-        {!position && (
+        {!position && !placing && (
           <CenterCard>
             {needsPermission ? (
               <>
@@ -691,17 +702,30 @@ export default function HomeScreen() {
                       : `${pin.lat.toFixed(5)}, ${pin.lon.toFixed(5)}`}
                   </T>
                 </View>
-              </View>
-              <View style={styles.pinActions}>
                 <Pressable
                   onPress={() => setPin(null)}
+                  hitSlop={10}
                   accessibilityRole="button"
-                  style={({ pressed }) => [styles.pinButton, { backgroundColor: palette.surface }, pressed && styles.pressed]}
+                  accessibilityLabel={t("cancel")}
+                  style={({ pressed }) => pressed && styles.pressed}
                 >
-                  <T w="semibold" size={15} color={palette.text}>
-                    {t("cancel")}
-                  </T>
+                  <Icon name="close" size={20} color={palette.text2} />
                 </Pressable>
+              </View>
+              <View style={styles.pinActions}>
+                {mayPlace && (
+                  <Pressable
+                    // The car is here, not a destination: the same placing as from the chip, starting at the pin.
+                    onPress={() => startPlacing(pin)}
+                    accessibilityRole="button"
+                    style={({ pressed }) => [styles.pinButton, { backgroundColor: palette.surface }, pressed && styles.pressed]}
+                  >
+                    <Icon name="location_on" size={16} color={palette.accent} />
+                    <T w="semibold" size={15} color={palette.accent}>
+                      {t("placeMeHere")}
+                    </T>
+                  </Pressable>
+                )}
                 <Pressable
                   onPress={() => {
                     startRoute({ lat: pin.lat, lon: pin.lon });

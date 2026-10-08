@@ -215,6 +215,9 @@ jammed:
   and nothing vouches for the dot — it is rougher than 75 m, or has no direction, or map matching is `offroad`, or
   more than 5 km have been driven since the last trusted fix; and after answering "No" to "Is the car where the dot
   is?" (§6.1). Driving off cancels it. Never offered while moving.
+- **Asked for** by the driver at any time the car stands, or before any position at all (the manual position is
+  shown without a fix, §6.3): **I'm here** on a dropped pin or on a place picked in the route screen's search
+  (UI-SPEC §6, §7.1). The placing then starts at that point instead of the dot; the steps are the same.
   > `accuracyM` alone was the whole rule until 2026-10-06, and it is the filter's own spread, which stays a few
   > metres however wrong the dot is. Over that day's 2 h 11 min without a satellite fix — the dot up to 10 km out,
   > 12 min of it standing at a filling station at ±5 m — the chip was offerable in 3 of 20 792 position samples,
@@ -223,7 +226,7 @@ jammed:
   > standing) the offer goes from 3.4 % of positions to 14.6 %, and every bit of that is on a jammed drive: the
   > clean ones are unchanged (0–2.3 %, and 0 % on the five with full satellite coverage), while the filling-station
   > stop goes 0.1 → 97.5 %, the crawl before it 0 → 98.6 %, and the two long drives sit at 2.8 % and 5.4 %.
-- **Placing:** the map zooms in (18, flat, north up) on the dot with a pin fixed at the screen centre; the driver drags
+- **Placing:** the map zooms in (18, flat, north up) on the dot (or the point it was asked for at) with a pin fixed at the screen centre; the driver drags
   the map until the pin is on the car, "Here". Then "tap where the front of the car points": an arrow from the pin
   shows the heading, another tap turns it, "Confirm" applies it. A placing always has a heading: Confirm is disabled
   until the first tap (there used to be a "Skip", which left the car anchored with no direction, and a route start

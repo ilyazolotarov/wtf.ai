@@ -29,6 +29,7 @@ import type { SearchResult } from "@/nav/search/search-index";
 import { inBounds, places, usePlaces } from "@/providers/places";
 import { usePosition } from "@/providers/position-provider";
 import { destinations, useRoute } from "@/providers/route-provider";
+import { requestPlacing, STANDING_MPS } from "@/services/navigation/place-request";
 import type { Place, SavedKind, SavedPlace } from "@/services/navigation/places-store";
 import { useMapPacks } from "@/services/offline-map/map-packs";
 import { activeSearchIndex } from "@/services/offline-map/search-file";
@@ -103,6 +104,9 @@ export default function RouteScreen() {
     return d?.id ? { id: d.id, title: d.name ?? "", detail: null, lat: d.lat, lon: d.lon } : null;
   });
   const [query, setQuery] = useState("");
+  // "I'm here": the car is at the place, not going there (NAVIGATOR-SPEC §6.2); the map puts it there while it
+  // isn't moving.
+  const mayPlace = (position?.speedMps ?? 0) < STANDING_MPS;
   // Distances from the car; without a fix, from the region's middle.
   const origin: Coordinate =
     position ?? (bounds ? { lat: (bounds[1] + bounds[3]) / 2, lon: (bounds[0] + bounds[2]) / 2 } : { lat: 50.45, lon: 30.52 });
@@ -316,6 +320,17 @@ export default function RouteScreen() {
               onPress={() => {
                 places.addRecent(selected);
                 startRoute({ lat: selected.lat, lon: selected.lon, name: selected.title, id: selected.id });
+                router.back();
+              }}
+            />
+          )}
+          {mayPlace && (
+            <ScreenAction
+              labelKey="placeMeHere"
+              icon="location_on"
+              secondary
+              onPress={() => {
+                requestPlacing(selected);
                 router.back();
               }}
             />

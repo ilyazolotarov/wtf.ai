@@ -191,7 +191,8 @@ after a gap, being checked), `NO_FIX` (no good satellite fix for 8 s).
     (NAVIGATOR-SPEC §7.3): −0.1 ± 0.1 s on an iPhone 13.
   - ZUPT at standstill: `v = 0`, measured yaw = bias.
   - Map-match pseudo-measurement from the particle filter (§3.7): position + road heading, **only when the posterior is unimodal**; covariance from cluster spread. In Stage 1 this is the main correction for gyro heading drift during long outages.
-  - Manual fix (user long-press on map, heading snapped to road).
+  - Manual fix: the driver puts the car on the map, with its heading (NAVIGATOR-SPEC §6.2): from the dot, a
+    long-pressed pin or an address search result.
 - Before the heading is known, the position is anchored at the best fix, with a radius that grows by the distance
   driven. The heading comes from a GNSS course or, under jamming, from fitting the OBD + gyro track to coarse fixes
   (NAVIGATOR-SPEC §4, §6).
