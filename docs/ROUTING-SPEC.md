@@ -264,14 +264,23 @@ replay's puck (`replayPuck`, what NavigatorService publishes) fed to guidance as
   pass over the same street (the whole-route search, now gone). It is optimistic as the simulator is (§9.4 there):
   no parking, reversing or unmapped roads.
 
-### 8.5 Voice (`src/nav/routing/announcer.ts`, `src/components/route/use-voice-guidance.ts`)
+### 8.5 Voice (`src/nav/routing/announcer.ts`, `src/components/route/voice-*.ts`, `tools/voice/`)
 
-`expo-speech`, in the app's language (`uk-UA` / `en-US`), ducking other audio (`useApplicationAudioSession:
-false`). Each maneuver is said twice: ahead of it, at max(250 m, 15 s at the current speed), "In 300 metres, turn
-left" (50 m steps); and at it, at max(40 m, 4 s), "Turn left", with "then turn right" when the next follows within
-120 m. "Ahead" is skipped when "at it" would follow within 6 s. Also "Route recalculated" for a re-plan and
-"You've arrived". Nothing about the current plan's maneuvers while off it. The banner's speaker button mutes it
-(kept across launches). iPhone speech is silent while the ring/silent switch is on (Expo docs).
+Recorded phrases from a neural voice (Ukrainian `uk-UA-PolinaNeural`, English `en-GB-SoniaNeural`), whole phrases,
+distance included and in words ("Через триста метрів, поверніть ліворуч"; digits get misread, "50" as "50th"), so
+the intonation and the grammar of numbers ("один кілометр", "півтора кілометра", "два кілометри") are right. `npm run voice:render` records them into `assets/voice/<lang>/` (edge-tts, silence trimmed)
+and writes the clip index; a Jest test fails when the words changed without recording again. Played with `expo-audio`
+one after another, lowering other audio meanwhile, also with the ring/silent switch on. An announcement without a
+clip for every phrase (a roundabout exit past the 6th) is said by the system voice (`expo-speech`, `uk-UA` /
+`en-US`), which is silent while the ring/silent switch is on.
+
+Each maneuver is said twice. Ahead of it, at a spoken distance: 50, 100, 200, 300, 400, 500, 600, 800 m, 1, 1.5 or
+2 km, the first at or beyond max(250 m, 15 s at the current speed), so the distance said is the distance left (a
+maneuver already closer, after a start or re-plan: the nearest). At it, at max(40 m, 4 s): "Поверніть ліворуч", with
+"потім …" when the next follows within 120 m ("і ви на місці" for the destination). "Ahead" is skipped when "at it"
+would follow within 6 s. Roundabout exits are ordinals ("другий з’їзд"). Also "Маршрут перебудовано" for a re-plan
+and "Ви прибули". Nothing about the current plan's maneuvers while off it. The banner's speaker button mutes it (kept
+across launches).
 
 ### 8.6 Route hint (R5, built, off)
 

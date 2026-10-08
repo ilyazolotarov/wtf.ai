@@ -31,20 +31,20 @@ function at(alongM: number, more: Partial<GuidanceStep> = {}, planId = 1): Annou
 }
 
 describe("Announcer", () => {
-  test("each maneuver once ahead (rounded distance) and once at it, with the one that follows closely", () => {
+  test("each maneuver once ahead (at a spoken distance) and once at it, with the one that follows closely", () => {
     const a = new Announcer();
     const said = [];
     for (let along = 0; along <= 1100; along += 10) said.push(...a.update(at(along)));
     expect(said.map((s) => (s.kind === "maneuver" ? `${s.stage} ${s.maneuver.kind}` : s.kind))).toEqual(["prepare left", "now left", "now right"]);
-    expect(said[0]).toMatchObject({ distanceM: 250 }); // max(250 m, 15 s at 10 m/s)
+    expect(said[0]).toMatchObject({ distanceM: 300 }); // max(250 m, 15 s at 10 m/s), up to the next spoken distance
     expect(said[1]).toMatchObject({ then: expect.objectContaining({ kind: "right" }) });
   });
 
   test("ahead of a maneuver at speed, earlier; too close to say both, only 'at it'", () => {
     const fast = new Announcer();
-    // At 30 m/s, 15 s ahead is 450 m: nothing at 600 m, then "in 450 m".
-    expect(fast.update({ ...at(400), speedMps: 30 })).toEqual([]);
-    expect(fast.update({ ...at(560), speedMps: 30 })).toEqual([expect.objectContaining({ stage: "prepare", distanceM: 450 })]);
+    // At 30 m/s, 15 s ahead is 450 m, said at 500 m: nothing at 510 m, then "in 500 m".
+    expect(fast.update({ ...at(490), speedMps: 30 })).toEqual([]);
+    expect(fast.update({ ...at(500), speedMps: 30 })).toEqual([expect.objectContaining({ stage: "prepare", distanceM: 500 })]);
     // The second maneuver comes 80 m after the first: no "ahead" for it, only "at it".
     const a = new Announcer();
     const said = [];
@@ -61,7 +61,12 @@ describe("Announcer", () => {
     expect(a.update(at(2000, { state: "arrived" }, 2))).toEqual([]);
   });
 
-  test("spoken distances: 10 m steps under 100 m, then 50 m", () => {
-    expect([spokenDistanceM(43), spokenDistanceM(96), spokenDistanceM(260), spokenDistanceM(612)]).toEqual([40, 100, 250, 600]);
+  test("a maneuver already closer than the spoken distance (a route starting near it): the nearest", () => {
+    const a = new Announcer();
+    expect(a.update({ ...at(780), planId: 3 })).toEqual([expect.objectContaining({ stage: "prepare", distanceM: 200 })]);
+  });
+
+  test("spoken distances: the nearest step", () => {
+    expect([43, 96, 260, 612, 720, 1300, 5000].map(spokenDistanceM)).toEqual([50, 100, 300, 600, 800, 1500, 2000]);
   });
 });
