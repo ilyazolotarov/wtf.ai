@@ -62,3 +62,6 @@ __pycache__/
 native-tests-android/.gradle/
 native-tests-android/build/
 native-tests-android/.kotlin/
+
+# Wrangler local state (upload Worker dev runs)
+.wrangler/

@@ -1,5 +1,5 @@
 import * as Sharing from "expo-sharing";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { Alert, StyleSheet, Text, useColorScheme, View } from "react-native";
 
 import { ScreenAction, ScreenContent, ScreenNote, ScreenRow, ScreenSection } from "@/components/screens/screen-ui";
@@ -12,10 +12,15 @@ import type { TripIndexEntry } from "@/services/trip-recorder/trip-recorder";
 /** Dev-only trip list: share / delete ULog files (TRIP-LOGGER-SPEC §7, §9.4). */
 export default function TripsScreen() {
   const { t } = useT();
-  const { recorder } = useRuntime();
+  const { recorder, uploader } = useRuntime();
   const snap = useRecorderSnapshot();
   const palette = Colors[useColorScheme() === "dark" ? "dark" : "light"];
   const [archiving, setArchiving] = useState(false);
+  const upload = useSyncExternalStore(
+    uploader?.subscribe ?? noSubscribe,
+    uploader?.getSnapshot ?? noUpload,
+    uploader?.getSnapshot ?? noUpload,
+  );
 
   useEffect(() => recorder.refresh(), [recorder]);
 
@@ -77,6 +82,8 @@ export default function TripsScreen() {
           trip.distanceM > 0 || live ? fmt(((live ? snap.current?.distanceM : trip.distanceM) ?? 0) / 1000, 2, "km") : null,
           trip.adapterName,
           trip.endReason,
+          upload?.name && trip.fileName in upload.uploaded ? t("tripUploaded") : null,
+          upload?.refused[trip.fileName] ? t("tripUploadRefused").replace("{error}", upload.refused[trip.fileName]) : null,
         ]
           .filter(Boolean)
           .join(" · ");
@@ -101,6 +108,9 @@ export default function TripsScreen() {
     </ScreenContent>
   );
 }
+
+const noSubscribe = () => () => {};
+const noUpload = () => null;
 
 const styles = StyleSheet.create({
   card: { padding: 16, borderRadius: 24, borderCurve: "continuous", gap: 6 },

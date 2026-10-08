@@ -10,11 +10,14 @@ import {
     SectionLabel,
     Segmented,
 } from "@/components/screens/screen-ui";
+import { TripStorageSection } from "@/components/settings/trip-storage-section";
+import { TripUploadSection } from "@/components/settings/trip-upload-section";
 import { Icon } from "@/components/ui/icon";
 import { installId } from "@/services/telemetry";
 import { T } from "@/components/ui/text";
 import { usePalette } from "@/constants/theme";
 import { useT, type LanguagePreference } from "@/i18n/provider";
+import { useRuntime } from "@/providers/runtime-provider";
 import {
     loadAppearance,
     setAppearance,
@@ -25,6 +28,7 @@ export default function SettingsScreen() {
   const { t, preference, setPreference } = useT();
   const palette = usePalette();
   const [appearance, setAppearanceState] = useState(loadAppearance);
+  const { uploader } = useRuntime();
 
   return (
     <ScreenContent title={t("settings")}>
@@ -64,6 +68,8 @@ export default function SettingsScreen() {
           </T>
         </ScreenCard>
       </View>
+      {uploader && <TripUploadSection uploader={uploader} />}
+      <TripStorageSection />
       <ScreenSection title={t("about")}>
         <ScreenRow
           labelKey="appVersion"

@@ -4,10 +4,11 @@
 import * as Location from "expo-location";
 import Constants from "expo-constants";
 import * as Device from "expo-device";
-import { Platform } from "react-native";
+import { AppState, Platform } from "react-native";
 
 import VehicleLinkModule from "../../modules/vehicle-link/src/VehicleLinkModule";
 import { Sentry, sentryMetricSink } from "@/config/sentry";
+import { TRIP_UPLOAD_URL } from "@/config/trip-upload";
 import { createClock } from "@/obd/clock";
 import { VehicleLinkCore } from "@/obd/vehicle-link-core";
 
@@ -19,7 +20,9 @@ import { activeRoadGraph, openActiveRoadGraph } from "./offline-map/road-graph-f
 import { SensorService } from "./sensor-capture/sensor-service";
 import { APP_NAV_DEFAULTS, APP_ROUTE_HINT } from "@/nav/app-defaults";
 import { createTripFiles } from "./trip-recorder/trip-files";
-import { TripRecorder } from "./trip-recorder/trip-recorder";
+import { TripRecorder, tripsOverLimit } from "./trip-recorder/trip-recorder";
+import { get, networkKind, onNetworkChange, putFile, uploadSecrets } from "./trip-upload/native";
+import { TripUploader } from "./trip-upload/trip-uploader";
 import { NativeDiscovery } from "./vehicle-link/discovery";
 import { TelemetryReporter } from "./telemetry";
 import { setTripService } from "./trip-service";
@@ -44,6 +47,8 @@ export interface Runtime {
   link: VehicleLinkCore;
   sensors: SensorService;
   recorder: TripRecorder;
+  /** Opt-in trip log upload (TRIP-LOGGER-SPEC §7.1); null when this build has no upload URL. */
+  uploader: TripUploader | null;
   /** The map's position: the navigator (NAVIGATOR-SPEC §9), or phone GNSS without an OBD adapter. */
   position: NavigatorService;
   /** Route planning and guidance (ROUTING-SPEC §8). */
@@ -85,10 +90,11 @@ export function getRuntime(): Runtime {
   const sensors = new SensorService();
   const sysHw = Device.modelId ?? Device.modelName ?? "unknown";
   const sysOsVer = `${Platform.OS} ${Device.osVersion ?? ""}`.trim();
+  const files = createTripFiles();
   const recorder = new TripRecorder({
     link,
     sensors,
-    files: createTripFiles(),
+    files,
     store: kvStore,
     nowUs,
     appInfo: () => ({
@@ -103,6 +109,59 @@ export function getRuntime(): Runtime {
     }),
   });
   recorder.start();
+
+  const uploader = TRIP_UPLOAD_URL
+    ? new TripUploader({
+        baseUrl: TRIP_UPLOAD_URL,
+        store: kvStore,
+        secrets: uploadSecrets,
+        network: networkKind,
+        recorder: { getSnapshot: () => recorder.getSnapshot(), tripUri: (fileName) => files.uri(fileName) },
+        removeTrip: (fileName) => {
+          const trip = recorder.getSnapshot().trips.find((t) => t.fileName === fileName);
+          if (trip) recorder.deleteTrip(trip.id);
+        },
+        putFile,
+        get,
+        now: () => Date.now(),
+      })
+    : null;
+  if (uploader) {
+    // A finished trip, the app back in front, a new network: each a chance to send what waits.
+    const upload = () => void uploader.run().catch((e) => Sentry.captureException(e));
+    let lastState = recorder.getSnapshot().state;
+    recorder.subscribe(() => {
+      const state = recorder.getSnapshot().state;
+      if (state !== lastState && lastState === "recording") upload();
+      lastState = state;
+    });
+    AppState.addEventListener("change", (s) => s === "active" && upload());
+    onNetworkChange(upload);
+    upload();
+  }
+
+  // The storage limit (TRIP-LOGGER-SPEC §7.2): checked a few seconds after a trip ends or the limit changes, so
+  // dragging the slider past a low value deletes nothing. Logs still waiting for upload are kept.
+  let pruneTimer: ReturnType<typeof setTimeout> | null = null;
+  const prune = () => {
+    pruneTimer = null;
+    const snap = recorder.getSnapshot();
+    const keep = new Set(uploader?.getSnapshot().name ? uploader.pending() : []);
+    for (const id of tripsOverLimit(snap.trips, snap.current?.id ?? null, snap.settings.storageLimitGb * 1e9, keep)) {
+      recorder.deleteTrip(id);
+    }
+  };
+  const schedulePrune = () => {
+    if (pruneTimer) clearTimeout(pruneTimer);
+    pruneTimer = setTimeout(prune, 3000);
+  };
+  let prunedFor = { state: recorder.getSnapshot().state, limit: recorder.getSnapshot().settings.storageLimitGb };
+  recorder.subscribe(() => {
+    const { state, settings } = recorder.getSnapshot();
+    if ((state !== prunedFor.state && prunedFor.state === "recording") || settings.storageLimitGb !== prunedFor.limit) schedulePrune();
+    prunedFor = { state, limit: settings.storageLimitGb };
+  });
+  schedulePrune();
 
   const position = new NavigatorService({
     sensors,
@@ -184,6 +243,7 @@ export function getRuntime(): Runtime {
     link,
     sensors,
     recorder,
+    uploader,
     position,
     routes,
     getDevSettings: () => dev,

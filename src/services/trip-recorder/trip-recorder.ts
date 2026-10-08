@@ -37,6 +37,8 @@ export interface TripSettings {
   parkedTimeoutMin: number;
   linkTimeoutMin: number;
   lingerMin: number;
+  /** Logs kept on the phone at most; the oldest finished ones go first (TRIP-LOGGER-SPEC §7.2). */
+  storageLimitGb: number;
 }
 
 export const DEFAULT_TRIP_SETTINGS: TripSettings = {
@@ -45,7 +47,24 @@ export const DEFAULT_TRIP_SETTINGS: TripSettings = {
   parkedTimeoutMin: DEFAULT_TRIP_CONFIG.parkedTimeoutUs / 60e6,
   linkTimeoutMin: DEFAULT_TRIP_CONFIG.linkTimeoutUs / 60e6,
   lingerMin: DEFAULT_TRIP_CONFIG.lingerUs / 60e6,
+  storageLimitGb: 1,
 };
+
+/**
+ * Trips to delete, oldest first, so that all logs (the one being written included) fit in `limitBytes`. The trip
+ * being written and those in `keep` (not yet uploaded) are never chosen.
+ */
+export function tripsOverLimit(trips: TripIndexEntry[], currentId: string | null, limitBytes: number, keep: ReadonlySet<string> = new Set()): string[] {
+  let total = trips.reduce((sum, t) => sum + t.bytes, 0);
+  const out: string[] = [];
+  for (const t of [...trips].sort((a, b) => a.startUtcMs - b.startUtcMs)) {
+    if (total <= limitBytes) break;
+    if (t.id === currentId || keep.has(t.fileName)) continue;
+    out.push(t.id);
+    total -= t.bytes;
+  }
+  return out;
+}
 
 export interface TripIndexEntry {
   id: string;

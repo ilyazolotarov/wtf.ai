@@ -100,7 +100,8 @@
           "url": "https://de.sentry.io/",
           "note": "Set SENTRY_AUTH_TOKEN, SENTRY_ORG and SENTRY_PROJECT to upload source maps; otherwise set SENTRY_DISABLE_AUTO_UPLOAD=true."
         }
-      ]
+      ],
+      "expo-secure-store"
     ],
     "locales": {
       "en": "./locales/en.json",

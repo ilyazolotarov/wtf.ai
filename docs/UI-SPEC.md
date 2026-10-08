@@ -255,7 +255,9 @@ No screen: calibration is learned while driving (SPEC §3.6).
 
 - Language: System / English / Українська (persisted).
 - Appearance: follows system (info only).
-- Privacy statement (all data on device; maps downloaded once, then offline).
+- Privacy statement (all data on device; maps downloaded once, then offline; the opt-in upload is the one exception).
+- Trip log upload (TRIP-LOGGER-SPEC §7.1): code entry, then sender name, sent / waiting counts, status, Wi-Fi only (default on), send now, turn off. Hidden in builds without an upload URL.
+- Trip logs on this phone (TRIP-LOGGER-SPEC §7.2): storage limit slider (0.25–10 GB, default 1 GB) and the space used.
 - About: app version (`expo-constants`).
 
 ## 8. Verification

@@ -51,6 +51,8 @@
   #driveList .drv.hl { background: color-mix(in srgb, var(--accent) 15%, transparent); }
   #driveList .drv.cur { font-weight: 600; }
   #driveList .id { font-family: ui-monospace, Consolas, monospace; }
+  #driveList .who { font-family: system-ui, sans-serif; font-size: 11px; color: var(--accent); border: 1px solid currentColor;
+    border-radius: 4px; padding: 0 4px; margin-left: 4px; }
   #driveList .empty { color: var(--text2); padding: 6px; }
   #status { color: var(--text2); margin-left: auto; }
   #loading { position: absolute; inset: 0; z-index: 4; display: grid; place-items: center; background: color-mix(in srgb, var(--bg) 55%, transparent); }
@@ -118,7 +120,7 @@
     <button id="drivePick" aria-haspopup="listbox" aria-expanded="false" title="Pick a drive (/)">—</button>
     <button id="driveNext" title="Newer drive">›</button>
     <div id="drivePop" hidden>
-      <input id="driveSearch" type="search" placeholder="id, date or time · &quot;drawn&quot; / &quot;undrawn&quot;" autocomplete="off" aria-label="Find a drive" />
+      <input id="driveSearch" type="search" placeholder="id, date, time, tester · drawn / undrawn · mine / testers" autocomplete="off" aria-label="Find a drive" />
       <ul id="driveList" role="listbox" aria-label="Drives"></ul>
     </div>
   </div>
@@ -321,8 +323,9 @@ const fmtM = (m) => m == null ? "—" : `${m < 10 ? m.toFixed(1) : Math.round(m)
 const grade = (m) => m == null ? "" : m < 10 ? "good" : m < 30 ? "meh" : "poor";
 const utc = (s) => data.startUtcMs == null ? "" : new Date(data.startUtcMs + s * 1000).toISOString().slice(11, 19) + " UTC";
 function driveName(file) {
-  const m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})_(\w+)/.exec(file);
-  return m ? `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]} · ${m[7]}` : file;
+  const who = /^testers\/([^/]+)\//.exec(file)?.[1];
+  const m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})_(\w+)/.exec(file.split("/").pop());
+  return (m ? `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]} · ${m[7]}` : file) + (who ? ` · ${who}` : "");
 }
 
 // ---------- map ----------
@@ -1202,14 +1205,18 @@ let logs = [];
 let pickRows = [];
 let pickHl = 0;
 function driveParts(file) {
-  const m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})\d{2}_(\w+)/.exec(file);
+  const m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})\d{2}_(\w+)/.exec(file.split("/").pop());
   return m ? { day: `${m[1]}-${m[2]}-${m[3]}`, time: `${m[4]}:${m[5]}`, id: m[6] } : { day: "", time: "", id: file };
 }
-/** Every word must match the id, day or time; "drawn"/"undrawn" filter on the ground truth. */
+/**
+ * Every word must match the id, day, time or tester; "drawn"/"undrawn" filter on the ground truth, "mine" and
+ * "testers" on whose phone it came from.
+ */
 function matchDrive(l, words) {
   const p = driveParts(l.file);
-  const hay = `${p.id} ${p.day} ${p.time} ${l.file}`.toLowerCase();
-  return words.every((w) => (w === "drawn" ? l.drawn : w === "undrawn" ? !l.drawn : hay.includes(w)));
+  const hay = `${p.id} ${p.day} ${p.time} ${l.who} ${l.file}`.toLowerCase();
+  const special = { drawn: l.drawn, undrawn: !l.drawn, mine: !l.who, testers: !!l.who };
+  return words.every((w) => (w in special ? special[w] : hay.includes(w)));
 }
 function renderPicker() {
   const words = $("driveSearch").value.toLowerCase().split(/\s+/).filter(Boolean);
@@ -1220,7 +1227,7 @@ function renderPicker() {
     const p = driveParts(l.file);
     const head = p.day !== day ? `<li class="day">${esc((day = p.day))}</li>` : "";
     return head + `<li class="drv${i === pickHl ? " hl" : ""}${l.file === $("file").value ? " cur" : ""}" role="option" data-i="${i}">` +
-      `<span>${esc(p.time)}</span><span class="id">${esc(p.id)}</span><span class="muted">${l.sizeMb} MB</span>` +
+      `<span>${esc(p.time)}</span><span class="id">${esc(p.id)}${l.who ? ` <span class="who">${esc(l.who)}</span>` : ""}</span><span class="muted">${l.sizeMb} MB</span>` +
       `<span title="${l.drawn ? "Ground truth drawn" : ""}">${l.drawn ? "✎" : ""}</span></li>`;
   }).join("") || `<li class="empty">No drive matches.</li>`;
   $("driveList").querySelector(".hl")?.scrollIntoView({ block: "nearest" });

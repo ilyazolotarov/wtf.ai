@@ -43,6 +43,24 @@ Nothing is deleted on either side. A file is replaced only where it is unchanged
 last sync; changed on both sides, it is reported as a conflict and left alone. A replaced
 remote file is kept under `logs/history/` in the bucket.
 
+Testers send logs from the app (Settings → Trip log upload, TRIP-LOGGER-SPEC §7.1) with a code
+from you; `logs:pull` brings them into `logs/testers/<name>/`.
+
+```bash
+npm run testers:add -- tester-a       # prints her code once, e.g. bakim-tuvod-segap
+npm run testers:add -- me --owner   # your own phone: its logs land next to the others
+npm run testers:list
+npm run testers:remove -- tester-a    # her code stops working; her logs stay
+```
+
+The upload Worker is in `workers/triplog-upload`. Deploying needs a Cloudflare login with only
+these scopes, once per deploy:
+
+```bash
+npx wrangler login --scopes account:read user:read workers_scripts:write
+npm run upload-worker:deploy
+```
+
 Tests read `tests/data/fixture.ulg`, written by the TS writer
 (`src/triplog/__fixtures__/trip-fixture.ts`; regenerate with `UPDATE_TRIPLOG_FIXTURE=1 npx jest src/triplog`):
 

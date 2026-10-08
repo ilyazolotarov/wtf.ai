@@ -196,7 +196,37 @@ The trip list shows free space; recording refuses to start below 200 MB free.
 - **Share sheet** (`expo-sharing`) from the trip list: one `.ulg` file, or **Share all** — every finished trip stored (not deflated) in one `wtf-trips-<UTC stamp>.zip`, built in `Caches/trip-archives` (only the latest is kept) → AirDrop is not available (no Mac), so typical targets are Files/iCloud Drive, OneDrive, Telegram, e-mail.
 - **Files app / USB**: `expo-file-system` config plugin `enableFileSharing: true` exposes `Documents/` (includes `trips/`). On Windows, the "Apple Devices" app (or iTunes) → device → Files → wtf.ai lets you copy logs over USB. Verify the folder appears in the Files app in Phase 0 (`LSSupportsOpeningDocumentsInPlace` may also be needed).
 - Delete single / all trips from the trip list.
-- No automatic upload (SPEC §2 privacy).
+- No automatic upload without the tester's opt-in (§7.1, SPEC §2 privacy).
+
+### 7.1 Opt-in upload
+
+Testers send logs without the share sheet. It must stay impossible for the app, or anyone holding a build, to read
+logs back.
+
+- **Path:** app → `workers/triplog-upload` (Cloudflare Worker, R2 binding) → private bucket. No storage keys are in
+  the app or the repo; the Worker can only add objects: `GET /me` (who a code belongs to), `PUT /logs/<trip file>`
+  (201 stored, 200 same name and size already there, 409 a different log has the name, 400 not a recorder file
+  name, 413 over 95 MB). Nothing lists, reads, overwrites or deletes.
+- **Codes:** one per person, made by `npm run testers:add -- <name> [--owner]`, shown once. Three pronounceable
+  groups (`bakim-tuvod-segap`, consonant-vowel-consonant-vowel-consonant, no `l`/`q`/`x`/`y`, about 51 bits); case,
+  spaces and dashes are ignored. The bucket keeps only the SHA-256 (`testers/<hash>.json` → name, owner flag).
+  `testers:remove` revokes one code; the tester's logs stay. Shared rules: `src/triplog/upload-protocol.ts`.
+- **Where logs land:** the owner's phone in `logs/` beside the existing logs; a tester's in `logs/testers/<name>/`,
+  so a tester's logs can be deleted together on request.
+- **App** (`src/services/trip-upload/`): off until a code is entered in Settings; the Worker checks it first. The
+  code is kept in the keychain (`expo-secure-store`, after first unlock), never in plain storage. Uploads run after a
+  trip ends, when the app comes to the foreground, and on network changes, oldest first, one at a time; the log
+  being written is never sent. Wi-Fi only by default (`expo-network`). A sent log is deleted from the phone; if the
+  deletion fails, it is remembered as sent and never sent twice. A refused log (409/413/400) is kept and marked; a
+  revoked code stops uploads until a new one is entered. No background scheduling beyond iOS finishing an upload
+  that already started.
+- **PC:** `npm run logs:pull` brings uploads down with everything else (tools/triplog/README.md).
+
+### 7.2 Storage limit
+
+Logs may take at most a set amount of space (Settings slider, 0.25–10 GB, default 1 GB ≈ 200 drives). A few
+seconds after a trip ends or the limit changes, the oldest finished logs are deleted until all logs fit
+(`tripsOverLimit`). The log being written, and logs waiting for upload while upload is on, are never deleted.
 
 ## 8. PC tooling — `tools/triplog/` (Python)
 

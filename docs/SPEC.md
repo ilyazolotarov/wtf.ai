@@ -35,7 +35,7 @@ Odometry is built up in stages (§2.1). Stage 1 uses the minimum that works on a
 | Phone mount                 | Stage 1 requires a **rigid phone mount** (the gyro is the only yaw source).                                                                                                                                               |
 | Standstill bias calibration | **2–3 s**, refined at every stop (ZUPT). No dedicated long standstill step.                                                                                                                                               |
 | Distribution                | Sideloading via AltStore now. App Store later needs a paid Apple Developer account; then BLE needs nothing more, MFi adapters need the vendors' authorizations (see §9).                                                    |
-| Privacy                     | All data stays on device. No position upload; trip logs exported only by explicit user action. **One exception: Sentry crash/error reports and logs** (EU region, all builds with `environment` = development/production, no PII, no replay/screenshots; coordinates and VINs scrubbed from events, breadcrumbs and logs in `src/config/sentry-scrub.ts`). |
+| Privacy                     | All data stays on device. No position upload; trip logs leave the phone only by explicit user action: the share sheet, or **opt-in upload** with a personal code from the developer (Settings), to the project's private bucket only (TRIP-LOGGER-SPEC §7.1). **One other exception: Sentry crash/error reports and logs** (EU region, all builds with `environment` = development/production, no PII, no replay/screenshots; coordinates and VINs scrubbed from events, breadcrumbs and logs in `src/config/sentry-scrub.ts`). |
 
 ### 2.1 Odometry stages
 
@@ -290,7 +290,7 @@ UI-first milestone (map with live GNSS + mock screens): see [UI-SPEC.md](UI-SPEC
   - Stage 1: every OBD poll (raw bytes, status, tx/rx timing), the text ELM327 transcript for all other exchanges, CoreLocation fixes with accuracies, phone IMU (`CMDeviceMotion` 100 Hz; raw gyro/accel optional), raw magnetometer (20 Hz), engine state and trip events.
   - Stage 2+: raw CAN frames in addition (new ULog message; the format is self-describing, so this is additive).
 - Replay harness: `src/nav/replay` (pure TS: merge streams, run the navigator, score fixes and outages, GeoJSON) + `tools/replay` (`npm run replay` CLI, `replay:view` browser viewer, `replay:bench` outage benchmark; Node 24 type stripping; see its README and NAVIGATOR-SPEC §10). Logs are read by `src/triplog/trip-log-reader.ts`. Simulated outages by cutting GNSS in clean logs (`--cut`, `--open-loop`); simulated spoofing by replacing satellite fixes (`--spoof`, `src/nav/replay/spoof.ts`; `replay:spoof` benchmark).
-- Real logs live in `tools/triplog/logs/`, git-ignored because they hold the VIN and GPS tracks.
+- Real logs live in `tools/triplog/logs/`, git-ignored because they hold the VIN and GPS tracks, and are backed up to the private bucket (`npm run logs:push` / `logs:pull`). Testers' uploads land in `logs/testers/<name>/`; the viewer lists them (one parked-pose chain per phone, i.e. per folder), the benchmarks read only the project's own top-level logs.
 - Map-matching metrics: wrong-road rate (share of time the dominant cluster is on a different edge than the GNSS ground truth), time to re-lock after an ambiguity, time spent multimodal, PF update time.
 - Stage comparison: Stage 2 logs can be degraded to Stage 1 inputs (wheel speed → quantized to 1 km/h, resampled at the measured PID rate; yaw → phone gyro) to compare stages on the same drive.
 
@@ -423,7 +423,7 @@ Status (2026-10-06):
 
 ## 8. Out of scope (v1)
 
-Google Maps; Google Play distribution; raw GNSS analysis; slow drag-off spoofing detection; Wi-Fi ELM327 adapters; magnetometer heading for navigation; STN/OBDLink-specific commands in Stage 1 (read-only `STI` identification excepted); Classic Bluetooth adapters without MFi on iOS (impossible); lane-level accuracy; any cloud services; feeding corrected location to other apps.
+Google Maps; Google Play distribution; raw GNSS analysis; slow drag-off spoofing detection; Wi-Fi ELM327 adapters; magnetometer heading for navigation; STN/OBDLink-specific commands in Stage 1 (read-only `STI` identification excepted); Classic Bluetooth adapters without MFi on iOS (impossible); lane-level accuracy; cloud services beyond Sentry and the opt-in trip log upload (TRIP-LOGGER-SPEC §7.1); feeding corrected location to other apps.
 
 ## 9. Risks & open items
 

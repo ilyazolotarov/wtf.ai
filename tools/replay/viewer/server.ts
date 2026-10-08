@@ -46,7 +46,7 @@ const learned = new Map<string, CompassCalibration | null>();
 function compassFromOtherLogs(file: string): { calibration: CompassCalibration; logs: number } | null {
   const cals: CompassCalibration[] = [];
   for (const { file: other } of listLogs()) {
-    if (other === file) continue;
+    if (other === file || !samePhone(other, file)) continue;
     if (!learned.has(other)) {
       const trip = readTripLog(new Uint8Array(readFileSync(path.join(LOG_DIR, other))));
       learned.set(other, trip.mag?.length ? replayTrip(trip).summary.compass.calibration : null);
@@ -82,7 +82,8 @@ function appStateBefore(file: string, loop: MapMatchLoop): AppState {
   const byProtocol = new Map<string, string>();
   const parkedAfter = new Map<string, string>();
   for (const { file: log } of [...listLogs()].reverse()) {
-    if (log > file) break;
+    if (!samePhone(log, file)) continue;
+    if (path.basename(log) > path.basename(file)) break;
     const trip = readTripLog(new Uint8Array(readFileSync(path.join(LOG_DIR, log))));
     const vin = carOf(trip, byProtocol);
     states.set(log, { store: store.copy(), vin, parkedAfter: vin ? (parkedAfter.get(vin) ?? null) : null });
@@ -148,14 +149,36 @@ function send(res: ServerResponse, status: number, type: string, body: string | 
   res.end(body);
 }
 
+/**
+ * Every log: the project's own in the logs folder, testers' uploads in testers/<name>/ (TRIP-LOGGER-SPEC §7.1).
+ * `file` is the path inside the logs folder; `who` is the tester ("" for the project's phone). Newest first.
+ */
 function listLogs() {
-  return readdirSync(LOG_DIR)
-    .filter((f) => f.endsWith(".ulg"))
-    .map((f) => {
-      const st = statSync(path.join(LOG_DIR, f));
-      return { file: f, sizeMb: Math.round((st.size / 1e6) * 10) / 10, drawn: existsSync(drawnFile(f)) };
-    })
-    .sort((a, b) => b.file.localeCompare(a.file));
+  const folders = [{ dir: "", who: "" }];
+  const testers = path.join(LOG_DIR, "testers");
+  if (existsSync(testers)) {
+    for (const e of readdirSync(testers, { withFileTypes: true })) if (e.isDirectory()) folders.push({ dir: `testers/${e.name}/`, who: e.name });
+  }
+  return folders
+    .flatMap(({ dir, who }) =>
+      readdirSync(path.join(LOG_DIR, dir))
+        .filter((f) => f.endsWith(".ulg"))
+        .map((f) => {
+          const file = dir + f;
+          const st = statSync(path.join(LOG_DIR, file));
+          return { file, who, sizeMb: Math.round((st.size / 1e6) * 10) / 10, drawn: existsSync(drawnFile(file)) };
+        }),
+    )
+    .sort((a, b) => path.basename(b.file).localeCompare(path.basename(a.file)));
+}
+
+/** The logs of one phone (its own storage on the device): the same folder. */
+const samePhone = (a: string, b: string) => path.dirname(a) === path.dirname(b);
+
+/** A `file` query parameter: a log inside the logs folder, or null (no escaping it with ../). */
+function logParam(url: URL): string | null {
+  const file = url.searchParams.get("file") ?? "";
+  return /^(testers\/[a-z0-9][a-z0-9-]*\/)?[\w-]+\.ulg$/.test(file) ? file : null;
 }
 
 /** Navigator versions (MAPMATCH-SPEC §9): the open-loop baseline (what the app runs), and the closed-loop steps. */
@@ -182,8 +205,8 @@ const server = createServer((req, res) => {
     } else if (url.pathname === "/api/logs") {
       send(res, 200, "application/json", JSON.stringify(listLogs()));
     } else if (url.pathname === "/api/replay") {
-      const file = path.basename(url.searchParams.get("file") ?? "");
-      if (!file.endsWith(".ulg")) return send(res, 400, "text/plain", "file must be a .ulg in the logs folder");
+      const file = logParam(url);
+      if (!file) return send(res, 400, "text/plain", "file must be a .ulg in the logs folder");
       const q = (name: string) => url.searchParams.get(name) ?? "";
       const lag = q("lag");
       const start = Number(q("start") || 0);
@@ -247,8 +270,8 @@ const server = createServer((req, res) => {
       }
       console.log(`replayed ${file} in ${Date.now() - started} ms`);
     } else if (url.pathname === "/api/roads") {
-      const file = path.basename(url.searchParams.get("file") ?? "");
-      if (!file.endsWith(".ulg")) return send(res, 400, "text/plain", "file must be a .ulg in the logs folder");
+      const file = logParam(url);
+      if (!file) return send(res, 400, "text/plain", "file must be a .ulg in the logs folder");
       const started = Date.now();
       const trip = loadTrip(file);
       const fixes = trip.gnss.filter((f) => f.hAccM <= 500);
@@ -261,8 +284,8 @@ const server = createServer((req, res) => {
       send(res, 200, "application/json", JSON.stringify(payload));
       console.log(`roads for ${file}: ${payload.graph ?? "no graph"}, ${payload.roads.features.length} edges in ${Date.now() - started} ms`);
     } else if (url.pathname === "/api/truth") {
-      const file = path.basename(url.searchParams.get("file") ?? "");
-      if (!file.endsWith(".ulg")) return send(res, 400, "text/plain", "file must be a .ulg in the logs folder");
+      const file = logParam(url);
+      if (!file) return send(res, 400, "text/plain", "file must be a .ulg in the logs folder");
       const started = Date.now();
       const trip = loadTrip(file);
       const first = trip.gnss.find((f) => f.hAccM <= 10);
@@ -275,8 +298,8 @@ const server = createServer((req, res) => {
     } else if (url.pathname === "/api/drawn") {
       // Ground truth drawn by hand: GET it, POST the clicked points (the server lays the path on the roads and saves
       // it), DELETE it.
-      const file = path.basename(url.searchParams.get("file") ?? "");
-      if (!file.endsWith(".ulg")) return send(res, 400, "text/plain", "file must be a .ulg in the logs folder");
+      const file = logParam(url);
+      if (!file) return send(res, 400, "text/plain", "file must be a .ulg in the logs folder");
       const trip = loadTrip(file);
       if (req.method === "GET") return send(res, 200, "application/json", JSON.stringify(drawnPayload(trip, readDrawn(file))));
       if (req.method === "DELETE") {
