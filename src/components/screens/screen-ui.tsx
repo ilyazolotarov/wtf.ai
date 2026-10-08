@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams } from "expo-router";
-import { Children, Fragment, isValidElement, useEffect, useRef } from "react";
+import { Children, Fragment, isValidElement } from "react";
 import {
   Pressable,
   ScrollView,
@@ -22,32 +22,24 @@ import { useT } from "@/i18n/provider";
  */
 export function ScreenContent({
   title,
-  tabs,
-  scrollKey,
   children,
-}: React.PropsWithChildren<{ title?: string; tabs?: React.ReactNode; scrollKey?: string }>) {
+}: React.PropsWithChildren<{ title?: string }>) {
   const palette = usePalette();
-  const scroll = useRef<ScrollView>(null);
-  // A new key (e.g. another tab) starts at the top instead of keeping the old offset.
-  useEffect(() => {
-    scroll.current?.scrollTo({ y: 0, animated: false });
-  }, [scrollKey]);
   return (
     <ScrollView
-      ref={scroll}
       style={{ backgroundColor: palette.sheetBg }}
       contentInsetAdjustmentBehavior="automatic"
       keyboardShouldPersistTaps="handled"
       stickyHeaderIndices={title ? [0] : undefined}
       contentContainerStyle={[styles.content, !title && styles.contentNoHeader]}
     >
-      {title && <SheetHeader title={title} tabs={tabs} />}
+      {title && <SheetHeader title={title} />}
       {children}
     </ScrollView>
   );
 }
 
-function SheetHeader({ title, tabs }: { title: string; tabs?: React.ReactNode }) {
+function SheetHeader({ title }: { title: string }) {
   const { t } = useT();
   const { from } = useLocalSearchParams<{ from?: string }>();
   const nested = from === "more";
@@ -68,7 +60,6 @@ function SheetHeader({ title, tabs }: { title: string; tabs?: React.ReactNode })
           onPress={() => (nested ? router.dismiss(2) : router.back())}
         />
       </View>
-      {tabs}
     </View>
   );
 }

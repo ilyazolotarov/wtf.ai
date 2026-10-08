@@ -35,7 +35,7 @@ Odometry is built up in stages (§2.1). Stage 1 uses the minimum that works on a
 | Phone mount                 | Stage 1 requires a **rigid phone mount** (the gyro is the only yaw source).                                                                                                                                               |
 | Standstill bias calibration | **2–3 s**, refined at every stop (ZUPT). No dedicated long standstill step.                                                                                                                                               |
 | Distribution                | Sideloading via AltStore now. App Store later needs a paid Apple Developer account; then BLE needs nothing more, MFi adapters need the vendors' authorizations (see §9).                                                    |
-| Privacy                     | All data stays on device. No position upload; trip logs leave the phone only by explicit user action: the share sheet, or **opt-in upload** with a personal code from the developer (Settings), to the project's private bucket only (TRIP-LOGGER-SPEC §7.1). **One other exception: Sentry crash/error reports and logs** (EU region, all builds with `environment` = development/production, no PII, no replay/screenshots; coordinates and VINs scrubbed from events, breadcrumbs and logs in `src/config/sentry-scrub.ts`). |
+| Privacy                     | All data stays on device. No position upload; trip logs leave the phone only by explicit user action: the share sheet, or **opt-in upload** with a personal code from the developer (Trip recorder sheet), to the project's private bucket only (TRIP-LOGGER-SPEC §7.1). **One other exception: Sentry crash/error reports and logs** (EU region, all builds with `environment` = development/production, no PII, no replay/screenshots; coordinates and VINs scrubbed from events, breadcrumbs and logs in `src/config/sentry-scrub.ts`). |
 
 ### 2.1 Odometry stages
 
@@ -275,12 +275,15 @@ Detailed in [MAPMATCH-SPEC.md](MAPMATCH-SPEC.md). Reference approach: Gustafsson
 
 UI-first milestone (map with live GNSS + mock screens): see [UI-SPEC.md](UI-SPEC.md). Phase 1 makes `vehicle` and `debug` real and adds dev-only `trips` and `debug-terminal` routes: see [TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md) §9.
 
-- Native launch splash — displays `wtf.ai` and **"Where the f\* am I?"**.
+- Native launch splash — displays `wtf.ai` and **"Where the f\* am I?"** (on iOS **"Where the funk am I?"**, for App Store review; `src/constants/brand.ts`).
 - `index` — map. It shows the Stage 1 navigator (NAVIGATOR-SPEC §9), or phone GNSS from `modules/sensor-capture` without an OBD adapter, with integrity's trust (§3.3): position puck + uncertainty circle (dominant hypothesis), alternative map-match hypotheses as secondary markers when ambiguous, raw GNSS ghost when untrusted, trust status, time and distance since the last trusted fix while untrusted, adapter status.
 - `onboarding` — first-run flow (welcome, location permission, adapter). No calibration step (§3.6).
-- `more` — sheet linking Offline data and Settings. Diagnostics live in the vehicle screen's developer section.
-- `vehicle` — adapter discovery list and connection (transport, ELM version, protocol, poll rate), VIN, engine state, active odometry stage.
-- `downloads` — offline data manager.
+- `more` — sheet linking Offline maps and Settings, then the diagnostic sheets: `position`, `recorder` (Trip recorder) and `developer`.
+- `vehicle` — the car only: adapter discovery list and connection (transport, ELM version, protocol, poll rate), VIN, engine state, active odometry stage.
+- `position` — integrity, live GNSS, EKF state, map matching and routing timings.
+- `recorder` — everything about trip logs: the trip now (start / stop / marker), the `trips` list, recording settings (trip end and linger times, raw IMU, IMU rate), the opt-in upload code and the storage limit.
+- `developer` — test switches and knobs (emulated adapters, particles, GPS outage button, route hint, speed cap, RPM period, navigator version) and the ELM terminal.
+- `downloads` — Offline maps: the regions to download (map, road graph and search index together).
 - `route` — offline routing (A\* on the road graph, ROUTING-SPEC), reroute on deviation, next maneuver + distance.
 - `debug` — live signals, EKF state, particle cloud overlay + cluster weights, trip recorder controls; `debug-terminal` (ELM terminal); `trips` (log list, share, delete).
 - Background (from Phase 1): iOS `UIBackgroundModes` = `location`, plus `external-accessory` (EA) and `bluetooth-central` (BLE) (config plugins, never hand-edit `ios/`). Location stays **When In Use**: a session started in the foreground continues in the background. "Always" is needed only for the later auto-wake (VEHICLE-LINK-SPEC §11).

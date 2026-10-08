@@ -213,7 +213,7 @@ logs back.
   `testers:remove` revokes one code; the tester's logs stay. Shared rules: `src/triplog/upload-protocol.ts`.
 - **Where logs land:** the owner's phone in `logs/` beside the existing logs; a tester's in `logs/testers/<name>/`,
   so a tester's logs can be deleted together on request.
-- **App** (`src/services/trip-upload/`): off until a code is entered in Settings; the Worker checks it first. The
+- **App** (`src/services/trip-upload/`): off until a code is entered in the Trip recorder sheet; the Worker checks it first. The
   code is kept in the keychain (`expo-secure-store`, after first unlock), never in plain storage. Uploads run after a
   trip ends, when the app comes to the foreground, and on network changes, oldest first, one at a time; the log
   being written is never sent. Wi-Fi only by default (`expo-network`). A sent log is deleted from the phone; if the
@@ -224,7 +224,7 @@ logs back.
 
 ### 7.2 Storage limit
 
-Logs may take at most a set amount of space (Settings slider, 0.25–10 GB, default 1 GB ≈ 200 drives). A few
+Logs may take at most a set amount of space (Trip recorder sheet slider, 0.25–10 GB, default 1 GB ≈ 200 drives). A few
 seconds after a trip ends or the limit changes, the oldest finished logs are deleted until all logs fit
 (`tripsOverLimit`). The log being written, and logs waiting for upload while upload is on, are never deleted.
 
@@ -269,11 +269,13 @@ Dev builds only. Replace mocks in existing screens; add routes under `src/app/`.
 - Probe result details on failure (which step failed, GATT dump for unknown devices, with a "copy" action so it can be added to the catalog).
 - "Use emulator" toggle (VEHICLE-LINK-SPEC §13).
 
-### 9.2 `debug` (extend)
+### 9.2 `recorder`, `position`, `developer` (sheets from More)
 
-- Trip recorder: state, current trip id, duration, file size, start reason; buttons Start (manual) / Stop / Marker.
-- Sensors: GNSS rate, last accuracy, speed accuracy; IMU rate (measured), dropped batches.
-- Knobs: speed cap override, RPM period, raw IMU toggle, IMU rate (50/100 Hz), trip thresholds (§4.2).
+- `recorder` holds all of trip logging in one place: state, current trip id, duration, file size, start reason;
+  buttons Start (manual) / Stop / Marker; the `trips` list; recording settings (trip thresholds §4.2, raw IMU
+  toggle, IMU rate 50/100 Hz); the upload code (§7.1); the storage limit (§7.2).
+- `position`: GNSS rate, last accuracy, speed accuracy; IMU rate (measured); EKF and map matching state.
+- `developer`: speed cap override, RPM period and the other test switches; the ELM terminal.
 
 ### 9.3 `debug-terminal` (new route, modal)
 
@@ -281,7 +283,7 @@ Dev builds only. Replace mocks in existing screens; add routes under `src/app/`.
 
 ### 9.4 `trips` (new route, modal)
 
-- List of logs: date, duration, distance, size, adapter, complete/incomplete. Actions: share, share all (ZIP), delete, delete all. Free space indicator.
+- List of logs: date, duration, distance, size, adapter, complete/incomplete. Actions: share, share all (ZIP), delete, delete all. Free space indicator. With upload on (§7.1): how many logs were sent, and that sent logs are deleted from the phone, so a short or empty list never reads as trips not recorded.
 
 ## 10. App configuration (one native batch)
 

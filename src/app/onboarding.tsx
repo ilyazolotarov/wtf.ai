@@ -7,6 +7,7 @@ import { ScreenCard } from "@/components/screens/screen-ui";
 import { useNavStatus } from "@/components/status/use-nav-status";
 import { Icon, type IconName } from "@/components/ui/icon";
 import { T } from "@/components/ui/text";
+import { TAGLINE } from "@/constants/brand";
 import { Radius, usePalette } from "@/constants/theme";
 import type { Strings } from "@/i18n/en";
 import { useT } from "@/i18n/provider";
@@ -15,8 +16,9 @@ import { markOnboardingDone } from "@/services/preferences";
 
 type Step = 0 | 1 | 2;
 
-const STEPS: { icon?: IconName; title: keyof Strings; body: keyof Strings }[] = [
-  { title: "obWelcomeTitle", body: "obWelcomeBody" },
+/** `title: null` is the welcome page: its title is the tagline, the same in every language. */
+const STEPS: { icon?: IconName; title: keyof Strings | null; body: keyof Strings }[] = [
+  { title: null, body: "obWelcomeBody" },
   { icon: "location_on", title: "obLocationTitle", body: "obLocationBody" },
   { icon: "directions_car", title: "obCarTitle", body: "obCarBody" },
 ];
@@ -94,7 +96,7 @@ export default function OnboardingScreen() {
               wtf.ai
             </T>
             <T w="semibold" size={40} style={styles.hero}>
-              {t(meta.title)}
+              {meta.title ? t(meta.title) : TAGLINE}
             </T>
             <T size={17} color={palette.text2} style={styles.lead}>
               {t(meta.body)}
@@ -106,7 +108,7 @@ export default function OnboardingScreen() {
               <Icon name={meta.icon!} size={30} color={palette.accent} />
             </View>
             <T w="semibold" size={30} style={styles.title}>
-              {t(meta.title)}
+              {meta.title ? t(meta.title) : TAGLINE}
             </T>
             <T size={16} color={palette.text2} style={styles.lead}>
               {t(meta.body)}

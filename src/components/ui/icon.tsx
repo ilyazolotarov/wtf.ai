@@ -18,6 +18,7 @@ const SF = {
   chevron_right: "chevron.right",
   bluetooth: "dot.radiowaves.left.and.right",
   download: "arrow.down.circle.fill",
+  map: "map.fill",
   tune: "slider.horizontal.3",
   monitoring: "waveform.path.ecg",
   settings: "gearshape.fill",

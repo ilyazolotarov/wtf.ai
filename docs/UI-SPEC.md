@@ -8,7 +8,7 @@ Status: draft v1 (2026-09-29). Companion to [SPEC.md](SPEC.md) §3.9. Source of 
 >
 > Position source (2026-10-03): §4.3 is updated. The map's GNSS now comes from `modules/sensor-capture` (shared with the trip log), not `expo-location`'s watcher, which stopped for good after jamming. Only satellite fixes count for trust. Since then `NavigatorService` ([NAVIGATOR-SPEC.md](NAVIGATOR-SPEC.md) §9) is the map's source; it shows phone GNSS as below when there is no OBD speed.
 >
-> Follow-up (2026-10-06): the `calibration` screen, the onboarding calibration step and the low-accuracy / "Not calibrated" chip are removed: the app calibrates itself while driving (SPEC §3.6). `SinceTrustedStrip` (§6.3) is a chip under the status pill while GNSS isn't trusted: "Trusted GPS 4 min ago, 2.3 km back". The `more` sheet lists Offline data and Settings; `src/mocks` is gone.
+> Follow-up (2026-10-06): the `calibration` screen, the onboarding calibration step and the low-accuracy / "Not calibrated" chip are removed: the app calibrates itself while driving (SPEC §3.6). `SinceTrustedStrip` (§6.3) is a chip under the status pill while GNSS isn't trusted: "Trusted GPS 4 min ago, 2.3 km back". The `more` sheet lists Offline maps and Settings; `src/mocks` is gone.
 
 > Follow-up (2026-10-03): the mock `vehicle` (§7.2) and `debug` (§7.5) screens become real in the trip logger milestone — see [TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md) §9 and [VEHICLE-LINK-SPEC.md](VEHICLE-LINK-SPEC.md). The `AdapterChip` (§6.3) then shows the real link state.
 
@@ -258,10 +258,11 @@ No screen: calibration is learned while driving (SPEC §3.6).
 
 - Language: System / English / Українська (persisted).
 - Appearance: follows system (info only).
-- Privacy statement (all data on device; maps downloaded once, then offline; the opt-in upload is the one exception).
-- Trip log upload (TRIP-LOGGER-SPEC §7.1): code entry, then sender name, sent / waiting counts, status, Wi-Fi only (default on), send now, turn off. Hidden in builds without an upload URL.
-- Trip logs on this phone (TRIP-LOGGER-SPEC §7.2): storage limit slider (0.25–10 GB, default 1 GB) and the space used.
+- Privacy statement (position data on device; maps downloaded once, then offline; crash reports carry no location or personal data; the opt-in trip log upload, in the `recorder` sheet).
 - About: app version (`expo-constants`).
+
+Trip log upload and the storage limit are not here: they live with the rest of trip logging in the `recorder`
+sheet (TRIP-LOGGER-SPEC §9.2).
 
 ## 8. Verification
 

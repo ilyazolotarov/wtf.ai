@@ -61,6 +61,9 @@ const SHEETS = [
   "more",
   "downloads",
   "settings",
+  "position",
+  "recorder",
+  "developer",
 ] as const;
 
 function AppStack() {
@@ -84,7 +87,7 @@ function AppStack() {
             presentation: "formSheet",
             sheetGrabberVisible: true,
             sheetCornerRadius: 32,
-            sheetAllowedDetents: name === "more" ? [0.5] : [0.86],
+            sheetAllowedDetents: name === "more" ? [0.7] : [0.86],
           }}
         />
       ))}

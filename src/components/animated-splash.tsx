@@ -16,13 +16,13 @@ import {
   Easing,
   Image,
   StyleSheet,
-  useColorScheme,
   View,
 } from "react-native";
 
+import { TAGLINE } from "@/constants/brand";
 import { Colors } from "@/constants/theme";
 import { T } from "@/components/ui/text";
-import { useT } from "@/i18n/provider";
+import { launchSystemScheme } from "@/services/preferences";
 
 /** Points; the canvas is centred on screen exactly like the native splash image. */
 const SPLASH = {
@@ -68,9 +68,10 @@ const steps = KEYFRAMES.map((_, i) => i);
 const scaleOf = (spread: number) => (SPLASH.puck + 2 * spread) / MAX_D;
 
 export function AnimatedSplash({ onDone }: { onDone(): void }) {
-  const scheme = useColorScheme() === "dark" ? "dark" : "light";
+  // The native splash is drawn in system colors before JS runs, so the overlay ignores
+  // the app's appearance setting to keep the hand-off invisible.
+  const scheme = launchSystemScheme;
   const palette = Colors[scheme];
-  const { t } = useT();
   const [progress] = useState(() => new Animated.Value(0));
   const [opacity] = useState(() => new Animated.Value(1));
   const [textOpacity] = useState(() => new Animated.Value(0));
@@ -163,7 +164,7 @@ export function AnimatedSplash({ onDone }: { onDone(): void }) {
         />
         <Animated.View style={[styles.tagline, { opacity: textOpacity }]}>
           <T size={16} color={palette.text2}>
-            {t("splashTagline")}
+            {TAGLINE}
           </T>
         </Animated.View>
       </View>

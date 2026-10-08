@@ -59,7 +59,8 @@ export default function TripsScreen() {
     <ScreenContent>
       <ScreenSection plain>
         <ScreenRow labelKey="freeSpace" value={fmtBytes(snap.freeBytes)} />
-        <ScreenRow labelKey="trips" value={String(snap.trips.length)} />
+        <ScreenRow labelKey="tripsOnPhone" value={String(snap.trips.length)} />
+        {upload?.name && <ScreenRow labelKey="tripsSentAway" value={String(upload.sentCount)} />}
         {finished > 0 && (
           <ScreenAction
             labelKey="shareAll"
@@ -73,6 +74,8 @@ export default function TripsScreen() {
           <ScreenAction labelKey="deleteAll" secondary onPress={() => confirmDelete(() => recorder.deleteAll())} />
         )}
       </ScreenSection>
+      {/* With upload on, a short list (or none) is the logs having gone, not a trip never recorded. */}
+      {upload?.name && <ScreenNote>{t("tripUploadDeleted")}</ScreenNote>}
       {snap.trips.length === 0 && <ScreenNote>{t("noTrips")}</ScreenNote>}
       {snap.trips.map((trip) => {
         const live = snap.current?.id === trip.id;

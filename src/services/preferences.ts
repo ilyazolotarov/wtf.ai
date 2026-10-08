@@ -15,6 +15,13 @@ export function loadAppearance(): AppearancePreference {
   }
 }
 
+/**
+ * The OS scheme at launch, read before `applyAppearance` overrides it (after that,
+ * `Appearance` reports the override). The native splash is drawn in this scheme.
+ */
+export const launchSystemScheme: "light" | "dark" =
+  Appearance.getColorScheme() === "dark" ? "dark" : "light";
+
 /** Overrides `useColorScheme()` app-wide, native sheets included. */
 export function applyAppearance(preference: AppearancePreference): void {
   Appearance.setColorScheme(preference === "system" ? "unspecified" : preference);
