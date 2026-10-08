@@ -2,6 +2,7 @@ import { Platform } from "react-native";
 
 import SensorCaptureModule from "../../modules/sensor-capture/src/SensorCaptureModule";
 import { en } from "@/i18n/en";
+import { systemLanguage } from "@/i18n/system-language";
 import { uk } from "@/i18n/uk";
 import { getLocales } from "expo-localization";
 import Storage from "expo-sqlite/kv-store";
@@ -14,7 +15,7 @@ const LANGUAGE_KEY = "language-preference";
 /** The notification's words in the app language (same rule as I18nProvider; this runs outside React). */
 export function tripNotificationCopy(): { title: string; text: string; channel: string } {
   const preference = Storage.getItemSync(LANGUAGE_KEY); // stored as a plain string by I18nProvider
-  const language = preference === "uk" || preference === "en" ? preference : getLocales()[0]?.languageCode === "uk" ? "uk" : "en";
+  const language = preference === "uk" || preference === "en" ? preference : systemLanguage(getLocales());
   const strings = language === "uk" ? uk : en;
   return { title: strings.tripNotificationTitle, text: strings.tripNotificationText, channel: strings.tripNotificationChannel };
 }

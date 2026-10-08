@@ -4,6 +4,7 @@ import * as React from "react";
 import { useEffect, useState } from "react";
 
 import { en, type Strings } from "@/i18n/en";
+import { systemLanguage } from "@/i18n/system-language";
 import { uk } from "@/i18n/uk";
 
 export type LanguagePreference = "system" | "en" | "uk";
@@ -23,12 +24,7 @@ export function I18nProvider({ children }: React.PropsWithChildren) {
   const [preference, setPreferenceState] =
     useState<LanguagePreference>("system");
 
-  const language =
-    preference === "system"
-      ? locales[0]?.languageCode === "uk"
-        ? "uk"
-        : "en"
-      : preference;
+  const language = preference === "system" ? systemLanguage(locales) : preference;
 
   useEffect(() => {
     let active = true;

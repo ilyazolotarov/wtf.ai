@@ -27,7 +27,7 @@ Get a visible, working app on the iPhone fast:
 | Map tiles  | OpenFreeMap **Liberty** style on offline PMTiles of the downloaded region (SPEC §3.8); no online map since 2026-10-06.                      |
 | Navigation | **Map-first**: full-screen map with floating controls; other screens are stack routes presented as sheets/modals. Remove template `NativeTabs`. |
 | Mocks      | Static placeholder data only (no simulated scenarios).                                                                                          |
-| Language   | English + Ukrainian, i18n-ready. Default from device locale, user override in Settings.                                                         |
+| Language   | English + Ukrainian, i18n-ready. Default: the first device language the app speaks, Russian as Ukrainian (iOS and Android); user override in Settings.                                                         |
 | Theme      | Follow system light/dark; map style switches too.                                                                                               |
 | Units      | SI internally (m, s, rad, m/s). Convert to km/h, km/m, degrees only in UI.                                                                      |
 | Privacy    | Offline map only: no map requests while driving or browsing. GitHub is contacted for the catalog and downloads only.                       |
@@ -43,7 +43,7 @@ Blocks seeing the map on a device.
    - `expo-location` plugin with **when-in-use** permission text only (background location comes in SPEC Phase 6).
    - `@maplibre/maplibre-react-native` plugin.
    - `ios.bundleIdentifier`.
-   - `locales` for `en` and `uk` (localized iOS permission strings).
+   - `locales` for `en` and `uk`, and `ru` with the Ukrainian strings (localized iOS permission strings).
 3. `eas.json` with a `development` profile (`developmentClient: true`, `distribution: internal`).
 4. `npx eas-cli@latest device:create` → register iPhone. `npx eas-cli@latest build -p ios --profile development`. See the `expo-dev-client` and `eas-app-stores` skills.
 5. From here on, Expo Go no longer works; use the dev client with `npx expo start`.

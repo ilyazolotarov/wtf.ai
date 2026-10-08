@@ -106,7 +106,8 @@
     ],
     "locales": {
       "en": "./locales/en.json",
-      "uk": "./locales/uk.json"
+      "uk": "./locales/uk.json",
+      "ru": "./locales/uk.json"
     },
     "experiments": {
       "typedRoutes": true,
