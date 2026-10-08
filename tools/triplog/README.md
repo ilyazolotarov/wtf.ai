@@ -28,6 +28,21 @@ Logs also open directly in PlotJuggler and Foxglove.
 Put real trip logs pulled from the phone in `tools/triplog/logs/`. It is git-ignored,
 because the logs hold the VIN and GPS tracks.
 
+The folder (logs, drawn ground truth, regress baselines) is backed up to a private
+S3-compatible bucket (Cloudflare R2). Never make the bucket public. `.env.local` at the repo
+root holds its endpoint, bucket name and an access key with read & write on it; the names are
+in `.env.example`.
+
+```bash
+npm run logs:status   # what differs, changes nothing
+npm run logs:push     # after pulling new logs from the phone or drawing ground truth
+npm run logs:pull     # on another PC, or to get back what was lost
+```
+
+Nothing is deleted on either side. A file is replaced only where it is unchanged since the
+last sync; changed on both sides, it is reported as a conflict and left alone. A replaced
+remote file is kept under `logs/history/` in the bucket.
+
 Tests read `tests/data/fixture.ulg`, written by the TS writer
 (`src/triplog/__fixtures__/trip-fixture.ts`; regenerate with `UPDATE_TRIPLOG_FIXTURE=1 npx jest src/triplog`):
 

@@ -153,7 +153,7 @@ function listLogs() {
     .filter((f) => f.endsWith(".ulg"))
     .map((f) => {
       const st = statSync(path.join(LOG_DIR, f));
-      return { file: f, sizeMb: Math.round((st.size / 1e6) * 10) / 10 };
+      return { file: f, sizeMb: Math.round((st.size / 1e6) * 10) / 10, drawn: existsSync(drawnFile(f)) };
     })
     .sort((a, b) => b.file.localeCompare(a.file));
 }
