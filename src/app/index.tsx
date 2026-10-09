@@ -826,7 +826,7 @@ export default function HomeScreen() {
             <HudAction icon="alt_route" label={t("route")} href="/route" />
             <HudAction
               icon="directions_car"
-              label={recording ? t("recording") : t("vehicle")}
+              label={recording ? t("driving") : t("vehicle")}
               href="/vehicle"
               badge={linkBadge}
               badgeLabel={t(LINK_BADGE_LABEL[linkBadge])}

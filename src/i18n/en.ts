@@ -12,6 +12,8 @@ export const en = {
   tapToFollow: "tap to follow",
   route: "Route",
   vehicle: "Vehicle",
+  /** The vehicle button while a trip records (the recorder itself is under More). */
+  driving: "Driving",
   downloads: "Offline maps",
   settings: "Settings",
   waitingForGps: "Waiting for GPS",

@@ -13,6 +13,8 @@ export function RuntimeProvider({ children }: React.PropsWithChildren) {
     const connect = () => void autoConnect().catch((error) => console.warn("auto-connect failed", error));
     connect();
     const subscription = AppState.addEventListener("change", (state) => {
+      // Into the trip log: what the driver saw on the map is only what happened while the app was in front.
+      getRuntime().recorder.note(`app ${state}`);
       if (state === "active") connect();
     });
     return () => subscription.remove();

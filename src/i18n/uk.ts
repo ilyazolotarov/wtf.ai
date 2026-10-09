@@ -14,6 +14,7 @@ export const uk = {
   tapToFollow: "натисніть, щоб стежити",
   route: "Маршрут",
   vehicle: "Авто",
+  driving: "У дорозі",
   downloads: "Офлайн-мапи",
   settings: "Налаштування",
   waitingForGps: "Очікування GPS",

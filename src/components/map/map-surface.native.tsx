@@ -25,7 +25,7 @@ import { usePosition } from "@/providers/position-provider";
 import { useDevSettings, useRuntime } from "@/providers/runtime-provider";
 import type { MapMatchOverlay } from "@/services/navigation/navigator-service";
 import { useRoute } from "@/providers/route-provider";
-import { mapBearingDeg, type CompassHeading } from "./use-compass-heading";
+import { COURSE_MIN_SPEED_MPS, mapBearingDeg, type CompassHeading } from "./use-compass-heading";
 
 type CameraMode = "follow" | "follow-heading" | "free";
 
@@ -35,7 +35,10 @@ interface MapSurfaceProps {
   ghostView: boolean;
   /** Walking compass (see `walkingCompass`): beam replaces the course cone and drives heading-up. */
   compass: CompassHeading | null;
-  /** Map bearing in follow-heading (see `useHeadingUp`); null: no direction known, the follow camera instead. */
+  /**
+   * Map bearing in follow-heading (see `useHeadingUp`); null: no direction known. Standing, the map keeps the bearing
+   * it has; moving, the follow camera instead.
+   */
   headingUpRad: number | null;
   onUserInteraction(): void;
   /** Long press: where on the map. */
@@ -132,20 +135,33 @@ export function MapSurface({
       : null;
   const deadReckoning = position != null && position.trust !== "TRUSTED";
   const tint = deadReckoning ? palette.warn.c : palette.accent;
-  // Heading-up with no direction known (anchored under jamming): the follow camera, north up, until there is one.
-  const camera = mode === "follow-heading" && headingUpRad === null ? "follow" : mode;
+  // Heading-up with no direction known. Standing (none yet: parked on phone GPS, the app just opened): still tilted and
+  // close in, the map left at the bearing it has, so the view doesn't drop flat and north while the button says
+  // heading-up. Moving without one (the navigator anchored under jamming): the follow camera, north up, flat, so it
+  // never looks like a heading-up view pointing the wrong way.
+  const noDirection = mode === "follow-heading" && headingUpRad === null;
+  const moving = (position?.speedMps ?? 0) > COURSE_MIN_SPEED_MPS;
+  const camera = noDirection && moving ? "follow" : mode;
   const follow = camera === "free" ? null : FOLLOW_CAMERA[camera];
-
   const followBearing =
-    camera === "follow-heading" && position && headingUpRad !== null
-      ? mapBearingDeg(headingUpRad)
-      : 0;
+    camera === "follow-heading" ? (headingUpRad !== null ? mapBearingDeg(headingUpRad) : undefined) : 0;
 
   useEffect(() => {
-    logCamera?.(`camera ${mode}${camera !== mode ? ` shown as ${camera}: no direction known` : ""}`);
+    logCamera?.(
+      `camera ${mode}${camera !== mode ? ` shown as ${camera}: moving, no direction known` : noDirection ? ": no direction known, the map keeps its bearing" : ""}`,
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, camera]);
+  }, [mode, camera, noDirection]);
   const lastCameraLog = useRef(0);
+  // Both put the map flat and north up (the GNSS ghost framed; placing the car).
+  const loggedViews = useRef({ ghostView, placing });
+  useEffect(() => {
+    const was = loggedViews.current;
+    if (ghostView !== was.ghostView) logCamera?.(`camera ghost view ${ghostView ? "on" : "off"}`);
+    if (placing !== was.placing) logCamera?.(`camera placing ${placing ?? "off"}`);
+    loggedViews.current = { ghostView, placing };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ghostView, placing]);
 
   // Placing starts at the dot, the pin or the search result it came from (or wherever the map was), flat and north
   // up, close in.
@@ -202,7 +218,7 @@ export function MapSurface({
     const stop = {
       center: [position.lon, position.lat] as [number, number],
       zoom: follow.zoom,
-      bearing: followBearing,
+      ...(followBearing !== undefined ? { bearing: followBearing } : {}),
       pitch: follow.pitch,
     };
     if (snapped) cameraRef.current?.jumpTo(stop);
@@ -243,16 +259,22 @@ export function MapSurface({
     onUserInteraction();
   };
   const handleRegionDidChange = (
-    event: NativeSyntheticEvent<{ pitch: number; bearing?: number; center?: [number, number] }>,
+    event: NativeSyntheticEvent<{ pitch: number; zoom?: number; bearing?: number; center?: [number, number] }>,
   ) => {
     const { bearing, center } = event.nativeEvent;
     if (placing === "position" && center) onCenter?.({ lat: center[1], lon: center[0] });
-    if (logCamera && camera === "follow-heading" && bearing !== undefined) {
+    if (logCamera && camera === "follow-heading" && bearing !== undefined && followBearing !== undefined) {
       const off = Math.abs(((bearing - followBearing + 540) % 360) - 180);
+      // Tilt too: a flat heading-up view with the right bearing looks north-up and leaves no other trace.
+      const { pitch, zoom } = event.nativeEvent;
+      const flat = follow && Math.abs(pitch - follow.pitch) > 10;
       const now = Date.now();
-      if (now - lastCameraLog.current >= (off > CAMERA_LOG_OFF_DEG ? 3000 : CAMERA_LOG_EVERY_MS)) {
+      if (now - lastCameraLog.current >= (off > CAMERA_LOG_OFF_DEG || flat ? 3000 : CAMERA_LOG_EVERY_MS)) {
         lastCameraLog.current = now;
-        logCamera(`camera heading-up: map bearing ${Math.round(bearing)}°, asked ${Math.round(followBearing)}°`);
+        logCamera(
+          `camera heading-up: map bearing ${Math.round(bearing)}°, asked ${Math.round(followBearing)}°; tilt ${Math.round(pitch)}°` +
+            `${zoom !== undefined ? `, zoom ${zoom.toFixed(1)}` : ""}${ghostView ? ", ghost view" : ""}`,
+        );
       }
     }
     const from = flattenFrom.current;
