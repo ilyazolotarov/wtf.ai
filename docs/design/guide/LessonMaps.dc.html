@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Lesson: offline maps</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Onest:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#4371B7}a:hover{color:#2F5A99}
+button{font-family:inherit}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #F5F4F1; color: #1D1C1A; font-family: 'Onest', sans-serif; display: flex; flex-direction: column; overflow: hidden">
+  <div style="display: flex; justify-content: center; padding-top: 8px"><div style="width: 38px; height: 5px; border-radius: 3px; background: rgba(0,0,0,0.18)"></div></div>
+  <div style="display: flex; align-items: center; padding: 10px 12px 0">
+    <a href="Guide.dc.html" style="height: 44px; display: flex; align-items: center; gap: 2px; text-decoration: none; font-size: 15px; font-weight: 500">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4371B7" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg>
+      Guide
+    </a>
+    <div style="flex: 1; text-align: right; padding-right: 6px; font-size: 12px; font-weight: 600; letter-spacing: 0.4px; color: #6B675F">LESSON 9 OF 9 · PRACTICE</div>
+  </div>
+
+  <div style="flex: 1; overflow-y: auto; padding: 6px 16px 28px; display: flex; flex-direction: column; gap: 14px">
+    <div style="display: flex; flex-direction: column; gap: 6px">
+      <div style="font-size: 26px; font-weight: 600; line-height: 30px; letter-spacing: -0.5px">Offline maps</div>
+      <div style="font-size: 15px; line-height: 21px; color: #6B675F">The app has no online map. One download per region holds the map, the roads it uses to find the car, and address search. Try downloading another region.</div>
+    </div>
+
+    <div style="background: #FFFFFF; border-radius: 24px; padding: 2px 14px">
+      <sc-for list="{{ regions }}" as="r" hint-placeholder-count="4">
+        <div style="min-height: 68px; display: flex; flex-direction: column; justify-content: center; gap: 8px; padding: 10px 0; border-top: {{ r.divider }}">
+          <div style="display: flex; align-items: center; gap: 12px">
+            <div style="width: 10px; height: 10px; border-radius: 5px; background: {{ r.dot }}; flex-shrink: 0"></div>
+            <div style="flex: 1; display: flex; flex-direction: column; gap: 2px">
+              <div style="font-size: 15px; font-weight: 500">{{ r.name }}</div>
+              <div style="font-size: 13px; color: {{ r.subColor }}">{{ r.sub }}</div>
+            </div>
+            <sc-if value="{{ r.hasButton }}" hint-placeholder-val="{{ true }}">
+              <button type="button" onClick="{{ r.act }}" style="height: 36px; border: 0; border-radius: 999px; background: {{ r.btnBg }}; color: {{ r.btnFg }}; padding: 0 14px; font-size: 13px; font-weight: 600; cursor: pointer; flex-shrink: 0">{{ r.btn }}</button>
+            </sc-if>
+          </div>
+          <sc-if value="{{ r.loading }}" hint-placeholder-val="{{ false }}">
+            <div style="height: 6px; border-radius: 3px; background: #E8E6E0; overflow: hidden; margin-left: 22px">
+              <div style="height: 6px; width: {{ r.pct }}%; background: #4371B7; border-radius: 3px; transition: width 220ms linear"></div>
+            </div>
+          </sc-if>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 8px">
+      <div style="font-size: 13px; font-weight: 500; color: #6B675F; padding-left: 4px">When you drive out of it</div>
+      <div style="background: #FFFFFF; border-radius: 24px; padding: 14px; display: flex; flex-direction: column; gap: 10px">
+        <div style="display: flex; gap: 12px; align-items: flex-start">
+          <div style="width: 36px; height: 36px; border-radius: 18px; background: #4371B722; display: flex; align-items: center; justify-content: center; flex-shrink: 0">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4371B7" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 6.5l5.5-2.5 6 2.5 5.5-2.5v13.5l-5.5 2.5-6-2.5-5.5 2.5z"></path><path d="M9 4v13.5M15 6.5V20"></path></svg>
+          </div>
+          <div style="flex: 1; display: flex; flex-direction: column; gap: 2px">
+            <div style="font-size: 15px; font-weight: 600">Outside {{ activeName }}</div>
+            <div style="font-size: 13px; line-height: 18px; color: #6B675F">The map shows a card like this. It switches to a map you have, or offers the download.</div>
+          </div>
+        </div>
+        <div style="display: flex; gap: 8px">
+          <div style="flex: 1; height: 40px; border-radius: 999px; background: #EDEBE6; color: #6B675F; font-size: 14px; font-weight: 600; display: flex; align-items: center; justify-content: center">Not now</div>
+          <div style="flex: 1; height: 40px; border-radius: 999px; background: #EDEBE6; color: #4371B7; font-size: 14px; font-weight: 600; display: flex; align-items: center; justify-content: center">Switch map</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="background: #FFFFFF; border-radius: 24px; padding: 4px 16px">
+      <div style="display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid rgba(0,0,0,0.07)">
+        <div style="width: 64px; flex-shrink: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.3px; color: #6B675F; padding-top: 2px">TIP</div>
+        <div style="flex: 1; font-size: 14px; line-height: 20px">Download before the trip, on Wi-Fi. On the road the map needs no internet.</div>
+      </div>
+      <div style="display: flex; gap: 12px; padding: 12px 0">
+        <div style="width: 64px; flex-shrink: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.3px; color: #6B675F; padding-top: 2px">ROUTES</div>
+        <div style="flex: 1; font-size: 14px; line-height: 20px">Stay inside the region on screen. For long trips, the whole of Ukraine is one download.</div>
+      </div>
+    </div>
+
+    <a href="Guide.dc.html" style="height: 54px; flex-shrink: 0; border-radius: 999px; background: #4371B7; color: #FFFFFF; font-size: 16px; font-weight: 600; display: flex; align-items: center; justify-content: center; text-decoration: none">All lessons done</a>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { active: 'kyiv', have: { kyiv: true }, loading: {}, };
+  }
+  componentWillUnmount() {
+    clearInterval(this.timer);
+  }
+  download(id) {
+    this.setState({ loading: { ...this.state.loading, [id]: 0 } });
+    clearInterval(this.timer);
+    this.timer = setInterval(() => {
+      const pct = (this.state.loading[id] || 0) + 8;
+      if (pct >= 100) {
+        clearInterval(this.timer);
+        const loading = { ...this.state.loading };
+        delete loading[id];
+        this.setState({ loading, have: { ...this.state.have, [id]: true } });
+      } else {
+        this.setState({ loading: { ...this.state.loading, [id]: pct } });
+      }
+    }, 200);
+  }
+  renderVals() {
+    const { active, have, loading } = this.state;
+    const REGIONS = [['kyiv', 'Kyiv Oblast'], ['lviv', 'Lviv Oblast'], ['odesa', 'Odesa Oblast'], ['ukraine', 'Ukraine · the whole country']];
+    const busy = Object.keys(loading).length > 0;
+    return {
+      activeName: REGIONS.find(([id]) => id === active)[1],
+      regions: REGIONS.map(([id, name], i) => {
+        const isActive = id === active;
+        const isLoading = loading[id] !== undefined;
+        const owned = !!have[id];
+        let sub = 'Not downloaded · [size]';
+        let btn = 'Download';
+        let act = () => { if (!busy) this.download(id); };
+        if (isLoading) { sub = 'Downloading… ' + loading[id] + ' %'; btn = ''; }
+        else if (isActive) { sub = 'On the map · ready offline'; btn = ''; }
+        else if (owned) { sub = 'Ready offline'; btn = 'Use this map'; act = () => this.setState({ active: id }); }
+        return {
+          name,
+          sub,
+          subColor: isActive || (owned && !isLoading) ? '#3D865A' : '#6B675F',
+          dot: isActive ? '#4371B7' : owned ? '#3D865A' : 'rgba(0,0,0,0.15)',
+          hasButton: btn !== '',
+          btn,
+          btnBg: owned ? '#EDEBE6' : '#4371B7',
+          btnFg: owned ? '#4371B7' : '#FFFFFF',
+          act,
+          loading: isLoading,
+          pct: loading[id] || 0,
+          divider: i === 0 ? 'none' : '1px solid rgba(0,0,0,0.07)',
+        };
+      }),
+    };
+  }
+}
+</script>
+</body>
+</html>

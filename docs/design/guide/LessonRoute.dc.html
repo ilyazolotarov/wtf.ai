@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Lesson: plan a route</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Onest:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#4371B7}a:hover{color:#2F5A99}
+button{font-family:inherit}
+@keyframes ring{0%{transform:scale(.4);opacity:.9}100%{transform:scale(1.6);opacity:0}}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #F5F4F1; color: #1D1C1A; font-family: 'Onest', sans-serif; display: flex; flex-direction: column; overflow: hidden">
+  <div style="display: flex; justify-content: center; padding-top: 8px"><div style="width: 38px; height: 5px; border-radius: 3px; background: rgba(0,0,0,0.18)"></div></div>
+  <div style="display: flex; align-items: center; padding: 10px 12px 0">
+    <a href="Guide.dc.html" style="height: 44px; display: flex; align-items: center; gap: 2px; text-decoration: none; font-size: 15px; font-weight: 500">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4371B7" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg>
+      Guide
+    </a>
+    <div style="flex: 1; text-align: right; padding-right: 6px; font-size: 12px; font-weight: 600; letter-spacing: 0.4px; color: #6B675F">LESSON 7 OF 9 · PRACTICE</div>
+  </div>
+
+  <div style="flex: 1; overflow-y: auto; padding: 6px 16px 28px; display: flex; flex-direction: column; gap: 12px">
+    <div style="display: flex; flex-direction: column; gap: 6px">
+      <div style="font-size: 26px; font-weight: 600; line-height: 30px; letter-spacing: -0.5px">Plan a route</div>
+      <div style="font-size: 15px; line-height: 21px; color: #6B675F">Two ways to get there. Try both.</div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 3px; border-radius: 999px; background: #E8E6E0">
+      <sc-for list="{{ tabs }}" as="tb" hint-placeholder-count="2">
+        <button type="button" onClick="{{ tb.pick }}" aria-pressed="{{ tb.on }}" style="height: 36px; border: 0; border-radius: 999px; background: {{ tb.bg }}; box-shadow: {{ tb.shadow }}; color: #1D1C1A; font-size: 14px; font-weight: 500; cursor: pointer">{{ tb.label }}</button>
+      </sc-for>
+    </div>
+
+    <div style="position: relative; height: 380px; flex-shrink: 0; border-radius: 24px; overflow: hidden; background: #F2EFE9">
+      <sc-if value="{{ showMap }}" hint-placeholder-val="{{ true }}">
+        <button type="button" onClick="{{ drop }}" aria-label="Map: press and hold to drop a pin" style="position: absolute; inset: 0; border: 0; padding: 0; background: none; cursor: {{ mapCursor }}">
+          <svg viewBox="0 0 358 380" width="358" height="380" style="position: absolute; left: 0; top: 0" aria-hidden="true">
+            <rect width="358" height="380" fill="#F2EFE9"></rect>
+            <rect x="120" y="110" width="140" height="70" rx="5" fill="#D5E8C8"></rect>
+            <rect x="14" y="110" width="66" height="70" rx="3" fill="#E6E1D8"></rect>
+            <rect x="14" y="220" width="66" height="170" rx="3" fill="#E6E1D8"></rect>
+            <rect x="120" y="220" width="140" height="70" rx="3" fill="#E6E1D8"></rect>
+            <rect x="120" y="320" width="140" height="70" rx="3" fill="#E6E1D8"></rect>
+            <rect x="300" y="110" width="60" height="70" rx="3" fill="#E6E1D8"></rect>
+            <rect x="300" y="220" width="60" height="170" rx="3" fill="#E6E1D8"></rect>
+            <rect x="14" y="-10" width="66" height="80" rx="3" fill="#E6E1D8"></rect>
+            <g fill="none" stroke-linecap="round">
+              <path d="M-10 90 H370 M280 -10 V390 M-10 305 H370" stroke="#DCD5C8" stroke-width="13"></path>
+              <path d="M-10 90 H370 M280 -10 V390 M-10 305 H370" stroke="#FFFFFF" stroke-width="10"></path>
+              <path d="M100 -10 V390 M-10 200 H370" stroke="#E3C77E" stroke-width="17"></path>
+              <path d="M100 -10 V390 M-10 200 H370" stroke="#F8DFA0" stroke-width="13"></path>
+            </g>
+            <path d="M100 340 V200 H280 V98" fill="none" stroke="#3F5FBF" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" opacity="{{ routeOpacity }}"></path>
+            <circle cx="100" cy="340" r="14" fill="rgba(67,113,183,0.14)" stroke="rgba(67,113,183,0.45)" stroke-width="1.5"></circle>
+            <circle cx="100" cy="340" r="8" fill="#4371B7" stroke="#FFFFFF" stroke-width="3"></circle>
+            <g opacity="{{ pinOpacity }}">
+              <path d="M280 98 C 276 88 264 78 264 66 a16 16 0 1 1 32 0 C 296 78 284 88 280 98 Z" fill="{{ pinColor }}"></path>
+              <circle cx="280" cy="66" r="6" fill="#FFFFFF"></circle>
+            </g>
+          </svg>
+        </button>
+      </sc-if>
+
+      <sc-if value="{{ isIdle }}" hint-placeholder-val="{{ true }}">
+        <div style="position: absolute; left: 240px; top: 50px; width: 80px; height: 80px; border-radius: 40px; border: 3px solid #4371B7; animation: ring 1.4s ease-out infinite; pointer-events: none"></div>
+        <div style="position: absolute; left: 50%; transform: translateX(-50%); top: 12px; padding: 8px 14px; border-radius: 999px; background: #1D1C1A; color: #FFFFFF; font-size: 13px; font-weight: 500; white-space: nowrap; pointer-events: none">Press and hold anywhere on the map</div>
+      </sc-if>
+
+      <sc-if value="{{ isPin }}" hint-placeholder-val="{{ false }}">
+        <div style="position: absolute; left: 10px; right: 10px; bottom: 10px; box-sizing: border-box; border-radius: 24px; background: rgba(255,255,255,0.95); box-shadow: 0 10px 30px rgba(40,30,10,0.14); padding: 14px; display: flex; flex-direction: column; gap: 10px">
+          <div style="display: flex; align-items: center; gap: 10px">
+            <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22s-7-6.2-7-12a7 7 0 1 1 14 0c0 5.8-7 12-7 12z" fill="#BC4A3F"></path><circle cx="12" cy="10" r="2.6" fill="#FFFFFF"></circle></svg>
+            <div style="flex: 1; font-size: 15px; font-weight: 600">1.4 km · north-east</div>
+            <button type="button" onClick="{{ reset }}" aria-label="Remove the pin" style="width: 36px; height: 36px; border: 0; border-radius: 18px; background: #EDEBE6; display: flex; align-items: center; justify-content: center; cursor: pointer">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6B675F" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg>
+            </button>
+          </div>
+          <div style="display: flex; gap: 8px">
+            <a href="LessonPlace.dc.html" style="flex: 1; height: 42px; border-radius: 999px; background: #EDEBE6; color: #4371B7; font-size: 14px; font-weight: 600; display: flex; align-items: center; justify-content: center; text-decoration: none">I’m here</a>
+            <button type="button" onClick="{{ go }}" style="flex: 1; height: 42px; border: 0; border-radius: 999px; background: #4371B7; color: #FFFFFF; font-size: 14px; font-weight: 600; cursor: pointer">Route here</button>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isRoute }}" hint-placeholder-val="{{ false }}">
+        <div style="position: absolute; left: 10px; right: 10px; top: 10px; box-sizing: border-box; border-radius: 24px; background: rgba(255,255,255,0.95); box-shadow: 0 10px 30px rgba(40,30,10,0.14); padding: 12px 12px 12px 14px; display: flex; gap: 12px; align-items: center">
+          <div style="width: 44px; height: 44px; border-radius: 14px; background: #3F5FBF; display: flex; align-items: center; justify-content: center; flex-shrink: 0">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 20v-7a3 3 0 0 1 3-3h8"></path><path d="M15 6l4 4-4 4"></path></svg>
+          </div>
+          <div style="flex: 1; display: flex; flex-direction: column; gap: 1px">
+            <div style="font-size: 20px; font-weight: 600">140 m</div>
+            <div style="font-size: 13px; color: #4A4741">Turn right onto [street]</div>
+            <div style="font-size: 12px; color: #6B675F">{{ routeSummary }}</div>
+          </div>
+          <button type="button" onClick="{{ reset }}" aria-label="End the route" style="width: 38px; height: 38px; border: 0; border-radius: 19px; background: #EDEBE6; display: flex; align-items: center; justify-content: center; align-self: flex-start; cursor: pointer">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6B675F" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg>
+          </button>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isSearch }}" hint-placeholder-val="{{ false }}">
+        <div style="position: absolute; inset: 0; background: #F5F4F1; padding: 14px; box-sizing: border-box; display: flex; flex-direction: column; gap: 12px">
+          <div style="height: 44px; border-radius: 999px; background: #FFFFFF; display: flex; align-items: center; gap: 10px; padding: 0 14px">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6B675F" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"></circle><path d="M16 16l4.5 4.5"></path></svg>
+            <div style="font-size: 15px; color: #6B675F">Address, place or city</div>
+          </div>
+          <div style="font-size: 12px; font-weight: 600; letter-spacing: 0.3px; color: #6B675F; padding-left: 4px">SAVED</div>
+          <div style="background: #FFFFFF; border-radius: 20px; padding: 0 12px">
+            <sc-for list="{{ places }}" as="p" hint-placeholder-count="3">
+              <button type="button" onClick="{{ p.pick }}" style="width: 100%; min-height: 54px; border: 0; border-top: {{ p.divider }}; background: none; display: flex; align-items: center; gap: 12px; padding: 0; text-align: left; cursor: pointer; color: #1D1C1A">
+                <div style="width: 32px; height: 32px; border-radius: 16px; background: #4371B729; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; color: #4371B7">{{ p.letter }}</div>
+                <div style="flex: 1; display: flex; flex-direction: column">
+                  <span style="font-size: 15px; font-weight: 500">{{ p.name }}</span>
+                  <span style="font-size: 12px; color: #6B675F">{{ p.sub }}</span>
+                </div>
+              </button>
+            </sc-for>
+          </div>
+          <div style="font-size: 13px; line-height: 18px; color: #6B675F; padding: 0 4px">Below them: your recent destinations and the region’s biggest towns.</div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isSummary }}" hint-placeholder-val="{{ false }}">
+        <div style="position: absolute; left: 10px; right: 10px; bottom: 10px; box-sizing: border-box; border-radius: 24px; background: #FFFFFF; box-shadow: 0 10px 30px rgba(40,30,10,0.18); padding: 16px; display: flex; flex-direction: column; gap: 10px">
+          <div style="font-size: 17px; font-weight: 600">{{ dest }}</div>
+          <div style="font-size: 13px; color: #6B675F">3.4 km straight line · north-east</div>
+          <button type="button" onClick="{{ go }}" style="height: 46px; border: 0; border-radius: 999px; background: #4371B7; color: #FFFFFF; font-size: 15px; font-weight: 600; cursor: pointer">Start guidance</button>
+        </div>
+      </sc-if>
+    </div>
+
+    <div style="background: #FFFFFF; border-radius: 24px; padding: 4px 16px">
+      <div style="display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid rgba(0,0,0,0.07)">
+        <div style="width: 72px; flex-shrink: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.3px; color: #6B675F; padding-top: 2px">NO GPS</div>
+        <div style="flex: 1; font-size: 14px; line-height: 20px">Guidance keeps going: it follows the dot, not the satellites.</div>
+      </div>
+      <div style="display: flex; gap: 12px; padding: 12px 0">
+        <div style="width: 72px; flex-shrink: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.3px; color: #6B675F; padding-top: 2px">WRONG TURN</div>
+        <div style="flex: 1; font-size: 14px; line-height: 20px">It plans again by itself. Routes stay inside the downloaded region.</div>
+      </div>
+    </div>
+
+    <a href="LessonVoice.dc.html" style="height: 54px; flex-shrink: 0; border-radius: 999px; background: #4371B7; color: #FFFFFF; font-size: 16px; font-weight: 600; display: flex; align-items: center; justify-content: center; text-decoration: none">Next: Spoken directions</a>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { tab: 'hold', step: 'idle', dest: '' };
+  }
+  renderVals() {
+    const { tab, step, dest } = this.state;
+    const onMap = tab === 'hold' || step === 'route';
+    const isRoute = step === 'route';
+    const pick = (name) => () => this.setState({ step: 'summary', dest: name });
+    const PLACES = [['H', 'Home', 'Saved'], ['W', 'Work', 'Saved'], ['★', '[favourite place]', 'Saved']];
+    return {
+      showMap: onMap,
+      isIdle: tab === 'hold' && step === 'idle',
+      isPin: tab === 'hold' && step === 'pin',
+      isRoute,
+      isSearch: tab === 'search' && (step === 'list' || step === 'summary'),
+      isSummary: tab === 'search' && step === 'summary',
+      mapCursor: step === 'idle' ? 'pointer' : 'default',
+      pinOpacity: step === 'pin' || isRoute ? 1 : 0,
+      pinColor: isRoute ? '#3F5FBF' : '#BC4A3F',
+      routeOpacity: isRoute ? 1 : 0,
+      routeSummary: '2.1 km · 6 min left · [arrival time]',
+      dest,
+      places: PLACES.map(([letter, name, sub], i) => ({
+        letter, name, sub, pick: pick(name),
+        divider: i === 0 ? 'none' : '1px solid rgba(0,0,0,0.07)',
+      })),
+      tabs: [['hold', 'Press and hold'], ['search', 'Search']].map(([value, label]) => {
+        const on = tab === value;
+        return {
+          label,
+          on: on ? 'true' : 'false',
+          bg: on ? '#FFFFFF' : 'transparent',
+          shadow: on ? '0 1px 4px rgba(0,0,0,0.12)' : 'none',
+          pick: () => this.setState({ tab: value, step: value === 'hold' ? 'idle' : 'list' }),
+        };
+      }),
+      drop: () => { if (step === 'idle') this.setState({ step: 'pin' }); },
+      go: () => this.setState({ step: 'route' }),
+      reset: () => this.setState({ step: tab === 'hold' ? 'idle' : 'list' }),
+    };
+  }
+}
+</script>
+</body>
+</html>

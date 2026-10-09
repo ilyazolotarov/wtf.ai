@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Lesson: what the dot is telling you</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Onest:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#4371B7}a:hover{color:#2F5A99}
+button{font-family:inherit}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #F5F4F1; color: #1D1C1A; font-family: 'Onest', sans-serif; display: flex; flex-direction: column; overflow: hidden">
+  <div style="display: flex; justify-content: center; padding-top: 8px"><div style="width: 38px; height: 5px; border-radius: 3px; background: rgba(0,0,0,0.18)"></div></div>
+  <div style="display: flex; align-items: center; padding: 10px 12px 0">
+    <a href="Guide.dc.html" style="height: 44px; display: flex; align-items: center; gap: 2px; text-decoration: none; font-size: 15px; font-weight: 500">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4371B7" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg>
+      Guide
+    </a>
+    <div style="flex: 1; text-align: right; padding-right: 6px; font-size: 12px; font-weight: 600; letter-spacing: 0.4px; color: #6B675F">LESSON 2 OF 9</div>
+  </div>
+
+  <div style="flex: 1; overflow-y: auto; padding: 6px 16px 28px; display: flex; flex-direction: column; gap: 14px">
+    <div style="display: flex; flex-direction: column; gap: 6px">
+      <div style="font-size: 26px; font-weight: 600; line-height: 30px; letter-spacing: -0.5px">What the dot is telling you</div>
+      <div style="font-size: 15px; line-height: 21px; color: #6B675F">Tap each state to see the map as you would on the road.</div>
+    </div>
+
+    <div style="position: relative; height: 250px; border-radius: 24px; overflow: hidden; background: #F2EFE9">
+      <svg viewBox="0 0 358 250" width="358" height="250" style="position: absolute; left: 0; top: 0" aria-hidden="true">
+        <rect width="358" height="250" fill="#F2EFE9"></rect>
+        <rect x="196" y="24" width="70" height="92" rx="5" fill="#D5E8C8"></rect>
+        <rect x="14" y="24" width="64" height="92" rx="3" fill="#E6E1D8"></rect>
+        <rect x="102" y="24" width="64" height="92" rx="3" fill="#E6E1D8"></rect>
+        <rect x="292" y="24" width="60" height="92" rx="3" fill="#E6E1D8"></rect>
+        <rect x="14" y="160" width="64" height="80" rx="3" fill="#E6E1D8"></rect>
+        <rect x="292" y="160" width="60" height="80" rx="3" fill="#E6E1D8"></rect>
+        <g fill="none" stroke-linecap="round">
+          <path d="M-10 138 H370 M90 -10 V260 M280 -10 V260" stroke="#DCD5C8" stroke-width="13"></path>
+          <path d="M-10 138 H370 M90 -10 V260 M280 -10 V260" stroke="#FFFFFF" stroke-width="10"></path>
+          <path d="M184 -10 V260" stroke="#E3C77E" stroke-width="17"></path>
+          <path d="M184 -10 V260" stroke="#F8DFA0" stroke-width="13"></path>
+        </g>
+        <g opacity="{{ s.ghost }}">
+          <circle cx="318" cy="62" r="16" fill="rgba(119,115,109,0.18)" stroke="#77736D" stroke-width="1.5" stroke-dasharray="4 3"></circle>
+          <circle cx="318" cy="62" r="6" fill="#77736D"></circle>
+        </g>
+        <circle cx="184" cy="168" r="{{ s.r }}" fill="rgba(67,113,183,0.14)" stroke="rgba(67,113,183,0.45)" stroke-width="1.5"></circle>
+        <circle cx="184" cy="168" r="8" fill="#4371B7" stroke="#FFFFFF" stroke-width="3"></circle>
+      </svg>
+      <div style="position: absolute; left: 10px; top: 10px; height: 46px; box-sizing: border-box; border-radius: 999px; background: rgba(255,255,255,0.86); backdrop-filter: blur(16px); box-shadow: 0 6px 20px rgba(40,30,10,0.12); display: flex; align-items: center; gap: 9px; padding: 0 14px 0 8px">
+        <div style="width: 28px; height: 28px; border-radius: 14px; background: {{ s.halo }}; display: flex; align-items: center; justify-content: center"><div style="width: 10px; height: 10px; border-radius: 5px; background: {{ s.color }}"></div></div>
+        <div style="display: flex; flex-direction: column">
+          <div style="font-size: 14px; font-weight: 600">{{ s.label }}</div>
+          <div style="font-size: 11px; color: #6B675F">{{ s.sub }}</div>
+        </div>
+      </div>
+      <sc-if value="{{ s.hasStrip }}" hint-placeholder-val="{{ false }}">
+        <div style="position: absolute; left: 10px; top: 62px; height: 30px; box-sizing: border-box; border-radius: 999px; background: rgba(255,255,255,0.86); padding: 0 12px; display: flex; align-items: center; font-size: 12px; font-weight: 500; color: #4A4741">Trusted GPS 4 min ago, 2.3 km back</div>
+      </sc-if>
+      <sc-if value="{{ s.hasGhost }}" hint-placeholder-val="{{ false }}">
+        <div style="position: absolute; left: 10px; right: 10px; bottom: 10px; height: 36px; box-sizing: border-box; border-radius: 999px; background: rgba(255,255,255,0.86); padding: 0 14px; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; color: #4371B7">Show where GPS thinks you are</div>
+      </sc-if>
+    </div>
+
+    <div style="display: flex; flex-wrap: wrap; gap: 8px" role="radiogroup" aria-label="GPS state">
+      <sc-for list="{{ chips }}" as="c" hint-placeholder-count="5">
+        <button type="button" role="radio" aria-checked="{{ c.on }}" onClick="{{ c.pick }}" style="height: 40px; border-radius: 999px; border: 1.5px solid {{ c.border }}; background: {{ c.bg }}; padding: 0 14px 0 10px; display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 500; color: #1D1C1A; cursor: pointer">
+          <span style="width: 10px; height: 10px; border-radius: 5px; background: {{ c.color }}"></span>{{ c.name }}
+        </button>
+      </sc-for>
+    </div>
+
+    <div style="background: #FFFFFF; border-radius: 24px; padding: 4px 16px">
+      <div style="display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid rgba(0,0,0,0.07)">
+        <div style="width: 64px; flex-shrink: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.3px; color: #6B675F; padding-top: 2px">THE APP</div>
+        <div style="flex: 1; font-size: 14px; line-height: 20px">{{ s.app }}</div>
+      </div>
+      <div style="display: flex; gap: 12px; padding: 12px 0">
+        <div style="width: 64px; flex-shrink: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.3px; color: #6B675F; padding-top: 2px">YOU</div>
+        <div style="flex: 1; font-size: 14px; line-height: 20px; font-weight: 500">{{ s.you }}</div>
+      </div>
+    </div>
+
+    <a href="LessonCar.dc.html" style="height: 54px; flex-shrink: 0; border-radius: 999px; background: #4371B7; color: #FFFFFF; font-size: 16px; font-weight: 600; display: flex; align-items: center; justify-content: center; text-decoration: none">Next: The car button</a>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { pick: 'nofix' };
+  }
+  renderVals() {
+    const STATES = {
+      ok: { name: 'Trusted', color: '#3D865A', label: 'Position trusted', sub: 'GNSS · ±5 m', r: 14,
+        app: 'Checks every GPS position against the car’s wheel speed and turns before using it.',
+        you: 'Keep driving normally.' },
+      approx: { name: 'Approximate', color: '#BD853F', label: 'Approximate location', sub: 'Wi-Fi or cell · ±300 m', r: 74,
+        app: 'No satellites, only a Wi-Fi or cell position. Good for a rough idea of where you are, not for driving by.',
+        you: 'Standing and the dot is wrong? Put the car on the map.' },
+      nofix: { name: 'No signal', color: '#77736D', label: 'No GPS signal', sub: 'Car sensors · ±40 m', r: 36, strip: true,
+        app: 'GPS is jammed. The dot keeps moving on wheel speed and the phone’s turns, kept on the roads. The circle grows slowly.',
+        you: 'Keep driving normally. If the dot is on the wrong road when you stop, put the car on the map.' },
+      spoof: { name: 'Spoofed', color: '#BC4A3F', label: 'GPS looks spoofed', sub: 'Car sensors · ±25 m', r: 28, ghost: true,
+        app: 'GPS jumped somewhere the car cannot have driven. The app ignores it and keeps the position from the car.',
+        you: 'Trust the blue dot, not the grey one. The grey one is only where GPS claims you are.' },
+      reacq: { name: 'Checking', color: '#BD853F', label: 'GPS is back — verifying', sub: 'Verifying GNSS · ±20 m', r: 22,
+        app: 'Satellites are back. For a few seconds they are checked against the car before they are trusted again.',
+        you: 'Keep driving normally. It turns green on its own.' },
+    };
+    const key = this.state.pick;
+    const cur = STATES[key];
+    return {
+      s: {
+        ...cur,
+        halo: cur.color + '2E',
+        ghost: cur.ghost ? 1 : 0,
+        hasGhost: !!cur.ghost,
+        hasStrip: !!cur.strip,
+      },
+      chips: Object.keys(STATES).map((k) => {
+        const on = k === key;
+        return {
+          name: STATES[k].name,
+          color: STATES[k].color,
+          on: on ? 'true' : 'false',
+          bg: on ? '#FFFFFF' : 'transparent',
+          border: on ? '#4371B7' : 'rgba(0,0,0,0.12)',
+          pick: () => this.setState({ pick: k }),
+        };
+      }),
+    };
+  }
+}
+</script>
+</body>
+</html>

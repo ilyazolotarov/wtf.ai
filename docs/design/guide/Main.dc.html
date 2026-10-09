@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Onboarding</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Onest:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#4371B7}a:hover{color:#2F5A99}
+button{font-family:inherit}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; padding: 62px 24px 34px; display: flex; flex-direction: column; gap: 20px; background: #F5F4F1; color: #1D1C1A; font-family: 'Onest', sans-serif; overflow: hidden">
+  <div style="display: flex; gap: 6px" aria-label="Step {{ stepNumber }} of 4">
+    <sc-for list="{{ dots }}" as="dot" hint-placeholder-count="4">
+      <div style="flex: 1; height: 4px; border-radius: 2px; background: {{ dot.color }}"></div>
+    </sc-for>
+  </div>
+
+  <div style="flex: 1; display: flex; flex-direction: column; justify-content: flex-end; gap: 16px">
+    <sc-if value="{{ isWelcome }}" hint-placeholder-val="{{ true }}">
+      <div style="font-size: 22px; font-weight: 700; color: #4371B7">wtf.ai</div>
+      <div style="font-size: 40px; font-weight: 600; line-height: 44px; letter-spacing: -1px">Where the f* am I?</div>
+      <div style="font-size: 17px; line-height: 24px; color: #6B675F">Navigation that keeps knowing where you are when GPS is jammed or spoofed.</div>
+    </sc-if>
+
+    <sc-if value="{{ isLocation }}" hint-placeholder-val="{{ false }}">
+      <div style="width: 64px; height: 64px; border-radius: 32px; background: #4371B729; display: flex; align-items: center; justify-content: center">
+        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#4371B7" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-6.5-5.8-6.5-11.2a6.5 6.5 0 1 1 13 0C18.5 15.2 12 21 12 21z"></path><circle cx="12" cy="9.8" r="2.4"></circle></svg>
+      </div>
+      <div style="font-size: 30px; font-weight: 600; line-height: 34px; letter-spacing: -0.6px">Allow location</div>
+      <div style="font-size: 16px; line-height: 24px; color: #6B675F">Used only to show your position. It never leaves this phone — no accounts, no uploads.</div>
+    </sc-if>
+
+    <sc-if value="{{ isCar }}" hint-placeholder-val="{{ false }}">
+      <div style="width: 64px; height: 64px; border-radius: 32px; background: #4371B729; display: flex; align-items: center; justify-content: center">
+        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#4371B7" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 14.5l1.7-5a2 2 0 0 1 1.9-1.4h7.8a2 2 0 0 1 1.9 1.4l1.7 5"></path><rect x="3" y="14.5" width="18" height="4.5" rx="1.6"></rect><path d="M6 19v1.5M18 19v1.5"></path></svg>
+      </div>
+      <div style="font-size: 30px; font-weight: 600; line-height: 34px; letter-spacing: -0.6px">Connect your car</div>
+      <div style="font-size: 16px; line-height: 24px; color: #6B675F">An OBD-II Bluetooth adapter streams wheel speed, so tracking continues when GPS can’t be trusted.</div>
+      <div style="background: #FFFFFF; border-radius: 24px; padding: 16px; display: flex; align-items: center; gap: 14px">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="{{ adapterColor }}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7l10 10-5 4V3l5 4L7 17"></path></svg>
+        <div style="flex: 1; display: flex; flex-direction: column; gap: 3px">
+          <div style="font-size: 15px; font-weight: 600">OBD adapter · <span style="color: {{ adapterColor }}">{{ adapterLabel }}</span></div>
+          <div style="font-size: 13px; line-height: 18px; color: #6B675F">Plug it into the OBD-II port under the dashboard and switch on the ignition.</div>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isMount }}" hint-placeholder-val="{{ false }}">
+      <div style="width: 64px; height: 64px; border-radius: 32px; background: #4371B729; display: flex; align-items: center; justify-content: center">
+        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#4371B7" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7.5" y="2.5" width="9" height="16" rx="2.2"></rect><path d="M11 15.5h2"></path><path d="M4.5 9v4.5M19.5 9v4.5"></path><path d="M9 21.5h6"></path><path d="M12 18.5v3"></path></svg>
+      </div>
+      <div style="font-size: 30px; font-weight: 600; line-height: 34px; letter-spacing: -0.6px">Put the phone in a holder</div>
+      <div style="font-size: 16px; line-height: 24px; color: #6B675F">Without GPS the phone itself feels every turn the car makes. In a firm holder it keeps the direction right for a long time.</div>
+      <div style="background: #FFFFFF; border-radius: 24px; padding: 6px 16px; display: flex; flex-direction: column">
+        <div style="display: flex; align-items: center; gap: 12px; min-height: 48px; border-bottom: 1px solid rgba(0,0,0,0.07)">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3D865A" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg>
+          <div style="font-size: 15px">A firm holder, not loose on a seat</div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 12px; min-height: 48px; border-bottom: 1px solid rgba(0,0,0,0.07)">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3D865A" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg>
+          <div style="font-size: 15px">Any angle, upright or flat</div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 12px; min-height: 48px">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3D865A" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg>
+          <div style="font-size: 15px">Picked up for a moment? It catches up.</div>
+        </div>
+      </div>
+      <div style="font-size: 13px; line-height: 18px; color: #6B675F">Tips and lessons stay in More › How to use wtf.ai.</div>
+    </sc-if>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 10px">
+    <sc-if value="{{ isMount }}" hint-placeholder-val="{{ false }}">
+      <a href="Tour.dc.html" style="height: 54px; border-radius: 999px; background: #4371B7; color: #FFFFFF; font-size: 16px; font-weight: 600; display: flex; align-items: center; justify-content: center; text-decoration: none">Done</a>
+    </sc-if>
+    <sc-if value="{{ showPrimaryButton }}" hint-placeholder-val="{{ true }}">
+      <button type="button" onClick="{{ primary }}" style="height: 54px; border: 0; border-radius: 999px; background: #4371B7; color: #FFFFFF; font-size: 16px; font-weight: 600; cursor: pointer">{{ primaryLabel }}</button>
+    </sc-if>
+    <sc-if value="{{ showSecondary }}" hint-placeholder-val="{{ false }}">
+      <button type="button" onClick="{{ secondary }}" style="height: 54px; border: 0; border-radius: 999px; background: #E8E6E0; color: #1D1C1A; font-size: 16px; font-weight: 600; cursor: pointer">{{ secondaryLabel }}</button>
+    </sc-if>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { step: 0, connected: false };
+  }
+  renderVals() {
+    const step = this.state.step;
+    const connected = this.state.connected;
+    const go = (n) => () => this.setState({ step: n });
+    let primaryLabel = 'Get started';
+    let primary = go(1);
+    let secondaryLabel = '';
+    let secondary = go(step);
+    if (step === 1) {
+      primaryLabel = 'Allow while using the app';
+      primary = go(2);
+      secondaryLabel = 'Not now';
+      secondary = go(2);
+    } else if (step === 2) {
+      primaryLabel = connected ? 'Continue' : 'Connect';
+      primary = connected ? go(3) : () => this.setState({ connected: true });
+      secondaryLabel = connected ? '' : 'Skip for now';
+      secondary = go(3);
+    }
+    return {
+      stepNumber: step + 1,
+      dots: [0, 1, 2, 3].map((i) => ({ color: i <= step ? '#4371B7' : 'rgba(0,0,0,0.09)' })),
+      isWelcome: step === 0,
+      isLocation: step === 1,
+      isCar: step === 2,
+      isMount: step === 3,
+      showPrimaryButton: step < 3,
+      showSecondary: secondaryLabel !== '',
+      primary,
+      primaryLabel,
+      secondary,
+      secondaryLabel,
+      adapterLabel: connected ? 'Connected' : 'Not connected',
+      adapterColor: connected ? '#3D865A' : '#6B675F',
+    };
+  }
+}
+</script>
+</body>
+</html>

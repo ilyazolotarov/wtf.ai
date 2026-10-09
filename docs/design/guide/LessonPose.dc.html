@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Lesson: is the car where the dot is?</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Onest:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#4371B7}a:hover{color:#2F5A99}
+button{font-family:inherit}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #F5F4F1; color: #1D1C1A; font-family: 'Onest', sans-serif; display: flex; flex-direction: column; overflow: hidden">
+  <div style="display: flex; justify-content: center; padding-top: 8px"><div style="width: 38px; height: 5px; border-radius: 3px; background: rgba(0,0,0,0.18)"></div></div>
+  <div style="display: flex; align-items: center; padding: 10px 12px 0">
+    <a href="Guide.dc.html" style="height: 44px; display: flex; align-items: center; gap: 2px; text-decoration: none; font-size: 15px; font-weight: 500">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4371B7" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg>
+      Guide
+    </a>
+    <div style="flex: 1; text-align: right; padding-right: 6px; font-size: 12px; font-weight: 600; letter-spacing: 0.4px; color: #6B675F">LESSON 6 OF 9</div>
+  </div>
+
+  <div style="flex: 1; overflow-y: auto; padding: 6px 16px 28px; display: flex; flex-direction: column; gap: 14px">
+    <div style="display: flex; flex-direction: column; gap: 6px">
+      <div style="font-size: 26px; font-weight: 600; line-height: 30px; letter-spacing: -0.5px">“Is the car where the dot is?”</div>
+      <div style="font-size: 15px; line-height: 21px; color: #6B675F">Without GPS, the app starts the car where you parked it. If Wi-Fi puts it somewhere else, it asks you. Answer it here.</div>
+    </div>
+
+    <div style="position: relative; height: 340px; flex-shrink: 0; border-radius: 24px; overflow: hidden; background: #F2EFE9">
+      <svg viewBox="0 0 358 340" width="358" height="340" style="position: absolute; left: 0; top: 0" aria-hidden="true">
+        <rect width="358" height="340" fill="#F2EFE9"></rect>
+        <rect x="190" y="150" width="150" height="110" rx="5" fill="#D5E8C8"></rect>
+        <rect x="14" y="290" width="150" height="60" rx="3" fill="#E6E1D8"></rect>
+        <rect x="200" y="290" width="150" height="60" rx="3" fill="#E6E1D8"></rect>
+        <rect x="56" y="196" width="100" height="74" rx="6" fill="#E2DED6"></rect>
+        <g stroke="#FFFFFF" stroke-width="2"><path d="M76 200 V222 M96 200 V222 M116 200 V222 M136 200 V222 M76 244 V266 M96 244 V266 M116 244 V266 M136 244 V266"></path></g>
+        <g fill="none" stroke-linecap="round">
+          <path d="M-10 276 H370 M176 -10 V350" stroke="#DCD5C8" stroke-width="13"></path>
+          <path d="M-10 276 H370 M176 -10 V350" stroke="#FFFFFF" stroke-width="10"></path>
+        </g>
+        <g opacity="{{ wifiOpacity }}">
+          <circle cx="318" cy="70" r="96" fill="rgba(119,115,109,0.12)" stroke="#77736D" stroke-width="1.5" stroke-dasharray="5 4"></circle>
+          <circle cx="318" cy="70" r="5" fill="#77736D"></circle>
+        </g>
+        <circle cx="{{ dotX }}" cy="{{ dotY }}" r="{{ dotR }}" fill="rgba(67,113,183,0.14)" stroke="rgba(67,113,183,0.45)" stroke-width="1.5"></circle>
+        <circle cx="{{ dotX }}" cy="{{ dotY }}" r="8" fill="#4371B7" stroke="#FFFFFF" stroke-width="3"></circle>
+      </svg>
+      <div style="position: absolute; left: 66px; top: 172px; width: 18px; height: 18px; border-radius: 4px; background: #4371B7; color: #FFFFFF; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center">P</div>
+      <sc-if value="{{ showWifiTag }}" hint-placeholder-val="{{ true }}">
+        <div style="position: absolute; right: 12px; top: 176px; padding: 4px 9px; border-radius: 8px; background: #1D1C1A; color: #FFFFFF; font-size: 12px; font-weight: 500">Wi-Fi says: 1.2 km this way</div>
+      </sc-if>
+
+      <sc-if value="{{ isAsk }}" hint-placeholder-val="{{ true }}">
+        <div style="position: absolute; left: 10px; right: 10px; top: 10px; box-sizing: border-box; border-radius: 24px; background: rgba(255,255,255,0.94); box-shadow: 0 10px 30px rgba(40,30,10,0.14); padding: 14px; display: flex; flex-direction: column; gap: 10px">
+          <div style="display: flex; gap: 12px; align-items: flex-start">
+            <div style="width: 36px; height: 36px; border-radius: 18px; background: #BD853F2E; display: flex; align-items: center; justify-content: center; flex-shrink: 0">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9A6A2C" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 14.5l1.7-5a2 2 0 0 1 1.9-1.4h7.8a2 2 0 0 1 1.9 1.4l1.7 5"></path><rect x="3" y="14.5" width="18" height="4.5" rx="1.6"></rect></svg>
+            </div>
+            <div style="flex: 1; display: flex; flex-direction: column; gap: 2px">
+              <div style="font-size: 15px; font-weight: 600">Is the car where the dot is?</div>
+              <div style="font-size: 13px; line-height: 18px; color: #6B675F">It starts where it was parked. Wi-Fi puts it 1.2 km away, but without GPS Wi-Fi is often wrong.</div>
+            </div>
+          </div>
+          <div style="display: flex; gap: 8px">
+            <button type="button" onClick="{{ yes }}" style="flex: 1; height: 42px; border: 0; border-radius: 999px; background: #EDEBE6; color: #4371B7; font-size: 14px; font-weight: 600; cursor: pointer">Yes, it’s here</button>
+            <button type="button" onClick="{{ no }}" style="flex: 1; height: 42px; border: 0; border-radius: 999px; background: #EDEBE6; color: #4371B7; font-size: 14px; font-weight: 600; cursor: pointer">No</button>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isNo }}" hint-placeholder-val="{{ false }}">
+        <div style="position: absolute; left: 10px; right: 10px; bottom: 10px; box-sizing: border-box; border-radius: 24px; background: rgba(255,255,255,0.94); box-shadow: 0 10px 30px rgba(40,30,10,0.14); padding: 14px; display: flex; gap: 12px; align-items: flex-start">
+          <div style="width: 36px; height: 36px; border-radius: 18px; background: #4371B722; display: flex; align-items: center; justify-content: center; flex-shrink: 0">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4371B7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s-7-6.2-7-12a7 7 0 1 1 14 0c0 5.8-7 12-7 12z"></path><circle cx="12" cy="10" r="2.5"></circle></svg>
+          </div>
+          <div style="flex: 1; display: flex; flex-direction: column; gap: 2px">
+            <div style="font-size: 15px; font-weight: 600">Where is the car?</div>
+            <div style="font-size: 13px; line-height: 18px; color: #6B675F">Move the map until the pin is on the car.</div>
+          </div>
+        </div>
+      </sc-if>
+    </div>
+
+    <sc-if value="{{ answered }}" hint-placeholder-val="{{ false }}">
+      <div style="background: #FFFFFF; border-radius: 24px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px">
+        <div style="font-size: 15px; font-weight: 600">{{ resultTitle }}</div>
+        <div style="font-size: 14px; line-height: 20px; color: #4A4741">{{ resultBody }}</div>
+        <div style="display: flex; gap: 16px">
+          <button type="button" onClick="{{ reset }}" style="border: 0; background: none; padding: 8px 0; color: #4371B7; font-size: 14px; font-weight: 600; cursor: pointer">Ask again</button>
+          <sc-if value="{{ isNo }}" hint-placeholder-val="{{ false }}">
+            <a href="LessonPlace.dc.html" style="padding: 8px 0; font-size: 14px; font-weight: 600; text-decoration: none">Practise placing the car</a>
+          </sc-if>
+        </div>
+      </div>
+    </sc-if>
+
+    <div style="background: #FFFFFF; border-radius: 24px; padding: 4px 16px">
+      <div style="display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid rgba(0,0,0,0.07)">
+        <div style="width: 64px; flex-shrink: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.3px; color: #6B675F; padding-top: 2px">WHEN</div>
+        <div style="flex: 1; font-size: 14px; line-height: 20px">You set off without GPS and Wi-Fi disagrees with where you parked.</div>
+      </div>
+      <div style="display: flex; gap: 12px; padding: 12px 0">
+        <div style="width: 64px; flex-shrink: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.3px; color: #6B675F; padding-top: 2px">NOT SURE</div>
+        <div style="flex: 1; font-size: 14px; line-height: 20px">Leave it. The map still works, and the question goes away once GPS settles it.</div>
+      </div>
+    </div>
+
+    <a href="LessonRoute.dc.html" style="height: 54px; flex-shrink: 0; border-radius: 999px; background: #4371B7; color: #FFFFFF; font-size: 16px; font-weight: 600; display: flex; align-items: center; justify-content: center; text-decoration: none">Next: Plan a route</a>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { answer: null };
+  }
+  renderVals() {
+    const answer = this.state.answer;
+    const isNo = answer === 'no';
+    return {
+      isAsk: answer === null,
+      isNo,
+      answered: answer !== null,
+      showWifiTag: answer === null,
+      wifiOpacity: answer === 'yes' ? 0 : 1,
+      dotX: isNo ? 300 : 106,
+      dotY: isNo ? 90 : 233,
+      dotR: isNo ? 70 : 12,
+      resultTitle: isNo ? 'The dot moves to Wi-Fi’s guess' : 'The dot stays where you parked',
+      resultBody: isNo
+        ? 'Wi-Fi is only a rough guess, so while the car stands the app asks you to show where it is. Move the map, then Here, then which way it faces.'
+        : 'Wi-Fi is ignored, and the dot sets off from the parking spot when you drive.',
+      yes: () => this.setState({ answer: 'yes' }),
+      no: () => this.setState({ answer: 'no' }),
+      reset: () => this.setState({ answer: null }),
+    };
+  }
+}
+</script>
+</body>
+</html>

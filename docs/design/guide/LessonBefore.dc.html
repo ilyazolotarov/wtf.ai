@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Lesson: before you drive</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Onest:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#4371B7}a:hover{color:#2F5A99}
+button{font-family:inherit}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #F5F4F1; color: #1D1C1A; font-family: 'Onest', sans-serif; display: flex; flex-direction: column; overflow: hidden">
+  <div style="display: flex; justify-content: center; padding-top: 8px"><div style="width: 38px; height: 5px; border-radius: 3px; background: rgba(0,0,0,0.18)"></div></div>
+  <div style="display: flex; align-items: center; padding: 10px 12px 0">
+    <a href="Guide.dc.html" style="height: 44px; display: flex; align-items: center; gap: 2px; text-decoration: none; font-size: 15px; font-weight: 500">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4371B7" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg>
+      Guide
+    </a>
+    <div style="flex: 1; text-align: right; padding-right: 6px; font-size: 12px; font-weight: 600; letter-spacing: 0.4px; color: #6B675F">LESSON 1 OF 9</div>
+  </div>
+
+  <div style="flex: 1; overflow-y: auto; padding: 6px 16px 28px; display: flex; flex-direction: column; gap: 14px">
+    <div style="display: flex; flex-direction: column; gap: 6px">
+      <div style="font-size: 26px; font-weight: 600; line-height: 30px; letter-spacing: -0.5px">Before you drive</div>
+      <div style="font-size: 15px; line-height: 21px; color: #6B675F">Five things that make the dot hold up without GPS. The app checks what it can; tick the rest.</div>
+    </div>
+
+    <div style="display: flex; align-items: center; gap: 12px; padding: 4px 4px 0">
+      <div style="flex: 1; height: 8px; border-radius: 4px; background: #E8E6E0; overflow: hidden">
+        <div style="height: 8px; width: {{ pct }}%; border-radius: 4px; background: {{ barColor }}; transition: width 300ms ease"></div>
+      </div>
+      <div style="font-size: 13px; font-weight: 600; color: #6B675F">{{ doneCount }} of 5</div>
+    </div>
+
+    <div style="background: #FFFFFF; border-radius: 24px; padding: 2px 14px">
+      <sc-for list="{{ items }}" as="it" hint-placeholder-count="5">
+        <div style="display: flex; align-items: center; gap: 12px; min-height: 72px; border-top: {{ it.divider }}">
+          <button type="button" onClick="{{ it.toggle }}" aria-label="{{ it.aria }}" style="width: 44px; height: 44px; margin-left: -6px; border: 0; background: none; display: flex; align-items: center; justify-content: center; cursor: {{ it.cursor }}; flex-shrink: 0">
+            <div style="width: 28px; height: 28px; border-radius: 14px; box-sizing: border-box; border: 2px solid {{ it.ring }}; background: {{ it.fill }}; display: flex; align-items: center; justify-content: center">
+              <sc-if value="{{ it.done }}" hint-placeholder-val="{{ false }}">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg>
+              </sc-if>
+            </div>
+          </button>
+          <div style="flex: 1; display: flex; flex-direction: column; gap: 2px; padding: 10px 0">
+            <div style="font-size: 15px; font-weight: 500">{{ it.title }}</div>
+            <div style="font-size: 13px; line-height: 18px; color: {{ it.subColor }}">{{ it.sub }}</div>
+          </div>
+          <sc-if value="{{ it.hasAction }}" hint-placeholder-val="{{ false }}">
+            <button type="button" onClick="{{ it.action }}" style="height: 36px; border: 0; border-radius: 999px; background: #4371B7; color: #FFFFFF; padding: 0 14px; font-size: 13px; font-weight: 600; cursor: pointer; flex-shrink: 0">{{ it.actionLabel }}</button>
+          </sc-if>
+        </div>
+      </sc-for>
+    </div>
+
+    <sc-if value="{{ allDone }}" hint-placeholder-val="{{ false }}">
+      <div style="background: #3D865A2E; border-radius: 24px; padding: 14px 16px; display: flex; gap: 12px; align-items: center">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#3D865A" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg>
+        <div style="flex: 1; font-size: 14px; line-height: 20px; font-weight: 500">Ready to drive. The app calibrates itself on the way, there is nothing to set up.</div>
+      </div>
+    </sc-if>
+
+    <a href="LessonStatus.dc.html" style="height: 54px; flex-shrink: 0; border-radius: 999px; background: #4371B7; color: #FFFFFF; font-size: 16px; font-weight: 600; display: flex; align-items: center; justify-content: center; text-decoration: none">Next: What the dot is telling you</a>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { adapter: 'off', holder: false, open: false, charging: false };
+  }
+  componentWillUnmount() {
+    clearTimeout(this.timer);
+  }
+  renderVals() {
+    const { adapter, holder, open, charging } = this.state;
+    const flip = (key) => () => this.setState({ [key]: !this.state[key] });
+    const connect = () => {
+      this.setState({ adapter: 'busy' });
+      clearTimeout(this.timer);
+      this.timer = setTimeout(() => this.setState({ adapter: 'on' }), 1400);
+    };
+    const rows = [
+      { title: 'A map of your region', sub: 'Kyiv Oblast · ready offline', subColor: '#3D865A', done: true, auto: true },
+      { title: 'Adapter in, ignition on',
+        sub: adapter === 'on' ? 'Connected · the car answers' : adapter === 'busy' ? 'Connecting…' : 'Not connected',
+        subColor: adapter === 'on' ? '#3D865A' : '#6B675F', done: adapter === 'on', auto: true,
+        actionLabel: adapter === 'off' ? 'Connect' : '', action: connect },
+      { title: 'Phone in a firm holder', sub: 'It feels the car’s turns when GPS is gone.', done: holder, toggle: flip('holder') },
+      { title: 'Open wtf.ai before you set off', sub: 'It follows the car from the first metre and remembers where you park.', done: open, toggle: flip('open') },
+      { title: 'Charging on long drives', sub: 'The map keeps the screen on.', done: charging, toggle: flip('charging') },
+    ];
+    const doneCount = rows.filter((r) => r.done).length;
+    return {
+      doneCount,
+      pct: doneCount * 20,
+      barColor: doneCount === 5 ? '#3D865A' : '#4371B7',
+      allDone: doneCount === 5,
+      items: rows.map((r, i) => ({
+        ...r,
+        subColor: r.subColor || '#6B675F',
+        divider: i === 0 ? 'none' : '1px solid rgba(0,0,0,0.07)',
+        ring: r.done ? '#3D865A' : 'rgba(0,0,0,0.2)',
+        fill: r.done ? '#3D865A' : 'transparent',
+        cursor: r.auto ? 'default' : 'pointer',
+        aria: (r.done ? 'Done: ' : 'To do: ') + r.title,
+        toggle: r.toggle || (() => {}),
+        hasAction: !!r.actionLabel,
+        actionLabel: r.actionLabel || '',
+        action: r.action || (() => {}),
+      })),
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Lesson: the car button</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Onest:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#4371B7}a:hover{color:#2F5A99}
+button{font-family:inherit}
+@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.35)}}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #F5F4F1; color: #1D1C1A; font-family: 'Onest', sans-serif; display: flex; flex-direction: column; overflow: hidden">
+  <div style="display: flex; justify-content: center; padding-top: 8px"><div style="width: 38px; height: 5px; border-radius: 3px; background: rgba(0,0,0,0.18)"></div></div>
+  <div style="display: flex; align-items: center; padding: 10px 12px 0">
+    <a href="Guide.dc.html" style="height: 44px; display: flex; align-items: center; gap: 2px; text-decoration: none; font-size: 15px; font-weight: 500">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4371B7" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg>
+      Guide
+    </a>
+    <div style="flex: 1; text-align: right; padding-right: 6px; font-size: 12px; font-weight: 600; letter-spacing: 0.4px; color: #6B675F">LESSON 3 OF 9</div>
+  </div>
+
+  <div style="flex: 1; overflow-y: auto; padding: 6px 16px 28px; display: flex; flex-direction: column; gap: 14px">
+    <div style="display: flex; flex-direction: column; gap: 6px">
+      <div style="font-size: 26px; font-weight: 600; line-height: 30px; letter-spacing: -0.5px">The car button</div>
+      <div style="font-size: 15px; line-height: 21px; color: #6B675F">At the bottom of the map. Its dot tells you whether the app can hear the car. Tap a state.</div>
+    </div>
+
+    <div style="position: relative; height: 150px; flex-shrink: 0; border-radius: 24px; overflow: hidden; background: #F2EFE9">
+      <svg viewBox="0 0 358 150" width="358" height="150" style="position: absolute; left: 0; top: 0" aria-hidden="true">
+        <rect width="358" height="150" fill="#F2EFE9"></rect>
+        <rect x="14" y="10" width="70" height="40" rx="3" fill="#E6E1D8"></rect>
+        <rect x="200" y="10" width="140" height="40" rx="3" fill="#D5E8C8"></rect>
+        <path d="M-10 66 H370" stroke="#DCD5C8" stroke-width="13"></path>
+        <path d="M-10 66 H370" stroke="#FFFFFF" stroke-width="10"></path>
+        <path d="M120 -10 V160" stroke="#E3C77E" stroke-width="17"></path>
+        <path d="M120 -10 V160" stroke="#F8DFA0" stroke-width="13"></path>
+      </svg>
+      <div style="position: absolute; left: 12px; right: 12px; bottom: 12px; height: 74px; border-radius: 24px; background: rgba(255,255,255,0.86); backdrop-filter: blur(16px); box-shadow: 0 10px 30px rgba(40,30,10,0.14); display: grid; grid-template-columns: repeat(3, minmax(0, 1fr))">
+        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; opacity: 0.4">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#1D1C1A" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="19" r="2"></circle><circle cx="18" cy="5" r="2"></circle><path d="M8 19h7.5a3.5 3.5 0 0 0 0-7h-7a3.5 3.5 0 0 1 0-7H16"></path></svg>
+          <div style="font-size: 12px; font-weight: 500">Route</div>
+        </div>
+        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px">
+          <div style="position: relative; width: 24px; height: 24px">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="{{ s.iconColor }}" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 14.5l1.7-5a2 2 0 0 1 1.9-1.4h7.8a2 2 0 0 1 1.9 1.4l1.7 5"></path><rect x="3" y="14.5" width="18" height="4.5" rx="1.6"></rect></svg>
+            <div style="position: absolute; right: -5px; top: -3px; width: 11px; height: 11px; border-radius: 6px; background: {{ s.color }}; border: 2px solid #FFFFFF; animation: {{ s.anim }}"></div>
+          </div>
+          <div style="font-size: 12px; font-weight: 500; color: {{ s.labelColor }}">{{ s.button }}</div>
+        </div>
+        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; opacity: 0.4">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="#1D1C1A" aria-hidden="true"><circle cx="5.5" cy="12" r="1.8"></circle><circle cx="12" cy="12" r="1.8"></circle><circle cx="18.5" cy="12" r="1.8"></circle></svg>
+          <div style="font-size: 12px; font-weight: 500">More</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px" role="radiogroup" aria-label="Connection state">
+      <sc-for list="{{ chips }}" as="c" hint-placeholder-count="4">
+        <button type="button" role="radio" aria-checked="{{ c.on }}" onClick="{{ c.pick }}" style="height: 44px; border-radius: 999px; border: 1.5px solid {{ c.border }}; background: {{ c.bg }}; padding: 0 12px; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 14px; font-weight: 500; color: #1D1C1A; cursor: pointer">
+          <span style="width: 10px; height: 10px; border-radius: 5px; background: {{ c.color }}"></span>{{ c.name }}
+        </button>
+      </sc-for>
+    </div>
+
+    <div style="background: #FFFFFF; border-radius: 24px; padding: 4px 16px">
+      <div style="display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid rgba(0,0,0,0.07)">
+        <div style="width: 64px; flex-shrink: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.3px; color: #6B675F; padding-top: 2px">MEANS</div>
+        <div style="flex: 1; font-size: 14px; line-height: 20px">{{ s.means }}</div>
+      </div>
+      <div style="display: flex; gap: 12px; padding: 12px 0">
+        <div style="width: 64px; flex-shrink: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.3px; color: #6B675F; padding-top: 2px">YOU</div>
+        <div style="flex: 1; font-size: 14px; line-height: 20px; font-weight: 500">{{ s.you }}</div>
+      </div>
+    </div>
+
+    <sc-if value="{{ s.isRed }}" hint-placeholder-val="{{ false }}">
+      <div style="display: flex; flex-direction: column; gap: 8px">
+        <div style="font-size: 13px; font-weight: 500; color: #6B675F; padding-left: 4px">If it stays red</div>
+        <div style="background: #FFFFFF; border-radius: 24px; padding: 4px 16px">
+          <sc-for list="{{ checks }}" as="k" hint-placeholder-count="4">
+            <div style="display: flex; gap: 12px; align-items: center; min-height: 46px; border-top: {{ k.divider }}">
+              <div style="width: 24px; height: 24px; border-radius: 12px; background: #EDEBE6; font-size: 12px; font-weight: 600; color: #6B675F; display: flex; align-items: center; justify-content: center; flex-shrink: 0">{{ k.n }}</div>
+              <div style="flex: 1; font-size: 14px; line-height: 19px; padding: 8px 0">{{ k.text }}</div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </sc-if>
+
+    <a href="LessonJamming.dc.html" style="height: 54px; flex-shrink: 0; border-radius: 999px; background: #4371B7; color: #FFFFFF; font-size: 16px; font-weight: 600; display: flex; align-items: center; justify-content: center; text-decoration: none">Next: Driving through jamming</a>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { pick: 'red' };
+  }
+  renderVals() {
+    const STATES = {
+      green: { name: 'Green', color: '#3D865A', button: 'Vehicle',
+        means: 'The adapter is connected and the car answers. Without GPS the dot runs on the car’s speed.',
+        you: 'Drive normally. It connects by itself next time.' },
+      yellow: { name: 'Yellow', color: '#BD853F', button: 'Vehicle', anim: 'pulse 1s ease-in-out infinite',
+        means: 'Connecting, or the engine is off. On a new car the app first looks for how to talk to it: up to 20 seconds.',
+        you: 'Switch on the ignition and wait.' },
+      red: { name: 'Red', color: '#BC4A3F', button: 'Vehicle', red: true,
+        means: 'No adapter found, or the car hasn’t answered for a while. Without GPS the dot then has only the phone to go on.',
+        you: 'Tap the button to see what is missing.' },
+      driving: { name: 'Driving', color: '#3D865A', button: 'Driving', accent: true,
+        means: 'A trip is on. The trip recorder keeps a log of it under More.',
+        you: 'Drive normally. The label goes back to Vehicle when you park.' },
+    };
+    const key = this.state.pick;
+    const cur = STATES[key];
+    const checks = [
+      'The adapter is in the port under the dashboard.',
+      'The ignition is on.',
+      'Bluetooth is on in the phone’s settings.',
+      'Tap Vehicle, then Connect.',
+    ];
+    return {
+      s: {
+        ...cur,
+        anim: cur.anim || 'none',
+        isRed: !!cur.red,
+        labelColor: cur.accent ? '#4371B7' : '#1D1C1A',
+        iconColor: cur.accent ? '#4371B7' : '#1D1C1A',
+      },
+      checks: checks.map((text, i) => ({ n: i + 1, text, divider: i === 0 ? 'none' : '1px solid rgba(0,0,0,0.07)' })),
+      chips: Object.keys(STATES).map((k) => {
+        const on = k === key;
+        return {
+          name: STATES[k].name,
+          color: STATES[k].color,
+          on: on ? 'true' : 'false',
+          bg: on ? '#FFFFFF' : 'transparent',
+          border: on ? '#4371B7' : 'rgba(0,0,0,0.12)',
+          pick: () => this.setState({ pick: k }),
+        };
+      }),
+    };
+  }
+}
+</script>
+</body>
+</html>

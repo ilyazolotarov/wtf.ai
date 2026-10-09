@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Lesson: put the car on the map</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Onest:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#4371B7}a:hover{color:#2F5A99}
+button{font-family:inherit}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #F5F4F1; color: #1D1C1A; font-family: 'Onest', sans-serif; display: flex; flex-direction: column; overflow: hidden">
+  <div style="display: flex; justify-content: center; padding-top: 8px"><div style="width: 38px; height: 5px; border-radius: 3px; background: rgba(0,0,0,0.18)"></div></div>
+  <div style="display: flex; align-items: center; padding: 10px 12px 0">
+    <a href="Guide.dc.html" style="height: 44px; display: flex; align-items: center; gap: 2px; text-decoration: none; font-size: 15px; font-weight: 500">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4371B7" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg>
+      Guide
+    </a>
+    <div style="flex: 1; text-align: right; padding-right: 6px; font-size: 12px; font-weight: 600; letter-spacing: 0.4px; color: #6B675F">LESSON 5 OF 9 · PRACTICE</div>
+  </div>
+
+  <div style="flex: 1; overflow-y: auto; padding: 6px 16px 28px; display: flex; flex-direction: column; gap: 14px">
+    <div style="display: flex; flex-direction: column; gap: 6px">
+      <div style="font-size: 26px; font-weight: 600; line-height: 30px; letter-spacing: -0.5px">Put the car on the map</div>
+      <div style="font-size: 15px; line-height: 21px; color: #6B675F">Without GPS the dot can end up on the wrong road. While the car stands, you can put it right. Try it here.</div>
+    </div>
+
+    <div style="position: relative; height: 430px; flex-shrink: 0; border-radius: 24px; overflow: hidden; background: #F2EFE9">
+      <button type="button" onClick="{{ pan }}" aria-label="Map: move it so the pin is on the car" style="position: absolute; inset: 0; border: 0; padding: 0; background: none; cursor: {{ panCursor }}">
+        <div style="position: absolute; left: -80px; top: -80px; width: 520px; height: 600px; transform: translate({{ dx }}px, {{ dy }}px); transition: transform 700ms cubic-bezier(.2,.8,.2,1)">
+          <svg viewBox="-80 -80 520 600" width="520" height="600" aria-hidden="true">
+            <rect x="-80" y="-80" width="520" height="600" fill="#F2EFE9"></rect>
+            <rect x="268" y="-60" width="110" height="170" rx="6" fill="#D5E8C8"></rect>
+            <rect x="-60" y="-60" width="150" height="150" rx="3" fill="#E6E1D8"></rect>
+            <rect x="130" y="-60" width="100" height="150" rx="3" fill="#E6E1D8"></rect>
+            <rect x="-60" y="140" width="150" height="130" rx="3" fill="#E6E1D8"></rect>
+            <rect x="130" y="180" width="100" height="90" rx="3" fill="#E6E1D8"></rect>
+            <rect x="270" y="180" width="110" height="90" rx="3" fill="#E6E1D8"></rect>
+            <rect x="-60" y="330" width="150" height="180" rx="3" fill="#E6E1D8"></rect>
+            <rect x="130" y="330" width="100" height="180" rx="3" fill="#E6E1D8"></rect>
+            <rect x="270" y="330" width="110" height="180" rx="3" fill="#E6E1D8"></rect>
+            <g fill="none" stroke-linecap="round">
+              <path d="M-80 300 H440 M-80 120 H250 M110 -80 V520" stroke="#DCD5C8" stroke-width="13"></path>
+              <path d="M-80 300 H440 M-80 120 H250 M110 -80 V520" stroke="#FFFFFF" stroke-width="10"></path>
+              <path d="M250 -80 V520" stroke="#E3C77E" stroke-width="17"></path>
+              <path d="M250 -80 V520" stroke="#F8DFA0" stroke-width="13"></path>
+            </g>
+            <g opacity="{{ carOpacity }}">
+              <rect x="241" y="124" width="18" height="32" rx="6" fill="#1D1C1A"></rect>
+              <rect x="244" y="130" width="12" height="8" rx="2" fill="#9DB4F2"></rect>
+            </g>
+            <circle cx="{{ dotX }}" cy="{{ dotY }}" r="{{ dotR }}" fill="rgba(67,113,183,0.14)" stroke="rgba(67,113,183,0.45)" stroke-width="1.5"></circle>
+            <circle cx="{{ dotX }}" cy="{{ dotY }}" r="8" fill="#4371B7" stroke="#FFFFFF" stroke-width="3"></circle>
+          </svg>
+        </div>
+      </button>
+
+      <sc-if value="{{ isIntro }}" hint-placeholder-val="{{ true }}">
+        <div style="position: absolute; left: 130px; top: 326px; padding: 4px 9px; border-radius: 8px; background: #1D1C1A; color: #FFFFFF; font-size: 12px; font-weight: 500; pointer-events: none">The app’s dot</div>
+        <div style="position: absolute; left: 270px; top: 120px; padding: 4px 9px; border-radius: 8px; background: #1D1C1A; color: #FFFFFF; font-size: 12px; font-weight: 500; pointer-events: none">Your car</div>
+        <button type="button" onClick="{{ startPlacing }}" style="position: absolute; left: 50%; transform: translateX(-50%); top: 12px; height: 40px; border: 0; border-radius: 999px; background: rgba(255,255,255,0.92); box-shadow: 0 6px 20px rgba(40,30,10,0.14); padding: 0 16px 0 12px; display: flex; align-items: center; gap: 6px; color: #4371B7; font-size: 13px; font-weight: 600; white-space: nowrap; cursor: pointer">
+          <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22s-7-6.2-7-12a7 7 0 1 1 14 0c0 5.8-7 12-7 12z" fill="#4371B7"></path><circle cx="12" cy="10" r="2.6" fill="#FFFFFF"></circle></svg>
+          Set your position on the map
+        </button>
+      </sc-if>
+
+      <sc-if value="{{ showPin }}" hint-placeholder-val="{{ false }}">
+        <svg width="300" height="300" viewBox="-150 -150 300 300" style="position: absolute; left: 29px; top: 65px; pointer-events: none" aria-hidden="true">
+          <g opacity="{{ arrowOpacity }}" transform="rotate({{ arrowAngle }})">
+            <path d="M0 0 V-78" stroke="#4371B7" stroke-width="4" stroke-linecap="round"></path>
+            <path d="M-11 -70 L0 -92 L11 -70 Z" fill="#4371B7"></path>
+          </g>
+          <path d="M0 0 C -4 -10 -16 -20 -16 -32 a16 16 0 1 1 32 0 C 16 -20 4 -10 0 0 Z" fill="#4371B7"></path>
+          <circle cx="0" cy="-32" r="6" fill="#FFFFFF"></circle>
+        </svg>
+      </sc-if>
+
+      <sc-if value="{{ isHeading }}" hint-placeholder-val="{{ false }}">
+        <button type="button" onClick="{{ faceUp }}" aria-label="The car faces up the road" style="position: absolute; left: 0; right: 0; top: 0; height: 215px; border: 0; background: none; cursor: crosshair"></button>
+        <button type="button" onClick="{{ faceDown }}" aria-label="The car faces down the road" style="position: absolute; left: 0; right: 0; bottom: 0; height: 215px; border: 0; background: none; cursor: crosshair"></button>
+      </sc-if>
+
+      <sc-if value="{{ showCard }}" hint-placeholder-val="{{ false }}">
+        <div style="position: absolute; left: 10px; right: 10px; bottom: 10px; box-sizing: border-box; border-radius: 24px; background: rgba(255,255,255,0.94); box-shadow: 0 10px 30px rgba(40,30,10,0.14); padding: 14px; display: flex; flex-direction: column; gap: 10px">
+          <div style="display: flex; gap: 12px; align-items: flex-start">
+            <div style="width: 36px; height: 36px; border-radius: 18px; background: #4371B722; display: flex; align-items: center; justify-content: center; flex-shrink: 0">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4371B7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s-7-6.2-7-12a7 7 0 1 1 14 0c0 5.8-7 12-7 12z"></path><circle cx="12" cy="10" r="2.5"></circle></svg>
+            </div>
+            <div style="flex: 1; display: flex; flex-direction: column; gap: 2px">
+              <div style="font-size: 15px; font-weight: 600">{{ cardTitle }}</div>
+              <div style="font-size: 13px; line-height: 18px; color: #6B675F">{{ cardHint }}</div>
+            </div>
+          </div>
+          <div style="display: flex; gap: 8px">
+            <button type="button" onClick="{{ reset }}" style="flex: 1; height: 42px; border: 0; border-radius: 999px; background: #EDEBE6; color: #6B675F; font-size: 14px; font-weight: 600; cursor: pointer">Cancel</button>
+            <button type="button" onClick="{{ confirm }}" disabled="{{ confirmDisabled }}" style="flex: 1; height: 42px; border: 0; border-radius: 999px; background: #EDEBE6; color: #4371B7; font-size: 14px; font-weight: 600; opacity: {{ confirmOpacity }}; cursor: pointer">{{ confirmLabel }}</button>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isDone }}" hint-placeholder-val="{{ false }}">
+        <div style="position: absolute; left: 50%; transform: translateX(-50%); top: 12px; height: 38px; box-sizing: border-box; border-radius: 999px; background: rgba(255,255,255,0.92); box-shadow: 0 6px 20px rgba(40,30,10,0.14); padding: 0 14px 0 12px; display: flex; align-items: center; gap: 6px; color: #4371B7; font-size: 13px; font-weight: 600; white-space: nowrap">
+          <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22s-7-6.2-7-12a7 7 0 1 1 14 0c0 5.8-7 12-7 12z" fill="#4371B7"></path><circle cx="12" cy="10" r="2.6" fill="#FFFFFF"></circle></svg>
+          Set on the map just now
+        </div>
+      </sc-if>
+    </div>
+
+    <sc-if value="{{ isDone }}" hint-placeholder-val="{{ false }}">
+      <div style="background: #3D865A2E; border-radius: 24px; padding: 14px 16px; display: flex; gap: 12px; align-items: center">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#3D865A" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg>
+        <div style="flex: 1; font-size: 14px; line-height: 20px">Done. The dot goes on from where you put it.</div>
+        <button type="button" onClick="{{ reset }}" style="border: 0; background: none; color: #4371B7; font-size: 14px; font-weight: 600; padding: 8px 4px; cursor: pointer">Again</button>
+      </div>
+    </sc-if>
+
+    <div style="background: #FFFFFF; border-radius: 24px; padding: 4px 16px">
+      <div style="display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid rgba(0,0,0,0.07)">
+        <div style="width: 64px; flex-shrink: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.3px; color: #6B675F; padding-top: 2px">WHEN</div>
+        <div style="flex: 1; font-size: 14px; line-height: 20px">The car stands and the dot is on the wrong road, or the app offers it.</div>
+      </div>
+      <div style="display: flex; gap: 12px; padding: 12px 0">
+        <div style="width: 64px; flex-shrink: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.3px; color: #6B675F; padding-top: 2px">ALSO</div>
+        <div style="flex: 1; font-size: 14px; line-height: 20px">Press and hold the map where the car is, then “I’m here”.</div>
+      </div>
+    </div>
+
+    <a href="LessonPose.dc.html" style="height: 54px; flex-shrink: 0; border-radius: 999px; background: #4371B7; color: #FFFFFF; font-size: 16px; font-weight: 600; display: flex; align-items: center; justify-content: center; text-decoration: none">Next: Is the car where the dot is?</a>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { step: 0, panned: false, facing: null };
+  }
+  renderVals() {
+    const { step, panned, facing } = this.state;
+    const isPosition = step === 1;
+    const isHeading = step === 2;
+    const isDone = step === 3;
+    const confirmDisabled = (isPosition && !panned) || (isHeading && facing === null);
+    return {
+      isIntro: step === 0,
+      isHeading,
+      isDone,
+      showPin: isPosition || isHeading,
+      showCard: isPosition || isHeading,
+      dx: panned ? -71 : 0,
+      dy: panned ? 75 : 0,
+      panCursor: isPosition ? 'grab' : 'default',
+      carOpacity: isDone ? 0 : 1,
+      dotX: isDone ? 250 : 110,
+      dotY: isDone ? 140 : 300,
+      dotR: isDone ? 12 : 44,
+      arrowOpacity: isHeading && facing !== null ? 1 : 0,
+      arrowAngle: facing === 'down' ? 180 : 0,
+      cardTitle: isPosition ? 'Where is the car?' : 'Which way does it face?',
+      cardHint: isPosition
+        ? (panned ? 'Pin on the car? Then Here.' : 'Move the map until the pin is on the car. (Here: tap the map.)')
+        : (facing === null ? 'Tap the map where the front of the car points.' : 'Does the arrow point where the car faces? Tap again to turn it.'),
+      confirmLabel: isPosition ? 'Here' : 'Confirm',
+      confirmDisabled,
+      confirmOpacity: confirmDisabled ? 0.45 : 1,
+      startPlacing: () => this.setState({ step: 1 }),
+      pan: () => { if (isPosition) this.setState({ panned: true }); },
+      faceUp: () => this.setState({ facing: 'up' }),
+      faceDown: () => this.setState({ facing: 'down' }),
+      confirm: () => this.setState({ step: step + 1 }),
+      reset: () => this.setState({ step: 0, panned: false, facing: null }),
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Lesson: spoken directions</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Onest:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#4371B7}a:hover{color:#2F5A99}
+button{font-family:inherit}
+input[type=range]{accent-color:#4371B7}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #F5F4F1; color: #1D1C1A; font-family: 'Onest', sans-serif; display: flex; flex-direction: column; overflow: hidden">
+  <div style="display: flex; justify-content: center; padding-top: 8px"><div style="width: 38px; height: 5px; border-radius: 3px; background: rgba(0,0,0,0.18)"></div></div>
+  <div style="display: flex; align-items: center; padding: 10px 12px 0">
+    <a href="Guide.dc.html" style="height: 44px; display: flex; align-items: center; gap: 2px; text-decoration: none; font-size: 15px; font-weight: 500">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4371B7" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg>
+      Guide
+    </a>
+    <div style="flex: 1; text-align: right; padding-right: 6px; font-size: 12px; font-weight: 600; letter-spacing: 0.4px; color: #6B675F">LESSON 8 OF 9 · PRACTICE</div>
+  </div>
+
+  <div style="flex: 1; overflow-y: auto; padding: 6px 16px 28px; display: flex; flex-direction: column; gap: 14px">
+    <div style="display: flex; flex-direction: column; gap: 6px">
+      <div style="font-size: 26px; font-weight: 600; line-height: 30px; letter-spacing: -0.5px">Spoken directions</div>
+      <div style="font-size: 15px; line-height: 21px; color: #6B675F">The button under the route’s × is the voice. Tap it to mute; press and hold it to choose the speakers.</div>
+    </div>
+
+    <div style="position: relative; height: 300px; flex-shrink: 0; border-radius: 24px; overflow: hidden; background: #F2EFE9">
+      <svg viewBox="0 0 358 300" width="358" height="300" style="position: absolute; left: 0; top: 0" aria-hidden="true">
+        <rect width="358" height="300" fill="#F2EFE9"></rect>
+        <rect x="120" y="150" width="140" height="70" rx="5" fill="#D5E8C8"></rect>
+        <rect x="14" y="230" width="66" height="80" rx="3" fill="#E6E1D8"></rect>
+        <rect x="300" y="150" width="60" height="160" rx="3" fill="#E6E1D8"></rect>
+        <g fill="none" stroke-linecap="round">
+          <path d="M280 -10 V310" stroke="#DCD5C8" stroke-width="13"></path>
+          <path d="M280 -10 V310" stroke="#FFFFFF" stroke-width="10"></path>
+          <path d="M100 -10 V310 M-10 240 H370" stroke="#E3C77E" stroke-width="17"></path>
+          <path d="M100 -10 V310 M-10 240 H370" stroke="#F8DFA0" stroke-width="13"></path>
+        </g>
+        <path d="M100 290 V240 H300" fill="none" stroke="#3F5FBF" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"></path>
+        <circle cx="100" cy="282" r="8" fill="#4371B7" stroke="#FFFFFF" stroke-width="3"></circle>
+      </svg>
+
+      <div style="position: absolute; left: 10px; right: 10px; top: 10px; box-sizing: border-box; border-radius: 24px; background: rgba(255,255,255,0.95); box-shadow: 0 10px 30px rgba(40,30,10,0.14); padding: 12px 10px 10px 14px; display: flex; gap: 12px">
+        <div style="width: 44px; height: 44px; border-radius: 14px; background: #3F5FBF; display: flex; align-items: center; justify-content: center; flex-shrink: 0">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 20v-7a3 3 0 0 1 3-3h8"></path><path d="M15 6l4 4-4 4"></path></svg>
+        </div>
+        <div style="flex: 1; display: flex; flex-direction: column; gap: 1px; padding-top: 2px">
+          <div style="font-size: 20px; font-weight: 600">40 m</div>
+          <div style="font-size: 13px; color: #4A4741">Turn right onto [street]</div>
+          <div style="font-size: 12px; color: #6B675F">1.6 km · 4 min left</div>
+        </div>
+        <div style="display: flex; flex-direction: column; justify-content: space-between; gap: 22px">
+          <div style="width: 38px; height: 38px; border-radius: 19px; background: #EDEBE6; display: flex; align-items: center; justify-content: center">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6B675F" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg>
+          </div>
+          <sc-if value="{{ hasVoice }}" hint-placeholder-val="{{ true }}">
+            <button type="button" onPointerDown="{{ down }}" onPointerUp="{{ up }}" onPointerLeave="{{ leave }}" aria-label="{{ voiceAria }}" style="width: 38px; height: 38px; border: 0; border-radius: 19px; background: {{ voiceBg }}; display: flex; align-items: center; justify-content: center; cursor: pointer; touch-action: none">
+              <sc-if value="{{ iconSpeaker }}" hint-placeholder-val="{{ true }}">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="{{ voiceFg }}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"></path><path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a7.5 7.5 0 0 1 0 11"></path></svg>
+              </sc-if>
+              <sc-if value="{{ iconMuted }}" hint-placeholder-val="{{ false }}">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6B675F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"></path><path d="M16 9.5l5 5M21 9.5l-5 5"></path></svg>
+              </sc-if>
+              <sc-if value="{{ iconAirplay }}" hint-placeholder-val="{{ false }}">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="{{ voiceFg }}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 16H4.5a1.5 1.5 0 0 1-1.5-1.5v-9A1.5 1.5 0 0 1 4.5 4h15A1.5 1.5 0 0 1 21 5.5v9a1.5 1.5 0 0 1-1.5 1.5H18"></path><path d="M12 14l5 6H7z"></path></svg>
+              </sc-if>
+            </button>
+          </sc-if>
+        </div>
+      </div>
+
+      <div style="position: absolute; left: 130px; right: 12px; top: 150px; box-sizing: border-box; padding: 10px 12px; border-radius: 16px; background: {{ bubbleBg }}; color: {{ bubbleFg }}; font-size: 13px; line-height: 18px; font-weight: 500">{{ bubble }}</div>
+
+      <sc-if value="{{ pickerOpen }}" hint-placeholder-val="{{ false }}">
+        <div style="position: absolute; inset: 0; background: rgba(14,13,12,0.4)"></div>
+        <div style="position: absolute; left: 10px; right: 10px; bottom: 10px; box-sizing: border-box; border-radius: 24px; background: #FFFFFF; padding: 8px 14px 12px; display: flex; flex-direction: column">
+          <div style="font-size: 12px; font-weight: 600; letter-spacing: 0.3px; color: #6B675F; padding: 8px 2px">PLAY THE VOICE ON</div>
+          <sc-for list="{{ outputs }}" as="o" hint-placeholder-count="2">
+            <button type="button" onClick="{{ o.pick }}" style="min-height: 52px; border: 0; border-top: {{ o.divider }}; background: none; display: flex; align-items: center; gap: 12px; padding: 0 2px; text-align: left; cursor: pointer; color: #1D1C1A">
+              <span style="flex: 1; font-size: 15px; font-weight: 500">{{ o.name }}</span>
+              <span style="font-size: 12px; color: #6B675F">{{ o.kind }}</span>
+              <span style="width: 22px; display: flex; justify-content: center">
+                <sc-if value="{{ o.on }}" hint-placeholder-val="{{ false }}">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4371B7" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-label="Selected" role="img"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg>
+                </sc-if>
+              </span>
+            </button>
+          </sc-for>
+        </div>
+      </sc-if>
+    </div>
+
+    <button type="button" onClick="{{ openPicker }}" style="align-self: flex-start; border: 0; background: none; padding: 4px 4px; color: #4371B7; font-size: 13px; font-weight: 600; cursor: pointer">No long press? Open the speaker picker</button>
+
+    <div style="display: flex; flex-direction: column; gap: 8px">
+      <div style="font-size: 13px; font-weight: 500; color: #6B675F; padding-left: 4px">Route voice volume · in Settings</div>
+      <div style="background: #FFFFFF; border-radius: 24px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px">
+        <div style="display: flex; align-items: center; gap: 12px">
+          <label for="vol" style="font-size: 14px; font-weight: 500; width: 40px">Level</label>
+          <input id="vol" type="range" min="0" max="100" step="10" value="{{ volume }}" onChange="{{ setVolume }}" style="flex: 1">
+          <div style="font-size: 14px; font-weight: 500; width: 44px; text-align: right">{{ volumeText }}</div>
+        </div>
+        <div style="font-size: 13px; line-height: 18px; color: #6B675F">{{ volumeNote }}</div>
+      </div>
+    </div>
+
+    <a href="LessonMaps.dc.html" style="height: 54px; flex-shrink: 0; border-radius: 999px; background: #4371B7; color: #FFFFFF; font-size: 16px; font-weight: 600; display: flex; align-items: center; justify-content: center; text-decoration: none">Next: Offline maps</a>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { muted: false, output: 'phone', picker: false, volume: 80 };
+  }
+  componentWillUnmount() {
+    clearTimeout(this.holdTimer);
+  }
+  renderVals() {
+    const { muted, output, picker, volume } = this.state;
+    const off = volume === 0;
+    const car = output === 'car';
+    const down = () => {
+      this.held = false;
+      clearTimeout(this.holdTimer);
+      this.holdTimer = setTimeout(() => { this.held = true; this.setState({ picker: true }); }, 500);
+    };
+    const up = () => {
+      clearTimeout(this.holdTimer);
+      if (!this.held) this.setState({ muted: !this.state.muted });
+      this.held = true;
+    };
+    const leave = () => clearTimeout(this.holdTimer);
+    let bubble = car ? '“In 40 metres, turn right” — through the car’s speakers' : '“In 40 metres, turn right”';
+    if (muted) bubble = 'Muted: directions only on screen.';
+    if (off) bubble = 'Volume 0: no voice, and no sound button on the map.';
+    const OUTPUTS = [['phone', 'iPhone', 'Speaker'], ['car', '[Car stereo]', 'Bluetooth']];
+    return {
+      hasVoice: !off,
+      iconSpeaker: !muted && !car,
+      iconMuted: muted,
+      iconAirplay: !muted && car,
+      voiceBg: muted ? '#EDEBE6' : '#4371B729',
+      voiceFg: '#4371B7',
+      voiceAria: muted ? 'Voice guidance off' : 'Voice guidance on',
+      bubble,
+      bubbleBg: muted || off ? 'rgba(255,255,255,0.9)' : '#1D1C1A',
+      bubbleFg: muted || off ? '#6B675F' : '#FFFFFF',
+      pickerOpen: picker,
+      outputs: OUTPUTS.map(([value, name, kind], i) => ({
+        name, kind,
+        on: output === value,
+        divider: i === 0 ? 'none' : '1px solid rgba(0,0,0,0.07)',
+        pick: () => this.setState({ output: value, picker: false, muted: false }),
+      })),
+      openPicker: () => this.setState({ picker: true }),
+      down, up, leave,
+      volume,
+      volumeText: off ? 'Off' : volume + ' %',
+      volumeNote: off
+        ? 'No voice guidance, and the sound button on the map is hidden.'
+        : 'Default: 80%. Let go of the slider to hear a sample.',
+      setVolume: (e) => this.setState({ volume: Number(e.target.value) }),
+    };
+  }
+}
+</script>
+</body>
+</html>
