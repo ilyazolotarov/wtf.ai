@@ -64,6 +64,8 @@ const SHEETS = [
   "position",
   "recorder",
   "developer",
+  "guide",
+  "lesson",
 ] as const;
 
 function AppStack() {

@@ -1,6 +1,7 @@
 import { router, type Href } from "expo-router";
 import { Pressable, StyleSheet, useColorScheme, View } from "react-native";
 
+import { AVAILABLE_LESSONS } from "@/components/guide/lesson-bodies";
 import { ScreenContent, ScreenSection } from "@/components/screens/screen-ui";
 import { useNavStatus } from "@/components/status/use-nav-status";
 import { Icon, type IconName } from "@/components/ui/icon";
@@ -9,6 +10,7 @@ import { fmtBytes } from "@/components/vehicle/format";
 import { usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
 import { useRecorderSnapshot } from "@/providers/runtime-provider";
+import { useLessonsDone } from "@/services/guide/guide-progress";
 import { useMapPacks } from "@/services/offline-map/map-packs";
 
 type Item = { icon: IconName; label: string; sub: string; subColor?: string; href: Href };
@@ -20,11 +22,20 @@ export default function MoreScreen() {
   const { installed } = useMapPacks();
   const nav = useNavStatus();
   const rec = useRecorderSnapshot();
+  const lessonsDone = useLessonsDone();
   // A region holds everything offline: the map, the road graph and the search index.
   const ready = installed.active != null;
   const logBytes = rec.trips.reduce((sum, trip) => sum + (trip.id === rec.current?.id ? (rec.current?.bytes ?? 0) : trip.bytes), 0);
 
   const items: Item[] = [
+    {
+      icon: "menu_book",
+      label: t("guideTitle"),
+      sub: t("guideProgress")
+        .replace("{done}", String(AVAILABLE_LESSONS.filter((lesson) => lessonsDone.has(lesson.id)).length))
+        .replace("{total}", String(AVAILABLE_LESSONS.length)),
+      href: "/guide?from=more",
+    },
     {
       icon: "map",
       label: t("downloads"),

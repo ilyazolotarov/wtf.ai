@@ -278,6 +278,30 @@ No screen: calibration is learned while driving (SPEC §3.6).
 Trip log upload and the storage limit are not here: they live with the rest of trip logging in the `recorder`
 sheet (TRIP-LOGGER-SPEC §9.2).
 
+### 7.7 Guide (`guide`, `lesson`)
+
+How to use the app, for drivers. Design: [design/guide/](design/guide/) (Claude Design canvas "wtf.ai Guide &
+Onboarding"). Strings in `src/i18n/guide-en.ts` / `guide-uk.ts`; driver advice is an action ("Keep driving
+normally"), never "Nothing".
+
+- **Onboarding** ends with a phone holder step (the gyro is the only yaw source without GPS, SPEC §2): a firm
+  holder, any angle, a phone picked up catches up; the Guide is in More.
+- **Map tour** (`src/components/guide/map-tour.tsx`): offered once on the map after onboarding and the first map
+  (a card above the camera button, hidden while a pin, a placing or the parked-pose question is up; kv-store
+  `guide.tour-offered`), and from the Guide at any time (the sheets close first). The screen dims except one control
+  at a time, with a card (step, title, text, Back / Next, Skip): the status pill, the dot (the screen centre: the
+  tour starts the follow camera), press and hold (a pulsing ring), the camera button, Vehicle and More (thirds of
+  the bottom bar). Done leaves a note for 6 s with a link to the Guide.
+- **Guide** sheet: the first row of More, "How to use wtf.ai · {done} of {total} done". The tour card, the lessons
+  in groups (Getting started, When GPS fails, Routes, Maps) with a tick once done (kv-store `guide.done`), "Show the
+  first-run screens again".
+- **Lessons** (`lesson?id=`), each interactive, on drawn maps (`react-native-svg`, `src/components/guide/mini-map.tsx`)
+  in the map's colours: never the live map, so practising never moves the car. The button at the bottom marks the
+  lesson done and opens the next. Built: 1 Before you drive (the map and the adapter read from the app, the rest
+  ticked), 2 What the dot is telling you (the five trust states), 3 The car button (its four states, a checklist
+  when red). To come: 4 Driving through jamming, 5 Put the car on the map, 6 "Is the car where the dot is?",
+  7 Plan a route, 8 Spoken directions, 9 Offline maps. The Guide lists only lessons that exist.
+
 ## 8. Verification
 
 1. `npx expo lint`, `npx tsc --noEmit`, `npx jest` pass.

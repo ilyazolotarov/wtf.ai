@@ -1,3 +1,5 @@
+import { guideEn } from "@/i18n/guide-en";
+
 export const en = {
   gpsOk: "GPS OK",
   untrusted: "UNTRUSTED",
@@ -394,6 +396,7 @@ export const en = {
   tripStorageUsed: "Used now",
   tripStorageNote: "When logs take more, the oldest are deleted. A drive is 3–25 MB. Logs waiting to be sent are kept until they are sent.",
   tripUploadDeleted: "Sent logs are deleted from this phone.",
+  ...guideEn,
 } as const;
 
 export type Strings = { [Key in keyof typeof en]: string };

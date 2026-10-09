@@ -277,8 +277,9 @@ UI-first milestone (map with live GNSS + mock screens): see [UI-SPEC.md](UI-SPEC
 
 - Native launch splash — displays `wtf.ai` and **"Where the f\* am I?"** (on iOS **"Where the funk am I?"**, for App Store review; `src/constants/brand.ts`).
 - `index` — map. It shows the Stage 1 navigator (NAVIGATOR-SPEC §9), or phone GNSS from `modules/sensor-capture` without an OBD adapter, with integrity's trust (§3.3): position puck + uncertainty circle (dominant hypothesis), alternative map-match hypotheses as secondary markers when ambiguous, raw GNSS ghost when untrusted, trust status, time and distance since the last trusted fix while untrusted, adapter status.
-- `onboarding` — first-run flow (welcome, location permission, adapter). No calibration step (§3.6).
-- `more` — sheet linking Offline maps and Settings, then the diagnostic sheets: `position`, `recorder` (Trip recorder) and `developer`.
+- `onboarding` — first-run flow (welcome, location permission, adapter, phone holder). No calibration step (§3.6).
+- `more` — sheet linking the Guide, Offline maps and Settings, then the diagnostic sheets: `position`, `recorder` (Trip recorder) and `developer`.
+- `guide`, `lesson` — the in-app guide: the map tour and interactive lessons (UI-SPEC §7.7).
 - `vehicle` — the car only: adapter discovery list and connection (transport, ELM version, protocol, poll rate), VIN, engine state, active odometry stage.
 - `position` — integrity, live GNSS, EKF state, map matching and routing timings.
 - `recorder` — everything about trip logs: the trip now (start / stop / marker), the `trips` list, recording settings (trip end and linger times, raw IMU, IMU rate), the opt-in upload code and the storage limit.

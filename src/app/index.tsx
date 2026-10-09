@@ -40,6 +40,8 @@ import { useHeldRoute, useRoute } from "@/providers/route-provider";
 import { useDevSettings, useRecorderSnapshot, useRuntime } from "@/providers/runtime-provider";
 import { onPlacingRequest, STANDING_MPS, takePlacingRequest } from "@/services/navigation/place-request";
 import { isOnboardingDone } from "@/services/preferences";
+import { MapTour, TourInvite } from "@/components/guide/map-tour";
+import { isTourOffered, markTourOffered, onTourRequest, takeTourRequest } from "@/services/guide/guide-progress";
 
 type CameraMode = "follow" | "follow-heading" | "free";
 
@@ -134,16 +136,6 @@ export default function HomeScreen() {
     setCameraMode(next);
   };
 
-  // First run: onboarding, then a map to download. Each time the map is back on top (the
-  // last region deleted, say), it asks again: the app has no online map.
-  const screenFocused = useIsFocused();
-  const mapReady = useHasUsableMap();
-  useEffect(() => {
-    if (!screenFocused) return;
-    if (!isOnboardingDone()) router.push("/onboarding");
-    else if (!mapReady) router.push("/map-setup");
-  }, [screenFocused, mapReady]);
-
   // Tap never enters free (only map gestures do); from free it returns to follow.
   const toggleCameraMode = () => {
     setGhostView(false);
@@ -189,6 +181,39 @@ export default function HomeScreen() {
   const hasDetails = outage != null || alertText != null || showCutGps;
   const [detailsToggled, setDetailsOpen] = useState(false);
   const detailsOpen = detailsToggled && hasDetails;
+
+  const screenFocused = useIsFocused();
+  const mapReady = useHasUsableMap();
+
+  // The map tour (UI-SPEC §7.7): offered once after the first map, or asked for from the Guide.
+  const [touring, setTouring] = useState(false);
+  const [tourOffered, setTourOffered] = useState(isTourOffered);
+  const statusRef = useRef<View>(null);
+  const followRef = useRef<View>(null);
+  const toolbarRef = useRef<View>(null);
+  const [tourTargets] = useState(() => ({ status: statusRef, follow: followRef, toolbar: toolbarRef }));
+  const answerTour = (take: boolean) => {
+    markTourOffered();
+    setTourOffered(true);
+    if (!take) return;
+    // The dot's stop is the screen centre, where the follow camera keeps the car.
+    setPin(null);
+    setDetailsOpen(false);
+    pickCameraMode(() => "follow");
+    setTouring(true);
+  };
+  const takeTour = useEffectEvent(() => {
+    if (takeTourRequest()) answerTour(true);
+  });
+  // The map stays mounted under the Guide sheet, so the request always comes while subscribed.
+  useEffect(() => onTourRequest(() => takeTour()), []);
+  // First run: onboarding, then a map to download. Each time the map is back on top (the
+  // last region deleted, say), it asks again: the app has no online map.
+  useEffect(() => {
+    if (!screenFocused) return;
+    if (!isOnboardingDone()) router.push("/onboarding");
+    else if (!mapReady) router.push("/map-setup");
+  }, [screenFocused, mapReady]);
 
   const panel = [
     styles.panel,
@@ -336,6 +361,7 @@ export default function HomeScreen() {
               disabled={!hasDetails}
               accessibilityRole="button"
               accessibilityState={{ expanded: detailsOpen }}
+              ref={statusRef}
               style={[panel, styles.statusPill]}
             >
               <GlassFill radius={Radius.pill} />
@@ -806,7 +832,11 @@ export default function HomeScreen() {
               </View>
             </View>
           )}
+          {mapReady && !tourOffered && !touring && !pin && !placing && !position?.poseQuestion && (
+            <TourInvite panelStyle={panel} onStart={() => answerTour(true)} onDismiss={() => answerTour(false)} />
+          )}
           <Pressable
+            ref={followRef}
             style={({ pressed }) => [panel, styles.cameraButton, pressed && styles.pressed]}
             onPress={toggleCameraMode}
             accessibilityRole="button"
@@ -823,7 +853,7 @@ export default function HomeScreen() {
               color={cameraMode === "free" ? palette.text2 : palette.accent}
             />
           </Pressable>
-          <View style={[panel, styles.bottomCard]}>
+          <View ref={toolbarRef} style={[panel, styles.bottomCard]}>
             <GlassFill radius={30} />
             <HudAction icon="alt_route" label={t("route")} href="/route" />
             <HudAction
@@ -838,6 +868,8 @@ export default function HomeScreen() {
           </View>
         </View>
       </View>
+      {/* Asked for from the Guide, it waits for the sheets to close. */}
+      {touring && screenFocused && <MapTour targets={tourTargets} onClose={() => setTouring(false)} />}
       <SheetBlur />
     </View>
   );

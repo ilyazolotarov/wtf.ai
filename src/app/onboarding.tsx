@@ -14,16 +14,20 @@ import { useT } from "@/i18n/provider";
 import { usePositionPermission } from "@/providers/position-provider";
 import { markOnboardingDone } from "@/services/preferences";
 
-type Step = 0 | 1 | 2;
+type Step = 0 | 1 | 2 | 3;
 
 /** `title: null` is the welcome page: its title is the tagline, the same in every language. */
 const STEPS: { icon?: IconName; title: keyof Strings | null; body: keyof Strings }[] = [
   { title: null, body: "obWelcomeBody" },
   { icon: "location_on", title: "obLocationTitle", body: "obLocationBody" },
   { icon: "directions_car", title: "obCarTitle", body: "obCarBody" },
+  { icon: "phone_iphone", title: "obHolderTitle", body: "obHolderBody" },
 ];
 
-/** First-run flow: welcome → location → adapter. The app calibrates itself while driving (NAVIGATOR-SPEC §7). */
+/** Without GPS the gyro is the only yaw source: a phone loose in the car loses the heading (SPEC §2, phone mount). */
+const HOLDER_TIPS = ["obHolderFirm", "obHolderAngle", "obHolderMoved"] as const;
+
+/** First-run flow: welcome → location → adapter → phone holder. The app calibrates itself while driving (NAVIGATOR-SPEC §7). */
 export default function OnboardingScreen() {
   const { t } = useT();
   const palette = usePalette();
@@ -56,17 +60,19 @@ export default function OnboardingScreen() {
               }
             },
           }
-        : nav.adapter === "on"
-          ? { label: t("continue"), onPress: finish }
-          : nav.adapter === "searching"
-            ? { label: t("obdSearching"), disabled: true, onPress: () => undefined }
-            : { label: t("connect"), onPress: () => router.push("/vehicle") };
+        : step === 3
+          ? { label: t("obDone"), onPress: finish }
+          : nav.adapter === "on"
+            ? { label: t("continue"), onPress: () => setStep(3) }
+            : nav.adapter === "searching"
+              ? { label: t("obdSearching"), disabled: true, onPress: () => undefined }
+              : { label: t("connect"), onPress: () => router.push("/vehicle") };
 
   const secondary: { label: string; onPress(): void } | null =
     step === 1
       ? { label: t("notNow"), onPress: () => setStep(2) }
       : step === 2 && nav.adapter !== "on"
-        ? { label: t("skipForNow"), onPress: finish }
+        ? { label: t("skipForNow"), onPress: () => setStep(3) }
         : null;
 
   return (
@@ -133,6 +139,26 @@ export default function OnboardingScreen() {
           </ScreenCard>
         )}
 
+        {step === 3 && (
+          <>
+            <ScreenCard style={styles.tips}>
+              {HOLDER_TIPS.map((key, i) => (
+                <View
+                  key={key}
+                  style={[styles.tip, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: palette.line }]}
+                >
+                  <Icon name="check" size={18} color={palette.ok.c} />
+                  <T size={15} style={styles.flex}>
+                    {t(key)}
+                  </T>
+                </View>
+              ))}
+            </ScreenCard>
+            <T size={13} color={palette.text2} style={styles.hint}>
+              {t("obGuideNote")}
+            </T>
+          </>
+        )}
       </View>
 
       <View style={styles.buttons}>
@@ -189,6 +215,8 @@ const styles = StyleSheet.create({
   adapterCard: { flexDirection: "row", alignItems: "center", gap: 14 },
   flex: { flex: 1, gap: 3 },
   hint: { lineHeight: 18 },
+  tips: { paddingVertical: 4 },
+  tip: { minHeight: 48, flexDirection: "row", alignItems: "center", gap: 12 },
   buttons: { gap: 10 },
   button: {
     height: 54,
