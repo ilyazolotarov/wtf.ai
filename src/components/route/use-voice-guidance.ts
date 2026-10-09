@@ -4,9 +4,10 @@ import { useT } from "@/i18n/provider";
 import { Announcer } from "@/nav/routing/announcer";
 import type { RouteSnapshot } from "@/services/navigation/route-service";
 import { kvStore } from "@/services/kv-store";
+import { getRuntime } from "@/services/runtime";
 
 import { announcementPhrases } from "./voice-phrases";
-import { hushVoice, sayPhrases } from "./voice-player";
+import { hushVoice, sayPhrases, setVoiceNote } from "./voice-player";
 
 const MUTED_KEY = "route.voice.muted";
 
@@ -30,6 +31,9 @@ export function useVoiceGuidance(route: RouteSnapshot | null, speedMps: number |
   const { t, language } = useT();
   const announcer = useRef<{ destination: RouteSnapshot["destination"]; announcer: Announcer } | null>(null);
 
+  // What the voice says and what goes wrong with it, into the trip log.
+  useEffect(() => setVoiceNote((text) => getRuntime().recorder.note(text)), []);
+
   useEffect(() => {
     if (!route) {
       announcer.current = null;
@@ -44,7 +48,10 @@ export function useVoiceGuidance(route: RouteSnapshot | null, speedMps: number |
       guidance: route.guidance,
       speedMps: speedMps ?? 0,
     });
-    if (muted) return;
+    if (muted) {
+      if (said.length) getRuntime().recorder.note(`voice muted: ${said.map((a) => (a.kind === "maneuver" ? `${a.stage} ${a.maneuver.kind}` : a.kind)).join(", ")}`);
+      return;
+    }
     for (const a of said) sayPhrases(announcementPhrases(a, t, language), language);
   }, [route, speedMps, muted, t, language]);
 

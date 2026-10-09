@@ -270,7 +270,9 @@ Recorded phrases from a neural voice (Ukrainian `uk-UA-PolinaNeural`, English `e
 distance included and in words ("Через триста метрів, поверніть ліворуч"; digits get misread, "50" as "50th"), so
 the intonation and the grammar of numbers ("один кілометр", "півтора кілометра", "два кілометри") are right. `npm run voice:render` records them into `assets/voice/<lang>/` (edge-tts, silence trimmed)
 and writes the clip index; a Jest test fails when the words changed without recording again. Played with `expo-audio`
-one after another, lowering other audio meanwhile, also with the ring/silent switch on. An announcement without a
+one after another, lowering other audio meanwhile, also with the ring/silent switch on and with the app in the
+background (`shouldPlayInBackground`, the `expo-audio` plugin's background playback; without it expo-audio pauses its
+players when the app leaves the screen). An announcement without a
 clip for every phrase (a roundabout exit past the 6th) is said by the system voice (`expo-speech`, `uk-UA` /
 `en-US`), which is silent while the ring/silent switch is on.
 
@@ -281,6 +283,13 @@ maneuver already closer, after a start or re-plan: the nearest). At it, at max(4
 would follow within 6 s. Roundabout exits are ordinals ("другий з’їзд"). Also "Маршрут перебудовано" for a re-plan
 and "Ви прибули". Nothing about the current plan's maneuvers while off it. The banner's speaker button mutes it (kept
 across launches).
+
+Into the trip log: `voice say <phrase ids>` for each announcement (`(system voice)` without clips, `after <n>
+waiting` when queued), `voice muted: …` for one not said, and what went wrong: a clip that never reported its end
+(given up after 8 s), one that didn't load or play (said by the system voice instead), the system voice failing or
+never finishing (given up after 4 s + 0.12 s a character). Whatever the player does, the next announcement is said:
+on 2026-10-09 only the first one of a drive was heard, with nothing in Sentry and nothing about the voice in the
+log, and these notes are what can tell next time.
 
 ### 8.6 Route hint (R5, built, off)
 
