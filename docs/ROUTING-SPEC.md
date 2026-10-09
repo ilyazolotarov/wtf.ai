@@ -232,7 +232,10 @@ next maneuver and the distance to it, and the one after when it follows within 1
   `route plan #n (reason): length, minutes, maneuvers; states, tiles, ms in slices (wall ms)`, `route plan #n
   failed: …`, `route off|on|unsure at <km>, <m> off, ±<accuracy>, <source>/<map match>`, `route arrived …:
   <min> (planned <min>), driven <km> (planned <km>)`, `route stop at <km> of <km>`. A route planned before the trip
-  starts is logged again when it does (reason `resume`).
+  starts is logged again when it does (reason `resume`), on the recorder's `tripStarted`, once the log is open: the
+  "recording" state comes before it, and a route written then was lost (every such trip until 2026-10-09, n9ytqu).
+  Replays of those logs plan it again (`routeBeforeLog`, tools/replay/app-chain.ts): from where the drive starts to
+  the destination of the log's first plan, shown in the viewer as "rebuilt".
 
 ### 8.3 What the first drives should answer (all from the trip log)
 

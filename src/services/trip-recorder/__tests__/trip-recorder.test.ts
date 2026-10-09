@@ -86,6 +86,18 @@ test("engine start → recording → key off → complete ULog trip", async () =
     nowUs: clock.nowUs,
     appInfo: () => ({ sys_name: "wtf.ai", ver_sw: "test" }),
   });
+  // What the app writes when the trip starts (the active route): on `tripStarted` it reaches the log; on the state
+  // turning "recording" it would not (the log isn't open yet).
+  const written: string[] = [];
+  const route = (tag: string) => ({
+    timestampUs: clock.nowUs(), planId: tag === "on start" ? 1 : 2, reason: "resume" as const, status: "done" as const, fromLatDeg: 50.45, fromLonDeg: 30.52,
+    fromHeadingRad: NaN, toLatDeg: 50.46, toLonDeg: 30.53, lengthM: 1000, durationS: 120, offStartM: 0, offEndM: 0, states: 0, tiles: 0,
+    planMs: 0, wallMs: 0, slices: 0, points: 0, maneuvers: 0, graphBuilt: 0,
+  });
+  recorder.tripStarted.on(() => {
+    written.push("on start");
+    recorder.navRoute(route("on start"));
+  });
   recorder.start();
   link.startDiscovery();
   void link.connect("emu");
@@ -143,6 +155,8 @@ test("engine start → recording → key off → complete ULog trip", async () =
   // Running at trip start (not the link snapshot's stale "engine-off"), then ignition off.
   expect(log.data.engine_state.map((e) => e.state)).toEqual([3, 3, 1]);
   expect(log.data.link_stats.length).toBeGreaterThanOrEqual(1);
+  expect(written).toEqual(["on start"]);
+  expect(log.data.nav_route?.map((r) => r.plan_id)).toEqual([1]);
   } finally {
     recorder.stop();
     await link.disconnect();

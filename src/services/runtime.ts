@@ -219,11 +219,11 @@ export function getRuntime(): Runtime {
     },
   });
   routes.resume();
-  // A route planned before the trip started (engine off) goes into the trip's log when it starts.
+  // A route planned before the trip started (engine off) goes into the trip's log once it is open.
+  recorder.tripStarted.on(() => routes.logActiveRoute());
   let wasRecording = recorder.getSnapshot().state === "recording";
   recorder.subscribe(() => {
     const recording = recorder.getSnapshot().state === "recording";
-    if (recording && !wasRecording) routes.logActiveRoute();
     // Android keeps sensors and the adapter alive with the screen off only while a foreground service runs.
     if (recording !== wasRecording) {
       void setTripService(recording).then((running) => {

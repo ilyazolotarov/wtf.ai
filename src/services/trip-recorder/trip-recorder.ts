@@ -149,6 +149,12 @@ interface LinkLine {
 
 export class TripRecorder {
   readonly events = new Emitter<[string]>();
+  /**
+   * A trip's log is open: what belongs at its start goes in now (the active route). Not the "recording" state: the
+   * detector sets that before the log is opened, so what is written on it is lost (2026-10-09: a route planned before
+   * the engine started never reached its trip's log).
+   */
+  readonly tripStarted = new Emitter<[]>();
 
   private snapshot: RecorderSnapshot;
   private listeners = new Set<() => void>();
@@ -476,6 +482,7 @@ export class TripRecorder {
     this.events.emit(`trip started (${reason})`);
     this.update({ current: { ...this.current }, lastError: null });
     this.syncSensors();
+    this.tripStarted.emit();
   }
 
   private endTrip(reason: EndReason, tUs: number): void {
