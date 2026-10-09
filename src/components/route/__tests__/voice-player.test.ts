@@ -10,13 +10,8 @@ const mockPlayers: { clip: number; listener: Listener | null; played: boolean; p
 let mockFailPlay = false;
 let mockFailRemove = false;
 
-const mockSession: boolean[] = [];
 jest.mock("expo-audio", () => ({
   setAudioModeAsync: jest.fn(() => Promise.resolve()),
-  setIsAudioActiveAsync: jest.fn((active: boolean) => {
-    mockSession.push(active);
-    return Promise.resolve();
-  }),
   createAudioPlayer: jest.fn((clip: number) => {
     const p = { clip, listener: null as Listener | null, played: false, plays: 0, seeks: 0, failPlay: mockFailPlay, failRemove: mockFailRemove };
     mockPlayers.push(p);
@@ -51,14 +46,8 @@ jest.mock("expo-speech", () => ({
 jest.mock("../voice-clips", () => ({ VOICE_CLIPS: { en: { "now-left": 1, "now-right": 2, "then-left": 3 } } }));
 
 const notes: string[] = [];
-const microtasks = async () => {
-  for (let i = 0; i < 5; i++) await Promise.resolve();
-};
-/** Lets the player go on, the music's 300 ms to go down included. */
 const flush = async () => {
-  await microtasks();
-  jest.advanceTimersByTime(300);
-  await microtasks();
+  for (let i = 0; i < 5; i++) await Promise.resolve();
 };
 const finish = (i: number) => mockPlayers[i].listener?.({ didJustFinish: true });
 
@@ -67,7 +56,6 @@ beforeEach(() => {
   hushVoice();
   mockPlayers.length = 0;
   mockSpoken.length = 0;
-  mockSession.length = 0;
   notes.length = 0;
   mockFailPlay = mockFailRemove = false;
   setVoiceNote((t) => notes.push(t));
@@ -83,29 +71,6 @@ describe("voice player", () => {
     await flush();
     expect(mockPlayers.map((p) => p.clip)).toEqual([1, 3]);
     expect(mockPlayers[1].played).toBe(true);
-  });
-
-  test("the music stays down through an announcement, from before its first clip to after its last", async () => {
-    sayPhrases([{ id: "now-left", text: "Turn left" }, { id: "then-left", text: "then left" }], "en");
-    await microtasks();
-    // Down first, the clip only once it is.
-    expect(mockSession).toEqual([true]);
-    expect(mockPlayers).toHaveLength(0);
-    await flush();
-    finish(0);
-    await flush();
-    expect(mockPlayers.map((p) => p.clip)).toEqual([1, 3]);
-    finish(1);
-    await flush();
-    expect(mockSession).toEqual([true]);
-    // Another announcement soon after keeps it down.
-    sayPhrases([{ id: "now-right", text: "Turn right" }], "en");
-    await flush();
-    expect(mockPlayers.at(-1)!.clip).toBe(2);
-    finish(2);
-    await flush();
-    jest.advanceTimersByTime(500);
-    expect(mockSession).toEqual([true, false]);
   });
 
   test("a clip that never reports its end holds the next announcement up only briefly", async () => {

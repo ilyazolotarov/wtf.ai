@@ -275,9 +275,8 @@ the intonation and the grammar of numbers ("один кілометр", "пів�
 and writes the clip index; a Jest test fails when the words changed without recording again. Each clip is compressed
 and brought to −15 LUFS, peaks under −1.5 dBFS (edge-tts gives about −21 LUFS, streamed music plays near −14: the voice
 was hard to hear over music from the same phone). Played with `expo-audio` one after another, lowering other audio
-meanwhile: on iOS the voice holds the audio session from 300 ms before an announcement's first clip (iOS fades the
-music down) to 500 ms after its last (expo-audio's own on/off per clip let the first syllables come over full music
-and the music rise between phrases). Also with the ring/silent switch on and with the app in the
+meanwhile (the music stays down through an announcement: expo-audio releases the session 100 ms after a clip only when
+nothing plays by then), also with the ring/silent switch on and with the app in the
 background (`shouldPlayInBackground`, the `expo-audio` plugin's background playback; without it expo-audio pauses its
 players when the app leaves the screen). The voice goes wherever the phone's audio goes: to a car's Bluetooth while it
 is connected, silent when the car plays another source (CarPlay of another phone), and the app can't tell. When that

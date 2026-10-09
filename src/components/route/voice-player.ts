@@ -1,4 +1,4 @@
-import { createAudioPlayer, setAudioModeAsync, setIsAudioActiveAsync } from "expo-audio";
+import { createAudioPlayer, setAudioModeAsync } from "expo-audio";
 import * as Speech from "expo-speech";
 import { Platform } from "react-native";
 
@@ -14,15 +14,6 @@ const MAX_REPLAYS = 2;
 /** The system voice: its end is waited for at most this long plus this much per character. */
 const SPEECH_TIMEOUT_MS = 4000;
 const SPEECH_MS_PER_CHAR = 120;
-/**
- * iOS lowers other audio (music) while the app's audio session is on, fading it down. expo-audio turns the session on
- * at each clip and off after it, so the first syllables came over music still loud and it rose between phrases: the
- * voice holds the session itself, from this long before an announcement's first clip…
- */
-const DUCK_LEAD_MS = 300;
-/** …to this long after the last (another announcement right after keeps the music down). */
-const DUCK_HOLD_MS = 500;
-const HOLD_SESSION = Platform.OS === "ios";
 
 const queue: Item[] = [];
 let busy = false;
@@ -30,9 +21,6 @@ let busy = false;
 let generation = 0;
 let stopCurrent: (() => void) | null = null;
 let audioMode: Promise<void> | null = null;
-/** The session the voice holds on (iOS), settled once the music is down. */
-let session: Promise<void> | null = null;
-let releaseTimer: ReturnType<typeof setTimeout> | undefined;
 /** Where the voice says what it did (the trip log's notes): the only way to tell later why a drive stayed silent. */
 let note: (text: string) => void = () => {};
 
@@ -65,28 +53,12 @@ export function hushVoice(): void {
   stopCurrent?.();
   stopCurrent = null;
   void Speech.stop();
-  releaseSession(0);
-}
-
-/** The music back up: `afterMs` after the voice falls quiet, unless it speaks again by then. */
-function releaseSession(afterMs: number): void {
-  clearTimeout(releaseTimer);
-  if (!session) return;
-  const off = () => {
-    session = null;
-    setIsAudioActiveAsync(false).catch((e: unknown) => note(`voice: audio session not released: ${String(e)}`));
-  };
-  if (afterMs > 0) releaseTimer = setTimeout(off, afterMs);
-  else off();
 }
 
 function next(): void {
   const item = queue.shift();
   busy = item !== undefined;
-  if (!item) {
-    releaseSession(DUCK_HOLD_MS);
-    return;
-  }
+  if (!item) return;
   const gen = generation;
   let finished = false;
   // Exactly once per item, whatever reports its end (or fails to).
@@ -132,14 +104,6 @@ async function playClip(item: Extract<Item, { clip: number }>, gen: number, done
   });
   await audioMode;
   if (gen !== generation) return;
-  if (HOLD_SESSION) {
-    clearTimeout(releaseTimer);
-    session ??= setIsAudioActiveAsync(true)
-      .then(() => new Promise<void>((resolve) => setTimeout(resolve, DUCK_LEAD_MS)))
-      .catch((e: unknown) => note(`voice: audio session not held: ${String(e)}`));
-    await session;
-    if (gen !== generation) return;
-  }
   // Said by the system voice instead, and the audio mode set again before the next clip.
   const fallBack = (why: string) => {
     note(`voice clip ${item.id} ${why}: system voice instead`);
@@ -148,7 +112,7 @@ async function playClip(item: Extract<Item, { clip: number }>, gen: number, done
   };
   let player: ReturnType<typeof createAudioPlayer>;
   try {
-    player = createAudioPlayer(item.clip, { keepAudioSessionActive: HOLD_SESSION });
+    player = createAudioPlayer(item.clip);
   } catch (e) {
     fallBack(`not loaded (${String(e)})`);
     return;
