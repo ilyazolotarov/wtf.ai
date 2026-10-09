@@ -39,6 +39,11 @@ export default function DeveloperScreen() {
           onValueChange={(v) => setDevSettings({ routeHint: v })}
           label={t("routeHintSetting")}
         />
+        <SwitchRow
+          value={dev.phoneOnly}
+          onValueChange={(v) => setDevSettings({ phoneOnly: v })}
+          label={t("phoneOnlySetting")}
+        />
         <CycleRow
           labelKey="speedCap"
           value={speedCap}

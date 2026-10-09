@@ -461,7 +461,7 @@ Measured on the 7 drives of 2026-10-04 (`mag_raw`, 19.4 Hz):
   spoofed fix as the ghost. **After the navigator's own dot** (the engine went off, the link dropped), only a
   satellite fix replaces it: the dot is where the car stopped, and a Wi-Fi/cell fix is hundreds of metres to
   kilometres wide under jamming — drawing it instead threw the car 1–10 km at the end of every trip of
-  2026-10-06.
+  2026-10-06. With phone-only mode on, §9.6 instead.
 - **Trip log:**
   - `nav_estimate` (TRIP-LOGGER-SPEC §6.3): every position the map was given (~2–3 Hz). It holds the drawn
     position and radius, mode, source, trust, heading and its σ, `k_s`, the GNSS lag in use, the parked-pose status,
@@ -478,6 +478,61 @@ Measured on the 7 drives of 2026-10-04 (`mag_raw`, 19.4 Hz):
   `npm run replay -- --app-cuts` (and `replay:mm`) cuts the same windows. Switching the button off ends an outage.
 - **Tests:** unit tests replay synthetic drives through the service. The 7 real logs replayed through it (real
   delivery delays) match the offline replay: median 0.1–1 m apart, identical learned values.
+
+### 9.6 Phone-only mode (experimental; Developer settings → "Navigate without an adapter")
+
+- **What:** without OBD speed (no adapter, or none for 10 s) and while GNSS isn't trusted (no satellite fix accepted
+  in the last 3 s), the map shows `PhoneNavigator` (`src/nav/phone/`): the phone's own speed (`imu-speed.ts`) on the
+  turn-anchored map matching (`turn-tracker.ts`), SPEC §3.10. `source: 'dr'`; the circle is the shown hypothesis'
+  along-road σ combined with the spread of the others (≤ 1 km); other roads it may be on are `alternatives`.
+- **Not good enough to go unattended:** on the 13 jammed city drives it is off the drawn route 27 % of the moving time
+  from their drawn starts (`replay:regress --speed phone-app`), and starting each drive where it ended the one before
+  it compounds to most of the time. The driver's placing (§6.2) is part of using it: a placing every ~4 min when the
+  dot is 100 m off brings it to ~9 % (simulated, `replay:turns --taps`). Placing is offered only while the car
+  stands.
+- **Graph:** its own reader of the active region's graph (`openActiveRoadGraph`), moved into a frame of its own at
+  each start, so the navigator's frame and tile cache are not touched; a new region or graph file reopens it.
+- **Start**, newest word first: the driver's placing (held manual position); the newest of the car's parked pose
+  and phone-only's own (key `phone`: without an adapter the phone doesn't know which car it is in); a trusted
+  satellite fix with a course (≥ 3 m/s). Without one it waits (`nav phone-only waits for a start …`) and the map
+  shows phone GNSS as without the mode.
+- **Fixes:** a trusted satellite fix (integrity passed, GNSS trusted, ≤ 20 m) re-anchors it at most every 2 s, with
+  its course when moving; Wi-Fi/cell fixes weigh its hypotheses; untrusted satellite fixes are ignored.
+- **The driver's placing** restarts it there (keeping the learned speed scale) and is shown as the manual position
+  (§6.3) while the car stands; once the phone measured 30 m of driving it is released (`nav manual position
+  released: the car drives (phone)`), as OBD speed releases it otherwise.
+- **Kept:** how the phone sits in the car (`PhoneMount`, per car or `phone`, §7.4); its pose when the car has stood
+  20 s (there is no engine-off without an adapter) and when the service stops with the car standing, under
+  `phone` and the car.
+- **On a route** (`setPhoneRoute`, the active plan's polyline; the driver said they will follow it, UI-SPEC §6.3):
+  the car is taken to be on it. `RouteFollower` (`src/nav/mapmatch/route-follower.ts`, SPEC §3.10) places it along
+  the route by the turns it makes; the dot is there, heading along the route, its circle the spread along it, no
+  alternatives. The tracker keeps running, moved to the follower's position at each stop and after each turn that
+  fits the route (0.6). Joined when the start, a placing or a trusted fix is within 30 m (+ its σ) of the route and
+  heads along it, or a new plan within 100 m of the dot. A new plan that starts within 300 m of the followed route,
+  ahead of the car or up to 300 m behind it, carries it on: the old route up to there, then the new one, from where
+  the car was with the scale it had learned (a replay's logged re-plan starts where the car really was, kilometres
+  ahead of a dot that lags on a highway; dropping to the tracker there took a wrong turn far behind on gc6xib and
+  never came back). The handover keeps the follower's gyro heading, the turn under way and its scale, and puts the
+  car where it was on the old route, else on the new route where the dot is, else at the new route's start (carrying
+  its whole belief over re-plans every few seconds piled up a lagging tail: jyxdtb 6 % → 25 %). **The nearest turn of
+  the route:** a turn the gyro sees that fits nowhere near where the follower has the car (best fit while it is in
+  the 80 m window < 0.5) puts the car at the route's nearest turn like it, up to 300 m back or max(1 km, 2 × the
+  phone's distance since the last turn that fitted) ahead, nearer ones likelier, with the scale the jump implies
+  (gc6xib's T-junction off the highway: 7.6 km ahead of the lagging dot). **Coarse fixes** up to ±5 km weigh it (the
+  tracker's limit is 400 m; on a route a ±3 km cell fix still tells far-apart places apart), and one that puts the
+  car well outside where it was taken to be (expected likelihood < 0.05, > max(500 m, 2σ) off) moves it to the
+  nearest stretch of the route that fits it, within the same reach. A placing or fix farther has left it (the tracker alone),
+  and the tracker within 30 m of it, heading along it (45°), for 5 s rejoins it. Turns alone can't tell a driver who
+  left it: on the bench a turn on the route fits 0.97 at the median and one off it still 0.81 (the follower slides
+  to another of the route's turns), so leaving it is the driver's placing, or GPS. On the 13 jammed city drives,
+  each started where its drawing starts and following the logged routes where the drawing says they were followed,
+  else the drawn route (`replay:regress --speed phone-app --phone-route`): off the drawn route 3 % of the moving
+  time, against 27 % without a route; the two long highway drives 53 % and 57 % (98 % and 57 % without), all of it
+  the dot lagging: the phone reads 40–80 km/h at 125–135 and the city prior pulls it towards 43.
+- **Notes:** `nav phone-only on|off`, `nav phone-only engine on <graph>[, phone mount from storage]`,
+  `nav phone-only start (<from>)`, `nav phone-only route: follows it | off it (the tracker alone) | none`. The trip
+  log's `nav_phone_only` info field: the setting at the trip's start.
 
 ### 9.1 Field results (2026-10-04, 7 drives, `nav_estimate`)
 

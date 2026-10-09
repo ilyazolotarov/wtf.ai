@@ -1,6 +1,7 @@
 // The Stage 1 navigator in the app (NAVIGATOR-SPEC §9): phone GNSS + IMU from SensorService and
 // OBD speed from the vehicle link, fused by `Navigator` into the map's position. Without OBD
-// speed it shows phone GNSS as before, because dead reckoning needs the car's speed.
+// speed it shows phone GNSS as before, because dead reckoning needs the car's speed; or, with the experimental
+// phone-only mode on (§9.6), the phone's own estimate (`PhoneNavigator`) while GNSS isn't trusted.
 
 import type { LocationPermissionResponse } from "expo-location";
 
@@ -8,6 +9,7 @@ import type { MapMatchConfig, MapMatchState } from "@/nav/mapmatch/particle-filt
 import { UpdateTiming, type UpdateTimingSummary } from "@/nav/mapmatch/update-timing";
 import type { FixOutcome, MapMatchEstimate, NavConfig, NavMode, ParkedPose } from "@/nav/navigator";
 import { Navigator } from "@/nav/navigator";
+import { PhoneNavigator, type PhoneGraph, type PhonePose, type PhoneRouteState } from "@/nav/phone/phone-navigator";
 import { haversineM } from "@/nav/geo";
 import { FUSED_WINDOW_US, puckAccuracyM, puckHypothesis } from "@/nav/position/puck";
 import type { PositionEstimate, PositionSourceKind, RawGnssFix, SimulatedOutage } from "@/nav/position/types";
@@ -71,6 +73,19 @@ const OVERLAY_PARTICLES = 200;
  * growing at town driving speed, since without OBD speed nothing says how far the car went.
  */
 const HELD_FIX_GROWTH_MPS = 15;
+/**
+ * Phone-only mode (§9.6): the key its phone mount is kept under when no car was ever connected, and its own parked
+ * pose (also kept per car): without an adapter the phone doesn't know which car it is in, and the pose is where its
+ * navigation left off.
+ */
+export const PHONE_CAR = "phone";
+/** Standing this long, the phone-only estimate is saved as the parked pose (no engine-off without an adapter). */
+const PHONE_PARK_AFTER_S = 20;
+/** The service stops (the map closed, the app going away): a car standing this long is parked there. */
+const PHONE_PARK_AT_STOP_S = 2;
+const PHONE_PARK_HEADING_SIGMA_RAD = (10 * Math.PI) / 180;
+/** The phone measured this far since the driver's placing: the car drives, the placing is released. */
+const PHONE_RELEASE_MANUAL_M = 30;
 
 export interface NavigatorLink {
   onSpeed(listener: (s: SpeedSample) => void): () => void;
@@ -142,6 +157,8 @@ export interface NavigatorServiceDeps {
   permission?: { get(): Promise<LocationPermissionResponse>; request(): Promise<LocationPermissionResponse> };
   /** A replay looking in: each navigator as it is made, each fix's outcome, the fixes a simulated outage withholds. */
   observer?: NavigatorObserver;
+  /** A reader of the active region's road graph of its own, for phone-only mode (§9.6); null: none. */
+  openPhoneGraph?(): { key: string; graph: PhoneGraph; close(): void } | null;
 }
 
 export interface ServiceClock {
@@ -240,6 +257,9 @@ export class NavigatorService implements PositionSource {
   private loop: MapMatchLoop = "open";
   /** The route's edges for the filter (ROUTING-SPEC §8.6), or null. */
   private routeHint: number[] | null = null;
+  /** The active route's polyline, for phone-only mode to follow (§9.6); and the state it last noted. */
+  private phoneRoute: { lat: number; lon: number }[] | null = null;
+  private phoneRouteState: PhoneRouteState = "none";
   /** Road corrections already summarised in the trip log. */
   private notedRoad = { heading: 0, position: 0 };
   private overlayStale = true;
@@ -248,6 +268,9 @@ export class NavigatorService implements PositionSource {
   private starts = { count: 0, totalMs: 0, maxMs: 0 };
   private timingSince = 0;
   private interval = { count: 0, totalMs: 0, maxMs: 0 };
+  /** Developer setting: navigation from the phone alone while no OBD speed comes (§9.6). */
+  private phoneOnly = false;
+  private phone: { engine: PhoneNavigator; graph: { key: string; close(): void }; car: string; started: boolean; parkedSaved: boolean } | null = null;
 
   private readonly clock: ServiceClock;
 
@@ -267,12 +290,31 @@ export class NavigatorService implements PositionSource {
     this.note(`nav map-match loop ${loop}`);
   }
 
+  /**
+   * Experimental (§9.6): without OBD speed, show the phone's own dead reckoning on the map (its speed from the IMU,
+   * map matching by turns) instead of phone GNSS, while GNSS isn't trusted.
+   */
+  setPhoneOnly(on: boolean): void {
+    if (on === this.phoneOnly) return;
+    this.phoneOnly = on;
+    this.note(`nav phone-only ${on ? "on" : "off"}`);
+    if (on) this.openPhone();
+    else this.closePhone();
+    if (this.timer) this.publish();
+  }
+
   /** The route the driver follows, for map matching (ROUTING-SPEC §8.6); null: none. Kept for a new navigator. */
   setRouteHint(edges: number[] | null): void {
     if (edges === this.routeHint || (!edges && !this.routeHint)) return;
     this.routeHint = edges;
     this.nav?.setRouteHint(edges);
     this.note(edges ? `nav route hint: ${edges.length} edges` : "nav route hint off");
+  }
+
+  /** The active route's polyline (null: none): phone-only mode takes the car to follow it (§9.6). */
+  setPhoneRoute(points: { lat: number; lon: number }[] | null): void {
+    this.phoneRoute = points;
+    this.phone?.engine.setRoute(points);
   }
 
   /**
@@ -288,6 +330,11 @@ export class NavigatorService implements PositionSource {
     this.note(`nav position set by the driver: ${at.lat.toFixed(6)},${at.lon.toFixed(6)}${moved}, heading ${Math.round(degrees360(headingRad))}°`);
     this.holdManual({ lat: at.lat, lon: at.lon, headingRad, placedAt: now, confirmedAt: now });
     this.applyManual();
+    this.phone?.engine.place({ lat: at.lat, lon: at.lon, headingRad, posSigmaM: USER_POSITION_SIGMA_M, headingSigmaRad: USER_HEADING_SIGMA_RAD });
+    if (this.phone && !this.phone.started) {
+      this.phone.started = true;
+      this.note("nav phone-only start (the driver's placing)");
+    }
     this.flush(this.deps.nowUs() - REORDER_US);
     this.publish();
     return true;
@@ -412,6 +459,7 @@ export class NavigatorService implements PositionSource {
 
   /** Online values worth keeping: written now (also every 30 s and when the navigator stops). */
   saveCalibration(): void {
+    this.savePhone();
     const nav = this.nav;
     if (!nav) return;
     this.lastSaveAt = this.clock.nowMs();
@@ -471,7 +519,14 @@ export class NavigatorService implements PositionSource {
     const { sensors, link } = this.deps;
     this.createNavigator();
     this.unsubscribers.push(
-      this.deps.roadGraph?.subscribe(() => this.applyRoadGraph()) ?? (() => {}),
+      this.deps.roadGraph?.subscribe(() => {
+        this.applyRoadGraph();
+        // Another region or graph file: the phone's reader follows.
+        if (this.phone && this.phone.graph.key !== (this.deps.roadGraph?.current()?.key ?? null)) {
+          this.closePhone();
+          this.openPhone();
+        }
+      }) ?? (() => {}),
       sensors.gnss.on((r) => this.onGnss(r)),
       sensors.imu.on((batch) => this.onImu(batch.motion, batch.mag)),
       link.onSpeed((s) => this.onSpeed(s)),
@@ -487,11 +542,13 @@ export class NavigatorService implements PositionSource {
     );
     this.lastSaveAt = this.clock.nowMs();
     this.timer = this.clock.setInterval(() => this.tick(), TICK_MS);
+    this.openPhone();
   }
 
   private detach(): void {
     this.flush(Infinity);
     this.saveCalibration();
+    this.closePhone();
     this.noteCompassSummary();
     this.noteMapMatchTiming();
     this.noteRoadCorrections();
@@ -503,6 +560,62 @@ export class NavigatorService implements PositionSource {
     this.nav = null;
     this.pending = [];
     this.setMode("none");
+  }
+
+  // ---- phone-only mode (§9.6) ----
+
+  private phoneCar(): string {
+    return this.vin ?? this.deps.link.expectedVin() ?? PHONE_CAR;
+  }
+
+  /** The phone engine on its own graph reader, started from the newest word on where the car is. */
+  private openPhone(): void {
+    if (!this.phoneOnly || this.phone || !this.timer || !this.deps.openPhoneGraph) return;
+    const g = this.deps.openPhoneGraph();
+    if (!g) {
+      this.note("nav phone-only: no road graph");
+      return;
+    }
+    const car = this.phoneCar();
+    const mount = this.deps.calibration.phoneMount(car);
+    this.phone = { engine: new PhoneNavigator(g.graph, {}, mount), graph: g, car, started: false, parkedSaved: false };
+    this.note(`nav phone-only engine on ${g.key}${mount ? ", phone mount from storage" : ""}`);
+    const m = this.manual;
+    const poses = [this.deps.calibration.parkedPose(car), this.deps.calibration.parkedPose(PHONE_CAR)].filter((x) => x !== null);
+    const pose = poses.sort((a, b) => b.savedAt - a.savedAt)[0] ?? null;
+    const start: (PhonePose & { from: string }) | null = m
+      ? { lat: m.lat, lon: m.lon, headingRad: m.headingRad, posSigmaM: USER_POSITION_SIGMA_M, headingSigmaRad: USER_HEADING_SIGMA_RAD, from: "manual position" }
+      : pose
+        ? { ...widen(pose), from: `parked pose, ${Math.round((this.clock.nowMs() - pose.savedAt) / 60_000)} min old` }
+        : null;
+    this.phone.engine.setRoute(this.phoneRoute);
+    if (start) {
+      this.phone.engine.start(start);
+      this.phone.started = true;
+      this.note(`nav phone-only start (${start.from})`);
+    } else this.note("nav phone-only waits for a start: a GPS fix with a course, or the driver's placing");
+  }
+
+  private closePhone(): void {
+    if (!this.phone) return;
+    this.savePhone(PHONE_PARK_AT_STOP_S);
+    this.phone.graph.close();
+    this.phone = null;
+  }
+
+  /** The phone mount, and the pose once the car has stood a while (there is no engine-off without an adapter). */
+  private savePhone(parkedAfterS = PHONE_PARK_AFTER_S): void {
+    const p = this.phone;
+    if (!p) return;
+    const mount = p.engine.mount;
+    if (mount) this.deps.calibration.savePhoneMount(p.car, mount, this.clock.nowMs());
+    const withObd = this.deps.nowUs() - this.lastObdUs < OBD_TIMEOUT_US;
+    const e = p.engine.estimate();
+    if (!withObd && e && p.engine.stillForS >= parkedAfterS) {
+      const pose = { lat: e.lat, lon: e.lon, headingRad: e.headingRad, posSigmaM: e.accuracyM, headingSigmaRad: PHONE_PARK_HEADING_SIGMA_RAD };
+      this.deps.calibration.saveParkedPose(PHONE_CAR, pose, this.clock.nowMs());
+      if (p.car !== PHONE_CAR) this.deps.calibration.saveParkedPose(p.car, pose, this.clock.nowMs());
+    }
   }
 
   private createNavigator(): void {
@@ -686,6 +799,20 @@ export class NavigatorService implements PositionSource {
       this.pending.push({ tUs: m.timestampUs, imu: { tUs: m.timestampUs, gyro: m.gyro, gravity: m.gravity, userAccel: m.userAccel } });
     }
     for (const f of mag) this.pending.push({ tUs: f.timestampUs, mag: { tUs: f.timestampUs, field: [f.v[0], f.v[1], f.v[2]] } });
+    const phone = this.phone;
+    if (phone) {
+      for (const m of motion) phone.engine.onImu({ tUs: m.timestampUs, gyro: m.gyro, gravity: m.gravity, userAccel: m.userAccel });
+      // Parked: save the pose once per stop, at once (no engine-off without an adapter, and the app may be killed).
+      if (phone.engine.stillForS < PHONE_PARK_AFTER_S) phone.parkedSaved = false;
+      else if (!phone.parkedSaved && phone.started) {
+        phone.parkedSaved = true;
+        this.savePhone();
+      }
+      if (this.manual && phone.started && phone.engine.distanceSinceStartM > PHONE_RELEASE_MANUAL_M && this.deps.nowUs() - this.lastObdUs >= OBD_TIMEOUT_US) {
+        this.note("nav manual position released: the car drives (phone)");
+        this.dropManual();
+      }
+    }
     this.flush(this.deps.nowUs() - REORDER_US);
     // A fix the navigator just took: phone GNSS shows it now rather than at the next tick.
     if (this.shownChanged && this.deps.nowUs() - this.lastObdUs >= OBD_TIMEOUT_US) this.publish();
@@ -730,6 +857,14 @@ export class NavigatorService implements PositionSource {
           this.shownChanged = true;
         }
         if (out.integrity === "ok" && nav.trustAt(input.tUs) === "TRUSTED") this.checkManualAgainst(input.fix);
+        const phone = this.phone;
+        if (phone) {
+          phone.engine.onFix(input.fix, out.integrity === "ok" && nav.trustAt(input.tUs) === "TRUSTED");
+          if (!phone.started && phone.engine.started) {
+            phone.started = true;
+            this.note(`nav phone-only start (GPS fix ±${Math.round(input.fix.hAccM)} m)`);
+          }
+        }
         if (out.status === "accepted" && input.fix.speedMps !== undefined) this.lastAcceptedSatUs = input.tUs;
         if (out.status === "init") this.note(`nav mode dr (${out.initMethod})`);
         if (out.relocated) this.note(`nav track lost: moved to the Wi-Fi/cell fixes (${Math.round(out.errorM ?? 0)} m away, ±${Math.round(input.fix.hAccM)} m)`);
@@ -844,6 +979,33 @@ export class NavigatorService implements PositionSource {
           rawGnss: raw,
         });
       }
+      return;
+    }
+    const phoneEngine = this.phoneOnly && !withObd ? this.phone?.engine : undefined;
+    const phone = phoneEngine?.estimate() ?? null;
+    for (const n of phoneEngine?.takeNotes() ?? []) this.note(`nav phone-only route: ${n}`);
+    if (phoneEngine?.started && phoneEngine.routeState !== this.phoneRouteState) {
+      this.phoneRouteState = phoneEngine.routeState;
+      this.note(`nav phone-only route: ${{ following: "follows it", off: "off it (the tracker alone)", none: "none" }[this.phoneRouteState]}`);
+    }
+    const gpsGood = trust === "TRUSTED" && nowUs - this.lastAcceptedSatUs < FUSED_WINDOW_US;
+    if (phone && !gpsGood) {
+      // Phone-only (§9.6): its dead reckoning, the circle as wide as its doubt, other roads it may be on.
+      this.set({
+        lat: phone.lat,
+        lon: phone.lon,
+        headingRad: phone.headingRad,
+        ...(phone.speedMps !== undefined ? { speedMps: phone.speedMps } : {}),
+        accuracyM: phone.accuracyM,
+        ...(phone.alternatives.length ? { alternatives: phone.alternatives } : {}),
+        source: "dr",
+        trust,
+        timestamp: now,
+        lastTrustedFixAt,
+        // Since its start, the driver's placing or a GPS fix: the map offers the placing after 5 km of it.
+        distanceSinceTrustedM: phoneEngine!.distanceSinceStartM,
+        rawGnss: fix ? rawOf(fix) : undefined,
+      });
       return;
     }
     if (!nav || !estimate || !withObd) {

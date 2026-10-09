@@ -39,9 +39,13 @@ export interface DevSettings {
   mapMatchLoop: MapMatchLoop;
   /** Map matching told the route (ROUTING-SPEC §8.6): at junctions it favours the route's exit. */
   routeHint: boolean;
+  /** Experimental navigation without an OBD adapter (NAVIGATOR-SPEC §9.6). */
+  phoneOnly: boolean;
 }
 
 const DEV_SETTINGS_KEY = "dev.settings";
+/** Tiles the phone-only navigator's own graph reader keeps decoded (a few km around the car). */
+const PHONE_GRAPH_CACHE_TILES = 64;
 
 export interface Runtime {
   link: VehicleLinkCore;
@@ -72,6 +76,7 @@ export function getRuntime(): Runtime {
     outageButton: false,
     mapMatchLoop: APP_NAV_DEFAULTS.mapMatchLoop!,
     routeHint: APP_ROUTE_HINT,
+    phoneOnly: false,
     ...(kvStore.getJson<Partial<DevSettings>>(DEV_SETTINGS_KEY) ?? {}),
   };
   const devListeners = new Set<() => void>();
@@ -106,6 +111,7 @@ export function getRuntime(): Runtime {
       // The navigator version this drive starts with (a change mid-drive is a note).
       nav_mapmatch_loop: dev.mapMatchLoop,
       nav_route_hint: dev.routeHint ? "on" : "off",
+      nav_phone_only: dev.phoneOnly ? "on" : "off",
     }),
   });
   recorder.start();
@@ -174,9 +180,12 @@ export function getRuntime(): Runtime {
     logMapMatch: (record) => recorder.navMapMatch(record),
     // Map matching on the active offline region's road graph (MAPMATCH-SPEC §11).
     roadGraph: activeRoadGraph,
+    // Phone-only mode reads the graph in a frame of its own (NAVIGATOR-SPEC §9.6).
+    openPhoneGraph: () => openActiveRoadGraph(PHONE_GRAPH_CACHE_TILES),
     permission: { get: Location.getForegroundPermissionsAsync, request: Location.requestForegroundPermissionsAsync },
   });
   position.setMapMatchLoop(dev.mapMatchLoop);
+  position.setPhoneOnly(dev.phoneOnly);
   // During a trip the navigator keeps running with the map off screen, so dead reckoning
   // doesn't start over each time the app comes back.
   const syncKeepAlive = () => position.setKeepAlive(recorder.getSnapshot().state === "recording");
@@ -197,7 +206,10 @@ export function getRuntime(): Runtime {
     openGraph: () => openActiveRoadGraph(ROUTER_CACHE_TILES),
     nowUs,
     store: kvStore,
-    onRoute: (legs) => position.setRouteHint(dev.routeHint && legs ? legs.map((l) => l.edge) : null),
+    onRoute: (plan) => {
+      position.setRouteHint(dev.routeHint && plan ? plan.legs.map((l) => l.edge) : null);
+      position.setPhoneRoute(plan ? plan.coordinates : null);
+    },
     note: (text) => recorder.note(text),
     log: {
       route: (r) => recorder.navRoute(r),
@@ -254,6 +266,7 @@ export function getRuntime(): Runtime {
       // Hiding the button ends a simulated outage, so it can't be left on unseen.
       if (patch.outageButton === false) position.setSimulatedOutage(false);
       if (patch.mapMatchLoop) position.setMapMatchLoop(patch.mapMatchLoop);
+      if (patch.phoneOnly !== undefined) position.setPhoneOnly(patch.phoneOnly);
       if (patch.routeHint !== undefined) {
         const plan = routes.getSnapshot()?.plan;
         position.setRouteHint(patch.routeHint && plan ? plan.legs.map((l) => l.edge) : null);

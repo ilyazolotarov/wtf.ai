@@ -202,6 +202,7 @@ export const en = {
   showParticles: "Map matching on the map (particles)",
   outageButton: "GPS outage button on the map",
   routeHintSetting: "Tell map matching the route",
+  phoneOnlySetting: "Navigate without an adapter (experimental)",
   mapMatchLoop: "Navigator version",
   loopOpen: "Open loop (map matching only watches)",
   loopHeading: "Road heading",
@@ -306,6 +307,15 @@ export const en = {
   obdAdapter: "OBD adapter",
   // Route guidance (ROUTING-SPEC §8).
   routeHere: "Route here",
+  // A route without an adapter (UI-SPEC §6.3).
+  noAdapterRouteTitle: "Navigating without an adapter",
+  noAdapterRouteSetPosition: "1. Set your position on the map while the car stands: without an adapter the app can't find the car by itself.",
+  noAdapterRoutePositionSet: "1. Position set {age}.",
+  noAdapterRouteGps: "1. GPS has your position now. If it drops out on the way, the app keeps track of the car by itself.",
+  noAdapterRouteStopToSet: "1. Stop the car, then set your position on the map: without an adapter the app can't find the car by itself.",
+  noAdapterRouteFollow: "2. Follow the route exactly. The app keeps track of the car by its turns, and a turn off the route loses it: then stop and set your position again.",
+  noAdapterRouteSetButton: "Set position",
+  noAdapterRouteAgree: "I'll follow the route",
   droppedPin: "Dropped pin",
   planningRoute: "Planning route…",
   replanning: "Off route, planning again…",

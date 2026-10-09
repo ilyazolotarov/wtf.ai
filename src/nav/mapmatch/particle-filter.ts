@@ -138,6 +138,12 @@ export interface MapMatchConfig {
   /** Per-particle distance scale: prior σ and jitter at resampling. */
   dksSigma: number;
   dksJitter: number;
+  /**
+   * Random walk of the per-particle distance scale while moving, per √s, and its bound. 0 for OBD, whose scale error
+   * is constant; a speed from the phone alone is off by an amount that wanders between turns (imu-speed.ts).
+   */
+  dksWalk: number;
+  dksMax: number;
   /** White along-track noise, share of each step. */
   alongNoise: number;
   /** Off-road heading noise, rad/√m. */
@@ -237,6 +243,8 @@ export const DEFAULT_MAP_MATCH: MapMatchConfig = {
   ekfPositionFloorM: 10,
   dksSigma: 0.02,
   dksJitter: 0.002,
+  dksWalk: 0,
+  dksMax: 0.5,
   alongNoise: 0.03,
   offRoadHeadingNoise: 0.01,
   offRoadLogPenalty: Math.log(0.5),
@@ -1020,7 +1028,9 @@ export class ParticleFilter {
   private propagate(step: OdometryStep, uTurned: boolean): void {
     const c = this.config;
     const p = this.p;
+    const walk = c.dksWalk > 0 && step.dsM > 0 ? c.dksWalk * Math.sqrt(Math.max(0, step.t1Us - step.t0Us) / 1e6) : 0;
     for (let i = 0; i < p.size; i++) {
+      if (walk > 0) p.dks[i] = Math.max(-c.dksMax, Math.min(c.dksMax, p.dks[i] + walk * this.random.gauss()));
       const ds = Math.max(0, step.dsM * (1 + p.dks[i]) + c.alongNoise * step.dsM * this.random.gauss());
       if (p.offRoad[i]) {
         this.offRoadStep(i, ds, step.dpsiRad);

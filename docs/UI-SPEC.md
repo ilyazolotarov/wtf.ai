@@ -145,6 +145,10 @@ Depends on Phase 2.
 - **Test tools** (Developer settings, off by default): the map-matching particle overlay (MAPMATCH-SPEC §11) and a
   "Cut GPS" chip that simulates a GNSS outage; while it is on, a card replaces the trust alert with the time,
   distance, the dot's distance from the withheld GPS fix and "Restore GPS" (NAVIGATOR-SPEC §9).
+- **Navigate without an adapter** (Developer settings, off by default; experimental): with no OBD speed and GNSS not
+  trusted, the dot is the phone's own dead reckoning (NAVIGATOR-SPEC §9.6), drawn as `dr` with its alternatives.
+  The driver keeps it right by putting the car on the map while it stands (§6.2, below): its circle over 75 m, or
+  5 km since its start, a placing or a trusted fix, offers the chip.
 - `useKeepAwake()` while the map screen is focused.
 
 ### 6.2 Camera modes
@@ -201,6 +205,13 @@ One small component each. Touch targets ≥ 56 pt; high contrast; minimal text.
   button mutes the spoken maneuvers (ROUTING-SPEC §8.5). The map draws the route ahead of the car (from its
   progress point, ROUTING-SPEC §8.1: what is driven disappears; faded while planning again; the stretch from the
   progress point to the next route vertex is dashed in the accent blue), its next maneuver and the destination.
+- **A route without an adapter** (phone-only mode on and no adapter connected, NAVIGATOR-SPEC §9.6): **Route here**
+  and **Start guidance** don't plan at once. The destination is held (`route-without-adapter.ts`) and a card on the
+  map says, first, where the position comes from: GPS has it (trusted), it was set on the map {age} ago, or "set
+  your position on the map while the car stands" with **Set position** (the placing, §6.3 above; "stop the car" while
+  it moves); second, "follow the route exactly: the app keeps track of the car by its turns, and a turn off the
+  route loses it; then stop and set your position again". The route is planned only on **I'll follow the route**
+  (noted `route without an adapter: the driver will follow it`); its ✕ drops it.
 
 ## 7. Phase 4 — Mock screens
 

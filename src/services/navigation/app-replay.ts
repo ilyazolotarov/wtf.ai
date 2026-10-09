@@ -9,6 +9,7 @@
 
 import type { MapMatchConfig } from "@/nav/mapmatch/particle-filter";
 import type { NavConfig } from "@/nav/navigator";
+import type { PhoneGraph } from "@/nav/phone/phone-navigator";
 import { jamFixes, type JamOptions, type JamWindow } from "@/nav/replay/jam";
 import { appOutageCuts, ReplayRecorder, type RecorderOptions, type ReplayCut, type ReplayResult } from "@/nav/replay/replay";
 import { isSatelliteFix, type GnssFix } from "@/nav/types";
@@ -89,12 +90,23 @@ export interface AppReplayOptions extends Pick<RecorderOptions, "trackStepS" | "
   vin?: string | null;
   /** Map-matching truth and particle snapshots for the recorder (the graph is `roadGraph`'s). */
   mapMatch?: Pick<NonNullable<RecorderOptions["mapMatch"]>, "truth" | "particlesEveryS">;
+  /**
+   * Phone-only mode on (§9.6), with this graph reader for it. The log's OBD speed and engine states are not fed: the
+   * drive as without an adapter.
+   */
+  phoneOnly?: { openGraph(): { key: string; graph: PhoneGraph; close(): void } | null };
+  /** The driver's placings in the log (`nav position set by the driver`) are made again at their time; false: ignored. */
+  placings?: boolean;
+  /** The routes the driver follows, each from `fromS` (s since the log's start); the app's route service doesn't run. */
+  phoneRoutes?: { fromS: number; points: { lat: number; lon: number }[] | null }[];
 }
 
 export interface AppReplayResult extends ReplayResult {
   /** Every position the service published, as the trip log records it. */
   published: NavEstimateRecord[];
   publishedMapMatch: NavMapMatchRecord[];
+  /** With each published position, the other roads the dot may be on (the map's alternatives; phone-only's). */
+  publishedAlternatives: { lat: number; lon: number; weight: number }[][];
   /** The service's notes (what the app would write to the trip log). */
   notes: { tUs: number; text: string }[];
 }
@@ -169,6 +181,7 @@ export function replayTripInApp(trip: TripLog, o: AppReplayOptions): AppReplayRe
   const vin = o.vin === undefined ? logVin : o.vin;
   const published: NavEstimateRecord[] = [];
   const publishedMapMatch: NavMapMatchRecord[] = [];
+  const publishedAlternatives: AppReplayResult["publishedAlternatives"] = [];
   const notes: AppReplayResult["notes"] = [];
   const graph = o.roadGraph ?? null;
   const rec = new ReplayRecorder(trip, {
@@ -192,9 +205,14 @@ export function replayTripInApp(trip: TripLog, o: AppReplayOptions): AppReplayRe
     nowUs: () => nowUs,
     clock,
     note: (text) => notes.push({ tUs: nowUs, text }),
-    log: (r) => published.push(r),
+    log: (r) => {
+      published.push(r);
+      // The snapshot is set before it is logged.
+      publishedAlternatives.push(service.getSnapshot()?.alternatives ?? []);
+    },
     logMapMatch: (r) => publishedMapMatch.push(r),
     roadGraph: { current: () => graph, subscribe: () => () => {} },
+    ...(o.phoneOnly ? { openPhoneGraph: o.phoneOnly.openGraph } : {}),
     nav: o.nav,
     mapMatch: o.mapMatchConfig,
     observer: {
@@ -208,6 +226,7 @@ export function replayTripInApp(trip: TripLog, o: AppReplayOptions): AppReplayRe
     },
   });
   if (o.loop) service.setMapMatchLoop(o.loop);
+  if (o.phoneOnly) service.setPhoneOnly(true);
 
   // The inputs, each at the time the app would get it.
   const records = (() => {
@@ -224,7 +243,7 @@ export function replayTripInApp(trip: TripLog, o: AppReplayOptions): AppReplayRe
   })();
   const arrival = (r: GnssRecord) => r.timestampUs + (Number.isFinite(r.deliveryDelayUs) && r.deliveryDelayUs >= 0 ? r.deliveryDelayUs : DEFAULT_DELIVERY_US);
   const fixes = [...records].sort((a, b) => arrival(a) - arrival(b));
-  const engineStates = trip.engine
+  const engineStates = (o.phoneOnly ? [] : trip.engine)
     .map((e) => ({ tUs: e.tUs, state: e.state as EngineState }))
     .filter((e) => (ENGINE_STATE_CODES as readonly string[]).includes(e.state));
   const ends = [trip.imu.at(-1)?.tUs, trip.obdSpeed.at(-1)?.tUs, trip.gnss.at(-1)?.tUs].filter((t): t is number => t !== undefined);
@@ -236,15 +255,23 @@ export function replayTripInApp(trip: TripLog, o: AppReplayOptions): AppReplayRe
   let ob = 0;
   let g = 0;
   let en = 0;
+  let pr = 0;
+  let pl = 0;
+  const placings = o.placings === false ? [] : driverPlacings(trip);
   while (nowUs < endUs + IMU_BATCH_US) {
     nowUs += IMU_BATCH_US;
     // The scenario's outage, as the developer switch would set it.
     service.setSimulatedOutage(rec.inCut(tS(nowUs)));
+    while (o.phoneRoutes && pr < o.phoneRoutes.length && o.phoneRoutes[pr].fromS <= tS(nowUs)) service.setPhoneRoute(o.phoneRoutes[pr++].points);
+    while (pl < placings.length && placings[pl].tUs <= nowUs) {
+      const p = placings[pl++];
+      service.setUserPosition(p, p.headingRad);
+    }
     while (en < engineStates.length && engineStates[en].tUs <= nowUs) {
       const e = engineStates[en++];
       engine.emit(e.state, e.tUs);
     }
-    while (ob < trip.obdSpeed.length && (trip.obdSpeed[ob].rxUs ?? trip.obdSpeed[ob].tUs) <= nowUs) {
+    while (!o.phoneOnly && ob < trip.obdSpeed.length && (trip.obdSpeed[ob].rxUs ?? trip.obdSpeed[ob].tUs) <= nowUs) {
       const s = trip.obdSpeed[ob++];
       const rx = s.rxUs ?? s.tUs;
       speed.emit({ txUs: 2 * s.tUs - rx, rxUs: rx, tUs: s.tUs, speedMps: s.speedMps, raw: s.rawKph });
@@ -271,5 +298,15 @@ export function replayTripInApp(trip: TripLog, o: AppReplayOptions): AppReplayRe
   // The app closes: what's pending is fed, and the calibration saved.
   service.setKeepAlive(false);
   const result = rec.finish(tS(endUs));
-  return { ...result, published, publishedMapMatch, notes };
+  return { ...result, published, publishedMapMatch, publishedAlternatives, notes };
+}
+
+/** The driver's placings in a log: its notes `nav position set by the driver: <lat>,<lon>…, heading <deg>°`. */
+export function driverPlacings(trip: TripLog): { tUs: number; lat: number; lon: number; headingRad: number }[] {
+  const out: { tUs: number; lat: number; lon: number; headingRad: number }[] = [];
+  for (const m of trip.messages) {
+    const x = /^nav position set by the driver: (-?[\d.]+),(-?[\d.]+).*heading (-?[\d.]+)°/.exec(m.text);
+    if (x) out.push({ tUs: m.tUs, lat: Number(x[1]), lon: Number(x[2]), headingRad: (Number(x[3]) * Math.PI) / 180 });
+  }
+  return out;
 }

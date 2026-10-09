@@ -73,7 +73,9 @@ function record(f: Partial<GnssFix> & Pick<GnssFix, "tUs" | "lat" | "lon">, over
 }
 
 /** The app around the service: fake sensors, vehicle link and clocks, driven by a synthetic trip. */
-function harness(options: { vin?: string | null; store?: ReturnType<typeof memoryStore>; roadGraph?: RoadGraphSource } = {}) {
+function harness(
+  options: { vin?: string | null; store?: ReturnType<typeof memoryStore>; roadGraph?: RoadGraphSource; phoneGraph?: () => TiledRoadGraph } = {},
+) {
   const gnss = new Emitter<[GnssRecord]>();
   const imu = new Emitter<[ReturnType<typeof decodeImuBatch>]>();
   const speed = new Emitter<[SpeedSample]>();
@@ -101,6 +103,7 @@ function harness(options: { vin?: string | null; store?: ReturnType<typeof memor
     log: (r) => logged.push(r),
     logMapMatch: (r) => loggedMapMatch.push(r),
     roadGraph: options.roadGraph,
+    ...(options.phoneGraph ? { openPhoneGraph: () => ({ key: "fixture", graph: options.phoneGraph!(), close: () => {} }) } : {}),
   });
 
   /** Deliver a trip the way the phone does: IMU in 100 ms batches, OBD live, fixes 50 ms late. */
@@ -895,5 +898,70 @@ describe("CalibrationStore", () => {
     expect(prior.ks).toBe(1.02);
     expect(Math.sqrt(prior.ksVar)).toBeGreaterThan(0.01);
     expect(calibration.speedScale("OTHERVIN")).toBeNull();
+  });
+});
+
+describe("phone-only mode (NAVIGATOR-SPEC §9.6)", () => {
+  // The fixture's long road: 60 —160— 61 east, the one-way 162 north from 61 (1.73 km east of 60).
+  const FIXTURE = readFileSync(path.join(__dirname, "../../../nav/mapmatch/__fixtures__/net.graph.bin"));
+  const ORIGIN = { lat: 51.53, lon: 30.75 };
+  const fixtureGraph = () => new TiledRoadGraph(bufferByteSource(new Uint8Array(FIXTURE)), new LocalFrame(ORIGIN));
+  const DRIVE: DriveSegment[] = [
+    { durationS: 10, speedMps: 0, yawRateDegS: 0 },
+    { durationS: 8, speedMps: 12, yawRateDegS: 0 },
+    { durationS: 138.5, speedMps: 12, yawRateDegS: 0 },
+    { durationS: 6, speedMps: 5, yawRateDegS: 0 },
+    { durationS: 4.5, speedMps: 5, yawRateDegS: 20 },
+    { durationS: 23, speedMps: 10, yawRateDegS: 0 },
+  ];
+
+  test("without an adapter: the driver's placing while standing, then the phone's dead reckoning once it drives", async () => {
+    const drive = syntheticDrive({ segments: DRIVE, origin: ORIGIN, startHeadingRad: Math.PI / 2, gnss: "none", phoneAccel: {} });
+    const start = drive.truthAt(drive.trip.imu[0].tUs);
+    const h = harness({ vin: null, phoneGraph: fixtureGraph });
+    h.service.setPhoneOnly(true);
+    await h.service.start();
+    expect(h.notes).toContain("nav phone-only waits for a start: a GPS fix with a course, or the driver's placing");
+    h.play(drive, { untilS: 3, withoutObd: true });
+    h.service.setUserPosition(start, Math.PI / 2);
+    h.play(drive, { untilS: 8, withoutObd: true });
+    expect(h.service.getSnapshot()!.source).toBe("manual");
+    h.play(drive, { withoutObd: true });
+    expect(h.notes).toContain("nav manual position released: the car drives (phone)");
+    const p = h.service.getSnapshot()!;
+    expect(p.source).toBe("dr");
+    // Turned north onto 162 at the junction, about the right distance up it (the phone's speed is a few % off).
+    expect(Math.abs(Math.atan2(Math.sin(p.headingRad!), Math.cos(p.headingRad!)))).toBeLessThan(0.3);
+    expect(haversineM(p, drive.truthAt(drive.trip.imu.at(-1)!.tUs))).toBeLessThan(120);
+    h.service.stop();
+  });
+
+  test("with a route the driver follows, the dot is on it", async () => {
+    const drive = syntheticDrive({ segments: DRIVE, origin: ORIGIN, startHeadingRad: Math.PI / 2, gnss: "none", phoneAccel: {} });
+    const imu = drive.trip.imu;
+    const route = [];
+    for (let t = imu[0].tUs; t <= imu.at(-1)!.tUs; t += 2e6) route.push(drive.truthAt(t));
+    const h = harness({ vin: null, phoneGraph: fixtureGraph });
+    h.service.setPhoneOnly(true);
+    h.service.setPhoneRoute(route);
+    await h.service.start();
+    h.play(drive, { untilS: 3, withoutObd: true });
+    h.service.setUserPosition(drive.truthAt(imu[0].tUs), Math.PI / 2);
+    h.play(drive, { withoutObd: true });
+    expect(h.notes).toContain("nav phone-only route: follows it");
+    const p = h.service.getSnapshot()!;
+    expect(p.source).toBe("dr");
+    expect(haversineM(p, drive.truthAt(imu.at(-1)!.tUs))).toBeLessThan(40);
+    h.service.stop();
+  });
+
+  test("off: without an adapter the map shows phone GNSS as before", async () => {
+    const drive = syntheticDrive({ segments: DRIVE.slice(0, 3), origin: ORIGIN, startHeadingRad: Math.PI / 2, gnss: "coarse", phoneAccel: {} });
+    const h = harness({ vin: null, phoneGraph: fixtureGraph });
+    await h.service.start();
+    h.play(drive, { untilS: 60, withoutObd: true });
+    expect(h.service.getSnapshot()?.source).toBe("gnss");
+    expect(h.notes.some((n) => n.startsWith("nav phone-only"))).toBe(false);
+    h.service.stop();
   });
 });

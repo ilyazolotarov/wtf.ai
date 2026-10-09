@@ -297,6 +297,49 @@ UI-first milestone (map with live GNSS + mock screens): see [UI-SPEC.md](UI-SPEC
 - Real logs live in `tools/triplog/logs/`, git-ignored because they hold the VIN and GPS tracks, and are backed up to the private bucket (`npm run logs:push` / `logs:pull`). Testers' uploads land in `logs/testers/<name>/`; the viewer lists them (one parked-pose chain per phone, i.e. per folder), the benchmarks read only the project's own top-level logs.
 - Map-matching metrics: wrong-road rate (share of time the dominant cluster is on a different edge than the GNSS ground truth), time to re-lock after an ambiguity, time spent multimodal, PF update time.
 - Stage comparison: Stage 2 logs can be degraded to Stage 1 inputs (wheel speed → quantized to 1 km/h, resampled at the measured PID rate; yaw → phone gyro) to compare stages on the same drive.
+- **Phone-only mode (experimental, in the app behind a developer setting: NAVIGATOR-SPEC §9.6).** Goal: navigation
+  without an adapter, usable in the city with the driver placing the car when it is off (about every 4 min under
+  jamming).
+  - Speed: `src/nav/odometry/imu/imu-speed.ts`. The car's axes in the phone frame are learned from turns and from
+    pulling away (almost always forwards), and kept per car while the phone sits the same way. Curves measure the
+    speed (sideways acceleration = v·ω, weakly: σ 1 m/s²). Stops (phone quiet, vertical vibration < 0.25 m/s², no
+    horizontal acceleration over 0.25 s) pin it at zero. In between, the forward acceleration is integrated against
+    a gyro-tracked vertical that levels in 60 s (1 s at stops). Before the axes are known the speed is unknown, not 0.
+    `replay:imuspeed [--chain]` scores it against OBD.
+  - Its limit is the vertical: carried by the gyro it is 1.4° off at the next stop (median, 3° p90); the last stop's
+    is 2° off (road slope). That is 0.2–0.5 m/s² of false acceleration, so the distance per stop-to-stop stretch reads
+    0.89× OBD at the median and 0.55× at p10. Measured on 30 drives: speed error median 2.5 km/h below 30 km/h,
+    5 km/h at 30–60, 15 km/h above 90.
+  - Map matching: `src/nav/mapmatch/turn-tracker.ts` (`replay:turns`): road hypotheses, each a position along a road
+    with its own uncertainty and speed scale; a turn the gyro sees snaps each to the junctions around where it
+    expected the turn whose exit turns that way (which teaches the scale); a free hypothesis dead-reckons off the
+    mapped roads and rejoins them. On the 13 jammed city drives from their drawn starts, seconds off the drawn route
+    (> 30 m): 8 % with OBD speed, 28 % with phone speed and its city prior (`--speed
+    '{"priorSigmaMps":5,"priorSpeedMps":12}'`; the particle filter on phone speed, `replay:regress --speed phone`:
+    30–38 %). Scaling the phone speed per stretch to OBD's distance gives 25 %: the rest of the gap is when within a
+    stretch the distance accrues, which picks the wrong junction among similar ones. It grows along a drive (22 % in
+    the first 4 minutes, 32 % after; with OBD 5 % and 12 %): once on a wrong road the tracker seldom gets back.
+  - Where the dot is along the drawn route next to the car (`replay:turns --along`, the 13 jammed drives): on
+    another road 19 % of the moving time, behind by > 300 m 10 %, ahead by > 300 m 1 %. Large errors are behind
+    (the phone under-reads distance) or on another road, seldom far ahead.
+  - Following a planned route (`src/nav/mapmatch/route-follower.ts`, `replay:turns --route`, bench only): with the
+    car taken to drive the route, its position is the distance along it: a grid over (distance, speed scale) moved by
+    the phone's speed and weighed by the gyro's heading change over the last 80 m against the route's over the same
+    distance (offset-free; matching absolute heading lost the car whenever the phone was handled). With the drawn
+    route as the plan (a driver who never leaves it): 3 % off the drawn route (worst drive 13 %), within ±100 m of
+    the car 78 % of the moving time, > 100 m ahead 12 %, > 100 m behind 10 %. In the app on the active route
+    (NAVIGATOR-SPEC §9.6): 3 % through the app path. Its turns don't tell that the driver left the route (best fit
+    while the turn is in the window: median 0.89 on it, 0.75 off it, `--route-source log`): that is the driver's
+    placing, or GPS. A turn's fit counts only while the turn is in the window: the update after it compares straight
+    road with straight road (0.96), which hid every missed turn until 2026-10-09.
+  - Not usable unattended. Tried without gain: vertical vibration and tyre frequency as speed cues (road-dependent; no
+    speed-locked peak), roads' usual speeds learned from other drives, a per-stretch drift state, heavy-tailed junction
+    distances, more hypotheses, absolute heading kept from the start (a phone handled on its mount loses it), coarse
+    fixes weighted less (Slavutych's are mostly cell-level: 130–460 m off), choosing per second between the tracker
+    and the particle filter (18 % even with perfect choice), re-injecting hypotheses around the best one, a
+    road-bend correction of the along-road position.
+  - Reverse (leaving a stop backwards) is not validated: most manoeuvres the CX-5's OBD can't see come before the
+    axis is known, and 7 of 8 reverses it reported were forward driving.
 
 ## 4. Repository layout (target)
 

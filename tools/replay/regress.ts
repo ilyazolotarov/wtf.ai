@@ -8,6 +8,8 @@
 //   npm run replay:regress -- --against before       # every drive against it: what got worse, what got better
 //   npm run replay:regress -- --seeds 5 --starts parked --logs 20261005 --nav '<json>' --mm '<json>' --threads 8
 //   npm run replay:regress -- --from after --against before   # two saved runs, nothing replayed
+//   npm run replay:regress -- --speed phone          # no adapter: OBD speed replaced by the phone's (phone-speed.ts)
+//   npm run replay:regress -- --speed phone-app --phone-route   # the app without an adapter, the driver on a route
 //
 // Truth per drive, best first: the roads drawn for it in the viewer (`<log>.truth.json`, drawn-truth.ts), else its
 // clean satellite fixes (the dot when GPS came back after each gap, and through the app's Cut GPS stretches: the
@@ -26,6 +28,8 @@ import type { MapMatchConfig } from "../../src/nav/mapmatch/particle-filter";
 import type { NavConfig, ParkedPose } from "../../src/nav/navigator";
 import { driveOutages, estimateTrack, obdDistanceM, type ShownPoint } from "../../src/nav/replay/drive-report";
 import { drawnTruthTrack, scoreDrawn, type DrawnTruth } from "../../src/nav/replay/drawn-truth";
+import type { PhoneMount } from "../../src/nav/odometry/imu/imu-speed";
+import { withPhoneSpeed } from "../../src/nav/replay/phone-speed";
 import { appOutageCuts } from "../../src/nav/replay/replay";
 import { obdOdometer } from "../../src/nav/replay/truth-match";
 import { wrapAngle } from "../../src/nav/ekf/dr-ekf";
@@ -33,7 +37,7 @@ import { MemoryKeyValueStore, phoneOf, replayTripInApp } from "../../src/service
 import { CalibrationStore } from "../../src/services/navigation/calibration-store";
 import type { MapMatchLoop } from "../../src/services/navigation/navigator-service";
 import { readTripLog, type TripLog } from "../../src/triplog/trip-log-reader";
-import { carOf, drawnStartPose, graphFor } from "./app-chain";
+import { carOf, drawnStartPose, graphFor, phoneRouteFor } from "./app-chain";
 import { isMainThread, Pool, serveJobs, threadsArg } from "./pool";
 
 const LOGS = path.join(path.dirname(fileURLToPath(import.meta.url)), "../triplog/logs");
@@ -61,6 +65,12 @@ interface Job {
   logs: string[];
   nav: Partial<NavConfig>;
   mm: Partial<MapMatchConfig>;
+  /** Where the navigator's speed comes from: the logged OBD, or the phone alone (scored against OBD all the same). */
+  speed?: "obd" | "phone" | "phone-oracle" | "phone-app";
+  /** Experiment: score the map matching's leading hypothesis instead of the published dot (where it has one). */
+  scoreMapMatch?: boolean;
+  /** phone-app: the driver follows a route (the logged ones if the drawing says they were followed, else the drawn one). */
+  phoneRoute?: boolean;
 }
 
 /** One drive, one start, one seed. Distances in m, times in s. */
@@ -155,6 +165,7 @@ function runJob(job: Job): DriveResult[] {
   const store = new MemoryKeyValueStore();
   const byProtocol = new Map<string, string>();
   const lastDot = new Map<string, { lat: number; lon: number }>();
+  const mounts = new Map<string, PhoneMount>();
   const results: DriveResult[] = [];
   for (const log of job.logs) {
     const trip = readTripLog(new Uint8Array(readFileSync(path.join(LOGS, log))));
@@ -165,7 +176,11 @@ function runJob(job: Job): DriveResult[] {
       const calibration = new CalibrationStore(chained ? store : new MemoryKeyValueStore(), phoneOf(trip));
       const pose = job.start === "drawn" && vin ? drawnStartPose(trip, readDrawn(log)) : null;
       if (pose && vin) calibration.saveParkedPose(vin, pose);
-      const r = replayTripInApp(trip, {
+      const phone = job.speed === "phone" || job.speed === "phone-oracle";
+      // phone-app: the app with phone-only mode on and no adapter (its own engine, not phone speed into the navigator).
+      const phoneApp = job.speed === "phone-app";
+      const input = phone ? withPhoneSpeed(trip, {}, chained ? mounts : undefined, true, job.speed === "phone-oracle") : trip;
+      const r = replayTripInApp(input, {
         calibration,
         loop: (job.nav.mapMatchLoop ?? APP_NAV_DEFAULTS.mapMatchLoop ?? "closed") as MapMatchLoop,
         roadGraph: graph?.active,
@@ -173,9 +188,27 @@ function runJob(job: Job): DriveResult[] {
         cuts: appOutageCuts(trip),
         nav: job.nav,
         mapMatchConfig: { ...job.mm, seed: job.seed },
+        ...(phoneApp
+          ? {
+              phoneOnly: {
+                openGraph: () => {
+                  const g = graphFor(trip);
+                  return g ? { key: g.active.key, graph: g.active.graph, close: g.close } : null;
+                },
+              },
+              ...(job.phoneRoute ? { phoneRoutes: phoneRouteFor(trip, readDrawn(log)).routes } : {}),
+            }
+          : {}),
       });
+      let mi = 0;
+      const mmTop = (tUs: number) => {
+        while (mi + 1 < r.publishedMapMatch.length && r.publishedMapMatch[mi + 1].timestampUs <= tUs) mi++;
+        const m = r.publishedMapMatch[mi];
+        const h = m && m.timestampUs <= tUs && tUs - m.timestampUs < 3e6 ? m.top.find((x) => Number.isFinite(x.latDeg)) : undefined;
+        return h ? { latDeg: h.latDeg, lonDeg: h.lonDeg } : null;
+      };
       const track = estimateTrack(
-        r.published.map((p) => ({ tUs: p.timestampUs, latDeg: p.latDeg, lonDeg: p.lonDeg, accuracyM: p.accuracyM })),
+        r.published.map((p) => ({ tUs: p.timestampUs, latDeg: p.latDeg, lonDeg: p.lonDeg, accuracyM: p.accuracyM, ...(job.scoreMapMatch ? mmTop(p.timestampUs) : {}) })),
         trip.startUs,
       );
       const before = vin ? lastDot.get(vin) : undefined;
@@ -289,6 +322,9 @@ async function main() {
   const mm = JSON.parse(arg("--mm") ?? "{}") as Partial<MapMatchConfig>;
   const saveAs = arg("--save");
   const against = arg("--against");
+  const speed = (arg("--speed") ?? "obd") as NonNullable<Job["speed"]>;
+  const scoreMapMatch = argv.includes("--score-mm");
+  const phoneRoute = argv.includes("--phone-route");
 
   const all = readdirSync(LOGS).filter((f) => f.endsWith(".ulg")).sort();
   const picked = only ? all.filter((f) => f.startsWith(only) || f.includes(only)) : all;
@@ -296,8 +332,8 @@ async function main() {
   // The parked chain replays every log up to the last one picked: those before it set its storage.
   const chain = all.filter((f) => f <= picked.at(-1)!);
   const jobs: Job[] = [];
-  for (let seed = 1; seed <= seeds; seed++) for (const start of ["drawn", "parked"] as const) if (starts.includes(start)) jobs.push({ start, seed, logs: chain, nav, mm });
-  for (let seed = 1; seed <= seeds; seed++) if (starts.includes("cold")) for (const log of picked) jobs.push({ start: "cold", seed, logs: [log], nav, mm });
+  for (let seed = 1; seed <= seeds; seed++) for (const start of ["drawn", "parked"] as const) if (starts.includes(start)) jobs.push({ start, seed, logs: chain, nav, mm, speed, scoreMapMatch, phoneRoute });
+  for (let seed = 1; seed <= seeds; seed++) if (starts.includes("cold")) for (const log of picked) jobs.push({ start: "cold", seed, logs: [log], nav, mm, speed, scoreMapMatch, phoneRoute });
   const started = Date.now();
   let results: DriveResult[];
   if (fromRun) results = fromRun.results.filter((r) => picked.includes(r.log));

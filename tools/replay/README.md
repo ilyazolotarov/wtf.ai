@@ -115,6 +115,12 @@ says so.
   - *Navigator*: the version the replay runs. *As on the phone* (default) is the one the drive was recorded with
     (the app's developer setting, in the log header); *Open loop* is what the app runs; *Road heading* and *Full correction*
     send map matching back into the navigator (MAPMATCH-SPEC §9).
+  - *Adapter*: *OBD, as recorded*, or *None: phone only*: the app in phone-only mode (NAVIGATOR-SPEC §9.6), fed
+    no OBD speed or engine states. The blue dot is then the phone's own dead reckoning wherever GPS isn't good; the
+    timeline draws its speed (blue, scaled by what its map matching learned) over OBD's (grey), rings around the dot
+    are the other roads its tracker holds (label = weight), and *At the cursor* says its speed and what the dot is
+    drawn from. Best with *Start: where the drawing starts* (as if the driver placed the car there); *Where it parked
+    last* starts it where the earlier drives, replayed with OBD, parked.
   - *GPS*: what the replay gets. *As in the app* withholds your "Cut GPS" moments, as the phone did; *All of it*;
     *Cut at…* (`120:240`, several with commas); *Jammed* (Wi-Fi/cell-like fixes only, `0:inf` or a window;
     `src/nav/replay/jam.ts`); *None after the start* (pure dead reckoning once the heading is known).
@@ -122,11 +128,13 @@ says so.
     earlier log replayed in order through the app with the same navigator version and one storage across them, so
     the parked pose, speed scale, compass and GNSS lag are what the phone would have had (NAVIGATOR-SPEC §6.1). The
     car is its VIN, else the car last seen on the same OBD protocol, as the app identifies it. The first load
-    replays them all (~25 s). *Cold*: empty storage, as after a fresh install. The status line says which drive
+    replays them all (~25 s). *Where the drawing starts*: empty storage but the parked pose, at the drawn ground
+    truth's start heading along it. *Cold*: empty storage, as after a fresh install. The status line says which drive
     the parked pose came from and what the first fixes made of it.
   - *Compare*: a second navigator version, drawn in orange.
   - *More*: GPS lag (empty = learned on the drive, as in the app), start the session later, compass at a jammed
-    start (MAPMATCH-SPEC §8.2).
+    start (MAPMATCH-SPEC §8.2), and the driver's placings: every app replay puts the car where the driver put it on
+    the map, at the moment they did (the log's `nav position set by the driver` notes); *ignored* replays without.
 - **Tracks** (side panel, each can be hidden): GPS in green (where the car really was), what the phone showed in
   purple (from the log's `nav_estimate`; older logs don't have it), the replay in blue, the compare replay in
   orange. A replay track is what the app would have shown (what its service published). Where

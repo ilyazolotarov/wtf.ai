@@ -84,6 +84,8 @@
     "replay:junction": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/junction.ts",
     "replay:offroad": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/offroad.ts",
     "replay:regress": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/regress.ts",
+    "replay:imuspeed": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/imu-speed.ts",
+    "replay:turns": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/turn-tracker.ts",
     "voice:render": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/voice/render.ts",
     "logs:status": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/triplog/sync.ts status",
     "logs:push": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/triplog/sync.ts push",

@@ -131,6 +131,11 @@
       <option value="heading">Road heading</option>
       <option value="closed">Full correction</option>
     </select></label>
+  <label title="OBD as recorded, or none: the app in phone-only mode (Developer settings → Navigate without an adapter, NAVIGATOR-SPEC §9.6), its dot from the phone's own speed and gyro; GPS still takes over when it is good">Adapter
+    <select id="adapter">
+      <option value="">OBD, as recorded</option>
+      <option value="none">None: phone only</option>
+    </select></label>
   <label title="What the replay gets of GPS. As in the app = your Cut GPS moments withheld, like on the phone">GPS
     <select id="gps">
       <option value="app">As in the app</option>
@@ -140,9 +145,10 @@
       <option value="nogps">None after the start</option>
     </select></label>
   <input id="cut" placeholder="start:length s, e.g. 120:240" size="20" hidden />
-  <label title="Where the replay starts. Parked = from where this car parked before (every earlier log replayed in order, the car by its VIN, else its OBD protocol), as the app does now; the first load replays them all; cold = no position or heading, as after a fresh install or a lost pose">Start
+  <label title="Where the replay starts. Parked = from where this car parked before (every earlier log replayed in order, the car by its VIN, else its OBD protocol), as the app does now; the first load replays them all; cold = no position or heading, as after a fresh install or a lost pose; drawing = where your drawn ground truth starts, heading along it (as if the driver placed the car there)">Start
     <select id="from">
       <option value="parked">Where it parked last</option>
+      <option value="drawn">Where the drawing starts</option>
       <option value="cold">Cold</option>
     </select></label>
   <label title="Run a second navigator version and draw it in orange">Compare
@@ -156,6 +162,8 @@
     <summary>More</summary>
     <div>
       <label title="GPS timing offset. Empty = learned on the drive, as in the app">GPS lag <input id="lag" type="number" step="0.05" placeholder="learned" style="width:80px" /> s</label>
+      <label title="Where the driver put the car on the map during the drive (the log's notes) is put there again in the replay at the same moment, as on the phone; off: the replay ignores them">Driver's placings
+        <select id="placings"><option value="">as logged</option><option value="off">ignored</option></select></label>
       <label title="Start the session this far into the log, as if the app started then">Start at <input id="start" type="number" step="10" min="0" placeholder="0" style="width:80px" /> s</label>
       <label title="Compass at a jammed start (MAPMATCH-SPEC §8.2), calibrated on the other logs; turned = a wrong calibration">Compass
         <select id="compass"><option value="">off</option><option value="on">from other logs</option><option value="90">turned 90°</option><option value="180">turned 180°</option></select></label>
@@ -580,7 +588,9 @@ function renderRoute() {
   const arrived = data.events.find((e) => e.text.startsWith("route arrived"));
   const offs = data.routes.progress.filter((g, i, a) => g[2] === "off" && a[i - 1]?.[2] !== "off").length;
   $("route").innerHTML = `<div class="facts">` +
-    plans.map((p) => `<div class="route-plan" data-t="${p.t}"><b>${fmtT(p.t)}</b> ${esc(p.reason)}: ` +
+    plans.map((p) => p.reason === "rebuilt"
+      ? `<div class="route-plan" data-t="${p.t}"><b>${fmtT(p.t)}</b> rebuilt: <b>${fmtKm(p.lengthM)}</b> <span class="muted">· planned before the log started, so not in it; planned again here to the same destination</span></div>`
+      : `<div class="route-plan" data-t="${p.t}"><b>${fmtT(p.t)}</b> ${esc(p.reason)}: ` +
       (p.status === "done" ? `<b>${fmtKm(p.lengthM)}</b>, ${Math.round(p.durationS / 60)} min planned` : `<span class="bad">${esc(p.status)}</span>`) +
       (p.reason === "resume" ? "" : ` · planned in <b>${Math.round(p.planMs)} ms</b>${p.slices > 1 ? ` (${p.slices} slices, ${Math.round(p.wallMs)} ms wall)` : ""}`) + `</div>`).join("") +
     `<div class="muted" style="margin-top:4px">${offs ? `${offs}× off the route` : "never off the route"}` +
@@ -601,12 +611,25 @@ function renderRouteNow() {
     `${fmtKm(along)} of ${fmtKm(plan.lengthM)}` + (next ? ` · next <b>${esc(next.kind === "roundabout" ? `roundabout exit ${next.exit}` : next.kind)}</b> in ${fmtM(toNext)}` : "");
 }
 
+/** Phone-only replays: the phone's speed, the dot's source and its other roads at `time` (null: none within 2 s). */
+function phoneAt(time) {
+  const p = data.phoneOnly ? lastBefore(data.phoneOnly, time) : null;
+  return p && time - p[0] <= 2 ? p : null;
+}
+
 function updateMapMatch() {
   const on = $("showMm").checked;
   const snap = on && data.particles?.length ? lastBefore(data.particles, t) : null;
   const pts = snap && t - snap[0] < 1.5 ? snap[1] : [];
   const maxW = pts.reduce((m, q) => Math.max(m, q[2]), 0) || 1;
   map.getSource("particles").setData(fc(pts.map(([lat, lon, w, off]) => pt({ lat, lon }, { rel: w / maxW, off }))));
+  if (data.phoneOnly) {
+    // Phone-only: the other roads its tracker holds (rings, by weight), whether or not the layer is on.
+    const now = phoneAt(t);
+    const alts = now && now[2] === "dr" ? now[3] : [];
+    map.getSource("clusters").setData(fc(alts.map(([lat, lon, w], rank) => pt({ lat, lon }, { rank: rank + 1, spread: 25, label: `${Math.round(w * 100)}%` }))));
+    return;
+  }
   const i = indexAt(data.track, t);
   const mm = on && i >= 0 ? data.track[i].mm : null;
   map.getSource("clusters").setData(fc(mm ? mm.c.map(([lat, lon, w, spread, road], rank) =>
@@ -908,7 +931,7 @@ function renderDrive() {
   const gpsGood = Math.max(0, 100 * (1 - data.noGpsS / Math.max(1, data.durationS)));
   const scenario = $("gps").selectedOptions[0].textContent;
   $("drive").innerHTML = `<div class="drive-title">${esc(driveName(data.file))}</div><div class="facts">` +
-    `<b>${fmtMin(data.durationS)}</b> · <b>${fmtKm(s.obdDistanceM)}</b> driven (OBD)<br>` +
+    `<b>${fmtMin(data.durationS)}</b> · <b>${fmtKm(data.obdDistanceM ?? s.obdDistanceM)}</b> driven (OBD)<br>` +
     `GPS good <b>${Math.round(gpsGood)} %</b> of the time` + (appCuts ? ` · <b>${appCuts}</b>× Cut GPS in the app` : "") + `<br>` +
     (data.phoneLoopLabel ? `Phone ran: ${esc(data.phoneLoopLabel)}<br>` : "") +
     `Replay: ${esc(data.loopLabel)} · GPS ${esc(scenario.toLowerCase())}` +
@@ -980,6 +1003,16 @@ function focusOutage(i) {
   seek(Math.min(o.toS, data.durationS) - 0.1);
 }
 
+/** Phone-only: its own speed and what the dot is drawn from, for the panel. */
+function phoneNow() {
+  if (!data.phoneOnly) return "";
+  const p = phoneAt(t);
+  if (!p) return " · phone: not running";
+  const from = { dr: "its dead reckoning", gnss: "GPS", manual: "your placing" }[p[2]] ?? p[2];
+  const alts = p[2] === "dr" && p[3].length ? ` · ${p[3].length} other road${p[3].length > 1 ? "s" : ""} (rings)` : "";
+  return ` · phone <b>${p[1] === null ? "unknown" : `${Math.round(p[1])} km/h`}</b> · dot from ${from}${alts}`;
+}
+
 function renderNow() {
   const { fix, truthFix } = fixesAt(t);
   const age = fix ? t - fix.t : Infinity;
@@ -1004,13 +1037,13 @@ function renderNow() {
   const obd = lastBefore(data.obd, t);
   $("now").innerHTML = `<div class="muted">${fmtT(t)} · ${utc(t)}</div>` +
     `<div class="now-row"><span class="swatch" style="background:var(--gps)"></span><span>GPS: ${gpsText}</span></div>` + rows +
-    `<div class="muted" style="margin-top:4px">Speed ${obd ? `${obd[1]} km/h (OBD)` : "—"}</div>`;
+    `<div class="muted" style="margin-top:4px">Speed ${obd ? `${obd[1]} km/h (OBD)` : "—"}${phoneNow()}</div>`;
   for (const li of $("events").children) li.classList.toggle("past", +li.dataset.t <= t);
   renderRouteNow();
 }
 
 // Events worth seeing by default: markers, trip start/end, Cut GPS, navigator and map-matching changes, GPS trust.
-const KEY_EVENT = /^(sim gnss outage|nav mode|nav reset|mm (?!graph)|gnss trust|nav parked pose (confirmed|rejected)|route )/;
+const KEY_EVENT = /^(sim gnss outage|nav mode|nav reset|mm (?!graph)|gnss trust|nav parked pose (confirmed|rejected)|route |nav position set by the driver|replay: )/;
 function renderEvents() {
   const all = $("allEvents").checked;
   const list = data.events.filter((e) => !e.text.startsWith("unsolicited") &&
@@ -1024,7 +1057,7 @@ function renderSummary() {
   const s = data.summary, fx = s.fixes;
   $("summary").textContent = [
     `${data.file}`,
-    `${data.durationS.toFixed(0)} s, OBD ${(s.obdDistanceM / 1000).toFixed(2)} km`,
+    `${data.durationS.toFixed(0)} s, OBD ${((data.obdDistanceM ?? s.obdDistanceM) / 1000).toFixed(2)} km`,
     `navigator start: ${s.init ? `${s.init.method} at ${s.init.tS.toFixed(0)} s` : "never"}`,
     `fixes ${fx.total} (${fx.satellite} satellite): ${fx.accepted} used, ${fx.rejected} rejected, ${fx.cut} withheld`,
     s.params ? `speed scale ${s.params.speedScale.toFixed(4)}, gyro bias ${s.params.gyroBiasDegS.toFixed(4)} °/s, gyro scale ${s.params.gyroScale.toFixed(4)}` : "",
@@ -1101,6 +1134,19 @@ function drawTimeline() {
   g.strokeStyle = text2; g.lineWidth = 1; g.globalAlpha = 0.7; g.beginPath();
   data.obd.forEach(([tt, v], i) => (i ? g.lineTo(x(tt), ys(v)) : g.moveTo(x(tt), ys(v))));
   g.stroke(); g.globalAlpha = 1;
+  if (data.phoneOnly) {
+    // The phone's own speed (scaled by what the map matching learned), in the replay's colour; gaps = unknown.
+    g.strokeStyle = css("--pred"); g.lineWidth = 1.4; g.beginPath();
+    let prev = null;
+    for (const [tt, v] of data.phoneOnly) {
+      if (v === null) { prev = null; continue; }
+      const y = ys(Math.min(maxKph, v));
+      if (prev === null || tt - prev > 2) g.moveTo(x(tt), y); else g.lineTo(x(tt), y);
+      prev = tt;
+    }
+    g.stroke();
+    g.fillStyle = css("--pred"); g.textAlign = "right"; g.fillText("phone", w - PAD_R, s0 + 9); g.textAlign = "left";
+  }
 
   // GPS: green = good satellite fix, pale = weak, amber = Wi-Fi/cell only, blank = none. Red ticks: markers.
   const [b0, b1] = ROWS.gps;
@@ -1192,7 +1238,7 @@ document.addEventListener("keydown", (e) => {
 window.addEventListener("resize", drawTimeline);
 
 // ---------- loading ----------
-const PARAMS = ["file", "loop", "gps", "cut", "from", "compare", "lag", "start", "compass"];
+const PARAMS = ["file", "loop", "adapter", "gps", "cut", "from", "compare", "lag", "start", "compass", "placings"];
 function syncCutInput() {
   const g = $("gps").value;
   $("cut").hidden = g !== "cut" && g !== "jam";
@@ -1316,7 +1362,7 @@ async function run() {
   if (drawnFor !== file) { drawn = null; drawnFor = null; undo.length = 0; setDrawing(false); }
   $("status").textContent = "replaying…";
   const started = performance.now();
-  const loading = showLoading(q.from !== "cold" && !(Number(q.start) > 0));
+  const loading = showLoading(q.from === "parked" && !(Number(q.start) > 0));
   let res;
   try {
     res = await fetch(`/api/replay?${new URLSearchParams(q)}`);
@@ -1329,9 +1375,12 @@ async function run() {
   if ($("file").value !== file) return;
   data = payload;
   const pf = data.parkedFrom;
-  const parkedNote = !pf ? "" : !pf.file ? " · no parked pose for this car before it: cold start" : ` · started where it parked after ${driveName(pf.file)}${pf.status ? ` (${pf.status})` : ""}`;
+  const parkedNote = data.startNote === "drawn" ? " · started where the drawing starts"
+    : data.startNote ? ` · ${data.startNote}`
+    : !pf ? "" : !pf.file ? " · no parked pose for this car before it: cold start" : ` · started where it parked after ${driveName(pf.file)}${pf.status ? ` (${pf.status})` : ""}`;
   const pathNote = data.inApp === false ? " · navigator alone (a research option is set), not the app" : "";
-  $("status").textContent = `replayed in ${((performance.now() - started) / 1000).toFixed(1)} s${parkedNote}${pathNote}`;
+  const routeNote = { log: " · the driver follows the routes the app planned", drawn: " · the driver follows the drawn route (none planned, or not followed)", none: " · no route to follow" }[data.phoneRouteSource] ?? "";
+  $("status").textContent = `replayed in ${((performance.now() - started) / 1000).toFixed(1)} s${parkedNote}${pathNote}${routeNote}`;
   renderDrive();
   renderOutages();
   renderEvents();
@@ -1348,7 +1397,7 @@ async function run() {
   }
   seek(0);
 }
-for (const id of ["loop", "from", "compare", "compass"]) $(id).onchange = run;
+for (const id of ["loop", "adapter", "from", "compare", "compass", "placings"]) $(id).onchange = run;
 $("gps").onchange = () => { syncCutInput(); if ($("gps").value !== "cut") run(); else $("cut").focus(); };
 for (const id of ["cut", "lag", "start"]) $(id).addEventListener("keydown", (e) => e.key === "Enter" && run());
 loadList();

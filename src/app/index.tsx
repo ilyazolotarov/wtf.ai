@@ -35,7 +35,7 @@ import { Radius, usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
 import { bearingRad, haversineM, type Coordinate } from "@/nav/geo";
 import { usePositionPermission } from "@/providers/position-provider";
-import { useRoute } from "@/providers/route-provider";
+import { useHeldRoute, useRoute } from "@/providers/route-provider";
 import { useDevSettings, useRecorderSnapshot, useRuntime } from "@/providers/runtime-provider";
 import { onPlacingRequest, STANDING_MPS, takePlacingRequest } from "@/services/navigation/place-request";
 import { isOnboardingDone } from "@/services/preferences";
@@ -78,6 +78,8 @@ export default function HomeScreen() {
   const { position, trust } = nav;
   const { permission, requestPermission } = usePositionPermission();
   const { route, startRoute, stopRoute } = useRoute();
+  // A route asked for without an adapter waits here for the driver's word (UI-SPEC §6.3).
+  const held = useHeldRoute();
   // A long press on the map drops a pin to route to (ROUTING-SPEC §8), or to say the car is there.
   const [pin, setPin] = useState<Coordinate | null>(null);
   const [voiceMuted, toggleVoice] = useVoiceMuted();
@@ -685,6 +687,64 @@ export default function HomeScreen() {
         )}
 
         <View pointerEvents="box-none" style={styles.bottomStack}>
+          {held.destination && !placing && (
+            <View style={[panel, styles.pinCard]}>
+              <GlassFill radius={Radius.rL} />
+              <View style={styles.alertRow}>
+                <View style={[styles.alertIcon, { backgroundColor: palette.warn.a }]}>
+                  <Icon name="alt_route" size={20} color={palette.warn.c} />
+                </View>
+                <View style={styles.alertText}>
+                  <T w="semibold" size={15}>
+                    {t("noAdapterRouteTitle")}
+                  </T>
+                  <T size={13} color={manual || trust === "TRUSTED" ? palette.ok.c : palette.text2}>
+                    {manual
+                      ? t("noAdapterRoutePositionSet").replace("{age}", manualAge)
+                      : trust === "TRUSTED"
+                        ? t("noAdapterRouteGps")
+                        : t(mayPlace ? "noAdapterRouteSetPosition" : "noAdapterRouteStopToSet")}
+                  </T>
+                  <T size={13} color={palette.text2}>
+                    {t("noAdapterRouteFollow")}
+                  </T>
+                </View>
+                <Pressable
+                  onPress={held.cancel}
+                  hitSlop={10}
+                  accessibilityRole="button"
+                  accessibilityLabel={t("cancel")}
+                  style={({ pressed }) => pressed && styles.pressed}
+                >
+                  <Icon name="close" size={20} color={palette.text2} />
+                </Pressable>
+              </View>
+              <View style={styles.pinActions}>
+                {!manual && trust !== "TRUSTED" && mayPlace && (
+                  <Pressable
+                    onPress={() => startPlacing()}
+                    accessibilityRole="button"
+                    style={({ pressed }) => [styles.pinButton, { backgroundColor: palette.surface }, pressed && styles.pressed]}
+                  >
+                    <Icon name="location_on" size={16} color={palette.accent} />
+                    <T w="semibold" size={15} color={palette.accent}>
+                      {t("noAdapterRouteSetButton")}
+                    </T>
+                  </Pressable>
+                )}
+                <Pressable
+                  onPress={held.confirm}
+                  accessibilityRole="button"
+                  style={({ pressed }) => [styles.pinButton, { backgroundColor: palette.accent }, pressed && styles.pressed]}
+                >
+                  <Icon name="navigation" size={16} color={palette.onAccent} />
+                  <T w="semibold" size={15} color={palette.onAccent}>
+                    {t("noAdapterRouteAgree")}
+                  </T>
+                </Pressable>
+              </View>
+            </View>
+          )}
           {pin && (
             <View style={[panel, styles.pinCard]}>
               <GlassFill radius={Radius.rL} />

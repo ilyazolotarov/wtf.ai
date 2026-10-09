@@ -1,8 +1,11 @@
 import { useSyncExternalStore } from "react";
 
+import { useAdapterStatus } from "@/components/status/use-nav-status";
 import type { Coordinate } from "@/nav/geo";
+import { useDevSettings } from "@/providers/runtime-provider";
 import { getRuntime } from "@/services/runtime";
 import type { RouteDestination, RouteSnapshot } from "@/services/navigation/route-service";
+import { heldRoute, holdRouteForGuide, onHeldRoute, takeHeldRoute } from "@/services/navigation/route-without-adapter";
 
 export interface Destination extends Coordinate {
   id: string;
@@ -30,9 +33,55 @@ export interface RouteControls {
   stopRoute(): void;
 }
 
-/** The app's route (ROUTING-SPEC §8), from the runtime's route service. */
+/** Navigation without an adapter (phone-only mode on, no adapter connected): a route waits for the driver's word. */
+export function useWithoutAdapter(): boolean {
+  const { phoneOnly } = useDevSettings();
+  const adapter = useAdapterStatus();
+  return phoneOnly && adapter !== "on";
+}
+
+/**
+ * The app's route (ROUTING-SPEC §8), from the runtime's route service. Without an adapter a new route is held for the
+ * map screen's guide (`useHeldRoute`) instead of planned at once.
+ */
 export function useRoute(): RouteControls {
   const { routes } = getRuntime();
   const route = useSyncExternalStore(routes.subscribe, routes.getSnapshot, routes.getSnapshot);
-  return { route, startRoute: (d) => routes.start(d), stopRoute: () => routes.stop() };
+  const withoutAdapter = useWithoutAdapter();
+  return {
+    route,
+    startRoute: (d) => {
+      if (!withoutAdapter) return routes.start(d);
+      routes.stop();
+      holdRouteForGuide(d);
+    },
+    stopRoute: () => {
+      takeHeldRoute();
+      routes.stop();
+    },
+  };
+}
+
+export interface HeldRoute {
+  /** The route waiting for the driver to say they will follow it (null: none). */
+  destination: RouteDestination | null;
+  /** Plan it: the driver said they will follow it. */
+  confirm(): void;
+  cancel(): void;
+}
+
+/** A route asked for without an adapter, waiting for the guide on the map (UI-SPEC §6.3). */
+export function useHeldRoute(): HeldRoute {
+  const { routes, recorder } = getRuntime();
+  const destination = useSyncExternalStore(onHeldRoute, heldRoute, heldRoute);
+  return {
+    destination,
+    confirm: () => {
+      const d = takeHeldRoute();
+      if (!d) return;
+      recorder.note("route without an adapter: the driver will follow it");
+      routes.start(d);
+    },
+    cancel: () => void takeHeldRoute(),
+  };
 }

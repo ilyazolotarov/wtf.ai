@@ -32,6 +32,11 @@ export interface SyntheticOptions {
   handling?: { fromS: number; toS: number; tiltRad: number; yawRateRadS?: number };
   /** Raw magnetometer at 20 Hz: Earth's field (19 µT horizontal, 46 µT down) plus a constant offset. */
   magnetometer?: { offsetUt?: [number, number, number] };
+  /**
+   * The accelerometer feels the drive (phone-only speed, imu-speed.ts): forward acceleration on x, the turn's v·ω
+   * on y (left), and the road's vertical shake on z while moving (`roadShakeMS2` RMS). Off: noise only.
+   */
+  phoneAccel?: { roadShakeMS2?: number };
   seed?: number;
 }
 
@@ -88,6 +93,7 @@ export function syntheticDrive(o: SyntheticOptions): SyntheticDrive {
   for (const seg of o.segments) {
     const v0 = v;
     const steps = Math.round(seg.durationS / dt);
+    const along = steps > 0 ? (seg.speedMps - v0) / (steps * dt) : 0;
     for (let k = 0; k < steps; k++, step++) {
       const tS = step * dt;
       const tUs = startUs + Math.round(tS * 1e6);
@@ -105,7 +111,13 @@ export function syntheticDrive(o: SyntheticOptions): SyntheticDrive {
         tUs,
         gyro: [0, 0, yawCcw + bias + gyroNoise * r.gauss() + (h?.yawRateRadS ?? 0)],
         gravity: [0, 9.80665 * Math.sin(tilt), -9.80665 * Math.cos(tilt)],
-        userAccel: [0.02 * r.gauss(), 0.02 * r.gauss(), 0.02 * r.gauss()],
+        userAccel: o.phoneAccel
+          ? [
+              (v > 0 ? along : 0) + 0.02 * r.gauss(),
+              v * yawCcw + 0.02 * r.gauss(),
+              (v > 0.5 ? (o.phoneAccel.roadShakeMS2 ?? 0.8) : 0.02) * r.gauss(),
+            ]
+          : [0.02 * r.gauss(), 0.02 * r.gauss(), 0.02 * r.gauss()],
       });
       if (o.magnetometer && step % 5 === 0) {
         // The phone lies flat with x forward: in (forward, left) Earth's horizontal field is

@@ -11,12 +11,15 @@
 //   tilt), most recent first. This phone only (the store is local).
 // - the position the driver set on the map (§6.3): for this phone, not a car, so it outlives the session (and a
 //   placing made without a car connected) until it is released or discarded.
+// - how the phone sits in the car for navigation without an adapter (§9.6): the car's axes in the phone frame,
+//   per car (the VIN, or "phone" for a car never connected), kept while the phone sits the same way.
 // The gyro bias and scale are not stored: CoreMotion corrects the bias itself and it drifts
 // with temperature, and the learned k_ω mostly absorbs GNSS timing (§7.2), not the gyro.
 
 import type { GnssLagEstimate } from "@/nav/calibration/gnss-lag";
 import type { CompassCalibration } from "@/nav/compass/compass";
 import type { ParkedPose } from "@/nav/navigator";
+import type { PhoneMount } from "@/nav/odometry/imu/imu-speed";
 import type { KeyValueStore } from "@/obd/vehicle-link-core";
 
 export interface PhoneKey {
@@ -56,10 +59,16 @@ export interface StoredCompass {
   savedAt: number;
 }
 
+export interface StoredPhoneMount {
+  mount: PhoneMount;
+  savedAt: number;
+}
+
 interface Stored {
   gnssLag?: StoredLag;
   speedScaleByVin?: Record<string, StoredSpeedScale>;
   compassByVin?: Record<string, StoredCompass>;
+  phoneMountByCar?: Record<string, StoredPhoneMount>;
 }
 
 /**
@@ -133,6 +142,17 @@ export class CalibrationStore {
 
   saveCompassCalibrations(vin: string, calibrations: CompassCalibration[], now = Date.now()): void {
     this.write((s) => (s.compassByVin = { ...s.compassByVin, [vin]: { calibrations, savedAt: now } }));
+  }
+
+  /** How the phone sat in this car when navigating without an adapter (malformed: null). */
+  phoneMount(car: string): PhoneMount | null {
+    const m = this.read().phoneMountByCar?.[car]?.mount;
+    const vec = (v: unknown) => Array.isArray(v) && v.length === 3 && v.every(Number.isFinite);
+    return m && vec(m.up) && vec(m.left) && [m.agreement, m.turnS, m.absPerS].every(Number.isFinite) ? m : null;
+  }
+
+  savePhoneMount(car: string, mount: PhoneMount, now = Date.now()): void {
+    this.write((s) => (s.phoneMountByCar = { ...s.phoneMountByCar, [car]: { mount, savedAt: now } }));
   }
 
   /** Pose saved when this car was last parked. */

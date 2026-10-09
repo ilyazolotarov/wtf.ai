@@ -465,3 +465,30 @@ export function scoreDrawn(trip: TripLog, truth: DrawnTruthTrack, track: ShownPo
     endErrorM,
   };
 }
+
+/** How far along the drawn path the dot is searched for, either side of where the car was: lag, not another road. */
+export const ALONG_WINDOW_M = 3000;
+
+/**
+ * Per moving second, where the dot is along the drawn path next to the car: m ahead (+) or behind (−) of it, when the
+ * dot is within `OFF_PATH_M` of the path within `ALONG_WINDOW_M` of the car; null when it is off the path (another
+ * road). Says whether a dot on the right roads runs ahead or behind the car.
+ */
+export function alongDrawn(trip: TripLog, truth: DrawnTruthTrack, track: ShownPoint[]): { t: number; aheadM: number | null }[] {
+  const odometer = obdOdometer(trip);
+  const odo = (t: number) => odometer(trip.startUs + t * 1e6);
+  const out: { t: number; aheadM: number | null }[] = [];
+  const step = truth.points.length > 1 ? truth.points[1][0] - truth.points[0][0] : 1;
+  for (const [t, , , s] of truth.points) {
+    const p = trackAt(track, t);
+    if (!p || odo(t + step / 2) - odo(t - step / 2) < MOVING_MPS * step) continue;
+    // Of the stretches of path the dot is on (a drive may pass a road twice), the one nearest the car along it.
+    let best: number | null = null;
+    for (let from = s - ALONG_WINDOW_M; from < s + ALONG_WINDOW_M; from += 100) {
+      const near = nearestOnPath(truth.path, truth.cum, p, from, from + 100);
+      if (near && near.distanceM <= OFF_PATH_M && (best === null || Math.abs(near.s - s) < Math.abs(best))) best = near.s - s;
+    }
+    out.push({ t, aheadM: best });
+  }
+  return out;
+}

@@ -15,6 +15,7 @@ import {
   type OutageWindow,
   type ShownPoint,
 } from "./drive-report";
+import { obdOdometer } from "./truth-match";
 import { replayTrip, type ReplayCut, type ReplayOptions, type ReplayResult, type ReplaySummary } from "./replay";
 
 /** [t, lat, lon, ~68 % radius m] */
@@ -31,7 +32,14 @@ export interface ViewerExtras {
    * How to replay (default `replayTrip`). The viewer replays through the app (app-replay.ts): its result carries
    * what the service published, which is then the track as shown.
    */
-  replay?: (options: ReplayOptions) => ReplayResult & { published?: { timestampUs: number; latDeg: number; lonDeg: number; accuracyM: number }[] };
+  replay?: (options: ReplayOptions) => ReplayResult & {
+    published?: { timestampUs: number; latDeg: number; lonDeg: number; accuracyM: number; speedMps?: number; source?: string }[];
+    publishedAlternatives?: { lat: number; lon: number; weight: number }[][];
+    /** The replayed service's own notes. */
+    notes?: { tUs: number; text: string }[];
+  };
+  /** The replay ran the app without an adapter (phone-only mode, NAVIGATOR-SPEC §9.6): its speed and other roads. */
+  phoneOnly?: boolean;
 }
 
 export interface ViewerTrackPoint {
@@ -83,6 +91,8 @@ export interface ViewerData {
   file: string;
   info: Record<string, string | number>;
   durationS: number;
+  /** The log's OBD distance, m (the replay's own summary has none when it ran without the adapter). */
+  obdDistanceM: number;
   /** UTC ms at t = 0, from the log's time sync (null when absent). */
   startUtcMs: number | null;
   /** Cut windows actually applied, including the open-loop one. */
@@ -111,6 +121,11 @@ export interface ViewerData {
   noGpsS: number;
   /** Routes planned in the app, and guidance at each published position: [t, plan, state, along m, off m, to next m, next]. */
   routes: { plans: ViewerRoutePlan[]; progress: [number, number, string, number, number | null, number, number][] };
+  /**
+   * Phone-only replays: what the dot drew on, at ≤ 2 Hz: [t, km/h of the phone's own speed (null: unknown), source
+   * ('dr' = the phone's dead reckoning, 'gnss', 'manual'), other roads the car may be on [lat, lon, weight][]].
+   */
+  phoneOnly: [number, number | null, string, [number, number, number][]][] | null;
 }
 
 const r = (v: number, digits: number) => {
@@ -145,6 +160,8 @@ export function buildViewerData(file: string, trip: TripLog, options: ReplayOpti
   const events: ViewerData["events"] = [
     ...trip.events.map((e) => ({ t: tS(e.tUs), kind: e.event, text: e.reason ? `${e.event}: ${e.reason}` : e.event })),
     ...trip.messages.filter((m) => m.tag !== "trip").map((m) => ({ t: tS(m.tUs), kind: m.tag || "log", text: m.text })),
+    // Phone-only replays: what the replay's own navigator did (on the route, off it, the turns and fixes it jumped to).
+    ...(extras.phoneOnly ? (result.notes ?? []).filter((n) => n.text.startsWith("nav phone-only")).map((n) => ({ t: tS(n.tUs), kind: "replay", text: `replay: ${n.text}` })) : []),
   ].sort((a, b) => a.t - b.t);
 
   // The stretches without GNSS, and how far off each track was.
@@ -200,11 +217,31 @@ export function buildViewerData(file: string, trip: TripLog, options: ReplayOpti
     g.nextIndex,
   ]);
 
+  let phoneOnly: ViewerData["phoneOnly"] = null;
+  if (extras.phoneOnly && result.published) {
+    phoneOnly = [];
+    const alts = result.publishedAlternatives ?? [];
+    let last = -Infinity;
+    result.published.forEach((p, i) => {
+      const t = tS(p.timestampUs);
+      if (t - last < 0.5) return;
+      last = t;
+      const v = p.speedMps;
+      phoneOnly!.push([
+        t,
+        v !== undefined && Number.isFinite(v) ? r(v * 3.6, 1) : null,
+        p.source ?? "",
+        (alts[i] ?? []).map((a): [number, number, number] => [r(a.lat, 6), r(a.lon, 6), r(a.weight, 3)]),
+      ]);
+    });
+  }
+
   const sync = trip.timeSync[0];
   return {
     file,
     info,
     durationS: r(result.summary.durationS, 1),
+    obdDistanceM: r(obdOdometer(trip)(trip.startUs + result.summary.durationS * 1e6), 0),
     startUtcMs: sync ? (sync.utcUs - (sync.tUs - trip.startUs)) / 1000 : null,
     options: {
       cuts: result.summary.cuts.map((c) => ({ fromS: c.fromS, toS: c.toS, ...(c.openLoop ? { openLoop: true } : {}) })),
@@ -259,5 +296,6 @@ export function buildViewerData(file: string, trip: TripLog, options: ReplayOpti
     errors,
     noGpsS: r(noGpsWindows(truth, result.summary.durationS).reduce((s, w) => s + w.toS - w.fromS, 0), 0),
     routes: { plans, progress },
+    phoneOnly,
   };
 }
