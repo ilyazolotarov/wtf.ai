@@ -297,8 +297,8 @@ maneuver already closer, after a start or re-plan: the nearest). At it, at max(4
 "потім …" when the next follows within 120 m ("і ви на місці" for the destination). "Ahead" is skipped when "at it"
 would follow within 6 s. Roundabout exits are ordinals ("другий з’їзд"). Also "Маршрут перебудовано" for a re-plan
 and "Ви прибули". Nothing about the current plan's maneuvers while off it. The banner's speaker button mutes it (kept
-across launches). Settings has the voice's volume, 0–100 % (kept across launches; a sample is said when the slider
-rests; 0 turns the voice off and hides the banner's speaker button). The player's gain is its square, so equal steps
+across launches). Settings has the voice's volume, 0–100 % (kept across launches; a sample is said when the finger
+leaves the slider (`LevelSlider`), not while it rests on it; 0 turns the voice off and hides the banner's speaker button). The player's gain is its square, so equal steps
 sound about equal: 100 % plays the clips as recorded, the default 80 % 3.9 dB lower (near −19 LUFS), 50 % 12 dB lower. It is
 the player's volume, applied to the clips and the system voice: the clips aren't recorded again to change it.
 

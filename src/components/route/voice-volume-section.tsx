@@ -1,8 +1,9 @@
-import { Host, Slider } from "@expo/ui";
-import { useEffect, useRef, useState } from "react";
+import { Host } from "@expo/ui";
+import { useState } from "react";
 import { StyleSheet, View } from "react-native";
 
 import { ScreenCard, ScreenNote, ScreenRow, SectionLabel } from "@/components/screens/screen-ui";
+import { LevelSlider } from "@/components/ui/level-slider";
 import { useT } from "@/i18n/provider";
 
 import { loadVoiceVolume, saveVoiceVolume } from "./use-voice-guidance";
@@ -10,20 +11,11 @@ import { hushVoice, sayPhrases } from "./voice-player";
 
 /** The slider's stops, in tenths of the recorded level; 0 turns the voice off. */
 const MAX_STOP = 10;
-/** A sample is said once the slider rests this long. */
-const SAMPLE_DELAY_MS = 600;
 
 /** How loud the route voice is (ROUTING-SPEC §8.5), with a sample to hear it. */
 export function VoiceVolumeSection() {
   const { t, language } = useT();
   const [stop, setStop] = useState(() => Math.round(loadVoiceVolume() * 10));
-  const sample = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(
-    () => () => {
-      if (sample.current) clearTimeout(sample.current);
-    },
-    [],
-  );
 
   return (
     <View style={styles.group}>
@@ -31,22 +23,21 @@ export function VoiceVolumeSection() {
       <ScreenCard style={styles.card}>
         <ScreenRow labelKey="voiceVolumeLevel" value={stop === 0 ? t("voiceVolumeOff") : `${stop * 10}%`} />
         <Host matchContents={{ vertical: true }}>
-          <Slider
+          <LevelSlider
             value={stop}
             min={0}
             max={MAX_STOP}
             step={1}
-            onValueChange={(v) => {
-              const i = Math.round(v);
+            onValueChange={(i) => {
               if (i === stop) return;
               setStop(i);
               saveVoiceVolume(i / 10);
-              if (sample.current) clearTimeout(sample.current);
+            }}
+            // A sample once the finger lifts, at the level it stopped on (already saved).
+            onRelease={(i) => {
               if (i === 0) return;
-              sample.current = setTimeout(() => {
-                hushVoice();
-                sayPhrases([{ id: "now-left", text: t("mLeft") }], language);
-              }, SAMPLE_DELAY_MS);
+              hushVoice();
+              sayPhrases([{ id: "now-left", text: t("mLeft") }], language);
             }}
           />
         </Host>

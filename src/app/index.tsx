@@ -608,10 +608,11 @@ export default function HomeScreen() {
           )}
 
           {!placing && sinceTrusted && (
-            <View style={[panel, styles.chip]}>
-              <GlassFill radius={Radius.pill} />
+            // Wraps: in Ukrainian the age and the distance back don't fit one line.
+            <View style={[panel, styles.chip, styles.sinceChip]}>
+              <GlassFill radius={Radius.rL} />
               <Icon name="history" size={16} color={palette.text2} />
-              <T w="medium" size={13} numberOfLines={1}>
+              <T w="medium" size={13} style={styles.sinceText}>
                 {sinceTrusted}
               </T>
             </View>
@@ -1104,6 +1105,8 @@ const styles = StyleSheet.create({
     paddingRight: 14,
     borderRadius: Radius.pill,
   },
+  sinceChip: { height: undefined, minHeight: 36, maxWidth: "100%", paddingVertical: 8, borderRadius: Radius.rL },
+  sinceText: { flexShrink: 1, lineHeight: 17 },
   calDot: { width: 8, height: 8, borderRadius: 4 },
   pinCard: { gap: 12, padding: 16, borderRadius: Radius.rL },
   pinActions: { flexDirection: "row", gap: 10 },

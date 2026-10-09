@@ -325,7 +325,7 @@ normally"), never "Nothing".
      saved place. The drawn map is a real road network (`route-map.ts`, `MemoryRoadGraph`): the app's router plans
      on it, the real route banner shows the maneuvers and the voice says the first one (unless muted).
   8. Spoken directions: the real banner on a planned route (a tap mutes, a long press opens the phone's audio
-     output list) and the Settings volume slider, for the lesson only (0 hides the button; at rest it says the
+     output list) and the Settings volume slider, for the lesson only (0 hides the button; let go, it says the
      route's instruction at that volume).
   9. Offline maps: the Offline maps screen as drawn there, with the phone's own regions when it has them (only the map
      in use starts downloaded, so there is one to try); downloads, switching and deleting are pretend.

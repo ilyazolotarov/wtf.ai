@@ -1,5 +1,5 @@
-import { Host, Slider } from "@expo/ui";
-import { useEffect, useRef, useState } from "react";
+import { Host } from "@expo/ui";
+import { useEffect, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { Path } from "react-native-svg";
 
@@ -11,6 +11,7 @@ import { RouteBanner } from "@/components/route/route-banner";
 import { useAudioOutput } from "@/components/route/use-audio-output";
 import { hushVoice } from "@/components/route/voice-player";
 import { ScreenCard, ScreenNote, ScreenRow, SectionLabel } from "@/components/screens/screen-ui";
+import { LevelSlider } from "@/components/ui/level-slider";
 import { formatDistance } from "@/components/status/format-geo";
 import { T } from "@/components/ui/text";
 import { Radius, usePalette } from "@/constants/theme";
@@ -19,8 +20,6 @@ import { RoadClass } from "@/nav/mapmatch/graph/format";
 
 /** Up the main road, then right: the first instruction is a right turn. */
 const DESTINATION = { x: 330, y: 200 };
-/** As in Settings: a sample once the slider rests this long. */
-const SAMPLE_DELAY_MS = 600;
 
 /**
  * Lesson 8: the route banner's voice button (UI-SPEC §6.3), the real banner on a planned route: a tap mutes, a long
@@ -33,25 +32,16 @@ export function LessonVoice() {
   const [muted, setMuted] = useState(false);
   const [stop, setStop] = useState(8);
   const { offPhone } = useAudioOutput(true);
-  const sample = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(
-    () => () => {
-      if (sample.current) clearTimeout(sample.current);
-      hushVoice();
-    },
-    [],
-  );
-  const setLevel = (v: number) => {
-    const i = Math.round(v);
+  // Leaving the lesson ends a sample still playing.
+  useEffect(() => () => hushVoice(), []);
+  const setLevel = (i: number) => {
     if (i === stop) return;
     setStop(i);
-    if (sample.current) clearTimeout(sample.current);
-    if (i === 0) {
-      hushVoice();
-      return;
-    }
-    // The route's own instruction at the lesson's volume; the driver's setting stays as it is.
-    sample.current = setTimeout(() => sayFirstInstruction(route.snapshot.maneuvers, t, language, i / 10), SAMPLE_DELAY_MS);
+    if (i === 0) hushVoice();
+  };
+  // As in Settings, a sample once the finger lifts: the route's own instruction at the lesson's volume.
+  const sampleAt = (i: number) => {
+    if (i > 0) sayFirstInstruction(route.snapshot.maneuvers, t, language, i / 10);
   };
   const off = stop === 0;
   const turn = route.snapshot.maneuvers?.[1];
@@ -110,7 +100,7 @@ export function LessonVoice() {
         <ScreenCard style={styles.card}>
           <ScreenRow labelKey="voiceVolumeLevel" value={off ? t("voiceVolumeOff") : `${stop * 10}%`} />
           <Host matchContents={{ vertical: true }}>
-            <Slider value={stop} min={0} max={10} step={1} onValueChange={setLevel} />
+            <LevelSlider value={stop} min={0} max={10} step={1} onValueChange={setLevel} onRelease={sampleAt} />
           </Host>
           <ScreenNote>{t(off ? "voiceVolumeOffNote" : "voiceLessonVolumeNote")}</ScreenNote>
         </ScreenCard>

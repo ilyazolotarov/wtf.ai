@@ -238,7 +238,7 @@ export function MapChip({ text, accent, style }: { text: string; accent?: boolea
   const palette = usePalette();
   return (
     <View style={[styles.chip, { backgroundColor: palette.panelSolid }, style]}>
-      <T w={accent ? "semibold" : "medium"} size={12} color={accent ? palette.accent : palette.text2} numberOfLines={1}>
+      <T w={accent ? "semibold" : "medium"} size={12} color={accent ? palette.accent : palette.text2} style={styles.chipText}>
         {text}
       </T>
     </View>
@@ -265,11 +265,15 @@ const styles = StyleSheet.create({
   halo: { width: 22, height: 22, borderRadius: 11, alignItems: "center", justifyContent: "center" },
   haloDot: { width: 12, height: 12, borderRadius: 6 },
   pillCopy: { flex: 1, gap: 1 },
+  // Wraps rather than running off the map (the Ukrainian "since trusted" line is long).
   chip: {
     position: "absolute",
-    height: 30,
-    borderRadius: Radius.pill,
+    minHeight: 30,
+    maxWidth: "94%",
+    borderRadius: 15,
     paddingHorizontal: 12,
+    paddingVertical: 6,
     justifyContent: "center",
   },
+  chipText: { lineHeight: 16 },
 });
