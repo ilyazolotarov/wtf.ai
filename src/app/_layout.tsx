@@ -64,17 +64,30 @@ function RootLayout() {
   );
 }
 
-const SHEETS = [
+/**
+ * Everything opened from the map is a page pushed on this one stack: it slides in from the right, and the system's
+ * swipe from the left edge (or the header's back button) goes back a level (UI-SPEC §7).
+ */
+const PAGES = [
   "route",
   "vehicle",
-  "more",
   "downloads",
-  "settings",
-  "position",
-  "recorder",
-  "developer",
-  "guide",
+  "more/index",
+  "more/downloads",
+  "more/settings",
+  "more/position",
+  "more/recorder",
+  "more/developer",
+  "guide/index",
+  "guide/lesson",
 ] as const;
+
+/** The map blurs while a page is over it (SheetBlur), un-blurring as soon as one starts going back. */
+const BLUR_LISTENERS = {
+  transitionStart: (e: { data: { closing: boolean } }) => setSheetClosing(e.data.closing),
+  transitionEnd: () => setSheetClosing(false),
+  gestureCancel: () => setSheetClosing(false),
+};
 
 function AppStack() {
   const { t } = useT();
@@ -83,23 +96,9 @@ function AppStack() {
   return (
     <Stack screenOptions={{ contentStyle: { backgroundColor: palette.sheetBg } }}>
       <Stack.Screen name="index" options={{ headerShown: false }} />
-      {SHEETS.map((name) => (
-        <Stack.Screen
-          key={name}
-          name={name}
-          listeners={{
-            transitionStart: (e) => setSheetClosing(e.data.closing),
-            transitionEnd: () => setSheetClosing(false),
-            gestureCancel: () => setSheetClosing(false),
-          }}
-          options={{
-            headerShown: false,
-            presentation: "formSheet",
-            sheetGrabberVisible: true,
-            sheetCornerRadius: 32,
-            sheetAllowedDetents: name === "more" ? [0.7] : [0.86],
-          }}
-        />
+      {PAGES.map((name) => (
+        // Sliding in from the right on Android too (its back gesture and button go back there).
+        <Stack.Screen key={name} name={name} listeners={BLUR_LISTENERS} options={{ headerShown: false, animation: "slide_from_right" }} />
       ))}
       <Stack.Screen
         name="onboarding"
@@ -111,10 +110,6 @@ function AppStack() {
         }}
       />
       <Stack.Screen
-        name="lesson"
-        options={{ headerShown: false, presentation: "fullScreenModal" }}
-      />
-      <Stack.Screen
         name="map-setup"
         options={{
           headerShown: false,
@@ -123,14 +118,9 @@ function AppStack() {
           contentStyle: { backgroundColor: palette.bg },
         }}
       />
-      <Stack.Screen
-        name="debug-terminal"
-        options={{ title: t("elmTerminal"), presentation: "modal" }}
-      />
-      <Stack.Screen
-        name="trips"
-        options={{ title: t("trips"), presentation: "modal" }}
-      />
+      {/* Developer pages with the system's header: its back button and swipe. */}
+      <Stack.Screen name="debug-terminal" options={{ title: t("elmTerminal") }} />
+      <Stack.Screen name="trips" options={{ title: t("trips") }} />
     </Stack>
   );
 }

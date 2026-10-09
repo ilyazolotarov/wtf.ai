@@ -30,7 +30,8 @@ const SF = {
   delete: "trash",
   arrow_back: "chevron.left",
   location_off: "location.slash.fill",
-  location_on: "location.fill",
+  // A pin, as Material's location_on on Android: its point is the spot (the placing target is aligned on it).
+  location_on: "mappin",
   // Route guidance (ROUTING-SPEC §8).
   straight: "arrow.up",
   turn_right: "arrow.turn.up.right",
@@ -58,6 +59,7 @@ const SF = {
   menu_book: "book.fill",
   phone_iphone: "iphone",
   play_arrow: "play.fill",
+  pause: "pause.fill",
   check: "checkmark",
 } as const satisfies Record<string, SFSymbol>;
 

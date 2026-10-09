@@ -1,7 +1,9 @@
 import { router, useLocalSearchParams } from "expo-router";
+import { useState } from "react";
 import { Pressable, StyleSheet } from "react-native";
 
 import { AVAILABLE_LESSONS, LessonBody } from "@/components/guide/lesson-bodies";
+import { ScrollLockContext } from "@/components/guide/lesson-ui";
 import type { LessonId } from "@/components/guide/lessons";
 import { ScreenContent } from "@/components/screens/screen-ui";
 import { T } from "@/components/ui/text";
@@ -14,9 +16,11 @@ export default function LessonScreen() {
   const { t } = useT();
   const palette = usePalette();
   const { id } = useLocalSearchParams<{ id: LessonId }>();
+  // A lesson's map being dragged (placing the car) holds the page still.
+  const [locked, setLocked] = useState(false);
   const index = AVAILABLE_LESSONS.findIndex((lesson) => lesson.id === id);
   const lesson = AVAILABLE_LESSONS[index];
-  if (!lesson) return <ScreenContent title={t("guideTitle")} fullScreen />;
+  if (!lesson) return <ScreenContent title={t("guideTitle")} />;
   const next = AVAILABLE_LESSONS[index + 1];
 
   const finish = () => {
@@ -29,13 +33,15 @@ export default function LessonScreen() {
     // Keyed by lesson: the next one starts at the top, with its own state.
     <ScreenContent
       key={lesson.id}
-      fullScreen
+      scrollEnabled={!locked}
       title={t("guideLessonOf").replace("{n}", String(index + 1)).replace("{total}", String(AVAILABLE_LESSONS.length))}
     >
       <T w="semibold" size={26} style={styles.title}>
         {t(lesson.title)}
       </T>
-      <LessonBody id={lesson.id} />
+      <ScrollLockContext value={setLocked}>
+        <LessonBody id={lesson.id} />
+      </ScrollLockContext>
       <Pressable
         onPress={finish}
         accessibilityRole="button"

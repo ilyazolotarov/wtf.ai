@@ -1,4 +1,4 @@
-import { router, useLocalSearchParams } from "expo-router";
+import { router, useNavigation, useRoute } from "expo-router";
 import { Children, Fragment, isValidElement } from "react";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
@@ -17,27 +17,26 @@ import type { Strings } from "@/i18n/en";
 import { useT } from "@/i18n/provider";
 
 /**
- * Sheet body. With `title`, renders the sheet header: title, a back button
- * when opened from the More sheet (`?from=more`), and a close button. The header stays
- * pinned while the body scrolls. `fullScreen`: the body of a full-screen modal, the header below the status bar.
+ * A page's body. With `title`, the page header below the status bar, pinned while the body scrolls: a back button
+ * (the system's swipe from the left edge goes back too), the title, and from the second level down a close button
+ * back to the map. Without, a plain scrolling body (pages with the system's header, the first-run map download).
  */
 export function ScreenContent({
   title,
-  fullScreen = false,
+  scrollEnabled = true,
   children,
-}: React.PropsWithChildren<{ title?: string; fullScreen?: boolean }>) {
+}: React.PropsWithChildren<{ title?: string; scrollEnabled?: boolean }>) {
   const palette = usePalette();
   const insets = useSafeAreaInsets();
-  if (fullScreen)
+  if (title)
     return (
-      <View style={[styles.fullScreen, { backgroundColor: palette.sheetBg, paddingTop: insets.top }]}>
-        {title && (
-          <View style={styles.fullScreenHeader}>
-            <SheetHeader title={title} />
-          </View>
-        )}
+      <View style={[styles.page, { backgroundColor: palette.sheetBg, paddingTop: insets.top }]}>
+        <View style={styles.pageHeader}>
+          <PageHeader title={title} />
+        </View>
         <ScrollView
           keyboardShouldPersistTaps="handled"
+          scrollEnabled={scrollEnabled}
           contentContainerStyle={[styles.content, { paddingBottom: styles.content.paddingBottom + insets.bottom }]}
         >
           {children}
@@ -49,35 +48,30 @@ export function ScreenContent({
       style={{ backgroundColor: palette.sheetBg }}
       contentInsetAdjustmentBehavior="automatic"
       keyboardShouldPersistTaps="handled"
-      stickyHeaderIndices={title ? [0] : undefined}
-      contentContainerStyle={[styles.content, !title && styles.contentNoHeader]}
+      scrollEnabled={scrollEnabled}
+      contentContainerStyle={[styles.content, styles.contentNoHeader]}
     >
-      {title && <SheetHeader title={title} />}
       {children}
     </ScrollView>
   );
 }
 
-function SheetHeader({ title }: { title: string }) {
+function PageHeader({ title }: { title: string }) {
   const { t } = useT();
-  const { from } = useLocalSearchParams<{ from?: string }>();
-  const nested = from === "more";
   const palette = usePalette();
+  const navigation = useNavigation();
+  const route = useRoute();
+  // How deep this page is: 1 right over the map; deeper pages also get a way straight back to it.
+  const depth = navigation.getState()?.routes.findIndex((r) => r.key === route.key) ?? 0;
   return (
     // Opaque and full-bleed so scrolled content doesn't show beside or under the pinned header.
     <View style={[styles.headerWrap, { backgroundColor: palette.sheetBg }]}>
       <View style={styles.header}>
-        {nested && (
-          <RoundButton icon="arrow_back" label={t("back")} onPress={() => router.back()} />
-        )}
+        {depth > 0 && <RoundButton icon="arrow_back" label={t("back")} onPress={() => router.back()} />}
         <T w="semibold" size={24} style={styles.headerTitle} numberOfLines={1}>
           {title}
         </T>
-        <RoundButton
-          icon="close"
-          label={t("close")}
-          onPress={() => (nested ? router.dismiss(2) : router.back())}
-        />
+        {depth > 1 && <RoundButton icon="close" label={t("close")} onPress={() => router.dismissAll()} />}
       </View>
     </View>
   );
@@ -335,8 +329,8 @@ const styles = StyleSheet.create({
     gap: 18,
   },
   contentNoHeader: { paddingTop: 16 },
-  fullScreen: { flex: 1 },
-  fullScreenHeader: { paddingHorizontal: 16, paddingTop: 8 },
+  page: { flex: 1 },
+  pageHeader: { paddingHorizontal: 16, paddingTop: 8 },
   headerWrap: { marginHorizontal: -16, paddingHorizontal: 16, paddingBottom: 6, marginBottom: -6 },
   header: {
     flexDirection: "row",

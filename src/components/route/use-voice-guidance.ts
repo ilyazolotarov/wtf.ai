@@ -18,7 +18,7 @@ const VOLUME_KEY = "route.voice.volume";
  */
 const DEFAULT_VOLUME = 0.8;
 /** The player's gain for a volume: the square, so equal steps of the slider sound about equal. */
-const gainOf = (v: number) => v * v;
+export const gainOf = (v: number) => v * v;
 
 let volume: number | null = null;
 const volumeListeners = new Set<() => void>();

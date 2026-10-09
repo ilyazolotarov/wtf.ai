@@ -489,7 +489,7 @@ function segmentHeading(xy: Float64Array, i: number): number {
 }
 
 /** Heading of the first non-degenerate segment, in geometry direction. */
-function startHeading(edge: RoadEdge): number {
+export function startHeading(edge: RoadEdge): number {
   if (edge.startHeadingRad !== undefined) return edge.startHeadingRad;
   const segs = edge.cum.length - 1;
   let heading = 0;
@@ -503,7 +503,7 @@ function startHeading(edge: RoadEdge): number {
 }
 
 /** Heading of the last non-degenerate segment, in geometry direction. */
-function endHeading(edge: RoadEdge): number {
+export function endHeading(edge: RoadEdge): number {
   if (edge.endHeadingRad !== undefined) return edge.endHeadingRad;
   let heading = 0;
   for (let i = edge.cum.length - 2; i >= 0; i--) {

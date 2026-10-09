@@ -3,7 +3,7 @@ import { StyleSheet, View } from "react-native";
 import { Circle, G } from "react-native-svg";
 
 import { ChoiceChips, ExplainCard, LessonIntro } from "@/components/guide/lesson-ui";
-import { MapChip, MiniMap, Puck, StatusPillMock } from "@/components/guide/mini-map";
+import { MapChip, MiniMap, Puck, StatusPillMock, useNudgedHeading } from "@/components/guide/mini-map";
 import { formatDistance } from "@/components/status/format-geo";
 import { usePalette, type StatusColor } from "@/constants/theme";
 import type { Strings } from "@/i18n/en";
@@ -37,6 +37,8 @@ export function LessonDot() {
   const { t, language } = useT();
   const palette = usePalette();
   const [state, setState] = useState<State>("nofix");
+  // The dot stands on the north–south road.
+  const heading = useNudgedHeading(0);
   const s = STATES[state];
   const color: StatusColor = palette[s.color];
   const since = t("sinceTrustedBack")
@@ -61,7 +63,7 @@ export function LessonDot() {
         major="M184 -10 V260"
         overlay={
           <>
-            <StatusPillMock color={color} label={t(s.label)} sub={`${t(s.source)} · ±${formatDistance(s.accuracyM, language)}`} />
+            <StatusPillMock color={color} label={t(s.label)} source={t(s.source)} accuracyM={s.accuracyM} trusted={state === "ok"} />
             {state === "nofix" && <MapChip text={since} style={styles.strip} />}
             {state === "spoof" && <MapChip text={t("showGhost")} accent style={styles.ghostButton} />}
           </>
@@ -73,7 +75,7 @@ export function LessonDot() {
             <Circle cx={318} cy={62} r={6} fill={palette.idle.c} />
           </G>
         )}
-        <Puck x={184} y={168} r={s.r} />
+        <Puck x={184} y={168} r={s.r} trusted={state === "ok"} headingDeg={heading} />
       </MiniMap>
       <ChoiceChips<State>
         value={state}
@@ -97,6 +99,6 @@ export function LessonDot() {
 }
 
 const styles = StyleSheet.create({
-  strip: { left: 10, top: 62 },
+  strip: { left: 10, top: 74 },
   ghostButton: { left: 10, right: 10, bottom: 10, height: 36, alignItems: "center" },
 });

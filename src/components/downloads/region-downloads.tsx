@@ -27,7 +27,7 @@ import {
     useMapPacks,
 } from "@/services/offline-map/map-packs";
 
-const formatMb = (bytes: number) =>
+export const formatMb = (bytes: number) =>
   bytes >= 1e9 ? `${(bytes / 1e9).toFixed(2)} GB` : `${(bytes / 1e6).toFixed(bytes < 1e8 ? 1 : 0)} MB`;
 
 interface RegionRow {
@@ -38,7 +38,7 @@ interface RegionRow {
 }
 
 
-function IconButton({ icon, label, danger, filled, onPress }: { icon: IconName; label: string; danger?: boolean; filled?: boolean; onPress(): void }) {
+export function IconButton({ icon, label, danger, filled, onPress }: { icon: IconName; label: string; danger?: boolean; filled?: boolean; onPress(): void }) {
   const palette = usePalette();
   return (
     <Pressable

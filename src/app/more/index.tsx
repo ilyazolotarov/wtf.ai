@@ -34,20 +34,20 @@ export default function MoreScreen() {
       sub: t("guideProgress")
         .replace("{done}", String(AVAILABLE_LESSONS.filter((lesson) => lessonsDone.has(lesson.id)).length))
         .replace("{total}", String(AVAILABLE_LESSONS.length)),
-      href: "/guide?from=more",
+      href: "/guide",
     },
     {
       icon: "map",
       label: t("downloads"),
       sub: ready ? t("readyOffline") : t("notDownloaded"),
       subColor: ready ? palette.ok.c : undefined,
-      href: "/downloads?from=more",
+      href: "/more/downloads",
     },
     {
       icon: "settings",
       label: t("settings"),
       sub: `${language === "uk" ? "Українська" : "English"} · ${dark ? t("darkAppearance") : t("lightAppearance")}`,
-      href: "/settings?from=more",
+      href: "/more/settings",
     },
   ];
   const diagnostics: Item[] = [
@@ -56,7 +56,7 @@ export default function MoreScreen() {
       label: t("position"),
       sub: `${nav.label} · ${nav.source}`,
       subColor: nav.color.c,
-      href: "/position?from=more",
+      href: "/more/position",
     },
     {
       icon: "radio_button_checked",
@@ -66,13 +66,13 @@ export default function MoreScreen() {
           ? t("recording")
           : t("tripLogsSummary").replace("{n}", String(rec.trips.length)).replace("{size}", fmtBytes(logBytes)),
       subColor: rec.state === "recording" ? palette.bad.c : undefined,
-      href: "/recorder?from=more",
+      href: "/more/recorder",
     },
     {
       icon: "tune",
       label: t("developer"),
       sub: t("developerSub"),
-      href: "/developer?from=more",
+      href: "/more/developer",
     },
   ];
 

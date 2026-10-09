@@ -4,6 +4,7 @@ import { Animated, StyleSheet, View } from "react-native";
 import { ChoiceChips, ExplainCard, LessonIntro } from "@/components/guide/lesson-ui";
 import { MiniMap } from "@/components/guide/mini-map";
 import { SectionLabel } from "@/components/screens/screen-ui";
+import { GlassFill } from "@/components/ui/glass-fill";
 import { Icon, type IconName } from "@/components/ui/icon";
 import { T } from "@/components/ui/text";
 import { Radius, usePalette } from "@/constants/theme";
@@ -40,16 +41,18 @@ export function LessonCar() {
         minor="M-10 66 H370"
         major="M120 -10 V160"
         overlay={
-          <View style={[styles.toolbar, { backgroundColor: palette.panelSolid }]}>
+          // The map's bottom bar (index.tsx: bottomCard, HudAction, BadgeDot).
+          <View style={[styles.toolbar, { boxShadow: palette.shadow }]}>
+            <GlassFill radius={30} />
             <ToolbarItem icon="alt_route" label={t("route")} dim />
             <View style={styles.item}>
-              <View>
-                <Icon name="directions_car" size={24} color={driving ? palette.accent : palette.text} />
+              <View style={styles.itemContent}>
+                <Icon name="directions_car" size={24} color={palette.text} />
                 <BadgeDot color={palette[s.color].c} border={palette.groupBg} pulse={state === "yellow"} />
+                <T w="medium" size={12} color={driving ? palette.accent : undefined}>
+                  {driving ? t("driving") : t("vehicle")}
+                </T>
               </View>
-              <T w="medium" size={12} color={driving ? palette.accent : undefined}>
-                {driving ? t("driving") : t("vehicle")}
-              </T>
             </View>
             <ToolbarItem icon="more_horiz" label={t("more")} dim />
           </View>
@@ -101,10 +104,12 @@ function ToolbarItem({ icon, label, dim }: { icon: IconName; label: string; dim?
   const palette = usePalette();
   return (
     <View style={[styles.item, dim && styles.dim]}>
-      <Icon name={icon} size={24} color={palette.text} />
-      <T w="medium" size={12}>
-        {label}
-      </T>
+      <View style={styles.itemContent}>
+        <Icon name={icon} size={24} color={palette.text} />
+        <T w="medium" size={12}>
+          {label}
+        </T>
+      </View>
     </View>
   );
 }
@@ -135,14 +140,16 @@ const styles = StyleSheet.create({
     left: 12,
     right: 12,
     bottom: 12,
-    height: 72,
-    borderRadius: 30,
     flexDirection: "row",
+    gap: 4,
+    padding: 6,
+    borderRadius: 30,
     borderCurve: "continuous",
   },
-  item: { flex: 1, alignItems: "center", justifyContent: "center", gap: 3 },
+  item: { flex: 1 },
+  itemContent: { height: 60, alignItems: "center", justifyContent: "center", gap: 3, borderRadius: 24 },
   dim: { opacity: 0.4 },
-  badge: { position: "absolute", right: -6, top: -4, width: 12, height: 12, borderRadius: 6, borderWidth: 2 },
+  badge: { position: "absolute", top: 8, right: 22, width: 12, height: 12, borderRadius: 6, borderWidth: 2 },
   group: { gap: 8 },
   card: { borderRadius: Radius.rL, paddingHorizontal: 16, paddingVertical: 4, borderCurve: "continuous" },
   line: { height: StyleSheet.hairlineWidth },

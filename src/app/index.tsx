@@ -205,7 +205,7 @@ export default function HomeScreen() {
   const takeTour = useEffectEvent(() => {
     if (takeTourRequest()) answerTour(true);
   });
-  // The map stays mounted under the Guide sheet, so the request always comes while subscribed.
+  // The map stays mounted under the Guide page, so the request always comes while subscribed.
   useEffect(() => onTourRequest(() => takeTour()), []);
   // First run: onboarding, then a map to download. Each time the map is back on top (the
   // last region deleted, say), it asks again: the app has no online map.
@@ -868,7 +868,7 @@ export default function HomeScreen() {
           </View>
         </View>
       </View>
-      {/* Asked for from the Guide, it waits for the sheets to close. */}
+      {/* Asked for from the Guide, it waits for the pages to close. */}
       {touring && screenFocused && <MapTour targets={tourTargets} onClose={() => setTouring(false)} />}
       <SheetBlur />
     </View>

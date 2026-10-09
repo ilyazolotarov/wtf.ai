@@ -220,6 +220,13 @@ One small component each. Touch targets ≥ 56 pt; high contrast; minimal text.
 
 Parallel with Phase 3; each screen is independent. Use `@expo/ui` for settings-like lists (see `expo-ui` skill).
 
+Pages, not sheets (2026-10-10): everything opened from the map (Route, Vehicle, Offline maps, More and what it opens,
+the Guide and its lessons, the developer pages) is a page pushed on the one root stack, sliding in from the right, so
+going back is the system's: the swipe from the left edge on iOS, the back gesture or button on Android. The page
+header (`ScreenContent`) has a back button, and from the second level down a ✕ straight back to the map. (A form
+sheet can't hold a stack, and iOS has no back swipe for a sheet.) Onboarding and the first map download stay
+full-screen modals: there is nothing to go back to.
+
 ### 7.1 `route`
 
 - Field empty (2026-10-06), only what a route can reach (inside the active region's bounds):
@@ -295,12 +302,37 @@ normally"), never "Nothing".
 - **Guide** sheet: the first row of More, "How to use? · {done} of {total} done". The tour card, the lessons
   in groups (Getting started, When GPS fails, Routes, Maps) with a tick once done (kv-store `guide.done`), "Show the
   first-run screens again".
-- **Lessons** (`lesson?id=`), full-screen (a sheet left too little room), each interactive, on drawn maps (`react-native-svg`, `src/components/guide/mini-map.tsx`)
+- **Lessons** (`guide/lesson?id=`), full pages pushed from the Guide (a sheet left too little room), each interactive, on drawn maps (`react-native-svg`, `src/components/guide/mini-map.tsx`)
   in the map's colours: never the live map, so practising never moves the car. The button at the bottom marks the
-  lesson done and opens the next. Built: 1 Before you drive (the map and the adapter read from the app, the rest
-  ticked), 2 What the dot is telling you (the five trust states), 3 The car button (its four states, a checklist
-  when red). To come: 4 Driving through jamming, 5 Put the car on the map, 6 "Is the car where the dot is?",
-  7 Plan a route, 8 Spoken directions, 9 Offline maps. The Guide lists only lessons that exist.
+  lesson done and opens the next. The Guide lists only lessons that exist (`lesson-bodies.tsx`).
+  1. Before you drive: the map and the adapter read from the app, the holder, opening the app first and charging
+     ticked by the driver.
+  2. What the dot is telling you: the five trust states on one map.
+  3. The car button: its four states, a checklist when red.
+  4. Driving through jamming: a drive played in five stages (GPS ok, jammed, 4 min, a turn, GPS back; 4 s each, the
+     stage's button filling as its time runs, the car moving between them), with or without the adapter (without,
+     the dot holds the last fix and the circle grows).
+  5. Put the car on the map: as on the map, the map dragged under the centre pin, Here, a tap for the heading,
+     Confirm. It leads to the right answer: a target circle around the car (the area that counts), Here only with the
+     pin's point in it (it snaps onto the car), a circle ahead of the car, Confirm only with the arrow along the road
+     the way the car faces. The lesson's pin is drawn so its point is exactly the placed spot; the cards sit at the
+     bottom of the lesson's small map, leaving the road ahead free to tap (`placing-map.tsx`, shared with lesson 6).
+     While placing, the page's back swipe is off (a drag from the map's edge moves the map) and Android's back cancels
+     the placing instead of leaving the lesson.
+  6. "Is the car where the dot is?": both answers. No moves the dot to Wi-Fi's guess and starts placing there, as on
+     the map; the car is up the street.
+  7. Plan a route: a long press anywhere drops the pin (I'm here moves the dot there; Route here plans), or search a
+     saved place. The drawn map is a real road network (`route-map.ts`, `MemoryRoadGraph`): the app's router plans
+     on it, the real route banner shows the maneuvers and the voice says the first one (unless muted).
+  8. Spoken directions: the real banner on a planned route (a tap mutes, a long press opens the phone's audio
+     output list) and the Settings volume slider, for the lesson only (0 hides the button; at rest it says the
+     route's instruction at that volume).
+  9. Offline maps: the Offline maps screen as drawn there, with the phone's own regions when it has them (only the map
+     in use starts downloaded, so there is one to try); downloads, switching and deleting are pretend.
+
+  The lessons draw the map's own pieces: its status pill, puck (blue when trusted, else yellow with a dashed circle;
+  the cone always along the road, where the car stands nudged by turning the phone: half the turn, at most ±20°),
+  cards, chips and bottom bar.
 
 ## 8. Verification
 

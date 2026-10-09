@@ -43,7 +43,7 @@ export function LessonBefore() {
       sub: region ? t("beforeMapReady").replace("{region}", region.name[language]) : t("beforeMapMissing"),
       done: region != null,
       subOk: region != null,
-      action: region ? undefined : { label: t("downloads"), onPress: () => router.push("/downloads?from=more") },
+      action: region ? undefined : { label: t("downloads"), onPress: () => router.push("/downloads") },
     },
     {
       key: "adapter",
@@ -51,7 +51,7 @@ export function LessonBefore() {
       sub: nav.adapter === "on" ? t("beforeAdapterOn") : nav.adapter === "searching" ? t("obdSearching") : t("obdNotConnected"),
       done: nav.adapter === "on",
       subOk: nav.adapter === "on",
-      action: nav.adapter === "off" ? { label: t("connect"), onPress: () => router.push("/vehicle?from=more") } : undefined,
+      action: nav.adapter === "off" ? { label: t("connect"), onPress: () => router.push("/vehicle") } : undefined,
     },
     ...(
       [

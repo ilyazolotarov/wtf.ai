@@ -9,7 +9,7 @@ import { Radius, usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
 import { markTourOffered, requestTour, useLessonsDone } from "@/services/guide/guide-progress";
 
-/** The Guide (UI-SPEC §7.7): the map tour and the lessons, from More. */
+/** The Guide (UI-SPEC §7.7): the map tour and the lessons. */
 export default function GuideScreen() {
   const { t } = useT();
   const palette = usePalette();
@@ -19,7 +19,7 @@ export default function GuideScreen() {
   const startTour = () => {
     markTourOffered();
     requestTour();
-    // The map takes the request when it is on top again.
+    // Back to the map, which takes the request when it is on top again.
     router.dismissAll();
   };
 
@@ -57,7 +57,7 @@ export default function GuideScreen() {
             return (
               <Pressable
                 key={lesson.id}
-                onPress={() => router.push(`/lesson?id=${lesson.id}&from=more`)}
+                onPress={() => router.push(`/guide/lesson?id=${lesson.id}`)}
                 accessibilityRole="button"
                 style={({ pressed }) => [styles.row, pressed && styles.pressed]}
               >
