@@ -1,4 +1,5 @@
-import { Pressable, StyleSheet, View } from "react-native";
+import { useRef } from "react";
+import { Pressable, processColor, StyleSheet, View } from "react-native";
 
 import { formatDistance } from "@/components/status/format-geo";
 import { GlassFill } from "@/components/ui/glass-fill";
@@ -8,6 +9,13 @@ import { Radius, usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
 import type { Maneuver } from "@/nav/routing/maneuvers";
 import type { RouteSnapshot } from "@/services/navigation/route-service";
+
+import {
+  AudioOutputPicker,
+  type AudioOutputPickerHandle,
+  canPickAudioOutput,
+  openAudioOutputPanel,
+} from "../../../modules/audio-output/src/AudioOutputModule";
 
 import {
   formatArrival,
@@ -21,6 +29,8 @@ import {
 /**
  * The route at the top of the map (ROUTING-SPEC §8): the next maneuver and the distance to it, the one after when
  * close, and what's left; or planning, failure, arrival. `nowMs` is the position's time (for the arrival clock).
+ * The voice button: a tap mutes; holding it opens the system's audio output picker (iOS, Android); `offPhone` (the voice goes to a
+ * car's Bluetooth or AirPlay) shows the output glyph instead of the speaker.
  */
 export function RouteBanner({
   route,
@@ -28,15 +38,22 @@ export function RouteBanner({
   onStop,
   muted,
   onToggleVoice,
+  offPhone = false,
 }: {
   route: RouteSnapshot;
   nowMs: number;
   onStop(): void;
   muted: boolean;
   onToggleVoice(): void;
+  offPhone?: boolean;
 }) {
   const { t, language } = useT();
   const palette = usePalette();
+  const picker = useRef<AudioOutputPickerHandle>(null);
+  const openPicker = () => {
+    if (AudioOutputPicker) void picker.current?.open().catch(() => false);
+    else openAudioOutputPanel();
+  };
   const instruction = (m: Maneuver) => t(MANEUVER_TEXT[m.kind]).replace("{n}", String(m.exit ?? 1));
 
   let icon: IconName = "alt_route";
@@ -121,26 +138,46 @@ export function RouteBanner({
           onPress={onStop}
           accessibilityRole="button"
           accessibilityLabel={t("stopGuidance")}
-          hitSlop={10}
-          style={({ pressed }) => [styles.stop, { backgroundColor: palette.surface }, pressed && styles.pressed]}
+          hitSlop={HIT_SLOP}
+          style={({ pressed }) => [styles.button, { backgroundColor: palette.surface }, pressed && styles.pressed]}
         >
-          <Icon name="close" size={16} color={palette.text2} />
+          <Icon name="close" size={17} color={palette.text2} />
         </Pressable>
         {route.status === "active" && (
           <Pressable
             onPress={onToggleVoice}
+            onLongPress={canPickAudioOutput ? openPicker : undefined}
             accessibilityRole="button"
             accessibilityLabel={t(muted ? "voiceOff" : "voiceOn")}
-            hitSlop={10}
-            style={({ pressed }) => [styles.stop, { backgroundColor: palette.surface }, pressed && styles.pressed]}
+            accessibilityHint={canPickAudioOutput ? t("voiceOutputHint") : undefined}
+            accessibilityActions={canPickAudioOutput ? [{ name: "activate" }, { name: "longpress", label: t("voiceOutput") }] : undefined}
+            onAccessibilityAction={(e) => (e.nativeEvent.actionName === "longpress" ? openPicker() : onToggleVoice())}
+            hitSlop={HIT_SLOP}
+            style={({ pressed }) => [styles.button, { backgroundColor: palette.surface }, pressed && styles.pressed]}
           >
-            <Icon name={muted ? "volume_off" : "volume_up"} size={15} color={muted ? palette.text2 : palette.accent} />
+            <Icon
+              name={muted ? "volume_off" : offPhone ? "airplay" : "volume_up"}
+              size={17}
+              color={muted ? palette.text2 : palette.accent}
+            />
+            {AudioOutputPicker && (
+              // Invisible: only its sheet is wanted, opened by the long press.
+              <AudioOutputPicker
+                ref={picker}
+                pointerEvents="none"
+                style={styles.picker}
+                tint={processColor(palette.text2) as number}
+                activeTint={processColor(palette.accent) as number}
+              />
+            )}
           </Pressable>
         )}
       </View>
     </View>
   );
 }
+
+const HIT_SLOP = { top: 6, bottom: 6, left: 12, right: 12 };
 
 const styles = StyleSheet.create({
   banner: {
@@ -163,13 +200,15 @@ const styles = StyleSheet.create({
   copy: { flex: 1, gap: 2 },
   distance: { fontVariant: ["tabular-nums"], letterSpacing: -0.4 },
   then: { flexDirection: "row", alignItems: "center", gap: 5 },
-  buttons: { gap: 8, alignSelf: "flex-start" },
-  stop: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+  // Apart, with taps that don't reach the other button: × ends the route.
+  buttons: { gap: 20, alignSelf: "stretch", justifyContent: "space-between" },
+  button: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     alignItems: "center",
     justifyContent: "center",
   },
+  picker: { position: "absolute", width: 1, height: 1, opacity: 0 },
   pressed: { opacity: 0.7 },
 });

@@ -1,5 +1,6 @@
 {
   "voice": "en-GB-SoniaNeural",
+  "processing": "trim, compress, -15 LUFS",
   "phrases": {
     "replanned": "Route recalculated",
     "arrived": "You've arrived",

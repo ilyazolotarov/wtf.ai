@@ -14,6 +14,7 @@ import { MapSurface } from "@/components/map/map-surface";
 import { useHasUsableMap } from "@/config/map";
 import { RegionPrompt } from "@/components/map/region-prompt";
 import { RouteBanner } from "@/components/route/route-banner";
+import { useAudioOutput } from "@/components/route/use-audio-output";
 import { useVoiceGuidance, useVoiceMuted } from "@/components/route/use-voice-guidance";
 import {
     COURSE_MIN_SPEED_MPS,
@@ -101,6 +102,7 @@ export default function HomeScreen() {
   );
   const headingUp = useHeadingUp(position, compass);
   useVoiceGuidance(route, position?.speedMps, voiceMuted);
+  const audioOutput = useAudioOutput(route?.status === "active");
 
   // Once per trip: follow becomes heading-up when the car first drives off, and goes back
   // to follow when the trip ends unless the driver has picked a mode since.
@@ -636,7 +638,7 @@ export default function HomeScreen() {
           )}
 
           {route && (
-            <RouteBanner route={route} nowMs={position?.timestamp ?? 0} onStop={stopRoute} muted={voiceMuted} onToggleVoice={toggleVoice} />
+            <RouteBanner route={route} nowMs={position?.timestamp ?? 0} onStop={stopRoute} muted={voiceMuted} onToggleVoice={toggleVoice} offPhone={audioOutput.offPhone} />
           )}
         </View>
 

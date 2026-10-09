@@ -1,5 +1,6 @@
 {
   "voice": "uk-UA-PolinaNeural",
+  "processing": "trim, compress, -15 LUFS",
   "phrases": {
     "replanned": "Маршрут перебудовано",
     "arrived": "Ви прибули",

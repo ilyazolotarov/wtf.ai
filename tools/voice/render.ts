@@ -6,7 +6,8 @@
 //   npm run voice:render -- --lang uk --voice uk-UA-OstapNeural  # one language, another voice
 //
 // Needs Python with edge-tts (`pip install edge-tts`), which uses the Microsoft Edge read-aloud service, and ffmpeg
-// (silence trimmed to a short tail, so the voice starts at once and two phrases in a row join naturally).
+// (silence trimmed to a short tail, so the voice starts at once and two phrases in a row join naturally; then evened
+// out and raised to one loudness, heard over music in a car).
 
 import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -36,22 +37,44 @@ const force = args.includes("--force");
 const silence = (keepS: number) => `silenceremove=start_periods=1:start_threshold=-50dB:start_silence=${keepS}`;
 /** 30 ms of silence before the words, 150 ms after. */
 const TRIM = [silence(0.03), "areverse", silence(0.15), "areverse"].join(",");
+/** Quiet syllables brought up to the loud ones, so the whole phrase carries over music and road noise. */
+const COMPRESS = "acompressor=threshold=-26dB:ratio=4:attack=3:release=60";
+/** Every clip at this integrated loudness (streamed music plays near −14 LUFS; edge-tts gives about −21). */
+const TARGET_LUFS = -15;
+/** Peaks held under −1.5 dBFS after the gain. */
+const LIMIT = "alimiter=limit=0.84:level=false";
+/** Changed with the processing above: every clip is recorded again. */
+const PROCESSING = `trim, compress, ${TARGET_LUFS} LUFS`;
+
+/** Integrated loudness (LUFS) of an audio file. */
+async function loudness(file: string): Promise<number> {
+  const { stderr } = await run("ffmpeg", ["-hide_banner", "-nostats", "-i", file, "-af", "loudnorm=print_format=json", "-f", "null", "-"]);
+  const lufs = Number(/"input_i"\s*:\s*"(-?[\d.]+|-inf)"/.exec(stderr)?.[1]);
+  if (!Number.isFinite(lufs)) throw new Error(`no loudness measured for ${file}`);
+  return lufs;
+}
 
 async function render(lang: VoiceLang, strings: Strings, voice: string): Promise<string[]> {
   const dir = path.join(ROOT, "assets", "voice", lang);
   mkdirSync(dir, { recursive: true });
   const manifestPath = path.join(dir, "phrases.json");
-  const before: { voice?: string; phrases?: Record<string, string> } = existsSync(manifestPath) ? JSON.parse(readFileSync(manifestPath, "utf8")) : {};
+  const before: { voice?: string; processing?: string; phrases?: Record<string, string> } = existsSync(manifestPath)
+    ? JSON.parse(readFileSync(manifestPath, "utf8"))
+    : {};
   const phrases = recordedPhrases((key) => strings[key], lang);
-  const todo = phrases.filter((p) => force || before.voice !== voice || before.phrases?.[p.id] !== p.text || !existsSync(path.join(dir, `${p.id}.mp3`)));
+  const todo = phrases.filter((p) => force || before.voice !== voice || before.processing !== PROCESSING || before.phrases?.[p.id] !== p.text || !existsSync(path.join(dir, `${p.id}.mp3`)));
 
   let done = 0;
   const worker = async () => {
     for (let p = todo.shift(); p; p = todo.shift()) {
       const raw = path.join(tmpdir(), `voice-${lang}-${p.id}.mp3`);
       await run("python", ["-m", "edge_tts", "--voice", voice, "--text", p.text, "--write-media", raw]);
-      await run("ffmpeg", ["-y", "-v", "error", "-i", raw, "-af", TRIM, "-ac", "1", "-b:a", "40k", path.join(dir, `${p.id}.mp3`)]);
+      const even = path.join(tmpdir(), `voice-${lang}-${p.id}.wav`);
+      await run("ffmpeg", ["-y", "-v", "error", "-i", raw, "-af", `${TRIM},${COMPRESS}`, "-ac", "1", even]);
+      const gainDb = TARGET_LUFS - (await loudness(even));
+      await run("ffmpeg", ["-y", "-v", "error", "-i", even, "-af", `volume=${gainDb.toFixed(2)}dB,${LIMIT}`, "-b:a", "40k", path.join(dir, `${p.id}.mp3`)]);
       rmSync(raw);
+      rmSync(even);
       done++;
       if (done % 20 === 0) console.log(`${lang}: ${done} recorded`);
     }
@@ -62,7 +85,7 @@ async function render(lang: VoiceLang, strings: Strings, voice: string): Promise
   for (const file of readdirSync(dir)) {
     if (file.endsWith(".mp3") && !ids.has(file.slice(0, -4))) rmSync(path.join(dir, file));
   }
-  writeFileSync(manifestPath, `${JSON.stringify({ voice, phrases: Object.fromEntries(phrases.map((p) => [p.id, p.text])) }, null, 2)}\n`);
+  writeFileSync(manifestPath, `${JSON.stringify({ voice, processing: PROCESSING, phrases: Object.fromEntries(phrases.map((p) => [p.id, p.text])) }, null, 2)}\n`);
   console.log(`${lang}: ${phrases.length} phrases, ${done} recorded with ${voice}`);
   return phrases.map((p) => p.id).sort();
 }

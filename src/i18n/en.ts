@@ -358,6 +358,8 @@ export const en = {
   sayOrdinals: "first|second|third|fourth|fifth|sixth",
   voiceOn: "Voice guidance on",
   voiceOff: "Voice guidance off",
+  voiceOutput: "Choose where the voice plays",
+  voiceOutputHint: "Hold to choose where the voice plays: the phone or Bluetooth",
   tripUpload: "Trip log upload",
   tripUploadAbout: "Testers can send their trip logs to the developer. A log holds the car's VIN, the GPS track of the drive and the phone's sensor data. It goes only to the developer's private storage, and only with a personal code from the developer. Ask them to delete your logs at any time.",
   tripUploadCode: "Code from the developer",

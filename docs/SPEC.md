@@ -354,6 +354,7 @@ src/services/            RN glue: position, vehicle-link, sensor-capture, trip-r
 src/components/          UI components
 modules/vehicle-link/    Expo module (Swift, Kotlin) — BLE + EA (MFi) on iOS, BLE + Classic SPP on Android; STN monitor in Stage 2
 modules/sensor-capture/  Expo module (Swift, Kotlin) — CoreLocation/CoreMotion or LocationManager/SensorManager capture, batched; Android trip foreground service
+modules/audio-output/    Expo module (Swift, Kotlin) — where the phone plays audio, and the system's output picker (ROUTING-SPEC §8.5)
 assets/profiles/         vehicle JSON profiles (Stage 2+)
 tools/re-yaw/            yaw reverse-engineering script (Stage 3)
 tools/replay/            replay CLI, viewer and benchmark over src/nav/replay; loads the road graph via Node fs later

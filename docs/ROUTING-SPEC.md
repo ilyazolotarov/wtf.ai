@@ -272,10 +272,22 @@ replay's puck (`replayPuck`, what NavigatorService publishes) fed to guidance as
 Recorded phrases from a neural voice (Ukrainian `uk-UA-PolinaNeural`, English `en-GB-SoniaNeural`), whole phrases,
 distance included and in words ("Через триста метрів, поверніть ліворуч"; digits get misread, "50" as "50th"), so
 the intonation and the grammar of numbers ("один кілометр", "півтора кілометра", "два кілометри") are right. `npm run voice:render` records them into `assets/voice/<lang>/` (edge-tts, silence trimmed)
-and writes the clip index; a Jest test fails when the words changed without recording again. Played with `expo-audio`
-one after another, lowering other audio meanwhile, also with the ring/silent switch on and with the app in the
+and writes the clip index; a Jest test fails when the words changed without recording again. Each clip is compressed
+and brought to −15 LUFS, peaks under −1.5 dBFS (edge-tts gives about −21 LUFS, streamed music plays near −14: the voice
+was hard to hear over music from the same phone). Played with `expo-audio` one after another, lowering other audio
+meanwhile: on iOS the voice holds the audio session from 300 ms before an announcement's first clip (iOS fades the
+music down) to 500 ms after its last (expo-audio's own on/off per clip let the first syllables come over full music
+and the music rise between phrases). Also with the ring/silent switch on and with the app in the
 background (`shouldPlayInBackground`, the `expo-audio` plugin's background playback; without it expo-audio pauses its
-players when the app leaves the screen). An announcement without a
+players when the app leaves the screen). The voice goes wherever the phone's audio goes: to a car's Bluetooth while it
+is connected, silent when the car plays another source (CarPlay of another phone), and the app can't tell. When that
+output goes away (Bluetooth turned off) expo-audio pauses its players and never resumes them: a clip paused that way
+is played again from its start (twice at most), on the phone's speaker. Without turning Bluetooth off, holding the
+banner's voice button opens the system's output picker, and the button shows where the voice goes (`modules/audio-output`;
+UI-SPEC §6.3). iOS: Apple's picker, opened by a tap sent to its button (it has no call to open it). Android: the output
+switcher (14+), the System UI media output dialog (12–13), the Settings panel (11), else Bluetooth settings; where the
+media plays is `getAudioDevicesForAttributes` (13+), else the connected output media prefers. Android doesn't pause
+the voice when its Bluetooth goes away (expo-audio leaves ExoPlayer's "becoming noisy" off). An announcement without a
 clip for every phrase (a roundabout exit past the 6th) is said by the system voice (`expo-speech`, `uk-UA` /
 `en-US`), which is silent while the ring/silent switch is on.
 
@@ -287,12 +299,12 @@ would follow within 6 s. Roundabout exits are ordinals ("другий з’їз�
 and "Ви прибули". Nothing about the current plan's maneuvers while off it. The banner's speaker button mutes it (kept
 across launches).
 
-Into the trip log: `voice say <phrase ids>` for each announcement (`(system voice)` without clips, `after <n>
+Into the trip log: `audio output: <kind> "<device>"` when a route starts and `audio output now: … (<why>)` on each
+change (speaker, receiver, wired, bluetooth, carplay, airplay), `voice say <phrase ids>` for each announcement (`(system voice)` without clips, `after <n>
 waiting` when queued), `voice muted: …` for one not said, and what went wrong: a clip that never reported its end
 (given up after 8 s), one that didn't load or play (said by the system voice instead), the system voice failing or
-never finishing (given up after 4 s + 0.12 s a character). Whatever the player does, the next announcement is said:
-on 2026-10-09 only the first one of a drive was heard, with nothing in Sentry and nothing about the voice in the
-log, and these notes are what can tell next time.
+never finishing (given up after 4 s + 0.12 s a character), a clip paused by the system and played again. Whatever
+the player does, the next announcement is said.
 
 ### 8.6 Route hint (R5, built, off)
 

@@ -202,7 +202,10 @@ One small component each. Touch targets ≥ 56 pt; high contrast; minimal text.
   to it (10 m steps under 300 m, 50 m under 1 km), its instruction, "then …" when the next follows within 120 m,
   and the distance, time and arrival clock left; or "Planning route…", "Off route, planning again…", "Position
   uncertain: keeping the route", "No route" with the reason, "You've arrived". Its × ends the route; its speaker
-  button mutes the spoken maneuvers (ROUTING-SPEC §8.5). The map draws the route ahead of the car (from its
+  button mutes the spoken maneuvers (ROUTING-SPEC §8.5); holding it opens the system's audio output picker
+  (iOS: Apple's, iPhone / Bluetooth / AirPlay; Android: the media output panel), and while the voice goes off the phone (a car's Bluetooth) it shows the AirPlay
+  audio glyph instead of the speaker. The two buttons are 38 pt, the × at the top and the voice at the bottom, at
+  least 20 pt apart, their touch areas not overlapping (a mis-tap on × ended the route). The map draws the route ahead of the car (from its
   progress point, ROUTING-SPEC §8.1: what is driven disappears; faded while planning again; the stretch from the
   progress point to the next route vertex is dashed in the accent blue), its next maneuver and the destination.
 - **A route without an adapter** (phone-only mode on and no adapter connected, NAVIGATOR-SPEC §9.6): **Route here**

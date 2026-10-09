@@ -52,6 +52,8 @@ const SF = {
   history: "clock.arrow.circlepath",
   volume_up: "speaker.wave.2.fill",
   volume_off: "speaker.slash.fill",
+  // The voice playing off the phone (a car's Bluetooth, AirPlay).
+  airplay: "airplayaudio",
 } as const satisfies Record<string, SFSymbol>;
 
 export type IconName = keyof typeof SF;
