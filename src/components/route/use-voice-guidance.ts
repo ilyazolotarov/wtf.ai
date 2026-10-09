@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import { useT } from "@/i18n/provider";
 import { Announcer } from "@/nav/routing/announcer";
@@ -7,9 +7,48 @@ import { kvStore } from "@/services/kv-store";
 import { getRuntime } from "@/services/runtime";
 
 import { announcementPhrases } from "./voice-phrases";
-import { hushVoice, sayPhrases, setVoiceNote } from "./voice-player";
+import { hushVoice, sayPhrases, setVoiceNote, setVoiceVolume } from "./voice-player";
 
 const MUTED_KEY = "route.voice.muted";
+const VOLUME_KEY = "route.voice.volume";
+
+/**
+ * The default volume: the clips are recorded loud (−15 LUFS, for loud music), and 80 % plays them 3.9 dB lower, near
+ * −19 LUFS, the usual level of a voice assistant (ROUTING-SPEC §8.5).
+ */
+const DEFAULT_VOLUME = 0.8;
+/** The player's gain for a volume: the square, so equal steps of the slider sound about equal. */
+const gainOf = (v: number) => v * v;
+
+let volume: number | null = null;
+const volumeListeners = new Set<() => void>();
+
+/** The voice's volume, 0–1 (kept across launches). 0: no voice at all. */
+export function loadVoiceVolume(): number {
+  if (volume === null) {
+    const v = kvStore.getJson<number>(VOLUME_KEY);
+    volume = typeof v === "number" && v >= 0 && v <= 1 ? v : DEFAULT_VOLUME;
+  }
+  return volume;
+}
+
+export function saveVoiceVolume(v: number): void {
+  volume = v;
+  kvStore.setJson(VOLUME_KEY, v);
+  setVoiceVolume(gainOf(v));
+  if (v === 0) hushVoice();
+  volumeListeners.forEach((l) => l());
+}
+
+const subscribeVolume = (l: () => void) => {
+  volumeListeners.add(l);
+  return () => void volumeListeners.delete(l);
+};
+
+/** The voice's volume, following Settings. */
+export function useVoiceVolume(): number {
+  return useSyncExternalStore(subscribeVolume, loadVoiceVolume);
+}
 
 /** Whether spoken guidance is off (kept across launches). */
 export function useVoiceMuted(): [boolean, () => void] {
@@ -32,7 +71,10 @@ export function useVoiceGuidance(route: RouteSnapshot | null, speedMps: number |
   const announcer = useRef<{ destination: RouteSnapshot["destination"]; announcer: Announcer } | null>(null);
 
   // What the voice says and what goes wrong with it, into the trip log.
-  useEffect(() => setVoiceNote((text) => getRuntime().recorder.note(text)), []);
+  useEffect(() => {
+    setVoiceNote((text) => getRuntime().recorder.note(text));
+    setVoiceVolume(gainOf(loadVoiceVolume()));
+  }, []);
 
   useEffect(() => {
     if (!route) {

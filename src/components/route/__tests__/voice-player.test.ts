@@ -1,21 +1,24 @@
 // The route voice's queue (voice-player.ts) on a fake audio player: whatever the player does or fails to report, the
 // next announcement is still said.
 
-import { hushVoice, sayPhrases, setVoiceNote } from "../voice-player";
+import { hushVoice, sayPhrases, setVoiceNote, setVoiceVolume } from "../voice-player";
 
 // jest.mock calls are hoisted above the import.
 type Listener = (status: { didJustFinish: boolean; playing?: boolean }) => void;
 
-const mockPlayers: { clip: number; listener: Listener | null; played: boolean; plays: number; seeks: number; failPlay: boolean; failRemove: boolean }[] = [];
+const mockPlayers: { clip: number; listener: Listener | null; played: boolean; plays: number; seeks: number; volume?: number; failPlay: boolean; failRemove: boolean }[] = [];
 let mockFailPlay = false;
 let mockFailRemove = false;
 
 jest.mock("expo-audio", () => ({
   setAudioModeAsync: jest.fn(() => Promise.resolve()),
   createAudioPlayer: jest.fn((clip: number) => {
-    const p = { clip, listener: null as Listener | null, played: false, plays: 0, seeks: 0, failPlay: mockFailPlay, failRemove: mockFailRemove };
+    const p = { clip, listener: null as Listener | null, played: false, plays: 0, seeks: 0, volume: undefined as number | undefined, failPlay: mockFailPlay, failRemove: mockFailRemove };
     mockPlayers.push(p);
     return {
+      set volume(v: number) {
+        p.volume = v;
+      },
       addListener: (_: string, l: Listener) => {
         p.listener = l;
         return { remove: () => {} };
@@ -37,9 +40,9 @@ jest.mock("expo-audio", () => ({
   }),
 }));
 
-const mockSpoken: { text: string; options: { onDone?: () => void } }[] = [];
+const mockSpoken: { text: string; options: { onDone?: () => void; volume?: number } }[] = [];
 jest.mock("expo-speech", () => ({
-  speak: jest.fn((text: string, options: { onDone?: () => void }) => mockSpoken.push({ text, options })),
+  speak: jest.fn((text: string, options: { onDone?: () => void; volume?: number }) => mockSpoken.push({ text, options })),
   stop: jest.fn(() => Promise.resolve()),
 }));
 
@@ -59,10 +62,22 @@ beforeEach(() => {
   notes.length = 0;
   mockFailPlay = mockFailRemove = false;
   setVoiceNote((t) => notes.push(t));
+  setVoiceVolume(1);
 });
 afterEach(() => jest.useRealTimers());
 
 describe("voice player", () => {
+  test("clips and the system voice play at the driver's volume", async () => {
+    setVoiceVolume(0.6);
+    sayPhrases([{ id: "now-left", text: "Turn left" }], "en");
+    await flush();
+    expect(mockPlayers[0].volume).toBe(0.6);
+    finish(0);
+    sayPhrases([{ id: "no-clip", text: "Somewhere" }], "en");
+    await flush();
+    expect(mockSpoken[0].options.volume).toBe(0.6);
+  });
+
   test("clips play one after another, each when the last reports its end", async () => {
     sayPhrases([{ id: "now-left", text: "Turn left" }, { id: "then-left", text: "then left" }], "en");
     await flush();

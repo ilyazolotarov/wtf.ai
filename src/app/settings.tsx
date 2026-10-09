@@ -10,6 +10,7 @@ import {
     SectionLabel,
     Segmented,
 } from "@/components/screens/screen-ui";
+import { VoiceVolumeSection } from "@/components/route/voice-volume-section";
 import { Icon } from "@/components/ui/icon";
 import { installId } from "@/services/telemetry";
 import { T } from "@/components/ui/text";
@@ -55,6 +56,7 @@ export default function SettingsScreen() {
           ]}
         />
       </View>
+      <VoiceVolumeSection />
       <View style={styles.group}>
         <SectionLabel>{t("privacy")}</SectionLabel>
         <ScreenCard style={styles.privacy}>

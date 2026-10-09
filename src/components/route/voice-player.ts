@@ -23,9 +23,15 @@ let stopCurrent: (() => void) | null = null;
 let audioMode: Promise<void> | null = null;
 /** Where the voice says what it did (the trip log's notes): the only way to tell later why a drive stayed silent. */
 let note: (text: string) => void = () => {};
+/** The player's gain for the driver's voice volume (Settings), 0–1 of the recorded level: a clip already playing keeps its own. */
+let volume = 1;
 
 export function setVoiceNote(fn: (text: string) => void): void {
   note = fn;
+}
+
+export function setVoiceVolume(v: number): void {
+  volume = Math.min(1, Math.max(0, v));
 }
 
 const languageOf = (lang: VoiceLang) => (lang === "uk" ? "uk-UA" : "en-US");
@@ -83,6 +89,7 @@ function speak(text: string, language: string, done: () => void): void {
   try {
     Speech.speak(text, {
       language,
+      volume,
       useApplicationAudioSession: false,
       onDone: end,
       onStopped: end,
@@ -113,6 +120,7 @@ async function playClip(item: Extract<Item, { clip: number }>, gen: number, done
   let player: ReturnType<typeof createAudioPlayer>;
   try {
     player = createAudioPlayer(item.clip);
+    player.volume = volume;
   } catch (e) {
     fallBack(`not loaded (${String(e)})`);
     return;

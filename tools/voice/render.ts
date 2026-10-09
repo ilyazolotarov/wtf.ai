@@ -39,7 +39,11 @@ const silence = (keepS: number) => `silenceremove=start_periods=1:start_threshol
 const TRIM = [silence(0.03), "areverse", silence(0.15), "areverse"].join(",");
 /** Quiet syllables brought up to the loud ones, so the whole phrase carries over music and road noise. */
 const COMPRESS = "acompressor=threshold=-26dB:ratio=4:attack=3:release=60";
-/** Every clip at this integrated loudness (streamed music plays near −14 LUFS; edge-tts gives about −21). */
+/**
+ * Every clip (mono) at this integrated loudness: the loudest the voice can play (edge-tts gives about −21). The app's
+ * default volume, 80 %, plays it 3.9 dB lower, near −19: Google's reference for mono voice, as loud as its assistant's
+ * speech (−16 LUFS stereo); −15 itself was too loud in the car, but is there for loud music (use-voice-guidance.ts).
+ */
 const TARGET_LUFS = -15;
 /** Peaks held under −1.5 dBFS after the gain. */
 const LIMIT = "alimiter=limit=0.84:level=false";

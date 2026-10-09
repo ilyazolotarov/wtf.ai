@@ -15,7 +15,7 @@ import { useHasUsableMap } from "@/config/map";
 import { RegionPrompt } from "@/components/map/region-prompt";
 import { RouteBanner } from "@/components/route/route-banner";
 import { useAudioOutput } from "@/components/route/use-audio-output";
-import { useVoiceGuidance, useVoiceMuted } from "@/components/route/use-voice-guidance";
+import { useVoiceGuidance, useVoiceMuted, useVoiceVolume } from "@/components/route/use-voice-guidance";
 import {
     COURSE_MIN_SPEED_MPS,
     useCompassHeading,
@@ -84,6 +84,8 @@ export default function HomeScreen() {
   // A long press on the map drops a pin to route to (ROUTING-SPEC §8), or to say the car is there.
   const [pin, setPin] = useState<Coordinate | null>(null);
   const [voiceMuted, toggleVoice] = useVoiceMuted();
+  // Volume 0 in Settings: no voice, and no button for it.
+  const voiceOff = useVoiceVolume() === 0;
   const [cameraMode, setCameraMode] = useState<CameraMode>("follow");
   const [ghostView, setGhostView] = useState(false);
   const [requesting, setRequesting] = useState(false);
@@ -101,7 +103,7 @@ export default function HomeScreen() {
     useCompassHeading(!recording && nav.adapter !== "on" && position != null),
   );
   const headingUp = useHeadingUp(position, compass);
-  useVoiceGuidance(route, position?.speedMps, voiceMuted);
+  useVoiceGuidance(route, position?.speedMps, voiceMuted || voiceOff);
   const audioOutput = useAudioOutput(route?.status === "active");
 
   // Once per trip: follow becomes heading-up when the car first drives off, and goes back
@@ -638,7 +640,7 @@ export default function HomeScreen() {
           )}
 
           {route && (
-            <RouteBanner route={route} nowMs={position?.timestamp ?? 0} onStop={stopRoute} muted={voiceMuted} onToggleVoice={toggleVoice} offPhone={audioOutput.offPhone} />
+            <RouteBanner route={route} nowMs={position?.timestamp ?? 0} onStop={stopRoute} muted={voiceMuted} onToggleVoice={voiceOff ? undefined : toggleVoice} offPhone={audioOutput.offPhone} />
           )}
         </View>
 

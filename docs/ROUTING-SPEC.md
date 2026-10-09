@@ -272,9 +272,10 @@ replay's puck (`replayPuck`, what NavigatorService publishes) fed to guidance as
 Recorded phrases from a neural voice (Ukrainian `uk-UA-PolinaNeural`, English `en-GB-SoniaNeural`), whole phrases,
 distance included and in words ("Через триста метрів, поверніть ліворуч"; digits get misread, "50" as "50th"), so
 the intonation and the grammar of numbers ("один кілометр", "півтора кілометра", "два кілометри") are right. `npm run voice:render` records them into `assets/voice/<lang>/` (edge-tts, silence trimmed)
-and writes the clip index; a Jest test fails when the words changed without recording again. Each clip is compressed
-and brought to −15 LUFS, peaks under −1.5 dBFS (edge-tts gives about −21 LUFS, streamed music plays near −14: the voice
-was hard to hear over music from the same phone). Played with `expo-audio` one after another, lowering other audio
+and writes the clip index; a Jest test fails when the words changed without recording again. Each clip (mono) is
+compressed, so quiet syllables carry over music and road noise, and brought to −15 LUFS, peaks under −1.5 dBFS: the loudest
+the voice plays, for loud music. The default volume plays it near −19 LUFS (below), Google's reference for mono voice,
+as loud as its assistant's speech (−16 LUFS stereo); −15 itself was too loud in the car. Played with `expo-audio` one after another, lowering other audio
 meanwhile (the music stays down through an announcement: expo-audio releases the session 100 ms after a clip only when
 nothing plays by then), also with the ring/silent switch on and with the app in the
 background (`shouldPlayInBackground`, the `expo-audio` plugin's background playback; without it expo-audio pauses its
@@ -296,7 +297,10 @@ maneuver already closer, after a start or re-plan: the nearest). At it, at max(4
 "потім …" when the next follows within 120 m ("і ви на місці" for the destination). "Ahead" is skipped when "at it"
 would follow within 6 s. Roundabout exits are ordinals ("другий з’їзд"). Also "Маршрут перебудовано" for a re-plan
 and "Ви прибули". Nothing about the current plan's maneuvers while off it. The banner's speaker button mutes it (kept
-across launches).
+across launches). Settings has the voice's volume, 0–100 % (kept across launches; a sample is said when the slider
+rests; 0 turns the voice off and hides the banner's speaker button). The player's gain is its square, so equal steps
+sound about equal: 100 % plays the clips as recorded, the default 80 % 3.9 dB lower (near −19 LUFS), 50 % 12 dB lower. It is
+the player's volume, applied to the clips and the system voice: the clips aren't recorded again to change it.
 
 Into the trip log: `audio output: <kind> "<device>"` when a route starts and `audio output now: … (<why>)` on each
 change (speaker, receiver, wired, bluetooth, carplay, airplay), `voice say <phrase ids>` for each announcement (`(system voice)` without clips, `after <n>

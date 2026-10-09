@@ -44,7 +44,8 @@ export function RouteBanner({
   nowMs: number;
   onStop(): void;
   muted: boolean;
-  onToggleVoice(): void;
+  /** Absent: no voice button (the voice is off in Settings). */
+  onToggleVoice?: () => void;
   offPhone?: boolean;
 }) {
   const { t, language } = useT();
@@ -143,7 +144,7 @@ export function RouteBanner({
         >
           <Icon name="close" size={17} color={palette.text2} />
         </Pressable>
-        {route.status === "active" && (
+        {route.status === "active" && onToggleVoice && (
           <Pressable
             onPress={onToggleVoice}
             onLongPress={canPickAudioOutput ? openPicker : undefined}
