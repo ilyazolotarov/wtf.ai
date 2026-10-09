@@ -1,5 +1,7 @@
 import { en } from "@/i18n/en";
 import { uk } from "@/i18n/uk";
+import enPermissions from "../../../locales/en.json";
+import ukPermissions from "../../../locales/uk.json";
 
 const entries = Object.entries(uk) as [keyof typeof en, string][];
 const placeholders = (s: string) => [...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort();
@@ -37,6 +39,16 @@ describe("Ukrainian strings", () => {
   test("are translated", () => {
     const same = entries.filter(([key, text]) => text === en[key] && !SAME_IN_BOTH.has(key));
     expect(same.map(([key]) => key)).toEqual([]);
+  });
+
+  test("do not confuse OBD speed with individual wheel speeds", () => {
+    expect(entries.filter(([, text]) => /швидкост[ію] коліс/i.test(text)).map(([key]) => key)).toEqual([]);
+  });
+
+  test("iOS permission descriptions cover the same permissions and use consistent terms", () => {
+    expect(Object.keys(ukPermissions).sort()).toEqual(Object.keys(enPermissions).sort());
+    expect(ukPermissions.NSLocationWhenInUseUsageDescription).toContain("геопозицію");
+    expect(ukPermissions.NSBluetoothAlwaysUsageDescription).toMatch(/підключатися.*OBD-II.*швидкість авто/);
   });
 
   test("use the typographic apostrophe and «» quotes", () => {

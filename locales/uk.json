@@ -1,4 +1,4 @@
 {
-  "NSLocationWhenInUseUsageDescription": "Дозвольте wtf.ai використовувати ваше місцезнаходження під час навігації.",
-  "NSBluetoothAlwaysUsageDescription": "Дозвольте wtf.ai під'єднуватися до вашого OBD-II адаптера, щоб зчитувати швидкість авто."
+  "NSLocationWhenInUseUsageDescription": "Дозвольте wtf.ai визначати вашу геопозицію під час навігації.",
+  "NSBluetoothAlwaysUsageDescription": "Дозвольте wtf.ai підключатися до адаптера OBD-II, щоб зчитувати швидкість авто."
 }

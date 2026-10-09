@@ -22,6 +22,11 @@ describe("voice phrases", () => {
     expect(announcementPhrases(now(m("roundabout", 3)), tEn, "en")[0].text).toBe("At the roundabout, take the third exit");
   });
 
+  test("slight turns include an instruction in Ukrainian", () => {
+    expect(announcementPhrases(now(m("slight-left")), tUk, "uk")[0].text).toBe("Плавно поверніть ліворуч");
+    expect(announcementPhrases(ahead(m("slight-right"), 300), tUk, "uk")[0].text).toBe("Через триста метрів, плавно поверніть праворуч");
+  });
+
   test("a word for every spoken distance", () => {
     for (const strings of [en, uk]) expect(strings.sayDistances.split("|")).toHaveLength(SPOKEN_DISTANCES_M.length);
   });
