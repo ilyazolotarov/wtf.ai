@@ -14,7 +14,7 @@ its state logic in the `<script type="text/x-dc">` block at the bottom.
 | `canvas.json` | Canvas layout: which screens exist and where they sit |
 | `Main.dc.html` | Onboarding: welcome → location → car → phone holder (new step) |
 | `Tour.dc.html` | Map tour: invite card, then six coach marks on the map's controls |
-| `More.dc.html` | More sheet with "How to use wtf.ai" as its first row (the Guide is not in Settings) |
+| `More.dc.html` | More sheet with the Guide, "How to use?", as its first row (the Guide is not in Settings) |
 | `Guide.dc.html` | Guide hub: the map tour, nine lessons in four groups, progress |
 | `LessonBefore.dc.html` | 1 · Before you drive: checklist (map, adapter, holder, open the app, charging) |
 | `LessonStatus.dc.html` | 2 · What the dot is telling you: the five trust states on a map |

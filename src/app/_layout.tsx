@@ -9,7 +9,7 @@ import {
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useState } from "react";
-import { useColorScheme } from "react-native";
+import { Platform, useColorScheme } from "react-native";
 
 import { AnimatedSplash } from "@/components/animated-splash";
 import { setSheetClosing } from "@/components/map/sheet-closing";
@@ -21,7 +21,9 @@ import { RuntimeProvider } from "@/providers/runtime-provider";
 import { applyAppearance, loadAppearance } from "@/services/preferences";
 
 initSentry();
-applyAppearance(loadAppearance());
+// On iOS the override would redraw the native splash, still on screen, in the app's scheme: a light flash over a
+// dark launch. There it is applied once the animated splash, drawn like the native one, has replaced it.
+if (Platform.OS !== "ios") applyAppearance(loadAppearance());
 void SplashScreen.preventAutoHideAsync();
 
 export default Sentry.wrap(RootLayout);
@@ -49,7 +51,14 @@ function RootLayout() {
             <AppStack />
           </RuntimeProvider>
         </PositionProvider>
-        {!splashDone && <AnimatedSplash onDone={() => setSplashDone(true)} />}
+        {!splashDone && (
+          <AnimatedSplash
+            onNativeHidden={() => {
+              if (Platform.OS === "ios") applyAppearance(loadAppearance());
+            }}
+            onDone={() => setSplashDone(true)}
+          />
+        )}
       </I18nProvider>
     </ThemeProvider>
   );
@@ -65,7 +74,6 @@ const SHEETS = [
   "recorder",
   "developer",
   "guide",
-  "lesson",
 ] as const;
 
 function AppStack() {
@@ -101,6 +109,10 @@ function AppStack() {
           gestureEnabled: false,
           contentStyle: { backgroundColor: palette.bg },
         }}
+      />
+      <Stack.Screen
+        name="lesson"
+        options={{ headerShown: false, presentation: "fullScreenModal" }}
       />
       <Stack.Screen
         name="map-setup"

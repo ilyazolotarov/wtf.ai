@@ -142,7 +142,7 @@ export function MapTour({ targets, onClose }: { targets: TourTargets; onClose():
     return (
       <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
         <View style={[styles.toast, { bottom: height - (boxes.toolbar?.y ?? height - 100) + 84 }]}>
-          <T size={13} color="#F2F0EC" style={styles.toastText}>
+          <T size={14} color="#F2F0EC" style={styles.toastText}>
             {t("tourFinished")}
           </T>
           <Pressable
@@ -153,7 +153,7 @@ export function MapTour({ targets, onClose }: { targets: TourTargets; onClose():
             accessibilityRole="button"
             style={({ pressed }) => [styles.toastButton, pressed && styles.pressed]}
           >
-            <T w="semibold" size={13} color="#0E1220">
+            <T w="semibold" size={14} color="#0E1220">
               {t("guideTitle")}
             </T>
           </Pressable>
@@ -325,19 +325,20 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 16,
     right: 16,
-    borderRadius: Radius.pill,
+    borderRadius: Radius.rL,
+    borderCurve: "continuous",
     backgroundColor: "rgba(29,28,26,0.94)",
-    paddingVertical: 8,
+    paddingVertical: 10,
     paddingLeft: 18,
-    paddingRight: 8,
+    paddingRight: 10,
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
   },
-  toastText: { flex: 1, lineHeight: 18 },
+  toastText: { flex: 1, lineHeight: 19 },
   toastButton: {
-    height: 36,
-    paddingHorizontal: 14,
+    height: 40,
+    paddingHorizontal: 18,
     borderRadius: Radius.pill,
     backgroundColor: "#90BAF1",
     justifyContent: "center",

@@ -4,7 +4,8 @@ import { Pressable, StyleSheet, View } from "react-native";
 import { T } from "@/components/ui/text";
 import { Radius, usePalette } from "@/constants/theme";
 
-/** Labelled rows under a lesson's map: "The app" / "You", "When" / "Also". */
+/** Labelled rows under a lesson's map: "The app" / "You", "When" / "Also". Each label sits above its text, so a
+ * long one (Ukrainian "Застосунок") never breaks mid-word. */
 export function ExplainCard({ rows }: { rows: { label: string; text: string; strong?: boolean }[] }) {
   const palette = usePalette();
   return (
@@ -81,9 +82,9 @@ export function LessonIntro({ children }: { children: string }) {
 const styles = StyleSheet.create({
   card: { borderRadius: Radius.rL, paddingHorizontal: 16, paddingVertical: 4, borderCurve: "continuous" },
   line: { height: StyleSheet.hairlineWidth },
-  explainRow: { flexDirection: "row", gap: 12, paddingVertical: 12 },
-  explainLabel: { width: 72, paddingTop: 2, letterSpacing: 0.3 },
-  explainText: { flex: 1, lineHeight: 20 },
+  explainRow: { gap: 4, paddingVertical: 12 },
+  explainLabel: { letterSpacing: 0.3 },
+  explainText: { lineHeight: 20 },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   chip: {
     height: 42,

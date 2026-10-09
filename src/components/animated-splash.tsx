@@ -67,7 +67,14 @@ const MAX_D = SPLASH.puck + 2 * 52;
 const steps = KEYFRAMES.map((_, i) => i);
 const scaleOf = (spread: number) => (SPLASH.puck + 2 * spread) / MAX_D;
 
-export function AnimatedSplash({ onDone }: { onDone(): void }) {
+export function AnimatedSplash({
+  onNativeHidden,
+  onDone,
+}: {
+  /** The native splash is gone and this overlay covers the screen. */
+  onNativeHidden(): void;
+  onDone(): void;
+}) {
   // The native splash is drawn in system colors before JS runs, so the overlay ignores
   // the app's appearance setting to keep the hand-off invisible.
   const scheme = launchSystemScheme;
@@ -77,10 +84,12 @@ export function AnimatedSplash({ onDone }: { onDone(): void }) {
   const [textOpacity] = useState(() => new Animated.Value(0));
   const [loaded, setLoaded] = useState(false);
   const finish = useEffectEvent(onDone);
+  const nativeHidden = useEffectEvent(onNativeHidden);
 
   useEffect(() => {
     if (!loaded) return;
-    void SplashScreen.hideAsync();
+    // Rejects when the native splash is already gone: this overlay covers the screen either way.
+    void SplashScreen.hideAsync().finally(() => nativeHidden());
     let cancelled = false;
     const run = (reduceMotion: boolean) => {
       if (cancelled) return;

@@ -292,10 +292,10 @@ normally"), never "Nothing".
   at a time, with a card (step, title, text, Back / Next, Skip): the status pill, the dot (the screen centre: the
   tour starts the follow camera), press and hold (a pulsing ring), the camera button, Vehicle and More (thirds of
   the bottom bar). Done leaves a note for 6 s with a link to the Guide.
-- **Guide** sheet: the first row of More, "How to use wtf.ai · {done} of {total} done". The tour card, the lessons
+- **Guide** sheet: the first row of More, "How to use? · {done} of {total} done". The tour card, the lessons
   in groups (Getting started, When GPS fails, Routes, Maps) with a tick once done (kv-store `guide.done`), "Show the
   first-run screens again".
-- **Lessons** (`lesson?id=`), each interactive, on drawn maps (`react-native-svg`, `src/components/guide/mini-map.tsx`)
+- **Lessons** (`lesson?id=`), full-screen (a sheet left too little room), each interactive, on drawn maps (`react-native-svg`, `src/components/guide/mini-map.tsx`)
   in the map's colours: never the live map, so practising never moves the car. The button at the bottom marks the
   lesson done and opens the next. Built: 1 Before you drive (the map and the adapter read from the app, the rest
   ticked), 2 What the dot is telling you (the five trust states), 3 The car button (its four states, a checklist

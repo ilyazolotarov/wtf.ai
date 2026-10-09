@@ -6,7 +6,7 @@ export const guideEn = {
   obHolderFirm: "A firm holder, not loose on a seat",
   obHolderAngle: "Any angle, upright or flat",
   obHolderMoved: "Picked up for a moment? It catches up.",
-  obGuideNote: "Tips and lessons stay in More › How to use wtf.ai.",
+  obGuideNote: "Tips and lessons stay in More › “How to use?”",
   obDone: "Done",
 
   // The map tour.
@@ -18,7 +18,7 @@ export const guideEn = {
   tourNext: "Next",
   tourBack: "Back",
   tourDone: "Done",
-  tourFinished: "Tour done. It’s in More › How to use wtf.ai.",
+  tourFinished: "Tour done. You can find it in More later.",
   tourStatusTitle: "Can GPS be trusted?",
   tourStatusBody: "Green when the phone’s GPS agrees with the car. When it is jammed or spoofed this says so, and what the dot follows instead. Tap it for details.",
   tourDotTitle: "The car is in the circle",
@@ -30,10 +30,10 @@ export const guideEn = {
   tourCarTitle: "Your car’s connection",
   tourCarBody: "Its dot: green, the car is connected; yellow, connecting; red, no adapter found. While you drive it reads “Driving”.",
   tourMoreTitle: "This guide, maps and settings",
-  tourMoreBody: "Come back to these lessons any time: More › How to use wtf.ai. Offline maps and Settings are there too.",
+  tourMoreBody: "Come back to these lessons any time: More › “How to use?”. Offline maps and Settings are there too.",
 
   // The Guide sheet.
-  guideTitle: "How to use wtf.ai",
+  guideTitle: "How to use?",
   guideProgress: "Map tour and lessons · {done} of {total} done",
   guideTourKicker: "ON THE MAP · 1 MIN",
   guideTourTitle: "Take the map tour",

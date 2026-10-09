@@ -1,5 +1,6 @@
 import { router, useLocalSearchParams } from "expo-router";
 import { Children, Fragment, isValidElement } from "react";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   Pressable,
   ScrollView,
@@ -18,13 +19,31 @@ import { useT } from "@/i18n/provider";
 /**
  * Sheet body. With `title`, renders the sheet header: title, a back button
  * when opened from the More sheet (`?from=more`), and a close button. The header stays
- * pinned while the body scrolls.
+ * pinned while the body scrolls. `fullScreen`: the body of a full-screen modal, the header below the status bar.
  */
 export function ScreenContent({
   title,
+  fullScreen = false,
   children,
-}: React.PropsWithChildren<{ title?: string }>) {
+}: React.PropsWithChildren<{ title?: string; fullScreen?: boolean }>) {
   const palette = usePalette();
+  const insets = useSafeAreaInsets();
+  if (fullScreen)
+    return (
+      <View style={[styles.fullScreen, { backgroundColor: palette.sheetBg, paddingTop: insets.top }]}>
+        {title && (
+          <View style={styles.fullScreenHeader}>
+            <SheetHeader title={title} />
+          </View>
+        )}
+        <ScrollView
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={[styles.content, { paddingBottom: styles.content.paddingBottom + insets.bottom }]}
+        >
+          {children}
+        </ScrollView>
+      </View>
+    );
   return (
     <ScrollView
       style={{ backgroundColor: palette.sheetBg }}
@@ -316,6 +335,8 @@ const styles = StyleSheet.create({
     gap: 18,
   },
   contentNoHeader: { paddingTop: 16 },
+  fullScreen: { flex: 1 },
+  fullScreenHeader: { paddingHorizontal: 16, paddingTop: 8 },
   headerWrap: { marginHorizontal: -16, paddingHorizontal: 16, paddingBottom: 6, marginBottom: -6 },
   header: {
     flexDirection: "row",

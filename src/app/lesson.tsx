@@ -16,7 +16,7 @@ export default function LessonScreen() {
   const { id } = useLocalSearchParams<{ id: LessonId }>();
   const index = AVAILABLE_LESSONS.findIndex((lesson) => lesson.id === id);
   const lesson = AVAILABLE_LESSONS[index];
-  if (!lesson) return <ScreenContent title={t("guideTitle")} />;
+  if (!lesson) return <ScreenContent title={t("guideTitle")} fullScreen />;
   const next = AVAILABLE_LESSONS[index + 1];
 
   const finish = () => {
@@ -29,6 +29,7 @@ export default function LessonScreen() {
     // Keyed by lesson: the next one starts at the top, with its own state.
     <ScreenContent
       key={lesson.id}
+      fullScreen
       title={t("guideLessonOf").replace("{n}", String(index + 1)).replace("{total}", String(AVAILABLE_LESSONS.length))}
     >
       <T w="semibold" size={26} style={styles.title}>
