@@ -6,7 +6,7 @@
 // weekday: the evening peak is the bigger one. The sizes are moderate on purpose.
 
 /**
- * [from hour, factor] in order, Monday to Friday; 1 at weekends. Smaller cities get none: the drives through Chernihiv
+ * [from hour, factor] in order, Monday to Friday; 1 at weekends. Smaller cities get none: the drives through a city
  * on a Tuesday 17:00–19:20 were free-flowing, and 1.4 on its main roads made their planned time 4 % worse
  * (ROUTING-SPEC §4.4).
  */

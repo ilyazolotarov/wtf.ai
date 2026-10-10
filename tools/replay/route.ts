@@ -1,6 +1,6 @@
 // Route planning on a region's road graph (ROUTING-SPEC §7).
 //
-//   npm run route -- --from 51.4939,31.2947 --to 51.5100,31.3300            # one route, Chernihiv
+//   npm run route -- --from 50.4501,30.5234 --to 50.4600,30.6000            # one route, Kyiv
 //   npm run route -- --from 51.4939,31.2947,90 --to ... --geojson route.geojson   # heading 90° at the start
 //   npm run route -- --bench 50                                              # random routes in the region
 //   npm run route -- --bench 50 --at 51.4939,31.2947 --radius 8             # ... within 8 km of a point

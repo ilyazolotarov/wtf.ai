@@ -12,11 +12,11 @@ cd tools/tiles
 python -m tiles.cli regions                    # (re)write regions/*.poly from regions/regions.json
 python -m tiles.cli border                     # the app's Ukraine border for GNSS integrity (src/nav/integrity/ukraine-border.ts)
 python -m tiles.cli build-all --heap 8g        # out/release/: ukraine, every region, index.json
-python -m tiles.cli build-region chernihiv     # one region (+ index.json)
-python -m tiles.cli graph chernihiv            # road graph only, from the cached extract (+ index.json)
-python -m tiles.cli graph-check out/release/chernihiv.graph.bin
-python -m tiles.cli search chernihiv            # address search index only (+ index.json)
-python -m tiles.cli search-check out/release/chernihiv.search.bin
+python -m tiles.cli build-region kyiv     # one region (+ index.json)
+python -m tiles.cli graph kyiv            # road graph only, from the cached extract (+ index.json)
+python -m tiles.cli graph-check out/release/kyiv.graph.bin
+python -m tiles.cli search kyiv            # address search index only (+ index.json)
+python -m tiles.cli search-check out/release/kyiv.search.bin
 python -m tiles.cli index                      # shared files + index.json
 python -m tiles.cli serve                      # http://<PC IP>:8765/ — app: Downloads → Map source
 python -m tiles.cli osm-date                   # date of the current Geofabrik extract
@@ -27,15 +27,15 @@ python -m pytest
 
 `ukraine` plus its 27 ISO 3166-2 subdivisions (24 oblasts, Crimea, Kyiv city, Sevastopol),
 listed with their OSM boundary relation in `regions/regions.json`. Each `.poly` is the
-boundary's outer ring (holes filled, so enclaves belong to the surrounding region: Slavutych
-is in both `chernihiv` and its own `kyiv` oblast), buffered by 500 m and simplified to ~20 m.
+boundary's outer ring (holes filled, so enclaves belong to the surrounding region as
+well as to their own), buffered by 500 m and simplified to ~20 m.
 
 One `osmium extract --strategy smart` pass clips the Ukraine extract to every region
 (`cache/extracts/`): only data inside the polygon, with ways and multipolygons that cross the
 border kept whole. Planetiler then builds each region from its own extract, so its tiles hold
 nothing from neighbouring regions at any zoom — only coarse Natural Earth context (borders,
 large water) at z ≤ 6. Clipping tiles instead (Planetiler `--polygon`, `pmtiles extract`)
-keeps whole tiles, which at z8 span ~150 km and showed half of Kyiv oblast in Chernihiv's map.
+keeps whole tiles, which at z8 span ~150 km and showed half of a neighbouring oblast in a region's map.
 
 The first build downloads ~2.3 GB into `cache/` (gitignored): the Ukraine PBF, Planetiler and
 its Natural Earth / water polygon sources. Later builds reuse it; `--refresh-osm` fetches a
@@ -66,10 +66,12 @@ Adding a region = an entry in `regions.json` + its `.poly`.
 ## Road graph (`tiles/graph.py`)
 
 The map-matching particle filter's road network ([MAPMATCH-SPEC.md](../../docs/MAPMATCH-SPEC.md) §4):
-drivable OSM ways split at junctions into edges, simplified to 1 m, with class, one-way, flags and
-turn restrictions. pyosmium reads the region's clipped extract in two passes (ways and
-restrictions, then locations of only the nodes those ways use), so Ukraine builds in ~2–3 min
-with a ~3 GB peak.
+drivable OSM ways split at junctions into edges, simplified to 1 m, with class, one-way, flags,
+turn restrictions and speed attributes for route times (speed limit, unpaved, urban / city / big
+city, traffic lights and stop signs; ROUTING-SPEC §4.1). pyosmium reads the region's clipped
+extract in three passes (ways and restrictions; locations and controls of only the nodes those
+ways use; settlements: place points and areas, built-up landuse), so Ukraine builds in ~8 min
+with a ~3 GB peak, an oblast in seconds.
 
 The file is tiled at z14 with a directory, so the app reads only the tiles near its position
 hypotheses: the 452 MB Ukraine graph costs about what a 15 MB oblast does. Byte layout:
@@ -79,10 +81,10 @@ MAPMATCH-SPEC §4.5; sizes: §4.7.
 
 Downloads lists the regions of the newest `maps-*` release (GitHub API → `index.json`). It
 downloads the shared files once (again when their MD5s change, even under the same OSM
-date) and any region's `.pmtiles` (iOS background session,
+date) and a region's `.pmtiles`, `.graph.bin` and `.search.bin` (iOS background session,
 pause/resume across restarts), checks size and MD5, and stores them in `Documents/maps/`
 (`src/services/offline-map/`). One downloaded region is active; the map uses only it, with no
-online requests. Without a downloaded region the map falls back to online OpenFreeMap.
+online requests. Without a downloaded region the app asks for one before showing the map.
 
 For testing, Downloads → *Map source* takes `http://<PC IP>:8765/` from `tiles serve`. Windows
 Firewall may need to allow Python on private networks for the phone to connect.

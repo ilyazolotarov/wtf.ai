@@ -1,6 +1,6 @@
 # wtf.ai — Vehicle Link (Bluetooth ELM327) Specification
 
-Status: draft v2 (2026-10-03), field-tested with the OBDLink MX+ on the CX-5. Companion to [SPEC.md](SPEC.md) §3.1. Source of truth for coding agents implementing adapter communication. The trip logger built on top of it is specified in [TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md).
+Status: v3 (2026-10-10), field-tested with the OBDLink MX+ (MFi) and the vLinker FD-IOS (BLE) on the main test car, and the MX+ on a second car over K-line. Companion to [SPEC.md](SPEC.md) §3.1. Source of truth for coding agents implementing adapter communication. The trip logger built on top of it is specified in [TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md).
 
 ## 1. Goal
 
@@ -174,7 +174,7 @@ Adds to `Info.plist` (never hand-edit `ios/`):
 ### 6.1 Transport (internal, implemented by native wrappers and the emulator)
 
 ```ts
-type TransportKind = "ble" | "mfi" | "emulator"; // later: "spp" (Android Classic)
+type TransportKind = "ble" | "mfi" | "spp" | "emulator"; // spp: Android Classic Bluetooth
 
 interface RawExchange {
   raw: string; // everything received up to and including '>'
@@ -350,7 +350,7 @@ Rules:
 - Pass = steps 3 and 4 succeed. The adapter is then marked verified and remembered.
 - Every probe exchange goes to the logger transcript (TRIP-LOGGER-SPEC §6.4).
 - The cached protocol is the adapter's last car's. An adapter moved to another car must not stay on it: on 2026-10-05
-  the MX+ went from the CX-5 (CAN, 6) to a Renault Logan (K-line, ISO 14230 KWP), and `ATSP6` + `0100` answered
+  the MX+ went from the main test car (CAN, 6) to the second test car (K-line, ISO 14230 KWP), and `ATSP6` + `0100` answered
   `CAN ERROR` every 5 s until the user gave up, while the OBDLink app (auto search) read the car. `NO DATA` doesn't start
   a search: the bus is there and the ECUs are asleep.
 - The protocol a search finds (`ATDPN` after its `0100`) is cached at once (link event `protocol-search: protocol 6
@@ -383,9 +383,9 @@ Rules:
 2. Supported PIDs: `0100` bitmap must contain `0C` and `0D`. Missing `0D` → error "vehicle doesn't report speed over OBD".
 3. VIN: `0902` once, after §9.2 (multi-frame; clones may fail — non-fatal). Mode 09 is the engine ECU's, so with
    another ECU pinned for speed it goes to the engine ECU (`ATSH7E0` + `ATCRA7E8`), then the speed ECU is pinned
-   again; the pinned ECU is the fallback. On the CX-5 the TCM (`7E9`) is pinned when the engine ECU misses the
+   again; the pinned ECU is the fallback. On the main test car the TCM (`7E9`) is pinned when the engine ECU misses the
    speed probe, and it answers `0902` with `7F 09 12`: that is why the VIN was in only 3 of 14 logs.
-   - Still missed with that fixed: 1 of 4 CX-5 drives on 2026-10-05 had the VIN (and the vLinker's one drive had none).
+   - Still missed with that fixed: 1 of 4 main test car drives on 2026-10-05 had the VIN (and the vLinker's one drive had none).
      The init runs before the trip log starts, so the cause isn't in the logs; likely the ECU is busy while the engine
      cranks (init starts when `0100` first answers, at ignition on). Since then the setup goes into the log
      (TRIP-LOGGER-SPEC §6.4) and:
@@ -462,11 +462,11 @@ Not used: bare-CR "repeat last command" (it saves nothing on BLE and breaks when
 | link lost                       | state becomes `unknown`                                                                        |
 
 - Speed > 0 while `engine-off` is valid (hybrids, coasting with stop-start). Parked with the engine off, speed drops to 1 Hz: it only has to notice the car rolling, and it keeps the parked timeout fed (TRIP-LOGGER-SPEC §4).
-- A running engine's RPM never repeats exactly (0.25 rpm resolution, polled seconds apart: 0 repeats in 167 samples over three real trips). Some ECUs answer with the RPM latched at the last shutdown while awake with the engine off: a Mazda CX-5 reported 796.50 for 280 s while parked with the engine off, and 724.00 after the engine was stopped. Without the repeat rule that started a trip and blocked the parked timeout.
+- A running engine's RPM never repeats exactly (0.25 rpm resolution, polled seconds apart: 0 repeats in 167 samples over three real trips). Some ECUs answer with the RPM latched at the last shutdown while awake with the engine off: a test car main test car reported 796.50 for 280 s while parked with the engine off, and 724.00 after the engine was stopped. Without the repeat rule that started a trip and blocked the parked timeout.
 - `ATRV` is read every 30 s (and logged). Voltage is a hint only (smart alternators make it unreliable for
-  engine-state decisions): the CX-5 read 11.9–12.1 V for 85 % of the driving on 2 of 14 drives, 14.0–14.4 V on the
+  engine-state decisions): the main test car read 11.9–12.1 V for 85 % of the driving on 2 of 14 drives, 14.0–14.4 V on the
   rest.
-- The CX-5 reports PID `0D` = 0 while reversing (3 manoeuvres in 14 drives: 2–10 km/h by GNSS, the car turning
+- The main test car reports PID `0D` = 0 while reversing (3 manoeuvres in 14 drives: 2–10 km/h by GNSS, the car turning
   10–20 °/s, the phone still in the mount). Reversing isn't counted as driving forward; it looks like standing.
 - Trip start/end on top of these states: TRIP-LOGGER-SPEC §4.
 
@@ -484,9 +484,9 @@ Not used: bare-CR "repeat last command" (it saves nothing on BLE and breaks when
 - Background, first target: polling runs in TS, which keeps running while the app is alive. The trip logger keeps the app alive with background location during a trip and for a linger period after it (TRIP-LOGGER-SPEC §4.3). `bluetooth-central` and `external-accessory` background modes keep the links alive.
 - **Later: fully automatic wake** (not in the first target): `CBCentralManager` state restoration (`restoreIdentifier`) + a pending connect to the remembered adapter relaunches the app when the adapter powers up; `EAAccessoryDidConnect` for MFi; significant-location-change as a fallback for adapters that never sleep. Needs "Always" location permission to start location updates from the background. The native API already takes `restoreIdentifier` so this doesn't need a new module shape.
 
-## 12. Future: Android
+## 12. Android
 
-The same contract with two transports: BLE (same GATT catalog) and Classic SPP (UUID `00001101-0000-1000-8000-00805F9B34FB`, which covers the old non-MFi Classic dongles). Not planned now (SPEC §2).
+The same contract with two transports: BLE (same GATT catalog) and Classic SPP (UUID `00001101-0000-1000-8000-00805F9B34FB`, which covers the old non-MFi Classic dongles), in Kotlin ([ANDROID-SPEC.md](ANDROID-SPEC.md) §3). Compile-checked and run against the emulated adapter only so far.
 
 ## 13. Testing
 
@@ -500,13 +500,13 @@ The same contract with two transports: BLE (same GATT catalog) and Classic SPP (
 
 | Adapter | Transport | Chip / ELM version | Profile | Car / protocol | Speed rate (Hz) | Latency p50 / p95 | Notes |
 | ------- | --------- | ------------------ | ------- | -------------- | --------------- | ----------------- | ----- |
-| OBDLink MX+ | MFi (`com.obdlink`) | STN2255 v5.10.3 / ELM327 v1.4b | — | Mazda CX-5 KF / 6 (CAN 11-bit 500k) | 25–32 moving, 20 on one drive (`010D1`, `ATSH7E0` or `7E1`, `ATAT1`) | 16–19 / 49–65 ms; 30–49 / 70–86 ms on 4 drives (cause unknown) | 18 drives. Rare stalls: replies arrive one command late, then `STOPPED` → re-init (2–6 s gap). The VIN was missed with `7E1` pinned, and still on 3 of 4 drives with `7E0` (§9.1). |
-| OBDLink MX+ | MFi (`com.obdlink`) | STN2255 v5.10.3 / ELM327 v1.4b | — | Renault Logan / ISO 14230 KWP (K-line, `A5`) | 7–9 (`010D1`) | — | 3 drives. Found by the protocol search (§8.1); VIN read (5-line K-line format). First connect took 77 s: the init tried `ATSP6` again and searched again, which broke the fresh K-line session four times; the protocol found is now cached at once. |
-| vLinker FD-IOS | BLE | STN1151 v4.3.2 / ELM327 v2.2 | — | Mazda CX-5 KF / A6 | 26–30 moving (p50 28), 21 standing | 29 / 45 ms | 2 sessions (2026-10-05), one a 1.75 km drive with a route; VIN read on the drive, not on the first short connect. |
+| OBDLink MX+ | MFi (`com.obdlink`) | STN2255 v5.10.3 / ELM327 v1.4b | — | Main test car / 6 (CAN 11-bit 500k) | 25–32 moving, 20 on one drive (`010D1`, `ATSH7E0` or `7E1`, `ATAT1`) | 16–19 / 49–65 ms; 30–49 / 70–86 ms on 4 drives (cause unknown) | 18 drives. Rare stalls: replies arrive one command late, then `STOPPED` → re-init (2–6 s gap). The VIN was missed with `7E1` pinned, and still on 3 of 4 drives with `7E0` (§9.1). |
+| OBDLink MX+ | MFi (`com.obdlink`) | STN2255 v5.10.3 / ELM327 v1.4b | — | Second test car / ISO 14230 KWP (K-line, `A5`) | 7–9 (`010D1`) | — | 3 drives. Found by the protocol search (§8.1); VIN read (5-line K-line format). First connect took 77 s: the init tried `ATSP6` again and searched again, which broke the fresh K-line session four times; the protocol found is now cached at once. |
+| vLinker FD-IOS | BLE | STN1151 v4.3.2 / ELM327 v2.2 | — | Main test car / A6 | 26–30 moving (p50 28), 21 standing | 29 / 45 ms | 2 sessions (2026-10-05), one a 1.75 km drive with a route; VIN read on the drive, not on the first short connect. |
 
 ## 14. Verification targets
 
-1. OBDLink MX+ (MFi) and at least one no-name BLE clone: discovered, probed, verified, polling on the CX-5.
+1. OBDLink MX+ (MFi) and at least one no-name BLE clone: discovered, probed, verified, polling on the main test car.
 2. Unknown BLE device that isn't an adapter (e.g. headphones, a watch): rejected with `no-uart-service` or `not-elm327` within 15 s, no crash.
 3. Speed rate measured and recorded per adapter; `010D1` and `ATSH` optimizations show a measurable gain or are auto-disabled.
 4. Engine state: start → `engine-running` within 5 s; stop-start stop → `engine-off` (not `ignition-off`); key off → `ignition-off` within 15 s of ECU silence.
@@ -515,15 +515,12 @@ The same contract with two transports: BLE (same GATT catalog) and Classic SPP (
 
 ## 15. Open items
 
-1. ~~Check on device that the MX+ reports `com.obdlink` and that an `EASession` opens (§3.4)~~ — verified on 7 drives.
-2. Test a vLinker FS/MS over `com.vgatemall` once one is available; until then their BLE+BT mode is the tested path.
-3. BLE poll rate measured on the vLinker FD-IOS (26–30 Hz, tested-adapter table): no BLE ceiling at the CX-5's rate.
+1. Test a vLinker FS/MS over `com.vgatemall` once one is available; until then their BLE+BT mode is the tested path.
+2. BLE poll rate measured on the vLinker FD-IOS (26–30 Hz, tested-adapter table): no BLE ceiling at the main test car's rate.
    Still to measure: a cheap no-name clone, and the connection interval itself (§3.5).
-4. Verify Expo Modules event payload performance for scan batches; switch to typed arrays if needed.
-5. Decide whether a native "repeat mode" (SPEC §3.1) is needed — only if bridge overhead measurably limits the poll rate. With the MX+ the JS loop reaches 25–29 Hz, so not needed so far.
-6. The VIN (`0902`): missed on 3 of 4 CX-5 drives even when sent to the engine ECU. Now retried while polling, with
+3. Verify Expo Modules event payload performance for scan batches; switch to typed arrays if needed.
+4. Decide whether a native "repeat mode" (SPEC §3.1) is needed — only if bridge overhead measurably limits the poll rate. With the MX+ the JS loop reaches 25–29 Hz, so not needed so far.
+5. The VIN (`0902`): missed on 3 of 4 main test car drives even when sent to the engine ECU. Now retried while polling, with
    the last car on the protocol assumed meanwhile (§9.1). Next drives: the setup in the log (`… s before the log:`)
    shows why the init read misses; `vin: read on retry n` how soon a retry gets it.
-7. Verify the auto-connect fix on device: open the app before the car wakes the MX+; it must connect once iOS reports the accessory.
-8. A K-line car (the Logan) is untested past the protocol search: emulated only (`KLINE_PROFILE`). Check the poll rate,
-   the response count (`010D1`) and the VIN format on a real one.
+6. Verify the auto-connect fix on device: open the app before the car wakes the MX+; it must connect once iOS reports the accessory.

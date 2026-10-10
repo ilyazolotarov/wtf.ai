@@ -1,6 +1,6 @@
-# wtf.ai — Trip Logger Milestone Specification
+# wtf.ai — Trip Logger Specification
 
-Status: draft v2 (2026-10-03), field-tested. Implements SPEC.md Phase 1 (Logger). Source of truth for coding agents. Adapter communication is specified in [VEHICLE-LINK-SPEC.md](VEHICLE-LINK-SPEC.md).
+Status: v3 (2026-10-10), field-tested. Implements SPEC.md Phase 1 (Logger). Source of truth for coding agents. Adapter communication is specified in [VEHICLE-LINK-SPEC.md](VEHICLE-LINK-SPEC.md).
 
 ## 1. Goal
 
@@ -9,7 +9,7 @@ First end-to-end target for the whole app:
 1. Know when a trip starts and ends (engine on/off) without user interaction once the app is open.
 2. Record each trip into a compact binary log: timestamps, OBD vehicle speed, GNSS position with its uncertainty, IMU.
 3. Move logs to a Windows PC and read them there (Python) to develop dead-reckoning algorithms offline.
-4. Temporary developer-only UI to drive and inspect all of this.
+4. Pages to drive and inspect all of this (Trip recorder, trips, the ELM terminal).
 
 ## 2. Decisions
 
@@ -100,7 +100,7 @@ modules/sensor-capture ─▶ src/services/sensor-capture ──(SensorStream)�
 ### 5.3 Bridge
 
 - Functions: `startGnss()`, `stopGnss()`, `startImu({ rateHz, raw, batchMs, magRateHz })`, `stopImu()`, `getPermissions()` / `requestPermissions()` (location When In Use, motion), `nowUs()`.
-- Events: `onGnss` (per fix, ~1 Hz), `onImuBatch` every 100 ms with columnar arrays (`t[]`, `gx[]`, …). Use typed arrays if Expo Modules events support them in SDK 57, else plain number arrays (verify in Phase 0).
+- Events: `onGnss` (per fix, ~1 Hz), `onImuBatch` every 100 ms with columnar plain number arrays (`t[]`, `gx[]`, …).
 - Config plugin: `NSMotionUsageDescription`, `NSLocationWhenInUseUsageDescription` (already set via `expo-location`), `UIBackgroundModes: location` (set via `expo-location` `isIosBackgroundLocationEnabled: true`).
 
 ## 6. Log format (ULog)
@@ -117,12 +117,12 @@ modules/sensor-capture ─▶ src/services/sensor-capture ──(SensorStream)�
 | --------------------------------- | ------------------------------------------------------ |
 | `char[] sys_name`                 | `wtf.ai`                                               |
 | `char[] ver_sw`                   | app version + git commit                               |
-| `char[] sys_hw`                   | iPhone model identifier (e.g. `iPhone15,2`)            |
-| `char[] sys_os_ver`               | iOS version                                            |
+| `char[] sys_hw`                   | phone model identifier (e.g. `iPhone15,2`)             |
+| `char[] sys_os_ver`               | OS version                                             |
 | `uint32_t wtf_log_ver`            | `1` (bump on breaking schema change; additive changes don't bump) |
 | `char[] trip_id`                  | 6-char id from the file name                           |
 | `char[] start_reason`             | `engine` / `speed` / `manual`                          |
-| `char[] adapter_transport`        | `ble` / `mfi` / `none`                                 |
+| `char[] adapter_transport`        | `ble` / `mfi` / `spp` (Android Classic) / `none`       |
 | `char[] adapter_name`             | advertised name / EA name                              |
 | `char[] adapter_elm`              | `ATI` answer                                           |
 | `char[] adapter_chip`             | `STI` answer or empty                                  |
@@ -195,7 +195,7 @@ The trip list shows free space; recording refuses to start below 200 MB free.
 ## 7. Export to PC
 
 - **Share sheet** (`expo-sharing`) from the trip list: one `.ulg` file, or **Share all** — every finished trip stored (not deflated) in one `wtf-trips-<UTC stamp>.zip`, built in `Caches/trip-archives` (only the latest is kept) → AirDrop is not available (no Mac), so typical targets are Files/iCloud Drive, OneDrive, Telegram, e-mail.
-- **Files app / USB**: `expo-file-system` config plugin `enableFileSharing: true` exposes `Documents/` (includes `trips/`). On Windows, the "Apple Devices" app (or iTunes) → device → Files → wtf.ai lets you copy logs over USB. Verify the folder appears in the Files app in Phase 0 (`LSSupportsOpeningDocumentsInPlace` may also be needed).
+- **Files app / USB**: `expo-file-system` config plugin `enableFileSharing: true` exposes `Documents/` (includes `trips/`). On Windows, the "Apple Devices" app (or iTunes) → device → Files → wtf.ai lets you copy logs over USB. Whether the folder also appears in the Files app is unverified (`LSSupportsOpeningDocumentsInPlace` may be needed).
 - Delete single / all trips from the trip list.
 - No automatic upload without the tester's opt-in (§7.1, SPEC §2 privacy).
 
@@ -258,19 +258,19 @@ trip.transcript      # tagged strings (level, tag, text)
 - Put real logs in `tools/triplog/logs/`; it is git-ignored (VIN, GPS tracks).
 - The files also open directly in PlotJuggler and Foxglove for quick looks.
 
-## 9. Developer UI (temporary)
+## 9. Pages
 
-Dev builds only. Replace mocks in existing screens; add routes under `src/app/`.
+Pages on the root stack (UI-SPEC §5): `vehicle` from the map's bar, the rest from More.
 
-### 9.1 `vehicle` (real data, replaces the mock card)
+### 9.1 `vehicle`
 
 - Device list per VEHICLE-LINK-SPEC §7: sections, RSSI, brand hint, rank, scanning indicator, "Pair MFi adapter", "Try anyway" for unknown devices, "Forget".
 - Connected adapter: link state, transport, name, ELM version, chip, suspected clone, battery voltage, protocol, VIN, capabilities, chosen GATT profile.
 - Live: OBD speed (km/h), RPM, engine state, speed poll rate (Hz), latency p50/p95, errors/min.
 - Probe result details on failure (which step failed, GATT dump for unknown devices, with a "copy" action so it can be added to the catalog).
-- "Use emulator" toggle (VEHICLE-LINK-SPEC §13).
+- Emulated adapters, listed when Developer → Show emulated adapters is on (VEHICLE-LINK-SPEC §13).
 
-### 9.2 `recorder`, `position`, `developer` (sheets from More)
+### 9.2 `recorder`, `position`, `developer` (from More)
 
 - `recorder` holds all of trip logging in one place: state, current trip id, duration, file size, start reason;
   buttons Start (manual) / Stop / Marker; the `trips` list; recording settings (trip thresholds §4.2, raw IMU
@@ -278,17 +278,17 @@ Dev builds only. Replace mocks in existing screens; add routes under `src/app/`.
 - `position`: GNSS rate, last accuracy, speed accuracy; IMU rate (measured); EKF and map matching state.
 - `developer`: speed cap override, RPM period and the other test switches; the ELM terminal.
 
-### 9.3 `debug-terminal` (new route, modal)
+### 9.3 `debug-terminal` (from Developer)
 
 - ELM terminal: text input, send via `VehicleLink.exclusive` (polling pauses), scrolling transcript with tx/rx times and latency. Quick buttons: `ATI`, `ATRV`, `ATDPN`, `0100`, `010D`, `010C`, `0902`.
 
-### 9.4 `trips` (new route, modal)
+### 9.4 `trips` (from Trip recorder)
 
 - List of logs: date, duration, distance, size, adapter, complete/incomplete. Actions: share, share all (ZIP), delete, delete all. Free space indicator. With upload on (§7.1): how many logs were sent, and that sent logs are deleted from the phone, so a short or empty list never reads as trips not recorded.
 
-## 10. App configuration (one native batch)
+## 10. App configuration
 
-All native changes land in one CI build (`build-ios` job → unsigned IPA → AltStore; no EAS):
+Native configuration, all through config plugins (never by hand in `ios/` or `android/`):
 
 - `modules/vehicle-link` + its config plugin (VEHICLE-LINK-SPEC §5.4).
 - `modules/sensor-capture` + `NSMotionUsageDescription`.
@@ -304,19 +304,12 @@ All native changes land in one CI build (`build-ios` job → unsigned IPA → Al
 | L1 | TS core (Windows-only)   | —          | `src/obd` (parser, probe, init, poller, engine state, emulator) + `src/triplog` (ULog encoder, schemas) with unit tests.       |
 | L2 | PC tooling               | L1         | `tools/triplog` + golden fixture tests.                                                                                       |
 | L3 | Services + dev UI        | L0, L1     | `vehicle-link`, `sensor-capture`, `trip-recorder` services; screens §9; export.                                                |
-| L4 | Field                    | L2, L3     | Drives on the CX-5 with MX+ and BLE clones; tested-adapter table; first DR dataset.                                           |
+| L4 | Field                    | L2, L3     | Drives on the main test car with MX+ and BLE clones; tested-adapter table; first DR dataset.                                           |
 
 L1 and L2 need no device and can start immediately.
 
-Status (2026-10-06): L0–L3 done. L4 started: drives on the CX-5 with the MX+ (MFi) and the vLinker FD-IOS (BLE,
-2026-10-05); no cheap no-name clone yet.
-
-Field fixes:
-
-- **Stale RPM:** a latched RPM started a trip with the engine off (VEHICLE-LINK-SPEC §10.4).
-- **Auto-connect:** it didn't wait for the MFi accessory to appear (VEHICLE-LINK-SPEC §7).
-- **Parked polling:** speed is now polled at 1 Hz when parked (VEHICLE-LINK-SPEC §10.3).
-- **Map GNSS:** the map's GNSS no longer stalls after jamming (§2).
+Status: L0–L4 done: drives on the main test car with the MX+ (MFi) and the vLinker FD-IOS (BLE), and on a second
+car over K-line; no cheap no-name clone yet.
 
 ## 12. Verification targets
 
@@ -357,9 +350,5 @@ engine-off):
 
 ## 13. Open items
 
-1. Expo Modules event payloads: typed arrays vs number arrays for IMU batches (§5.3).
-2. Files app visibility of `Documents/` (§7).
-3. ~~Whether the map and the log should share one GNSS source~~ — done: the map uses `modules/sensor-capture` too. `expo-location`'s watcher stopped for good after a jamming episode, until an app restart.
-4. Tune trip thresholds (§4.2) from field data. So far the defaults behaved correctly on all 7 drives.
-5. ~~The VIN is often missing from the log~~ — `0902` went to the ECU pinned for speed (VEHICLE-LINK-SPEC §9.1).
-   Verify on the next drives.
+1. Files app visibility of `Documents/` (§7).
+2. Tune trip thresholds (§4.2) from field data. So far the defaults behaved correctly on every drive.

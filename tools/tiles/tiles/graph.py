@@ -77,7 +77,7 @@ CONTROL_NODE_M = 40.0
 URBAN_LANDUSE = {"residential", "commercial", "retail"}
 URBAN_LANDUSE_M = 100.0
 URBAN_PLACE_M = {"city": 4000.0, "town": 1500.0, "village": 600.0, "hamlet": 300.0}
-# Rush hours slow traffic in cities this big (ROUTING-SPEC §4.3): Chernihiv's evening peak drove free-flowing.
+# Rush hours slow traffic in cities this big (ROUTING-SPEC §4.3): a smaller city's evening peak drove free-flowing.
 BIG_CITY_POPULATION = 500_000
 
 # Access precedence: the most specific key present wins.
@@ -350,7 +350,7 @@ def city_radius_m(population: np.ndarray) -> np.ndarray:
 def urban_mask(lon: np.ndarray, lat: np.ndarray, s: Settlements) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """(urban, city, big city) for points (°). Urban: in a place area, near built-up landuse or near
     a place point; scored on the main roads with a tagged limit (≤ 60 urban, ≥ 80 rural): 80 % right
-    in Chernihiv oblast, 86 % in Kyiv oblast (ROUTING-SPEC §4.1). City: in a place=city area or near
+    in the test oblast, 86 % in Kyiv oblast (ROUTING-SPEC §4.1). City: in a place=city area or near
     its point (`city_radius_m`). Big city: one of `BIG_CITY_POPULATION` or more, where rush hours
     slow traffic. Distances in a local frame (x scaled by the cosine of the mean latitude)."""
     urban = np.zeros(len(lon), dtype=bool)

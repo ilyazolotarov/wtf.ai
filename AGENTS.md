@@ -23,7 +23,7 @@ npx expo-doctor             # diagnose dependency and config issues
 npx expo install --fix      # fix incompatible package versions
 ```
 
-Run lint and typecheck before declaring any task done. When touching native modules, also run the Swift logic tests (`swift test`, see README) and keep logic in `modules/*/ios/Logic/` so it stays testable without Xcode.
+Run lint and typecheck before declaring any task done. When touching native modules, also run the Swift and Kotlin logic tests (`swift test`, `gradle test` in `native-tests-android/`; see README) and keep logic in `modules/*/ios/Logic/` and `modules/*/android/**/logic/` so it stays testable without Xcode or a device.
 
 ## Navigation & Routing
 
@@ -35,7 +35,7 @@ Run lint and typecheck before declaring any task done. When touching native modu
 
 **Do not use EAS Build, EAS Submit, or EAS Update, and do not suggest them.** There is no paid Apple Developer account and no Mac. iOS builds are made like this:
 
-- `.github/workflows/ci.yml` runs on every push, but only the jobs for what changed ([docs/CI.md](docs/CI.md)): lint, typecheck, Jest, Python tests, `expo-doctor`, Swift tests, then `.github/workflows/build-ios.yml`. Docs-only pushes run nothing. Pull requests run CI only from forks.
+- `.github/workflows/ci.yml` runs on every push, but only the jobs for what changed ([docs/CI.md](docs/CI.md)): lint, typecheck, Jest, Python tests, `expo-doctor`, Swift and Kotlin tests, then `.github/workflows/build-ios.yml` and `build-android.yml`. Docs-only pushes run nothing. Pull requests run CI only from forks.
 - iOS builds happen on `main` (app changes, sent to Telegram), on branch pushes that change native code (compile check, not sent), and on branch pushes with **`[build]`** (or `[build ios]` / `[build android]`) in a commit message: add it when the user wants an IPA of the branch to install. Don't add it for JS-only work that nobody will install.
 - `build-ios.yml` runs `expo prebuild` + `xcodebuild` on a GitHub macOS runner with code signing disabled and uploads an **unsigned IPA** artifact (can also be started by hand: Actions → *Build Unsigned iOS App*, Release or Debug).
 - The IPA is sideloaded with **AltStore** (re-signed with a free Apple ID: the app expires after 7 days and must be refreshed via AltServer on Windows).

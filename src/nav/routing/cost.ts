@@ -83,7 +83,7 @@ export const DEFAULT_ROUTE_COSTS: RouteCosts = {
   urbanLimitKph: 50,
   ruralLimitKph: 90,
   motorwayLimitKph: 130,
-  // Logged drives (Chernihiv oblast, 2026-10-03…06, ROUTING-SPEC §4.4): 102 km/h on rural 90 roads, 75 on 50 through
+  // Logged drives (the test oblast, 2026-10-03…06, ROUTING-SPEC §4.4): 102 km/h on rural 90 roads, 75 on 50 through
   // villages, 39 on untagged town tertiaries, 24–29 on city primaries. Rounded down: one driver's car.
   ruralLimitShare: 1.1,
   townMainLimitShare: 1.3,

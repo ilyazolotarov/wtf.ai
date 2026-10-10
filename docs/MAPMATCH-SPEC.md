@@ -1,6 +1,6 @@
 # wtf.ai — Map Matching Specification
 
-Status: draft v2 (2026-10-04). Implements SPEC.md Phase 5 (map matching) and the road-graph item of Phase 0.
+Status: v3 (2026-10-10). Implements SPEC.md Phase 5 (map matching) and the road-graph item of Phase 0.
 Details SPEC §3.7 (particle filter) and §3.8 item 3 (road graph). Builds on the Stage 1 navigator
 ([NAVIGATOR-SPEC.md](NAVIGATOR-SPEC.md)). Source of truth for coding agents.
 
@@ -15,7 +15,7 @@ Place the car on the offline road network, so that:
 3. Ambiguity is shown, not hidden: when two roads fit, both stay alive until a turn decides between them.
 4. It works the same for one oblast and for the whole of Ukraine, on the JS thread, within a few ms per update.
 
-## 2. Status (2026-10-04)
+## 2. Status
 
 - **M1 done:** `tools/tiles/tiles/graph.py` builds `<region>.graph.bin` (`tiles graph`, and part of `build-all`).
   Measured in §4.7.
@@ -28,7 +28,7 @@ Place the car on the offline road network, so that:
   §7.7.
 - **M5 done in replay:** the filter starts at the first fix with the heading unknown and can start the EKF (§8);
   simulated jamming (`--jam`, `--start`) and `replay:bench --jam-start`. Measured in §8.1. Still to do: drives
-  beyond Slavutych (§10.3).
+  beyond the test area (§10.3).
 - **M7 in the app, driven (2026-10-05, 10 trip logs, both adapters):** the graph downloads with the region, the
   navigator runs the filter on it, the puck follows the dominant hypothesis while dead-reckoning with alternatives
   on the map, and trip logs carry `nav_mapmatch` (§11), with a particle overlay and a simulated outage for testing
@@ -39,7 +39,8 @@ Place the car on the offline road network, so that:
   circle 61–65 % of the time. Simulated 3 h city drives without GPS (§9.4): dot median 4–6 m, never lost. A developer
   setting picks it in the app (§11); Full correction is the app's default since 2026-10-05 (replay tools keep the
   open loop as their baseline).
-- Next: an app switch to compare the loops on a drive, and a drive for M7. Order of work in §12.
+- Next: the update time on the iPhone (§15.9), and drives in bigger cities with parallel roads and dense grids
+  (§10.3).
 
 ## 3. Decisions
 
@@ -104,7 +105,7 @@ Place the car on the offline road network, so that:
   - `urban`: the edge's middle is in a `place=city|town|village|hamlet` area, within 100 m of
     `landuse=residential|commercial|retail`, or near a place point (city by population below, town 1.5 km, village
     600 m, hamlet 300 m). Scored on main roads with a tagged limit (≤ 60 urban, ≥ 80 rural): 80 % right in
-    Chernihiv oblast, 86 % in Kyiv oblast; road density alone 78 / 82 %, landuse alone 66 / 81 %.
+    the test oblast, 86 % in Kyiv oblast; road density alone 78 / 82 %, landuse alone 66 / 81 %.
   - `city`: in a `place=city` area, or within 4 km × √(population ÷ 300 000) of its point (3–15 km; 4 km
     untagged). `big_city`: the same for a population of 500 000 or more.
   - Traffic lights (`highway=traffic_signals`, and `highway=crossing` + `crossing=traffic_signals`) and stop /
@@ -151,7 +152,7 @@ tiles              per non-empty tile, in tile order:
 ```
 
 - **Directory size:** a dense array over the region's tile range. Ukraine is 827 × 554 tiles, 1.8 MB, read once
-  when the file is opened. Chernihiv's is 85 kB.
+  when the file is opened. An oblast's is ~85 kB.
 - **Ids:** a reference is (tile, local index); `GraphId = tile · 65536 + index`, exact in a JS number. The builder
   fails if a tile has more than 65 535 nodes or edges (the densest Ukraine tile is 216 kB in total).
 - **Home tile:** an edge lives in the tile of its first node (in OSM way order), and a node in the tile that
@@ -186,7 +187,7 @@ tiles              per non-empty tile, in tile order:
 
 | Region | File | Edges | Nodes | Tiles | Build | Peak memory |
 | --- | --- | --- | --- | --- | --- | --- |
-| `chernihiv` | 14.6 MB | 132 k | 102 k | 11.8 k | 6 s | — |
+| an oblast | 14.6 MB | 132 k | 102 k | 11.8 k | 6 s | — |
 | `ukraine` | 452 MB | 4.34 M | 3.36 M | 206 k | 2 min 20 s | 2.9 GB |
 
 - Ukraine: 2.08 M kept ways, 24.6 M vertices → 19.8 M after simplification. Restrictions: 35 k mapped, 1.9 k
@@ -194,7 +195,7 @@ tiles              per non-empty tile, in tile order:
 - Where the bytes go (Ukraine): vertices 35 %, edges 27 %, incidence 15 %, nodes 12 %, spatial 9 %.
 - **Download:** the Ukraine graph adds 38 % to its 1.2 GB display pack; an oblast's (~15 MB) is small next to its
   36–89 MB pack.
-- **Compression:** per-tile deflate gives 1.85× (Chernihiv). Not used in format 1, because it would need a JS
+- **Compression:** per-tile deflate gives 1.85× (an oblast). Not used in format 1, because it would need a JS
   inflater on every tile load. If the Ukraine size matters, the cheaper option is delta-encoded i16 vertices
   (§15.1).
 - Simplifying all 4.3 M edges with shapely at once peaked at 9 GB; in chunks of 200 k edges the peak is node pass 2.
@@ -248,7 +249,7 @@ On the 5 drives with clean moving satellite fixes (≤ 10 m, ≥ 3 m/s; 30–276
 | Open | 0.1 ms (oblast), 0.8 ms (Ukraine: the 1.8 MB directory) |
 | Tile load | 0.07–0.3 ms typical, one 1 ms outlier |
 | `edgesNear(50 m)` from cached tiles | 40–90 µs |
-| Tiles per Slavutych drive | 6–12 |
+| Tiles per town drive | 6–12 |
 
 - The oblast and Ukraine files give identical matches and load the same tiles.
 - Checked by eye (roads, one-way arrows, junction and dead-end nodes under the fixes) on drive q8tfjs. The only
@@ -583,7 +584,7 @@ Simulated jams on the clean drives: 35 sessions starting every 60 s, jammed from
   that won by chance. The later coarse fixes are accepted and pull the EKF back. The along-road spread starts
   (σ up to 150 m) are honest.
 - Holding the heading for 50 m instead of 100 m starts a little sooner (median 0.36 km, map 31 of 35) with the
-  same accuracy here. 100 m stays until drives beyond Slavutych show grids and parallel roads.
+  same accuracy here. 100 m stays until drives beyond the test area show grids and parallel roads.
 
 With the 7 drives of 2026-10-04 (65 simulated sessions, after the handling and coarse-repeat changes of
 NAVIGATOR-SPEC §4, §5.1):
@@ -750,7 +751,7 @@ share of held-out fixes within the circle the map draws (1.5 σ, the ~68 % radiu
   | 480 s, 5.6 km | 24 (2: 5mn7ai, j5m8tq) | 93.4 / 35.0 m | 20.0 / 4.3 m | 24.8 m | 64 % |
 
   No 600 s window has 80 % clean GNSS: the logs are 4–12 min of driving. Hours in a city need longer drives (Cut
-  GPS keeps the real fixes in the log as truth) and grids with parallel roads; Slavutych has few.
+  GPS keeps the real fixes in the log as truth) and grids with parallel roads; the test town has few.
 - Synthetic drive (`particle-filter.test.ts`): GNSS cut 50 s before a junction, unlearned gyro bias, OBD 3 % low; no
   road position with GNSS throughout; with the cut, the EKF ends closer to the truth than open loop, with a smaller
   radius that still covers it.
@@ -761,8 +762,8 @@ The logs are 4–12 min of driving in a small town. `src/nav/sim/city-drive.ts` 
 graph for hours: drivable roads only (not service or private), straight on three times as often as turning, cruise
 speed by road class, slowing for turns (2.5 m/s² lateral), stopping at a quarter of the junctions for 5–45 s, pure
 pursuit on a line 1.5–3.5 m right of the centre line on two-way roads (±2 m on one-ways) with a slow lateral wander
-for map error (σ 1.5 m over 150 m). The phone's sensors come from the truth with the errors measured on the CX-5 and
-iPhone 13: gyro bias 0.05 °/s with a random walk of 0.03 °/s per √h, scale 1.007, noise 0.003 rad/s; OBD × 0.981
+for map error (σ 1.5 m over 150 m). The phone's sensors come from the truth with the errors measured on the main test car and
+test phone: gyro bias 0.05 °/s with a random walk of 0.03 °/s per √h, scale 1.007, noise 0.003 rad/s; OBD × 0.981
 − 0.23 km/h, rounded, 0 below 2.5 km/h; GNSS errors σ 2.5 m correlated over 30 s. The truth is exact, scored every
 second. `tools/replay/simulate.ts` runs it: GPS for the first 3 minutes, then none to the end.
 
@@ -770,13 +771,13 @@ Three 3-hour drives per case (seeds 1–3, IMU 50 Hz; GNSS speed 1.0 s late, as 
 
 | Case | Loop | Dot error median | Max over 3 h | > 50 m of the time |
 | --- | --- | --- | --- | --- |
-| Chernihiv city (65 km, a turn per 0.3–0.4 km) | open | 8 / 178 / 353 m | 8.0 / 1.8 / 10.6 km | 32 / 66 / 64 % |
+| Regional city (65 km, a turn per 0.3–0.4 km) | open | 8 / 178 / 353 m | 8.0 / 1.8 / 10.6 km | 32 / 66 / 64 % |
 | | closed | 4.6 / 4.9 / 4.9 m | 41 / 50 / 35 m | 0 % |
 | Kyiv city centre (58 km, a turn per 0.4 km) | open | 89 / 5 / 537 m | 9.9 / 0.2 / 4.5 km | 51 / 2 / 74 % |
 | | closed | 4.8 / 5.5 / 4.0 m | 39 / 32 / 54 m | 0 / 0 / 0.2 % |
 | Kyiv avenues (`--route arterial`, a turn per 1.8–3.7 km) | open | 4.8 / 4.3 / 3.7 m | 178 / 360 / 104 m | 2 / 2 / 0 % |
 | | closed | 3.4 / 4.4 / 4.4 m | 26 / 33 / 21 m | 0 % |
-| Chernihiv oblast main roads (`arterial`, a turn per 2.3–10 km, intercity at 70 km/h) | open | 13 / 15 / 3062 m | 23 / 3.6 / 17 km | 40 / 43 / 62 % |
+| Oblast main roads (`arterial`, a turn per 2.3–10 km, intercity at 70 km/h) | open | 13 / 15 / 3062 m | 23 / 3.6 / 17 km | 40 / 43 / 62 % |
 | | closed, fixed along floor | 6.5 / 28 / 3.6 m | 140 / 188 / 48 m | 11 / 41 / 0 % |
 | | closed (along floor 1 % since the last turn) | 5.8 / 15 / 3.8 m | 64 / 67 / 48 m | 4 / 9 / 0 % |
 
@@ -785,7 +786,7 @@ Three 3-hour drives per case (seeds 1–3, IMU 50 Hz; GNSS speed 1.0 s late, as 
   (§7.4) pulls the filter onto wrong roads, and nothing brings it back without GNSS.
 - About 1 road-heading correction per 50 m and 1 road position per 200 m; a few per thousand refused by the gate.
 - 30 min drives replay in ~4 s, 3 h in ~20 s (Node, Windows PC).
-- **Long roads with few turns** (Chernihiv intercity, seeds 1–2) failed with a fixed along-road floor. Traced
+- **Long roads with few turns** (Intercity, seeds 1–2) failed with a fixed along-road floor. Traced
   (`--trace`):
   - The error is along the road (across median 2.2 m): the dot falls behind ~0.15–0.25 % of the distance at
     70 km/h. After an hour of highway it is 110–170 m behind; a turn is then matched to the next junction (the dot
@@ -814,7 +815,7 @@ The navigator can run a second EKF on the same sensors and GNSS that never takes
 mistakes can't reach the filter through the EKF and a wrong-road lock shows as the two disagreeing. Two uses tried
 on the simulated drives (3 h, seeds 1–3):
 
-| Filter takes from the twin | Chernihiv intercity: time > 50 m off | Kyiv city: max |
+| Filter takes from the twin | Intercity: time > 50 m off | Kyiv city: max |
 | --- | --- | --- |
 | nothing (main EKF, as kept) | 11 / 41 / 0 % | 39 / 32 / 54 m |
 | position prior | 39 / 83 / 25 % (up to 66 km) | 478 / 120 / 381 m |
@@ -948,8 +949,8 @@ drives worse, the ones the viewer showed, and 3 better.
   - the particle cloud at the cursor time, and clusters with their weights (done in M4: particles once a second,
     200 heaviest, size by weight; clusters as rings sized by spread, labelled with weight and state; from M5 also
     while anchored).
-- **Logs:** all 14 current logs are from Slavutych, a small planned town. Parallel-road and dense-grid cases (SPEC §7.5)
-  need drives elsewhere: Kyiv, or Chernihiv's ring roads. Record some before calling M5 done.
+- **Logs:** all 14 logs then were from one small planned town. Parallel-road and dense-grid cases (SPEC §7.5)
+  need drives elsewhere: Kyiv, or a bigger city's ring roads. Record some before calling M5 done.
 
 ### 10.4 Measured (M3, `npm run replay:truth`)
 
@@ -967,7 +968,7 @@ drives worse, the ones the viewer showed, and 3 better.
   moves at 6–7 km/h and OBD reads 0, then nothing. That is the driver walking off with the phone, as on two of the
   new drives, rather than the car in a yard. The new drives' walks show up the same way (9qw8wn: a 31-fix break,
   route 149 % of the OBD distance).
-- Routes are 1–7 % longer than OBD: OBD reads ~2 % low on the CX-5 (NAVIGATOR-SPEC §5.2), and the centre line is
+- Routes are 1–7 % longer than OBD: OBD reads ~2 % low on the main test car (NAVIGATOR-SPEC §5.2), and the centre line is
   not the driven line. The navigator's odometry (`k_s` learned) is 0.7 % above to 5.4 % below the route.
 - Of 725 moving legs, one doesn't fit its OBD distance (a 1 s fix jump). No leg needed a penalty.
 - 7–64 ms per drive in Node.
@@ -1038,13 +1039,13 @@ drives worse, the ones the viewer showed, and 3 better.
 
 | # | Milestone | Exit |
 | --- | --- | --- |
-| M1 | Graph builder (§4) | `chernihiv` and `ukraine` built; size, build time and peak memory recorded here; pytest green. **Done** (§4.7) |
+| M1 | Graph builder (§4) | an oblast and `ukraine` built; size, build time and peak memory recorded here; pytest green. **Done** (§4.7) |
 | M2 | Reader + viewer layer (§5, §10.3) | TS round-trip tests on a fixture; graph drawn over the drives in `replay:view` and checked by eye; tile load time in Node. **Done** (§5.1) |
 | M3 | Odometry output + ground truth (§6.1, §10.1) | odometry chunks sum to the EKF's distance and heading change; truth edge sequences for the 4 clean drives with no unexplained breaks. **Done** (§10.4) |
 | M4 | PF open loop, known heading (§7) | §10.2 metrics on all drives; dominant-cluster max error on 240 s cuts better than the EKF's 37 m median; truth survival 100 %. **Done** (§7.7): 30.5 m; survival 100 % except 2 s leaving a yard |
-| M5 | Heading init from the map (§8) | EKF starts sooner than alignment on the jammed drives and on `--jam-start`, with no start > 10° off. **Done in replay** (§8.1): sooner on 2 of 3 jammed drives (the third as soon) and 29 of 35 simulated sessions; map starts ≤ 2.6° off. To confirm on drives beyond Slavutych |
+| M5 | Heading init from the map (§8) | EKF starts sooner than alignment on the jammed drives and on `--jam-start`, with no start > 10° off. **Done in replay** (§8.1): sooner on 2 of 3 jammed drives (the third as soon) and 29 of 35 simulated sessions; map starts ≤ 2.6° off. To confirm on drives beyond the test area |
 | M6 | Closed loop (§9) | `replay:bench --mm` closed against open loop on the same windows and seeds: EKF max error better at 120 / 240 s (median and p90), no worse at 60 s; the truth inside the drawn circle 60–85 % of the time pooled, and no drive below 40 % unless open loop already was (max error ÷ σ misjudges a bounded error, §9.3). **Done in replay** (§9.2, §9.3): 240 s max error 59 → 17 m, p90 124 → 20 m; inside 61–65 %, lowest drive 40 % (94zf2q, open loop 36–40 %) |
-| M7 | App (§11) | graph download, `nav_mapmatch` in trip logs, alternatives on the map, update time on iPhone < 5 ms p99. **Built** (§2): needs a drive for the update time |
+| M7 | App (§11) | graph download, `nav_mapmatch` in trip logs, alternatives on the map, update time on iPhone < 5 ms p99. **Built and driven** (§2); the update time is over budget on the iPhone (§15.9) |
 
 M1–M3 can partly overlap. M4 needs M1–M3. M5 and M6 are independent of each other.
 
@@ -1099,11 +1100,12 @@ M1–M3 can partly overlap. M4 needs M1–M3. M5 and M6 are independent of each 
 2. The PF and the EKF both use the same odometry. Watch for overconfidence after closing the loop (max error ÷ σ).
 3. Correlated coarse fixes may lock a jammed start onto the wrong road. The ×2 σ and the distinct-position rule
    are a first guess. In the simulated jams (§8.1) the one wrong-place start was a turn-sequence alias along the
-   right road, not a coarse-fix lock; Slavutych has few parallel roads.
+   right road, not a coarse-fix lock; the test town has few parallel roads.
 4. Via-way restrictions, ferries and street names are not in v1.
-5. Test drives beyond Slavutych for parallel roads and dense grids (§10.3).
-6. Spoofing replay (NAVIGATOR-SPEC §13.6) is needed before integrity can use the clusters.
-7. **Reversing.** The CX-5 reads OBD 0 while reversing (VEHICLE-LINK-SPEC §10.4), so the particles stand still
+5. Test drives beyond the test area for parallel roads and dense grids (§10.3).
+6. (settled) Integrity uses the map-matching clusters as hypotheses after a gap (SPEC §3.3), tested with the
+   spoofing replay (NAVIGATOR-SPEC §13.6).
+7. **Reversing.** The main test car reads OBD 0 while reversing (VEHICLE-LINK-SPEC §10.4), so the particles stand still
    while the gyro turns them: they rotate in place and lose the 5–15 m driven. It costs most in yards (§7.7). OBD
    0 with the gyro turning and the phone steady in the mount marks a reverse; PID `A4` (gear) could confirm it.
 8. **Low-speed manoeuvring** decides road vs off-road 20–30 m late; the 120 s p90 is worse than the EKF's because
@@ -1133,7 +1135,7 @@ M1–M3 can partly overlap. M4 needs M1–M3. M5 and M6 are independent of each 
       otherwise), so overall it is a wash (outage benchmark 240 s p90 77 → 72 m; sessions below 100 %: 21 → 23 of
       30). Not kept. Same cause as item 10; it needs a better position prior after a start from coarse fixes, or
       fixes that can unseat a confident wrong lock.
-13. **Jammed from the start, the EKF pull locks the filter off-road** (2026-10-05, CX-5 across town from the
+13. **Jammed from the start, the EKF pull locks the filter off-road** (2026-10-05, main test car across town from the
     parked pose, Wi-Fi fixes only). Replayed with the app's closed loop: off-road 73 % of the moving time, end 86 m
     from where the car stopped; with `ekfPositionScale` 0: 4 %, 20 m. Wi-Fi fixes (often hundreds of metres off)
     move the EKF, and the pull drags the filter after it; on the phone the off-road dot crossed five streets away
@@ -1149,7 +1151,8 @@ M1–M3 can partly overlap. M4 needs M1–M3. M5 and M6 are independent of each 
       below the stale off-road threshold, and the resampling that follows reshuffles the hypotheses. It also checks
       every off-road particle's step against the roads around it: update p99 7.9 → 93–178 ms. The speed rule
       already took the off-road cluster's crossings on the jammed drives from 4 to 0.
-    - *Road class by speed* (the speed limit, which the graph doesn't hold; most city streets are 50 km/h anyway).
+    - *Road class by speed* (the graph holds tagged speed limits since 2026-10-10, but most city streets are untagged
+      and 50 km/h anyway).
       Real speeds on the clean drives' matched roads (OBD, 1 h of driving): service p99 25 / max 26 km/h,
       unclassified max 30, residential p99 47 / max 51, tertiary max 73, primary max 77. So only "faster than this
       class ever sees" could work (service above ~35, residential above ~60), like the off-road rule. With the
@@ -1222,7 +1225,7 @@ M1–M3 can partly overlap. M4 needs M1–M3. M5 and M6 are independent of each 
       at 0.1.* It is weighed every 10 m and carries the same odometry the particles integrate, so on a long road it
       holds the cloud to the EKF's place along it: here 140–220 m short, the speed scale learned at 0.992 where the
       drawing says 1.0075. Each fixed the cold start at this junction (783 → 13 s) and broke the drawn start: 2–4
-      of 8 seeds ended ~1 700 s off the road; across only, the Chernihiv end of the drive settled a block short.
+      of 8 seeds ended ~1 700 s off the road; across only, the city end of the drive settled a block short.
       Weighing it across at 0.1 instead of 0.3, with the lost-turn restart: drawn 82 → 138 s, more jumps.
 
     The fixture junction the test uses is shaped on the real one, read off the region graph with

@@ -1,8 +1,8 @@
 # wtf.ai — Spoofing-Resilient Car Navigator: High-Level Specification
 
-Status: draft v10 (2026-10-06). Source of truth for coding agents. Update this file when decisions change.
+Status: v11 (2026-10-10). Source of truth for coding agents. Update this file when decisions change.
 
-Companion specs: [UI-SPEC.md](UI-SPEC.md) (UI-first milestone), [VEHICLE-LINK-SPEC.md](VEHICLE-LINK-SPEC.md) (Bluetooth ELM327 communication), [TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md) (trip detection, logging, export — Phase 1), [NAVIGATOR-SPEC.md](NAVIGATOR-SPEC.md) (Stage 1 EKF, online calibration, replay — Phase 2), [MAPMATCH-SPEC.md](MAPMATCH-SPEC.md) (road graph, particle filter — Phase 5), [ROUTING-SPEC.md](ROUTING-SPEC.md) (A\* routing on the road graph — Phase 6), [SEARCH-SPEC.md](SEARCH-SPEC.md) (offline address search — Phase 6).
+Companion specs: [UI-SPEC.md](UI-SPEC.md) (screens and the map), [VEHICLE-LINK-SPEC.md](VEHICLE-LINK-SPEC.md) (Bluetooth ELM327 communication), [TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md) (trip detection, logging, export — Phase 1), [NAVIGATOR-SPEC.md](NAVIGATOR-SPEC.md) (Stage 1 EKF, online calibration, integrity, replay — Phases 2–4), [MAPMATCH-SPEC.md](MAPMATCH-SPEC.md) (road graph, particle filter — Phase 5), [ROUTING-SPEC.md](ROUTING-SPEC.md) (A\* routing on the road graph — Phase 6), [SEARCH-SPEC.md](SEARCH-SPEC.md) (offline address search — Phase 6), [ANDROID-SPEC.md](ANDROID-SPEC.md) (the Android build).
 
 ## 1. Problem & goal
 
@@ -14,36 +14,36 @@ Odometry is built up in stages (§2.1). Stage 1 uses the minimum that works on a
 
 ## 2. Fixed decisions
 
-| Topic                       | Decision                                                                                                                                                                                                                  |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Platform                    | **iOS first**. **Android** is built for volunteer testers, sideloaded as an APK from CI and tested on emulators (no Android device on hand): [ANDROID-SPEC.md](ANDROID-SPEC.md), tester guide [ANDROID-TESTING.md](ANDROID-TESTING.md).                                                                                                                                                            |
-| Dev environment             | Windows only, no Mac, **no paid Apple Developer account**. iOS builds: **GitHub Actions** macOS runner, `expo prebuild` + `xcodebuild` with signing disabled → unsigned IPA, sideloaded with **AltStore** (free Apple ID, 7-day refresh). **No EAS** (Build/Submit/Update). CI runs checks, and this build when needed ([CI.md](CI.md), §6). |
-| Framework                   | Expo SDK 57, Expo Router, TypeScript. Dev builds only (no Expo Go).                                                                                                                                                       |
-| Odometry roadmap            | **Staged** (§2.1): Stage 1 OBD-II speed + phone gyro → Stage 2 CAN wheel speeds → Stage 3 CAN yaw rate. Each stage is a drop-in odometry source; the EKF, integrity, and map matching don't change between stages.           |
-| Adapter protocol            | Stage 1: **plain ELM327 command subset only** (§3.1), for broad dongle compatibility. No STN/OBDLink-specific commands until Stage 2.                                                                                        |
-| Adapter transport           | From Phase 1, both: **BLE** (CoreBluetooth, no MFi — any Bluetooth 4.0+ LE ELM327 adapter, including no-name clones) and **MFi Classic Bluetooth** over `ExternalAccessory` (OBDLink MX+, the dev adapter on hand). The ELM327 layer is transport-agnostic. See [VEHICLE-LINK-SPEC.md](VEHICLE-LINK-SPEC.md). |
-| Trip log format             | **ULog** (PX4), written by a pure-TS encoder; read on PC with Python (`pyulog`-based `tools/triplog`). See [TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md).                                                                       |
-| Sensor capture              | Own native module `modules/sensor-capture` (CoreLocation + CoreMotion, batched) for logging, estimation and the map's position, sharing one monotonic clock with the adapter timestamps. `expo-location` is used only for permissions and the walking compass (its position watcher stopped for good after jamming). |
-| First vehicle               | **Mazda CX-5 KF (2017–2021)**.                                                                                                                                                                                            |
-| Map display                 | **MapLibre** (`@maplibre/maplibre-react-native`) with **offline** OSM vector tiles. Not Google Maps.                                                                                                                      |
-| Routing                     | **A\* in TS on our own road graph** (`src/nav/routing/`, the map-matching graph of §3.8), see [ROUTING-SPEC.md](ROUTING-SPEC.md). Valhalla dropped (2026-10-05): its native packaging was never solved, its tiles were a second download, and its roads differed from the filter's. |
-| Map matching                | **Custom road-constrained particle filter** in TS (`src/nav/mapmatch/`) over **our own compact road graph** (§3.8). Valhalla `trace_attributes` is **not** used: its HMM assumes independent, bounded GNSS-like errors, while DR error is correlated and grows, so it locks onto parallel roads and returns a single answer. |
-| Estimator location          | **TypeScript** (`src/nav/`), not native. Reason: Windows-only dev; logic must hot-reload and be unit-testable/replayable on Windows. Native code stays thin.                                                              |
-| GNSS integrity              | Only two checks: **outside-Ukraine polygon** and **teleport vs odometry/DR**. Do **not** use raw GNSS data. Do **not** implement slow drag-off detection.                                                                 |
-| Yaw source                  | Stage 1: **phone gyro** projected onto gravity. Stage 2: rear wheel-speed differential. Stage 3: **CAN yaw rate** (to be reverse-engineered; not in opendbc).                                                            |
+| Topic                       | Decision                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Platform                    | **iOS first**. **Android** is built for volunteer testers, sideloaded as an APK from CI and tested on emulators (no Android device on hand): [ANDROID-SPEC.md](ANDROID-SPEC.md), tester guide [ANDROID-TESTING.md](ANDROID-TESTING.md).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Dev environment             | Windows only, no Mac, **no paid Apple Developer account**. iOS builds: **GitHub Actions** macOS runner, `expo prebuild` + `xcodebuild` with signing disabled → unsigned IPA, sideloaded with **AltStore** (free Apple ID, 7-day refresh). **No EAS** (Build/Submit/Update). CI runs checks, and this build when needed ([CI.md](CI.md), §6).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Framework                   | Expo SDK 57, Expo Router, TypeScript. Dev builds only (no Expo Go).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Odometry roadmap            | **Staged** (§2.1): Stage 1 OBD-II speed + phone gyro → Stage 2 CAN wheel speeds → Stage 3 CAN yaw rate. Each stage is a drop-in odometry source; the EKF, integrity, and map matching don't change between stages.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Adapter protocol            | Stage 1: **plain ELM327 command subset only** (§3.1), for broad dongle compatibility. No STN/OBDLink-specific commands until Stage 2.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Adapter transport           | From Phase 1, both: **BLE** (CoreBluetooth, no MFi — any Bluetooth 4.0+ LE ELM327 adapter, including no-name clones) and **MFi Classic Bluetooth** over `ExternalAccessory` (OBDLink MX+, the dev adapter on hand). The ELM327 layer is transport-agnostic. See [VEHICLE-LINK-SPEC.md](VEHICLE-LINK-SPEC.md).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Trip log format             | **ULog** (PX4), written by a pure-TS encoder; read on PC with Python (`pyulog`-based `tools/triplog`). See [TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Sensor capture              | Own native module `modules/sensor-capture` (CoreLocation + CoreMotion, batched) for logging, estimation and the map's position, sharing one monotonic clock with the adapter timestamps. `expo-location` is used only for permissions and the walking compass (its position watcher stopped for good after jamming).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| First vehicle               | **the main test car (11-bit CAN, 500 kbps)**.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Map display                 | **MapLibre** (`@maplibre/maplibre-react-native`) with **offline** OSM vector tiles of the active downloaded region only; without one the app asks for a download (`map-setup`). Not Google Maps.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Routing                     | **A\* in TS on our own road graph** (`src/nav/routing/`, the map-matching graph of §3.8), see [ROUTING-SPEC.md](ROUTING-SPEC.md). Valhalla dropped (2026-10-05): its native packaging was never solved, its tiles were a second download, and its roads differed from the filter's.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Map matching                | **Custom road-constrained particle filter** in TS (`src/nav/mapmatch/`) over **our own compact road graph** (§3.8). Valhalla `trace_attributes` is **not** used: its HMM assumes independent, bounded GNSS-like errors, while DR error is correlated and grows, so it locks onto parallel roads and returns a single answer.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Estimator location          | **TypeScript** (`src/nav/`), not native. Reason: Windows-only dev; logic must hot-reload and be unit-testable/replayable on Windows. Native code stays thin.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| GNSS integrity              | Only two checks: **outside-Ukraine polygon** and **teleport vs odometry/DR**. Do **not** use raw GNSS data. Do **not** implement slow drag-off detection.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Yaw source                  | Stage 1: **phone gyro** projected onto gravity. Stage 2: rear wheel-speed differential. Stage 3: **CAN yaw rate** (to be reverse-engineered; not in opendbc).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | Absolute heading            | From trusted GNSS course, particle-filter road heading, manual fix, and the pose persisted at ignition off. **The magnetometer is not used** for navigation: in-car distortion (body steel, wiring, mount) changes when the phone moves. Exceptions: a display-only compass beam on the map when walking (UI-SPEC §6.1); the raw magnetometer is logged (TRIP-LOGGER-SPEC §5.2). Measured on 7 drives (NAVIGATOR-SPEC §7.5): calibrated on other drives, median error 4–18°, always < 90°; re-seating the phone costs 15–20°. **In replay only:** a calibrated compass weighs the travel directions at a jammed map-matching start (at most 6.7:1), only while its calibration was confirmed on the drive that kept it; a wrong one can still cause a wrong start (MAPMATCH-SPEC §8.2, NAVIGATOR-SPEC §7.6). In the app in **shadow mode**: computed, checked and logged on real drives (one calibration per car and phone mounting), never navigated with, until the logs show how often a stored calibration is wrong (NAVIGATOR-SPEC §7.6). |
-| Phone mount                 | Stage 1 requires a **rigid phone mount** (the gyro is the only yaw source).                                                                                                                                               |
-| Standstill bias calibration | **2–3 s**, refined at every stop (ZUPT). No dedicated long standstill step.                                                                                                                                               |
-| Distribution                | Sideloading via AltStore now. App Store later needs a paid Apple Developer account; then BLE needs nothing more, MFi adapters need the vendors' authorizations (see §9).                                                    |
-| Privacy                     | All data stays on device. No position upload; trip logs leave the phone only by explicit user action: the share sheet, or **opt-in upload** with a personal code from the developer (Trip recorder sheet), to the project's private bucket only (TRIP-LOGGER-SPEC §7.1). **One other exception: Sentry crash/error reports and logs** (EU region, all builds with `environment` = development/production, no PII, no replay/screenshots; coordinates and VINs scrubbed from events, breadcrumbs and logs in `src/config/sentry-scrub.ts`). |
+| Phone mount                 | Stage 1 requires a **rigid phone mount** (the gyro is the only yaw source).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Standstill bias calibration | **2–3 s**, refined at every stop (ZUPT). No dedicated long standstill step.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Distribution                | Sideloading via AltStore now. App Store later needs a paid Apple Developer account; then BLE needs nothing more, MFi adapters need the vendors' authorizations (see §9).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Privacy                     | All data stays on device. No position upload; trip logs leave the phone only by explicit user action: the share sheet, or **opt-in upload** with a personal code from the developer (Trip recorder sheet), to the project's private bucket only (TRIP-LOGGER-SPEC §7.1). **One other exception: Sentry crash/error reports and logs** (EU region, all builds with `environment` = development/production, no PII, no replay/screenshots; coordinates and VINs scrubbed from events, breadcrumbs and logs in `src/config/sentry-scrub.ts`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 
 ### 2.1 Odometry stages
 
-| Stage | Speed source                                                   | Yaw source                                  | Adapter features                          | Vehicle-specific data              |
-| ----- | -------------------------------------------------------------- | ------------------------------------------- | ----------------------------------------- | ---------------------------------- |
-| 1     | OBD-II Mode 01 PID `0D` (1 km/h resolution), polled, unsigned  | Phone gyro `ω = gyro · ĝ`                   | ELM327 subset, request/response           | None (works on any OBD-II car)     |
-| 2     | CAN wheel speeds (0.01 km/h, ~50 Hz), signed by CAN gear       | Rear wheel differential, gyro as cross-check | STN passive CAN monitor + pass filters    | JSON vehicle profile (opendbc)     |
-| 3     | As Stage 2                                                     | CAN yaw rate (reverse-engineered)           | As Stage 2                                | Profile + RE yaw signal            |
+| Stage | Speed source                                                  | Yaw source                                   | Adapter features                       | Vehicle-specific data          |
+| ----- | ------------------------------------------------------------- | -------------------------------------------- | -------------------------------------- | ------------------------------ |
+| 1     | OBD-II Mode 01 PID `0D` (1 km/h resolution), polled, unsigned | Phone gyro `ω = gyro · ĝ`                    | ELM327 subset, request/response        | None (works on any OBD-II car) |
+| 2     | CAN wheel speeds (0.01 km/h, ~50 Hz), signed by CAN gear      | Rear wheel differential, gyro as cross-check | STN passive CAN monitor + pass filters | JSON vehicle profile (opendbc) |
+| 3     | As Stage 2                                                    | CAN yaw rate (reverse-engineered)            | As Stage 2                             | Profile + RE yaw signal        |
 
 - Stage 1 is the permanent fallback: cars with a CAN gateway firewall, unknown makes/models, and generic dongles stay on it.
 - Stage selection is automatic per vehicle: the highest stage whose requirements are met (adapter supports monitoring, profile exists for the VIN, signals are visible at the OBD port).
@@ -66,13 +66,14 @@ CoreLocation + CoreMotion ───▶ src/nav (TypeScript)
                                    │    └─ can        (JSON vehicle profiles, decoder)    Stage 2+
                                    ├─ integrity        (GNSS trust state machine)
                                    ├─ ekf              (dead reckoning + updates)
-                                   ├─ calibration      (initial + online)
+                                   ├─ calibration      (online)
                                    ├─ mapmatch         (particle filter on road graph)
-                                   │    └─ RoadGraph interface ◀─ graph tiles (device: file/SQLite reader; replay: Node fs)
-                                   └─ routing          (A* on the same road graph)
+                                   │    └─ RoadGraph interface ◀─ graph tiles (device: file reader; replay: Node fs)
+                                   ├─ routing          (A* on the same road graph)
+                                   └─ search           (offline address search)
                                            │
                                            ▼
-                                 src/app screens (MapLibre, routing, wizard)
+                                 src/services (RN glue) → src/app screens (map, routing, search, guide)
 ```
 
 ### 3.1 Vehicle link: `modules/vehicle-link` (Swift) + `src/obd` (TS)
@@ -108,7 +109,7 @@ A common `OdometrySource` interface feeds the EKF with timestamped speed and yaw
 - Parses PID `0D` (km/h, integer) → m/s. Unsigned. Forward is assumed unless PID `A4` reports reverse.
 - Measurement noise covers 1 km/h quantization, possible truncation bias (§9), and poll-timing latency.
 - Some ECUs report 0 below ~2–3 km/h. Standstill therefore also requires a quiet IMU (§3.6).
-- CX-5 KF: PID `0D` reads about 2 % below GNSS speed; `k_s` absorbs it.
+- Main test car: PID `0D` reads about 2 % below GNSS speed; `k_s` absorbs it.
 
 #### Stage 1+: phone IMU (`odometry/imu/`)
 
@@ -120,15 +121,15 @@ A common `OdometrySource` interface feeds the EKF with timestamped speed and yaw
 - JSON profiles derived from opendbc (MIT) subset + our reverse-engineered signals. No DBC parsing on device.
 - Profile fields: bus, CAN IDs, signals (start bit, length, endianness, signedness, scale, offset), track width, wheelbase, default wheel scale.
 
-##### Mazda CX-5 KF — known signals (opendbc `mazda_2017.dbc`, HS-CAN pins 6/14)
+##### Main test car — known signals (its opendbc DBC, HS-CAN pins 6/14)
 
-| ID (hex / dec) | Message        | Signals                                                                                         |
-| -------------- | -------------- | ----------------------------------------------------------------------------------------------- |
-| 0x215 / 533    | `WHEEL_SPEEDS` | FL `7\|16@0+`, FR `23\|16@0+`, RL `39\|16@0+`, RR `55\|16@0+`; scale 0.01, offset −100, km/h    |
-| 0x228 / 552    | `GEAR`         | `GEAR 2\|3@0+`: 0 shifting, 1 P, 2 R, 3 N, 4 D                                                  |
-| 0x082 / 130    | `STEER`        | `STEER_ANGLE 23\|16@0+` scale 0.05, offset −1600, deg                                           |
-| 0x078 / 120    | `BRAKE`        | `VEHICLE_ACC_X 5\|13@0+` (0.01, −40) m/s²; `VEHICLE_ACC_Y 8\|13@0+` (0.001, −4.096) m/s²        |
-| 0x202 / 514    | `ENGINE_DATA`  | `SPEED 23\|16@0+` scale 0.01 km/h                                                               |
+| ID (hex / dec) | Message        | Signals                                                                                                  |
+| -------------- | -------------- | -------------------------------------------------------------------------------------------------------- |
+| 0x215 / 533    | `WHEEL_SPEEDS` | FL `7\|16@0+`, FR `23\|16@0+`, RL `39\|16@0+`, RR `55\|16@0+`; scale 0.01, offset −100, km/h             |
+| 0x228 / 552    | `GEAR`         | `GEAR 2\|3@0+`: 0 shifting, 1 P, 2 R, 3 N, 4 D                                                           |
+| 0x082 / 130    | `STEER`        | `STEER_ANGLE 23\|16@0+` scale 0.05, offset −1600, deg                                                    |
+| 0x078 / 120    | `BRAKE`        | `VEHICLE_ACC_X 5\|13@0+` (0.01, −40) m/s²; `VEHICLE_ACC_Y 8\|13@0+` (0.001, −4.096) m/s²                 |
+| 0x202 / 514    | `ENGINE_DATA`  | `SPEED 23\|16@0+` scale 0.01 km/h                                                                        |
 | ?              | yaw rate       | **Unknown — reverse-engineer (Phase 9, Stage 3).** Likely near 0x078 (stability-control sensor cluster). |
 
 - Wheel speeds are unsigned → direction from `GEAR` (R = negative).
@@ -188,7 +189,7 @@ after a gap, being checked), `NO_FIX` (no good satellite fix for 8 s).
     through the EKF innovation gate. Leaked fixes under jamming are used while the shown state is still `NO_FIX`.
   - Coarse Wi-Fi/cell positions in any trust state, at their reported accuracy (§3.3 item 5).
   - Fix comparisons are lag-corrected. CoreLocation's lag behind the gyro/OBD is measured online from turns
-    (NAVIGATOR-SPEC §7.3): −0.1 ± 0.1 s on an iPhone 13.
+    (NAVIGATOR-SPEC §7.3): −0.1 ± 0.1 s on the test iPhone.
   - ZUPT at standstill: `v = 0`, measured yaw = bias.
   - Map-match pseudo-measurement from the particle filter (§3.7): position + road heading, **only when the posterior is unimodal**; covariance from cluster spread. In Stage 1 this is the main correction for gyro heading drift during long outages.
   - Manual fix: the driver puts the car on the map, with its heading (NAVIGATOR-SPEC §6.2): from the dot, a
@@ -244,7 +245,7 @@ Detailed in [MAPMATCH-SPEC.md](MAPMATCH-SPEC.md). Reference approach: Gustafsson
 
 **Weight**
 
-- **Relative heading (primary)**: measured `Δψ` over a sliding window (~20–50 m) vs the road-geometry heading change along the particle's path. Uses heading *changes*, so slow gyro drift doesn't hurt.
+- **Relative heading (primary)**: measured `Δψ` over a sliding window (~20–50 m) vs the road-geometry heading change along the particle's path. Uses heading _changes_, so slow gyro drift doesn't hurt.
 - **Absolute heading (weak)**: EKF `ψ` vs road heading, using the EKF `ψ` variance.
 - **GNSS position** — only fixes integrity passes (§3.3). The PF keeps running with GNSS so it is already locked when an outage starts.
 - **Off-road penalty**: small constant likelihood penalty for off-road particles.
@@ -265,29 +266,30 @@ Detailed in [MAPMATCH-SPEC.md](MAPMATCH-SPEC.md). Reference approach: Gustafsson
 ### 3.8 Offline data (`tools/tiles/`)
 
 - Source: Geofabrik Ukraine PBF.
-- Outputs:
-  1. (Dropped 2026-10-05: Valhalla routing tiles. Routing runs on item 3, ROUTING-SPEC.)
-  2. Vector map tiles (PMTiles/MBTiles) + MapLibre style.
-  3. **Road graph for map matching and routing**: drivable OSM ways (no footway/path/cycleway/steps; `service`/`private` kept but flagged), split at intersections. Per edge: simplified polyline (≤ ~1 m deviation), length, road class, one-way, connectivity, turn restrictions (OSM relations). One file per region (`<region>.graph.bin`, `ukraine` included; no cross-region navigation), tiled internally at z14 with a directory and per-tile spatial lists, read by random access: the device decodes only tiles around the active hypotheses, so the Ukraine graph costs about what an oblast's does. Built with pyosmium. Size to be measured in Phase 0. Format: MAPMATCH-SPEC §4.
-- Hosted as versioned, checksummed downloads. In-app download manager: resumable, checksum-verified, update check.
+- Outputs, per region (`ukraine` and its 27 subdivisions):
+  1. Vector map tiles (PMTiles, OpenMapTiles schema) + the MapLibre style, sprite and glyphs.
+  2. **Road graph for map matching and routing**: drivable OSM ways (no footway/path/cycleway/steps; `service`/`private` kept but flagged), split at intersections. Per edge: simplified polyline (≤ ~1 m deviation), length, road class, one-way, connectivity, turn restrictions (OSM relations), and speed attributes for route times (speed limit, settlement, surface, traffic lights). One file per region (`<region>.graph.bin`; no cross-region navigation), tiled internally at z14 with a directory and per-tile spatial lists, read by random access: the device decodes only tiles around the active hypotheses, so the Ukraine graph (453 MB) costs about what an oblast's (~15 MB) does. Built with pyosmium. Format: MAPMATCH-SPEC §4.
+  3. **Address search index** (`<region>.search.bin`, SEARCH-SPEC).
+- Published as GitHub releases `maps-<osm_date>` by `.github/workflows/map-packs.yml` (weekly when Geofabrik has a newer extract). In-app download manager: resumable, checksum-verified, update check (`tools/tiles/README.md`).
 
 ### 3.9 App (`src/app/`, Expo Router)
 
-UI-first milestone (map with live GNSS + mock screens): see [UI-SPEC.md](UI-SPEC.md). Phase 1 makes `vehicle` and `debug` real and adds dev-only `trips` and `debug-terminal` routes: see [TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md) §9.
+Screens and the map in detail: [UI-SPEC.md](UI-SPEC.md); the trip-log pages: [TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md) §9.
 
 - Native launch splash — displays `wtf.ai` and **"Where the f\* am I?"** (on iOS **"Where the funk am I?"**, for App Store review; `src/constants/brand.ts`).
 - `index` — map. It shows the Stage 1 navigator (NAVIGATOR-SPEC §9), or phone GNSS from `modules/sensor-capture` without an OBD adapter, with integrity's trust (§3.3): position puck + uncertainty circle (dominant hypothesis), alternative map-match hypotheses as secondary markers when ambiguous, raw GNSS ghost when untrusted, trust status, time and distance since the last trusted fix while untrusted, adapter status.
 - `onboarding` — first-run flow (welcome, location permission, adapter, phone holder). No calibration step (§3.6).
+- `map-setup` — the first map download (full-screen, until a region is installed).
 - Pages: everything below is pushed on the root stack from the map and goes back by the system's back swipe or gesture (UI-SPEC §7).
-- `more/` — the list linking the Guide, Offline maps and Settings, then the diagnostic pages `position`, `recorder` (Trip recorder) and `developer`.
+- `more/` — the list linking the Guide, Offline maps (`more/downloads`) and `settings`, then the diagnostic pages `position`, `recorder` (Trip recorder) and `developer`.
 - `guide/` — the in-app guide: the map tour and the interactive lessons (`guide/lesson`, UI-SPEC §7.7).
 - `vehicle` — the car only: adapter discovery list and connection (transport, ELM version, protocol, poll rate), VIN, engine state, active odometry stage.
 - `position` — integrity, live GNSS, EKF state, map matching and routing timings.
 - `recorder` — everything about trip logs: the trip now (start / stop / marker), the `trips` list, recording settings (trip end and linger times, raw IMU, IMU rate), the opt-in upload code and the storage limit.
 - `developer` — test switches and knobs (emulated adapters, particles, GPS outage button, route hint, speed cap, RPM period, navigator version) and the ELM terminal.
 - `downloads` — Offline maps: the regions to download (map, road graph and search index together).
-- `route` — offline routing (A\* on the road graph, ROUTING-SPEC), reroute on deviation, next maneuver + distance.
-- `debug` — live signals, EKF state, particle cloud overlay + cluster weights, trip recorder controls; `debug-terminal` (ELM terminal); `trips` (log list, share, delete).
+- `route` — destination search, saved places and recents, and starting guidance (ROUTING-SPEC, SEARCH-SPEC).
+- `trips` (log list, share, delete) and `debug-terminal` (ELM terminal), opened from the recorder and developer pages.
 - Background (from Phase 1): iOS `UIBackgroundModes` = `location`, plus `external-accessory` (EA) and `bluetooth-central` (BLE) (config plugins, never hand-edit `ios/`). Location stays **When In Use**: a session started in the foreground continues in the background. "Always" is needed only for the later auto-wake (VEHICLE-LINK-SPEC §11).
 
 ### 3.10 Logging & replay (`tools/replay/`)
@@ -299,121 +301,82 @@ UI-first milestone (map with live GNSS + mock screens): see [UI-SPEC.md](UI-SPEC
 - Real logs live in `tools/triplog/logs/`, git-ignored because they hold the VIN and GPS tracks, and are backed up to the private bucket (`npm run logs:push` / `logs:pull`). Testers' uploads land in `logs/testers/<name>/`; the viewer lists them (one parked-pose chain per phone, i.e. per folder), the benchmarks read only the project's own top-level logs.
 - Map-matching metrics: wrong-road rate (share of time the dominant cluster is on a different edge than the GNSS ground truth), time to re-lock after an ambiguity, time spent multimodal, PF update time.
 - Stage comparison: Stage 2 logs can be degraded to Stage 1 inputs (wheel speed → quantized to 1 km/h, resampled at the measured PID rate; yaw → phone gyro) to compare stages on the same drive.
-- **Phone-only mode (experimental, in the app behind a developer setting: NAVIGATOR-SPEC §9.6).** Goal: navigation
-  without an adapter, usable in the city with the driver placing the car when it is off (about every 4 min under
-  jamming).
-  - Speed: `src/nav/odometry/imu/imu-speed.ts`. The car's axes in the phone frame are learned from turns and from
-    pulling away (almost always forwards), and kept per car while the phone sits the same way. Curves measure the
-    speed (sideways acceleration = v·ω, weakly: σ 1 m/s²). Stops (phone quiet, vertical vibration < 0.25 m/s², no
-    horizontal acceleration over 0.25 s) pin it at zero. In between, the forward acceleration is integrated against
-    a gyro-tracked vertical that levels in 60 s (1 s at stops). Before the axes are known the speed is unknown, not 0.
-    `replay:imuspeed [--chain]` scores it against OBD.
-  - Its limit is the vertical: carried by the gyro it is 1.4° off at the next stop (median, 3° p90); the last stop's
-    is 2° off (road slope). That is 0.2–0.5 m/s² of false acceleration, so the distance per stop-to-stop stretch reads
-    0.89× OBD at the median and 0.55× at p10. Measured on 30 drives: speed error median 2.5 km/h below 30 km/h,
-    5 km/h at 30–60, 15 km/h above 90.
-  - Map matching: `src/nav/mapmatch/turn-tracker.ts` (`replay:turns`): road hypotheses, each a position along a road
-    with its own uncertainty and speed scale; a turn the gyro sees snaps each to the junctions around where it
-    expected the turn whose exit turns that way (which teaches the scale); a free hypothesis dead-reckons off the
-    mapped roads and rejoins them. On the 13 jammed city drives from their drawn starts, seconds off the drawn route
-    (> 30 m): 8 % with OBD speed, 28 % with phone speed and its city prior (`--speed
-    '{"priorSigmaMps":5,"priorSpeedMps":12}'`; the particle filter on phone speed, `replay:regress --speed phone`:
-    30–38 %). Scaling the phone speed per stretch to OBD's distance gives 25 %: the rest of the gap is when within a
-    stretch the distance accrues, which picks the wrong junction among similar ones. It grows along a drive (22 % in
-    the first 4 minutes, 32 % after; with OBD 5 % and 12 %): once on a wrong road the tracker seldom gets back.
-  - Where the dot is along the drawn route next to the car (`replay:turns --along`, the 13 jammed drives): on
-    another road 19 % of the moving time, behind by > 300 m 10 %, ahead by > 300 m 1 %. Large errors are behind
-    (the phone under-reads distance) or on another road, seldom far ahead.
-  - Following a planned route (`src/nav/mapmatch/route-follower.ts`, `replay:turns --route`, bench only): with the
-    car taken to drive the route, its position is the distance along it: a grid over (distance, speed scale) moved by
-    the phone's speed and weighed by the gyro's heading change over the last 80 m against the route's over the same
-    distance (offset-free; matching absolute heading lost the car whenever the phone was handled). With the drawn
-    route as the plan (a driver who never leaves it): 3 % off the drawn route (worst drive 13 %), within ±100 m of
-    the car 78 % of the moving time, > 100 m ahead 12 %, > 100 m behind 10 %. In the app on the active route
-    (NAVIGATOR-SPEC §9.6): 3 % through the app path. Its turns don't tell that the driver left the route (best fit
-    while the turn is in the window: median 0.89 on it, 0.75 off it, `--route-source log`): that is the driver's
-    placing, or GPS. A turn's fit counts only while the turn is in the window: the update after it compares straight
-    road with straight road (0.96), which hid every missed turn until 2026-10-09.
-  - Not usable unattended. Tried without gain: vertical vibration and tyre frequency as speed cues (road-dependent; no
-    speed-locked peak), roads' usual speeds learned from other drives, a per-stretch drift state, heavy-tailed junction
-    distances, more hypotheses, absolute heading kept from the start (a phone handled on its mount loses it), coarse
-    fixes weighted less (Slavutych's are mostly cell-level: 130–460 m off), choosing per second between the tracker
-    and the particle filter (18 % even with perfect choice), re-injecting hypotheses around the best one, a
-    road-bend correction of the along-road position.
-  - Reverse (leaving a stop backwards) is not validated: most manoeuvres the CX-5's OBD can't see come before the
-    axis is known, and 7 of 8 reverses it reported were forward driving.
+- **Phone-only mode** (experimental, a developer setting; NAVIGATOR-SPEC §9.6): navigation without an adapter from
+  the phone's own speed estimate and turn-anchored map matching, with the driver placing the car. Not usable
+  unattended: off the drawn route 27–28 % of the moving time on the 13 jammed city drives (3 % when following a
+  planned route). Research results and dead ends: NAVIGATOR-SPEC §9.7.
 
-## 4. Repository layout (target)
+## 4. Repository layout
 
 ```
 src/app/                 Expo Router screens only
 src/nav/                 pure TS core (no React Native imports)
-  odometry/{obd,imu,can}/ ekf/ integrity/ (+ Ukraine border polygon) calibration/ mapmatch/ routing/ geo/ replay/
+  odometry/{obd,imu}/ ekf/ integrity/ (+ Ukraine border polygon) calibration/ compass/ mapmatch/ routing/ search/
+  phone/ (phone-only mode) position/ geo/ replay/ sim/
   navigator.ts           Stage 1 sensor fusion entry point (live services and replay feed it)
 src/obd/                 pure TS: adapter catalog, ELM327 session/probe/parser, PIDs, poller, engine state, emulator
-src/triplog/             pure TS: ULog encoder (+ reader for replay), trip log schemas
-src/services/            RN glue: position, vehicle-link, sensor-capture, trip-recorder
-src/components/          UI components
-modules/vehicle-link/    Expo module (Swift, Kotlin) — BLE + EA (MFi) on iOS, BLE + Classic SPP on Android; STN monitor in Stage 2
+src/triplog/             pure TS: ULog encoder and reader, trip log schemas, upload protocol
+src/services/            RN glue: navigation (navigator, routes), position, vehicle-link, sensor-capture, trip-recorder,
+                         trip-upload, offline-map, guide, telemetry; runtime.ts creates them once
+src/providers/           React bindings of the services; src/components/ UI; src/i18n/ strings (en, uk)
+modules/vehicle-link/    Expo module (Swift, Kotlin) — BLE + EA (MFi) on iOS, BLE + Classic SPP on Android
 modules/sensor-capture/  Expo module (Swift, Kotlin) — CoreLocation/CoreMotion or LocationManager/SensorManager capture, batched; Android trip foreground service
 modules/audio-output/    Expo module (Swift, Kotlin) — where the phone plays audio, and the system's output picker (ROUTING-SPEC §8.5)
-assets/profiles/         vehicle JSON profiles (Stage 2+)
-tools/re-yaw/            yaw reverse-engineering script (Stage 3)
-tools/replay/            replay CLI, viewer and benchmark over src/nav/replay; loads the road graph via Node fs later
-tools/tiles/             build pipeline: vector tiles, road graph
+native-tests/            XCTest for the modules' Foundation-only Swift logic (Package.swift at the root)
+native-tests-android/    JUnit for the modules' plain-Kotlin logic
+tools/replay/            replay CLI, viewer, benchmarks, route tools over src/nav/replay (Node, reads the road graph from disk)
+tools/tiles/             build pipeline: vector tiles, road graph, search index, map releases
 tools/triplog/           Python: ULog trip log reader, CSV/Parquet export, plots, checks; logs/ (git-ignored)
+tools/voice/             records the spoken maneuvers (ROUTING-SPEC §8.5)
+workers/triplog-upload/  Cloudflare Worker for the opt-in log upload (TRIP-LOGGER-SPEC §7.1)
 ```
+
+Stage 2–3 will add `src/nav/odometry/can/`, vehicle profiles (`assets/profiles/`) and the yaw reverse-engineering
+script (`tools/re-yaw/`).
 
 ## 5. Phases
 
 ### Stage 1 — minimum viable odometry
 
-| #   | Phase                       | Depends on | Key output                                                                                                                                                                                               |
-| --- | --------------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0   | Setup & spikes              | —          | CI unsigned build sideloaded with AltStore on iPhone; MX+ EA + one BLE clone connect, ELM327 init + `010D1` poll rate measured on CX-5 (MX+ EA session over `com.obdlink` verified); DeviceMotion rate measured; ~~valhalla-mobile inside Expo module~~ (dropped, ROUTING-SPEC); MapLibre offline tiles; Ukraine road graph built, size and tile-load time measured |
-| 1   | Trip logger                 | 0          | [TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md): BLE + MFi vehicle link, adapter verification, speed/RPM poller, automatic trip start/end, ULog trip logs (OBD + GNSS + IMU) exportable, Python reader, dev UI |
-| 2   | TS EKF + replay             | 1          | `src/nav/odometry` (obd, imu), `src/nav/ekf`, replay metrics                                                                                                                                             |
-| 3   | Integrity                   | 2          | `src/nav/integrity`                                                                                                                                                                                      |
-| 4   | Calibration                 | 2, 3       | online estimation, per-VIN storage (no wizard, §3.6)                                                                                                                                                     |
-| 5   | Map matching (particle filter) | 0, 2    | road-graph pipeline + `RoadGraph` reader (device + Node), `src/nav/mapmatch` PF, heading init from the map under jamming, EKF pseudo-measurements, replay map-matching metrics (§3.10); see MAPMATCH-SPEC §12 |
-| 6   | App UI, routing, background | 2–5        | screens, download manager, routing ([ROUTING-SPEC.md](ROUTING-SPEC.md))|
-| 7   | Field test (Stage 1)        | 6          | real outage drives; baseline DR error numbers                                                                                                                                                            |
-| 7b  | Adapter coverage            | 1          | more BLE clones, OBDLink CX, vLinker; grow the GATT catalog and the tested-adapter list with measured poll rates (VEHICLE-LINK-SPEC §13)                                                                  |
+| #   | Phase                          | Depends on | Key output                                                                                                                                                                                                                                                                                                       |
+| --- | ------------------------------ | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0   | Setup & spikes                 | —          | CI unsigned build sideloaded with AltStore on iPhone; MX+ EA + one BLE clone connect, ELM327 init + `010D1` poll rate measured on the main test car (MX+ EA session over `com.obdlink` verified); DeviceMotion rate measured; MapLibre offline tiles; Ukraine road graph built, size and tile-load time measured |
+| 1   | Trip logger                    | 0          | [TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md): BLE + MFi vehicle link, adapter verification, speed/RPM poller, automatic trip start/end, ULog trip logs (OBD + GNSS + IMU) exportable, Python reader, dev UI                                                                                                        |
+| 2   | TS EKF + replay                | 1          | `src/nav/odometry` (obd, imu), `src/nav/ekf`, replay metrics                                                                                                                                                                                                                                                     |
+| 3   | Integrity                      | 2          | `src/nav/integrity`                                                                                                                                                                                                                                                                                              |
+| 4   | Calibration                    | 2, 3       | online estimation, per-VIN storage (no wizard, §3.6)                                                                                                                                                                                                                                                             |
+| 5   | Map matching (particle filter) | 0, 2       | road-graph pipeline + `RoadGraph` reader (device + Node), `src/nav/mapmatch` PF, heading init from the map under jamming, EKF pseudo-measurements, replay map-matching metrics (§3.10); see MAPMATCH-SPEC §12                                                                                                    |
+| 6   | App UI, routing, background    | 2–5        | screens, download manager, routing ([ROUTING-SPEC.md](ROUTING-SPEC.md))                                                                                                                                                                                                                                          |
+| 7   | Field test (Stage 1)           | 6          | real outage drives; baseline DR error numbers                                                                                                                                                                                                                                                                    |
+| 7b  | Adapter coverage               | 1          | more BLE clones, OBDLink CX, vLinker; grow the GATT catalog and the tested-adapter list with measured poll rates (VEHICLE-LINK-SPEC §13)                                                                                                                                                                         |
 
-Status (2026-10-06):
+Status (2026-10-10): Phases 0–6 built; Phase 7 under way (43 trip logs, two test cars, one iPhone).
 
-- **Phase 0:**
-  - Done: CI unsigned build + AltStore, MX+ EA session over `com.obdlink`, `010D1` at ~27 Hz on the CX-5,
-    DeviceMotion at 100 Hz, MapLibre offline tiles (per-region packs).
-  - Road graph built (MAPMATCH-SPEC §4.7): Ukraine 452 MB, 4.3 M edges, 2–3 min and 2.9 GB to build; Chernihiv
-    15 MB.
-  - BLE: vLinker FD-IOS on the CX-5 (2026-10-05), 26–30 Hz moving, the same as the MX+ (VEHICLE-LINK-SPEC §13).
-    A cheap no-name clone is still untested (Phase 7b). (valhalla-mobile dropped 2026-10-05: routing runs on the
-    road graph, ROUTING-SPEC.)
-- **Phase 1:** done and field-tested (14 drives, TRIP-LOGGER-SPEC §11).
+- **Phase 0:** done. `010D1` at ~27 Hz on the main test car over the MX+ (MFi) and 26–30 Hz over the vLinker FD-IOS (BLE),
+  DeviceMotion at 100 Hz, offline map packs per region. Road graph: Ukraine 453 MB, 4.3 M edges; an oblast ~15 MB
+  (MAPMATCH-SPEC §4.7). A cheap no-name clone is still untested (Phase 7b).
+- **Phase 1:** done and field-tested (TRIP-LOGGER-SPEC §12).
+- **Phase 2:** the navigator and replay drive the map through `NavigatorService` and save its calibration;
+  field-tested (NAVIGATOR-SPEC §9.1): 26 m off after 2.7 km jammed throughout.
 - **Phase 3:** integrity implemented (§3.3), measured on replay with simulated spoofing (§7 target 7); no real
   spoofed drive logged yet.
-- **Phase 4:** online only (§3.6), done: no wizard.
-- **Phase 2:** the navigator and replay are implemented. It drives the map through `NavigatorService` and saves its
-  calibration. Field-tested on 7 drives (NAVIGATOR-SPEC §9.1): 26 m off after 2.7 km jammed throughout.
-- **Phase 6 (routing):** built and driven (2026-10-05, routes in 6 trip logs; ROUTING-SPEC §2): A\* on the road
-  graph (city routes ≤ 0.1 s, oblast routes ≤ 1 s in Node), turn instructions, guidance that works without GPS (no
-  false "off route" in 5.4 simulated hours), spoken maneuvers, long press → Route here, routes and guidance in trip
-  logs and `replay:view`. Address search (SEARCH-SPEC): indexes built for every region, tried on the phone.
-- **Phase 5:** measured on replay and simulation (MAPMATCH-SPEC §2): road graph, particle filter, heading init from
-  the map under jamming, the closed loop (M6: road heading and position back into the EKF, the app's default). The
-  app (M7) is driven (2026-10-05, 10 trip logs): graph download, map matching on the phone, the puck on the road
-  while dead-reckoning, `nav_mapmatch` in trip logs. Open: the update time on the iPhone is over budget (§7 target
-  6), and drives beyond Slavutych.
+- **Phase 4:** online calibration only (§3.6): no wizard.
+- **Phase 5:** road graph, particle filter, heading init from the map under jamming and the closed loop (road
+  heading and position back into the EKF, the app's default), driven in the app (MAPMATCH-SPEC §2). Open: the
+  update time on the iPhone is over budget (§7 target 6), and drives in more places (bigger cities, parallel roads).
+- **Phase 6:** A\* routing on the road graph with route times from the map's speed attributes and rush hours,
+  guidance that works without GPS, spoken maneuvers, re-planning, alternative routes (ROUTING-SPEC §2); address
+  search for every region (SEARCH-SPEC); the in-app guide (UI-SPEC §7.7). Android: tester APKs from CI, checked on
+  emulators (ANDROID-SPEC §6).
 
 ### Stage 2 & 3 — vehicle-specific improvements
 
-| #     | Phase                         | Depends on        | Key output                                                                                  |
-| ----- | ----------------------------- | ----------------- | ------------------------------------------------------------------------------------------- |
-| 8     | CAN wheel speeds (Stage 2)    | 7                 | STN monitor mode, `odometry/can` + Mazda profile, raw CAN in logger, wheel-differential yaw |
-| 9     | Yaw RE (Stage 3)              | 8                 | CAN yaw signal in Mazda profile                                                             |
-| 10    | Stage comparison field test   | 9                 | DR error per stage on the same drives (§3.10)                                               |
-| later | App Store                     | BLE or MFi        | — (Android: [ANDROID-SPEC.md](ANDROID-SPEC.md))                                             |
+| #     | Phase                       | Depends on | Key output                                                                                           |
+| ----- | --------------------------- | ---------- | ---------------------------------------------------------------------------------------------------- |
+| 8     | CAN wheel speeds (Stage 2)  | 7          | STN monitor mode, `odometry/can` + the test car's profile, raw CAN in logger, wheel-differential yaw |
+| 9     | Yaw RE (Stage 3)            | 8          | CAN yaw signal in the test car's profile                                                             |
+| 10    | Stage comparison field test | 9          | DR error per stage on the same drives (§3.10)                                                        |
+| later | App Store                   | BLE or MFi | — (Android: [ANDROID-SPEC.md](ANDROID-SPEC.md))                                                      |
 
 ### Phase 9 method (yaw RE)
 
@@ -431,14 +394,14 @@ Status (2026-10-06):
 - Units internally: SI (m, s, rad, m/s, rad/s). Convert at boundaries. Exception: engine speed in rev/min, with the unit in the field name (`rpm`).
 - Time base: every sensor/adapter/log timestamp is monotonic uptime in µs (`ProcessInfo.systemUptime`, the CoreMotion clock). Wall-clock time only through explicit sync records.
 - Minimize native changes — each one needs a CI macOS build (~20–40 min) and a re-sideload. Never rely on EAS.
-- CI (`.github/workflows/ci.yml`) runs lint, typecheck, Jest, `tools/triplog` pytest, `expo-doctor`, and the unsigned iOS build, each only when what it covers changed ([CI.md](CI.md)): native changes are always compiled, JS-only branch pushes get an IPA with `[build]` in the commit message. The macOS build is the only Swift compiler available: keep it green.
+- CI (`.github/workflows/ci.yml`) runs lint, typecheck, Jest, the Python tests, `expo-doctor`, the Swift and Kotlin logic tests, and the iOS and Android builds, each only when what it covers changed ([CI.md](CI.md)): native changes are always compiled, JS-only branch pushes get builds with `[build]` in the commit message. The macOS build is the only Swift compiler available: keep it green.
 - Before declaring done: `npx expo lint`, `npx tsc --noEmit`, and unit tests for `src/nav`, `src/obd`, `src/triplog` (plus `tools/triplog` Python tests when touched).
 
 ## 7. Verification targets
 
 ### Stage 1
 
-1. Phase 0: `010D1` poll rate on CX-5 via MX+ measured and reported (target ≥ 10 Hz); PID `0D` matches GNSS speed within 1 km/h at steady speed; VIN read via `0902`.
+1. Phase 0: `010D1` poll rate on the main test car via MX+ measured and reported (target ≥ 10 Hz); PID `0D` matches GNSS speed within 1 km/h at steady speed; VIN read via `0902`.
    - Result (2026-10-03): 25–29 Hz, p50 latency 16–18 ms. OBD reads about 2 % below GNSS (−0.3 … −0.8 km/h median).
    - The VIN was read in only 3 of 14 logs: `0902` went to the TCM when it was pinned for speed. Fixed
      (VEHICLE-LINK-SPEC §9.1).
@@ -467,38 +430,42 @@ Status (2026-10-06):
 
 ### Stage 2 & 3
 
-9. CX-5 wheel speeds and gear decode correctly (compare to GNSS speed / gear lever).
+9. main test car wheel speeds and gear decode correctly (compare to GNSS speed / gear lever).
 10. Yaw RE: candidate correlation > 0.98 vs phone vertical yaw, both turn directions.
 11. Stage comparison: DR error for Stage 2 and 3 vs Stage 1 on the same logs (§3.10); each stage must not be worse than the previous.
 
 ## 8. Out of scope (v1)
 
-Google Maps; Google Play distribution; raw GNSS analysis; slow drag-off spoofing detection; Wi-Fi ELM327 adapters; magnetometer heading for navigation; STN/OBDLink-specific commands in Stage 1 (read-only `STI` identification excepted); Classic Bluetooth adapters without MFi on iOS (impossible); lane-level accuracy; cloud services beyond Sentry and the opt-in trip log upload (TRIP-LOGGER-SPEC §7.1); feeding corrected location to other apps.
+Google Maps; Google Play distribution; live traffic (none is open for Ukraine: ROUTING-SPEC §4); raw GNSS analysis; slow drag-off spoofing detection; Wi-Fi ELM327 adapters; magnetometer heading for navigation; STN/OBDLink-specific commands in Stage 1 (read-only `STI` identification excepted); Classic Bluetooth adapters without MFi on iOS (impossible); lane-level accuracy; cloud services beyond Sentry and the opt-in trip log upload (TRIP-LOGGER-SPEC §7.1); feeding corrected location to other apps.
 
 ## 9. Risks & open items
 
 1. **ELM327 clone quality**: many clones (fake "v2.1") are slow, lack the response-count suffix, or mis-handle timeouts → poll rate may drop to ~3–8 Hz. Measure per adapter; define a minimum usable rate; keep a tested-adapter list.
-2. **OBD speed quality**: 1 km/h resolution; some ECUs truncate rather than round (small constant bias that `k_s` can't absorb; not the case on the CX-5, NAVIGATOR-SPEC §13.2); zero cutoff at low speed; unsigned, so reversing counts as forward unless PID `A4` is supported, or reads 0 (CX-5: the car turns in place in the model). ZUPT and map matching must absorb these.
+2. **OBD speed quality**: 1 km/h resolution; some ECUs truncate rather than round (small constant bias that `k_s` can't absorb; not the case on the main test car, NAVIGATOR-SPEC §13.2); zero cutoff at low speed; unsigned, so reversing counts as forward unless PID `A4` is supported, or reads 0 (main test car: the car turns in place in the model). ZUPT and map matching must absorb these.
 3. **Gyro-only heading drift** in Stage 1 during long outages (residual bias ~0.01°/s ≈ 9° per 15 min). Depends on map matching and on a rigid mount; quantify in Phase 7.
    - Measured in replay (NAVIGATOR-SPEC §10): the gyro is fine (scale 1.007 over 13 turns, bias 0.007 °/s). DR is
      limited by about 2° of heading error at the start of an outage plus ±2–3 % along-track error, not by gyro
      drift.
 4. **MFi for App Store** (EA adapters only): ad-hoc/dev builds only need the EA protocol strings in Info.plist. App Store (and likely external TestFlight) requires an MFi authorization from **each** vendor, referenced by PPID in the review information. Authorizations on hand: OBDLink MX+ (OBD Solutions LLC, `com.obdlink`, PPID `221699-0001`), Vgate vLinker FS / MS (ShenZhen CheBoTong, `com.vgatemall`, PIDs `649626-099130` / `649626-112572`). Declare only authorized protocol strings. The BLE transport avoids MFi entirely. Each new MFi protocol string needs a native rebuild and a new authorization; BLE profiles need neither.
 5. **BLE in background**: verify that polling survives screen lock / background with `bluetooth-central` while background location keeps the app alive (TRIP-LOGGER-SPEC §4.3). Auto-wake of a non-running app is deferred (VEHICLE-LINK-SPEC §11).
-6. **CAN visibility at OBD port** on CX-5 KF (Stage 2) — verify in Phase 8; fallback MS-CAN pins 3/11.
+6. **CAN visibility at OBD port** on the main test car (Stage 2) — verify in Phase 8; fallback MS-CAN pins 3/11.
 7. **No Mac, no paid Apple account**: native iteration only via CI macOS builds (slow; macOS runner minutes cost more on private repos); free-account sideloading expires after 7 days and limits the device to 3 sideloaded apps. Mitigation: thin native layer; protocol logic in TS, tested on Windows with the emulator.
-8. **Routing time on the phone**: Valhalla was dropped (2026-10-05) for A\* on our own road graph in TS (ROUTING-SPEC), which removes the native dependency. The risk moves to planning time on the JS thread for long routes: measured in ROUTING-SPEC §7, searched in slices so the map never freezes.
-9. **Data sizes** (vector tiles, road graph for Ukraine) — measure in Phase 0.
+8. **Routing time on the phone**: A\* in TS on the JS thread, searched in slices so the map never freezes. Long
+   routes around obstacles fall back to a stronger heuristic (ROUTING-SPEC §7); the phone's own planning time on
+   long routes is still to be read from trip logs.
+9. **Data sizes**: Ukraine tiles 1.2 GB and graph 453 MB; an oblast 36–89 MB of tiles and ~15 MB of graph. Oblasts
+   are the usual download.
 10. **Particle filter robustness**: particle depletion (correct hypothesis pruned), tuning of noise/penalties, and CPU budget. Mitigations: off-road share, re-injection near clusters, replay metrics on hard segments before field tests.
 11. **OSM completeness**: missing or outdated roads, wrong one-way/turn-restriction tags → on-road hypotheses die. Mitigations: off-road particles, soft (not hard) restriction penalties if replay shows false pruning.
 12. MFi protocol strings are known (`com.obdlink`, `com.vgatemall`; VEHICLE-LINK-SPEC §3.4). Verified: an `EASession` opens on the MX+. Still to verify: vLinker FS/MS over EA once one is available (none on hand; the vLinker FD-IOS is BLE and works).
-13. **Privacy exception closed (2026-10-06)**: the online OpenFreeMap style is gone. The map uses only the active offline region (regions built by `tools/tiles`, published as GitHub releases `maps-<osm_date>` by `.github/workflows/map-packs.yml`); without one, the app asks for a download first (`map-setup`, UI-SPEC §7.4). Fetching the catalog and maps contacts GitHub only from the download screens.
+13. **Offline map only**: the map draws only the active downloaded region (§2); fetching the catalog and maps
+    contacts GitHub only from the download screens. A region not downloaded can't be navigated.
 14. **BLE throughput ceiling**: iOS connection intervals (15–30 ms) limit one adapter to roughly 15–30 polls/s at best; clones are lower. Measure per adapter (VEHICLE-LINK-SPEC §3.5).
 15. **BLE catalog completeness**: no-name adapters use varied GATT layouts and names, and many don't advertise services. Mitigations: unfiltered scan + name ranking + heuristic UART search + "Try anyway"; GATT dumps of unknown devices are logged to extend the catalog.
-16. **Vehicle ECU quirks:** while the ECU is awake with the engine off, the CX-5 answers PID `0C` with a stale RPM
+16. **Vehicle ECU quirks:** while the ECU is awake with the engine off, the main test car answers PID `0C` with a stale RPM
     latched at shutdown. The repeat rule handles it (VEHICLE-LINK-SPEC §10.4). It reads speed 0 while reversing, and
     battery voltage ~12 V while driving on some drives. Other makes may have other quirks, so check engine state
     and speed against logs on every new car.
-17. **Tuning from one phone:** all navigator tuning comes from one iPhone 13, one mount and one car. GNSS timing is
+17. **Tuning from one phone:** all navigator tuning comes from one iPhone, one mount and one car. GNSS timing is
     measured online; the rest needs logs from another phone and mount (NAVIGATOR-SPEC §11).
 18. **Sentry source maps**: uploads need the `SENTRY_AUTH_TOKEN` secret and `SENTRY_ORG` / `SENTRY_PROJECT` repo variables (all set since 2026-10-03); without them builds skip the upload and JS stack traces are minified.

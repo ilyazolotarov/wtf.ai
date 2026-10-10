@@ -187,7 +187,7 @@ like a driver, and the phone's sensors with measured errors (`src/nav/sim/city-d
 minutes, then none; each navigator version is scored against the exact truth every second.
 
 ```bash
-npm run replay:sim                                       # Chernihiv, 60 min, seeds 1–3, open vs closed loop
+npm run replay:sim                                       # default graph, 60 min, seeds 1–3, open vs closed loop
 npm run replay:sim -- --minutes 180 --imu-hz 50 --every 30
 npm run replay:sim -- --at 50.4501,30.5234 --graph tools/tiles/out/release/kyiv-city.graph.bin
 npm run replay:sim -- --loops open,heading,closed --gps-min 5
@@ -206,21 +206,34 @@ The app's route planner (ROUTING-SPEC, `src/nav/routing/`) on a region's road gr
 time of many random ones.
 
 ```bash
-npm run route -- --from 51.4939,31.2947 --to 51.5100,31.3300            # one route; --from lat,lon,headingDeg
-npm run route -- --from 51.4939,31.2947 --to 50.5956,32.3873 --geojson route.geojson
+npm run route -- --from 50.4501,30.5234 --to 50.4600,30.6000            # one route; --from lat,lon,headingDeg
+npm run route -- --from 50.4501,30.5234 --to 49.7988,30.1153 --geojson route.geojson
 npm run route -- --bench 50                                              # random routes in the region
-npm run route -- --bench 50 --at 51.4939,31.2947 --radius 8             # ... within 8 km of a point
+npm run route -- --bench 50 --at 50.4501,30.5234 --radius 8             # ... within 8 km of a point
 ```
 
 One route: length, time, edges, its turn instructions, how far its ends are from the points, states settled, tiles
 read and planning time (`--geojson` writes the line and the maneuvers). The bench prints planning time, states and
 the route's length over the straight line by distance, and the `--from`/`--to` of every route that failed.
+`--alternatives` adds the alternative routes (ROUTING-SPEC §8.7): for one route each with its time and share on the
+main route's roads (and in the GeoJSON); for the bench how often there are some, how much slower and how different,
+and the search time.
+
+Route times against the logged drives (ROUTING-SPEC §4.4): the planner's time for the road path each drive actually
+took, against the real time, in ~2 km windows.
+
+```bash
+npm run route:eta                                        # every log: drawn truth, else the clean fixes' match
+npm run route:eta -- --by-road                           # real and planned km/h by class, setting and limit
+npm run route:eta -- --costs '{"signalS":20}' --no-rush  # other cost values; free-flowing
+npm run route:eta -- --graphs <dir>                      # graph files from elsewhere (e.g. freshly built)
+```
 
 Guidance on simulated drives (ROUTING-SPEC §8.4): false "off route" while the car follows its route without GPS,
 and how soon guidance notices when it leaves one.
 
 ```bash
-npm run route:sim                                        # Chernihiv, 60 min, seeds 1–3, GPS for the first 3 min
+npm run route:sim                                        # default graph, 60 min, seeds 1–3, GPS for the first 3 min
 npm run route:sim -- --at 50.4501,30.5234 --graph tools/tiles/out/release/kyiv-city.graph.bin
 npm run route:sim -- --gps                               # GPS all along
 ```
@@ -231,7 +244,7 @@ on the timeline: pink on the route, amber leaving it, red off it, grey unsure; t
 
 ## Road graph
 
-Map matching runs on the road graph built by `tools/tiles` (`python -m tiles.cli graph chernihiv`, see its
+Map matching runs on the road graph built by `tools/tiles` (`python -m tiles.cli graph kyiv`, see its
 README; MAPMATCH-SPEC §4–5). Tools pick the smallest `tools/tiles/out/release/*.graph.bin` with roads at the
 trip's first fix, so the oblast rather than Ukraine; `--graph <file>` overrides.
 

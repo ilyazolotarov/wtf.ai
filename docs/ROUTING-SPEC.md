@@ -1,6 +1,6 @@
 # wtf.ai — Routing Specification
 
-Status: draft v1 (2026-10-05). Implements the routing part of SPEC.md Phase 6. Replaces Valhalla (SPEC §2) with
+Status: v2 (2026-10-10). Implements the routing part of SPEC.md Phase 6. Replaces Valhalla (SPEC §2) with
 A* on the map-matching road graph ([MAPMATCH-SPEC.md](MAPMATCH-SPEC.md) §4–5). Source of truth for coding agents.
 
 ## 1. Goal
@@ -13,7 +13,7 @@ Plan a drive to a destination offline and guide the driver along it, so that:
 3. The route and the position filter see the same roads: same one-ways, same turn restrictions, same edge ids.
 4. Later, the route helps map matching: at a junction the driver more likely takes the route's exit (§8).
 
-## 2. Status (2026-10-05)
+## 2. Status
 
 - **R1 done:** this spec; SPEC.md moved routing here from Valhalla.
 - **R2 done:** the planner `src/nav/routing/` (§4–5) and `npm run route` (§7): city routes in 0.1 s or less, oblast
@@ -26,7 +26,7 @@ Plan a drive to a destination offline and guide the driver along it, so that:
 - **R5 built, off:** the route as a hint for map matching, a developer switch; measured in §8.6.
 - **Cost model from the map (2026-10-10):** speed limits, settlement, surface, traffic lights and rush hours from
   the graph's speed attributes (§4.1–4.3), checked on 26 drives (§4.4). Takes effect with map packs built from then.
-- **Long routes (2026-10-10, §7):** a search past 150 k states starts again at weight 2: Slavutych → Mariupol in
+- **Long routes (2026-10-10, §7):** a search past 150 k states starts again at weight 2: a 923 km route to Mariupol in
   373 k states instead of 1.52 M.
 - **Alternative routes (2026-10-10, §8.7):** searched after a new route, shown and chosen on the map, taken over
   when driven or faster.
@@ -56,7 +56,7 @@ from the class alone (km/h, MAPMATCH-SPEC §4.3):
 | 110 | 90 | 60 | 50 | 45 | 35 | 25 | 8 | 12 | 10 | 20 |
 
 - Minor roads first were 40 / 30 / 10 / 20 / 15 / 25 km/h with turns 5 / 10 / 10 / 15 s. On 2026-10-05 a test route across town
-  in Chernihiv went 316 m along a service lane through the blocks and 215 m of residential street (1.47 km), where
+  in a regional city went 316 m along a service lane through the blocks and 215 m of residential street (1.47 km), where
   the driver takes the main street (tertiary, 1.84 km, 123 m residential). Now near OSRM's car profile (residential
   25, service 15) with turns 8 / 15 / 15 / 20 s, which picks the main street. 40 random routes within 8 km of the
   city: no failures, 16 / 32 ms p90.
@@ -88,11 +88,11 @@ itself, checked against logged drives (§4.4).
 
 - **Limit:** the tagged one (`maxspeedKph`), else by law (traffic rules §12.4–12.6): 50 in a settlement (`urban`), 90
   outside, 130 on motorways. Tagged on 86–94 % of trunks, 47–69 % of primaries, 23–52 % of secondaries, under 15 % of
-  minor roads (Chernihiv / Kyiv oblasts).
+  minor roads (the test oblast / Kyiv oblast).
 - **Share** of the limit driven between junctions, free-flowing: outside settlements 1.1; in a town or village 1.3 on
   its through roads (motorway, trunk, primary, secondary) and 1.0 on its other streets; in a city (`city`) 0.9, its
   traffic lights priced apart (§4.2). From the logged drives (§4.4): 102 km/h on rural roads limited to 90, 75 on 50
-  through villages, 39 on untagged town tertiaries, 24–29 on Chernihiv's primaries; rounded down, one driver's car.
+  through villages, 39 on untagged town tertiaries, 24–29 on a regional city's primaries; rounded down, one driver's car.
 - **Caps** (km/h): motorway 120, trunk 110, primary 100, secondary 90, tertiary 80, unclassified 60, residential 30,
   living_street 10, service 15, track 15, road 30. Unpaved: at most 30.
 - The A* heuristic's speed is the fastest in either table (120 km/h).
@@ -118,7 +118,7 @@ phone's clock when a plan starts (the note `route plan #n …; rush hour ×f`).
 - A guess until drives measure it. The hours follow TomTom's public Traffic Index for Kyiv (peaks 08–09 and 17–18,
   pre-war figures); TomTom's router gave one 16 km Kyiv route 15 / 17 / 23 min at 03:00 / 08:30 / 18:00 on a weekday
   in October 2026: the evening peak is the bigger one.
-- Smaller cities get none: the drives through Chernihiv on a Tuesday 17:00–19:20 were free-flowing, and 1.4 on its
+- Smaller cities get none: the drives through a regional city (under 500 000 people) on a Tuesday 17:00–19:20 were free-flowing, and 1.4 on its
   main roads made their planned time 4 % worse.
 
 ### 4.4 Checked against drives (`npm run route:eta`)
@@ -128,7 +128,7 @@ no part): the drawn truth where there is one (timed by the odometer between clea
 clean fixes. Cut into ~2 km windows; stops over 2 min end a window, shorter ones count. `--by-road` gives real and
 planned km/h by class, setting and limit; `--costs '<json>'` tries other values; `--graphs <dir>` other graph files.
 
-26 drawn drives, 173 km, 221 min (Chernihiv oblast, 2026-10-03…06; the clean fixes alone cover 33 km):
+26 drawn drives, 173 km, 221 min (the test oblast, 2026-10-03…06; the clean fixes alone cover 33 km):
 
 | Model | Planned | Real vs planned | Windows p10 / p50 / p90 | Median miss |
 | --- | --- | --- | --- | --- |
@@ -137,9 +137,9 @@ planned km/h by class, setting and limit; `--costs '<json>'` tries other values;
 | + priority road | 266 min | −17 % | −43 / −24 / +12 % | 34 % |
 | + shares by setting (§4.1), rush hours (§4.3) | 241 min | −8 % | −39 / −12 / +18 % | 18 % |
 
-- Still slow on the short Slavutych drives (small-town streets, −15 to −50 %); one drive with a long crawl through a
+- Still slow on the short small-town drives (narrow streets, −15 to −50 %); one drive with a long crawl through a
   yard reads +93 %.
-- Planning on the attributed Chernihiv graph searched 30–40 % fewer states than on the class speeds (60 random
+- Planning on the attributed oblast graph searched 30–40 % fewer states than on the class speeds (60 random
   routes, `npm run route -- --bench 60`): main roads now stand out from minor ones.
 - Kyiv rush hours and the other big cities are unmeasured: no logged drive there yet.
 
@@ -202,8 +202,8 @@ slices between frames and shows progress. `planRoute()` runs it to the end (tool
 - **Turning around at the start:** when the route leaves against the car's heading (`plan.startTurnaround`), a
   `u-turn` at 0 m comes first.
 
-Checked by eye on Chernihiv and Kyiv routes (`npm run route` prints them): 5 instructions on 4.2 km across
-Chernihiv, 12 on 13 km across Kyiv, 12 on 172 km across the oblast.
+Checked by eye on routes in a regional city and in Kyiv (`npm run route` prints them): 5 instructions on 4.2 km
+across the city, 12 on 13 km across Kyiv, 12 on 172 km across the oblast.
 
 ## 7. Measurements (`npm run route`)
 
@@ -216,21 +216,21 @@ Node on the Windows PC, cold tile cache (2026-10-05):
 
 | Graph, routes | Straight line | ms p50 / p90 / max | States p50 / max | Route ÷ line |
 | --- | --- | --- | --- | --- |
-| Chernihiv, within 8 km of the centre | 0–5 km | 19 / 44 / 79 | 3 323 / 29 721 | 1.73 |
+| Regional city, within 8 km of the centre | 0–5 km | 19 / 44 / 79 | 3 323 / 29 721 | 1.73 |
 | | 5–15 km | 47 / 106 / 112 | 17 265 / 47 319 | 1.45 |
 | Kyiv city, within 15 km of the centre | 0–5 km | 11 / 29 / 29 | 6 220 / 12 978 | 1.75 |
 | | 5–15 km | 95 / 360 / 602 | 41 027 / 211 749 | 1.46 |
 | | 15–50 km | 352 / 535 / 622 | 121 822 / 211 041 | 1.45 |
-| Chernihiv oblast | 15–50 km | 28 / 181 / 181 | 6 343 / 34 211 | 1.30 |
+| Its oblast | 15–50 km | 28 / 181 / 181 | 6 343 / 34 211 | 1.30 |
 | | 50–100 km | 304 / 461 / 619 | 56 955 / 164 864 | 1.44 |
 | | 100+ km | 530 / 949 / 964 | 141 499 / 241 588 | 1.37 |
 
-- A 172 km route across the oblast (Chernihiv → Pryluky area) settles 148 k states; it reads 81 k tiles with the
+- A 172 km route across the oblast settles 148 k states; it reads 81 k tiles with the
   filter's 128-tile cache (1.1 s), 5.2 k with 2048 (0.57 s, 20 MB held), 4.5 k with 4096 (0.51 s, 79 MB).
 - Of 130 random routes, 4 had no road route: 3 ended on track networks or yards connected to nothing, now refused
   in ~10 ms (island check); one start on a source-only stretch found its route once fallbacks were added.
 - **Speed-up (2026-10-06, `npm run route:bench`).** The phone hit `too-far` on long routes: with the straight-line
-  heuristic at the fastest speed (110 km/h) an exact search floods the country (Slavutych → Lviv-like routes on the
+  heuristic at the fastest speed (110 km/h) an exact search floods the country (cross-country routes on the
   synthetic grid: over 1 M states). Now:
   - **Hierarchy pruning** (`HIERARCHY` in router.ts): from 12 km off the nearer end only roads up to tertiary are
     searched, from 35 km up to secondary, from 80 km up to primary. A node whose legal exits are all smaller roads
@@ -247,7 +247,7 @@ Node on the Windows PC, cold tile cache (2026-10-05):
   cold for 4 routes (warm 0.56 s), routes within 0.2 % of the exact search's time. Default 250 × 150 km grid,
   107–198 km: 24 s → 1.9 s for 6 routes. `--exact` prints each route against the exact search, `--options '<json>'`
   passes `RouteOptions` (`hierarchy`, `heuristicWeight`), `--graph <file> --at lat,lon --radius km` uses a real graph.
-- **Weight fallback (2026-10-10).** Slavutych → Mariupol (923 km by road, 690 km straight: around the front line and
+- **Weight fallback (2026-10-10).** A route across the country to Mariupol (923 km by road, 690 km straight: around the front line and
   the Dnipro) settled 1.52 M states and read 378 k tiles (10 s in Node, far longer on the phone): a route that much
   longer than the straight line keeps weight 1.5's frontier wide. A search past 150 k states now starts again at
   weight 2 (`FALLBACK_AFTER_STATES`, `RouteStats.fellBackAt`, note `weight raised after n states`): 373 k states,
@@ -346,11 +346,11 @@ City drives from the simulator (MAPMATCH-SPEC §9.4), 60 min × seeds 1–3, GPS
 replay's puck (`replayPuck`, what NavigatorService publishes) fed to guidance as the app does.
 
 - **Following the route** (routes along the car's own path, cut where it loops back: every "off" is false):
-  Chernihiv 30 routes / 2.7 h and Kyiv 26 / 2.7 h: **no false "off"**; `unsure` 0.2 % of the time; progress along
+  Regional city 30 routes / 2.7 h and Kyiv 26 / 2.7 h: **no false "off"**; `unsure` 0.2 % of the time; progress along
   the route off by 5 / 4 m median, 13 / 10 m p90, 90 / 123 m at most.
 - **Leaving the route** (a route planned every 6 min to a point 2–4 km away; the car keeps to its own way): all 28
   departures noticed, 5–6 s and ~50 m (median) after the car was 25 m off the route; at most 59 s / 173 m (slow
-  traffic); no "off" before the car left. With GPS all along, the same. (2026-10-06, Chernihiv: the count restarting
+  traffic); no "off" before the car left. With GPS all along, the same. (2026-10-06, regional city: the count restarting
   at each `unsure` had made it 8 s / 67 m median, 129 s / 925 m at most; pausing it instead, 5 s / 45 m and
   59 s / 173 m.)
 - Two fixes came from it: an early `arrived` where a route passed near its end, and progress jumping to a later
@@ -405,7 +405,7 @@ the player does, the next announcement is said.
 times more particles onto an exit along the route. Only the proposal at junctions changes, never the weights, so
 the turns still decide (a test drives a 10:1 hint the wrong way and the filter follows the car). In the app it is a
 developer switch, **off by default** ("Tell map matching the route"; trip-log info `nav_route_hint`, note
-`nav route hint …`). `npm run route:sim -- --hint <factor>`, same drives as §8.4 (Chernihiv / Kyiv):
+`nav route hint …`). `npm run route:sim -- --hint <factor>`, same drives as §8.4 (regional city / Kyiv):
 
 | Hint | Dot off the truth p50 / p90 / max | Progress error max | Top hypothesis on the car's edge | Departures: median, worst | False "off" before leaving |
 | --- | --- | --- | --- | --- | --- |
@@ -414,7 +414,7 @@ developer switch, **off by default** ("Tell map matching the route"; trip-log in
 | 10× | 4 / 9 / 55 m; 4 / 9 / 28 m | 46 m; 18 m | 83.8 %; 82.6 % | 9 s / 71 m, 117 s / 925 m; 6 s / 62 m, 10 s / 105 m | 1; 0 |
 
 - 3× changes little: the simulated filter already holds the road (dot median 4–5 m), so a prior adds almost nothing
-  but trims the worst progress errors. 10× starts to hide real departures (925 m before Chernihiv's slowest was
+  but trims the worst progress errors. 10× starts to hide real departures (925 m before the regional city's slowest was
   noticed). Hence off, 3× when on.
 - Worth trying on the road only where map matching struggles without it (multimodal for long stretches, MAPMATCH-SPEC
   §9.4's long arterials); the simulator is optimistic there.
@@ -447,7 +447,7 @@ Random routes on the attributed graphs (Node, cold cache, 2026-10-10):
 
 | Graph, routes | None / 1 / 2 | Search ms p50 / p90 / max | Slower p50 / max | Shared p50 / max |
 | --- | --- | --- | --- | --- |
-| Chernihiv oblast, 15–50 km | 4 / 2 / 1 | 17 / 60 / 60 | 20 / 21 % | 19 / 34 % |
+| Test oblast, 15–50 km | 4 / 2 / 1 | 17 / 60 / 60 | 20 / 21 % | 19 / 34 % |
 | 50–100 km | 6 / 10 / 5 | 83 / 227 / 271 | 8 / 20 % | 34 / 58 % |
 | 100+ km | 11 / 10 / 7 | 265 / 668 / 794 | 9 / 16 % | 33 / 58 % |
 | Kyiv city, 5–15 km | 8 / 2 / 7 | 187 / 477 / 725 | 11 / 26 % | 36 / 58 % |
@@ -460,10 +460,12 @@ One short Kyiv route's "alternative" was 27 % faster than the main route: what t
 | # | Output |
 | --- | --- |
 | R1 | This spec; SPEC.md moves routing from Valhalla to here |
-| R2 | Planner (§4–5), `npm run route` with timings on Chernihiv and Kyiv |
+| R2 | Planner (§4–5), `npm run route` with timings on a regional city and Kyiv |
 | R3 | Turn instructions (§6) |
 | R4 | App: destination, route line, banner, re-plan |
 | R5 | The route as a map-matching hint, measured in the simulator (built, off: §8.6) |
+| R6 | Route times from the map's speed attributes, rush hours, checked on drives (§4) |
+| R7 | Alternative routes (§8.7) |
 
 ## 10. Open items
 

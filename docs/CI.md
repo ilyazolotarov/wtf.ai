@@ -16,7 +16,9 @@ covered again by the next run.
 | `checks` (lint, tsc, Jest, doctor)    | anything except docs (`docs/`, `*.md`, `.claude/`, …), or a build runs      |
 | `python` (pytest)                     | `tools/triplog/`, `tools/tiles/`                                            |
 | `native-logic` (Swift tests)          | `modules/*/ios/`, `native-tests/`, `Package.swift`                          |
+| `native-logic-android` (Kotlin tests) | `modules/*/android/`, `native-tests-android/`                               |
 | `build-ios` (unsigned IPA)            | see below                                                                   |
+| `build-android` (signed APK)          | see Android below                                                           |
 
 ## Builds
 
@@ -72,8 +74,7 @@ runs `.github/workflows/build-android.yml` with it.
   can also be started on its own.
 - Signed with the stable key from the `ANDROID_KEYSTORE_*` secrets when present, else the debug key
   (docs/ANDROID-SPEC.md §4).
-- Caches, saved by `main` and, until Android is merged into `main`, by `android` (a branch reads only its own
-  and `main`'s caches, so a branch made from `android` starts cold until then):
+- Caches, saved by `main` (a branch reads only its own and `main`'s caches):
   - Gradle (`setup-gradle`): dependencies, wrapper and the Gradle build cache (`--build-cache`: Kotlin/Java
     compiles, dexing).
   - ccache (`~/.ccache`) for the C/C++ of React Native's CMake builds, through `CMAKE_C(XX)_COMPILER_LAUNCHER`.

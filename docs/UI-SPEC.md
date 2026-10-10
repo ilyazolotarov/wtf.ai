@@ -1,56 +1,33 @@
-# wtf.ai — UI-First Milestone Specification
+# wtf.ai — UI Specification
 
-Status: draft v1 (2026-09-29). Companion to [SPEC.md](SPEC.md) §3.9. Source of truth for coding agents implementing the UI milestone.
-
-> Builds (2026-10-03): EAS is no longer used. Read the EAS steps in §3 as history; builds come from GitHub Actions as unsigned IPAs sideloaded with AltStore (SPEC §2, AGENTS.md).
->
-> Redesign (2026-10-03): the UI follows the **Calm** design (claude.ai/design project "wtf.ai Redesign", option 1b): Onest type, frosted-glass map panels (`expo-blur` + translucent tint, `src/components/ui/glass-fill.tsx`), sentence-case trust status, big light speed numeral, OpenFreeMap **Liberty** style in both color schemes. Theme tokens live in `src/constants/theme.ts` (`usePalette()`), icons in `src/components/ui/icon.tsx` (Material names → SF Symbols). Changes to the sections below: the menu is a `more` sheet (Offline data, Calibration, Diagnostics, Settings; nested sheets get `?from=more` for a back button); sheets draw their own header (`headerShown: false`); Settings adds an Appearance override (System / Light / Dark via `Appearance.setColorScheme`, persisted); a first-run `onboarding` route (welcome → location → adapter → calibration) shows until `onboarding-done` is set in kv-store; on `UNTRUSTED` the map shows the raw GNSS ghost and can frame it ("Show where GPS thinks you are").
->
-> Position source (2026-10-03): §4.3 is updated. The map's GNSS now comes from `modules/sensor-capture` (shared with the trip log), not `expo-location`'s watcher, which stopped for good after jamming. Only satellite fixes count for trust. Since then `NavigatorService` ([NAVIGATOR-SPEC.md](NAVIGATOR-SPEC.md) §9) is the map's source; it shows phone GNSS as below when there is no OBD speed.
->
-> Follow-up (2026-10-06): the `calibration` screen, the onboarding calibration step and the low-accuracy / "Not calibrated" chip are removed: the app calibrates itself while driving (SPEC §3.6). `SinceTrustedStrip` (§6.3) is a chip under the status pill while GNSS isn't trusted: "Trusted GPS 4 min ago, 2.3 km back". The `more` sheet lists Offline maps and Settings; `src/mocks` is gone.
-
-> Follow-up (2026-10-03): the mock `vehicle` (§7.2) and `debug` (§7.5) screens become real in the trip logger milestone — see [TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md) §9 and [VEHICLE-LINK-SPEC.md](VEHICLE-LINK-SPEC.md). The `AdapterChip` (§6.3) then shows the real link state.
+Status: v2 (2026-10-10). The screens and the map as built. Companion to [SPEC.md](SPEC.md) §3.9. Source of truth for
+coding agents working on the UI.
 
 ## 1. Goal
 
-Get a visible, working app on the iPhone fast:
-
-- **Map screen with real data**: live GNSS position via a `PositionSource` abstraction, so the EKF can replace it later without UI changes.
-- **All other screens** from SPEC §3.9 built with **static placeholder data** (mocks).
+A map-first app a driver can use with one glance and one tap while the car moves: the position and how far to trust
+it, the route, and the car's connection; everything else one level down.
 
 ## 2. Decisions
 
-| Topic      | Decision                                                                                                                                        |
-| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| Build      | No dev build yet → first step is an EAS dev build. MapLibre does not run in Expo Go.                                                            |
-| Map tiles  | OpenFreeMap **Liberty** style on offline PMTiles of the downloaded region (SPEC §3.8); no online map since 2026-10-06.                      |
-| Navigation | **Map-first**: full-screen map with floating controls; other screens are stack routes presented as sheets/modals. Remove template `NativeTabs`. |
-| Mocks      | Static placeholder data only (no simulated scenarios).                                                                                          |
-| Language   | English + Ukrainian, i18n-ready. Default: the first device language the app speaks, Russian as Ukrainian (iOS and Android); user override in Settings.                                                         |
-| Theme      | Follow system light/dark; map style switches too.                                                                                               |
-| Units      | SI internally (m, s, rad, m/s). Convert to km/h, km/m, degrees only in UI.                                                                      |
-| Privacy    | Offline map only: no map requests while driving or browsing. GitHub is contacted for the catalog and downloads only.                       |
+| Topic      | Decision |
+| ---------- | -------- |
+| Builds     | Dev and release builds from CI, sideloaded (SPEC §2). MapLibre does not run in Expo Go. |
+| Map tiles  | OpenFreeMap **Liberty** style on offline PMTiles of the active downloaded region (SPEC §3.8); no online map. |
+| Navigation | **Map-first**: full-screen map with floating controls; everything else is a page pushed on one root stack (§5). |
+| Design     | **Calm** (claude.ai/design project "wtf.ai Redesign", option 1b): Onest type, frosted-glass map panels (`expo-blur` + translucent tint, `src/components/ui/glass-fill.tsx`), sentence-case trust status, a big light speed numeral. Tokens in `src/constants/theme.ts` (`usePalette()`), icons in `src/components/ui/icon.tsx` (Material names → SF Symbols / Material Symbols). |
+| Language   | English + Ukrainian. Default: the first device language the app speaks, Russian as Ukrainian (iOS and Android); override in Settings. |
+| Theme      | System light/dark, or a fixed one from Settings (`Appearance.setColorScheme`, persisted); the map style switches too. |
+| Units      | SI internally (m, s, rad, m/s). Convert to km/h, km/m, degrees only in UI. |
+| Privacy    | Offline map only: no map requests while driving or browsing. GitHub is contacted for the catalog and downloads only. |
 
-## 3. Phase 0 — Dev build foundation
+## 3. Position source
 
-Blocks seeing the map on a device.
+The map's position comes from `NavigatorService` ([NAVIGATOR-SPEC.md](NAVIGATOR-SPEC.md) §9), the runtime's
+`PositionSource`; without OBD speed it shows phone GNSS (§4.3). GNSS comes from `modules/sensor-capture` (shared with
+the trip log), never `expo-location`'s watcher, which stopped for good after jamming.
 
-1. Install all native deps in **one** batch (each native change costs an EAS build) via `npx expo install`:
-   - `expo-dev-client`, `expo-location`, `@maplibre/maplibre-react-native`, `expo-localization`, `expo-keep-awake`, `expo-sqlite` (kv-store for settings now, per-VIN calibration later).
-   - Recommended (saves a rebuild before the SPEC Phase 1 logger): `expo-sensors`, `expo-file-system`, `expo-sharing`.
-2. `app.json`:
-   - `expo-location` plugin with **when-in-use** permission text only (background location comes in SPEC Phase 6).
-   - `@maplibre/maplibre-react-native` plugin.
-   - `ios.bundleIdentifier`.
-   - `locales` for `en` and `uk`, and `ru` with the Ukrainian strings (localized iOS permission strings).
-3. `eas.json` with a `development` profile (`developmentClient: true`, `distribution: internal`).
-4. `npx eas-cli@latest device:create` → register iPhone. `npx eas-cli@latest build -p ios --profile development`. See the `expo-dev-client` and `eas-app-stores` skills.
-5. From here on, Expo Go no longer works; use the dev client with `npx expo start`.
-
-## 4. Phase 1 — Foundations
-
-Can run in parallel with Phase 0 once deps are installed.
+## 4. Foundations
 
 ### 4.1 Position types — `src/nav/position/types.ts` (pure TS)
 
@@ -67,8 +44,8 @@ Can run in parallel with Phase 0 once deps are installed.
 
 ### 4.2 Geo helpers — `src/nav/geo/` (pure TS)
 
-- `haversineM(a, b)`, `bearingRad(a, b)`, `circlePolygon(center, radiusM, steps)` → GeoJSON Polygon.
-- Unit tests with `jest-expo` (first test setup in the repo; follow Expo unit-testing docs).
+- `haversineM(a, b)`, `bearingRad(a, b)`, `circlePolygon(center, radiusM, steps)` → GeoJSON Polygon, and the rest of
+  the geometry the map draws.
 
 ### 4.3 Position service — `src/services/position/` (may import Expo)
 
@@ -105,38 +82,30 @@ Can run in parallel with Phase 0 once deps are installed.
 - `useT()` hook; locale from `expo-localization`; override (`system | en | uk`) persisted in `expo-sqlite/kv-store`.
 - No hardcoded user-facing strings in components.
 
-### 4.6 Mocks — `src/mocks/`
+### 4.6 Theme and map config
 
-Typed static data; real services will later return the same types.
+- `src/constants/theme.ts`: light and dark palettes (`bg`, `text`, `accent`, `route`, `routeAlt`, status colours
+  `ok` / `warn` / `bad` / `idle`, …), `usePalette()`.
+- `src/config/map.ts`: the active region's offline style (`useMapStyle(scheme)`, `hasUsableMap`); `map-dark.ts` re-tints
+  the Liberty style for the dark scheme.
 
-- Adapter state (OBDLink MX+ over ExternalAccessory, `disconnected`; ELM327 version, OBD protocol, poll rate all `null`).
-- Vehicle: VIN `null`, odometry Stage 1 (SPEC §2.1), OBD speed and yaw rate `null`, yaw source phone gyro.
-- Calibration status (`not-calibrated`, 3 steps).
-- Download packs (map tiles, routing data — size, version, status).
-- EKF state (all `null`).
-- Destinations: Kyiv, Lviv, Odesa, Dnipro, Kharkiv, Zaporizhzhia, Vinnytsia (name EN/UK + coordinates).
+## 5. App shell
 
-### 4.7 Theme & map config
+- `src/app/_layout.tsx`: `Stack` inside `ThemeProvider` → `I18nProvider` → `PositionProvider` → `RuntimeProvider`
+  (`src/services/runtime.ts` creates the services once for the app's lifetime).
+- **Pages, not sheets:** everything opened from the map (Route, Vehicle, Offline maps, More and what it opens, the
+  Guide and its lessons, the developer pages) is a page pushed on the one root stack, sliding in from the right, so
+  going back is the system's: the swipe from the left edge on iOS, the back gesture or button on Android. The page
+  header (`ScreenContent`) has a back button, and from the second level down a ✕ straight back to the map. (A form
+  sheet can't hold a stack, and iOS has no back swipe for a sheet.)
+- **Full-screen modals**, with nothing to go back to: `onboarding` (welcome → location → adapter → phone holder; shown
+  until `onboarding-done` is set in kv-store) and `map-setup` (the first map download).
 
-- Extend `src/constants/theme.ts` with status colors (light + dark): `trustOk`, `untrusted`, `reacquiring`, `noFix`, `puck`, `ghost`, `accuracyFill`.
-- `src/config/map.ts`: OpenFreeMap light and dark style URLs (verify current URLs at openfreemap.org) + `getMapStyle(scheme)`.
-
-## 5. Phase 2 — Navigation shell
-
-Depends on 4.4 and 4.5.
-
-1. `src/app/_layout.tsx`: `Stack` wrapped in `ThemeProvider` → `I18nProvider` → `PositionProvider`.
-   - `index`: `headerShown: false`.
-   - `route`, `vehicle`, `calibration`, `downloads`, `debug`, `settings`: `formSheet` or `modal` presentation. Check the `expo-router` skill for SDK 57 options.
-2. Remove template leftovers: `src/app/explore.tsx`, `src/components/app-tabs.tsx`, `app-tabs.web.tsx`, `hint-row.tsx`, `web-badge.tsx`, `animated-icon*`, and `ui/collapsible.tsx` / `external-link.tsx` if unused.
-
-## 6. Phase 3 — Map screen (`src/app/index.tsx`, real data)
-
-Depends on Phase 2.
+## 6. Map screen (`src/app/index.tsx`)
 
 ### 6.1 Map
 
-- Full-screen MapLibre `MapView`, style from `getMapStyle(colorScheme)`. Read the MapLibre RN docs for the installed version before coding (API changed between majors).
+- Full-screen MapLibre map, the active offline region's style (`useMapStyle(scheme)`, `src/config/map.ts`; the dark scheme re-tints it, `map-dark.ts`). Read the MapLibre RN docs for the installed version before coding (the API changed between majors).
 - **Custom puck** from `usePosition()` via GeoJSON source + layers: dot + heading arrow (arrow only when heading known) + accuracy circle (`circlePolygon`). Do **not** use MapLibre's built-in user location — it bypasses the abstraction.
 - **Compass beam** (display-only, `useCompassHeading`): when not in a car (no trip recording, adapter not connected) and speed < 3 m/s, a wide faint sector from `watchHeadingAsync` replaces the course cone and shows where the phone points. Half-width = iOS compass uncertainty (20°/35°/50°/60° for accuracy 3–0). The compass runs only while allowed and never reaches `PositionEstimate`.
 - Raw GNSS **ghost marker** from `rawGnss`; hidden while `source === 'gnss'`.
@@ -163,7 +132,7 @@ The vehicle button in the footer carries the connection dot: green when the car 
 
 While the OBD adapter searches all protocols (`protocolSearch`, another car on it: up to ~20 s), a chip under the status pill says "Finding the car's protocol…", and the vehicle screen's adapter tile says the same.
 
-Heading-up bearing: the walking compass beam when shown; else the navigator heading (`dr`/`fused` source, valid while stopped); else GNSS course when speed > ~2 m/s; else the last of these held, so the map does not snap north at a stop. No direction known while standing (none yet: parked on phone GPS before a trip, the app just opened): heading-up keeps its camera (zoom 17, tilted) and the map keeps the bearing it has, so the view doesn't drop flat and north while the button says heading-up. Moving without one (the navigator anchored under GNSS jamming): the `follow` camera (zoom 16, flat, north up) until there is one, so it never looks like a heading-up view pointing the wrong way. The bearing goes to the map in [0°, 360°): iOS MapLibre ignores a negative one, and the dead-reckoning heading is signed, so until 2026-10-06 the map stopped turning whenever the car drove west under jamming.
+Heading-up bearing: the walking compass beam when shown; else the navigator heading (`dr`/`fused` source, valid while stopped); else GNSS course when speed > ~2 m/s; else the last of these held, so the map does not snap north at a stop. No direction known while standing (none yet: parked on phone GPS before a trip, the app just opened): heading-up keeps its camera (zoom 17, tilted) and the map keeps the bearing it has, so the view doesn't drop flat and north while the button says heading-up. Moving without one (the navigator anchored under GNSS jamming): the `follow` camera (zoom 16, flat, north up) until there is one, so it never looks like a heading-up view pointing the wrong way. The bearing goes to the map in [0°, 360°): iOS MapLibre ignores a negative one, and the dead-reckoning heading is signed.
 
 Auto heading-up: once per trip, when a trip is recording and speed stays > ~2 m/s for 2 s, `follow` switches to `follow-heading` (any other mode is left alone). When the trip ends (recorder leaves `recording`/`lingering`) it goes back to `follow`, unless the driver changed the mode by button or gesture in between.
 
@@ -177,24 +146,24 @@ One small component each. Touch targets ≥ 56 pt; high contrast; minimal text.
 
 | Position | Component           | Content                                                                                    |
 | -------- | ------------------- | ------------------------------------------------------------------------------------------ |
-| Top      | `TrustBadge`        | `GPS OK` / `UNTRUSTED` / `REACQUIRING` / `NO FIX`, colored by trust state                  |
-| Top      | `SinceTrustedStrip` | Time and distance since last trusted fix, while not trusted                                |
-| Top      | `AdapterChip`       | Adapter status (mock: Disconnected); tap → `vehicle`                                       |
-| Top      | `RouteBanner`       | Only with a route: next maneuver, distance, what is left (below, and 7.1)                  |
-| Bottom   | `SpeedReadout`      | Speed in km/h (GNSS speed)                                                                 |
-| Bottom   | `RecenterButton`    | Camera mode cycle                                                                          |
-| Bottom   | `MapToolbar`        | Route, Vehicle, menu → Downloads, Calibration, Debug, Settings (`Link` from `expo-router`) |
+| Top      | Status pill         | Trust state in words, coloured by it (`GPS OK`, "GPS looks spoofed", "GPS is back — verifying", no fix) |
+| Top      | `SinceTrustedStrip` | While GNSS isn't trusted: "Trusted GPS 4 min ago, 2.3 km back"                             |
+| Top      | `RouteBanner`       | Only with a route: next maneuver, distance, what is left (below, and §7.1)                 |
+| Top      | Chips and cards     | Protocol search, parked-pose question, set your position, outside the region (§6.2, below) |
+| Bottom   | Speed               | Speed in km/h                                                                              |
+| Bottom   | Camera button       | Camera mode cycle (§6.2)                                                                   |
+| Bottom   | Bar                 | Route, Vehicle (with the connection dot; "Driving" while a trip records), More              |
 | Center   | `PermissionCard`    | Location denied → explanation + "Open Settings" (`Linking.openURL('app-settings:')`)       |
 | Center   | `NoFixCard`         | "Waiting for GPS…" when no fix yet                                                         |
 
-- **Outside the region** (`src/components/map/region-prompt.tsx`, 2026-10-06): when the position (any fix to
+- **Outside the region** (`src/components/map/region-prompt.tsx`): when the position (any fix to
   5 km, Wi-Fi and cell ones too, but not one suspected of spoofing) is more than max(1 km, its accuracy) outside
   the active region's outline (`region-check.ts`; bounds for releases without
   outlines), a card "Outside <region>" offers **Switch map** to a downloaded region that has the car, else
   **Download** the smallest catalog region that has it (an oblast before Ukraine; the catalog is fetched once,
   then; the downloaded region becomes the map when installed), else Offline data. "Not now" hides it for that
-  pair of regions until the app restarts. Hidden while that region downloads. (First built for trusted GNSS
-  only, which never prompted indoors: a Wi-Fi fix is "APPROXIMATE", never trusted.)
+  pair of regions until the app restarts. Hidden while that region downloads. Wi-Fi fixes count: built for trusted
+  GNSS only, it never prompted indoors.
 - Long-press on map → drops a pin; a card above the toolbar shows its distance and direction, a ✕ to cancel, and
   **Route here** (ROUTING-SPEC §8). While the car stands (or there is no position yet) it also offers **I'm here**:
   putting the car on the map (NAVIGATOR-SPEC §6.2), starting at the pin instead of the dot.
@@ -222,20 +191,11 @@ One small component each. Touch targets ≥ 56 pt; high contrast; minimal text.
   route loses it; then stop and set your position again". The route is planned only on **I'll follow the route**
   (noted `route without an adapter: the driver will follow it`); its ✕ drops it.
 
-## 7. Phase 4 — Mock screens
-
-Parallel with Phase 3; each screen is independent. Use `@expo/ui` for settings-like lists (see `expo-ui` skill).
-
-Pages, not sheets (2026-10-10): everything opened from the map (Route, Vehicle, Offline maps, More and what it opens,
-the Guide and its lessons, the developer pages) is a page pushed on the one root stack, sliding in from the right, so
-going back is the system's: the swipe from the left edge on iOS, the back gesture or button on Android. The page
-header (`ScreenContent`) has a back button, and from the second level down a ✕ straight back to the map. (A form
-sheet can't hold a stack, and iOS has no back swipe for a sheet.) Onboarding and the first map download stay
-full-screen modals: there is nothing to go back to.
+## 7. Pages
 
 ### 7.1 `route`
 
-- Field empty (2026-10-06), only what a route can reach (inside the active region's bounds):
+- Field empty, only what a route can reach (inside the active region's bounds):
   - **Saved**: Home, Work, then favourites (`src/services/navigation/places-store.ts`, kv-store `places.saved`).
   - **Recent**: the last 10 destinations guided to from this screen, newest first, one per place (within 30 m);
     "Clear recent" (kv-store `places.recent`).
@@ -258,38 +218,37 @@ full-screen modals: there is nothing to go back to.
 
 ### 7.2 `vehicle`
 
-- Adapter card: model OBDLink MX+, connection ExternalAccessory, status Disconnected, ELM327 version / OBD protocol / speed poll rate `—`, Connect button disabled.
-- Odometry: VIN `—`; stage "1 · OBD speed + phone gyro".
-- Live signals placeholders (`—`): speed (OBD), yaw rate.
-- Yaw source: "Phone gyro". (Stage 2+ rows — wheel speeds, gear, profile — come with SPEC Phase 8.)
+The car only: the adapter list and connection, the connected adapter's details, live OBD signals, VIN, engine state
+and odometry stage; specified in [TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md) §9.1 and
+[VEHICLE-LINK-SPEC.md](VEHICLE-LINK-SPEC.md) §7. The learned calibration shows in its developer section (SPEC §3.6).
 
-### 7.3 `calibration` (removed 2026-10-06)
+### 7.3 `more`
 
-No screen: calibration is learned while driving (SPEC §3.6).
+The list: How to use? (the Guide, §7.7), Offline maps (`more/downloads`, §7.4), Settings (§7.6), then the diagnostic
+pages `position` (integrity, live GNSS, EKF and map matching state, routing timings), `recorder` (Trip recorder:
+everything about trip logs, TRIP-LOGGER-SPEC §9.2) and `developer` (test switches and knobs, the ELM terminal).
 
 ### 7.4 `downloads`
 
 - Regions of the newest map release (README of `tools/tiles`): download, pause, resume, delete, switch the active
   one, update; the catalog source (GitHub or a PC's `tiles serve`).
-- **No online map** (2026-10-06): the map draws only the active offline region. Until one is usable, the
-  `map-setup` screen (full-screen, no close or swipe; after onboarding) shows the same region list with "Download a
-  map" above it, and closes itself once the region is installed. Deleting the last region brings it back.
+- **No online map:** the map draws only the active offline region. Until one is usable, the `map-setup` screen
+  (full-screen, no close or swipe; after onboarding) shows the same region list with "Download a map" above it, and
+  closes itself once the region is installed. Deleting the last region brings it back.
 
-### 7.5 `debug`
+### 7.5 (removed)
 
-- **Live** GNSS section: lat, lon, accuracy, speed, heading, fix age, update rate (Hz).
-- Mock: integrity state, EKF state table (E, N, ψ, v, k_s, b_ω, k_ω), OBD polls/s.
-- Logging toggle + Export button, disabled.
+The `debug` and `calibration` screens of the first milestone are gone: diagnostics live under More (§7.3), and
+calibration is learned while driving (SPEC §3.6).
 
 ### 7.6 `settings`
 
 - Language: System / English / Українська (persisted).
-- Appearance: follows system (info only).
-- Privacy statement (position data on device; maps downloaded once, then offline; crash reports carry no location or personal data; the opt-in trip log upload, in the `recorder` sheet).
-- About: app version (`expo-constants`).
-
-Trip log upload and the storage limit are not here: they live with the rest of trip logging in the `recorder`
-sheet (TRIP-LOGGER-SPEC §9.2).
+- Appearance: System / Light / Dark (persisted).
+- Voice volume for the spoken maneuvers (ROUTING-SPEC §8.5).
+- Privacy statement (position data on device; maps downloaded once, then offline; crash reports carry no location or
+  personal data; the opt-in trip log upload, in the `recorder` page).
+- About: app version, support code (the install id testers send), map data credit.
 
 ### 7.7 Guide (`guide`, `lesson`)
 
@@ -301,14 +260,14 @@ normally"), never "Nothing".
   holder, any angle, a phone picked up catches up; the Guide is in More.
 - **Map tour** (`src/components/guide/map-tour.tsx`): offered once on the map after onboarding and the first map
   (a card above the camera button, hidden while a pin, a placing or the parked-pose question is up; kv-store
-  `guide.tour-offered`), and from the Guide at any time (the sheets close first). The screen dims except one control
+  `guide.tour-offered`), and from the Guide at any time (the pages close first). The screen dims except one control
   at a time, with a card (step, title, text, Back / Next, Skip): the status pill, the dot (the screen centre: the
   tour starts the follow camera), press and hold (a pulsing ring), the camera button, Vehicle and More (thirds of
   the bottom bar). Done leaves a note for 6 s with a link to the Guide.
-- **Guide** sheet: the first row of More, "How to use? · {done} of {total} done". The tour card, the lessons
+- **Guide** page: the first row of More, "How to use? · {done} of {total} done". The tour card, the lessons
   in groups (Getting started, When GPS fails, Routes, Maps) with a tick once done (kv-store `guide.done`), "Show the
   first-run screens again".
-- **Lessons** (`guide/lesson?id=`), full pages pushed from the Guide (a sheet left too little room), each interactive, on drawn maps (`react-native-svg`, `src/components/guide/mini-map.tsx`)
+- **Lessons** (`guide/lesson?id=`), full pages pushed from the Guide, each interactive, on drawn maps (`react-native-svg`, `src/components/guide/mini-map.tsx`)
   in the map's colours: never the live map, so practising never moves the car. The button at the bottom marks the
   lesson done and opens the next. The Guide lists only lessons that exist (`lesson-bodies.tsx`).
   1. Before you drive: the map and the adapter read from the app, the holder, opening the app first and charging
@@ -343,18 +302,13 @@ normally"), never "Nothing".
 ## 8. Verification
 
 1. `npx expo lint`, `npx tsc --noEmit`, `npx jest` pass.
-2. `npx expo-doctor` clean; EAS dev build installs on iPhone and connects to `npx expo start`.
-3. On device:
+2. On device:
    - Permission prompt appears, localized per device language.
    - Puck tracks while walking/driving; accuracy circle scales with reported accuracy.
-   - Driving off on a trip turns follow into heading-up; it holds its heading at a stop; pan → free; recenter restores follow.
-   - Airplane mode / indoors → `NO FIX` within ~5 s.
+   - Driving off on a trip turns follow into heading-up; it holds its heading at a stop; pan → free; recenter
+     restores follow.
+   - Airplane mode / indoors → no fix within ~8 s.
    - Deny permission → `PermissionCard`.
-   - Dark mode switches map style.
-   - All sheets open/close; Ukrainian strings fit without overflow.
-   - Route: select destination → distance plausible; Start → line + banner on map.
-4. Debug GNSS values match the puck; update rate ≈ 1 Hz.
-
-## 9. Out of scope (this milestone)
-
-Background location; EKF, integrity, calibration logic; vehicle-link module (ELM327 / CAN); real routing and downloads; persistence beyond language setting; web and Android polish.
+   - Dark mode switches the map style.
+   - Every page opens and goes back by the system's gesture; Ukrainian strings fit without overflow.
+   - Route: select a destination → distance plausible; Start → line, alternatives and banner on the map.

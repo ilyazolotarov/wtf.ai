@@ -1,16 +1,16 @@
 # wtf.ai — Address Search Specification
 
-Status: draft v1 (2026-10-05). Implements ROUTING-SPEC §10.2: search for a destination by place,
+Status: v2 (2026-10-10). Implements ROUTING-SPEC §10.2: search for a destination by place,
 street, house number or POI, offline, in the downloaded region. Source of truth for coding agents.
 
 ## 1. Goal
 
-1. Type "Шевченка 10", "shevchenka 10 chernihiv", "Сільпо" or "Іванівка" and pick a destination to route to.
+1. Type "Шевченка 10", "shevchenka 10 kyiv", "Сільпо" or "Іванівка" and pick a destination to route to.
 2. Offline: from a file built with the region and downloaded with it; nothing is sent anywhere.
 3. Fast enough to search on every keystroke on the JS thread, also on the whole-Ukraine region.
 4. Either script: a Cyrillic or Latin query finds Ukrainian names (and their English names).
 
-## 2. Status (2026-10-05)
+## 2. Status
 
 - **S1 built:** this spec; the index builder (`tools/tiles/tiles/search.py`, `tiles search`), part
   of every release build; the reader and ranking (`src/nav/search/`); download with the region;
@@ -138,11 +138,11 @@ expected several times slower; an oblast is about a 25th of this.
 
 ```bash
 cd tools/tiles
-python -m tiles.cli search chernihiv                      # out/release/chernihiv.search.bin + index.json
+python -m tiles.cli search kyiv                      # out/release/kyiv.search.bin + index.json
 python -m tiles.cli search-file some.osm.pbf out.search.bin
-python -m tiles.cli search-check out/release/chernihiv.search.bin
+python -m tiles.cli search-check out/release/kyiv.search.bin
 cd ../..
-npm run search -- tools/tiles/out/release/chernihiv.search.bin "Шевченка 10" "Сільпо" --near 51.49,31.29
+npm run search -- tools/tiles/out/release/kyiv.search.bin "Шевченка 10" "Сільпо" --near 50.45,30.52
 ```
 
 ## 8. To check on real data
@@ -160,5 +160,4 @@ npm run search -- tools/tiles/out/release/chernihiv.search.bin "Шевченка
 1. Settlements from admin boundaries instead of the nearest place node.
 2. Relations: multipolygon buildings with addresses, place areas.
 3. Typo tolerance (one edit for words of 5+ letters).
-4. ~~Recent destinations~~ (done 2026-10-06, with saved places: UI-SPEC §7.1).
-5. Show the result on the map before routing; search from the map screen.
+4. Show the result on the map before routing; search from the map screen.

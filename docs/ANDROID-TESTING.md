@@ -28,8 +28,9 @@ adapter (ELM327 type) plugged into the car to try the full thing; without one th
    `0000` if that fails), then go back to the app. Paired adapters appear in the list.
 4. Tap the adapter. When it says connected you will see a **Disconnect** button.
 
-Tested adapter types: Vgate vLinker FD+ and generic ELM327 clones. Other adapters may work. If yours does not, the
-**Settings** (More → Settings → About) shows a **Support code**; send it with a description (see §6).
+Adapters that should work: Vgate vLinker FD+, OBDLink MX+ and most ELM327 clones (Bluetooth Classic or BLE). The
+Android version hasn't met a real adapter yet, so tell us how yours does either way. If it doesn't connect, send the
+**Support code** (More → Settings → About) with a description (see §6).
 
 ## 4. Keep the app alive while driving (important)
 
@@ -49,8 +50,9 @@ running with the screen off.
 1. Mount the phone rigidly (a firm car holder); the phone's gyroscope is the only turn sensor.
 2. Connect the adapter, start the engine, and drive. A trip starts and ends on its own.
 3. Try it with the screen off for a few minutes, then wake it: the dot should still be where the car is.
-4. Afterwards open **Vehicle**, go to the recorder tab, tap **Trips**, pick the trip, and share the log file with the
-   person who gave you this build.
+4. Afterwards open **More → Trip recorder → Trips**, pick the trip, and share the log file with the person who gave
+   you this build. If they gave you an upload code, enter it in Trip recorder instead: logs then go by themselves
+   over Wi-Fi.
 
 ## 6. Reporting a problem
 
@@ -63,4 +65,4 @@ Send:
 
 The app sends crash reports and health numbers (connection time, how often the adapter answers, whether the sensors kept
 running with the screen off). They contain no positions, no VIN and no adapter serial number. Your trip logs leave the
-phone only when you share them.
+phone only when you share them, or upload them with a code you were given.
