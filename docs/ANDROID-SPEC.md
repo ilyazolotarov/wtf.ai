@@ -61,10 +61,13 @@ Status: v2 (2026-10-10). The Android build for volunteer testers. Companion to [
   emulator, connects the simulated OBD adapter (`wtfai://vehicle?emulators=1`, the same switch as Developer → Show
   emulated adapters), starts the IMU and survives; writes screenshots and logcat.
   `bash scripts/android-smoke.sh path/to/app.apk out-dir`.
-- **Signing:** a stable keystore from secrets (`ANDROID_KEYSTORE_BASE64`, `_PASSWORD`, `_KEY_ALIAS`, `_KEY_PASSWORD`;
+- **Signing:** a stable keystore (`ANDROID_KEYSTORE_BASE64`, `_PASSWORD`, `_KEY_ALIAS`, `_KEY_PASSWORD`;
   `bash scripts/android-keystore.sh` creates the key outside the repo and prints the `gh secret set` commands), so
-  APK updates install over the previous one and keep app data. Without the secrets the job signs with a debug key
-  (fine for CI, not sent to testers).
+  APK updates install over the previous one and keep app data. The secrets belong to the GitHub environment
+  `android-release`, which only `main` may use, never to the repository: whoever holds the key can ship an APK that
+  installs over the testers' app, and a workflow edited on a branch could leak a repository secret. Branch APKs
+  (compile checks, `[build android]`) are therefore signed with a debug key: a tester must uninstall `main`'s APK
+  (losing its data) to try one.
 - **What CI cannot prove:** real BLE/SPP adapters and OEM battery killers. The first tester round is staged: one
   tester with a common phone and a Classic adapter, using the tester guide; trip logs come back and are replayed with
   `replay:parity`, then the wider group. Phone sensor quirks (gyro noise, GNSS lag per model) come from those logs

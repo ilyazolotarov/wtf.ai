@@ -39,6 +39,7 @@ on:
     secrets:
       SENTRY_AUTH_TOKEN:
         required: false
+      # Declared for the linter: on main the job's android-release environment holds them, and its values win.
       ANDROID_KEYSTORE_BASE64:
         required: false
       ANDROID_KEYSTORE_PASSWORD:
@@ -54,6 +55,9 @@ on:
 
 jobs:
   build-android:
+    # The release keystore is in the android-release environment, which only main may use: a workflow edited on a
+    # branch never sees it. Branch APKs are signed with the debug key (docs/ANDROID-SPEC.md §4).
+    environment: ${{ github.ref == 'refs/heads/main' && 'android-release' || '' }}
     runs-on: ubuntu-latest
     outputs:
       runtime: ${{ steps.runtime.outputs.runtime }}
@@ -142,7 +146,7 @@ jobs:
               echo "ANDROID_KEY_PASSWORD=$KEY_PASSWORD"
             } >> "$GITHUB_ENV"
           else
-            echo "::notice::No ANDROID_KEYSTORE_BASE64 secret: signing with the debug key"
+            echo "::notice::No ANDROID_KEYSTORE_BASE64 secret (it is only on main): signing with the debug key"
           fi
 
       - name: Build release APK

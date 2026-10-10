@@ -77,11 +77,13 @@ echo
 echo "Key created: $KEYSTORE"
 echo "Password saved: $DIR/password.txt (back both up somewhere private; do not commit them)"
 echo
-echo "Store them as repository secrets with these commands (run them one by one):"
+echo "Store them as secrets of the android-release environment (main only) with these commands, one by one:"
 echo
-echo "  base64 -w0 \"$KEYSTORE\" | gh secret set ANDROID_KEYSTORE_BASE64"
-echo "  gh secret set ANDROID_KEYSTORE_PASSWORD < \"$DIR/password.txt\""
-echo "  echo -n $ALIAS | gh secret set ANDROID_KEY_ALIAS"
-echo "  gh secret set ANDROID_KEY_PASSWORD < \"$DIR/password.txt\""
+echo "  echo '{\"deployment_branch_policy\":{\"protected_branches\":false,\"custom_branch_policies\":true}}' | gh api -X PUT \"repos/{owner}/{repo}/environments/android-release\" --input -"
+echo "  gh api -X POST \"repos/{owner}/{repo}/environments/android-release/deployment-branch-policies\" -f name=main -f type=branch"
+echo "  base64 -w0 \"$KEYSTORE\" | gh secret set ANDROID_KEYSTORE_BASE64 --env android-release"
+echo "  gh secret set ANDROID_KEYSTORE_PASSWORD --env android-release < \"$DIR/password.txt\""
+echo "  echo -n $ALIAS | gh secret set ANDROID_KEY_ALIAS --env android-release"
+echo "  gh secret set ANDROID_KEY_PASSWORD --env android-release < \"$DIR/password.txt\""
 echo
 echo "Then run Actions -> CI -> Run workflow with android = tester. The job log says which key signed the APK."

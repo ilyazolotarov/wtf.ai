@@ -76,7 +76,7 @@ runs `.github/workflows/build-android.yml` with it.
 - Delivery: like iOS. The APK is uploaded unzipped and sent to Telegram only when the plan says `notify`.
 - Manual: Actions → **CI** → Run workflow has an `android` choice (`none` / `tester` / `ci`); **Build Android APK**
   can also be started on its own.
-- Signed with the stable key from the `ANDROID_KEYSTORE_*` secrets when present, else the debug key
+- Signed with the stable key on `main` (the `ANDROID_KEYSTORE_*` secrets of the `android-release` environment), else the debug key
   (docs/ANDROID-SPEC.md §4).
 - Caches, saved by `main` (a branch reads only its own and `main`'s caches):
   - Gradle (`setup-gradle`): dependencies, wrapper and the Gradle build cache (`--build-cache`: Kotlin/Java
