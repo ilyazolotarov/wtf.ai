@@ -10,11 +10,30 @@ import { readActiveStyle, useMapPacks, type InstalledState } from "@/services/of
  */
 export type MapStyle = MapStyleJson;
 
+/**
+ * The map data credit MapLibre's (i) button shows (OSMF attribution guidelines: in a corner of the map; OpenMapTiles
+ * schema, CC BY 4.0). Map packs built before 2026-10-10 carry none in their style, so it is set on every vector source
+ * that lacks one.
+ */
+export const MAP_ATTRIBUTION =
+  '<a href="https://www.openstreetmap.org/copyright">© OpenStreetMap contributors</a> ' +
+  '<a href="https://www.openmaptiles.org/">© OpenMapTiles</a>';
+
+export function withAttribution(style: MapStyleJson): MapStyleJson {
+  const sources = style.sources as Record<string, { type?: string; attribution?: string }> | undefined;
+  if (!sources) return style;
+  const fixed = Object.fromEntries(
+    Object.entries(sources).map(([id, source]) => [id, source.type === "vector" && !source.attribution ? { ...source, attribution: MAP_ATTRIBUTION } : source]),
+  );
+  return { ...style, sources: fixed };
+}
+
 /** Active offline region's style for the scheme, or `null` when there is no usable pack. */
 function packStyle(installed: InstalledState, scheme: "light" | "dark"): MapStyleJson | null {
   try {
-    const style = readActiveStyle(installed);
-    if (!style) return null;
+    const read = readActiveStyle(installed);
+    if (!read) return null;
+    const style = withAttribution(read);
     return scheme === "dark" ? tintDarkStyle(style) : style;
   } catch (error) {
     console.warn("Offline map style unreadable", error);

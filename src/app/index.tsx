@@ -4,6 +4,7 @@ import { useEffect, useEffectEvent, useRef, useState } from "react";
 import {
     Animated,
     Linking,
+    Platform,
     Pressable,
     StyleSheet,
     View,
@@ -44,6 +45,10 @@ import { MapTour, TourInvite } from "@/components/guide/map-tour";
 import { isTourOffered, markTourOffered, onTourRequest, takeTourRequest } from "@/services/guide/guide-progress";
 
 type CameraMode = "follow" | "follow-heading" | "free";
+/** MapLibre's attribution (i) button: a system info button on iOS (22 pt), the SDK's icon on Android (24 dp). */
+const ATTRIBUTION_BUTTON = Platform.OS === "ios" ? 22 : 24;
+/** iOS MapLibre places its ornaments from the safe area, not the screen's edge: the home indicator inset is already in. */
+const ATTRIBUTION_INSET = (bottomInset: number) => (Platform.OS === "ios" ? bottomInset : 0);
 
 const CAMERA: Record<CameraMode, { icon: IconName; label: "follow" | "followHeading" | "free" }> = {
   follow: { icon: "my_location", label: "follow" },
@@ -74,6 +79,10 @@ const AUTO_HEADING_UP_MS = 2000;
 export default function HomeScreen() {
   useKeepAwake();
   const insets = useSafeAreaInsets();
+  // The bottom bar's height, for MapLibre's attribution button above it (OSM credit, UI-SPEC §6.1), level with the
+  // camera button: its centre is the bar, the stack's gap and half the button up from the bottom padding.
+  const [barHeight, setBarHeight] = useState(72);
+  const cameraCentre = Math.max(insets.bottom - 6, 14) + barHeight + styles.bottomStack.gap + styles.cameraButton.height / 2;
   const { t, language } = useT();
   const palette = usePalette();
   const nav = useNavStatus();
@@ -344,6 +353,7 @@ export default function HomeScreen() {
           onCenter={(at) => (placeCenter.current = at)}
           onTap={aimPlacing}
           overview={overview}
+          attributionBottom={cameraCentre - ATTRIBUTION_BUTTON / 2 - ATTRIBUTION_INSET(insets.bottom)}
           placedMark={
             placing === "heading" && placeAt
               ? { at: placeAt, headingRad: placeHeading, draft: true }
@@ -868,7 +878,7 @@ export default function HomeScreen() {
               color={cameraMode === "free" ? palette.text2 : palette.accent}
             />
           </Pressable>
-          <View ref={toolbarRef} style={[panel, styles.bottomCard]}>
+          <View ref={toolbarRef} style={[panel, styles.bottomCard]} onLayout={(e) => setBarHeight(e.nativeEvent.layout.height)}>
             <GlassFill radius={30} />
             <HudAction icon="alt_route" label={t("route")} href="/route" />
             <HudAction

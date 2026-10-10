@@ -118,6 +118,11 @@ the trip log), never `expo-location`'s watcher, which stopped for good after jam
   trusted, the dot is the phone's own dead reckoning (NAVIGATOR-SPEC §9.6), drawn as `dr` with its alternatives.
   The driver keeps it right by putting the car on the map while it stands (§6.2, below): its circle over 75 m, or
   5 km since its start, a placing or a trusted fix, offers the chip.
+- **Map data credit:** MapLibre's (i) button, bottom left, level with the camera button (`attributionBottom`: the
+  bar's measured height, the stack's gap and half the camera button, less half the (i); on iOS less the bottom safe
+  area too, which MapLibre measures from), opens "© OpenStreetMap contributors · © OpenMapTiles" with links (OSMF attribution guidelines).
+  The app sets the credit on the style's vector source (`withAttribution`, `src/config/map.ts`): packs built before
+  2026-10-10 carry none. Settings → About repeats it.
 - `useKeepAwake()` while the map screen is focused.
 
 ### 6.2 Camera modes

@@ -72,7 +72,7 @@ export default function SettingsScreen() {
           value={Constants.expoConfig?.version ?? t("unavailableValue")}
         />
         <ScreenRow labelKey="supportCode" value={installId()} />
-        <ScreenRow labelKey="mapData" value="© OpenStreetMap · OpenFreeMap" />
+        <ScreenRow labelKey="mapData" value="© OpenStreetMap contributors · © OpenMapTiles" />
       </ScreenSection>
     </ScreenContent>
   );

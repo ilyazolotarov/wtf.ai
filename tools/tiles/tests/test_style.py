@@ -12,9 +12,12 @@ def test_font_slug():
 
 def test_offline_style_has_no_network_urls():
     style = offline_style(LIBERTY, "test")
-    text = json.dumps(style)
+    # The credit's links are opened by a tap, never fetched; everything else stays offline.
+    source = style["sources"]["openmaptiles"]
+    assert "openstreetmap.org/copyright" in source["attribution"] and "OpenMapTiles" in source["attribution"]
+    text = json.dumps({**style, "sources": {"openmaptiles": {**source, "attribution": ""}}})
     assert "http://" not in text and "https://" not in text
-    assert style["sources"] == {"openmaptiles": {"type": "vector", "url": f"pmtiles://{TILES}"}}
+    assert {k: v for k, v in source.items() if k != "attribution"} == {"type": "vector", "url": f"pmtiles://{TILES}"}
     assert style["glyphs"] == f"{COMMON}/fonts/{{fontstack}}/{{range}}.pbf"
     assert style["sprite"] == f"{COMMON}/sprites/ofm"
 

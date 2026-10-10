@@ -14,6 +14,11 @@ from typing import Any
 COMMON = "{common}"
 TILES = "{tiles}"
 VECTOR_SOURCE = "openmaptiles"
+# The map data credit MapLibre shows behind its (i) button (OSMF attribution guidelines; OpenMapTiles schema, CC BY 4.0).
+ATTRIBUTION = (
+    '<a href="https://www.openstreetmap.org/copyright">© OpenStreetMap contributors</a> '
+    '<a href="https://www.openmaptiles.org/">© OpenMapTiles</a>'
+)
 DROPPED_SOURCES = {"ne2_shaded"}  # low-zoom shaded relief raster, online only
 SPRITE_NAME = "ofm"
 
@@ -39,7 +44,7 @@ def offline_style(liberty: dict[str, Any], name: str) -> dict[str, Any]:
     style = copy.deepcopy(liberty)
     style["name"] = name
     style["sources"] = {
-        VECTOR_SOURCE: {"type": "vector", "url": f"pmtiles://{TILES}"},
+        VECTOR_SOURCE: {"type": "vector", "url": f"pmtiles://{TILES}", "attribution": ATTRIBUTION},
     }
     style["layers"] = [l for l in style["layers"] if l.get("source") not in DROPPED_SOURCES]
     style["glyphs"] = f"{COMMON}/fonts/{{fontstack}}/{{range}}.pbf"
