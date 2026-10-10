@@ -26,6 +26,10 @@ on:
       retention-days:
         type: number
         default: 14
+    outputs:
+      runtime:
+        # The OTA runtime of a Release build (docs/OTA.md), empty for Debug: ci.yml registers it on main.
+        value: ${{ jobs.build-ios.outputs.runtime }}
     secrets:
       SENTRY_AUTH_TOKEN:
         required: false
@@ -33,13 +37,13 @@ on:
         required: false
       TELEGRAM_CHAT_ID:
         required: false
-      OTA_PUBLISH_TOKEN:
-        required: false
 
 jobs:
   build-ios:
     # Expo SDK 57 requires Xcode 26.4+
     runs-on: macos-26
+    outputs:
+      runtime: ${{ steps.runtime.outputs.runtime }}
     timeout-minutes: 60
     env:
       CONFIGURATION: ${{ inputs.configuration }}
@@ -52,8 +56,6 @@ jobs:
       # Optional: the IPA is also sent to a Telegram chat when both secrets are set (README).
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      # Lets main's Release builds register their runtime with the update Worker (docs/OTA.md).
-      OTA_PUBLISH_TOKEN: ${{ secrets.OTA_PUBLISH_TOKEN }}
       # Compiler cache for the C/C++/Objective-C of the pods (React Native core and Expo modules
       # come prebuilt; Swift is not cached). The Podfile turns it on with USE_CCACHE=1, which points
       # CC/CXX at React Native's ccache-clang(++).sh. Xcode runs compiles without the job's
@@ -214,17 +216,17 @@ jobs:
             curl -sS --fail-with-body -o /dev/null --data-urlencode chat_id="$TELEGRAM_CHAT_ID" --data-urlencode text="$CAPTION (IPA over 50 MB: download it from the run)" "$API/sendMessage"
           fi
 
-      - name: Register the runtime for OTA updates
-        # Last, so a Worker problem never holds back the IPA. JS updates of main go to this runtime from now on
-        # (docs/OTA.md). Release only: a Debug build runs its own JS. The runtime is the fingerprint the build embedded,
-        # so the Worker and the app cannot disagree.
-        if: ${{ inputs.configuration == 'Release' && github.ref == 'refs/heads/main' && env.OTA_PUBLISH_TOKEN != '' }}
+      - name: OTA runtime of the build
+        # The fingerprint the build embedded, so the update Worker and the app cannot disagree (docs/OTA.md). Release
+        # only: a Debug build runs its own JS. ci.yml registers it, in the ota environment that holds the token.
+        id: runtime
+        if: ${{ inputs.configuration == 'Release' }}
         run: |
           APP=$(ls -d build/Build/Products/${CONFIGURATION}-iphoneos/*.app | head -n 1)
           FINGERPRINT=$(find "$APP" -path '*EXUpdates.bundle*' -name fingerprint | head -n 1)
           if [ -n "$FINGERPRINT" ]; then
-            npm run -s ota:publish -- --register-build --platform ios --runtime "$(cat "$FINGERPRINT")"
+            echo "runtime=$(cat "$FINGERPRINT")" >> "$GITHUB_OUTPUT"
+            echo "Runtime: $(cat "$FINGERPRINT")"
           else
-            echo "::warning::No embedded fingerprint in the app: resolving the runtime from the checkout"
-            npm run -s ota:publish -- --register-build --platform ios
+            echo "::warning::No embedded fingerprint in the app: JS updates will not be published for this build"
           fi

@@ -16,6 +16,7 @@ on:
         type: string
         required: true
     secrets:
+      # Declared for the linter: the job's ota environment (main only) holds them, and its values win over the caller's.
       OTA_SIGNING_KEY:
         required: false
       OTA_PUBLISH_TOKEN:
@@ -29,6 +30,9 @@ jobs:
   publish:
     # Phones run main: a branch's JS never goes out (a branch gets an IPA/APK with [build]).
     if: ${{ github.ref == 'refs/heads/main' }}
+    # Holds the signing key and the publish token; only main may use it (docs/OTA.md), so a workflow edited on a
+    # branch never sees them.
+    environment: ota
     # One publish at a time, in push order: the last one is what phones get.
     concurrency:
       group: publish-ota
@@ -45,8 +49,8 @@ jobs:
       - name: Check the secrets
         # main no longer builds an IPA/APK for JS-only changes: without these, they would reach no phone.
         run: |
-          [ -n "$OTA_SIGNING_KEY" ] || { echo "::error::OTA_SIGNING_KEY secret is missing (docs/OTA.md)"; exit 1; }
-          [ -n "$OTA_PUBLISH_TOKEN" ] || { echo "::error::OTA_PUBLISH_TOKEN secret is missing (docs/OTA.md)"; exit 1; }
+          [ -n "$OTA_SIGNING_KEY" ] || { echo "::error::OTA_SIGNING_KEY is missing from the ota environment (docs/OTA.md)"; exit 1; }
+          [ -n "$OTA_PUBLISH_TOKEN" ] || { echo "::error::OTA_PUBLISH_TOKEN is missing from the ota environment (docs/OTA.md)"; exit 1; }
 
       - name: Checkout repository
         uses: actions/checkout@v7

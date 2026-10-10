@@ -208,3 +208,31 @@ jobs:
     with:
       platforms: ${{ needs.plan.outputs.ota }}
     secrets: inherit
+
+  register-ota-runtime:
+    # main's builds take the JS updates after them (docs/OTA.md): tell the update Worker their runtime. A job of its
+    # own because the token lives in the ota environment, which only main may use; the builds also run on branches.
+    needs: [build-ios, build-android]
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && (needs.build-ios.outputs.runtime != '' || needs.build-android.outputs.runtime != '') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: ota
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Register
+        # ota:publish needs no dependencies for this.
+        env:
+          OTA_PUBLISH_TOKEN: ${{ secrets.OTA_PUBLISH_TOKEN }}
+          IOS_RUNTIME: ${{ needs.build-ios.outputs.runtime }}
+          ANDROID_RUNTIME: ${{ needs.build-android.outputs.runtime }}
+        run: |
+          [ -n "$OTA_PUBLISH_TOKEN" ] || { echo "::error::OTA_PUBLISH_TOKEN is missing from the ota environment (docs/OTA.md)"; exit 1; }
+          if [ -n "$IOS_RUNTIME" ]; then npm run -s ota:publish -- --register-build --platform ios --runtime "$IOS_RUNTIME"; fi
+          if [ -n "$ANDROID_RUNTIME" ]; then npm run -s ota:publish -- --register-build --platform android --runtime "$ANDROID_RUNTIME"; fi

@@ -13,8 +13,10 @@ build from CI ([CI.md](CI.md)).
 3. At launch the app asks `GET /manifest` with its platform and runtime version, without waiting for the answer. A new
    update downloads in the background and runs from the **next cold start**: an update takes two launches.
 
-A native change on `main` builds Release instead (`build-ios.yml`, `build-android.yml`). The build registers its
-runtime with the Worker (`PUT /publish/builds/…`, the fingerprint it embedded); later JS updates go to it.
+A native change on `main` builds Release instead (`build-ios.yml`, `build-android.yml`). The build outputs the
+fingerprint it embedded, and `ci.yml`'s `register-ota-runtime` job registers it with the Worker
+(`PUT /publish/builds/…`); later JS updates go to it. A build started by hand from **Build Unsigned iOS App** is not
+registered: start it from **CI** instead.
 
 ## Rules
 
@@ -27,7 +29,11 @@ runtime with the Worker (`PUT /publish/builds/…`, the fingerprint it embedded)
 - **No update for a runtime no build has.** `--require-build` fails the publish when the fingerprint changed without
   a native build (a native input `ci-plan.sh` does not know): the fix is a build, then publish again.
 - **Signed.** The app accepts only updates signed with the key of `certs/certificate.pem` (`rsa-v1_5-sha256`, keyid
-  `main`). The private key never enters the repo: it lives with the owner and in the `OTA_SIGNING_KEY` CI secret.
+  `main`). The private key never enters the repo: it lives with the owner and in the `OTA_SIGNING_KEY` secret.
+- **Secrets only on main.** `OTA_SIGNING_KEY` and `OTA_PUBLISH_TOKEN` are secrets of the GitHub environment `ota`,
+  which only `main` may use, never repository secrets: every branch push runs workflows, and a workflow edited on a
+  branch could print a repository secret (disguised, past the log masking) into public logs. Only the jobs that need
+  them (`publish-ota`, `register-ota-runtime`) run in the environment.
   The Worker holds no key: a leaked publish token can replace what phones get only with something CI signed.
   A new certificate means a new native build, and phones on the old one take no updates until they install it.
 - **Never mid-drive.** `fallbackToCacheTimeout: 0`; the app never calls `reloadAsync()` on its own.
@@ -57,11 +63,19 @@ runtime with the Worker (`PUT /publish/builds/…`, the fingerprint it embedded)
 2. A publish token: any long random string. `npx wrangler secret put PUBLISH_TOKEN --config workers/app-updates/wrangler.toml`.
 3. `npm run updates-worker:deploy` (serves at `https://wtf-app-updates.<account>.workers.dev`, the `updates.url` of
    `app.json`).
-4. GitHub repo secrets: `OTA_SIGNING_KEY` (the PEM of the private key) and `OTA_PUBLISH_TOKEN` (the same token).
+4. The GitHub environment `ota`, usable from `main` only, with the two secrets:
+
+   ```powershell
+   '{"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}' | gh api -X PUT "repos/{owner}/{repo}/environments/ota" --input -
+   gh api -X POST "repos/{owner}/{repo}/environments/ota/deployment-branch-policies" -f name=main -f type=branch
+   Get-Content -Raw private-key.pem | gh secret set OTA_SIGNING_KEY --env ota
+   gh secret set OTA_PUBLISH_TOKEN --env ota --body $token
+   ```
 5. Build Release on `main` once (Actions → CI → Run workflow, iOS Release, Android ci) and install it: from then on,
    JS pushes reach it.
 
-Without the secrets the publish job fails: `main` no longer builds an IPA/APK for JS-only changes.
+Without the secrets the publish job fails: `main` no longer builds an IPA/APK for JS-only changes. The key's only
+copies are the owner's backup and the secret, which cannot be read back: keep the backup.
 
 ## Store layout (R2 `wtf-ai-updates`)
 
