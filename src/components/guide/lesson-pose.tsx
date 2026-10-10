@@ -33,6 +33,11 @@ const BLOCKS = [
 ];
 const PARK = { x: 190, y: -26, w: 216, h: 288 };
 const LOT = { x: 56, y: 196, w: 100, h: 74 };
+/**
+ * The question card covers the map's top (~175 points): the map shows from 130 above the scene, so Wi-Fi's circle and
+ * the lot sit below it. 480 high at most: placing centres Wi-Fi's guess (y 90) with the frame's top at the map's (-150).
+ */
+const VIEW = { top: -130, height: 480 };
 
 /** Lesson 6: the parked-pose question (UI-SPEC §6.2) and what each answer does; "No" goes on to placing the car. */
 export function LessonPose() {
@@ -56,6 +61,7 @@ export function LessonPose() {
       <LessonIntro>{t("poseIntro")}</LessonIntro>
       <PlacingMap
         key={attempt}
+        view={VIEW}
         step={step}
         onStep={setStep}
         onCancel={askAgain}
@@ -71,7 +77,7 @@ export function LessonPose() {
           <>
             <Rect x={PARK.x} y={PARK.y} width={PARK.w} height={PARK.h} rx={6} fill={c.park} />
             {BLOCKS.map((b, i) => (
-              <Rect key={i} x={b.x} y={b.y} width={b.w} height={b.h} rx={3} fill={c.block} />
+              <Rect key={i} x={b.x} y={b.y} width={b.w} height={b.h} rx={3} fill={c.building} />
             ))}
             <Rect x={LOT.x} y={LOT.y} width={LOT.w} height={LOT.h} rx={6} fill={c.minorCasing} />
             <G stroke="#FFFFFF" strokeWidth={2}>

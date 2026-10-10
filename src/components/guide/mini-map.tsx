@@ -3,40 +3,20 @@ import { useEffect, useState, type PropsWithChildren } from "react";
 import { StyleSheet, useColorScheme, View, type LayoutChangeEvent } from "react-native";
 import Svg, { Circle, G, Path, Rect } from "react-native-svg";
 
+import { CAR_COLOR, FALLBACK_PALETTE, type MapColors } from "@/components/guide/map-colors";
+import { CONE, CONE_FILL_OPACITY, CONE_OUTLINE, DESTINATION_DOT, PIN_DOT, PUCK, PUCK_OUTER } from "@/components/map/puck-style";
 import { GlassFill } from "@/components/ui/glass-fill";
 import { T } from "@/components/ui/text";
+import { useMapPalette } from "@/config/map";
 import { Radius, usePalette, type StatusColor } from "@/constants/theme";
 
-/** Map colours of the lessons' drawn maps, close to the Liberty style the real map uses. */
-const MAP_COLORS = {
-  light: {
-    land: "#F2EFE9",
-    block: "#E6E1D8",
-    park: "#D5E8C8",
-    water: "#BFD9EC",
-    minorCasing: "#DCD5C8",
-    minor: "#FFFFFF",
-    majorCasing: "#E3C77E",
-    major: "#F8DFA0",
-    car: "#1D1C1A",
-  },
-  dark: {
-    land: "#1E1D1B",
-    block: "#2A2926",
-    park: "#23301F",
-    water: "#1F2E3A",
-    minorCasing: "#2F2E2B",
-    minor: "#3D3B37",
-    majorCasing: "#5A4A26",
-    major: "#6E5A2E",
-    car: "#F2F0EC",
-  },
-} as const;
+export type { MapColors };
 
-export type MapColors = (typeof MAP_COLORS)["light" | "dark"];
-
+/** The lesson maps in the colours the real map draws in now (its active style, light or Night Drive). */
 export function useMapColors(): MapColors {
-  return MAP_COLORS[useColorScheme() === "dark" ? "dark" : "light"];
+  const scheme = useColorScheme() === "dark" ? "dark" : "light";
+  const palette = useMapPalette(scheme) ?? FALLBACK_PALETTE[scheme];
+  return { ...palette, car: CAR_COLOR[scheme] };
 }
 
 export interface Box {
@@ -81,7 +61,7 @@ export function MiniMap({
           <Rect key={`p${i}`} x={b.x} y={b.y} width={b.w} height={b.h} rx={5} fill={c.park} />
         ))}
         {blocks.map((b, i) => (
-          <Rect key={`b${i}`} x={b.x} y={b.y} width={b.w} height={b.h} rx={3} fill={c.block} />
+          <Rect key={`b${i}`} x={b.x} y={b.y} width={b.w} height={b.h} rx={3} fill={c.building} />
         ))}
         <G fill="none" strokeLinecap="round">
           {minor && <Path d={minor} stroke={c.minorCasing} strokeWidth={13} />}
@@ -96,13 +76,21 @@ export function MiniMap({
   );
 }
 
-/** The map's course cone: 28° each side (map-layers.tsx), in map units. */
-const CONE_HALF_RAD = (28 * Math.PI) / 180;
-const CONE_R = 34;
+/** A route as the map draws it (map-layers.tsx): the route colour over its casing, which sets it off the roads. */
+export function RouteLine({ d }: { d: string }) {
+  const palette = usePalette();
+  return (
+    <G fill="none" strokeLinecap="round" strokeLinejoin="round">
+      <Path d={d} stroke={palette.routeCasing} strokeOpacity={0.9} strokeWidth={9} />
+      <Path d={d} stroke={palette.route} strokeWidth={6} />
+    </G>
+  );
+}
+
 
 /**
- * The car's dot as the map draws it (map-layers.tsx): blue while GPS is trusted; otherwise yellow, a light
- * centre and a dashed circle. `headingDeg` (clockwise from up) draws the cone.
+ * The car's dot as the map draws it (map-layers.tsx, puck-style.ts): blue while GPS is trusted; otherwise yellow, a light
+ * centre and a dashed circle; a thin dark edge round both. `headingDeg` (clockwise from up) draws the cone.
  */
 export function Puck({
   x,
@@ -118,12 +106,14 @@ export function Puck({
   headingDeg?: number | null;
 }) {
   const palette = usePalette();
-  const tint = trusted ? palette.accent : palette.warn.c;
+  const coneOutline = CONE_OUTLINE[useColorScheme() === "dark" ? "dark" : "light"];
+  const tint = trusted ? palette.puck : palette.puckDoubt;
   let cone: string | null = null;
   if (headingDeg != null) {
     const h = (headingDeg * Math.PI) / 180;
-    const point = (a: number) => `${x + CONE_R * Math.sin(a)} ${y - CONE_R * Math.cos(a)}`;
-    cone = `M${x} ${y} L${point(h - CONE_HALF_RAD)} A${CONE_R} ${CONE_R} 0 0 1 ${point(h + CONE_HALF_RAD)} Z`;
+    // The map's cone (puck-style.ts): a lesson map unit is about a point on screen.
+    const point = (a: number) => `${x + CONE.r * Math.sin(a)} ${y - CONE.r * Math.cos(a)}`;
+    cone = `M${x} ${y} L${point(h - CONE.halfAngleRad)} A${CONE.r} ${CONE.r} 0 0 1 ${point(h + CONE.halfAngleRad)} Z`;
   }
   return (
     <G>
@@ -137,9 +127,50 @@ export function Puck({
         strokeWidth={trusted ? 1 : 1.5}
         strokeDasharray={trusted ? undefined : "3 2"}
       />
-      {cone && <Path d={cone} fill={tint} fillOpacity={0.28} />}
-      <Circle cx={x} cy={y + 2} r={11} fill="#000000" fillOpacity={0.12} />
-      <Circle cx={x} cy={y} r={7} fill={trusted ? palette.accent : palette.bg} stroke={trusted ? "#FFFFFF" : palette.warn.c} strokeWidth={4} />
+      {cone && (
+        <G strokeLinejoin="round">
+          <Path d={cone} fill={tint} fillOpacity={CONE_FILL_OPACITY} stroke={palette.puckEdge} strokeWidth={coneOutline.edge} />
+          {coneOutline.ring > 0 && <Path d={cone} fill="none" stroke={trusted ? palette.puckRing : palette.puckDoubt} strokeWidth={coneOutline.ring} />}
+        </G>
+      )}
+      <Circle cx={x} cy={y + 2} r={PUCK_OUTER} fill="#000000" fillOpacity={0.12} />
+      <Circle cx={x} cy={y} r={PUCK_OUTER} fill={palette.puckEdge} />
+      {/* An SVG stroke straddles its circle: radius to the ring's middle, as MapLibre's stroke outside the fill. */}
+      <Circle
+        cx={x}
+        cy={y}
+        r={PUCK.r + PUCK.ring / 2}
+        fill={trusted ? palette.puck : palette.bg}
+        stroke={trusted ? palette.puckRing : palette.puckDoubt}
+        strokeWidth={PUCK.ring}
+      />
+    </G>
+  );
+}
+
+/**
+ * A dropped pin as the map draws it (map-layers.tsx): a dot banded as the car's, in a faint halo; once a route goes
+ * there (`destination`), the route's destination dot. SVG strokes straddle their circle: radius to the ring's middle.
+ */
+export function PinDot({ x, y, destination = false }: { x: number; y: number; destination?: boolean }) {
+  const palette = usePalette();
+  if (destination) {
+    return (
+      <Circle
+        cx={x}
+        cy={y}
+        r={DESTINATION_DOT.r + DESTINATION_DOT.ring / 2}
+        fill={palette.route}
+        stroke={palette.routeCasing}
+        strokeWidth={DESTINATION_DOT.ring}
+      />
+    );
+  }
+  return (
+    <G>
+      <Circle cx={x} cy={y} r={PIN_DOT.halo} fill={palette.accent} fillOpacity={0.18} />
+      <Circle cx={x} cy={y} r={PIN_DOT.r + PIN_DOT.ring + PUCK.edge} fill={palette.puckEdge} />
+      <Circle cx={x} cy={y} r={PIN_DOT.r + PIN_DOT.ring / 2} fill={palette.accent} stroke={palette.puckRing} strokeWidth={PIN_DOT.ring} />
     </G>
   );
 }

@@ -21,8 +21,11 @@ import {
   particleFeatures,
   pointFeatures,
   routeFeatures,
+  screenSectorFeatures,
   sectorFeatures,
+  type CameraView,
 } from "./map-features";
+import { CONE, CONE_FILL_OPACITY, CONE_OUTLINE, DESTINATION_DOT, PIN_DOT, PUCK, PUCK_OUTER } from "./puck-style";
 import type { CompassHeading } from "./use-compass-heading";
 
 /**
@@ -34,10 +37,6 @@ import type { CompassHeading } from "./use-compass-heading";
 const PLACED_ARROW_HALF_ANGLE_RAD = (14 * Math.PI) / 180;
 const PLACED_ARROW_M = 28;
 
-const CONE_RADIUS_M = 45;
-const CONE_HALF_ANGLE_RAD = (28 * Math.PI) / 180;
-const BEAM_RADIUS_M = 70;
-const BEAM_CORE_RADIUS_M = 40;
 
 /**
  * The app's own labels: a font stack of the offline style, by the name its glyph folders have (tools/tiles style.py
@@ -117,7 +116,7 @@ export function RouteLayers({
   return (
     <>
       <GeoJSONSource id="alternative-routes" data={alternativeLines} onPress={pickAlternative}>
-        <Layer id="alternative-route-casing" type="line" layout={ROUTE_LAYOUT} paint={{ "line-color": palette.routeCasing, "line-width": 8, "line-opacity": 0.9 }} />
+        <Layer id="alternative-route-casing" type="line" layout={ROUTE_LAYOUT} paint={{ "line-color": palette.routeAltCasing, "line-width": 8 }} />
         <Layer id="alternative-route-line" type="line" layout={ROUTE_LAYOUT} paint={{ "line-color": palette.routeAlt, "line-width": 5 }} />
       </GeoJSONSource>
       <GeoJSONSource id="active-route" data={routeAhead}>
@@ -139,7 +138,7 @@ export function RouteLayers({
         <Layer
           id="route-destination-dot"
           type="circle"
-          paint={{ "circle-radius": 8, "circle-color": palette.route, "circle-stroke-color": palette.routeCasing, "circle-stroke-width": 3 }}
+          paint={{ "circle-radius": DESTINATION_DOT.r, "circle-color": palette.route, "circle-stroke-color": palette.routeCasing, "circle-stroke-width": DESTINATION_DOT.ring }}
         />
       </GeoJSONSource>
       <GeoJSONSource id="alternative-route-labels" data={alternativeLabels} onPress={pickAlternative}>
@@ -167,10 +166,12 @@ export function MarkLayers({
   pin,
   placedMark,
   palette,
+  scheme,
 }: {
   pin: Coordinate | null;
   placedMark: { at: Coordinate; headingRad: number | null; draft: boolean } | null;
   palette: Palette;
+  scheme: "light" | "dark";
 }) {
   const pinPoint = pin ? pointFeatures(pin) : emptyPoints();
   const placedPoint = placedMark ? pointFeatures(placedMark.at) : emptyPoints();
@@ -179,18 +180,21 @@ export function MarkLayers({
       ? sectorFeatures(placedMark.at, placedMark.headingRad, PLACED_ARROW_HALF_ANGLE_RAD, PLACED_ARROW_M)
       : emptyPolygons();
   const placedOpacity = placedMark?.draft ? 1 : 0.45;
+  const arrowOutline = CONE_OUTLINE[scheme];
   return (
     <>
+      {/* Pins and marks are banded as the car's dot (puck-style.ts): a white ring, a dark edge outside it. */}
       <GeoJSONSource id="dropped-pin" data={pinPoint}>
         <Layer
           id="dropped-pin-halo"
           type="circle"
-          paint={{ "circle-radius": 16, "circle-color": palette.accent, "circle-opacity": 0.18 }}
+          paint={{ "circle-radius": PIN_DOT.halo, "circle-color": palette.accent, "circle-opacity": 0.18 }}
         />
+        <Layer id="dropped-pin-edge" type="circle" paint={{ "circle-radius": PIN_DOT.r + PIN_DOT.ring + PUCK.edge, "circle-color": palette.puckEdge }} />
         <Layer
           id="dropped-pin-dot"
           type="circle"
-          paint={{ "circle-radius": 7, "circle-color": palette.accent, "circle-stroke-color": palette.bg, "circle-stroke-width": 3 }}
+          paint={{ "circle-radius": PIN_DOT.r, "circle-color": palette.accent, "circle-stroke-color": palette.puckRing, "circle-stroke-width": PIN_DOT.ring }}
         />
       </GeoJSONSource>
       <GeoJSONSource id="placed-arrow" data={placedArrow}>
@@ -199,8 +203,26 @@ export function MarkLayers({
           type="fill"
           paint={{ "fill-color": palette.accent, "fill-opacity": 0.55 * placedOpacity }}
         />
+        {/* Outlined as the heading cone. */}
+        <Layer
+          id="placed-arrow-edge"
+          type="line"
+          layout={{ "line-join": "round" }}
+          paint={{ "line-color": palette.puckEdge, "line-width": arrowOutline.edge, "line-opacity": placedOpacity }}
+        />
+        <Layer
+          id="placed-arrow-ring"
+          type="line"
+          layout={{ "line-join": "round" }}
+          paint={{ "line-color": palette.puckRing, "line-width": arrowOutline.ring, "line-opacity": placedOpacity }}
+        />
       </GeoJSONSource>
       <GeoJSONSource id="placed-point" data={placedPoint}>
+        <Layer
+          id="placed-point-edge"
+          type="circle"
+          paint={{ "circle-radius": 7 + 3 + PUCK.edge, "circle-color": palette.puckEdge, "circle-opacity": placedOpacity }}
+        />
         <Layer
           id="placed-point-dot"
           type="circle"
@@ -208,7 +230,7 @@ export function MarkLayers({
             "circle-radius": 7,
             "circle-color": palette.accent,
             "circle-opacity": placedOpacity,
-            "circle-stroke-color": palette.bg,
+            "circle-stroke-color": palette.puckRing,
             "circle-stroke-width": 3,
             "circle-stroke-opacity": placedOpacity,
           }}
@@ -219,33 +241,35 @@ export function MarkLayers({
 }
 
 /**
- * Under the puck: its accuracy circle, the course cone or the walking compass beam (`compass`), and the raw GNSS
+ * Under the puck: its accuracy circle, the heading cone (from the walking compass, `compass`, away from the car), and the raw GNSS
  * fix while it is suspected of spoofing (the ghost).
  */
 export function PositionLayers({
   position,
   compass,
   palette,
+  scheme,
+  view,
 }: {
   position: PositionEstimate | null;
   compass: CompassHeading | null;
   palette: Palette;
+  scheme: "light" | "dark";
+  /** The camera now: the heading cone looks the same on screen in every one (puck-style.ts). */
+  view: CameraView;
 }) {
   const dr = deadReckoning(position);
-  const tint = dr ? palette.warn.c : palette.accent;
+  const tint = dr ? palette.puckDoubt : palette.puck;
+  const coneOutline = CONE_OUTLINE[scheme];
   const accuracy = position ? accuracyFeatures(position) : emptyPolygons();
+  // The heading cone, the same on screen at every zoom and as in the lessons; walking (`compass`), the phone's compass
+  // draws it, as wide each side as the compass is unsure.
   const cone =
-    position && !compass && position.headingRad != null
-      ? sectorFeatures(position, position.headingRad, CONE_HALF_ANGLE_RAD, CONE_RADIUS_M)
-      : emptyPolygons();
-  const beam =
     position && compass
-      ? sectorFeatures(position, compass.headingRad, compass.uncertaintyRad, BEAM_RADIUS_M)
-      : emptyPolygons();
-  const beamCore =
-    position && compass
-      ? sectorFeatures(position, compass.headingRad, compass.uncertaintyRad, BEAM_CORE_RADIUS_M)
-      : emptyPolygons();
+      ? screenSectorFeatures(position, compass.headingRad, compass.uncertaintyRad, CONE.r, view)
+      : position && position.headingRad != null
+        ? screenSectorFeatures(position, position.headingRad, CONE.halfAngleRad, CONE.r, view)
+        : emptyPolygons();
   const ghost = position?.trust === "UNTRUSTED" && position.rawGnss ? position.rawGnss : null;
   const ghostPoint = ghost ? pointFeatures(ghost) : emptyPoints();
   return (
@@ -273,22 +297,21 @@ export function PositionLayers({
         <Layer
           id="position-cone-fill"
           type="fill"
-          paint={{ "fill-color": tint, "fill-opacity": 0.28 }}
+          paint={{ "fill-color": tint, "fill-opacity": CONE_FILL_OPACITY }}
         />
-      </GeoJSONSource>
-      {/* Two stacked sectors fake a fade-out; wider and fainter than the course cone. */}
-      <GeoJSONSource id="compass-beam" data={beam}>
+        {/* Its outline, as the dot's bands (puck-style.ts); the ring line is drawn at width 0 in light, not unmounted,
+            so the layers keep their order when the theme changes. */}
         <Layer
-          id="compass-beam-fill"
-          type="fill"
-          paint={{ "fill-color": tint, "fill-opacity": 0.1 }}
+          id="position-cone-edge"
+          type="line"
+          layout={{ "line-join": "round" }}
+          paint={{ "line-color": palette.puckEdge, "line-width": coneOutline.edge }}
         />
-      </GeoJSONSource>
-      <GeoJSONSource id="compass-beam-core" data={beamCore}>
         <Layer
-          id="compass-beam-core-fill"
-          type="fill"
-          paint={{ "fill-color": tint, "fill-opacity": 0.14 }}
+          id="position-cone-ring"
+          type="line"
+          layout={{ "line-join": "round" }}
+          paint={{ "line-color": dr ? palette.puckDoubt : palette.puckRing, "line-width": coneOutline.ring }}
         />
       </GeoJSONSource>
       <GeoJSONSource id="gnss-ghost" data={ghostPoint}>
@@ -301,13 +324,14 @@ export function PositionLayers({
             "circle-opacity": 0.18,
           }}
         />
+        <Layer id="gnss-ghost-edge" type="circle" paint={{ "circle-radius": 6 + 3 + PUCK.edge, "circle-color": palette.puckEdge }} />
         <Layer
           id="gnss-ghost-dot"
           type="circle"
           paint={{
             "circle-radius": 6,
             "circle-color": palette.bad.c,
-            "circle-stroke-color": palette.bg,
+            "circle-stroke-color": palette.puckRing,
             "circle-stroke-width": 3,
           }}
         />
@@ -417,6 +441,16 @@ export function PuckLayers({ position, palette }: { position: PositionEstimate |
   return (
     <>
       <GeoJSONSource id="map-match-alternatives" data={alternatives}>
+        {/* As the dot in doubt, smaller: an amber ring round a light centre, a dark edge outside it. */}
+        <Layer
+          id="map-match-alternative-edge"
+          type="circle"
+          paint={{
+            "circle-radius": 6 + 2 + PUCK.edge,
+            "circle-color": palette.puckEdge,
+            "circle-opacity": ["interpolate", ["linear"], ["get", "weight"], 0, 0.35, 0.5, 0.9],
+          }}
+        />
         <Layer
           id="map-match-alternative-dot"
           type="circle"
@@ -424,7 +458,7 @@ export function PuckLayers({ position, palette }: { position: PositionEstimate |
             "circle-radius": 6,
             "circle-color": palette.bg,
             "circle-opacity": ["interpolate", ["linear"], ["get", "weight"], 0, 0.35, 0.5, 0.9],
-            "circle-stroke-color": palette.warn.c,
+            "circle-stroke-color": palette.puckDoubt,
             "circle-stroke-width": 2,
             "circle-stroke-opacity": ["interpolate", ["linear"], ["get", "weight"], 0, 0.35, 0.5, 0.9],
           }}
@@ -435,21 +469,23 @@ export function PuckLayers({ position, palette }: { position: PositionEstimate |
           id="position-shadow"
           type="circle"
           paint={{
-            "circle-radius": 13,
+            "circle-radius": PUCK_OUTER + 2,
             "circle-color": "#000000",
             "circle-opacity": 0.22,
             "circle-blur": 0.8,
             "circle-translate": [0, 2],
           }}
         />
+        {/* The dark edge (puck-style.ts): a disc under the dot, showing past its ring (strokes are drawn outside). */}
+        <Layer id="position-edge" type="circle" paint={{ "circle-radius": PUCK_OUTER, "circle-color": palette.puckEdge }} />
         <Layer
           id="position-dot"
           type="circle"
           paint={{
-            "circle-radius": 7,
-            "circle-color": dr ? palette.bg : palette.accent,
-            "circle-stroke-color": dr ? palette.warn.c : "#FFFFFF",
-            "circle-stroke-width": 4,
+            "circle-radius": PUCK.r,
+            "circle-color": dr ? palette.bg : palette.puck,
+            "circle-stroke-color": dr ? palette.puckDoubt : palette.puckRing,
+            "circle-stroke-width": PUCK.ring,
           }}
         />
       </GeoJSONSource>

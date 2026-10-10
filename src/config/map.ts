@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 
 import { tintDarkStyle, type MapStyleJson } from "@/config/map-dark";
+import { stylePalette, type MapPalette } from "@/config/map-palette";
 import { withWorld } from "@/config/map-world";
 import { readActiveStyle, readActiveWorld, useMapPacks, type InstalledState } from "@/services/offline-map/map-packs";
 
@@ -46,6 +47,23 @@ function packStyle(installed: InstalledState, scheme: "light" | "dark"): MapStyl
 export function useMapStyle(scheme: "light" | "dark"): MapStyle | null {
   const { installed } = useMapPacks();
   return useMemo(() => packStyle(installed, scheme), [installed, scheme]);
+}
+
+/** Palettes read from each install's styles, so every lesson map doesn't parse the style again. */
+const palettes = new WeakMap<InstalledState, Partial<Record<"light" | "dark", MapPalette | null>>>();
+
+/** The colours the map draws in for the scheme (`stylePalette`); `null` while no offline region is usable. */
+export function useMapPalette(scheme: "light" | "dark"): MapPalette | null {
+  const { installed } = useMapPacks();
+  return useMemo(() => {
+    const cached = palettes.get(installed) ?? {};
+    palettes.set(installed, cached);
+    if (!(scheme in cached)) {
+      const style = packStyle(installed, scheme);
+      cached[scheme] = style && stylePalette(style);
+    }
+    return cached[scheme] ?? null;
+  }, [installed, scheme]);
 }
 
 /** True once an offline region is downloaded, active and readable: the app can be used. */

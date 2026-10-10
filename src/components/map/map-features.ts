@@ -14,7 +14,50 @@ export function accuracyFeatures(position: PositionEstimate): FeatureCollection<
   };
 }
 
-/** Sector ahead of the puck: the course cone, the compass beam, the placed car's arrow. */
+/** Ground metres one screen point spans at `zoom` and latitude `latDeg` (MapLibre's 512-point tiles). */
+export function metresPerPoint(latDeg: number, zoom: number): number {
+  return (40_075_016.686 * Math.cos((latDeg * Math.PI) / 180)) / 2 ** (zoom + 9);
+}
+
+/** The camera, as MapLibre reports it: zoom, bearing (degrees clockwise from north) and tilt (degrees). */
+export interface CameraView {
+  zoom: number;
+  bearingDeg: number;
+  pitchDeg: number;
+}
+
+/**
+ * A sector that looks the same on screen in every camera: `radiusPt` long and `halfAngleRad` each side of where
+ * `headingRad` points on screen, drawn on the ground. A tilted map squashes the ground along the screen's vertical by
+ * cos(tilt), so the sector is stretched that way first (perspective across a few dozen points is left out). The
+ * heading cone, so the map's matches the lessons' (puck-style.ts).
+ */
+export function screenSectorFeatures(
+  center: { lat: number; lon: number },
+  headingRad: number,
+  halfAngleRad: number,
+  radiusPt: number,
+  view: CameraView,
+): FeatureCollection<Polygon> {
+  const mpp = metresPerPoint(center.lat, view.zoom);
+  const bearing = (view.bearingDeg * Math.PI) / 180;
+  const squash = Math.max(0.1, Math.cos((view.pitchDeg * Math.PI) / 180));
+  // Where the heading points on screen: its ahead part shrinks with the tilt, its sideways part doesn't.
+  const axis = Math.atan2(Math.sin(headingRad - bearing), Math.cos(headingRad - bearing) * squash);
+  const ring: [number, number][] = [[center.lon, center.lat]];
+  const steps = Math.max(8, Math.round((halfAngleRad * 180) / Math.PI / 4));
+  for (let i = 0; i <= steps; i++) {
+    const s = axis - halfAngleRad + (2 * halfAngleRad * i) / steps;
+    const across = radiusPt * Math.sin(s) * mpp;
+    const ahead = (radiusPt * Math.cos(s) * mpp) / squash;
+    const p = destinationAtBearing(center, bearing + Math.atan2(across, ahead), Math.hypot(across, ahead));
+    ring.push([p.lon, p.lat]);
+  }
+  ring.push([center.lon, center.lat]);
+  return { type: "FeatureCollection", features: [{ type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [ring] } }] };
+}
+
+/** Sector ahead of a point, in metres: the placed car's arrow. */
 export function sectorFeatures(
   position: { lat: number; lon: number },
   headingRad: number,

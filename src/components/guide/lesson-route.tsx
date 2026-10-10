@@ -1,12 +1,11 @@
 import { Fragment, useEffect, useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
-import { G, Path } from "react-native-svg";
 
 import { ExplainCard, LessonIntro, PulseRing } from "@/components/guide/lesson-ui";
 import { sayFirstInstruction } from "@/components/guide/lesson-voice-sample";
 import { MapCard, MapCardHeader, MapChipButton } from "@/components/guide/map-ui";
-import { MiniMap, Puck, useNudgedHeading } from "@/components/guide/mini-map";
-import { BLOCKS, CAR, H, PARKS, PLACES, plan, roadHeadingDeg, roads, toCoordinate, W, type Planned, type Point } from "@/components/guide/route-map";
+import { MiniMap, PinDot, Puck, RouteLine, useNudgedHeading } from "@/components/guide/mini-map";
+import { BLOCKS, CAR, H, PARKS, PLACES, plan, roadHeadingDeg, roads, toCoordinate, TOP, W, type Planned, type Point } from "@/components/guide/route-map";
 import { RouteBanner } from "@/components/route/route-banner";
 import { hushVoice } from "@/components/route/voice-player";
 import { Segmented } from "@/components/screens/screen-ui";
@@ -98,7 +97,7 @@ export function LessonRoute() {
             )}
             {!searching && !pin && !route && (
               <>
-                <PulseRing left={`${(280 / W) * 100}%`} top={`${(150 / H) * 100}%`} />
+                <PulseRing left={`${(280 / W) * 100}%`} top={`${((TOP + 150) / H) * 100}%`} />
                 <View pointerEvents="none" style={[styles.hint, placed && styles.hintBelowChip, { backgroundColor: palette.text }]}>
                   <T w="medium" size={13} color={palette.bg}>
                     {t("routeHoldHint")}
@@ -221,15 +220,9 @@ export function LessonRoute() {
           </>
         }
       >
-        {route?.path ? (
-          <Path d={route.path} fill="none" stroke={palette.route} strokeWidth={6} strokeLinecap="round" strokeLinejoin="round" />
-        ) : null}
-        {pin && (
-          <G transform={`translate(${pin.x} ${pin.y})`}>
-            <Path d="M0 0 C -4 -10 -16 -20 -16 -32 a16 16 0 1 1 32 0 C 16 -20 4 -10 0 0 Z" fill={route ? palette.route : palette.accent} />
-            <Path d="M-6 -32 a6 6 0 1 0 12 0 a6 6 0 1 0 -12 0" fill="#FFFFFF" />
-          </G>
-        )}
+        {route?.path ? <RouteLine d={route.path} /> : null}
+        {/* As the map: a dropped pin's dot, then the destination's once the route goes there. */}
+        {pin && <PinDot x={pin.x} y={pin.y} destination={route != null} />}
         <Puck x={dot.x} y={dot.y} r={12} headingDeg={heading} />
       </MiniMap>
 

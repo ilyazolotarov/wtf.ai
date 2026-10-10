@@ -6,6 +6,7 @@ import Svg, { Circle, G, Path, Rect } from "react-native-svg";
 import { useScrollLock } from "@/components/guide/lesson-ui";
 import { MapCard, MapCardButtons, MapCardHeader, MapChipButton } from "@/components/guide/map-ui";
 import { CarGlyph, Puck, useMapColors, useNudgedHeading } from "@/components/guide/mini-map";
+import { PlacingPinShape } from "@/components/map/placing-pin";
 import { Radius, usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
 
@@ -15,19 +16,19 @@ export interface Point {
   y: number;
 }
 
-/** The frame, in map units; the map under it is larger, to drag around. A scene draws within `PLACING_MAP`. */
+/**
+ * The frame, in map units, showing the map from y = 0 unless a lesson asks for more above (`view`); the map under it is
+ * larger, to drag around. A scene draws within `PLACING_MAP`.
+ */
 export const PLACING_FRAME = { w: 358, h: 430 };
 export const PLACING_MAP = { x: -150, y: -150, w: 660, h: 730 };
-const FRAME = PLACING_FRAME;
 const MAP = PLACING_MAP;
-/** The pin stays at the frame's centre while the map moves under it, as on the map screen. */
-const PIN: Point = { x: FRAME.w / 2, y: FRAME.h / 2 };
 /** Close enough to count as on the car (the pin then snaps onto it): the target circle drawn around it. */
 const HIT_UNITS = 28;
 /** The arrow counts as the car's direction within this. */
 const HIT_DEG = 40;
-/** Where to tap for the heading: ahead of the car (it faces up its road), above the pin. */
-const AHEAD: Point = { x: PIN.x, y: PIN.y - 80 };
+/** Where to tap for the heading: this far ahead of the car (it faces up its road), above the pin. */
+const AHEAD_UNITS = 80;
 const AHEAD_R = 26;
 
 /**
@@ -48,6 +49,7 @@ export function PlacingMap({
   dotHeadingDeg = null,
   startAt,
   overlay,
+  view,
 }: {
   step: PlaceStep;
   onStep(step: PlaceStep): void;
@@ -66,12 +68,26 @@ export function PlacingMap({
   startAt?: Point;
   /** Views over the map before placing (chips, cards, tags); `at` turns map units into points. */
   overlay?: (at: (p: Point) => { left: number; top: number }) => ReactNode;
+  /**
+   * The map rows the frame shows before it is dragged (default 0 to `PLACING_FRAME.h`): a taller view starting
+   * higher keeps the scene below a card over the top of the map.
+   */
+  view?: { top: number; height: number };
 }) {
   const { t } = useT();
   const palette = usePalette();
   const c = useMapColors();
   const lockScroll = useScrollLock();
   const [scale, setScale] = useState(1);
+  const frameW = PLACING_FRAME.w;
+  const frameH = view?.height ?? PLACING_FRAME.h;
+  /** The map row at the frame's top before any drag: the map's own top, in frame units, is `MAP.y - top`. */
+  const top = view?.top ?? 0;
+  // The pin stays at the frame's centre while the map moves under it, as on the map screen: (pinX, pinY) in the
+  // frame, (pinX, pinMapY) the map point under it before any drag.
+  const pinX = frameW / 2;
+  const pinY = frameH / 2;
+  const pinMapY = pinY + top;
   const [headingDeg, setHeadingDeg] = useState<number | null>(null);
   const [onCar, setOnCar] = useState(false);
   // Once placed, the car points up its road.
@@ -80,10 +96,10 @@ export function PlacingMap({
   const [pan] = useState(() => new Animated.ValueXY({ x: 0, y: 0 }));
   useEffect(() => {
     const id = pan.addListener((value) => {
-      setOnCar(Math.hypot(PIN.x - value.x / scale - car.x, PIN.y - value.y / scale - car.y) <= HIT_UNITS);
+      setOnCar(Math.hypot(pinX - value.x / scale - car.x, pinMapY - value.y / scale - car.y) <= HIT_UNITS);
     });
     return () => pan.removeListener(id);
-  }, [pan, scale, car]);
+  }, [pan, scale, car, pinX, pinMapY]);
 
   // While placing, a drag from the frame's left edge is the map's, not the page's back swipe (iOS); Android's back
   // gesture can't be turned off, so there back cancels the placing instead of leaving the lesson.
@@ -107,7 +123,7 @@ export function PlacingMap({
   useEffect(() => {
     if (step !== "position" || !startAt) return;
     Animated.spring(pan, {
-      toValue: { x: (PIN.x - startAt.x) * scale, y: (PIN.y - startAt.y) * scale },
+      toValue: { x: (pinX - startAt.x) * scale, y: (pinMapY - startAt.y) * scale },
       useNativeDriver: false,
       bounciness: 0,
     }).start();
@@ -118,16 +134,16 @@ export function PlacingMap({
   // Dragging moves the map, only while asking where the car is; it stops where the map still fills the frame.
   const responder = useMemo(() => {
     const clamp = (v: Point) => ({
-      x: Math.min(-MAP.x * scale, Math.max(FRAME.w * scale - (MAP.x + MAP.w) * scale, v.x)),
-      y: Math.min(-MAP.y * scale, Math.max(FRAME.h * scale - (MAP.y + MAP.h) * scale, v.y)),
+      x: Math.min(-MAP.x * scale, Math.max(frameW * scale - (MAP.x + MAP.w) * scale, v.x)),
+      y: Math.min(-(MAP.y - top) * scale, Math.max(frameH * scale - (MAP.y - top + MAP.h) * scale, v.y)),
     });
     const end = () => {
       lockScroll(false);
       pan.flattenOffset();
       pan.stopAnimation((at) => {
         // Close to the car: the pin settles on it.
-        const near = Math.hypot(PIN.x - at.x / scale - car.x, PIN.y - at.y / scale - car.y) <= HIT_UNITS;
-        const to = near ? { x: (PIN.x - car.x) * scale, y: (PIN.y - car.y) * scale } : clamp(at);
+        const near = Math.hypot(pinX - at.x / scale - car.x, pinMapY - at.y / scale - car.y) <= HIT_UNITS;
+        const to = near ? { x: (pinX - car.x) * scale, y: (pinMapY - car.y) * scale } : clamp(at);
         Animated.spring(pan, { toValue: to, useNativeDriver: false, bounciness: 0 }).start();
       });
     };
@@ -143,18 +159,18 @@ export function PlacingMap({
       onPanResponderRelease: end,
       onPanResponderTerminate: end,
     });
-  }, [step, scale, pan, lockScroll, car]);
+  }, [step, scale, pan, lockScroll, car, frameW, frameH, top, pinX, pinMapY]);
 
   const done = step === "done";
   const placing = step === "position" || step === "heading";
   // The car faces up its road: the arrow has to point that way to go on.
   const headingRight = headingDeg != null && Math.abs(((headingDeg + 540) % 360) - 180) <= HIT_DEG;
-  const at = (p: Point) => ({ left: p.x * scale, top: p.y * scale });
+  const at = (p: Point) => ({ left: p.x * scale, top: (p.y - top) * scale });
 
   return (
     <View
-      style={[styles.frame, { backgroundColor: c.land }]}
-      onLayout={(event) => setScale(event.nativeEvent.layout.width / FRAME.w)}
+      style={[styles.frame, { aspectRatio: frameW / frameH, backgroundColor: c.land }]}
+      onLayout={(event) => setScale(event.nativeEvent.layout.width / frameW)}
       {...responder.panHandlers}
     >
       <Animated.View
@@ -163,7 +179,7 @@ export function PlacingMap({
           styles.layer,
           {
             left: MAP.x * scale,
-            top: MAP.y * scale,
+            top: (MAP.y - top) * scale,
             width: MAP.w * scale,
             height: MAP.h * scale,
             transform: [{ translateX: pan.x }, { translateY: pan.y }],
@@ -200,30 +216,28 @@ export function PlacingMap({
         <Pressable
           style={StyleSheet.absoluteFill}
           onPress={(event) => {
-            const dx = event.nativeEvent.locationX - PIN.x * scale;
-            const dy = event.nativeEvent.locationY - PIN.y * scale;
+            const dx = event.nativeEvent.locationX - pinX * scale;
+            const dy = event.nativeEvent.locationY - pinY * scale;
             if (Math.hypot(dx, dy) > 8) setHeadingDeg((Math.atan2(dx, -dy) * 180) / Math.PI);
           }}
           accessibilityLabel={t("placeHeadingHint")}
         />
       )}
       {placing && (
-        <Svg pointerEvents="none" style={StyleSheet.absoluteFill} viewBox={`0 0 ${FRAME.w} ${FRAME.h}`}>
+        <Svg pointerEvents="none" style={StyleSheet.absoluteFill} viewBox={`0 0 ${frameW} ${frameH}`}>
           {step === "heading" && !headingRight && (
             // Where to tap: ahead of the car, up its road.
-            <Circle cx={AHEAD.x} cy={AHEAD.y} r={AHEAD_R} fill={palette.accent} fillOpacity={0.16} stroke={palette.accent} strokeWidth={2} strokeDasharray="6 4" />
+            <Circle cx={pinX} cy={pinY - AHEAD_UNITS} r={AHEAD_R} fill={palette.accent} fillOpacity={0.16} stroke={palette.accent} strokeWidth={2} strokeDasharray="6 4" />
           )}
           {step === "heading" && headingDeg != null && (
-            <G transform={`rotate(${headingDeg} ${PIN.x} ${PIN.y})`}>
-              <Path d={`M${PIN.x} ${PIN.y} V${PIN.y - 70}`} stroke={palette.accent} strokeWidth={4} strokeLinecap="round" />
-              <Path d={`M${PIN.x - 11} ${PIN.y - 62} L${PIN.x} ${PIN.y - 84} L${PIN.x + 11} ${PIN.y - 62} Z`} fill={palette.accent} />
+            <G transform={`rotate(${headingDeg} ${pinX} ${pinY})`}>
+              <Path d={`M${pinX} ${pinY} V${pinY - 70}`} stroke={palette.accent} strokeWidth={4} strokeLinecap="round" />
+              <Path d={`M${pinX - 11} ${pinY - 62} L${pinX} ${pinY - 84} L${pinX + 11} ${pinY - 62} Z`} fill={palette.accent} />
             </G>
           )}
           {/* The pin: its point is exactly the spot that is placed, the frame's centre. */}
-          <G transform={`translate(${PIN.x} ${PIN.y})`}>
-            <Path d="M0 0 C -4 -10 -16 -20 -16 -32 a16 16 0 1 1 32 0 C 16 -20 4 -10 0 0 Z" fill={palette.accent} stroke="#FFFFFF" strokeWidth={1.5} />
-            <Circle cx={0} cy={-32} r={6} fill="#FFFFFF" />
-            <Circle cx={0} cy={0} r={3} fill={palette.accent} stroke="#FFFFFF" strokeWidth={1.5} />
+          <G transform={`translate(${pinX} ${pinY})`}>
+            <PlacingPinShape />
           </G>
         </Svg>
       )}
@@ -273,7 +287,6 @@ export function PlacingMap({
 const styles = StyleSheet.create({
   frame: {
     width: "100%",
-    aspectRatio: FRAME.w / FRAME.h,
     borderRadius: Radius.rL,
     overflow: "hidden",
     borderCurve: "continuous",

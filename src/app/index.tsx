@@ -10,6 +10,7 @@ import { NoFixCard, PermissionCard } from "@/components/map/center-cards";
 import { HeldRouteCard, PinCard } from "@/components/map/destination-cards";
 import { HudChip, usePanelStyle } from "@/components/map/hud-card";
 import { MapSurface } from "@/components/map/map-surface";
+import { PlacingPin } from "@/components/map/placing-pin";
 import { ManualChip, ManualQuestionCard, PlacingCard, PoseQuestionCard } from "@/components/map/placing-cards";
 import { RegionPrompt } from "@/components/map/region-prompt";
 import { SheetBlur } from "@/components/map/sheet-blur";
@@ -23,7 +24,6 @@ import { RouteBanner } from "@/components/route/route-banner";
 import { useAudioOutput } from "@/components/route/use-audio-output";
 import { useVoiceGuidance, useVoiceMuted, useVoiceVolume } from "@/components/route/use-voice-guidance";
 import { useNavStatus } from "@/components/status/use-nav-status";
-import { Icon } from "@/components/ui/icon";
 import { BlurTarget } from "@/components/ui/glass-fill";
 import { useHasUsableMap } from "@/config/map";
 import { usePalette } from "@/constants/theme";
@@ -160,11 +160,8 @@ export default function HomeScreen() {
           placedMark={place.mark}
         />
       </BlurTarget>
-      {placing === "position" && (
-        <View pointerEvents="none" style={styles.placeTarget}>
-          <Icon name="location_on" size={44} color={palette.accent} />
-        </View>
-      )}
+      {/* Its point on the map's centre, the spot placed: the lesson's pin (placing-pin.tsx). */}
+      {placing === "position" && <PlacingPin />}
       <View
         pointerEvents="box-none"
         style={[styles.overlay, { paddingTop: insets.top + 10, paddingBottom: bottomPadding }]}
@@ -301,7 +298,5 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
   },
   topStack: { gap: 10 },
-  // The pin's tip on the map centre: the icon is 44 high, its tip at the bottom.
-  placeTarget: { position: "absolute", left: "50%", top: "50%", marginLeft: -22, marginTop: -40 },
   bottomStack: { gap: 12 },
 });

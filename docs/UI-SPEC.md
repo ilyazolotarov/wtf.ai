@@ -109,7 +109,20 @@ the trip log), never `expo-location`'s watcher, which stopped for good after jam
 
 - Full-screen MapLibre map, the active offline region's style (`useMapStyle(scheme)`, `src/config/map.ts`; the dark scheme re-tints it, `map-dark.ts`). Read the MapLibre RN docs for the installed version before coding (the API changed between majors).
 - **Custom puck** from `usePosition()` via GeoJSON source + layers: dot + heading arrow (arrow only when heading known) + accuracy circle (`circlePolygon`). Do **not** use MapLibre's built-in user location — it bypasses the abstraction.
-- **Compass beam** (display-only, `useCompassHeading`): when not in a car (no trip recording, adapter not connected) and speed < 3 m/s, a wide faint sector from `watchHeadingAsync` replaces the course cone and shows where the phone points. Half-width = iOS compass uncertainty (20°/35°/50°/60° for accuracy 3–0). The compass runs only while allowed and never reaches `PositionEstimate`.
+  The dot (`puck-style.ts`, theme `puck*`): an 8 pt fill, a 3.5 pt ring and a 1.5 pt dark edge outside it (light: 90 %
+  black; dark: black). Trusted GPS: a blue fill in a white ring (light #0A84FF, brighter and more cyan than the
+  route's indigo; dark periwinkle #6B8CFF, apart from the azure route by hue). Otherwise: the theme background in an
+  amber ring (`puckDoubt`: light #B47D38, deeper than `warn` for 3:1 against its centre). Wherever it sits, one band
+  stands out: the dark edge against yellow and orange roads and light land, the ring against the blue route and the
+  dark ground.
+  The heading cone is part of the dot: 34 pt long, 28° each side, the same on screen at every zoom and camera tilt
+  (built in screen points and laid on the ground for the camera's zoom, bearing and tilt), filled at 32 % and outlined
+  as the dot (light: the dark edge; dark: the ring's colour on a black edge). Pins and marks are banded the same way:
+  the dropped pin, the placed position and its arrow, the GPS ghost, the other roads the car may be on.
+  The lessons' drawn maps draw the same dot, cone, dropped pin and destination; the placing pin (`placing-pin.tsx`, a
+  banded teardrop whose point is the spot placed) is one component on the map and in lessons 5 and 6. `map-contrast.test.ts` holds everything the app
+  draws on the map to 3:1 against every surface under it, in both themes (WCAG SC 1.4.11), from the map's own styles.
+- **Compass heading** (display-only, `useCompassHeading`): when not in a car (no trip recording, adapter not connected) and speed < 3 m/s, the heading cone comes from `watchHeadingAsync` and shows where the phone points, as wide each side as the compass is unsure (iOS: 20°/35°/50°/60° for accuracy 3–0). The compass runs only while allowed and never reaches `PositionEstimate`.
 - Raw GNSS **ghost marker** from `rawGnss`; hidden while `source === 'gnss'`.
 - **Map-match alternatives** from `alternatives` (other roads the car may be on, MAPMATCH-SPEC §11): hollow
   markers under the puck, more opaque the heavier they are.
@@ -140,7 +153,7 @@ The vehicle button in the footer carries the connection dot: green when the car 
 
 While the OBD adapter searches all protocols (`protocolSearch`, another car on it: up to ~20 s), a chip under the status pill says "Finding the car's protocol…", and the vehicle screen's adapter tile says the same.
 
-Heading-up bearing: the walking compass beam when shown; else the navigator heading (`dr`/`fused` source, valid while stopped); else GNSS course when speed > ~2 m/s; else the last of these held, so the map does not snap north at a stop. No direction known while standing (none yet: parked on phone GPS before a trip, the app just opened): heading-up keeps its camera (zoom 17, tilted) and the map keeps the bearing it has, so the view doesn't drop flat and north while the button says heading-up. Moving without one (the navigator anchored under GNSS jamming): the `follow` camera (zoom 16, flat, north up) until there is one, so it never looks like a heading-up view pointing the wrong way. The bearing goes to the map in [0°, 360°): iOS MapLibre ignores a negative one, and the dead-reckoning heading is signed.
+Heading-up bearing: the walking compass heading when shown; else the navigator heading (`dr`/`fused` source, valid while stopped); else GNSS course when speed > ~2 m/s; else the last of these held, so the map does not snap north at a stop. No direction known while standing (none yet: parked on phone GPS before a trip, the app just opened): heading-up keeps its camera (zoom 17, tilted) and the map keeps the bearing it has, so the view doesn't drop flat and north while the button says heading-up. Moving without one (the navigator anchored under GNSS jamming): the `follow` camera (zoom 16, flat, north up) until there is one, so it never looks like a heading-up view pointing the wrong way. The bearing goes to the map in [0°, 360°): iOS MapLibre ignores a negative one, and the dead-reckoning heading is signed.
 
 Auto heading-up: once per trip, when a trip is recording and speed stays > ~2 m/s for 2 s, `follow` switches to `follow-heading` (any other mode is left alone). When the trip ends (recorder leaves `recording`/`lingering`) it goes back to `follow`, unless the driver changed the mode by button or gesture in between.
 
@@ -189,10 +202,12 @@ One small component each; the screen (`src/app/index.tsx`) only places them and 
   least 20 pt apart, their touch areas not overlapping (a mis-tap on × ended the route). The map draws the route ahead of the car (from its
   progress point, ROUTING-SPEC §8.1: what is driven disappears; faded while planning again; the stretch from the
   progress point to the next route vertex is dashed in the accent blue), its next maneuver and the destination.
-  In the dark (Night Drive) the route is azure #1EA0FF with a near-black #001428 outline: opposite the map's amber and
-  orange roads and far lighter than its ground and water; the next maneuver's dot is white ringed in #001428.
-  **Alternatives** (ROUTING-SPEC §8.7) are quieter solid blue lines under it (`routeAlt`: light #93A6DE, dark
-  #5B7896; a translucent route colour turned muddy on the dark map), each labelled on its own stretch
+  In light the route is indigo #3D5CBC with an off-white outline. In the dark (Night Drive) it is azure #47B2FF with a
+  near-black #001428 outline: opposite the map's amber and orange roads, far lighter than its ground and water, and
+  light enough for 3:1 on the grey minor roads; the next maneuver's dot is white ringed in #001428.
+  **Alternatives** (ROUTING-SPEC §8.7) are quieter solid lines under it: light, the route's inverse, a light #B8C7EE
+  line in a #53618A casing (a light line in a light casing vanished on the map); dark, grey-blue #93ABC4 in the
+  route's outline (a translucent route colour turned muddy on the dark map). Each is labelled on its own stretch
   with its time against the route ("+4 min", "−2 min", "Same time"); a tap on a line or label follows it. When they
   come while the car stands, the map frames all routes once (free camera).
 - **A route without an adapter** (phone-only mode on and no adapter connected, NAVIGATOR-SPEC §9.6): **Route here**
@@ -280,7 +295,9 @@ normally"), never "Nothing".
   in groups (Getting started, When GPS fails, Routes, Maps) with a tick once done (kv-store `guide.done`), "Show the
   first-run screens again".
 - **Lessons** (`guide/lesson?id=`), full pages pushed from the Guide, each interactive, on drawn maps (`react-native-svg`, `src/components/guide/mini-map.tsx`)
-  in the map's colours: never the live map, so practising never moves the car. The button at the bottom marks the
+  in the map's colours, read from the style the map draws now (`useMapPalette`, `src/config/map-palette.ts`: Liberty's
+  ground, buildings, parks, water, minor and main streets in light; the same re-tinted for Night Drive in dark; built-in
+  copies only without a usable region): never the live map, so practising never moves the car. The button at the bottom marks the
   lesson done and opens the next. The Guide lists only lessons that exist (`lesson-bodies.tsx`).
   1. Before you drive: the map and the adapter read from the app, the holder, opening the app first and charging
      ticked by the driver.

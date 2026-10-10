@@ -69,7 +69,7 @@ export function LessonPlace() {
         scene={
           <>
             {CELLS.map((b, i) => (
-              <Rect key={i} x={b.x} y={b.y} width={b.w} height={b.h} rx={b.park ? 6 : 3} fill={b.park ? c.park : c.block} />
+              <Rect key={i} x={b.x} y={b.y} width={b.w} height={b.h} rx={b.park ? 6 : 3} fill={b.park ? c.park : c.building} />
             ))}
             <G fill="none" strokeLinecap="round">
               <Path d={MINOR} stroke={c.minorCasing} strokeWidth={13} />

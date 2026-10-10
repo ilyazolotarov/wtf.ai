@@ -15,9 +15,12 @@ import { useT } from "@/i18n/provider";
 
 type Stage = 0 | 1 | 2 | 3 | 4;
 
-/** The drive: up the main road, then right at the junction. Positions are distances along it, map units. */
-const START = { x: 120, y: 270 };
-const CORNER = { x: 120, y: 70 };
+/**
+ * The drive: up the main road, then right at the junction. Positions are distances along it, map units. The junction
+ * sits below the status pill and the "Trusted GPS …" strip (to ~120 even wrapped), so the turn stays in sight.
+ */
+const START = { x: 120, y: 380 };
+const CORNER = { x: 120, y: 180 };
 const END_X = 270;
 const LEG1 = START.y - CORNER.y;
 const ALONG: Record<Stage, number> = { 0: 20, 1: 75, 2: 150, 3: 265, 4: 350 };
@@ -124,18 +127,24 @@ export function LessonJamming() {
       />
       <MiniMap
         width={358}
-        height={290}
-        parks={[{ x: 230, y: 92, w: 110, h: 88 }]}
+        height={400}
+        parks={[{ x: 230, y: 202, w: 110, h: 88 }]}
         blocks={[
-          { x: 140, y: 92, w: 52, h: 88 },
-          { x: 14, y: 92, w: 86, h: 88 },
-          { x: 14, y: 220, w: 86, h: 80 },
-          { x: 140, y: 220, w: 52, h: 80 },
-          { x: 14, y: -10, w: 86, h: 58 },
-          { x: 230, y: 220, w: 110, h: 80 },
+          { x: 140, y: 202, w: 52, h: 88 },
+          { x: 14, y: 202, w: 86, h: 88 },
+          { x: 14, y: 330, w: 86, h: 80 },
+          { x: 140, y: 330, w: 52, h: 80 },
+          { x: 230, y: 330, w: 110, h: 80 },
+          // Under the panels: the street and blocks beyond the junction.
+          { x: 14, y: 100, w: 86, h: 58 },
+          { x: 140, y: 100, w: 52, h: 58 },
+          { x: 230, y: 100, w: 110, h: 58 },
+          { x: 14, y: -10, w: 86, h: 72 },
+          { x: 140, y: -10, w: 52, h: 72 },
+          { x: 230, y: -10, w: 110, h: 72 },
         ]}
-        minor="M-10 200 H370 M210 -10 V300"
-        major={`M120 300 V70 M-10 70 H370`}
+        minor="M-10 310 H370 M-10 81 H370 M210 -10 V410"
+        major={`M120 410 V180 M-10 180 H370`}
         overlay={
           <>
             <StatusPillMock

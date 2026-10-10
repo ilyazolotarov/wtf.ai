@@ -1,12 +1,11 @@
 import { Host } from "@expo/ui";
 import { useEffect, useState } from "react";
 import { StyleSheet, View } from "react-native";
-import { Path } from "react-native-svg";
 
 import { LessonIntro } from "@/components/guide/lesson-ui";
 import { sayFirstInstruction } from "@/components/guide/lesson-voice-sample";
-import { MiniMap, Puck } from "@/components/guide/mini-map";
-import { BLOCKS, CAR, H, PARKS, plan, roads, W } from "@/components/guide/route-map";
+import { MiniMap, Puck, RouteLine } from "@/components/guide/mini-map";
+import { BLOCKS, CAR, H, PARKS, plan, roads, TOP, W } from "@/components/guide/route-map";
 import { RouteBanner } from "@/components/route/route-banner";
 import { useAudioOutput } from "@/components/route/use-audio-output";
 import { hushVoice } from "@/components/route/voice-player";
@@ -19,7 +18,9 @@ import { useT } from "@/i18n/provider";
 import { RoadClass } from "@/nav/mapmatch/graph/format";
 
 /** Up the main road, then right: the first instruction is a right turn. */
-const DESTINATION = { x: 330, y: 200 };
+const DESTINATION = { x: 330, y: TOP + 200 };
+/** What the voice says, between the main street and the one below it, clear of the route. */
+const SAID_TOP = `${((TOP + 232) / H) * 100}%` as const;
 
 /**
  * Lesson 8: the route banner's voice button (UI-SPEC §6.3), the real banner on a planned route: a tap mutes, a long
@@ -83,7 +84,7 @@ export function LessonVoice() {
                 offPhone={offPhone}
               />
             </View>
-            <View style={[styles.said, { backgroundColor: quiet ? palette.panelSolid : palette.text }]}>
+            <View style={[styles.said, { top: SAID_TOP, backgroundColor: quiet ? palette.panelSolid : palette.text }]}>
               <T w="medium" size={13} color={quiet ? palette.text2 : palette.bg} style={styles.lead}>
                 {said}
               </T>
@@ -91,7 +92,7 @@ export function LessonVoice() {
           </>
         }
       >
-        <Path d={route.path} fill="none" stroke={palette.route} strokeWidth={6} strokeLinecap="round" strokeLinejoin="round" />
+        <RouteLine d={route.path} />
         <Puck x={CAR.x} y={CAR.y} r={12} headingDeg={0} />
       </MiniMap>
 
@@ -111,7 +112,7 @@ export function LessonVoice() {
 
 const styles = StyleSheet.create({
   banner: { position: "absolute", left: 10, right: 10, top: 10 },
-  said: { position: "absolute", left: "34%", right: 12, top: "58%", borderRadius: Radius.rL, paddingHorizontal: 12, paddingVertical: 10 },
+  said: { position: "absolute", left: "34%", right: 12, borderRadius: Radius.rL, paddingHorizontal: 12, paddingVertical: 10 },
   lead: { lineHeight: 18 },
   group: { gap: 8 },
   card: { gap: 10 },

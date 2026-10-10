@@ -1,5 +1,5 @@
-import { Camera, Map, type PressEvent } from "@maplibre/maplibre-react-native";
-import type { ComponentProps } from "react";
+import { Camera, Map, type PressEvent, type ViewStateChangeEvent } from "@maplibre/maplibre-react-native";
+import { useState, type ComponentProps } from "react";
 import { useColorScheme, View, type NativeSyntheticEvent } from "react-native";
 
 import { ANDROID_BLURS } from "@/components/ui/glass-fill";
@@ -9,11 +9,15 @@ import type { Coordinate } from "@/nav/geo";
 import { usePosition } from "@/providers/position-provider";
 import { useRoute } from "@/providers/route-provider";
 
+import type { CameraView } from "./map-features";
 import { DebugLayers, MarkLayers, PositionLayers, PuckLayers, RouteLayers } from "./map-layers";
 import type { CameraMode } from "./use-camera-mode";
 import type { CompassHeading } from "./use-compass-heading";
 import { useMapCamera } from "./use-map-camera";
 import type { PlacingStep } from "./use-placing";
+
+/** The camera's zoom before the first follow. */
+const INITIAL_ZOOM = 15.4;
 
 interface MapSurfaceProps {
   mode: CameraMode;
@@ -88,6 +92,18 @@ export function MapSurface({
     logCamera,
   });
 
+  // The camera now, rounded (zoom to 0.1, bearing and tilt to a degree): the heading cone looks the same on screen in
+  // every camera (puck-style.ts), and a camera that holds draws nothing again.
+  const [view, setView] = useState<CameraView>({ zoom: INITIAL_ZOOM, bearingDeg: 0, pitchDeg: 0 });
+  const trackView = (event: NativeSyntheticEvent<ViewStateChangeEvent>) => {
+    const { zoom, bearing, pitch } = event.nativeEvent;
+    if (![zoom, bearing, pitch].every(Number.isFinite)) return;
+    const next = { zoom: Math.round(zoom * 10) / 10, bearingDeg: Math.round(bearing), pitchDeg: Math.round(pitch) };
+    setView((was) =>
+      was.zoom === next.zoom && was.bearingDeg === next.bearingDeg && was.pitchDeg === next.pitchDeg ? was : next,
+    );
+  };
+
   // No offline region yet (the map-setup screen asks for one): a plain canvas, never online tiles.
   if (mapStyle == null)
     return <View style={{ flex: 1, backgroundColor: palette.bg }} />;
@@ -117,22 +133,28 @@ export function MapSurface({
         const [lon, lat] = event.nativeEvent.lngLat;
         onTap?.({ lat, lon });
       }}
-      onRegionIsChanging={onRegionIsChanging}
-      onRegionDidChange={onRegionDidChange}
+      onRegionIsChanging={(event: NativeSyntheticEvent<ViewStateChangeEvent>) => {
+        onRegionIsChanging(event);
+        trackView(event);
+      }}
+      onRegionDidChange={(event: NativeSyntheticEvent<ViewStateChangeEvent>) => {
+        onRegionDidChange(event);
+        trackView(event);
+      }}
     >
       <Camera
         ref={cameraRef}
         initialViewState={{
           center: [30.5234, 50.4501],
-          zoom: 15.4,
+          zoom: INITIAL_ZOOM,
           pitch: 0,
           bearing: 0,
         }}
       />
       {/* Bottom to top: MapLibre stacks layers in the order they are declared. */}
       <RouteLayers route={route} palette={palette} onChoose={chooseAlternative} />
-      <MarkLayers pin={pin} placedMark={placedMark} palette={palette} />
-      <PositionLayers position={position} compass={compass} palette={palette} />
+      <MarkLayers pin={pin} placedMark={placedMark} palette={palette} scheme={scheme} />
+      <PositionLayers position={position} compass={compass} palette={palette} scheme={scheme} view={view} />
       <DebugLayers position={position} palette={palette} />
       <PuckLayers position={position} palette={palette} />
     </Map>
