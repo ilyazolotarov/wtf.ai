@@ -202,6 +202,34 @@ describe("VehicleLinkCore", () => {
     await core.disconnect();
   });
 
+  test("a K-line car on a new adapter: the init keeps the protocol the search found, without searching again", async () => {
+    // A tester's car (2026-10-10): each init searched again (ATSP0), which dropped the session the search had just
+    // opened; the ECU ignores a new init while that one is open, so init failed, standby found the car, init failed…
+    // for 2 min 15 s before the first poll.
+    const { core, clock, emulators } = setup(KLINE_PROFILE);
+    core.startDiscovery();
+    void core.connect("emu-1");
+    await until(() => core.getSnapshot().link === "polling" || clock.nowUs() > 300e6);
+    expect(core.getSnapshot().link).toBe("polling");
+    expect(clock.nowUs()).toBeLessThan(30e6);
+    expect(core.getSnapshot().vehicle?.protocol).toBe("5");
+    expect(emulators.get("emu-1")!.log.filter((c) => c === "ATSP0")).toHaveLength(1);
+    await core.disconnect();
+  });
+
+  test("a K-line car whose ECU still holds an old session at connect: standby finds it, the init keeps it", async () => {
+    const { core, clock, emulators } = setup(KLINE_PROFILE);
+    core.startDiscovery();
+    void core.connect("emu-1");
+    await until(() => emulators.has("emu-1"));
+    // The adapter's previous session (before the app connected) left the ECU busy: the probe's search fails.
+    emulators.get("emu-1")!.holdEcuSession(6000);
+    await until(() => core.getSnapshot().link === "polling" || clock.nowUs() > 300e6);
+    expect(core.getSnapshot().link).toBe("polling");
+    expect(clock.nowUs()).toBeLessThan(40e6);
+    await core.disconnect();
+  });
+
   test("another car found from standby: every few bus errors, all protocols are searched", async () => {
     const { core, emulators } = setup(KLINE_PROFILE, storeWithCx5());
     core.startDiscovery();

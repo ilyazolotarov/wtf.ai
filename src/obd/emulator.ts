@@ -34,6 +34,12 @@ export interface EmulatorProfile {
   carProtocol: number;
   /** The first this many `0902` requests get NO DATA (the VIN read missing at init on the CX-5). */
   vinMisses: number;
+  /**
+   * K-line: how long the ECU keeps a session after its last request (KWP2000 P3max). An init while it is open fails
+   * (the ECU ignores it): after the adapter drops its session (`ATSP0`, a reset) the car is unreachable this long.
+   * 0: not modelled.
+   */
+  klineSessionMs?: number;
 }
 
 export interface VehicleState {
@@ -92,6 +98,7 @@ export const STN_PROFILE: EmulatorProfile = {
 export const KLINE_PROFILE: Partial<EmulatorProfile> = {
   ...STN_PROFILE,
   carProtocol: 5,
+  klineSessionMs: 5000,
   ecus: [0x7a],
   obdLatencyMs: 60,
   vin: "VF1LSRAEH12345678",
@@ -134,6 +141,9 @@ export class Elm327Emulator implements Transport {
   private headers = false;
   private protocol = 0;
   private searched = false;
+  /** K-line: the adapter has an open session with the ECU, and until when the ECU holds its side (µs). */
+  private klineOpen = false;
+  private ecuSessionUntilUs = 0;
   private header = 0x7df;
   private receiveFilter: number | null = null;
   private vinRequests = 0;
@@ -143,6 +153,12 @@ export class Elm327Emulator implements Transport {
     profile: Partial<EmulatorProfile> = {},
   ) {
     this.profile = { ...GENUINE_PROFILE, ...profile };
+  }
+
+  /** K-line: the ECU holds a session from before (another connection) for this long more. */
+  holdEcuSession(ms: number): void {
+    this.klineOpen = false;
+    this.ecuSessionUntilUs = this.clock.nowUs() + ms * 1000;
   }
 
   setVehicle(state: Partial<VehicleState>): void {
@@ -246,6 +262,7 @@ export class Elm327Emulator implements Transport {
       if (c !== "D") {
         this.protocol = 0;
         this.searched = false;
+        this.klineOpen = false;
       }
       return c === "D" ? ok : ["", this.profile.banner];
     }
@@ -275,6 +292,8 @@ export class Elm327Emulator implements Transport {
       const n = c.slice(2).replace("A", "");
       this.protocol = parseInt(n, 16) || 0;
       if (this.protocol === 0) this.searched = false;
+      // Setting the protocol the session is on keeps it; a search or another protocol closes it.
+      if (this.protocol !== this.profile.carProtocol) this.klineOpen = false;
       return ok;
     }
     if (c.startsWith("SH")) {
@@ -310,6 +329,17 @@ export class Elm327Emulator implements Transport {
       return { body: [isCan(this.protocol) ? "CAN ERROR" : "BUS INIT: ...ERROR"], delayMs: p.noDataWaitMs };
     }
     if (!this.vehicle.ignition) return { body: ["NO DATA"], delayMs: p.noDataWaitMs };
+    // K-line: a new session needs an init, which the ECU ignores while its previous session is open.
+    if (p.klineSessionMs && !this.klineOpen) {
+      if (this.clock.nowUs() < this.ecuSessionUntilUs) {
+        if (searchDelay > 0) this.searched = false;
+        return searchDelay > 0
+          ? { body: ["SEARCHING...", "UNABLE TO CONNECT"], delayMs: searchDelay }
+          : { body: ["BUS INIT: ...ERROR"], delayMs: p.noDataWaitMs };
+      }
+      this.klineOpen = true;
+    }
+    if (p.klineSessionMs) this.ecuSessionUntilUs = this.clock.nowUs() + searchDelay * 1000 + p.klineSessionMs * 1000;
 
     let countDigit: number | null = null;
     let request = cmd;

@@ -84,7 +84,9 @@ describe("init", () => {
     const r = await initVehicle(send);
     expect(r.ok).toBe(true);
     expect(r.protocolNumber).toBe(6);
-    expect(r.vehicle).toMatchObject({ protocol: "A6", vin: "JM3KFBDM1J0123456", speedEcu: "7E8" });
+    // The probe's search found it: the init keeps that protocol (set, so "6", not the search's "A6").
+    expect(r.vehicle).toMatchObject({ protocol: "6", vin: "JM3KFBDM1J0123456", speedEcu: "7E8" });
+    expect(emu.log.filter((c) => c === "ATSP0")).toHaveLength(1);
     expect(r.vehicle.supportedPids01).toEqual(expect.arrayContaining(["0C", "0D"]));
     expect(r.capabilities).toEqual({ responseCount: true, adaptiveTiming2: true, physicalAddressing: true });
     expect(r.poll).toEqual({ speedCommand: "010D1", rpmCommand: "010C1" });

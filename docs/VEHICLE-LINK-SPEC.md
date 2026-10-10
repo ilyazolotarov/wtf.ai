@@ -380,6 +380,11 @@ Rules:
 `ATE0`, `ATL0`, `ATS0` (no spaces, ~30% fewer bytes), `ATH1` (headers on while identifying ECUs), `ATAT1`, then:
 
 1. Protocol: `ATSP0` + `0100` (auto search) → `ATDPN` → `ATSPn` (lock it, so later requests never re-search). Cache `n` per VIN/adapter for fast reconnect.
+   The init first asks `ATDPN`: a protocol the adapter has just found by its own search (`A5`: the probe's or
+   standby's `0100` answered) is locked as is, never searched again. `ATSP0` drops the K-line session that search
+   opened, and the ECU ignores a new init until its old session times out (KWP2000 P3max, ~5 s): a tester's K-line car
+   went init → fail → standby → found → init for 2 min 15 s (2026-10-10), passing only when the adapter happened to
+   be slow enough. The emulator's K-line profile models that session (`klineSessionMs`).
 2. Supported PIDs: `0100` bitmap must contain `0C` and `0D`. Missing `0D` → error "vehicle doesn't report speed over OBD".
 3. VIN: `0902` once, after §9.2 (multi-frame; clones may fail — non-fatal). Mode 09 is the engine ECU's, so with
    another ECU pinned for speed it goes to the engine ECU (`ATSH7E0` + `ATCRA7E8`), then the speed ECU is pinned
@@ -502,6 +507,7 @@ The same contract with two transports: BLE (same GATT catalog) and Classic SPP (
 | ------- | --------- | ------------------ | ------- | -------------- | --------------- | ----------------- | ----- |
 | OBDLink MX+ | MFi (`com.obdlink`) | STN2255 v5.10.3 / ELM327 v1.4b | — | Main test car / 6 (CAN 11-bit 500k) | 25–32 moving, 20 on one drive (`010D1`, `ATSH7E0` or `7E1`, `ATAT1`) | 16–19 / 49–65 ms; 30–49 / 70–86 ms on 4 drives (cause unknown) | 18 drives. Rare stalls: replies arrive one command late, then `STOPPED` → re-init (2–6 s gap). The VIN was missed with `7E1` pinned, and still on 3 of 4 drives with `7E0` (§9.1). |
 | OBDLink MX+ | MFi (`com.obdlink`) | STN2255 v5.10.3 / ELM327 v1.4b | — | Second test car / ISO 14230 KWP (K-line, `A5`) | 7–9 (`010D1`) | — | 3 drives. Found by the protocol search (§8.1); VIN read (5-line K-line format). First connect took 77 s: the init tried `ATSP6` again and searched again, which broke the fresh K-line session four times; the protocol found is now cached at once. |
+| No-name "OBD II" | Classic SPP (Android) | ELM327 v1.5 (no `AT@1` text beyond the default, no `STI`) | — | A tester's K-line car / `A5` | 5.3 (`010D1`), p50 latency 169 ms | — | 1 drive (2026-10-10). First connect: 2 min 15 s to the first poll, the init searching again after each found session (§9.1, fixed). VIN read. |
 | vLinker FD-IOS | BLE | STN1151 v4.3.2 / ELM327 v2.2 | — | Main test car / A6 | 26–30 moving (p50 28), 21 standing | 29 / 45 ms | 2 sessions (2026-10-05), one a 1.75 km drive with a route; VIN read on the drive, not on the first short connect. |
 
 ## 14. Verification targets

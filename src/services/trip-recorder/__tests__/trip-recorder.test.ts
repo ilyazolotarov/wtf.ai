@@ -143,7 +143,7 @@ test("engine start → recording → key off → complete ULog trip", async () =
   // The adapter setup ran before the engine state was known (no pre-roll yet): it opens the log, with its age.
   const before = log.logs.filter((l) => l.text.includes(" s before the log: "));
   expect(before.map((l) => l.text.replace(/^.* s before the log: /, "").replace(/tx=\d+ /, "").split(" |")[0])).toEqual(
-    expect.arrayContaining(["ATZ", "ATSP0", "0100", "ATDPN", "0902", "initialized: A6 010D1"]),
+    expect.arrayContaining(["ATZ", "ATSP0", "0100", "ATDPN", "0902", "initialized: 6 010D1"]),
   );
   expect(before.every((l) => l.timestampUs === before[0].timestampUs && /^\d+\.\d s/.test(l.text))).toBe(true);
   const speeds = log.data.obd_pid.filter((r) => r.pid === 0x0d && r.status === 0);

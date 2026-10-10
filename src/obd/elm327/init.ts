@@ -103,8 +103,13 @@ export async function initVehicle(send: Send, opts: InitOptions = {}): Promise<I
     if (!/\bOK\b/.test(r.lines.join(" "))) await send(c, { timeoutMs: 1000 });
   }
 
-  // 1. Protocol: auto search (or cached), then lock it.
-  const cached = opts.cachedProtocol ?? 0;
+  // 1. Protocol: auto search (or cached), then lock it. A car that has just answered an auto search (`ATDPN` "A5":
+  // found by the adapter, the session open) keeps that protocol: searching again (`ATSP0`) drops the K-line session
+  // the search opened, and the ECU ignores a new init until the old session times out (~5 s, KWP2000 P3max). A
+  // tester's K-line car went init → fail → standby → found → init for 2 min 15 s that way.
+  const current = await send("ATDPN", { timeoutMs: 1000 });
+  const found = /^A[1-9A-C]$/i.test(current.lines.join("").replace(/\s/g, "")) ? parseProtocolNumber(current.lines) : null;
+  const cached = found ?? opts.cachedProtocol ?? 0;
   await send(`ATSP${hex(cached)}`, { timeoutMs: 1000 });
   let supported = await send("0100", { timeoutMs: 10000 });
   // An "OK" or other text without the bitmap: a reply arriving one command late. The next one answers.
