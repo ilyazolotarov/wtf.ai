@@ -96,12 +96,12 @@ export function MiniMap({
   );
 }
 
-/** The map's course cone: 28° each side (map-surface.native.tsx), in map units. */
+/** The map's course cone: 28° each side (map-layers.tsx), in map units. */
 const CONE_HALF_RAD = (28 * Math.PI) / 180;
 const CONE_R = 34;
 
 /**
- * The car's dot as the map draws it (map-surface.native.tsx): blue while GPS is trusted; otherwise yellow, a light
+ * The car's dot as the map draws it (map-layers.tsx): blue while GPS is trusted; otherwise yellow, a light
  * centre and a dashed circle. `headingDeg` (clockwise from up) draws the cone.
  */
 export function Puck({
