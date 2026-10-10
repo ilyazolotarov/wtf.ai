@@ -29,7 +29,8 @@ import type { RouteSnapshot } from "@/services/navigation/route-service";
  * Buttons do nothing.
  */
 export default function UiGalleryScreen() {
-  const { t } = useT();
+  const { t, language } = useT();
+  const label = (english: string, ukrainian: string) => language === "uk" ? ukrainian : english;
   const palette = usePalette();
   const panel = usePanelStyle();
   // Fixed once, so the ages ("4 min ago") don't tick between screenshots.
@@ -39,21 +40,22 @@ export default function UiGalleryScreen() {
     navStatusFrom(trust ? position(now, trust, extra) : null, adapter, false, palette, t);
 
   const statuses: [string, ReturnType<typeof nav>][] = [
-    ["trusted", nav("TRUSTED", "on")],
-    ["dead reckoning", nav("NO_FIX", "on")],
-    ["Wi-Fi fix, no adapter", nav("NO_FIX", "off", { speedMps: undefined })],
-    ["spoofed", nav("UNTRUSTED", "on")],
-    ["reacquiring", nav("REACQUIRING", "on")],
-    ["placed by hand", nav("NO_FIX", "on", { source: "manual" })],
-    ["no position", nav(null, "off")],
+    [label("trusted", "надійна позиція"), nav("TRUSTED", "on")],
+    [label("dead reckoning", "за даними авто"), nav("NO_FIX", "on")],
+    [label("Wi-Fi fix, no adapter", "позиція за Wi-Fi, без адаптера"), nav("NO_FIX", "off", { speedMps: undefined })],
+    [label("spoofed", "підміна GPS"), nav("UNTRUSTED", "on")],
+    [label("reacquiring", "перевірка GPS"), nav("REACQUIRING", "on")],
+    [label("placed by hand", "указано вручну"), nav("NO_FIX", "on", { source: "manual" })],
+    [label("no position", "позиція невідома"), nav(null, "off")],
   ];
+  const routeStates = demoRouteStates(label);
   const spoofed = nav("UNTRUSTED", "off");
   const ghost = { lat: 50.47, lon: 30.6, accuracyM: 8, timestamp: now };
   const manual = { placedAt: now - 300_000, confirmedAt: now - 240_000, asking: false };
 
   return (
     <ScreenContent title={t("uiGallery")}>
-      <Group title="Status pill">
+      <Group title={label("Status pill", "Індикатор стану")}>
         {statuses.map(([name, status]) => (
           <Item key={name} name={name}>
             <StatusRow nav={status} expandable expanded={false} onToggle={none} />
@@ -61,14 +63,14 @@ export default function UiGalleryScreen() {
         ))}
       </Group>
 
-      <Group title="Under the pill">
-        <Item name="since trusted, driven">
+      <Group title={label("Under the pill", "Під індикатором стану")}>
+        <Item name={label("since trusted, driven", "від останньої надійної позиції, у дорозі")}>
           <SinceTrustedStrip position={position(now, "UNTRUSTED", { lastTrustedFixAt: now - 240_000, distanceSinceTrustedM: 2300 })} />
         </Item>
         {(["UNTRUSTED", "NO_FIX", "REACQUIRING"] as const).map((trust) => {
           const status = nav(trust, "off");
           return (
-            <Item key={trust} name={`trust alert ${trust}`}>
+            <Item key={trust} name={`${label("trust alert", "попередження про GPS")} ${trust}`}>
               <TrustAlertCard
                 nav={status}
                 text={trustAlertText(status, t) ?? ""}
@@ -79,41 +81,41 @@ export default function UiGalleryScreen() {
             </Item>
           );
         })}
-        <Item name="trust alert, Wi-Fi fix">
+        <Item name={label("trust alert, Wi-Fi fix", "попередження: позиція за Wi-Fi")}>
           <TrustAlertCard nav={statuses[2][1]} text={trustAlertText(statuses[2][1], t) ?? ""} ghost={undefined} showingGhost={false} onToggleGhost={none} />
         </Item>
-        <Item name="spoof, showing the claim">
+        <Item name={label("spoof, showing the claim", "підміна: позиція за GPS")}>
           <TrustAlertCard nav={spoofed} text={trustAlertText(spoofed, t) ?? ""} ghost={ghost} showingGhost onToggleGhost={none} />
         </Item>
-        <Item name="simulated outage">
+        <Item name={label("simulated outage", "імітація втрати GPS")}>
           <OutageCard outage={{ startedAt: now - 95_000, distanceM: 1830, errorM: 24, maxErrorM: 61 }} nowMs={now} onRestore={none} />
           <OutageCard outage={{ startedAt: now - 20_000, distanceM: 120 }} nowMs={now} onRestore={none} />
         </Item>
-        <Item name="chips">
+        <Item name={label("chips", "позначки стану")}>
           <HudChip icon="location_on" label={t("placeOffer")} color={palette.accent} onPress={none} />
           <HudChip icon="bluetooth" label={t("obdFindingProtocol")} color={palette.warn.c} />
           <HudChip icon="gps_off" label={t("cutGps")} color={palette.accent} onPress={none} />
           <ManualChip manual={manual} onPlace={none} onForget={none} />
           <ManualChip manual={manual} onPlace={undefined} onForget={none} />
         </Item>
-        <Item name="region prompt">
+        <Item name={label("region prompt", "вибір регіону")}>
           <RegionPromptCard
             panelStyle={panel}
-            title={t("regionOutsideTitle").replace("{region}", "Kyiv Oblast")}
-            body={t("regionSwitchBody").replace("{region}", "Zhytomyr Oblast")}
+            title={t("regionOutsideTitle").replace("{region}", label("Kyiv Oblast", "Київська область"))}
+            body={t("regionSwitchBody").replace("{region}", label("Zhytomyr Oblast", "Житомирська область"))}
             action={{ label: t("regionSwitch"), onPress: none }}
             onDismiss={none}
           />
           <RegionPromptCard
             panelStyle={panel}
-            title={t("regionOutsideTitle").replace("{region}", "Kyiv")}
-            body={t("regionDownloadBody").replace("{region}", "Chernihiv Oblast").replace("{size}", "61 MB")}
+            title={t("regionOutsideTitle").replace("{region}", label("Kyiv", "Київ"))}
+            body={t("regionDownloadBody").replace("{region}", label("Chernihiv Oblast", "Чернігівська область")).replace("{size}", label("61 MB", "61 МБ"))}
             action={{ label: t("download"), onPress: none }}
             onDismiss={none}
           />
           <RegionPromptCard
             panelStyle={panel}
-            title={t("regionOutsideTitle").replace("{region}", "Kyiv")}
+            title={t("regionOutsideTitle").replace("{region}", label("Kyiv", "Київ"))}
             body={t("regionUnknownBody")}
             action={{ label: t("downloads"), onPress: none }}
             onDismiss={none}
@@ -121,64 +123,64 @@ export default function UiGalleryScreen() {
         </Item>
       </Group>
 
-      <Group title="Putting the car on the map">
-        <Item name="placing: where">
+      <Group title={label("Putting the car on the map", "Позиція авто на мапі")}>
+        <Item name={label("placing: where", "укажіть позицію")}>
           <PlacingCard step="position" hasHeading={false} onCancel={none} onNext={none} />
         </Item>
-        <Item name="placing: which way, before and after the tap">
+        <Item name={label("placing: which way, before and after the tap", "укажіть напрямок: до й після натискання")}>
           <PlacingCard step="heading" hasHeading={false} onCancel={none} onNext={none} />
           <PlacingCard step="heading" hasHeading onCancel={none} onNext={none} />
         </Item>
-        <Item name="is the car where the dot is?">
+        <Item name={label("is the car where the dot is?", "авто там, де точка?")}>
           <PoseQuestionCard distanceM={420} onAnswer={none} />
         </Item>
-        <Item name="still where you put it?">
+        <Item name={label("still where you put it?", "авто досі там, де ви вказали?")}>
           <ManualQuestionCard manual={{ ...manual, asking: true }} onAnswer={none} />
         </Item>
       </Group>
 
-      <Group title="Route">
-        {ROUTE_STATES.map(([name, route, muted, offPhone]) => (
+      <Group title={label("Route", "Маршрут")}>
+        {routeStates.map(([name, route, muted, offPhone]) => (
           <Item key={name} name={name}>
             <RouteBanner route={route} nowMs={now} onStop={none} muted={muted} onToggleVoice={none} offPhone={offPhone} />
           </Item>
         ))}
-        <Item name="voice off in Settings">
-          <RouteBanner route={ROUTE_STATES[2][1]} nowMs={now} onStop={none} muted={false} />
+        <Item name={label("voice off in Settings", "голос вимкнено в налаштуваннях")}>
+          <RouteBanner route={routeStates[2][1]} nowMs={now} onStop={none} muted={false} />
         </Item>
-        <Item name="dropped pin, standing / moving">
+        <Item name={label("dropped pin, standing / moving", "обрана точка, авто стоїть / рухається")}>
           <PinCard pin={{ lat: 50.46, lon: 30.53 }} position={position(now, "TRUSTED")} onClose={none} onPlace={none} onRoute={none} />
           <PinCard pin={{ lat: 50.46, lon: 30.53 }} position={null} onClose={none} onPlace={undefined} onRoute={none} />
         </Item>
-        <Item name="route held without an adapter">
+        <Item name={label("route held without an adapter", "маршрут без адаптера")}>
           <HeldRouteCard manual={undefined} trusted={false} mayPlace onPlace={none} onCancel={none} onConfirm={none} />
           <HeldRouteCard manual={undefined} trusted={false} mayPlace={false} onPlace={none} onCancel={none} onConfirm={none} />
           <HeldRouteCard manual={manual} trusted={false} mayPlace onPlace={none} onCancel={none} onConfirm={none} />
           <HeldRouteCard manual={undefined} trusted mayPlace onPlace={none} onCancel={none} onConfirm={none} />
         </Item>
-        <Item name="saved place">
-          <SaveConfirmation kind="home" replaced="Khreshchatyk 22" onUndo={none} />
+        <Item name={label("saved place", "збережене місце")}>
+          <SaveConfirmation kind="home" replaced={label("Khreshchatyk 22", "Хрещатик, 22")} onUndo={none} />
           <SaveConfirmation kind="favorite" replaced={null} onUndo={none} />
           <SaveConfirmation kind={null} replaced={null} onUndo={none} />
         </Item>
       </Group>
 
-      <Group title="Map, bottom and centre">
-        <Item name="tour invite">
+      <Group title={label("Map, bottom and centre", "Мапа: нижня й центральна частини")}>
+        <Item name={label("tour invite", "запрошення до огляду")}>
           <TourInvite panelStyle={panel} onStart={none} onDismiss={none} />
         </Item>
-        <Item name="camera button: follow, heading-up, free">
+        <Item name={label("camera button: follow, heading-up, free", "режим мапи: за авто, за курсом, вільний")}>
           <View style={styles.row}>
             <CameraButton mode="follow" onPress={none} />
             <CameraButton mode="follow-heading" onPress={none} />
             <CameraButton mode="free" onPress={none} />
           </View>
         </Item>
-        <Item name="bottom bar, parked / driving">
+        <Item name={label("bottom bar, parked / driving", "нижня панель, стоянка / поїздка")}>
           <BottomBar recording={false} onLayout={none} />
           <BottomBar recording onLayout={none} />
         </Item>
-        <Item name="location denied / no fix yet">
+        <Item name={label("location denied / no fix yet", "немає доступу до геопозиції / позицію ще не визначено")}>
           <PermissionCard />
           <NoFixCard />
         </Item>
@@ -224,10 +226,8 @@ function position(now: number, trust: TrustState, extra: Partial<PositionEstimat
 }
 
 /** The banner's states: name, route, muted, voice off the phone. */
-const ROUTE_STATES = routeStates();
-
-function routeStates(): [string, RouteSnapshot, boolean, boolean][] {
-  const destination = { lat: 50.4, lon: 30.6, name: "Boryspil" };
+function demoRouteStates(label: (english: string, ukrainian: string) => string): [string, RouteSnapshot, boolean, boolean][] {
+  const destination = { lat: 50.4, lon: 30.6, name: label("Boryspil", "Бориспіль") };
   const maneuvers: Maneuver[] = [
     { kind: "depart", atM: 0, lat: 50.45, lon: 30.52, turnRad: 0 },
     { kind: "roundabout", atM: 900, lat: 50.45, lon: 30.53, turnRad: 1.2, exit: 3 },
@@ -249,15 +249,15 @@ function routeStates(): [string, RouteSnapshot, boolean, boolean][] {
     ...extra,
   });
   return [
-    ["planning", { destination, status: "planning", planId: 1, replanning: false }, false, false],
-    ["failed", { destination, status: "failed", failure: "no-road-at-destination", planId: 1, replanning: false }, false, false],
-    ["on route", active(guidance("on")), false, false],
-    ["on route, then keep right, muted", active(guidance("on", { toNextM: 80, thenIndex: 2 })), true, false],
-    ["voice to the car's Bluetooth", active(guidance("on")), false, true],
-    ["planning again", active(guidance("off"), { replanning: true }), false, false],
-    ["re-plan failed", active(guidance("off"), { replanFailure: "no-route" }), false, false],
-    ["position uncertain", active(guidance("unsure")), false, false],
-    ["arrived", active(guidance("arrived")), false, false],
+    [label("planning", "прокладаємо маршрут"), { destination, status: "planning", planId: 1, replanning: false }, false, false],
+    [label("failed", "маршрут не знайдено"), { destination, status: "failed", failure: "no-road-at-destination", planId: 1, replanning: false }, false, false],
+    [label("on route", "на маршруті"), active(guidance("on")), false, false],
+    [label("on route, then keep right, muted", "на маршруті, потім тримайтеся правіше, без звуку"), active(guidance("on", { toNextM: 80, thenIndex: 2 })), true, false],
+    [label("voice to the car's Bluetooth", "голос через Bluetooth авто"), active(guidance("on")), false, true],
+    [label("planning again", "перепрокладаємо маршрут"), active(guidance("off"), { replanning: true }), false, false],
+    [label("re-plan failed", "не вдалося перепрокласти маршрут"), active(guidance("off"), { replanFailure: "no-route" }), false, false],
+    [label("position uncertain", "позиція неточна"), active(guidance("unsure")), false, false],
+    [label("arrived", "прибуття"), active(guidance("arrived")), false, false],
   ];
 }
 
