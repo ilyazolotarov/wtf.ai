@@ -170,7 +170,7 @@ export function LessonRoute() {
               <View style={[styles.search, { backgroundColor: palette.sheetBg }]}>
                 <View style={[styles.field, { backgroundColor: palette.groupBg }]}>
                   <Icon name="search" size={16} color={palette.text2} />
-                  <T size={15} color={palette.text2} numberOfLines={1}>
+                  <T size={15} color={palette.text2} fit>
                     {t("searchPlaces")}
                   </T>
                 </View>

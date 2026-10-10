@@ -71,7 +71,7 @@ function HudAction({
           <View style={[styles.actionContent, pressed && { backgroundColor: palette.line }]}>
             <Icon name={icon} size={24} color={palette.text} />
             {badge && <BadgeDot color={badgeColor} border={palette.groupBg} pulse={badge === "busy"} label={badgeLabel} />}
-            <T w="medium" size={12} color={highlight ? palette.accent : undefined}>
+            <T w="medium" size={12} color={highlight ? palette.accent : undefined} fit>
               {label}
             </T>
           </View>

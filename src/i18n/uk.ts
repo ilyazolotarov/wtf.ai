@@ -185,6 +185,7 @@ export const uk = {
   lastError: "Помилка",
   copyGattDump: "Поділитися GATT-дампом",
   elmTerminal: "ELM-термінал",
+  uiGallery: "Галерея інтерфейсу",
   send: "Надіслати",
   commandPlaceholder: "AT-команда або OBD-запит",
   clear: "Очистити",

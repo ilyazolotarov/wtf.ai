@@ -119,7 +119,7 @@ export function RouteBanner({
             {distance}
           </T>
         )}
-        <T w="semibold" size={distance ? 15 : 17} numberOfLines={2}>
+        <T w="semibold" size={distance ? 15 : 17} fit={2}>
           {title}
         </T>
         {then && (
@@ -128,13 +128,15 @@ export function RouteBanner({
               {t("thenManeuver")}
             </T>
             <Icon name={MANEUVER_ICON[then.kind]} size={13} color={palette.text2} />
-            <T size={13} color={palette.text2} numberOfLines={1}>
-              {instruction(then)}
-            </T>
+            <View style={styles.thenText}>
+              <T size={13} color={palette.text2} fit={2}>
+                {instruction(then)}
+              </T>
+            </View>
           </View>
         )}
         {sub && (
-          <T size={13} color={subColor} numberOfLines={2}>
+          <T size={13} color={subColor} fit={2}>
             {sub}
           </T>
         )}
@@ -208,6 +210,7 @@ const styles = StyleSheet.create({
   copy: { flex: 1, gap: 2 },
   distance: { fontVariant: ["tabular-nums"], letterSpacing: -0.4 },
   then: { flexDirection: "row", alignItems: "center", gap: 5 },
+  thenText: { flexShrink: 1 },
   // Apart, with taps that don't reach the other button: × ends the route.
   buttons: { gap: 20, alignSelf: "stretch", justifyContent: "space-between" },
   button: {

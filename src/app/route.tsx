@@ -20,7 +20,7 @@ import { formatDurationS, PROBLEM_TEXT } from "@/components/route/guidance-text"
 import { Flash, SaveConfirmation } from "@/components/route/save-feedback";
 import { resultDetail, resultTitle } from "@/components/route/search-text";
 import { Icon, type IconName } from "@/components/ui/icon";
-import { T } from "@/components/ui/text";
+import { INPUT_MAX_FONT_SCALE, T } from "@/components/ui/text";
 import { Font, Radius, usePalette } from "@/constants/theme";
 import type { Strings } from "@/i18n/en";
 import { useT } from "@/i18n/provider";
@@ -193,7 +193,7 @@ export default function RouteScreen() {
           <T w="semibold" size={16} numberOfLines={2}>
             {options.title ?? d.title}
           </T>
-          <T size={12} color={palette.text2} numberOfLines={1}>
+          <T size={12} color={palette.text2} fit>
             {detail ? `${detail} · ${where}` : where}
           </T>
         </View>
@@ -226,6 +226,7 @@ export default function RouteScreen() {
           placeholderTextColor={palette.text2}
           autoCorrect={false}
           returnKeyType="search"
+          maxFontSizeMultiplier={INPUT_MAX_FONT_SCALE}
           style={[styles.searchInput, { color: palette.text }]}
         />
       </View>
@@ -384,14 +385,14 @@ function Metric({ label, value }: { label: string; value: string }) {
 
 const styles = StyleSheet.create({
   search: {
-    height: 48,
+    minHeight: 48,
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
     paddingHorizontal: 16,
     borderRadius: Radius.pill,
   },
-  searchInput: { flex: 1, height: 48, fontSize: 16, fontFamily: Font.regular },
+  searchInput: { flex: 1, minHeight: 48, paddingVertical: 8, fontSize: 16, fontFamily: Font.regular },
   empty: { paddingVertical: 18 },
   destination: { minHeight: 58, flexDirection: "row", alignItems: "center", gap: 12 },
   destinationCopy: { flex: 1, gap: 2 },

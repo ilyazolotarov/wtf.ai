@@ -56,12 +56,12 @@ export function SaveConfirmation({
           {message}
         </T>
         {replaced && (
-          <T size={12} color={palette.text2} numberOfLines={1}>
+          <T size={12} color={palette.text2} fit>
             {t("replacedPlace").replace("{name}", replaced)}
           </T>
         )}
       </View>
-      <Pressable onPress={onUndo} accessibilityRole="button" hitSlop={8} style={({ pressed }) => pressed && styles.pressed}>
+      <Pressable onPress={onUndo} accessibilityRole="button" hitSlop={8} style={({ pressed }) => [styles.undo, pressed && styles.pressed]}>
         <T w="semibold" size={14} color={palette.accent}>
           {t("undo")}
         </T>
@@ -88,15 +88,19 @@ export function Flash({ onDone }: { onDone(): void }) {
 }
 
 const styles = StyleSheet.create({
+  // A pill on one line; at a large text size Undo goes under the message, on the right, instead of squeezing it.
   strip: {
     flexDirection: "row",
+    flexWrap: "wrap",
     alignItems: "center",
-    gap: 10,
+    columnGap: 10,
+    rowGap: 4,
     paddingHorizontal: 14,
     paddingVertical: 10,
-    borderRadius: Radius.pill,
+    borderRadius: Radius.rL,
   },
-  copy: { flex: 1, gap: 1 },
+  copy: { flex: 1, minWidth: "60%", gap: 1 },
+  undo: { marginLeft: "auto" },
   pressed: { opacity: 0.6 },
   flash: { marginHorizontal: -8, borderRadius: 12 },
 });

@@ -290,7 +290,7 @@ Screens and the map in detail: [UI-SPEC.md](UI-SPEC.md); the trip-log pages: [TR
 - `vehicle` — the car only: adapter discovery list and connection (transport, ELM version, protocol, poll rate), VIN, engine state, active odometry stage.
 - `position` — integrity, live GNSS, EKF state, map matching and routing timings.
 - `recorder` — everything about trip logs: the trip now (start / stop / marker), the `trips` list, recording settings (trip end and linger times, raw IMU, IMU rate), the opt-in upload code and the storage limit.
-- `developer` — test switches and knobs (emulated adapters, particles, GPS outage button, route hint, speed cap, RPM period, navigator version) and the ELM terminal.
+- `developer` — test switches and knobs (emulated adapters, particles, GPS outage button, route hint, speed cap, RPM period, navigator version), the ELM terminal and the UI gallery (every conditional map panel at once, for large-text checks: UI-SPEC §4.7).
 - `downloads` — Offline maps: the regions to download (map, road graph and search index together).
 - `route` — destination search, saved places and recents, and starting guidance (ROUTING-SPEC, SEARCH-SPEC).
 - `trips` (log list, share, delete) and `debug-terminal` (ELM terminal), opened from the recorder and developer pages.

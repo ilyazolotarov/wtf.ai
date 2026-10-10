@@ -91,6 +91,41 @@ the trip log), never `expo-location`'s watcher, which stopped for good after jam
   high-contrast palette for driving (Night Drive): near-black ground, amber primary roads, orange motorways and trunk
   roads (Ukraine's national highways), dark road names on a white halo.
 
+### 4.7 Text size, system bars and orientation
+
+The app follows the phone's text size (Android: up to 200 %, often with a larger display size too; iOS Dynamic Type),
+within limits that keep each layout whole. Following Apple's HIG (Typography: keep truncation to a minimum, stack
+instead of crowding side by side, fewer columns as text grows; not every word needs to grow) and Android's (nonlinear
+scaling: large text grows less; test at 200 %).
+
+- **`T` scales itself** (`src/components/ui/text.tsx`): font size and `lineHeight` by the same factor, capped; left to
+  Android, a fixed `lineHeight` grows by the full 200 % while a capped font doesn't, and text came out double-spaced.
+  Text up to 18 pt grows by the whole factor, larger text by the points 18 pt gains (a 30 pt title 1.3× at 150 %).
+- **Caps:** pages 150 % (`MAX_FONT_SCALE`); the map screen's panels 130 % (`FontScaleLimit`: the map is what the
+  driver reads); the Guide's drawn maps 115 % (pictures of the screen at a fixed size; the lesson's own text grows as
+  the pages'); text fields 125 % (Android can neither shrink nor wrap a placeholder); the speed numeral 120 %. React
+  Native's own `Text`/`TextInput` outside `T` carry `maxFontSizeMultiplier` (a Jest test holds every one to it), and
+  icons don't scale with text.
+- **One line that shrinks** (`T fit`, down to half): button, chip and bar labels, page titles, list-row titles. Two
+  lines then shrinking (`fit={2}`): the status pill's lines, the route banner's instruction and line under it,
+  onboarding's buttons (which grow taller).
+- **Side by side while it fits, else stacked:** a card's or page's two buttons (`flexWrap`, each ≥ 40 % wide), a row's
+  label and value (the value goes under the label, on the right), the adapter's name and its button, a region's name
+  and its state, a saved-place message and its Undo.
+- A number and its unit never part at a line end (a no-break space: `formatDistance`, the pill's accuracy).
+- **System bars:** Android draws edge to edge, so every screen pads itself by the safe-area insets: top, bottom, and
+  the sides (landscape, a tablet ignoring the portrait lock). The map's bottom bar sits fully above Android's
+  navigation bar (the 3-button one is 48 dp); iOS lets it reach into the home indicator's strip. The status bar icons
+  follow the app's scheme (`expo-status-bar`, `style="auto"`): Android drew white ones over the light map.
+- **Orientation:** the app is portrait only (`app.json`): its map screen has no landscape layout (top and bottom
+  panels would leave a strip of map between them). The navigator doesn't care how the phone is mounted (the yaw is
+  the gyro projected on gravity). **The map turns with the phone** (`map-turn.ts`): held sideways (or upside down),
+  only the map view is rotated 90° (180°) about the screen's centre, from the IMU's gravity (running while the map is
+  on screen), so north-up has north at the physical top and heading-up the road ahead there, and the map's labels,
+  tilt and (i) follow; the panels stay as they are. A new turn holds 0.7 s first, ±15° of hysteresis past the
+  diagonal, kept while the phone lies flat; `map turned <deg>°` goes into the trip log. The walking compass turns
+  with it (it reports the phone's top). Not on Android 10–11: their map is a GLSurfaceView, which can't be rotated.
+
 ## 5. App shell
 
 - `src/app/_layout.tsx`: `Stack` inside `ThemeProvider` → `I18nProvider` → `PositionProvider` → `RuntimeProvider`
@@ -101,7 +136,9 @@ the trip log), never `expo-location`'s watcher, which stopped for good after jam
   header (`ScreenContent`) has a back button, and from the second level down a ✕ straight back to the map. (A form
   sheet can't hold a stack, and iOS has no back swipe for a sheet.)
 - **Full-screen modals**, with nothing to go back to: `onboarding` (welcome → location → adapter → phone holder; shown
-  until `onboarding-done` is set in kv-store) and `map-setup` (the first map download).
+  until `onboarding-done` is set in kv-store; a step's text scrolls when large text makes it taller than the screen,
+  while the buttons and, on the adapter step, the adapter's state stay in view above them) and `map-setup` (the first
+  map download).
 
 ## 6. Map screen (`src/app/index.tsx`)
 
@@ -253,7 +290,8 @@ and odometry stage; specified in [TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md) §9.
 
 The list: How to use? (the Guide, §7.7), Offline maps (`more/downloads`, §7.4), Settings (§7.6), then the diagnostic
 pages `position` (integrity, live GNSS, EKF and map matching state, routing timings), `recorder` (Trip recorder:
-everything about trip logs, TRIP-LOGGER-SPEC §9.2) and `developer` (test switches and knobs, the ELM terminal).
+everything about trip logs, TRIP-LOGGER-SPEC §9.2) and `developer` (test switches and knobs, the ELM terminal, and the **UI gallery**: every panel the map shows only in
+some state, drawn at once with made-up data, to see them all at a large text size and in both languages).
 
 ### 7.4 `downloads`
 
@@ -340,4 +378,10 @@ normally"), never "Nothing".
    - Deny permission → `PermissionCard`.
    - Dark mode switches the map style.
    - Every page opens and goes back by the system's gesture; Ukrainian strings fit without overflow.
+3. At a large text size (§4.7), on the Android emulator: `python scripts/android-ui-sweep.py out-dir` opens every
+   page, the UI gallery and every lesson at 100 %, 130 % and 200 % text (with larger display sizes), scrolls each to
+   the end and screenshots it, and fails when text or a button reaches under the navigation bar or a label spills
+   out of its button. Run it in both languages and look through the screenshots: a label shrunk too far or a layout
+   that merely looks wrong is only seen there. Onboarding (Guide → "Show the first-run screens again") and the map
+   download (no map installed) are checked by hand.
    - Route: select a destination → distance plausible; Start → line, alternatives and banner on the map.

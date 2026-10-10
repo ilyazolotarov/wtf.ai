@@ -65,8 +65,11 @@ interface MapSurfaceProps {
   placedMark?: { at: Coordinate; headingRad: number | null; draft: boolean } | null;
   /** Changes when the route and its alternatives should be framed (they came while the car stood). */
   overview?: number | null;
-  /** Points from the bottom for MapLibre's attribution button: above the screen's bottom bar, which would cover it. */
-  attributionBottom?: number;
+  /**
+   * Where MapLibre's attribution button goes, in points from the map's edges: clear of the screen's panels, which
+   * would cover it.
+   */
+  attributionPosition?: { top?: number; bottom?: number; left?: number; right?: number };
 }
 
 export function MapSurface({
@@ -84,7 +87,7 @@ export function MapSurface({
   onTap,
   placedMark = null,
   overview = null,
-  attributionBottom = 8,
+  attributionPosition = { bottom: 8, left: 18 },
 }: MapSurfaceProps) {
   const scheme = useColorScheme() === "dark" ? "dark" : "light";
   const palette = Colors[scheme];
@@ -129,7 +132,7 @@ export function MapSurface({
       // the blur came out empty. A TextureView is, so use it wherever blur runs (Android 12+).
       androidView={ANDROID_BLURS ? "texture" : "surface"}
       attribution
-      attributionPosition={{ bottom: attributionBottom, left: 18 }}
+      attributionPosition={attributionPosition as ComponentProps<typeof Map>["attributionPosition"]}
       compass={false}
       logo={false}
       scaleBar={false}

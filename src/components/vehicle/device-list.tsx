@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Pressable, StyleSheet, Text, useColorScheme, View } from "react-native";
 
+import { MAX_FONT_SCALE } from "@/components/ui/text";
 import { Colors } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
 import type { DiscoveredDevice } from "@/obd/types";
@@ -41,14 +42,14 @@ function DeviceRow({
       style={({ pressed }) => [styles.row, pressed && styles.pressed, active && { backgroundColor: palette.accentA }]}
     >
       <View style={styles.rowText}>
-        <Text style={[styles.name, { color: palette.text }]} numberOfLines={1}>
+        <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[styles.name, { color: palette.text }]} numberOfLines={1}>
           {device.name ?? device.id}
         </Text>
-        <Text style={[styles.subtitle, { color: palette.textSecondary }]} numberOfLines={1}>
+        <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[styles.subtitle, { color: palette.textSecondary }]} numberOfLines={1}>
           {subtitle || dash}
         </Text>
       </View>
-      <Text style={[styles.rssi, { color: palette.textSecondary }]}>{rssiBars(device.rssi)}</Text>
+      <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[styles.rssi, { color: palette.textSecondary }]}>{rssiBars(device.rssi)}</Text>
     </Pressable>
   );
 }
@@ -72,7 +73,7 @@ export function DeviceList({
   const section = (title: string, list: DiscoveredDevice[]) =>
     list.length > 0 && (
       <View style={styles.group}>
-        <Text style={[styles.groupTitle, { color: palette.textSecondary }]}>{title}</Text>
+        <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[styles.groupTitle, { color: palette.textSecondary }]}>{title}</Text>
         {list.map((d) => (
           <DeviceRow key={d.id} device={d} active={d.id === activeId} onPress={() => onSelect(d)} />
         ))}
@@ -84,11 +85,11 @@ export function DeviceList({
       {section(t("remembered"), remembered)}
       {section(t("obdAdapters"), adapters)}
       {remembered.length === 0 && adapters.length === 0 && (
-        <Text style={[styles.subtitle, { color: palette.textSecondary }]}>{t("noAdaptersFound")}</Text>
+        <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[styles.subtitle, { color: palette.textSecondary }]}>{t("noAdaptersFound")}</Text>
       )}
       {showOther && section(`${t("otherDevices")} · ${t("tryAnyway")}`, other)}
       <Pressable onPress={() => setShowOther((v) => !v)} accessibilityRole="button">
-        <Text style={[styles.link, { color: palette.accent }]}>{showOther ? t("hideOtherDevices") : t("showOtherDevices")}</Text>
+        <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[styles.link, { color: palette.accent }]}>{showOther ? t("hideOtherDevices") : t("showOtherDevices")}</Text>
       </Pressable>
     </View>
   );

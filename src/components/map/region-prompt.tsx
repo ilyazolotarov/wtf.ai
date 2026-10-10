@@ -80,7 +80,6 @@ function advise(
  */
 export function RegionPrompt({ panelStyle }: { panelStyle: StyleProp<ViewStyle> }) {
   const { t, language } = useT();
-  const palette = usePalette();
   const { installed, catalog, catalogLoading, download } = useMapPacks();
   const check = useCheckPoint();
   const [, setDismissals] = useState(0);
@@ -132,6 +131,36 @@ export function RegionPrompt({ panelStyle }: { panelStyle: StyleProp<ViewStyle> 
         : { label: t("downloads"), onPress: () => router.push("/downloads") };
 
   return (
+    <RegionPromptCard
+      panelStyle={panelStyle}
+      title={t("regionOutsideTitle").replace("{region}", active.name[language])}
+      body={body}
+      action={action}
+      onDismiss={() => {
+        dismissed.add(key);
+        setDismissals((n) => n + 1);
+      }}
+    />
+  );
+}
+
+/** The card itself (the developer's UI gallery draws it without a region check). */
+export function RegionPromptCard({
+  panelStyle,
+  title,
+  body,
+  action,
+  onDismiss,
+}: {
+  panelStyle: StyleProp<ViewStyle>;
+  title: string;
+  body: string;
+  action: { label: string; onPress(): void };
+  onDismiss(): void;
+}) {
+  const { t } = useT();
+  const palette = usePalette();
+  return (
     <View style={[panelStyle, styles.card]}>
       <GlassFill radius={Radius.rL} />
       <View style={styles.row}>
@@ -140,7 +169,7 @@ export function RegionPrompt({ panelStyle }: { panelStyle: StyleProp<ViewStyle> 
         </View>
         <View style={styles.text}>
           <T w="semibold" size={15}>
-            {t("regionOutsideTitle").replace("{region}", active.name[language])}
+            {title}
           </T>
           <T size={13} color={palette.text2}>
             {body}
@@ -153,19 +182,16 @@ export function RegionPrompt({ panelStyle }: { panelStyle: StyleProp<ViewStyle> 
           accessibilityRole="button"
           style={({ pressed }) => [styles.button, { backgroundColor: palette.accent }, pressed && styles.pressed]}
         >
-          <T w="semibold" size={14} color={palette.onAccent}>
+          <T w="semibold" size={14} color={palette.onAccent} fit>
             {action.label}
           </T>
         </Pressable>
         <Pressable
-          onPress={() => {
-            dismissed.add(key);
-            setDismissals((n) => n + 1);
-          }}
+          onPress={onDismiss}
           accessibilityRole="button"
           style={({ pressed }) => [styles.button, { backgroundColor: palette.surface }, pressed && styles.pressed]}
         >
-          <T w="semibold" size={14} color={palette.accent}>
+          <T w="semibold" size={14} color={palette.accent} fit>
             {t("notNow")}
           </T>
         </Pressable>
@@ -179,7 +205,8 @@ const styles = StyleSheet.create({
   row: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
   icon: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
   text: { flex: 1, gap: 2 },
-  buttons: { flexDirection: "row", gap: 8 },
-  button: { flex: 1, alignItems: "center", paddingHorizontal: 16, paddingVertical: 10, borderRadius: 18 },
+  // Side by side, equal, while both labels fit; otherwise stacked (a large text size, a long label).
+  buttons: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  button: { flexGrow: 1, minWidth: "40%", alignItems: "center", paddingHorizontal: 16, paddingVertical: 10, borderRadius: 18 },
   pressed: { opacity: 0.7 },
 });

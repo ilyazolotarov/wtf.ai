@@ -87,10 +87,10 @@ export default function MoreScreen() {
         <Icon name={item.icon} size={20} color={palette.accent} />
       </View>
       <View style={styles.copy}>
-        <T w="medium" size={16}>
+        <T w="medium" size={16} fit>
           {item.label}
         </T>
-        <T size={13} color={item.subColor ?? palette.text2} numberOfLines={1}>
+        <T size={13} color={item.subColor ?? palette.text2} fit>
           {item.sub}
         </T>
       </View>

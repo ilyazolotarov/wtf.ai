@@ -43,6 +43,8 @@ example
 # generated native folders
 /ios
 /android
+# a local Gradle build's output inside the Expo modules
+/modules/*/android/build/
 
 # Python (tools/)
 __pycache__/

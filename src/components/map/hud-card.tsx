@@ -109,11 +109,11 @@ export function CardButton({
         pressed && hud.pressed,
       ]}
     >
-      <T w="semibold" size={14} color={color ?? palette.accent}>
+      <T w="semibold" size={14} color={color ?? palette.accent} fit>
         {label}
       </T>
       {sub && (
-        <T size={12} color={palette.text2}>
+        <T size={12} color={palette.text2} fit>
           {sub}
         </T>
       )}
@@ -146,7 +146,7 @@ export function PillButton({
       ]}
     >
       <Icon name={icon} size={16} color={color} />
-      <T w="semibold" size={15} color={color}>
+      <T w="semibold" size={15} color={color} fit>
         {label}
       </T>
     </Pressable>
@@ -170,9 +170,12 @@ export function HudChip({
     <>
       <GlassFill radius={Radius.pill} />
       <Icon name={icon} size={16} color={color} />
-      <T w="semibold" size={13} color={color}>
-        {label}
-      </T>
+      {/* Its own box: in a row sized by its content, a label measured wide and then narrowed is cut off, not shrunk. */}
+      <View style={hud.fitBox}>
+        <T w="semibold" size={13} color={color} fit>
+          {label}
+        </T>
+      </View>
     </>
   );
   if (!onPress) return <View style={[panel, hud.chip]}>{body}</View>;
@@ -191,6 +194,7 @@ export const hud = StyleSheet.create({
   panel: { borderCurve: "continuous" },
   pressed: { opacity: 0.75 },
   disabled: { opacity: 0.4 },
+  fitBox: { flexShrink: 1 },
   card: { gap: 12, padding: 16, borderRadius: Radius.rL },
   row: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
   icon: {
@@ -201,17 +205,20 @@ export const hud = StyleSheet.create({
     justifyContent: "center",
   },
   text: { flex: 1 },
-  actions: { flexDirection: "row" },
+  // Side by side, equal, while both labels fit; otherwise stacked (a large text size, a long label).
+  actions: { flexDirection: "row", flexWrap: "wrap" },
   button: {
     gap: 2,
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 18,
   },
-  wide: { flex: 1, alignItems: "center" },
+  wide: { flexGrow: 1, minWidth: "40%", alignItems: "center" },
   pill: {
-    flex: 1,
-    height: 44,
+    flexGrow: 1,
+    minWidth: "40%",
+    minHeight: 44,
+    paddingHorizontal: 12,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -220,6 +227,7 @@ export const hud = StyleSheet.create({
   },
   chip: {
     alignSelf: "flex-start",
+    maxWidth: "100%",
     height: 36,
     flexDirection: "row",
     alignItems: "center",

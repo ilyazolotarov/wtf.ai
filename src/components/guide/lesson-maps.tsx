@@ -180,12 +180,12 @@ export function LessonMaps() {
           </View>
           <View style={styles.buttons}>
             <View style={[styles.button, { backgroundColor: palette.surface }]}>
-              <T w="semibold" size={14} color={palette.text2}>
+              <T w="semibold" size={14} color={palette.text2} fit>
                 {t("notNow")}
               </T>
             </View>
             <View style={[styles.button, { backgroundColor: palette.surface }]}>
-              <T w="semibold" size={14} color={palette.accent}>
+              <T w="semibold" size={14} color={palette.accent} fit>
                 {t("regionSwitch")}
               </T>
             </View>
@@ -205,8 +205,9 @@ export function LessonMaps() {
 
 const styles = StyleSheet.create({
   card: { gap: 12 },
-  head: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 10 },
-  copy: { flex: 1, gap: 3 },
+  // The region's state beside its name while both fit; otherwise under it, on the right (a large text size).
+  head: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: 10 },
+  copy: { flex: 1, minWidth: "55%", gap: 3 },
   row: { gap: 8, paddingVertical: 10 },
   rowHead: { flexDirection: "row", alignItems: "center", gap: 8 },
   progress: { gap: 8 },
@@ -218,6 +219,7 @@ const styles = StyleSheet.create({
   promptRow: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
   promptIcon: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
   lead: { lineHeight: 18 },
-  buttons: { flexDirection: "row", gap: 8 },
-  button: { flex: 1, alignItems: "center", paddingHorizontal: 16, paddingVertical: 10, borderRadius: 18 },
+  // Side by side, equal, while both labels fit; otherwise stacked (a large text size, a long label).
+  buttons: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  button: { flexGrow: 1, minWidth: "40%", alignItems: "center", paddingHorizontal: 16, paddingVertical: 10, borderRadius: 18 },
 });

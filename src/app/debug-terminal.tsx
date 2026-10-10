@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, useColorScheme, View } from "react-native";
 
 import { ScreenAction, ScreenContent, ScreenNote, ScreenSection } from "@/components/screens/screen-ui";
+import { INPUT_MAX_FONT_SCALE, MAX_FONT_SCALE } from "@/components/ui/text";
 import { Colors } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
 import { useRuntime, useVehicleLinkValue } from "@/providers/runtime-provider";
@@ -56,13 +57,14 @@ export default function DebugTerminalScreen() {
           autoCapitalize="characters"
           autoCorrect={false}
           returnKeyType="send"
+          maxFontSizeMultiplier={INPUT_MAX_FONT_SCALE}
           onSubmitEditing={() => void run(command)}
           style={[styles.input, { color: palette.text, borderColor: palette.textSecondary }]}
         />
         <View style={styles.quick}>
           {QUICK.map((q) => (
             <Pressable key={q} onPress={() => void run(q)} disabled={!connected || busy} style={[styles.chip, { backgroundColor: palette.accentA }]}>
-              <Text style={[styles.chipText, { color: palette.accent }]}>{q}</Text>
+              <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[styles.chipText, { color: palette.accent }]}>{q}</Text>
             </Pressable>
           ))}
         </View>
@@ -72,13 +74,13 @@ export default function DebugTerminalScreen() {
       {!connected && <ScreenNote>{t("adapterDisconnected")}</ScreenNote>}
       {log.map((e) => (
         <View key={e.id} style={[styles.entry, { backgroundColor: palette.backgroundElement }]}>
-          <Text style={[styles.mono, { color: palette.text }]}>
+          <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[styles.mono, { color: palette.text }]}>
             {"> "}
             {e.command}
-            <Text style={{ color: palette.textSecondary }}>{`   ${e.status} · ${e.latencyMs.toFixed(0)} ms`}</Text>
+            <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={{ color: palette.textSecondary }}>{`   ${e.status} · ${e.latencyMs.toFixed(0)} ms`}</Text>
           </Text>
           {e.lines.map((line, i) => (
-            <Text key={i} selectable style={[styles.mono, { color: palette.text }]}>
+            <Text key={i} selectable maxFontSizeMultiplier={MAX_FONT_SCALE} style={[styles.mono, { color: palette.text }]}>
               {line}
             </Text>
           ))}

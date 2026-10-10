@@ -3,6 +3,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { Alert, StyleSheet, Text, useColorScheme, View } from "react-native";
 
 import { ScreenAction, ScreenContent, ScreenNote, ScreenRow, ScreenSection } from "@/components/screens/screen-ui";
+import { MAX_FONT_SCALE } from "@/components/ui/text";
 import { fmt, fmtBytes, fmtDate, fmtDuration } from "@/components/vehicle/format";
 import { Colors } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
@@ -92,10 +93,10 @@ export default function TripsScreen() {
           .join(" · ");
         return (
           <View key={trip.id} style={[styles.card, { backgroundColor: palette.backgroundElement }]}>
-            <Text style={[styles.title, { color: palette.text }]}>
+            <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[styles.title, { color: palette.text }]}>
               {fmtDate(trip.startUtcMs)} · {trip.id}
             </Text>
-            <Text style={[styles.meta, { color: live ? palette.bad.c : palette.textSecondary }]}>{meta}</Text>
+            <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[styles.meta, { color: live ? palette.bad.c : palette.textSecondary }]}>{meta}</Text>
             <View style={styles.actions}>
               <View style={styles.action}>
                 <ScreenAction labelKey="share" secondary disabled={live} onPress={() => void share(trip)} />
@@ -119,6 +120,7 @@ const styles = StyleSheet.create({
   card: { padding: 16, borderRadius: 24, borderCurve: "continuous", gap: 6 },
   title: { fontSize: 15, fontWeight: "600" },
   meta: { fontSize: 13 },
-  actions: { flexDirection: "row", gap: 10 },
-  action: { flex: 1 },
+  // Side by side, equal, while both labels fit; otherwise stacked (a large text size, a long label).
+  actions: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  action: { flexGrow: 1, minWidth: "40%" },
 });

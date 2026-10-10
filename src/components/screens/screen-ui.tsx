@@ -2,6 +2,7 @@ import { router, useNavigation, useRoute } from "expo-router";
 import { Children, Fragment, isValidElement } from "react";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -20,17 +21,25 @@ import { useT } from "@/i18n/provider";
  * A page's body. With `title`, the page header below the status bar, pinned while the body scrolls: a back button
  * (the system's swipe from the left edge goes back too), the title, and from the second level down a close button
  * back to the map. Without, a plain scrolling body (pages with the system's header, the first-run map download).
+ * `fullScreen`: no header at all (the first-run map download), so the body keeps clear of the status bar itself.
  */
 export function ScreenContent({
   title,
   scrollEnabled = true,
+  fullScreen = false,
   children,
-}: React.PropsWithChildren<{ title?: string; scrollEnabled?: boolean }>) {
+}: React.PropsWithChildren<{ title?: string; scrollEnabled?: boolean; fullScreen?: boolean }>) {
   const palette = usePalette();
   const insets = useSafeAreaInsets();
   if (title)
     return (
-      <View style={[styles.page, { backgroundColor: palette.sheetBg, paddingTop: insets.top }]}>
+      // Sideways the navigation bar and cutouts are at the sides: the page keeps clear of them too.
+      <View
+        style={[
+          styles.page,
+          { backgroundColor: palette.sheetBg, paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right },
+        ]}
+      >
         <View style={styles.pageHeader}>
           <PageHeader title={title} />
         </View>
@@ -43,16 +52,35 @@ export function ScreenContent({
         </ScrollView>
       </View>
     );
-  return (
+  // iOS insets the scrolling body by the bars itself (`contentInsetAdjustmentBehavior`); Android draws edge to edge
+  // and leaves it to the app: the end of the body clear of the navigation bar, and with no header above, the top of
+  // the status bar (the page stops under it rather than scrolling behind the clock).
+  const android = Platform.OS === "android";
+  const body = (
     <ScrollView
       style={{ backgroundColor: palette.sheetBg }}
       contentInsetAdjustmentBehavior="automatic"
       keyboardShouldPersistTaps="handled"
       scrollEnabled={scrollEnabled}
-      contentContainerStyle={[styles.content, styles.contentNoHeader]}
+      contentContainerStyle={[
+        styles.content,
+        styles.contentNoHeader,
+        android && { paddingBottom: styles.content.paddingBottom + insets.bottom },
+      ]}
     >
       {children}
     </ScrollView>
+  );
+  if (!(android && fullScreen)) return body;
+  return (
+    <View
+      style={[
+        styles.page,
+        { backgroundColor: palette.sheetBg, paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right },
+      ]}
+    >
+      {body}
+    </View>
   );
 }
 
@@ -68,7 +96,7 @@ function PageHeader({ title }: { title: string }) {
     <View style={[styles.headerWrap, { backgroundColor: palette.sheetBg }]}>
       <View style={styles.header}>
         {depth > 0 && <RoundButton icon="arrow_back" label={t("back")} onPress={() => router.back()} />}
-        <T w="semibold" size={24} style={styles.headerTitle} numberOfLines={1}>
+        <T w="semibold" size={24} style={styles.headerTitle} fit>
           {title}
         </T>
         {depth > 1 && <RoundButton icon="close" label={t("close")} onPress={() => router.dismissAll()} />}
@@ -224,7 +252,7 @@ export function ScreenAction({
       ]}
     >
       {icon && <Icon name={icon} size={18} color={fg} />}
-      <T w="semibold" size={compact ? 14 : 15} color={fg}>
+      <T w="semibold" size={compact ? 14 : 15} color={fg} fit>
         {label ?? (labelKey ? t(labelKey) : "")}
       </T>
     </Pressable>
@@ -245,7 +273,7 @@ export function ScreenLink({
       accessibilityRole="button"
       style={({ pressed }) => [styles.link, pressed && styles.pressed]}
     >
-      <T w="semibold" size={14} color={palette.accent}>
+      <T w="semibold" size={14} color={palette.accent} fit>
         {label}
       </T>
     </Pressable>
@@ -286,14 +314,7 @@ export function Segmented<V extends string>({
             accessibilityState={{ selected: active }}
             style={[styles.segment, active && { backgroundColor: palette.accent }]}
           >
-            <T
-              w="semibold"
-              size={14}
-              numberOfLines={1}
-              adjustsFontSizeToFit
-              minimumFontScale={0.75}
-              color={active ? palette.onAccent : palette.text}
-            >
+            <T w="semibold" size={14} fit color={active ? palette.onAccent : palette.text}>
               {option.label}
             </T>
           </Pressable>
@@ -353,17 +374,22 @@ const styles = StyleSheet.create({
   plainGroup: { padding: 16, gap: 12, borderRadius: Radius.rL, borderCurve: "continuous" },
   separator: { height: StyleSheet.hairlineWidth },
   card: { padding: 16, gap: 8, borderRadius: Radius.rL, borderCurve: "continuous" },
+  // Label and value side by side while they fit on one line; otherwise the value goes under the label, on the right
+  // (a large text size, long Ukrainian labels), instead of both breaking into narrow columns.
   row: {
     minHeight: 46,
     flexDirection: "row",
+    flexWrap: "wrap",
     justifyContent: "space-between",
     alignItems: "center",
-    gap: 12,
+    columnGap: 12,
+    rowGap: 2,
     paddingVertical: 8,
   },
   rowLabel: { flexShrink: 1 },
   rowValue: {
-    maxWidth: "60%",
+    flexShrink: 1,
+    marginLeft: "auto",
     fontVariant: ["tabular-nums"],
     textAlign: "right",
   },

@@ -3,7 +3,7 @@ import { useState, useSyncExternalStore } from "react";
 import { StyleSheet, TextInput, View } from "react-native";
 
 import { ScreenAction, ScreenCard, ScreenNote, ScreenRow, SectionLabel } from "@/components/screens/screen-ui";
-import { T } from "@/components/ui/text";
+import { INPUT_MAX_FONT_SCALE, T } from "@/components/ui/text";
 import { usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
 import { useRecorderSnapshot } from "@/providers/runtime-provider";
@@ -48,6 +48,7 @@ export function TripUploadSection({ uploader }: { uploader: TripUploader }) {
               }}
               onSubmitEditing={() => void connect()}
               placeholder="bakim-tuvod-segap"
+              maxFontSizeMultiplier={INPUT_MAX_FONT_SCALE}
               placeholderTextColor={palette.text2}
               accessibilityLabel={t("tripUploadCode")}
               autoCapitalize="none"

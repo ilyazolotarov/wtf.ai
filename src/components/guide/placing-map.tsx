@@ -7,6 +7,7 @@ import { useScrollLock } from "@/components/guide/lesson-ui";
 import { MapCard, MapCardButtons, MapCardHeader, MapChipButton } from "@/components/guide/map-ui";
 import { CarGlyph, Puck, useMapColors, useNudgedHeading } from "@/components/guide/mini-map";
 import { PlacingPinShape } from "@/components/map/placing-pin";
+import { DRAWING_MAX_FONT_SCALE, FontScaleLimit } from "@/components/ui/text";
 import { Radius, usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
 
@@ -168,119 +169,122 @@ export function PlacingMap({
   const at = (p: Point) => ({ left: p.x * scale, top: (p.y - top) * scale });
 
   return (
-    <View
-      style={[styles.frame, { aspectRatio: frameW / frameH, backgroundColor: c.land }]}
-      onLayout={(event) => setScale(event.nativeEvent.layout.width / frameW)}
-      {...responder.panHandlers}
-    >
-      <Animated.View
-        pointerEvents="none"
-        style={[
-          styles.layer,
-          {
-            left: MAP.x * scale,
-            top: (MAP.y - top) * scale,
-            width: MAP.w * scale,
-            height: MAP.h * scale,
-            transform: [{ translateX: pan.x }, { translateY: pan.y }],
-          },
-        ]}
+    // A picture of the screen at a fixed size: its cards and chips grow less than the lesson's text (text.tsx).
+    <FontScaleLimit max={DRAWING_MAX_FONT_SCALE}>
+      <View
+        style={[styles.frame, { aspectRatio: frameW / frameH, backgroundColor: c.land }]}
+        onLayout={(event) => setScale(event.nativeEvent.layout.width / frameW)}
+        {...responder.panHandlers}
       >
-        <Svg width="100%" height="100%" viewBox={`${MAP.x} ${MAP.y} ${MAP.w} ${MAP.h}`}>
-          <Rect x={MAP.x} y={MAP.y} width={MAP.w} height={MAP.h} fill={c.land} />
-          {scene}
-          {step === "position" && (
-            // The target: exactly the area that counts as on the car, drawn in the map so it stays on it.
-            <Circle
-              cx={car.x}
-              cy={car.y}
-              r={HIT_UNITS}
-              fill={onCar ? palette.ok.c : palette.accent}
-              fillOpacity={0.16}
-              stroke={onCar ? palette.ok.c : palette.accent}
-              strokeWidth={2}
-              strokeDasharray={onCar ? undefined : "6 4"}
-            />
-          )}
-          {carVisible && !done && <CarGlyph x={car.x} y={car.y} />}
-          {done ? (
-            <Puck x={car.x} y={car.y} r={10} trusted={false} headingDeg={placedHeading} />
-          ) : (
-            <Puck x={dot.x} y={dot.y} r={dotR} trusted={false} headingDeg={placing ? null : dotHeadingDeg} />
-          )}
-        </Svg>
-      </Animated.View>
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.layer,
+            {
+              left: MAP.x * scale,
+              top: (MAP.y - top) * scale,
+              width: MAP.w * scale,
+              height: MAP.h * scale,
+              transform: [{ translateX: pan.x }, { translateY: pan.y }],
+            },
+          ]}
+        >
+          <Svg width="100%" height="100%" viewBox={`${MAP.x} ${MAP.y} ${MAP.w} ${MAP.h}`}>
+            <Rect x={MAP.x} y={MAP.y} width={MAP.w} height={MAP.h} fill={c.land} />
+            {scene}
+            {step === "position" && (
+              // The target: exactly the area that counts as on the car, drawn in the map so it stays on it.
+              <Circle
+                cx={car.x}
+                cy={car.y}
+                r={HIT_UNITS}
+                fill={onCar ? palette.ok.c : palette.accent}
+                fillOpacity={0.16}
+                stroke={onCar ? palette.ok.c : palette.accent}
+                strokeWidth={2}
+                strokeDasharray={onCar ? undefined : "6 4"}
+              />
+            )}
+            {carVisible && !done && <CarGlyph x={car.x} y={car.y} />}
+            {done ? (
+              <Puck x={car.x} y={car.y} r={10} trusted={false} headingDeg={placedHeading} />
+            ) : (
+              <Puck x={dot.x} y={dot.y} r={dotR} trusted={false} headingDeg={placing ? null : dotHeadingDeg} />
+            )}
+          </Svg>
+        </Animated.View>
 
-      {step === "heading" && (
-        // A tap draws the arrow from the pin that way; another turns it.
-        <Pressable
-          style={StyleSheet.absoluteFill}
-          onPress={(event) => {
-            const dx = event.nativeEvent.locationX - pinX * scale;
-            const dy = event.nativeEvent.locationY - pinY * scale;
-            if (Math.hypot(dx, dy) > 8) setHeadingDeg((Math.atan2(dx, -dy) * 180) / Math.PI);
-          }}
-          accessibilityLabel={t("placeHeadingHint")}
-        />
-      )}
-      {placing && (
-        <Svg pointerEvents="none" style={StyleSheet.absoluteFill} viewBox={`0 0 ${frameW} ${frameH}`}>
-          {step === "heading" && !headingRight && (
-            // Where to tap: ahead of the car, up its road.
-            <Circle cx={pinX} cy={pinY - AHEAD_UNITS} r={AHEAD_R} fill={palette.accent} fillOpacity={0.16} stroke={palette.accent} strokeWidth={2} strokeDasharray="6 4" />
-          )}
-          {step === "heading" && headingDeg != null && (
-            <G transform={`rotate(${headingDeg} ${pinX} ${pinY})`}>
-              <Path d={`M${pinX} ${pinY} V${pinY - 70}`} stroke={palette.accent} strokeWidth={4} strokeLinecap="round" />
-              <Path d={`M${pinX - 11} ${pinY - 62} L${pinX} ${pinY - 84} L${pinX + 11} ${pinY - 62} Z`} fill={palette.accent} />
+        {step === "heading" && (
+          // A tap draws the arrow from the pin that way; another turns it.
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={(event) => {
+              const dx = event.nativeEvent.locationX - pinX * scale;
+              const dy = event.nativeEvent.locationY - pinY * scale;
+              if (Math.hypot(dx, dy) > 8) setHeadingDeg((Math.atan2(dx, -dy) * 180) / Math.PI);
+            }}
+            accessibilityLabel={t("placeHeadingHint")}
+          />
+        )}
+        {placing && (
+          <Svg pointerEvents="none" style={StyleSheet.absoluteFill} viewBox={`0 0 ${frameW} ${frameH}`}>
+            {step === "heading" && !headingRight && (
+              // Where to tap: ahead of the car, up its road.
+              <Circle cx={pinX} cy={pinY - AHEAD_UNITS} r={AHEAD_R} fill={palette.accent} fillOpacity={0.16} stroke={palette.accent} strokeWidth={2} strokeDasharray="6 4" />
+            )}
+            {step === "heading" && headingDeg != null && (
+              <G transform={`rotate(${headingDeg} ${pinX} ${pinY})`}>
+                <Path d={`M${pinX} ${pinY} V${pinY - 70}`} stroke={palette.accent} strokeWidth={4} strokeLinecap="round" />
+                <Path d={`M${pinX - 11} ${pinY - 62} L${pinX} ${pinY - 84} L${pinX + 11} ${pinY - 62} Z`} fill={palette.accent} />
+              </G>
+            )}
+            {/* The pin: its point is exactly the spot that is placed, the frame's centre. */}
+            <G transform={`translate(${pinX} ${pinY})`}>
+              <PlacingPinShape />
             </G>
-          )}
-          {/* The pin: its point is exactly the spot that is placed, the frame's centre. */}
-          <G transform={`translate(${pinX} ${pinY})`}>
-            <PlacingPinShape />
-          </G>
-        </Svg>
-      )}
+          </Svg>
+        )}
 
-      {step === "idle" && overlay?.(at)}
+        {step === "idle" && overlay?.(at)}
 
-      {step === "position" && (
-        <MapCard style={styles.bottom}>
-          <MapCardHeader icon="location_on" title={t("placeTitle")} body={t(onCar ? "placeOnCar" : "placeHint")} />
-          <MapCardButtons
-            buttons={[
-              { label: t("placeCancel"), muted: true, onPress: onCancel },
-              // Only on the car: the lesson leads there.
-              { label: t("placeHere"), disabled: !onCar, onPress: () => onStep("heading") },
-            ]}
+        {step === "position" && (
+          <MapCard style={styles.bottom}>
+            <MapCardHeader icon="location_on" title={t("placeTitle")} body={t(onCar ? "placeOnCar" : "placeHint")} />
+            <MapCardButtons
+              buttons={[
+                { label: t("placeCancel"), muted: true, onPress: onCancel },
+                // Only on the car: the lesson leads there.
+                { label: t("placeHere"), disabled: !onCar, onPress: () => onStep("heading") },
+              ]}
+            />
+          </MapCard>
+        )}
+        {step === "heading" && (
+          <MapCard style={styles.bottom}>
+            <MapCardHeader
+              icon="navigation"
+              title={t("placeHeadingTitle")}
+              body={t(headingDeg == null ? "placeHeadingHint" : headingRight ? "placeHeadingConfirm" : "placeWrongWay")}
+            />
+            <MapCardButtons
+              buttons={[
+                { label: t("placeCancel"), muted: true, onPress: onCancel },
+                { label: t("placeConfirm"), disabled: !headingRight, onPress: () => onStep("done") },
+              ]}
+            />
+          </MapCard>
+        )}
+        {done && (
+          <MapChipButton
+            icon="location_on"
+            label={t("manualChip").replace("{age}", t("ageJustNow"))}
+            onClose={onCancel}
+            closeLabel={t("manualForget")}
+            style={styles.topLeft}
           />
-        </MapCard>
-      )}
-      {step === "heading" && (
-        <MapCard style={styles.bottom}>
-          <MapCardHeader
-            icon="navigation"
-            title={t("placeHeadingTitle")}
-            body={t(headingDeg == null ? "placeHeadingHint" : headingRight ? "placeHeadingConfirm" : "placeWrongWay")}
-          />
-          <MapCardButtons
-            buttons={[
-              { label: t("placeCancel"), muted: true, onPress: onCancel },
-              { label: t("placeConfirm"), disabled: !headingRight, onPress: () => onStep("done") },
-            ]}
-          />
-        </MapCard>
-      )}
-      {done && (
-        <MapChipButton
-          icon="location_on"
-          label={t("manualChip").replace("{age}", t("ageJustNow"))}
-          onClose={onCancel}
-          closeLabel={t("manualForget")}
-          style={styles.topLeft}
-        />
-      )}
-    </View>
+        )}
+      </View>
+    </FontScaleLimit>
   );
 }
 

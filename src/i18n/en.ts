@@ -185,6 +185,7 @@ export const en = {
   lastError: "Error",
   copyGattDump: "Share GATT dump",
   elmTerminal: "ELM terminal",
+  uiGallery: "UI gallery",
   send: "Send",
   commandPlaceholder: "AT command or OBD request",
   clear: "Clear",

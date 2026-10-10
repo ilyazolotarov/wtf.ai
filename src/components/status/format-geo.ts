@@ -16,9 +16,10 @@ export function cardinal(degrees: number, lang: Lang): string {
 export function formatDistance(meters: number, lang: Lang): string {
   const km = lang === "uk" ? "км" : "km";
   const m = lang === "uk" ? "м" : "m";
-  if (meters < 1000) return `${Math.round(meters)} ${m}`;
+  // A no-break space: a line never ends between the number and its unit.
+  if (meters < 1000) return `${Math.round(meters)}\u00a0${m}`;
   const value = (meters / 1000).toFixed(meters >= 100000 ? 0 : 1);
-  return `${lang === "uk" ? value.replace(".", ",") : value} ${km}`;
+  return `${lang === "uk" ? value.replace(".", ",") : value}\u00a0${km}`;
 }
 
 /** Travel time at 60 km/h. */

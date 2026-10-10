@@ -100,28 +100,32 @@ function CarDetails() {
             <Icon name="bluetooth" size={24} color={nav.adapterColor} />
           </View>
           <View style={styles.adapterCopy}>
-            <T w="semibold" size={16} numberOfLines={1}>
+            <T w="semibold" size={16} fit>
               {adapterName}
             </T>
-            <T size={13} color={nav.adapterColor}>
+            <T size={13} color={nav.adapterColor} fit>
               {nav.adapterLabel}
             </T>
           </View>
           {snap.activeDeviceId ? (
-            <ScreenAction
-              // Still waiting for the adapter to show up (auto-connect, a reconnect): stopping that isn't a disconnect.
-              labelKey={snap.link === "connecting" || snap.link === "reconnecting" ? "stopSearching" : "disconnect"}
-              secondary
-              compact
-              onPress={() => void link.disconnect()}
-            />
+            <View style={styles.adapterAction}>
+              <ScreenAction
+                // Still waiting for the adapter to show up (auto-connect, a reconnect): stopping that isn't a disconnect.
+                labelKey={snap.link === "connecting" || snap.link === "reconnecting" ? "stopSearching" : "disconnect"}
+                secondary
+                compact
+                onPress={() => void link.disconnect()}
+              />
+            </View>
           ) : remembered ? (
-            <ScreenAction
-              labelKey="connect"
-              compact
-              disabled={nav.adapter === "searching"}
-              onPress={() => void link.autoConnect()}
-            />
+            <View style={styles.adapterAction}>
+              <ScreenAction
+                labelKey="connect"
+                compact
+                disabled={nav.adapter === "searching"}
+                onPress={() => void link.autoConnect()}
+              />
+            </View>
           ) : null}
         </View>
         {snap.activeDeviceId && (
@@ -199,7 +203,8 @@ function CarDetails() {
 }
 
 const styles = StyleSheet.create({
-  adapterCard: { flexDirection: "row", alignItems: "center", gap: 14, marginBottom: 4 },
+  // The button goes under the adapter's name when both don't fit on one line (a large text size, a long label).
+  adapterCard: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 14, marginBottom: 4 },
   adapterTile: {
     width: 48,
     height: 48,
@@ -207,7 +212,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  adapterCopy: { flex: 1, gap: 2 },
-  actions: { flexDirection: "row", gap: 10, marginTop: -6 },
-  flex: { flex: 1 },
+  adapterCopy: { flex: 1, minWidth: 150, gap: 2 },
+  adapterAction: { marginLeft: "auto" },
+  // Side by side, equal, while both labels fit; otherwise stacked (a large text size, a long label).
+  actions: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: -6 },
+  flex: { flexGrow: 1, minWidth: "40%" },
 });

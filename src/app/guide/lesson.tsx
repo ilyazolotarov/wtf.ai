@@ -47,7 +47,7 @@ export default function LessonScreen() {
         accessibilityRole="button"
         style={({ pressed }) => [styles.next, { backgroundColor: palette.accent }, pressed && styles.pressed]}
       >
-        <T w="semibold" size={16} color={palette.onAccent} numberOfLines={1}>
+        <T w="semibold" size={16} color={palette.onAccent} fit>
           {next ? t("guideNextLesson").replace("{title}", t(next.title)) : t("guideAllDone")}
         </T>
       </Pressable>

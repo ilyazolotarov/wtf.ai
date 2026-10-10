@@ -24,7 +24,7 @@ export default function MapSetupScreen() {
   }, [ready]);
 
   return (
-    <ScreenContent>
+    <ScreenContent fullScreen>
       <View style={styles.intro}>
         <View style={[styles.iconTile, { backgroundColor: palette.accentA }]}>
           <Icon name="download" size={30} color={palette.accent} />

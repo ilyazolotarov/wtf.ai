@@ -8,6 +8,7 @@ import {
 } from "@expo-google-fonts/onest";
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
+import { StatusBar } from "expo-status-bar";
 import { useState } from "react";
 import { Platform, useColorScheme } from "react-native";
 
@@ -45,6 +46,9 @@ function RootLayout() {
 
   return (
     <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
+      {/* Dark icons on the light theme, light on the dark one, following the app's scheme (Settings may fix it):
+          Android drew white ones over the light map. */}
+      <StatusBar style="auto" />
       <I18nProvider>
         <PositionProvider>
           <RuntimeProvider>
@@ -78,6 +82,7 @@ const PAGES = [
   "more/position",
   "more/recorder",
   "more/developer",
+  "more/ui-gallery",
   "guide/index",
   "guide/lesson",
 ] as const;

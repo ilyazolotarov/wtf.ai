@@ -78,7 +78,7 @@ export function ManualChip({
         style={({ pressed }) => [styles.manualBody, pressed && hud.pressed]}
       >
         <Icon name="location_on" size={16} color={palette.accent} />
-        <T w="semibold" size={13} color={palette.accent} numberOfLines={1}>
+        <T w="semibold" size={13} color={palette.accent} fit>
           {t("manualChip").replace("{age}", age)}
         </T>
       </Pressable>

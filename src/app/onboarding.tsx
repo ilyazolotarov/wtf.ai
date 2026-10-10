@@ -1,6 +1,6 @@
 import { router } from "expo-router";
 import { useState } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ScreenCard } from "@/components/screens/screen-ui";
@@ -95,7 +95,8 @@ export default function OnboardingScreen() {
         ))}
       </View>
 
-      <View style={styles.body}>
+      {/* Anchored at the bottom, by the buttons; scrolls when large text makes a step taller than the screen. */}
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.body}>
         {step === 0 ? (
           <>
             <T w="bold" size={22} color={palette.accent}>
@@ -122,23 +123,6 @@ export default function OnboardingScreen() {
           </>
         )}
 
-        {step === 2 && (
-          <ScreenCard style={styles.adapterCard}>
-            <Icon name="bluetooth" size={24} color={nav.adapterColor} />
-            <View style={styles.flex}>
-              <T w="semibold" size={15}>
-                {`${t("obdAdapter")} · `}
-                <T w="semibold" size={15} color={nav.adapterColor}>
-                  {nav.adapterLabel}
-                </T>
-              </T>
-              <T size={13} color={palette.text2} style={styles.hint}>
-                {t("obCarHint")}
-              </T>
-            </View>
-          </ScreenCard>
-        )}
-
         {step === 3 && (
           <>
             <ScreenCard style={styles.tips}>
@@ -159,7 +143,25 @@ export default function OnboardingScreen() {
             </T>
           </>
         )}
-      </View>
+      </ScrollView>
+
+      {/* By the buttons, never scrolled away: whether the adapter answers is what this step is for. */}
+      {step === 2 && (
+        <ScreenCard style={styles.adapterCard}>
+          <Icon name="bluetooth" size={24} color={nav.adapterColor} />
+          <View style={styles.flex}>
+            <T w="semibold" size={15}>
+              {`${t("obdAdapter")} · `}
+              <T w="semibold" size={15} color={nav.adapterColor}>
+                {nav.adapterLabel}
+              </T>
+            </T>
+            <T size={13} color={palette.text2} style={styles.hint}>
+              {t("obCarHint")}
+            </T>
+          </View>
+        </ScreenCard>
+      )}
 
       <View style={styles.buttons}>
         <Pressable
@@ -173,7 +175,7 @@ export default function OnboardingScreen() {
             pressed && styles.pressed,
           ]}
         >
-          <T w="semibold" size={16} color={palette.onAccent}>
+          <T w="semibold" size={16} color={palette.onAccent} fit={2} style={styles.buttonLabel}>
             {primary.label}
           </T>
         </Pressable>
@@ -187,7 +189,7 @@ export default function OnboardingScreen() {
               pressed && styles.pressed,
             ]}
           >
-            <T w="semibold" size={16}>
+            <T w="semibold" size={16} fit={2} style={styles.buttonLabel}>
               {secondary.label}
             </T>
           </Pressable>
@@ -201,7 +203,8 @@ const styles = StyleSheet.create({
   root: { flex: 1, gap: 20, paddingHorizontal: 24 },
   dots: { flexDirection: "row", gap: 6 },
   dot: { flex: 1, height: 4, borderRadius: 2 },
-  body: { flex: 1, justifyContent: "flex-end", gap: 16 },
+  scroll: { flex: 1 },
+  body: { flexGrow: 1, justifyContent: "flex-end", gap: 16 },
   hero: { lineHeight: 44, letterSpacing: -1 },
   title: { lineHeight: 34, letterSpacing: -0.6 },
   lead: { lineHeight: 24 },
@@ -218,12 +221,16 @@ const styles = StyleSheet.create({
   tips: { paddingVertical: 4 },
   tip: { minHeight: 48, flexDirection: "row", alignItems: "center", gap: 12 },
   buttons: { gap: 10 },
+  // A long label at a large text size takes a second line before it shrinks.
   button: {
-    height: 54,
+    minHeight: 54,
     alignItems: "center",
     justifyContent: "center",
+    paddingHorizontal: 20,
+    paddingVertical: 8,
     borderRadius: Radius.pill,
   },
+  buttonLabel: { textAlign: "center" },
   disabled: { opacity: 0.5 },
   pressed: { opacity: 0.8 },
 });

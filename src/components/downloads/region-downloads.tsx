@@ -9,7 +9,7 @@ import {
     ScreenSection,
 } from "@/components/screens/screen-ui";
 import { Icon, type IconName } from "@/components/ui/icon";
-import { T } from "@/components/ui/text";
+import { INPUT_MAX_FONT_SCALE, T } from "@/components/ui/text";
 import { usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
 import {
@@ -226,6 +226,7 @@ export function RegionDownloads() {
           autoCorrect={false}
           keyboardType="url"
           returnKeyType="done"
+          maxFontSizeMultiplier={INPUT_MAX_FONT_SCALE}
           style={[styles.input, { color: palette.text, backgroundColor: palette.surface }]}
         />
         <ScreenAction labelKey="apply" compact secondary onPress={applySource} />
@@ -237,8 +238,9 @@ export function RegionDownloads() {
 
 const styles = StyleSheet.create({
   card: { gap: 12 },
-  head: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 10 },
-  copy: { flex: 1, gap: 3 },
+  // The region's state beside its name while both fit; otherwise under it, on the right (a large text size).
+  head: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: 10 },
+  copy: { flex: 1, minWidth: "55%", gap: 3 },
   row: { gap: 8, paddingVertical: 10 },
   rowHead: { flexDirection: "row", alignItems: "center", gap: 8 },
   iconButton: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },

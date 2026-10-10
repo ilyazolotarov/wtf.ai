@@ -1,12 +1,13 @@
 import { StyleSheet, Text, View } from "react-native";
 
+import { MAX_FONT_SCALE } from "@/components/ui/text";
 import { useT } from "@/i18n/provider";
 
 export function MapSurface() {
   const { t } = useT();
   return (
     <View style={styles.canvas}>
-      <Text style={styles.label}>{t("unavailable")}</Text>
+      <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.label}>{t("unavailable")}</Text>
     </View>
   );
 }

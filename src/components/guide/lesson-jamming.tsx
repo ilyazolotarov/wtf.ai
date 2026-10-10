@@ -210,7 +210,7 @@ export function LessonJamming() {
                   ]}
                 />
               </View>
-              <T w="semibold" size={11} color={i === stage ? palette.text : palette.text2} numberOfLines={1}>
+              <T w="semibold" size={11} color={i === stage ? palette.text : palette.text2} fit>
                 {t(label)}
               </T>
             </Pressable>

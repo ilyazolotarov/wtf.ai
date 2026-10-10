@@ -6,7 +6,7 @@ import Svg, { Circle, G, Path, Rect } from "react-native-svg";
 import { CAR_COLOR, FALLBACK_PALETTE, type MapColors } from "@/components/guide/map-colors";
 import { CONE, CONE_FILL_OPACITY, CONE_OUTLINE, DESTINATION_DOT, PIN_DOT, PUCK, PUCK_OUTER } from "@/components/map/puck-style";
 import { GlassFill } from "@/components/ui/glass-fill";
-import { T } from "@/components/ui/text";
+import { DRAWING_MAX_FONT_SCALE, FontScaleLimit, T } from "@/components/ui/text";
 import { useMapPalette } from "@/config/map";
 import { Radius, usePalette, type StatusColor } from "@/constants/theme";
 
@@ -71,7 +71,7 @@ export function MiniMap({
         </G>
         {children}
       </Svg>
-      {overlay}
+      <FontScaleLimit max={DRAWING_MAX_FONT_SCALE}>{overlay}</FontScaleLimit>
     </View>
   );
 }
@@ -250,13 +250,13 @@ export function StatusPillMock({
         <View style={[styles.haloDot, { backgroundColor: color.c }]} />
       </View>
       <View style={styles.pillCopy}>
-        <T w="semibold" size={15} numberOfLines={1}>
+        <T w="semibold" size={15} fit>
           {label}
         </T>
-        <T size={12} color={palette.text2} numberOfLines={1}>
+        <T size={12} color={palette.text2} fit>
           {source} ·{" "}
           <T size={12} color={accuracyColor}>
-            {`±${Math.round(accuracyM)} m`}
+            {`±${Math.round(accuracyM)}\u00a0m`}
           </T>
         </T>
       </View>

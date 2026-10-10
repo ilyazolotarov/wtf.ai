@@ -4,7 +4,7 @@ import type { IconName } from "@/components/ui/icon";
 import { usePalette, type StatusColor } from "@/constants/theme";
 import type { Strings } from "@/i18n/en";
 import { useT } from "@/i18n/provider";
-import type { TrustState } from "@/nav/position/types";
+import type { PositionEstimate, TrustState } from "@/nav/position/types";
 import { usePosition } from "@/providers/position-provider";
 import type { VehicleLinkSnapshot } from "@/obd/types";
 import { useVehicleLinkValue } from "@/providers/runtime-provider";
@@ -76,6 +76,17 @@ export function useNavStatus() {
   const position = usePosition();
   const adapter = useAdapterStatus();
   const protocolSearch = useVehicleLinkValue((s) => s.protocolSearch);
+  return navStatusFrom(position, adapter, protocolSearch, palette, t);
+}
+
+/** `useNavStatus` for a given position and adapter state (the developer's UI gallery draws every state with it). */
+export function navStatusFrom(
+  position: PositionEstimate | null,
+  adapter: AdapterStatus,
+  protocolSearch: boolean,
+  palette: ReturnType<typeof usePalette>,
+  t: ReturnType<typeof useT>["t"],
+) {
   const trust: TrustState = position?.trust ?? "NO_FIX";
   // Wi-Fi/cell fixes (no speed) never earn trust, but the position is still a real, if coarse, one.
   const approximate =

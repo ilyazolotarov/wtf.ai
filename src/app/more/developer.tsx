@@ -78,6 +78,7 @@ export default function DeveloperScreen() {
         disabled={!activeDeviceId}
         onPress={() => router.push("/debug-terminal")}
       />
+      <ScreenAction labelKey="uiGallery" secondary onPress={() => router.push("/more/ui-gallery")} />
     </ScreenContent>
   );
 }

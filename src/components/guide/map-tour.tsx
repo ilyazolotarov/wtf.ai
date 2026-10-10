@@ -83,7 +83,7 @@ export function TourInvite({
           accessibilityRole="button"
           style={({ pressed }) => [styles.button, { backgroundColor: palette.surface }, pressed && styles.pressed]}
         >
-          <T w="semibold" size={14} color={palette.text2}>
+          <T w="semibold" size={14} color={palette.text2} fit>
             {t("notNow")}
           </T>
         </Pressable>
@@ -92,7 +92,7 @@ export function TourInvite({
           accessibilityRole="button"
           style={({ pressed }) => [styles.button, { backgroundColor: palette.accent }, pressed && styles.pressed]}
         >
-          <T w="semibold" size={14} color={palette.onAccent}>
+          <T w="semibold" size={14} color={palette.onAccent} fit>
             {t("tourShowMe")}
           </T>
         </Pressable>
@@ -208,7 +208,7 @@ export function MapTour({ targets, onClose }: { targets: TourTargets; onClose():
               accessibilityRole="button"
               style={({ pressed }) => [styles.button, { backgroundColor: palette.surface }, pressed && styles.pressed]}
             >
-              <T w="semibold" size={14}>
+              <T w="semibold" size={14} fit>
                 {t("tourBack")}
               </T>
             </Pressable>
@@ -218,7 +218,7 @@ export function MapTour({ targets, onClose }: { targets: TourTargets; onClose():
             accessibilityRole="button"
             style={({ pressed }) => [styles.button, { backgroundColor: palette.accent }, pressed && styles.pressed]}
           >
-            <T w="semibold" size={14} color={palette.onAccent}>
+            <T w="semibold" size={14} color={palette.onAccent} fit>
               {last ? t("tourDone") : t("tourNext")}
             </T>
           </Pressable>
@@ -304,8 +304,17 @@ const styles = StyleSheet.create({
   inviteRow: { flexDirection: "row", alignItems: "center", gap: 12 },
   inviteIcon: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
   inviteCopy: { flex: 1, gap: 2 },
-  buttons: { flexDirection: "row", gap: 8, marginTop: 4 },
-  button: { flex: 1, height: 44, borderRadius: Radius.pill, alignItems: "center", justifyContent: "center" },
+  // Side by side, equal, while both labels fit; otherwise stacked (a large text size, a long label).
+  buttons: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4 },
+  button: {
+    flexGrow: 1,
+    minWidth: "40%",
+    minHeight: 44,
+    paddingHorizontal: 12,
+    borderRadius: Radius.pill,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   pressed: { opacity: 0.75 },
   card: {
     position: "absolute",

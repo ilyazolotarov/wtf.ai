@@ -61,6 +61,17 @@ Status: v2 (2026-10-10). The Android build for volunteer testers. Companion to [
   emulator, connects the simulated OBD adapter (`wtfai://vehicle?emulators=1`, the same switch as Developer → Show
   emulated adapters), starts the IMU and survives; writes screenshots and logcat.
   `bash scripts/android-smoke.sh path/to/app.apk out-dir`.
+- **Local build and emulator** (Windows, no Android Studio needed): the SDK command-line tools with
+  `platform-tools`, `emulator`, `platforms;android-36`, `build-tools;36.0.0`, `ndk;27.1.12297006`, `cmake;3.30.5` and
+  an x86_64 Google APIs system image (install with `cmdline-tools/latest/bin/android.exe sdk install "<pkg>"`: the
+  `sdkmanager.bat` wrapper splits package names at `;`), and a JDK 17 for Gradle. `npx expo prebuild --platform
+  android --no-install` (it rewrites `package.json`'s `android`/`ios` scripts: restore them), then `cd android &&
+  ./gradlew assembleDebug -PreactNativeArchitectures=x86_64` (~10 min cold, ~1 min after). The debug dev client asks
+  Metro for a manifest signed with the OTA key (`app.json` `updates.codeSigningCertificate`), which only the owner
+  holds: for a local build drop the two `expo.modules.updates.CODE_SIGNING_*` entries from the generated
+  `AndroidManifest.xml`. Test with a 3-button navigation bar (`cmd overlay enable
+  com.android.internal.systemui.navbar.threebutton`, gestural off): most phones have one, and it is what hid the
+  bottom bar. The large-text sweep (UI-SPEC §8) runs against this emulator.
 - **Signing:** a stable keystore (`ANDROID_KEYSTORE_BASE64`, `_PASSWORD`, `_KEY_ALIAS`, `_KEY_PASSWORD`;
   `bash scripts/android-keystore.sh` creates the key outside the repo and prints the `gh secret set` commands), so
   APK updates install over the previous one and keep app data. The secrets belong to the GitHub environment

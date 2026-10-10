@@ -10,6 +10,9 @@ import { useT } from "@/i18n/provider";
 
 import { usePanelStyle } from "./hud-card";
 
+/** How far the speed numeral grows with the system's text size (the rest of the app: up to 150 %). */
+const SPEED_MAX_FONT_SCALE = 1.2;
+
 /** Above this (and without trusted GPS) the accuracy turns amber. */
 const ROUGH_ACCURACY_M = 25;
 
@@ -53,14 +56,15 @@ export function StatusRow({
         <View style={[styles.halo, { backgroundColor: nav.color.a }]}>
           <View style={[styles.dot, { backgroundColor: nav.color.c }]} />
         </View>
+        {/* At a large text size each line wraps once before it shrinks: the trust state stays readable at a glance. */}
         <View style={styles.copy}>
-          <T w="semibold" size={15} numberOfLines={1}>
+          <T w="semibold" size={15} fit={2}>
             {nav.sentence}
           </T>
-          <T size={12} color={palette.text2} numberOfLines={1}>
+          <T size={12} color={palette.text2} fit={2}>
             {position ? (
               <>
-                {nav.source} · <T size={12} color={accuracyColor}>{accuracy == null ? "—" : `±${accuracy} m`}</T>
+                {nav.source} · <T size={12} color={accuracyColor}>{accuracy == null ? "—" : `±${accuracy}\u00a0m`}</T>
               </>
             ) : (
               "—"
@@ -75,10 +79,11 @@ export function StatusRow({
       </Pressable>
       <View style={[panel, styles.speed]}>
         <GlassFill radius={28} />
-        <T w="light" size={28} style={styles.speedNumber}>
+        {/* Already large: it grows less than the text beside it, which needs the room. */}
+        <T w="light" size={28} style={styles.speedNumber} maxFontSizeMultiplier={SPEED_MAX_FONT_SCALE}>
           {speed}
         </T>
-        <T size={11} color={palette.text2}>
+        <T size={11} color={palette.text2} maxFontSizeMultiplier={SPEED_MAX_FONT_SCALE} fit>
           {t("speed")}
         </T>
       </View>

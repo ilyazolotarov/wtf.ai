@@ -85,7 +85,7 @@ export function MapCardButtons({
             pressed && styles.pressed,
           ]}
         >
-          <T w="semibold" size={14} color={button.muted ? palette.text2 : palette.accent}>
+          <T w="semibold" size={14} color={button.muted ? palette.text2 : palette.accent} fit>
             {button.label}
           </T>
         </Pressable>
@@ -121,7 +121,7 @@ export function MapChipButton({
         style={({ pressed }) => [styles.chipBody, pressed && styles.pressed]}
       >
         <Icon name={icon} size={16} color={palette.accent} />
-        <T w="semibold" size={13} color={palette.accent} numberOfLines={1}>
+        <T w="semibold" size={13} color={palette.accent} fit>
           {label}
         </T>
       </Pressable>
@@ -140,8 +140,9 @@ const styles = StyleSheet.create({
   icon: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
   text: { flex: 1, gap: 2 },
   body: { lineHeight: 18 },
-  buttons: { flexDirection: "row", gap: 8 },
-  button: { flex: 1, alignItems: "center", paddingHorizontal: 16, paddingVertical: 10, borderRadius: 18 },
+  // Side by side, equal, while both labels fit; otherwise stacked (a large text size, a long label).
+  buttons: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  button: { flexGrow: 1, minWidth: "40%", alignItems: "center", paddingHorizontal: 16, paddingVertical: 10, borderRadius: 18 },
   disabled: { opacity: 0.4 },
   pressed: { opacity: 0.75 },
   chip: {
