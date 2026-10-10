@@ -1,12 +1,13 @@
 import { useMemo } from "react";
 
 import { tintDarkStyle, type MapStyleJson } from "@/config/map-dark";
-import { readActiveStyle, useMapPacks, type InstalledState } from "@/services/offline-map/map-packs";
+import { withWorld } from "@/config/map-world";
+import { readActiveStyle, readActiveWorld, useMapPacks, type InstalledState } from "@/services/offline-map/map-packs";
 
 /**
  * The map draws only the active offline region (SPEC §3.8): OpenFreeMap Liberty, built into
- * the release by `tools/tiles`, re-tinted for dark mode. There is no online map: without a
- * downloaded region the app asks for one first (`map-setup`).
+ * the release by `tools/tiles`, with the world drawn around it (`map-world`), re-tinted for dark
+ * mode. There is no online map: without a downloaded region the app asks for one first (`map-setup`).
  */
 export type MapStyle = MapStyleJson;
 
@@ -33,7 +34,7 @@ function packStyle(installed: InstalledState, scheme: "light" | "dark"): MapStyl
   try {
     const read = readActiveStyle(installed);
     if (!read) return null;
-    const style = withAttribution(read);
+    const style = withWorld(withAttribution(read), readActiveWorld(installed));
     return scheme === "dark" ? tintDarkStyle(style) : style;
   } catch (error) {
     console.warn("Offline map style unreadable", error);

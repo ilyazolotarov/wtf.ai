@@ -521,3 +521,11 @@ export function readActiveStyle(installed: InstalledState): MapStyleJson | null 
     .replaceAll("{tiles}", tiles.uri);
   return JSON.parse(raw) as MapStyleJson;
 }
+
+/** The world drawn around the active region (`world.geojson`, shared files since 2026-10-10), or `null`. */
+export function readActiveWorld(installed: InstalledState): { url: string; region: string } | null {
+  const region = installed.active;
+  if (!region || !installed.common) return null;
+  const world = new File(COMMON(), "world.geojson");
+  return world.exists ? { url: world.uri, region } : null;
+}

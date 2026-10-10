@@ -49,6 +49,7 @@ OUT = ROOT / "out"
 RELEASE = OUT / "release"
 REGIONS = ROOT / "regions"
 LIBERTY = ROOT / "style" / "liberty.json"
+WORLD = ROOT / "style" / "world.geojson"  # tiles/world.py
 
 PLANETILER_VERSION = "0.10.2"
 PLANETILER_URL = f"https://github.com/onthegomap/planetiler/releases/download/v{PLANETILER_VERSION}/planetiler.jar"
@@ -185,7 +186,7 @@ def fetch_cached(url: str, cache_path: Path) -> Path | None:
 
 
 def build_common(release: Path = RELEASE) -> list[dict[str, str]]:
-    """Style, sprites and glyphs shared by all regions; returns [{asset, path}]."""
+    """Style, sprites, glyphs and the world around the region, shared by all regions; returns [{asset, path}]."""
     liberty = json.loads(LIBERTY.read_text(encoding="utf-8"))
     release.mkdir(parents=True, exist_ok=True)
     files: list[dict[str, str]] = []
@@ -212,6 +213,8 @@ def build_common(release: Path = RELEASE) -> list[dict[str, str]]:
         if src is None:
             raise RuntimeError(f"sprite {sprite + suffix} not found")
         put(src, f"sprite-{SPRITE_NAME}{suffix}", f"sprites/{SPRITE_NAME}{suffix}")
+
+    put(WORLD, "world.geojson", "world.geojson")
 
     style = offline_style(liberty, "wtf.ai Liberty offline")
     (release / "style.json").write_text(json.dumps(style, ensure_ascii=False), encoding="utf-8", newline="\n")

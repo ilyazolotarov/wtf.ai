@@ -86,7 +86,8 @@ the trip log), never `expo-location`'s watcher, which stopped for good after jam
 
 - `src/constants/theme.ts`: light and dark palettes (`bg`, `text`, `accent`, `route`, `routeAlt`, `routeCasing`, `maneuver`, status colours
   `ok` / `warn` / `bad` / `idle`, …), `usePalette()`.
-- `src/config/map.ts`: the active region's offline style (`useMapStyle(scheme)`, `hasUsableMap`); `map-dark.ts` re-tints the Liberty style for the dark scheme with one
+- `src/config/map.ts`: the active region's offline style (`useMapStyle(scheme)`, `hasUsableMap`), with the world drawn
+  around it (`map-world.ts`, SPEC §3.8); `map-dark.ts` re-tints the Liberty style for the dark scheme with one
   high-contrast palette for driving (Night Drive): near-black ground, amber primary roads, orange motorways and trunk
   roads (Ukraine's national highways), dark road names on a white halo.
 

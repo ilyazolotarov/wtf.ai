@@ -270,6 +270,10 @@ Detailed in [MAPMATCH-SPEC.md](MAPMATCH-SPEC.md). Reference approach: Gustafsson
   1. Vector map tiles (PMTiles, OpenMapTiles schema) + the MapLibre style, sprite and glyphs.
   2. **Road graph for map matching and routing**: drivable OSM ways (no footway/path/cycleway/steps; `service`/`private` kept but flagged), split at intersections. Per edge: simplified polyline (≤ ~1 m deviation), length, road class, one-way, connectivity, turn restrictions (OSM relations), and speed attributes for route times (speed limit, settlement, surface, traffic lights). One file per region (`<region>.graph.bin`; no cross-region navigation), tiled internally at z14 with a directory and per-tile spatial lists, read by random access: the device decodes only tiles around the active hypotheses, so the Ukraine graph (453 MB) costs about what an oblast's (~15 MB) does. Built with pyosmium. Format: MAPMATCH-SPEC §4.
   3. **Address search index** (`<region>.search.bin`, SEARCH-SPEC).
+- Shared by all regions, besides the style: **the world around the region** (`world.geojson`, `tools/tiles/README.md`). The
+  app draws it over the tiles everywhere the active region's own tiles don't reach: water, land, country and oblast borders,
+  country names, the same at every zoom whichever region is installed. Natural Earth from the Ukrainian point of view;
+  Ukraine's oblasts from OSM.
 - Published as GitHub releases `maps-<osm_date>` by `.github/workflows/map-packs.yml` (weekly when Geofabrik has a newer extract). In-app download manager: resumable, checksum-verified, update check (`tools/tiles/README.md`).
 
 ### 3.9 App (`src/app/`, Expo Router)

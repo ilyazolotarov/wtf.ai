@@ -11,6 +11,7 @@ pip install -e "tools/tiles[dev]"
 cd tools/tiles
 python -m tiles.cli regions                    # (re)write regions/*.poly from regions/regions.json
 python -m tiles.cli border                     # the app's Ukraine border for GNSS integrity (src/nav/integrity/ukraine-border.ts)
+python -m tiles.cli world                      # style/world.geojson: the world drawn around a region (below)
 python -m tiles.cli build-all --heap 8g        # out/release/: ukraine, every region, index.json
 python -m tiles.cli build-region kyiv     # one region (+ index.json)
 python -m tiles.cli graph kyiv            # road graph only, from the cached extract (+ index.json)
@@ -53,6 +54,7 @@ folders):
 | `<region>.search.bin` | address search index ([SEARCH-SPEC.md](../../docs/SEARCH-SPEC.md)); the region's `search` entry |
 | `<region>.pmtiles` | OpenMapTiles-schema vector tiles, clipped to the region polygon (Ukraine 1.2 GB, oblasts 36–89 MB) |
 | `style.json` | OpenFreeMap Liberty (`style/liberty.json`, pinned snapshot); URLs use `{common}` (shared files directory) and `{tiles}` (region file), substituted by the app |
+| `world.geojson` | the world drawn around the active region (`style/world.geojson`, below) |
 | `sprite-ofm*`, `font-<slug>-<range>.pbf` | Liberty sprite and Noto Sans glyphs (every range below U+3000: all alphabets and symbols, no CJK; plus variation selectors and full-width forms); `path` in index.json says where the app stores each |
 
 The OpenMapTiles schema keeps the style identical to the online Liberty map, including the
@@ -76,6 +78,29 @@ with a ~3 GB peak, an oblast in seconds.
 The file is tiled at z14 with a directory, so the app reads only the tiles near its position
 hypotheses: the 452 MB Ukraine graph costs about what a 15 MB oblast does. Byte layout:
 MAPMATCH-SPEC §4.5; sizes: §4.7.
+
+## World around the region (`tiles/world.py`)
+
+A region's tiles end at its border, and at z ≤ 6 they carry whatever Natural Earth context their
+few tiles hold, so outside the region the map changed with zoom. `style/world.geojson` (committed;
+`tiles world` rewrites it) is drawn over the tiles instead, by `src/config/map-world.ts`, with
+the pack style's own colours and line and label styles:
+
+- `water` under the whole world but Ukraine, and the sea inside each oblast's boundary;
+- `land`: Natural Earth countries (`ne_10m_admin_0_countries_ukr`, the Ukrainian point of view:
+  Crimea and the occupied oblasts are Ukraine), ~250 m detail near Ukraine and ~4 km elsewhere,
+  grown to meet Ukraine's OSM border; and each oblast's land;
+- `border`: Natural Earth country borders, Ukraine's from its oblasts; `region-border`: oblast
+  borders on land;
+- `label`: country names (Natural Earth label point and rank), replacing the tiles' own.
+
+Russia is neither land nor border: it is the Ukrainian Sea (`sea-label`: «Ukrainian Sea / Українське море», at its middle and, from z5, off Ukraine's border).
+
+Oblasts are their OSM boundaries (Nominatim at ~1 m, cached in `cache/boundaries/`), rebuilt as a
+gapless mosaic and simplified together (~40 m, shared edges kept shared): an oblast edge is where a
+region's real map meets the drawn one. Each oblast feature carries `covered:<region>` for every
+region whose `.poly` holds it (`ukraine` holds all, `kyiv` holds Kyiv city); the app leaves those
+out, so the active region's tiles show through. A pack without `world.geojson` gets the plain style.
 
 ## In the app
 
