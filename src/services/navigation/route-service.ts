@@ -5,6 +5,7 @@
 import type { Coordinate } from "@/nav/geo";
 import { LocalFrame } from "@/nav/geo/local-frame";
 import type { GraphStats, RoadGraph } from "@/nav/mapmatch/graph/road-graph";
+import { congestionAt } from "@/nav/routing/congestion";
 import { RouteGuidance, type GuidanceState, type GuidanceStep } from "@/nav/routing/guidance";
 import { routeManeuvers, type Maneuver } from "@/nav/routing/maneuvers";
 import { RouteSearch, type RouteFailure, type RoutePlan } from "@/nav/routing/router";
@@ -236,6 +237,9 @@ export class RouteService {
     this.logPlan(s.planId, "resume", s.plan, s.maneuvers, null);
   }
 
+  /** `RouteCosts.congestion` of the last plan started. */
+  private planCongestion = 1;
+
   private now(): number {
     return this.deps.now?.() ?? Date.now();
   }
@@ -283,8 +287,10 @@ export class RouteService {
     const frame = new LocalFrame(position);
     graph.graph.setFrame(frame);
     const from = startOf(position);
-    const search = new RouteSearch(graph.graph, frame, from, s.destination);
     const startedAt = this.now();
+    // Rush hours at the time it leaves (ROUTING-SPEC §4.3): city main roads take longer, the route may go round them.
+    this.planCongestion = congestionAt(new Date(startedAt));
+    const search = new RouteSearch(graph.graph, frame, from, s.destination, { costs: { congestion: this.planCongestion } });
     let slices = 0;
     // Measured from when the last plan's route went off, not from this plan: the wait itself must not end the streak.
     const quick = this.offSincePlanAt !== null && this.offSincePlanAt - this.lastPlanAt < REPLAN_SETTLED_MS;
@@ -381,7 +387,8 @@ export class RouteService {
       this.note(
         `route plan #${id} (${reason}): ${km(plan.lengthM)}, ${Math.round(plan.durationS / 60)} min, ${maneuvers.length - 2} maneuvers; ` +
           `${stats.states} states, ${stats.tiles} tiles, ${Math.round(stats.planMs)} ms in ${stats.slices} slices (${Math.round(stats.wallMs)} ms wall)` +
-          (plan.offRoadM.start > 30 || plan.offRoadM.end > 30 ? `; ends ${Math.round(plan.offRoadM.start)} / ${Math.round(plan.offRoadM.end)} m off` : ""),
+          (plan.offRoadM.start > 30 || plan.offRoadM.end > 30 ? `; ends ${Math.round(plan.offRoadM.start)} / ${Math.round(plan.offRoadM.end)} m off` : "") +
+          (this.planCongestion !== 1 ? `; rush hour ×${this.planCongestion}` : ""),
       );
     }
     const log = this.deps.log;

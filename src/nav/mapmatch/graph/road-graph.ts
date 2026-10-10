@@ -25,6 +25,8 @@ export interface RoadEdge {
   /** `Oneway`, relative to the geometry direction (the OSM way's). */
   readonly oneway: number;
   readonly flags: number;
+  /** The OSM speed limit, km/h; 0 when untagged (or the graph predates speed attributes: `EdgeFlag.attributes`). */
+  readonly maxspeedKph: number;
   /** Vertices in degrees: [lon0, lat0, lon1, lat1, …], from `from` to `to`. */
   readonly lonLat: Float64Array;
   /** The same vertices in the graph's local frame: [e0, n0, e1, n1, …] (m). */
@@ -209,6 +211,7 @@ class Tile {
       cls: this.eU8[28 * k + 2],
       oneway: this.eU8[28 * k + 3],
       flags: this.eU16[14 * k + 2],
+      maxspeedKph: this.eU8[28 * k + 14],
       to: graphId(this.eU32[7 * k + 2], this.eU16[14 * k + 6]),
       lengthM: this.eF32[7 * k + 4],
       wayId: this.eU32[7 * k + 6],

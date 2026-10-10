@@ -47,7 +47,7 @@ describe("TiledRoadGraph", () => {
     const ways = byWay(open());
     expect([...ways.keys()].sort((a, b) => a - b)).toEqual([101, 102, 103, 104, 105, 106, 107, 108, 109, 160, 161, 162, 170, 171, 172, 173, 174, 175]);
     const [e102] = ways.get(102)!;
-    expect(e102).toMatchObject({ cls: RoadClass.primary, oneway: Oneway.none, flags: EdgeFlag.bridge });
+    expect(e102).toMatchObject({ cls: RoadClass.primary, oneway: Oneway.none, flags: EdgeFlag.bridge | EdgeFlag.attributes });
     expect(e102.lonLat.length).toBe(4); // 2-3-4 is straight: simplified to its ends
     expect(e102.lengthM).toBeCloseTo(2 * DX, 0);
     expect(e102.cum[1]).toBeCloseTo(2 * DX, 0);

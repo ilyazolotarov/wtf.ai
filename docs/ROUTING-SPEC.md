@@ -24,8 +24,9 @@ Plan a drive to a destination offline and guide the driver along it, so that:
   the banner and the route on the map, spoken maneuvers (§8, UI-SPEC §6.3, §7.1). Checked on simulated drives
   (§8.4); routes and guidance show in `replay:view`.
 - **R5 built, off:** the route as a hint for map matching, a developer switch; measured in §8.6.
-- Next: read §8.3's questions from the 2026-10-05 logs (`nav_route`, `route …` notes), then the ETA speeds from
-  them.
+- **Cost model from the map (2026-10-10):** speed limits, settlement, surface, traffic lights and rush hours from
+  the graph's speed attributes (§4.1–4.3), checked on 26 drives (§4.4). Takes effect with map packs built from then.
+- Next: read §8.3's questions from the 2026-10-05 logs (`nav_route`, `route …` notes).
 
 ## 3. Decisions
 
@@ -33,16 +34,18 @@ Plan a drive to a destination offline and guide the driver along it, so that:
 | --- | --- |
 | Engine | **A\* in pure TS** (`src/nav/routing/`) over the region's `<region>.graph.bin`, read by its own `TiledRoadGraph` (own tile cache, so planning never evicts the filter's working set). Valhalla and its routing tiles are dropped: its native packaging was never solved (SPEC §9.8), its tiles would be a second download per region, and its roads would differ from the filter's. |
 | Search state | **Directed edges** (edge, direction), not nodes, so turn costs and `from → via node → to` restrictions are exact. |
-| Cost | **Time** (s): length at a speed per road class, plus junction and turn costs and penalties for private, minor service and track roads (§4). No traffic, no time of day. |
+| Cost | **Time** (s): length at a speed from the map's limit, setting and surface (by class on older graphs), plus junction, turn and traffic-light time, rush hours in big cities, and penalties for private, minor service and track roads (§4). No live traffic: none is open for Ukraine. |
 | OSM rules | **Hard** for planning: never against a one-way, never a restricted turn, U-turns only at dead ends or at the start. (The filter keeps them soft, MAPMATCH-SPEC §3: a route must be legal, a position must survive wrong tags.) |
 | Extent | One region, as for map matching: no cross-region routes. |
 | Destination | A point on the map (long press), a city from the list, or an address search result ([SEARCH-SPEC.md](SEARCH-SPEC.md)). |
 | Instructions | From the route's geometry and the graph (turn angle, roundabouts); **no street names in v1** (not in the graph, MAPMATCH-SPEC §15.4). The map shows names. |
 | Thread | The JS thread, in slices (§5.4): a long search must not freeze the map. |
 
-## 4. Cost model (starting values; tune from drives)
+## 4. Cost model (`src/nav/routing/cost.ts`)
 
-Time to drive an edge = OSM length ÷ speed. Speeds (km/h) by class (MAPMATCH-SPEC §4.3):
+Time to drive an edge = OSM length ÷ its speed, plus junction, turn and traffic-light time. Speeds come from the
+map's speed attributes (§4.1) on graphs built with them (`EdgeFlag.attributes`, MAPMATCH-SPEC §4.3); on older graphs
+from the class alone (km/h, MAPMATCH-SPEC §4.3):
 
 | motorway | trunk | primary | secondary | tertiary | unclassified | residential | living_street | service | track | road |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -52,12 +55,14 @@ Time to drive an edge = OSM length ÷ speed. Speeds (km/h) by class (MAPMATCH-SP
   in Chernihiv went 316 m along a service lane through the blocks and 215 m of residential street (1.47 km), where
   the driver takes the main street (tertiary, 1.84 km, 123 m residential). Now near OSRM's car profile (residential
   25, service 15) with turns 8 / 15 / 15 / 20 s, which picks the main street. 40 random routes within 8 km of the
-  city: no failures, 16 / 32 ms p90. Still to calibrate: the logs have each plan's time and the time driven.
+  city: no failures, 16 / 32 ms p90.
 
-- Links (`link` flag): 0.6 × the class speed. Roundabouts: at most 30 km/h.
+- Links (`link` flag): 0.6 × the speed. Roundabouts: at most 30 km/h.
 - **Junction** (a node with 3 or more edges): 2 s for passing it, plus the turn by the angle between arrival and
   departure (clockwise positive): straight (< 30°) 0 s; right 8 s; left 15 s (crossing oncoming traffic); sharp
-  (> 120°) right 15 s, left 20 s. A node with 2 edges is a bend in one road: no cost.
+  (> 120°) right 15 s, left 20 s. A node with 2 edges is a bend in one road: no cost. **Straight on along the priority
+  road** (arriving and leaving on a bigger class than every other road there: a main road past side streets) costs
+  no junction time: a village's side lanes every 100 m would add ~20 s/km nobody loses.
 - **U-turn**: 30 s, only at a dead end (no other legal exit). Starting against the car's heading counts as a U-turn
   on the road: 60 s; 300 s while the car drives (over 3 m/s: a re-plan after a wrong turn), as turning mid-street
   needs a gap and is often not allowed. On 2026-10-06 a re-plan at 40 km/h said "turn around" (131 s + 60 s) where
@@ -66,8 +71,73 @@ Time to drive an edge = OSM length ÷ speed. Speeds (km/h) by class (MAPMATCH-SP
   service (driveway, parking aisle) 60 s, track 120 s.
 - Forbidden: against a one-way, a restricted turn (`no_*`, or not the `only_*` exit).
 
-ETA is this time. It will read short in a city with traffic lights; calibrate the speeds and junction cost from
-drives (trip logs give the real time per edge class).
+ETA is this time (`plan.durationS`).
+
+No live or historical traffic for Ukraine is open: TomTom's traffic API answers nothing for any Ukrainian point (its
+router still knows typical times there, which its terms keep inside it), Google switched public traffic off in 2022,
+and the open collections (graphhopper/open-traffic-collection) list no speeds for Ukraine. So time comes from the map
+itself, checked against logged drives (§4.4).
+
+### 4.1 Speed from the map
+
+`edgeSpeedMps`: the limit × a share for where the road is, capped by class and surface.
+
+- **Limit:** the tagged one (`maxspeedKph`), else by law (traffic rules §12.4–12.6): 50 in a settlement (`urban`), 90
+  outside, 130 on motorways. Tagged on 86–94 % of trunks, 47–69 % of primaries, 23–52 % of secondaries, under 15 % of
+  minor roads (Chernihiv / Kyiv oblasts).
+- **Share** of the limit driven between junctions, free-flowing: outside settlements 1.1; in a town or village 1.3 on
+  its through roads (motorway, trunk, primary, secondary) and 1.0 on its other streets; in a city (`city`) 0.9, its
+  traffic lights priced apart (§4.2). From the logged drives (§4.4): 102 km/h on rural roads limited to 90, 75 on 50
+  through villages, 39 on untagged town tertiaries, 24–29 on Chernihiv's primaries; rounded down, one driver's car.
+- **Caps** (km/h): motorway 120, trunk 110, primary 100, secondary 90, tertiary 80, unclassified 60, residential 30,
+  living_street 10, service 15, track 15, road 30. Unpaved: at most 30.
+- The A* heuristic's speed is the fastest in either table (120 km/h).
+
+### 4.2 Junction controls
+
+- A junction with traffic lights (`NodeFlag.signals`): + 15 s, the mean wait for green and the start (a 60–90 s
+  cycle). A traffic light away from junctions (a signalled crossing, `EdgeFlag.signals`): + 5 s, charged by the share
+  of the edge driven, as where along it is unknown.
+- Stop and give-way signs (`NodeFlag.stop`) are in the graph but cost nothing: they hold only the minor road, and
+  which approach that is isn't known when passing the node.
+
+### 4.3 Rush hours (`congestion.ts`)
+
+`RouteCosts.congestion` multiplies the time on the main roads (trunk to tertiary) of big cities (`bigCity`: 500 000
+people or more: Kyiv, Kharkiv, Odesa, Dnipro, Lviv, Zaporizhzhia, Kryvyi Rih). The route service sets it from the
+phone's clock when a plan starts (the note `route plan #n …; rush hour ×f`).
+
+| Mon–Fri | 07–08 | 08–09 | 09–10 | 17–19 | 19–20 | otherwise, weekends |
+| --- | --- | --- | --- | --- | --- | --- |
+| factor | 1.15 | 1.3 | 1.1 | 1.4 | 1.15 | 1 |
+
+- A guess until drives measure it. The hours follow TomTom's public Traffic Index for Kyiv (peaks 08–09 and 17–18,
+  pre-war figures); TomTom's router gave one 16 km Kyiv route 15 / 17 / 23 min at 03:00 / 08:30 / 18:00 on a weekday
+  in October 2026: the evening peak is the bigger one.
+- Smaller cities get none: the drives through Chernihiv on a Tuesday 17:00–19:20 were free-flowing, and 1.4 on its
+  main roads made their planned time 4 % worse.
+
+### 4.4 Checked against drives (`npm run route:eta`)
+
+The planner's time for the road path each logged drive actually took, against the time it took (route choice plays
+no part): the drawn truth where there is one (timed by the odometer between clean fixes), else the truth match of the
+clean fixes. Cut into ~2 km windows; stops over 2 min end a window, shorter ones count. `--by-road` gives real and
+planned km/h by class, setting and limit; `--costs '<json>'` tries other values; `--graphs <dir>` other graph files.
+
+26 drawn drives, 173 km, 221 min (Chernihiv oblast, 2026-10-03…06; the clean fixes alone cover 33 km):
+
+| Model | Planned | Real vs planned | Windows p10 / p50 / p90 | Median miss |
+| --- | --- | --- | --- | --- |
+| Class speeds, 2 s every junction | 295 min | −25 % | −54 / −39 / +6 % | 67 % |
+| Map speed attributes, shares 0.9 | 293 min | −25 % | −47 / −29 / −4 % | 43 % |
+| + priority road | 266 min | −17 % | −43 / −24 / +12 % | 34 % |
+| + shares by setting (§4.1), rush hours (§4.3) | 241 min | −8 % | −39 / −12 / +18 % | 18 % |
+
+- Still slow on the short Slavutych drives (small-town streets, −15 to −50 %); one drive with a long crawl through a
+  yard reads +93 %.
+- Planning on the attributed Chernihiv graph searched 30–40 % fewer states than on the class speeds (60 random
+  routes, `npm run route -- --bench 60`): main roads now stand out from minor ones.
+- Kyiv rush hours and the other big cities are unmeasured: no logged drive there yet.
 
 ## 5. Planner (`src/nav/routing/`)
 
@@ -176,7 +246,7 @@ Node on the Windows PC, cold tile cache (2026-10-05):
 - On the phone: unknown. The filter's updates ran about as fast on the iPhone as in Node (MAPMATCH-SPEC §15.9), but
   tile reads go through the file system there. The app logs every plan's time (§8); if oblast routes are slow,
   the candidates are a routing-only tile decode (no geometry arrays) and skipping minor roads far from both ends.
-- ETA: the model's 50 min for 32 km across Kyiv and 162 min for 172 km are guesses until calibrated (§4).
+- ETA: checked against drives in §4.4.
 
 ## 8. App and the route hint (R4, R5)
 
@@ -241,8 +311,8 @@ next maneuver and the distance to it, and the one after when it follows within 1
 
 1. **Planning time on the iPhone**: `plan_ms`, `wall_ms` and `slices` per plan, against Node's (§7) for the same
    route (`npm run route -- --from … --to …` replans it on the PC).
-2. **ETA**: `route arrived` notes, planned minutes against real ones, and length against distance driven. Then the
-   speeds per road class and the junction cost (§4) can be fitted to the drives.
+2. **ETA**: `route arrived` notes, planned minutes against real ones, and length against distance driven; for the
+   cost model as a whole, `npm run route:eta` (§4.4).
 3. **False "off route"**: `route off` notes while the car was on the route (GPS truth in the log), especially
    while dead-reckoning; and late ones: the distance driven off the route before `off`.
 4. **Instruction timing**: `to_next_m` when the car actually turned (from the GPS track): is the next maneuver
@@ -348,4 +418,6 @@ developer switch, **off by default** ("Tell map matching the route"; trip-log in
    searching them means decoding every z14 tile of the region, so it would need an index built on the phone after
    the download anyway. Preferred: a small search index built with the region in `tools/tiles` from the OSM extract
    (`addr:street` + `addr:housenumber`, places, POIs), downloaded with the map.
-3. ETA calibration from drives (§4).
+3. Rush hours (§4.3) from drives in a big city at its peaks; the shares (§4.1) from more drivers than one.
+4. Kyiv road closures (data.gov.ua, CC BY, the city's map server) as an online add-on: a slower or closed road
+   for the works in force, fetched once a day for the whole city (no position sent).

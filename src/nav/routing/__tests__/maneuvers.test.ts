@@ -74,7 +74,7 @@ describe("routeManeuvers", () => {
   test("fork: the straightest way with another close to it is keep left / keep right", () => {
     // A three-edge stand-in: arriving on 1, on along 2 (10° right) or 3 (30° right).
     const edge = (id: number): RoadEdge => ({
-      id, wayId: id, from: 10 * id, to: 10 * id + 1, lengthM: 100, cls: 2, oneway: 0, flags: 0,
+      id, wayId: id, from: 10 * id, to: 10 * id + 1, lengthM: 100, cls: 2, oneway: 0, flags: 0, maxspeedKph: 0,
       lonLat: new Float64Array([0, 0, 0, 0]), xy: new Float64Array([0, 0, 0, 100]), cum: new Float64Array([0, 100]),
     });
     const node = (id: number): RoadNode => ({ id, lat: 50, lon: 30, e: 0, n: 0, flags: 0, edges: [] });

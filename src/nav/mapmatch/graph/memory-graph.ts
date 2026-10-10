@@ -17,6 +17,7 @@ export interface MemoryWay {
   points: Coordinate[];
   oneway?: number;
   flags?: number;
+  maxspeedKph?: number;
 }
 
 const TWO_PI = 2 * Math.PI;
@@ -74,6 +75,7 @@ export class MemoryRoadGraph implements RoadGraph {
       cls: way.cls,
       oneway: way.oneway ?? Oneway.none,
       flags: way.flags ?? 0,
+      maxspeedKph: way.maxspeedKph ?? 0,
       lonLat,
       xy,
       cum,

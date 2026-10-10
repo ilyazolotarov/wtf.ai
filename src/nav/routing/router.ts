@@ -5,7 +5,7 @@ import type { Coordinate } from "../geo";
 import type { LocalFrame } from "../geo/local-frame";
 import { EdgeFlag, Oneway, RoadClass } from "../mapmatch/graph/format";
 import type { EdgeId, GraphStats, NearEdge, RoadEdge, RoadGraph } from "../mapmatch/graph/road-graph";
-import { DEFAULT_ROUTE_COSTS, edgeSpeedMps, entrySeconds, maxSpeedMps, turnSeconds, type RouteCosts } from "./cost";
+import { DEFAULT_ROUTE_COSTS, edgeSeconds, entrySeconds, maxSpeedMps, onPriorityRoad, passSeconds, type RouteCosts } from "./cost";
 import { MinHeap } from "./min-heap";
 
 export interface RouteStart extends Coordinate {
@@ -367,10 +367,10 @@ export class RouteSearch {
       // Straight to a destination ahead on the same edge.
       const dest = this.dests.get(edge.id);
       if (dest && (dir === 1 ? dest.near.alongM >= alongM : dest.near.alongM <= alongM)) {
-        this.offerGoal(g0 + dest.extraS + stretchM(edge, alongM, dest.near.alongM) / edgeSpeedMps(edge, c), dest, -1, dir, alongM, start);
+        this.offerGoal(g0 + dest.extraS + edgeSeconds(edge, stretchM(edge, alongM, dest.near.alongM), c), dest, -1, dir, alongM, start);
       }
       const key = keyOf(edge.id, dir);
-      const g = g0 + stretchM(edge, alongM, dir === 1 ? geometryLength(edge) : 0) / edgeSpeedMps(edge, c);
+      const g = g0 + edgeSeconds(edge, stretchM(edge, alongM, dir === 1 ? geometryLength(edge) : 0), c);
       const known = this.states.find(key);
       let i: number;
       if (known < 0) {
@@ -394,35 +394,34 @@ export class RouteSearch {
     const edge = this.graph.edge(edgeOf(key));
     const dir = dirOf(key);
     const node = this.graph.node(dir === 1 ? edge.to : edge.from);
-    const junction = node.edges.length >= 3;
     const exits = this.graph.exits(edge.id, dir);
     // Away from both ends only the main roads are searched, unless nothing else is legal there (see HIERARCHY).
     let maxClass = this.pruning ? this.maxClassAt(node.lat, node.lon) : Infinity;
     let legal = 0;
     let kept = 0;
-    for (const x of exits) {
+    const cls = exits.map((x) => this.graph.edge(x.edge).cls);
+    for (const [i, x] of exits.entries()) {
       if (x.uTurn || x.againstOneway || x.restricted) continue;
       legal++;
-      if (this.graph.edge(x.edge).cls <= maxClass) kept++;
+      if (cls[i] <= maxClass) kept++;
     }
     if (!kept) maxClass = Infinity;
     // A dead end (or a one-way trap): turning back is the only way on.
     const uTurns = legal === 0;
-    for (const x of exits) {
+    for (const [i, x] of exits.entries()) {
       if (x.againstOneway || (uTurns ? !x.uTurn : x.uTurn || x.restricted)) continue;
       const out = this.graph.edge(x.edge);
       if (out.cls > maxClass) continue;
-      const pass = x.uTurn ? c.uTurnS : junction ? c.junctionS + turnSeconds(x.turnRad, c) : 0;
-      const speed = edgeSpeedMps(out, c);
+      const pass = passSeconds(node, x, c, onPriorityRoad(edge.cls, i, exits, cls));
       const dest = this.dests.get(out.id);
       if (dest) {
         const entry = x.dir === 1 ? 0 : geometryLength(out);
-        this.offerGoal(g + pass + dest.extraS + stretchM(out, entry, dest.near.alongM) / speed, dest, index, x.dir, entry);
+        this.offerGoal(g + pass + dest.extraS + edgeSeconds(out, stretchM(out, entry, dest.near.alongM), c), dest, index, x.dir, entry);
       }
       const nextKey = keyOf(out.id, x.dir);
       const known = states.find(nextKey);
       if (known >= 0 && states.closed[known]) continue;
-      const ng = g + pass + entrySeconds(out, c) + out.lengthM / speed;
+      const ng = g + pass + entrySeconds(out, c) + edgeSeconds(out, out.lengthM, c);
       if (known < 0) {
         const next = states.add(nextKey, ng, this.heuristic(out, x.dir), index);
         this.heap.push(ng + states.h[next], next);

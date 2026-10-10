@@ -223,7 +223,8 @@ def locate_ways(pbf: Path, ways: list[Item]) -> None:
     """Centroid of a way's nodes; for a street, the vertex halfway along it and its length."""
     if not ways:
         return
-    ids, lon, lat = read_locations(pbf, np.unique(np.fromiter((r for w in ways for r in w.refs), dtype=np.int64)))
+    loc = read_locations(pbf, np.unique(np.fromiter((r for w in ways for r in w.refs), dtype=np.int64)))
+    ids, lon, lat = loc.ids, loc.lon, loc.lat
     for item in ways:
         refs = np.asarray(item.refs, dtype=np.int64)
         pos = np.searchsorted(ids, refs)

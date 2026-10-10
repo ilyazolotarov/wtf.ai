@@ -95,7 +95,8 @@
     "testers:list": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/triplog/testers.ts list",
     "testers:remove": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/triplog/testers.ts remove",
     "upload-worker:deploy": "npx wrangler deploy --config workers/triplog-upload/wrangler.toml",
-    "upload-worker:dev": "npx wrangler dev --config workers/triplog-upload/wrangler.toml"
+    "upload-worker:dev": "npx wrangler dev --config workers/triplog-upload/wrangler.toml",
+    "route:eta": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/eta.ts"
   },
   "jest": {
     "preset": "jest-expo"

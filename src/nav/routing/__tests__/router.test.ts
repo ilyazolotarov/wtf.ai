@@ -5,7 +5,9 @@ import { haversineM } from "@/nav/geo";
 import { LocalFrame } from "@/nav/geo/local-frame";
 import { bufferByteSource } from "@/nav/mapmatch/graph/byte-source";
 import { TiledRoadGraph } from "@/nav/mapmatch/graph/road-graph";
-import { DEFAULT_ROUTE_COSTS, turnSeconds } from "@/nav/routing/cost";
+import { EdgeFlag, NodeFlag, RoadClass } from "@/nav/mapmatch/graph/format";
+import type { Exit, RoadEdge, RoadNode } from "@/nav/mapmatch/graph/road-graph";
+import { DEFAULT_ROUTE_COSTS, edgeSeconds, edgeSpeedMps, maxSpeedMps, onPriorityRoad, passSeconds, turnSeconds } from "@/nav/routing/cost";
 import { planRoute, RouteSearch, type RoutePlan, type RouteStart } from "@/nav/routing/router";
 
 // net.graph.bin (tools/tiles/tests/test_graph.py): a grid of D = 0.0006° around (LAT0, LON0).
@@ -44,6 +46,59 @@ describe("cost model", () => {
     expect(turnSeconds(150 * DEG, c)).toBe(c.sharpRightS);
     expect(turnSeconds(-150 * DEG, c)).toBe(c.sharpLeftS);
   });
+
+  const road = (cls: number, flags: number, maxspeedKph = 0): RoadEdge => ({
+    id: 1, wayId: 1, from: 0, to: 1, lengthM: 1000, cls, oneway: 0, flags, maxspeedKph,
+    lonLat: new Float64Array(4), xy: new Float64Array(4), cum: new Float64Array([0, 1000]),
+  });
+  const kph = (e: RoadEdge) => edgeSpeedMps(e, DEFAULT_ROUTE_COSTS) * 3.6;
+
+  test("speeds: the class alone without attributes; the limit, where and surface with them", () => {
+    const c = DEFAULT_ROUTE_COSTS;
+    const A = EdgeFlag.attributes;
+    expect(kph(road(RoadClass.primary, 0))).toBeCloseTo(c.speedKph[RoadClass.primary]);
+    // Untagged: the limit by law; tagged: the tag. Rural and town through roads are driven over it, cities under.
+    expect(kph(road(RoadClass.primary, A))).toBeCloseTo(c.ruralLimitKph * c.ruralLimitShare);
+    expect(kph(road(RoadClass.primary, A, 70))).toBeCloseTo(70 * c.ruralLimitShare);
+    expect(kph(road(RoadClass.primary, A | EdgeFlag.urban))).toBeCloseTo(c.urbanLimitKph * c.townMainLimitShare);
+    expect(kph(road(RoadClass.tertiary, A | EdgeFlag.urban))).toBeCloseTo(c.urbanLimitKph * c.townLimitShare);
+    expect(kph(road(RoadClass.primary, A | EdgeFlag.urban | EdgeFlag.city))).toBeCloseTo(c.urbanLimitKph * c.cityLimitShare);
+    // Capped by class whatever the limit, and on unpaved roads.
+    expect(kph(road(RoadClass.residential, A))).toBeCloseTo(c.capKph[RoadClass.residential]);
+    expect(kph(road(RoadClass.unclassified, A | EdgeFlag.unpaved))).toBeCloseTo(c.unpavedMaxKph);
+    expect(kph(road(RoadClass.motorway, A))).toBeLessThanOrEqual(maxSpeedMps(c) * 3.6);
+  });
+
+  test("time: a signalled crossing by the share driven; rush hours on big cities' main roads only", () => {
+    const c = DEFAULT_ROUTE_COSTS;
+    const A = EdgeFlag.attributes;
+    const plain = road(RoadClass.secondary, A | EdgeFlag.urban);
+    const lit = road(RoadClass.secondary, A | EdgeFlag.urban | EdgeFlag.signals);
+    expect(edgeSeconds(lit, 500, c) - edgeSeconds(plain, 500, c)).toBeCloseTo(c.crossingSignalS / 2);
+    const rush = { ...c, congestion: 1.5 };
+    const big = road(RoadClass.secondary, A | EdgeFlag.urban | EdgeFlag.city | EdgeFlag.bigCity);
+    expect(edgeSeconds(big, 1000, rush)).toBeCloseTo(1.5 * edgeSeconds(big, 1000, c));
+    const city = road(RoadClass.secondary, A | EdgeFlag.urban | EdgeFlag.city);
+    expect(edgeSeconds(city, 1000, rush)).toBeCloseTo(edgeSeconds(city, 1000, c));
+    expect(edgeSeconds(plain, 1000, rush)).toBeCloseTo(edgeSeconds(plain, 1000, c));
+    const side = road(RoadClass.residential, A | EdgeFlag.urban | EdgeFlag.city | EdgeFlag.bigCity);
+    expect(edgeSeconds(side, 1000, rush)).toBeCloseTo(edgeSeconds(side, 1000, c));
+  });
+
+  test("junctions: lights add their wait; straight on along the priority road costs no junction time", () => {
+    const c = DEFAULT_ROUTE_COSTS;
+    const exit = (turnDeg: number, uTurn = false): Exit => ({ edge: 1, dir: 1, turnRad: turnDeg * DEG, againstOneway: false, restricted: false, uTurn });
+    const node = (flags: number): RoadNode => ({ id: 0, lat: 0, lon: 0, e: 0, n: 0, flags, edges: [{ edge: 1, end: 0 }, { edge: 2, end: 0 }, { edge: 3, end: 0 }] });
+    expect(passSeconds(node(0), exit(0), c)).toBe(c.junctionS);
+    expect(passSeconds(node(0), exit(0), c, true)).toBe(0);
+    expect(passSeconds(node(0), exit(90), c, true)).toBe(c.junctionS + c.rightS);
+    expect(passSeconds(node(NodeFlag.signals), exit(0), c, true)).toBe(c.signalS);
+    // Primary on, residential off: priority. Another primary there: not.
+    const exits = [exit(0), exit(90), exit(-90)];
+    expect(onPriorityRoad(RoadClass.primary, 0, exits, [RoadClass.primary, RoadClass.residential, RoadClass.residential])).toBe(true);
+    expect(onPriorityRoad(RoadClass.primary, 0, exits, [RoadClass.primary, RoadClass.primary, RoadClass.residential])).toBe(false);
+    expect(onPriorityRoad(RoadClass.residential, 0, exits, [RoadClass.residential, RoadClass.primary, RoadClass.primary])).toBe(false);
+  });
 });
 
 describe("planRoute", () => {
@@ -54,8 +109,10 @@ describe("planRoute", () => {
     expect(p.ways).toEqual([101, 102]);
     const metres = haversineM(from, to);
     expect(p.lengthM).toBeCloseTo(metres, -1);
-    // 60 km/h on primary roads, plus 2 s for passing node 2 (four roads meet there).
-    expect(p.durationS).toBeCloseTo(p.lengthM / (60 / 3.6) + DEFAULT_ROUTE_COSTS.junctionS, 0);
+    // An untagged rural primary: the rural limit at the rural share. Node 2 is passed straight on along the primary,
+    // its other roads residential: no junction time.
+    const c = DEFAULT_ROUTE_COSTS;
+    expect(p.durationS).toBeCloseTo(p.lengthM / ((c.ruralLimitKph * c.ruralLimitShare) / 3.6), 0);
     expect(haversineM(p.coordinates[0], from)).toBeLessThan(1);
     expect(haversineM(p.coordinates.at(-1)!, to)).toBeLessThan(1);
     expect(p.offRoadM.start).toBeLessThan(1);

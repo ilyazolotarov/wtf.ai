@@ -1,3 +1,4 @@
+import math
 import os
 from pathlib import Path
 
@@ -6,10 +7,10 @@ import pytest
 from shapely.geometry import Polygon
 
 from tiles.graph import (
-    BRIDGE, CLASSES, LINK, MINOR_SERVICE, NODE_BOUNDARY, NODE_DEAD_END, ONEWAY_BACKWARD,
-    ONEWAY_FORWARD, ONEWAY_NONE, PRIVATE, RESTRICT_NO, RESTRICT_ONLY, ROUNDABOUT,
-    build_graph, read_graph, read_locations, read_roads, restriction_kind, road_attrs,
-    segment_tiles, validate, write_graph,
+    ATTRIBUTES, BRIDGE, CITY, CLASSES, FEATURE_ATTRIBUTES, LINK, MINOR_SERVICE, NODE_BOUNDARY, NODE_DEAD_END,
+    NODE_SIGNALS, NODE_STOP, ONEWAY_BACKWARD, ONEWAY_FORWARD, ONEWAY_NONE, PRIVATE, RESTRICT_NO, RESTRICT_ONLY,
+    ROUNDABOUT, SIGNALS, UNPAVED, URBAN, Settlements, population, build_graph, maxspeed_kph, read_graph, read_locations,
+    read_roads, read_settlements, restriction_kind, road_attrs, segment_tiles, urban_mask, validate, write_graph,
 )
 
 # --- Tag rules ----------------------------------------------------------------------------
@@ -53,7 +54,22 @@ def test_oneway_variants():
 def test_flags():
     a = road_attrs({"highway": "service", "service": "parking_aisle", "bridge": "yes", "junction": "roundabout"})
     assert a.flags & MINOR_SERVICE and a.flags & BRIDGE and a.flags & ROUNDABOUT
-    assert not road_attrs({"highway": "service", "service": "alley", "bridge": "no"}).flags
+    assert road_attrs({"highway": "service", "service": "alley", "bridge": "no"}).flags == ATTRIBUTES
+    assert road_attrs({"highway": "track", "surface": "dirt"}).flags & UNPAVED
+    assert not road_attrs({"highway": "residential", "surface": "asphalt"}).flags & UNPAVED
+
+
+def test_maxspeed():
+    def ms(**tags):
+        return maxspeed_kph(tags)
+
+    assert ms() == 0
+    assert ms(maxspeed="90") == 90 and ms(maxspeed=" 50 ") == 50 and ms(maxspeed="60 km/h") == 60
+    assert ms(maxspeed="30 mph") == 48
+    assert ms(maxspeed="UA:urban") == 50 and ms(maxspeed="UA:rural") == 90 and ms(maxspeed="RU:urban") == 60
+    assert ms(maxspeed="none") == ms(maxspeed="signals") == ms(maxspeed="50;30") == 0
+    assert ms(**{"maxspeed:forward": "70", "maxspeed:backward": "50"}) == 70
+    assert road_attrs({"highway": "primary", "maxspeed": "110"}).maxspeed == 110
 
 
 def test_restriction_kind():
@@ -355,3 +371,88 @@ def test_ts_fixture_is_current(tmp_path: Path):
         TS_FIXTURE.parent.mkdir(parents=True, exist_ok=True)
         TS_FIXTURE.write_bytes(data)
     assert TS_FIXTURE.exists() and TS_FIXTURE.read_bytes() == data, "TS fixture is stale: UPDATE_FIXTURES=1 python -m pytest"
+
+
+# --- Speed attributes (ROUTING-SPEC §4.1) ---------------------------------------------------
+#
+#  8 ---- 1 ---- 2 · 3 ---------- 4 ---------- 5      (primary 301, maxspeed 90; village point just past 5)
+#         |        |
+#         9 (stop) 6
+#         |
+#         7
+# 2: a traffic light 20 m before junction 3 (its stop line); 4: a signalled crossing far from any junction.
+
+
+def _m(east: float, north: float) -> tuple[float, float]:
+    """Metres east/north of LON0, LAT0 as (lon, lat)."""
+    return (LON0 + east / (111_195 * np.cos(np.radians(LAT0))), LAT0 + north / 111_195)
+
+
+CONTROL_NODES = {
+    1: (_m(0, 0), {}), 2: (_m(280, 0), {"highway": "traffic_signals"}), 3: (_m(300, 0), {}),
+    4: (_m(600, 0), {"highway": "crossing", "crossing": "traffic_signals"}), 5: (_m(900, 0), {}),
+    6: (_m(300, 200), {}), 7: (_m(0, -200), {}), 8: (_m(-200, 0), {}), 9: (_m(0, -10), {"highway": "stop"}),
+    90: (_m(1000, 0), {"place": "village"}),
+}
+CONTROL_WAYS = [
+    (301, [1, 2, 3, 4, 5], {"highway": "primary", "maxspeed": "90"}),
+    (302, [3, 6], {"highway": "residential"}),
+    (303, [1, 9, 7], {"highway": "residential", "surface": "ground"}),
+    (304, [8, 1], {"highway": "tertiary"}),
+]
+
+
+@pytest.fixture(scope="module")
+def controls(tmp_path_factory):
+    tmp = tmp_path_factory.mktemp("controls")
+    xml = ['<osm version="0.6">']
+    for nid, ((lon, lat), tags) in CONTROL_NODES.items():
+        xml.append(f'<node id="{nid}" version="1" lat="{lat:.7f}" lon="{lon:.7f}">'
+                   + "".join(f'<tag k="{k}" v="{v}"/>' for k, v in tags.items()) + "</node>")
+    for wid, refs, tags in CONTROL_WAYS:
+        xml.append(f'<way id="{wid}" version="1">' + "".join(f'<nd ref="{r}"/>' for r in refs)
+                   + "".join(f'<tag k="{k}" v="{v}"/>' for k, v in tags.items()) + "</way>")
+    xml.append("</osm>")
+    pbf = tmp / "controls.osm"
+    pbf.write_text("\n".join(xml), encoding="utf-8")
+    roads = read_roads(pbf)
+    region = Polygon([(LON0 - 0.05, LAT0 - 0.05), (LON0 + 0.05, LAT0 - 0.05), (LON0 + 0.05, LAT0 + 0.05), (LON0 - 0.05, LAT0 + 0.05)])
+    return build_graph(roads, read_locations(pbf, np.unique(roads.refs)), region, settlements=read_settlements(pbf))
+
+
+def test_controls_mark_junctions_and_crossings(controls):
+    g = controls
+    flags = dict(zip(g.node_ids.tolist(), g.node_flags.tolist()))
+    assert 2 not in flags and flags[3] & NODE_SIGNALS  # the stop-line light controls junction 3
+    assert flags[1] & NODE_STOP and not flags[1] & NODE_SIGNALS
+    assert not flags[5] & NODE_SIGNALS  # 4 is 300 m from 3, and 5 is a dead end: a crossing, not a junction light
+    by_nodes = {(int(g.node_ids[a]), int(g.node_ids[b])): f for a, b, f in zip(g.edge_from, g.edge_to, g.edge_flags.tolist())}
+    assert by_nodes[(3, 5)] & SIGNALS and not by_nodes[(1, 3)] & SIGNALS
+
+
+def test_urban_maxspeed_and_surface(controls):
+    g = controls
+    edges = {(int(g.node_ids[a]), int(g.node_ids[b])): i for i, (a, b) in enumerate(zip(g.edge_from, g.edge_to))}
+    assert g.edge_flags[edges[(3, 5)]] & URBAN  # middle 400 m from the village point
+    assert not g.edge_flags[edges[(1, 3)]] & URBAN  # middle 850 m from it
+    assert g.edge_maxspeed[edges[(3, 5)]] == 90 and g.edge_maxspeed[edges[(8, 1)]] == 0
+    assert g.edge_flags[edges[(1, 7)]] & UNPAVED
+    assert all(f & ATTRIBUTES for f in g.edge_flags.tolist())
+    assert g.stats["signal_nodes"] == 1 and g.stats["signal_edges"] == 1 and g.stats["stop_nodes"] == 1
+
+
+def test_urban_mask_city_radius_and_size():
+    def mask(population: float, *pts):
+        s = Settlements({"city": np.array([_m(0, 0)])}, [], [], city_population=np.array([population]))
+        return [m.tolist() for m in urban_mask(np.array([p[0] for p in pts]), np.array([p[1] for p in pts]), s)]
+
+    # Untagged: 4 km, not big. Chernihiv-sized: still not big. Kyiv-sized: ~12 km, big.
+    assert mask(math.nan, _m(3500, 0), _m(0, 4500)) == [[True, False], [True, False], [False, False]]
+    assert mask(280_000, _m(3500, 0)) == [[True], [True], [False]]
+    assert mask(2_950_000, _m(11_000, 0), _m(0, 13_500)) == [[True, False], [True, False], [True, False]]
+    assert population({"population": "2 952 301"}) == 2_952_301 and math.isnan(population({"population": "~1M"}))
+
+
+def test_header_features(built):
+    _, _, gf = built
+    assert gf.features == FEATURE_ATTRIBUTES

@@ -69,7 +69,8 @@ Place the car on the offline road network, so that:
   with none of `yes`, `designated`, `permissive`, `destination`, `customers`, `official`, `unknown` (e.g. `private`,
   `agricultural;forestry`, `delivery`) sets the `private` flag.
 - Edge flags: `link`, `roundabout` (`junction=roundabout|circular`), `tunnel`, `bridge`, `private`, `minor_service`
-  (`service=driveway|parking_aisle|drive-through|emergency_access`). `service` and `track` are classes (§4.3).
+  (`service=driveway|parking_aisle|drive-through|emergency_access`). `service` and `track` are classes (§4.3). Speed
+  attribute flags: §4.3.
 - Ferries are out of scope for v1.
 - Memory: Ukraine has far more nodes than the kept ways use. Read ways first, then fetch locations only for the
   nodes those ways reference (two passes, sorted arrays). Don't build a location index of every node. The build
@@ -95,6 +96,22 @@ Place the car on the offline road network, so that:
   - `junction=roundabout` and `highway=motorway` imply forward unless `oneway=no`.
   - `oneway:conditional` is ignored.
 - Flags (§4.1).
+- **Speed attributes** for routing time (ROUTING-SPEC §4.1), every edge flagged `attributes` (graphs from
+  2026-10-10 on):
+  - Speed limit (u8 km/h, 0 untagged): `maxspeed`, else `maxspeed:forward` / `:backward`; numbers, `mph`, and the
+    implicit `UA:urban` 50, `UA:rural` 90, `UA:trunk` 110, `UA:motorway` 130, `UA:living_street` 20 (and `RU:*`).
+  - `unpaved`: `surface` unpaved, gravel, fine_gravel, compacted, dirt, earth, ground, grass, sand, mud, pebblestone.
+  - `urban`: the edge's middle is in a `place=city|town|village|hamlet` area, within 100 m of
+    `landuse=residential|commercial|retail`, or near a place point (city by population below, town 1.5 km, village
+    600 m, hamlet 300 m). Scored on main roads with a tagged limit (≤ 60 urban, ≥ 80 rural): 80 % right in
+    Chernihiv oblast, 86 % in Kyiv oblast; road density alone 78 / 82 %, landuse alone 66 / 81 %.
+  - `city`: in a `place=city` area, or within 4 km × √(population ÷ 300 000) of its point (3–15 km; 4 km
+    untagged). `big_city`: the same for a population of 500 000 or more.
+  - Traffic lights (`highway=traffic_signals`, and `highway=crossing` + `crossing=traffic_signals`) and stop /
+    give-way signs on a graph node flag the node (`signals`, `stop`); on a way within 40 m of a junction (3+ edges)
+    they flag that junction (the stop line before it). A light farther from any junction flags its edge
+    (`signals`: a signalled crossing). Signs away from junctions are dropped.
+  - A third pass reads the settlements (pyosmium area assembly over `place` and `landuse`).
 - Names are not stored in v1. Routing on this graph (SPEC §9.8) would add them.
 
 ### 4.4 Turn restrictions
@@ -113,16 +130,20 @@ without copying.
 
 ```
 header      64 B   "WTFG", u16 format, u16 zoom (14), u32 x0, y0, nx, ny, u32 nodes, edges,
-                   u32 directory offset (64), u32 data offset, char[16] OSM date, u32 build time (unix s), u32 0
+                   u32 directory offset (64), u32 data offset, char[16] OSM date, u32 build time (unix s),
+                   u32 features (1: speed attributes)
 directory          u32[nx·ny + 1]: tile i = (y − y0)·nx + (x − x0) spans [off[i], off[i+1]) after the data
                    offset; an empty tile has zero length
 tiles              per non-empty tile, in tile order:
   counts    24 B   u32 nodes, incidence, edges, vertices, restrictions, spatial
-  nodes     16 B   i32 lon, lat (1e-6°); u32 first incidence; u16 incidence count; u16 flags (1 boundary, 2 dead end)
+  nodes     16 B   i32 lon, lat (1e-6°); u32 first incidence; u16 incidence count;
+                   u16 flags (1 boundary, 2 dead end, 4 traffic lights, 8 stop / give way)
   incidence  8 B   u32 tile, u16 edge index, u16 end (0: the edge starts at this node, 1: it ends here)
-  edges     28 B   u16 from-node (local); u8 class; u8 one-way (0 none, 1 forward, 2 backward); u16 flags;
-                   u16 vertex count; u32 to-node tile, u16 to-node index, u16 0; f32 length (m);
-                   u32 first vertex; u32 OSM way id
+  edges     28 B   u16 from-node (local); u8 class; u8 one-way (0 none, 1 forward, 2 backward); u16 flags (1 link,
+                   2 roundabout, 4 tunnel, 8 bridge, 16 private, 32 minor service, 64 unpaved, 128 urban, 256 traffic
+                   light along it, 512 attributes, 1024 city, 2048 big city); u16 vertex count; u32 to-node tile,
+                   u16 to-node index, u8 speed limit (km/h, 0 untagged), u8 0; f32 length (m); u32 first vertex;
+                   u32 OSM way id
   vertices   8 B   i32 lon, lat (1e-6°); an edge's first and last vertex are its from- and to-node
   restr.    20 B   u16 via node (local); u8 kind (1 no, 2 only); u8 0; u32 from-edge tile, u16 index, u16 0;
                    u32 to-edge tile, u16 index, u16 0
@@ -143,6 +164,9 @@ tiles              per non-empty tile, in tile order:
   a point" is the union over the tiles the query circle touches.
 - **OSM way id** (u32; current ids are below 2³¹) is for debugging, the viewer, and HMM break reports.
 - **Compression:** none in format 1 (§4.7).
+- **Speed attributes** went into spare flag bits, the edge's padding byte and the header's last word, so the format
+  stays 1: older apps read newer files (ignoring them) and newer apps older files (no `attributes` flag: routing
+  falls back to the class speeds).
 - `tiles graph-check <file>` validates a file: geometry ends at its nodes, incidence matches the edges, every edge
   is in its home tile's spatial list, counts match the header.
 
@@ -154,7 +178,8 @@ tiles              per non-empty tile, in tile order:
   A region without `graph` is display-only.
 - The `maps-*` workflow publishes the graph files as release assets like the rest.
 - `tools/tiles/tests/test_graph.py` covers the tag rules, splitting (shared nodes, closed ways, loops, missing
-  nodes), simplification, node flags, restriction mapping, spatial lists across tiles, and the file round trip.
+  nodes), simplification, node flags, restriction mapping, spatial lists across tiles, the file round trip, and the
+  speed attributes (limits, surface, lights and signs, urban / city / big city).
   The TS reader (M2) gets its own fixture from the same builder.
 
 ### 4.7 Measured (OSM 2026-10-03, Windows PC)
