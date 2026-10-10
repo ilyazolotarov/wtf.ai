@@ -315,7 +315,8 @@ calibration is learned while driving (SPEC §3.6).
 - Voice volume for the spoken maneuvers (ROUTING-SPEC §8.5).
 - Privacy statement (position data on device; maps and app updates fetched from the project's own server; crash reports carry no location or
   personal data; the opt-in trip log upload, in the `recorder` page).
-- About: app version, support code (the install id testers send), map data credit.
+- About: app version with its build number ("1.0.0 (3563887)", as App update and AltStore name builds), support code
+  (the install id testers send), map data credit.
 
 ### 7.7 Guide (`guide`, `lesson`)
 

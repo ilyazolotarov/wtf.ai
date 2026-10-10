@@ -68,9 +68,13 @@ export default function SettingsScreen() {
         </ScreenCard>
       </View>
       <ScreenSection title={t("about")}>
+        {/* The build number beside the version: what App update and AltStore name a build by. */}
         <ScreenRow
           labelKey="appVersion"
-          value={Constants.expoConfig?.version ?? t("unavailableValue")}
+          value={
+            (Constants.expoConfig?.version ?? t("unavailableValue")) +
+            (Constants.nativeBuildVersion ? ` (${Constants.nativeBuildVersion})` : "")
+          }
         />
         <ScreenRow labelKey="appCode" value={appCode(t)} />
         <ScreenRow labelKey="supportCode" value={installId()} />
