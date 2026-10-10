@@ -19,11 +19,11 @@ import type { TripLog } from "../../src/triplog/trip-log-reader";
 type NavRow = TripLog["navEstimate"][number];
 type MmRow = TripLog["navMapMatch"][number];
 
-/** `src/app/index.tsx`. */
+/** `src/services/navigation/place-request.ts`, `src/components/map/use-placing.ts`. */
 const STANDING_MPS = 1;
 const PLACE_OFFER_ACCURACY_M = 75;
 const PLACE_OFFER_DISTANCE_M = 5000;
-/** `map-surface.native.tsx`. */
+/** `src/components/map/use-map-camera.ts`. */
 const FOLLOW_JUMP_M = 80;
 
 const C = DEFAULT_NAV_CONFIG;

@@ -5,14 +5,14 @@
 
 import type { LocationPermissionResponse } from "expo-location";
 
-import type { MapMatchConfig, MapMatchState } from "@/nav/mapmatch/particle-filter";
-import { UpdateTiming, type UpdateTimingSummary } from "@/nav/mapmatch/update-timing";
+import type { MapMatchConfig } from "@/nav/mapmatch/particle-filter";
+import type { UpdateTimingSummary } from "@/nav/mapmatch/update-timing";
 import type { FixOutcome, MapMatchEstimate, NavConfig, NavMode, ParkedPose } from "@/nav/navigator";
 import { Navigator } from "@/nav/navigator";
 import { PhoneNavigator, type PhoneGraph, type PhonePose, type PhoneRouteState } from "@/nav/phone/phone-navigator";
 import { haversineM } from "@/nav/geo";
 import { FUSED_WINDOW_US, puckAccuracyM, puckHypothesis } from "@/nav/position/puck";
-import type { PositionEstimate, PositionSourceKind, RawGnssFix, SimulatedOutage } from "@/nav/position/types";
+import type { PositionEstimate, PositionSourceKind, RawGnssFix } from "@/nav/position/types";
 import type { CompassTrust } from "@/nav/compass/compass";
 import type { GnssFix, ImuSample, MagSample, ObdSpeedSample } from "@/nav/types";
 import type { EngineState, SpeedSample, VehicleLinkSnapshot } from "@/obd/types";
@@ -30,7 +30,11 @@ import {
   type Vec3Record,
 } from "@/triplog/schema";
 
-import type { CalibrationStore, StoredManualPosition } from "./calibration-store";
+import type { CalibrationStore } from "./calibration-store";
+import { ManualHold, USER_HEADING_SIGMA_RAD, USER_POSITION_SIGMA_M } from "./manual-hold";
+import { MapMatchTiming } from "./map-match-timing";
+import { compassOff, NavigatorNotes } from "./navigator-notes";
+import { SimulatedOutageTool } from "./simulated-outage";
 
 const OWNER = "navigator";
 /** Trip-log note with what is stored for the phone or the car as a navigator starts: JSON of a StoredSnapshot. */
@@ -48,24 +52,13 @@ const SAVE_EVERY_MS = 30_000;
 /** Note a saved speed scale in the trip log when it moved this much. */
 const SPEED_SCALE_NOTE_STEP = 0.002;
 const EARTH_RADIUS_M = 6_371_000;
-/** The driver's placing on the map: a car's length or so, and the heading of a tap (NAVIGATOR-SPEC §6.2). */
-const USER_POSITION_SIGMA_M = 10;
-const USER_HEADING_SIGMA_RAD = (15 * Math.PI) / 180;
-/** A position set on the map is asked about ("are you still here?") this long after it was confirmed (§6.3). */
-export const MANUAL_ASK_AFTER_MS = 15 * 60_000;
 /** A parked pose newer than the placing but this close to it was saved from it: the placing still starts the navigator. */
 const MANUAL_SAME_POSE_M = 15;
-/** Trusted satellite fixes in a row that disagree with the placing before GPS takes over (the EKF's rule too). */
-const MANUAL_REJECTED_FIXES = 5;
 /** Added to a stored parked pose's 1σ: the car settles, the phone may sit differently in the mount. */
 const POSE_POSITION_SLACK_M = 5;
 const POSE_HEADING_SLACK_RAD = (2 * Math.PI) / 180;
-const DEG = 180 / Math.PI;
 /** Alternatives lighter than this aren't drawn. */
 const ALTERNATIVE_MIN_WEIGHT = 0.05;
-/** In a simulated outage, a withheld fix is the truth when it is a satellite fix this accurate and recent. */
-const OUTAGE_TRUTH_MAX_ACC_M = 10;
-const OUTAGE_TRUTH_MAX_AGE_MS = 3000;
 /** Particles in the debug overlay, heaviest first. */
 const OVERLAY_PARTICLES = 200;
 /**
@@ -222,10 +215,6 @@ export class NavigatorService implements PositionSource {
   private lastShownFix: GnssRecord | null = null;
   /** `lastShownFix` changed since the last publish: phone GNSS shows it at the next IMU batch, not the next tick. */
   private shownChanged = false;
-  /** The latest integrity verdict noted in the trip log (notes on changes only). */
-  private notedIntegrity: string = "ok";
-  /** The doubt last noted in the trip log (see `noteDoubt`). */
-  private notedDoubt: number | undefined;
   private lastObdUs = -Infinity;
   private lastAcceptedSatUs = -Infinity;
   private mode: NavMode = "none";
@@ -237,21 +226,12 @@ export class NavigatorService implements PositionSource {
   private poseStatus: NavigatorDebug["parkedPose"] = "none";
   /** A Wi-Fi fix doubts the parked pose the navigator started from: the driver is asked. */
   private poseQuestion: { distanceM: number } | null = null;
-  /** Where the driver set the car on the map (§6.3), until released or discarded; stored, so it outlives the session. */
-  private manual: StoredManualPosition | null;
-  /** The running navigator started from `manual`. */
-  private manualApplied = false;
-  /** Trusted satellite fixes in a row that disagree with `manual`. */
-  private manualRejected = 0;
-  private notedManualAsk = false;
-  /** Compass shadow notes: the trust last noted, and the trust checks already summarised. */
-  private notedCompassTrust: CompassTrust = "none";
-  private summarisedChecks = 0;
+  /** Where the driver set the car on the map (§6.3). */
+  private readonly held: ManualHold;
   /** The road graph set on the navigator: its key, region and build time. */
   private graph: { key: string; region: string; builtAt: number } | null = null;
-  private notedMapMatch: MapMatchState = "off";
-  /** Test tool: GNSS withheld from the navigator. `hidden` is the newest fix withheld. */
-  private outage: { startedAt: number; startDistanceM: number | null; hidden: GnssRecord | null; maxErrorM: number } | null = null;
+  /** Test tool: GNSS withheld from the navigator. */
+  private readonly outage = new SimulatedOutageTool();
   private overlay: MapMatchOverlay | null = null;
   /** Developer setting: how map matching feeds back into the navigator (MAPMATCH-SPEC §9). */
   private loop: MapMatchLoop = "open";
@@ -260,14 +240,9 @@ export class NavigatorService implements PositionSource {
   /** The active route's polyline, for phone-only mode to follow (§9.6); and the state it last noted. */
   private phoneRoute: { lat: number; lon: number }[] | null = null;
   private phoneRouteState: PhoneRouteState = "none";
-  /** Road corrections already summarised in the trip log. */
-  private notedRoad = { heading: 0, position: 0 };
   private overlayStale = true;
-  /** Filter update times: this drive's, and those since the last `nav_mapmatch` record; its starts, apart. */
-  private timing = new UpdateTiming();
-  private starts = { count: 0, totalMs: 0, maxMs: 0 };
-  private timingSince = 0;
-  private interval = { count: 0, totalMs: 0, maxMs: 0 };
+  private readonly timing: MapMatchTiming;
+  private readonly notes = new NavigatorNotes((text) => this.note(text));
   /** Developer setting: navigation from the phone alone while no OBD speed comes (§9.6). */
   private phoneOnly = false;
   private phone: { engine: PhoneNavigator; graph: { key: string; close(): void }; car: string; started: boolean; parkedSaved: boolean } | null = null;
@@ -277,7 +252,12 @@ export class NavigatorService implements PositionSource {
   constructor(deps: NavigatorServiceDeps) {
     this.deps = deps;
     this.clock = deps.clock ?? SYSTEM_CLOCK;
-    this.manual = deps.calibration.manualPosition();
+    this.held = new ManualHold(deps.calibration, () => this.clock.nowMs());
+    this.timing = new MapMatchTiming(() => this.clock.nowMs());
+  }
+
+  private get manual() {
+    return this.held.current;
   }
 
   getSnapshot = (): PositionEstimate | null => this.position;
@@ -328,7 +308,7 @@ export class NavigatorService implements PositionSource {
     const was = this.position;
     const moved = was ? ` ${Math.round(haversineM(was, at))} m from the dot` : "";
     this.note(`nav position set by the driver: ${at.lat.toFixed(6)},${at.lon.toFixed(6)}${moved}, heading ${Math.round(degrees360(headingRad))}°`);
-    this.holdManual({ lat: at.lat, lon: at.lon, headingRad, placedAt: now, confirmedAt: now });
+    this.held.hold({ lat: at.lat, lon: at.lon, headingRad, placedAt: now, confirmedAt: now });
     this.applyManual();
     this.phone?.engine.place({ lat: at.lat, lon: at.lon, headingRad, posSigmaM: USER_POSITION_SIGMA_M, headingSigmaRad: USER_HEADING_SIGMA_RAD });
     if (this.phone && !this.phone.started) {
@@ -350,9 +330,9 @@ export class NavigatorService implements PositionSource {
     }
     const minutes = Math.round((this.clock.nowMs() - m.confirmedAt) / 60_000);
     this.note(`nav manual position confirmed by the driver (${minutes} min since the last time)`);
-    this.holdManual({ ...m, confirmedAt: this.clock.nowMs() });
+    this.held.hold({ ...m, confirmedAt: this.clock.nowMs() });
     // Asked at a start: the navigator didn't start from it.
-    if (!this.manualApplied) this.applyManual();
+    if (!this.held.applied) this.applyManual();
     this.publish();
   }
 
@@ -364,8 +344,8 @@ export class NavigatorService implements PositionSource {
     const m = this.manual;
     if (!m) return;
     this.note(`nav manual position ${why}`);
-    const applied = this.manualApplied;
-    this.dropManual();
+    const applied = this.held.applied;
+    this.held.drop();
     if (applied && this.nav) {
       const pose = this.vin ? this.deps.calibration.parkedPose(this.vin) : null;
       if (pose && pose.savedAt >= m.placedAt && this.vin) this.deps.calibration.clearParkedPose(this.vin);
@@ -389,7 +369,7 @@ export class NavigatorService implements PositionSource {
   }
 
   get simulatedOutage(): boolean {
-    return this.outage !== null;
+    return this.outage.on;
   }
 
   /**
@@ -397,18 +377,11 @@ export class NavigatorService implements PositionSource {
    * sensors keep logging it. The map shows the withheld fix and how far the dot is from it.
    */
   setSimulatedOutage(on: boolean): void {
-    if (on === (this.outage !== null)) return;
+    if (on === this.outage.on) return;
     if (on) {
-      this.outage = { startedAt: this.clock.nowMs(), startDistanceM: this.nav?.stats.obdDistanceM ?? null, hidden: null, maxErrorM: 0 };
+      this.outage.start(this.clock.nowMs(), this.nav?.stats.obdDistanceM ?? null);
       this.note("sim gnss outage on");
-    } else {
-      const o = this.position?.simulatedOutage;
-      const parts = [`${Math.round((this.clock.nowMs() - this.outage!.startedAt) / 1000)} s`];
-      if (o?.distanceM !== undefined) parts.push(`${(o.distanceM / 1000).toFixed(2)} km`);
-      if (o?.errorM !== undefined) parts.push(`dot ${Math.round(o.errorM)} m from GPS (max ${Math.round(o.maxErrorM ?? 0)} m)`);
-      this.note(`sim gnss outage off: ${parts.join(", ")}`);
-      this.outage = null;
-    }
+    } else this.note(this.outage.stop(this.clock.nowMs(), this.position?.simulatedOutage));
     if (this.position) this.set(this.position);
   }
 
@@ -504,7 +477,7 @@ export class NavigatorService implements PositionSource {
       roadPosition: nav ? { accepted: nav.stats.roadPositionAccepted, rejected: nav.stats.roadPositionRejected } : null,
       mapMatch: e?.mapMatch ?? null,
       mapMatchTiming: this.timingSummary(),
-      mapMatchStarts: this.starts.count ? { count: this.starts.count, maxMs: this.starts.maxMs } : null,
+      mapMatchStarts: this.timing.startSummary(),
     };
   }
 
@@ -535,9 +508,7 @@ export class NavigatorService implements PositionSource {
         if (state !== "engine-off" && state !== "ignition-off") return;
         this.flush(this.deps.nowUs() - REORDER_US);
         this.saveCalibration();
-        this.noteCompassSummary();
-        this.noteMapMatchTiming();
-        this.noteRoadCorrections();
+        this.noteDrive();
       }),
     );
     this.lastSaveAt = this.clock.nowMs();
@@ -549,9 +520,7 @@ export class NavigatorService implements PositionSource {
     this.flush(Infinity);
     this.saveCalibration();
     this.closePhone();
-    this.noteCompassSummary();
-    this.noteMapMatchTiming();
-    this.noteRoadCorrections();
+    this.noteDrive();
     this.unsubscribers.forEach((u) => u());
     this.unsubscribers = [];
     if (this.timer) this.clock.clearInterval(this.timer);
@@ -625,28 +594,22 @@ export class NavigatorService implements PositionSource {
     // What this navigator starts from, raw, so a replay can start from the same (app-replay.ts).
     this.note(`${STORAGE_NOTE}${JSON.stringify(calibration.snapshot(null))}`);
     const nav = new Navigator({ ...this.deps.nav, mapMatchLoop: this.loop, ...(lag ? { gnssLagS: lag.lagS } : {}) });
-    this.notedRoad = { heading: 0, position: 0 };
     this.nav = nav;
     this.deps.observer?.navigator?.(nav);
     if (lag) this.note(`nav gnss lag ${lag.lagS} s from storage (${lag.windows} turn windows)`);
     this.fedUs = -Infinity;
     this.lastAcceptedSatUs = -Infinity;
     // `lastShownFix` stays: the navigator before checked it, and phone GNSS goes on showing it.
-    this.notedIntegrity = "ok";
-    this.notedDoubt = undefined;
+    this.notes.reset();
     this.vin = null;
     this.poseStatus = "none";
     this.poseQuestion = null;
-    this.notedCompassTrust = "none";
-    this.summarisedChecks = 0;
     // Before the parked pose: the filter then starts around it.
     this.graph = null;
-    this.notedMapMatch = "off";
-    this.interval = { count: 0, totalMs: 0, maxMs: 0 };
+    this.timing.resetInterval();
     this.applyRoadGraph();
     nav.setRouteHint(this.routeHint);
-    this.manualApplied = false;
-    this.manualRejected = 0;
+    this.held.setApplied(false);
     // Known before the adapter connects: the last car seen.
     const vin = link.expectedVin();
     if (vin) this.setVehicle(vin);
@@ -660,7 +623,7 @@ export class NavigatorService implements PositionSource {
    */
   private startFromManual(vin: string | null): boolean {
     const m = this.manual;
-    if (!m || this.manualAsking()) return false;
+    if (!m || this.held.asking()) return false;
     const pose = vin ? this.deps.calibration.parkedPose(vin) : null;
     if (pose && pose.savedAt > m.confirmedAt && haversineM(pose, m) > MANUAL_SAME_POSE_M) {
       this.note(`nav manual position older than the parked pose (${Math.round(haversineM(pose, m))} m apart): parked pose`);
@@ -676,47 +639,9 @@ export class NavigatorService implements PositionSource {
     const m = this.manual;
     if (!m || !this.nav) return;
     this.nav.setPosition({ lat: m.lat, lon: m.lon, headingRad: m.headingRad, posSigmaM: USER_POSITION_SIGMA_M, headingSigmaRad: USER_HEADING_SIGMA_RAD });
-    this.manualApplied = true;
-    this.manualRejected = 0;
+    this.held.setApplied(true);
     this.poseQuestion = null;
     this.poseStatus = "none";
-  }
-
-  private holdManual(m: StoredManualPosition): void {
-    this.manual = m;
-    this.notedManualAsk = false;
-    this.deps.calibration.saveManualPosition(m);
-  }
-
-  /** The manual position is no longer held; a navigator started from it carries on. */
-  private dropManual(): void {
-    this.manual = null;
-    this.manualApplied = false;
-    this.manualRejected = 0;
-    this.deps.calibration.saveManualPosition(null);
-  }
-
-  /** It is 15 min since the driver confirmed the manual position: "are you still here?". */
-  private manualAsking(): boolean {
-    return this.manual !== null && this.clock.nowMs() - this.manual.confirmedAt >= MANUAL_ASK_AFTER_MS;
-  }
-
-  /**
-   * A trusted satellite fix (integrity passed it, GNSS trusted) that agrees releases the manual position to GPS; so
-   * do 5 in a row that disagree.
-   */
-  private checkManualAgainst(fix: GnssFix): void {
-    const m = this.manual;
-    if (!m) return;
-    const d = haversineM(m, fix);
-    const accM = fix.hAccM;
-    if (d <= 3 * Math.hypot(accM, USER_POSITION_SIGMA_M)) {
-      this.note(`nav manual position released: GPS trusted, fix ${Math.round(d)} m away (±${Math.round(accM)} m)`);
-      this.dropManual();
-    } else if (++this.manualRejected >= MANUAL_REJECTED_FIXES) {
-      this.note(`nav manual position released: ${this.manualRejected} trusted GPS fixes disagree, the last ${Math.round(d)} m away`);
-      this.dropManual();
-    }
   }
 
   /** The pose saved when this car was parked, if the navigator has no better start; `late`: the VIN came after the start. */
@@ -778,9 +703,9 @@ export class NavigatorService implements PositionSource {
 
   private onGnss(r: GnssRecord): void {
     if (!Number.isFinite(r.latDeg) || !Number.isFinite(r.lonDeg)) return;
-    if (this.outage) {
+    if (this.outage.on) {
       this.deps.observer?.withheld?.(r);
-      this.outage.hidden = r;
+      this.outage.withhold(r);
       this.publish();
       return;
     }
@@ -810,7 +735,7 @@ export class NavigatorService implements PositionSource {
       }
       if (this.manual && phone.started && phone.engine.distanceSinceStartM > PHONE_RELEASE_MANUAL_M && this.deps.nowUs() - this.lastObdUs >= OBD_TIMEOUT_US) {
         this.note("nav manual position released: the car drives (phone)");
-        this.dropManual();
+        this.held.drop();
       }
     }
     this.flush(this.deps.nowUs() - REORDER_US);
@@ -823,7 +748,7 @@ export class NavigatorService implements PositionSource {
     if (s.raw > 0 && this.manual) {
       // Driving: the navigator carries the placing on (it started from it, or from something newer).
       this.note("nav manual position released: the car drives");
-      this.dropManual();
+      this.held.drop();
     }
     if (s.raw > 0 && this.poseStored) {
       // Driving: the stored pose is stale until the next stop.
@@ -848,7 +773,7 @@ export class NavigatorService implements PositionSource {
         if (late && this.fedUs - input.tUs > LATE_FIX_MAX_US) continue;
         const out = nav.onGnss(input.fix);
         this.deps.observer?.fix?.(input.fix, out);
-        this.noteIntegrity(out, input.fix);
+        this.notes.fixOutcome(out, input.fix);
         // Only a fix the navigator took: phone GNSS shows this one when there is no car speed, and `skipped`
         // means too coarse to weigh (over `maxFixAccuracyM`) or a repeat. Showing a skipped one threw the dot
         // 1.4-10.7 km at each ignition-off of a jammed day (2026-10-06).
@@ -856,7 +781,10 @@ export class NavigatorService implements PositionSource {
           this.lastShownFix = input.record;
           this.shownChanged = true;
         }
-        if (out.integrity === "ok" && nav.trustAt(input.tUs) === "TRUSTED") this.checkManualAgainst(input.fix);
+        if (out.integrity === "ok" && nav.trustAt(input.tUs) === "TRUSTED") {
+          const released = this.held.checkAgainst(input.fix);
+          if (released) this.note(released);
+        }
         const phone = this.phone;
         if (phone) {
           phone.engine.onFix(input.fix, out.integrity === "ok" && nav.trustAt(input.tUs) === "TRUSTED");
@@ -898,48 +826,24 @@ export class NavigatorService implements PositionSource {
 
   private tick(): void {
     this.checkVehicle();
-    if (this.manualAsking() && !this.notedManualAsk) {
-      this.notedManualAsk = true;
-      this.note("nav manual position 15 min old: asking the driver if they are still there");
-    }
+    const ask = this.held.askNote();
+    if (ask) this.note(ask);
     this.flush(this.deps.nowUs() - REORDER_US);
     this.publish();
-    this.noteCompassTrust();
+    if (this.nav) this.notes.compassTrustChange(this.nav);
     if (this.clock.nowMs() - this.lastSaveAt >= SAVE_EVERY_MS) this.saveCalibration();
   }
 
-  // ---- compass in shadow (NAVIGATOR-SPEC §7.6): logged, never navigated with ----
-
-  /** The heading just became known: what the compass said at that moment. */
-  private noteCompassAtStart(): void {
-    const nav = this.nav;
-    if (!nav) return;
-    const off = compassOff(nav);
-    this.note(`nav compass at start: ${off === null ? "none" : `${off.toFixed(0)}° off`} (${nav.compassTrust})`);
-  }
-
-  /** A stored calibration checked against the known heading: confirmed or rejected. */
-  private noteCompassTrust(): void {
-    const nav = this.nav;
-    if (!nav || nav.compassTrust === this.notedCompassTrust) return;
-    const before = this.notedCompassTrust;
-    this.notedCompassTrust = nav.compassTrust;
-    const diffs = nav.compassCheckDiffs.slice(-10).map((d) => Math.abs(d) * DEG);
-    const median = diffs.length ? ` (median ${percentile(diffs, 0.5).toFixed(0)}° over ${diffs.length} checks)` : "";
-    this.note(`nav compass ${before} → ${nav.compassTrust}${median}`);
-  }
-
-  /** At the end of a drive: how the compass did against the known heading. */
-  private noteCompassSummary(): void {
-    const nav = this.nav;
-    if (!nav) return;
-    const diffs = nav.compassCheckDiffs.map((d) => Math.abs(d) * DEG);
-    if (diffs.length === this.summarisedChecks) return;
-    this.summarisedChecks = diffs.length;
-    this.note(
-      `nav compass drive: ${nav.compassTrust}, ${diffs.length} checks, median ${percentile(diffs, 0.5).toFixed(0)}°, ` +
-        `p90 ${percentile(diffs, 0.9).toFixed(0)}°, ${nav.compassCalibrations.length} mounting(s) kept`,
-    );
+  /**
+   * At the end of a drive (engine off, the service stopping): how the compass did in shadow, how long map matching
+   * took, and the road corrections it sent.
+   */
+  private noteDrive(): void {
+    if (this.nav) this.notes.compassSummary(this.nav);
+    this.drainUpdateTimes();
+    const timing = this.timing.endDrive();
+    if (timing) this.note(timing);
+    if (this.nav) this.notes.roadCorrections(this.nav, this.loop);
   }
 
   // ---- output ----
@@ -965,7 +869,7 @@ export class NavigatorService implements PositionSource {
       const raw = fix ? rawOf(fix) : undefined;
       const same =
         p?.source === "manual" && p.trust === trust && p.rawGnss?.timestamp === raw?.timestamp &&
-        p.manual?.confirmedAt === m.confirmedAt && p.manual.asking === this.manualAsking();
+        p.manual?.confirmedAt === m.confirmedAt && p.manual.asking === this.held.asking();
       if (!same) {
         this.set({
           lat: m.lat,
@@ -1034,8 +938,8 @@ export class NavigatorService implements PositionSource {
 
     const fused = estimate.mode === "dr" && trust === "TRUSTED" && estimate.tUs - this.lastAcceptedSatUs < FUSED_WINDOW_US;
     const mm = estimate.mapMatch;
-    this.noteMapMatch(mm?.state ?? "off");
-    this.noteDoubt(estimate.doubtM);
+    this.notes.mapMatch(nav, mm?.state ?? "off");
+    this.notes.doubt(estimate.doubtM);
     // Dead-reckoning on the map, or anchored once the filter found the road: the dominant hypothesis is the puck, the
     // others its alternatives (MAPMATCH-SPEC §6.2). With GNSS the EKF stays the puck: it is within a few metres there.
     const top = puckHypothesis(estimate, estimate.mode === "dr" && !fused);
@@ -1088,62 +992,24 @@ export class NavigatorService implements PositionSource {
     if (mode !== "dr") return;
     // Fix-based starts are noted with the fix; a map start happens between fixes.
     if (this.nav?.initialization?.method === "map") this.note("nav mode dr (map)");
-    this.noteCompassAtStart();
-  }
-
-  /** Map-match state changes into the trip log, except the flips between tracking and multimodal. */
-  private noteMapMatch(state: MapMatchState): void {
-    const onRoad = (s: MapMatchState) => s === "tracking" || s === "multimodal";
-    if (state === this.notedMapMatch || (onRoad(state) && onRoad(this.notedMapMatch))) return;
-    const mm = this.nav?.estimate()?.mapMatch;
-    this.notedMapMatch = state;
-    this.note(`mm ${state}${mm ? ` (${mm.particles} particles, ${mm.clusters.length} hypotheses)` : ""}`);
-  }
-
-  /** The coarse fixes agreeing the track is lost, and letting go of that doubt, both go in the trip log. */
-  private noteDoubt(doubtM: number | undefined): void {
-    const was = this.notedDoubt;
-    this.notedDoubt = doubtM;
-    if ((was === undefined) === (doubtM === undefined)) return;
-    this.note(
-      doubtM === undefined
-        ? "nav position doubt cleared: a fix agrees with the dead reckoning again"
-        : `nav position doubted: Wi-Fi/cell fixes put the car ${Math.round(doubtM)} m from the dead reckoning`,
-    );
+    if (this.nav) this.notes.compassAtStart(this.nav);
   }
 
   private note(text: string): void {
     this.deps.note?.(text);
   }
 
-  /**
-   * Integrity's verdict into the trip log when it changes (SPEC §3.3): `gnss integrity <verdict>: <why>` with the
-   * fix's accuracy; back to `ok` with how trust came back.
-   */
-  private noteIntegrity(out: FixOutcome, fix: GnssFix): void {
-    const v = out.integrity;
-    if (!v || v === this.notedIntegrity) return;
-    // A refusal's follow-ups (still refused, reacquiring) aren't news unless they carry a reason.
-    if ((v === "untrusted" || v === "reacquiring") && !out.integrityDetail && this.notedIntegrity !== "ok") {
-      this.notedIntegrity = v;
-      return;
-    }
-    this.notedIntegrity = v;
-    const off = out.errorM === undefined ? "" : `, ${Math.round(out.errorM)} m from the dead reckoning`;
-    this.note(`gnss integrity ${v}${out.integrityDetail ? `: ${out.integrityDetail}` : ""} (fix ±${Math.round(fix.hAccM)} m${v === "ok" ? "" : off})`);
-  }
-
   /** `behindUs`: how far the navigator's state lags now (the drawn position is extrapolated over it). */
   private set(position: PositionEstimate, behindUs = 0): void {
     this.drainUpdateTimes();
     const { simulatedOutage: _, poseQuestion: _q, manual: _m, ...rest } = position;
-    const outage = this.outageInfo(rest);
+    const outage = this.outage.info(rest, this.clock.nowMs(), this.nav?.stats.obdDistanceM);
     const m = this.manual;
     this.position = {
       ...rest,
       ...(outage ? { simulatedOutage: outage } : {}),
       ...(this.poseQuestion ? { poseQuestion: this.poseQuestion } : {}),
-      ...(m ? { manual: { placedAt: m.placedAt, confirmedAt: m.confirmedAt, asking: this.manualAsking() } } : {}),
+      ...(m ? { manual: { placedAt: m.placedAt, confirmedAt: m.confirmedAt, asking: this.held.asking() } } : {}),
     };
     this.overlayStale = true;
     this.logPosition(position, behindUs);
@@ -1152,76 +1018,13 @@ export class NavigatorService implements PositionSource {
 
   // ---- map-matching speed (MAPMATCH-SPEC §11) ----
 
-  /** Every filter start and update since the last drain, out of the filter (whose lists would grow all drive). */
   private drainUpdateTimes(): void {
-    const pf = this.nav?.mapMatcher;
-    if (!pf || (!pf.updateTimes.length && !pf.startTimes.length)) return;
-    if (!this.timing.count && !this.starts.count) this.timingSince = this.clock.nowMs();
-    for (const ms of pf.startTimes.splice(0)) {
-      this.starts.count++;
-      this.starts.totalMs += ms;
-      this.starts.maxMs = Math.max(this.starts.maxMs, ms);
-    }
-    for (const ms of pf.updateTimes.splice(0)) {
-      this.timing.add(ms);
-      this.interval.count++;
-      this.interval.totalMs += ms;
-      this.interval.maxMs = Math.max(this.interval.maxMs, ms);
-    }
+    this.timing.drain(this.nav?.mapMatcher);
   }
 
   private timingSummary(): NavigatorDebug["mapMatchTiming"] {
     this.drainUpdateTimes();
-    const s = this.timing.summary();
-    if (!s) return null;
-    return { ...s, share: (s.totalMs + this.starts.totalMs) / Math.max(1, this.clock.nowMs() - this.timingSince) };
-  }
-
-  /** At the end of a drive: how long the filter's updates took, then start counting afresh. */
-  private noteMapMatchTiming(): void {
-    const s = this.timingSummary();
-    const starts = this.starts;
-    this.timing = new UpdateTiming();
-    this.starts = { count: 0, totalMs: 0, maxMs: 0 };
-    if (!s) return;
-    const ms = (v: number) => (v < 10 ? v.toFixed(2) : v.toFixed(0));
-    this.note(
-      `mm timing: ${s.count} updates, p50 ${ms(s.p50Ms)} ms, p99 ${ms(s.p99Ms)} ms, max ${ms(s.maxMs)} ms, ` +
-        `${(s.share * 100).toFixed(2)} % of the time, ${s.overBudget} over 5 ms` +
-        (starts.count ? `; ${starts.count} start${starts.count === 1 ? "" : "s"}, slowest ${ms(starts.maxMs)} ms` : ""),
-    );
-  }
-
-  /** At the end of a drive: the road corrections map matching sent the navigator, and how many it refused. */
-  private noteRoadCorrections(): void {
-    const s = this.nav?.stats;
-    if (!s || this.loop === "open") return;
-    const heading = s.roadHeadingAccepted + s.roadHeadingRejected;
-    const position = s.roadPositionAccepted + s.roadPositionRejected;
-    if (heading === this.notedRoad.heading && position === this.notedRoad.position) return;
-    this.notedRoad = { heading, position };
-    this.note(
-      `mm loop ${this.loop}: road heading ${s.roadHeadingAccepted} (${s.roadHeadingRejected} refused), ` +
-        `road position ${s.roadPositionAccepted} (${s.roadPositionRejected} refused)`,
-    );
-  }
-
-  private outageInfo(p: PositionEstimate): SimulatedOutage | undefined {
-    const o = this.outage;
-    if (!o) return undefined;
-    const h = o.hidden;
-    const truth =
-      h && isSatelliteRecord(h) && h.hAccM <= OUTAGE_TRUTH_MAX_ACC_M && this.clock.nowMs() - h.utcUs / 1000 <= OUTAGE_TRUTH_MAX_AGE_MS
-        ? { lat: h.latDeg, lon: h.lonDeg, accuracyM: h.hAccM, timestamp: h.utcUs / 1000 }
-        : undefined;
-    const errorM = truth ? haversineM(p, truth) : undefined;
-    if (errorM !== undefined) o.maxErrorM = Math.max(o.maxErrorM, errorM);
-    const nav = this.nav;
-    return {
-      startedAt: o.startedAt,
-      ...(nav && o.startDistanceM !== null ? { distanceM: Math.max(0, nav.stats.obdDistanceM - o.startDistanceM) } : {}),
-      ...(truth ? { gnss: truth, errorM, maxErrorM: o.maxErrorM } : {}),
-    };
+    return this.timing.summary();
   }
 
   private logPosition(p: PositionEstimate, behindUs: number): void {
@@ -1252,7 +1055,7 @@ export class NavigatorService implements PositionSource {
       particles: mm.particles,
       clusters: mm.clusters.length,
       updateUs: mm.updateMs * 1000,
-      updates: { count: this.interval.count, totalUs: this.interval.totalMs * 1000, maxUs: this.interval.maxMs * 1000 },
+      updates: this.timing.takeInterval(),
       graphBuilt: this.graph?.builtAt ?? 0,
       top: mm.clusters.slice(0, MAPMATCH_TOP).map((c) => ({
         weight: c.weight,
@@ -1262,7 +1065,6 @@ export class NavigatorService implements PositionSource {
         spreadM: c.spreadM,
       })),
     });
-    this.interval = { count: 0, totalMs: 0, maxMs: 0 };
   }
 }
 
@@ -1272,19 +1074,6 @@ function ahead(p: { lat: number; lon: number }, headingRad: number | undefined, 
   const lat = p.lat + ((d * Math.cos(headingRad)) / EARTH_RADIUS_M) * (180 / Math.PI);
   const lon = p.lon + ((d * Math.sin(headingRad)) / (EARTH_RADIUS_M * Math.cos((lat * Math.PI) / 180))) * (180 / Math.PI);
   return { lat, lon };
-}
-
-/** Compass heading minus the EKF heading now, degrees (null: either unknown). */
-function compassOff(nav: Navigator): number | null {
-  const compass = nav.compassHeading;
-  const heading = nav.estimate()?.headingRad;
-  if (!compass || heading === undefined) return null;
-  return Math.atan2(Math.sin(compass.psi - heading), Math.cos(compass.psi - heading)) * DEG;
-}
-
-function percentile(values: number[], q: number): number {
-  const s = [...values].sort((a, b) => a - b);
-  return s[Math.min(s.length - 1, Math.floor(q * s.length))];
 }
 
 /** A stored pose gets some slack: the car settles, and the saved σ came from a converged filter. */
