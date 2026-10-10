@@ -4,7 +4,9 @@ import { getRuntime } from "@/services/runtime";
 
 import { type AudioOutput, currentAudioOutput, onAudioOutput } from "../../../modules/audio-output/src/AudioOutputModule";
 
-const describe = (o: AudioOutput) => `${o.kind}${o.name ? ` "${o.name}"` : ""}${o.reason ? ` (${o.reason})` : ""}`;
+const describe = (o: AudioOutput) =>
+  `${o.kind}${o.name ? ` "${o.name}"` : ""}${o.reason ? ` (${o.reason})` : ""}` +
+  `${o.volume != null ? `, volume ${Math.round(o.volume * 100)} %` : ""}${o.all ? `; all: ${o.all.join(", ")}` : ""}`;
 
 /** The phone's own outputs: the voice is heard there whatever the car plays. */
 const ON_THE_PHONE = new Set<AudioOutput["kind"]>(["speaker", "receiver", "wired", "none"]);

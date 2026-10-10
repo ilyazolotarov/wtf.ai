@@ -54,24 +54,34 @@ class AudioOutputModule : Module() {
     }
   }
 
-  /** Where media plays now: its kind, the device's name, and why it changed (when it did). */
+  /**
+   * Where media plays now: its kind, the device's name, why it changed (when it did), the media volume (0–1), and every
+   * device media goes to when more than one (a screen recording or mirroring adds a "remote submix" to the speaker or
+   * takes the sound away from it).
+   */
   private fun describe(reason: String?): Map<String, Any?> {
-    val device = audio?.let { output(it) }
+    val am = audio
+    val devices = am?.let { outputs(it) } ?: emptyList()
+    val device = devices.firstOrNull()
+    val max = am?.getStreamMaxVolume(AudioManager.STREAM_MUSIC) ?: 0
     return mapOf(
       "kind" to (device?.let { kind(it.type) } ?: "none"),
       "name" to device?.productName?.toString(),
       "reason" to reason,
+      "volume" to if (am != null && max > 0) am.getStreamVolume(AudioManager.STREAM_MUSIC).toDouble() / max else null,
+      "all" to if (devices.size > 1) devices.map { "${kind(it.type)} ${it.productName}" } else null,
     ).filterValues { it != null }
   }
 
-  private fun output(am: AudioManager): AudioDeviceInfo? {
+  private fun outputs(am: AudioManager): List<AudioDeviceInfo> {
     if (Build.VERSION.SDK_INT >= 33) {
       val media = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).build()
-      am.getAudioDevicesForAttributes(media).firstOrNull()?.let { return it }
+      val devices = am.getAudioDevicesForAttributes(media)
+      if (devices.isNotEmpty()) return devices
     }
     // Before Android 13: what media prefers among the outputs connected.
     val outputs = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
-    return PREFERRED.firstNotNullOfOrNull { type -> outputs.firstOrNull { it.type == type } }
+    return listOfNotNull(PREFERRED.firstNotNullOfOrNull { type -> outputs.firstOrNull { it.type == type } })
   }
 
   /**
@@ -129,6 +139,8 @@ class AudioOutputModule : Module() {
       AudioDeviceInfo.TYPE_AUX_LINE -> "wired"
       AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_BLUETOOTH_SCO, AudioDeviceInfo.TYPE_BLE_HEADSET,
       AudioDeviceInfo.TYPE_BLE_SPEAKER, AudioDeviceInfo.TYPE_BLE_BROADCAST -> "bluetooth"
+      // Captured or redirected: a screen recording with sound, mirroring or casting the screen.
+      AudioDeviceInfo.TYPE_REMOTE_SUBMIX -> "capture"
       else -> "other"
     }
   }

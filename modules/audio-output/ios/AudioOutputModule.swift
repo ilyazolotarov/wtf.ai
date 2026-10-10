@@ -50,13 +50,18 @@ public class AudioOutputModule: Module {
     }
   }
 
-  /** The first output of the current route: its kind, the device's name, and why it changed (when it did). */
+  /**
+   * The first output of the current route: its kind, the device's name, why it changed (when it did), and the volume
+   * it plays at (0–1).
+   */
   private static func describe(reason: AVAudioSession.RouteChangeReason?) -> [String: Any?] {
-    let output = AVAudioSession.sharedInstance().currentRoute.outputs.first
+    let session = AVAudioSession.sharedInstance()
+    let output = session.currentRoute.outputs.first
     return [
       "kind": output.map { kind(of: $0.portType) } ?? "none",
       "name": output?.portName,
       "reason": reason.map(name(of:)),
+      "volume": Double(session.outputVolume),
     ]
   }
 

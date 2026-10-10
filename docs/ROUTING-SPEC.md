@@ -392,8 +392,11 @@ leaves the slider (`LevelSlider`), not while it rests on it; 0 turns the voice o
 sound about equal: 100 % plays the clips as recorded, the default 80 % 3.9 dB lower (near −19 LUFS), 50 % 12 dB lower. It is
 the player's volume, applied to the clips and the system voice: the clips aren't recorded again to change it.
 
-Into the trip log: `audio output: <kind> "<device>"` when a route starts and `audio output now: … (<why>)` on each
-change (speaker, receiver, wired, bluetooth, carplay, airplay), `voice say <phrase ids>` for each announcement (`(system voice)` without clips, `after <n>
+Into the trip log: `audio output: <kind> "<device>", volume <n> %` when a route starts and `audio output now: …
+(<why>)` on each change (speaker, receiver, wired, bluetooth, carplay, airplay; the volume is the phone's media volume on
+Android, the output volume on iOS: at 0 the voice is silent whatever its own volume; on Android `; all: …` lists every
+device media plays to when more than one, and `capture` is media captured or redirected, a screen recording with sound,
+mirroring or casting: a tester's drive had only `capture "remote-submix"` and heard no voice), `voice say <phrase ids>` for each announcement (`(system voice)` without clips, `after <n>
 waiting` when queued), `voice muted: …` for one not said, and what went wrong: a clip that never reported its end
 (given up after 8 s), one that didn't load or play (said by the system voice instead), the system voice failing or
 never finishing (given up after 4 s + 0.12 s a character), a clip paused by the system and played again. Whatever

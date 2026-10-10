@@ -4,7 +4,17 @@ import { Platform, type ViewProps } from "react-native";
 
 // Typed binding for modules/audio-output (iOS and Android; on web there is no output and no picker).
 
-export type AudioOutputKind = "speaker" | "receiver" | "wired" | "bluetooth" | "carplay" | "airplay" | "other" | "none";
+/** `capture` (Android): media captured or redirected (a screen recording with sound, mirroring or casting). */
+export type AudioOutputKind =
+  | "speaker"
+  | "receiver"
+  | "wired"
+  | "bluetooth"
+  | "carplay"
+  | "airplay"
+  | "capture"
+  | "other"
+  | "none";
 
 export interface AudioOutput {
   kind: AudioOutputKind;
@@ -12,6 +22,13 @@ export interface AudioOutput {
   name?: string | null;
   /** Why it changed (events only): "new device", "device gone", "override", … */
   reason?: string | null;
+  /**
+   * The volume it plays at, 0–1: the media volume on Android, the output volume on iOS. The route voice plays there,
+   * so 0 is silence whatever the app's own voice volume (Settings).
+   */
+  volume?: number | null;
+  /** Android: every device media plays to (`<kind> <name>`), when more than one. */
+  all?: string[] | null;
 }
 
 type AudioOutputEvents = { onOutputChange(output: AudioOutput): void };
