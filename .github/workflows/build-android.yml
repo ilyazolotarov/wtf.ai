@@ -175,7 +175,10 @@ jobs:
         run: |
           cp android/app/build/outputs/apk/release/app-release.apk "wtfai-${VARIANT}.apk"
           ls -l "wtfai-${VARIANT}.apk"
-          "$ANDROID_HOME"/build-tools/*/apksigner verify --print-certs "wtfai-${VARIANT}.apk" | head -3
+          # Which key signed it: the release key's SHA-256 is the same in every main build (docs/ANDROID-SPEC.md §4).
+          # The newest build-tools: with several installed, the glob alone runs one apksigner with another as argument.
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n 1)
+          "$APKSIGNER" verify --print-certs "wtfai-${VARIANT}.apk" | grep -E "certificate (DN|SHA-256)"
 
       - name: Upload APK to install
         # The tester build always; the CI build when the plan wants it delivered (notify).
