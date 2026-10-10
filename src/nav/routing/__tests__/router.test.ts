@@ -67,6 +67,8 @@ describe("cost model", () => {
     expect(kph(road(RoadClass.residential, A))).toBeCloseTo(c.capKph[RoadClass.residential]);
     expect(kph(road(RoadClass.unclassified, A | EdgeFlag.unpaved))).toBeCloseTo(c.unpavedMaxKph);
     expect(kph(road(RoadClass.motorway, A))).toBeLessThanOrEqual(maxSpeedMps(c) * 3.6);
+    expect(kph(road(RoadClass.motorway, 0))).toBeLessThanOrEqual(maxSpeedMps(c, false) * 3.6);
+    expect(maxSpeedMps(c, false)).toBeLessThan(maxSpeedMps(c));
   });
 
   test("time: a signalled crossing by the share driven; rush hours on big cities' main roads only", () => {
@@ -117,6 +119,16 @@ describe("planRoute", () => {
     expect(haversineM(p.coordinates.at(-1)!, to)).toBeLessThan(1);
     expect(p.offRoadM.start).toBeLessThan(1);
     expect(p.offRoadM.end).toBeLessThan(1);
+  });
+
+  test("a search past its state budget starts again at the fallback weight, and still finds the route", () => {
+    const g = graph();
+    const r = planRoute(g, frame, at(0.5, 0, 90), at(2, 0), { fallbackAfterStates: 0 });
+    expect(r.status).toBe("done");
+    expect(r.stats.fellBackAt).toBeGreaterThan(0);
+    const plain = planRoute(graph(), frame, at(0.5, 0, 90), at(2, 0));
+    expect(plain.stats.fellBackAt).toBeUndefined();
+    if (r.status === "done" && plain.status === "done") expect(r.plan.durationS).toBeCloseTo(plain.plan.durationS, 3);
   });
 
   test("never takes a restricted turn: no left from 101 onto 103, so it turns around somewhere", () => {

@@ -201,13 +201,19 @@ One small component each. Touch targets ≥ 56 pt; high contrast; minimal text.
 - With a route (`src/components/route/route-banner.tsx`): the banner shows the next maneuver's icon, the distance
   to it (10 m steps under 300 m, 50 m under 1 km), its instruction, "then …" when the next follows within 120 m,
   and the distance, time and arrival clock left; or "Planning route…", "Off route, planning again…", "Position
-  uncertain: keeping the route", "No route" with the reason, "You've arrived". Its × ends the route; its speaker
+  uncertain: keeping the route", "No route" with the reason, "You've arrived". While the planner works a thin bar
+  sweeps under the text (accent; amber for a re-plan), and for a first plan a ring pulses out of the icon; both hold
+  still with the system's Reduce Motion. Its × ends the route; its speaker
   button mutes the spoken maneuvers (ROUTING-SPEC §8.5) and is hidden while the voice volume in Settings is 0; holding it opens the system's audio output picker
   (iOS: Apple's, iPhone / Bluetooth / AirPlay; Android: the media output panel), and while the voice goes off the phone (a car's Bluetooth) it shows the AirPlay
   audio glyph instead of the speaker. The two buttons are 38 pt, the × at the top and the voice at the bottom, at
   least 20 pt apart, their touch areas not overlapping (a mis-tap on × ended the route). The map draws the route ahead of the car (from its
   progress point, ROUTING-SPEC §8.1: what is driven disappears; faded while planning again; the stretch from the
   progress point to the next route vertex is dashed in the accent blue), its next maneuver and the destination.
+  **Alternatives** (ROUTING-SPEC §8.7) are quieter solid blue lines under it (`routeAlt`: light #93A6DE, dark
+  #7489C2; a translucent route colour turned muddy on the dark map), each labelled on its own stretch
+  with its time against the route ("+4 min", "−2 min", "Same time"); a tap on a line or label follows it. When they
+  come while the car stands, the map frames all routes once (free camera).
 - **A route without an adapter** (phone-only mode on and no adapter connected, NAVIGATOR-SPEC §9.6): **Route here**
   and **Start guidance** don't plan at once. The destination is held (`route-without-adapter.ts`) and a card on the
   map says, first, where the position comes from: GPS has it (trusted), it was set on the map {age} ago, or "set

@@ -42,6 +42,8 @@ export const Colors = {
     cardShadow: "0 12px 40px rgba(0,0,0,0.25)",
     grab: "rgba(0,0,0,0.18)",
     route: "#3F5FBF",
+    /** Alternative routes: solid (a translucent route colour over the casing turned muddy on the dark map), quieter. */
+    routeAlt: "#93A6DE",
     // Legacy names used by dev-only screens (trips, ELM terminal, device list).
     background: "#F5F4F1",
     backgroundElement: "#FFFFFF",
@@ -70,6 +72,7 @@ export const Colors = {
     cardShadow: "0 12px 40px rgba(0,0,0,0.25)",
     grab: "rgba(255,255,255,0.25)",
     route: "#9DB4F2",
+    routeAlt: "#7489C2",
     background: "#121211",
     backgroundElement: "#232220",
     backgroundSelected: "#2C2B29",

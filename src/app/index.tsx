@@ -136,6 +136,19 @@ export default function HomeScreen() {
     setCameraMode(next);
   };
 
+  // Alternatives for a new route while the car stands: the map shows them all once (ROUTING-SPEC §8.7); the
+  // recentre button goes back to following. Moving, the camera is left alone.
+  // (State adjusted during render, not in an effect.)
+  const [overview, setOverview] = useState<number | null>(null);
+  const [overviewFor, setOverviewFor] = useState<object | null>(null);
+  if (route?.alternatives?.length && overviewFor !== route.destination) {
+    setOverviewFor(route.destination);
+    if ((position?.speedMps ?? 0) <= COURSE_MIN_SPEED_MPS) {
+      setCameraMode("free");
+      setOverview(route.planId);
+    }
+  }
+
   // Tap never enters free (only map gestures do); from free it returns to follow.
   const toggleCameraMode = () => {
     setGhostView(false);
@@ -330,6 +343,7 @@ export default function HomeScreen() {
           placeFrom={placeFrom}
           onCenter={(at) => (placeCenter.current = at)}
           onTap={aimPlacing}
+          overview={overview}
           placedMark={
             placing === "heading" && placeAt
               ? { at: placeAt, headingRad: placeHeading, draft: true }

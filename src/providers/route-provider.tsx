@@ -31,6 +31,8 @@ export interface RouteControls {
   route: RouteSnapshot | null;
   startRoute(destination: RouteDestination): void;
   stopRoute(): void;
+  /** Follow `route.alternatives[index]` instead (ROUTING-SPEC §8.7). */
+  chooseAlternative(index: number): void;
 }
 
 /** Navigation without an adapter (phone-only mode on, no adapter connected): a route waits for the driver's word. */
@@ -59,6 +61,7 @@ export function useRoute(): RouteControls {
       takeHeldRoute();
       routes.stop();
     },
+    chooseAlternative: (index) => routes.chooseAlternative(index),
   };
 }
 

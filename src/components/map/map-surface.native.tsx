@@ -19,11 +19,13 @@ import { useColorScheme, View, type NativeSyntheticEvent } from "react-native";
 import { ANDROID_BLURS } from "@/components/ui/glass-fill";
 import { useMapStyle } from "@/config/map";
 import { Colors } from "@/constants/theme";
+import { useT } from "@/i18n/provider";
 import { circlePolygon, destinationAtBearing, haversineM, type Coordinate } from "@/nav/geo";
 import type { PositionEstimate } from "@/nav/position/types";
 import { usePosition } from "@/providers/position-provider";
 import { useDevSettings, useRuntime } from "@/providers/runtime-provider";
 import type { MapMatchOverlay } from "@/services/navigation/navigator-service";
+import type { AlternativeRoute } from "@/services/navigation/route-service";
 import { useRoute } from "@/providers/route-provider";
 import { COURSE_MIN_SPEED_MPS, mapBearingDeg, type CompassHeading } from "./use-compass-heading";
 
@@ -60,6 +62,8 @@ interface MapSurfaceProps {
    * confirmed one, fainter, kept until the car has driven away from it.
    */
   placedMark?: { at: Coordinate; headingRad: number | null; draft: boolean } | null;
+  /** Changes when the route and its alternatives should be framed (they came while the car stood). */
+  overview?: number | null;
 }
 
 /** The placed car's arrow: narrow and long enough to read at zoom 18. */
@@ -102,6 +106,12 @@ const FOLLOW_CAMERA: Record<
 /** Leaving follow by the button steps back to a flat overview. */
 const FREE_ZOOM = 15.5;
 
+/**
+ * The app's own labels: a font stack of the offline style, by the name its glyph folders have (tools/tiles style.py
+ * `font_slug`: "Noto Sans Bold" → `noto-sans-bold`). The display name finds no glyphs there and every label is blank.
+ */
+const LABEL_FONT = ["noto-sans-bold"];
+
 const ROUTE_LAYOUT = { "line-cap": "round", "line-join": "round" } as const;
 /** Butt caps keep the dashes crisp (round caps would grow each dash into the next gap). */
 const ROUTE_HEAD_LAYOUT = { "line-cap": "butt", "line-join": "round" } as const;
@@ -120,12 +130,14 @@ export function MapSurface({
   onCenter,
   onTap,
   placedMark = null,
+  overview = null,
 }: MapSurfaceProps) {
   const scheme = useColorScheme() === "dark" ? "dark" : "light";
   const palette = Colors[scheme];
   const mapStyle = useMapStyle(scheme);
   const position = usePosition();
-  const { route } = useRoute();
+  const { route, chooseAlternative } = useRoute();
+  const { t } = useT();
   const { showParticles } = useDevSettings();
   const { position: navigator } = useRuntime();
   const cameraRef = useRef<CameraRef | null>(null);
@@ -224,6 +236,22 @@ export function MapSurface({
     if (snapped) cameraRef.current?.jumpTo(stop);
     else cameraRef.current?.easeTo({ ...stop, duration: FOLLOW_EASE_MS });
   }, [follow, position, ghostView, followBearing]);
+
+  // The route and its alternatives at once (ROUTING-SPEC §8.7), north up: framed once when asked.
+  useEffect(() => {
+    if (overview == null || !route?.plan) return;
+    const all = [route.plan, ...(route.alternatives ?? []).map((a) => a.plan)].flatMap((p) => p.coordinates);
+    if (all.length < 2) return;
+    const lons = all.map((c) => c.lon);
+    const lats = all.map((c) => c.lat);
+    cameraRef.current?.fitBounds([Math.min(...lons), Math.min(...lats), Math.max(...lons), Math.max(...lats)], {
+      padding: { top: 300, bottom: 260, left: 60, right: 60 },
+      bearing: 0,
+      pitch: 0,
+      duration: 900,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overview]);
 
   const hasGhost = ghost != null;
   useEffect(() => {
@@ -361,6 +389,20 @@ export function MapSurface({
       : undefined;
   const maneuverPoint = nextManeuver && nextManeuver.kind !== "arrive" ? pointFeatures(nextManeuver) : emptyPoints();
   const destination = route ? pointFeatures(route.destination) : emptyPoints();
+  // Alternatives (ROUTING-SPEC §8.7): fainter lines under the route, each labelled with its time against it; a tap
+  // on either follows it.
+  const alternativeRoutes = route?.alternatives;
+  const alternativeLines = useMemo(() => alternativeLineFeatures(alternativeRoutes), [alternativeRoutes]);
+  const alternativeLabels = alternativeLabelFeatures(alternativeRoutes, (deltaS) => {
+    const n = Math.round(Math.abs(deltaS) / 60);
+    return n === 0 ? t("alternativeSame") : t(deltaS > 0 ? "alternativeSlower" : "alternativeFaster").replace("{n}", String(n));
+  });
+  const pickAlternative = (event: NativeSyntheticEvent<{ features: GeoJSON.Feature[] }>) => {
+    const index = event.nativeEvent.features?.[0]?.properties?.index;
+    if (typeof index !== "number") return;
+    event.stopPropagation();
+    chooseAlternative(index);
+  };
   const pinPoint = pin ? pointFeatures(pin) : emptyPoints();
   const placedPoint = placedMark ? pointFeatures(placedMark.at) : emptyPoints();
   const placedArrow =
@@ -410,6 +452,10 @@ export function MapSurface({
           bearing: 0,
         }}
       />
+      <GeoJSONSource id="alternative-routes" data={alternativeLines} onPress={pickAlternative}>
+        <Layer id="alternative-route-casing" type="line" layout={ROUTE_LAYOUT} paint={{ "line-color": palette.bg, "line-width": 8, "line-opacity": 0.9 }} />
+        <Layer id="alternative-route-line" type="line" layout={ROUTE_LAYOUT} paint={{ "line-color": palette.routeAlt, "line-width": 5 }} />
+      </GeoJSONSource>
       <GeoJSONSource id="active-route" data={routeAhead}>
         <Layer id="active-route-casing" type="line" layout={ROUTE_LAYOUT} paint={routeCasing} />
         <Layer id="active-route-line" type="line" layout={ROUTE_LAYOUT} paint={routePaint} />
@@ -430,6 +476,19 @@ export function MapSurface({
           id="route-destination-dot"
           type="circle"
           paint={{ "circle-radius": 8, "circle-color": palette.route, "circle-stroke-color": palette.bg, "circle-stroke-width": 3 }}
+        />
+      </GeoJSONSource>
+      <GeoJSONSource id="alternative-route-labels" data={alternativeLabels} onPress={pickAlternative}>
+        <Layer
+          id="alternative-route-label"
+          type="symbol"
+          layout={{
+            "text-field": ["get", "label"],
+            "text-font": LABEL_FONT,
+            "text-size": 14,
+            "text-allow-overlap": true,
+          }}
+          paint={{ "text-color": palette.route, "text-halo-color": palette.bg, "text-halo-width": 3 }}
         />
       </GeoJSONSource>
       <GeoJSONSource id="dropped-pin" data={pinPoint}>
@@ -531,7 +590,7 @@ export function MapSurface({
           type="symbol"
           layout={{
             "text-field": "GPS?",
-            "text-font": ["Noto Sans Bold"],
+            "text-font": LABEL_FONT,
             "text-size": 11,
             "text-offset": [0, 1.9],
             "text-anchor": "top",
@@ -570,7 +629,7 @@ export function MapSurface({
           type="symbol"
           layout={{
             "text-field": ["get", "label"],
-            "text-font": ["Noto Sans Bold"],
+            "text-font": LABEL_FONT,
             "text-size": 11,
             "text-anchor": "bottom",
             "text-allow-overlap": true,
@@ -594,7 +653,7 @@ export function MapSurface({
           type="symbol"
           layout={{
             "text-field": "GPS",
-            "text-font": ["Noto Sans Bold"],
+            "text-font": LABEL_FONT,
             "text-size": 11,
             "text-offset": [0, 1.2],
             "text-anchor": "top",
@@ -751,6 +810,28 @@ function routeFeatures(
     geometry: { type: "LineString", coordinates },
   };
   return { type: "FeatureCollection", features: [feature] };
+}
+
+function alternativeLineFeatures(alternatives: AlternativeRoute[] | undefined): FeatureCollection<LineString> {
+  return {
+    type: "FeatureCollection",
+    features: (alternatives ?? []).map((a, index) => ({
+      type: "Feature",
+      properties: { index },
+      geometry: { type: "LineString", coordinates: a.plan.coordinates.map((c) => [c.lon, c.lat]) },
+    })),
+  };
+}
+
+function alternativeLabelFeatures(alternatives: AlternativeRoute[] | undefined, label: (deltaS: number) => string): FeatureCollection<Point> {
+  return {
+    type: "FeatureCollection",
+    features: (alternatives ?? []).map((a, index) => ({
+      type: "Feature",
+      properties: { index, label: label(a.deltaS) },
+      geometry: { type: "Point", coordinates: [a.labelAt.lon, a.labelAt.lat] },
+    })),
+  };
 }
 
 function emptyPolygons(): FeatureCollection<Polygon> {

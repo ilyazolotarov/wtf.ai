@@ -1,14 +1,16 @@
 // Routing in the app (ROUTING-SPEC §8): plans a route from the published position on the active region's road
 // graph, in slices between frames, guides along it, plans again when the car leaves it, and writes every plan
-// and the guidance into the trip log.
+// and the guidance into the trip log. After a new route is on its way, alternatives are searched the same way
+// (§8.7): never before the route itself, so they never hold up the start.
 
 import type { Coordinate } from "@/nav/geo";
 import { LocalFrame } from "@/nav/geo/local-frame";
 import type { GraphStats, RoadGraph } from "@/nav/mapmatch/graph/road-graph";
+import { AlternativeSearch, edgeSet, labelPoint, sharedM } from "@/nav/routing/alternatives";
 import { congestionAt } from "@/nav/routing/congestion";
 import { RouteGuidance, type GuidanceState, type GuidanceStep } from "@/nav/routing/guidance";
 import { routeManeuvers, type Maneuver } from "@/nav/routing/maneuvers";
-import { RouteSearch, type RouteFailure, type RoutePlan } from "@/nav/routing/router";
+import { RouteSearch, type RouteFailure, type RoutePlan, type RouteStart } from "@/nav/routing/router";
 import type { PositionEstimate } from "@/nav/position/types";
 import type {
   NavRouteManeuverRecord,
@@ -41,6 +43,10 @@ const ARRIVED_LINGER_MS = 60_000;
 /** The active route's destination, kept so a restarted app (iOS may end it mid-drive) picks the route up again. */
 const ACTIVE_KEY = "route.active";
 const RESUME_MAX_AGE_MS = 12 * 3600_000;
+/** A faster alternative replaces the route by itself while the car is still this close to the start. */
+const SWAP_NEAR_START_M = 50;
+/** … and only if it saves at least this. */
+const SWAP_MIN_GAIN_S = 30;
 
 export interface RouteDestination extends Coordinate {
   /** A name to show (a city from the list); a point on the map has none. */
@@ -50,6 +56,15 @@ export interface RouteDestination extends Coordinate {
 }
 
 export type RouteProblem = RouteFailure | "no-road-graph" | "no-position" | "outside-region";
+
+/** Another way to the destination (ROUTING-SPEC §8.7), drawn beside the route until the car is on one of them. */
+export interface AlternativeRoute {
+  plan: RoutePlan;
+  /** Its time minus the route's, s (negative: faster). */
+  deltaS: number;
+  /** Where the map labels it: on its own stretch, away from the route. */
+  labelAt: Coordinate;
+}
 
 export interface RouteSnapshot {
   destination: RouteDestination;
@@ -64,6 +79,8 @@ export interface RouteSnapshot {
   replanning: boolean;
   /** The last re-plan failed (the old route stays). */
   replanFailure?: RouteProblem;
+  /** Other ways to the destination; empty or absent: none (yet). */
+  alternatives?: AlternativeRoute[];
 }
 
 /** The last plan's cost on this phone, for the developer screen (trip logs only record while driving). */
@@ -164,6 +181,10 @@ export class RouteService {
   private sliceStates = FIRST_SLICE_STATES;
   private planCount = 0;
   private lastStats: RoutePlanStats | null = null;
+  /** The alternatives search in progress (after a new route): its plan id and how to cancel the next slice. */
+  private altSearch: { id: number; cancel: () => void } | null = null;
+  /** The alternatives, each followed by its own guidance from the start: the one the car is on can take over. */
+  private others: { plan: RoutePlan; maneuvers: Maneuver[]; guidance: RouteGuidance }[] = [];
 
   constructor(deps: RouteServiceDeps) {
     this.deps = deps;
@@ -217,6 +238,7 @@ export class RouteService {
     if (note) this.note(`route stop${this.guidance?.step ? ` at ${km(this.guidance.step.alongM)} of ${km(this.guidance.plan.lengthM)}` : ""}`);
     this.planning?.cancel();
     this.planning = null;
+    this.dropAlternatives(false);
     this.arrivedTimer?.();
     this.arrivedTimer = null;
     this.unsubscribe?.();
@@ -284,6 +306,7 @@ export class RouteService {
       this.failed(id, reason, problem ?? "no-position", position, 0);
       return;
     }
+    this.dropAlternatives();
     const frame = new LocalFrame(position);
     graph.graph.setFrame(frame);
     const from = startOf(position);
@@ -297,7 +320,7 @@ export class RouteService {
     this.replanStreak = reason === "off-route" && quick ? this.replanStreak + 1 : 0;
     this.lastPlanAt = startedAt;
     this.offSincePlanAt = null;
-    if (reason === "off-route") this.set({ ...s, replanning: true });
+    if (reason === "off-route") this.set({ ...this.snapshot!, replanning: true });
     const step = () => {
       if (this.planning?.id !== id) return;
       slices++;
@@ -323,11 +346,108 @@ export class RouteService {
       this.trip ??= { startedAt, plannedS: r.plan.durationS, plannedM: r.plan.lengthM, drivenM: 0, lastAt: null };
       const cur = this.snapshot!;
       this.set({ ...cur, status: "active", failure: undefined, replanFailure: undefined, planId: id, plan: r.plan, maneuvers, guidance: undefined, replanning: false });
-      this.logPlan(id, reason, r.plan, maneuvers, { states: r.stats.states, tiles: r.stats.tilesRead, planMs: r.stats.ms, wallMs, slices }, position);
+      this.logPlan(id, reason, r.plan, maneuvers, { states: r.stats.states, tiles: r.stats.tilesRead, planMs: r.stats.ms, wallMs, slices, fellBackAt: r.stats.fellBackAt }, position);
       this.deps.onRoute?.(r.plan);
       this.onPosition();
+      // The route is on its way; alternatives only now, in slices of their own.
+      if (reason === "new") this.searchAlternatives(id, graph, frame, from, r.plan);
     };
     this.planning = { id, cancel: this.defer(step, 0) };
+  }
+
+  /**
+   * Alternatives to a new route (ROUTING-SPEC §8.7), searched in slices after it. A faster one takes over while the
+   * car hasn't left the start (the main search's weighted heuristic can miss the fastest route).
+   */
+  private searchAlternatives(id: number, graph: RoutingGraph, frame: LocalFrame, from: RouteStart, main: RoutePlan): void {
+    const s = this.snapshot;
+    if (!s) return;
+    const search = new AlternativeSearch(graph.graph, frame, from, s.destination, main, { costs: { congestion: this.planCongestion } });
+    const startedAt = this.now();
+    const step = () => {
+      if (this.altSearch?.id !== id) return;
+      const r = search.run(this.sliceStates);
+      if (r.status === "more") {
+        this.altSearch = { id, cancel: this.defer(step, 0) };
+        return;
+      }
+      this.altSearch = null;
+      const cur = this.snapshot;
+      if (!cur || cur.planId !== id || !cur.plan) return;
+      this.others = r.alternatives.map((plan) => {
+        const maneuvers = routeManeuvers(graph.graph, plan);
+        return { plan, maneuvers, guidance: new RouteGuidance(plan, maneuvers) };
+      });
+      const mainEdges = edgeSet(main);
+      this.note(
+        `route alternatives: ${r.alternatives.length}` +
+          r.alternatives.map((a) => ` (${signedMin(a.durationS - main.durationS)}, ${km(a.lengthM)}, ${Math.round((sharedM(graph.graph, a, mainEdges) / a.lengthM) * 100)} % shared)`).join("") +
+          `; ${r.stats.searches} searches, ${r.stats.states} states, ${Math.round(r.stats.ms)} ms (${Math.round(this.now() - startedAt)} ms wall)`,
+      );
+      let fastest = -1;
+      this.others.forEach((o, i) => {
+        if (o.plan.durationS < (fastest < 0 ? main.durationS : this.others[fastest].plan.durationS)) fastest = i;
+      });
+      const along = this.guidance?.step?.alongM ?? 0;
+      if (fastest >= 0 && main.durationS - this.others[fastest].plan.durationS >= SWAP_MIN_GAIN_S && along <= SWAP_NEAR_START_M) {
+        this.takeAlternative(fastest, "faster");
+        return;
+      }
+      this.publishAlternatives();
+    };
+    this.altSearch = { id, cancel: this.defer(step, 0) };
+  }
+
+  /** Follow alternative `index` instead of the route: tapped on the map. */
+  chooseAlternative(index: number): void {
+    if (index >= 0 && index < this.others.length) this.takeAlternative(index, "chosen");
+  }
+
+  /**
+   * Alternative `index` becomes the route and the route an alternative. Their guidance changes places with them, so
+   * the progress each has made stays.
+   */
+  private takeAlternative(index: number, why: "chosen" | "faster" | "taken"): void {
+    const s = this.snapshot;
+    const current = this.guidance;
+    if (!s?.plan || !s.maneuvers || !current) return;
+    const next = this.others[index];
+    const id = this.nextPlanId++;
+    this.others = [{ plan: s.plan, maneuvers: s.maneuvers, guidance: current }, ...this.others.filter((_, i) => i !== index)];
+    this.guidance = next.guidance;
+    this.notedState = null;
+    if (this.trip) {
+      this.trip.plannedS = next.plan.durationS;
+      this.trip.plannedM = next.plan.lengthM;
+    }
+    this.note(`route alternative taken (${why}): ${km(next.plan.lengthM)}, ${Math.round(next.plan.durationS / 60)} min, was ${Math.round(s.plan.durationS / 60)} min`);
+    this.set({ ...s, planId: id, plan: next.plan, maneuvers: next.maneuvers, guidance: next.guidance.step ?? undefined, replanning: false, replanFailure: undefined });
+    this.logPlan(id, "alternative", next.plan, next.maneuvers, null, this.deps.position.getSnapshot() ?? undefined);
+    this.publishAlternatives();
+    this.deps.onRoute?.(next.plan);
+  }
+
+  /** The alternatives into the snapshot, timed against the route and labelled off its roads. */
+  private publishAlternatives(): void {
+    const s = this.snapshot;
+    const graph = this.graph?.graph;
+    if (!s?.plan || !graph) return;
+    const main = s.plan;
+    const mainEdges = edgeSet(main);
+    const alternatives = this.others.map((o) => ({
+      plan: o.plan,
+      deltaS: o.plan.durationS - main.durationS,
+      labelAt: labelPoint(graph, o.plan, [mainEdges]),
+    }));
+    this.set({ ...s, alternatives });
+  }
+
+  /** No more alternatives: a re-plan, the end, or the car is on its route and off all of them. */
+  private dropAlternatives(publish = true): void {
+    this.altSearch?.cancel();
+    this.altSearch = null;
+    this.others = [];
+    if (publish && this.snapshot?.alternatives) this.set({ ...this.snapshot, alternatives: undefined });
   }
 
   private failed(
@@ -375,7 +495,7 @@ export class RouteService {
     reason: Reason,
     plan: RoutePlan,
     maneuvers: Maneuver[],
-    stats: { states: number; tiles: number; planMs: number; wallMs: number; slices: number } | null,
+    stats: { states: number; tiles: number; planMs: number; wallMs: number; slices: number; fellBackAt?: number } | null,
     position?: PositionEstimate,
   ): void {
     const s = this.snapshot!;
@@ -383,12 +503,14 @@ export class RouteService {
     const start = plan.coordinates[0];
     if (stats) {
       this.planCount++;
-      this.lastStats = { id, reason, outcome: "done", lengthM: plan.lengthM, ...stats };
+      const { fellBackAt, ...counts } = stats;
+      this.lastStats = { id, reason, outcome: "done", lengthM: plan.lengthM, ...counts };
       this.note(
         `route plan #${id} (${reason}): ${km(plan.lengthM)}, ${Math.round(plan.durationS / 60)} min, ${maneuvers.length - 2} maneuvers; ` +
           `${stats.states} states, ${stats.tiles} tiles, ${Math.round(stats.planMs)} ms in ${stats.slices} slices (${Math.round(stats.wallMs)} ms wall)` +
           (plan.offRoadM.start > 30 || plan.offRoadM.end > 30 ? `; ends ${Math.round(plan.offRoadM.start)} / ${Math.round(plan.offRoadM.end)} m off` : "") +
-          (this.planCongestion !== 1 ? `; rush hour ×${this.planCongestion}` : ""),
+          (this.planCongestion !== 1 ? `; rush hour ×${this.planCongestion}` : "") +
+          (fellBackAt ? `; weight raised after ${fellBackAt} states` : ""),
       );
     }
     const log = this.deps.log;
@@ -432,7 +554,7 @@ export class RouteService {
       if (trip.lastAt !== null && p.speedMps !== undefined) trip.drivenM += p.speedMps * Math.max(0, (p.timestamp - trip.lastAt) / 1000);
       trip.lastAt = p.timestamp;
     }
-    const step = guidance.update({
+    const at = {
       lat: p.lat,
       lon: p.lon,
       tMs: p.timestamp,
@@ -441,7 +563,18 @@ export class RouteService {
       speedMps: p.speedMps,
       mapMatch: p.mapMatch,
       reliable: reliable(p),
-    });
+    };
+    const step = guidance.update(at);
+    // The alternatives follow the car too: off the route but on one of them, the driver chose it.
+    const others = this.others.map((o) => o.guidance.update(at));
+    if (step.state === "off") {
+      const taken = others.findIndex((o) => o.state === "on");
+      if (taken >= 0) {
+        this.takeAlternative(taken, "taken");
+        return;
+      }
+    }
+    if (others.length && step.state === "on" && others.every((o) => o.state === "off")) this.dropAlternatives(false);
     this.deps.log?.progress({
       timestampUs: this.deps.nowUs(),
       planId: s.planId,
@@ -454,10 +587,13 @@ export class RouteService {
       toNextM: step.toNextM,
     });
     this.noteState(step, p);
-    this.set({ ...s, guidance: step });
+    this.set({ ...s, guidance: step, ...(this.others.length ? {} : { alternatives: undefined }) });
     if (step.state === "off" && !this.planning) this.offSincePlanAt ??= this.now();
     if (step.state === "off" && !this.planning && this.mayReplan(p)) this.plan("off-route");
-    if (step.state === "arrived" && !this.arrivedTimer) this.arrivedTimer = this.defer(() => this.stop(), ARRIVED_LINGER_MS);
+    if (step.state === "arrived" && !this.arrivedTimer) {
+      this.dropAlternatives();
+      this.arrivedTimer = this.defer(() => this.stop(), ARRIVED_LINGER_MS);
+    }
   };
 
   /**
@@ -495,3 +631,4 @@ export class RouteService {
 }
 
 const km = (m: number) => `${(m / 1000).toFixed(m < 10_000 ? 2 : 1)} km`;
+const signedMin = (s: number) => `${s < 0 ? "−" : "+"}${Math.round(Math.abs(s) / 60)} min`;

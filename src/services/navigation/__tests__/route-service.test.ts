@@ -4,7 +4,9 @@ import path from "node:path";
 import { LocalFrame } from "@/nav/geo/local-frame";
 import { bufferByteSource } from "@/nav/mapmatch/graph/byte-source";
 import { TiledRoadGraph } from "@/nav/mapmatch/graph/road-graph";
+import type { Coordinate } from "@/nav/geo";
 import type { PositionEstimate } from "@/nav/position/types";
+import { at as ladderAt, ladder } from "@/nav/routing/__fixtures__/ladder";
 import { RouteService, type RoutingGraph } from "@/services/navigation/route-service";
 import type { NavRouteProgressRecord, NavRouteRecord } from "@/triplog/schema";
 
@@ -16,7 +18,7 @@ const LAT0 = 51.52;
 const D = 0.0006;
 const at = (x: number, y: number) => ({ lat: LAT0 + y * D, lon: LON0 + x * D });
 
-function harness(options: { graph?: boolean; store?: Map<string, unknown> } = {}) {
+function harness(options: { graph?: boolean; store?: Map<string, unknown>; network?: "ladder" } = {}) {
   let position: PositionEstimate | null = null;
   const listeners = new Set<() => void>();
   let clock = 1_000_000;
@@ -33,6 +35,7 @@ function harness(options: { graph?: boolean; store?: Map<string, unknown> } = {}
     openGraph: (): RoutingGraph | null => {
       if (options.graph === false) return null;
       opened++;
+      if (options.network === "ladder") return { key: "ladder", graph: Object.assign(ladder(), { setFrame: () => {} }), close: () => closed++ };
       const graph = new TiledRoadGraph(bufferByteSource(new Uint8Array(FIXTURE)), new LocalFrame({ lat: LAT0, lon: LON0 }));
       return { key: "net", graph, close: () => closed++ };
     },
@@ -58,12 +61,18 @@ function harness(options: { graph?: boolean; store?: Map<string, unknown> } = {}
   const flush = () => {
     while (deferred.length) deferred.shift()!();
   };
-  const move = (x: number, y: number, more: Partial<PositionEstimate> = {}) => {
-    position = { ...at(x, y), accuracyM: 5, source: "fused", trust: "TRUSTED", timestamp: clock, headingRad: Math.PI / 2, speedMps: 10, ...more };
+  /** Run deferred slices one by one until `done` says so. */
+  const flushUntil = (done: () => boolean) => {
+    while (deferred.length && !done()) deferred.shift()!();
+  };
+  const moveTo = (c: Coordinate, more: Partial<PositionEstimate> = {}) => {
+    position = { ...c, accuracyM: 5, source: "fused", trust: "TRUSTED", timestamp: clock, headingRad: Math.PI / 2, speedMps: 10, ...more };
     listeners.forEach((l) => l());
   };
+  const move = (x: number, y: number, more: Partial<PositionEstimate> = {}) => moveTo(at(x, y), more);
   const tick = (ms: number) => (clock += ms);
-  return { service, flush, move, tick, notes, routes, progress, counts: () => ({ points, maneuvers, opened, closed }) };
+  const pending = () => deferred.length;
+  return { service, flush, flushUntil, pending, move, moveTo, tick, notes, routes, progress, counts: () => ({ points, maneuvers, opened, closed }) };
 }
 
 describe("RouteService", () => {
@@ -242,5 +251,87 @@ describe("RouteService", () => {
     }
     expect(h.service.getSnapshot()!.guidance!.state).toBe("unsure");
     expect(h.routes).toHaveLength(1);
+  });
+
+  describe("alternatives (the ladder: a north branch, a south one 0.2 km longer)", () => {
+    const south = (c: Coordinate[]) => c.some((p) => p.lat < ladderAt(0, -350).lat);
+    const start = () => {
+      const h = harness({ network: "ladder" });
+      h.moveTo(ladderAt(0, 0));
+      h.service.start(ladderAt(2200, 0));
+      return h;
+    };
+
+    test("the route is on its way before any alternative is searched; they come after, in slices of their own", () => {
+      const h = start();
+      h.flushUntil(() => h.service.getSnapshot()?.status === "active");
+      const s = h.service.getSnapshot()!;
+      expect(south(s.plan!.coordinates)).toBe(false);
+      expect(s.alternatives).toBeUndefined();
+      expect(h.pending()).toBeGreaterThan(0); // the alternatives search, queued behind the route
+      h.flush();
+      const alts = h.service.getSnapshot()!.alternatives!;
+      expect(alts).toHaveLength(1);
+      expect(south(alts[0].plan.coordinates)).toBe(true);
+      expect(alts[0].deltaS).toBeGreaterThan(0);
+      expect(alts[0].labelAt.lat).toBeLessThan(ladderAt(0, -350).lat);
+      expect(h.notes.some((n) => /^route alternatives: 1 \(\+\d+ min/.test(n))).toBe(true);
+    });
+
+    test("choosing the alternative makes it the route (logged, reason alternative); the old route is the alternative", () => {
+      const h = start();
+      h.flush();
+      const before = h.service.getSnapshot()!;
+      h.service.chooseAlternative(0);
+      const s = h.service.getSnapshot()!;
+      expect(south(s.plan!.coordinates)).toBe(true);
+      expect(s.planId).toBeGreaterThan(before.planId);
+      expect(s.alternatives).toHaveLength(1);
+      expect(s.alternatives![0].deltaS).toBeLessThan(0);
+      expect(h.routes.map((r) => r.reason)).toEqual(["new", "alternative"]);
+    });
+
+    test("driving the alternative's road takes it instead of planning again", () => {
+      const h = start();
+      h.flush();
+      for (const n of [-50, -120, -200, -280, -360, -400]) {
+        h.tick(1000);
+        h.moveTo(ladderAt(100, n), { headingRad: Math.PI });
+      }
+      for (const e of [200, 300, 400]) {
+        h.tick(1000);
+        h.moveTo(ladderAt(e, -400), { headingRad: Math.PI / 2 });
+      }
+      h.flush();
+      const s = h.service.getSnapshot()!;
+      expect(south(s.plan!.coordinates)).toBe(true);
+      expect(h.notes.some((n) => n.startsWith("route alternative taken (taken)"))).toBe(true);
+      expect(h.routes.map((r) => r.reason)).toEqual(["new", "alternative"]);
+    });
+
+    test("on the route and off every alternative, they go away", () => {
+      const h = start();
+      h.flush();
+      // 10 m/s, a fix every 8 s: the south branch's guidance has to see the car drive 200 m off it.
+      for (const n of [80, 160, 240, 300]) {
+        h.tick(8000);
+        h.moveTo(ladderAt(100, n), { headingRad: 0 });
+      }
+      for (const e of [180, 260, 340, 420]) {
+        h.tick(8000);
+        h.moveTo(ladderAt(e, 300), { headingRad: Math.PI / 2 });
+      }
+      expect(h.service.getSnapshot()!.alternatives).toBeUndefined();
+      expect(h.service.getSnapshot()!.guidance).toMatchObject({ state: "on" });
+    });
+
+    test("stopping cancels an alternatives search still running", () => {
+      const h = start();
+      h.flushUntil(() => h.service.getSnapshot()?.status === "active");
+      h.service.stop();
+      h.flush();
+      expect(h.service.getSnapshot()).toBeNull();
+      expect(h.notes.some((n) => n.startsWith("route alternatives"))).toBe(false);
+    });
   });
 });

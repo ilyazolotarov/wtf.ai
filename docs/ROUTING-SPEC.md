@@ -26,6 +26,10 @@ Plan a drive to a destination offline and guide the driver along it, so that:
 - **R5 built, off:** the route as a hint for map matching, a developer switch; measured in §8.6.
 - **Cost model from the map (2026-10-10):** speed limits, settlement, surface, traffic lights and rush hours from
   the graph's speed attributes (§4.1–4.3), checked on 26 drives (§4.4). Takes effect with map packs built from then.
+- **Long routes (2026-10-10, §7):** a search past 150 k states starts again at weight 2: Slavutych → Mariupol in
+  373 k states instead of 1.52 M.
+- **Alternative routes (2026-10-10, §8.7):** searched after a new route, shown and chosen on the map, taken over
+  when driven or faster.
 - Next: read §8.3's questions from the 2026-10-05 logs (`nav_route`, `route …` notes).
 
 ## 3. Decisions
@@ -243,6 +247,22 @@ Node on the Windows PC, cold tile cache (2026-10-05):
   cold for 4 routes (warm 0.56 s), routes within 0.2 % of the exact search's time. Default 250 × 150 km grid,
   107–198 km: 24 s → 1.9 s for 6 routes. `--exact` prints each route against the exact search, `--options '<json>'`
   passes `RouteOptions` (`hierarchy`, `heuristicWeight`), `--graph <file> --at lat,lon --radius km` uses a real graph.
+- **Weight fallback (2026-10-10).** Slavutych → Mariupol (923 km by road, 690 km straight: around the front line and
+  the Dnipro) settled 1.52 M states and read 378 k tiles (10 s in Node, far longer on the phone): a route that much
+  longer than the straight line keeps weight 1.5's frontier wide. A search past 150 k states now starts again at
+  weight 2 (`FALLBACK_AFTER_STATES`, `RouteStats.fellBackAt`, note `weight raised after n states`): 373 k states,
+  29 k tiles, 1.4 s, 11.40 h instead of 11.39. 24 routes between Ukrainian cities on the attributed Ukraine graph:
+
+  | Search | States | Node ms | Failed (too far) | Slower than weight 1.5: median / max |
+  | --- | --- | --- | --- | --- |
+  | Weight 1.5 | 8.9 M | 45 000 | 2 (Uzhhorod, Lviv → Mariupol) | — |
+  | Weight 2 | 1.6 M | 5 000 | 0 | 0 / 14 % (Dnipro → Kharkiv, 46 k states at 1.5) |
+  | 1.5, then 2 after 300 k | 6.5 M | 37 000 | 0 | 0 / 7.7 % |
+  | **1.5, then 2 after 150 k** | 4.3 M | 14 000 | 0 | 0 / 7.7 % (Mariupol → Lviv, 1 280 km) |
+
+  Routes under 150 k states plan exactly as before. Smaller hierarchy zones (30 / 15 / 6 km) changed nothing: the
+  states are on the main roads far from both ends. Graphs without speed attributes keep the heuristic at the class
+  speeds' 110 km/h (the caps' 120 would only weaken it).
 - On the phone: unknown. The filter's updates ran about as fast on the iPhone as in Node (MAPMATCH-SPEC §15.9), but
   tile reads go through the file system there. The app logs every plan's time (§8); if oblast routes are slow,
   the candidates are a routing-only tile decode (no geometry arrays) and skipping minor roads far from both ends.
@@ -398,6 +418,42 @@ developer switch, **off by default** ("Tell map matching the route"; trip-log in
   noticed). Hence off, 3× when on.
 - Worth trying on the road only where map matching struggles without it (multimodal for long stretches, MAPMATCH-SPEC
   §9.4's long arterials); the simulator is optimistic there.
+
+### 8.7 Alternative routes (`src/nav/routing/alternatives.ts`)
+
+After a new route (reason `new`), up to two other ways to the destination, like Google Maps' grey routes.
+
+- **Search (penalty method):** the planner runs again with every road of the routes kept so far slower by 1.4×
+  (once per route that has it; `RouteOptions.avoid`, left out of the plan's `durationS`). A result is kept when it
+  takes at most 1.3× the main route's time and at most 20 min more, and at most 60 % of its length is on the roads of
+  any route kept so far. At most 3 searches; a rejected result costs one.
+- **Never in the way of the route:** the main plan is published and guided first; the alternatives search runs after
+  it in its own slices between frames (the same budget), and a re-plan, arrival or stop cancels it. Their note:
+  `route alternatives: n (+m min, km, % shared) …; searches, states, ms`.
+- **A faster one takes over:** the main search's weighted heuristic (§7) can miss the fastest route; an alternative at
+  least 30 s faster replaces it while the car is within 50 m of the start (`route alternative taken (faster)`).
+- **Choosing:** a tap on a grey route or its label makes it the route (`chooseAlternative`); the route becomes an
+  alternative. Logged as a plan with reason `alternative` (TRIP-LOGGER-SPEC §4).
+- **Driving one:** each alternative is followed by its own guidance from the start. When the route goes `off` while
+  an alternative is `on`, the car is on that one: it becomes the route instead of planning again
+  (`route alternative taken (taken)`). On the route and off every alternative, they go away.
+- **Map** (UI-SPEC §6.3): quieter solid lines under the route, each labelled on its own stretch ("+4 min", "−2 min", "Same
+  time"). They come while the car stands: the map frames all routes once (free camera; the recentre button follows
+  again). Moving, the camera is left alone.
+- `npm run route -- --from … --to … --alternatives` prints them (and writes them to `--geojson`); `--bench <n>
+  --alternatives` counts how often there are some, how much slower and how different, and the search time.
+
+Random routes on the attributed graphs (Node, cold cache, 2026-10-10):
+
+| Graph, routes | None / 1 / 2 | Search ms p50 / p90 / max | Slower p50 / max | Shared p50 / max |
+| --- | --- | --- | --- | --- |
+| Chernihiv oblast, 15–50 km | 4 / 2 / 1 | 17 / 60 / 60 | 20 / 21 % | 19 / 34 % |
+| 50–100 km | 6 / 10 / 5 | 83 / 227 / 271 | 8 / 20 % | 34 / 58 % |
+| 100+ km | 11 / 10 / 7 | 265 / 668 / 794 | 9 / 16 % | 33 / 58 % |
+| Kyiv city, 5–15 km | 8 / 2 / 7 | 187 / 477 / 725 | 11 / 26 % | 36 / 58 % |
+| 15–50 km | 5 / 7 / 19 | 399 / 555 / 636 | 8 / 27 % | 32 / 60 % |
+
+One short Kyiv route's "alternative" was 27 % faster than the main route: what the faster-takes-over rule is for.
 
 ## 9. Milestones
 

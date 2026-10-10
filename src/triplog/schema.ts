@@ -285,8 +285,8 @@ export const NAV_SOURCE_CODES = ["gnss", "fused", "dr", "manual"] as const;
 export const NAV_TRUST_CODES = ["TRUSTED", "UNTRUSTED", "REACQUIRING", "NO_FIX"] as const;
 export const NAV_POSE_CODES = ["none", "unverified", "confirmed", "rejected"] as const;
 export const NAV_MAPMATCH_STATE_CODES = ["off", "init", "tracking", "multimodal", "offroad"] as const;
-/** Why a route was planned: a new destination, the car left the route, or logged again at a trip's start. */
-export const ROUTE_REASON_CODES = ["new", "off-route", "resume"] as const;
+/** Why a route was planned: a new destination, the car left the route, logged again at a trip's start, or an alternative taken. */
+export const ROUTE_REASON_CODES = ["new", "off-route", "resume", "alternative"] as const;
 export const ROUTE_STATUS_CODES = ["done", "no-road-at-start", "no-road-at-destination", "no-route", "too-far", "cancelled"] as const;
 export const ROUTE_STATE_CODES = ["on", "leaving", "off", "unsure", "arrived"] as const;
 /** `ManeuverKind` (src/nav/routing/maneuvers.ts), in its order. */

@@ -136,9 +136,12 @@ export function edgeSeconds(edge: RoadEdge, m: number, c: RouteCosts): number {
   return s;
 }
 
-/** The fastest speed in the model, m/s: the A* heuristic's. */
-export function maxSpeedMps(c: RouteCosts): number {
-  return Math.max(...c.speedKph, ...c.capKph) / 3.6;
+/**
+ * The fastest speed in the model, m/s: the A* heuristic's. On a graph with speed attributes the caps, on an older one
+ * the class speeds: the higher caps there would only weaken the heuristic (more states searched for nothing).
+ */
+export function maxSpeedMps(c: RouteCosts, attributes = true): number {
+  return Math.max(...(attributes ? c.capKph : c.speedKph)) / 3.6;
 }
 
 /** A turn by `turnRad` (clockwise positive) at a junction. */

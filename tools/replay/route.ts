@@ -5,6 +5,8 @@
 //   npm run route -- --bench 50                                              # random routes in the region
 //   npm run route -- --bench 50 --at 51.4939,31.2947 --radius 8             # ... within 8 km of a point
 //   npm run route -- --bench 30 --graph tools/tiles/out/release/kyiv-city.graph.bin
+//   npm run route -- --from ... --to ... --alternatives                       # alternative routes too (§8.7)
+//   npm run route -- --bench 50 --alternatives                               # how often, how different, how long
 
 import { writeFileSync } from "node:fs";
 import path from "node:path";
@@ -12,8 +14,9 @@ import path from "node:path";
 import type { Coordinate } from "../../src/nav/geo";
 import { LocalFrame } from "../../src/nav/geo/local-frame";
 import { TiledRoadGraph } from "../../src/nav/mapmatch/graph/road-graph";
+import { AlternativeSearch, sharedM } from "../../src/nav/routing/alternatives";
 import { routeManeuvers } from "../../src/nav/routing/maneuvers";
-import { planRoute, type RouteStart } from "../../src/nav/routing/router";
+import { planRoute, type RoutePlan, type RouteStart } from "../../src/nav/routing/router";
 import { fileByteSource, findGraph } from "./graph-file";
 
 function parseArgs(argv: string[]) {
@@ -31,6 +34,7 @@ function parseArgs(argv: string[]) {
   let seed = 1;
   let warm = false;
   let cacheTiles = 2048;
+  let alternatives = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--from") from = point(argv[++i]);
@@ -43,15 +47,16 @@ function parseArgs(argv: string[]) {
     else if (a === "--seed") seed = Number(argv[++i]);
     else if (a === "--warm") warm = true;
     else if (a === "--cache-tiles") cacheTiles = Number(argv[++i]);
+    else if (a === "--alternatives") alternatives = true;
     else if (a === "-h" || a === "--help") {
       console.log(
-        "route --from lat,lon[,headingDeg] --to lat,lon [--graph <file>] [--geojson <out>]\n" +
-          "route --bench <n> [--at lat,lon] [--radius km] [--seed 1] [--warm] [--cache-tiles 2048] [--graph <file>]",
+        "route --from lat,lon[,headingDeg] --to lat,lon [--alternatives] [--graph <file>] [--geojson <out>]\n" +
+          "route --bench <n> [--alternatives] [--at lat,lon] [--radius km] [--seed 1] [--warm] [--cache-tiles 2048] [--graph <file>]",
       );
       process.exit(0);
     }
   }
-  return { from, to, graph, geojson, bench, at, radiusKm, seed, warm, cacheTiles };
+  return { from, to, graph, geojson, bench, at, radiusKm, seed, warm, cacheTiles, alternatives };
 }
 
 const args = parseArgs(process.argv.slice(2));
@@ -67,13 +72,23 @@ function openGraph(origin: Coordinate) {
 }
 
 const km = (m: number) => `${(m / 1000).toFixed(1)} km`;
+
+/** Alternatives to `main`, searched to the end; with each one's share on the main route's roads. */
+function findAlternatives(g: ReturnType<typeof openGraph>, from: RouteStart, to: Coordinate, main: RoutePlan) {
+  const r = new AlternativeSearch(g.graph, g.frame, from, to, main).run();
+  if (r.status !== "done") throw new Error("unfinished");
+  const mainEdges = new Set(main.legs.map((l) => l.edge));
+  return { ...r, shared: r.alternatives.map((a) => sharedM(g.graph, a, mainEdges) / a.lengthM) };
+}
 const min = (s: number) => `${Math.floor(s / 60)} min ${Math.round(s % 60)} s`;
 
 if (!args.bench) {
   if (!args.from || !args.to) throw new Error("pass --from and --to, or --bench <n>");
-  const { graph, frame, close } = openGraph(args.from);
+  const opened = openGraph(args.from);
+  const { graph, frame, close } = opened;
   const r = planRoute(graph, frame, args.from, args.to);
   const maneuvers = r.status === "done" ? routeManeuvers(graph, r.plan) : [];
+  const alts = r.status === "done" && args.alternatives ? findAlternatives(opened, args.from, args.to, r.plan) : null;
   close();
   console.log(`${path.basename(graphFile)}: ${r.stats.states} states, ${r.stats.tilesRead} tiles read, ${r.stats.ms.toFixed(0)} ms`);
   if (r.status === "failed") {
@@ -86,10 +101,21 @@ if (!args.bench) {
     const extra = m.exit ? ` exit ${m.exit}` : m.kind === "depart" || m.kind === "arrive" ? "" : ` ${Math.round((m.turnRad * 180) / Math.PI)}°`;
     console.log(`  ${km(m.atM).padStart(9)}  ${m.kind}${extra}  ${m.lat.toFixed(5)},${m.lon.toFixed(5)}`);
   }
+  if (alts) {
+    console.log(`alternatives: ${alts.alternatives.length} from ${alts.stats.searches} searches, ${alts.stats.states} states, ${alts.stats.ms.toFixed(0)} ms`);
+    alts.alternatives.forEach((a, i) =>
+      console.log(`  ${i + 1}. ${km(a.lengthM)}, ${min(a.durationS)} (+${Math.round((a.durationS - plan.durationS) / 60)} min), ${Math.round(alts.shared[i] * 100)} % on the main route's roads`),
+    );
+  }
   if (args.geojson) {
-    const line = { type: "Feature", properties: { lengthM: Math.round(plan.lengthM), durationS: Math.round(plan.durationS) }, geometry: { type: "LineString", coordinates: plan.coordinates.map((c) => [c.lon, c.lat]) } };
+    const lineOf = (p: RoutePlan, alternative?: number) => ({
+      type: "Feature",
+      properties: { lengthM: Math.round(p.lengthM), durationS: Math.round(p.durationS), ...(alternative ? { alternative } : {}) },
+      geometry: { type: "LineString", coordinates: p.coordinates.map((c) => [c.lon, c.lat]) },
+    });
     const points = maneuvers.map((m) => ({ type: "Feature", properties: { kind: m.kind, atM: Math.round(m.atM), ...(m.exit ? { exit: m.exit } : {}) }, geometry: { type: "Point", coordinates: [m.lon, m.lat] } }));
-    writeFileSync(args.geojson, JSON.stringify({ type: "FeatureCollection", features: [line, ...points] }));
+    const others = (alts?.alternatives ?? []).map((a, i) => lineOf(a, i + 1));
+    writeFileSync(args.geojson, JSON.stringify({ type: "FeatureCollection", features: [lineOf(plan), ...others, ...points] }));
     console.log(`wrote ${args.geojson}`);
   }
 } else {
@@ -124,7 +150,18 @@ if (!args.bench) {
     return near ? probe.frame.toCoordinate(near.e, near.n) : null;
   };
   const shared = args.warm ? openGraph(anchor) : null;
-  const rows: { a: Coordinate; b: Coordinate; distKm: number; ms: number; states: number; tiles: number; ok: boolean; reason?: string; lengthKm?: number }[] = [];
+  const rows: {
+    a: Coordinate;
+    b: Coordinate;
+    distKm: number;
+    ms: number;
+    states: number;
+    tiles: number;
+    ok: boolean;
+    reason?: string;
+    lengthKm?: number;
+    alts?: { count: number; ms: number; extra: number[]; shared: number[] };
+  }[] = [];
   console.log(`${path.basename(graphFile)}: ${args.bench} random routes${args.radiusKm ? ` within ${args.radiusKm} km of ${anchor.lat},${anchor.lon}` : " in the region"}, ${args.warm ? "warm" : "cold"} tile cache`);
   while (rows.length < args.bench) {
     const a = randomPoint();
@@ -132,6 +169,7 @@ if (!args.bench) {
     if (!a || !b) continue;
     const g = shared ?? openGraph(a);
     const r = planRoute(g.graph, g.frame, a, b);
+    const found = r.status === "done" && args.alternatives ? findAlternatives(g, a, b, r.plan) : null;
     if (!shared) g.close();
     const distKm = Math.hypot(...probe.frame.toEnu(b).map((v, i) => v - probe.frame.toEnu(a)[i])) / 1000;
     rows.push({
@@ -143,6 +181,16 @@ if (!args.bench) {
       tiles: r.stats.tilesRead,
       ok: r.status === "done",
       ...(r.status === "failed" ? { reason: r.reason } : { lengthKm: r.plan.lengthM / 1000 }),
+      ...(found && r.status === "done"
+        ? {
+            alts: {
+              count: found.alternatives.length,
+              ms: found.stats.ms,
+              extra: found.alternatives.map((x) => x.durationS / r.plan.durationS - 1),
+              shared: found.shared,
+            },
+          }
+        : {}),
     });
   }
   probe.close();
@@ -166,6 +214,24 @@ if (!args.bench) {
         `${`${quantile(states, 0.5)} / ${Math.max(...states)}`.padStart(22)}${`${quantile(b.map((r) => r.tiles), 0.5)}`.padStart(11)}` +
         `${ok.length ? quantile(detour, 0.5).toFixed(2) : "—"}`.padStart(14),
     );
+  }
+  if (args.alternatives) {
+    console.log(`\n${"alternatives".padEnd(16)}${"routes".padStart(7)}${"none / 1 / 2".padStart(16)}${"ms p50 / p90 / max".padStart(24)}${"slower p50 / max".padStart(20)}${"shared p50 / max".padStart(20)}`);
+    for (const [lo, hi] of buckets) {
+      const b = rows.filter((r) => r.alts && r.distKm >= lo && r.distKm < hi);
+      if (!b.length) continue;
+      const n = (k: number) => b.filter((r) => r.alts!.count === k).length;
+      const ms = b.map((r) => r.alts!.ms);
+      const extra = b.flatMap((r) => r.alts!.extra);
+      const sh = b.flatMap((r) => r.alts!.shared);
+      const pct = (v: number) => `${Math.round(v * 100)} %`;
+      console.log(
+        `${`${lo}–${hi === Infinity ? "" : hi} km`.padEnd(16)}${`${b.length}`.padStart(7)}${`${n(0)} / ${n(1)} / ${n(2)}`.padStart(16)}` +
+          `${`${quantile(ms, 0.5).toFixed(0)} / ${quantile(ms, 0.9).toFixed(0)} / ${Math.max(...ms).toFixed(0)}`.padStart(24)}` +
+          `${extra.length ? `${pct(quantile(extra, 0.5))} / ${pct(Math.max(...extra))}` : "—"}`.padStart(20) +
+          `${sh.length ? `${pct(quantile(sh, 0.5))} / ${pct(Math.max(...sh))}` : "—"}`.padStart(20),
+      );
+    }
   }
   const failed = rows.filter((r) => !r.ok);
   const ll = (c: Coordinate) => `${c.lat.toFixed(5)},${c.lon.toFixed(5)}`;

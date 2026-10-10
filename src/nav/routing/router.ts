@@ -21,10 +21,24 @@ export interface RouteOptions {
   costs?: Partial<RouteCosts>;
   /** States settled before giving up ("too far"). */
   maxStates?: number;
-  /** Hierarchy pruning far from the ends (`HIERARCHY`); false: every road everywhere (exact, slow on long routes). */
-  hierarchy?: boolean;
+  /**
+   * Hierarchy pruning far from the ends (`HIERARCHY`); false: every road everywhere (exact, slow on long routes); a
+   * table of its own ([from m, up to class], farthest first).
+   */
+  hierarchy?: boolean | readonly (readonly [number, number])[];
   /** The heuristic times this (`HEURISTIC_WEIGHT`); 1: A*, the fastest route under the cost model. */
   heuristicWeight?: number;
+  /**
+   * After this many states settled without a route, the search starts again with `fallbackWeight` (§7: a long
+   * route around an obstacle floods the country at the first weight). Infinity: never.
+   */
+  fallbackAfterStates?: number;
+  fallbackWeight?: number;
+  /**
+   * Time on these edges × the factor (≥ 1) while searching: alternative routes (§8.7). The plan's `durationS` leaves
+   * it out (the time the route takes).
+   */
+  avoid?: ReadonlyMap<EdgeId, number>;
 }
 
 /** A directed stretch of an edge, from `fromM` to `toM` along its geometry (`fromM > toM`: against it). */
@@ -53,6 +67,8 @@ export interface RouteStats {
   tilesRead: number;
   /** Time spent in `run`, ms. */
   ms: number;
+  /** States settled when the search started again at the fallback weight; absent: it didn't. */
+  fellBackAt?: number;
 }
 
 export type RouteFailure = "no-road-at-start" | "no-road-at-destination" | "no-route" | "too-far";
@@ -108,6 +124,15 @@ const HIERARCHY: readonly (readonly [number, number])[] = [
  * slower than the fastest; in practice (`npm run route:bench`) they are within about a percent.
  */
 const HEURISTIC_WEIGHT = 1.5;
+/**
+ * A search still going after this many states starts again at `FALLBACK_WEIGHT`. Across Ukraine (24 routes between
+ * cities, 2026-10-10, §7) weight 1.5 settled 8.9 M states and failed two routes to Mariupol at the 2 M limit; weight
+ * 2 alone settled 1.6 M but came out up to 14 % slower on routes 1.5 plans cheaply (Dnipro → Kharkiv, 46 k states).
+ * Falling back after 150 k: 4.3 M states, every route found, the cheap ones unchanged, the rest at most 7.7 % slower
+ * (median 0); after 300 k the same routes for 6.5 M states.
+ */
+const FALLBACK_AFTER_STATES = 150_000;
+const FALLBACK_WEIGHT = 2;
 export const DEFAULT_MAX_STATES = 2_000_000;
 
 const EARTH_RADIUS_M = 6_371_000;
@@ -204,7 +229,13 @@ export class RouteSearch {
   /** Every start end, to search again without pruning. */
   private readonly startEnds: End[] = [];
   private pruning: boolean;
-  private readonly weight: number;
+  private readonly hierarchy: readonly (readonly [number, number])[];
+  private weight: number;
+  private readonly fallbackAfter: number;
+  private readonly fallbackWeight: number;
+  /** States settled before the search started again at the fallback weight (0: it hasn't). */
+  private fellBackAt = 0;
+  private readonly avoid: ReadonlyMap<EdgeId, number> | null;
   /**
    * Goal entries (queued as −(index + 1)): the destination end, the parent state index (−1: straight from `start`
    * on the same edge), and where the last leg enters the destination's edge.
@@ -217,7 +248,7 @@ export class RouteSearch {
   /** Metres per degree of longitude and latitude at the start, and the same at the destination (pruning). */
   private readonly startKm = { x: 0, y: 0 };
   private readonly destKm = { x: 0, y: 0 };
-  private readonly vmax: number;
+  private vmax: number;
   private started = false;
   private finished: RouteStatus | null = null;
   private readonly stats: RouteStats = { states: 0, tilesRead: 0, ms: 0 };
@@ -232,8 +263,12 @@ export class RouteSearch {
   ) {
     this.costs = { ...DEFAULT_ROUTE_COSTS, ...options.costs };
     this.maxStates = options.maxStates ?? DEFAULT_MAX_STATES;
-    this.pruning = options.hierarchy ?? true;
+    this.pruning = options.hierarchy !== false;
+    this.hierarchy = Array.isArray(options.hierarchy) ? options.hierarchy : HIERARCHY;
     this.weight = options.heuristicWeight ?? HEURISTIC_WEIGHT;
+    this.fallbackAfter = options.fallbackAfterStates ?? FALLBACK_AFTER_STATES;
+    this.fallbackWeight = options.fallbackWeight ?? FALLBACK_WEIGHT;
+    this.avoid = options.avoid?.size ? options.avoid : null;
     this.vmax = maxSpeedMps(this.costs);
     this.tilesAtStart = graph.stats?.tileLoads ?? 0;
   }
@@ -259,6 +294,10 @@ export class RouteSearch {
         if (this.states.closed[value]) continue;
         this.states.closed[value] = 1;
         if (++this.stats.states > this.maxStates) return this.finish({ status: "failed", reason: "too-far", stats: this.stats });
+        if (!this.fellBackAt && this.stats.states > this.fallbackAfter && this.weight < this.fallbackWeight) {
+          this.fallBack();
+          continue;
+        }
         this.expand(value);
       }
       return { status: "more", stats: this.stats };
@@ -268,9 +307,21 @@ export class RouteSearch {
     }
   }
 
+  /** Too many states at the first weight: from scratch at the fallback weight (the pruning as it is). */
+  private fallBack(): void {
+    this.fellBackAt = this.stats.states;
+    this.stats.fellBackAt = this.stats.states;
+    this.weight = this.fallbackWeight;
+    this.restart();
+  }
+
   /** The pruned search ran out of roads (the route needs a minor road far from both ends): every road, from scratch. */
   private searchAgainUnpruned(): void {
     this.pruning = false;
+    this.restart();
+  }
+
+  private restart(): void {
     this.states = new StateTable();
     this.starts = new Map();
     this.goals = [];
@@ -305,6 +356,8 @@ export class RouteSearch {
     const [se, sn] = this.frame.toEnu(this.from);
     const nearStart = this.graph.edgesNear(se, sn, FALLBACK_RADIUS_M);
     if (!nearStart.length) return "no-road-at-start";
+    // The heuristic's speed for this graph: with speed attributes or without (a graph is built one way or the other).
+    this.vmax = maxSpeedMps(this.costs, (nearStart[0].edge.flags & EdgeFlag.attributes) !== 0);
     // Within the position's accuracy, the nearest road and those as near (a parallel road); off the roads, the
     // nearest road. Not the roads that only touch the nearest one at a junction close by: the car isn't on them.
     const nearest = nearStart[0];
@@ -367,10 +420,10 @@ export class RouteSearch {
       // Straight to a destination ahead on the same edge.
       const dest = this.dests.get(edge.id);
       if (dest && (dir === 1 ? dest.near.alongM >= alongM : dest.near.alongM <= alongM)) {
-        this.offerGoal(g0 + dest.extraS + edgeSeconds(edge, stretchM(edge, alongM, dest.near.alongM), c), dest, -1, dir, alongM, start);
+        this.offerGoal(g0 + dest.extraS + this.edgeS(edge, stretchM(edge, alongM, dest.near.alongM)), dest, -1, dir, alongM, start);
       }
       const key = keyOf(edge.id, dir);
-      const g = g0 + edgeSeconds(edge, stretchM(edge, alongM, dir === 1 ? geometryLength(edge) : 0), c);
+      const g = g0 + this.edgeS(edge, stretchM(edge, alongM, dir === 1 ? geometryLength(edge) : 0));
       const known = this.states.find(key);
       let i: number;
       if (known < 0) {
@@ -416,12 +469,12 @@ export class RouteSearch {
       const dest = this.dests.get(out.id);
       if (dest) {
         const entry = x.dir === 1 ? 0 : geometryLength(out);
-        this.offerGoal(g + pass + dest.extraS + edgeSeconds(out, stretchM(out, entry, dest.near.alongM), c), dest, index, x.dir, entry);
+        this.offerGoal(g + pass + dest.extraS + this.edgeS(out, stretchM(out, entry, dest.near.alongM)), dest, index, x.dir, entry);
       }
       const nextKey = keyOf(out.id, x.dir);
       const known = states.find(nextKey);
       if (known >= 0 && states.closed[known]) continue;
-      const ng = g + pass + entrySeconds(out, c) + edgeSeconds(out, out.lengthM, c);
+      const ng = g + pass + entrySeconds(out, c) + this.edgeS(out, out.lengthM);
       if (known < 0) {
         const next = states.add(nextKey, ng, this.heuristic(out, x.dir), index);
         this.heap.push(ng + states.h[next], next);
@@ -433,6 +486,12 @@ export class RouteSearch {
     }
   }
 
+  /** Seconds to drive `m` metres of the edge in the search: its time, × the avoid factor. */
+  private edgeS(edge: RoadEdge, m: number): number {
+    const s = edgeSeconds(edge, m, this.costs);
+    return this.avoid ? s * (this.avoid.get(edge.id) ?? 1) : s;
+  }
+
   /** The largest road class searched at this point (see HIERARCHY); flat-earth distances to the ends. */
   private maxClassAt(lat: number, lon: number): number {
     let dx = (lon - this.from.lon) * this.startKm.x;
@@ -441,7 +500,7 @@ export class RouteSearch {
     dx = (lon - this.to.lon) * this.destKm.x;
     dy = (lat - this.to.lat) * this.destKm.y;
     const d2 = Math.min(fromStart2, dx * dx + dy * dy);
-    for (const [m, cls] of HIERARCHY) if (d2 > m * m) return cls;
+    for (const [m, cls] of this.hierarchy) if (d2 > m * m) return cls;
     return Infinity;
   }
 
@@ -475,13 +534,16 @@ export class RouteSearch {
     }
     const coordinates: Coordinate[] = [];
     let lengthM = 0;
-    // The duration is the search's cost without its penalties: fallback ends and the entry penalties of the legs
-    // between the first and the last (those two never pay one).
+    // The duration is the search's cost without its penalties: fallback ends, the entry penalties of the legs
+    // between the first and the last (those two never pay one), and the avoid factors.
     let penaltyS = start!.extraS + goal.dest.extraS;
     for (const [i, leg] of legs.entries()) {
       const edge = this.graph.edge(leg.edge);
       if (i > 0 && i < legs.length - 1) penaltyS += entrySeconds(edge, this.costs);
-      lengthM += stretchM(edge, leg.fromM, leg.toM);
+      const m = stretchM(edge, leg.fromM, leg.toM);
+      const avoid = this.avoid?.get(edge.id);
+      if (avoid !== undefined) penaltyS += (avoid - 1) * edgeSeconds(edge, m, this.costs);
+      lengthM += m;
       for (const p of legCoordinates(edge, leg)) {
         const last = coordinates.at(-1);
         if (!last || last.lat !== p.lat || last.lon !== p.lon) coordinates.push(p);

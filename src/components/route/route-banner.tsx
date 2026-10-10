@@ -25,6 +25,7 @@ import {
   MANEUVER_TEXT,
   PROBLEM_TEXT,
 } from "./guidance-text";
+import { PlanningPulse, PlanningSweep } from "./planning-motion";
 
 /**
  * The route at the top of the map (ROUTING-SPEC §8): the next maneuver and the distance to it, the one after when
@@ -102,10 +103,14 @@ export function RouteBanner({
     sub ??= `${formatDistance(remainingM, language)} · ${formatDurationS(remainingS, t)} · ${t("arriveAt").replace("{time}", formatArrival(remainingS, nowMs))}`;
   }
 
+  // The planner at work: a ring pulsing out of the icon for a first plan, a sweeping bar for it and for a re-plan.
+  const planning = route.status === "planning";
+  const working = planning || (route.status === "active" && route.replanning);
   return (
     <View style={[styles.banner, { boxShadow: palette.shadow }]}>
       <GlassFill radius={Radius.rL} />
       <View style={[styles.icon, { backgroundColor: iconBg }]}>
+        {planning && <PlanningPulse color={iconBg} size={ICON_SIZE} />}
         <Icon name={icon} size={26} color={palette.onAccent} />
       </View>
       <View style={styles.copy}>
@@ -133,6 +138,7 @@ export function RouteBanner({
             {sub}
           </T>
         )}
+        {working && <PlanningSweep color={planning ? palette.accent : palette.warn.c} />}
       </View>
       <View style={styles.buttons}>
         <Pressable
@@ -179,6 +185,7 @@ export function RouteBanner({
 }
 
 const HIT_SLOP = { top: 6, bottom: 6, left: 12, right: 12 };
+const ICON_SIZE = 52;
 
 const styles = StyleSheet.create({
   banner: {
@@ -192,9 +199,9 @@ const styles = StyleSheet.create({
     borderCurve: "continuous",
   },
   icon: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: ICON_SIZE,
+    height: ICON_SIZE,
+    borderRadius: ICON_SIZE / 2,
     alignItems: "center",
     justifyContent: "center",
   },

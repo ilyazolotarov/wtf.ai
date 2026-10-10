@@ -48,7 +48,7 @@ NAV_POSES = ["none", "unverified", "confirmed", "rejected"]
 NAV_MAPMATCH_STATES = ["off", "init", "tracking", "multimodal", "offroad"]
 MAPMATCH_TOP = 3
 # Routing (ROUTING-SPEC §8); the maneuver kinds in src/nav/routing/maneuvers.ts order.
-ROUTE_REASONS = ["new", "off-route", "resume"]
+ROUTE_REASONS = ["new", "off-route", "resume", "alternative"]
 ROUTE_STATUSES = ["done", "no-road-at-start", "no-road-at-destination", "no-route", "too-far", "cancelled"]
 ROUTE_STATES = ["on", "leaving", "off", "unsure", "arrived"]
 ROUTE_MANEUVERS = [
