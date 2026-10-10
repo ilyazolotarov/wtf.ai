@@ -37,6 +37,7 @@ PAGES = [
     "more",
     "more/settings",
     "more/downloads",
+    "more/update",
     "more/recorder",
     "more/position",
     "more/developer",

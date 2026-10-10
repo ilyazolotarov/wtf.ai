@@ -11,7 +11,6 @@
       "policy": "fingerprint"
     },
     "updates": {
-      "url": "https://wtf-app-updates.ilyazolotarov.workers.dev/manifest",
       "checkAutomatically": "ON_LOAD",
       "fallbackToCacheTimeout": 0,
       "codeSigningCertificate": "./certs/certificate.pem",
@@ -38,7 +37,8 @@
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION"
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.REQUEST_INSTALL_PACKAGES"
       ],
       "package": "ai.wtf.navigator"
     },
@@ -110,8 +110,7 @@
       [
         "@sentry/react-native/expo",
         {
-          "url": "https://de.sentry.io/",
-          "note": "Set SENTRY_AUTH_TOKEN, SENTRY_ORG and SENTRY_PROJECT to upload source maps; otherwise set SENTRY_DISABLE_AUTO_UPLOAD=true."
+          "note": "Set SENTRY_URL, SENTRY_AUTH_TOKEN, SENTRY_ORG and SENTRY_PROJECT to upload source maps; otherwise set SENTRY_DISABLE_AUTO_UPLOAD=true."
         }
       ],
       "expo-secure-store",

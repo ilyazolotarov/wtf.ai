@@ -16,6 +16,7 @@ import { kvStore } from "./kv-store";
 import { CalibrationStore } from "./navigation/calibration-store";
 import { NavigatorService, type MapMatchLoop } from "./navigation/navigator-service";
 import { ROUTER_CACHE_TILES, RouteService } from "./navigation/route-service";
+import { startUpdateCenter } from "./app-update/update-center";
 import { onMapDownloadFailed } from "./offline-map/map-packs";
 import { activeRoadGraph, openActiveRoadGraph } from "./offline-map/road-graph-file";
 import { SensorService } from "./sensor-capture/sensor-service";
@@ -257,6 +258,20 @@ export function getRuntime(): Runtime {
   onMapDownloadFailed((e, { region, ...where }) =>
     Sentry.captureException(e, { tags: { feature: "map-download", map_region: region }, extra: where }),
   );
+
+  // Update checks, prompts' data and the automatic map update (docs/UPDATES-SPEC.md §5). A map update replaces the
+  // map in use only while no trip records and no route is on.
+  startUpdateCenter({
+    driving: () => recorder.getSnapshot().state === "recording" || routes.getSnapshot() != null,
+    subscribeDriving: (listener) => {
+      const offRecorder = recorder.subscribe(listener);
+      const offRoutes = routes.subscribe(listener);
+      return () => {
+        offRecorder();
+        offRoutes();
+      };
+    },
+  });
 
   runtime = {
     link,

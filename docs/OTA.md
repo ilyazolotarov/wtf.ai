@@ -2,7 +2,8 @@
 
 A JS-only change on `main` reaches installed Release builds without a new IPA/APK: `expo-updates` in the app, our own
 update server (`workers/app-updates`, a Cloudflare Worker over an R2 bucket), no EAS. Native changes still need a new
-build from CI ([CI.md](CI.md)).
+build from CI ([CI.md](CI.md)). The same Worker serves those builds, our AltStore source and the offline maps; what
+the app does with them is [UPDATES-SPEC.md](UPDATES-SPEC.md).
 
 ## How an update travels
 
@@ -14,9 +15,9 @@ build from CI ([CI.md](CI.md)).
    update downloads in the background and runs from the **next cold start**: an update takes two launches.
 
 A native change on `main` builds Release instead (`build-ios.yml`, `build-android.yml`). The build outputs the
-fingerprint it embedded, and `ci.yml`'s `register-ota-runtime` job registers it with the Worker
-(`PUT /publish/builds/…`); later JS updates go to it. A build started by hand from **Build Unsigned iOS App** is not
-registered: start it from **CI** instead.
+fingerprint it embedded, and `ci.yml`'s `publish-builds` job registers it with the Worker (`PUT /publish/builds/…`);
+later JS updates go to it. The same job uploads the IPA/APK (UPDATES-SPEC §3). A build started by hand from **Build
+Unsigned iOS App** is neither registered nor published: start it from **CI** instead.
 
 ## Rules
 
@@ -33,14 +34,17 @@ registered: start it from **CI** instead.
 - **Secrets only on main.** `OTA_SIGNING_KEY` and `OTA_PUBLISH_TOKEN` are secrets of the GitHub environment `ota`,
   which only `main` may use, never repository secrets: every branch push runs workflows, and a workflow edited on a
   branch could print a repository secret (disguised, past the log masking) into public logs. Only the jobs that need
-  them (`publish-ota`, `register-ota-runtime`) run in the environment.
+  them (`publish-ota`, `publish-builds`, `map-packs`) run in the environment.
   The Worker holds no key: a leaked publish token can replace what phones get only with something CI signed.
   A new certificate means a new native build, and phones on the old one take no updates until they install it.
 - **Never mid-drive.** `fallbackToCacheTimeout: 0`; the app never calls `reloadAsync()` on its own.
 - **Which JS ran is known.** About shows the JS commit and whether it is built in or an update; trip logs carry
   `ver_update` and `ver_runtime` (TRIP-LOGGER-SPEC §6.2); Sentry events the `js_source` tag next to `build_sha`.
 - **Files are immutable.** `assets/<key>` is the file's SHA-256; a file is uploaded once and never changed or
-  removed while an update uses it (the client checks each download against the hash in the signed manifest).
+  removed while a kept update uses it (the client checks each download against the hash in the signed manifest).
+- **Pruned.** The Worker removes what no phone needs, daily and after each publish (UPDATES-SPEC §2.1): JS of all but
+  the newest 3 runtimes per platform (each keeps only its latest update), all but the newest 3 builds, map releases but
+  the newest (and the one before it for 2 days). `POST /publish/prune?dry=1` lists what it would remove.
 
 ## Recovery
 
@@ -61,8 +65,11 @@ registered: start it from **CI** instead.
 
 1. `npx wrangler login`, then `npx wrangler r2 bucket create wtf-ai-updates`.
 2. A publish token: any long random string. `npx wrangler secret put PUBLISH_TOKEN --config workers/app-updates/wrangler.toml`.
-3. `npm run updates-worker:deploy` (serves at `https://wtf-app-updates.<account>.workers.dev`, the `updates.url` of
-   `app.json`).
+3. `npx wrangler deploy --config workers/app-updates/wrangler.toml --domain <host>` (the Worker's own domain, on a zone of the same Cloudflare
+   account; it also keeps its `workers.dev` address). Set the repository variable `UPDATES_ORIGIN` to `https://<host>`:
+   app.config.js makes it the app's `updates.url`, and the OTA tools and workflows use it. The repo names no server;
+   without the variable a build takes no JS updates and publishing fails. Changing it later needs a native build (it is
+   part of the runtime version), and builds with the old address keep asking there.
 4. The GitHub environment `ota`, usable from `main` only, with the two secrets:
 
    ```powershell
@@ -73,9 +80,30 @@ registered: start it from **CI** instead.
    ```
 5. Build Release on `main` once (Actions → CI → Run workflow, iOS Release, Android ci) and install it: from then on,
    JS pushes reach it.
+6. In AltStore on the iPhone: Sources → + → `<UPDATES_ORIGIN>/altstore.json` (or
+   App update → Open AltStore in the app). AltStore then shows each new build as an update.
 
 Without the secrets the publish job fails: `main` no longer builds an IPA/APK for JS-only changes. The key's only
 copies are the owner's backup and the secret, which cannot be read back: keep the backup.
+
+## Worker routes
+
+Public:
+
+- `GET /manifest`, `GET /assets/<key>`: JS updates (above).
+- `GET /apps/<platform>/latest.json`: the newest build (`AppBuild`, UPDATES-SPEC §3); 404 before the first.
+- `GET /apps/<platform>/<file>`: an IPA or APK. `GET /maps/latest.json`: `{osm_date}` of the current map release;
+  `GET /maps/<osm_date>/<file>`: its files. Both answer `Range` and `If-Range`.
+- `GET /altstore.json`: the AltStore source, built from the kept iOS builds.
+
+With the publish token (`/publish/…`): `missing`, `assets/<key>`, `builds/<runtime>/<platform>`,
+`updates/<runtime>/<platform>/<id>` (JS, above); `files/<path>` (a file up to 64 MiB) and `uploads/<path>` (multipart:
+`POST` starts, `PUT ?uploadId&part` sends a part, `POST ?uploadId` with `{parts}` ends) for `apps/` and `maps/` files;
+`files-missing` (which of these the bucket lacks, by size and MD5); `apps/<platform>` (a build's record, after its
+file); `maps/<osm_date>` (makes a release current, after its files); `prune`.
+
+The CLI for builds and maps is `npm run ota:upload` (`tools/ota/upload.ts`): `--app ios|android --file …` from
+`publish-builds`, `--maps tools/tiles/out/release` from `map-packs.yml`.
 
 ## Store layout (R2 `wtf-ai-updates`)
 
@@ -84,8 +112,11 @@ copies are the owner's backup and the secret, which cannot be read back: keep th
   byte for byte with `signature` as its `expo-signature` header: re-serializing the JSON breaks the signature.
 - `latest/<runtime>/<platform>.json`: a copy of the record phones get now.
 - `builds/<runtime>/<platform>.json`: `{commit, built}` of the native build that has the runtime.
+- `apps/<platform>/<build>.json`: a published build (`AppBuild`); `apps/<platform>/latest.json`: a copy of the newest;
+  `apps/<platform>/wtfai-<build>.ipa|apk`: its file.
+- `maps/<osm_date>/…`: a map release as `tools/tiles` wrote it (`index.json`, region files, shared files);
+  `maps/latest.json`: `{osm_date, published, previous?: {osm_date, until}}`.
 
 The update id is a digest of the runtime version, the platform and every file, so the same JS published twice is the
 same update and phones download nothing. `Constants.expoConfig` inside an update comes from the manifest
-(`extra.expoClient`, the public Expo config at export time). Old updates and files are never deleted for now (R2's
-free 10 GB holds hundreds of updates).
+(`extra.expoClient`, the public Expo config at export time).

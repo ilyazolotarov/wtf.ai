@@ -78,6 +78,7 @@ const PAGES = [
   "downloads",
   "more/index",
   "more/downloads",
+  "more/update",
   "more/settings",
   "more/position",
   "more/recorder",

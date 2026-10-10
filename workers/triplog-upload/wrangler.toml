@@ -2,6 +2,9 @@
 name = "wtf-triplog-upload"
 main = "index.ts"
 compatibility_date = "2026-10-01"
+# Its own domain is attached at deploy (`npx wrangler deploy --config workers/triplog-upload/wrangler.toml --domain
+# <host>`), never named here: the repo is public. Builds take it from the TRIP_UPLOAD_ORIGIN repository variable (app.config.js). workers.dev stays on for
+# builds made without it.
 workers_dev = true
 
 [[r2_buckets]]

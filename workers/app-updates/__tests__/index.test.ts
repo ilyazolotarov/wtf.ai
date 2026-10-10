@@ -3,29 +3,8 @@
  */
 import { createHash } from "node:crypto";
 
-import worker, { type Env, type R2Bucket } from "../index";
-
-function fakeBucket(): R2Bucket & { objects: Map<string, { data: ArrayBuffer | string; contentType?: string }> } {
-  const objects = new Map<string, { data: ArrayBuffer | string; contentType?: string }>();
-  return {
-    objects,
-    async get(key) {
-      const o = objects.get(key);
-      if (!o) return null;
-      return {
-        body: new Response(o.data).body!,
-        httpMetadata: { contentType: o.contentType },
-        text: async () => (typeof o.data === "string" ? o.data : new TextDecoder().decode(o.data)),
-      };
-    },
-    async put(key, value, options) {
-      objects.set(key, { data: value, contentType: options?.httpMetadata?.contentType });
-    },
-    async list({ prefix }) {
-      return { objects: [...objects.keys()].filter((k) => k.startsWith(prefix)).map((key) => ({ key })), truncated: false };
-    },
-  };
-}
+import worker, { type Env } from "../index";
+import { testBucket, type TestBucket } from "../test-bucket";
 
 const TOKEN = "publish-secret";
 const RUNTIME = "fp1";
@@ -35,9 +14,9 @@ const ID = "11111111-2222-3333-4444-555555555555";
 const MANIFEST = JSON.stringify({ id: ID, runtimeVersion: RUNTIME, launchAsset: { key: KEY }, assets: [] });
 const RECORD = JSON.stringify({ id: ID, manifest: MANIFEST, signature: 'sig="abc", keyid="main"' });
 
-let env: Env & { BUCKET: ReturnType<typeof fakeBucket> };
+let env: Env & { BUCKET: TestBucket };
 beforeEach(() => {
-  env = { BUCKET: fakeBucket(), PUBLISH_TOKEN: TOKEN };
+  env = { BUCKET: testBucket(), PUBLISH_TOKEN: TOKEN };
 });
 
 const call = (path: string, init: RequestInit & { headers?: Record<string, string> } = {}) =>

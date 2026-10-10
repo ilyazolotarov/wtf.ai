@@ -26,6 +26,25 @@ Not yet: CAN wheel speeds and yaw rate (Stages 2–3 of [the spec](docs/SPEC.md)
 
 Built with Expo SDK 57, React Native, TypeScript and Expo Router. Development happens on Windows; unsigned iOS builds come from GitHub Actions macOS runners and are sideloaded with AltStore. Android APKs come from the same CI ([docs/ANDROID-TESTING.md](docs/ANDROID-TESTING.md)).
 
+## Configuration: your own servers
+
+The repo names no server or account of its own, so a fork builds against its own without code changes. They come
+from the environment: in CI, GitHub repository variables (Settings → Secrets and variables → Actions → Variables);
+locally, `.env.local` (git-ignored, loaded by Expo). Every one is optional: without it, its feature is off.
+
+| Variable | What | Without it |
+| --- | --- | --- |
+| `UPDATES_ORIGIN` | the update Worker (`workers/app-updates`): JS updates, builds, AltStore source, maps ([docs/OTA.md](docs/OTA.md)) | no OTA updates, no update checks; maps from the repo's GitHub releases |
+| `TRIP_UPLOAD_ORIGIN` | the trip log upload Worker (`workers/triplog-upload`) | no upload in the Trip recorder |
+| `SENTRY_DSN` | where crash reports go | no crash reports |
+| `SENTRY_URL`, `SENTRY_ORG`, `SENTRY_PROJECT` (+ secret `SENTRY_AUTH_TOKEN`) | source map / dSYM uploads (`SENTRY_URL` is the region, e.g. the EU one) | minified JS stack traces |
+| `MAP_RELEASES_REPO` (local only) | `owner/repo` of the `maps-*` releases; CI uses its own repo | — |
+
+They are built into the app and are part of the OTA runtime version (`app.config.js`): changing one needs a native
+build. The Workers get their own domains at deploy, on every deploy (`--domain`, not through `npm run`: PowerShell eats
+its `--`): `npx wrangler deploy --config workers/app-updates/wrangler.toml --domain <host>`, and the same with
+`workers/triplog-upload/wrangler.toml` (each keeps its `workers.dev` address for builds made without a domain).
+
 ## Run the app
 
 You need Node.js with npm. Expo Go is not supported (the app has its own native modules): install a build from CI.
@@ -38,14 +57,14 @@ You need Node.js with npm. Expo Go is not supported (the app has its own native 
 
 2. Get an unsigned iOS build from GitHub Actions ([docs/CI.md](docs/CI.md)): the **CI** workflow's `build-ios` job uploads `wtfai-Release-unsigned.ipa` for every push to `main` that changes native code, and `wtfai-Debug-unsigned.ipa` (a dev client with the JS bundle embedded) for branch pushes with `[build]` in a commit message. JS-only pushes to `main` reach an installed Release build over the air instead ([docs/OTA.md](docs/OTA.md)): restart the app twice. You can also run **CI** or **Build Unsigned iOS App** by hand.
 
-   Optional: get the IPAs in Telegram as soon as they're built (branch compile checks are not sent).
+   Optional: a Telegram message for every build (branch compile checks are not sent).
    1. In Telegram, create a bot with [@BotFather](https://t.me/BotFather) (`/newbot`) and copy its token.
    2. Send the bot any message, then open `https://api.telegram.org/bot<token>/getUpdates` and copy `"chat":{"id":…}`.
    3. Add both as repository secrets: `gh secret set TELEGRAM_BOT_TOKEN`, then `gh secret set TELEGRAM_CHAT_ID` (each prompts for the value).
 
-   Every build then sends the IPA with the branch, commit and run link. Builds without the secrets skip the step.
+   Every build then sends a message, never the file: `main`'s builds with their download links (IPA, APK, AltStore source), branch builds with the link to the run whose artifacts hold them. Builds without the secrets skip the step.
 
-3. Sideload the IPA with [AltStore](https://altstore.io) (free Apple ID; refresh the app every 7 days with AltServer). For a Debug build, start Metro on the same network:
+3. Sideload the IPA with [AltStore](https://altstore.io) (free Apple ID; refresh the app every 7 days with AltServer). To get `main`'s builds as AltStore updates, add our source once: in the app, More → App update → Open AltStore (or AltStore → Sources → + → `<update server>/altstore.json`, the server being the `UPDATES_ORIGIN` repository variable; [docs/UPDATES-SPEC.md](docs/UPDATES-SPEC.md)). For a Debug build, start Metro on the same network:
 
    ```bash
    npx expo start --dev-client

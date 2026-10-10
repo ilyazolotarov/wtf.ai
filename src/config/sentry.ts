@@ -1,15 +1,17 @@
 import * as Sentry from "@sentry/react-native";
+import Constants from "expo-constants";
 
 import { deviceTags, sentryEnvironment, type MetricSink } from "@/services/telemetry";
 import { scrubBreadcrumb, scrubEvent, scrubLog } from "./sentry-scrub";
 
-// Crash and error reporting (SPEC §2 privacy exception). The DSN is a public client key.
-export const SENTRY_DSN =
-  "https://0bcf0358b74b501bcc05a79a0b3ee6a0@o4512190401937408.ingest.de.sentry.io/4512190411833424";
+// Crash and error reporting (SPEC §2 privacy exception). The DSN (a public client key) comes from the build's
+// environment, SENTRY_DSN (app.config.js), so the source names no Sentry account. Without it nothing is sent.
+export const SENTRY_DSN: string | null = (Constants.expoConfig?.extra as { sentryDsn?: string | null } | undefined)?.sentryDsn ?? null;
 
 export function initSentry(): void {
   Sentry.init({
-    dsn: SENTRY_DSN,
+    dsn: SENTRY_DSN ?? undefined,
+    enabled: SENTRY_DSN != null,
     // On in every build (Debug IPAs run without a Mac console); filter by environment in Sentry.
     // Emulator runs in CI report as "ci" so they never mix with testers' phones.
     environment: sentryEnvironment(),

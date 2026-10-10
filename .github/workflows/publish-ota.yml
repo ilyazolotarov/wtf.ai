@@ -26,6 +26,15 @@ on:
       TELEGRAM_CHAT_ID:
         required: false
 
+# This project's servers and Sentry account (app.config.js): repository variables, so the repo names none and a fork
+# sets its own. Every job that builds, exports or publishes sees the same values: they are part of the OTA runtime
+# version. Unset: that feature is off. SENTRY_URL (the Sentry region) is read by sentry-cli for the uploads.
+env:
+  UPDATES_ORIGIN: ${{ vars.UPDATES_ORIGIN }}
+  TRIP_UPLOAD_ORIGIN: ${{ vars.TRIP_UPLOAD_ORIGIN }}
+  SENTRY_DSN: ${{ vars.SENTRY_DSN }}
+  SENTRY_URL: ${{ vars.SENTRY_URL }}
+
 jobs:
   publish:
     # Phones run main: a branch's JS never goes out (a branch gets an IPA/APK with [build]).
@@ -51,6 +60,7 @@ jobs:
         run: |
           [ -n "$OTA_SIGNING_KEY" ] || { echo "::error::OTA_SIGNING_KEY is missing from the ota environment (docs/OTA.md)"; exit 1; }
           [ -n "$OTA_PUBLISH_TOKEN" ] || { echo "::error::OTA_PUBLISH_TOKEN is missing from the ota environment (docs/OTA.md)"; exit 1; }
+          [ -n "$UPDATES_ORIGIN" ] || { echo "::error::The UPDATES_ORIGIN repository variable is not set (docs/OTA.md)"; exit 1; }
 
       - name: Checkout repository
         uses: actions/checkout@v7

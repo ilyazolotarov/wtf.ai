@@ -1,10 +1,17 @@
-# OTA update server (docs/OTA.md). Deploy: npm run updates-worker:deploy (after `npx wrangler login`); once:
+# Update server (docs/OTA.md, docs/UPDATES-SPEC.md). Deploy: npm run updates-worker:deploy (after `npx wrangler login`); once:
 # `npx wrangler r2 bucket create wtf-ai-updates` and `npx wrangler secret put PUBLISH_TOKEN --config workers/app-updates/wrangler.toml`.
 name = "wtf-app-updates"
 main = "index.ts"
 compatibility_date = "2026-10-01"
+# Its own domain is attached at deploy (`npx wrangler deploy --config workers/app-updates/wrangler.toml --domain <host>`),
+# never named here: the repo is public. Builds take it from the UPDATES_ORIGIN repository variable (app.config.js). workers.dev stays on for builds
+# made without it.
 workers_dev = true
 
 [[r2_buckets]]
 binding = "BUCKET"
 bucket_name = "wtf-ai-updates"
+
+# Daily pruning (docs/UPDATES-SPEC.md §2.1): keeps the bucket within R2's free 10 GB.
+[triggers]
+crons = ["30 3 * * *"]

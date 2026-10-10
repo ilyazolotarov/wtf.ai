@@ -3,7 +3,7 @@ import { useSyncExternalStore } from "react";
 
 import type { MapStyleJson } from "@/config/map-dark";
 import { kvStore } from "@/services/kv-store";
-import { assetUrl, fetchCatalog, type CatalogRegion, type MapCatalog } from "@/services/offline-map/catalog";
+import { assetUrl, CatalogFormatError, fetchCatalog, type CatalogRegion, type MapCatalog } from "@/services/offline-map/catalog";
 
 /**
  * Offline map packs (SPEC §3.8), downloaded from the map catalog (catalog.ts):
@@ -19,7 +19,8 @@ import { assetUrl, fetchCatalog, type CatalogRegion, type MapCatalog } from "@/s
  * fetched in turn in an iOS background session into `common.staging/` and `.part` files, with
  * one byte count and pause/resume on whichever file is current. The job (with the current
  * file's DownloadTask.savable()) is kept in kv-store, so it survives app restarts. Only when
- * every file matches the catalog's size and MD5 is it all installed, in one step.
+ * every file matches the catalog's size and MD5 is it all installed, in one step. An automatic update
+ * (docs/UPDATES-SPEC.md §5.2) then waits, verified, until the install gate opens: never mid-drive.
  */
 export interface InstalledRegion {
   region: string;
@@ -50,9 +51,12 @@ export interface InstalledState {
 /** Progress of the whole download (shared files, tiles and road graph together), in bytes. */
 export interface MapDownload {
   region: string;
-  phase: "downloading" | "verifying" | "paused";
+  /** `waiting`: an automatic update, verified, until the install gate opens (no trip, no route). */
+  phase: "downloading" | "verifying" | "paused" | "waiting";
   bytes: number;
   total: number;
+  /** Started by the app (an update on Wi-Fi), not by the driver. */
+  auto: boolean;
 }
 
 export interface MapPacksState {
@@ -60,6 +64,8 @@ export interface MapPacksState {
   catalog: MapCatalog | null;
   catalogLoading: boolean;
   catalogError: string | null;
+  /** The published maps are for a newer app (another catalog format). */
+  catalogTooNew: boolean;
   download: MapDownload | null;
   downloadError: string | null;
 }
@@ -87,6 +93,8 @@ interface DownloadJob {
   graph: boolean;
   /** Absent in jobs saved before search indexes. */
   search?: boolean;
+  /** An automatic update: installed only once the gate allows. */
+  auto?: boolean;
   files: JobFile[];
   /** Next file to fetch; bytes of the files before it. */
   index: number;
@@ -141,8 +149,9 @@ function initialState(): MapPacksState {
     catalog: null,
     catalogLoading: false,
     catalogError: null,
+    catalogTooNew: false,
     // A job found at start is paused: the app was closed (or killed) during the download.
-    download: job ? { region: job.region.region, phase: "paused", bytes: job.done, total: job.total } : null,
+    download: job ? { region: job.region.region, phase: "paused", bytes: job.done, total: job.total, auto: !!job.auto } : null,
     downloadError: null,
   };
 }
@@ -157,6 +166,17 @@ let pauseRequested = false;
 let runId = 0;
 /** Told of every download that failed (the app sends it to Sentry); the screen shows the message itself. */
 let reportFailure: (error: unknown, where: { region: string; file: string; index: number; files: number }) => void = () => {};
+
+/** When an automatic update may replace the map in use: not during a trip or a route (set by the update center). */
+export interface InstallGate {
+  allowed(): boolean;
+  subscribe(listener: () => void): () => void;
+}
+let installGate: InstallGate = { allowed: () => true, subscribe: () => () => {} };
+
+export function setInstallGate(gate: InstallGate): void {
+  installGate = gate;
+}
 
 export function onMapDownloadFailed(report: typeof reportFailure): void {
   reportFailure = report;
@@ -173,7 +193,7 @@ function setState(patch: Partial<MapPacksState>) {
 }
 
 function setDownload(phase: MapDownload["phase"], bytes: number) {
-  if (job) setState({ download: { region: job.region.region, phase, bytes, total: job.total } });
+  if (job) setState({ download: { region: job.region.region, phase, bytes, total: job.total, auto: !!job.auto } });
 }
 
 function saveJob() {
@@ -201,13 +221,17 @@ export function useMapPacks(): MapPacksState {
 export const getCatalogUrl = () => kvStore.getJson<string>(CATALOG_URL_KEY) ?? "";
 export const setCatalogUrl = (url: string) => kvStore.setJson(CATALOG_URL_KEY, url.trim());
 
-export async function loadCatalog(): Promise<void> {
-  if (getState().catalogLoading) return;
+/** Fetches the catalog; resolves with it (null when it failed: `catalogError` says why). */
+export async function loadCatalog(): Promise<MapCatalog | null> {
+  if (getState().catalogLoading) return null;
   setState({ catalogLoading: true, catalogError: null });
   try {
-    setState({ catalog: await fetchCatalog(getCatalogUrl()), catalogLoading: false });
+    const catalog = await fetchCatalog(getCatalogUrl());
+    setState({ catalog, catalogLoading: false, catalogTooNew: false });
+    return catalog;
   } catch (e) {
-    setState({ catalogLoading: false, catalogError: e instanceof Error ? e.message : String(e) });
+    setState({ catalogLoading: false, catalogError: e instanceof Error ? e.message : String(e), catalogTooNew: e instanceof CatalogFormatError });
+    return null;
   }
 }
 
@@ -273,6 +297,24 @@ export function activeSearchFile(installed: InstalledState): { region: string; f
   if (!region || !search) return null;
   const file = searchFile(region);
   return file.exists ? { region, file, md5: search.md5 } : null;
+}
+
+/** The bytes a download of `region` would fetch now: only what changed. */
+export function plannedBytes(catalog: MapCatalog, region: string): number {
+  const entry = catalog.regions.find((r) => r.region === region);
+  return entry ? planJob(catalog, entry).total : 0;
+}
+
+/** Resolves once the install gate allows, or when `stillWanted` says the job was dropped meanwhile. */
+function gateOpen(stillWanted: () => boolean): Promise<void> {
+  return new Promise((resolve) => {
+    if (installGate.allowed()) return resolve();
+    const unsubscribe = installGate.subscribe(() => {
+      if (!installGate.allowed() && stillWanted()) return;
+      unsubscribe();
+      resolve();
+    });
+  });
 }
 
 /** What `region` still lacks: shared files (if changed), tiles, graph and search index (if changed). */
@@ -441,6 +483,11 @@ async function run(id: number) {
   await letRender(); // "verifying" before MD5 blocks
   for (const f of j.files) verify(new File(ROOT(), f.dest), f, f.label);
   if (id !== runId) return;
+  if (j.auto && !installGate.allowed()) {
+    setDownload("waiting", j.total);
+    await gateOpen(() => id === runId);
+    if (id !== runId) return;
+  }
   install(j);
   job = null;
   saveJob();
@@ -478,12 +525,13 @@ async function runGuarded(id: number) {
   }
 }
 
-export async function downloadRegion(region: string): Promise<void> {
+/** `auto`: an update the app started by itself (docs/UPDATES-SPEC.md §5.2), installed only once the gate allows. */
+export async function downloadRegion(region: string, { auto = false }: { auto?: boolean } = {}): Promise<void> {
   const { catalog, download } = getState();
   const entry = catalog?.regions.find((r) => r.region === region);
   if (!catalog || !entry || download) return;
   const id = ++runId;
-  const planned = planJob(catalog, entry);
+  const planned = { ...planJob(catalog, entry), auto };
   if (planned.files.length === 0) return;
   const needed = planned.total + DISK_MARGIN;
   if (Paths.availableDiskSpace < needed) {

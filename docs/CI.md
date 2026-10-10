@@ -20,6 +20,7 @@ covered again by the next run.
 | `build-ios` (unsigned IPA)            | see below                                                                   |
 | `build-android` (signed APK)          | see Android below                                                           |
 | `publish-ota` (JS update)             | `main` only, see below and [OTA.md](OTA.md)                                 |
+| `publish-builds` (to the update Worker) | `main`'s Release builds: their runtime for OTA, the IPA/APK for the in-app update ([UPDATES-SPEC.md](UPDATES-SPEC.md) §3) |
 
 ## Builds
 
@@ -31,9 +32,9 @@ platform's build workflow.
 | Event                                  | Build                                    | Telegram | Kept    |
 | -------------------------------------- | ---------------------------------------- | -------- | ------- |
 | Push to a branch, native change        | Debug, as a compile check                | no       | 7 days  |
-| Push to a branch, `[build]` in a commit message | Debug                           | yes      | 7 days  |
+| Push to a branch, `[build]` in a commit message | Debug                           | yes (a message: the run's link) | 7 days  |
 | Push to a branch, anything else        | none                                     | —        | —       |
-| Push to `main`, native change          | Release (registers its runtime for OTA)  | yes      | 14 days |
+| Push to `main`, native change          | Release, published to the update Worker (`publish-builds`: its runtime for OTA, the IPA/APK for the in-app update, [UPDATES-SPEC.md](UPDATES-SPEC.md) §3) | yes (a message: download links) | 14 days |
 | Push to `main`, other app code (`src/`, `assets/`, `locales/`, …) | none: an OTA JS update | yes (a message) | — |
 | Push to `main`, docs/tools only        | none                                     | —        | —       |
 | Pull request from a fork               | native change → Debug compile check      | no       | 7 days  |
@@ -73,7 +74,8 @@ runs `.github/workflows/build-android.yml` with it.
   (`wtfai-emulator.apk`, an artifact; Telegram if ticked). CI never builds x86_64.
 - No emulator test in CI: it took too long. The smoke test (`scripts/android-smoke.sh`) runs against a local
   emulator: `bash scripts/android-smoke.sh path/to/app.apk out-dir`.
-- Delivery: like iOS. The APK is uploaded unzipped and sent to Telegram only when the plan says `notify`.
+- Delivery: like iOS. The APK is uploaded unzipped; Telegram gets a message (never the file) only when the plan says
+  `notify`: on `main` from `publish-builds`, with the download link.
 - Manual: Actions → **CI** → Run workflow has an `android` choice (`none` / `tester` / `ci`); **Build Android APK**
   can also be started on its own.
 - Signed with the stable key on `main` (the `ANDROID_KEYSTORE_*` secrets of the `android-release` environment), else the debug key

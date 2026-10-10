@@ -3,10 +3,10 @@ name: Build Offline Map Packs
 # Weekly: when Geofabrik has a newer Ukraine extract than the newest published maps, build
 # Ukraine's tiles with Planetiler, cut every other region in tools/tiles/regions/regions.json
 # from them (pmtiles extract), clip the extract per region (osmium) for the road graphs and
-# search indexes (built in parallel), and publish tools/tiles/out/release/ as release
-# `maps-<osm_date>`: index.json, one <region>.pmtiles per region and the shared files.
-# The app's Downloads screen reads index.json of the newest `maps-*` release. Older
-# releases are pruned.
+# search indexes (built in parallel), and publish tools/tiles/out/release/ (index.json, one
+# <region>.pmtiles per region and the shared files) to the update Worker, where the app reads
+# it (docs/UPDATES-SPEC.md §4); the Worker keeps one release. Also as GitHub release
+# `maps-<osm_date>` for app JS older than the Worker's maps; older releases are pruned.
 on:
   schedule:
     - cron: "0 4 * * 1" # Monday; Geofabrik refreshes extracts around 01–02 UTC
@@ -26,9 +26,14 @@ concurrency:
 
 env:
   KEEP_RELEASES: 3
+  # The update Worker's address (app.config.js): a repository variable, so the repo names no server. Unset: the maps go
+  # to GitHub releases only.
+  UPDATES_ORIGIN: ${{ vars.UPDATES_ORIGIN }}
 
 jobs:
   map-packs:
+    # The publish token is in the ota environment, which only main may use (docs/OTA.md).
+    environment: ota
     runs-on: ubuntu-latest
     timeout-minutes: 240
     steps:
@@ -48,12 +53,17 @@ jobs:
       - name: Check for a newer OSM extract
         id: check
         env:
-          GH_TOKEN: ${{ github.token }}
           FORCE: ${{ inputs.force }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           date=$(tiles osm-date)
-          if [ "$FORCE" != "true" ] && gh release view "maps-$date" >/dev/null 2>&1; then
-            echo "maps-$date already published"
+          if [ -n "$UPDATES_ORIGIN" ]; then
+            current=$(curl -fsS "${UPDATES_ORIGIN%/}/maps/latest.json" | jq -r .osm_date || echo none)
+          else
+            current=$(gh release view "maps-$date" --json tagName -q .tagName 2>/dev/null | sed 's/^maps-//' || echo none)
+          fi
+          if [ "$FORCE" != "true" ] && [ "$current" = "$date" ]; then
+            echo "maps $date already published"
             echo "build=false" >> "$GITHUB_OUTPUT"
           else
             echo "Building maps for Geofabrik extract $date"
@@ -94,7 +104,23 @@ jobs:
           tiles build-all --heap 10g
           ls -l out/release/*.pmtiles
 
+      - name: Setup Node.js
+        if: steps.check.outputs.build == 'true' && env.UPDATES_ORIGIN != ''
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Publish to the update Worker
+        # Files the Worker has (same size and MD5) are skipped, index.json goes last, then the release becomes current.
+        if: steps.check.outputs.build == 'true' && env.UPDATES_ORIGIN != ''
+        env:
+          OTA_PUBLISH_TOKEN: ${{ secrets.OTA_PUBLISH_TOKEN }}
+        run: |
+          [ -n "$OTA_PUBLISH_TOKEN" ] || { echo "::error::OTA_PUBLISH_TOKEN is missing from the ota environment (docs/OTA.md)"; exit 1; }
+          npm run -s ota:upload -- --maps tools/tiles/out/release
+
       - name: Publish release
+        # For app JS older than the Worker's maps (docs/UPDATES-SPEC.md §4).
         if: steps.check.outputs.build == 'true'
         env:
           GH_TOKEN: ${{ github.token }}

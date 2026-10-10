@@ -11,7 +11,9 @@ adapter (ELM327 type) plugged into the car to try the full thing; without one th
    for this one install.
 3. If Google Play Protect says "unrecognized app" or "app scan recommended", choose **More details → Install anyway**.
    This build is not on Google Play.
-4. To update later, install the new `.apk` the same way. Your settings and trip logs are kept.
+4. Updates come through the app: when a new version is out, it asks (or shows a red dot on **More**). Tap **Update**
+   (or More → App update → Download and install), then **Install**. The first time, Android asks to allow installing
+   apps from wtf.ai: allow it, go back and tap **Install** again. Your settings and trip logs are kept.
 
 ## 2. First start
 

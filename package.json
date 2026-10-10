@@ -6,6 +6,7 @@
     "@expo-google-fonts/onest": "^0.4.2",
     "@expo/ui": "~57.0.22",
     "@maplibre/maplibre-react-native": "^11.4.0",
+    "@react-native-community/netinfo": "12.0.1",
     "@sentry/react-native": "~7.11.0",
     "expo": "~57.0.27",
     "expo-asset": "~57.0.19",
@@ -19,6 +20,7 @@
     "expo-font": "~57.0.4",
     "expo-glass-effect": "~57.0.4",
     "expo-image": "~57.0.5",
+    "expo-intent-launcher": "~57.0.1",
     "expo-keep-awake": "~57.0.2",
     "expo-linking": "~57.0.12",
     "expo-localization": "~57.0.2",
@@ -99,6 +101,7 @@
     "upload-worker:dev": "npx wrangler dev --config workers/triplog-upload/wrangler.toml",
     "ota:prepare": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/ota/prepare.ts",
     "ota:publish": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/ota/publish.ts",
+    "ota:upload": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/ota/upload.ts",
     "updates-worker:deploy": "npx wrangler deploy --config workers/app-updates/wrangler.toml",
     "updates-worker:dev": "npx wrangler dev --config workers/app-updates/wrangler.toml",
     "route:eta": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/eta.ts"

@@ -24,6 +24,7 @@ import { MapTour, TourInvite } from "@/components/guide/map-tour";
 import { RouteBanner } from "@/components/route/route-banner";
 import { useAudioOutput } from "@/components/route/use-audio-output";
 import { useVoiceGuidance, useVoiceMuted, useVoiceVolume } from "@/components/route/use-voice-guidance";
+import { UpdatePrompts } from "@/components/update/update-prompts";
 import { useNavStatus } from "@/components/status/use-nav-status";
 import { ANDROID_BLURS, BlurTarget } from "@/components/ui/glass-fill";
 import { FontScaleLimit, MAP_MAX_FONT_SCALE } from "@/components/ui/text";
@@ -31,6 +32,7 @@ import { useHasUsableMap } from "@/config/map";
 import { usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
 import type { Coordinate } from "@/nav/geo";
+import { MOVING_MPS } from "@/services/app-update/decide";
 import { usePositionPermission } from "@/providers/position-provider";
 import { useHeldRoute, useRoute } from "@/providers/route-provider";
 import { useDevSettings, useRecorderSnapshot, useRuntime } from "@/providers/runtime-provider";
@@ -355,6 +357,21 @@ export default function HomeScreen() {
         </View>
         {/* Asked for from the Guide, it waits for the pages to close. */}
         {touring && screenFocused && <MapTour targets={tourTargets} onClose={() => setTouring(false)} />}
+        {/* Update prompts only while nothing else goes on (docs/UPDATES-SPEC.md §5.3). */}
+        <UpdatePrompts
+          busy={
+            recording ||
+            route != null ||
+            nav.adapter === "on" ||
+            (position?.speedMps ?? 0) > MOVING_MPS ||
+            !screenFocused ||
+            !mapReady ||
+            touring ||
+            !tourOffered ||
+            pin != null ||
+            placing != null
+          }
+        />
       </FontScaleLimit>
       <SheetBlur />
     </View>

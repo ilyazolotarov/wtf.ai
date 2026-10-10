@@ -65,6 +65,10 @@ describe("buildManifest", () => {
     });
   });
 
+  it("carries the commit's title when it has one", () => {
+    expect(buildManifest(args({ message: "Faster start" })).manifest.metadata).toEqual({ commit: "abc1234", message: "Faster start" });
+  });
+
   it("lists each file to upload once, with forward-slash paths", () => {
     const { files } = buildManifest(
       args({

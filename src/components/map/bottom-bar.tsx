@@ -8,12 +8,16 @@ import { Icon, type IconName } from "@/components/ui/icon";
 import { T } from "@/components/ui/text";
 import { usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
+import { useUpdateBadges } from "@/services/app-update/update-center";
 
 import { usePanelStyle } from "./hud-card";
 
 const LINK_BADGE_LABEL = { ok: "badgeOk", busy: "badgeBusy", bad: "badgeBad" } as const;
 
-/** The map's bottom bar: Route, Vehicle (with the connection dot; "Driving" while a trip records), More. */
+/**
+ * The map's bottom bar: Route, Vehicle (with the connection dot; "Driving" while a trip records), More (a red dot while
+ * an app or map update waits: docs/UPDATES-SPEC.md §5.4).
+ */
 export function BottomBar({
   recording,
   onLayout,
@@ -27,6 +31,7 @@ export function BottomBar({
   const { t } = useT();
   const panel = usePanelStyle();
   const linkBadge = useLinkBadge();
+  const updates = useUpdateBadges();
   return (
     <View ref={ref} style={[panel, styles.bar]} onLayout={onLayout}>
       <GlassFill radius={30} />
@@ -39,7 +44,13 @@ export function BottomBar({
         badgeLabel={t(LINK_BADGE_LABEL[linkBadge])}
         highlight={recording}
       />
-      <HudAction icon="more_horiz" label={t("more")} href="/more" />
+      <HudAction
+        icon="more_horiz"
+        label={t("more")}
+        href="/more"
+        badge={updates.any ? "bad" : undefined}
+        badgeLabel={updates.any ? t(updates.app ? "appUpdateAvailable" : "updateAvailable") : undefined}
+      />
     </View>
   );
 }
@@ -55,7 +66,7 @@ function HudAction({
   icon: IconName;
   label: string;
   href: "/route" | "/vehicle" | "/more";
-  /** Connection state dot: green ready, yellow connecting, red not connected. */
+  /** Connection state dot: green ready, yellow connecting, red not connected; on More, red: an update waits. */
   badge?: LinkBadge;
   badgeLabel?: string;
   /** The label in the accent colour (a trip is recording). */

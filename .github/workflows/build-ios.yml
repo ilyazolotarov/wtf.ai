@@ -11,7 +11,7 @@ on:
         options: [Release, Debug]
         default: Release
       notify:
-        description: "Send the IPA to Telegram"
+        description: "Tell Telegram (a message with the run's link)"
         type: boolean
         default: true
   workflow_call:
@@ -20,7 +20,7 @@ on:
         type: string
         default: Release
       notify:
-        # false for compile checks of branch pushes: the IPA is only uploaded as an artifact.
+        # false for compile checks of branch pushes. main's Release builds are announced by ci.yml's publish-builds.
         type: boolean
         default: false
       retention-days:
@@ -30,6 +30,15 @@ on:
       runtime:
         # The OTA runtime of a Release build (docs/OTA.md), empty for Debug: ci.yml registers it on main.
         value: ${{ jobs.build-ios.outputs.runtime }}
+      # What ci.yml's publish-builds needs to publish a Release build (docs/UPDATES-SPEC.md §3).
+      build:
+        value: ${{ jobs.build-ios.outputs.build }}
+      version:
+        value: ${{ jobs.build-ios.outputs.version }}
+      permissions:
+        value: ${{ jobs.build-ios.outputs.permissions }}
+      min-os:
+        value: ${{ jobs.build-ios.outputs.min-os }}
     secrets:
       SENTRY_AUTH_TOKEN:
         required: false
@@ -38,22 +47,35 @@ on:
       TELEGRAM_CHAT_ID:
         required: false
 
+# This project's servers and Sentry account (app.config.js): repository variables, so the repo names none and a fork
+# sets its own. Every job that builds, exports or publishes sees the same values: they are part of the OTA runtime
+# version. Unset: that feature is off. SENTRY_URL (the Sentry region) is read by sentry-cli for the uploads.
+env:
+  UPDATES_ORIGIN: ${{ vars.UPDATES_ORIGIN }}
+  TRIP_UPLOAD_ORIGIN: ${{ vars.TRIP_UPLOAD_ORIGIN }}
+  SENTRY_DSN: ${{ vars.SENTRY_DSN }}
+  SENTRY_URL: ${{ vars.SENTRY_URL }}
+
 jobs:
   build-ios:
     # Expo SDK 57 requires Xcode 26.4+
     runs-on: macos-26
     outputs:
       runtime: ${{ steps.runtime.outputs.runtime }}
+      build: ${{ steps.build-number.outputs.build }}
+      version: ${{ steps.build-number.outputs.version }}
+      permissions: ${{ steps.permissions.outputs.permissions }}
+      min-os: ${{ steps.permissions.outputs.min-os }}
     timeout-minutes: 60
     env:
       CONFIGURATION: ${{ inputs.configuration }}
-      # Source maps / dSYMs go to Sentry only when the SENTRY_AUTH_TOKEN secret (plus SENTRY_ORG and
+      # Source maps / dSYMs go to Sentry only when the SENTRY_AUTH_TOKEN secret (plus the SENTRY_URL, SENTRY_ORG and
       # SENTRY_PROJECT repo variables) are set; otherwise the Sentry build phases skip the upload.
       SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
       SENTRY_ORG: ${{ vars.SENTRY_ORG }}
       SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
       SENTRY_DISABLE_AUTO_UPLOAD: ${{ secrets.SENTRY_AUTH_TOKEN == '' && 'true' || 'false' }}
-      # Optional: the IPA is also sent to a Telegram chat when both secrets are set (README).
+      # Optional: a message to a Telegram chat when both secrets are set (README).
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       # Compiler cache for the C/C++/Objective-C of the pods (React Native core and Expo modules
@@ -122,6 +144,21 @@ jobs:
         # Prebuild runs `pod install` itself on macOS
         run: npx expo prebuild --platform ios --clean
 
+      - name: Build number
+        # The commit's time in minutes since 2020-01-01 UTC (docs/UPDATES-SPEC.md §3): it grows along main, so AltStore
+        # and the app see a newer build. Set in the generated Info.plist, never in app.json: it must not change the
+        # runtime version (ios/ is generated and not part of the fingerprint).
+        id: build-number
+        run: |
+          BUILD=$(( ($(git log -1 --format=%ct) - 1577836800) / 60 ))
+          VERSION=$(jq -r .expo.version app.json)
+          SCHEME=$(basename "$(ls -d ios/*.xcworkspace | head -n 1)" .xcworkspace)
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD" "ios/$SCHEME/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "ios/$SCHEME/Info.plist"
+          echo "build=$BUILD" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Version $VERSION, build $BUILD"
+
       - name: Embed JS bundle in Debug builds
         # The prebuild template's "Bundle React Native code and images" phase does
         # `export SKIP_BUNDLING=1` for Debug (FORCE_BUNDLING can't override it; it only applies to
@@ -159,7 +196,7 @@ jobs:
         # hangs from Debug IPAs came with every frame of the app <redacted>.
         if: ${{ inputs.configuration == 'Debug' && env.SENTRY_DISABLE_AUTO_UPLOAD != 'true' }}
         continue-on-error: true
-        run: npx sentry-cli --url https://de.sentry.io/ debug-files upload build/Build/Products/Debug-iphoneos
+        run: npx sentry-cli debug-files upload build/Build/Products/Debug-iphoneos
 
       - name: ccache statistics
         if: ${{ !cancelled() }}
@@ -198,23 +235,40 @@ jobs:
           path: wtfai-${{ inputs.configuration }}-unsigned.ipa
           retention-days: ${{ inputs.retention-days || 14 }}
 
-      - name: Send IPA to Telegram
-        if: ${{ inputs.notify && env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != '' }}
-        # A delivery problem must not fail the build: the artifact above is the source of truth.
+      - name: Permissions for AltStore
+        # AltStore refuses an IPA whose entitlements and usage descriptions differ from its source's appPermissions
+        # (docs/UPDATES-SPEC.md §3): read them from the app just built. Unsigned, it has no entitlements. Release only:
+        # only main's Release builds are published.
+        id: permissions
+        if: ${{ inputs.configuration == 'Release' }}
+        # A failure here stops only the publish of this IPA (publish-builds checks for the output), not the build.
         continue-on-error: true
         run: |
-          IPA="wtfai-${CONFIGURATION}-unsigned.ipa"
+          APP=$(ls -d build/Build/Products/${CONFIGURATION}-iphoneos/*.app | head -n 1)
+          PRIVACY=$(plutil -convert json -o - "$APP/Info.plist" | jq -c 'with_entries(select(.key | endswith("UsageDescription")))')
+          ENTITLEMENTS='[]'
+          for BIN in "$APP" "$APP"/PlugIns/*.appex; do
+            [ -e "$BIN" ] || continue
+            FOUND=$( (codesign -d --entitlements :- "$BIN" 2>/dev/null | plutil -convert json -o - - 2>/dev/null | jq -c 'keys') || true)
+            [ -n "$FOUND" ] && ENTITLEMENTS=$(jq -cn --argjson a "$ENTITLEMENTS" --argjson b "$FOUND" '$a + $b | unique')
+          done
+          PERMISSIONS=$(jq -cn --argjson e "$ENTITLEMENTS" --argjson p "$PRIVACY" '{entitlements: ($e - ["application-identifier", "com.apple.developer.team-identifier"]), privacy: $p}')
+          echo "permissions=$PERMISSIONS" >> "$GITHUB_OUTPUT"
+          echo "min-os=$(plutil -extract MinimumOSVersion raw -o - "$APP/Info.plist")" >> "$GITHUB_OUTPUT"
+          echo "$PERMISSIONS"
+
+      - name: Tell Telegram
+        # A message, never the file (docs/UPDATES-SPEC.md §3): the run's artifacts hold it. main's Release builds are
+        # announced by ci.yml's publish-builds, with the download links, once they are published.
+        if: ${{ inputs.notify && !(github.ref == 'refs/heads/main' && inputs.configuration == 'Release') && env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != '' }}
+        continue-on-error: true
+        run: |
           RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          CAPTION="wtf.ai ${CONFIGURATION} · ${GITHUB_REF_NAME} @ ${GITHUB_SHA:0:7}
+          TEXT="wtf.ai iOS ${CONFIGURATION} · ${GITHUB_REF_NAME} @ ${GITHUB_SHA:0:7}
           $(git log -1 --format=%s)
-          ${RUN_URL}"
-          API="https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}"
-          # Bot API uploads are limited to 50 MB; past that, send the link to the run instead.
-          if [ "$(stat -f%z "$IPA")" -lt 49000000 ]; then
-            curl -sS --fail-with-body -o /dev/null -F chat_id="$TELEGRAM_CHAT_ID" -F caption="$CAPTION" -F document=@"$IPA" "$API/sendDocument"
-          else
-            curl -sS --fail-with-body -o /dev/null --data-urlencode chat_id="$TELEGRAM_CHAT_ID" --data-urlencode text="$CAPTION (IPA over 50 MB: download it from the run)" "$API/sendMessage"
-          fi
+          IPA: ${RUN_URL}"
+          curl -sS --fail-with-body -o /dev/null --data-urlencode chat_id="$TELEGRAM_CHAT_ID" --data-urlencode text="$TEXT" \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage"
 
       - name: OTA runtime of the build
         # The fingerprint the build embedded, so the update Worker and the app cannot disagree (docs/OTA.md). Release

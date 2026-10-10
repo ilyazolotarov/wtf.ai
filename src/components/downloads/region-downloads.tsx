@@ -12,6 +12,7 @@ import { Icon, type IconName } from "@/components/ui/icon";
 import { INPUT_MAX_FONT_SCALE, T } from "@/components/ui/text";
 import { usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
+import { skipMap } from "@/services/app-update/update-center";
 import {
     cancelDownload,
     downloadRegion,
@@ -53,18 +54,28 @@ export function IconButton({ icon, label, danger, filled, onPress }: { icon: Ico
   );
 }
 
-/** Progress text, bar and pause/resume/cancel controls of the running download. */
-function DownloadProgress({ download }: { download: MapDownload }) {
+/**
+ * Progress text, bar and pause/resume/cancel controls of the running download. Cancelling an update the app started by
+ * itself skips that map release (no prompt, no dot: docs/UPDATES-SPEC.md §5.3); Offline maps still offers it.
+ */
+function DownloadProgress({ download, osmDate }: { download: MapDownload; osmDate?: string }) {
   const { t } = useT();
   const palette = usePalette();
+  const cancel = () => {
+    if (download.auto && osmDate) skipMap(osmDate);
+    cancelDownload();
+  };
   return (
     <View style={styles.progress}>
       <T size={13} color={palette.text2}>
-        {download.phase === "paused"
-          ? t("paused") + (download.bytes ? ` · ${formatMb(download.bytes)} / ${formatMb(download.total)}` : "")
-          : download.phase === "verifying"
-            ? t("verifying")
-            : `${t("downloading")} ${formatMb(download.bytes)} / ${formatMb(download.total)}`}
+        {(download.auto && download.phase !== "waiting" ? `${t("mapUpdateAuto")} · ` : "") +
+          (download.phase === "paused"
+            ? t("paused") + (download.bytes ? ` · ${formatMb(download.bytes)} / ${formatMb(download.total)}` : "")
+            : download.phase === "verifying"
+              ? t("verifying")
+              : download.phase === "waiting"
+                ? t("mapUpdateWaiting")
+                : `${t("downloading")} ${formatMb(download.bytes)} / ${formatMb(download.total)}`)}
       </T>
       <View style={[styles.bar, { backgroundColor: palette.surface }]}>
         <View
@@ -78,28 +89,28 @@ function DownloadProgress({ download }: { download: MapDownload }) {
         />
       </View>
       <View style={styles.actions}>
-        {download.phase !== "paused" && (
+        {download.phase === "downloading" && (
           <ScreenAction labelKey="pause" compact secondary onPress={pauseDownload} />
         )}
         {download.phase === "paused" && (
           <ScreenAction labelKey="resume" compact onPress={() => void resumeDownload()} />
         )}
-        {download.phase !== "verifying" && <ScreenAction labelKey="cancel" compact secondary onPress={cancelDownload} />}
+        {download.phase !== "verifying" && <ScreenAction labelKey="cancel" compact secondary onPress={cancel} />}
       </View>
     </View>
   );
 }
 
 /**
- * Offline maps (SPEC §3.8): regions from the newest GitHub map release (or a custom catalog
- * URL, e.g. `tiles serve` on a PC), downloaded one at a time; one installed region is active.
+ * Offline maps (SPEC §3.8): regions from the published map release (the update Worker's; or a custom
+ * catalog URL, e.g. `tiles serve` on a PC), downloaded one at a time; one installed region is active.
  * Each region bundles its road graph and search index; progress and pause/cancel controls show
  * in the region's row. The body of the Downloads sheet and of the first-run `map-setup` screen.
  */
 export function RegionDownloads() {
   const { t, language } = useT();
   const palette = usePalette();
-  const { installed, catalog, catalogLoading, catalogError, download, downloadError } = useMapPacks();
+  const { installed, catalog, catalogLoading, catalogError, catalogTooNew, download, downloadError } = useMapPacks();
   const [source, setSource] = useState(getCatalogUrl);
 
   useEffect(() => {
@@ -156,7 +167,7 @@ export function RegionDownloads() {
             </T>
           )}
         </View>
-        {activeBusy && download && <DownloadProgress download={download} />}
+        {activeBusy && download && <DownloadProgress download={download} osmDate={catalog?.osm_date} />}
       </ScreenCard>
 
       {downloadError && <ScreenNote color={palette.bad.c}>{downloadError}</ScreenNote>}
@@ -200,14 +211,14 @@ export function RegionDownloads() {
                   <IconButton icon="delete" danger label={t("delete")} onPress={() => removeRegion(row.region)} />
                 )}
               </View>
-              {busy && !isActive && download && <DownloadProgress download={download} />}
+              {busy && !isActive && download && <DownloadProgress download={download} osmDate={catalog?.osm_date} />}
             </View>
           );
         })}
       </ScreenSection>
       {catalogError && (
         <View style={styles.errorRow}>
-          <ScreenNote color={palette.bad.c}>{catalogError}</ScreenNote>
+          <ScreenNote color={palette.bad.c}>{catalogTooNew ? t("mapsNeedNewerApp") : catalogError}</ScreenNote>
           <ScreenLink label={t("retry")} onPress={() => void loadCatalog()} />
         </View>
       )}

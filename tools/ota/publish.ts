@@ -10,26 +10,9 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
-import { flag, resolveRuntimeVersion, runMain, updatesConfig } from "./cli";
+import { expectOk, flag, inParallel, publishCall as call, requestPrune, resolveRuntimeVersion, runMain } from "./cli";
 import type { UpdateManifest } from "./manifest";
 import { isPlatform, isRollback, parseRecord, type Platform, type PublishedRecord } from "./protocol";
-
-const PARALLEL = 8;
-
-async function call(method: string, route: string, token: string, body?: BodyInit, contentType = "application/json"): Promise<Response> {
-  const res = await fetch(`${flag("url") ?? new URL(updatesConfig().url).origin}/publish/${route}`, {
-    method,
-    body,
-    headers: { authorization: `Bearer ${token}`, ...(body ? { "content-type": contentType } : {}) },
-  });
-  if (res.status === 401) throw new Error("the Worker refused OTA_PUBLISH_TOKEN");
-  return res;
-}
-
-async function expectOk(res: Promise<Response>, what: string) {
-  const r = await res;
-  if (!r.ok) throw new Error(`${what}: HTTP ${r.status} ${await r.text()}`);
-}
 
 interface Found {
   runtime: string;
@@ -51,13 +34,6 @@ function findRecords(out: string): Found[] {
     }
   }
   return found;
-}
-
-async function inParallel<T>(items: T[], run: (item: T) => Promise<void>) {
-  const queue = [...items];
-  await Promise.all(Array.from({ length: PARALLEL }, async () => {
-    for (let item = queue.shift(); item !== undefined; item = queue.shift()) await run(item);
-  }));
 }
 
 async function main() {
@@ -114,6 +90,7 @@ async function main() {
     await expectOk(call("PUT", `updates/${runtime}/${platform}/${record.id}`, token, JSON.stringify(record)), `publishing ${record.id}`);
     console.log(`${platform}: ${isRollback(record) ? "rollback" : `update ${record.id}`} is now live for runtime ${runtime}`);
   }
+  await requestPrune(token);
 }
 
 runMain(main);

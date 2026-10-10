@@ -38,6 +38,15 @@ permissions:
   contents: read
   actions: read # ci-plan.sh looks up the last green run
 
+# This project's servers and Sentry account (app.config.js): repository variables, so the repo names none and a fork
+# sets its own. Every job that builds, exports or publishes sees the same values: they are part of the OTA runtime
+# version. Unset: that feature is off. SENTRY_URL (the Sentry region) is read by sentry-cli for the uploads.
+env:
+  UPDATES_ORIGIN: ${{ vars.UPDATES_ORIGIN }}
+  TRIP_UPLOAD_ORIGIN: ${{ vars.TRIP_UPLOAD_ORIGIN }}
+  SENTRY_DSN: ${{ vars.SENTRY_DSN }}
+  SENTRY_URL: ${{ vars.SENTRY_URL }}
+
 jobs:
   plan:
     # Pull requests from branches of this repo already ran on push.
@@ -209,30 +218,92 @@ jobs:
       platforms: ${{ needs.plan.outputs.ota }}
     secrets: inherit
 
-  register-ota-runtime:
-    # main's builds take the JS updates after them (docs/OTA.md): tell the update Worker their runtime. A job of its
-    # own because the token lives in the ota environment, which only main may use; the builds also run on branches.
-    needs: [build-ios, build-android]
+  publish-builds:
+    # main's Release builds (docs/OTA.md, docs/UPDATES-SPEC.md §3): their runtimes take the JS updates after them, and
+    # the IPA/APK go to the update Worker for the in-app update and the AltStore source. A job of its own because the
+    # token lives in the ota environment, which only main may use; the builds also run on branches.
+    needs: [plan, build-ios, build-android]
     if: ${{ !cancelled() && github.ref == 'refs/heads/main' && (needs.build-ios.outputs.runtime != '' || needs.build-android.outputs.runtime != '') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     environment: ota
+    env:
+      OTA_PUBLISH_TOKEN: ${{ secrets.OTA_PUBLISH_TOKEN }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      IOS_RUNTIME: ${{ needs.build-ios.outputs.runtime }}
+      ANDROID_RUNTIME: ${{ needs.build-android.outputs.runtime }}
+      APK: wtfai-${{ needs.plan.outputs.build_android }}.apk
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          # The build's notes are the commit titles since the previous published build.
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
           node-version: 24
 
-      - name: Register
-        # ota:publish needs no dependencies for this.
+      - name: Download the IPA
+        if: ${{ env.IOS_RUNTIME != '' }}
+        uses: actions/download-artifact@v8
+        with:
+          name: wtfai-Release-unsigned.ipa
+
+      - name: Download the APK
+        if: ${{ env.ANDROID_RUNTIME != '' }}
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ env.APK }}
+
+      - name: Register and publish
+        # ota:publish and ota:upload need no dependencies.
         env:
-          OTA_PUBLISH_TOKEN: ${{ secrets.OTA_PUBLISH_TOKEN }}
-          IOS_RUNTIME: ${{ needs.build-ios.outputs.runtime }}
-          ANDROID_RUNTIME: ${{ needs.build-android.outputs.runtime }}
+          IOS_BUILD: ${{ needs.build-ios.outputs.build }}
+          IOS_VERSION: ${{ needs.build-ios.outputs.version }}
+          IOS_PERMISSIONS: ${{ needs.build-ios.outputs.permissions }}
+          IOS_MIN_OS: ${{ needs.build-ios.outputs.min-os }}
+          ANDROID_BUILD: ${{ needs.build-android.outputs.build }}
+          ANDROID_VERSION: ${{ needs.build-android.outputs.version }}
         run: |
           [ -n "$OTA_PUBLISH_TOKEN" ] || { echo "::error::OTA_PUBLISH_TOKEN is missing from the ota environment (docs/OTA.md)"; exit 1; }
+          [ -n "$UPDATES_ORIGIN" ] || { echo "::error::The UPDATES_ORIGIN repository variable is not set (docs/OTA.md)"; exit 1; }
+          # Wherever download-artifact put them.
+          find_file() { find . -maxdepth 3 -type f -name "$1" -not -path "./node_modules/*" | head -n 1; }
+          # The runtimes first: JS updates need them even if a file upload below fails.
           if [ -n "$IOS_RUNTIME" ]; then npm run -s ota:publish -- --register-build --platform ios --runtime "$IOS_RUNTIME"; fi
           if [ -n "$ANDROID_RUNTIME" ]; then npm run -s ota:publish -- --register-build --platform android --runtime "$ANDROID_RUNTIME"; fi
+          if [ -n "$IOS_RUNTIME" ]; then
+            IPA_FILE=$(find_file wtfai-Release-unsigned.ipa)
+            [ -n "$IPA_FILE" ] || { echo "::error::The IPA artifact was not downloaded"; exit 1; }
+            # Without them AltStore refuses the IPA: better no publish than a broken source.
+            [ -n "$IOS_PERMISSIONS" ] || { echo "::error::build-ios gave no permissions for AltStore"; exit 1; }
+            npm run -s ota:upload -- --app ios --file "$IPA_FILE" --build "$IOS_BUILD" --version "$IOS_VERSION" \
+              --runtime "$IOS_RUNTIME" --permissions "$IOS_PERMISSIONS" --min-os "$IOS_MIN_OS"
+          fi
+          if [ -n "$ANDROID_RUNTIME" ]; then
+            APK_FILE=$(find_file "$APK")
+            [ -n "$APK_FILE" ] || { echo "::error::The APK artifact was not downloaded"; exit 1; }
+            npm run -s ota:upload -- --app android --file "$APK_FILE" --build "$ANDROID_BUILD" --version "$ANDROID_VERSION" \
+              --runtime "$ANDROID_RUNTIME"
+          fi
+
+      - name: Tell Telegram
+        # A message with the links, never the file (docs/UPDATES-SPEC.md §3).
+        if: ${{ env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != '' }}
+        continue-on-error: true
+        env:
+          IOS_BUILD: ${{ needs.build-ios.outputs.build }}
+          ANDROID_BUILD: ${{ needs.build-android.outputs.build }}
+        run: |
+          ORIGIN=${UPDATES_ORIGIN%/}
+          TEXT="wtf.ai build · main @ ${GITHUB_SHA:0:7}
+          $(git log -1 --format=%s)"
+          if [ -n "$IOS_RUNTIME" ]; then TEXT="$TEXT
+          iOS ${IOS_BUILD}: AltStore shows it as an update (source ${ORIGIN}/altstore.json); IPA ${ORIGIN}/apps/ios/wtfai-${IOS_BUILD}.ipa"; fi
+          if [ -n "$ANDROID_RUNTIME" ]; then TEXT="$TEXT
+          Android ${ANDROID_BUILD}: the app offers it (More → App update); APK ${ORIGIN}/apps/android/wtfai-${ANDROID_BUILD}.apk"; fi
+          curl -sS --fail-with-body -o /dev/null --data-urlencode chat_id="$TELEGRAM_CHAT_ID" --data-urlencode text="$TEXT" \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage"

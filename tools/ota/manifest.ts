@@ -85,6 +85,8 @@ export interface BuildManifestArgs {
   expoClient: Record<string, unknown>;
   /** The commit the bundle was built from, for the update history. */
   commit: string;
+  /** Its title: the app's App update page shows it for a downloaded update (docs/UPDATES-SPEC.md §5.5). */
+  message?: string;
 }
 
 export function buildManifest(args: BuildManifestArgs): { manifest: UpdateManifest; files: UpdateFile[] } {
@@ -117,7 +119,7 @@ export function buildManifest(args: BuildManifestArgs): { manifest: UpdateManife
       runtimeVersion: args.runtimeVersion,
       launchAsset,
       assets,
-      metadata: { commit: args.commit },
+      metadata: { commit: args.commit, ...(args.message ? { message: args.message } : {}) },
       extra: { expoClient: args.expoClient },
     },
     files,

@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       notify:
-        description: "Send the APK to Telegram"
+        description: "Tell Telegram (a message with the run's link)"
         type: boolean
         default: false
 

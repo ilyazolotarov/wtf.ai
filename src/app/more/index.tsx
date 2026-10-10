@@ -10,10 +10,12 @@ import { fmtBytes } from "@/components/vehicle/format";
 import { usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
 import { useRecorderSnapshot } from "@/providers/runtime-provider";
+import { useUpdateCenter, useUpdateBadges } from "@/services/app-update/update-center";
 import { useLessonsDone } from "@/services/guide/guide-progress";
 import { useMapPacks } from "@/services/offline-map/map-packs";
 
-type Item = { icon: IconName; label: string; sub: string; subColor?: string; href: Href };
+/** `badge`: the red update dot (docs/UPDATES-SPEC.md §5.4). */
+type Item = { icon: IconName; label: string; sub: string; subColor?: string; href: Href; badge?: boolean };
 
 export default function MoreScreen() {
   const { t, language } = useT();
@@ -23,6 +25,8 @@ export default function MoreScreen() {
   const nav = useNavStatus();
   const rec = useRecorderSnapshot();
   const lessonsDone = useLessonsDone();
+  const updates = useUpdateBadges();
+  const { found } = useUpdateCenter();
   // A region holds everything offline: the map, the road graph and the search index.
   const ready = installed.active != null;
   const logBytes = rec.trips.reduce((sum, trip) => sum + (trip.id === rec.current?.id ? (rec.current?.bytes ?? 0) : trip.bytes), 0);
@@ -39,9 +43,18 @@ export default function MoreScreen() {
     {
       icon: "map",
       label: t("downloads"),
-      sub: ready ? t("readyOffline") : t("notDownloaded"),
-      subColor: ready ? palette.ok.c : undefined,
+      sub: updates.maps ? t("updateAvailable") : ready ? t("readyOffline") : t("notDownloaded"),
+      subColor: updates.maps ? palette.bad.c : ready ? palette.ok.c : undefined,
       href: "/more/downloads",
+      badge: updates.maps,
+    },
+    {
+      icon: "system_update",
+      label: t("appUpdate"),
+      sub: found.native ? t("appUpdateAvailable") : found.js ? t("appUpdateReady") : t("appUpdateUpToDate"),
+      subColor: updates.app ? palette.bad.c : undefined,
+      href: "/more/update",
+      badge: updates.app,
     },
     {
       icon: "settings",
@@ -85,6 +98,7 @@ export default function MoreScreen() {
     >
       <View style={[styles.tile, { backgroundColor: palette.accentA }]}>
         <Icon name={item.icon} size={20} color={palette.accent} />
+        {item.badge && <View style={[styles.badge, { backgroundColor: palette.bad.c, borderColor: palette.groupBg }]} />}
       </View>
       <View style={styles.copy}>
         <T w="medium" size={16} fit>
@@ -117,4 +131,5 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   copy: { flex: 1, gap: 2 },
+  badge: { position: "absolute", top: -3, right: -3, width: 12, height: 12, borderRadius: 6, borderWidth: 2 },
 });

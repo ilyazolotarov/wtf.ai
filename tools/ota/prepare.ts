@@ -66,6 +66,12 @@ function main() {
   const expoClient = JSON.parse(runCli("expo/bin/cli", ["config", "--json", "--type", "public"])) as Record<string, unknown>;
   const metadata = JSON.parse(readFileSync(path.join(dist, "metadata.json"), "utf8")) as ExportMetadata;
   const createdAt = new Date();
+  let message: string | undefined;
+  try {
+    message = execFileSync("git", ["log", "-1", "--format=%s", commit], { cwd: ROOT, encoding: "utf8" }).trim() || undefined;
+  } catch {
+    // Not in this clone: the update has no title.
+  }
   const platforms = Object.keys(metadata.fileMetadata).filter(isPlatform).filter((p) => !only || p === only);
   if (!platforms.length) throw new Error(`${dist} has no ${only ?? "ios or android"} bundle: run npx expo export first`);
 
@@ -80,6 +86,7 @@ function main() {
       baseUrl,
       expoClient,
       commit,
+      message,
     });
     const body = JSON.stringify(manifest);
     mkdirSync(path.join(out, "assets"), { recursive: true });

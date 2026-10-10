@@ -212,7 +212,7 @@ One small component each; the screen (`src/app/index.tsx`) only places them and 
 | Top      | `RegionPrompt`, `HudChip`                  | Outside the region (below), protocol search                                                |
 | Bottom   | `destination-cards.tsx`                    | Dropped pin, a route held without an adapter (below)                                       |
 | Bottom   | `CameraButton`                             | Camera mode cycle (§6.2)                                                                   |
-| Bottom   | `BottomBar`                                | Route, Vehicle (with the connection dot; "Driving" while a trip records), More              |
+| Bottom   | `BottomBar`                                | Route, Vehicle (with the connection dot; "Driving" while a trip records), More (a red dot while an app or map update waits: UPDATES-SPEC §5.4) |
 | Center   | `PermissionCard`                           | Location denied → explanation + "Open Settings" (`Linking.openURL('app-settings:')`)       |
 | Center   | `NoFixCard`                                | "Waiting for GPS…" when no fix yet                                                         |
 
@@ -288,7 +288,8 @@ and odometry stage; specified in [TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md) §9.
 
 ### 7.3 `more`
 
-The list: How to use? (the Guide, §7.7), Offline maps (`more/downloads`, §7.4), Settings (§7.6), then the diagnostic
+The list: How to use? (the Guide, §7.7), Offline maps (`more/downloads`, §7.4), App update (`more/update`:
+UPDATES-SPEC §5.5; its row and Offline maps' carry the update dot, §5.4), Settings (§7.6), then the diagnostic
 pages `position` (integrity, live GNSS, EKF and map matching state, routing timings), `recorder` (Trip recorder:
 everything about trip logs, TRIP-LOGGER-SPEC §9.2) and `developer` (test switches and knobs, the ELM terminal, and the **UI gallery**: every panel the map shows only in
 some state, drawn at once with made-up data, to see them all at a large text size and in both languages).
@@ -296,7 +297,8 @@ some state, drawn at once with made-up data, to see them all at a large text siz
 ### 7.4 `downloads`
 
 - Regions of the newest map release (README of `tools/tiles`): download, pause, resume, delete, switch the active
-  one, update; the catalog source (GitHub or a PC's `tiles serve`).
+  one, update; the catalog source (the update Worker, or a PC's `tiles serve`). The active region also updates by
+  itself, or asks (UPDATES-SPEC §5.2).
 - **No online map:** the map draws only the active offline region. Until one is usable, the `map-setup` screen
   (full-screen, no close or swipe; after onboarding) shows the same region list with "Download a map" above it, and
   closes itself once the region is installed. Deleting the last region brings it back.
@@ -311,7 +313,7 @@ calibration is learned while driving (SPEC §3.6).
 - Language: System / English / Українська (persisted).
 - Appearance: System / Light / Dark (persisted).
 - Voice volume for the spoken maneuvers (ROUTING-SPEC §8.5).
-- Privacy statement (position data on device; maps downloaded once, then offline; crash reports carry no location or
+- Privacy statement (position data on device; maps and app updates fetched from the project's own server; crash reports carry no location or
   personal data; the opt-in trip log upload, in the `recorder` page).
 - About: app version, support code (the install id testers send), map data credit.
 

@@ -61,6 +61,12 @@ const SF = {
   play_arrow: "play.fill",
   pause: "pause.fill",
   check: "checkmark",
+  // App update (docs/UPDATES-SPEC.md §5.5).
+  system_update: "arrow.down.app.fill",
+  install_mobile: "arrow.down.app",
+  refresh: "arrow.clockwise",
+  open_in_new: "arrow.up.right.square",
+  ios_share: "square.and.arrow.up",
 } as const satisfies Record<string, SFSymbol>;
 
 export type IconName = keyof typeof SF;
