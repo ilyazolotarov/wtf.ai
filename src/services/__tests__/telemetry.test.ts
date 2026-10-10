@@ -6,6 +6,7 @@ import { adapterModel, TelemetryReporter, type MetricSink } from "../telemetry";
 
 jest.mock("expo-device", () => ({ osVersion: "14", platformApiLevel: 34, manufacturer: "Acme", modelName: "Phone 1", isDevice: true }));
 jest.mock("react-native", () => ({ Platform: { OS: "android" } }));
+jest.mock("expo-updates", () => ({ isEnabled: false }));
 jest.mock("@/services/kv-store", () => ({ kvStore: { getJson: jest.fn(() => null), setJson: jest.fn() } }));
 
 type Call = [kind: string, name: string, value: number, attrs?: Record<string, string>];

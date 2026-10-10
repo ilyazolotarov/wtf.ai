@@ -7,7 +7,8 @@ name: CI
 # - Branch pushes: checks for what changed; a native change is also compiled (CI is the only
 #   Xcode). `[build]`, `[build ios]` or `[build android]` in a commit message also builds and
 #   sends the result to Telegram.
-# - Pushes to main: checks, and a Debug build sent to Telegram when app code changed.
+# - Pushes to main: checks; app code changes go to Telegram: a Release build after a native change, else an OTA JS
+#   update for the installed builds (docs/OTA.md).
 # - Pull requests: from forks only (branches of this repo are covered by their pushes).
 # - Manual run (Actions → CI → Run workflow): all checks, builds as chosen.
 
@@ -50,6 +51,7 @@ jobs:
       kotlin: ${{ steps.plan.outputs.kotlin }}
       build_ios: ${{ steps.plan.outputs.build_ios }}
       build_android: ${{ steps.plan.outputs.build_android }}
+      ota: ${{ steps.plan.outputs.ota }}
       notify: ${{ steps.plan.outputs.notify }}
       retention: ${{ steps.plan.outputs.retention }}
     steps:
@@ -196,4 +198,13 @@ jobs:
       variant: ${{ needs.plan.outputs.build_android }}
       notify: ${{ needs.plan.outputs.notify == 'true' }}
       retention-days: ${{ fromJSON(needs.plan.outputs.retention) }}
+    secrets: inherit
+
+  publish-ota:
+    # JS-only changes of main, for the platforms that got no native build (docs/OTA.md).
+    needs: [plan, checks]
+    if: ${{ !cancelled() && needs.plan.outputs.ota != '' && needs.checks.result == 'success' }}
+    uses: ./.github/workflows/publish-ota.yml
+    with:
+      platforms: ${{ needs.plan.outputs.ota }}
     secrets: inherit

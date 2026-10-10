@@ -36,7 +36,7 @@ You need Node.js with npm. Expo Go is not supported (the app has its own native 
    npm install
    ```
 
-2. Get an unsigned iOS build from GitHub Actions: the **CI** workflow's `build-ios` job uploads `wtfai-Debug-unsigned.ipa` (a dev client with the JS bundle embedded) for every push to `main` that changes the app, for branch pushes with `[build]` in a commit message, and when you run **CI** by hand ([docs/CI.md](docs/CI.md)). For a Release build (production JS, no dev client), run **Build Unsigned iOS App** by hand with `Release`.
+2. Get an unsigned iOS build from GitHub Actions ([docs/CI.md](docs/CI.md)): the **CI** workflow's `build-ios` job uploads `wtfai-Release-unsigned.ipa` for every push to `main` that changes native code, and `wtfai-Debug-unsigned.ipa` (a dev client with the JS bundle embedded) for branch pushes with `[build]` in a commit message. JS-only pushes to `main` reach an installed Release build over the air instead ([docs/OTA.md](docs/OTA.md)): restart the app twice. You can also run **CI** or **Build Unsigned iOS App** by hand.
 
    Optional: get the IPAs in Telegram as soon as they're built (branch compile checks are not sent).
    1. In Telegram, create a bot with [@BotFather](https://t.me/BotFather) (`/newbot`) and copy its token.

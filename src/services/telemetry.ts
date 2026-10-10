@@ -2,6 +2,7 @@ import * as Device from "expo-device";
 import { Platform } from "react-native";
 
 import type { LinkState, VehicleLinkSnapshot } from "@/obd/types";
+import { jsSource } from "@/services/js-source";
 import { kvStore } from "@/services/kv-store";
 
 // Health and compatibility metrics for field testers (docs/ANDROID-SPEC.md §4.1). Numbers only: no positions, no VINs,
@@ -127,6 +128,8 @@ export function deviceTags(): Record<string, string> {
     device_manufacturer: Device.manufacturer ?? "unknown",
     device_model: Device.modelName ?? "unknown",
     build_sha: (process.env.EXPO_PUBLIC_BUILD_SHA ?? "dev").slice(0, 7),
+    // build_sha is the JS commit; this says whether it came with the IPA/APK or as an OTA update.
+    js_source: jsSource(),
     install_id: installId(),
   };
 }

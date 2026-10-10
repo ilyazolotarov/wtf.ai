@@ -3,7 +3,7 @@
 // (prepare.ts) reads the files, and the Worker serves the result byte for byte.
 import { createHash, createSign } from "node:crypto";
 
-export type Platform = "ios" | "android";
+import type { Platform } from "./protocol";
 
 /** `metadata.json` written by `expo export`. Paths use the exporting OS's separator. */
 export interface ExportMetadata {
@@ -123,6 +123,13 @@ export function buildManifest(args: BuildManifestArgs): { manifest: UpdateManife
     files,
   };
 }
+
+/**
+ * The directive that sends phones back to the JS embedded in their build. They apply it only if their build is older
+ * than `commitTime`, and from the next cold start.
+ */
+export const rollbackDirective = (commitTime: Date): string =>
+  JSON.stringify({ type: "rollBackToEmbedded", parameters: { commitTime: commitTime.toISOString() } });
 
 /** A string item of an Expo SFV dictionary (RFC 8941 sf-string). */
 const sfString = (s: string): string => `"${s.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;

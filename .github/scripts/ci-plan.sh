@@ -29,7 +29,8 @@ is_docs() {
 is_native_shared() {
   case "$1" in
     app.json | package.json | package-lock.json | patches/* | plugins/* | metro.config.js | \
-      modules/*/app.plugin.js | modules/*/expo-module.config.json) return 0 ;;
+      modules/*/app.plugin.js | modules/*/expo-module.config.json | \
+      fingerprint.config.js | .fingerprintignore | certs/*) return 0 ;;
   esac
   return 1
 }
@@ -105,10 +106,11 @@ keyword_wants() { # <platform> <messages on stdin>
 
 # --- Decision -----------------------------------------------------------------------------------
 
-# decide → sets BUILD_IOS ('' | Debug | Release), BUILD_ANDROID ('' | ci | tester), NOTIFY, RETENTION
+# decide → sets BUILD_IOS ('' | Debug | Release), BUILD_ANDROID ('' | ci | tester), OTA (the platforms to publish a JS
+# update for: '' | "ios" | "android" | "ios android"), NOTIFY, RETENTION
 # from EVENT, REF_NAME, DEFAULT_BRANCH, the classify() flags, MESSAGES and DISPATCH_*.
 decide() {
-  BUILD_IOS='' BUILD_ANDROID='' NOTIFY=false RETENTION=7
+  BUILD_IOS='' BUILD_ANDROID='' OTA='' NOTIFY=false RETENTION=7
   case "$EVENT" in
     workflow_dispatch)
       [ "${DISPATCH_IOS:-none}" != none ] && BUILD_IOS=$DISPATCH_IOS
@@ -121,8 +123,13 @@ decide() {
       ;;
     push)
       if [ "$REF_NAME" = "$DEFAULT_BRANCH" ]; then
-        # What is on main is what goes on the phone. Debug until the app switches to Release.
-        if $APP; then BUILD_IOS=Debug BUILD_ANDROID=ci NOTIFY=true RETENTION=14; fi
+        # What is on main is what goes on the phone. A native change needs a new Release build (which takes the JS
+        # updates after it); JS alone goes over the air to the builds already installed (docs/OTA.md).
+        if $APP; then
+          NOTIFY=true RETENTION=14
+          if $IOS_NATIVE; then BUILD_IOS=Release; else OTA=ios; fi
+          if $ANDROID_NATIVE; then BUILD_ANDROID=ci; else OTA="${OTA:+$OTA }android"; fi
+        fi
       else
         # Branches: native changes are compiled (CI is the only Xcode/Gradle); an IPA/APK to
         # install is asked for with the keyword.
@@ -133,8 +140,8 @@ decide() {
       fi
       ;;
   esac
-  # Nothing to compile against without the checks: a build always runs them too.
-  if [ -n "$BUILD_IOS$BUILD_ANDROID" ]; then CHECKS=true; fi
+  # Nothing to compile or publish without the checks: a build or an update always runs them too.
+  if [ -n "$BUILD_IOS$BUILD_ANDROID$OTA" ]; then CHECKS=true; fi
   return 0
 }
 
@@ -177,6 +184,7 @@ plan() {
   echo "kotlin=$KOTLIN"
   echo "build_ios=$BUILD_IOS"
   echo "build_android=$BUILD_ANDROID"
+  echo "ota=$OTA"
   echo "notify=$NOTIFY"
   echo "retention=$RETENTION"
 }
@@ -211,14 +219,16 @@ main() {
 
 self_test() {
   local fails=0
-  # expect <description> <expected "checks python swift build_ios build_android notify"> <event> <ref> <messages> <files...>
+  # expect <description> <expected "checks python swift build_ios build_android notify ota"> <event> <ref> <messages> <files...>
+  # (ota: the platforms joined by +, or -)
   expect() {
     local desc=$1 want=$2
     EVENT=$3 REF_NAME=$4 MESSAGES=$5 DEFAULT_BRANCH=main
     shift 5
     classify < <(printf '%s\n' "$@")
     decide
-    local got="$CHECKS $PYTHON $SWIFT ${BUILD_IOS:--} ${BUILD_ANDROID:--} $NOTIFY"
+    local ota=${OTA// /+}
+    local got="$CHECKS $PYTHON $SWIFT ${BUILD_IOS:--} ${BUILD_ANDROID:--} $NOTIFY ${ota:--}"
     if [ "$got" = "$want" ]; then
       echo "ok   $desc"
     else
@@ -226,22 +236,28 @@ self_test() {
       fails=$((fails + 1))
     fi
   }
-  expect "docs only on a branch" "false false false - - false" push b "" docs/SPEC.md README.md
-  expect "docs only on main" "false false false - - false" push main "" docs/SPEC.md
-  expect "JS on a branch: checks only" "true false false - - false" push b "" src/app/index.tsx
-  expect "JS on a branch with [build]" "true false false Debug ci true" push b "Fix x [build]" src/app/index.tsx
-  expect "JS on a branch with [build ios]" "true false false Debug - true" push b "x [Build iOS]" src/a.ts
-  expect "JS on a branch with [build android]" "true false false - ci true" push b "x [build android]" src/a.ts
-  expect "docs on a branch with [build]" "true false false Debug ci true" push b "[build]" docs/x.md
-  expect "Swift module on a branch" "true false true Debug - false" push b "" modules/vehicle-link/ios/Link.swift
-  expect "Kotlin module on a branch" "true false false - ci false" push b "" modules/vehicle-link/android/src/A.kt
-  expect "app.json on a branch: both" "true false false Debug ci false" push b "" app.json
-  expect "Python tools on a branch" "true true false - - false" push b "" tools/tiles/tiles/graph.py
-  expect "replay tools (TS) on a branch" "true false false - - false" push b "" tools/replay/cli.ts
-  expect "JS on main: builds, delivered" "true false false Debug ci true" push main "" src/a.ts
-  expect "Python on main: no build" "true true false - - false" push main "" tools/triplog/x.py
-  expect "native on a fork PR" "true false true Debug - false" pull_request x "[build]" modules/a/ios/A.swift
-  expect "JS on a fork PR: keyword ignored" "true false false - - false" pull_request x "[build]" src/a.ts
+  expect "docs only on a branch" "false false false - - false -" push b "" docs/SPEC.md README.md
+  expect "docs only on main" "false false false - - false -" push main "" docs/SPEC.md
+  expect "JS on a branch: checks only" "true false false - - false -" push b "" src/app/index.tsx
+  expect "JS on a branch with [build]" "true false false Debug ci true -" push b "Fix x [build]" src/app/index.tsx
+  expect "JS on a branch with [build ios]" "true false false Debug - true -" push b "x [Build iOS]" src/a.ts
+  expect "JS on a branch with [build android]" "true false false - ci true -" push b "x [build android]" src/a.ts
+  expect "docs on a branch with [build]" "true false false Debug ci true -" push b "[build]" docs/x.md
+  expect "Swift module on a branch" "true false true Debug - false -" push b "" modules/vehicle-link/ios/Link.swift
+  expect "Kotlin module on a branch" "true false false - ci false -" push b "" modules/vehicle-link/android/src/A.kt
+  expect "app.json on a branch: both" "true false false Debug ci false -" push b "" app.json
+  expect "Python tools on a branch" "true true false - - false -" push b "" tools/tiles/tiles/graph.py
+  expect "replay tools (TS) on a branch" "true false false - - false -" push b "" tools/replay/cli.ts
+  expect "JS on main: an OTA update, no builds" "true false false - - true ios+android" push main "" src/a.ts
+  expect "app.json on main: Release builds, no update" "true false false Release ci true -" push main "" app.json src/a.ts
+  expect "Swift module on main: iOS build, Android update" "true false true Release - true android" push main "" modules/a/ios/A.swift
+  expect "Kotlin module on main: Android build, iOS update" "true false false - ci true ios" push main "" modules/a/android/A.kt
+  expect "signing certificate on main: builds" "true false false Release ci true -" push main "" certs/certificate.pem
+  expect "fingerprint config on main: builds" "true false false Release ci true -" push main "" fingerprint.config.js
+  expect "OTA tools on main: nothing to ship" "true false false - - false -" push main "" tools/ota/prepare.ts
+  expect "Python on main: no build" "true true false - - false -" push main "" tools/triplog/x.py
+  expect "native on a fork PR" "true false true Debug - false -" pull_request x "[build]" modules/a/ios/A.swift
+  expect "JS on a fork PR: keyword ignored" "true false false - - false -" pull_request x "[build]" src/a.ts
   # Kotlin logic tests run for Android module/test changes only (expect_kotlin <description> <true|false> <file>).
   local kt
   for kt in "true modules/sensor-capture/android/src/main/java/A.kt" "true native-tests-android/build.gradle.kts" "false modules/sensor-capture/ios/A.swift" "false src/a.ts"; do
@@ -250,7 +266,7 @@ self_test() {
     if [ "$KOTLIN" = "${kt%% *}" ]; then echo "ok   kotlin=$KOTLIN for ${kt#* }"; else echo "FAIL kotlin for ${kt#* }: want ${kt%% *}"; fails=$((fails + 1)); fi
   done
   DISPATCH_IOS=Release DISPATCH_ANDROID=none
-  expect "manual Release" "true false false Release - true" workflow_dispatch b ""
+  expect "manual Release" "true false false Release - true -" workflow_dispatch b ""
   if [ "$fails" -ne 0 ]; then
     echo "$fails failed"
     return 1

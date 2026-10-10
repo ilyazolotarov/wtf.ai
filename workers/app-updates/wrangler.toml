@@ -1,0 +1,10 @@
+# OTA update server (docs/OTA.md). Deploy: npm run updates-worker:deploy (after `npx wrangler login`); once:
+# `npx wrangler r2 bucket create wtf-ai-updates` and `npx wrangler secret put PUBLISH_TOKEN --config workers/app-updates/wrangler.toml`.
+name = "wtf-app-updates"
+main = "index.ts"
+compatibility_date = "2026-10-01"
+workers_dev = true
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "wtf-ai-updates"

@@ -26,6 +26,7 @@ import { get, networkKind, onNetworkChange, putFile, uploadSecrets } from "./tri
 import { TripUploader } from "./trip-upload/trip-uploader";
 import { NativeDiscovery } from "./vehicle-link/discovery";
 import { TelemetryReporter } from "./telemetry";
+import { jsSourceInfo } from "./js-source";
 import { setTripService } from "./trip-service";
 import { DrivingEmulator } from "./vehicle-link/driving-emulator";
 import { NativeTransport } from "./vehicle-link/native-transport";
@@ -107,6 +108,8 @@ export function getRuntime(): Runtime {
       sys_name: "wtf.ai",
       // The commit CI built (EXPO_PUBLIC_BUILD_SHA, inlined by Metro): which build a log came from.
       ver_sw: `${Constants.expoConfig?.version ?? "?"} (${Constants.nativeBuildVersion ?? "dev"}${process.env.EXPO_PUBLIC_BUILD_SHA ? ` ${process.env.EXPO_PUBLIC_BUILD_SHA.slice(0, 7)}` : ""})`,
+      // The OTA update the drive ran, when the JS is newer than the build.
+      ...jsSourceInfo(),
       sys_hw: sysHw,
       sys_os_ver: sysOsVer,
       // The navigator version this drive starts with (a change mid-drive is a note).

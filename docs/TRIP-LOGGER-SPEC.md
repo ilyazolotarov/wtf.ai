@@ -117,6 +117,8 @@ modules/sensor-capture ─▶ src/services/sensor-capture ──(SensorStream)�
 | --------------------------------- | ------------------------------------------------------ |
 | `char[] sys_name`                 | `wtf.ai`                                               |
 | `char[] ver_sw`                   | app version + git commit                               |
+| `char[] ver_update`               | the JS that ran: `embedded` (the build's own), the OTA update id, or `off` (Debug build); ` emergency` appended when a broken update fell back to the embedded JS (OTA.md) |
+| `char[] ver_runtime`              | the build's OTA runtime version (fingerprint), empty in a Debug build |
 | `char[] sys_hw`                   | phone model identifier (e.g. `iPhone15,2`)             |
 | `char[] sys_os_ver`               | OS version                                             |
 | `uint32_t wtf_log_ver`            | `1` (bump on breaking schema change; additive changes don't bump) |

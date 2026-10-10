@@ -47,6 +47,8 @@ on:
         required: false
       TELEGRAM_CHAT_ID:
         required: false
+      OTA_PUBLISH_TOKEN:
+        required: false
 
 jobs:
   build-android:
@@ -62,6 +64,8 @@ jobs:
       SENTRY_DISABLE_AUTO_UPLOAD: ${{ secrets.SENTRY_AUTH_TOKEN == '' && 'true' || 'false' }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      # Lets main's builds register their runtime with the update Worker (docs/OTA.md).
+      OTA_PUBLISH_TOKEN: ${{ secrets.OTA_PUBLISH_TOKEN }}
       # Caches are saved by main (and by android while it is the integration branch for Android:
       # main has no Android builds before the merge) and restored everywhere, so branch builds
       # don't evict them.
@@ -194,3 +198,16 @@ jobs:
             curl -sS --fail-with-body -o /dev/null --data-urlencode chat_id="$TELEGRAM_CHAT_ID" --data-urlencode text="$CAPTION (APK over 50 MB: download it from the run)" "$API/sendMessage"
           fi
 
+      - name: Register the runtime for OTA updates
+        # Last, so a Worker problem never holds back the APK. JS updates of main go to this runtime from now on
+        # (docs/OTA.md). The runtime is the fingerprint the build embedded, so the Worker and the app cannot disagree.
+        # Emulator builds are not what phones run.
+        if: ${{ github.ref == 'refs/heads/main' && env.OTA_PUBLISH_TOKEN != '' && env.ARCHITECTURES == 'arm64-v8a,armeabi-v7a' }}
+        run: |
+          RUNTIME=$(unzip -p "wtfai-${VARIANT}.apk" assets/fingerprint 2>/dev/null || true)
+          if [ -n "$RUNTIME" ]; then
+            npm run -s ota:publish -- --register-build --platform android --runtime "$RUNTIME"
+          else
+            echo "::warning::No embedded fingerprint in the APK: resolving the runtime from the checkout"
+            npm run -s ota:publish -- --register-build --platform android
+          fi

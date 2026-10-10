@@ -1,4 +1,5 @@
 import Constants from "expo-constants";
+import * as Updates from "expo-updates";
 import { useState } from "react";
 import { StyleSheet, View } from "react-native";
 
@@ -12,6 +13,7 @@ import {
 } from "@/components/screens/screen-ui";
 import { VoiceVolumeSection } from "@/components/route/voice-volume-section";
 import { Icon } from "@/components/ui/icon";
+import { jsCommit, jsSource } from "@/services/js-source";
 import { installId } from "@/services/telemetry";
 import { T } from "@/components/ui/text";
 import { usePalette } from "@/constants/theme";
@@ -71,11 +73,22 @@ export default function SettingsScreen() {
           labelKey="appVersion"
           value={Constants.expoConfig?.version ?? t("unavailableValue")}
         />
+        <ScreenRow labelKey="appCode" value={appCode(t)} />
         <ScreenRow labelKey="supportCode" value={installId()} />
         <ScreenRow labelKey="mapData" value="© OpenStreetMap contributors · © OpenMapTiles" />
       </ScreenSection>
     </ScreenContent>
   );
+}
+
+/** The JS commit and where it came from: with the IPA/APK, or an OTA update (docs/OTA.md). */
+function appCode(t: ReturnType<typeof useT>["t"]): string {
+  const source = jsSource();
+  const how =
+    source === "update" && Updates.createdAt
+      ? t("appCodeUpdate").replace("{date}", Updates.createdAt.toLocaleDateString())
+      : t(source === "off" ? "appCodeDev" : "appCodeEmbedded");
+  return `${jsCommit() ?? "dev"} · ${how}`;
 }
 
 const styles = StyleSheet.create({

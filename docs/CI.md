@@ -19,19 +19,22 @@ covered again by the next run.
 | `native-logic-android` (Kotlin tests) | `modules/*/android/`, `native-tests-android/`                               |
 | `build-ios` (unsigned IPA)            | see below                                                                   |
 | `build-android` (signed APK)          | see Android below                                                           |
+| `publish-ota` (JS update)             | `main` only, see below and [OTA.md](OTA.md)                                 |
 
 ## Builds
 
 "Native" here: `modules/*/ios/` (iOS) or `modules/*/android/` (Android), and for both
 `app.json`, `package.json`, `package-lock.json`, `patches/`, `plugins/`, `metro.config.js`, module
-`app.plugin.js` / `expo-module.config.json` and the platform's build workflow.
+`app.plugin.js` / `expo-module.config.json`, `fingerprint.config.js`, `.fingerprintignore`, `certs/` and the
+platform's build workflow.
 
 | Event                                  | Build                                    | Telegram | Kept    |
 | -------------------------------------- | ---------------------------------------- | -------- | ------- |
 | Push to a branch, native change        | Debug, as a compile check                | no       | 7 days  |
 | Push to a branch, `[build]` in a commit message | Debug                           | yes      | 7 days  |
 | Push to a branch, anything else        | none                                     | —        | —       |
-| Push to `main` changing app code (`src/`, `assets/`, `locales/`, native, …) | Debug | yes | 14 days |
+| Push to `main`, native change          | Release (registers its runtime for OTA)  | yes      | 14 days |
+| Push to `main`, other app code (`src/`, `assets/`, `locales/`, …) | none: an OTA JS update | yes (a message) | — |
 | Push to `main`, docs/tools only        | none                                     | —        | —       |
 | Pull request from a fork               | native change → Debug compile check      | no       | 7 days  |
 | Manual: Actions → **CI** → Run workflow | iOS: Debug / Release / none; all checks | yes      | 14 days |
@@ -40,7 +43,8 @@ covered again by the next run.
 Keywords, in any commit message of a push: `[build]` (both platforms), `[build ios]`, `[build android]`.
 GitHub's own `[skip ci]` skips the run entirely.
 
-`main` builds Debug (dev client with the JS bundle embedded) for now, and will switch to Release later.
+`main` builds Release: what phones run, and what takes the OTA updates. Per platform: a platform with a native change
+gets a build, the other gets the JS as an update (an iOS-only Swift change builds iOS and updates Android).
 
 Pull requests from branches of this repo don't run CI again: their branch pushes already did.
 

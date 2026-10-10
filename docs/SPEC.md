@@ -334,6 +334,7 @@ tools/triplog/           Python: ULog trip log reader, CSV/Parquet export, plots
 tools/voice/             records the spoken maneuvers (ROUTING-SPEC §8.5)
 tools/ota/               signed OTA JS updates from an `expo export` ([OTA.md](OTA.md))
 workers/triplog-upload/  Cloudflare Worker for the opt-in log upload (TRIP-LOGGER-SPEC §7.1)
+workers/app-updates/     Cloudflare Worker serving the OTA JS updates ([OTA.md](OTA.md))
 ```
 
 Stage 2–3 will add `src/nav/odometry/can/`, vehicle profiles (`assets/profiles/`) and the yaw reverse-engineering
