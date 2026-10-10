@@ -1,0 +1,5 @@
+# What the OTA runtime version (fingerprint, docs/OTA.md) must not hash; also see fingerprint.config.js.
+# React Native's Gradle plugin rewrites some libraries' AndroidManifest.xml inside node_modules during the build (it
+# drops the old `package` attribute): the build would hash the rewritten file, an export (publish-ota) the original,
+# and no Android update would ever match its build. A library's real change still shows in its other files.
+node_modules/**/android/src/main/AndroidManifest.xml

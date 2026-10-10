@@ -27,6 +27,8 @@ Unsigned iOS App** is neither registered nor published: start it from **CI** ins
   native modules, config plugins, `patches/`, `app.json`, …; `fingerprint.config.js` leaves out package.json scripts
   and `.gitignore`). An update goes only to builds with exactly its runtime version, so JS can never land on a
   binary without the native code it needs. Resolve it in CI (Linux/macOS), never on Windows: line endings change it.
+  `.fingerprintignore` leaves out the library `AndroidManifest.xml` files in `node_modules`: React Native's Gradle
+  plugin rewrites some of them during the build, so the build and an export would never agree on Android's runtime.
 - **No update for a runtime no build has.** `--require-build` fails the publish when the fingerprint changed without
   a native build (a native input `ci-plan.sh` does not know): the fix is a build, then publish again.
 - **Signed.** The app accepts only updates signed with the key of `certs/certificate.pem` (`rsa-v1_5-sha256`, keyid
