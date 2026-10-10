@@ -1,10 +1,12 @@
 name: Build Offline Map Packs
 
-# Weekly: when Geofabrik has a newer Ukraine extract than the newest published maps, clip it
-# to every region in tools/tiles/regions/regions.json (osmium), build each with Planetiler
-# and publish tools/tiles/out/release/ as release `maps-<osm_date>`: index.json, one
-# <region>.pmtiles per region and the shared style/sprite/font files. The app's Downloads
-# screen reads index.json of the newest `maps-*` release. Older releases are pruned.
+# Weekly: when Geofabrik has a newer Ukraine extract than the newest published maps, build
+# Ukraine's tiles with Planetiler, cut every other region in tools/tiles/regions/regions.json
+# from them (pmtiles extract), clip the extract per region (osmium) for the road graphs and
+# search indexes (built in parallel), and publish tools/tiles/out/release/ as release
+# `maps-<osm_date>`: index.json, one <region>.pmtiles per region and the shared files.
+# The app's Downloads screen reads index.json of the newest `maps-*` release. Older
+# releases are pruned.
 on:
   schedule:
     - cron: "0 4 * * 1" # Monday; Geofabrik refreshes extracts around 01–02 UTC

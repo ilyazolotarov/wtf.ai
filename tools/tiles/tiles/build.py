@@ -1,10 +1,12 @@
 """Build the offline map release.
 
-One `osmium extract` pass clips the Geofabrik extract to every region polygon in
-`regions/regions.json` (strategy `smart`: ways and multipolygons crossing the border stay
-whole), then Planetiler builds each region from its own clipped data. So a region's tiles
-contain only that region at every zoom (no neighbouring data in the big low-zoom tiles),
-apart from Natural Earth context at z ≤ 6.
+Planetiler builds Ukraine's tiles once; every other region's are cut from them (`pmtiles extract`
+on the region's polygon, seconds instead of a Planetiler run each). Whole tiles are kept, so a
+region's border tiles hold some of its neighbours; the app covers everything outside the region
+with the world drawn around it (world.py), so none of it shows. One `osmium extract` pass clips the
+Geofabrik extract to every region polygon in `regions/regions.json` (strategy `smart`: ways and
+multipolygons crossing the border stay whole) for the road graphs and search indexes, built in
+parallel processes.
 
 Output is one flat directory, published as-is as GitHub release assets (`maps-<osm_date>`)
 and served by `tiles serve` for LAN testing. The app downloads the shared files once and
@@ -28,6 +30,8 @@ from __future__ import annotations
 import email.utils
 import hashlib
 import json
+import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -35,8 +39,11 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable
+from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
+
+from shapely.geometry import mapping
 
 from .graph import build_region_graph
 from .region import load_registry, read_poly, region_outline
@@ -53,6 +60,9 @@ WORLD = ROOT / "style" / "world.geojson"  # tiles/world.py
 
 PLANETILER_VERSION = "0.10.2"
 PLANETILER_URL = f"https://github.com/onthegomap/planetiler/releases/download/v{PLANETILER_VERSION}/planetiler.jar"
+PMTILES_VERSION = "1.31.2"
+PMTILES_URL = "https://github.com/protomaps/go-pmtiles/releases/download/v{v}/{name}"
+WHOLE = "ukraine"  # the region Planetiler builds; the others are cut from its tiles
 CLIP_BATCH = 4  # regions per osmium pass (memory)
 OSMIUM_IMAGE = "wtf-osmium"  # docker/osmium.Dockerfile, used when `osmium` is not on PATH
 OSM_URL = "https://download.geofabrik.de/europe/ukraine-latest.osm.pbf"
@@ -120,6 +130,21 @@ def ensure_planetiler() -> Path:
         log(f"Downloading Planetiler {PLANETILER_VERSION}")
         download(PLANETILER_URL, jar)
     return jar
+
+
+def ensure_pmtiles() -> Path:
+    """The go-pmtiles CLI for this machine (Windows or Linux, x86_64 or arm64)."""
+    system = platform.system()
+    arch = {"amd64": "x86_64", "x86_64": "x86_64", "arm64": "arm64", "aarch64": "arm64"}[platform.machine().lower()]
+    exe = CACHE / f"pmtiles-{PMTILES_VERSION}" / ("pmtiles.exe" if system == "Windows" else "pmtiles")
+    if not exe.exists():
+        name = f"go-pmtiles_{PMTILES_VERSION}_{system}_{arch}.{'zip' if system == 'Windows' else 'tar.gz'}"
+        log(f"Downloading {name}")
+        archive = CACHE / name
+        download(PMTILES_URL.format(v=PMTILES_VERSION, name=name), archive)
+        shutil.unpack_archive(archive, exe.parent)
+        exe.chmod(0o755)
+    return exe
 
 
 def run_planetiler(jar: Path, pbf: Path, poly: Path, output: Path, heap: str) -> None:
@@ -222,12 +247,25 @@ def build_common(release: Path = RELEASE) -> list[dict[str, str]]:
     return files
 
 
-def build_region(region: str, clipped: Path, heap: str = "4g", release: Path = RELEASE) -> Path:
-    """Planetiler on the region's clipped extract → out/release/<region>.pmtiles."""
-    poly = REGIONS / f"{region}.poly"
+def build_whole(clipped: Path, heap: str = "4g", release: Path = RELEASE) -> Path:
+    """Planetiler on Ukraine's clipped extract → out/release/ukraine.pmtiles."""
     release.mkdir(parents=True, exist_ok=True)
+    output = release / f"{WHOLE}.pmtiles"
+    run_planetiler(ensure_planetiler(), clipped, REGIONS / f"{WHOLE}.poly", output, heap)
+    log(f"{WHOLE}: {output.stat().st_size / 1e6:.1f} MB")
+    return output
+
+
+def extract_region(region: str, release: Path = RELEASE) -> Path:
+    """The region's tiles cut from Ukraine's on its polygon → out/release/<region>.pmtiles."""
+    whole = release / f"{WHOLE}.pmtiles"
+    if not whole.exists():
+        raise FileNotFoundError(f"{whole} missing: build {WHOLE} first (its tiles are cut from Ukraine's)")
+    polygon = CACHE / "tmp" / f"{region}.geojson"
+    polygon.parent.mkdir(parents=True, exist_ok=True)
+    polygon.write_text(json.dumps(mapping(read_poly(REGIONS / f"{region}.poly"))), encoding="utf-8")
     output = release / f"{region}.pmtiles"
-    run_planetiler(ensure_planetiler(), clipped, poly, output, heap)
+    subprocess.run([str(ensure_pmtiles()), "extract", str(whole), str(output), f"--region={polygon}"], check=True, capture_output=True)
     log(f"{region}: {output.stat().st_size / 1e6:.1f} MB")
     return output
 
@@ -294,18 +332,27 @@ def write_index(common: list[dict[str, str]], release: Path = RELEASE) -> dict:
     return index
 
 
-def build_all(regions: list[str] | None = None, refresh_osm: bool = False, heap: str = "4g") -> dict:
-    """Clip every region (or the given ones) from the Ukraine extract, build each, write index.json."""
+def build_all(regions: list[str] | None = None, refresh_osm: bool = False, heap: str = "4g", jobs: int | None = None) -> dict:
+    """Clip every region (or the given ones) from the Ukraine extract, build each, write index.json.
+    A region other than Ukraine needs out/release/ukraine.pmtiles: its tiles are cut from it."""
     registry = load_registry(REGIONS)
     names = regions or list(registry)
     missing = [n for n in names if n not in registry or not (REGIONS / f"{n}.poly").exists()]
     if missing:
         raise FileNotFoundError(f"unknown regions or missing .poly: {missing}; see `tiles regions`")
     pbf, _ = ensure_osm(refresh_osm)
-    for name, clipped in clip_regions(pbf, names).items():
-        build_region(name, clipped, heap=heap)
-        build_graph(name, clipped)
-        build_search(name, clipped)
+    clipped = clip_regions(pbf, names)
+    if WHOLE in names:
+        build_whole(clipped[WHOLE], heap=heap)
+    for name in names:
+        if name != WHOLE:
+            extract_region(name)
+    # Graphs and search indexes: one process each, the biggest regions first (Ukraine's take minutes).
+    by_size = sorted(names, key=lambda n: clipped[n].stat().st_size, reverse=True)
+    with ProcessPoolExecutor(jobs or os.cpu_count()) as pool:
+        tasks = [pool.submit(build, name, clipped[name]) for name in by_size for build in (build_graph, build_search)]
+        for task in tasks:
+            task.result()
     return write_index(build_common())
 
 

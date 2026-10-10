@@ -13,7 +13,7 @@ python -m tiles.cli regions                    # (re)write regions/*.poly from r
 python -m tiles.cli border                     # the app's Ukraine border for GNSS integrity (src/nav/integrity/ukraine-border.ts)
 python -m tiles.cli world                      # style/world.geojson: the world drawn around a region (below)
 python -m tiles.cli build-all --heap 8g        # out/release/: ukraine, every region, index.json
-python -m tiles.cli build-region kyiv     # one region (+ index.json)
+python -m tiles.cli build-region kyiv     # one region (+ index.json; its tiles are cut from ukraine.pmtiles)
 python -m tiles.cli graph kyiv            # road graph only, from the cached extract (+ index.json)
 python -m tiles.cli graph-check out/release/kyiv.graph.bin
 python -m tiles.cli search kyiv            # address search index only (+ index.json)
@@ -31,16 +31,20 @@ listed with their OSM boundary relation in `regions/regions.json`. Each `.poly` 
 boundary's outer ring (holes filled, so enclaves belong to the surrounding region as
 well as to their own), buffered by 500 m and simplified to ~20 m.
 
-One `osmium extract --strategy smart` pass clips the Ukraine extract to every region
-(`cache/extracts/`): only data inside the polygon, with ways and multipolygons that cross the
-border kept whole. Planetiler then builds each region from its own extract, so its tiles hold
-nothing from neighbouring regions at any zoom — only coarse Natural Earth context (borders,
-large water) at z ≤ 6. Clipping tiles instead (Planetiler `--polygon`, `pmtiles extract`)
-keeps whole tiles, which at z8 span ~150 km and showed half of a neighbouring oblast in a region's map.
+Planetiler builds Ukraine's tiles once; every other region's are cut from them by
+`pmtiles extract` on its `.poly` (under a second each, against ~80 s for a Planetiler run;
+~6 % larger). Whole tiles are kept, so a region's border tiles, up to ~150 km at z8, hold parts
+of its neighbours: the app covers everything outside the region with the world drawn around
+it (below), so none of it shows. Building `kyiv` alone therefore needs `out/release/ukraine.pmtiles`.
 
-The first build downloads ~2.3 GB into `cache/` (gitignored): the Ukraine PBF, Planetiler and
-its Natural Earth / water polygon sources. Later builds reuse it; `--refresh-osm` fetches a
-new extract.
+One `osmium extract --strategy smart` pass clips the Ukraine extract to every region
+(`cache/extracts/`) for the road graphs and search indexes: only data inside the polygon, with
+ways and multipolygons that cross the border kept whole. They build in parallel processes
+(`--jobs`, one per CPU by default), Ukraine's first.
+
+The first build downloads ~2.3 GB into `cache/` (gitignored): the Ukraine PBF, Planetiler,
+go-pmtiles and Planetiler's Natural Earth / water polygon sources. Later builds reuse it;
+`--refresh-osm` fetches a new extract.
 
 ## Release (`out/release/`)
 
@@ -52,7 +56,7 @@ folders):
 | `index.json` | catalog: `format`, `osm_date`, `common[]` (asset, path, size, md5, sha256), `regions[]` (region, iso, name en/uk, bounds, outline: outer rings simplified to ~1 km, asset, size, md5, sha256) |
 | `<region>.graph.bin` | road graph for map matching (below); listed as the region's `graph` entry in index.json |
 | `<region>.search.bin` | address search index ([SEARCH-SPEC.md](../../docs/SEARCH-SPEC.md)); the region's `search` entry |
-| `<region>.pmtiles` | OpenMapTiles-schema vector tiles, clipped to the region polygon (Ukraine 1.2 GB, oblasts 36–89 MB) |
+| `<region>.pmtiles` | OpenMapTiles-schema vector tiles: Ukraine's by Planetiler (1.2 GB), the others cut from it on the region polygon, whole tiles (oblasts ~40–90 MB) |
 | `style.json` | OpenFreeMap Liberty (`style/liberty.json`, pinned snapshot); URLs use `{common}` (shared files directory) and `{tiles}` (region file), substituted by the app |
 | `world.geojson` | the world drawn around the active region (`style/world.geojson`, below) |
 | `sprite-ofm*`, `font-<slug>-<range>.pbf` | Liberty sprite and Noto Sans glyphs (every range below U+3000: all alphabets and symbols, no CJK; plus variation selectors and full-width forms); `path` in index.json says where the app stores each |

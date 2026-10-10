@@ -35,6 +35,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("names", nargs="*")
     p.add_argument("--refresh-osm", action="store_true", help="re-download the Ukraine extract")
     p.add_argument("--heap", default="4g", help="Java heap for Planetiler")
+    p.add_argument("--jobs", type=int, help="parallel graph / search builds (default: one per CPU)")
 
     p = sub.add_parser("graph", help="build out/release/<region>.graph.bin (all regions by default) and refresh index.json")
     p.add_argument("names", nargs="*")
@@ -54,7 +55,10 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("search-check", help="validate search files")
     p.add_argument("paths", nargs="+")
 
-    p = sub.add_parser("build-region", help="build out/release/<region>.pmtiles + .graph.bin + .search.bin and refresh index.json")
+    p = sub.add_parser(
+        "build-region",
+        help="build out/release/<region>.pmtiles (cut from ukraine.pmtiles but for ukraine) + .graph.bin + .search.bin, refresh index.json",
+    )
     p.add_argument("region")
     p.add_argument("--refresh-osm", action="store_true")
     p.add_argument("--heap", default="4g")
@@ -78,7 +82,7 @@ def main(argv: list[str] | None = None) -> None:
         args.out.write_text(world_geojson(features), encoding="utf-8", newline="\n")
         print(args.out)
     elif args.cmd == "build-all":
-        build_all(args.names or None, refresh_osm=args.refresh_osm, heap=args.heap)
+        build_all(args.names or None, refresh_osm=args.refresh_osm, heap=args.heap, jobs=args.jobs)
     elif args.cmd == "graph":
         build_graphs(args.names or None, refresh_osm=args.refresh_osm)
     elif args.cmd == "graph-check":
