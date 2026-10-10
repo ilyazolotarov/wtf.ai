@@ -29,6 +29,8 @@ yarn-error.*
 # macOS
 .DS_Store
 *.pem
+# The OTA update signing certificate is public (the app checks updates against it); its private key never enters the repo.
+!/certs/certificate.pem
 
 # local env files
 .env*.local
@@ -62,6 +64,9 @@ __pycache__/
 native-tests-android/.gradle/
 native-tests-android/build/
 native-tests-android/.kotlin/
+
+# Signed OTA updates ready to upload (tools/ota/prepare.ts)
+/ota-out/
 
 # Wrangler local state (upload Worker dev runs)
 .wrangler/
