@@ -129,7 +129,8 @@ the trip log), never `expo-location`'s watcher, which stopped for good after jam
 
 ### 6.2 Camera modes
 
-`follow` → `follow-heading` → `free`. User pan/zoom gesture switches to `free`. `RecenterButton` cycles modes and shows the current one.
+`follow` → `follow-heading` → `free`. User pan/zoom gesture switches to `free`. `CameraButton` cycles modes and shows the current one; the mode and its
+automatic turns live in `useCameraMode`.
 
 When the navigator started from where the car was parked and a Wi-Fi fix puts it elsewhere (NAVIGATOR-SPEC §6.1), a card under the status pill asks "Is the car where the dot is?", with how far Wi-Fi puts it: "Yes, it's here" keeps the dot, "No" moves it to the Wi-Fi position. It stays until answered or settled by the fixes; it never blocks the map.
 
@@ -149,19 +150,21 @@ Following the dot: each position eases over 450 ms, but a step over 80 m is a sn
 
 ### 6.3 Overlays — `src/components/map/`
 
-One small component each. Touch targets ≥ 56 pt; high contrast; minimal text.
+One small component each; the screen (`src/app/index.tsx`) only places them and wires their state. Cards share
+`hud-card.tsx` (`HudCard`, `HudChip`, buttons, the panel style). Touch targets ≥ 56 pt; high contrast; minimal text.
 
-| Position | Component           | Content                                                                                    |
-| -------- | ------------------- | ------------------------------------------------------------------------------------------ |
-| Top      | Status pill         | Trust state in words, coloured by it (`GPS OK`, "GPS looks spoofed", "GPS is back — verifying", no fix) |
-| Top      | `SinceTrustedStrip` | While GNSS isn't trusted: "Trusted GPS 4 min ago, 2.3 km back"                             |
-| Top      | `RouteBanner`       | Only with a route: next maneuver, distance, what is left (below, and §7.1)                 |
-| Top      | Chips and cards     | Protocol search, parked-pose question, set your position, outside the region (§6.2, below) |
-| Bottom   | Speed               | Speed in km/h                                                                              |
-| Bottom   | Camera button       | Camera mode cycle (§6.2)                                                                   |
-| Bottom   | Bar                 | Route, Vehicle (with the connection dot; "Driving" while a trip records), More              |
-| Center   | `PermissionCard`    | Location denied → explanation + "Open Settings" (`Linking.openURL('app-settings:')`)       |
-| Center   | `NoFixCard`         | "Waiting for GPS…" when no fix yet                                                         |
+| Position | Component                                  | Content                                                                                    |
+| -------- | ------------------------------------------ | ------------------------------------------------------------------------------------------ |
+| Top      | `StatusRow`                                | Status pill: trust state in words, coloured by it (`GPS OK`, "GPS looks spoofed", "GPS is back — verifying", no fix); the speed in km/h beside it |
+| Top      | `SinceTrustedStrip`                        | While GNSS isn't trusted: "Trusted GPS 4 min ago, 2.3 km back"                             |
+| Top      | `RouteBanner`                              | Only with a route: next maneuver, distance, what is left (below, and §7.1)                 |
+| Top      | `trust-cards.tsx`, `placing-cards.tsx`     | Trust alert, simulated outage, parked-pose question, set your position (`usePlacing`), the manual position |
+| Top      | `RegionPrompt`, `HudChip`                  | Outside the region (below), protocol search                                                |
+| Bottom   | `destination-cards.tsx`                    | Dropped pin, a route held without an adapter (below)                                       |
+| Bottom   | `CameraButton`                             | Camera mode cycle (§6.2)                                                                   |
+| Bottom   | `BottomBar`                                | Route, Vehicle (with the connection dot; "Driving" while a trip records), More              |
+| Center   | `PermissionCard`                           | Location denied → explanation + "Open Settings" (`Linking.openURL('app-settings:')`)       |
+| Center   | `NoFixCard`                                | "Waiting for GPS…" when no fix yet                                                         |
 
 - **Outside the region** (`src/components/map/region-prompt.tsx`): when the position (any fix to
   5 km, Wi-Fi and cell ones too, but not one suspected of spoofing) is more than max(1 km, its accuracy) outside
