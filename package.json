@@ -34,6 +34,7 @@
     "expo-status-bar": "~57.0.1",
     "expo-symbols": "~57.0.3",
     "expo-system-ui": "~57.0.4",
+    "expo-updates": "~57.0.25",
     "expo-web-browser": "~57.0.3",
     "react": "19.2.3",
     "react-dom": "19.2.3",
@@ -96,6 +97,7 @@
     "testers:remove": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/triplog/testers.ts remove",
     "upload-worker:deploy": "npx wrangler deploy --config workers/triplog-upload/wrangler.toml",
     "upload-worker:dev": "npx wrangler dev --config workers/triplog-upload/wrangler.toml",
+    "ota:prepare": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/ota/prepare.ts",
     "route:eta": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/eta.ts"
   },
   "jest": {

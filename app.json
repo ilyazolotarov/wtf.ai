@@ -7,6 +7,19 @@
     "icon": "./assets/images/icon.png",
     "scheme": "wtfai",
     "userInterfaceStyle": "automatic",
+    "runtimeVersion": {
+      "policy": "fingerprint"
+    },
+    "updates": {
+      "url": "https://wtf-app-updates.ilyazolotarov.workers.dev/manifest",
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0,
+      "codeSigningCertificate": "./certs/certificate.pem",
+      "codeSigningMetadata": {
+        "keyid": "main",
+        "alg": "rsa-v1_5-sha256"
+      }
+    },
     "ios": {
       "icon": "./assets/images/icon.png",
       "bundleIdentifier": "ai.wtf.navigator",
