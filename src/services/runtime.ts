@@ -16,6 +16,7 @@ import { kvStore } from "./kv-store";
 import { CalibrationStore } from "./navigation/calibration-store";
 import { NavigatorService, type MapMatchLoop } from "./navigation/navigator-service";
 import { ROUTER_CACHE_TILES, RouteService } from "./navigation/route-service";
+import { onMapDownloadFailed } from "./offline-map/map-packs";
 import { activeRoadGraph, openActiveRoadGraph } from "./offline-map/road-graph-file";
 import { SensorService } from "./sensor-capture/sensor-service";
 import { APP_NAV_DEFAULTS, APP_ROUTE_HINT } from "@/nav/app-defaults";
@@ -250,6 +251,9 @@ export function getRuntime(): Runtime {
     Sentry.addBreadcrumb({ category: "trip-recorder", message });
     if (message.startsWith("recorder error")) Sentry.captureMessage(message, "error");
   });
+  onMapDownloadFailed((e, { region, ...where }) =>
+    Sentry.captureException(e, { tags: { feature: "map-download", map_region: region }, extra: where }),
+  );
 
   runtime = {
     link,

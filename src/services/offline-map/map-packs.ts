@@ -11,7 +11,7 @@ import { assetUrl, fetchCatalog, type CatalogRegion, type MapCatalog } from "@/s
  *   Documents/maps/
  *     installed.json        InstalledState (what is complete and verified)
  *     common/               style.json, sprites/, fonts/ — shared by all regions
- *     <region>.pmtiles      one per installed region; `.part` while downloading
+ *     <region>.<md5>.pmtiles one per installed region (InstalledRegion.tiles); `<region>.pmtiles.part` while downloading
  *     <region>.graph.bin    its road graph for map matching (MAPMATCH-SPEC §11); `.part` too
  *     <region>.search.bin   its address search index (SEARCH-SPEC); `.part` too
  *
@@ -32,6 +32,8 @@ export interface InstalledRegion {
   size: number;
   /** Tiles checksum; absent on installs made before it was recorded. */
   md5?: string;
+  /** Tiles file name (`tilesName`); absent on installs made before it changed with every update: `<region>.pmtiles`. */
+  tiles?: string;
   /** Road graph; absent until downloaded (regions installed before graphs get it as an update). */
   graph?: { size: number; md5: string };
   /** Search index; absent until downloaded (an update for regions installed before it). */
@@ -97,7 +99,13 @@ interface DownloadJob {
 const ROOT = () => new Directory(Paths.document, "maps");
 const COMMON = () => new Directory(ROOT(), "common");
 const STAGING = "common.staging";
-const tilesFile = (region: string) => new File(ROOT(), `${region}.pmtiles`);
+/**
+ * Every install of a region's tiles gets its own name. MapLibre keeps a PMTiles file's header and directories by URL
+ * for the life of the app and never reads them again: an update written over the old name was read at the old
+ * offsets, and every tile failed ("Error decompressing PMTiles tile").
+ */
+const tilesName = (region: string, md5: string) => `${region}.${md5.slice(0, 8)}.pmtiles`;
+const tilesFile = (region: string, name: string | undefined) => new File(ROOT(), name ?? `${region}.pmtiles`);
 const tilesPart = (region: string) => `${region}.pmtiles.part`;
 const graphFile = (region: string) => new File(ROOT(), `${region}.graph.bin`);
 const graphPart = (region: string) => `${region}.graph.bin.part`;
@@ -147,6 +155,12 @@ let task: DownloadTask | null = null;
 let pauseRequested = false;
 /** Incremented by every start, resume and cancel; a stale run ignores its own result. */
 let runId = 0;
+/** Told of every download that failed (the app sends it to Sentry); the screen shows the message itself. */
+let reportFailure: (error: unknown, where: { region: string; file: string; index: number; files: number }) => void = () => {};
+
+export function onMapDownloadFailed(report: typeof reportFailure): void {
+  reportFailure = report;
+}
 
 function getState(): MapPacksState {
   state ??= initialState();
@@ -220,7 +234,7 @@ const commonCurrent = (installed: InstalledState, catalog: MapCatalog) =>
   installed.common?.fingerprint === commonFingerprint(catalog) && new File(COMMON(), "style.json").exists;
 
 const tilesCurrent = (have: InstalledRegion | undefined, entry: CatalogRegion) =>
-  have?.md5 === entry.md5 && tilesFile(entry.region).exists;
+  have?.md5 === entry.md5 && tilesFile(entry.region, have?.tiles).exists;
 
 /** True also when the catalog has no graph for the region: nothing to fetch. */
 const graphCurrent = (have: InstalledRegion | undefined, entry: CatalogRegion) =>
@@ -303,13 +317,18 @@ const letRender = () => new Promise((resolve) => setTimeout(resolve, 50));
 /** Moves the verified files into place and records the region, all at once. */
 function install(j: DownloadJob) {
   const region = j.region.region;
+  const { installed } = getState();
+  const have = installed.regions[region];
+  const tiles = j.tiles ? tilesName(region, j.region.md5) : have?.tiles;
   if (j.common) {
     const common = COMMON();
     if (common.exists) common.delete();
     new Directory(ROOT(), STAGING).rename("common");
   }
+  // The tiles they replace, under their own (older) name.
+  if (j.tiles && tilesFile(region, have?.tiles).exists) tilesFile(region, have?.tiles).delete();
   for (const [want, part, dest] of [
-    [j.tiles, tilesPart(region), tilesFile(region)],
+    [j.tiles, tilesPart(region), tilesFile(region, tiles)],
     [j.graph, graphPart(region), graphFile(region)],
     [!!j.search, searchPart(region), searchFile(region)],
   ] as const) {
@@ -317,8 +336,6 @@ function install(j: DownloadJob) {
     if (dest.exists) dest.delete();
     new File(ROOT(), part).rename(dest.name);
   }
-  const { installed } = getState();
-  const have = installed.regions[region];
   const { asset: _asset, md5, sha256: _sha256, graph, search, size, ...info } = j.region;
   const regionGraph = j.graph && graph ? { size: graph.size, md5: graph.md5 } : have?.graph;
   const regionSearch = j.search && search ? { size: search.size, md5: search.md5 } : have?.search;
@@ -332,6 +349,7 @@ function install(j: DownloadJob) {
         osm_date: j.tiles ? j.osm_date : (have?.osm_date ?? j.osm_date),
         size: j.tiles ? size : (have?.size ?? size),
         md5: j.tiles ? md5 : have?.md5,
+        ...(tiles ? { tiles } : {}),
         ...(regionGraph ? { graph: regionGraph } : {}),
         ...(regionSearch ? { search: regionSearch } : {}),
       },
@@ -450,7 +468,13 @@ async function runGuarded(id: number) {
   try {
     await run(id);
   } catch (e) {
-    if (id === runId) cleanUp(e);
+    if (id !== runId) return;
+    if (job) {
+      // Past the last file, it failed verifying or installing.
+      const file = job.files[job.index]?.label ?? "verify";
+      reportFailure(e, { region: job.region.region, file, index: job.index, files: job.files.length });
+    }
+    cleanUp(e);
   }
 }
 
@@ -492,8 +516,10 @@ export function cancelDownload(): void {
 }
 
 export function removeRegion(region: string): void {
-  for (const file of [tilesFile(region), graphFile(region), searchFile(region)]) if (file.exists) file.delete();
   const { installed } = getState();
+  for (const file of [tilesFile(region, installed.regions[region]?.tiles), graphFile(region), searchFile(region)]) {
+    if (file.exists) file.delete();
+  }
   const { [region]: _removed, ...regions } = installed.regions;
   const active = installed.active === region ? (Object.keys(regions)[0] ?? null) : installed.active;
   // Last region gone: drop the shared files too, so a fresh download fetches them anew
@@ -512,7 +538,7 @@ export function setActiveRegion(region: string): void {
 export function readActiveStyle(installed: InstalledState): MapStyleJson | null {
   const region = installed.active;
   if (!region || !installed.common) return null;
-  const tiles = tilesFile(region);
+  const tiles = tilesFile(region, installed.regions[region]?.tiles);
   const style = new File(COMMON(), "style.json");
   if (!tiles.exists || !style.exists) return null;
   const raw = style

@@ -1,9 +1,10 @@
-import { Camera, Map, type PressEvent, type ViewStateChangeEvent } from "@maplibre/maplibre-react-native";
+import { Camera, LogManager, Map, type PressEvent, type ViewStateChangeEvent } from "@maplibre/maplibre-react-native";
 import { useState, type ComponentProps } from "react";
 import { useColorScheme, View, type NativeSyntheticEvent } from "react-native";
 
 import { ANDROID_BLURS } from "@/components/ui/glass-fill";
 import { useMapStyle } from "@/config/map";
+import { Sentry } from "@/config/sentry";
 import { Colors } from "@/constants/theme";
 import type { Coordinate } from "@/nav/geo";
 import { usePosition } from "@/providers/position-provider";
@@ -18,6 +19,18 @@ import type { PlacingStep } from "./use-placing";
 
 /** The camera's zoom before the first follow. */
 const INITIAL_ZOOM = 15.4;
+
+// MapLibre's own errors (a tile it can't read, a style it can't load) reach JS only as console lines, which Sentry
+// keeps as logs, not issues. Each kind becomes an issue once per run: a broken pack fails every tile on screen.
+const reportedMapErrors = new Set<string>();
+LogManager.onLog(({ level, tag, message }) => {
+  const kind = `${tag}: ${message.replace(/\d+/g, "#")}`;
+  if (level === "error" && !reportedMapErrors.has(kind)) {
+    reportedMapErrors.add(kind);
+    Sentry.captureMessage(`MapLibre ${tag}: ${message}`, { level: "error", tags: { feature: "map" } });
+  }
+  return false; // and logged as before
+});
 
 interface MapSurfaceProps {
   mode: CameraMode;

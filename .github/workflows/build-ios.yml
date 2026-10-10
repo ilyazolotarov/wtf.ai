@@ -145,7 +145,15 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
+            DEBUG_INFORMATION_FORMAT=dwarf-with-dsym \
             build
+
+      - name: Upload Debug dSYMs to Sentry
+        # Sentry's build phase skips any configuration named Debug, and Debug makes no dSYMs by default: crashes and
+        # hangs from Debug IPAs came with every frame of the app <redacted>.
+        if: ${{ inputs.configuration == 'Debug' && env.SENTRY_DISABLE_AUTO_UPLOAD != 'true' }}
+        continue-on-error: true
+        run: npx sentry-cli --url https://de.sentry.io/ debug-files upload build/Build/Products/Debug-iphoneos
 
       - name: ccache statistics
         if: ${{ !cancelled() }}

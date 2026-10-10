@@ -274,7 +274,7 @@ Detailed in [MAPMATCH-SPEC.md](MAPMATCH-SPEC.md). Reference approach: Gustafsson
   app draws it over the tiles everywhere the active region's own tiles don't reach: water, land, country and oblast borders,
   country names, the same at every zoom whichever region is installed. Natural Earth from the Ukrainian point of view;
   Ukraine's oblasts from OSM.
-- Published as GitHub releases `maps-<osm_date>` by `.github/workflows/map-packs.yml` (weekly when Geofabrik has a newer extract). In-app download manager: resumable, checksum-verified, update check (`tools/tiles/README.md`).
+- Published as GitHub releases `maps-<osm_date>` by `.github/workflows/map-packs.yml` (weekly when Geofabrik has a newer extract). In-app download manager: resumable, checksum-verified, update check (`tools/tiles/README.md`). Every install of a region's tiles gets its own file name (`<region>.<md5>.pmtiles`): MapLibre keeps a PMTiles file's header and directories by URL for the life of the app, so tiles updated under the same name would fail to decode until a restart. Failed downloads are reported to Sentry.
 
 ### 3.9 App (`src/app/`, Expo Router)
 
