@@ -113,6 +113,8 @@ describe("builds", () => {
   });
 
   it("serves the AltStore source: the kept builds newest first, with the newest's permissions", async () => {
+    // Nothing to describe the app with yet.
+    expect((await call("/altstore.json")).status).toBe(404);
     await publishBuild(100);
     await publishBuild(101);
     const source = await (await call("/altstore.json")).json();

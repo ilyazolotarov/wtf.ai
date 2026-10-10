@@ -92,7 +92,10 @@ export function altStoreSource(builds: AppBuild[], origin: string) {
 }
 
 export async function serveAltStoreSource(request: Request, env: Env): Promise<Response> {
-  const source = altStoreSource(await appBuilds(env, "ios"), new URL(request.url).origin);
+  const builds = await appBuilds(env, "ios");
+  // The app's name, icon and versions come from its builds: without one AltStore would refuse the source as invalid.
+  if (!builds.length) return json(404, { error: "no iOS build published yet" });
+  const source = altStoreSource(builds, new URL(request.url).origin);
   return json(200, source, { "cache-control": "public, max-age=300" });
 }
 
