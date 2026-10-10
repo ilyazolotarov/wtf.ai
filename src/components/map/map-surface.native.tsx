@@ -378,7 +378,7 @@ export function MapSurface({
           [headTo.lon, headTo.lat],
         ])
       : emptyLines();
-  const routeCasing = { "line-color": palette.bg, "line-width": 9, "line-opacity": route?.replanning ? 0.4 : 0.9 };
+  const routeCasing = { "line-color": palette.routeCasing, "line-width": 9, "line-opacity": route?.replanning ? 0.4 : 0.9 };
   const routePaint = { "line-color": palette.route, "line-width": 6, "line-opacity": route?.replanning ? 0.4 : 1 };
   const routeHeadPaint = {
     "line-color": palette.accent,
@@ -456,7 +456,7 @@ export function MapSurface({
         }}
       />
       <GeoJSONSource id="alternative-routes" data={alternativeLines} onPress={pickAlternative}>
-        <Layer id="alternative-route-casing" type="line" layout={ROUTE_LAYOUT} paint={{ "line-color": palette.bg, "line-width": 8, "line-opacity": 0.9 }} />
+        <Layer id="alternative-route-casing" type="line" layout={ROUTE_LAYOUT} paint={{ "line-color": palette.routeCasing, "line-width": 8, "line-opacity": 0.9 }} />
         <Layer id="alternative-route-line" type="line" layout={ROUTE_LAYOUT} paint={{ "line-color": palette.routeAlt, "line-width": 5 }} />
       </GeoJSONSource>
       <GeoJSONSource id="active-route" data={routeAhead}>
@@ -471,14 +471,14 @@ export function MapSurface({
         <Layer
           id="route-next-maneuver-dot"
           type="circle"
-          paint={{ "circle-radius": 5, "circle-color": palette.bg, "circle-stroke-color": palette.route, "circle-stroke-width": 3 }}
+          paint={{ "circle-radius": 5, "circle-color": palette.maneuver, "circle-stroke-color": palette.maneuverEdge, "circle-stroke-width": 3 }}
         />
       </GeoJSONSource>
       <GeoJSONSource id="route-destination" data={destination}>
         <Layer
           id="route-destination-dot"
           type="circle"
-          paint={{ "circle-radius": 8, "circle-color": palette.route, "circle-stroke-color": palette.bg, "circle-stroke-width": 3 }}
+          paint={{ "circle-radius": 8, "circle-color": palette.route, "circle-stroke-color": palette.routeCasing, "circle-stroke-width": 3 }}
         />
       </GeoJSONSource>
       <GeoJSONSource id="alternative-route-labels" data={alternativeLabels} onPress={pickAlternative}>

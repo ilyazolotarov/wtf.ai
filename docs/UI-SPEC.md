@@ -84,10 +84,11 @@ the trip log), never `expo-location`'s watcher, which stopped for good after jam
 
 ### 4.6 Theme and map config
 
-- `src/constants/theme.ts`: light and dark palettes (`bg`, `text`, `accent`, `route`, `routeAlt`, status colours
+- `src/constants/theme.ts`: light and dark palettes (`bg`, `text`, `accent`, `route`, `routeAlt`, `routeCasing`, `maneuver`, status colours
   `ok` / `warn` / `bad` / `idle`, …), `usePalette()`.
-- `src/config/map.ts`: the active region's offline style (`useMapStyle(scheme)`, `hasUsableMap`); `map-dark.ts` re-tints
-  the Liberty style for the dark scheme.
+- `src/config/map.ts`: the active region's offline style (`useMapStyle(scheme)`, `hasUsableMap`); `map-dark.ts` re-tints the Liberty style for the dark scheme with one
+  high-contrast palette for driving (Night Drive): near-black ground, amber primary roads, orange motorways and trunk
+  roads (Ukraine's national highways), dark road names on a white halo.
 
 ## 5. App shell
 
@@ -184,8 +185,10 @@ One small component each. Touch targets ≥ 56 pt; high contrast; minimal text.
   least 20 pt apart, their touch areas not overlapping (a mis-tap on × ended the route). The map draws the route ahead of the car (from its
   progress point, ROUTING-SPEC §8.1: what is driven disappears; faded while planning again; the stretch from the
   progress point to the next route vertex is dashed in the accent blue), its next maneuver and the destination.
+  In the dark (Night Drive) the route is azure #1EA0FF with a near-black #001428 outline: opposite the map's amber and
+  orange roads and far lighter than its ground and water; the next maneuver's dot is white ringed in #001428.
   **Alternatives** (ROUTING-SPEC §8.7) are quieter solid blue lines under it (`routeAlt`: light #93A6DE, dark
-  #7489C2; a translucent route colour turned muddy on the dark map), each labelled on its own stretch
+  #5B7896; a translucent route colour turned muddy on the dark map), each labelled on its own stretch
   with its time against the route ("+4 min", "−2 min", "Same time"); a tap on a line or label follows it. When they
   come while the car stands, the map frames all routes once (free camera).
 - **A route without an adapter** (phone-only mode on and no adapter connected, NAVIGATOR-SPEC §9.6): **Route here**

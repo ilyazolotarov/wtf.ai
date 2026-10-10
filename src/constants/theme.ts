@@ -44,6 +44,11 @@ export const Colors = {
     route: "#3F5FBF",
     /** Alternative routes: solid (a translucent route colour over the casing turned muddy on the dark map), quieter. */
     routeAlt: "#93A6DE",
+    /** The outline of the routes and the destination dot. */
+    routeCasing: "#F5F4F1",
+    /** The next maneuver's dot: fill and ring. */
+    maneuver: "#F5F4F1",
+    maneuverEdge: "#3F5FBF",
     // Legacy names used by dev-only screens (trips, ELM terminal, device list).
     background: "#F5F4F1",
     backgroundElement: "#FFFFFF",
@@ -71,8 +76,13 @@ export const Colors = {
     shadow: "0 10px 30px rgba(0,0,0,0.4)",
     cardShadow: "0 12px 40px rgba(0,0,0,0.25)",
     grab: "rgba(255,255,255,0.25)",
-    route: "#9DB4F2",
-    routeAlt: "#7489C2",
+    // Night Drive: azure, opposite the map's amber and orange roads and far lighter than its ground and water (~7:1),
+    // with a near-black outline where it runs along an amber road.
+    route: "#1EA0FF",
+    routeAlt: "#5B7896",
+    routeCasing: "#001428",
+    maneuver: "#FFFFFF",
+    maneuverEdge: "#001428",
     background: "#121211",
     backgroundElement: "#232220",
     backgroundSelected: "#2C2B29",
