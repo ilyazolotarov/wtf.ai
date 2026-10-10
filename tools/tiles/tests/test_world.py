@@ -5,6 +5,7 @@ from pathlib import Path
 import shapely
 from shapely.geometry import Point, Polygon, box, shape
 
+from tiles.region import load_registry, read_poly
 from tiles.world import mosaic
 
 WORLD = Path(__file__).parent.parent / "style" / "world.geojson"
@@ -43,6 +44,21 @@ def test_ukraine_is_land_left_out_where_the_active_region_shows_it():
         [land] = at(lon, lat, "land")
         assert f"covered:{region}" in land and "covered:ukraine" in land, region
         assert not at(lon, lat, "water"), region
+
+
+def test_every_piece_of_ukraine_is_left_out_by_every_region_whose_map_holds_it():
+    # An exclave of one oblast inside another is on the surrounding oblast's map too.
+    regions = Path(__file__).parent.parent / "regions"
+    outlines = {r: read_poly(regions / f"{r}.poly") for r in load_registry(regions) if r != "ukraine"}
+    for f in features():
+        props = f["properties"]
+        if props["kind"] not in ("land", "water") or "covered:ukraine" not in props:
+            continue
+        for part in shapely.get_parts(shape(f["geometry"])):
+            point = part.representative_point()
+            for region, outline in outlines.items():
+                if outline.contains(point):
+                    assert f"covered:{region}" in props, (region, point.wkt)
 
 
 def test_rings_wind_the_way_maplibre_reads_holes():

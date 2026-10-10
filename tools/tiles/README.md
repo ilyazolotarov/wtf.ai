@@ -98,9 +98,10 @@ Russia is neither land nor border: it is the Ukrainian Sea (`sea-label`: «Ukrai
 
 Oblasts are their OSM boundaries (Nominatim at ~1 m, cached in `cache/boundaries/`), rebuilt as a
 gapless mosaic and simplified together (~40 m, shared edges kept shared): an oblast edge is where a
-region's real map meets the drawn one. Each oblast feature carries `covered:<region>` for every
-region whose `.poly` holds it (`ukraine` holds all, `kyiv` holds Kyiv city); the app leaves those
-out, so the active region's tiles show through. A pack without `world.geojson` gets the plain style.
+region's real map meets the drawn one. Each separate piece of an oblast carries `covered:<region>`
+for every region whose `.poly` holds it (`ukraine` holds all, `kyiv` holds Kyiv city, an exclave is
+held by the oblast around it too); the app leaves those out, so the active region's tiles show
+through. A pack without `world.geojson` gets the plain style.
 
 ## In the app
 

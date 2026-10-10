@@ -137,11 +137,17 @@ def build(ne: sqlite3.Connection, registry: dict[str, Any], regions_dir: Path, b
     names = [n for n in registry if n != WHOLE]
     oblasts = [shapely.make_valid(g) for g in shapely.coverage_simplify(mosaic([boundary(registry[n]["relation"]) for n in names]), OBLAST_TOLERANCE_DEG)]
     ukraine = unary_union(oblasts)
+    # Each separate piece of an oblast is covered by its own region and by every region whose .poly holds it: an
+    # exclave inside another oblast is on that oblast's map too (a .poly's holes are filled).
     outlines = {r: read_poly(regions_dir / f"{r}.poly") for r in registry if r != WHOLE}
-    covers = [
-        [WHOLE] + [r for r, outline in outlines.items() if r == names[i] or outline.contains(g.representative_point())]
-        for i, g in enumerate(oblasts)
-    ]
+    pieces: list[tuple[BaseGeometry, list[str]]] = []
+    for name, oblast in zip(names, oblasts):
+        by_cover: dict[tuple[str, ...], list[Polygon]] = {}
+        for part in polygons(oblast):
+            point = part.representative_point()
+            cover = (WHOLE, *(r for r, outline in outlines.items() if r == name or outline.contains(point)))
+            by_cover.setdefault(cover, []).append(part)
+        pieces += [(unary_union(parts), list(cover)) for cover, parts in by_cover.items()]
 
     features: list[dict] = []
 
@@ -159,7 +165,7 @@ def build(ne: sqlite3.Connection, registry: dict[str, Any], regions_dir: Path, b
     add("land", unary_union([p for p in polygons(foreign) if p.area >= MIN_PART_DEG2]))
 
     coast = land_all.intersection(NEAR).simplify(NEAR_TOLERANCE_DEG)  # oblasts not on the map need no finer coast
-    for g, regions in zip(oblasts, covers):
+    for g, regions in pieces:
         add("land", g.intersection(coast), **covered(regions))
         add("water", g.difference(coast), **covered(regions))
 
@@ -170,11 +176,11 @@ def build(ne: sqlite3.Connection, registry: dict[str, Any], regions_dir: Path, b
     add("border", ukraine.boundary.intersection(neighbours.difference(russia.buffer(SEAM_DEG)).buffer(SEAM_DEG)))
 
     # Oblast borders on land, hidden where one map covers both sides (its own tiles draw them).
-    for i in range(len(oblasts)):
-        for j in range(i + 1, len(oblasts)):
-            shared = [l for l in lines(oblasts[i].boundary.intersection(oblasts[j].boundary)) if l.length > 1e-4]
+    for i, (a, cover_a) in enumerate(pieces):
+        for b, cover_b in pieces[i + 1 :]:
+            shared = [l for l in lines(a.boundary.intersection(b.boundary)) if l.length > 1e-4]
             if shared:
-                both = [r for r in covers[i] if r in covers[j]]
+                both = [r for r in cover_a if r in cover_b]
                 add("region-border", unary_union(shared).intersection(coast), **covered(both))
 
     for a3, (_, name, rank, x, y) in sorted(countries.items()):
