@@ -2,8 +2,10 @@
 // which changes with every `prebuild --clean`: a tester could not update over the previous APK. With
 // ANDROID_KEYSTORE_PATH (+ _PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD) set, release uses that stable key;
 // without them it falls back to the debug key (fine for CI runs that are never sent to testers).
+// 3) More memory for Gradle: expo-updates' code generation (KSP) runs out of the template's 512 MB metaspace, and
+// Gradle then hangs until the job times out instead of failing.
 // Never edit android/ by hand; prebuild applies this.
-const { withAppBuildGradle } = require("expo/config-plugins");
+const { withAppBuildGradle, withGradleProperties } = require("expo/config-plugins");
 
 const MARKER = "// wtf.ai release signing";
 const LINT_MARKER = "// wtf.ai lint";
@@ -56,10 +58,28 @@ function patchGradle(src) {
   return patchLint(patchSigning(src));
 }
 
+// The CI runner has 16 GB: Gradle's own JVM and the Kotlin compile daemon each get room for the code generators.
+const GRADLE_PROPERTIES = {
+  "org.gradle.jvmargs": "-Xmx4g -XX:MaxMetaspaceSize=1536m -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8",
+  "kotlin.daemon.jvmargs": "-Xmx3g -XX:MaxMetaspaceSize=1g",
+};
+
+/** Sets GRADLE_PROPERTIES in gradle.properties (a list of {type, key, value} items), replacing the template's values. */
+function patchGradleProperties(items) {
+  const out = items.filter((item) => !(item.type === "property" && item.key in GRADLE_PROPERTIES));
+  for (const [key, value] of Object.entries(GRADLE_PROPERTIES)) out.push({ type: "property", key, value });
+  return out;
+}
+
 module.exports = function withAndroidBuild(config) {
-  return withAppBuildGradle(config, (cfg) => {
+  config = withAppBuildGradle(config, (cfg) => {
     cfg.modResults.contents = patchGradle(cfg.modResults.contents);
+    return cfg;
+  });
+  return withGradleProperties(config, (cfg) => {
+    cfg.modResults = patchGradleProperties(cfg.modResults);
     return cfg;
   });
 };
 module.exports.patchGradle = patchGradle;
+module.exports.patchGradleProperties = patchGradleProperties;

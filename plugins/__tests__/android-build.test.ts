@@ -1,11 +1,12 @@
-// Config plugin: stable release signing key for sideloaded APKs (debug-key fallback) and the lint setting.
+// Config plugin: stable release signing key for sideloaded APKs (debug-key fallback), the lint setting, Gradle memory.
 
 jest.mock("expo/config-plugins", () => ({
   withAppBuildGradle: (config: any, mod: (c: any) => any) => mod(config),
+  withGradleProperties: (config: any, mod: (c: any) => any) => mod(config),
 }));
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { patchGradle } = require("../android-build.js");
+const { patchGradle, patchGradleProperties } = require("../android-build.js");
 
 // The relevant part of the SDK 57 prebuild template (android/app/build.gradle).
 const TEMPLATE = `android {
@@ -54,5 +55,20 @@ describe("android-build plugin", () => {
 
   test("fails loudly when the template changes shape", () => {
     expect(() => patchGradle("android {}")).toThrow(/signingConfigs.debug not found/);
+  });
+
+  test("gives Gradle and the Kotlin daemon more metaspace than the template, once", () => {
+    const template = [
+      { type: "comment", value: "Project-wide Gradle settings." },
+      { type: "property", key: "org.gradle.jvmargs", value: "-Xmx2048m -XX:MaxMetaspaceSize=512m" },
+      { type: "property", key: "android.useAndroidX", value: "true" },
+    ];
+    const out = patchGradleProperties(template);
+    const value = (key: string) => out.filter((i: any) => i.key === key).map((i: any) => i.value);
+    expect(value("org.gradle.jvmargs")).toEqual([expect.stringContaining("-XX:MaxMetaspaceSize=1536m")]);
+    expect(value("kotlin.daemon.jvmargs")).toEqual([expect.stringContaining("-XX:MaxMetaspaceSize=1g")]);
+    expect(value("android.useAndroidX")).toEqual(["true"]);
+    expect(out[0]).toEqual(template[0]);
+    expect(patchGradleProperties(out)).toEqual(out);
   });
 });
