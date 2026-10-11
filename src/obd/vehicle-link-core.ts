@@ -2,6 +2,7 @@
 // Pure TS: transports, discovery, and storage are injected, so the whole lifecycle
 // runs in Node tests against the emulator.
 
+import { CanMonitorCollector, formatSurvey, type CanSurvey } from "./can-monitor";
 import { compareDevices, rankDevice } from "./catalog";
 import type { Clock } from "./clock";
 import { probeAdapter, searchProtocols, warmReset, wrongBus } from "./elm327/probe";
@@ -141,6 +142,10 @@ export class VehicleLinkCore implements VehicleLink {
   /** Bumped by a user's connect/disconnect and by each auto-connect round: an older round stops. */
   private autoRun = 0;
   private roundRun: number | null = null;
+  /** The ECU init pinned for speed (`ATCRA`), restored after a CAN monitor. */
+  private pinnedEcu: number | null = null;
+  /** While the CAN monitor runs, the adapter's output goes here instead of the link events. */
+  private monitorSink: ((text: string, rxUs: number) => void) | null = null;
 
   constructor(private readonly deps: VehicleLinkDeps) {
     this.engine = new EngineStateMachine((state, tUs) => this.onEngineChange(state, tUs));
@@ -261,7 +266,10 @@ export class VehicleLinkCore implements VehicleLink {
     this.transport = transport;
     this.unsubscribers.push(transport.onLinkLost((reason) => this.onLinkLost(gen, reason)));
     this.unsubscribers.push(
-      transport.onUnsolicited((text, rxUs) => this.linkEvents.emit({ type: "unsolicited", tUs: rxUs, detail: text })),
+      transport.onUnsolicited((text, rxUs) => {
+        if (this.monitorSink) this.monitorSink(text, rxUs);
+        else this.linkEvents.emit({ type: "unsolicited", tUs: rxUs, detail: text });
+      }),
     );
     let info: ConnectedInfo | null;
     try {
@@ -364,6 +372,58 @@ export class VehicleLinkCore implements VehicleLink {
   setRpmPeriods(periods: Partial<Pick<PollerConfig, "rpmPeriodRunningMs" | "rpmPeriodEngineOffMs" | "rpmPeriodIgnitionOffMs">>): void {
     this.rpmPeriods = { ...this.rpmPeriods, ...periods };
     this.poller?.setRpmPeriods(periods);
+  }
+
+  /**
+   * Listen to the CAN bus for `durationMs` with polling paused, then poll again (§16, developer survey). STN
+   * adapters on a CAN car only. `ids` null: every id, which a busy 500 kbit/s bus can overrun (`BUFFER FULL`).
+   */
+  async monitorCan(opts: { ids: number[] | null; durationMs: number }): Promise<CanSurvey> {
+    const transport = this.transport;
+    if (!transport?.writeRaw || !/^STN/i.test(this.snapshot.adapter?.chip ?? "")) throw new Error("needs an STN adapter");
+    const protocol = this.remembered().find((a) => a.id === this.snapshot.activeDeviceId)?.protocolNumber ?? null;
+    if (protocol === null || protocol < 6 || protocol > 9) throw new Error("needs a car on CAN (protocol 6–9)");
+    if (this.monitorSink) throw new Error("the monitor is running");
+    const idDigits = protocol === 7 || protocol === 9 ? 8 : 3;
+    const hex = (n: number, digits: number) => n.toString(16).toUpperCase().padStart(digits, "0");
+    const collector = new CanMonitorCollector(idDigits);
+    const survey = await this.requireSession().exclusive(async (send) => {
+      let running = false;
+      try {
+        await send("ATH1", { timeoutMs: 1000 });
+        // The speed ECU's ATCRA is the CAN hardware filter, which STM obeys too: clear it (and all custom filters).
+        await send("ATAR", { timeoutMs: 1000 });
+        await send("STCMM0", { timeoutMs: 1000 }); // listen only, no ACKs (the default; older firmware may answer ?)
+        const zero = "0".repeat(idDigits);
+        const mask = idDigits === 3 ? "7FF" : "1FFFFFFF";
+        const filters = opts.ids === null ? [`${zero},${zero}`] : opts.ids.map((id) => `${hex(id, idDigits)},${mask}`);
+        for (const f of filters) {
+          // STFAP: the name before STFPA, on older firmware.
+          const added = (await send(`STFPA${f}`, { timeoutMs: 1000 })).status === "ok" || (await send(`STFAP${f}`, { timeoutMs: 1000 })).status === "ok";
+          if (!added) throw new Error(`pass filter ${f} refused`);
+        }
+        this.monitorSink = (text, rxUs) => collector.push(text, rxUs);
+        const startUs = this.deps.clock.nowUs();
+        running = true;
+        await transport.writeRaw!("STM\r");
+        await this.deps.clock.sleep(opts.durationMs);
+        // Any character stops it: the rest of the output, STOPPED, the prompt.
+        const stop = await send("", { timeoutMs: 2000 });
+        running = false;
+        collector.push(stop.raw, stop.rxUs);
+        collector.end(stop.rxUs);
+        return collector.survey((stop.txUs - startUs) / 1000);
+      } finally {
+        // A character sent into a running monitor only stops it (and is lost): stop it before the commands.
+        if (running) await send("", { timeoutMs: 2000 }).catch(() => undefined);
+        await send("ATAR", { timeoutMs: 1000 }).catch(() => undefined);
+        if (this.pinnedEcu !== null) await send(`ATCRA${hex(this.pinnedEcu, 3)}`, { timeoutMs: 1000 }).catch(() => undefined);
+        await send("ATH0", { timeoutMs: 1000 }).catch(() => undefined);
+        this.monitorSink = null;
+      }
+    });
+    this.event("can-monitor", formatSurvey(survey).join("; "));
+    return survey;
   }
 
   async dispose(): Promise<void> {
@@ -485,6 +545,7 @@ export class VehicleLinkCore implements VehicleLink {
     }
     const adapter = this.snapshot.adapter ? { ...this.snapshot.adapter, capabilities: init.capabilities } : null;
     const vehicle = this.identify(init.vehicle, init.protocolNumber);
+    this.pinnedEcu = init.pinnedEcu;
     this.update({ vehicle, adapter });
     this.patchRemembered({ protocolNumber: init.protocolNumber, adapter: adapter ?? undefined });
     this.event("initialized", `${init.vehicle.protocol ?? "?"} ${init.poll.speedCommand}`);

@@ -5,6 +5,7 @@ import { ScreenAction, ScreenContent, ScreenNote, ScreenSection } from "@/compon
 import { INPUT_MAX_FONT_SCALE, MAX_FONT_SCALE } from "@/components/ui/text";
 import { Colors } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
+import { formatSurvey, parseCanIds } from "@/obd/can-monitor";
 import { useRuntime, useVehicleLinkValue } from "@/providers/runtime-provider";
 
 interface Entry {
@@ -19,7 +20,7 @@ const QUICK = ["ATI", "ATRV", "ATDPN", "STI", "0100", "010D", "010C", "0902"];
 
 let nextId = 1;
 
-/** Dev-only ELM terminal (TRIP-LOGGER-SPEC §9.3). Commands run with polling paused. */
+/** Dev-only ELM terminal (TRIP-LOGGER-SPEC §9.3). Commands and the CAN monitor run with polling paused. */
 export default function DebugTerminalScreen() {
   const { t } = useT();
   const { link } = useRuntime();
@@ -41,6 +42,27 @@ export default function DebugTerminalScreen() {
       ].slice(0, 200));
     } catch (error) {
       setLog((l) => [{ id: nextId++, command: c, status: "error", lines: [String(error)], latencyMs: 0 }, ...l]);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Passive CAN monitor (VEHICLE-LINK-SPEC §16): every id for 3 s, or the ids typed in the field for 10 s. */
+  const monitor = async (all: boolean) => {
+    if (busy) return;
+    const ids = all ? null : parseCanIds(command);
+    const label = all ? "STM all ids" : `STM ${command.trim()}`;
+    const add = (e: Omit<Entry, "id">) => setLog((l) => [{ id: nextId++, ...e }, ...l].slice(0, 200));
+    if (!all && ids === null) {
+      add({ command: label, status: "error", lines: [t("canIdsHint")], latencyMs: 0 });
+      return;
+    }
+    setBusy(true);
+    try {
+      const survey = await link.monitorCan({ ids, durationMs: all ? 3000 : 10000 });
+      add({ command: label, status: survey.bufferFull > 0 ? "buffer-full" : "ok", lines: formatSurvey(survey), latencyMs: survey.durationMs });
+    } catch (error) {
+      add({ command: label, status: "error", lines: [String(error)], latencyMs: 0 });
     } finally {
       setBusy(false);
     }
@@ -69,6 +91,8 @@ export default function DebugTerminalScreen() {
           ))}
         </View>
         <ScreenAction labelKey="send" disabled={!connected || busy} onPress={() => void run(command)} />
+        <ScreenAction labelKey="canMonitorAll" secondary disabled={!connected || busy} onPress={() => void monitor(true)} />
+        <ScreenAction labelKey="canMonitorIds" secondary disabled={!connected || busy} onPress={() => void monitor(false)} />
         <ScreenAction labelKey="clear" secondary onPress={() => setLog([])} />
       </ScreenSection>
       {!connected && <ScreenNote>{t("adapterDisconnected")}</ScreenNote>}

@@ -283,6 +283,8 @@ Pages on the root stack (UI-SPEC §5): `vehicle` from the map's bar, the rest fr
 ### 9.3 `debug-terminal` (from Developer)
 
 - ELM terminal: text input, send via `VehicleLink.exclusive` (polling pauses), scrolling transcript with tx/rx times and latency. Quick buttons: `ATI`, `ATRV`, `ATDPN`, `0100`, `010D`, `010C`, `0902`.
+- CAN monitor (STN adapters, VEHICLE-LINK-SPEC §16.1): "all ids, 3 s" and "ids above, 10 s" (hex ids typed in the
+  field). The result (per id: Hz, data lengths, last bytes) goes to the transcript and to the link event `can-monitor`.
 
 ### 9.4 `trips` (from Trip recorder)
 

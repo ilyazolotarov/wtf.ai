@@ -49,6 +49,8 @@ export interface Transport {
   disconnect(): Promise<void>;
   /** Write `command + "\r"`, resolve on `>` or timeout. One in flight. */
   exchange(command: string, timeoutMs: number): Promise<RawExchange>;
+  /** Write without waiting for a prompt (starts the CAN monitor; its output arrives as unsolicited text). */
+  writeRaw?(text: string): Promise<void>;
   onUnsolicited(listener: (text: string, rxUs: number) => void): () => void;
   onLinkLost(listener: (reason: string) => void): () => void;
 }

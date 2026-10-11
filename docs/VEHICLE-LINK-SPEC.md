@@ -25,7 +25,7 @@ First target for the module:
 | Native code             | Own Expo module `modules/vehicle-link` (Swift). Thin: scan, connect, write, frame on the `>` prompt, timestamp. No ELM327 logic in Swift. No third-party BLE library.                   |
 | Protocol logic          | Pure TypeScript in `src/obd/` (no React Native imports), unit-testable in Node/Bun on Windows against an ELM327 emulator.                                                                  |
 | Adapter catalog         | BLE GATT profiles and name patterns live in a **TS table** passed to native, so adding a BLE adapter needs no native build. MFi protocol strings must be in `Info.plist` → native build. |
-| Command set             | Plain ELM327 subset (§9). STN commands only for read-only identification (`STI`), never for features (STN features are Stage 2, SPEC §2.1).                                              |
+| Command set             | Plain ELM327 subset (§9) for polling. STN commands: `STI` for identification, and the CAN monitor (§16, SPEC §2.1 Stage 2) on STN adapters only.                                        |
 | Speed rate              | Closed-loop, back-to-back polling. No artificial cap apart from a 50 Hz safety ceiling and an optional per-vehicle cap derived from measured ECU refresh (§10.2).                          |
 | RPM rate                | Every 5 s while the engine runs, 2 s while the ECU is awake with the engine stopped, 5 s ignition probe while the ECU is silent (§10.3).                                                    |
 | Time base               | All timestamps are **monotonic uptime in µs** (`ProcessInfo.systemUptime`, same clock as CoreMotion). Wall clock only through explicit sync records.                                    |
@@ -189,6 +189,7 @@ interface Transport {
   connect(device: DeviceRef): Promise<ConnectedInfo>; // ConnectedInfo: chosen GATT pair or EA protocol, GATT dump, DIS fields
   disconnect(): Promise<void>;
   exchange(command: string, timeoutMs: number): Promise<RawExchange>;
+  writeRaw?(text: string): Promise<void>; // no prompt awaited: starts the CAN monitor (§16)
   onUnsolicited(listener: (text: string, rxUs: number) => void): () => void;
   onLinkLost(listener: (reason: string) => void): () => void;
 }
@@ -425,7 +426,7 @@ Each is measured over ~20 polls and kept only if it is accepted and actually fas
 | Adaptive timing 2 | `ATAT2` (aggressive). Keep if `NO DATA` rate doesn't increase.                           | `ATAT1`         |
 | Timeout          | Only with response count off: lower `ATST` (e.g. `19` ≈ 100 ms) if no responses are lost. | default `ATST`  |
 
-Not used: bare-CR "repeat last command" (it saves nothing on BLE and breaks when RPM polls are interleaved); multi-PID requests (`010D0C`), since many clones mis-handle them; STN batch/monitor commands (Stage 2).
+Not used: bare-CR "repeat last command" (it saves nothing on BLE and breaks when RPM polls are interleaved); multi-PID requests (`010D0C`), since many clones mis-handle them; STN batch commands. The STN monitor is §16.
 
 ## 10. Polling
 
@@ -530,3 +531,49 @@ The same contract with two transports: BLE (same GATT catalog) and Classic SPP (
    the last car on the protocol assumed meanwhile (§9.1). Next drives: the setup in the log (`… s before the log:`)
    shows why the init read misses; `vin: read on retry n` how soon a retry gets it.
 6. Verify the auto-connect fix on device: open the app before the car wakes the MX+; it must connect once iOS reports the accessory.
+7. CAN monitor survey (§16.1) on the main test car with both STN adapters: which ids and rates reach the phone, and
+   whether an unfiltered bus overruns the adapter or the link (`BUFFER FULL`, chars/s).
+
+## 16. CAN monitor (STN)
+
+Passive listening to the CAN broadcast at the OBD port, for SPEC §2.1 Stage 2. STN adapters (`STI` answered) on a
+CAN car (protocol 6–9) only: plain ELM327s and clones have one receive filter and small buffers.
+
+### 16.1 Port survey (developer)
+
+`VehicleLinkCore.monitorCan({ ids, durationMs })`, from the ELM terminal (TRIP-LOGGER-SPEC §9.3): every id for 3 s,
+or the ids typed in the field (hex) for 10 s. It runs as an exclusive section, so polling pauses for its duration.
+
+| Step | Command                                   | Why                                                                                                   |
+| ---- | ----------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| 1    | `ATH1`                                    | Ids in the output.                                                                                    |
+| 2    | `ATAR`                                    | Clears all custom filters, including the speed ECU's `ATCRA` (§9.2): it sets the CAN hardware filter, which `STM` obeys, so only `7E8` would pass. |
+| 3    | `STCMM0`                                  | Listen only, no ACKs (the default; older firmware may answer `?`, ignored).                            |
+| 4    | `STFPA <id>,7FF` per id; `000,000` for all | Pass filters. `STFAP` (the older name) when `STFPA` is refused; neither → the survey fails.           |
+| 5    | `STM`, written without awaiting a prompt  | Raw frames through the pass filters as set. Not `STMA`: it treats CAN as ISO 15765 and passes all.     |
+| 6    | bare CR after `durationMs`                | Any character stops the monitor; the adapter prints the rest of its output, `STOPPED` and the prompt. |
+| 7    | `ATAR`, `ATCRA<pinned ECU>`, `ATH0`       | The session as the init left it.                                                                      |
+
+- While the monitor runs, the native module has no transaction in flight and forwards every chunk as `onUnsolicited`
+  (iOS and Android), so no native change is needed. The chunks go to the monitor, not to the link events.
+- A character written into a running monitor only stops it and is discarded: after a failure, the cleanup stops the
+  monitor before step 7.
+- Output, with headers on and spaces off: the id (3 hex digits on 11-bit CAN, 8 on 29-bit), then 0–8 data bytes. The
+  data length isn't printed (no `ATD1`).
+- Result per id: frames per monitored second, data lengths, the last bytes; totals: frames/s, chars/s, `BUFFER FULL`
+  lines. Shown in the terminal and logged as the link event `can-monitor` (TRIP-LOGGER-SPEC §6.4).
+- The emulator models `STFPA`/`STFPC`/`STCMM`, the hardware filter and `STM` with a per-profile broadcast list
+  (`broadcast`).
+
+### 16.2 Shadow logging (next)
+
+- The monitor runs only while the ECU is awake (`engine-off`, `engine-running`). `standby` and `ignition-off` keep the
+  OBD probe (§10.3).
+- Time-slicing: the monitor breaks for `010D1` at a rate chosen in replay (the drawn-truth corpus with OBD speed
+  decimated), with `010C`, `ATRV` and VIN retries in the same breaks. The engine-state machine (§10.4) gets the same
+  samples as without the monitor.
+- Each break costs a stop, the request and a restart; measured per adapter.
+- A monitor failure (`BUFFER FULL` streak, garbled output, no prompt) → plain polling for the rest of the drive.
+- The trip log gets the raw frames (id, bytes, chunk arrival time) and the monitor's on/off windows, so replay can
+  tell a gap from a frame the car didn't send. Decoding happens in replay; counter and checksum signals rebuild frame
+  timing and catch lines garbled in transport.

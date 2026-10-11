@@ -47,7 +47,20 @@ Odometry is built up in stages (§2.1). Stage 1 uses the minimum that works on a
 
 - Stage 1 is the permanent fallback: cars with a CAN gateway firewall, unknown makes/models, and generic dongles stay on it.
 - Stage selection is automatic per vehicle: the highest stage whose requirements are met (adapter supports monitoring, profile exists for the VIN, signals are visible at the OBD port).
-- An ELM327-class adapter can't poll PIDs and passively monitor CAN at the same time. Stage 2+ takes speed from the wheel-speed frames and doesn't poll.
+- An adapter can't poll and monitor CAN at the same moment, but it switches within tens of milliseconds (any character
+  stops the monitor). Stage 2 shares the adapter by time-slicing (VEHICLE-LINK-SPEC §16): the monitor runs while the
+  ECU is awake and breaks for OBD requests. Engine and ignition state stay on OBD (`010C`, the `0100` probe) in every
+  stage.
+- Per car (VIN), CAN data goes through three levels:
+
+  | Level       | Navigation speed                    | CAN frames                     | OBD `010D`                                                          |
+  | ----------- | ----------------------------------- | ------------------------------ | ------------------------------------------------------------------- |
+  | OBD         | `010D`, back-to-back                | not read                       | the speed source                                                    |
+  | CAN shadow  | `010D`, at the time-sliced rate     | logged raw, decoded in replay  | the speed source, and the reference for the CAN mapping             |
+  | CAN primary | wheel speeds                        | decoded on the phone           | ~1 Hz cross-check; a disagreement or missing frames → back to OBD   |
+
+  A car moves to CAN primary when its drives, each on its own, show the CAN speed matching `010D` within its 1 km/h
+  step, the wheel speeds matching GNSS, and the gear reading R while reversing.
 
 ## 3. Architecture
 
@@ -97,8 +110,9 @@ Full specification: [VEHICLE-LINK-SPEC.md](VEHICLE-LINK-SPEC.md). Summary:
 
 **Stage 2+ (STN)**
 
-- Reset, select protocol/bus (HS-CAN 500 kbps), set **pass filters** for required IDs only, start monitor mode. Unfiltered mode only for the logger/RE workflow.
-- Batch frames to JS every 50–100 ms. Ignition-off detection: CAN silence timeout.
+- Select protocol/bus (HS-CAN 500 kbps), set **pass filters** for required IDs only, monitor with `STM`
+  (VEHICLE-LINK-SPEC §16). Unfiltered mode only for the port survey and the logger/RE workflow.
+- Batch frames to JS every 50–100 ms. CAN silence is a hint for ignition-off; the OBD probe confirms it.
 
 ### 3.2 Odometry sources (`src/nav/odometry/`)
 
@@ -120,6 +134,16 @@ A common `OdometrySource` interface feeds the EKF with timestamped speed and yaw
 
 - JSON profiles derived from opendbc (MIT) subset + our reverse-engineered signals. No DBC parsing on device.
 - Profile fields: bus, CAN IDs, signals (start bit, length, endianness, signedness, scale, offset), track width, wheelbase, default wheel scale.
+- A profile has two parts. **Signal definitions** are generated from a pinned opendbc commit, for every make, so
+  nothing in the repo marks the test cars. A **per-make mapping** is written by hand from opendbc's `carstate` code:
+  which message and signal give each quantity (wheel speeds, speed, gear, steering angle), its unit (km/h or mph),
+  extra factors, sign and gear value table, and the per-platform choices `carstate` makes. The rest of `carstate`
+  (cruise, buttons, lane keeping) isn't ported.
+- A mapping is trusted only after the CAN shadow comparison (§2.1): `010D` is km/h on every car, so a wrong unit or
+  factor shows as a constant ratio.
+- Profile selection: the VIN's make (WMI) gives the candidate profiles; a survey of the OBD port (ids, lengths,
+  rates) picks one and shows whether its signals are visible. openpilot's CAN fingerprints aren't used: they are
+  recorded at its camera harness, behind any gateway, not at the OBD port.
 
 ##### Main test car — known signals (its opendbc DBC, HS-CAN pins 6/14)
 
@@ -133,7 +157,8 @@ A common `OdometrySource` interface feeds the EKF with timestamped speed and yaw
 | ?              | yaw rate       | **Unknown — reverse-engineer (Phase 9, Stage 3).** Likely near 0x078 (stability-control sensor cluster). |
 
 - Wheel speeds are unsigned → direction from `GEAR` (R = negative).
-- MS-CAN (pins 3/11, 125 kbps) is a fallback bus if chassis frames aren't on HS-CAN at the OBD port.
+- The main test car's OBD port carries the HS-CAN broadcast (no gateway). MS-CAN (pins 3/11, 125 kbps) is the
+  fallback for a signal that isn't on HS-CAN.
 
 ### 3.3 GNSS integrity (`src/nav/integrity/`)
 

@@ -66,6 +66,10 @@ export class NativeTransport implements Transport {
     }
   }
 
+  writeRaw(text: string): Promise<void> {
+    return VehicleLinkModule.writeRaw(text);
+  }
+
   onUnsolicited(listener: (text: string, rxUs: number) => void): () => void {
     return this.unsolicited.on(listener);
   }

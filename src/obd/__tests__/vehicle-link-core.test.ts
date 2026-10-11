@@ -396,4 +396,50 @@ describe("VehicleLinkCore", () => {
     expect(both.map((x) => x.lines[0])).toEqual(["ELM327 v1.5", "6"]);
     await core.disconnect();
   });
+  describe("CAN monitor (§16)", () => {
+    const BROADCAST = [
+      { id: 0x215, periodMs: 20, data: [0x27, 0x10, 0x27, 0x10, 0x27, 0x10, 0x27, 0x10] },
+      { id: 0x228, periodMs: 100, data: [0x10] },
+      { id: 0x4f0, periodMs: 1000, data: [1, 2, 3] },
+    ];
+
+    test("monitors the ids asked for, past the speed ECU's receive filter, then polls again", async () => {
+      const { core, emulators, events } = setup({ ...STN_PROFILE, broadcast: BROADCAST });
+      core.startDiscovery();
+      void core.connect("emu-1");
+      await until(() => core.getSnapshot().link === "polling" && core.getSnapshot().lastSpeed !== null);
+      const emu = emulators.get("emu-1")!;
+      expect(emu.log).toContain("ATCRA7E8");
+
+      const survey = await core.monitorCan({ ids: [0x215, 0x228], durationMs: 2000 });
+      expect(survey.ids.map((i) => i.id)).toEqual([0x215, 0x228]);
+      expect(survey.ids[0].hz).toBeGreaterThan(45);
+      expect(survey.ids[0].hz).toBeLessThan(55);
+      expect(survey.ids[1].hz).toBeGreaterThan(8);
+      expect(survey.ids[1].hz).toBeLessThan(12);
+      expect(survey.ids[0].last).toEqual(BROADCAST[0].data);
+      expect(events.some((e) => e.type === "can-monitor" && e.detail?.startsWith("2 ids"))).toBe(true);
+      expect(events.some((e) => e.type === "unsolicited")).toBe(false);
+
+      // The session is back as init left it: headers off, the speed ECU pinned again.
+      const log = emu.log.slice(emu.log.indexOf("STM"));
+      expect(log.slice(0, 5)).toEqual(["STM", "", "ATAR", "ATCRA7E8", "ATH0"]);
+      const polls = core.getSnapshot().lastSpeed!.rxUs;
+      await until(() => core.getSnapshot().lastSpeed!.rxUs > polls);
+
+      // Every id: a pass-all filter.
+      const all = await core.monitorCan({ ids: null, durationMs: 3000 });
+      expect(all.ids.map((i) => i.id)).toEqual([0x215, 0x228, 0x4f0]);
+      await core.disconnect();
+    });
+
+    test("needs an STN adapter", async () => {
+      const { core } = setup({ broadcast: BROADCAST });
+      core.startDiscovery();
+      void core.connect("emu-1");
+      await until(() => core.getSnapshot().link === "polling");
+      await expect(core.monitorCan({ ids: null, durationMs: 1000 })).rejects.toThrow("needs an STN adapter");
+      await core.disconnect();
+    });
+  });
 });

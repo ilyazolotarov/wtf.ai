@@ -40,6 +40,8 @@ export interface EmulatorProfile {
    * 0: not modelled.
    */
   klineSessionMs?: number;
+  /** CAN frames the car broadcasts while the ignition is on, for the STN monitor (`STM`). */
+  broadcast?: { id: number; periodMs: number; data: number[] }[];
 }
 
 export interface VehicleState {
@@ -147,6 +149,11 @@ export class Elm327Emulator implements Transport {
   private header = 0x7df;
   private receiveFilter: number | null = null;
   private vinRequests = 0;
+  /** STN pass filters (`STFPA pattern,mask`) and the monitor (`STM`). */
+  private passFilters: { pattern: number; mask: number }[] = [];
+  private monitoring = false;
+  private monitorStartUs = 0;
+  private broadcastSent: number[] = [];
 
   constructor(
     private readonly clock: Clock,
@@ -195,6 +202,46 @@ export class Elm327Emulator implements Transport {
     return this.unsolicited.on(listener);
   }
 
+  /** Only `STM` (STN monitor): its frames arrive as unsolicited text until the next command stops it. */
+  async writeRaw(text: string): Promise<void> {
+    if (!this.connected) throw new Error("not connected");
+    this.log.push(text.trim());
+    if (text.trim().toUpperCase() !== "STM" || !this.profile.stn) return;
+    this.monitoring = true;
+    this.monitorStartUs = this.clock.nowUs();
+    this.broadcastSent = (this.profile.broadcast ?? []).map(() => 0);
+    void this.monitorLoop();
+  }
+
+  private async monitorLoop(): Promise<void> {
+    const eol = this.profile.lineEnding;
+    while (this.monitoring && this.connected) {
+      await this.clock.sleep(20);
+      if (!this.monitoring) return;
+      const lines = this.dueFrames();
+      if (lines.length > 0) this.unsolicited.emit(lines.join(eol) + eol, this.clock.nowUs());
+    }
+  }
+
+  /** Broadcast frames sent since the last call that pass the CAN hardware filter (ATCRA) and a pass filter. */
+  private dueFrames(): string[] {
+    const lines: string[] = [];
+    const elapsedUs = this.clock.nowUs() - this.monitorStartUs;
+    (this.profile.broadcast ?? []).forEach((b, i) => {
+      const due = Math.floor(elapsedUs / (b.periodMs * 1000));
+      const passes =
+        this.vehicle.ignition &&
+        (this.receiveFilter === null || this.receiveFilter === b.id) &&
+        this.passFilters.some((f) => (b.id & f.mask) === (f.pattern & f.mask));
+      for (; this.broadcastSent[i] < due; this.broadcastSent[i]++) {
+        if (!passes) continue;
+        const sep = this.spaces ? " " : "";
+        lines.push([...(this.headers ? [b.id.toString(16).toUpperCase().padStart(3, "0")] : []), ...b.data.map(hex2)].join(sep));
+      }
+    });
+    return lines;
+  }
+
   onLinkLost(listener: (reason: string) => void): () => void {
     return this.linkLost.on(listener);
   }
@@ -204,6 +251,15 @@ export class Elm327Emulator implements Transport {
     if (!this.connected) throw new Error("not connected");
     this.commandCount++;
     this.log.push(command);
+
+    if (this.monitoring) {
+      // Any character stops the monitor: the frames still buffered, STOPPED, the prompt.
+      this.monitoring = false;
+      const eol = this.profile.lineEnding;
+      await this.clock.sleep(this.profile.atLatencyMs);
+      const raw = [...this.dueFrames(), "STOPPED"].join(eol) + eol + eol + ">";
+      return { raw, status: "ok", txUs, rxFirstUs: this.clock.nowUs(), rxUs: this.clock.nowUs() };
+    }
 
     if (!this.profile.isElm || (this.profile.dropFirstCommand && this.firstCommand)) {
       this.firstCommand = false;
@@ -247,6 +303,7 @@ export class Elm327Emulator implements Transport {
     if (cmd === "") return { body: ["?"], delayMs: at };
     if (cmd.startsWith("AT")) return { body: this.atCommand(cmd.slice(2)), delayMs: at };
     if (cmd === "STI") return { body: [this.profile.stn ?? "?"], delayMs: at };
+    if (cmd.startsWith("ST")) return { body: this.stnCommand(cmd.slice(2)), delayMs: at };
     if (/^[0-9A-F]+$/.test(cmd)) return this.obdCommand(cmd);
     return { body: ["?"], delayMs: at };
   }
@@ -259,6 +316,7 @@ export class Elm327Emulator implements Transport {
       this.headers = false;
       this.header = 0x7df;
       this.receiveFilter = null;
+      this.passFilters = [];
       if (c !== "D") {
         this.protocol = 0;
         this.searched = false;
@@ -308,9 +366,26 @@ export class Elm327Emulator implements Transport {
     }
     if (c === "AR") {
       this.receiveFilter = null;
+      this.passFilters = [];
       return ok;
     }
     if (c.startsWith("ST")) return ok;
+    return ["?"];
+  }
+
+  private stnCommand(c: string): string[] {
+    if (!this.profile.stn) return ["?"];
+    if (c.startsWith("FPA") || c.startsWith("FAP")) {
+      const [pattern, mask] = c.slice(3).split(",").map((h) => parseInt(h, 16));
+      if (!Number.isFinite(pattern) || !Number.isFinite(mask)) return ["?"];
+      this.passFilters.push({ pattern, mask });
+      return ["OK"];
+    }
+    if (c === "FPC" || c === "FAC") {
+      this.passFilters = [];
+      return ["OK"];
+    }
+    if (/^CMM[0-2]$/.test(c)) return ["OK"];
     return ["?"];
   }
 
