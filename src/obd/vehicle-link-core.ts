@@ -81,8 +81,16 @@ export interface VehicleLinkDeps {
 
 const ADAPTERS_KEY = "vehicleLink.adapters";
 const SPEED_CAPS_KEY = "vehicleLink.speedCapsByVin";
-/** Adapters whose CAN monitor froze them, with the firmware it happened on (§16.2). */
-const SHADOW_FROZE_KEY = "vehicleLink.canShadowFroze";
+/**
+ * Adapters whose CAN monitor froze them, with the firmware it happened on (§16.2). (The first key also held a car
+ * switched off taken for a freeze: not read.)
+ */
+const SHADOW_FROZE_KEY = "vehicleLink.canShadowFrozeOn";
+/**
+ * Standing, a monitor gone silent may be the car switched off (the adapter powers down; iOS reports it gone within
+ * seconds). It counts as a freeze only when the adapter is still there this long after, and doesn't answer.
+ */
+const FROZE_CONFIRM_US = 20_000_000;
 const CARS_KEY = "vehicleLink.cars";
 const STATS_INTERVAL_US = 250_000;
 
@@ -145,6 +153,8 @@ export class VehicleLinkCore implements VehicleLink {
   private unsubscribers: (() => void)[] = [];
   private lastStatsUs = 0;
   private reiniting = false;
+  /** The CAN monitor went silent while standing: a freeze, or the car switched off (§16.2). */
+  private shadowFrozeSuspect: { deviceId: string; chip: string; sinceUs: number } | null = null;
   private speedCapOverride: number | null = null;
   private rpmPeriods: Partial<PollerConfig> = {};
   /** Bumped by every init: a VIN retry belongs to the init that started it. */
@@ -488,6 +498,9 @@ export class VehicleLinkCore implements VehicleLink {
       onSearch: (active) => this.update({ protocolSearch: active }),
     });
     this.check(gen);
+    const suspect = this.shadowFrozeSuspect;
+    if (!probe.ok && suspect && this.deps.clock.nowUs() - suspect.sinceUs >= FROZE_CONFIRM_US) this.markShadowFroze(suspect);
+    if (probe.ok) this.shadowFrozeSuspect = null;
     if (!probe.ok) {
       this.event("probe-failed", probe.failedStep);
       if (reconnect) throw new Error(`probe failed at ${probe.failedStep}`);
@@ -798,9 +811,14 @@ export class VehicleLinkCore implements VehicleLink {
               void this.restoreAfterShadow();
               return;
             }
-            // Not again on this adapter until its firmware changes (§16.2); recover the link now rather than
-            // after the polls time out.
-            if (adapter?.chip) this.deps.store.setJson(SHADOW_FROZE_KEY, { ...this.shadowFroze(), [adapter.deviceId]: adapter.chip });
+            // Not again on this adapter until its firmware changes (§16.2): at once while moving (the car isn't
+            // switched off at speed); standing, once the adapter is still there and silent (`runSession`).
+            if (adapter?.chip) {
+              const froze = { deviceId: adapter.deviceId, chip: adapter.chip, sinceUs: this.deps.clock.nowUs() };
+              if ((this.snapshot.lastSpeed?.raw ?? 0) > 0) this.markShadowFroze(froze);
+              else this.shadowFrozeSuspect = froze;
+            }
+            // Recover the link now rather than after the polls time out.
             void this.reinit(gen, "adapter silent in the CAN monitor", true);
           },
         });
@@ -816,6 +834,12 @@ export class VehicleLinkCore implements VehicleLink {
   /** Adapter id → the chip and firmware (`STN2255 v5.10.3`) it froze on in the CAN monitor. */
   private shadowFroze(): Record<string, string> {
     return this.deps.store.getJson<Record<string, string>>(SHADOW_FROZE_KEY) ?? {};
+  }
+
+  private markShadowFroze(froze: { deviceId: string; chip: string }): void {
+    this.shadowFrozeSuspect = null;
+    this.event("can-shadow", `froze the adapter: off on ${froze.chip} from now on`);
+    this.deps.store.setJson(SHADOW_FROZE_KEY, { ...this.shadowFroze(), [froze.deviceId]: froze.chip });
   }
 
   /** The adapter as the init left it: no pass filters, headers off, the speed ECU pinned. */

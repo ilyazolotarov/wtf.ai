@@ -1,4 +1,4 @@
-import { Announcer, spokenDistanceM, type AnnouncerInput } from "@/nav/routing/announcer";
+import { Announcer, nowDistanceM, spokenDistanceM, type AnnouncerInput } from "@/nav/routing/announcer";
 import type { GuidanceStep } from "@/nav/routing/guidance";
 import type { Maneuver } from "@/nav/routing/maneuvers";
 
@@ -64,6 +64,21 @@ describe("Announcer", () => {
   test("a maneuver already closer than the spoken distance (a route starting near it): the nearest", () => {
     const a = new Announcer();
     expect(a.update({ ...at(780), planId: 3 })).toEqual([expect.objectContaining({ stage: "prepare", distanceM: 200 })]);
+  });
+
+  test("'at it' early enough to hear it, react and slow down for the turn", () => {
+    const kph = (v: number) => v / 3.6;
+    // City turns: ~45 m at 30 km/h, ~90 m at 50, ~150 m at 70; never under 40 m.
+    expect(nowDistanceM("right", kph(30))).toBeCloseTo(43, 0);
+    expect(nowDistanceM("left", kph(50))).toBeCloseTo(89, 0);
+    expect(nowDistanceM("left", kph(70))).toBeCloseTo(151, 0);
+    expect(nowDistanceM("left", kph(10))).toBe(40);
+    // A slight turn or a ramp is driven fast: less to brake.
+    expect(nowDistanceM("keep-right", kph(100))).toBeLessThan(nowDistanceM("right", kph(100)) - 40);
+    // The announcer uses it: at 50 km/h a left is said 89 m before, not 56 m.
+    const a = new Announcer();
+    expect(a.update({ ...at(905), speedMps: kph(50) }).map((s) => s.kind === "maneuver" && s.stage)).toEqual([]);
+    expect(a.update({ ...at(915), speedMps: kph(50) }).map((s) => s.kind === "maneuver" && s.stage)).toEqual(["now"]);
   });
 
   test("spoken distances: the nearest step", () => {

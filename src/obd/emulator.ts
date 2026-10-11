@@ -44,6 +44,11 @@ export interface EmulatorProfile {
   broadcast?: { id: number; periodMs: number; data: number[] }[];
   /** STN pass filters also pass broadcast frames into request answers (one arrives before the ECU's answer). */
   passFiltersLeak?: boolean;
+  /**
+   * A bare `ATCRA` (open the receive filter again): `refused` answers `?`, `ignored` answers OK and keeps the filter.
+   * Either explains a monitor that hears nothing after its first break (OBDLink MX+ on 5.13.1, 2026-10-11).
+   */
+  bareAtcra?: "refused" | "ignored";
 }
 
 export interface VehicleState {
@@ -159,6 +164,8 @@ export class Elm327Emulator implements Transport {
   private broadcastSent: number[] = [];
   private frozen: "until-reconnect" | "for-good" | null = null;
   private freezeAtMonitor: "until-reconnect" | "for-good" | null = null;
+  private poweredOff = false;
+  private powerOffAtMonitor = false;
 
   constructor(
     private readonly clock: Clock,
@@ -179,6 +186,7 @@ export class Elm327Emulator implements Transport {
 
   async connect(): Promise<ConnectedInfo> {
     await this.clock.sleep(50);
+    if (this.poweredOff) throw new Error("adapter not reachable");
     this.connected = true;
     this.firstCommand = true;
     if (this.frozen === "until-reconnect") this.frozen = null;
@@ -207,6 +215,19 @@ export class Elm327Emulator implements Transport {
     this.monitoring = false;
   }
 
+  /**
+   * The car switched off at the next `STM` (with the monitor running, as on 2026-10-11): the adapter goes silent and
+   * can't be reached until `powerOn`.
+   */
+  powerOffInMonitor(): void {
+    this.powerOffAtMonitor = true;
+  }
+
+  powerOn(): void {
+    this.poweredOff = false;
+    this.frozen = null;
+  }
+
   /** `freeze()` at the next `STM`: inside a monitor window, as both freezes seen. */
   freezeInMonitor(untilReconnect = true): void {
     this.freezeAtMonitor = untilReconnect ? "until-reconnect" : "for-good";
@@ -228,6 +249,12 @@ export class Elm327Emulator implements Transport {
     this.log.push(text.trim());
     if (this.frozen) return;
     if (text.trim().toUpperCase() !== "STM" || !this.profile.stn) return;
+    if (this.powerOffAtMonitor) {
+      this.powerOffAtMonitor = false;
+      this.poweredOff = true;
+      this.frozen = "for-good";
+      return;
+    }
     if (this.freezeAtMonitor) {
       this.frozen = this.freezeAtMonitor;
       this.freezeAtMonitor = null;
@@ -398,6 +425,8 @@ export class Elm327Emulator implements Transport {
     if (c.startsWith("CRA")) {
       if (!this.profile.supportsHeaderSet) return ["?"];
       const digits = c.slice(3);
+      if (digits === "" && this.profile.bareAtcra === "refused") return ["?"];
+      if (digits === "" && this.profile.bareAtcra === "ignored") return ok;
       this.receiveFilter =
         digits === ""
           ? null

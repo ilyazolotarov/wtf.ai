@@ -91,6 +91,7 @@
     "replay:imuspeed": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/imu-speed.ts",
     "replay:turns": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/turn-tracker.ts",
     "can:profiles": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/can/profiles.ts",
+    "replay:voice": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/voice-timing.ts",
     "replay:can": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/can-report.ts",
     "voice:render": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/voice/render.ts",
     "logs:status": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/triplog/sync.ts status",

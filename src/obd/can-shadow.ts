@@ -48,6 +48,13 @@ export interface CanShadowDeps {
 /** The monitor ending by itself this many times: back to plain polling for the session. */
 const SELF_ENDS_TO_FAIL = 3;
 const SILENT = "no answer at all after stopping the monitor";
+/**
+ * Listening this long in a row without a frame of the ids: the receive filter (pinned for the polls) didn't open
+ * again. Then it is opened by a full setup (ATAR and the pass filters) before every window; deaf as long again after
+ * that, the shadow is off. On 2026-10-11 the MX+ on firmware 5.13.1 heard 129 frames in its first window and none in
+ * the 2770 after its first break (12 min of listening).
+ */
+const DEAF_US = 5_000_000;
 /** Stops that found no prompt, this many times: likewise. */
 const STOP_FAILURES_TO_FAIL = 3;
 /** Commands of others that change what the monitor sees: set up again before the next window. */
@@ -73,6 +80,10 @@ export class CanShadow implements IdleMonitor {
   private stopFailures = 0;
   private garbled = 0;
   private windowFrames = 0;
+  /** Listening since the last frame of the ids, µs. */
+  private deafUs = 0;
+  /** A bare `ATCRA` doesn't open the receive filter on this adapter: a full setup does. */
+  private reopenBySetup = false;
   private readonly wantedIds: Set<number>;
 
   constructor(private readonly deps: CanShadowDeps) {
@@ -107,9 +118,16 @@ export class CanShadow implements IdleMonitor {
     try {
       if (!this.configured && !(await this.setup(send))) return;
       // The monitor obeys the receive filter too.
-      if (this.pinned) {
-        await send("ATCRA", 1000);
-        this.pinned = false;
+      if (this.pinned && this.reopenBySetup) {
+        if (!(await this.setup(send))) return;
+      } else if (this.pinned) {
+        const r = await send("ATCRA", 1000);
+        if (r.status === "ok") this.pinned = false;
+        else {
+          this.deps.onEvent(`a bare ATCRA answered ${JSON.stringify(r.raw.trim())}: the filter opens by a full setup from now on`);
+          this.reopenBySetup = true;
+          if (!(await this.setup(send))) return;
+        }
       }
       // Only the ids asked for: any other is a line that lost its start in transport.
       this.collector = new CanMonitorCollector(this.deps.idDigits, (f) => {
@@ -219,6 +237,16 @@ export class CanShadow implements IdleMonitor {
     this.windows++;
     this.deps.onWindow({ startUs: this.windowStartUs, endUs, frames: this.windowFrames, endedItself, bufferFull: c.bufferFullCount });
     this.deps.onStatus(this.status);
+    if (this.windowFrames > 0) this.deafUs = 0;
+    else if ((this.deafUs += endUs - this.windowStartUs) >= DEAF_US) {
+      this.deafUs = 0;
+      const heard = `${DEAF_US / 1e6} s of listening heard none of the ids`;
+      if (this.reopenBySetup) this.fail(`${heard}, with a full setup before each window`);
+      else {
+        this.reopenBySetup = true;
+        this.deps.onEvent(`${heard}: the filter opens by a full setup from now on`);
+      }
+    }
   }
 
   private flush(): void {

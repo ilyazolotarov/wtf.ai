@@ -26,7 +26,7 @@ export const guideEn = {
   tourHoldTitle: "Press and hold the map",
   tourHoldBody: "Drops a pin: Route here. While the car stands, “I’m here” puts the car on the map when the dot is wrong.",
   tourFollowTitle: "Follow the car",
-  tourFollowBody: "Tap to switch between following and heading up. Moving the map lets go of the car; tap to come back.",
+  tourFollowBody: "Tap to switch between following and heading up. Moving the map lets go of the car; tap to come back, or drive on: it comes back by itself.",
   tourCarTitle: "Your car’s connection",
   tourCarBody: "Its dot: green, the car is connected; yellow, connecting; red, no adapter found. While you drive it reads “Driving”.",
   tourMoreTitle: "This guide, maps and settings",

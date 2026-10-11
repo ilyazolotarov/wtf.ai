@@ -3,15 +3,22 @@
 // speech in the driver's language.
 
 import type { GuidanceStep } from "./guidance";
-import type { Maneuver } from "./maneuvers";
+import type { Maneuver, ManeuverKind } from "./maneuvers";
 
 export interface AnnouncerConfig {
   /** Ahead: at max(`prepareMinM`, `prepareS` at the current speed) before the maneuver, up to a spoken distance. */
   prepareMinM: number;
   prepareS: number;
-  /** At it: max(`nowMinM`, `nowS` at the current speed) before it. */
+  /**
+   * At it: early enough to hear it, react and slow down for the turn (`nowDistanceM`). The car starts turning
+   * `nowTurnStartM` before the maneuver point; hearing it out and reacting take `nowSayS` (the position update and
+   * the clip starting, the phrase, a reaction); braking from the current speed to the maneuver's turning speed
+   * (`turnSpeedMps`) at `nowBrakeMps2`. At least `nowMinM`.
+   */
   nowMinM: number;
-  nowS: number;
+  nowTurnStartM: number;
+  nowSayS: number;
+  nowBrakeMps2: number;
   /** Not "ahead" when "at it" follows this soon after (the two would run into each other). */
   minGapS: number;
 }
@@ -20,9 +27,42 @@ export const DEFAULT_ANNOUNCER: AnnouncerConfig = {
   prepareMinM: 250,
   prepareS: 15,
   nowMinM: 40,
-  nowS: 4,
+  nowTurnStartM: 10,
+  // 0.5 s until the position and the clip, 1.3 s the phrase ("Поверніть праворуч"), 1 s to react.
+  nowSayS: 2.8,
+  nowBrakeMps2: 2,
   minGapS: 6,
 };
+
+/** The speed a maneuver is driven at, m/s: what the driver slows down to after "at it". */
+export function turnSpeedMps(kind: ManeuverKind): number {
+  switch (kind) {
+    case "slight-left":
+    case "slight-right":
+    case "keep-left":
+    case "keep-right":
+      return 50 / 3.6;
+    case "roundabout":
+      return 25 / 3.6;
+    case "u-turn":
+    case "sharp-left":
+    case "sharp-right":
+      return 15 / 3.6;
+    default:
+      return 20 / 3.6;
+  }
+}
+
+/**
+ * How far before a maneuver "at it" is said, m. With the old 4 s at the current speed it started on average 1.5 s
+ * before the car began to turn and ended after it (39 followed turns, 2026-10-09 to 10-11): too late to slow down.
+ */
+export function nowDistanceM(kind: ManeuverKind, speedMps: number, c: AnnouncerConfig = DEFAULT_ANNOUNCER): number {
+  const v = Math.max(0, speedMps);
+  const vt = turnSpeedMps(kind);
+  const brakeM = v > vt ? (v * v - vt * vt) / (2 * c.nowBrakeMps2) : 0;
+  return Math.max(c.nowMinM, c.nowTurnStartM + v * c.nowSayS + brakeM);
+}
 
 export type Announcement =
   | { kind: "maneuver"; stage: "prepare" | "now"; maneuver: Maneuver; distanceM: number; then: Maneuver | null }
@@ -82,7 +122,7 @@ export class Announcer {
     const next = maneuvers[g.nextIndex];
     if (!next || next.kind === "depart" || next.kind === "arrive") return out;
     const v = Math.max(0, input.speedMps);
-    const nowM = Math.max(c.nowMinM, c.nowS * v);
+    const nowM = nowDistanceM(next.kind, v, c);
     const prepareM = spokenDistanceAtLeastM(Math.max(c.prepareMinM, c.prepareS * v));
     const then = g.thenIndex !== null ? (maneuvers[g.thenIndex] ?? null) : null;
     const key = (stage: string) => `${g.nextIndex}:${stage}`;

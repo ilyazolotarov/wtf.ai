@@ -136,12 +136,13 @@ export default function HomeScreen() {
   useVoiceGuidance(route, position?.speedMps, voiceMuted || voiceOff);
   const audioOutput = useAudioOutput(route?.status === "active");
 
-  const { cameraMode, setCameraMode, pickCameraMode, toggleCameraMode: toggleMode, overview } = useCameraMode({
+  const { cameraMode, setCameraMode, onGesture, toggleCameraMode: toggleMode, overview } = useCameraMode({
     recording,
     // A linger after engine off is still the same drive for the camera.
     onTrip: recording || recorderState === "lingering",
     speedMps: position?.speedMps,
     route,
+    log: (text) => runtime.recorder.note(text),
   });
   // Tap never enters free (only map gestures do); from free it goes to heading-up.
   const toggleCameraMode = () => {
@@ -149,7 +150,7 @@ export default function HomeScreen() {
     toggleMode();
   };
 
-  const place = usePlacing({ position, navigator, pickCameraMode, setCameraMode, onStart: () => setPin(null) });
+  const place = usePlacing({ position, navigator, setCameraMode, onStart: () => setPin(null) });
   const placing = place.step;
   // Lost while standing: offer putting the car on the map, and say so when the ignition comes on.
   const placeOffered = !placing && !position?.poseQuestion && !manual && place.standing && isLost(position);
@@ -183,7 +184,7 @@ export default function HomeScreen() {
     // The dot's stop is the screen centre, where the follow camera keeps the car.
     setPin(null);
     setDetailsOpen(false);
-    pickCameraMode(() => "follow");
+    setCameraMode("follow");
     setTouring(true);
   };
   const takeTour = useEffectEvent(() => {
@@ -208,7 +209,7 @@ export default function HomeScreen() {
             ghostView={showingGhost}
             compass={compass}
             headingUpRad={headingUp}
-            onUserInteraction={() => pickCameraMode(() => "free")}
+            onUserInteraction={onGesture}
             onLongPress={setPin}
             pin={placing ? null : pin}
             logCamera={(text) => runtime.recorder.note(text)}

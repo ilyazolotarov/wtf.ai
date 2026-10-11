@@ -44,13 +44,12 @@ export function isLost(position: PositionEstimate | null): boolean {
 export function usePlacing({
   position,
   navigator,
-  pickCameraMode,
   setCameraMode,
   onStart,
 }: {
   position: PositionEstimate | null;
   navigator: NavigatorService;
-  pickCameraMode(next: (mode: CameraMode) => CameraMode): void;
+  /** The screen's change of camera: placing doesn't change the view a trip drives in. */
   setCameraMode(mode: CameraMode): void;
   /** A placing starts: whatever else the map was showing (a dropped pin) gives way. */
   onStart(): void;
@@ -77,13 +76,13 @@ export function usePlacing({
     setHeading(null);
     setPlaced(null);
     setStep("position");
-    pickCameraMode(() => "free");
+    setCameraMode("free");
   };
   const stop = () => {
     setStep(null);
     setPlaceAt(null);
     setHeading(null);
-    pickCameraMode(() => "follow");
+    setCameraMode("follow");
   };
   const placeHere = () => {
     const at = center.current;

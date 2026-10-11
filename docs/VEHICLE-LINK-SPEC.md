@@ -553,8 +553,9 @@ The same contract with two transports: BLE (same GATT catalog) and Classic SPP (
 6. Verify the auto-connect fix on device: open the app before the car wakes the MX+; it must connect once iOS reports the accessory.
 7. CAN shadow (§16.2) on the vLinker FD-IOS (BLE, STN1151): its break cost; and the listening share at 2 Hz on
    both adapters. On 2026-10-11 its windows heard frames only a few times in 8 min.
-8. The OBDLink MX+ froze in the CAN monitor on firmware 5.10.3 (§16.2); 5.13.1 lists raw CAN fixes. Drives on 5.13.1
-   with the shadow on tell whether it still freezes.
+8. The OBDLink MX+ froze in the CAN monitor on firmware 5.10.3 (§16.2); 5.13.1 lists raw CAN fixes. Its first drive
+   (2026-10-11) heard nothing after the first break (the filter didn't open again), so it says nothing about freezes
+   yet: drives with the full-setup reopening tell both.
 
 ## 16. CAN monitor (STN)
 
@@ -631,10 +632,19 @@ the hex ids (`can_shadow` in the log's info).
 - **Failure → plain polling for the session** (link event `can-shadow: off: …`, the adapter restored with `ATAR`,
   `ATCRA<pinned>`, `ATH0`, the speed cap back): a pass filter refused; the monitor ending by itself (`BUFFER FULL`, a
   reset: the prompt arrives unasked) 3 times; 3 stops without a prompt.
+- **The receive filter must open again** before each window (`ATCRA` with no address). If that isn't answered `OK`,
+  or 5 s of listening in a row hear none of the ids, the filter is opened by a full setup (`ATAR` and the pass
+  filters, ~0.1 s) before every window from then on (link event `can-shadow: … opens by a full setup`); deaf for as
+  long again after that, the shadow is off. On 2026-10-11 the MX+ on firmware 5.13.1 heard 129 frames in its first
+  window and none in the 2770 after its first break; a successful `ATCRA`'s answer isn't logged, so which of the two
+  it was is still open.
 - **The adapter froze in the monitor:** a stop gets no byte back at all (not even the frames still buffered), CR sent
   twice. The shadow goes off, the link is reset with one `ATWS` and, without an answer, closed and reopened (§10.5),
-  standing or moving. The adapter id and its chip and firmware (`STN2255 v5.10.3`) are stored: the shadow stays off on
-  it (link event `can-shadow: off: the adapter froze in the monitor on this firmware (…)`) until the firmware changes.
+  standing or moving. The adapter id and its chip and firmware (`STN2255 v5.10.3`) are stored, and the shadow stays
+  off on it (link event `can-shadow: off: the adapter froze in the monitor on this firmware (…)`) until the firmware
+  changes: at once when the car was moving; standing, only when the reconnect still reaches the adapter 20 s later
+  and it doesn't answer. Standing, the silence may be the car switched off: the MX+ powers down, and iOS reports it
+  gone within seconds (2026-10-11, 5.13.1: 3 s after the silent stop; a freeze kept the link up ~2 min).
   The OBDLink MX+ on 5.10.3 froze twice in ~22 min of listening (2026-10-11), inside a window both times (once at
   39 km/h, once standing), never without the monitor; iOS dropped it ~2 min later and it came back only when tapped in
   iOS Settings → Bluetooth.

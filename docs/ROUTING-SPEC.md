@@ -383,7 +383,13 @@ clip for every phrase (a roundabout exit past the 6th) is said by the system voi
 
 Each maneuver is said twice. Ahead of it, at a spoken distance: 50, 100, 200, 300, 400, 500, 600, 800 m, 1, 1.5 or
 2 km, the first at or beyond max(250 m, 15 s at the current speed), so the distance said is the distance left (a
-maneuver already closer, after a start or re-plan: the nearest). At it, at max(40 m, 4 s): "Поверніть ліворуч", with
+maneuver already closer, after a start or re-plan: the nearest). At it, early enough to hear it, react and slow down
+(`nowDistanceM`): 10 m before the maneuver point (where turning starts) + 2.8 s at the current speed (0.5 s for the
+position and the clip to start, 1.3 s the phrase, 1 s to react) + braking at 2 m/s² to the maneuver's speed (20 km/h a
+turn, 15 a sharp turn or U-turn, 25 a roundabout, 50 a slight turn or keep), at least 40 m: ~45 m at 30 km/h, ~90 m
+at 50, ~150 m at 70. The old 4 s at the current speed started on average 1.4 s before the car began turning and ended
+after it, 39 followed turns (`npm run replay:voice`: the turn from the gyro, so it doesn't depend on the dot, which
+reached the junction with the sharpest yaw, +6.2 s vs +6.1 s): too late to slow down. "Поверніть ліворуч", with
 "потім …" when the next follows within 120 m ("і ви на місці" for the destination). "Ahead" is skipped when "at it"
 would follow within 6 s. Roundabout exits are ordinals ("другий з’їзд"). Also "Маршрут перебудовано" for a re-plan
 and "Ви прибули". Nothing about the current plan's maneuvers while off it. The banner's speaker button mutes it (kept
@@ -441,8 +447,8 @@ After a new route (reason `new`), up to two other ways to the destination, like 
   an alternative is `on`, the car is on that one: it becomes the route instead of planning again
   (`route alternative taken (taken)`). On the route and off every alternative, they go away.
 - **Map** (UI-SPEC §6.3): quieter solid lines under the route, each labelled on its own stretch ("+4 min", "−2 min", "Same
-  time"). They come while the car stands: the map frames all routes once (free camera; the recentre button follows
-  again). Moving, the camera is left alone.
+  time"). They come while the car stands: the map frames all routes once (free camera; driving off or the camera button
+  follows again, UI-SPEC §6.2). Moving, the camera is left alone.
 - `npm run route -- --from … --to … --alternatives` prints them (and writes them to `--geojson`); `--bench <n>
   --alternatives` counts how often there are some, how much slower and how different, and the search time.
 

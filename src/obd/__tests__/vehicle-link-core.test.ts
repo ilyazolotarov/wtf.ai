@@ -549,11 +549,12 @@ describe("VehicleLinkCore", () => {
       }
     });
 
-    // 2026-10-11: an OBDLink MX+ (STN2255 v5.10.3) froze twice inside a monitor window, once standing.
-    test("the adapter freezes in the monitor: the link reopens at once, the shadow stays off on that firmware", async () => {
+    // 2026-10-11: an OBDLink MX+ (STN2255 v5.10.3) froze twice inside a monitor window, once at 39 km/h.
+    test("the adapter freezes in the monitor while driving: the link reopens at once, the shadow stays off on that firmware", async () => {
       const { core, windows, emu, events, store } = await shadowOn({});
       try {
-        await until(() => windows.length >= 3);
+        emu.setVehicle({ speedKph: 39 });
+        await until(() => windows.length >= 3 && core.getSnapshot().lastSpeed?.raw === 39);
         const chip = core.getSnapshot().adapter!.chip!;
         emu.freezeInMonitor();
         await until(() => events.some((e) => e.type === "reopen"));
@@ -562,13 +563,61 @@ describe("VehicleLinkCore", () => {
         expect(events.filter((e) => e.type === "reinit").map((e) => e.detail)).toEqual(["adapter silent in the CAN monitor"]);
         await until(() => core.getSnapshot().link === "polling" && events.some((e) => e.type === "link-restored"));
         await until(() => events.some((e) => e.detail === `off: the adapter froze in the monitor on this firmware (${chip})`));
-        expect(store.getJson<Record<string, string>>("vehicleLink.canShadowFroze")).toEqual({ "emu-1": chip });
+        expect(store.getJson<Record<string, string>>("vehicleLink.canShadowFrozeOn")).toEqual({ "emu-1": chip });
         // Other firmware (updated): it listens again.
-        store.setJson("vehicleLink.canShadowFroze", { "emu-1": "STN2255 v5.10.2" });
+        store.setJson("vehicleLink.canShadowFrozeOn", { "emu-1": "STN2255 v5.10.2" });
         const n = windows.length;
         core.setCanShadow(null);
         core.setCanShadow([0x215, 0x228]);
         await until(() => windows.length >= n + 3);
+      } finally {
+        await core.disconnect();
+      }
+    });
+
+    test("standing, a freeze counts once the adapter is still there and silent 20 s later", async () => {
+      const { core, windows, emu, events, store, clock } = await shadowOn({});
+      try {
+        await until(() => windows.length >= 3);
+        emu.freezeInMonitor(false);
+        await until(() => events.some((e) => e.type === "reopen"));
+        const t0 = clock.nowUs();
+        expect(store.getJson("vehicleLink.canShadowFrozeOn")).toBeNull();
+        await until(() => store.getJson("vehicleLink.canShadowFrozeOn") !== null);
+        expect(clock.nowUs() - t0).toBeGreaterThan(15_000_000);
+      } finally {
+        await core.disconnect();
+      }
+    });
+
+    // 2026-10-11, 5.13.1: the car switched off with the monitor running; iOS reported the MX+ gone 3 s later. That
+    // first build took it for a freeze and kept the shadow off on the new firmware.
+    test("the car switched off while listening (the adapter powers down): not a freeze", async () => {
+      const { core, windows, emu, events, store, clock } = await shadowOn({});
+      try {
+        await until(() => windows.length >= 3);
+        emu.powerOffInMonitor();
+        await until(() => events.some((e) => e.type === "reopen"));
+        const t0 = clock.nowUs();
+        await until(() => clock.nowUs() - t0 > 60_000_000);
+        expect(store.getJson("vehicleLink.canShadowFrozeOn")).toBeNull();
+        emu.powerOn();
+        await until(() => core.getSnapshot().link === "polling" && windows.length > 3 && core.getSnapshot().canShadow?.state !== "failed");
+        const n = windows.length;
+        await until(() => windows.length >= n + 3);
+      } finally {
+        await core.disconnect();
+      }
+    });
+
+    test.each(["refused", "ignored"] as const)("a bare ATCRA %s on the adapter: the filter opens by a full setup, frames go on", async (bareAtcra) => {
+      const { core, windows, events } = await shadowOn({ bareAtcra });
+      try {
+        await until(() => events.some((e) => e.type === "can-shadow" && /opens by a full setup/.test(e.detail ?? "")));
+        const n = windows.length;
+        await until(() => windows.length >= n + 5);
+        expect(windows.slice(n).every((w) => w.frames > 0)).toBe(true);
+        expect(core.getSnapshot().canShadow?.state).not.toBe("failed");
       } finally {
         await core.disconnect();
       }

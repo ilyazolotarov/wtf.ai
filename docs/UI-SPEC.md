@@ -179,9 +179,23 @@ scaling: large text grows less; test at 200 %).
 
 ### 6.2 Camera modes
 
-`follow` (north up) and `follow-heading`; a pan/zoom gesture switches to `free`. `CameraButton` shows the current mode;
-a tap from `free` always goes to `follow-heading` (a tap back to north up read as "heading-up points north"), then
-between `follow-heading` and `follow`. The mode and its automatic turns live in `useCameraMode`.
+`follow` (north up), `follow-heading` and `free`. The rules are a pure reducer (`camera-policy.ts`), fed by
+`useCameraMode`. On a trip the map's job is to follow the car; `free` is either a look around (a pan/zoom gesture) or a
+view the app opened (a new route's alternatives, placing the car), and it ends by itself once the car drives:
+
+- **The driving view**: `follow-heading`, unless the driver toggles to `follow` with the button during the trip (then
+  `follow` for the rest of it). A toggle off a trip, the screen's own changes (placing the car, the tour) and the
+  trip's end don't change it; the next trip drives heading-up again.
+- **Driving** (a trip recording, speed > ~2 m/s for 2 s; checked every second): north-up `follow` and the app's `free`
+  become the driving view at once; a look around once the map hasn't been touched for 10 s. Standing, `free` stays
+  (a look around at a stop, the alternatives to choose from). On 2026-10-11 the alternatives' overview stayed on for
+  28 s of driving, and after a pan the button had to be found while driving.
+- **The button** (`CameraButton`, shows the mode): from `free` always `follow-heading` (a tap back to north up read as
+  "heading-up points north"), then between `follow-heading` and `follow`.
+- **The trip ends** (recorder leaves `recording`/`lingering`): `follow-heading` goes back to `follow`, unless the
+  driver toggled the follow modes during it.
+- Into the trip log: every mode (`camera <mode>`), and a change the policy made by itself (`camera <mode> by itself:
+  driving off` / `driving, after the app's view` / `driving, the map left alone`).
 
 When the navigator started from where the car was parked and a Wi-Fi fix puts it elsewhere (NAVIGATOR-SPEC §6.1), a card under the status pill asks "Is the car where the dot is?", with how far Wi-Fi puts it: "Yes, it's here" keeps the dot, "No" moves it to the Wi-Fi position. It stays until answered or settled by the fixes; it never blocks the map.
 
@@ -192,8 +206,6 @@ The vehicle button in the footer carries the connection dot: green when the car 
 While the OBD adapter searches all protocols (`protocolSearch`, another car on it: up to ~20 s), a chip under the status pill says "Finding the car's protocol…", and the vehicle screen's adapter tile says the same.
 
 Heading-up bearing: the walking compass heading when shown; else the navigator heading (`dr`/`fused` source, valid while stopped); else GNSS course when speed > ~2 m/s; else the last of these held, so the map does not snap north at a stop. No direction known while standing (none yet: parked on phone GPS before a trip, the app just opened): heading-up keeps its camera (zoom 17, tilted) and the map keeps the bearing it has, so the view doesn't drop flat and north while the button says heading-up. Moving without one (the navigator anchored under GNSS jamming): the `follow` camera (zoom 16, flat, north up) until there is one, so it never looks like a heading-up view pointing the wrong way. The bearing goes to the map in [0°, 360°): iOS MapLibre ignores a negative one, and the dead-reckoning heading is signed.
-
-Auto heading-up: once per trip, when a trip is recording and speed stays > ~2 m/s for 2 s, `follow` switches to `follow-heading`. In `free` then (the map panned before driving off, a route's overview), the mode stays `free` (the button brings `follow-heading`). When the trip ends (recorder leaves `recording`/`lingering`) it goes back to `follow`, unless the driver picked a follow mode by button in between (a gesture into `free` doesn't count).
 
 Tilt: the camera tilts to 50° (navigator view) while a trip is recording or when zoomed in to ≥ 16.5 (back to top-down below 16). It applies in every mode and returns to top-down while the ghost view is open. Pitch is set only when this rule flips, so a manual two-finger tilt stays until then.
 
