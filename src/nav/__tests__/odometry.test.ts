@@ -41,6 +41,22 @@ describe("OdometryChunker", () => {
     expect(s.dsVar).toBeCloseTo((0.01 * 0.2) ** 2 + (0.1 * 0.02) ** 2, 12);
     expect(s.dpsiVar).toBeCloseTo(2e-7 + (0.001 * 0.02) ** 2 + (0.02 * 0.002) ** 2, 14);
   });
+
+  test("a chunk never mixes forward and reverse; distance stays cumulative either way", () => {
+    const steps: OdometryStep[] = [];
+    const c = new OdometryChunker();
+    steps.push(...c.add(inc(10_000), cal));
+    steps.push(...c.add(inc(20_000, { reverse: true }), cal));
+    steps.push(...c.add(inc(30_000, { reverse: true }), cal));
+    steps.push(...c.add(inc(40_000), cal));
+    const last = c.flush();
+    if (last) steps.push(last);
+    expect(steps.map((x) => [x.reverse, x.dsM.toFixed(1), x.distanceM.toFixed(1)])).toEqual([
+      [false, "0.1", "0.1"],
+      [true, "0.2", "0.3"],
+      [false, "0.1", "0.4"],
+    ]);
+  });
 });
 
 // ~2.4 km: pull away, straights, left and right turns, a stop, more turns (as navigator.test.ts).

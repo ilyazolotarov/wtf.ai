@@ -1033,20 +1033,25 @@ export class ParticleFilter {
       if (walk > 0) p.dks[i] = Math.max(-c.dksMax, Math.min(c.dksMax, p.dks[i] + walk * this.random.gauss()));
       const ds = Math.max(0, step.dsM * (1 + p.dks[i]) + c.alongNoise * step.dsM * this.random.gauss());
       if (p.offRoad[i]) {
-        this.offRoadStep(i, ds, step.dpsiRad);
+        this.offRoadStep(i, step.reverse ? -ds : ds, step.dpsiRad);
         continue;
       }
-      if (uTurned && this.random.uniform() < c.uTurnShare * (step.dsM / c.uTurnWindowM)) {
+      if (!step.reverse && uTurned && this.random.uniform() < c.uTurnShare * (step.dsM / c.uTurnWindowM)) {
         p.dir[i] = p.dir[i] === 1 ? -1 : 1;
       }
-      this.advanceOnRoad(i, ds);
+      this.advanceOnRoad(i, ds, step.reverse);
     }
   }
 
-  private advanceOnRoad(i: number, ds: number): void {
+  /**
+   * Moves a particle `ds` along its road: forward, the way it faces (`dir`); `backward` (reverse gear), the other
+   * way, still facing as it did, so at a junction it takes an exit behind it and keeps its nose to the road it left.
+   */
+  private advanceOnRoad(i: number, ds: number, backward = false): void {
     const p = this.p;
     let edge = this.graph.edge(p.edge[i]);
-    let dir = p.dir[i] as 1 | -1;
+    // The direction of travel along the edge.
+    let dir = (backward ? -p.dir[i] : p.dir[i]) as 1 | -1;
     let len = edgeLength(edge);
     let offset = p.offset[i] + dir * ds;
     for (let hops = 0; (offset > len || offset < 0) && hops < 50; hops++) {
@@ -1056,12 +1061,14 @@ export class ParticleFilter {
         // The way continues beyond the extract: carry on off the graph.
         p.offRoad[i] = 1;
         p.offset[i] = dir === 1 ? len : 0;
+        p.dir[i] = backward ? -dir : dir;
         this.placeOnRoad(i, edge);
-        p.e[i] += over * Math.sin(p.psi[i]);
-        p.n[i] += over * Math.cos(p.psi[i]);
+        const sign = backward ? -1 : 1;
+        p.e[i] += sign * over * Math.sin(p.psi[i]);
+        p.n[i] += sign * over * Math.cos(p.psi[i]);
         return;
       }
-      const exit = this.chooseExit(edge.id, dir);
+      const exit = this.chooseExit(edge.id, dir, backward);
       if (!exit) {
         dir = dir === 1 ? -1 : 1;
         offset = dir === 1 ? over : len - over;
@@ -1073,7 +1080,7 @@ export class ParticleFilter {
       offset = dir === 1 ? over : len - over;
     }
     p.edge[i] = edge.id;
-    p.dir[i] = dir;
+    p.dir[i] = backward ? -dir : dir;
     p.offset[i] = Math.min(len, Math.max(0, offset));
     this.placeOnRoad(i, edge);
   }
@@ -1104,16 +1111,17 @@ export class ParticleFilter {
     p.psi[i] = wrap(heading);
   }
 
+  /** `ds` < 0: backwards (reverse gear), the particle still facing `psi`. */
   private offRoadStep(i: number, ds: number, dpsi: number): void {
     const c = this.config;
     const p = this.p;
-    const turn = dpsi + c.offRoadHeadingNoise * Math.sqrt(ds) * this.random.gauss();
+    const turn = dpsi + c.offRoadHeadingNoise * Math.sqrt(Math.abs(ds)) * this.random.gauss();
     const mid = p.psi[i] + turn / 2;
     p.e[i] += ds * Math.sin(mid);
     p.n[i] += ds * Math.cos(mid);
     p.psi[i] = wrap(p.psi[i] + turn);
     p.roadTurn[i] += turn;
-    if (ds > 0 && this.random.uniform() < c.snapProbability) {
+    if (ds !== 0 && this.random.uniform() < c.snapProbability) {
       const near = this.graph.edgesNear(p.e[i], p.n[i], c.snapRadiusM)[0];
       if (!near) return;
       for (const dir of [1, -1] as const) {
@@ -1130,8 +1138,9 @@ export class ParticleFilter {
     }
   }
 
-  private chooseExit(edge: EdgeId, dir: 1 | -1): Exit | null {
-    const key = `${edge}:${dir}`;
+  /** `backward`: reversing out of `edge`; a one-way doesn't count (the car faces the other way). */
+  private chooseExit(edge: EdgeId, dir: 1 | -1, backward = false): Exit | null {
+    const key = `${edge}:${dir}${backward ? ":b" : ""}`;
     let choice = this.exitCache.get(key);
     if (!choice) {
       const c = this.config;
@@ -1142,7 +1151,7 @@ export class ParticleFilter {
       for (const x of exits) {
         const to = this.graph.edge(x.edge);
         let f = 1;
-        if (x.againstOneway) f *= c.againstOnewayFactor;
+        if (x.againstOneway && !backward) f *= c.againstOnewayFactor;
         if (x.restricted) f *= c.restrictedFactor;
         if (x.uTurn && !deadEnd) f *= c.uTurnFactor;
         if (to.flags & EdgeFlag.private) f *= c.privateFactor;

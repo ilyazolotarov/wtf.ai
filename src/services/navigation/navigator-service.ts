@@ -767,7 +767,7 @@ export class NavigatorService implements PositionSource {
       if (this.vin) this.deps.calibration.clearParkedPose(this.vin);
       this.poseStored = false;
     }
-    this.pending.push({ tUs: s.tUs, obd: { tUs: s.tUs, speedMps: s.speedMps, rawKph: s.raw } });
+    this.pending.push({ tUs: s.tUs, obd: { tUs: s.tUs, speedMps: s.speedMps, rawKph: s.raw, ...(s.source ? { source: s.source } : {}) } });
   }
 
   /** Feed everything up to `untilUs` in time order. */

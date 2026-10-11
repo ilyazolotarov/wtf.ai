@@ -93,6 +93,21 @@ jammed:
   the dead reckoning forward instead of back (~2× the reverse distance) and the turn isn't a manoeuvre; it needs
   reverse detected from the accelerometer along the car's axis, which nothing learns yet.
 
+### 5.3 CAN wheel speed (SPEC §2.1 Stage 2; replay only for now)
+
+- A speed sample may come from CAN (`ObdSpeedSample.source: "can"`): the mean of the four wheel speeds
+  (`odometry/can/can-speed.ts`, ~10 Hz, 0.01 km/h steps rounded so a standing car reads exactly 0), and the log's OBD
+  speed where the monitor didn't hear them (its breaks for polls: OBD fills in when the last CAN sample is over 0.3 s
+  old). It updates the same `v = k_s · s` with σ 0.1 m/s (a zero 0.3 m/s). σ 0.1–0.3 scored the same on the one drive
+  with clean GNSS (`replay:bench --speed can`, 8 seeds), so the physical value stays: timing jitter at city
+  acceleration, not resolution.
+- **Reverse gear** (CAN `GEAR` R) makes the speed negative: the EKF and the relative track move the car backwards,
+  and the odometry chunk is `reverse` (MAPMATCH-SPEC §6.1). The §5.2 manoeuvre handling then doesn't run (the speed
+  isn't 0). OBD's speed is never negative, so nothing changes without CAN.
+- Replay: `withCanSpeed` (`nav/replay/can.ts`); `replay:bench --speed can`, `replay:regress --speed can`, the
+  viewer's *Adapter: CAN wheel speeds*. On the drive from home (2026-10-11, jammed, after a placing) the shown dot
+  went back 9.9 and 6.1 m when the wheels reversed 7.8 and 4.2 m; on OBD it stood still.
+
 ## 6. EKF (`ekf/dr-ekf.ts`) and heading initialization
 
 - **State:** `E, N, ψ` (clockwise from north), `v`, `k_s`, `b_ω`, `k_ω`.

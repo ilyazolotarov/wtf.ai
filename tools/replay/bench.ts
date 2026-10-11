@@ -6,6 +6,7 @@
 //   npm run replay:bench -- tools/triplog/logs/*.ulg --mm [--seeds 3] [--mm-config '{"particles":1000}'] [--graph <file>]
 //   npm run replay:bench -- tools/triplog/logs/*.ulg --mm --durations 300,600   (longer outages; default 60,120,240)
 //   npm run replay:bench -- tools/triplog/logs/*.ulg --obd-hz 2   (OBD speed thinned to 2 Hz, thin-obd.ts)
+//   npm run replay:bench -- tools/triplog/logs/*.ulg --speed can  (CAN wheel speeds where heard, can.ts; drives without them are left out)
 //   npm run replay:bench -- tools/triplog/logs/*.ulg --jam-start [--every 60] [--seeds 3] [--mm-config '<json>'] [--graph <file>]
 //
 // With --mm the particle filter runs in every window (open loop) and its dominant cluster is
@@ -27,6 +28,7 @@ import type { NavConfig } from "../../src/nav/navigator";
 import { replayTrip, TripReplay, type CutResult, type ReplayOptions } from "../../src/nav/replay/replay";
 import { isSatelliteFix } from "../../src/nav/types";
 import { readTripLog, type TripLog } from "../../src/triplog/trip-log-reader";
+import { withCanSpeed } from "../../src/nav/replay/can";
 import { thinObd } from "./thin-obd";
 import { findGraph, openGraph } from "./graph-file";
 import { runInitBench } from "./init-bench";
@@ -75,6 +77,7 @@ function parseArgs(argv: string[]) {
   let everyS = 60;
   let seedCount = DEFAULT_SEEDS;
   let obdHz: number | undefined;
+  let speed: "obd" | "can" = "obd";
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--nav") nav = JSON.parse(argv[++i]) as Partial<NavConfig>;
     else if (argv[i] === "--verbose") verbose = true;
@@ -87,12 +90,13 @@ function parseArgs(argv: string[]) {
     else if (argv[i] === "--seeds") seedCount = Number(argv[++i]);
     else if (argv[i] === "--durations") DURATIONS_S = argv[++i].split(",").map(Number);
     else if (argv[i] === "--obd-hz") obdHz = Number(argv[++i]);
+    else if (argv[i] === "--speed") speed = argv[++i] === "can" ? "can" : "obd";
     else files.push(argv[i]);
   }
   if (!(Number.isInteger(seedCount) && seedCount >= 1)) throw new Error("--seeds takes a whole number ≥ 1");
   const first = mmConfig.seed ?? 1;
   const seeds = Array.from({ length: seedCount }, (_, k) => first + k);
-  return { files, nav, verbose, mm, mmConfig, graph, jamStart, everyS, compass, seeds, obdHz };
+  return { files, nav, verbose, mm, mmConfig, graph, jamStart, everyS, compass, seeds, obdHz, speed };
 }
 
 const median = (v: number[]) => {
@@ -123,6 +127,8 @@ interface Options {
   seeds: number[];
   durationsS: number[];
   obdHz?: number;
+  /** `can`: CAN wheel speeds where the monitor heard them (withCanSpeed). */
+  speed?: "obd" | "can";
 }
 /** The windows starting at one time: their lengths, shortest first. */
 type Start = { fromS: number; lensS: number[] };
@@ -138,8 +144,11 @@ function load(file: string, o: Options) {
   if (cached?.file === file) return cached;
   cached?.graph?.close();
   const read = readTripLog(new Uint8Array(readFileSync(file)));
-  const trip = o.obdHz ? thinObd(read, o.obdHz) : read;
+  const thinned = o.obdHz ? thinObd(read, o.obdHz) : read;
+  const can = o.speed === "can" ? withCanSpeed(thinned) : null;
+  const trip = can ?? thinned;
   cached = { file, trip, graph: null };
+  if (o.speed === "can" && !can) cached.skipped = "no CAN wheel speeds";
   if (o.mm) {
     const first = trip.gnss.find((f) => isSatelliteFix(f) && f.hAccM <= 10) ?? trip.gnss.find((f) => f.hAccM < 500);
     const graphFile = first && (o.graph ?? findGraph(first));
@@ -240,12 +249,12 @@ function runJob(job: Job): Plan | WindowRun[] {
 async function main() {
   const argv = process.argv.slice(2);
   const threads = threadsArg(argv);
-  const { files, nav, verbose, mm, mmConfig, graph, jamStart, everyS, compass, seeds, obdHz } = parseArgs(argv);
+  const { files, nav, verbose, mm, mmConfig, graph, jamStart, everyS, compass, seeds, obdHz, speed } = parseArgs(argv);
   if (jamStart) {
     await runInitBench(files, { nav, mmConfig, graph, everyS, verbose, compass, seeds, threads });
     return;
   }
-  const o: Options = { nav, mm, mmConfig, graph, seeds, durationsS: DURATIONS_S, obdHz };
+  const o: Options = { nav, mm, mmConfig, graph, seeds, durationsS: DURATIONS_S, obdHz, speed };
   const byDuration = new Map<number, (CutResult & { file: string })[]>(DURATIONS_S.map((d) => [d, []]));
   /** Map matching, one entry per window and seed (the EKF's max error alongside, for "better than"). */
   const mmByDuration = new Map<number, { maxM: number; endM: number; ekfMaxM: number }[]>(DURATIONS_S.map((d) => [d, []]));

@@ -7,7 +7,7 @@ export type OdometrySource = "ekf" | "relative";
 export interface OdometryStep {
   t0Us: number;
   t1Us: number;
-  /** Distance travelled, m (≥ 0: OBD speed is unsigned). */
+  /** Distance travelled, m (≥ 0; `reverse` gives the direction). */
   dsM: number;
   /** Heading change, rad, clockwise positive (the heading convention). */
   dpsiRad: number;
@@ -24,6 +24,11 @@ export interface OdometryStep {
   speedUnknown: boolean;
   /** `ekf`: EKF speed and calibrated gyro (mode dr). `relative`: OBD × stored speed scale and gyro − learned bias (before the EKF starts). */
   source: OdometrySource;
+  /**
+   * The car moved backwards (reverse gear, known from CAN only: OBD speed is unsigned): `dsM` is the distance, and
+   * `dpsiRad` the change of the way it faces. A chunk never mixes the two directions.
+   */
+  reverse: boolean;
 }
 
 /** One integration step of the navigator (one IMU or OBD event). */
@@ -38,6 +43,7 @@ export interface OdometryIncrement {
   yawUnknown: boolean;
   speedUnknown: boolean;
   source: OdometrySource;
+  reverse?: boolean;
 }
 
 /** Calibration uncertainty at the time of the step: correlated over a chunk. */
@@ -76,7 +82,8 @@ export class OdometryChunker {
 
   /** The chunks this closes: none, one, or two (a source change closes the one before). */
   add(inc: OdometryIncrement, calibration: OdometryCalibration): readonly OdometryStep[] {
-    const before = this.pending && this.pending.source !== inc.source ? this.flush() : null;
+    const p0 = this.pending;
+    const before = p0 && (p0.source !== inc.source || !!p0.reverse !== !!inc.reverse) ? this.flush() : null;
     const p = this.pending;
     if (!p) {
       this.pending = { ...inc, t0Us: inc.tUs - inc.dtS * 1e6, durationS: inc.dtS, whiteVar: inc.dpsiWhiteVar, calibration };
@@ -129,6 +136,7 @@ export class OdometryChunker {
       yawUnknown: p.yawUnknown,
       speedUnknown: p.speedUnknown,
       source: p.source,
+      reverse: !!p.reverse,
     };
   }
 }

@@ -131,10 +131,11 @@
       <option value="heading">Road heading</option>
       <option value="closed">Full correction</option>
     </select></label>
-  <label title="OBD as recorded, or none: the app in phone-only mode (Developer settings → Navigate without an adapter, NAVIGATOR-SPEC §9.6), its dot from the phone's own speed and gyro; GPS still takes over when it is good">Adapter
+  <label title="OBD as recorded; CAN wheel speeds where the CAN shadow heard them (OBD between; SPEC §2.1 Stage 2); or none: the app in phone-only mode (Developer settings → Navigate without an adapter, NAVIGATOR-SPEC §9.6), its dot from the phone's own speed and gyro; GPS still takes over when it is good">Adapter
     <select id="adapter">
       <option value="">OBD, as recorded</option>
       <option value="none">None: phone only</option>
+      <option value="can">CAN wheel speeds (where heard)</option>
     </select></label>
   <label title="What the replay gets of GPS. As in the app = your Cut GPS moments withheld, like on the phone">GPS
     <select id="gps">

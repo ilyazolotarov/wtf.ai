@@ -264,16 +264,18 @@ now hands them out (computed only while someone listens; `flushOdometry()` at th
 `odometry`):
 
 - **Chunks** (`OdometryStep`): each integration step's `Δs` and `Δψ`, summed into chunks of 2 m or 0.2 s
-  (whichever comes first; a change of source closes one early). Each chunk carries:
-  - `t0Us`, `t1Us`; `dsM` (≥ 0), `dpsiRad` (clockwise positive, like the heading) and their variances;
+  (whichever comes first; a change of source or of direction closes one early). Each chunk carries:
+  - `t0Us`, `t1Us`; `dsM` (≥ 0, a distance), `dpsiRad` (clockwise positive, like the heading) and their variances;
   - `distanceM` and `turnRad`: cumulative distance and unwrapped cumulative turn since the navigator started. The
     PF reads windows from them (§7.4);
   - flags: `stopped` (the whole chunk at standstill or zero speed), `yawUnknown` (gyro invalid while moving:
-    `Δψ` = 0 with handling noise), `speedUnknown` (OBD stale);
+    `Δψ` = 0 with handling noise), `speedUnknown` (OBD stale), `reverse` (the car moved backwards: reverse gear
+    from CAN, NAVIGATOR-SPEC §5.3; never with OBD's unsigned speed);
   - `source`.
 - **Source:**
   - `ekf` (mode `dr`): computed from the state before each prediction, so it is exactly the EKF's own motion:
-    `Δs = max(0, v)·dt` (v ≈ `k_s · s_OBD`), `Δψ = −k_ω (ω − b_ω) dt`, 0 while holding at standstill.
+    `Δs = max(0, v)·dt` (v ≈ `k_s · s_OBD`; reversing, `max(0, −v)·dt`), `Δψ = −k_ω (ω − b_ω) dt`, 0 while
+    holding at standstill.
   - `relative` (before the EKF starts): OBD × the stored `k_s` (NAVIGATOR-SPEC §7.4, default 1), and the gyro
     minus the bias learned at stops, `k_ω` = 1. This is what makes §8 possible.
 - **Variances:** `dsVar = (σ_ks/k_s · Δs)² + (0.1 m/s · T)²` (scale error correlated over the chunk, plus OBD
@@ -366,6 +368,11 @@ Arrays of numbers, not objects (structure of arrays over typed arrays), for Herm
   probability per step, an off-road particle within 5 m of an edge, heading within 20° of it, snaps onto the edge.
 - **Stopped chunks** (speed below 0.2 m/s) freeze the particles.
 - **`yawUnknown` chunks:** junction choice stays uniform, and the next relative-heading weight is skipped.
+- **`reverse` chunks** (reverse gear, from CAN): the particle moves `Δs` the other way along its road, still facing
+  as it did (`dir` and `ψ` are the way the car faces); at a node it takes an exit behind it, one-ways not counted
+  (the car faces against its travel); off-road, the unicycle steps backwards. No U-turn flips. On the fixture
+  graph (`particle-filter.test.ts`) a car reversing 36 m without GNSS ends 0.4 m from the truth; on unsigned OBD
+  speed it stays where it stopped, 37 m off.
 
 ### 7.4 Weighting
 

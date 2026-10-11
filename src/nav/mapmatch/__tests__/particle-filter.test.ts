@@ -32,6 +32,40 @@ function junctionDrive(turnDegS: number, exitMps = 10): DriveSegment[] {
 }
 
 describe("ParticleFilter in the navigator (synthetic drives on the fixture graph)", () => {
+  // CAN knows reverse gear (SPEC §2.1 Stage 2): the speed is negative, and the car moves backwards on the map. OBD's
+  // speed is unsigned (the main test car reads 0 in reverse): the car stays where it stopped.
+  test("reversing with CAN speed: the matched car goes back along the road, still facing the way it did", () => {
+    const g = graph();
+    const segments: DriveSegment[] = [
+      { durationS: 3, speedMps: 0, yawRateDegS: 0 },
+      { durationS: 10, speedMps: 12, yawRateDegS: 0 }, // 60 m
+      { durationS: 80, speedMps: 12, yawRateDegS: 0 }, // 960 m
+      { durationS: 5, speedMps: 0, yawRateDegS: 0 }, // 30 m, stops
+      { durationS: 3, speedMps: 0, yawRateDegS: 0 },
+      { durationS: 2, speedMps: -3, yawRateDegS: 0 }, // 3 m back
+      { durationS: 10, speedMps: -3, yawRateDegS: 0 }, // 30 m back
+      { durationS: 2, speedMps: 0, yawRateDegS: 0 }, // 3 m back
+      { durationS: 3, speedMps: 0, yawRateDegS: 0 },
+    ];
+    const drive = syntheticDrive({ segments, origin: ORIGIN, startHeadingRad: Math.PI / 2, gnss: "clean", obdScale: 1 });
+    // GNSS gone from the stop: only odometry and the map follow the reversing.
+    const cuts = [{ fromS: 95, toS: 1e9 }];
+    const can = { ...drive.trip, obdSpeed: drive.trip.obdSpeed.map((o) => ({ ...o, rawKph: Math.abs(o.rawKph), source: "can" as const })) };
+    const obd = { ...drive.trip, obdSpeed: drive.trip.obdSpeed.map((o) => ({ ...o, speedMps: Math.max(0, o.speedMps), rawKph: Math.max(0, o.rawKph) })) };
+    const truth = drive.truthAt(drive.trip.imu.at(-1)!.tUs);
+    const errorM = (trip: typeof drive.trip) => {
+      const top = replayTrip(trip, { mapMatch: { graph: g }, cuts }).track.at(-1)!.mapMatch!.clusters[0];
+      const dN = (top.lat - truth.lat) * 111_195;
+      const dE = (top.lon - truth.lon) * 111_195 * Math.cos((truth.lat * Math.PI) / 180);
+      return { m: Math.hypot(dE, dN), way: wayOf(g, top.edge) };
+    };
+    const withCan = errorM(can);
+    expect(withCan.way).toBe(160);
+    expect(withCan.m).toBeLessThan(8);
+    // The same drive on OBD speed: the car stays where it stopped, the 36 m back missed.
+    expect(errorM(obd).m).toBeGreaterThan(25);
+  });
+
   test("without GNSS it follows the turn onto the branch the car took", () => {
     const g = graph();
     const drive = syntheticDrive({ segments: junctionDrive(20), origin: ORIGIN, startHeadingRad: Math.PI / 2, gnss: "clean", obdScale: 0.99 });

@@ -15,6 +15,7 @@ import type { TiledRoadGraph } from "../../../src/nav/mapmatch/graph/road-graph"
 import type { NavConfig } from "../../../src/nav/navigator";
 import { drawnTruthTrack, drawPath, type DrawnPoint, type DrawnTruth } from "../../../src/nav/replay/drawn-truth";
 import { appOutageCuts, replayTrip, type ReplayOptions } from "../../../src/nav/replay/replay";
+import { withCanSpeed } from "../../../src/nav/replay/can";
 import { buildViewerData } from "../../../src/nav/replay/viewer-data";
 import { replayTripInApp, MemoryKeyValueStore, phoneOf, seedFromLog } from "../../../src/services/navigation/app-replay";
 import { CalibrationStore } from "../../../src/services/navigation/calibration-store";
@@ -237,13 +238,16 @@ const server = createServer((req, res) => {
       const startFrom = q("from") || "phone";
       // Adapter: the log's OBD as recorded, or none (phone-only mode, NAVIGATOR-SPEC §9.6: no OBD speed or engine).
       const phoneOnly = q("adapter") === "none";
+      // CAN: wheel speeds where the CAN shadow heard them, OBD between (SPEC §2.1 Stage 2; replay only).
+      const canSpeed = q("adapter") === "can";
       const compareLoop = LOOPS[q("compare")] ?? null;
       // Compass: off, or calibrated on the other logs, optionally turned (a wrong calibration).
       const compassArg = url.searchParams.get("compass") ?? "";
       const compass = compassArg ? compassFromOtherLogs(file) : null;
       const rotateDeg = Number(compassArg) || 0;
       const started = Date.now();
-      const trip = loadTrip(file);
+      const logged0 = loadTrip(file);
+      const trip = (canSpeed && withCanSpeed(logged0)) || logged0;
       // The navigator version the phone ran (trip log header, from the app's developer setting); default open.
       const phoneLoop = typeof trip.info.nav_mapmatch_loop === "string" ? trip.info.nav_mapmatch_loop : null;
       const loopKey = q("loop") || phoneLoop || "open";

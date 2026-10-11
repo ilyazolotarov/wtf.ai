@@ -143,8 +143,10 @@ export interface SampleTiming {
 
 export interface SpeedSample extends SampleTiming {
   speedMps: number;
-  /** PID 0D byte, km/h. */
+  /** PID 0D byte, km/h (from CAN: the wheel speed, 0.01 km/h steps). */
   raw: number;
+  /** CAN wheel speeds instead of PID 0D (SPEC §2.1: replay now, the app at level "CAN primary"). */
+  source?: "can";
 }
 
 export interface RpmSample extends SampleTiming {

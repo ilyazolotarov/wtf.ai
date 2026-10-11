@@ -11,6 +11,7 @@
 //   npm run replay:regress -- --speed phone          # no adapter: OBD speed replaced by the phone's (phone-speed.ts)
 //   npm run replay:regress -- --speed phone-app --phone-route   # the app without an adapter, the driver on a route
 //   npm run replay:regress -- --obd-hz 5             # OBD speed thinned to 5 Hz (the CAN monitor's time-slicing)
+//   npm run replay:regress -- --speed can            # CAN wheel speeds where the shadow heard them (can.ts); drives without, as logged
 //
 // Truth per drive, best first: the roads drawn for it in the viewer (`<log>.truth.json`, drawn-truth.ts), else its
 // clean satellite fixes (the dot when GPS came back after each gap, and through the app's Cut GPS stretches: the
@@ -30,6 +31,7 @@ import type { NavConfig, ParkedPose } from "../../src/nav/navigator";
 import { driveOutages, estimateTrack, obdDistanceM, type ShownPoint } from "../../src/nav/replay/drive-report";
 import { drawnTruthTrack, scoreDrawn, type DrawnTruth } from "../../src/nav/replay/drawn-truth";
 import type { PhoneMount } from "../../src/nav/odometry/imu/imu-speed";
+import { withCanSpeed } from "../../src/nav/replay/can";
 import { withPhoneSpeed } from "../../src/nav/replay/phone-speed";
 import { thinObd } from "./thin-obd";
 import { appOutageCuts } from "../../src/nav/replay/replay";
@@ -68,7 +70,7 @@ interface Job {
   nav: Partial<NavConfig>;
   mm: Partial<MapMatchConfig>;
   /** Where the navigator's speed comes from: the logged OBD, or the phone alone (scored against OBD all the same). */
-  speed?: "obd" | "phone" | "phone-oracle" | "phone-app";
+  speed?: "obd" | "phone" | "phone-oracle" | "phone-app" | "can";
   /** Experiment: score the map matching's leading hypothesis instead of the published dot (where it has one). */
   scoreMapMatch?: boolean;
   /** phone-app: the driver follows a route (the logged ones if the drawing says they were followed, else the drawn one). */
@@ -183,7 +185,12 @@ function runJob(job: Job): DriveResult[] {
       const phone = job.speed === "phone" || job.speed === "phone-oracle";
       // phone-app: the app with phone-only mode on and no adapter (its own engine, not phone speed into the navigator).
       const phoneApp = job.speed === "phone-app";
-      const input = phone ? withPhoneSpeed(trip, {}, chained ? mounts : undefined, true, job.speed === "phone-oracle") : job.obdHz ? thinObd(trip, job.obdHz) : trip;
+      const obd = job.obdHz ? thinObd(trip, job.obdHz) : trip;
+      const input = phone
+        ? withPhoneSpeed(trip, {}, chained ? mounts : undefined, true, job.speed === "phone-oracle")
+        : job.speed === "can"
+          ? (withCanSpeed(obd) ?? obd)
+          : obd;
       const r = replayTripInApp(input, {
         calibration,
         loop: (job.nav.mapMatchLoop ?? APP_NAV_DEFAULTS.mapMatchLoop ?? "closed") as MapMatchLoop,

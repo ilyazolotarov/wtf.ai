@@ -154,6 +154,9 @@ A common `OdometrySource` interface feeds the EKF with timestamped speed and yaw
   length (only those the monitor listened for, when it was filtered) pick one, and a profile needs a wheel or speed
   message among them. openpilot's CAN fingerprints aren't used: they are recorded at its camera harness, behind any
   gateway, not at the OBD port.
+- Navigation on CAN speed, replay only so far: wheel speeds as the navigator's speed, reverse gear moving the car
+  and the map matching backwards (NAVIGATOR-SPEC §5.3, MAPMATCH-SPEC §7.3); `--speed can` in `replay:bench` and
+  `replay:regress`, *Adapter: CAN wheel speeds* in the viewer. Wheel-differential yaw is next.
 - Replay: `npm run replay:can` decodes a log's frames and compares wheel and CAN speed with `010D` and satellite GNSS
   speed, gear with motion, and shows steering, brake and the share of the drive the monitor heard; the replay viewer
   draws the CAN wheel speed under the OBD speed and shows speed, gear and steering at the cursor.

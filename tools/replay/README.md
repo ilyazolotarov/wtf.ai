@@ -261,6 +261,7 @@ npm run replay:bench -- tools/triplog/logs/*.ulg --mm                  # outage 
 npm run replay:bench -- tools/triplog/logs/*.ulg --jam-start --verbose # heading init under jamming, with and without the map
 npm run replay:bench -- tools/triplog/logs/*.ulg --jam-start --compass   # …and with a compass calibrated on the other drives (right, turned 90°/180°)
 npm run replay:compass -- tools/triplog/logs/*.ulg                        # what the app logged about the compass in shadow (NAVIGATOR-SPEC §7.6)
+npm run replay:bench -- tools/triplog/logs/*.ulg --speed can --mm        # the navigator on CAN wheel speeds where heard (NAVIGATOR-SPEC §5.3)
 npm run replay:voice -- tools/triplog/logs/*.ulg                          # "turn now" vs when the car turned (gyro), per followed turn (ROUTING-SPEC §8.5)
 npm run replay:can -- tools/triplog/logs/*.ulg                            # CAN shadow frames decoded: wheel/CAN speed vs 010D and GNSS, gear, steering (SPEC §3.2)
 npm run replay:can -- trip.ulg --profile toyota/toyota/toyota_nodsu_pt_generated # …through a given profile (make/mapping/DBC)

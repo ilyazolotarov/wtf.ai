@@ -274,7 +274,7 @@ export function replayTripInApp(trip: TripLog, o: AppReplayOptions): AppReplayRe
     while (!o.phoneOnly && ob < trip.obdSpeed.length && (trip.obdSpeed[ob].rxUs ?? trip.obdSpeed[ob].tUs) <= nowUs) {
       const s = trip.obdSpeed[ob++];
       const rx = s.rxUs ?? s.tUs;
-      speed.emit({ txUs: 2 * s.tUs - rx, rxUs: rx, tUs: s.tUs, speedMps: s.speedMps, raw: s.rawKph });
+      speed.emit({ txUs: 2 * s.tUs - rx, rxUs: rx, tUs: s.tUs, speedMps: s.speedMps, raw: s.rawKph, ...(s.source ? { source: s.source } : {}) });
     }
     while (g < fixes.length && arrival(fixes[g]) <= nowUs) gnss.emit(fixes[g++]);
     const motion: ImuMotionRecord[] = [];

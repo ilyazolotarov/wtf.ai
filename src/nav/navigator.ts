@@ -60,6 +60,9 @@ export interface NavConfig {
   obdSigmaMps: number;
   /** OBD reads 0 below ~2–3 km/h, so a zero is a weak measurement unless the IMU agrees. */
   obdZeroSigmaMps: number;
+  /** CAN wheel speed (0.01 km/h steps, ~10 Hz; `ObdSpeedSample.source`), and a zero from it. */
+  canSigmaMps: number;
+  canZeroSigmaMps: number;
   /** Standstill = OBD 0 and a quiet IMU for this long. */
   standstillUs: number;
   /** OBD speed older than this is unknown (link lost); the parked poll runs at 1 Hz. */
@@ -175,6 +178,8 @@ export const DEFAULT_NAV_CONFIG: NavConfig = {
   resetAfterRejected: 5,
   obdSigmaMps: 0.3,
   obdZeroSigmaMps: 0.8,
+  canSigmaMps: 0.1,
+  canZeroSigmaMps: 0.3,
   standstillUs: 2_000_000,
   obdStaleUs: 2_500_000,
   // Pulling away, CoreLocation's course can be off by tens of degrees while claiming ±18°.
@@ -782,7 +787,8 @@ export class Navigator {
       this.manoeuvreRad = 0;
     }
     if (!this.ekf) return;
-    const obdSigma = s.rawKph === 0 ? this.config.obdZeroSigmaMps : this.config.obdSigmaMps;
+    const c = this.config;
+    const obdSigma = s.source === "can" ? (s.rawKph === 0 ? c.canZeroSigmaMps : c.canSigmaMps) : s.rawKph === 0 ? c.obdZeroSigmaMps : c.obdSigmaMps;
     for (const ekf of this.twin ? [this.ekf, this.twin] : [this.ekf]) {
       if (this.standstill) ekf.updateZeroSpeed(0.02);
       else ekf.updateObdSpeed(s.speedMps, obdSigma);
@@ -1040,10 +1046,10 @@ export class Navigator {
     const hold = this.standstill || (yaw === null && parked);
     if (yaw === null && !parked) this.stats.imuInvalidS += dt;
     if (this.standstill) this.stats.standstillS += dt;
-    this.stats.obdDistanceM += speed * dt;
+    this.stats.obdDistanceM += Math.abs(speed) * dt;
     if (!obdFresh) this.stats.unknownSpeedS += dt;
     // Without speed the car may still move: grow the radius at the last known speed.
-    if (this.anchor) this.anchor.distanceM += (this.lastObd?.speedMps ?? 0) * dt;
+    if (this.anchor) this.anchor.distanceM += Math.abs(this.lastObd?.speedMps ?? 0) * dt;
 
     const relRate = hold || yaw === null ? 0 : yaw - this.rel.bias;
     // Signed: idling, the gyro's noise averages out; a manoeuvre turns the car one way.
@@ -1094,19 +1100,21 @@ export class Navigator {
     let dpsi: number;
     let kw: number;
     let calibration;
+    // Backwards: only CAN speed reads below zero (in reverse gear); OBD's is unsigned, and its motion stays forward.
+    const reverse = (this.lastObd?.speedMps ?? 0) < 0;
     // The twin's motion when asked: its calibration came from GNSS only, never from the filter's corrections (§9.5).
     const src = this.config.mapMatchTwin.odometry && this.twin ? this.twin : this.ekf;
     if (src) {
       const p = src.params();
       kw = p.kw;
-      ds = Math.max(0, src.speed) * dt;
+      ds = Math.max(0, reverse ? -src.speed : src.speed) * dt;
       dpsi = hold || yaw === null ? 0 : -p.kw * (yaw - p.bw) * dt;
       calibration = { speedScaleRelSigma: Math.sqrt(p.ksVar) / p.ks, gyroBiasSigma: Math.sqrt(p.bwVar) * p.kw, gyroScaleSigma: Math.sqrt(p.kwVar) };
     } else {
       const ks = this.speedScale?.ks ?? 1;
       kw = 1;
       // The offset applies only to readings above the zero cutoff, as in the EKF.
-      ds = (obdSpeed > 0 ? ks * obdSpeed + (this.speedScale?.so ?? 0) : 0) * dt;
+      ds = (obdSpeed > 0 ? ks * obdSpeed + (this.speedScale?.so ?? 0) : reverse ? -ks * obdSpeed : 0) * dt;
       dpsi = hold || yaw === null ? 0 : -(yaw - this.rel.bias) * dt;
       calibration = {
         speedScaleRelSigma: Math.sqrt(this.speedScale?.ksVar ?? c.initSpeedScaleSigma ** 2) / ks,
@@ -1119,7 +1127,7 @@ export class Navigator {
     // A source change closes the chunk before this increment joins the next one: handed out first.
     if (this.odometry.pendingSource !== null && this.odometry.pendingSource !== source) this.flushOdometry();
     const steps = this.odometry.add(
-      { tUs, dtS: dt, dsM: ds, dpsiRad: dpsi, dpsiWhiteVar: white, stopped: hold || ds < STOPPED_SPEED_MPS * dt, yawUnknown, speedUnknown: !obdFresh, source },
+      { tUs, dtS: dt, dsM: ds, dpsiRad: dpsi, dpsiWhiteVar: white, stopped: hold || ds < STOPPED_SPEED_MPS * dt, yawUnknown, speedUnknown: !obdFresh, source, reverse },
       calibration,
     );
     for (const step of steps) this.emitOdometry(step);

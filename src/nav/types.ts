@@ -25,8 +25,10 @@ export interface MagSample {
 export interface ObdSpeedSample {
   tUs: number;
   speedMps: number;
-  /** Raw PID byte, km/h. */
+  /** Raw PID byte, km/h (from CAN: the wheel speed in its 0.01 km/h steps). */
   rawKph: number;
+  /** CAN wheel speeds (SPEC §2.1 Stage 2) instead of PID `0D`: finer and more often, so trusted more. */
+  source?: "can";
 }
 
 /** CoreLocation fix. Optional fields are absent when CoreLocation reports them invalid. */
