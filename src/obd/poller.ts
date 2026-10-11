@@ -164,8 +164,10 @@ export class ObdPoller {
         await this.clock.sleep(waitUs / 1000);
         continue;
       }
+      // From when the request went out, not from before it: a monitor break ahead of it can take a second (the
+      // vLinker, 2026-10-11), and measured from before, the next poll came at once and the monitor got a 1 ms window.
       lastSpeedTxUs = this.clock.nowUs();
-      await this.pollSpeed();
+      lastSpeedTxUs = (await this.pollSpeed()) ?? lastSpeedTxUs;
     }
   }
 
@@ -193,13 +195,14 @@ export class ObdPoller {
     }
   }
 
-  private async pollSpeed(): Promise<void> {
+  /** Returns when the request went out (null: not polled). */
+  private async pollSpeed(): Promise<number | null> {
     const res = await this.poll(this.config.speedCommand, Priority.Speed);
-    if (!res) return;
+    if (!res) return null;
     const { r, o } = res;
     const ok = o?.status === "ok" && o.pid === PID_SPEED;
     this.stats.onSpeedPoll(r.rxUs, r.rxUs - r.txUs, ok);
-    if (!ok || !o?.bytes) return;
+    if (!ok || !o?.bytes) return r.txUs;
     this.speedWorked = true;
     this.lastSpeedRaw = o.bytes[0];
     const sample: SpeedSample = {
@@ -211,6 +214,7 @@ export class ObdPoller {
     };
     this.engine.onSpeed(sample.tUs, sample.raw);
     this.hooks.onSpeed(sample);
+    return r.txUs;
   }
 
   private async pollRpm(): Promise<void> {

@@ -223,8 +223,22 @@ export const CAN_FRAME: ULogFormat = {
 /** A CAN shadow listening window (timestamp: its start): outside the windows frames weren't heard, not missing. */
 export const CAN_WINDOW: ULogFormat = {
   name: "can_window",
-  fields: [ts, { type: "uint32_t", name: "duration_us" }, { type: "uint16_t", name: "frames" }, { type: "uint8_t", name: "flags" }],
+  fields: [
+    ts,
+    { type: "uint32_t", name: "duration_us" },
+    { type: "uint16_t", name: "frames" },
+    { type: "uint8_t", name: "flags" },
+    { type: "uint32_t", name: "bytes" },
+    { type: "uint16_t", name: "other" },
+    // Stop character → prompt, ms; CAN_STOP_NONE: none (the window ended by itself, or no prompt came).
+    { type: "uint16_t", name: "stop_ms" },
+    { type: "uint8_t", name: "reopen" },
+  ],
 };
+
+/** `can_window.reopen`: how the receive filter was opened for the window (VEHICLE-LINK-SPEC §16.2). */
+export const CAN_REOPEN_CODES = ["open", "bare", "wildcard", "setup"] as const;
+export const CAN_STOP_NONE = 0xffff;
 
 export const ALL_FORMATS: readonly ULogFormat[] = [
   OBD_PID,
@@ -313,6 +327,8 @@ export const ROUTE_MANEUVER_CODES = [
 export const CAN_WINDOW_FLAGS = {
   endedItself: 1,
   bufferFull: 2,
+  /** The first stop character got no prompt within its timeout. */
+  stopRetried: 4,
 } as const;
 
 export const GNSS_FLAGS = {
@@ -348,6 +364,14 @@ export interface CanWindowRecord {
   frames: number;
   endedItself: boolean;
   bufferFull: number;
+  /** Monitor output received, bytes. */
+  bytes: number;
+  /** Frames with an id not asked for. */
+  other: number;
+  /** Stop character → prompt, ms; null: none. */
+  stopMs: number | null;
+  stopRetried: boolean;
+  reopen: (typeof CAN_REOPEN_CODES)[number];
 }
 
 export interface GnssRecord {

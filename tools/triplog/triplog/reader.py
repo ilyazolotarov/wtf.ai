@@ -63,6 +63,9 @@ PID_SPEED = 0x0D
 PID_RPM = 0x0C
 
 
+CAN_REOPEN = ["open", "bare", "wildcard", "setup"]
+
+
 def _name(table: list[str], code: int) -> str:
     return table[code] if 0 <= code < len(table) else f"code_{code}"
 
@@ -163,6 +166,10 @@ def _frame(ulog: ULog, name: str, start_us: int, columns: dict[str, tuple[str, l
         return pd.DataFrame(columns=["t_s", *columns])
     out: dict[str, object] = {"t_s": _t(start_us, d["timestamp"])}
     for column, (field_name, codes) in columns.items():
+        if field_name not in d:
+            # A field added to the format later: NaN in older logs.
+            out[column] = np.full(len(d["timestamp"]), np.nan)
+            continue
         v = d[field_name]
         out[column] = [_name(codes, int(x)) for x in v] if codes else (v.astype("float64") if v.dtype.kind == "f" else v.astype("int64"))
     return pd.DataFrame(out)
@@ -432,11 +439,28 @@ def load(path: str | Path) -> Trip:
     )
 
     can = _frame(ulog, "can_frame", start, {"id": ("id", None), "len": ("len", None), **{f"d{i}": (f"data[{i}]", None) for i in range(8)}})
-    can_windows = _frame(ulog, "can_window", start, {"duration_s": ("duration_us", None), "frames": ("frames", None), "flags": ("flags", None)})
+    can_windows = _frame(
+        ulog,
+        "can_window",
+        start,
+        {
+            "duration_s": ("duration_us", None),
+            "frames": ("frames", None),
+            "flags": ("flags", None),
+            "bytes": ("bytes", None),
+            "other": ("other", None),
+            "stop_ms": ("stop_ms", None),
+            "reopen": ("reopen", None),
+        },
+    )
     if len(can_windows):
         can_windows["duration_s"] = can_windows["duration_s"] / 1e6
         can_windows["ended_itself"] = (can_windows["flags"] & 1) != 0
         can_windows["buffer_full"] = (can_windows["flags"] & 2) != 0
+        can_windows["stop_retried"] = (can_windows["flags"] & 4) != 0
+        # Logs since 2026-10-12 (NaN before): stop character → prompt (NaN: none), how the filter was opened.
+        can_windows["stop_ms"] = can_windows["stop_ms"].where(can_windows["stop_ms"] != 0xFFFF)
+        can_windows["reopen"] = [CAN_REOPEN[int(x)] if x == x else None for x in can_windows["reopen"]]
         can_windows = can_windows.drop(columns="flags")
 
     rows = []

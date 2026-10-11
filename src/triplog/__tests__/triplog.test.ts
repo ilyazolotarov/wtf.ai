@@ -123,7 +123,9 @@ describe("TripLogWriter", () => {
       { tUs: FIXTURE_START_US + 1_850_000, id: 0x228, data: [0x01, 0x20, 0x07, 0xff, 0x00, 0xf0, 0x00, 0x00] },
       { tUs: FIXTURE_START_US + 1_900_000, id: 0x202, data: [0x0d, 0x43, 0x00, 0x00, 0x19, 0xd5] },
     ]);
-    expect(log.canWindows).toEqual([{ startUs: FIXTURE_START_US + 1_800_000, endUs: FIXTURE_START_US + 2_000_000, frames: 3, flags: 2 }]);
+    expect(log.canWindows).toEqual([
+      { startUs: FIXTURE_START_US + 1_800_000, endUs: FIXTURE_START_US + 2_000_000, frames: 3, flags: 6, bytes: 123, other: 1, stopMs: 42, stopRetried: true, reopen: "wildcard" },
+    ]);
   });
 
   test("route maneuver codes follow the planner's kinds", () => {

@@ -87,7 +87,9 @@ def test_can(trip):
     assert w.iloc[0]["t_s"] == pytest.approx(1.8)
     assert w.iloc[0]["duration_s"] == pytest.approx(0.2)
     assert int(w.iloc[0]["frames"]) == 3
-    assert not w.iloc[0]["ended_itself"] and w.iloc[0]["buffer_full"]
+    assert not w.iloc[0]["ended_itself"] and w.iloc[0]["buffer_full"] and w.iloc[0]["stop_retried"]
+    assert int(w.iloc[0]["bytes"]) == 123 and int(w.iloc[0]["other"]) == 1
+    assert w.iloc[0]["stop_ms"] == 42 and w.iloc[0]["reopen"] == "wildcard"
 
 
 def test_events_and_time(trip):

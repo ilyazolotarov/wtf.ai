@@ -18,6 +18,7 @@ function shadow() {
     onEvent: () => undefined,
     onStatus: () => undefined,
     onFailed: () => undefined,
+    selfTest: false,
   });
   // OK to every setup command; the stop gets the prompt.
   const send: RawSend = async (command) => ({
@@ -32,6 +33,92 @@ function shadow() {
 }
 
 describe("CanShadow", () => {
+  test("a window carries its bytes, the frames of other ids, how its stop went and how the filter was opened", async () => {
+    const clock = new VirtualClock();
+    const frames: CanFrame[] = [];
+    const windows: CanWindow[] = [];
+    const events: string[] = [];
+    const s = new CanShadow({
+      clock,
+      writeRaw: async () => undefined,
+      ids: [0x215],
+      idDigits: 3,
+      pinnedEcu: 0x7e8,
+      awake: () => true,
+      onFrames: (f) => frames.push(...f),
+      onWindow: (w) => windows.push(w),
+      onEvent: (e) => events.push(e),
+      onStatus: () => undefined,
+      onFailed: () => undefined,
+      selfTest: false,
+    });
+    let stops = 0;
+    // The first stop character gets no prompt (the adapter still draining, 2026-10-11 on the vLinker); the second does.
+    const send: RawSend = async (command) => {
+      const txUs = clock.nowUs();
+      if (command === "" && stops++ === 0) {
+        await clock.sleep(1000);
+        return { command, status: "timeout", lines: [], raw: "", txUs, rxUs: clock.nowUs() };
+      }
+      await clock.sleep(30);
+      const raw = command === "" ? "2152710271027102710\rSTOPPED\r\r>" : "OK\r\r>";
+      return { command, status: "ok", lines: [], raw, txUs, rxUs: clock.nowUs() };
+    };
+    await s.start(send);
+    s.onText("2152710271027102710\r2280120\r", clock.nowUs());
+    await s.stop(send);
+    expect(frames.map((f) => f.id)).toEqual([0x215, 0x215]);
+    expect(windows).toHaveLength(1);
+    // 28 bytes of monitor output, 30 in the stop's answer.
+    expect(windows[0]).toMatchObject({ frames: 2, other: 1, bytes: 58, stopRetried: true, reopen: "open" });
+    expect(windows[0].stopMs).toBeGreaterThanOrEqual(1030);
+    // The second window: the filter was opened by a bare ATCRA.
+    await s.start(send);
+    await s.stop(send);
+    expect(windows[1]).toMatchObject({ frames: 1, stopRetried: false, reopen: "bare" });
+    expect(windows[1].stopMs).toBe(30);
+    // A retried stop that got its prompt is the window's `stopRetried`, not a wrong answer.
+    expect(events.some((e) => e.startsWith("stop: no prompt"))).toBe(false);
+  });
+
+  test("a silent stop says what the window was", async () => {
+    const clock = new VirtualClock();
+    const windows: CanWindow[] = [];
+    const events: string[] = [];
+    const s = new CanShadow({
+      clock,
+      writeRaw: async () => undefined,
+      ids: [0x215],
+      idDigits: 3,
+      pinnedEcu: 0x7e8,
+      awake: () => true,
+      onFrames: () => undefined,
+      onWindow: (w) => windows.push(w),
+      onEvent: (e) => events.push(e),
+      onStatus: () => undefined,
+      onFailed: () => undefined,
+      selfTest: false,
+    });
+    const silent: RawSend = async (command) => {
+      const txUs = clock.nowUs();
+      if (command === "") {
+        await clock.sleep(1000);
+        return { command, status: "timeout", lines: [], raw: "", txUs, rxUs: clock.nowUs() };
+      }
+      return { command, status: "ok", lines: [], raw: "OK\r\r>", txUs, rxUs: clock.nowUs() };
+    };
+    await s.start(silent);
+    await clock.sleep(300);
+    s.onText("2152710271027102710\r", clock.nowUs());
+    await clock.sleep(150);
+    await s.stop(silent);
+    expect(windows[0]).toMatchObject({ frames: 1, stopMs: null, stopRetried: true });
+    // The window ends with the first stop character; the 1 s without a prompt is not listening.
+    expect(windows[0].endUs - windows[0].startUs).toBe(450_000);
+    expect(events.find((e) => e.startsWith("off: no answer at all"))).toMatch(/\(window 450 ms, 1 frames, 20 bytes, last output 150 ms before the stop\)/);
+    expect(s.status.state).toBe("failed");
+  });
+
   test("drops lines with an id it didn't ask for (a line that lost its start), and counts them", async () => {
     const { s, send, frames, windows } = shadow();
     await s.start(send);

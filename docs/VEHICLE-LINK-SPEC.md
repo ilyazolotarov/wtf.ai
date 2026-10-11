@@ -446,6 +446,9 @@ Not used: bare-CR "repeat last command" (it saves nothing on BLE and breaks when
     5 Hz, 19–21 at 2 Hz, 15 at 1 Hz; error over the claimed σ 2.1, 1.6, 1.8, 1.5. Back-to-back polls repeat the same
     1 km/h value, which the EKF counted as new evidence and grew overconfident on.
   - The navigator treats OBD speed as stale after 2.5 s; a stop or start shows up at most 0.5 s later.
+- The 2 Hz count from when the request went out, not from when the poller asked for it: a CAN monitor break ahead
+  of it can take over a second (the vLinker, 2026-10-11), and counted from before it the next poll came at once,
+  giving the monitor a 1 ms window and another break.
 - Fewer exchanges load the phone and the link less (the car's bus hardly notices either way) and leave the adapter to
   the CAN shadow between polls (§16.2).
 - A 50 Hz safety ceiling stops runaway loops when the cap is raised. A per-VIN cap from the ECU refresh analysis
@@ -496,7 +499,8 @@ Not used: bare-CR "repeat last command" (it saves nothing on BLE and breaks when
 - `stopped` / `buffer-full`: send `"\r"`, wait for `>`, retry once.
 - 3 consecutive `timeout`s with no bytes at all: the adapter is hung → `ATWS`, re-run §9 from the cached configuration.
   No answer to one `ATWS` (3 when standing) with the car moving (last speed > 0), or after the CAN monitor froze
-  (§16.2): the link is closed and reopened as after a link
+  (§16.2; then `ATI` after a 1 s pause before it and `ATZ` after it, each answer a `frozen` link event): the link is
+  closed and reopened as after a link
   loss (§11), and its probe is retried with the reconnect's backoff instead of ending in an error. A frozen link
   (the iOS stream) comes back this way; a frozen adapter only when it restarts. An MFi adapter that drops off iOS
   then comes back only when it connects to iOS again (an app can't make it); after 25 s of waiting the vehicle
@@ -554,9 +558,14 @@ The same contract with two transports: BLE (same GATT catalog) and Classic SPP (
 7. CAN shadow (§16.2) on the vLinker FD-IOS (BLE, STN1151): its break cost; and the listening share at 2 Hz on
    both adapters. On 2026-10-11 it was deaf after its first break (the filter didn't open again); the next drive's
    `reopen:` lines show which way opens it.
-8. The OBDLink MX+ froze in the CAN monitor on firmware 5.10.3 (§16.2); 5.13.1 lists raw CAN fixes. Its first drive
-   (2026-10-11) heard nothing after the first break (the filter didn't open again), so it says nothing about freezes
-   yet: drives with the full-setup reopening tell both.
+8. The OBDLink MX+ froze in the CAN monitor on firmware 5.10.3 (§16.2). The vendor's 5.12.4 notes list a fix for a
+   lock-up of that firmware line ("CAN multi-frame message transmission would cause the device to lock up after 35
+   minutes of uptime"), so 5.13.1 may have it; its first drive (2026-10-11) was deaf after the first break (the
+   filter didn't open again), so it says nothing about freezes yet. The next drives' `filter test` and `frozen` events
+   tell both.
+9. The vLinker FD-IOS over BLE delivered 149 frames/s where the five ids send ~370/s (§16.2): it needs the two ids
+   navigation uses (`215 228`, ~150/s). Whether `STM n` (a window ending by itself) stops faster than a stop character
+   through a full buffer is in its `can_window` stop latencies.
 
 ## 16. CAN monitor (STN)
 
@@ -633,17 +642,35 @@ the hex ids (`can_shadow` in the log's info).
 - **Failure → plain polling for the session** (link event `can-shadow: off: …`, the adapter restored with `ATAR`,
   `ATCRA<pinned>`, `ATH0`, the speed cap back): a pass filter refused; the monitor ending by itself (`BUFFER FULL`, a
   reset: the prompt arrives unasked) 3 times; 3 stops without a prompt.
-- **The receive filter must open again** before each window, cheapest way first: a bare `ATCRA` (reset); an
-  explicit all-pass `ATCRAXXX` (`ATCRAXXXXXXXX` on 29-bit); a full setup (`ATAR` and the pass filters: 8 commands,
-  ~0.25 s over BLE). A way not answered `OK`, or 5 s of listening in a row hearing none of the ids, moves to the next
-  one for the session (link event `can-shadow: … opens by … from now on`); deaf after the full setup too, the shadow
-  is off. The first answer of each way goes to the log (`can-shadow: reopen: ATCRA answered "…"`). On 2026-10-11 a
-  bare `ATCRA` worked on the MX+ with firmware 5.10.3 but not with 5.13.1, nor on the vLinker (STN1151 v4.3.2): both
-  heard frames only in the first window after each full setup (13 of 13 windows that heard any; the setups came
-  after the VIN retries), so listening was almost entirely deaf.
+- **The receive filter must open again** before each window. The manual (OBDLink FRPM rev F, `ATCRA`): a bare
+  `ATCRA` or `ATAR` "reset the CAN hardware filter to its default state", the protocol's own filter (the OBD reply
+  ids), and `ATAR` also "clears all custom filters" (the pass filters); `X` digits are don't-cares. So the one-command
+  way to open it is `ATCRAXXX` (`ATCRAXXXXXXXX` on 29-bit), and `ATAR` alone is no way at all. A bare `ATCRA` opened
+  it on the MX+ with firmware 5.10.3 only (5.12.4 "corrected ATCRA to restore default filters"): with 5.13.1 and on
+  the vLinker (STN1151 v4.3.2) the monitor heard frames only in the first window after each full setup (13 of 13
+  windows that heard any, 2026-10-11), so listening was almost entirely deaf.
+  - **Measured, not assumed:** once per session after the first setup, a self-test (~2 s; up to ~5 s over BLE)
+    listens 250 ms after each of: the setup (the filter as `ATAR` left it), the pin alone (must hear nothing: `STM`
+    obeys it), a bare `ATCRA` after a pin, `ATCRAXXX` after a pin, a full setup after a pin; then sends `STM 20` to
+    see whether the adapter ends a window by itself after n frames (MX+ firmware 5.12.4+). It picks the cheapest way
+    that heard at least 30 % of what the open filter heard, and writes one link event with every count and answer:
+    `can-shadow: filter test: setup 112, pinned 0, ATCRA "OK" 0, ATCRAXXX "OK" 110, setup again 108, STM n
+    accepted (20 frames in 123 ms) → opens by ATCRAXXX from now on`. Nothing heard with the filter open (a silent
+    bus): no verdict, tried again a minute later.
+  - **Backstop:** a way not answered `OK`, or 5 s of listening in a row hearing none of the ids, moves to the next
+    way for the session (`can-shadow: … opens by … from now on`); deaf after the full setup too, the shadow is off.
+- **Into the log, per window** (`can_window`, TRIP-LOGGER-SPEC §6.3): the bytes received (the link's throughput:
+  the vLinker's BLE carried 149 frames/s of the 370/s the five ids send; the MX+ 367/s), the frames of ids not asked
+  for (a filter wide open, or lines that lost their start), the stop's latency from the stop character to the
+  prompt (the adapter draining its buffer: over BLE, over a second) and whether the first stop character got no
+  prompt, and how the filter was opened. The window ends with the first stop character. The transcript gets the
+  shadow's own exchanges for the first three of each kind (stop, pin, each way) and the setup's commands including
+  `ATCS` (the CAN error counters); answers that went wrong are link events (up to 30).
 - **The adapter froze in the monitor:** a stop gets no byte back at all (not even the frames still buffered), CR sent
-  twice. The shadow goes off, the link is reset with one `ATWS` and, without an answer, closed and reopened (§10.5),
-  standing or moving. The adapter id and its chip and firmware (`STN2255 v5.10.3`) are stored, and the shadow stays
+  twice; the event says what the window was (`… (window 412 ms, 150 frames, 3012 bytes, last output 18 ms before
+  the stop)`). The shadow goes off, and the link is reset with `ATI` after a 1 s pause, one `ATWS`, then `ATZ`
+  (each answer a `frozen` link event: an adapter still draining its buffer answers one of them); without an answer,
+  closed and reopened (§10.5), standing or moving. The adapter id and its chip and firmware (`STN2255 v5.10.3`) are stored, and the shadow stays
   off on it (link event `can-shadow: off: the adapter froze in the monitor on this firmware (…)`) until the firmware
   changes: at once when the car was moving; standing, only when the reconnect still reaches the adapter 20 s later
   and it doesn't answer. Standing, the silence may be the car switched off: the MX+ powers down, and iOS reports it

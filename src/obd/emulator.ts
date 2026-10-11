@@ -51,6 +51,8 @@ export interface EmulatorProfile {
   bareAtcra?: "refused" | "ignored";
   /** An all-pass `ATCRAXXX` answers OK and keeps the filter (only a full setup opens it). */
   wildcardAtcraIgnored?: boolean;
+  /** `STM n` (a monitor window ending by itself after n frames, MX+ firmware 5.12.4+) answers `?`. */
+  stmCountUnsupported?: boolean;
 }
 
 export interface VehicleState {
@@ -367,6 +369,15 @@ export class Elm327Emulator implements Transport {
     const at = this.profile.atLatencyMs;
     if (cmd === "") return { body: ["?"], delayMs: at };
     if (cmd.startsWith("AT")) return { body: this.atCommand(cmd.slice(2)), delayMs: at };
+    const count = /^STM(\d+)$/.exec(cmd);
+    if (count && this.profile.stn) {
+      if (this.profile.stmCountUnsupported) return { body: ["?"], delayMs: at };
+      // The next n frames that pass the filters, one every 10 ms; none passing: it never comes back (a timeout).
+      const n = Number(count[1]);
+      const passing = (this.profile.broadcast ?? []).filter((b) => this.broadcastPasses(b.id));
+      if (!passing.length) return { body: [], delayMs: 1e9 };
+      return { body: Array.from({ length: n }, (_, i) => this.broadcastLine(passing[i % passing.length])), delayMs: n * 10 };
+    }
     if (cmd === "STI") return { body: [this.profile.stn ?? "?"], delayMs: at };
     if (cmd.startsWith("ST")) return { body: this.stnCommand(cmd.slice(2)), delayMs: at };
     if (/^[0-9A-F]+$/.test(cmd)) return this.obdCommand(cmd);
@@ -406,6 +417,7 @@ export class Elm327Emulator implements Transport {
     if (c === "AT2") return this.profile.supportsAdaptiveTiming2 ? ok : ["?"];
     if (c === "I") return [this.profile.banner];
     if (c === "@1") return [this.profile.description ?? "?"];
+    if (c === "CS") return ["T:00 R:00"];
     if (c === "RV") {
       const v = !this.vehicle.ignition ? 12.4 : this.vehicle.rpm > 300 ? 14.2 : 12.2;
       return [`${v.toFixed(1)}V`];

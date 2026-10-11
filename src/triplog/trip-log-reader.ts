@@ -2,6 +2,9 @@
 
 import type { GnssFix, ImuSample, ObdSpeedSample, Vec3 } from "../nav/types";
 import {
+  CAN_REOPEN_CODES,
+  CAN_STOP_NONE,
+  CAN_WINDOW_FLAGS,
   END_REASONS,
   ENGINE_STATE_CODES,
   GNSS_FLAGS,
@@ -61,8 +64,19 @@ export interface TripLog {
   navRouteProgress: (Omit<NavRouteProgressRecord, "timestampUs"> & { tUs: number })[];
   /** CAN shadow frames (VEHICLE-LINK-SPEC §16.2), by arrival; absent when it didn't run. */
   can?: { tUs: number; id: number; data: number[] }[];
-  /** Its listening windows: a frame missing outside them wasn't heard. */
-  canWindows?: { startUs: number; endUs: number; frames: number; flags: number }[];
+  /** Its listening windows: a frame missing outside them wasn't heard. The last five fields: logs since 2026-10-12. */
+  canWindows?: {
+    startUs: number;
+    endUs: number;
+    frames: number;
+    flags: number;
+    bytes?: number;
+    other?: number;
+    /** Stop character → prompt, ms; null: the window ended by itself or no prompt came. */
+    stopMs?: number | null;
+    stopRetried?: boolean;
+    reopen?: (typeof CAN_REOPEN_CODES)[number];
+  }[];
   truncated: boolean;
 }
 
@@ -256,6 +270,15 @@ export function readTripLog(bytes: Uint8Array): TripLog {
     endUs: num(r, "timestamp") + num(r, "duration_us"),
     frames: num(r, "frames"),
     flags: num(r, "flags"),
+    ...(r.bytes !== undefined
+      ? {
+          bytes: num(r, "bytes"),
+          other: num(r, "other"),
+          stopMs: num(r, "stop_ms") === CAN_STOP_NONE ? null : num(r, "stop_ms"),
+          stopRetried: (num(r, "flags") & CAN_WINDOW_FLAGS.stopRetried) !== 0,
+          reopen: CAN_REOPEN_CODES[num(r, "reopen")] ?? "open",
+        }
+      : {}),
   }));
 
   return {

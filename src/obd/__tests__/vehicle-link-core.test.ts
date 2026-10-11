@@ -530,11 +530,16 @@ describe("VehicleLinkCore", () => {
         const meanGapUs = (polled.at(-1)!.tUs - polled[0].tUs) / (polled.length - 1);
         expect(meanGapUs).toBeGreaterThanOrEqual((1e6 / OBD_SPEED_HZ) * 0.95);
         const log = emu.log.slice(logFrom);
-        expect(log.slice(0, 5)).toEqual(["ATH1", "ATAR", "STCMM0", "STFPA215,7FF", "STFPA228,7FF"]);
-        // A break: stop, pin, poll; open again before the next window.
-        const pins = log.filter((c) => c.startsWith("ATCRA"));
+        expect(log.slice(0, 6)).toEqual(["ATH1", "ATAR", "STCMM0", "STFPA215,7FF", "STFPA228,7FF", "ATCS"]);
+        // The filter self-test first (its last command is STM 20), then a break: stop, pin, poll; open again before
+        // the next window.
+        const test = events.find((e) => e.type === "can-shadow" && e.detail?.startsWith("filter test: "));
+        expect(test?.detail).toMatch(/^filter test: setup [1-9]\d*, pinned 0, ATCRA "OK" [1-9]\d*, ATCRAXXX "OK" [1-9]\d*, setup again [1-9]\d*, STM n accepted \(20 frames in \d+ ms\) → opens by ATCRA from now on$/);
+        const after = log.slice(log.indexOf("STM 20") + 1);
+        const pins = after.filter((c) => c.startsWith("ATCRA"));
         expect(pins.length).toBeGreaterThan(10);
         expect(pins.slice(0, 4)).toEqual(["ATCRA7E8", "ATCRA", "ATCRA7E8", "ATCRA"]);
+        expect(windows.slice(1).every((w) => w.reopen === "bare" && w.stopMs !== null && w.stopMs >= 0 && !w.stopRetried && w.bytes > 0)).toBe(true);
         expect(windows.every((w) => !w.endedItself && w.endUs > w.startUs)).toBe(true);
 
         core.setCanShadow(null);
@@ -581,10 +586,12 @@ describe("VehicleLinkCore", () => {
         await until(() => windows.length >= 3);
         emu.freezeInMonitor(false);
         await until(() => events.some((e) => e.type === "reopen"));
-        const t0 = clock.nowUs();
+        const silentUs = events.find((e) => e.detail?.startsWith("off: no answer at all"))!.tUs;
         expect(store.getJson("vehicleLink.canShadowFrozeOn")).toBeNull();
+        // The forensics first, each answer in the events: ATI after a pause, ATWS, ATZ.
+        expect(events.filter((e) => e.type === "frozen").map((e) => e.detail)).toEqual(["ATI: no answer 1 s after the silent stop", "ATZ: no answer either"]);
         await until(() => store.getJson("vehicleLink.canShadowFrozeOn") !== null);
-        expect(clock.nowUs() - t0).toBeGreaterThan(15_000_000);
+        expect(clock.nowUs() - silentUs).toBeGreaterThanOrEqual(20_000_000);
       } finally {
         await core.disconnect();
       }
@@ -617,12 +624,26 @@ describe("VehicleLinkCore", () => {
         await until(() => events.some((e) => e.type === "can-shadow" && /opens by ATCRAXXX from now on/.test(e.detail ?? "")));
         const n = windows.length;
         await until(() => windows.length >= n + 5);
-        expect(windows.slice(n).every((w) => w.frames > 0)).toBe(true);
+        // The first window after the self-test finds the filter open; every break after it opens by ATCRAXXX.
+        expect(windows.slice(n).every((w) => w.frames > 0 && (w.reopen === "wildcard" || w.reopen === "open"))).toBe(true);
+        expect(windows.slice(n + 1).every((w) => w.reopen === "wildcard")).toBe(true);
         expect(core.getSnapshot().canShadow?.state).not.toBe("failed");
-        // What each way answered, once, into the log; no full setup needed.
-        expect(events.filter((e) => e.detail?.startsWith("reopen: ATCRA answered")).length).toBe(1);
-        expect(events.some((e) => e.detail === 'reopen: ATCRAXXX answered "OK"')).toBe(true);
-        expect(emu.log.filter((c) => c === "ATAR").length).toBe(1);
+        // The self-test measured each way; no full setup since its own.
+        const test = events.find((e) => e.detail?.startsWith("filter test: "))!.detail!;
+        expect(test).toMatch(bareAtcra === "refused" ? /ATCRA "\?" 0, ATCRAXXX "OK" [1-9]/ : /ATCRA "OK" 0, ATCRAXXX "OK" [1-9]/);
+        expect(emu.log.filter((c) => c === "ATAR").length).toBe(2);
+      } finally {
+        await core.disconnect();
+      }
+    });
+
+    test("STM n refused: noted, nothing else changes", async () => {
+      const { core, windows, events } = await shadowOn({ stmCountUnsupported: true });
+      try {
+        await until(() => events.some((e) => e.detail?.startsWith("filter test: ")));
+        expect(events.find((e) => e.detail?.startsWith("filter test: "))!.detail).toMatch(/STM n "\?" → opens by ATCRA from now on/);
+        await until(() => windows.length >= 3);
+        expect(core.getSnapshot().canShadow?.state).not.toBe("failed");
       } finally {
         await core.disconnect();
       }

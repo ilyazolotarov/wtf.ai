@@ -5,6 +5,8 @@ import {
   ACCEL_RAW,
   CAN_FRAME,
   CAN_WINDOW,
+  CAN_REOPEN_CODES,
+  CAN_STOP_NONE,
   CAN_WINDOW_FLAGS,
   MAG_RAW,
   ALL_FORMATS,
@@ -172,12 +174,19 @@ export class TripLogWriter {
   }
 
   canWindow(r: CanWindowRecord): void {
-    const flags = (r.endedItself ? CAN_WINDOW_FLAGS.endedItself : 0) | (r.bufferFull > 0 ? CAN_WINDOW_FLAGS.bufferFull : 0);
+    const flags =
+      (r.endedItself ? CAN_WINDOW_FLAGS.endedItself : 0) |
+      (r.bufferFull > 0 ? CAN_WINDOW_FLAGS.bufferFull : 0) |
+      (r.stopRetried ? CAN_WINDOW_FLAGS.stopRetried : 0);
     this.enc.data(CAN_WINDOW.name, [
       Math.round(r.startUs),
       Math.min(0xffffffff, Math.max(0, Math.round(r.endUs - r.startUs))),
       Math.min(0xffff, r.frames),
       flags,
+      Math.min(0xffffffff, Math.max(0, Math.round(r.bytes))),
+      Math.min(0xffff, Math.max(0, r.other)),
+      r.stopMs === null ? CAN_STOP_NONE : Math.min(CAN_STOP_NONE - 1, Math.max(0, Math.round(r.stopMs))),
+      Math.max(0, CAN_REOPEN_CODES.indexOf(r.reopen)),
     ]);
   }
 

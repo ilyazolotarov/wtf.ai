@@ -685,9 +685,23 @@ export class VehicleLinkCore implements VehicleLink {
       await this.poller?.stop();
       this.poller = null;
       this.check(gen);
+      if (frozen) {
+        // Forensics, each answer in the transcript: ATI after a pause (an adapter still draining its buffer answers
+        // by then; not a bare CR, which repeats the last command, STM), then ATWS below, then ATZ.
+        await this.deps.clock.sleep(1000);
+        this.check(gen);
+        const ati = await this.requireSession().send("ATI", { timeoutMs: 1000 });
+        this.event("frozen", ati.status === "timeout" ? "ATI: no answer 1 s after the silent stop" : `ATI answered 1 s after the silent stop: ${JSON.stringify(ati.raw.trim())}`);
+      }
       // Moving, every second without speed counts: one try, then the link is reopened.
-      const answered = await warmReset((c, o) => this.requireSession().send(c, o), moving ? 1 : 3);
+      let answered = await warmReset((c, o) => this.requireSession().send(c, o), moving ? 1 : 3);
       this.check(gen);
+      if (!answered && frozen) {
+        const atz = await this.requireSession().send("ATZ", { timeoutMs: 2000 });
+        this.check(gen);
+        answered = atz.status !== "timeout";
+        this.event("frozen", answered ? `ATZ answered: ${JSON.stringify(atz.raw.trim())}` : "ATZ: no answer either");
+      }
       if (!answered && moving) {
         this.event("reopen", frozen ? "no answer to ATWS after the monitor froze" : "no answer to ATWS while moving");
         await this.transport?.disconnect().catch(() => undefined);

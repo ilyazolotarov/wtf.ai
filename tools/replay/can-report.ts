@@ -96,6 +96,24 @@ function report(file: string, trip: TripLog) {
       `${(spanUs / 60e6).toFixed(1)} min` +
       (can.listened ? `; ids asked: ${[...can.listened].map(hex).join(" ")}` : ""),
   );
+  const ws = windows.filter((w) => w.bytes !== undefined);
+  if (ws.length) {
+    const stops = ws.map((w) => w.stopMs).filter((s): s is number => s != null);
+    const retried = ws.filter((w) => w.stopRetried).length;
+    const other = ws.reduce((n, w) => n + (w.other ?? 0), 0);
+    const long = ws.filter((w) => w.endUs - w.startUs >= 200_000);
+    const kbs = long.map((w) => w.bytes! / ((w.endUs - w.startUs) / 1e6) / 1024);
+    const ways = new Map<string, number>();
+    for (const w of ws) ways.set(w.reopen ?? "open", (ways.get(w.reopen ?? "open") ?? 0) + 1);
+    console.log(
+      `  stops: median ${quantile(stops, 0.5).toFixed(0)} ms, p90 ${quantile(stops, 0.9).toFixed(0)} ms, the first stop character timed out in ${retried} of ${ws.length}; ` +
+        `${other} frames of other ids; ${long.length ? `${quantile(kbs, 0.5).toFixed(1)} KB/s median in windows of 0.2 s and more` : "no window of 0.2 s"}; ` +
+        `filter opened by ${[...ways].map(([k, n]) => `${k} ${n}`).join(", ")}`,
+    );
+  }
+  for (const m of trip.messages.filter((x) => /^(can-shadow: (filter test|off|set up|.*answered|.*opens by)|frozen|reinit|reopen|link-lost)/.test(x.text)).slice(0, 14)) {
+    console.log(`  ${((m.tUs - trip.startUs) / 1e6).toFixed(0).padStart(5)} s  ${m.text.slice(0, 220)}`);
+  }
   for (const m of can.matches.slice(0, 3)) {
     console.log(`  profile ${m.profile.key}: ${m.seen}/${m.heard} ids${m.speed ? "" : ", no speed message"}`);
   }
