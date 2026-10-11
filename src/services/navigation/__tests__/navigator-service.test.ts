@@ -11,6 +11,7 @@ import { Emitter } from "@/obd/emitter";
 import type { EngineState, SpeedSample } from "@/obd/types";
 import type { KeyValueStore } from "@/obd/vehicle-link-core";
 import { CALIBRATION_KEY, CalibrationStore, PARKED_POSES_KEY, type StoredPose } from "@/services/navigation/calibration-store";
+import { seedFromLog } from "@/services/navigation/app-replay";
 import { NavigatorService } from "@/services/navigation/navigator-service";
 import type { ActiveRoadGraph, RoadGraphSource } from "@/services/offline-map/road-graph-file";
 import type { decodeImuBatch } from "@/services/sensor-capture/sensor-service";
@@ -157,6 +158,33 @@ function harness(
 
 beforeEach(() => jest.useFakeTimers());
 afterEach(() => jest.useRealTimers());
+
+test("logStorage notes what is stored for the phone and the car, so a replay can start from it", () => {
+  const store = memoryStore();
+  const pose = { lat: 50.45, lon: 30.52, headingRad: 2, posSigmaM: 3, headingSigmaRad: 0.05 };
+  new CalibrationStore(store, PHONE).saveParkedPose(VIN, pose, 1_790_000_000_000);
+  const { service, notes } = harness({ store });
+  notes.length = 0;
+  service.logStorage();
+  expect(notes).toHaveLength(2);
+  const seeded = new CalibrationStore(memoryStore(), PHONE);
+  const messages = notes.map((text) => ({ tUs: 0, tag: "app", text }));
+  expect(seedFromLog({ messages } as never, seeded)).toBe(2);
+  expect(seeded.parkedPose(VIN)).toMatchObject(pose);
+  expect(seeded.manualPosition()).toBeNull();
+});
+
+test("logStorage carries a held manual position: a replay starts from the driver's placing made before its log", () => {
+  const store = memoryStore();
+  const manual = { lat: 50.45, lon: 30.52, headingRad: 1, placedAt: 1_790_000_000_000, confirmedAt: 1_790_000_600_000 };
+  new CalibrationStore(store, PHONE).saveManualPosition(manual);
+  const { service, notes } = harness({ store });
+  notes.length = 0;
+  service.logStorage();
+  const seeded = new CalibrationStore(memoryStore(), PHONE);
+  seedFromLog({ messages: notes.map((text) => ({ tUs: 0, tag: "app", text })) } as never, seeded);
+  expect(seeded.manualPosition()).toEqual(manual);
+});
 
 describe("NavigatorService", () => {
   test("asks for GNSS and IMU while running and releases them on stop", async () => {

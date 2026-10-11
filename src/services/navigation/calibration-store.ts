@@ -76,7 +76,8 @@ interface Stored {
  * log when a navigator starts, so a replay can start from what the app had (app-replay.ts).
  */
 export type StoredSnapshot =
-  | { gnssLag: StoredLag | null }
+  /** `manualPosition`: absent in notes from before 2026-10-11 (then left as it is). */
+  | { gnssLag: StoredLag | null; manualPosition?: StoredManualPosition | null }
   | { vin: string; parkedPose: StoredPose | null; speedScale: StoredSpeedScale | null; compass: StoredCompass | null };
 
 export const CALIBRATION_KEY = "nav.calibration";
@@ -185,7 +186,7 @@ export class CalibrationStore {
   /** What is stored for the phone (`vin` null) or this car, as it is. */
   snapshot(vin: string | null): StoredSnapshot {
     const s = this.read();
-    if (vin === null) return { gnssLag: s.gnssLag ?? null };
+    if (vin === null) return { gnssLag: s.gnssLag ?? null, manualPosition: this.manualPosition() };
     return { vin, parkedPose: this.parkedPoses()[vin] ?? null, speedScale: s.speedScaleByVin?.[vin] ?? null, compass: s.compassByVin?.[vin] ?? null };
   }
 
@@ -193,6 +194,7 @@ export class CalibrationStore {
   restore(snap: StoredSnapshot): void {
     if (!("vin" in snap)) {
       this.write((s) => (snap.gnssLag ? (s.gnssLag = snap.gnssLag) : delete s.gnssLag));
+      if (snap.manualPosition !== undefined) this.saveManualPosition(snap.manualPosition);
       return;
     }
     const { vin } = snap;

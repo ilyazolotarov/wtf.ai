@@ -430,6 +430,18 @@ export class NavigatorService implements PositionSource {
     this.sync();
   }
 
+  /**
+   * What is stored now, for the phone and the car, as `nav storage` notes: at a trip's start, so its log has the state
+   * the drive starts from even when the navigator started before the log (its own notes then fall outside the log).
+   * A replay seeds from these (app-replay.ts `seedFromLog`) instead of replaying the drives before.
+   */
+  logStorage(): void {
+    const { calibration, link } = this.deps;
+    this.note(`${STORAGE_NOTE}${JSON.stringify(calibration.snapshot(null))}`);
+    const vin = this.vin ?? link.expectedVin();
+    if (vin) this.note(`${STORAGE_NOTE}${JSON.stringify(calibration.snapshot(vin))}`);
+  }
+
   /** Online values worth keeping: written now (also every 30 s and when the navigator stops). */
   saveCalibration(): void {
     this.savePhone();

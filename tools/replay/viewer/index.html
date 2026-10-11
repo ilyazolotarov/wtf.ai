@@ -145,9 +145,10 @@
       <option value="nogps">None after the start</option>
     </select></label>
   <input id="cut" placeholder="start:length s, e.g. 120:240" size="20" hidden />
-  <label title="Where the replay starts. Parked = from where this car parked before (every earlier log replayed in order, the car by its VIN, else its OBD protocol), as the app does now; the first load replays them all; cold = no position or heading, as after a fresh install or a lost pose; drawing = where your drawn ground truth starts, heading along it (as if the driver placed the car there)">Start
+  <label title="Where the replay starts. As stored on the phone = what the app had stored when the drive started (parked pose, speed scale, compass, GNSS lag), read from the log: instant; a log from before 2026-10-11 doesn't have it and falls back to the next. Where it parked last = where this navigator version would have parked the car before (every earlier log replayed in order, the car by its VIN, else its OBD protocol): use it to judge a navigator change on its own chain; the first load replays them all; cold = no position or heading, as after a fresh install or a lost pose; drawing = where your drawn ground truth starts, heading along it (as if the driver placed the car there)">Start
     <select id="from">
-      <option value="parked">Where it parked last</option>
+      <option value="phone">As stored on the phone</option>
+      <option value="parked">Where it parked last (replays earlier drives)</option>
       <option value="drawn">Where the drawing starts</option>
       <option value="cold">Cold</option>
     </select></label>
@@ -165,6 +166,8 @@
       <label title="Where the driver put the car on the map during the drive (the log's notes) is put there again in the replay at the same moment, as on the phone; off: the replay ignores them">Driver's placings
         <select id="placings"><option value="">as logged</option><option value="off">ignored</option></select></label>
       <label title="Start the session this far into the log, as if the app started then">Start at <input id="start" type="number" step="10" min="0" placeholder="0" style="width:80px" /> s</label>
+      <label title="Clock times on the page (drive list, time bar, the panel): this computer's local time, or UTC. Hover a time to see the other.">Times
+        <select id="tz"><option value="local">local</option><option value="utc">UTC</option></select></label>
       <label title="Compass at a jammed start (MAPMATCH-SPEC §8.2), calibrated on the other logs; turned = a wrong calibration">Compass
         <select id="compass"><option value="">off</option><option value="on">from other logs</option><option value="90">turned 90°</option><option value="180">turned 180°</option></select></label>
     </div>
@@ -329,11 +332,24 @@ const fmtMin = (s) => { s = Math.round(s); return s < 60 ? `${s} s` : `${Math.fl
 const fmtKm = (m) => m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(2)} km`;
 const fmtM = (m) => m == null ? "—" : `${m < 10 ? m.toFixed(1) : Math.round(m)} m`;
 const grade = (m) => m == null ? "" : m < 10 ? "good" : m < 30 ? "meh" : "poor";
-const utc = (s) => data.startUtcMs == null ? "" : new Date(data.startUtcMs + s * 1000).toISOString().slice(11, 19) + " UTC";
+// Clock times: local by default, UTC by the setting under More ("replay.tz"); the other one on hover.
+let useUtc = false;
+try { useUtc = localStorage.getItem("replay.tz") === "utc"; } catch {}
+const pad2 = (n) => String(n).padStart(2, "0");
+const dayOf = (ms, inUtc = useUtc) => { const d = new Date(ms); return inUtc ? `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}` : `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
+const hmsOf = (ms, inUtc = useUtc) => { const d = new Date(ms); return inUtc ? `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}:${pad2(d.getUTCSeconds())}` : `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`; };
+const zone = (inUtc = useUtc) => inUtc ? "UTC" : "local";
+/** The clock time at drive time `s`, in the chosen zone ("" without a time sync); `other`: in the other zone. */
+const clock = (s, other = false) => data.startUtcMs == null ? "" : `${hmsOf(data.startUtcMs + s * 1000, useUtc !== other)} ${zone(useUtc !== other)}`;
+/** A log's start from its file name (the app names logs in UTC), and its id. */
+function stampOf(file) {
+  const m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})_(\w+)/.exec(file.split("/").pop());
+  return m ? { ms: Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]), id: m[7] } : null;
+}
 function driveName(file) {
   const who = /^testers\/([^/]+)\//.exec(file)?.[1];
-  const m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})_(\w+)/.exec(file.split("/").pop());
-  return (m ? `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]} · ${m[7]}` : file) + (who ? ` · ${who}` : "");
+  const st = stampOf(file);
+  return (st ? `${dayOf(st.ms)} ${hmsOf(st.ms).slice(0, 5)}${useUtc ? " UTC" : ""} · ${st.id}` : file) + (who ? ` · ${who}` : "");
 }
 
 // ---------- map ----------
@@ -1035,7 +1051,7 @@ function renderNow() {
       `<span class="num big ${grade(d)}">${fmtM(d)}</span> from GPS · ${d <= p.acc ? "inside" : "outside"} its circle (±${Math.round(p.acc)} m)</span></div>`;
   }).join("");
   const obd = lastBefore(data.obd, t);
-  $("now").innerHTML = `<div class="muted">${fmtT(t)} · ${utc(t)}</div>` +
+  $("now").innerHTML = `<div class="muted">${fmtT(t)} · <span title="${clock(t, true)}">${clock(t)}</span></div>` +
     `<div class="now-row"><span class="swatch" style="background:var(--gps)"></span><span>GPS: ${gpsText}</span></div>` + rows +
     `<div class="muted" style="margin-top:4px">Speed ${obd ? `${obd[1]} km/h (OBD)` : "—"}${phoneNow()}</div>`;
   for (const li of $("events").children) li.classList.toggle("past", +li.dataset.t <= t);
@@ -1179,7 +1195,8 @@ function drawTimeline() {
   // Playhead.
   g.strokeStyle = css("--text"); g.lineWidth = 1.5;
   g.beginPath(); g.moveTo(x(t), 0); g.lineTo(x(t), h); g.stroke();
-  $("time").textContent = `${fmtT(t)} / ${fmtT(data.durationS)}  ${utc(t)}`;
+  $("time").textContent = `${fmtT(t)} / ${fmtT(data.durationS)}  ${clock(t)}`;
+  $("time").title = clock(t, true);
 }
 
 let dragging = false;
@@ -1250,9 +1267,11 @@ function syncCutInput() {
 let logs = [];
 let pickRows = [];
 let pickHl = 0;
+/** Day and time in the chosen zone; `other` in the other zone (for the hover and the search). */
 function driveParts(file) {
-  const m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})\d{2}_(\w+)/.exec(file.split("/").pop());
-  return m ? { day: `${m[1]}-${m[2]}-${m[3]}`, time: `${m[4]}:${m[5]}`, id: m[6] } : { day: "", time: "", id: file };
+  const st = stampOf(file);
+  if (!st) return { day: "", time: "", id: file, other: "" };
+  return { day: dayOf(st.ms), time: hmsOf(st.ms).slice(0, 5), id: st.id, other: `${dayOf(st.ms, !useUtc)} ${hmsOf(st.ms, !useUtc).slice(0, 5)} ${zone(!useUtc)}` };
 }
 /**
  * Every word must match the id, day, time or tester; "drawn"/"undrawn" filter on the ground truth, "mine" and
@@ -1260,7 +1279,7 @@ function driveParts(file) {
  */
 function matchDrive(l, words) {
   const p = driveParts(l.file);
-  const hay = `${p.id} ${p.day} ${p.time} ${l.who} ${l.file}`.toLowerCase();
+  const hay = `${p.id} ${p.day} ${p.time} ${p.other} ${l.who} ${l.file}`.toLowerCase();
   const special = { drawn: l.drawn, undrawn: !l.drawn, mine: !l.who, testers: !!l.who };
   return words.every((w) => (w in special ? special[w] : hay.includes(w)));
 }
@@ -1273,7 +1292,7 @@ function renderPicker() {
     const p = driveParts(l.file);
     const head = p.day !== day ? `<li class="day">${esc((day = p.day))}</li>` : "";
     return head + `<li class="drv${i === pickHl ? " hl" : ""}${l.file === $("file").value ? " cur" : ""}" role="option" data-i="${i}">` +
-      `<span>${esc(p.time)}</span><span class="id">${esc(p.id)}${l.who ? ` <span class="who">${esc(l.who)}</span>` : ""}</span><span class="muted">${l.sizeMb} MB</span>` +
+      `<span title="${esc(p.other)}">${esc(p.time)}</span><span class="id">${esc(p.id)}${l.who ? ` <span class="who">${esc(l.who)}</span>` : ""}</span><span class="muted">${l.sizeMb} MB</span>` +
       `<span title="${l.drawn ? "Ground truth drawn" : ""}">${l.drawn ? "✎" : ""}</span></li>`;
   }).join("") || `<li class="empty">No drive matches.</li>`;
   $("driveList").querySelector(".hl")?.scrollIntoView({ block: "nearest" });
@@ -1326,6 +1345,15 @@ $("driveSearch").addEventListener("keydown", (e) => {
 $("driveList").onclick = (e) => { const li = e.target.closest(".drv"); if (li) pickDrive(pickRows[Number(li.dataset.i)].file); };
 document.addEventListener("mousedown", (e) => { if (!$("drivePop").hidden && !e.target.closest(".picker")) closePicker(); });
 
+$("tz").value = useUtc ? "utc" : "local";
+$("tz").onchange = () => {
+  useUtc = $("tz").value === "utc";
+  try { localStorage.setItem("replay.tz", $("tz").value); } catch {}
+  showPicked();
+  if (!$("drivePop").hidden) renderPicker();
+  if (data) { renderDrive(); updateDynamic(); }
+};
+
 async function loadList() {
   logs = await (await fetch("/api/logs")).json();
   const params = new URLSearchParams(location.hash.slice(1));
@@ -1340,10 +1368,12 @@ async function loadList() {
 
 /** The overlay over the map while the server replays (the first parked-pose start replays every earlier log). */
 let loadingRun = 0;
-function showLoading(chained) {
+function showLoading(chained, from) {
   const id = ++loadingRun;
   const started = performance.now();
-  $("loadingNote").textContent = chained ? "The first replay of a session also replays the earlier drives for the parked pose." : "";
+  $("loadingNote").textContent = !chained ? ""
+    : from === "phone" ? "A log without the phone's stored state (older app): the first replay of a session also replays the earlier drives for it."
+    : "The first replay of a session also replays the earlier drives for the parked pose.";
   const tick = () => { $("loadingTime").textContent = `${Math.floor((performance.now() - started) / 1000)} s`; };
   tick();
   $("loading").hidden = false;
@@ -1362,7 +1392,7 @@ async function run() {
   if (drawnFor !== file) { drawn = null; drawnFor = null; undo.length = 0; setDrawing(false); }
   $("status").textContent = "replaying…";
   const started = performance.now();
-  const loading = showLoading(q.from === "parked" && !(Number(q.start) > 0));
+  const loading = showLoading((q.from === "parked" || q.from === "phone") && !(Number(q.start) > 0), q.from);
   let res;
   try {
     res = await fetch(`/api/replay?${new URLSearchParams(q)}`);
@@ -1375,9 +1405,12 @@ async function run() {
   if ($("file").value !== file) return;
   data = payload;
   const pf = data.parkedFrom;
+  const chainNote = !pf ? "" : !pf.file ? " · no parked pose for this car before it: cold start" : ` · started where it parked after ${driveName(pf.file)}${pf.status ? ` (${pf.status})` : ""}`;
   const parkedNote = data.startNote === "drawn" ? " · started where the drawing starts"
+    : data.startNote === "phone" ? " · started from what the phone had stored (in the log)"
+    : data.startNote === "phone-missing" ? ` · no stored state in this log (older app)${chainNote}`
     : data.startNote ? ` · ${data.startNote}`
-    : !pf ? "" : !pf.file ? " · no parked pose for this car before it: cold start" : ` · started where it parked after ${driveName(pf.file)}${pf.status ? ` (${pf.status})` : ""}`;
+    : chainNote;
   const pathNote = data.inApp === false ? " · navigator alone (a research option is set), not the app" : "";
   const routeNote = { log: " · the driver follows the routes the app planned", drawn: " · the driver follows the drawn route (none planned, or not followed)", none: " · no route to follow" }[data.phoneRouteSource] ?? "";
   $("status").textContent = `replayed in ${((performance.now() - started) / 1000).toFixed(1)} s${parkedNote}${pathNote}${routeNote}`;

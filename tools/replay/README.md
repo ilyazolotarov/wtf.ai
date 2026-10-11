@@ -119,20 +119,24 @@ says so.
     no OBD speed or engine states. The blue dot is then the phone's own dead reckoning wherever GPS isn't good; the
     timeline draws its speed (blue, scaled by what its map matching learned) over OBD's (grey), rings around the dot
     are the other roads its tracker holds (label = weight), and *At the cursor* says its speed and what the dot is
-    drawn from. Best with *Start: where the drawing starts* (as if the driver placed the car there); *Where it parked
-    last* starts it where the earlier drives, replayed with OBD, parked.
+    drawn from. Best with *Start: where the drawing starts* (as if the driver placed the car there); *As stored on the
+    phone* and *Where it parked last* start it where the phone, or the earlier drives replayed with OBD, parked it.
   - *GPS*: what the replay gets. *As in the app* withholds your "Cut GPS" moments, as the phone did; *All of it*;
     *Cut at…* (`120:240`, several with commas); *Jammed* (Wi-Fi/cell-like fixes only, `0:inf` or a window;
     `src/nav/replay/jam.ts`); *None after the start* (pure dead reckoning once the heading is known).
-  - *Start*: *Where it parked last* (default) starts with the app's storage as it was before this drive: every
-    earlier log replayed in order through the app with the same navigator version and one storage across them, so
-    the parked pose, speed scale, compass and GNSS lag are what the phone would have had (NAVIGATOR-SPEC §6.1). The
-    car is its VIN, else the car last seen on the same OBD protocol, as the app identifies it. The first load
-    replays them all (~25 s). *Where the drawing starts*: empty storage but the parked pose, at the drawn ground
+  - *Start*: *As stored on the phone* (default) starts with what the app had stored when the drive started (parked
+    pose, speed scale, compass, GNSS lag, a manual position the driver set before the drive), read from the log's `nav storage` notes, which the app writes at every
+    trip start: instant. A log from an app before 2026-10-11 doesn't have them and falls back to the next one.
+    *Where it parked last* starts with the storage this navigator version would have had: every earlier log
+    replayed in order through the app with one storage across them (NAVIGATOR-SPEC §6.1); use it to judge a
+    navigator change on its own chain. The car is its VIN, else the car last seen on the same OBD protocol, as the
+    app identifies it. The first load replays them all (~35 s for 48 logs), then they are kept until the viewer
+    restarts (it restarts by itself when the code changes). *Where the drawing starts*: empty storage but the parked pose, at the drawn ground
     truth's start heading along it. *Cold*: empty storage, as after a fresh install. The status line says which drive
     the parked pose came from and what the first fixes made of it.
   - *Compare*: a second navigator version, drawn in orange.
-  - *More*: GPS lag (empty = learned on the drive, as in the app), start the session later, compass at a jammed
+  - *More*: clock times local or UTC (hover a time for the other; the drive list, the time bar and the panel),
+    GPS lag (empty = learned on the drive, as in the app), start the session later, compass at a jammed
     start (MAPMATCH-SPEC §8.2), and the driver's placings: every app replay puts the car where the driver put it on
     the map, at the moment they did (the log's `nav position set by the driver` notes); *ignored* replays without.
 - **Tracks** (side panel, each can be hidden): GPS in green (where the car really was), what the phone showed in

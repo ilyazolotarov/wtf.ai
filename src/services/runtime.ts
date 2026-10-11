@@ -235,7 +235,11 @@ export function getRuntime(): Runtime {
   });
   routes.resume();
   // A route planned before the trip started (engine off) goes into the trip's log once it is open.
-  recorder.tripStarted.on(() => routes.logActiveRoute());
+  // Likewise what the navigator has stored (parked pose, speed scale, compass, GNSS lag): a replay starts from it.
+  recorder.tripStarted.on(() => {
+    routes.logActiveRoute();
+    position.logStorage();
+  });
   let wasRecording = recorder.getSnapshot().state === "recording";
   recorder.subscribe(() => {
     const recording = recorder.getSnapshot().state === "recording";

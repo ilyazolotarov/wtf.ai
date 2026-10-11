@@ -16,9 +16,9 @@ import type { NavConfig } from "../../../src/nav/navigator";
 import { drawnTruthTrack, drawPath, type DrawnPoint, type DrawnTruth } from "../../../src/nav/replay/drawn-truth";
 import { appOutageCuts, replayTrip, type ReplayOptions } from "../../../src/nav/replay/replay";
 import { buildViewerData } from "../../../src/nav/replay/viewer-data";
-import { replayTripInApp, MemoryKeyValueStore, phoneOf } from "../../../src/services/navigation/app-replay";
+import { replayTripInApp, MemoryKeyValueStore, phoneOf, seedFromLog } from "../../../src/services/navigation/app-replay";
 import { CalibrationStore } from "../../../src/services/navigation/calibration-store";
-import { PHONE_CAR, type MapMatchLoop } from "../../../src/services/navigation/navigator-service";
+import { PHONE_CAR, STORAGE_NOTE, type MapMatchLoop } from "../../../src/services/navigation/navigator-service";
 import { readTripLog, type TripLog } from "../../../src/triplog/trip-log-reader";
 import { carOf, drawnStartPose, graphFor as graphForTrip, phoneRouteFor, regionPoint, routeBeforeLog } from "../app-chain";
 import { findGraph, openGraph, roadsAround, truthRoute } from "../graph-file";
@@ -101,6 +101,26 @@ function appStateBefore(file: string, loop: MapMatchLoop): AppState {
     }
   }
   return states.get(file) ?? { store: new MemoryKeyValueStore(), vin: null, parkedAfter: null };
+}
+
+/**
+ * What the phone had stored when the drive started, from the log's `nav storage` notes (the app writes them at every
+ * trip start): no earlier drive to replay. Null: the log has none (an app from before 2026-10-11).
+ */
+function appStateFromLog(trip: TripLog): AppState | null {
+  const store = new MemoryKeyValueStore();
+  if (!seedFromLog(trip, new CalibrationStore(store, phoneOf(trip)))) return null;
+  const stored = trip.messages
+    .filter((m) => m.text.startsWith(STORAGE_NOTE))
+    .map((m) => {
+      try {
+        return (JSON.parse(m.text.slice(STORAGE_NOTE.length)) as { vin?: string }).vin;
+      } catch {
+        return undefined;
+      }
+    })
+    .find(Boolean);
+  return { store, vin: carOf(trip, new Map()) ?? stored ?? null, parkedAfter: null };
 }
 
 /** Ground truth drawn in the viewer, next to its log (git-ignored with it): `<log>.truth.json`. */
@@ -212,9 +232,9 @@ const server = createServer((req, res) => {
       const start = Number(q("start") || 0);
       // GPS scenario: as in the app (its "Cut GPS" windows withheld), all of it, cut where asked, jammed, or none.
       const gps = q("gps") || "app";
-      // Start: from where the car parked after its previous drive (as the app does now), where the drawn truth
-      // starts, or cold.
-      const startFrom = q("from") || "parked";
+      // Start: from what the phone had stored (in the log), from where this navigator would have parked the car after
+      // its previous drive (every earlier drive replayed), where the drawn truth starts, or cold.
+      const startFrom = q("from") || "phone";
       // Adapter: the log's OBD as recorded, or none (phone-only mode, NAVIGATOR-SPEC §9.6: no OBD speed or engine).
       const phoneOnly = q("adapter") === "none";
       const compareLoop = LOOPS[q("compare")] ?? null;
@@ -232,7 +252,10 @@ const server = createServer((req, res) => {
       const inApp = phoneOnly || (!(start > 0) && !lag && !compassArg);
       const appLoop = (loop.nav.mapMatchLoop ?? "open") as MapMatchLoop;
       const fresh = (): AppState => ({ store: new MemoryKeyValueStore(), vin: carOf(trip, new Map()), parkedAfter: null });
-      const state = !inApp ? null : startFrom === "parked" ? appStateBefore(file, appLoop) : fresh();
+      const logged = inApp && startFrom === "phone" ? appStateFromLog(trip) : null;
+      // A log without the stored state: the chain, as "parked".
+      const chained = inApp && (startFrom === "parked" || (startFrom === "phone" && !logged));
+      const state = !inApp ? null : logged ?? (chained ? appStateBefore(file, appLoop) : fresh());
       // From the drawn start: its place and heading as the car's parked pose (and phone-only's own), nothing else kept.
       const drawnPose = inApp && startFrom === "drawn" ? drawnStartPose(trip, readDrawn(file)) : null;
       // Phone-only: the driver follows the routes the app planned, or the drawn one where they didn't (app-chain.ts).
@@ -290,7 +313,8 @@ const server = createServer((req, res) => {
           ...(compareLoop ? { compare: { label: compareLoop.label, options: { ...common, nav: navFor(compareLoop.nav) } } } : {}),
         });
         const compassInfo = compassArg ? { logs: compass?.logs ?? 0, rotateDeg, trust: data.summary.compass.trust } : null;
-        const startNote = startFrom === "drawn" ? (drawnPose ? "drawn" : "no drawing: cold") : null;
+        const startNote =
+          startFrom === "drawn" ? (drawnPose ? "drawn" : "no drawing: cold") : startFrom === "phone" && inApp ? (logged ? "phone" : "phone-missing") : null;
         // A route guided along before its plan reached the log: planned again and drawn as the plan then (reason
         // "rebuilt"), so the map has the route the driver followed.
         const rebuilt = routeBeforeLog(trip, readDrawn(file) ? drawnStartPose(trip, readDrawn(file)) : null);
@@ -301,7 +325,7 @@ const server = createServer((req, res) => {
             maneuvers: [],
           });
         }
-        send(res, 200, "application/json", JSON.stringify({ ...data, compassInfo, startNote, phoneRouteSource: phoneRoute?.source ?? null, loopLabel: phoneOnly ? "Phone only (no adapter)" : loop.label, phoneLoopLabel: phoneLoop ? (LOOPS[phoneLoop]?.label ?? phoneLoop) : null, appCuts: appCuts.length, parkedFrom: state && startFrom === "parked" ? { file: state.parkedAfter, status: data.summary.startPose?.status ?? null } : null, inApp }));
+        send(res, 200, "application/json", JSON.stringify({ ...data, compassInfo, startNote, phoneRouteSource: phoneRoute?.source ?? null, loopLabel: phoneOnly ? "Phone only (no adapter)" : loop.label, phoneLoopLabel: phoneLoop ? (LOOPS[phoneLoop]?.label ?? phoneLoop) : null, appCuts: appCuts.length, parkedFrom: state && chained ? { file: state.parkedAfter, status: data.summary.startPose?.status ?? null } : null, inApp }));
       } finally {
         opened?.close();
       }

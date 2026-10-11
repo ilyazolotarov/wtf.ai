@@ -274,8 +274,9 @@ jammed:
   navigator already started from the manual position.
 - **Is it the phone or the car?** The placing means the car (§6.2), but it can be made without one, to test at home.
   Placed at home, then walking to a car parked elsewhere within 15 min, the car starts at home: forget it with ✕.
-- **Not in replays:** `npm run replay` doesn't reproduce driver placings (neither §6.2 nor this); its notes are in the
-  log.
+- **In replays:** the app replay (viewer, `replay:regress`) makes the log's placings again at their time (its
+  `nav position set by the driver` notes), and a position held from before the log comes with the log's `nav storage`
+  notes (§10; logs from 2026-10-11 on). The navigator-only `npm run replay` doesn't reproduce placings.
 
 ## 7. Calibration (online)
 
@@ -608,9 +609,11 @@ every 4 min under jamming). Measured in replay on the logged drives:
   (`fork.test.ts`); so navigator state keeps no closures (`deep-copy.ts` refuses them). `replay:bench` replays each
   drive once per seed up to each window and goes on from forks, and leaves out before any replay the windows whose
   satellite fixes couldn't reach the truth share.
-- **Starting as the phone did:** when a navigator starts, and when it learns the car, the service notes what is
-  stored (`nav storage {json}`: the GNSS lag; per car the parked pose, speed scale and compass, raw). A replay seeds
-  its storage from these notes (`seedFromLog`), and `npm run replay:parity` compares its dot with the phone's. With
+- **Starting as the phone did:** when a navigator starts, when it learns the car, and at every trip's start
+  (`logStorage`), the service notes what is stored (`nav storage {json}`: the GNSS lag and the held manual position
+  (§6.3); per car the parked pose, speed scale and compass, raw). The first two usually come before the trip's log opens and are lost with the
+  pre-roll; the trip-start ones are always in the log. A replay seeds its storage from these notes (`seedFromLog`,
+  the first per phone and per car), and `npm run replay:parity` compares its dot with the phone's. With
   the navigation code unchanged since the log's build (`ver_sw` carries the commit) they must agree (p90 ≤ 3 m), else
   the replay doesn't reproduce the app. A test replays a synthetic drive's notes and requires the same dots.
 
