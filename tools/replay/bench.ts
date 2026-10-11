@@ -5,6 +5,7 @@
 //   npm run replay:bench -- tools/triplog/logs/*.ulg --nav '{"ekf":{"initYawScaleSigma":0}}'
 //   npm run replay:bench -- tools/triplog/logs/*.ulg --mm [--seeds 3] [--mm-config '{"particles":1000}'] [--graph <file>]
 //   npm run replay:bench -- tools/triplog/logs/*.ulg --mm --durations 300,600   (longer outages; default 60,120,240)
+//   npm run replay:bench -- tools/triplog/logs/*.ulg --obd-hz 2   (OBD speed thinned to 2 Hz, thin-obd.ts)
 //   npm run replay:bench -- tools/triplog/logs/*.ulg --jam-start [--every 60] [--seeds 3] [--mm-config '<json>'] [--graph <file>]
 //
 // With --mm the particle filter runs in every window (open loop) and its dominant cluster is
@@ -26,6 +27,7 @@ import type { NavConfig } from "../../src/nav/navigator";
 import { replayTrip, TripReplay, type CutResult, type ReplayOptions } from "../../src/nav/replay/replay";
 import { isSatelliteFix } from "../../src/nav/types";
 import { readTripLog, type TripLog } from "../../src/triplog/trip-log-reader";
+import { thinObd } from "./thin-obd";
 import { findGraph, openGraph } from "./graph-file";
 import { runInitBench } from "./init-bench";
 import { isMainThread, Pool, serveJobs, threadsArg } from "./pool";
@@ -72,6 +74,7 @@ function parseArgs(argv: string[]) {
   let compass = false;
   let everyS = 60;
   let seedCount = DEFAULT_SEEDS;
+  let obdHz: number | undefined;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--nav") nav = JSON.parse(argv[++i]) as Partial<NavConfig>;
     else if (argv[i] === "--verbose") verbose = true;
@@ -83,12 +86,13 @@ function parseArgs(argv: string[]) {
     else if (argv[i] === "--every") everyS = Number(argv[++i]);
     else if (argv[i] === "--seeds") seedCount = Number(argv[++i]);
     else if (argv[i] === "--durations") DURATIONS_S = argv[++i].split(",").map(Number);
+    else if (argv[i] === "--obd-hz") obdHz = Number(argv[++i]);
     else files.push(argv[i]);
   }
   if (!(Number.isInteger(seedCount) && seedCount >= 1)) throw new Error("--seeds takes a whole number ≥ 1");
   const first = mmConfig.seed ?? 1;
   const seeds = Array.from({ length: seedCount }, (_, k) => first + k);
-  return { files, nav, verbose, mm, mmConfig, graph, jamStart, everyS, compass, seeds };
+  return { files, nav, verbose, mm, mmConfig, graph, jamStart, everyS, compass, seeds, obdHz };
 }
 
 const median = (v: number[]) => {
@@ -118,6 +122,7 @@ interface Options {
   graph: string | undefined;
   seeds: number[];
   durationsS: number[];
+  obdHz?: number;
 }
 /** The windows starting at one time: their lengths, shortest first. */
 type Start = { fromS: number; lensS: number[] };
@@ -132,7 +137,8 @@ let cached: { file: string; trip: TripLog; graph: ReturnType<typeof openGraph> |
 function load(file: string, o: Options) {
   if (cached?.file === file) return cached;
   cached?.graph?.close();
-  const trip = readTripLog(new Uint8Array(readFileSync(file)));
+  const read = readTripLog(new Uint8Array(readFileSync(file)));
+  const trip = o.obdHz ? thinObd(read, o.obdHz) : read;
   cached = { file, trip, graph: null };
   if (o.mm) {
     const first = trip.gnss.find((f) => isSatelliteFix(f) && f.hAccM <= 10) ?? trip.gnss.find((f) => f.hAccM < 500);
@@ -234,12 +240,12 @@ function runJob(job: Job): Plan | WindowRun[] {
 async function main() {
   const argv = process.argv.slice(2);
   const threads = threadsArg(argv);
-  const { files, nav, verbose, mm, mmConfig, graph, jamStart, everyS, compass, seeds } = parseArgs(argv);
+  const { files, nav, verbose, mm, mmConfig, graph, jamStart, everyS, compass, seeds, obdHz } = parseArgs(argv);
   if (jamStart) {
     await runInitBench(files, { nav, mmConfig, graph, everyS, verbose, compass, seeds, threads });
     return;
   }
-  const o: Options = { nav, mm, mmConfig, graph, seeds, durationsS: DURATIONS_S };
+  const o: Options = { nav, mm, mmConfig, graph, seeds, durationsS: DURATIONS_S, obdHz };
   const byDuration = new Map<number, (CutResult & { file: string })[]>(DURATIONS_S.map((d) => [d, []]));
   /** Map matching, one entry per window and seed (the EKF's max error alongside, for "better than"). */
   const mmByDuration = new Map<number, { maxM: number; endM: number; ekfMaxM: number }[]>(DURATIONS_S.map((d) => [d, []]));

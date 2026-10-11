@@ -13,7 +13,7 @@ First target for the module:
 
 1. Discover adapters automatically and offer the user a ranked list.
 2. Connect and **verify** that the device really is an ELM327-compatible adapter.
-3. Poll OBD-II vehicle speed (PID `0D`) at the highest rate this adapter + car can sustain.
+3. Poll OBD-II vehicle speed (PID `0D`): 2 Hz, the rate navigation needs (§10.2).
 4. Poll engine RPM (PID `0C`) occasionally to know whether the engine is running.
 5. Expose all of this through a transport-agnostic TypeScript contract (§6) that the rest of the app uses. Nothing above the contract knows whether the adapter is BLE or MFi.
 
@@ -26,7 +26,7 @@ First target for the module:
 | Protocol logic          | Pure TypeScript in `src/obd/` (no React Native imports), unit-testable in Node/Bun on Windows against an ELM327 emulator.                                                                  |
 | Adapter catalog         | BLE GATT profiles and name patterns live in a **TS table** passed to native, so adding a BLE adapter needs no native build. MFi protocol strings must be in `Info.plist` → native build. |
 | Command set             | Plain ELM327 subset (§9) for polling. STN commands: `STI` for identification, and the CAN monitor (§16, SPEC §2.1 Stage 2) on STN adapters only.                                        |
-| Speed rate              | Closed-loop, back-to-back polling. No artificial cap apart from a 50 Hz safety ceiling and an optional per-vehicle cap derived from measured ECU refresh (§10.2).                          |
+| Speed rate              | 2 Hz (`OBD_SPEED_HZ`): in replay navigation was no worse than at 25–30 Hz back-to-back (§10.2). A per-vehicle cap can only lower it; the developer override can raise it.                 |
 | RPM rate                | Every 5 s while the engine runs, 2 s while the ECU is awake with the engine stopped, 5 s ignition probe while the ECU is silent (§10.3).                                                    |
 | Time base               | All timestamps are **monotonic uptime in µs** (`ProcessInfo.systemUptime`, same clock as CoreMotion). Wall clock only through explicit sync records.                                    |
 | Lifecycle (first target) | The user opens the app; from then on connect, trip detection, and polling are automatic and continue in the background while the app stays alive. Waking a non-running app is later (§11). |
@@ -432,14 +432,24 @@ Not used: bare-CR "repeat last command" (it saves nothing on BLE and breaks when
 
 ### 10.1 Scheduler
 
-- One loop in TS (`src/obd/poller`). On each completed exchange, pick the next job: pending `send`/`exclusive` → due RPM job → speed job. The speed job is always due (back-to-back), subject to its cap.
+- One loop in TS (`src/obd/poller`). On each completed exchange, pick the next job: pending `send`/`exclusive` → due RPM job → speed job. The speed job is due once per period of its cap.
 - Speed timestamp = midpoint of `txUs` and `rxUs` (SPEC §3.1).
 - Statistics: EWMA rate, latency p50/p95 over the last 100 exchanges, error counts per status. Exposed in `PollStats` and logged at 1 Hz.
 
-### 10.2 "Maximum meaningful" speed rate
+### 10.2 Speed rate
 
-- **Default**: back-to-back polling, so the rate is whatever adapter + BLE + ECU allow. A 50 Hz safety ceiling stops runaway loops if an adapter answers instantly with garbage.
-- **Meaningful limit**: polling faster than the ECU refreshes its PID `0D` value only returns duplicates. The refresh period is estimated offline from logs: during acceleration, value changes only happen on multiples of the ECU update period. `tools/triplog` provides this analysis (TRIP-LOGGER-SPEC §8). When an estimate exists for a VIN, the cap is set to `2 / refresh period` (each ECU update is seen within half a period; stored per VIN via `setSpeedCapForVin`), freeing slots for future PIDs and saving battery.
+- **Default: 2 Hz** (`OBD_SPEED_HZ`). Measured in replay on every drive (2026-10-11), OBD speed thinned from the
+  25–30 Hz back-to-back polls:
+  - the app with map matching (`replay:regress --obd-hz`, parked and drawn starts, 8 seeds): 10, 5 and 2 Hz changed
+    nothing beyond seed noise;
+  - dead reckoning through simulated GNSS cuts (`replay:bench --obd-hz`): the error per km 21 m at 25–30 Hz, 17 at
+    5 Hz, 19–21 at 2 Hz, 15 at 1 Hz; error over the claimed σ 2.1, 1.6, 1.8, 1.5. Back-to-back polls repeat the same
+    1 km/h value, which the EKF counted as new evidence and grew overconfident on.
+  - The navigator treats OBD speed as stale after 2.5 s; a stop or start shows up at most 0.5 s later.
+- Fewer exchanges load the phone and the link less (the car's bus hardly notices either way) and leave the adapter to
+  the CAN shadow between polls (§16.2).
+- A 50 Hz safety ceiling stops runaway loops when the cap is raised. A per-VIN cap from the ECU refresh analysis
+  (`tools/triplog` `refresh`, TRIP-LOGGER-SPEC §8; `setSpeedCapForVin`) can only lower the rate.
 - Dev UI can override the cap (for experiments).
 - Every poll is logged, so the rate decision can always be revisited from data.
 
@@ -447,8 +457,8 @@ Not used: bare-CR "repeat last command" (it saves nothing on BLE and breaks when
 
 | Engine state      | Speed job     | RPM job (`010C`, response count when supported) |
 | ----------------- | ------------- | ----------------------------------------------- |
-| `engine-running`  | back-to-back  | every 5 s                                       |
-| `engine-off`      | 1 Hz while speed is 0; back-to-back once the car rolls (hybrid EV mode, coasting) | every 2 s (catch restarts after auto stop-start) |
+| `engine-running`  | at the cap (2 Hz) | every 5 s                                   |
+| `engine-off`      | 1 Hz while speed is 0; at the cap once the car rolls (hybrid EV mode, coasting) | every 2 s (catch restarts after auto stop-start) |
 | `ignition-off`    | stopped       | every 5 s as the ignition probe                  |
 | `unknown`         | stopped       | immediately, then per the resulting state        |
 
@@ -526,13 +536,13 @@ The same contract with two transports: BLE (same GATT catalog) and Classic SPP (
 2. BLE poll rate measured on the vLinker FD-IOS (26–30 Hz, tested-adapter table): no BLE ceiling at the main test car's rate.
    Still to measure: a cheap no-name clone, and the connection interval itself (§3.5).
 3. Verify Expo Modules event payload performance for scan batches; switch to typed arrays if needed.
-4. Decide whether a native "repeat mode" (SPEC §3.1) is needed — only if bridge overhead measurably limits the poll rate. With the MX+ the JS loop reaches 25–29 Hz, so not needed so far.
+4. A native "repeat mode" (SPEC §3.1) isn't needed: speed is polled at 2 Hz (§10.2), and the JS loop reached 25–29 Hz with the MX+.
 5. The VIN (`0902`): missed on 3 of 4 main test car drives even when sent to the engine ECU. Now retried while polling, with
    the last car on the protocol assumed meanwhile (§9.1). Next drives: the setup in the log (`… s before the log:`)
    shows why the init read misses; `vin: read on retry n` how soon a retry gets it.
 6. Verify the auto-connect fix on device: open the app before the car wakes the MX+; it must connect once iOS reports the accessory.
-7. CAN shadow (§16.2) on the road: whether the STN pass filters reach poll answers (the mode it settles on, per
-   adapter), how much of each window it hears, and what a break costs.
+7. CAN shadow (§16.2) on the vLinker FD-IOS (BLE, STN1151): its break cost; and the listening share at 2 Hz on
+   both adapters.
 
 ## 16. CAN monitor (STN)
 
@@ -591,19 +601,19 @@ the hex ids (`can_shadow` in the log's info).
   command. The poller, RPM polls, `ATRV`, VIN retries and the terminal work unchanged.
 - **When.** Only while the ECU is awake (`engine-off`, `engine-running`); `standby` and `ignition-off` keep the OBD
   probe (§10.3). Engine and ignition state come from OBD as without it (§10.4).
-- **OBD speed rate:** 5 Hz (`CAN_SHADOW_SPEED_HZ`, a speed cap; the developer override still wins). In replay (every
-  drive, parked and drawn starts, 8 seeds) OBD speed thinned to 10, 5 and 2 Hz changed nothing beyond seed noise
-  against the full 25–30 Hz. A break is a stop (~25 ms on the MX+) and a poll (~20 ms), so the monitor hears about
-  three quarters of the time.
+- **OBD speed rate:** the usual 2 Hz (§10.2). A break on the MX+ costs ~160 ms (median; the poll itself 31 ms, the
+  stop, the two `ATCRA` and the restart the rest): at 5 Hz the monitor heard 19 % of a 13-min drive; 2 Hz leaves
+  about two thirds.
 - **Setup** (again after any other component's `ATCRA`/`ATCF`/`ATCM`/`ATAR`/`ATZ`/`ATWS`/`ATD`/`ATSP`/`ATH`/`ST…`
-  command, e.g. a VIN read or the survey): `ATH1`, `ATAR`, `STCMM0`, `STFPA` per id (`STFAP` fallback). The first
-  setup of a session sends three `010D1` with the pass filters set (not logged as polls) and picks the mode:
-  - **fast**: no broadcast frame in the answers. A break is stop, poll, `STM`. Headers stay on (the poll parser reads
-    them).
-  - **safe**: a broadcast frame came back (with the response count, the adapter returns the first message it passes).
-    Each stop is followed by `ATCRA<pinned ECU>` (`7EX` / `18DAF1XX` with functional addressing), each start preceded
-    by `ATCRA` (hardware filter open again).
-  - A fast session that later sees a broadcast frame in a poll answer switches to safe (link event).
+  command, e.g. a VIN read or the survey): `ATH1`, `ATAR`, `STCMM0`, `STFPA` per id (`STFAP` fallback). Headers stay
+  on (the poll parser reads them).
+- **A break** is: stop, `ATCRA<pinned ECU>` (`7EX` / `18DAF1XX` with functional addressing), the polls, then `ATCRA`
+  (the receive filter open again) and `STM`. The STN pass filters also pass broadcast frames into request answers: on
+  the MX+, `010D1` with the filters set answered with a wheel-speed frame (with the response count the adapter returns
+  the first message it passes). Pinning the receive filter keeps poll answers clean on any adapter, for two short
+  commands per break; the vLinker is an STN too.
+- **Only the ids asked for** are logged: a frame with any other id is a line that lost its start in transport (1 in
+  56,626 on the MX+), counted in the status as `garbled`.
 - **Stop:** a bare CR. One that times out is sent again: a CR reaching an adapter that has just stopped by itself
   repeats its last command, `STM`.
 - **Failure → plain polling for the session** (link event `can-shadow: off: …`, the adapter restored with `ATAR`,

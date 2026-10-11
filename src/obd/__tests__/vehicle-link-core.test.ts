@@ -4,7 +4,7 @@ import type { CanFrame } from "@/obd/can-monitor";
 import type { CanWindow } from "@/obd/can-shadow";
 import {
   AUTO_CONNECT_WINDOW_MS,
-  CAN_SHADOW_SPEED_HZ,
+  OBD_SPEED_HZ,
   VehicleLinkCore,
   type DiscoveryBackend,
   type KeyValueStore,
@@ -452,8 +452,9 @@ describe("VehicleLinkCore", () => {
       { id: 0x4f0, periodMs: 100, data: [1, 2, 3] },
     ];
 
+    // As on the MX+: with the pass filters set, broadcast frames reach request answers.
     async function shadowOn(profile: Partial<EmulatorProfile>) {
-      const s = setup({ ...STN_PROFILE, broadcast: BROADCAST, ...profile });
+      const s = setup({ ...STN_PROFILE, broadcast: BROADCAST, passFiltersLeak: true, ...profile });
       s.core.startDiscovery();
       void s.core.connect("emu-1");
       await until(() => s.core.getSnapshot().engine === "engine-running");
@@ -475,18 +476,21 @@ describe("VehicleLinkCore", () => {
       const { core, frames, windows, speeds, emu, logFrom, events } = await shadowOn({});
       try {
         await until(() => windows.length >= 10 && speeds.length >= 10);
-        expect(core.getSnapshot().canShadow?.mode).toBe("fast");
-        expect(events.some((e) => e.type === "can-shadow" && e.detail?.includes("clear of broadcast frames"))).toBe(true);
+        expect(core.getSnapshot().canShadow?.state).not.toBe("failed");
+        expect(events.some((e) => e.type === "can-shadow" && e.detail === "set up: 2 ids")).toBe(true);
         expect(new Set(frames.map((f) => f.id))).toEqual(new Set([0x215, 0x228]));
+        // Every poll reads the ECU's answer, never a broadcast frame: the receive filter is pinned for it.
         expect(speeds.every((s) => s.ok)).toBe(true);
         // Polls at the shadow's rate (on average: the emulator's monitor loop moves the virtual clock in between).
         const polled = speeds.slice(2);
         const meanGapUs = (polled.at(-1)!.tUs - polled[0].tUs) / (polled.length - 1);
-        expect(meanGapUs).toBeGreaterThanOrEqual((1e6 / CAN_SHADOW_SPEED_HZ) * 0.95);
+        expect(meanGapUs).toBeGreaterThanOrEqual((1e6 / OBD_SPEED_HZ) * 0.95);
         const log = emu.log.slice(logFrom);
         expect(log.slice(0, 5)).toEqual(["ATH1", "ATAR", "STCMM0", "STFPA215,7FF", "STFPA228,7FF"]);
-        // fast: a break is the stop and the poll, nothing pinned.
-        expect(log.filter((c) => c.startsWith("ATCRA"))).toEqual([]);
+        // A break: stop, pin, poll; open again before the next window.
+        const pins = log.filter((c) => c.startsWith("ATCRA"));
+        expect(pins.length).toBeGreaterThan(10);
+        expect(pins.slice(0, 4)).toEqual(["ATCRA7E8", "ATCRA", "ATCRA7E8", "ATCRA"]);
         expect(windows.every((w) => !w.endedItself && w.endUs > w.startUs)).toBe(true);
 
         core.setCanShadow(null);
@@ -496,24 +500,6 @@ describe("VehicleLinkCore", () => {
         const n = speeds.length;
         await until(() => speeds.length >= n + 10);
         expect(emu.log.lastIndexOf("STM")).toBe(stm);
-      } finally {
-        await core.disconnect();
-      }
-    });
-
-    test("broadcast frames in poll answers: each break pins the speed ECU's filter", async () => {
-      const { core, frames, windows, speeds, emu, logFrom, events } = await shadowOn({ passFiltersLeak: true });
-      try {
-        await until(() => windows.length >= 10);
-        expect(core.getSnapshot().canShadow?.mode).toBe("safe");
-        expect(events.some((e) => e.type === "can-shadow" && e.detail?.includes("reach poll answers"))).toBe(true);
-        const log = emu.log.slice(logFrom);
-        expect(log).toContain("ATCRA7E8");
-        expect(log).toContain("ATCRA");
-        // Every poll after the setup reads the ECU's answer, never a broadcast frame.
-        expect(speeds.length).toBeGreaterThan(5);
-        expect(speeds.every((s) => s.ok)).toBe(true);
-        expect(frames.length).toBeGreaterThan(10);
       } finally {
         await core.disconnect();
       }

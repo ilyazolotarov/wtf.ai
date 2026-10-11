@@ -1,16 +1,13 @@
 // CAN shadow (docs/VEHICLE-LINK-SPEC.md §16.2): the STN monitor runs between OBD polls while the ECU is awake, and
 // its raw frames go to the trip log. Navigation keeps OBD speed. Pure TS: the session starts and stops it.
+//
+// The STN pass filters also pass broadcast frames into request answers (the MX+ answered `010D1` with a wheel-speed
+// frame), so every break pins the speed ECU's receive filter (`ATCRA`) for the polls and opens it for the monitor.
 
-import { CanMonitorCollector, parseMonitorLine, type CanFrame } from "./can-monitor";
+import { CanMonitorCollector, type CanFrame } from "./can-monitor";
 import type { Clock } from "./clock";
 import type { IdleMonitor, RawSend } from "./elm327/session";
 import type { ElmResponse } from "./types";
-
-/**
- * How polls stay clear of broadcast frames. fast: the pass filters don't reach request answers, a break is stop, poll,
- * restart. safe: they do, so each break pins the speed ECU's receive filter (`ATCRA`) and opens it again after.
- */
-export type CanShadowMode = "fast" | "safe";
 
 export interface CanWindow {
   startUs: number;
@@ -23,9 +20,10 @@ export interface CanWindow {
 
 export interface CanShadowStatus {
   state: "waiting" | "listening" | "failed";
-  mode: CanShadowMode | null;
   frames: number;
   windows: number;
+  /** Lines dropped: an id not asked for (a line that lost its start). */
+  garbled: number;
   failure: string | null;
 }
 
@@ -50,8 +48,6 @@ export interface CanShadowDeps {
 const SELF_ENDS_TO_FAIL = 3;
 /** Stops that found no prompt, this many times: likewise. */
 const STOP_FAILURES_TO_FAIL = 3;
-/** Polls sent with the pass filters set, to see whether broadcast frames reach their answers. */
-const LEAK_PROBES = 3;
 /** Commands of others that change what the monitor sees: set up again before the next window. */
 const RESETS_SETUP = /^(AT(CRA|CF|CM|SP|TP)|AT(AR|Z|WS|D|H[01])$|ST(?!I$))/;
 
@@ -60,7 +56,8 @@ const hex = (n: number, digits: number) => n.toString(16).toUpperCase().padStart
 export class CanShadow implements IdleMonitor {
   private live = false;
   private configured = false;
-  private mode: CanShadowMode | null = null;
+  /** The receive filter is pinned to the speed ECU (after a stop): open it before the next window. */
+  private pinned = false;
   private failure: string | null = null;
   private disabled = false;
   /** Inside our own exchanges: they don't reset the setup. */
@@ -72,8 +69,13 @@ export class CanShadow implements IdleMonitor {
   private windows = 0;
   private selfEnds = 0;
   private stopFailures = 0;
+  private garbled = 0;
+  private windowFrames = 0;
+  private readonly wantedIds: Set<number>;
 
-  constructor(private readonly deps: CanShadowDeps) {}
+  constructor(private readonly deps: CanShadowDeps) {
+    this.wantedIds = new Set(deps.ids);
+  }
 
   get running(): boolean {
     return this.live;
@@ -82,9 +84,9 @@ export class CanShadow implements IdleMonitor {
   get status(): CanShadowStatus {
     return {
       state: this.failure ? "failed" : this.live ? "listening" : "waiting",
-      mode: this.mode,
       frames: this.frames,
       windows: this.windows,
+      garbled: this.garbled,
       failure: this.failure,
     };
   }
@@ -102,9 +104,21 @@ export class CanShadow implements IdleMonitor {
     this.own = true;
     try {
       if (!this.configured && !(await this.setup(send))) return;
-      // safe: the break before pinned the speed ECU's receive filter, which the monitor obeys too.
-      if (this.mode === "safe") await send("ATCRA", 1000);
-      this.collector = new CanMonitorCollector(this.deps.idDigits, (f) => this.pending.push(f));
+      // The monitor obeys the receive filter too.
+      if (this.pinned) {
+        await send("ATCRA", 1000);
+        this.pinned = false;
+      }
+      // Only the ids asked for: any other is a line that lost its start in transport.
+      this.collector = new CanMonitorCollector(this.deps.idDigits, (f) => {
+        if (!this.wantedIds.has(f.id)) {
+          this.garbled++;
+          return;
+        }
+        this.pending.push(f);
+        this.windowFrames++;
+      });
+      this.windowFrames = 0;
       this.windowStartUs = this.deps.clock.nowUs();
       this.live = true;
       await this.deps.writeRaw("STM\r");
@@ -128,7 +142,8 @@ export class CanShadow implements IdleMonitor {
       this.collector?.push(r.raw, r.rxUs);
       this.closeWindow(r.txUs, false);
       if (r.status === "timeout" && ++this.stopFailures >= STOP_FAILURES_TO_FAIL) this.fail(`no prompt after stopping the monitor ${this.stopFailures} times`);
-      if (this.mode === "safe") await send(`ATCRA${this.pinFilter()}`, 1000);
+      // Broadcast frames would reach the poll's answer through the pass filters.
+      if ((await send(`ATCRA${this.pinFilter()}`, 1000)).status === "ok") this.pinned = true;
     } finally {
       this.live = false;
       this.own = false;
@@ -149,15 +164,10 @@ export class CanShadow implements IdleMonitor {
     else this.deps.onEvent(`the monitor ended by itself (${this.selfEnds})`);
   }
 
-  /** Every session exchange: another component's setup change, or a poll answer with broadcast frames in it. */
+  /** Every session exchange: another component's setup change means setting up again. */
   onExchange(r: ElmResponse): void {
     if (this.own) return;
-    const c = r.command.replace(/\s+/g, "").toUpperCase();
-    if (RESETS_SETUP.test(c)) this.configured = false;
-    if (this.mode === "fast" && /^01[0-9A-F]{2}/.test(c) && this.leak(r.lines)) {
-      this.mode = "safe";
-      this.deps.onEvent("broadcast frames in a poll answer: the speed ECU's filter is set for each poll from now on");
-    }
+    if (RESETS_SETUP.test(r.command.replace(/\s+/g, "").toUpperCase())) this.configured = false;
   }
 
   private async setup(send: RawSend): Promise<boolean> {
@@ -175,30 +185,10 @@ export class CanShadow implements IdleMonitor {
         return false;
       }
     }
-    if (this.mode === null) {
-      // Not logged: they aren't speed samples. The event says what was found.
-      let leak: string | undefined;
-      for (let i = 0; i < LEAK_PROBES && !leak; i++) leak = this.leak((await send("010D1", 1000)).lines);
-      this.mode = leak ? "safe" : "fast";
-      this.deps.onEvent(
-        `${ids.length} ids; ` +
-          (leak
-            ? `broadcast frames reach poll answers (${leak}): the speed ECU's filter is set for each poll`
-            : "poll answers clear of broadcast frames"),
-      );
-    }
+    if (this.windows === 0) this.deps.onEvent(`set up: ${ids.length} ids`);
+    this.pinned = false;
     this.configured = true;
     return true;
-  }
-
-  /** The first line that is a CAN frame from something other than an OBD responder (7E8–7EF, 18DAF1xx). */
-  private leak(lines: string[]): string | undefined {
-    const { idDigits } = this.deps;
-    return lines.find((line) => {
-      const f = parseMonitorLine(line, idDigits);
-      if (!f) return false;
-      return idDigits === 3 ? f.id < 0x7e8 || f.id > 0x7ef : (f.id & 0x1fffff00) !== 0x18daf100;
-    });
   }
 
   private pinFilter(): string {
@@ -213,9 +203,9 @@ export class CanShadow implements IdleMonitor {
     c.end(endUs);
     this.flush();
     this.collector = null;
-    this.frames += c.frameCount;
+    this.frames += this.windowFrames;
     this.windows++;
-    this.deps.onWindow({ startUs: this.windowStartUs, endUs, frames: c.frameCount, endedItself, bufferFull: c.bufferFullCount });
+    this.deps.onWindow({ startUs: this.windowStartUs, endUs, frames: this.windowFrames, endedItself, bufferFull: c.bufferFullCount });
     this.deps.onStatus(this.status);
   }
 

@@ -31,6 +31,7 @@ import { driveOutages, estimateTrack, obdDistanceM, type ShownPoint } from "../.
 import { drawnTruthTrack, scoreDrawn, type DrawnTruth } from "../../src/nav/replay/drawn-truth";
 import type { PhoneMount } from "../../src/nav/odometry/imu/imu-speed";
 import { withPhoneSpeed } from "../../src/nav/replay/phone-speed";
+import { thinObd } from "./thin-obd";
 import { appOutageCuts } from "../../src/nav/replay/replay";
 import { obdOdometer } from "../../src/nav/replay/truth-match";
 import { wrapAngle } from "../../src/nav/ekf/dr-ekf";
@@ -162,18 +163,6 @@ function score(trip: TripLog, log: string, track: ShownPoint[], graph: ReturnTyp
     out.offRoadS = Math.round(out.offRoadS);
   }
   return out;
-}
-
-/** The OBD speed samples a poller capped at `hz` would have read: each at least 1/hz after the one kept before. */
-function thinObd(trip: TripLog, hz: number): TripLog {
-  const gapUs = 1e6 / hz;
-  let lastUs = -Infinity;
-  const obdSpeed = trip.obdSpeed.filter((s) => {
-    if (s.tUs - lastUs < gapUs * 0.95) return false;
-    lastUs = s.tUs;
-    return true;
-  });
-  return { ...trip, obdSpeed };
 }
 
 function runJob(job: Job): DriveResult[] {

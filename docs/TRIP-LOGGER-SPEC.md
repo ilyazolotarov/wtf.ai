@@ -141,7 +141,7 @@ modules/sensor-capture ─▶ src/services/sensor-capture ──(SensorStream)�
 
 | Message        | Fields (after `uint64_t timestamp`)                                                                                                                                                                         | Rate            | Payload |
 | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------- | ------- |
-| `obd_pid`      | `uint32_t latency_us` (rx − tx; timestamp is **rx**), `uint8_t mode`, `uint8_t pid`, `uint8_t status` (§6.5), `uint8_t n_bytes`, `uint8_t[4] data` (raw A–D), `uint16_t ecu` (CAN id or 0), `float value` (decoded: m/s for `0D`, rpm for `0C`, NaN otherwise) | every poll (~5–30 Hz) | 26 B |
+| `obd_pid`      | `uint32_t latency_us` (rx − tx; timestamp is **rx**), `uint8_t mode`, `uint8_t pid`, `uint8_t status` (§6.5), `uint8_t n_bytes`, `uint8_t[4] data` (raw A–D), `uint16_t ecu` (CAN id or 0), `float value` (decoded: m/s for `0D`, rpm for `0C`, NaN otherwise) | every poll (2 Hz speed, RPM every 2–5 s) | 26 B |
 | `gnss`         | `int64_t utc_us` (fix wall clock), `double lat_deg`, `double lon_deg`, `float alt_msl_m`, `float alt_ellipsoid_m`, `float h_acc_m`, `float v_acc_m`, `float speed_mps`, `float speed_acc_mps`, `float course_rad`, `float course_acc_rad`, `uint32_t delivery_delay_us`, `uint8_t flags` (bit0 simulated, bit1 from accessory) | ~1 Hz           | 69 B    |
 | `imu_motion`   | `float[3] gyro_rad_s`, `float[3] user_accel_m_s2`, `float[3] gravity_m_s2`, `float[4] attitude_q` (w, x, y, z)                                                                                             | 100 Hz          | 60 B    |
 | `gyro_raw`     | `float[3] gyro_rad_s`                                                                                                                                                                                        | 100 Hz, optional | 20 B   |
@@ -188,7 +188,7 @@ modules/sensor-capture ─▶ src/services/sensor-capture ──(SensorStream)�
 | Stream                 | Bytes/s (incl. 5 B `D` header) |
 | ---------------------- | ------------------------------ |
 | `imu_motion` @ 100 Hz  | 6,500                          |
-| `obd_pid` @ 20 Hz      | 620                            |
+| `obd_pid` @ 2 Hz       | 62                             |
 | `gnss` @ 1 Hz          | 74                             |
 | `mag_raw` @ 20 Hz      | 500                            |
 | `can_frame` @ 285/s (CAN shadow on) | 7,400             |
@@ -283,7 +283,7 @@ Pages on the root stack (UI-SPEC §5): `vehicle` from the map's bar, the rest fr
   toggle, IMU rate 50/100 Hz); the upload code (§7.1); the storage limit (§7.2).
 - `position`: GNSS rate, last accuracy, speed accuracy; IMU rate (measured); EKF and map matching state.
 - `developer`: speed cap override, RPM period and the other test switches; the CAN shadow (switch, hex ids, and its
-  state: waiting / listening / off with the reason, frames heard, fast or safe breaks); the ELM terminal.
+  state: waiting / listening / off with the reason, frames heard); the ELM terminal.
 
 ### 9.3 `debug-terminal` (from Developer)
 

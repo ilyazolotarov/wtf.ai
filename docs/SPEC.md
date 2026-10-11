@@ -55,7 +55,7 @@ Odometry is built up in stages (§2.1). Stage 1 uses the minimum that works on a
 
   | Level       | Navigation speed                    | CAN frames                     | OBD `010D`                                                          |
   | ----------- | ----------------------------------- | ------------------------------ | ------------------------------------------------------------------- |
-  | OBD         | `010D`, back-to-back                | not read                       | the speed source                                                    |
+  | OBD         | `010D` at 2 Hz                      | not read                       | the speed source                                                    |
   | CAN shadow  | `010D`, at the time-sliced rate     | logged raw, decoded in replay  | the speed source, and the reference for the CAN mapping             |
   | CAN primary | wheel speeds                        | decoded on the phone           | ~1 Hz cross-check; a disagreement or missing frames → back to OBD   |
 
@@ -102,7 +102,7 @@ Full specification: [VEHICLE-LINK-SPEC.md](VEHICLE-LINK-SPEC.md). Summary:
 
 - Probe: `ATZ` (or `ATWS`), `ATE0`, `ATI`, `AT@1`, `ATRV`; `STI` for read-only chip identification (no STN features in Stage 1).
 - Init: `ATE0`, `ATL0`, `ATS0`, `ATH1` (while identifying ECUs), `ATAT1`, `ATSP0` + `0100` (auto-detect), `ATDPN`, then `ATSPn` (lock it). On 11-bit CAN, pin the speed ECU with `ATSH`/`ATCRA` (physical addressing); then `ATH0`.
-- Speed poll: `010D1`, back-to-back. The trailing `1` is the expected response count, so the adapter answers without waiting out its timeout. If the adapter rejects it (`?`) or doesn't speed up, fall back to `010D`. `ATAT2` kept if it helps.
+- Speed poll: `010D1` at 2 Hz (VEHICLE-LINK-SPEC §10.2: in replay, no worse than back-to-back). The trailing `1` is the expected response count, so the adapter answers without waiting out its timeout. If the adapter rejects it (`?`) or doesn't speed up, fall back to `010D`. `ATAT2` kept if it helps.
 - RPM: `010C` every 5 s while the engine runs (engine on/off for trip detection), every 2 s while the ECU is awake with the engine stopped, and as a 5 s ignition probe while the ECU is silent.
 - VIN: `0902` (per-VIN calibration storage; fall back to an adapter ID if unsupported).
 - Supported-PID probe: `0100`/`0120`/…; if PID `A4` (transmission actual gear) is supported, poll it at a low rate to sign speed in reverse.
@@ -156,6 +156,9 @@ A common `OdometrySource` interface feeds the EKF with timestamped speed and yaw
 | 0x202 / 514    | `ENGINE_DATA`  | 100 Hz               | `RPM 7\|16@0+` scale 0.25 rpm (matches PID `0C` within 3 rpm at idle); `SPEED 23\|16@0+` scale 0.01 km/h |
 | ?              | yaw rate       | —                    | **Unknown — reverse-engineer (Phase 9, Stage 3).** Likely near 0x078 (stability-control sensor cluster). |
 
+- Decoded from a 13-min drive through the CAN shadow (2026-10-11): mean wheel speed / PID `0D` 0.996 above 5 km/h
+  (difference median 0.22 km/h, within `0D`'s 1 km/h step), `ENGINE_DATA` speed / `0D` 0.999, `RPM` within 1.5 rpm of
+  `0C` read at the same moment, `GEAR` P, R, N and D as driven, steering −487…+492°.
 - Wheel speeds are unsigned → direction from `GEAR` (R = negative).
 - The main test car's OBD port carries the HS-CAN broadcast (no gateway). MS-CAN (pins 3/11, 125 kbps) is the
   fallback for a signal that isn't on HS-CAN.

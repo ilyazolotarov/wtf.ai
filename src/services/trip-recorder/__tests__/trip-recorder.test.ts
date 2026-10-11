@@ -147,7 +147,8 @@ test("engine start → recording → key off → complete ULog trip", async () =
   );
   expect(before.every((l) => l.timestampUs === before[0].timestampUs && /^\d+\.\d s/.test(l.text))).toBe(true);
   const speeds = log.data.obd_pid.filter((r) => r.pid === 0x0d && r.status === 0);
-  expect(speeds.length).toBeGreaterThan(20);
+  // Polled at OBD_SPEED_HZ (2 Hz) through a drive of a few seconds.
+  expect(speeds.length).toBeGreaterThan(5);
   expect(speeds.some((r) => (r.data as number[])[0] === 30)).toBe(true);
   expect(log.data.obd_pid.some((r) => r.pid === 0x0c)).toBe(true);
   expect(log.data.gnss).toHaveLength(4);

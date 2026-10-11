@@ -99,8 +99,11 @@ const VIN_RETRY_MS = [5_000, 10_000, 15_000, 30_000, 60_000, 120_000];
 const SEARCH_EVERY = 4;
 /** Auto-connect with several adapters remembered: each gets this long to become reachable, most recent first (§7). */
 export const AUTO_CONNECT_WINDOW_MS = 8_000;
-/** OBD speed polls while the CAN shadow listens between them (§16.2); chosen in replay (docs/VEHICLE-LINK-SPEC.md). */
-export const CAN_SHADOW_SPEED_HZ = 5;
+/**
+ * OBD speed polls per second (§10.2). In replay, navigation at 2 Hz was no worse than at the 25–30 Hz back-to-back
+ * polls, and its claimed accuracy more honest; the CAN shadow listens in between (a break costs ~160 ms on the MX+).
+ */
+export const OBD_SPEED_HZ = 2;
 /** The shadow's counts in the snapshot at most this often (its state changes go at once). */
 const CAN_STATUS_INTERVAL_US = 1_000_000;
 
@@ -390,7 +393,7 @@ export class VehicleLinkCore implements VehicleLink {
 
   /**
    * CAN shadow (§16.2): listen to these ids between OBD polls while the ECU is awake, frames to the trip log; OBD
-   * speed polls drop to `CAN_SHADOW_SPEED_HZ`. Null or empty: off. STN adapters on a CAN car only.
+   * speed polls stay at `OBD_SPEED_HZ`. Null or empty: off. STN adapters on a CAN car only.
    */
   setCanShadow(ids: number[] | null): void {
     const next = ids && ids.length > 0 ? ids : null;
@@ -794,7 +797,7 @@ export class VehicleLinkCore implements VehicleLink {
   private onCanStatus(status: CanShadowStatus): void {
     const prev = this.snapshot.canShadow;
     const now = this.deps.clock.nowUs();
-    const changed = !prev || prev.state !== status.state || prev.mode !== status.mode || prev.failure !== status.failure;
+    const changed = !prev || prev.state !== status.state || prev.failure !== status.failure;
     if (!changed && now - this.lastCanStatusUs < CAN_STATUS_INTERVAL_US) return;
     this.lastCanStatusUs = now;
     this.update({ canShadow: status });
@@ -846,9 +849,8 @@ export class VehicleLinkCore implements VehicleLink {
   private speedCapFor(vin: string | null): number {
     if (this.speedCapOverride !== null) return this.speedCapOverride;
     const caps = this.deps.store.getJson<Record<string, number>>(SPEED_CAPS_KEY) ?? {};
-    const cap = (vin && caps[vin]) || Infinity;
-    // The CAN shadow listens between polls: fewer of them.
-    return this.shadow && this.shadow.status.state !== "failed" ? Math.min(cap, CAN_SHADOW_SPEED_HZ) : cap;
+    // A per-VIN cap (ECU refresh analysis) can only lower the rate.
+    return Math.min((vin && caps[vin]) || Infinity, OBD_SPEED_HZ);
   }
 
   /** Cars seen, most recent first; before the list existed, the VINs adapters remembered. */

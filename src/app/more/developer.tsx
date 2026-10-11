@@ -69,7 +69,7 @@ export default function DeveloperScreen() {
           <ScreenNote>
             {canShadow.state === "failed"
               ? `${t("canShadowFailed")}: ${canShadow.failure ?? ""}`
-              : `${t(canShadow.state === "listening" ? "canShadowListening" : "canShadowWaiting")} · ${canShadow.frames} ${t("canShadowFrames")}${canShadow.mode ? ` · ${canShadow.mode}` : ""}`}
+              : `${t(canShadow.state === "listening" ? "canShadowListening" : "canShadowWaiting")} · ${canShadow.frames} ${t("canShadowFrames")}`}
           </ScreenNote>
         )}
         <CycleRow
