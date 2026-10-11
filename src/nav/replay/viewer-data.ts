@@ -15,6 +15,7 @@ import {
   type OutageWindow,
   type ShownPoint,
 } from "./drive-report";
+import { decodeTripCan } from "./can";
 import { obdOdometer } from "./truth-match";
 import { replayTrip, type ReplayCut, type ReplayOptions, type ReplayResult, type ReplaySummary } from "./replay";
 
@@ -126,6 +127,11 @@ export interface ViewerData {
    * ('dr' = the phone's dead reckoning, 'gnss', 'manual'), other roads the car may be on [lat, lon, weight][]].
    */
   phoneOnly: [number, number | null, string, [number, number, number][]][] | null;
+  /**
+   * CAN shadow frames decoded through the car's profile (null without frames), at ≤ 10 Hz while the monitor listened:
+   * [t, km/h] mean wheel speed (or the CAN speed when the profile has no wheels), [t, gear] at each change, [t, °].
+   */
+  can: { profile: string | null; speed: [number, number][]; gear: [number, string][]; steer: [number, number][] } | null;
 }
 
 const r = (v: number, digits: number) => {
@@ -283,6 +289,7 @@ export function buildViewerData(file: string, trip: TripLog, options: ReplayOpti
     })),
     obd,
     rpm: trip.rpm.map((s) => [tS(s.tUs), Math.round(s.rpm)]),
+    can: viewerCan(trip, tS),
     engine: trip.engine.map((e) => ({ t: tS(e.tUs), state: e.state })),
     events,
     particles: result.particles.map((s) => [
@@ -298,4 +305,30 @@ export function buildViewerData(file: string, trip: TripLog, options: ReplayOpti
     routes: { plans, progress },
     phoneOnly,
   };
+}
+
+function viewerCan(trip: TripLog, tS: (tUs: number) => number): ViewerData["can"] {
+  const can = decodeTripCan(trip);
+  if (!can) return null;
+  const out: NonNullable<ViewerData["can"]> = { profile: can.profile?.key ?? null, speed: [], gear: [], steer: [] };
+  const wheels = !!can.profile?.wheels;
+  let lastSpeed = -Infinity;
+  let lastSteer = -Infinity;
+  let lastGear: string | null = null;
+  for (const s of can.samples) {
+    const t = tS(s.tUs);
+    if ((s.q === "wheels" || (s.q === "speed" && !wheels)) && t - lastSpeed >= 0.1) {
+      const v = s.q === "wheels" ? (s.v[0] + s.v[1] + s.v[2] + s.v[3]) / 4 : s.v;
+      out.speed.push([t, r(v * 3.6, 2)]);
+      lastSpeed = t;
+    } else if (s.q === "steer" && t - lastSteer >= 0.1) {
+      out.steer.push([t, r(s.deg, 1)]);
+      lastSteer = t;
+    } else if (s.q === "gear") {
+      const g = s.gear ?? "?";
+      if (g !== lastGear) out.gear.push([t, g]);
+      lastGear = g;
+    }
+  }
+  return out;
 }

@@ -1,7 +1,7 @@
 // Lets Node run the app's TypeScript directly (with --experimental-transform-types):
 // resolves the `@/` alias and extensionless relative imports to .ts files.
 // Also lowers the tool's CPU priority, so a benchmark on every core never makes the desktop unresponsive.
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { registerHooks } from "node:module";
 import { constants, setPriority } from "node:os";
 import path from "node:path";
@@ -36,5 +36,12 @@ registerHooks({
     const file = base && tsFile(base);
     if (file) return nextResolve(pathToFileURL(file).href, context);
     return nextResolve(specifier, context);
+  },
+  // The app imports JSON as Metro does (a default export), without import attributes.
+  load(url, context, nextLoad) {
+    if (url.startsWith("file:") && url.endsWith(".json")) {
+      return { format: "module", source: `export default ${readFileSync(fileURLToPath(url), "utf8")};`, shortCircuit: true };
+    }
+    return nextLoad(url, context);
   },
 });

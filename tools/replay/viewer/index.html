@@ -12,7 +12,7 @@
     --gps: #16a34a; --phone: #7c3aed; --pred: #2563eb; --cmp: #ea580c;
     --coarse: #d97706; --rej: #dc2626; --cut: #8b93a1; --ok: #16a34a; --warn: #d97706; --bad: #dc2626;
     --road: #a21caf; --road-end: #ea580c; --truth: #0f766e; --mm: #111827; --accent: #2563eb;
-    --nogps: #8b93a1; --appcut: #d97706; --replaycut: #2563eb; --route: #db2777; --drawn: #111827;
+    --nogps: #8b93a1; --appcut: #d97706; --replaycut: #2563eb; --route: #db2777; --drawn: #111827; --can: #0d9488;
     color-scheme: light;
   }
   @media (prefers-color-scheme: dark) {
@@ -21,7 +21,7 @@
       --gps: #4ade80; --phone: #c4b5fd; --pred: #60a5fa; --cmp: #fb923c;
       --coarse: #fbbf24; --rej: #f87171; --cut: #8b93a1; --ok: #4ade80; --warn: #fbbf24; --bad: #f87171;
       --road: #e879f9; --road-end: #fb923c; --truth: #2dd4bf; --mm: #fde047; --accent: #60a5fa;
-      --nogps: #8b93a1; --appcut: #fbbf24; --replaycut: #60a5fa; --route: #f472b6; --drawn: #f8fafc;
+      --nogps: #8b93a1; --appcut: #fbbf24; --replaycut: #60a5fa; --route: #f472b6; --drawn: #f8fafc; --can: #2dd4bf;
       color-scheme: dark;
     }
   }
@@ -1020,6 +1020,20 @@ function focusOutage(i) {
 }
 
 /** Phone-only: its own speed and what the dot is drawn from, for the panel. */
+// The decoded CAN shadow at the cursor: heard within the last second (the monitor listens between OBD polls).
+function canNow() {
+  if (!data.can) return "";
+  const speed = lastBefore(data.can.speed, t);
+  const gear = lastBefore(data.can.gear, t);
+  const steer = lastBefore(data.can.steer, t);
+  const parts = [];
+  if (speed && t - speed[0] <= 1) parts.push(`<b>${speed[1].toFixed(1)} km/h</b>`);
+  if (gear) parts.push(`gear ${esc(gear[1])}`);
+  if (steer && t - steer[0] <= 1) parts.push(`steering ${Math.round(steer[1])}°`);
+  const title = data.can.profile ? ` title="profile ${esc(data.can.profile)}"` : "";
+  return ` · <span${title}>CAN ${parts.length ? parts.join(", ") : "not heard"}</span>`;
+}
+
 function phoneNow() {
   if (!data.phoneOnly) return "";
   const p = phoneAt(t);
@@ -1053,7 +1067,7 @@ function renderNow() {
   const obd = lastBefore(data.obd, t);
   $("now").innerHTML = `<div class="muted">${fmtT(t)} · <span title="${clock(t, true)}">${clock(t)}</span></div>` +
     `<div class="now-row"><span class="swatch" style="background:var(--gps)"></span><span>GPS: ${gpsText}</span></div>` + rows +
-    `<div class="muted" style="margin-top:4px">Speed ${obd ? `${obd[1]} km/h (OBD)` : "—"}${phoneNow()}</div>`;
+    `<div class="muted" style="margin-top:4px">Speed ${obd ? `${obd[1]} km/h (OBD)` : "—"}${canNow()}${phoneNow()}</div>`;
   for (const li of $("events").children) li.classList.toggle("past", +li.dataset.t <= t);
   renderRouteNow();
 }
@@ -1150,6 +1164,18 @@ function drawTimeline() {
   g.strokeStyle = text2; g.lineWidth = 1; g.globalAlpha = 0.7; g.beginPath();
   data.obd.forEach(([tt, v], i) => (i ? g.lineTo(x(tt), ys(v)) : g.moveTo(x(tt), ys(v))));
   g.stroke(); g.globalAlpha = 1;
+  if (data.can?.speed.length) {
+    // CAN wheel speed while the monitor listened (gaps: OBD polls, or not listening).
+    g.strokeStyle = css("--can"); g.lineWidth = 1.2; g.beginPath();
+    let prev = null;
+    for (const [tt, v] of data.can.speed) {
+      const y = ys(Math.min(maxKph, v));
+      if (prev === null || tt - prev > 0.6) g.moveTo(x(tt), y); else g.lineTo(x(tt), y);
+      prev = tt;
+    }
+    g.stroke();
+    g.fillStyle = css("--can"); g.textAlign = "right"; g.fillText("CAN wheels", w - PAD_R, s0 + 21); g.textAlign = "left";
+  }
   if (data.phoneOnly) {
     // The phone's own speed (scaled by what the map matching learned), in the replay's colour; gaps = unknown.
     g.strokeStyle = css("--pred"); g.lineWidth = 1.4; g.beginPath();

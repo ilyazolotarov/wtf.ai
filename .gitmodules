@@ -1,0 +1,4 @@
+[submodule "tools/can/opendbc"]
+	path = tools/can/opendbc
+	url = https://github.com/commaai/opendbc.git
+	shallow = true
