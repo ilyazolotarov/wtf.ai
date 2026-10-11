@@ -552,7 +552,8 @@ The same contract with two transports: BLE (same GATT catalog) and Classic SPP (
    shows why the init read misses; `vin: read on retry n` how soon a retry gets it.
 6. Verify the auto-connect fix on device: open the app before the car wakes the MX+; it must connect once iOS reports the accessory.
 7. CAN shadow (§16.2) on the vLinker FD-IOS (BLE, STN1151): its break cost; and the listening share at 2 Hz on
-   both adapters. On 2026-10-11 its windows heard frames only a few times in 8 min.
+   both adapters. On 2026-10-11 it was deaf after its first break (the filter didn't open again); the next drive's
+   `reopen:` lines show which way opens it.
 8. The OBDLink MX+ froze in the CAN monitor on firmware 5.10.3 (§16.2); 5.13.1 lists raw CAN fixes. Its first drive
    (2026-10-11) heard nothing after the first break (the filter didn't open again), so it says nothing about freezes
    yet: drives with the full-setup reopening tell both.
@@ -632,12 +633,14 @@ the hex ids (`can_shadow` in the log's info).
 - **Failure → plain polling for the session** (link event `can-shadow: off: …`, the adapter restored with `ATAR`,
   `ATCRA<pinned>`, `ATH0`, the speed cap back): a pass filter refused; the monitor ending by itself (`BUFFER FULL`, a
   reset: the prompt arrives unasked) 3 times; 3 stops without a prompt.
-- **The receive filter must open again** before each window (`ATCRA` with no address). If that isn't answered `OK`,
-  or 5 s of listening in a row hear none of the ids, the filter is opened by a full setup (`ATAR` and the pass
-  filters, ~0.1 s) before every window from then on (link event `can-shadow: … opens by a full setup`); deaf for as
-  long again after that, the shadow is off. On 2026-10-11 the MX+ on firmware 5.13.1 heard 129 frames in its first
-  window and none in the 2770 after its first break; a successful `ATCRA`'s answer isn't logged, so which of the two
-  it was is still open.
+- **The receive filter must open again** before each window, cheapest way first: a bare `ATCRA` (reset); an
+  explicit all-pass `ATCRAXXX` (`ATCRAXXXXXXXX` on 29-bit); a full setup (`ATAR` and the pass filters: 8 commands,
+  ~0.25 s over BLE). A way not answered `OK`, or 5 s of listening in a row hearing none of the ids, moves to the next
+  one for the session (link event `can-shadow: … opens by … from now on`); deaf after the full setup too, the shadow
+  is off. The first answer of each way goes to the log (`can-shadow: reopen: ATCRA answered "…"`). On 2026-10-11 a
+  bare `ATCRA` worked on the MX+ with firmware 5.10.3 but not with 5.13.1, nor on the vLinker (STN1151 v4.3.2): both
+  heard frames only in the first window after each full setup (13 of 13 windows that heard any; the setups came
+  after the VIN retries), so listening was almost entirely deaf.
 - **The adapter froze in the monitor:** a stop gets no byte back at all (not even the frames still buffered), CR sent
   twice. The shadow goes off, the link is reset with one `ATWS` and, without an answer, closed and reopened (§10.5),
   standing or moving. The adapter id and its chip and firmware (`STN2255 v5.10.3`) are stored, and the shadow stays

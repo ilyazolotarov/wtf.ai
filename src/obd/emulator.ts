@@ -49,6 +49,8 @@ export interface EmulatorProfile {
    * Either explains a monitor that hears nothing after its first break (OBDLink MX+ on 5.13.1, 2026-10-11).
    */
   bareAtcra?: "refused" | "ignored";
+  /** An all-pass `ATCRAXXX` answers OK and keeps the filter (only a full setup opens it). */
+  wildcardAtcraIgnored?: boolean;
 }
 
 export interface VehicleState {
@@ -427,6 +429,7 @@ export class Elm327Emulator implements Transport {
       const digits = c.slice(3);
       if (digits === "" && this.profile.bareAtcra === "refused") return ["?"];
       if (digits === "" && this.profile.bareAtcra === "ignored") return ok;
+      if (/^X+$/.test(digits) && this.profile.wildcardAtcraIgnored) return ok;
       this.receiveFilter =
         digits === ""
           ? null

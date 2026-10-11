@@ -610,10 +610,28 @@ describe("VehicleLinkCore", () => {
       }
     });
 
-    test.each(["refused", "ignored"] as const)("a bare ATCRA %s on the adapter: the filter opens by a full setup, frames go on", async (bareAtcra) => {
-      const { core, windows, events } = await shadowOn({ bareAtcra });
+    // 2026-10-11: a bare ATCRA didn't open the filter on the vLinker (STN1151 v4.3.2) nor the MX+ on 5.13.1.
+    test.each(["refused", "ignored"] as const)("a bare ATCRA %s on the adapter: ATCRAXXX opens the filter, frames go on", async (bareAtcra) => {
+      const { core, windows, events, emu } = await shadowOn({ bareAtcra });
       try {
-        await until(() => events.some((e) => e.type === "can-shadow" && /opens by a full setup/.test(e.detail ?? "")));
+        await until(() => events.some((e) => e.type === "can-shadow" && /opens by ATCRAXXX from now on/.test(e.detail ?? "")));
+        const n = windows.length;
+        await until(() => windows.length >= n + 5);
+        expect(windows.slice(n).every((w) => w.frames > 0)).toBe(true);
+        expect(core.getSnapshot().canShadow?.state).not.toBe("failed");
+        // What each way answered, once, into the log; no full setup needed.
+        expect(events.filter((e) => e.detail?.startsWith("reopen: ATCRA answered")).length).toBe(1);
+        expect(events.some((e) => e.detail === 'reopen: ATCRAXXX answered "OK"')).toBe(true);
+        expect(emu.log.filter((c) => c === "ATAR").length).toBe(1);
+      } finally {
+        await core.disconnect();
+      }
+    });
+
+    test("neither ATCRA opens it: a full setup before every window", async () => {
+      const { core, windows, events } = await shadowOn({ bareAtcra: "ignored", wildcardAtcraIgnored: true });
+      try {
+        await until(() => events.some((e) => e.type === "can-shadow" && /opens by a full setup from now on/.test(e.detail ?? "")));
         const n = windows.length;
         await until(() => windows.length >= n + 5);
         expect(windows.slice(n).every((w) => w.frames > 0)).toBe(true);
