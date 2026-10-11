@@ -13,8 +13,8 @@ const AUTO_HEADING_UP_MS = 2000;
  * The map camera's mode (UI-SPEC §6.2) and its own turns: heading-up once per trip as the car drives off, and the
  * overview of a new route's alternatives while the car stands.
  *
- * `pickCameraMode` is the driver's (or the screen's) choice: it ends the trip's auto heading-up. `setCameraMode`
- * leaves it armed.
+ * `pickCameraMode` is the driver's (or the screen's) choice: a follow mode picked ends the trip's auto heading-up.
+ * `setCameraMode` leaves it armed.
  */
 export function useCameraMode({
   recording,
@@ -30,8 +30,9 @@ export function useCameraMode({
 }) {
   const [cameraMode, setCameraMode] = useState<CameraMode>("follow");
 
-  // Once per trip: follow becomes heading-up when the car first drives off, and goes back
-  // to follow when the trip ends unless the driver has picked a mode since.
+  // Once per trip: heading-up when the car first drives off, and back to follow when the trip ends unless the
+  // driver has picked a follow mode since. Driving off in free (the map panned, a route's overview), the map stays
+  // free: the button brings heading-up.
   const autoHeadingUp = useRef<"armed" | "on" | "done">("armed");
   const driving = recording && (speedMps ?? 0) > COURSE_MIN_SPEED_MPS;
   useEffect(() => {
@@ -53,10 +54,17 @@ export function useCameraMode({
     }
     autoHeadingUp.current = "armed";
   }, [onTrip]);
+  /** The driver's (or the screen's) choice. Picking a follow mode ends the trip's auto heading-up; free doesn't. */
   const pickCameraMode = (next: (mode: CameraMode) => CameraMode) => {
-    if (autoHeadingUp.current === "on") autoHeadingUp.current = "done";
-    setCameraMode(next);
+    const picked = next(cameraMode);
+    if (picked !== "free" && autoHeadingUp.current === "on") autoHeadingUp.current = "done";
+    setCameraMode(picked);
   };
+  /**
+   * The camera button: from free always heading-up first (the driver's choice, 2026-10-11: back to north-up read
+   * as "heading-up points north"), then between heading-up and follow.
+   */
+  const toggleCameraMode = () => pickCameraMode((mode) => (mode === "follow-heading" ? "follow" : "follow-heading"));
 
   // Alternatives for a new route while the car stands: the map shows them all once (ROUTING-SPEC §8.7); the
   // recentre button goes back to following. Moving, the camera is left alone.
@@ -71,5 +79,5 @@ export function useCameraMode({
     }
   }
 
-  return { cameraMode, setCameraMode, pickCameraMode, overview };
+  return { cameraMode, setCameraMode, pickCameraMode, toggleCameraMode, overview };
 }

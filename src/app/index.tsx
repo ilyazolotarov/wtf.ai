@@ -18,6 +18,7 @@ import { SheetBlur } from "@/components/map/sheet-blur";
 import { StatusRow } from "@/components/map/status-row";
 import { OutageCard, SinceTrustedStrip, TrustAlertCard, trustAlertText } from "@/components/map/trust-cards";
 import { useCameraMode } from "@/components/map/use-camera-mode";
+import { usePlaceReminder } from "@/components/map/use-place-reminder";
 import { useCompassHeading, useHeadingUp, walkingCompass } from "@/components/map/use-compass-heading";
 import { isLost, usePlacing } from "@/components/map/use-placing";
 import { MapTour, TourInvite } from "@/components/guide/map-tour";
@@ -135,21 +136,24 @@ export default function HomeScreen() {
   useVoiceGuidance(route, position?.speedMps, voiceMuted || voiceOff);
   const audioOutput = useAudioOutput(route?.status === "active");
 
-  const { cameraMode, setCameraMode, pickCameraMode, overview } = useCameraMode({
+  const { cameraMode, setCameraMode, pickCameraMode, toggleCameraMode: toggleMode, overview } = useCameraMode({
     recording,
     // A linger after engine off is still the same drive for the camera.
     onTrip: recording || recorderState === "lingering",
     speedMps: position?.speedMps,
     route,
   });
-  // Tap never enters free (only map gestures do); from free it returns to follow.
+  // Tap never enters free (only map gestures do); from free it goes to heading-up.
   const toggleCameraMode = () => {
     setGhostView(false);
-    pickCameraMode((mode) => (mode === "follow" ? "follow-heading" : "follow"));
+    toggleMode();
   };
 
   const place = usePlacing({ position, navigator, pickCameraMode, setCameraMode, onStart: () => setPin(null) });
   const placing = place.step;
+  // Lost while standing: offer putting the car on the map, and say so when the ignition comes on.
+  const placeOffered = !placing && !position?.poseQuestion && !manual && place.standing && isLost(position);
+  usePlaceReminder({ offered: placeOffered, muted: voiceMuted || voiceOff });
 
   const ghost = trust === "UNTRUSTED" ? position?.rawGnss : undefined;
   const showingGhost = ghostView && ghost != null;
@@ -262,7 +266,7 @@ export default function HomeScreen() {
               />
             )}
 
-            {!placing && !position?.poseQuestion && !manual && place.standing && isLost(position) && (
+            {placeOffered && (
               <HudChip icon="location_on" label={t("placeOffer")} color={palette.accent} onPress={() => place.start()} />
             )}
 

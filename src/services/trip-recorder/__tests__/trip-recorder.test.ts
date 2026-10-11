@@ -125,7 +125,10 @@ test("engine start → recording → key off → complete ULog trip", async () =
   recorder.tick();
   expect(recorder.getSnapshot().current?.distanceM).toBeCloseTo(111.2, 0);
 
-  emu.setVehicle({ ignition: false, rpm: 0, speedKph: 0 });
+  // The car stops, then the key turns (silence right after moving is the link, not the ignition).
+  emu.setVehicle({ speedKph: 0 });
+  await until(() => link.getSnapshot().lastSpeed?.raw === 0);
+  emu.setVehicle({ ignition: false, rpm: 0 });
   await until(() => recorder.getSnapshot().state === "lingering");
   expect(wanted).toEqual({ gnss: true, imu: false });
 

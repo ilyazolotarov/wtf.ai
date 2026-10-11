@@ -473,10 +473,14 @@ Not used: bare-CR "repeat last command" (it saves nothing on BLE and breaks when
 | any → `engine-running`          | 2 consecutive RPM samples ≥ 400 rpm, each different from the one before                       |
 | `engine-running` → `engine-off` | 2 consecutive RPM samples < 250 rpm (auto stop-start, hybrid EV mode, key in ON position)      |
 | `engine-running` → `engine-off` | the same non-zero RPM read 3 times in a row (stale value, see below)                           |
-| any → `ignition-off`            | no valid response (`no-data`, `unable-to-connect`, `bus-error`, `timeout`) for ≥ 10 s          |
+| any → `ignition-off`            | no valid response (`no-data`, `unable-to-connect`, `bus-error`, `timeout`) for ≥ 10 s, the last speed read 0 |
+| any → `unknown` → `ignition-off` | the same silence right after a speed > 0: `unknown` at 10 s (the adapter or its link, not the key), `ignition-off` at 2 min |
 | `unknown` / `ignition-off` → `engine-off` | first valid RPM response (a high one counts as the first of the 2 for `engine-running`) |
 | link lost                       | state becomes `unknown`                                                                        |
 
+- A car stops before the key turns, and speed is polled at 2 Hz: all 19 ignition-offs in the logs read 0 last. The
+  one silence after a speed > 0 was an adapter freezing at 39 km/h (2026-10-11); as `ignition-off` it ended the trip
+  and saved a parked pose on the road.
 - Speed > 0 while `engine-off` is valid (hybrids, coasting with stop-start). Parked with the engine off, speed drops to 1 Hz: it only has to notice the car rolling, and it keeps the parked timeout fed (TRIP-LOGGER-SPEC §4).
 - A running engine's RPM never repeats exactly (0.25 rpm resolution, polled seconds apart: 0 repeats in 167 samples over three real trips). Some ECUs answer with the RPM latched at the last shutdown while awake with the engine off: a test car main test car reported 796.50 for 280 s while parked with the engine off, and 724.00 after the engine was stopped. Without the repeat rule that started a trip and blocked the parked timeout.
 - `ATRV` is read every 30 s (and logged). Voltage is a hint only (smart alternators make it unreliable for
@@ -491,6 +495,12 @@ Not used: bare-CR "repeat last command" (it saves nothing on BLE and breaks when
 - Isolated `no-data`/`timeout` on a speed poll: log it and continue.
 - `stopped` / `buffer-full`: send `"\r"`, wait for `>`, retry once.
 - 3 consecutive `timeout`s with no bytes at all: the adapter is hung → `ATWS`, re-run §9 from the cached configuration.
+  No answer to one `ATWS` (3 when standing) with the car moving (last speed > 0), or after the CAN monitor froze
+  (§16.2): the link is closed and reopened as after a link
+  loss (§11), and its probe is retried with the reconnect's backoff instead of ending in an error. A frozen link
+  (the iOS stream) comes back this way; a frozen adapter only when it restarts. An MFi adapter that drops off iOS
+  then comes back only when it connects to iOS again (an app can't make it); after 25 s of waiting the vehicle
+  screen says to tap it in iOS Settings → Bluetooth.
 - `?` on a command that worked before: the adapter reset itself (`LV RESET`, brown-out at cranking) → re-run §9.
 
 ## 11. Link loss, reconnect, background
@@ -542,7 +552,9 @@ The same contract with two transports: BLE (same GATT catalog) and Classic SPP (
    shows why the init read misses; `vin: read on retry n` how soon a retry gets it.
 6. Verify the auto-connect fix on device: open the app before the car wakes the MX+; it must connect once iOS reports the accessory.
 7. CAN shadow (§16.2) on the vLinker FD-IOS (BLE, STN1151): its break cost; and the listening share at 2 Hz on
-   both adapters.
+   both adapters. On 2026-10-11 its windows heard frames only a few times in 8 min.
+8. The OBDLink MX+ froze in the CAN monitor on firmware 5.10.3 (§16.2); 5.13.1 lists raw CAN fixes. Drives on 5.13.1
+   with the shadow on tell whether it still freezes.
 
 ## 16. CAN monitor (STN)
 
@@ -619,6 +631,13 @@ the hex ids (`can_shadow` in the log's info).
 - **Failure → plain polling for the session** (link event `can-shadow: off: …`, the adapter restored with `ATAR`,
   `ATCRA<pinned>`, `ATH0`, the speed cap back): a pass filter refused; the monitor ending by itself (`BUFFER FULL`, a
   reset: the prompt arrives unasked) 3 times; 3 stops without a prompt.
+- **The adapter froze in the monitor:** a stop gets no byte back at all (not even the frames still buffered), CR sent
+  twice. The shadow goes off, the link is reset with one `ATWS` and, without an answer, closed and reopened (§10.5),
+  standing or moving. The adapter id and its chip and firmware (`STN2255 v5.10.3`) are stored: the shadow stays off on
+  it (link event `can-shadow: off: the adapter froze in the monitor on this firmware (…)`) until the firmware changes.
+  The OBDLink MX+ on 5.10.3 froze twice in ~22 min of listening (2026-10-11), inside a window both times (once at
+  39 km/h, once standing), never without the monitor; iOS dropped it ~2 min later and it came back only when tapped in
+  iOS Settings → Bluetooth.
 - **Off:** turning the setting off restores the adapter the same way. A reinit drops the shadow; the next init sets it
   up again.
 - **Not decoded on the phone.** Replay decodes the frames; counter and checksum signals rebuild frame timing and catch

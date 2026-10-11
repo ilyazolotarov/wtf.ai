@@ -157,6 +157,8 @@ export class Elm327Emulator implements Transport {
   private monitoring = false;
   private monitorStartUs = 0;
   private broadcastSent: number[] = [];
+  private frozen: "until-reconnect" | "for-good" | null = null;
+  private freezeAtMonitor: "until-reconnect" | "for-good" | null = null;
 
   constructor(
     private readonly clock: Clock,
@@ -179,6 +181,7 @@ export class Elm327Emulator implements Transport {
     await this.clock.sleep(50);
     this.connected = true;
     this.firstCommand = true;
+    if (this.frozen === "until-reconnect") this.frozen = null;
     return { deviceInfo: { name: "Emulator", model: this.profile.banner } };
   }
 
@@ -195,6 +198,20 @@ export class Elm327Emulator implements Transport {
     this.desyncWhen = when;
   }
 
+  /**
+   * Simulate the adapter going silent with the link up (2026-10-11, an OBDLink MX+ at 39 km/h): no byte comes back,
+   * the monitor stops too. `untilReconnect`: a new connection brings it back (the link froze, not the adapter).
+   */
+  freeze(untilReconnect = true): void {
+    this.frozen = untilReconnect ? "until-reconnect" : "for-good";
+    this.monitoring = false;
+  }
+
+  /** `freeze()` at the next `STM`: inside a monitor window, as both freezes seen. */
+  freezeInMonitor(untilReconnect = true): void {
+    this.freezeAtMonitor = untilReconnect ? "until-reconnect" : "for-good";
+  }
+
   /** Simulate the adapter dropping off (unplugged / brown-out). */
   dropLink(reason = "emulated link loss"): void {
     this.connected = false;
@@ -209,7 +226,13 @@ export class Elm327Emulator implements Transport {
   async writeRaw(text: string): Promise<void> {
     if (!this.connected) throw new Error("not connected");
     this.log.push(text.trim());
+    if (this.frozen) return;
     if (text.trim().toUpperCase() !== "STM" || !this.profile.stn) return;
+    if (this.freezeAtMonitor) {
+      this.frozen = this.freezeAtMonitor;
+      this.freezeAtMonitor = null;
+      return;
+    }
     this.monitoring = true;
     this.monitorStartUs = this.clock.nowUs();
     this.broadcastSent = (this.profile.broadcast ?? []).map(() => 0);
@@ -260,6 +283,10 @@ export class Elm327Emulator implements Transport {
     if (!this.connected) throw new Error("not connected");
     this.commandCount++;
     this.log.push(command);
+    if (this.frozen) {
+      await this.clock.sleep(timeoutMs);
+      return { raw: "", status: "timeout", txUs, rxUs: this.clock.nowUs() };
+    }
 
     if (this.monitoring) {
       // Any character stops the monitor: the frames still buffered, STOPPED, the prompt.

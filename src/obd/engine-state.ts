@@ -9,6 +9,11 @@ export interface EngineStateConfig {
   /** Repeats of the same non-zero RPM that mark the value as stale (engine stopped). */
   staleRepeats: number;
   silenceToIgnitionOffUs: number;
+  /**
+   * Silence right after the car was moving is the adapter or the link, not the ignition (a car stops before the key
+   * turns, and speed is polled at 2 Hz): `unknown` after `silenceToIgnitionOffUs`, `ignition-off` only after this.
+   */
+  silenceWhileMovingToIgnitionOffUs: number;
 }
 
 export const DEFAULT_ENGINE_CONFIG: EngineStateConfig = {
@@ -17,6 +22,7 @@ export const DEFAULT_ENGINE_CONFIG: EngineStateConfig = {
   confirmSamples: 2,
   staleRepeats: 2,
   silenceToIgnitionOffUs: 10_000_000,
+  silenceWhileMovingToIgnitionOffUs: 120_000_000,
 };
 
 export class EngineStateMachine {
@@ -27,6 +33,8 @@ export class EngineStateMachine {
   private lastRpm: number | null = null;
   /** Start of the current run of invalid responses. */
   private silentSinceUs: number | null = null;
+  /** The last speed read was above 0. */
+  private moving = false;
 
   constructor(
     private readonly onChange: (state: EngineState, tUs: number) => void,
@@ -44,7 +52,11 @@ export class EngineStateMachine {
       return;
     }
     if (this.silentSinceUs === null) this.silentSinceUs = tUs;
-    if (tUs - this.silentSinceUs >= this.config.silenceToIgnitionOffUs) this.set("ignition-off", tUs);
+    const silentUs = tUs - this.silentSinceUs;
+    if (silentUs < this.config.silenceToIgnitionOffUs) return;
+    // 2026-10-11: the adapter froze at 39 km/h; "ignition off" ended the trip and saved a parked pose on the road.
+    if (this.moving && silentUs < this.config.silenceWhileMovingToIgnitionOffUs) this.set("unknown", tUs);
+    else this.set("ignition-off", tUs);
   }
 
   /**
@@ -79,9 +91,11 @@ export class EngineStateMachine {
     }
   }
 
-  /** Speed > 0 proves the ECU is awake (hybrids may move with the engine off). */
-  onSpeed(tUs: number): void {
+  /** Every speed read. Speed > 0 proves the ECU is awake (hybrids may move with the engine off). */
+  onSpeed(tUs: number, rawKph: number): void {
     this.silentSinceUs = null;
+    this.moving = rawKph > 0;
+    if (!this.moving) return;
     if (this.current === "unknown" || this.current === "ignition-off") this.set("engine-off", tUs);
   }
 
@@ -89,6 +103,7 @@ export class EngineStateMachine {
     this.high = this.low = this.stale = 0;
     this.lastRpm = null;
     this.silentSinceUs = null;
+    this.moving = false;
     this.set("unknown", tUs);
   }
 

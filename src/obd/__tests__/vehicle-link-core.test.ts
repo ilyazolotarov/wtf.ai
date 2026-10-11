@@ -184,6 +184,50 @@ describe("VehicleLinkCore", () => {
     await core.disconnect();
   });
 
+  // 2026-10-11: an OBDLink MX+ went silent at 39 km/h with its link up; the app reported ignition off and kept the
+  // dead session for 2 min.
+  test("the adapter freezes while driving: no ignition-off, the link reopens and polls again", async () => {
+    const { core, emulators, events } = setup();
+    const engine: string[] = [];
+    core.onEngineState((s) => engine.push(s));
+    core.startDiscovery();
+    void core.connect("emu-1");
+    await until(() => emulators.has("emu-1"));
+    const emu = emulators.get("emu-1")!;
+    emu.setVehicle({ speedKph: 39 });
+    await until(() => core.getSnapshot().link === "polling" && (core.getSnapshot().lastSpeed?.raw ?? 0) === 39);
+    try {
+      emu.freeze();
+      await until(() => events.some((e) => e.type === "reopen"));
+      await until(() => core.getSnapshot().link === "polling" && events.some((e) => e.type === "link-restored"));
+      expect(events.find((e) => e.type === "link-lost")?.detail).toBe("adapter silent");
+      expect(engine).not.toContain("ignition-off");
+    } finally {
+      await core.disconnect();
+    }
+  });
+
+  test("frozen for good while driving: the reconnect keeps trying, never an error", async () => {
+    const { core, clock, emulators, events } = setup();
+    core.startDiscovery();
+    void core.connect("emu-1");
+    await until(() => emulators.has("emu-1"));
+    const emu = emulators.get("emu-1")!;
+    emu.setVehicle({ speedKph: 39 });
+    await until(() => core.getSnapshot().link === "polling" && (core.getSnapshot().lastSpeed?.raw ?? 0) === 39);
+    try {
+      emu.freeze(false);
+      await until(() => events.some((e) => e.type === "reopen"));
+      const t0 = clock.nowUs();
+      await until(() => clock.nowUs() - t0 > 90_000_000);
+      expect(["reconnecting", "probing"]).toContain(core.getSnapshot().link);
+      expect(events.some((e) => e.type === "error")).toBe(false);
+      expect(events.filter((e) => e.type === "probe-failed").length).toBeGreaterThan(1);
+    } finally {
+      await core.disconnect();
+    }
+  });
+
   test("another car on the adapter (K-line after CAN): the cached protocol's bus errors start a search", async () => {
     const { core, store, events, emulators } = setup(KLINE_PROFILE, storeWithCx5());
     core.startDiscovery();
@@ -500,6 +544,31 @@ describe("VehicleLinkCore", () => {
         const n = speeds.length;
         await until(() => speeds.length >= n + 10);
         expect(emu.log.lastIndexOf("STM")).toBe(stm);
+      } finally {
+        await core.disconnect();
+      }
+    });
+
+    // 2026-10-11: an OBDLink MX+ (STN2255 v5.10.3) froze twice inside a monitor window, once standing.
+    test("the adapter freezes in the monitor: the link reopens at once, the shadow stays off on that firmware", async () => {
+      const { core, windows, emu, events, store } = await shadowOn({});
+      try {
+        await until(() => windows.length >= 3);
+        const chip = core.getSnapshot().adapter!.chip!;
+        emu.freezeInMonitor();
+        await until(() => events.some((e) => e.type === "reopen"));
+        expect(events.find((e) => e.type === "can-shadow" && e.detail?.startsWith("off: no answer at all"))).toBeDefined();
+        // At the first silent stop, not after three.
+        expect(events.filter((e) => e.type === "reinit").map((e) => e.detail)).toEqual(["adapter silent in the CAN monitor"]);
+        await until(() => core.getSnapshot().link === "polling" && events.some((e) => e.type === "link-restored"));
+        await until(() => events.some((e) => e.detail === `off: the adapter froze in the monitor on this firmware (${chip})`));
+        expect(store.getJson<Record<string, string>>("vehicleLink.canShadowFroze")).toEqual({ "emu-1": chip });
+        // Other firmware (updated): it listens again.
+        store.setJson("vehicleLink.canShadowFroze", { "emu-1": "STN2255 v5.10.2" });
+        const n = windows.length;
+        core.setCanShadow(null);
+        core.setCanShadow([0x215, 0x228]);
+        await until(() => windows.length >= n + 3);
       } finally {
         await core.disconnect();
       }

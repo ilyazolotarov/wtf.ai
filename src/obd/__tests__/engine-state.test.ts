@@ -88,8 +88,36 @@ describe("EngineStateMachine", () => {
     m.onObdResponse(false, s(0));
     m.onObdResponse(false, s(11));
     expect(m.state).toBe("ignition-off");
-    m.onSpeed(s(12));
+    m.onSpeed(s(12), 3);
     expect(m.state).toBe("engine-off");
+  });
+
+  // 2026-10-11: the adapter froze at 39 km/h (no answer at all); the trip ended as ignition off and the navigator
+  // saved a parked pose on the road.
+  test("silence right after moving is the link, not the ignition: unknown, ignition-off only after 2 min", () => {
+    const { m, changes } = machine();
+    m.onRpm(800, s(0));
+    m.onRpm(810, s(0.5));
+    m.onSpeed(s(1), 39);
+    m.onObdResponse(false, s(2));
+    m.onObdResponse(false, s(13));
+    expect(m.state).toBe("unknown");
+    m.onObdResponse(false, s(100));
+    expect(m.state).toBe("unknown");
+    m.onObdResponse(false, s(123));
+    expect(m.state).toBe("ignition-off");
+    expect(changes).toEqual(["engine-off", "engine-running", "unknown", "ignition-off"]);
+  });
+
+  test("silence after the car stood (speed 0) is the ignition", () => {
+    const { m } = machine();
+    m.onRpm(800, s(0));
+    m.onRpm(810, s(0.5));
+    m.onSpeed(s(1), 20);
+    m.onSpeed(s(2), 0);
+    m.onObdResponse(false, s(3));
+    m.onObdResponse(false, s(14));
+    expect(m.state).toBe("ignition-off");
   });
 
   // Real log 20261003-101005_vwaz7t (Mazda CX-5, OBDLink MX+): parked ~2 min after the

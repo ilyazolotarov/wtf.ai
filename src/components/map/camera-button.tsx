@@ -17,7 +17,7 @@ const CAMERA: Record<CameraMode, { icon: IconName; label: "follow" | "followHead
   free: { icon: "location_searching", label: "free" },
 };
 
-/** Shows the camera mode; a tap goes between follow and heading-up, and back to follow from free (UI-SPEC §6.2). */
+/** Shows the camera mode; a tap goes between heading-up and follow, and from free to heading-up (UI-SPEC §6.2). */
 export function CameraButton({ mode, onPress, ref }: { mode: CameraMode; onPress(): void; ref?: Ref<View> }) {
   const { t } = useT();
   const palette = usePalette();

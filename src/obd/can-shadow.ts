@@ -41,11 +41,13 @@ export interface CanShadowDeps {
   onWindow(window: CanWindow): void;
   onEvent(detail: string): void;
   onStatus(status: CanShadowStatus): void;
-  onFailed(reason: string): void;
+  /** `silent`: the adapter stopped answering altogether while monitoring. */
+  onFailed(reason: string, silent: boolean): void;
 }
 
 /** The monitor ending by itself this many times: back to plain polling for the session. */
 const SELF_ENDS_TO_FAIL = 3;
+const SILENT = "no answer at all after stopping the monitor";
 /** Stops that found no prompt, this many times: likewise. */
 const STOP_FAILURES_TO_FAIL = 3;
 /** Commands of others that change what the monitor sees: set up again before the next window. */
@@ -136,11 +138,21 @@ export class CanShadow implements IdleMonitor {
     try {
       // Any character stops it: the rest of the output, STOPPED, the prompt.
       let r = await send("", 1000);
+      let silent = r.raw === "";
       // A CR reaching an adapter that had just stopped by itself repeats its last command, STM: stop that one too.
-      if (r.status === "timeout") r = await send("", 1000);
+      if (r.status === "timeout") {
+        r = await send("", 1000);
+        silent &&= r.raw === "";
+      }
       this.live = false;
       this.collector?.push(r.raw, r.rxUs);
       this.closeWindow(r.txUs, false);
+      // Not a byte back, not even the frames still buffered: the adapter froze in the monitor (an OBDLink MX+ twice
+      // on 2026-10-11). Polls won't get answers either; the owner recovers the link.
+      if (r.status === "timeout" && silent) {
+        this.fail(SILENT, true);
+        return;
+      }
       if (r.status === "timeout" && ++this.stopFailures >= STOP_FAILURES_TO_FAIL) this.fail(`no prompt after stopping the monitor ${this.stopFailures} times`);
       // Broadcast frames would reach the poll's answer through the pass filters.
       if ((await send(`ATCRA${this.pinFilter()}`, 1000)).status === "ok") this.pinned = true;
@@ -216,11 +228,11 @@ export class CanShadow implements IdleMonitor {
     this.deps.onFrames(frames);
   }
 
-  private fail(reason: string): void {
+  private fail(reason: string, silent = false): void {
     if (this.failure) return;
     this.failure = reason;
     this.deps.onEvent(`off: ${reason}`);
     this.deps.onStatus(this.status);
-    this.deps.onFailed(reason);
+    this.deps.onFailed(reason, silent);
   }
 }

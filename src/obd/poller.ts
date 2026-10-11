@@ -209,7 +209,7 @@ export class ObdPoller {
       speedMps: o.value,
       raw: o.bytes[0],
     };
-    if (sample.raw > 0) this.engine.onSpeed(sample.tUs);
+    this.engine.onSpeed(sample.tUs, sample.raw);
     this.hooks.onSpeed(sample);
   }
 

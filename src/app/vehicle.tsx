@@ -10,7 +10,7 @@ import {
   ScreenRow,
   ScreenSection,
 } from "@/components/screens/screen-ui";
-import { useNavStatus } from "@/components/status/use-nav-status";
+import { useLinkBadge, useNavStatus } from "@/components/status/use-nav-status";
 import { Icon } from "@/components/ui/icon";
 import { T } from "@/components/ui/text";
 import { DeviceList } from "@/components/vehicle/device-list";
@@ -83,6 +83,14 @@ function CarDetails() {
     );
 
   const remembered = snap.devices.find((d) => d.rank === "remembered");
+  // An MFi adapter that dropped off iOS (it froze, or lost power) only comes back when it connects to iOS again: the
+  // app can only wait. When the wait is long, say where the driver can make it connect (2026-10-11).
+  const badge = useLinkBadge();
+  const mfi = snap.devices.find((d) => d.transport === "mfi" && d.rank === "remembered");
+  const mfiHint =
+    Platform.OS === "ios" && mfi && badge === "bad" && (snap.link === "connecting" || snap.link === "reconnecting")
+      ? t("mfiReconnectHint").replace("{name}", mfi.name ?? t("obdAdapter"))
+      : null;
   const active = snap.devices.find((d) => d.id === snap.activeDeviceId);
   const adapterName = adapter?.name ?? active?.name ?? remembered?.name ?? t("obdAdapter");
   const gattDump = snap.error?.code === "other" && snap.error.message?.startsWith("[") ? snap.error.message : null;
@@ -143,6 +151,7 @@ function CarDetails() {
         )}
         {errorText && <ScreenRow labelKey="lastError" value={errorText} valueColor={palette.bad.c} />}
       </ScreenCard>
+      {mfiHint && <ScreenNote>{mfiHint}</ScreenNote>}
       {gattDump && (
         <ScreenAction labelKey="copyGattDump" secondary onPress={() => void Share.share({ message: gattDump })} />
       )}

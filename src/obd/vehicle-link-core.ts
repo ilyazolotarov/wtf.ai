@@ -81,6 +81,8 @@ export interface VehicleLinkDeps {
 
 const ADAPTERS_KEY = "vehicleLink.adapters";
 const SPEED_CAPS_KEY = "vehicleLink.speedCapsByVin";
+/** Adapters whose CAN monitor froze them, with the firmware it happened on (§16.2). */
+const SHADOW_FROZE_KEY = "vehicleLink.canShadowFroze";
 const CARS_KEY = "vehicleLink.cars";
 const STATS_INTERVAL_US = 250_000;
 
@@ -473,6 +475,8 @@ export class VehicleLinkCore implements VehicleLink {
     info: ConnectedInfo,
     device: { id: string; transport: TransportKind; name: string | null },
     remembered: RememberedAdapter | undefined,
+    /** A reconnect of the adapter in use: a probe that fails is retried (it may still be frozen), not an error. */
+    reconnect = false,
   ): Promise<void> {
     const session = new Elm327Session(this.transport!);
     this.session = session;
@@ -486,6 +490,7 @@ export class VehicleLinkCore implements VehicleLink {
     this.check(gen);
     if (!probe.ok) {
       this.event("probe-failed", probe.failedStep);
+      if (reconnect) throw new Error(`probe failed at ${probe.failedStep}`);
       await this.transport?.disconnect().catch(() => undefined);
       this.update({ link: "error", error: { code: "not-elm327", message: `probe failed at ${probe.failedStep}` } });
       return;
@@ -655,16 +660,28 @@ export class VehicleLinkCore implements VehicleLink {
     if (vehicle && !vehicle.vin) this.update({ vehicle: { ...vehicle, vinSource: "missing" } });
   }
 
-  private async reinit(gen: number, reason: string): Promise<void> {
+  /** `frozen`: the adapter is known to have frozen (the CAN monitor got no byte back), not the car switched off. */
+  private async reinit(gen: number, reason: string, frozen = false): Promise<void> {
     if (this.reiniting || gen !== this.gen) return;
     this.reiniting = true;
     this.event("reinit", reason);
     this.shadow?.disable();
     try {
+      // The car was moving: it didn't switch off, the adapter or its link froze (§10.5).
+      const moving = frozen || (this.snapshot.lastSpeed?.raw ?? 0) > 0;
       await this.poller?.stop();
       this.poller = null;
       this.check(gen);
-      await warmReset((c, o) => this.requireSession().send(c, o));
+      // Moving, every second without speed counts: one try, then the link is reopened.
+      const answered = await warmReset((c, o) => this.requireSession().send(c, o), moving ? 1 : 3);
+      this.check(gen);
+      if (!answered && moving) {
+        this.event("reopen", frozen ? "no answer to ATWS after the monitor froze" : "no answer to ATWS while moving");
+        await this.transport?.disconnect().catch(() => undefined);
+        this.check(gen);
+        this.onLinkLost(gen, "adapter silent");
+        return;
+      }
       await this.initAndPoll(gen);
     } catch (error) {
       this.handleFailure(gen, error);
@@ -693,11 +710,14 @@ export class VehicleLinkCore implements VehicleLink {
             info,
             { id: this.snapshot.activeDeviceId!, transport: device?.transport ?? this.transport!.kind, name: device?.name ?? null },
             remembered,
+            true,
           );
           return;
         } catch (error) {
           if (error instanceof Cancelled || gen !== this.gen) return;
           if (error instanceof SessionClosedError) continue;
+          // A probe that failed left its session behind.
+          await this.teardownSession();
           await this.deps.clock.sleep(delayMs);
           delayMs = Math.min(delayMs * 2, 30000);
         }
@@ -754,8 +774,13 @@ export class VehicleLinkCore implements VehicleLink {
         : protocol === null || protocol < 6 || protocol > 9
           ? "needs a car on CAN"
           : null;
+      const adapter = this.snapshot.adapter;
+      const froze = adapter && this.shadowFroze()[adapter.deviceId];
+      const firmware = froze && froze === adapter.chip ? froze : null;
       if (why) this.event("can-shadow", `off: ${why}`);
+      else if (firmware) this.event("can-shadow", `off: the adapter froze in the monitor on this firmware (${firmware})`);
       else {
+        const gen = this.gen;
         shadow = new CanShadow({
           clock: this.deps.clock,
           writeRaw: (text) => transport!.writeRaw!(text),
@@ -767,9 +792,16 @@ export class VehicleLinkCore implements VehicleLink {
           onWindow: (w) => this.canWindows.emit(w),
           onEvent: (detail) => this.event("can-shadow", detail),
           onStatus: (status) => this.onCanStatus(status),
-          onFailed: () => {
-            void this.restoreAfterShadow();
+          onFailed: (_reason, silent) => {
             this.poller?.setSpeedCap(this.speedCapFor(this.snapshot.vehicle?.vin ?? null));
+            if (!silent) {
+              void this.restoreAfterShadow();
+              return;
+            }
+            // Not again on this adapter until its firmware changes (§16.2); recover the link now rather than
+            // after the polls time out.
+            if (adapter?.chip) this.deps.store.setJson(SHADOW_FROZE_KEY, { ...this.shadowFroze(), [adapter.deviceId]: adapter.chip });
+            void this.reinit(gen, "adapter silent in the CAN monitor", true);
           },
         });
       }
@@ -779,6 +811,11 @@ export class VehicleLinkCore implements VehicleLink {
     if (old && !shadow) void this.restoreAfterShadow();
     this.update({ canShadow: shadow?.status ?? null });
     this.poller?.setSpeedCap(this.speedCapFor(this.snapshot.vehicle?.vin ?? null));
+  }
+
+  /** Adapter id → the chip and firmware (`STN2255 v5.10.3`) it froze on in the CAN monitor. */
+  private shadowFroze(): Record<string, string> {
+    return this.deps.store.getJson<Record<string, string>>(SHADOW_FROZE_KEY) ?? {};
   }
 
   /** The adapter as the init left it: no pass filters, headers off, the speed ECU pinned. */

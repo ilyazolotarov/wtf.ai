@@ -76,6 +76,11 @@ export function announcementPhrases(a: Announcement, t: T, lang: VoiceLang): Phr
   }
 }
 
+/** The engine started and the app can't tell where the car is: the driver is asked to put it on the map. */
+export function placeCarPhrase(t: T): Phrase {
+  return { id: "place-car", text: t("sayPlaceCar") };
+}
+
 /** Every phrase that gets a recorded clip. */
 export function recordedPhrases(t: T, lang: VoiceLang): Phrase[] {
   const maneuvers = SPOKEN_KINDS.flatMap((kind): Pick<Maneuver, "kind" | "exit">[] =>
@@ -84,6 +89,7 @@ export function recordedPhrases(t: T, lang: VoiceLang): Phrase[] {
   return [
     { id: "replanned", text: t("sayReplanned") },
     { id: "arrived", text: t("arrived") },
+    placeCarPhrase(t),
     ...maneuvers.map((m) => {
       const i = instruction(m, t);
       return { id: `now-${i.id}`, text: i.text };
