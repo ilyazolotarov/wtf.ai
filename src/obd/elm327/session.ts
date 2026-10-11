@@ -1,6 +1,7 @@
 // ELM327 command session: one command in flight, priority queue, exclusive sections,
 // timeout resync (docs/VEHICLE-LINK-SPEC.md §6.2 rules, §10.5).
 
+import { yieldMacrotask } from "../clock";
 import { Emitter } from "../emitter";
 import type { ElmResponse, Transport } from "../types";
 import { parseResponse } from "./parser";
@@ -29,6 +30,22 @@ interface QueueItem {
 
 export const DEFAULT_TIMEOUT_MS = 2000;
 
+/** One exchange outside the queue, for an idle monitor; `log`: also emitted on `exchanges` (the transcript). */
+export type RawSend = (command: string, timeoutMs: number, log?: boolean) => Promise<ElmResponse>;
+
+/**
+ * Runs on the adapter while the session has nothing to send: the CAN monitor (docs/VEHICLE-LINK-SPEC.md §16.2).
+ * Started when the queue is empty and no exclusive section is open; stopped before the next command.
+ */
+export interface IdleMonitor {
+  readonly running: boolean;
+  /** May it start now? */
+  wanted(): boolean;
+  start(send: RawSend): Promise<void>;
+  /** Resolves with the adapter at its prompt again. */
+  stop(send: RawSend): Promise<void>;
+}
+
 export class SessionClosedError extends Error {
   constructor() {
     super("ELM327 session closed");
@@ -45,8 +62,19 @@ export class Elm327Session {
   /** Owner of the running exclusive section, if any. */
   private lockOwner: symbol | null = null;
   private lockWaiters: { owner: symbol; priority: Priority; seq: number; grant(): void }[] = [];
+  private monitor: IdleMonitor | null = null;
+  /** A replaced monitor still running: the next command stops it. */
+  private stale: IdleMonitor | null = null;
+  private monitorPending = false;
 
   constructor(private readonly transport: Transport) {}
+
+  /** Replace the idle monitor; a running one is stopped before the next command, as always. */
+  setIdleMonitor(monitor: IdleMonitor | null): void {
+    if (this.monitor?.running && monitor !== this.monitor) this.stale = this.monitor;
+    this.monitor = monitor;
+    this.pump();
+  }
 
   send(command: string, opts: SendOptions = {}): Promise<ElmResponse> {
     return this.enqueue(command, opts, null);
@@ -123,26 +151,56 @@ export class Elm327Session {
       }
     }
     const item = this.pickNext();
-    if (!item) return;
+    if (!item) {
+      this.maybeStartMonitor();
+      return;
+    }
     this.queue.splice(this.queue.indexOf(item), 1);
     this.busy = true;
     void this.run(item);
   }
 
+  private idle(): boolean {
+    return !this.busy && !this.closed && this.lockOwner === null && this.lockWaiters.length === 0 && this.queue.length === 0;
+  }
+
+  /** Idle: start the monitor after a macrotask, so back-to-back commands don't start and stop it in between. */
+  private maybeStartMonitor(): void {
+    if (this.monitorPending || !this.idle() || !this.monitor || this.monitor.running || !this.monitor.wanted()) return;
+    this.monitorPending = true;
+    yieldMacrotask(() => {
+      this.monitorPending = false;
+      const monitor = this.monitor;
+      if (!monitor || monitor.running || !this.idle() || !monitor.wanted()) return;
+      this.busy = true;
+      void monitor
+        .start(this.rawSend)
+        .catch(() => undefined)
+        .finally(() => {
+          this.busy = false;
+          this.pump();
+        });
+    });
+  }
+
+  private rawSend: RawSend = async (command, timeoutMs, log = false) => {
+    const response = await this.exchange(command, timeoutMs);
+    if (log) this.exchanges.emit(response);
+    return response;
+  };
+
+  private async exchange(command: string, timeoutMs: number): Promise<ElmResponse> {
+    const raw = await this.transport.exchange(command, timeoutMs);
+    const parsed = raw.status === "timeout" ? { status: "timeout" as const, lines: [] } : parseResponse(command, raw.raw);
+    return { command, status: parsed.status, lines: parsed.lines, raw: raw.raw, txUs: raw.txUs, rxUs: raw.rxUs };
+  }
+
   private async run(item: QueueItem): Promise<void> {
     try {
-      const raw = await this.transport.exchange(item.command, item.timeoutMs);
-      const parsed =
-        raw.status === "timeout" ? { status: "timeout" as const, lines: [] } : parseResponse(item.command, raw.raw);
-      const response: ElmResponse = {
-        command: item.command,
-        status: parsed.status,
-        lines: parsed.lines,
-        raw: raw.raw,
-        txUs: raw.txUs,
-        rxUs: raw.rxUs,
-      };
-      if (raw.status === "timeout") {
+      for (const m of [this.stale, this.monitor]) if (m?.running) await m.stop(this.rawSend).catch(() => undefined);
+      this.stale = null;
+      const response = await this.exchange(item.command, item.timeoutMs);
+      if (response.status === "timeout") {
         // Get back in sync: a bare CR interrupts a busy ELM and yields a prompt.
         await this.transport.exchange("", 500).catch(() => undefined);
       }

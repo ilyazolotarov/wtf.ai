@@ -214,6 +214,18 @@ export const NAV_ROUTE_PROGRESS: ULogFormat = {
   ],
 };
 
+/** A raw CAN frame heard by the CAN shadow (VEHICLE-LINK-SPEC §16.2); timestamp: arrival of its chunk. */
+export const CAN_FRAME: ULogFormat = {
+  name: "can_frame",
+  fields: [ts, { type: "uint32_t", name: "id" }, { type: "uint8_t", name: "len" }, { type: "uint8_t", name: "data", count: 8 }],
+};
+
+/** A CAN shadow listening window (timestamp: its start): outside the windows frames weren't heard, not missing. */
+export const CAN_WINDOW: ULogFormat = {
+  name: "can_window",
+  fields: [ts, { type: "uint32_t", name: "duration_us" }, { type: "uint16_t", name: "frames" }, { type: "uint8_t", name: "flags" }],
+};
+
 export const ALL_FORMATS: readonly ULogFormat[] = [
   OBD_PID,
   GNSS,
@@ -231,6 +243,8 @@ export const ALL_FORMATS: readonly ULogFormat[] = [
   NAV_ROUTE_POINT,
   NAV_ROUTE_MANEUVER,
   NAV_ROUTE_PROGRESS,
+  CAN_FRAME,
+  CAN_WINDOW,
 ];
 
 export const ENGINE_STATE_CODES = ["unknown", "ignition-off", "engine-off", "engine-running"] as const;
@@ -295,6 +309,12 @@ export const ROUTE_MANEUVER_CODES = [
   "keep-left", "keep-right", "u-turn", "roundabout", "arrive",
 ] as const;
 
+/** `can_window.flags`: the adapter stopped monitoring by itself; BUFFER FULL in the window. */
+export const CAN_WINDOW_FLAGS = {
+  endedItself: 1,
+  bufferFull: 2,
+} as const;
+
 export const GNSS_FLAGS = {
   simulated: 1,
   fromAccessory: 2,
@@ -312,6 +332,22 @@ export interface ObdPidRecord {
   data: number[];
   ecu: number;
   value: number;
+}
+
+export interface CanFrameRecord {
+  /** Arrival of the chunk it came in, µs uptime. */
+  timestampUs: number;
+  id: number;
+  /** 0–8 bytes. */
+  data: number[];
+}
+
+export interface CanWindowRecord {
+  startUs: number;
+  endUs: number;
+  frames: number;
+  endedItself: boolean;
+  bufferFull: number;
 }
 
 export interface GnssRecord {

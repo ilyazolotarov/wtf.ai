@@ -9,6 +9,7 @@ import { AppState, Platform } from "react-native";
 import VehicleLinkModule from "../../modules/vehicle-link/src/VehicleLinkModule";
 import { Sentry, sentryMetricSink } from "@/config/sentry";
 import { TRIP_UPLOAD_URL } from "@/config/trip-upload";
+import { parseCanIds } from "@/obd/can-monitor";
 import { createClock } from "@/obd/clock";
 import { VehicleLinkCore } from "@/obd/vehicle-link-core";
 
@@ -44,6 +45,10 @@ export interface DevSettings {
   routeHint: boolean;
   /** Experimental navigation without an OBD adapter (NAVIGATOR-SPEC §9.6). */
   phoneOnly: boolean;
+  /** CAN shadow (VEHICLE-LINK-SPEC §16.2): raw CAN frames of these ids into the trip log, STN adapters only. */
+  canShadow: boolean;
+  /** Hex ids, separated by spaces or commas. */
+  canShadowIds: string;
 }
 
 const DEV_SETTINGS_KEY = "dev.settings";
@@ -80,6 +85,8 @@ export function getRuntime(): Runtime {
     mapMatchLoop: APP_NAV_DEFAULTS.mapMatchLoop!,
     routeHint: APP_ROUTE_HINT,
     phoneOnly: false,
+    canShadow: false,
+    canShadowIds: "",
     ...(kvStore.getJson<Partial<DevSettings>>(DEV_SETTINGS_KEY) ?? {}),
   };
   const devListeners = new Set<() => void>();
@@ -117,9 +124,12 @@ export function getRuntime(): Runtime {
       nav_mapmatch_loop: dev.mapMatchLoop,
       nav_route_hint: dev.routeHint ? "on" : "off",
       nav_phone_only: dev.phoneOnly ? "on" : "off",
+      can_shadow: dev.canShadow ? dev.canShadowIds.trim() || "no ids" : "off",
     }),
   });
   recorder.start();
+  const syncCanShadow = () => link.setCanShadow(dev.canShadow ? parseCanIds(dev.canShadowIds) : null);
+  syncCanShadow();
 
   const uploader = TRIP_UPLOAD_URL
     ? new TripUploader({
@@ -289,6 +299,7 @@ export function getRuntime(): Runtime {
       if (patch.outageButton === false) position.setSimulatedOutage(false);
       if (patch.mapMatchLoop) position.setMapMatchLoop(patch.mapMatchLoop);
       if (patch.phoneOnly !== undefined) position.setPhoneOnly(patch.phoneOnly);
+      if (patch.canShadow !== undefined || patch.canShadowIds !== undefined) syncCanShadow();
       if (patch.routeHint !== undefined) {
         const plan = routes.getSnapshot()?.plan;
         position.setRouteHint(patch.routeHint && plan ? plan.legs.map((l) => l.edge) : null);

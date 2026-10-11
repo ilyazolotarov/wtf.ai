@@ -3,6 +3,9 @@
 
 import {
   ACCEL_RAW,
+  CAN_FRAME,
+  CAN_WINDOW,
+  CAN_WINDOW_FLAGS,
   MAG_RAW,
   ALL_FORMATS,
   ENGINE_STATE,
@@ -30,6 +33,8 @@ import {
   TIME_SYNC,
   TRIP_EVENT,
   WTF_LOG_VERSION,
+  type CanFrameRecord,
+  type CanWindowRecord,
   type GnssRecord,
   type ImuMotionRecord,
   type LinkStatsRecord,
@@ -158,6 +163,22 @@ export class TripLogWriter {
   magRaw(r: Vec3Record): void {
     if (this.overBudget(r.timestampUs)) return;
     this.enc.data(MAG_RAW.name, [r.timestampUs, r.v]);
+  }
+
+  canFrame(r: CanFrameRecord): void {
+    if (this.overBudget(r.timestampUs)) return;
+    const data = Array.from({ length: 8 }, (_, i) => r.data[i] ?? 0);
+    this.enc.data(CAN_FRAME.name, [Math.round(r.timestampUs), r.id, Math.min(8, r.data.length), data]);
+  }
+
+  canWindow(r: CanWindowRecord): void {
+    const flags = (r.endedItself ? CAN_WINDOW_FLAGS.endedItself : 0) | (r.bufferFull > 0 ? CAN_WINDOW_FLAGS.bufferFull : 0);
+    this.enc.data(CAN_WINDOW.name, [
+      Math.round(r.startUs),
+      Math.min(0xffffffff, Math.max(0, Math.round(r.endUs - r.startUs))),
+      Math.min(0xffff, r.frames),
+      flags,
+    ]);
   }
 
   engineState(timestampUs: number, code: number): void {

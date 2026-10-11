@@ -59,6 +59,10 @@ export interface TripLog {
   navRoutePoints: (Omit<NavRoutePointRecord, "timestampUs"> & { tUs: number })[];
   navRouteManeuvers: (Omit<NavRouteManeuverRecord, "timestampUs"> & { tUs: number })[];
   navRouteProgress: (Omit<NavRouteProgressRecord, "timestampUs"> & { tUs: number })[];
+  /** CAN shadow frames (VEHICLE-LINK-SPEC §16.2), by arrival; absent when it didn't run. */
+  can?: { tUs: number; id: number; data: number[] }[];
+  /** Its listening windows: a frame missing outside them wasn't heard. */
+  canWindows?: { startUs: number; endUs: number; frames: number; flags: number }[];
   truncated: boolean;
 }
 
@@ -242,6 +246,18 @@ export function readTripLog(bytes: Uint8Array): TripLog {
     toNextM: num(r, "to_next_m"),
   }));
 
+  const can = rows("can_frame").map((r) => ({
+    tUs: num(r, "timestamp"),
+    id: num(r, "id"),
+    data: (r.data as number[]).slice(0, num(r, "len")),
+  }));
+  const canWindows = rows("can_window").map((r) => ({
+    startUs: num(r, "timestamp"),
+    endUs: num(r, "timestamp") + num(r, "duration_us"),
+    frames: num(r, "frames"),
+    flags: num(r, "flags"),
+  }));
+
   return {
     startUs: log.startUs,
     info: log.info,
@@ -261,6 +277,8 @@ export function readTripLog(bytes: Uint8Array): TripLog {
     navRoutePoints,
     navRouteManeuvers,
     navRouteProgress,
+    ...(can.length ? { can } : {}),
+    ...(canWindows.length ? { canWindows } : {}),
     truncated: log.truncated,
   };
 }

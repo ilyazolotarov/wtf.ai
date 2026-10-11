@@ -77,6 +77,14 @@ export class CanMonitorCollector {
     this.line(last, rxUs);
   }
 
+  get frameCount(): number {
+    return this.frames;
+  }
+
+  get bufferFullCount(): number {
+    return this.bufferFull;
+  }
+
   survey(durationMs: number): CanSurvey {
     const seconds = durationMs / 1000;
     const ids = [...this.byId.entries()]

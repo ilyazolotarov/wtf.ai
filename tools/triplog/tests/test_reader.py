@@ -76,6 +76,20 @@ def test_mag(trip):
     assert mag["t_s"].diff().iloc[1:].round(6).unique().tolist() == [0.05]
 
 
+def test_can(trip):
+    can = trip.can
+    assert can["id"].tolist() == [0x215, 0x228, 0x202]
+    assert can["len"].tolist() == [8, 8, 6]
+    assert can.iloc[2][[f"d{i}" for i in range(8)]].tolist() == [0x0D, 0x43, 0, 0, 0x19, 0xD5, 0, 0]
+    assert can["t_s"].round(6).tolist() == [1.85, 1.85, 1.9]
+    w = trip.can_windows
+    assert len(w) == 1
+    assert w.iloc[0]["t_s"] == pytest.approx(1.8)
+    assert w.iloc[0]["duration_s"] == pytest.approx(0.2)
+    assert int(w.iloc[0]["frames"]) == 3
+    assert not w.iloc[0]["ended_itself"] and w.iloc[0]["buffer_full"]
+
+
 def test_events_and_time(trip):
     assert trip.engine["state"].tolist() == ["engine-running"]
     assert trip.trip_events["event"].tolist() == ["start", "end"]

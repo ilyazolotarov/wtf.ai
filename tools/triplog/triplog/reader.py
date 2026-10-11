@@ -97,6 +97,10 @@ class Trip:
     route_points: pd.DataFrame = field(default_factory=pd.DataFrame)
     route_maneuvers: pd.DataFrame = field(default_factory=pd.DataFrame)
     route_progress: pd.DataFrame = field(default_factory=pd.DataFrame)
+    # CAN shadow (VEHICLE-LINK-SPEC §16.2): raw frames (t_s = arrival of their chunk, id, len, d0..d7) and the
+    # listening windows; a frame missing outside a window wasn't heard. Empty when it didn't run.
+    can: pd.DataFrame = field(default_factory=pd.DataFrame)
+    can_windows: pd.DataFrame = field(default_factory=pd.DataFrame)
     dropouts_ms: list[int] = field(default_factory=list)
 
     @property
@@ -136,6 +140,8 @@ class Trip:
             "time_sync": self.time_sync,
             "transcript": self.transcript,
             "nav": self.nav,
+            "can": self.can,
+            "can_windows": self.can_windows,
         }
 
 
@@ -425,6 +431,14 @@ def load(path: str | Path) -> Trip:
         },
     )
 
+    can = _frame(ulog, "can_frame", start, {"id": ("id", None), "len": ("len", None), **{f"d{i}": (f"data[{i}]", None) for i in range(8)}})
+    can_windows = _frame(ulog, "can_window", start, {"duration_s": ("duration_us", None), "frames": ("frames", None), "flags": ("flags", None)})
+    if len(can_windows):
+        can_windows["duration_s"] = can_windows["duration_s"] / 1e6
+        can_windows["ended_itself"] = (can_windows["flags"] & 1) != 0
+        can_windows["buffer_full"] = (can_windows["flags"] & 2) != 0
+        can_windows = can_windows.drop(columns="flags")
+
     rows = []
     for tag, messages in getattr(ulog, "logged_messages_tagged", {}).items():
         for m in messages:
@@ -465,5 +479,7 @@ def load(path: str | Path) -> Trip:
         route_points=route_points,
         route_maneuvers=route_maneuvers,
         route_progress=route_progress,
+        can=can,
+        can_windows=can_windows,
         dropouts_ms=dropouts,
     )

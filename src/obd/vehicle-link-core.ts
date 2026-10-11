@@ -2,7 +2,8 @@
 // Pure TS: transports, discovery, and storage are injected, so the whole lifecycle
 // runs in Node tests against the emulator.
 
-import { CanMonitorCollector, formatSurvey, type CanSurvey } from "./can-monitor";
+import { CanMonitorCollector, formatSurvey, type CanFrame, type CanSurvey } from "./can-monitor";
+import { CanShadow, type CanShadowStatus, type CanWindow } from "./can-shadow";
 import { compareDevices, rankDevice } from "./catalog";
 import type { Clock } from "./clock";
 import { probeAdapter, searchProtocols, warmReset, wrongBus } from "./elm327/probe";
@@ -98,6 +99,10 @@ const VIN_RETRY_MS = [5_000, 10_000, 15_000, 30_000, 60_000, 120_000];
 const SEARCH_EVERY = 4;
 /** Auto-connect with several adapters remembered: each gets this long to become reachable, most recent first (§7). */
 export const AUTO_CONNECT_WINDOW_MS = 8_000;
+/** OBD speed polls while the CAN shadow listens between them (§16.2); chosen in replay (docs/VEHICLE-LINK-SPEC.md). */
+export const CAN_SHADOW_SPEED_HZ = 5;
+/** The shadow's counts in the snapshot at most this often (its state changes go at once). */
+const CAN_STATUS_INTERVAL_US = 1_000_000;
 
 type OpenOutcome = "connected" | "unreachable" | "stopped";
 
@@ -146,6 +151,14 @@ export class VehicleLinkCore implements VehicleLink {
   private pinnedEcu: number | null = null;
   /** While the CAN monitor runs, the adapter's output goes here instead of the link events. */
   private monitorSink: ((text: string, rxUs: number) => void) | null = null;
+  /** Ids the CAN shadow listens to (developer setting); null: off. */
+  private canShadowIds: number[] | null = null;
+  private shadow: CanShadow | null = null;
+  /** A replaced shadow still listening: its output is its own until the next command stops it. */
+  private retiredShadow: CanShadow | null = null;
+  private lastCanStatusUs = 0;
+  private canFrames = new Emitter<[CanFrame[]]>();
+  private canWindows = new Emitter<[CanWindow]>();
 
   constructor(private readonly deps: VehicleLinkDeps) {
     this.engine = new EngineStateMachine((state, tUs) => this.onEngineChange(state, tUs));
@@ -168,6 +181,10 @@ export class VehicleLinkCore implements VehicleLink {
   onEngineState = (l: (e: EngineState, tUs: number) => void) => this.engineEvents.on(l);
   onExchange = (l: (e: ExchangeEvent) => void) => this.exchanges.on(l);
   onLinkEvent = (l: (e: LinkEvent) => void) => this.linkEvents.on(l);
+  /** CAN shadow frames, in arrival batches (§16.2). */
+  onCanFrames = (l: (frames: CanFrame[]) => void) => this.canFrames.on(l);
+  /** Each CAN shadow listening window, when it closes. */
+  onCanWindow = (l: (w: CanWindow) => void) => this.canWindows.on(l);
 
   // ---- VehicleLink: discovery ----
 
@@ -268,6 +285,8 @@ export class VehicleLinkCore implements VehicleLink {
     this.unsubscribers.push(
       transport.onUnsolicited((text, rxUs) => {
         if (this.monitorSink) this.monitorSink(text, rxUs);
+        else if (this.shadow?.running) this.shadow.onText(text, rxUs);
+        else if (this.retiredShadow?.running) this.retiredShadow.onText(text, rxUs);
         else this.linkEvents.emit({ type: "unsolicited", tUs: rxUs, detail: text });
       }),
     );
@@ -367,6 +386,17 @@ export class VehicleLinkCore implements VehicleLink {
     else caps[vin] = hz;
     this.deps.store.setJson(SPEED_CAPS_KEY, caps);
     this.poller?.setSpeedCap(this.speedCapFor(this.snapshot.vehicle?.vin ?? null));
+  }
+
+  /**
+   * CAN shadow (§16.2): listen to these ids between OBD polls while the ECU is awake, frames to the trip log; OBD
+   * speed polls drop to `CAN_SHADOW_SPEED_HZ`. Null or empty: off. STN adapters on a CAN car only.
+   */
+  setCanShadow(ids: number[] | null): void {
+    const next = ids && ids.length > 0 ? ids : null;
+    if (JSON.stringify(next) === JSON.stringify(this.canShadowIds)) return;
+    this.canShadowIds = next;
+    if (this.poller) this.attachShadow();
   }
 
   setRpmPeriods(periods: Partial<Pick<PollerConfig, "rpmPeriodRunningMs" | "rpmPeriodEngineOffMs" | "rpmPeriodIgnitionOffMs">>): void {
@@ -576,6 +606,7 @@ export class VehicleLinkCore implements VehicleLink {
     this.poller = poller;
     poller.start();
     this.update({ link: this.engine.state === "ignition-off" ? "standby" : "polling" });
+    this.attachShadow();
     if (vehicle.vinSource !== "read") void this.retryVin(gen, seq, init.pinnedEcu, init.protocolNumber);
   }
 
@@ -625,6 +656,7 @@ export class VehicleLinkCore implements VehicleLink {
     if (this.reiniting || gen !== this.gen) return;
     this.reiniting = true;
     this.event("reinit", reason);
+    this.shadow?.disable();
     try {
       await this.poller?.stop();
       this.poller = null;
@@ -675,6 +707,8 @@ export class VehicleLinkCore implements VehicleLink {
     const session = this.session;
     this.poller = null;
     this.session = null;
+    this.shadow = null;
+    this.retiredShadow = null;
     session?.close();
     await poller?.stop().catch(() => undefined);
   }
@@ -700,7 +734,74 @@ export class VehicleLinkCore implements VehicleLink {
     return this.session;
   }
 
+  /** The CAN shadow on this session, when asked for and possible: an STN adapter on a CAN car (§16.2). */
+  private attachShadow(): void {
+    const session = this.session;
+    if (!session) return;
+    const old = this.shadow;
+    old?.disable();
+    this.retiredShadow = old?.running ? old : null;
+    const ids = this.canShadowIds;
+    const protocol = this.remembered().find((a) => a.id === this.snapshot.activeDeviceId)?.protocolNumber ?? null;
+    let shadow: CanShadow | null = null;
+    if (ids) {
+      const transport = this.transport;
+      const why = !transport?.writeRaw || !/^STN/i.test(this.snapshot.adapter?.chip ?? "")
+        ? "needs an STN adapter"
+        : protocol === null || protocol < 6 || protocol > 9
+          ? "needs a car on CAN"
+          : null;
+      if (why) this.event("can-shadow", `off: ${why}`);
+      else {
+        shadow = new CanShadow({
+          clock: this.deps.clock,
+          writeRaw: (text) => transport!.writeRaw!(text),
+          ids,
+          idDigits: protocol === 7 || protocol === 9 ? 8 : 3,
+          pinnedEcu: this.pinnedEcu,
+          awake: () => this.engine.state === "engine-running" || this.engine.state === "engine-off",
+          onFrames: (frames) => this.canFrames.emit(frames),
+          onWindow: (w) => this.canWindows.emit(w),
+          onEvent: (detail) => this.event("can-shadow", detail),
+          onStatus: (status) => this.onCanStatus(status),
+          onFailed: () => {
+            void this.restoreAfterShadow();
+            this.poller?.setSpeedCap(this.speedCapFor(this.snapshot.vehicle?.vin ?? null));
+          },
+        });
+      }
+    }
+    this.shadow = shadow;
+    session.setIdleMonitor(shadow);
+    if (old && !shadow) void this.restoreAfterShadow();
+    this.update({ canShadow: shadow?.status ?? null });
+    this.poller?.setSpeedCap(this.speedCapFor(this.snapshot.vehicle?.vin ?? null));
+  }
+
+  /** The adapter as the init left it: no pass filters, headers off, the speed ECU pinned. */
+  private async restoreAfterShadow(): Promise<void> {
+    const session = this.session;
+    const pinned = this.pinnedEcu;
+    await session
+      ?.exclusive(async (send) => {
+        await send("ATAR", { timeoutMs: 1000 });
+        if (pinned !== null) await send(`ATCRA${pinned.toString(16).toUpperCase()}`, { timeoutMs: 1000 });
+        await send("ATH0", { timeoutMs: 1000 });
+      })
+      .catch(() => undefined);
+  }
+
+  private onCanStatus(status: CanShadowStatus): void {
+    const prev = this.snapshot.canShadow;
+    const now = this.deps.clock.nowUs();
+    const changed = !prev || prev.state !== status.state || prev.mode !== status.mode || prev.failure !== status.failure;
+    if (!changed && now - this.lastCanStatusUs < CAN_STATUS_INTERVAL_US) return;
+    this.lastCanStatusUs = now;
+    this.update({ canShadow: status });
+  }
+
   private onSessionExchange(r: ElmResponse): void {
+    this.shadow?.onExchange(r);
     const poll = interpretPoll(r);
     const event: ExchangeEvent = poll
       ? {
@@ -745,7 +846,9 @@ export class VehicleLinkCore implements VehicleLink {
   private speedCapFor(vin: string | null): number {
     if (this.speedCapOverride !== null) return this.speedCapOverride;
     const caps = this.deps.store.getJson<Record<string, number>>(SPEED_CAPS_KEY) ?? {};
-    return (vin && caps[vin]) || Infinity;
+    const cap = (vin && caps[vin]) || Infinity;
+    // The CAN shadow listens between polls: fewer of them.
+    return this.shadow && this.shadow.status.state !== "failed" ? Math.min(cap, CAN_SHADOW_SPEED_HZ) : cap;
   }
 
   /** Cars seen, most recent first; before the list existed, the VINs adapters remembered. */

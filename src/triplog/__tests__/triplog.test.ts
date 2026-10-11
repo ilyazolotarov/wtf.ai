@@ -116,6 +116,16 @@ describe("TripLogWriter", () => {
     ]);
   });
 
+  test("CAN shadow frames and windows", () => {
+    const log = readTripLog(buildFixture());
+    expect(log.can).toEqual([
+      { tUs: FIXTURE_START_US + 1_850_000, id: 0x215, data: [0x27, 0x10, 0x27, 0x10, 0x27, 0x10, 0x27, 0x10] },
+      { tUs: FIXTURE_START_US + 1_850_000, id: 0x228, data: [0x01, 0x20, 0x07, 0xff, 0x00, 0xf0, 0x00, 0x00] },
+      { tUs: FIXTURE_START_US + 1_900_000, id: 0x202, data: [0x0d, 0x43, 0x00, 0x00, 0x19, 0xd5] },
+    ]);
+    expect(log.canWindows).toEqual([{ startUs: FIXTURE_START_US + 1_800_000, endUs: FIXTURE_START_US + 2_000_000, frames: 3, flags: 2 }]);
+  });
+
   test("route maneuver codes follow the planner's kinds", () => {
     expect([...ROUTE_MANEUVER_CODES]).toEqual([...MANEUVER_KINDS]);
   });

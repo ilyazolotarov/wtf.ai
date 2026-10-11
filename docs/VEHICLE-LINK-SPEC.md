@@ -531,8 +531,8 @@ The same contract with two transports: BLE (same GATT catalog) and Classic SPP (
    the last car on the protocol assumed meanwhile (§9.1). Next drives: the setup in the log (`… s before the log:`)
    shows why the init read misses; `vin: read on retry n` how soon a retry gets it.
 6. Verify the auto-connect fix on device: open the app before the car wakes the MX+; it must connect once iOS reports the accessory.
-7. CAN monitor survey (§16.1) on the main test car with both STN adapters: which ids and rates reach the phone, and
-   whether an unfiltered bus overruns the adapter or the link (`BUFFER FULL`, chars/s).
+7. CAN shadow (§16.2) on the road: whether the STN pass filters reach poll answers (the mode it settles on, per
+   adapter), how much of each window it hears, and what a break costs.
 
 ## 16. CAN monitor (STN)
 
@@ -562,18 +562,54 @@ or the ids typed in the field (hex) for 10 s. It runs as an exclusive section, s
   data length isn't printed (no `ATD1`).
 - Result per id: frames per monitored second, data lengths, the last bytes; totals: frames/s, chars/s, `BUFFER FULL`
   lines. Shown in the terminal and logged as the link event `can-monitor` (TRIP-LOGGER-SPEC §6.4).
-- The emulator models `STFPA`/`STFPC`/`STCMM`, the hardware filter and `STM` with a per-profile broadcast list
-  (`broadcast`).
+- The emulator models `STFPA`/`STFPC`/`STCMM`, the hardware filter (`ATCRA`, with `X` digits and without an
+  argument), `STM` with a per-profile broadcast list (`broadcast`), and pass filters reaching request answers
+  (`passFiltersLeak`).
 
-### 16.2 Shadow logging (next)
+Measured on the main test car, parked, engine running (2026-10-11):
 
-- The monitor runs only while the ECU is awake (`engine-off`, `engine-running`). `standby` and `ignition-off` keep the
-  OBD probe (§10.3).
-- Time-slicing: the monitor breaks for `010D1` at a rate chosen in replay (the drawn-truth corpus with OBD speed
-  decimated), with `010C`, `ATRV` and VIN retries in the same breaks. The engine-state machine (§10.4) gets the same
-  samples as without the monitor.
-- Each break costs a stop, the request and a restart; measured per adapter.
-- A monitor failure (`BUFFER FULL` streak, garbled output, no prompt) → plain polling for the rest of the drive.
-- The trip log gets the raw frames (id, bytes, chunk arrival time) and the monitor's on/off windows, so replay can
-  tell a gap from a frame the car didn't send. Decoding happens in replay; counter and checksum signals rebuild frame
-  timing and catch lines garbled in transport.
+| Adapter                 | Filter                         | Heard                                                                 | Load                         |
+| ----------------------- | ------------------------------ | --------------------------------------------------------------------- | ---------------------------- |
+| OBDLink MX+ (MFi)       | 5 ids (215 228 82 78 202)      | all of it: 0x215 and 0x202 100 Hz, 0x082 66.7 Hz, 0x078 and 0x228 50 Hz | 367 frames/s, 7,300 chars/s |
+| vLinker FD-IOS (BLE)    | the same 5 ids                 | all of it, the same rates; one line in 3,668 arrived 2 bytes short     | 366 frames/s, 7,300 chars/s |
+| OBDLink MX+             | none (85 ids)                  | about a third (0x215 at 35 Hz), `BUFFER FULL`                          | 750 frames/s, 15,000 chars/s |
+| vLinker FD-IOS          | none                           | ~100 frames, then `BUFFER FULL` ended the monitor                      | —                            |
+
+- Unfiltered monitoring isn't usable on either adapter, and after it the MX+ timed out or answered `STOPPED` to polls
+  for up to ~7 s. It stays a 3 s survey, never a drive mode.
+- A frame shorter or longer than its id's usual length is a transport error: replay's decoding drops it.
+
+### 16.2 CAN shadow (developer setting)
+
+The monitor runs between OBD polls while the ECU is awake; its raw frames go to the trip log (TRIP-LOGGER-SPEC §6.3
+`can_frame`, `can_window`). Navigation keeps OBD speed (SPEC §2.1, level *CAN shadow*). Developer setting: on/off and
+the hex ids (`can_shadow` in the log's info).
+
+- **Where it runs.** `CanShadow` (`src/obd/can-shadow.ts`) is the session's *idle monitor*
+  (`Elm327Session.setIdleMonitor`): it starts once the queue is empty, no exclusive section is open and a macrotask
+  has passed (so back-to-back commands don't start and stop it in between), and it is stopped before the next
+  command. The poller, RPM polls, `ATRV`, VIN retries and the terminal work unchanged.
+- **When.** Only while the ECU is awake (`engine-off`, `engine-running`); `standby` and `ignition-off` keep the OBD
+  probe (§10.3). Engine and ignition state come from OBD as without it (§10.4).
+- **OBD speed rate:** 5 Hz (`CAN_SHADOW_SPEED_HZ`, a speed cap; the developer override still wins). In replay (every
+  drive, parked and drawn starts, 8 seeds) OBD speed thinned to 10, 5 and 2 Hz changed nothing beyond seed noise
+  against the full 25–30 Hz. A break is a stop (~25 ms on the MX+) and a poll (~20 ms), so the monitor hears about
+  three quarters of the time.
+- **Setup** (again after any other component's `ATCRA`/`ATCF`/`ATCM`/`ATAR`/`ATZ`/`ATWS`/`ATD`/`ATSP`/`ATH`/`ST…`
+  command, e.g. a VIN read or the survey): `ATH1`, `ATAR`, `STCMM0`, `STFPA` per id (`STFAP` fallback). The first
+  setup of a session sends three `010D1` with the pass filters set (not logged as polls) and picks the mode:
+  - **fast**: no broadcast frame in the answers. A break is stop, poll, `STM`. Headers stay on (the poll parser reads
+    them).
+  - **safe**: a broadcast frame came back (with the response count, the adapter returns the first message it passes).
+    Each stop is followed by `ATCRA<pinned ECU>` (`7EX` / `18DAF1XX` with functional addressing), each start preceded
+    by `ATCRA` (hardware filter open again).
+  - A fast session that later sees a broadcast frame in a poll answer switches to safe (link event).
+- **Stop:** a bare CR. One that times out is sent again: a CR reaching an adapter that has just stopped by itself
+  repeats its last command, `STM`.
+- **Failure → plain polling for the session** (link event `can-shadow: off: …`, the adapter restored with `ATAR`,
+  `ATCRA<pinned>`, `ATH0`, the speed cap back): a pass filter refused; the monitor ending by itself (`BUFFER FULL`, a
+  reset: the prompt arrives unasked) 3 times; 3 stops without a prompt.
+- **Off:** turning the setting off restores the adapter the same way. A reinit drops the shadow; the next init sets it
+  up again.
+- **Not decoded on the phone.** Replay decodes the frames; counter and checksum signals rebuild frame timing and catch
+  lines garbled in transport. Frames outside the `can_window`s weren't heard.

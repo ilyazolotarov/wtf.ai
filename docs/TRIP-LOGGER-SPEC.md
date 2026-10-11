@@ -135,6 +135,7 @@ modules/sensor-capture ─▶ src/services/sensor-capture ──(SensorStream)�
 | `char[] nav_mapmatch_loop`        | navigator version at trip start: `open` / `heading` / `closed` (MAPMATCH-SPEC §9); a change mid-drive is the note `nav map-match loop <v>` |
 | `char[] nav_route_hint`           | `on` / `off`: map matching told the active route (ROUTING-SPEC §8.6, developer setting); a change is the note `nav route hint …` |
 | `char[] nav_phone_only`           | `on` / `off`: navigation without an adapter (NAVIGATOR-SPEC §9.6, developer setting); a change is the note `nav phone-only …` |
+| `char[] can_shadow`               | the CAN shadow's ids as typed (VEHICLE-LINK-SPEC §16.2, developer setting), `no ids`, or `off` |
 
 ### 6.3 Data messages (`F` + `D`)
 
@@ -155,6 +156,8 @@ modules/sensor-capture ─▶ src/services/sensor-capture ──(SensorStream)�
 | `nav_route` | Each route plan (ROUTING-SPEC §8): `uint16_t plan_id` (from 1 per app session), `uint8_t reason` (0 new, 1 off-route, 2 resume: an active route logged again when a trip starts, 3 alternative: an alternative became the route, ROUTING-SPEC §8.7), `uint8_t status` (0 done, 1 no-road-at-start, 2 no-road-at-destination, 3 no-route, 4 too-far, 5 cancelled), `double from_lat_deg`, `double from_lon_deg`, `float from_heading_rad` (NaN unknown), `double to_lat_deg`, `double to_lon_deg`, `float length_m`, `float duration_s`, `float off_start_m`, `float off_end_m` (NaN unless done), `uint32_t states`, `uint32_t tiles`, `float plan_ms` (in the search), `float wall_ms` (request to result), `uint16_t slices`, `uint16_t points`, `uint16_t maneuvers`, `uint32_t graph_built` | per plan | 95 B |
 | `nav_route_point` | The plan's polyline, one per vertex: `uint16_t plan_id`, `uint16_t index`, `double lat_deg`, `double lon_deg` | after `nav_route` | 33 B |
 | `nav_route_maneuver` | The plan's maneuvers: `uint16_t plan_id`, `uint16_t index`, `uint8_t kind` (`ROUTE_MANEUVER_CODES`: depart, slight-left, slight-right, left, right, sharp-left, sharp-right, keep-left, keep-right, u-turn, roundabout, arrive), `uint8_t exit` (roundabouts; else 0), `double lat_deg`, `double lon_deg`, `float at_m` (from the start), `float turn_rad` | after `nav_route` | 43 B |
+| `can_frame` | A raw CAN frame heard by the CAN shadow (VEHICLE-LINK-SPEC §16.2); timestamp: arrival of the chunk it came in. `uint32_t id`, `uint8_t len` (0–8), `uint8_t[8] data` (zero-padded) | ~285/s for 5 ids on the main test car | 21 B |
+| `can_window` | A listening window of the CAN shadow; timestamp: its start. `uint32_t duration_us`, `uint16_t frames`, `uint8_t flags` (bit0 the adapter stopped monitoring by itself, bit1 `BUFFER FULL` in it). A frame missing outside the windows wasn't heard (a poll break) | ~5/s | 15 B |
 | `nav_route_progress` | Guidance at that `nav_estimate` while a route is active: `uint16_t plan_id`, `uint8_t state` (0 on, 1 leaving, 2 off, 3 unsure, 4 arrived), `uint16_t next_index` (maneuver), `float along_m`, `float off_m` (NaN: nothing matched), `float remaining_m`, `float remaining_s`, `float to_next_m` | with `nav_estimate` | 38 B |
 
 - `obd_pid` is lossless for single-response polls (raw bytes + status + timing), so the poll transcript isn't duplicated as text.
@@ -177,7 +180,7 @@ modules/sensor-capture ─▶ src/services/sensor-capture ──(SensorStream)�
 ### 6.6 Writer behavior
 
 - Encode in memory; flush to the file every 1 s or 64 KB, whichever comes first, followed by an `S` sync message. A crash loses at most ~1 s; `pyulog` reads truncated files.
-- If the sink falls behind (buffer > 1 MB), drop IMU batches and write an `O` dropout message with the lost duration.
+- If the sink falls behind (buffer > 1 MB), drop IMU batches and CAN frames and write an `O` dropout message with the lost duration.
 - iOS doesn't reliably notify the app before terminating it, so the 1 s flush is the only guarantee. Files without a `trip_event end` are labelled "incomplete" in the trip list.
 
 ### 6.7 Size
@@ -188,6 +191,7 @@ modules/sensor-capture ─▶ src/services/sensor-capture ──(SensorStream)�
 | `obd_pid` @ 20 Hz      | 620                            |
 | `gnss` @ 1 Hz          | 74                             |
 | `mag_raw` @ 20 Hz      | 500                            |
+| `can_frame` @ 285/s (CAN shadow on) | 7,400             |
 | other                  | < 100                          |
 | **Total**              | **≈ 7.8 KB/s ≈ 28 MB/h**       |
 | + raw IMU (optional)   | + 5 KB/s → ≈ 44 MB/h           |
@@ -278,7 +282,8 @@ Pages on the root stack (UI-SPEC §5): `vehicle` from the map's bar, the rest fr
   buttons Start (manual) / Stop / Marker; the `trips` list; recording settings (trip thresholds §4.2, raw IMU
   toggle, IMU rate 50/100 Hz); the upload code (§7.1); the storage limit (§7.2).
 - `position`: GNSS rate, last accuracy, speed accuracy; IMU rate (measured); EKF and map matching state.
-- `developer`: speed cap override, RPM period and the other test switches; the ELM terminal.
+- `developer`: speed cap override, RPM period and the other test switches; the CAN shadow (switch, hex ids, and its
+  state: waiting / listening / off with the reason, frames heard, fast or safe breaks); the ELM terminal.
 
 ### 9.3 `debug-terminal` (from Developer)
 

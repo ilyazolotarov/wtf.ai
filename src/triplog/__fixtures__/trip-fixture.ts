@@ -132,6 +132,11 @@ export function buildFixture(): Uint8Array {
   w.navRouteManeuver({ timestampUs: t0 + 1_600_000, planId: 1, index: 0, kind: "depart", exit: 0, latDeg: 50.4501, lonDeg: 30.52, atM: 0, turnRad: 0 });
   w.navRouteManeuver({ timestampUs: t0 + 1_600_000, planId: 1, index: 1, kind: "roundabout", exit: 2, latDeg: 50.455, lonDeg: 30.525, atM: 700, turnRad: 1.5 });
   w.navRouteProgress({ timestampUs: t0 + 1_700_000, planId: 1, state: "leaving", nextIndex: 1, alongM: 100, offM: 45, remainingM: 1400, remainingS: 140, toNextM: 600 });
+  // CAN shadow: a 200 ms window, two frames in one chunk, one short frame.
+  w.canWindow({ startUs: t0 + 1_800_000, endUs: t0 + 2_000_000, frames: 3, endedItself: false, bufferFull: 1 });
+  w.canFrame({ timestampUs: t0 + 1_850_000, id: 0x215, data: [0x27, 0x10, 0x27, 0x10, 0x27, 0x10, 0x27, 0x10] });
+  w.canFrame({ timestampUs: t0 + 1_850_000, id: 0x228, data: [0x01, 0x20, 0x07, 0xff, 0x00, 0xf0, 0x00, 0x00] });
+  w.canFrame({ timestampUs: t0 + 1_900_000, id: 0x202, data: [0x0d, 0x43, 0x00, 0x00, 0x19, 0xd5] });
   w.linkStats({ timestampUs: t0 + 1_000_000, speedHz: 19.5, latencyP50Ms: 40, latencyP95Ms: 55, errors: 1, linkState: 6, batteryV: 14.2 });
   w.log("info", LOG_TAGS.elm, t0 + 1, "tx=10000000 ATI | ELM327 v1.5\\r\\r>");
   w.tripEvent(t0 + 3_000_000, TRIP_EVENTS.end, 0);

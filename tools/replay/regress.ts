@@ -10,6 +10,7 @@
 //   npm run replay:regress -- --from after --against before   # two saved runs, nothing replayed
 //   npm run replay:regress -- --speed phone          # no adapter: OBD speed replaced by the phone's (phone-speed.ts)
 //   npm run replay:regress -- --speed phone-app --phone-route   # the app without an adapter, the driver on a route
+//   npm run replay:regress -- --obd-hz 5             # OBD speed thinned to 5 Hz (the CAN monitor's time-slicing)
 //
 // Truth per drive, best first: the roads drawn for it in the viewer (`<log>.truth.json`, drawn-truth.ts), else its
 // clean satellite fixes (the dot when GPS came back after each gap, and through the app's Cut GPS stretches: the
@@ -71,6 +72,8 @@ interface Job {
   scoreMapMatch?: boolean;
   /** phone-app: the driver follows a route (the logged ones if the drawing says they were followed, else the drawn one). */
   phoneRoute?: boolean;
+  /** OBD speed thinned to this rate (VEHICLE-LINK-SPEC §16.2: polls between CAN monitor windows). */
+  obdHz?: number;
 }
 
 /** One drive, one start, one seed. Distances in m, times in s. */
@@ -161,6 +164,18 @@ function score(trip: TripLog, log: string, track: ShownPoint[], graph: ReturnTyp
   return out;
 }
 
+/** The OBD speed samples a poller capped at `hz` would have read: each at least 1/hz after the one kept before. */
+function thinObd(trip: TripLog, hz: number): TripLog {
+  const gapUs = 1e6 / hz;
+  let lastUs = -Infinity;
+  const obdSpeed = trip.obdSpeed.filter((s) => {
+    if (s.tUs - lastUs < gapUs * 0.95) return false;
+    lastUs = s.tUs;
+    return true;
+  });
+  return { ...trip, obdSpeed };
+}
+
 function runJob(job: Job): DriveResult[] {
   const store = new MemoryKeyValueStore();
   const byProtocol = new Map<string, string>();
@@ -179,7 +194,7 @@ function runJob(job: Job): DriveResult[] {
       const phone = job.speed === "phone" || job.speed === "phone-oracle";
       // phone-app: the app with phone-only mode on and no adapter (its own engine, not phone speed into the navigator).
       const phoneApp = job.speed === "phone-app";
-      const input = phone ? withPhoneSpeed(trip, {}, chained ? mounts : undefined, true, job.speed === "phone-oracle") : trip;
+      const input = phone ? withPhoneSpeed(trip, {}, chained ? mounts : undefined, true, job.speed === "phone-oracle") : job.obdHz ? thinObd(trip, job.obdHz) : trip;
       const r = replayTripInApp(input, {
         calibration,
         loop: (job.nav.mapMatchLoop ?? APP_NAV_DEFAULTS.mapMatchLoop ?? "closed") as MapMatchLoop,
@@ -238,7 +253,7 @@ interface Saved {
   name: string;
   commit: string;
   createdAt: string;
-  options: { seeds: number; starts: Start[]; nav: Partial<NavConfig>; mm: Partial<MapMatchConfig> };
+  options: { seeds: number; starts: Start[]; nav: Partial<NavConfig>; mm: Partial<MapMatchConfig>; obdHz?: number };
   results: DriveResult[];
 }
 
@@ -325,6 +340,7 @@ async function main() {
   const speed = (arg("--speed") ?? "obd") as NonNullable<Job["speed"]>;
   const scoreMapMatch = argv.includes("--score-mm");
   const phoneRoute = argv.includes("--phone-route");
+  const obdHz = arg("--obd-hz") ? Number(arg("--obd-hz")) : undefined;
 
   const all = readdirSync(LOGS).filter((f) => f.endsWith(".ulg")).sort();
   const picked = only ? all.filter((f) => f.startsWith(only) || f.includes(only)) : all;
@@ -332,8 +348,8 @@ async function main() {
   // The parked chain replays every log up to the last one picked: those before it set its storage.
   const chain = all.filter((f) => f <= picked.at(-1)!);
   const jobs: Job[] = [];
-  for (let seed = 1; seed <= seeds; seed++) for (const start of ["drawn", "parked"] as const) if (starts.includes(start)) jobs.push({ start, seed, logs: chain, nav, mm, speed, scoreMapMatch, phoneRoute });
-  for (let seed = 1; seed <= seeds; seed++) if (starts.includes("cold")) for (const log of picked) jobs.push({ start: "cold", seed, logs: [log], nav, mm, speed, scoreMapMatch, phoneRoute });
+  for (let seed = 1; seed <= seeds; seed++) for (const start of ["drawn", "parked"] as const) if (starts.includes(start)) jobs.push({ start, seed, logs: chain, nav, mm, speed, scoreMapMatch, phoneRoute, obdHz });
+  for (let seed = 1; seed <= seeds; seed++) if (starts.includes("cold")) for (const log of picked) jobs.push({ start: "cold", seed, logs: [log], nav, mm, speed, scoreMapMatch, phoneRoute, obdHz });
   const started = Date.now();
   let results: DriveResult[];
   if (fromRun) results = fromRun.results.filter((r) => picked.includes(r.log));
@@ -410,7 +426,7 @@ async function main() {
   }
   if (saveAs) {
     mkdirSync(SAVED, { recursive: true });
-    const saved: Saved = { version: 1, name: saveAs, commit, createdAt: new Date().toISOString(), options: { seeds, starts, nav, mm }, results };
+    const saved: Saved = { version: 1, name: saveAs, commit, createdAt: new Date().toISOString(), options: { seeds, starts, nav, mm, ...(obdHz ? { obdHz } : {}) }, results };
     writeFileSync(path.join(SAVED, `${saveAs}.json`), JSON.stringify(saved));
     console.log(`saved as "${saveAs}" (${path.relative(process.cwd(), path.join(SAVED, `${saveAs}.json`))})`);
   }

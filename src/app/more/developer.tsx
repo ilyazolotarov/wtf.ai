@@ -1,8 +1,11 @@
 import { router } from "expo-router";
 import { useState } from "react";
+import { StyleSheet, TextInput, useColorScheme } from "react-native";
 
-import { ScreenAction, ScreenContent, ScreenSection } from "@/components/screens/screen-ui";
+import { ScreenAction, ScreenContent, ScreenNote, ScreenSection } from "@/components/screens/screen-ui";
 import { CycleRow, SwitchRow } from "@/components/screens/setting-rows";
+import { INPUT_MAX_FONT_SCALE } from "@/components/ui/text";
+import { Colors } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
 import type { MapMatchLoop } from "@/services/navigation/navigator-service";
 import { useDevSettings, useRuntime, useVehicleLinkSnapshot } from "@/providers/runtime-provider";
@@ -11,10 +14,14 @@ import { useDevSettings, useRuntime, useVehicleLinkSnapshot } from "@/providers/
 export default function DeveloperScreen() {
   const { t } = useT();
   const { link, setDevSettings } = useRuntime();
-  const activeDeviceId = useVehicleLinkSnapshot().activeDeviceId;
+  const snapshot = useVehicleLinkSnapshot();
+  const activeDeviceId = snapshot.activeDeviceId;
+  const canShadow = snapshot.canShadow ?? null;
   const dev = useDevSettings();
   const [speedCap, setSpeedCap] = useState<number | null>(null);
   const [rpmPeriod, setRpmPeriod] = useState<number>(5);
+  const [canIds, setCanIds] = useState(dev.canShadowIds);
+  const palette = Colors[useColorScheme() === "dark" ? "dark" : "light"];
 
   return (
     <ScreenContent title={t("developer")}>
@@ -44,6 +51,27 @@ export default function DeveloperScreen() {
           onValueChange={(v) => setDevSettings({ phoneOnly: v })}
           label={t("phoneOnlySetting")}
         />
+        <SwitchRow value={dev.canShadow} onValueChange={(v) => setDevSettings({ canShadow: v })} label={t("canShadowSetting")} />
+        {dev.canShadow && (
+          <TextInput
+            value={canIds}
+            onChangeText={setCanIds}
+            onEndEditing={() => setDevSettings({ canShadowIds: canIds })}
+            placeholder={t("canShadowIds")}
+            placeholderTextColor={palette.textSecondary}
+            autoCapitalize="characters"
+            autoCorrect={false}
+            maxFontSizeMultiplier={INPUT_MAX_FONT_SCALE}
+            style={[styles.input, { color: palette.text, borderColor: palette.textSecondary }]}
+          />
+        )}
+        {dev.canShadow && canShadow && (
+          <ScreenNote>
+            {canShadow.state === "failed"
+              ? `${t("canShadowFailed")}: ${canShadow.failure ?? ""}`
+              : `${t(canShadow.state === "listening" ? "canShadowListening" : "canShadowWaiting")} · ${canShadow.frames} ${t("canShadowFrames")}${canShadow.mode ? ` · ${canShadow.mode}` : ""}`}
+          </ScreenNote>
+        )}
         <CycleRow
           labelKey="speedCap"
           value={speedCap}
@@ -82,3 +110,7 @@ export default function DeveloperScreen() {
     </ScreenContent>
   );
 }
+
+const styles = StyleSheet.create({
+  input: { minHeight: 48, borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, fontSize: 16, fontFamily: "Menlo" },
+});

@@ -42,7 +42,7 @@ Odometry is built up in stages (§2.1). Stage 1 uses the minimum that works on a
 | Stage | Speed source                                                  | Yaw source                                   | Adapter features                       | Vehicle-specific data          |
 | ----- | ------------------------------------------------------------- | -------------------------------------------- | -------------------------------------- | ------------------------------ |
 | 1     | OBD-II Mode 01 PID `0D` (1 km/h resolution), polled, unsigned | Phone gyro `ω = gyro · ĝ`                    | ELM327 subset, request/response        | None (works on any OBD-II car) |
-| 2     | CAN wheel speeds (0.01 km/h, ~50 Hz), signed by CAN gear      | Rear wheel differential, gyro as cross-check | STN passive CAN monitor + pass filters | JSON vehicle profile (opendbc) |
+| 2     | CAN wheel speeds (0.01 km/h, 100 Hz), signed by CAN gear      | Rear wheel differential, gyro as cross-check | STN passive CAN monitor + pass filters | JSON vehicle profile (opendbc) |
 | 3     | As Stage 2                                                    | CAN yaw rate (reverse-engineered)            | As Stage 2                             | Profile + RE yaw signal        |
 
 - Stage 1 is the permanent fallback: cars with a CAN gateway firewall, unknown makes/models, and generic dongles stay on it.
@@ -147,14 +147,14 @@ A common `OdometrySource` interface feeds the EKF with timestamped speed and yaw
 
 ##### Main test car — known signals (its opendbc DBC, HS-CAN pins 6/14)
 
-| ID (hex / dec) | Message        | Signals                                                                                                  |
-| -------------- | -------------- | -------------------------------------------------------------------------------------------------------- |
-| 0x215 / 533    | `WHEEL_SPEEDS` | FL `7\|16@0+`, FR `23\|16@0+`, RL `39\|16@0+`, RR `55\|16@0+`; scale 0.01, offset −100, km/h             |
-| 0x228 / 552    | `GEAR`         | `GEAR 2\|3@0+`: 0 shifting, 1 P, 2 R, 3 N, 4 D                                                           |
-| 0x082 / 130    | `STEER`        | `STEER_ANGLE 23\|16@0+` scale 0.05, offset −1600, deg                                                    |
-| 0x078 / 120    | `BRAKE`        | `VEHICLE_ACC_X 5\|13@0+` (0.01, −40) m/s²; `VEHICLE_ACC_Y 8\|13@0+` (0.001, −4.096) m/s²                 |
-| 0x202 / 514    | `ENGINE_DATA`  | `SPEED 23\|16@0+` scale 0.01 km/h                                                                        |
-| ?              | yaw rate       | **Unknown — reverse-engineer (Phase 9, Stage 3).** Likely near 0x078 (stability-control sensor cluster). |
+| ID (hex / dec) | Message        | Rate at the OBD port | Signals                                                                                                  |
+| -------------- | -------------- | -------------------- | -------------------------------------------------------------------------------------------------------- |
+| 0x215 / 533    | `WHEEL_SPEEDS` | 100 Hz               | FL `7\|16@0+`, FR `23\|16@0+`, RL `39\|16@0+`, RR `55\|16@0+`; scale 0.01, offset −100, km/h             |
+| 0x228 / 552    | `GEAR`         | 50 Hz                | `GEAR 2\|3@0+`: 0 shifting, 1 P, 2 R, 3 N, 4 D                                                           |
+| 0x082 / 130    | `STEER`        | 66.7 Hz              | `STEER_ANGLE 23\|16@0+` scale 0.05, offset −1600, deg                                                    |
+| 0x078 / 120    | `BRAKE`        | 50 Hz                | `VEHICLE_ACC_X 5\|13@0+` (0.01, −40) m/s²; `VEHICLE_ACC_Y 8\|13@0+` (0.001, −4.096) m/s²                 |
+| 0x202 / 514    | `ENGINE_DATA`  | 100 Hz               | `RPM 7\|16@0+` scale 0.25 rpm (matches PID `0C` within 3 rpm at idle); `SPEED 23\|16@0+` scale 0.01 km/h |
+| ?              | yaw rate       | —                    | **Unknown — reverse-engineer (Phase 9, Stage 3).** Likely near 0x078 (stability-control sensor cluster). |
 
 - Wheel speeds are unsigned → direction from `GEAR` (R = negative).
 - The main test car's OBD port carries the HS-CAN broadcast (no gateway). MS-CAN (pins 3/11, 125 kbps) is the
@@ -207,7 +207,7 @@ after a gap, being checked), `NO_FIX` (no good satellite fix for 8 s).
 - State: `E, N, ψ (heading), v, k_s (speed scale), b_ω (yaw bias), k_ω (yaw scale)`; plus `r_LR` (left/right wheel radius ratio) in Stage 2 while using wheel-differential yaw.
 - Predict: unicycle/CTRV model.
   - Stage 1: driven by the phone yaw rate at the IMU rate (~50–100 Hz); `v` is a random walk (acceleration process noise), corrected by speed updates.
-  - Stage 2+: ~50 Hz on CAN data; speed = mean rear wheel speed × `k_s`, signed by gear.
+  - Stage 2+: 100 Hz on CAN data (the main test car's wheel speeds); speed = mean rear wheel speed × `k_s`, signed by gear.
 - Updates:
   - Stage 1 speed: `v = k_s · s_OBD` at the poll rate (expected ~5–20 Hz depending on adapter).
   - Satellite GNSS position (+ course when speed is sufficient) — **only fixes integrity passes** (§3.3), then

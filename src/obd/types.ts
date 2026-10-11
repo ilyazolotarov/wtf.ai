@@ -1,6 +1,8 @@
 // Public and internal types of the vehicle link (docs/VEHICLE-LINK-SPEC.md §6).
 // Pure TS: no React Native / Expo imports.
 
+import type { CanShadowStatus } from "./can-shadow";
+
 /** `spp` = Classic Bluetooth serial (RFCOMM), Android only; `mfi` = iOS ExternalAccessory. */
 export type TransportKind = "ble" | "mfi" | "spp" | "emulator";
 
@@ -239,6 +241,8 @@ export interface VehicleLinkSnapshot {
    * reconnects; null when ready (polling, VIN known) or stopped by the user. The UI badge times out on it.
    */
   tryingSinceMs: number | null;
+  /** The CAN shadow on this session (VEHICLE-LINK-SPEC §16.2); null: off. */
+  canShadow?: CanShadowStatus | null;
 }
 
 export type SendFn = (

@@ -209,6 +209,13 @@ export class TripRecorder {
       link.onEngineState((state, tUs) => this.onEngine(state, tUs)),
       link.onSpeed((s) => this.detector.onSpeed(s.raw, s.tUs)),
       link.onExchange((e) => this.onExchange(e)),
+      // CAN shadow (VEHICLE-LINK-SPEC §16.2): one pre-roll entry per batch.
+      link.onCanFrames((frames) =>
+        this.record(frames[0].rxUs, (w) => {
+          for (const f of frames) w.canFrame({ timestampUs: f.rxUs, id: f.id, data: f.data });
+        }),
+      ),
+      link.onCanWindow((win) => this.record(win.startUs, (w) => w.canWindow(win))),
       link.onLinkEvent((e) => {
         const level = e.type === "error" || e.type === "probe-failed" ? "error" : "info";
         const text = `${e.type}${e.detail ? `: ${e.detail}` : ""}`;

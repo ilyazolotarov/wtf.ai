@@ -42,6 +42,8 @@ export interface EmulatorProfile {
   klineSessionMs?: number;
   /** CAN frames the car broadcasts while the ignition is on, for the STN monitor (`STM`). */
   broadcast?: { id: number; periodMs: number; data: number[] }[];
+  /** STN pass filters also pass broadcast frames into request answers (one arrives before the ECU's answer). */
+  passFiltersLeak?: boolean;
 }
 
 export interface VehicleState {
@@ -147,7 +149,8 @@ export class Elm327Emulator implements Transport {
   private klineOpen = false;
   private ecuSessionUntilUs = 0;
   private header = 0x7df;
-  private receiveFilter: number | null = null;
+  /** CAN hardware filter (ATCRA, `X` digits don't care); null: open. */
+  private receiveFilter: { pattern: number; mask: number } | null = null;
   private vinRequests = 0;
   /** STN pass filters (`STFPA pattern,mask`) and the monitor (`STM`). */
   private passFilters: { pattern: number; mask: number }[] = [];
@@ -229,17 +232,23 @@ export class Elm327Emulator implements Transport {
     const elapsedUs = this.clock.nowUs() - this.monitorStartUs;
     (this.profile.broadcast ?? []).forEach((b, i) => {
       const due = Math.floor(elapsedUs / (b.periodMs * 1000));
-      const passes =
-        this.vehicle.ignition &&
-        (this.receiveFilter === null || this.receiveFilter === b.id) &&
-        this.passFilters.some((f) => (b.id & f.mask) === (f.pattern & f.mask));
-      for (; this.broadcastSent[i] < due; this.broadcastSent[i]++) {
-        if (!passes) continue;
-        const sep = this.spaces ? " " : "";
-        lines.push([...(this.headers ? [b.id.toString(16).toUpperCase().padStart(3, "0")] : []), ...b.data.map(hex2)].join(sep));
-      }
+      const passes = this.broadcastPasses(b.id);
+      for (; this.broadcastSent[i] < due; this.broadcastSent[i]++) if (passes) lines.push(this.broadcastLine(b));
     });
     return lines;
+  }
+
+  private receives(id: number): boolean {
+    return this.receiveFilter === null || (id & this.receiveFilter.mask) === (this.receiveFilter.pattern & this.receiveFilter.mask);
+  }
+
+  private broadcastPasses(id: number): boolean {
+    return this.vehicle.ignition && this.receives(id) && this.passFilters.some((f) => (id & f.mask) === (f.pattern & f.mask));
+  }
+
+  private broadcastLine(b: { id: number; data: number[] }): string {
+    const sep = this.spaces ? " " : "";
+    return [...(this.headers ? [b.id.toString(16).toUpperCase().padStart(3, "0")] : []), ...b.data.map(hex2)].join(sep);
   }
 
   onLinkLost(listener: (reason: string) => void): () => void {
@@ -361,7 +370,14 @@ export class Elm327Emulator implements Transport {
     }
     if (c.startsWith("CRA")) {
       if (!this.profile.supportsHeaderSet) return ["?"];
-      this.receiveFilter = parseInt(c.slice(3), 16);
+      const digits = c.slice(3);
+      this.receiveFilter =
+        digits === ""
+          ? null
+          : {
+              pattern: parseInt(digits.replace(/X/g, "0"), 16),
+              mask: parseInt(digits.replace(/[0-9A-F]/g, "F").replace(/X/g, "0"), 16),
+            };
       return ok;
     }
     if (c === "AR") {
@@ -454,14 +470,15 @@ export class Elm327Emulator implements Transport {
 
     // Physical addressing (ATSH 7E0) → only that ECU answers; receive filter likewise.
     if (this.header !== 0x7df) answers = answers.filter((a) => a.ecu === this.header + 8);
-    if (this.receiveFilter !== null) answers = answers.filter((a) => a.ecu === this.receiveFilter);
+    answers = answers.filter((a) => this.receives(a.ecu));
     if (answers.length === 0) return { body: ["NO DATA"], delayMs: searchDelay + p.noDataWaitMs };
 
     let delayMs = searchDelay + p.obdLatencyMs;
-    if (countDigit !== null) answers = answers.slice(0, countDigit);
+    let body = answers.map(({ ecu, data }) => this.frame(ecu, data));
+    const leaked = p.passFiltersLeak ? (p.broadcast ?? []).find((b) => this.broadcastPasses(b.id)) : undefined;
+    if (leaked) body = [this.broadcastLine(leaked), ...body];
+    if (countDigit !== null) body = body.slice(0, countDigit);
     else delayMs += p.multiResponseWaitMs;
-
-    const body = answers.map(({ ecu, data }) => this.frame(ecu, data));
     return { body: [...(searchDelay > 0 ? ["SEARCHING..."] : []), ...body], delayMs };
   }
 
