@@ -1,7 +1,7 @@
 // The route voice's queue (voice-player.ts) on a fake audio player: whatever the player does or fails to report, the
 // next announcement is still said.
 
-import { hushVoice, sayPhrases, setVoiceNote, setVoiceVolume } from "../voice-player";
+import { hushVoice, sayOnSpeaker, sayPhrases, setVoiceNote, setVoiceVolume } from "../voice-player";
 
 // jest.mock calls are hoisted above the import.
 type Listener = (status: { didJustFinish: boolean; playing?: boolean }) => void;
@@ -46,6 +46,23 @@ jest.mock("expo-speech", () => ({
   stop: jest.fn(() => Promise.resolve()),
 }));
 
+// Android's player on the phone's speaker: each call waits for `mockSpeaker.end` to say how it went.
+const mockSpeaker: { plays: { uri: string; volume: number }[]; end: ((played: boolean) => void) | null; stops: number } = { plays: [], end: null, stops: 0 };
+jest.mock("../../../../modules/audio-output/src/AudioOutputModule", () => ({
+  canPlayOnSpeaker: true,
+  playOnSpeaker: jest.fn((uri: string, volume: number) => {
+    mockSpeaker.plays.push({ uri, volume });
+    return new Promise<boolean>((resolve) => (mockSpeaker.end = resolve));
+  }),
+  stopOnSpeaker: jest.fn(() => {
+    mockSpeaker.stops++;
+    mockSpeaker.end?.(false);
+  }),
+}));
+jest.mock("expo-asset", () => ({
+  Asset: { fromModule: (clip: number) => ({ downloadAsync: () => Promise.resolve({ localUri: `file:///clip-${clip}.mp3` }) }) },
+}));
+
 jest.mock("../voice-clips", () => ({ VOICE_CLIPS: { en: { "now-left": 1, "now-right": 2, "then-left": 3 } } }));
 
 const notes: string[] = [];
@@ -61,6 +78,9 @@ beforeEach(() => {
   mockSpoken.length = 0;
   notes.length = 0;
   mockFailPlay = mockFailRemove = false;
+  mockSpeaker.plays.length = 0;
+  mockSpeaker.end = null;
+  mockSpeaker.stops = 0;
   setVoiceNote((t) => notes.push(t));
   setVoiceVolume(1);
 });
@@ -155,5 +175,49 @@ describe("voice player", () => {
     jest.advanceTimersByTime(10_000);
     await flush();
     expect(mockPlayers.map((p) => p.clip)).toEqual([2]);
+  });
+
+  test("a phrase for the phone's speaker plays there at the driver's volume, then the queue goes on", async () => {
+    setVoiceVolume(0.6);
+    sayOnSpeaker([{ id: "now-left", text: "Turn left" }], "en");
+    sayPhrases([{ id: "now-right", text: "Turn right" }], "en");
+    await flush();
+    expect(mockSpeaker.plays).toEqual([{ uri: "file:///clip-1.mp3", volume: 0.6 }]);
+    expect(mockPlayers).toHaveLength(0);
+    mockSpeaker.end?.(true);
+    await flush();
+    expect(mockPlayers.map((p) => p.clip)).toEqual([2]);
+    expect(notes[0]).toBe("voice say now-left (phone speaker)");
+  });
+
+  test("a phrase the speaker won't play goes where the audio goes", async () => {
+    sayOnSpeaker([{ id: "now-left", text: "Turn left" }], "en");
+    await flush();
+    mockSpeaker.end?.(false);
+    await flush();
+    expect(mockPlayers.map((p) => p.clip)).toEqual([1]);
+    expect(mockPlayers[0].played).toBe(true);
+    expect(notes.some((n) => n.startsWith("voice clip now-left not played on the phone's speaker"))).toBe(true);
+  });
+
+  test("hushing stops the speaker, and nothing else is said for it", async () => {
+    sayOnSpeaker([{ id: "now-left", text: "Turn left" }], "en");
+    await flush();
+    hushVoice();
+    await flush();
+    expect(mockSpeaker.stops).toBe(1);
+    expect(mockPlayers).toHaveLength(0);
+    expect(mockSpoken).toHaveLength(0);
+  });
+
+  test("the speaker that never reports its end is stopped, and the queue goes on", async () => {
+    sayOnSpeaker([{ id: "now-left", text: "Turn left" }], "en");
+    sayPhrases([{ id: "now-right", text: "Turn right" }], "en");
+    await flush();
+    jest.advanceTimersByTime(8000);
+    await flush();
+    expect(mockSpeaker.stops).toBe(1);
+    expect(mockPlayers.map((p) => p.clip)).toEqual([2]);
+    expect(notes).toContain("voice clip now-left on the phone's speaker never reported its end");
   });
 });

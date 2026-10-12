@@ -37,6 +37,9 @@ declare class AudioOutputNativeModule extends NativeModule<AudioOutputEvents> {
   current(): AudioOutput;
   /** Android: opens the system's media output panel; false when none opened. */
   openPicker?(): boolean;
+  /** Android: plays a local clip on the phone's speaker; true once it played to its end. */
+  playOnSpeaker?(uri: string, volume: number): Promise<boolean>;
+  stopOnSpeaker?(): Promise<void>;
 }
 
 const native = requireOptionalNativeModule<AudioOutputNativeModule>("AudioOutput");
@@ -45,6 +48,12 @@ const native = requireOptionalNativeModule<AudioOutputNativeModule>("AudioOutput
 export function currentAudioOutput(): AudioOutput | null {
   return native?.current() ?? null;
 }
+
+/** The phone's own outputs: the voice is heard there whatever the car plays. */
+const ON_THE_PHONE = new Set<AudioOutputKind>(["speaker", "receiver", "wired", "none"]);
+
+/** Somewhere off the phone: a car's Bluetooth, silent while the car plays another source. */
+export const isOffPhone = (o: AudioOutput) => !ON_THE_PHONE.has(o.kind);
 
 /** Each change of where the phone plays audio. */
 export function onAudioOutput(fn: (output: AudioOutput) => void): () => void {
@@ -58,6 +67,22 @@ export const canPickAudioOutput = native != null;
 /** Android: opens the system's media output panel (on iOS the picker view's `open` does). */
 export function openAudioOutputPanel(): boolean {
   return native?.openPicker?.() ?? false;
+}
+
+/**
+ * Whether a clip can be played on the phone's own speaker while a car's Bluetooth is connected: Android only (iOS
+ * plays to the speaker over Bluetooth only in a recording session, which asks for the microphone).
+ */
+export const canPlayOnSpeaker = native?.playOnSpeaker != null;
+
+/** Android: plays a local clip (`file://`) on the phone's speaker at `volume` (0–1); true once it played to its end. */
+export function playOnSpeaker(uri: string, volume: number): Promise<boolean> {
+  return native?.playOnSpeaker?.(uri, volume) ?? Promise.resolve(false);
+}
+
+/** Stops the clip `playOnSpeaker` plays (its promise then resolves false). */
+export function stopOnSpeaker(): void {
+  void native?.stopOnSpeaker?.();
 }
 
 /** The picker's methods, on its ref. */

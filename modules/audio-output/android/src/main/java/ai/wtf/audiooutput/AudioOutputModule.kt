@@ -5,20 +5,28 @@ import android.content.Intent
 import android.media.AudioAttributes
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
+import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.media.MediaPlayer
 import android.media.MediaRouter2
+import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import expo.modules.kotlin.Promise
+import expo.modules.kotlin.functions.Queues
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
 // Where the phone plays audio, and the system's output switcher (ROUTING-SPEC §8.5); the same JS contract as the iOS
-// module, without its picker view: `openPicker` opens the system's media output panel instead.
+// module, without its picker view: `openPicker` opens the system's media output panel instead. `playOnSpeaker` plays
+// a clip on the phone's own speaker whatever else is connected (UI-SPEC §6.2's reminder to put the car on the map).
 
 class AudioOutputModule : Module() {
   private var callback: AudioDeviceCallback? = null
+  /** Ends the clip playing on the speaker (resolving its promise false); null when none plays. */
+  private var stopSpeaker: (() -> Unit)? = null
 
   private val audio: AudioManager?
     get() = appContext.reactContext?.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
@@ -31,6 +39,18 @@ class AudioOutputModule : Module() {
     Function("current") { describe(null) }
 
     Function("openPicker") { openPicker() }
+
+    AsyncFunction("playOnSpeaker") { uri: String, volume: Double, promise: Promise ->
+      playOnSpeaker(uri, volume.toFloat(), promise)
+    }.runOnQueue(Queues.MAIN)
+
+    AsyncFunction("stopOnSpeaker") {
+      stopSpeaker?.invoke()
+    }.runOnQueue(Queues.MAIN)
+
+    OnDestroy {
+      stopSpeaker?.invoke()
+    }
 
     OnStartObserving {
       val am = audio ?: return@OnStartObserving
@@ -82,6 +102,63 @@ class AudioOutputModule : Module() {
     // Before Android 13: what media prefers among the outputs connected.
     val outputs = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
     return listOfNotNull(PREFERRED.firstNotNullOfOrNull { type -> outputs.firstOrNull { it.type == type } })
+  }
+
+  /**
+   * Plays a local clip (`file://`) on the built-in speaker, lowering other audio meanwhile; true once it played to its
+   * end, false when it couldn't (no speaker, a player error, stopped). A car's Bluetooth keeps playing what it plays.
+   */
+  private fun playOnSpeaker(uri: String, volume: Float, promise: Promise) {
+    stopSpeaker?.invoke()
+    val context = appContext.reactContext
+    val am = audio
+    val speaker = am?.getDevices(AudioManager.GET_DEVICES_OUTPUTS)?.firstOrNull {
+      it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+    }
+    if (context == null || am == null || speaker == null) {
+      promise.resolve(false)
+      return
+    }
+    val attributes = AudioAttributes.Builder()
+      .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+      .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+      .build()
+    val focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+      .setAudioAttributes(attributes)
+      .build()
+    val player = MediaPlayer()
+    var settled = false
+    lateinit var stop: () -> Unit
+    // Exactly once, whatever ends it.
+    val finish = { played: Boolean ->
+      if (!settled) {
+        settled = true
+        if (stopSpeaker === stop) stopSpeaker = null
+        am.abandonAudioFocusRequest(focus)
+        player.release()
+        promise.resolve(played)
+      }
+    }
+    stop = { finish(false) }
+    stopSpeaker = stop
+    try {
+      player.setAudioAttributes(attributes)
+      player.setDataSource(context, Uri.parse(uri))
+      player.setVolume(volume, volume)
+      player.setPreferredDevice(speaker)
+      player.setOnCompletionListener { finish(true) }
+      player.setOnErrorListener { _, _, _ ->
+        finish(false)
+        true
+      }
+      player.setOnPreparedListener {
+        am.requestAudioFocus(focus)
+        it.start()
+      }
+      player.prepareAsync()
+    } catch (e: Exception) {
+      finish(false)
+    }
   }
 
   /**

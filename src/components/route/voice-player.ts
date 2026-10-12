@@ -1,12 +1,19 @@
+import { Asset } from "expo-asset";
 import { createAudioPlayer, setAudioModeAsync } from "expo-audio";
 import * as Speech from "expo-speech";
 import { Platform } from "react-native";
 
+import { canPlayOnSpeaker, playOnSpeaker, stopOnSpeaker } from "../../../modules/audio-output/src/AudioOutputModule";
 import { VOICE_CLIPS } from "./voice-clips";
 import type { Phrase, VoiceLang } from "./voice-phrases";
 
-/** `gain`: this item's own (a sample at another volume); otherwise the driver's, as the player has it when it plays. */
-type Item = { clip: number; id: string; text: string; language: string; gain?: number } | { text: string; language: string; gain?: number };
+/**
+ * `gain`: this item's own (a sample at another volume); otherwise the driver's, as the player has it when it plays.
+ * `speaker`: on the phone's own speaker where it can be (`canPlayOnSpeaker`), whatever else is connected.
+ */
+type Item =
+  | { clip: number; id: string; text: string; language: string; gain?: number; speaker?: boolean }
+  | { text: string; language: string; gain?: number };
 
 /** A clip that never reports its end (failed to load) doesn't hold up what comes after it. */
 const CLIP_TIMEOUT_MS = 8000;
@@ -45,11 +52,25 @@ const languageOf = (lang: VoiceLang) => (lang === "uk" ? "uk-UA" : "en-US");
  * it travels with them, since a clip starts only once the audio mode is set.
  */
 export function sayPhrases(phrases: Phrase[], lang: VoiceLang, gain?: number): void {
+  say(phrases, lang, gain, false);
+}
+
+/**
+ * Says phrases as `sayPhrases` does, their clips on the phone's own speaker where it can (Android): heard at once even
+ * while the car's Bluetooth is still connecting, or connected and playing another source. Elsewhere, and when the
+ * speaker won't play it, wherever the phone's audio goes.
+ */
+export function sayOnSpeaker(phrases: Phrase[], lang: VoiceLang): void {
+  say(phrases, lang, undefined, canPlayOnSpeaker);
+}
+
+function say(phrases: Phrase[], lang: VoiceLang, gain: number | undefined, speaker: boolean): void {
   const language = languageOf(lang);
   const clips = phrases.map((p) => VOICE_CLIPS[lang]?.[p.id]);
-  if (clips.every((c) => c !== undefined)) queue.push(...phrases.map((p, i) => ({ clip: clips[i]!, id: p.id, text: p.text, language, gain })));
+  const recorded = clips.every((c) => c !== undefined);
+  if (recorded) queue.push(...phrases.map((p, i) => ({ clip: clips[i]!, id: p.id, text: p.text, language, gain, speaker })));
   else queue.push({ text: phrases.map((p) => p.text).join(", "), language, gain });
-  note(`voice say ${phrases.map((p) => p.id).join(" + ")}${clips.every((c) => c !== undefined) ? "" : " (system voice)"}${busy ? `, after ${queue.length - 1} waiting` : ""}`);
+  note(`voice say ${phrases.map((p) => p.id).join(" + ")}${recorded ? (speaker ? " (phone speaker)" : "") : " (system voice)"}${busy ? `, after ${queue.length - 1} waiting` : ""}`);
   if (!busy) next();
 }
 
@@ -75,7 +96,7 @@ function next(): void {
     finished = true;
     if (gen === generation) next();
   };
-  if ("clip" in item) void playClip(item, gen, done);
+  if ("clip" in item) void (item.speaker ? playOnPhoneSpeaker(item, gen, done) : playClip(item, gen, done));
   else speak(item.text, item.language, done, item.gain);
 }
 
@@ -103,6 +124,36 @@ function speak(text: string, language: string, done: () => void, gain = volume):
   } catch (e) {
     note(`voice: the system voice failed: ${String(e)}`);
     end();
+  }
+}
+
+/** A clip on the phone's speaker (Android's own player); one that won't play there goes where the audio goes. */
+async function playOnPhoneSpeaker(item: Extract<Item, { clip: number }>, gen: number, done: () => void): Promise<void> {
+  let played = false;
+  let gaveUp = false;
+  const timer = setTimeout(() => {
+    gaveUp = true;
+    stopOnSpeaker();
+  }, CLIP_TIMEOUT_MS);
+  try {
+    const { localUri } = await Asset.fromModule(item.clip).downloadAsync();
+    if (localUri && gen === generation && !gaveUp) {
+      stopCurrent = stopOnSpeaker;
+      played = await playOnSpeaker(localUri, item.gain ?? volume);
+    }
+  } catch (e) {
+    note(`voice clip ${item.id} on the phone's speaker failed: ${String(e)}`);
+  }
+  clearTimeout(timer);
+  if (stopCurrent === stopOnSpeaker) stopCurrent = null;
+  if (gen !== generation) return;
+  if (gaveUp) {
+    note(`voice clip ${item.id} on the phone's speaker never reported its end`);
+    done();
+  } else if (played) done();
+  else {
+    note(`voice clip ${item.id} not played on the phone's speaker: where the audio goes instead`);
+    void playClip(item, gen, done);
   }
 }
 
