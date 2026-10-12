@@ -599,63 +599,69 @@ class LinkCore(private val context: Context, private val emit: (String, Map<Stri
     kind = Kind.SPP
     io.execute {
       fun cancelled() = generation != connectGeneration
-      // 1. Pair first when needed: the system shows the PIN dialog (most adapters: 1234 or 0000).
-      if (device.bondState == BluetoothDevice.BOND_NONE) {
-        val latch = CountDownLatch(1)
-        synchronized(bondWaiters) { bondWaiters[mac] = latch }
-        device.createBond()
-        latch.await(90, TimeUnit.SECONDS)
-        synchronized(bondWaiters) { bondWaiters.remove(mac) }
-        if (device.bondState != BluetoothDevice.BOND_BONDED) {
-          if (!cancelled()) handler.post { failConnect("bond-failed", "pairing was not completed") }
-          return@execute
-        }
-      }
-      a.cancelDiscovery()
-      // 2. Connect: secure RFCOMM first, then the insecure one, then the hidden channel-1 socket many clones need.
-      while (!cancelled()) {
-        var opened: BluetoothSocket? = null
-        var how = ""
-        val attempts = listOf<Pair<String, () -> BluetoothSocket>>(
-          "secure" to { device.createRfcommSocketToServiceRecord(SPP_UUID) },
-          "insecure" to { device.createInsecureRfcommSocketToServiceRecord(SPP_UUID) },
-          "channel1" to {
-            device.javaClass.getMethod("createRfcommSocket", Int::class.javaPrimitiveType).invoke(device, 1) as BluetoothSocket
-          },
-        )
-        for ((name, create) in attempts) {
-          if (cancelled()) return@execute
-          try {
-            val s = create()
-            s.connect()
-            opened = s
-            how = name
-            break
-          } catch (e: Exception) {
-            Log.w(TAG, "spp $name connect failed: ${e.message}")
+      try {
+        // 1. Pair first when needed: the system shows the PIN dialog (most adapters: 1234 or 0000).
+        if (device.bondState == BluetoothDevice.BOND_NONE) {
+          val latch = CountDownLatch(1)
+          synchronized(bondWaiters) { bondWaiters[mac] = latch }
+          device.createBond()
+          latch.await(90, TimeUnit.SECONDS)
+          synchronized(bondWaiters) { bondWaiters.remove(mac) }
+          if (device.bondState != BluetoothDevice.BOND_BONDED) {
+            if (!cancelled()) handler.post { failConnect("bond-failed", "pairing was not completed") }
+            return@execute
           }
         }
-        if (opened != null) {
-          val s = opened
-          val method = how
-          handler.post {
-            if (cancelled() || connectPromise == null) {
-              runCatching { s.close() }
-              return@post
+        a.cancelDiscovery()
+        // 2. Connect: secure RFCOMM first, then the insecure one, then the hidden channel-1 socket many clones need.
+        while (!cancelled()) {
+          var opened: BluetoothSocket? = null
+          var how = ""
+          val attempts = listOf<Pair<String, () -> BluetoothSocket>>(
+            "secure" to { device.createRfcommSocketToServiceRecord(SPP_UUID) },
+            "insecure" to { device.createInsecureRfcommSocketToServiceRecord(SPP_UUID) },
+            "channel1" to {
+              device.javaClass.getMethod("createRfcommSocket", Int::class.javaPrimitiveType).invoke(device, 1) as BluetoothSocket
+            },
+          )
+          for ((name, create) in attempts) {
+            if (cancelled()) return@execute
+            try {
+              val s = create()
+              s.connect()
+              opened = s
+              how = name
+              break
+            } catch (e: Exception) {
+              Log.w(TAG, "spp $name connect failed: ${e.message}")
             }
-            socket = s
-            sppOut = s.outputStream
-            startReader(s, s.inputStream)
-            succeedConnect(mapOf("protocol" to "spp", "deviceInfo" to mapOf("name" to (safeName(device) ?: ""), "socket" to method)))
           }
-          return@execute
+          if (opened != null) {
+            val s = opened
+            val method = how
+            handler.post {
+              if (cancelled() || connectPromise == null) {
+                runCatching { s.close() }
+                return@post
+              }
+              socket = s
+              sppOut = s.outputStream
+              startReader(s, s.inputStream)
+              succeedConnect(mapOf("protocol" to "spp", "deviceInfo" to mapOf("name" to (safeName(device) ?: ""), "socket" to method)))
+            }
+            return@execute
+          }
+          // A reconnect (timeoutMs 0) keeps trying until the adapter is back or the connect is cancelled.
+          if (request.timeoutMs != 0L) {
+            handler.post { if (!cancelled()) failConnect("connect-failed", "could not open a serial connection to the adapter") }
+            return@execute
+          }
+          Thread.sleep(SPP_RETRY_MS)
         }
-        // A reconnect (timeoutMs 0) keeps trying until the adapter is back or the connect is cancelled.
-        if (request.timeoutMs != 0L) {
-          handler.post { if (!cancelled()) failConnect("connect-failed", "could not open a serial connection to the adapter") }
-          return@execute
-        }
-        Thread.sleep(SPP_RETRY_MS)
+      } catch (e: InterruptedException) {
+        // shutdown() stops the pool with shutdownNow(): the retry sleep or the pairing wait ends here instead of
+        // escaping the worker thread, which would kill the app.
+        synchronized(bondWaiters) { bondWaiters.remove(mac) }
       }
     }
   }

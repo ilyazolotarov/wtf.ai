@@ -219,11 +219,14 @@ final class LinkCore: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
       done(LinkCore.stateString(central.state))
       return
     }
-    var finished = false
+    // `done` holds a JS promise. Drop it as soon as it has run: the 5 s fallback block below outlives the answer,
+    // and an Expo promise released from that block after JS saw its value frees a JS value off the JS thread
+    // (EXC_BAD_ACCESS in jsi::Value::~Value).
+    var pendingDone: ((String) -> Void)? = done
     let wrapped: (String) -> Void = { state in
-      if finished { return }
-      finished = true
-      done(state)
+      guard let call = pendingDone else { return }
+      pendingDone = nil
+      call(state)
     }
     stateWaiters.append(wrapped)
     queue.asyncAfter(deadline: .now() + 5) {
