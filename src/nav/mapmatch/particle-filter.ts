@@ -62,6 +62,13 @@ export interface MapMatchConfig {
   /** Minimum share of off-road particles (parking lots, roads missing from OSM). */
   offRoadShare: number;
   /**
+   * Off-road share of a start where the car was parked off the roads (a lot, a yard; `init`'s `offRoadStart`).
+   * With `offRoadShare` there, the roads within 3σ took the weight and the heaviest one, 84 m from the spot, was
+   * where the dot started (2026-10-12). Above half, the start is `offroad` at the spot until the car drives onto a
+   * road and the off-road penalty hands the weight over.
+   */
+  parkedOffRoadShare: number;
+  /**
    * Resample when the off-road particles hold less weight than this. Their penalty accumulates while
    * the car follows a road, and without resampling they drift away from it: when the car then leaves
    * the road, none would be near it or heavy enough to take over. Resampling makes fresh off-road
@@ -216,6 +223,7 @@ export const DEFAULT_MAP_MATCH: MapMatchConfig = {
   agreeMarginM: 30,
   agreeMarginRad: 30 * DEG,
   offRoadShare: 0.05,
+  parkedOffRoadShare: 0.6,
   offRoadMinWeight: 1e-5,
   onRoadShare: 0.1,
   onRoadProjectM: 15,
@@ -521,10 +529,19 @@ export class ParticleFilter {
 
   /**
    * Start around a known pose (§7.2): particles on edges within 3σ whose direction fits the
-   * heading, weighted by the position likelihood; the off-road share at the pose. `distanceM` /
-   * `turnRad` are the odometry totals now, so turn comparisons start here.
+   * heading, weighted by the position likelihood; the off-road share at the pose (`parkedOffRoadShare` with
+   * `offRoadStart`: the car was parked off the roads). `distanceM` / `turnRad` are the odometry totals now, so turn
+   * comparisons start here.
    */
-  init(e: number, n: number, posSigmaM: number, psi: number, psiSigma: number, odometry: { distanceM: number; turnRad: number }): void {
+  init(
+    e: number,
+    n: number,
+    posSigmaM: number,
+    psi: number,
+    psiSigma: number,
+    odometry: { distanceM: number; turnRad: number },
+    offRoadStart = false,
+  ): void {
     const c = this.config;
     const t0 = now();
     this.allocate(c.particles);
@@ -540,7 +557,7 @@ export class ParticleFilter {
       }
     }
     const p = this.p;
-    const offRoad = candidates.length ? Math.ceil(c.offRoadShare * p.size) : p.size;
+    const offRoad = candidates.length ? Math.ceil((offRoadStart ? c.parkedOffRoadShare : c.offRoadShare) * p.size) : p.size;
     const sigma2 = posSigmaM * posSigmaM + c.laneSigmaM * c.laneSigmaM;
     for (let i = 0; i < p.size; i++) {
       p.dks[i] = c.dksSigma * this.random.gauss();

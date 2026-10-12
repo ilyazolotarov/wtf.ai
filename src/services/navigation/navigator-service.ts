@@ -451,7 +451,7 @@ export class NavigatorService implements PositionSource {
     const pose = nav.parkedPose;
     if (pose && this.vin) {
       this.deps.calibration.saveParkedPose(this.vin, pose, this.clock.nowMs());
-      if (!this.poseStored) this.note(`nav parked pose saved (heading ±${((pose.headingSigmaRad * 180) / Math.PI).toFixed(1)}°)`);
+      if (!this.poseStored) this.note(`nav parked pose saved (heading ±${((pose.headingSigmaRad * 180) / Math.PI).toFixed(1)}°${pose.offRoad ? ", off the roads" : ""})`);
       this.poseStored = true;
     }
     const lag = nav.gnssLagEstimate;
@@ -984,6 +984,7 @@ export class NavigatorService implements PositionSource {
       speedMps: speed,
       accuracyM: puckAccuracyM(estimate, top),
       ...(mm ? { mapMatch: mm.state } : {}),
+      ...(estimate.parkedOffRoad ? { parkedOffRoad: true } : {}),
       ...(alternatives?.length ? { alternatives } : {}),
       source,
       trust,

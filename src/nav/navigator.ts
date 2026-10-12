@@ -256,6 +256,11 @@ export interface NavEstimate {
    * (`positionDoubtM`): the dot's radius instead of `accuracyM`, which only ever reports the filter's spread.
    */
   doubtM?: number;
+  /**
+   * Standing where it was parked off the roads, started from there: map matching `offroad` is where the car is,
+   * not a lost track (the map doesn't ask to place the car for it).
+   */
+  parkedOffRoad?: boolean;
 }
 
 export interface MapMatchEstimate {
@@ -308,6 +313,8 @@ export interface ParkedPose {
   /** 1σ. */
   posSigmaM: number;
   headingSigmaRad: number;
+  /** Map matching had the car off every road (a lot, a yard): the next start keeps it there (MAPMATCH-SPEC §7.2). */
+  offRoad?: boolean;
 }
 
 /** `untrusted`: a satellite fix integrity refused (`integrity` says why); nothing used it. */
@@ -388,6 +395,8 @@ const fixSigma = (f: GnssFix) => (isSatelliteFix(f) ? f.hAccM / SQRT_68 : f.hAcc
  * took a parallel one (pxpcgw, 3 seeds in 8).
  */
 const JAMMED_POSE_SIGMA_M = 30;
+/** A start from a pose parked off the roads stays "at the spot" until the car has driven this far. */
+const PARKED_SPOT_M = 20;
 const POSE_GPS_WITHIN_M = 300;
 /** A road position update's σ along the road when it knows nothing new there (no turn since the last one), m. */
 const UNKNOWN_ALONG_M = 10_000;
@@ -501,6 +510,8 @@ export class Navigator {
   private speedScale: { ks: number; ksVar: number; so?: number; soVar?: number } | null = null;
   /** The EKF started from a parked pose that no fix has confirmed yet (OBD distance at the start). */
   private poseUnverifiedFromM: number | null = null;
+  /** The EKF started from a pose parked off the roads (OBD distance at the start). */
+  private poseOffRoadAtM: number | null = null;
   /** Parked pose taken when the phone was first handled while parked: it may leave the car after that. */
   private frozenPose: ParkedPose | null = null;
   /**
@@ -905,6 +916,7 @@ export class Navigator {
         speedMps: Math.max(0, this.ekf.speed),
         ...(this.pf?.isActive ? { mapMatch: this.mapMatchEstimate(this.frame) } : {}),
         ...(this.doubtM === null ? {} : { doubtM: this.doubtM }),
+        ...(this.atParkedOffRoadSpot() && this.pf?.output().state === "offroad" ? { parkedOffRoad: true } : {}),
       };
     }
     if (this.anchor) {
@@ -937,7 +949,19 @@ export class Navigator {
     // Dead-reckoned to the spot without GPS, the EKF's own σ is what the road updates made of it, not how far off it is.
     const sinceGps = this.distanceSinceTrustedM;
     const posSigmaM = sinceGps === undefined || sinceGps > POSE_GPS_WITHIN_M ? Math.max(this.ekf.positionSigma, JAMMED_POSE_SIGMA_M) : this.ekf.positionSigma;
-    return { ...this.frame.toCoordinate(this.ekf.east, this.ekf.north), headingRad: psi, posSigmaM, headingSigmaRad: this.ekf.psiSigma };
+    const offRoad = this.pf?.isActive === true && this.pf.output().state === "offroad";
+    return {
+      ...this.frame.toCoordinate(this.ekf.east, this.ekf.north),
+      headingRad: psi,
+      posSigmaM,
+      headingSigmaRad: this.ekf.psiSigma,
+      ...(offRoad ? { offRoad } : {}),
+    };
+  }
+
+  /** Started from a pose parked off the roads and not yet driven away from it. */
+  private atParkedOffRoadSpot(): boolean {
+    return this.poseOffRoadAtM !== null && this.stats.obdDistanceM - this.poseOffRoadAtM < PARKED_SPOT_M;
   }
 
   /**
@@ -958,6 +982,7 @@ export class Navigator {
     const theta = wrapAngle(this.rel.psi - pose.headingRad);
     const cs = Math.cos(theta);
     const sn = Math.sin(theta);
+    this.poseOffRoadAtM = pose.offRoad ? this.stats.obdDistanceM : null;
     this.initEkf(theta, e - (cs * this.rel.e - sn * this.rel.n), n - (sn * this.rel.e + cs * this.rel.n), pose.posSigmaM, pose.headingSigmaRad, "pose");
     this.poseUnverifiedFromM = this.stats.obdDistanceM;
     this.poseCoarseRejected = 0;
@@ -985,6 +1010,7 @@ export class Navigator {
     this.alignPoints = [];
     this.rejectedSat = 0;
     this.poseUnverifiedFromM = null;
+    this.poseOffRoadAtM = null;
     this.poseCoarseRejected = 0;
     this.poseDoubt = null;
     this.frozenPose = null;
@@ -1172,7 +1198,7 @@ export class Navigator {
     this.offRoadFromM = null;
     this.trackingFromM = null;
     this.alongFromTurnM = null;
-    this.pf.init(ekf.east, ekf.north, sigmaScale * ekf.positionSigma, ekf.psi, ekf.psiSigma, this.odometry.totals);
+    this.pf.init(ekf.east, ekf.north, sigmaScale * ekf.positionSigma, ekf.psi, ekf.psiSigma, this.odometry.totals, this.atParkedOffRoadSpot());
   }
 
   /**
@@ -1480,6 +1506,7 @@ export class Navigator {
     this.anchor = null;
     this.rejectedSat = 0;
     this.started = { method, tUs: this.lastTUs ?? 0 };
+    if (method !== "pose") this.poseOffRoadAtM = null;
     this.trackingFromM = null;
     // Started from the map, the filter carries on; otherwise it is kept only if it agrees.
     if (method !== "map" && !this.mapMatchAgrees()) this.startMapMatch();
@@ -1635,6 +1662,7 @@ export class Navigator {
     this.alignPoints = [];
     this.rejectedSat = 0;
     this.poseUnverifiedFromM = null;
+    this.poseOffRoadAtM = null;
     this.clearDoubt();
     this.stats.resets++;
     this.pf?.stop();

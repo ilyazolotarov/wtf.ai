@@ -38,6 +38,8 @@ export interface PositionEstimate {
   rawGnss?: RawGnssFix;
   /** Map matching (MAPMATCH-SPEC §6.2); absent without a road graph. */
   mapMatch?: MapMatchState;
+  /** Standing where it was parked off the roads, started from there: `offroad` is where the car is, not lost. */
+  parkedOffRoad?: boolean;
   /** Other roads the car may be on while map matching is ambiguous, heaviest first. */
   alternatives?: { lat: number; lon: number; weight: number }[];
   simulatedOutage?: SimulatedOutage;

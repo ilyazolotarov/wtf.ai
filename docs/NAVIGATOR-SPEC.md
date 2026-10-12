@@ -138,7 +138,9 @@ jammed:
 - **Why:** a session otherwise has no heading until a GNSS course (≥ 5 m/s) or, under jamming, alignment after
   ~500 m. The car usually starts where it was parked, facing the same way.
 - **Saved** (`Navigator.parkedPose`): position, heading and their σ while the car stands (standstill, or OBD 0) in
-  mode `dr`. The service stores it per VIN at engine/ignition off, every 30 s while parked, and when it stops.
+  mode `dr`, and `offRoad` when map matching had it off every road (a lot, a yard): the next start keeps it there
+  rather than on the roads around it (MAPMATCH-SPEC §7.2), and standing there the map doesn't take `offroad` for
+  lost (UI-SPEC §6.2; note `nav parked pose saved (…, off the roads)`). The service stores it per VIN at engine/ignition off, every 30 s while parked, and when it stops.
   The first OBD speed > 0 clears it, so a pose never outlives a drive. The pose is the EKF's, not the map's dot.
   Dead-reckoned there without a trusted satellite fix in the last 300 m, its σ is at least 30 m: against the drawn
   truth the jammed drives of 2026-10-06 ended 12–80 m from where the car parked while the EKF said 5–7 m, and the

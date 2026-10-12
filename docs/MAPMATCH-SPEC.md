@@ -321,7 +321,14 @@ Arrays of numbers, not objects (structure of arrays over typed arrays), for Herm
 
 - **Known heading** (EKF running; parked pose; manual fix):
   - Candidate edges within 3σ of the position, travel directions within 3σ_ψ + 10° of the heading.
-  - Particles are spread over them by the position likelihood.
+  - Particles are spread over them by the position likelihood; the off-road share (5 %) around the position.
+  - **Parked off the roads** (the pose's `offRoad`: the filter was `offroad` when it was saved, a lot or a yard):
+    the off-road share is 60 %, so the start is `offroad` at the spot until the car drives onto a road and the
+    off-road penalty hands the weight over. With 5 % the roads within 3σ (90 m for a jammed pose's 30 m) took the
+    weight, and the dot started on the heaviest one: 84 m from a lot the car stood on (2026-10-12). Replayed through
+    the app from the parked chain (57 drives, 8 seeds): the start's gap from where the last drive's dot stopped fell
+    on 26 drives, typically 20–55 → 2–16 m (that one 52 → 15 m), jumps 113 → 99, the Wi-Fi fixes' median distance
+    1482 → 1368 m summed, nothing worse beyond the seeds' spread.
 - **Unknown heading** (navigator `anchored`, §8; `initUnknown`):
   - All roads within the anchor radius: 3σ of the anchor fix (σ = `h_acc` for a coarse fix, `h_acc/1.5` for a
     satellite one) plus the distance driven since it, at least 20 m. The parts of the edges inside the circle,
@@ -1006,6 +1013,9 @@ drives worse, the ones the viewer showed, and 3 better.
     227 → 149 s — the worst are the seeds where the filter has lost the car by more than the reach. On real drives
     jammed after the start the dot is > 50 m off 4.0 → 3.4 % of the time; the simulated drives, which never leave a
     road, are unchanged.
+  - **At the spot it parked in off the roads** (`NavEstimate.parkedOffRoad`: started from such a pose, not 20 m
+    driven since, state `offroad`): the EKF is the puck, not the dominant hypothesis. The off-road particles spread
+    over the pose's σ in clusters lighter than a road's within it.
     - Tried, not kept: *forbidding off-road from 10–20 km/h in the filter* instead of 20–40 km/h. It also kept the
       dot on the roads of the real day, and lost the city simulations (time > 50 m off 0.1 → 5.5 %, one run in
       twelve 30 % of its time): off-road particles are the filter's way back from a wrong road, and at 20 km/h it

@@ -9,6 +9,7 @@ import { replayTrip } from "@/nav/replay/replay";
 import { rotateCalibration } from "@/nav/compass/compass";
 import { ParticleFilter } from "@/nav/mapmatch/particle-filter";
 import { Navigator } from "@/nav/navigator";
+import { puckHypothesis } from "@/nav/position/puck";
 
 // The fixture's long road (tools/tiles tests/test_graph.py): 60 —160— 61 —161— 63 due east at
 // LAT0 + 0.01, with the one-way 162 running north from 61 (1.73 km east of 60).
@@ -447,3 +448,68 @@ describe("the nearest road a car could be driving along (the dot at speed, MAPMA
   });
 });
 
+describe("a start where the car was parked off the roads (MAPMATCH-SPEC §7.2)", () => {
+  const DEG = Math.PI / 180;
+  const start = (offRoadStart: boolean) => {
+    // 30 m beside the long road, heading along it, 30 m sure: a lot beside a street.
+    const pf = new ParticleFilter(new TiledRoadGraph(bufferByteSource(new Uint8Array(FIXTURE)), new LocalFrame({ lat: 51.53, lon: 30.76 })));
+    pf.init(0, 30, 30, 92 * DEG, 2 * DEG, { distanceM: 0, turnRad: 0 }, offRoadStart);
+    return pf;
+  };
+
+  test("parked on the road side as usual: the road takes the weight", () => {
+    const pf = start(false);
+    expect(pf.output().state).not.toBe("offroad");
+    expect(pf.offRoadWeight()).toBeLessThan(0.5);
+  });
+
+  // 2026-10-12: parked on a lot, the next drive's dot started on the heaviest road within 3σ, 84 m from the spot.
+  test("parked off the roads: it starts off-road", () => {
+    const pf = start(true);
+    expect(pf.output().state).toBe("offroad");
+    expect(pf.offRoadWeight()).toBeGreaterThanOrEqual(0.6);
+  });
+});
+
+describe("a drive from a lot (NAVIGATOR-SPEC §6.1)", () => {
+  // Parked facing east 30 m north of the long road, out of the lot onto it, then 700 m east along it; no GNSS.
+  const LOT = { lat: 51.53 + 30 / 111_195, lon: 30.76 };
+  const segments: DriveSegment[] = [
+    { durationS: 5, speedMps: 0, yawRateDegS: 0 },
+    { durationS: 2, speedMps: 5, yawRateDegS: 0 },
+    { durationS: 3, speedMps: 5, yawRateDegS: -30 }, // right, to the south
+    { durationS: 3, speedMps: 5, yawRateDegS: 0 },
+    { durationS: 3, speedMps: 5, yawRateDegS: 30 }, // left, onto the road east
+    { durationS: 60, speedMps: 12, yawRateDegS: 0 },
+  ];
+  const drive = syntheticDrive({ segments, origin: LOT, startHeadingRad: Math.PI / 2, gnss: "clean", obdScale: 1 });
+  const run = (offRoad: boolean) =>
+    replayTrip(drive.trip, {
+      mapMatch: { graph: graph() },
+      cuts: [{ fromS: 0, toS: 1e9 }],
+      startPose: { ...LOT, headingRad: Math.PI / 2, posSigmaM: 30, headingSigmaRad: 0.04, ...(offRoad ? { offRoad } : {}) },
+    }).track;
+
+  test("saved off the roads: off-road at the spot until it drives away, then on the road", () => {
+    const track = run(true);
+    const parked = track.filter((p) => p.tS < 4);
+    expect(parked.length).toBeGreaterThan(0);
+    for (const p of parked) {
+      expect(p.mapMatch?.state).toBe("offroad");
+      expect(p.parkedOffRoad).toBe(true);
+      // The dot is the spot itself, not a hypothesis on a road beside it.
+      expect(puckHypothesis(p, true)).toBeUndefined();
+    }
+    const end = track.at(-1)!;
+    expect(end.parkedOffRoad).toBeUndefined();
+    const top = end.mapMatch!.clusters[0];
+    const truth = drive.truthAt(drive.trip.imu.at(-1)!.tUs);
+    expect(Math.hypot((top.lat - truth.lat) * 111_195, (top.lon - truth.lon) * 111_195 * Math.cos((truth.lat * Math.PI) / 180))).toBeLessThan(15);
+  });
+
+  test("saved on a road side: the road beside it takes the start, as before", () => {
+    const first = run(false)[0];
+    expect(first.mapMatch?.state).not.toBe("offroad");
+    expect(first.parkedOffRoad).toBeUndefined();
+  });
+});

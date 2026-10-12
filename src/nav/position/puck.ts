@@ -21,10 +21,12 @@ export const MAP_MATCH_MIN_ACCURACY_M = 5;
  * while dead-reckoning, and while anchored (heading unknown) once the filter has found a road (it left `init`). The
  * anchor is the latest Wi-Fi/cell fix: under jamming hundreds of metres off, and standing still while the car drives.
  * On 2026-10-06 from a cold start the filter held the road within 10 m for minutes while that dot drifted 3 km away.
+ * Not while standing where it was parked off the roads (`parkedOffRoad`): the off-road particles spread over the
+ * pose's σ in clusters lighter than a road's within it, and the dot is the spot it parked in.
  */
 export function puckHypothesis(estimate: NavEstimate, deadReckoning: boolean): MapMatchEstimate["clusters"][number] | undefined {
   const mm = estimate.mapMatch;
-  if (!(deadReckoning || estimate.mode === "anchored") || !mm || !MAP_MATCH_PUCK.has(mm.state)) return undefined;
+  if (!(deadReckoning || estimate.mode === "anchored") || !mm || !MAP_MATCH_PUCK.has(mm.state) || estimate.parkedOffRoad) return undefined;
   const top = mm.clusters[0];
   // The filter keeps its off-road hypothesis (it is how it finds the road again), but a car at speed is drawn on a road.
   if (top?.road && mm.state === "offroad" && (estimate.speedMps ?? 0) >= DRAW_ON_ROAD_MPS) {

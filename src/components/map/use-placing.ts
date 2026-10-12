@@ -23,8 +23,8 @@ const PLACED_SHOWN_M = 50;
 
 /**
  * Lost enough to offer putting the car on the map: no GPS, and nothing vouching for the dot — rough, no direction,
- * off any road, or a long way on dead reckoning. A confident filter on the wrong road looks like none of the first
- * three.
+ * off any road (not where it was parked off the roads, started from there: a lot), or a long way on dead reckoning. A
+ * confident filter on the wrong road looks like none of the first three.
  */
 export function isLost(position: PositionEstimate | null): boolean {
   return (
@@ -32,7 +32,7 @@ export function isLost(position: PositionEstimate | null): boolean {
     position.trust !== "TRUSTED" &&
     (position.accuracyM > PLACE_OFFER_ACCURACY_M ||
       position.headingRad == null ||
-      position.mapMatch === "offroad" ||
+      (position.mapMatch === "offroad" && !position.parkedOffRoad) ||
       (position.distanceSinceTrustedM ?? 0) > PLACE_OFFER_DISTANCE_M)
   );
 }
