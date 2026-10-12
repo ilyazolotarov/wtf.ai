@@ -306,7 +306,10 @@ next maneuver and the distance to it, and the one after when it follows within 1
   lost", not "the car turned", and a plan from a dot beside the road starts off it and goes off again at once.
 - **The wait** starts at 10 s and doubles for each off-route plan whose route goes `off` again within a minute of
   being made, up to 160 s; a route that stays on for a minute clears the streak. A plan that did not survive its
-  own first seconds did not fix anything: the route was never the problem, the position was. The minute is measured
+  own first seconds did not fix anything: the route was never the problem, the position was. A route the car was on
+  for 100 m along it did, however soon it left it: the driver took another way, and the next plan waits 10 s
+  (2026-10-12: driven 155–260 m each and left at their first turns, counted as failures the waits grew to 40 and
+  80 s, and the last plan never came; the 2026-10-06 loop's routes mostly went off within 50 m). The minute is measured
   from the plan to its route going off, never from one plan to the next: the waits from 80 s on would otherwise
   end the streak themselves, and it would cycle 10 → 80 s without reaching the cap.
   > Both rules come from 2026-10-06, 2 h 11 min of jamming: a flat 10 s cooldown re-planned a 62 km route 25 times

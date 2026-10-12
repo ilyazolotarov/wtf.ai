@@ -166,6 +166,43 @@ describe("RouteService", () => {
     expect(driveOff()).toBeLessThanOrEqual(12);
   });
 
+  // 2026-10-12: a driver ignoring the route on purpose drove each new one 155-260 m, and the waits grew to 80 s.
+  test("a route the car drove 100 m on and then left did fix something: the next plan waits 10 s, not twice that", () => {
+    const h = harness({ network: "ladder" });
+    h.moveTo(ladderAt(0, 0));
+    h.service.start(ladderAt(2200, 0));
+    h.flush();
+    const step = (e: number, n: number, headingRad: number) => {
+      h.tick(1000);
+      h.moveTo(ladderAt(e, n), { headingRad });
+    };
+    // On the route, 10 m/s: east to the north branch, 200 m up it.
+    for (let e = 10; e <= 100; e += 10) step(e, 0, Math.PI / 2);
+    for (let n = 10; n <= 200; n += 10) step(100, n, 0);
+    expect(h.service.getSnapshot()!.guidance).toMatchObject({ state: "on" });
+    // Then east across the blocks, 100 m south of the branch: the seconds until a plan.
+    let e = 100;
+    const offUntilPlan = () => {
+      for (let i = 1; i <= 200; i++) {
+        e += 10;
+        step(e, 200, Math.PI / 2);
+        if (h.service.getSnapshot()?.replanning) {
+          h.flush();
+          return i;
+        }
+      }
+      return Infinity;
+    };
+    expect(offUntilPlan()).toBeLessThan(10);
+    // Left within a minute of its plan, but driven 200 m: no streak, the next plan waits 10 s.
+    const second = offUntilPlan();
+    expect(second).toBeGreaterThanOrEqual(10);
+    expect(second).toBeLessThan(20);
+    // That one's route was never driven on: it fixed nothing, the next waits 20 s.
+    expect(offUntilPlan()).toBeGreaterThanOrEqual(20);
+    expect(h.routes.map((r) => r.reason)).toEqual(["new", "off-route", "off-route", "off-route"]);
+  });
+
   test("a destination without a road route fails, and says why", () => {
     const h = harness();
     h.move(0.5, 0);

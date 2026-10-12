@@ -38,6 +38,13 @@ const REPLAN_COOLDOWN_MS = 10_000;
  */
 const REPLAN_SETTLED_MS = 60_000;
 const REPLAN_COOLDOWN_MAX_MS = 160_000;
+/**
+ * A route the car drove this far on did fix something, however soon it left it: the driver took another way. On
+ * 2026-10-12 a driver ignoring the route on purpose drove each new one 155-260 m and turned off at its first turn;
+ * counted as plans that fixed nothing, the waits grew to 40 and 80 s and the last one never came. The plans of the
+ * 2026-10-06 loop mostly went off within 50 m, many within 4 s, before the car was ever on them.
+ */
+const REPLAN_FOLLOWED_M = 100;
 /** "Arrived" stays on the map this long, then the route ends. */
 const ARRIVED_LINGER_MS = 60_000;
 /** The active route's destination, kept so a restarted app (iOS may end it mid-drive) picks the route up again. */
@@ -175,6 +182,8 @@ export class RouteService {
   private replanStreak = 0;
   /** When the route of the last plan first went off (null: not yet). */
   private offSincePlanAt: number | null = null;
+  /** How far along the last plan's route the car has been on it. */
+  private followedM = 0;
   private unsubscribe: (() => void) | null = null;
   private notedState: GuidanceState | null = null;
   /** For the arrival note: when the route started, the first plan's time and length, and the distance driven. */
@@ -318,10 +327,11 @@ export class RouteService {
     const search = new RouteSearch(graph.graph, frame, from, s.destination, { costs: { congestion: this.planCongestion } });
     let slices = 0;
     // Measured from when the last plan's route went off, not from this plan: the wait itself must not end the streak.
-    const quick = this.offSincePlanAt !== null && this.offSincePlanAt - this.lastPlanAt < REPLAN_SETTLED_MS;
+    const quick = this.offSincePlanAt !== null && this.offSincePlanAt - this.lastPlanAt < REPLAN_SETTLED_MS && this.followedM < REPLAN_FOLLOWED_M;
     this.replanStreak = reason === "off-route" && quick ? this.replanStreak + 1 : 0;
     this.lastPlanAt = startedAt;
     this.offSincePlanAt = null;
+    this.followedM = 0;
     if (reason === "off-route") this.set({ ...this.snapshot!, replanning: true });
     const step = () => {
       if (this.planning?.id !== id) return;
@@ -590,6 +600,7 @@ export class RouteService {
     });
     this.noteState(step, p);
     this.set({ ...s, guidance: step, ...(this.others.length ? {} : { alternatives: undefined }) });
+    if (step.state === "on" && !this.planning) this.followedM = Math.max(this.followedM, step.alongM);
     if (step.state === "off" && !this.planning) this.offSincePlanAt ??= this.now();
     if (step.state === "off" && !this.planning && this.mayReplan(p)) this.plan("off-route");
     if (step.state === "arrived" && !this.arrivedTimer) {
