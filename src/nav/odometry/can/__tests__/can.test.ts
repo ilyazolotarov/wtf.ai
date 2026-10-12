@@ -115,6 +115,20 @@ describe("car state", () => {
     expect(of(out, "brake")[0].on).toBe(true);
   });
 
+  // 2026-10-12: a sample per wheel read mixed this frame's wheels with the last one's.
+  test("all four wheels in one frame: one sample per frame, all from it", () => {
+    const p = profileByKey("mazda/mazda/mazda_2017")!;
+    const wheels = of(
+      decode(p, [
+        { tUs: 0, ...frame("mazda_2017", "WHEEL_SPEEDS", { FL: 30, FR: 30, RL: 30, RR: 30 }) },
+        { tUs: 10_000, ...frame("mazda_2017", "WHEEL_SPEEDS", { FL: 31, FR: 32, RL: 33, RR: 34 }) },
+      ]),
+      "wheels",
+    );
+    expect(wheels).toHaveLength(2);
+    expect(wheels[1].v.map((v) => v * 3.6)).toEqual([31, 32, 33, 34].map((v) => expect.closeTo(v, 6)));
+  });
+
   test("alternatives: the first one heard wins, a later one only while the earlier is silent", () => {
     const p = profileByKey("hyundai/can/hyundai_can_generated")!;
     const dbc = "hyundai_can_generated";

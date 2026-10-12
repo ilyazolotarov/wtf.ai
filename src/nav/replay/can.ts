@@ -1,6 +1,9 @@
 // A trip log's CAN shadow frames decoded through the car's profile (SPEC §2.1: decoded in replay).
 import { CarStateDecoder, type CarStateSample } from "../odometry/can/car-state";
 import { canSpeedSamples, type CanSpeedSample } from "../odometry/can/can-speed";
+import { wheelYawSamples } from "../odometry/can/wheel-yaw";
+import { WheelYawCalibrator, type WheelYawCalibration, type WheelYawCalibrationConfig } from "../odometry/can/wheel-yaw-calibration";
+import { ImuProcessor } from "../odometry/imu/imu-processor";
 import { matchProfiles, profileByKey, type Profile, type ProfileMatch, type SeenId } from "../odometry/can/profile";
 import type { TripLog } from "../../triplog/trip-log-reader";
 
@@ -40,10 +43,28 @@ export function seenIds(frames: { id: number; data: number[] }[]): Map<number, S
   return out;
 }
 
+/**
+ * The frames at when the bus carried them, as near as the log tells: one that arrived after its window ended (the
+ * stop's drain, sent before the stop character reached the adapter) at the window's end. On the vLinker a stop
+ * without an answer was retried after 1 s, and the frames it drained, arriving then, put a turn's start a second late
+ * (2026-10-12).
+ */
+export function busTimedFrames(trip: TripLog): NonNullable<TripLog["can"]> {
+  const frames = trip.can ?? [];
+  const windows = trip.canWindows;
+  if (!windows?.length) return frames;
+  let w = 0;
+  return frames.map((f) => {
+    while (w + 1 < windows.length && windows[w + 1].startUs <= f.tUs) w++;
+    const win = windows[w];
+    return win.startUs <= f.tUs && f.tUs > win.endUs ? { ...f, tUs: win.endUs } : f;
+  });
+}
+
 /** Null when the log has no CAN frames. `profileKey` overrides the choice ("make/mapping/dbc"). */
 export function decodeTripCan(trip: TripLog, profileKey?: string): TripCan | null {
-  const frames = trip.can;
-  if (!frames?.length) return null;
+  if (!trip.can?.length) return null;
+  const frames = busTimedFrames(trip);
   const seen = seenIds(frames);
   const listened = listenedIds(trip);
   const vin = typeof trip.info.vehicle_vin === "string" ? trip.info.vehicle_vin : null;
@@ -88,4 +109,93 @@ export function withCanSpeed(trip: TripLog, profileKey?: string): TripLog | null
   }
   for (; ci < speeds.length; ci++) merged.push(canSample(speeds[ci]));
   return { ...trip, obdSpeed: merged };
+}
+
+/** A wheel yaw sample stands for the IMU samples within this of it (the monitor's breaks for polls are ~0.16 s). */
+const YAW_FRESH_US = 300_000;
+/** Wheel yaw comes this much after the gyro's (2026-10-12, both adapters: 0–120 ms). */
+const WHEEL_LAG_US = 100_000;
+
+export interface WheelYawOptions {
+  /** A fixed track instead of learning (no `calibrate`). */
+  trackM?: number;
+  profileKey?: string;
+  /** The phone leaves the mount here (s since log start): the gyro before it, the wheels after. Default: from the start. */
+  fromS?: number;
+  /** Learn the wheels' calibration from the gyro while it is used (WheelYawCalibrator), and turn on it after. */
+  calibrate?: boolean;
+  calibration?: Partial<WheelYawCalibrationConfig>;
+}
+
+/**
+ * The trip as the navigator would turn on the rear wheels' yaw (SPEC §2.1 Stage 2, replay only): from `fromS` each
+ * IMU sample's rotation replaced by the wheel yaw about the phone's "up" (its gravity kept), as if the gyro read
+ * exactly the car's turning — what a phone held in a hand or in a pocket would need. Where no wheel sample is near,
+ * the phone's own gyro stays; `gyroShare` says how much of that stretch it was. Null when the log has no wheel speeds.
+ */
+export function withWheelYaw(
+  trip: TripLog,
+  options: WheelYawOptions = {},
+): { trip: TripLog; gyroShare: number; calibration: WheelYawCalibration | null } | null {
+  const can = decodeTripCan(trip, options.profileKey);
+  const speeds = can ? canSpeedSamples(can.samples) : [];
+  if (!speeds.length) return null;
+  const fromUs = trip.startUs + (options.fromS ?? 0) * 1e6;
+  // The gyro's yaw rate per IMU sample, as the navigator reads it.
+  const imuYaw = (() => {
+    const p = new ImuProcessor();
+    return trip.imu.map((s) => {
+      const o = p.process(s);
+      return { tUs: s.tUs, yaw: o.valid ? o.yawRate : null };
+    });
+  })();
+  let gi = 0;
+  const gyroAround = (tUs: number): number | null => {
+    const a = tUs - WHEEL_LAG_US - 50_000;
+    const b = tUs - WHEEL_LAG_US + 50_000;
+    while (gi < imuYaw.length && imuYaw[gi].tUs < a) gi++;
+    let sum = 0;
+    let n = 0;
+    for (let j = gi; j < imuYaw.length && imuYaw[j].tUs <= b; j++) {
+      const y = imuYaw[j].yaw;
+      if (y === null) return null;
+      sum += y;
+      n++;
+    }
+    return n ? sum / n : null;
+  };
+  const calibrator = options.calibrate ? new WheelYawCalibrator(null, options.calibration) : null;
+  const fixed = wheelYawSamples(speeds, options.trackM);
+  const yaw = speeds.map((s, i) => {
+    const [, , rl, rr] = s.wheelsMps;
+    if (calibrator && s.tUs < fromUs) calibrator.push(s.tUs, rl, rr, gyroAround(s.tUs), s.reverse);
+    if (!calibrator) return fixed[i];
+    const w = calibrator.yaw(rr - rl, s.speedMps);
+    return { tUs: s.tUs, radps: s.reverse ? -w : w };
+  });
+  let k = 0;
+  let kept = 0;
+  let after = 0;
+  const imu = trip.imu.map((s) => {
+    if (s.tUs < fromUs) return s;
+    after++;
+    while (k + 1 < yaw.length && yaw[k + 1].tUs <= s.tUs) k++;
+    const a = yaw[k];
+    const b = yaw[k + 1];
+    let radps: number | null = null;
+    if (a.tUs <= s.tUs && b && b.tUs - a.tUs <= 2 * YAW_FRESH_US) {
+      radps = a.radps + ((b.radps - a.radps) * (s.tUs - a.tUs)) / (b.tUs - a.tUs);
+    } else {
+      const near = [a, b].filter((y) => y && Math.abs(y.tUs - s.tUs) <= YAW_FRESH_US);
+      if (near.length) radps = near[0].radps;
+    }
+    if (radps === null) {
+      kept++;
+      return s;
+    }
+    const g = Math.hypot(...s.gravity);
+    const up: [number, number, number] = g > 0 ? [-s.gravity[0] / g, -s.gravity[1] / g, -s.gravity[2] / g] : [0, 0, 1];
+    return { ...s, gyro: [up[0] * radps, up[1] * radps, up[2] * radps] as [number, number, number] };
+  });
+  return { trip: { ...trip, imu }, gyroShare: after ? kept / after : 0, calibration: calibrator?.calibration ?? null };
 }

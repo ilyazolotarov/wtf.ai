@@ -33,16 +33,18 @@ export class CarStateDecoder {
     dirUs: -Infinity,
   }));
   private readonly brakeOn = new Map<number, { on: boolean; tUs: number }>();
+  /** Ids that carry a wheel speed: one wheel sample per frame, once all its wheels are read. */
+  private readonly wheelIds = new Set<number>();
 
   constructor(readonly profile: Profile) {
     const { wheels } = profile;
     if (wheels) {
       wheels.forEach((w, i) => {
+        this.wheelIds.add(w.id);
         this.on(w.id, (tUs, data, len) => {
           const v = w.read(data, len);
-          if (Number.isNaN(v)) return null;
-          Object.assign(this.wheel[i], { v, tUs });
-          return this.wheelSample(tUs);
+          if (!Number.isNaN(v)) Object.assign(this.wheel[i], { v, tUs });
+          return null;
         });
         const dir = w.dir;
         if (dir) {
@@ -86,6 +88,12 @@ export class CarStateDecoder {
     for (const h of handlers) {
       const s = h(tUs, data, len);
       if (s) out.push(s);
+    }
+    // After every wheel of the frame: a sample per wheel read mixed this frame's wheels with the last one's
+    // (2026-10-12: four samples per frame where the car sends all four wheels in one).
+    if (this.wheelIds.has(id)) {
+      const w = this.wheelSample(tUs);
+      if (w) out.push(w);
     }
     return out;
   }

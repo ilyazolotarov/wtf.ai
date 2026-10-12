@@ -12,6 +12,8 @@
 //   npm run replay:regress -- --speed phone-app --phone-route   # the app without an adapter, the driver on a route
 //   npm run replay:regress -- --obd-hz 5             # OBD speed thinned to 5 Hz (the CAN monitor's time-slicing)
 //   npm run replay:regress -- --speed can            # CAN wheel speeds where the shadow heard them (can.ts); drives without, as logged
+//   npm run replay:regress -- --speed can --yaw wheels   # and the rear wheels' yaw instead of the gyro's (a phone in a pocket)
+//   npm run replay:regress -- --speed can --yaw wheels --yaw-from 120 --yaw-cal   # the gyro until 120 s, learning the wheels from it
 //
 // Truth per drive, best first: the roads drawn for it in the viewer (`<log>.truth.json`, drawn-truth.ts), else its
 // clean satellite fixes (the dot when GPS came back after each gap, and through the app's Cut GPS stretches: the
@@ -31,7 +33,7 @@ import type { NavConfig, ParkedPose } from "../../src/nav/navigator";
 import { driveOutages, estimateTrack, obdDistanceM, type ShownPoint } from "../../src/nav/replay/drive-report";
 import { drawnTruthTrack, scoreDrawn, type DrawnTruth } from "../../src/nav/replay/drawn-truth";
 import type { PhoneMount } from "../../src/nav/odometry/imu/imu-speed";
-import { withCanSpeed } from "../../src/nav/replay/can";
+import { withCanSpeed, withWheelYaw } from "../../src/nav/replay/can";
 import { withPhoneSpeed } from "../../src/nav/replay/phone-speed";
 import { thinObd } from "./thin-obd";
 import { appOutageCuts } from "../../src/nav/replay/replay";
@@ -77,6 +79,11 @@ interface Job {
   phoneRoute?: boolean;
   /** OBD speed thinned to this rate (VEHICLE-LINK-SPEC §16.2: polls between CAN monitor windows). */
   obdHz?: number;
+  /** Where the turning comes from: the phone's gyro, or the rear wheels' speed difference where the shadow heard it. */
+  yaw?: "gyro" | "wheels";
+  /** With `yaw: "wheels"`: the gyro until this time (s), the wheels after; `yawCal`: learning the wheels from the gyro. */
+  yawFromS?: number;
+  yawCal?: boolean;
 }
 
 /** One drive, one start, one seed. Distances in m, times in s. */
@@ -186,11 +193,12 @@ function runJob(job: Job): DriveResult[] {
       // phone-app: the app with phone-only mode on and no adapter (its own engine, not phone speed into the navigator).
       const phoneApp = job.speed === "phone-app";
       const obd = job.obdHz ? thinObd(trip, job.obdHz) : trip;
-      const input = phone
+      const speedInput = phone
         ? withPhoneSpeed(trip, {}, chained ? mounts : undefined, true, job.speed === "phone-oracle")
         : job.speed === "can"
           ? (withCanSpeed(obd) ?? obd)
           : obd;
+      const input = job.yaw === "wheels" ? (withWheelYaw(speedInput, { fromS: job.yawFromS, calibrate: job.yawCal })?.trip ?? speedInput) : speedInput;
       const r = replayTripInApp(input, {
         calibration,
         loop: (job.nav.mapMatchLoop ?? APP_NAV_DEFAULTS.mapMatchLoop ?? "closed") as MapMatchLoop,
@@ -337,6 +345,9 @@ async function main() {
   const scoreMapMatch = argv.includes("--score-mm");
   const phoneRoute = argv.includes("--phone-route");
   const obdHz = arg("--obd-hz") ? Number(arg("--obd-hz")) : undefined;
+  const yaw = (arg("--yaw") ?? "gyro") as NonNullable<Job["yaw"]>;
+  const yawFromS = arg("--yaw-from") ? Number(arg("--yaw-from")) : undefined;
+  const yawCal = process.argv.includes("--yaw-cal");
 
   const all = readdirSync(LOGS).filter((f) => f.endsWith(".ulg")).sort();
   const picked = only ? all.filter((f) => f.startsWith(only) || f.includes(only)) : all;
@@ -344,8 +355,8 @@ async function main() {
   // The parked chain replays every log up to the last one picked: those before it set its storage.
   const chain = all.filter((f) => f <= picked.at(-1)!);
   const jobs: Job[] = [];
-  for (let seed = 1; seed <= seeds; seed++) for (const start of ["drawn", "parked"] as const) if (starts.includes(start)) jobs.push({ start, seed, logs: chain, nav, mm, speed, scoreMapMatch, phoneRoute, obdHz });
-  for (let seed = 1; seed <= seeds; seed++) if (starts.includes("cold")) for (const log of picked) jobs.push({ start: "cold", seed, logs: [log], nav, mm, speed, scoreMapMatch, phoneRoute, obdHz });
+  for (let seed = 1; seed <= seeds; seed++) for (const start of ["drawn", "parked"] as const) if (starts.includes(start)) jobs.push({ start, seed, logs: chain, nav, mm, speed, scoreMapMatch, phoneRoute, obdHz, yaw, yawFromS, yawCal });
+  for (let seed = 1; seed <= seeds; seed++) if (starts.includes("cold")) for (const log of picked) jobs.push({ start: "cold", seed, logs: [log], nav, mm, speed, scoreMapMatch, phoneRoute, obdHz, yaw, yawFromS, yawCal });
   const started = Date.now();
   let results: DriveResult[];
   if (fromRun) results = fromRun.results.filter((r) => picked.includes(r.log));

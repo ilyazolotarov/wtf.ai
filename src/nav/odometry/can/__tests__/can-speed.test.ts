@@ -1,4 +1,5 @@
 import { CAN_SPEED_PERIOD_US, canSpeedSamples } from "../can-speed";
+import { wheelYawSamples } from "../wheel-yaw";
 import type { CarStateSample } from "../car-state";
 
 const wheels = (tUs: number, kph: number): CarStateSample => ({ q: "wheels", tUs, v: [kph / 3.6, kph / 3.6, kph / 3.6, kph / 3.6] });
@@ -28,5 +29,39 @@ describe("CAN speed samples", () => {
       ["R", true],
       [null, false],
     ]);
+  });
+
+  // 2026-10-12: a monitor line that lost characters still parses as 8 bytes.
+  test("a garbled frame (wheels no car turns at, or a jump no car makes) is left out", () => {
+    const s = canSpeedSamples([
+      wheels(0, 50),
+      { q: "wheels", tUs: 10_000, v: [195, 36, 210, 187].map((k) => k / 3.6) as [number, number, number, number] },
+      wheels(20_000, 50.1),
+      wheels(30_000, 70),
+      wheels(40_000, 50.2),
+    ]);
+    expect(s).toHaveLength(1);
+    expect(s[0].speedMps * 3.6).toBeCloseTo(50.1, 6);
+  });
+
+  test("the wheels keep their exact mean: the yaw rate is in their differences", () => {
+    const k = (kph: number) => kph / 3.6;
+    const s = canSpeedSamples([
+      { q: "wheels", tUs: 0, v: [k(36), k(36), k(36), k(36.01)] },
+      { q: "wheels", tUs: 10_000, v: [k(36), k(36), k(36), k(36)] },
+    ]);
+    expect((s[0].wheelsMps[3] - s[0].wheelsMps[2]) * 3.6).toBeCloseTo(0.005, 9);
+  });
+});
+
+describe("wheel yaw", () => {
+  const sample = (rl: number, rr: number, reverse = false) => ({ tUs: 0, speedMps: 0, wheelsMps: [0, 0, rl, rr] as [number, number, number, number], gear: null, reverse });
+
+  test("the right rear wheel faster turns the car left (positive), by the difference over the track", () => {
+    expect(wheelYawSamples([sample(5, 5.16)], 1.6)[0].radps).toBeCloseTo(0.1, 9);
+  });
+
+  test("in reverse the same difference turns it the other way", () => {
+    expect(wheelYawSamples([sample(2, 2.16, true)], 1.6)[0].radps).toBeCloseTo(-0.1, 9);
   });
 });

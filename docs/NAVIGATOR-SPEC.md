@@ -107,6 +107,29 @@ jammed:
 - Replay: `withCanSpeed` (`nav/replay/can.ts`); `replay:bench --speed can`, `replay:regress --speed can`, the
   viewer's *Adapter: CAN wheel speeds*. On the drive from home (2026-10-11, jammed, after a placing) the shown dot
   went back 9.9 and 6.1 m when the wheels reversed 7.8 and 4.2 m; on OBD it stood still.
+- **Frames as decoded:** one wheel sample per frame once all its wheels are read (a sample per wheel mixed one
+  frame's wheels with the last one's); a sample no car makes is dropped (the wheels more than 3 km/h + 10 % apart,
+  or one changed faster than 50 km/h/s: a monitor line that lost characters, 4–23 a drive); the per-wheel means
+  are kept exact (their differences are the yaw rate), only the speed is rounded; a frame that arrived after its
+  window ended is put at the window's end (the stop's drain, captured before the stop character).
+
+### 5.4 Wheel yaw (SPEC §2.1 Stage 2; replay only for now)
+
+- The rear wheels aren't steered: (right − left) / track is the car's yaw rate (`odometry/can/wheel-yaw.ts`,
+  track 1.60 m, opposite in reverse), whatever the phone does — the way to navigate with the phone in a hand, a
+  pocket or on a seat. Against the mounted phone's gyro on the drives of 2026-10-11/12: correlation 0.95–0.98,
+  0.1 s behind it, |difference| median 0.3–0.5 °/s, 99 % under 2.4–3.5 °/s; the track fitted 1.60–1.63 m (the car's
+  spec: 1.595 m). The one handling while driving differed by 51 °/s: a consistency check between the two is how the
+  app would know the phone moves on its own, wherever it lies (the handling flag only sees it picked up).
+- Replay: `withWheelYaw` (`nav/replay/can.ts`) puts the wheel yaw in the gyro's place from `fromS`;
+  `replay:regress --speed can --yaw wheels [--yaw-from s --yaw-cal]`. Wheels alone, against the drawn truth
+  (2026-10-12, 8 seeds): the three MX+ drives as with the gyro; the vLinker drive off the drawn road 7 s (median)
+  against 1, one seed lost.
+- **What's left:** the vLinker's unanswered stops (VEHICLE-LINK-SPEC §16.2) left 1.1 s of a turn unheard; the rear
+  tyres' radii a few hundredths of a percent apart read as 0.2–0.9 °/s of turning at 60–67 km/h on a straight road.
+  Learning track and tyre from the gyro while both agree (`wheel-yaw-calibration.ts`) found 1.59–1.61 m and
+  −0.005…−0.02 % within a drive, and the wheels' heading after the gyro stopped was no better than with the defaults
+  (worst 7–22° against 6–14° over 1–4 min): the rest is turn-by-turn noise, not calibration. Not in the app.
 
 ## 6. EKF (`ekf/dr-ekf.ts`) and heading initialization
 
