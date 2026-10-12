@@ -734,6 +734,27 @@ describe("VehicleLinkCore", () => {
       }
     });
 
+    // 2026-10-12: the vLinker answered a stop character with nothing now and then; waiting 1 s left a turn unheard.
+    test("a stop character without an answer: once the adapter's stops are known, the second one goes soon", async () => {
+      const { core, windows, emu } = await shadowOn({});
+      try {
+        await until(() => windows.length >= 5);
+        emu.ignoreNextStop();
+        await until(() => windows.some((w) => w.stopRetried));
+        // Before 30 stops are measured, the full second.
+        expect(windows.find((w) => w.stopRetried)!.stopMs).toBeGreaterThanOrEqual(1000);
+        const n = windows.length;
+        await until(() => windows.length >= n + 30);
+        emu.ignoreNextStop();
+        await until(() => windows.slice(n).some((w) => w.stopRetried));
+        const late = windows.slice(n).find((w) => w.stopRetried)!;
+        expect(late.stopMs).toBeLessThan(400);
+        expect(core.getSnapshot().canShadow?.state).not.toBe("failed");
+      } finally {
+        await core.disconnect();
+      }
+    });
+
     test("STM n refused: noted, nothing else changes", async () => {
       const { core, windows, events } = await shadowOn({ stmCountUnsupported: true });
       try {

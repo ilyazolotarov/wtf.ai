@@ -667,6 +667,11 @@ the hex ids (`can_shadow` in the log's info).
     `ATCRA` then, chose a full setup for every window: listening 48 %. It doesn't take `STM n`.
   - **Backstop:** a way not answered `OK`, or 5 s of listening in a row hearing none of the ids, moves to the next
     way for the session (`can-shadow: … opens by … from now on`); deaf after the full setup too, the shadow is off.
+- **A stop character without an answer** (the vLinker, 4 in 600 windows on 2026-10-12, two within one turn) is
+  followed by a second one after 3× the slowest of the session's last 100 stops, within 200–1000 ms, once 30 were
+  measured; until then 1 s. Its stops took at most 89 ms otherwise (a second after ~270 ms, not 1.1 s of nothing
+  heard); the MX+'s drain takes up to 455 ms and keeps the full second: a second character after the prompt would
+  start the monitor again (a CR repeats the last command).
 - **Into the log, per window** (`can_window`, TRIP-LOGGER-SPEC §6.3): the bytes received (the link's throughput:
   the vLinker's BLE carried 149 frames/s of the 370/s the five ids send; the MX+ 367/s), the frames of ids not asked
   for (a filter wide open, or lines that lost their start), the stop's latency from the stop character to the

@@ -166,6 +166,7 @@ export class Elm327Emulator implements Transport {
   /** STN pass filters (`STFPA pattern,mask`) and the monitor (`STM`). */
   private passFilters: { pattern: number; mask: number }[] = [];
   private monitoring = false;
+  private stopIgnored: "next" | "now" | null = null;
   private monitorStartUs = 0;
   private broadcastSent: number[] = [];
   private frozen: "until-reconnect" | "for-good" | null = null;
@@ -234,6 +235,14 @@ export class Elm327Emulator implements Transport {
     this.frozen = null;
   }
 
+  /**
+   * The next stop character gets no answer: the monitor goes quiet and the exchange times out; the one after stops it
+   * (the vLinker, 4 in 600 windows on 2026-10-12).
+   */
+  ignoreNextStop(): void {
+    this.stopIgnored = "next";
+  }
+
   /** `freeze()` at the next `STM`: inside a monitor window, as both freezes seen. */
   freezeInMonitor(untilReconnect = true): void {
     this.freezeAtMonitor = untilReconnect ? "until-reconnect" : "for-good";
@@ -277,6 +286,7 @@ export class Elm327Emulator implements Transport {
     while (this.monitoring && this.connected) {
       await this.clock.sleep(20);
       if (!this.monitoring) return;
+      if (this.stopIgnored === "now") continue;
       const lines = this.dueFrames();
       if (lines.length > 0) this.unsolicited.emit(lines.join(eol) + eol, this.clock.nowUs());
     }
@@ -326,9 +336,15 @@ export class Elm327Emulator implements Transport {
       return { raw: "", status: "timeout", txUs, rxUs: this.clock.nowUs() };
     }
 
+    if (this.monitoring && this.stopIgnored === "next") {
+      this.stopIgnored = "now";
+      await this.clock.sleep(timeoutMs);
+      return { raw: "", status: "timeout", txUs, rxUs: this.clock.nowUs() };
+    }
     if (this.monitoring) {
       // Any character stops the monitor: the frames still buffered, STOPPED, the prompt.
       this.monitoring = false;
+      this.stopIgnored = null;
       const eol = this.profile.lineEnding;
       await this.clock.sleep(this.profile.atLatencyMs);
       const raw = [...this.dueFrames(), "STOPPED"].join(eol) + eol + eol + ">";

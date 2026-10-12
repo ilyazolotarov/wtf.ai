@@ -86,6 +86,19 @@ const TEST_LISTEN_MS = 250;
 const TEST_MIN_SHARE = 0.3;
 /** With nothing heard even after the setup (a silent bus), the test is tried again after this long. */
 const TEST_RETRY_US = 60_000_000;
+/**
+ * How long the first stop character waits for the prompt: `STOP_WAIT_FACTOR` times the slowest of the last
+ * `STOP_HISTORY` stops, within [`STOP_WAIT_MIN_MS`, `STOP_WAIT_MAX_MS`], once `STOP_HISTORY_MIN` were measured; until then
+ * the most. Then a second one. The vLinker now and then answers a stop character with nothing at all (4 in 600, two
+ * within one turn on 2026-10-12): its stops took at most 89 ms otherwise, and waiting 1 s for the prompt left the turn
+ * unheard. The MX+'s drain takes up to 455 ms: it keeps the full wait. A second character after the prompt would
+ * start the monitor again (a CR repeats the last command), hence the margin.
+ */
+const STOP_WAIT_MAX_MS = 1000;
+const STOP_WAIT_MIN_MS = 200;
+const STOP_WAIT_FACTOR = 3;
+const STOP_HISTORY = 100;
+const STOP_HISTORY_MIN = 30;
 /** Own exchanges into the transcript: the first few of each kind (what each adapter answers is the diagnosis). */
 const LOG_FIRST = 3;
 /** Answers that went wrong go to the link events, up to this many. */
@@ -132,6 +145,8 @@ export class CanShadow implements IdleMonitor {
   private testedUs: number | null = null;
   private retestLater = false;
   private readonly logCounts = new Map<string, number>();
+  /** The last stops' latencies (a prompt at the first character), ms. */
+  private readonly stopLatencies: number[] = [];
   private wrongLogged = 0;
   private readonly wantedIds: Set<number>;
 
@@ -208,7 +223,7 @@ export class CanShadow implements IdleMonitor {
     try {
       // Any character stops it: the rest of the output, STOPPED, the prompt.
       const t0 = this.deps.clock.nowUs();
-      let r = await send("", 1000, this.logs("stop"));
+      let r = await send("", this.firstStopWaitMs(), this.logs("stop"));
       let silent = r.raw === "";
       const retried = r.status === "timeout";
       // A CR reaching an adapter that had just stopped by itself repeats its last command, STM: stop that one too.
@@ -223,6 +238,10 @@ export class CanShadow implements IdleMonitor {
       this.collector?.push(r.raw, r.rxUs);
       this.windowBytes += r.raw.length;
       const stopMs = r.status !== "timeout" ? Math.round((r.rxUs - t0) / 1000) : null;
+      if (stopMs !== null && !retried) {
+        this.stopLatencies.push(stopMs);
+        if (this.stopLatencies.length > STOP_HISTORY) this.stopLatencies.shift();
+      }
       const lastOutputMs = Math.round((t0 - Math.max(this.lastTextUs, this.windowStartUs)) / 1000);
       // Listening ended with the first stop character; what came after it is the drain (`stopMs`).
       const w = this.closeWindow(t0, false, stopMs, retried);
@@ -244,6 +263,11 @@ export class CanShadow implements IdleMonitor {
       this.live = false;
       this.own = false;
     }
+  }
+
+  private firstStopWaitMs(): number {
+    if (this.stopLatencies.length < STOP_HISTORY_MIN) return STOP_WAIT_MAX_MS;
+    return Math.min(STOP_WAIT_MAX_MS, Math.max(STOP_WAIT_MIN_MS, STOP_WAIT_FACTOR * Math.max(...this.stopLatencies)));
   }
 
   /** Broadcast frames would reach the poll's answer through the pass filters: pin the speed ECU's filter. */
