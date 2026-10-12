@@ -45,10 +45,12 @@ export interface EmulatorProfile {
   /** STN pass filters also pass broadcast frames into request answers (one arrives before the ECU's answer). */
   passFiltersLeak?: boolean;
   /**
-   * A bare `ATCRA` (open the receive filter again): `refused` answers `?`, `ignored` answers OK and keeps the filter.
-   * Either explains a monitor that hears nothing after its first break (OBDLink MX+ on 5.13.1, 2026-10-11).
+   * A bare `ATCRA` (open the receive filter again): `refused` answers `?`, `ignored` answers OK and keeps the filter,
+   * `default` restores the protocol's filter (the OBD answers) and clears the pass filters, as the manual says and
+   * the OBDLink MX+ on 5.13.1 and the vLinker do (2026-10-12). Each explains a monitor that hears nothing after its
+   * first break.
    */
-  bareAtcra?: "refused" | "ignored";
+  bareAtcra?: "refused" | "ignored" | "default";
   /** An all-pass `ATCRAXXX` answers OK and keeps the filter (only a full setup opens it). */
   wildcardAtcraIgnored?: boolean;
   /** `STM n` (a monitor window ending by itself after n frames, MX+ firmware 5.12.4+) answers `?`. */
@@ -280,13 +282,16 @@ export class Elm327Emulator implements Transport {
     }
   }
 
-  /** Broadcast frames sent since the last call that pass the CAN hardware filter (ATCRA) and a pass filter. */
+  /**
+   * Broadcast frames sent since the last call that pass the CAN hardware filter (ATCRA) and a pass filter; with none
+   * set, every id (2026-10-12: ATCRAXXX after the pass filters were cleared heard every id on the bus).
+   */
   private dueFrames(): string[] {
     const lines: string[] = [];
     const elapsedUs = this.clock.nowUs() - this.monitorStartUs;
     (this.profile.broadcast ?? []).forEach((b, i) => {
       const due = Math.floor(elapsedUs / (b.periodMs * 1000));
-      const passes = this.broadcastPasses(b.id);
+      const passes = this.broadcastPasses(b.id, true);
       for (; this.broadcastSent[i] < due; this.broadcastSent[i]++) if (passes) lines.push(this.broadcastLine(b));
     });
     return lines;
@@ -296,8 +301,10 @@ export class Elm327Emulator implements Transport {
     return this.receiveFilter === null || (id & this.receiveFilter.mask) === (this.receiveFilter.pattern & this.receiveFilter.mask);
   }
 
-  private broadcastPasses(id: number): boolean {
-    return this.vehicle.ignition && this.receives(id) && this.passFilters.some((f) => (id & f.mask) === (f.pattern & f.mask));
+  private broadcastPasses(id: number, monitor = false): boolean {
+    if (!this.vehicle.ignition || !this.receives(id)) return false;
+    if (monitor && this.passFilters.length === 0) return true;
+    return this.passFilters.some((f) => (id & f.mask) === (f.pattern & f.mask));
   }
 
   private broadcastLine(b: { id: number; data: number[] }): string {
@@ -441,6 +448,11 @@ export class Elm327Emulator implements Transport {
       const digits = c.slice(3);
       if (digits === "" && this.profile.bareAtcra === "refused") return ["?"];
       if (digits === "" && this.profile.bareAtcra === "ignored") return ok;
+      if (digits === "" && this.profile.bareAtcra === "default") {
+        this.receiveFilter = { pattern: 0x7e8, mask: 0x7f8 };
+        this.passFilters = [];
+        return ok;
+      }
       if (/^X+$/.test(digits) && this.profile.wildcardAtcraIgnored) return ok;
       this.receiveFilter =
         digits === ""

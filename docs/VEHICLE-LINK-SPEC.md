@@ -448,7 +448,9 @@ Not used: bare-CR "repeat last command" (it saves nothing on BLE and breaks when
   - The navigator treats OBD speed as stale after 2.5 s; a stop or start shows up at most 0.5 s later.
 - The 2 Hz count from when the request went out, not from when the poller asked for it: a CAN monitor break ahead
   of it can take over a second (the vLinker, 2026-10-11), and counted from before it the next poll came at once,
-  giving the monitor a 1 ms window and another break.
+  giving the monitor a 1 ms window and another break. And the poll is asked for early by how long the last breaks
+  held the requests back (smoothed over ~5 polls, at most half the gap): without it every break came on top of the
+  gap, 1.75 Hz instead of 2 (2026-10-12).
 - Fewer exchanges load the phone and the link less (the car's bus hardly notices either way) and leave the adapter to
   the CAN shadow between polls (§16.2).
 - A 50 Hz safety ceiling stops runaway loops when the cap is raised. A per-VIN cap from the ECU refresh analysis
@@ -560,12 +562,10 @@ The same contract with two transports: BLE (same GATT catalog) and Classic SPP (
    `reopen:` lines show which way opens it.
 8. The OBDLink MX+ froze in the CAN monitor on firmware 5.10.3 (§16.2). The vendor's 5.12.4 notes list a fix for a
    lock-up of that firmware line ("CAN multi-frame message transmission would cause the device to lock up after 35
-   minutes of uptime"), so 5.13.1 may have it; its first drive (2026-10-11) was deaf after the first break (the
-   filter didn't open again), so it says nothing about freezes yet. The next drives' `filter test` and `frozen` events
-   tell both.
-9. The vLinker FD-IOS over BLE delivered 149 frames/s where the five ids send ~370/s (§16.2): it needs the two ids
-   navigation uses (`215 228`, ~150/s). Whether `STM n` (a window ending by itself) stops faster than a stop character
-   through a full buffer is in its `can_window` stop latencies.
+   minutes of uptime"). On 5.13.1 with the filter opening (2026-10-12): no freeze in 13 min of listening over three
+   drives, the longest 7 min; the 35 min of the vendor's bug need a longer drive.
+9. The vLinker FD-IOS over BLE delivered 149 frames/s where the five ids send ~370/s (§16.2); the two ids navigation
+   uses (`215 228`, ~150/s) arrive at their full rate (2026-10-12). It doesn't take `STM n`.
 
 ## 16. CAN monitor (STN)
 
@@ -652,12 +652,19 @@ the hex ids (`can_shadow` in the log's info).
   windows that heard any, 2026-10-11), so listening was almost entirely deaf.
   - **Measured, not assumed:** once per session after the first setup, a self-test (~2 s; up to ~5 s over BLE)
     listens 250 ms after each of: the setup (the filter as `ATAR` left it), the pin alone (must hear nothing: `STM`
-    obeys it), a bare `ATCRA` after a pin, `ATCRAXXX` after a pin, a full setup after a pin; then sends `STM 20` to
-    see whether the adapter ends a window by itself after n frames (MX+ firmware 5.12.4+). It picks the cheapest way
-    that heard at least 30 % of what the open filter heard, and writes one link event with every count and answer:
-    `can-shadow: filter test: setup 112, pinned 0, ATCRA "OK" 0, ATCRAXXX "OK" 110, setup again 108, STM n
-    accepted (20 frames in 123 ms) → opens by ATCRAXXX from now on`. Nothing heard with the filter open (a silent
-    bus): no verdict, tried again a minute later.
+    obeys it), `ATCRAXXX` after a pin, a bare `ATCRA` after a pin, a full setup after a pin; then sends `STM 20` to
+    see whether the adapter ends a window by itself after n frames (MX+ firmware 5.12.4+). `ATCRAXXX` goes before the
+    bare `ATCRA`, which clears the pass filters as well (both adapters, 2026-10-12: `ATCRAXXX` after it heard every id
+    on the bus, ~8 others for each one asked for). It picks the cheapest way that heard at least 30 % of what the open
+    filter heard and no more frames of other ids than of the ids (more fill the link and the stop's drain), and writes
+    one link event with every count and answer: `can-shadow: filter test: setup 35, pinned 0, ATCRAXXX "OK" 38, ATCRA
+    "OK" 0, setup again 39, STM n accepted (20 frames in 164 ms) → opens by ATCRAXXX from now on`. Nothing heard with
+    the filter open (a silent bus): no verdict, tried again a minute later.
+  - **Measured 2026-10-12** (four drives, the first build with the self-test): `ATCRAXXX` keeps the pass filters
+    and opens the filter on both adapters: the MX+ on 5.13.1 heard every id at its full rate (2 ids, then 5 at
+    7.2 KB/s), no frame of another id, listening 66–74 % of the time, stops' drain 22–51 ms (median). The vLinker
+    over BLE heard both navigation ids at their full rate (2.9 KB/s); its self-test, trying `ATCRAXXX` after a bare
+    `ATCRA` then, chose a full setup for every window: listening 48 %. It doesn't take `STM n`.
   - **Backstop:** a way not answered `OK`, or 5 s of listening in a row hearing none of the ids, moves to the next
     way for the session (`can-shadow: … opens by … from now on`); deaf after the full setup too, the shadow is off.
 - **Into the log, per window** (`can_window`, TRIP-LOGGER-SPEC §6.3): the bytes received (the link's throughput:

@@ -620,12 +620,14 @@ describe("VehicleLinkCore", () => {
         const polled = speeds.slice(2);
         const meanGapUs = (polled.at(-1)!.tUs - polled[0].tUs) / (polled.length - 1);
         expect(meanGapUs).toBeGreaterThanOrEqual((1e6 / OBD_SPEED_HZ) * 0.95);
+        // The breaks don't come on top of the gap: the poll is asked for early by what they take.
+        expect(meanGapUs).toBeLessThanOrEqual((1e6 / OBD_SPEED_HZ) * 1.05);
         const log = emu.log.slice(logFrom);
         expect(log.slice(0, 6)).toEqual(["ATH1", "ATAR", "STCMM0", "STFPA215,7FF", "STFPA228,7FF", "ATCS"]);
         // The filter self-test first (its last command is STM 20), then a break: stop, pin, poll; open again before
         // the next window.
         const test = events.find((e) => e.type === "can-shadow" && e.detail?.startsWith("filter test: "));
-        expect(test?.detail).toMatch(/^filter test: setup [1-9]\d*, pinned 0, ATCRA "OK" [1-9]\d*, ATCRAXXX "OK" [1-9]\d*, setup again [1-9]\d*, STM n accepted \(20 frames in \d+ ms\) → opens by ATCRA from now on$/);
+        expect(test?.detail).toMatch(/^filter test: setup [1-9]\d*, pinned 0, ATCRAXXX "OK" [1-9]\d*, ATCRA "OK" [1-9]\d*, setup again [1-9]\d*, STM n accepted \(20 frames in \d+ ms\) → opens by ATCRA from now on$/);
         const after = log.slice(log.indexOf("STM 20") + 1);
         const pins = after.filter((c) => c.startsWith("ATCRA"));
         expect(pins.length).toBeGreaterThan(10);
@@ -708,8 +710,10 @@ describe("VehicleLinkCore", () => {
       }
     });
 
-    // 2026-10-11: a bare ATCRA didn't open the filter on the vLinker (STN1151 v4.3.2) nor the MX+ on 5.13.1.
-    test.each(["refused", "ignored"] as const)("a bare ATCRA %s on the adapter: ATCRAXXX opens the filter, frames go on", async (bareAtcra) => {
+    // 2026-10-11: a bare ATCRA didn't open the filter on the vLinker (STN1151 v4.3.2) nor the MX+ on 5.13.1; it restores
+    // the OBD answers' filter and clears the pass filters (`default`), which on 2026-10-12 had the self-test, trying
+    // ATCRAXXX after it, hear every id and choose a full setup for the vLinker.
+    test.each(["refused", "ignored", "default"] as const)("a bare ATCRA %s on the adapter: ATCRAXXX opens the filter, frames go on", async (bareAtcra) => {
       const { core, windows, events, emu } = await shadowOn({ bareAtcra });
       try {
         await until(() => events.some((e) => e.type === "can-shadow" && /opens by ATCRAXXX from now on/.test(e.detail ?? "")));
@@ -718,10 +722,12 @@ describe("VehicleLinkCore", () => {
         // The first window after the self-test finds the filter open; every break after it opens by ATCRAXXX.
         expect(windows.slice(n).every((w) => w.frames > 0 && (w.reopen === "wildcard" || w.reopen === "open"))).toBe(true);
         expect(windows.slice(n + 1).every((w) => w.reopen === "wildcard")).toBe(true);
+        // The pass filters stay: only the ids asked for.
+        expect(windows.slice(n).every((w) => w.other === 0)).toBe(true);
         expect(core.getSnapshot().canShadow?.state).not.toBe("failed");
         // The self-test measured each way; no full setup since its own.
         const test = events.find((e) => e.detail?.startsWith("filter test: "))!.detail!;
-        expect(test).toMatch(bareAtcra === "refused" ? /ATCRA "\?" 0, ATCRAXXX "OK" [1-9]/ : /ATCRA "OK" 0, ATCRAXXX "OK" [1-9]/);
+        expect(test).toMatch(bareAtcra === "refused" ? /ATCRAXXX "OK" [1-9]\d*, ATCRA "\?" 0,/ : /ATCRAXXX "OK" [1-9]\d*, ATCRA "OK" 0,/);
         expect(emu.log.filter((c) => c === "ATAR").length).toBe(2);
       } finally {
         await core.disconnect();

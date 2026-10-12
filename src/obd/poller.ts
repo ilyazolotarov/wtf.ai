@@ -24,6 +24,8 @@ export interface PollerConfig {
 }
 
 export const SAFETY_CEILING_HZ = 50;
+/** Smoothing of how long a speed request waits to go out (`speedLeadUs`): about the last five polls. */
+const SPEED_LEAD_GAIN = 0.2;
 
 export const DEFAULT_POLLER_CONFIG: PollerConfig = {
   speedCommand: "010D",
@@ -75,6 +77,12 @@ export class ObdPoller {
   private consecutiveTimeouts = 0;
   private speedWorked = false;
   private lastSpeedRaw: number | null = null;
+  /**
+   * How long a speed request waits to go out after it is asked for (a CAN monitor break ahead of it: the stop's
+   * drain and the pin), smoothed. The poll is asked for this much early, at most half the gap, so the requests keep
+   * the rate: counted from each request alone, every break came on top of the gap (1.75 Hz of 2, 2026-10-12).
+   */
+  private speedLeadUs = 0;
 
   constructor(
     private readonly session: Elm327Session,
@@ -159,15 +167,21 @@ export class ObdPoller {
       }
       const standingOff = state === "engine-off" && this.lastSpeedRaw === 0;
       const minGapUs = 1e6 / (standingOff ? Math.min(this.config.speedHzEngineOffStanding, this.effectiveCap()) : this.effectiveCap());
-      const waitUs = Math.min(lastSpeedTxUs + minGapUs - now, nextRpmUs - now);
+      const waitUs = Math.min(lastSpeedTxUs + minGapUs - Math.min(this.speedLeadUs, minGapUs / 2) - now, nextRpmUs - now);
       if (waitUs > 0) {
         await this.clock.sleep(waitUs / 1000);
         continue;
       }
       // From when the request went out, not from before it: a monitor break ahead of it can take a second (the
       // vLinker, 2026-10-11), and measured from before, the next poll came at once and the monitor got a 1 ms window.
-      lastSpeedTxUs = this.clock.nowUs();
-      lastSpeedTxUs = (await this.pollSpeed()) ?? lastSpeedTxUs;
+      const askedUs = this.clock.nowUs();
+      lastSpeedTxUs = askedUs;
+      const txUs = await this.pollSpeed();
+      if (txUs !== null) {
+        lastSpeedTxUs = txUs;
+        // A wait longer than that is no break but a setup, the shadow's self-test or a reconnect.
+        this.speedLeadUs += SPEED_LEAD_GAIN * (Math.min(txUs - askedUs, minGapUs / 2) - this.speedLeadUs);
+      }
     }
   }
 

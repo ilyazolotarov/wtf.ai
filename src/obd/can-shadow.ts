@@ -322,13 +322,18 @@ export class CanShadow implements IdleMonitor {
    * than assumed. 2026-10-11: a bare ATCRA opened it on the MX+ with firmware 5.10.3 only (the manual: it restores
    * the protocol's default filter, 5.12.4 made it do so), not with 5.13.1 nor on the vLinker, which were deaf after
    * their first break. Listens TEST_LISTEN_MS after: the setup (the filter as ATAR left it); the pin alone (must hear
-   * nothing: STM obeys it); each way after a pin. Picks the cheapest way that heard enough. Also whether `STM n`
-   * (a window ending by itself after n frames, MX+ firmware 5.12.4+) is accepted. One line with it all into the log.
+   * nothing: STM obeys it); each way after a pin, ATCRAXXX before a bare ATCRA, which also clears the pass filters
+   * on both (2026-10-12: ATCRAXXX after it heard every id on the bus, and the vLinker, its link full of them, took a
+   * full setup for every window). Picks the cheapest way that heard enough of the ids and not more of others. Also
+   * whether `STM n` (a window ending by itself after n frames, MX+ firmware 5.12.4+) is accepted. One line with it
+   * all into the log.
    */
   private async filterTest(send: RawSend): Promise<boolean> {
     const parts: string[] = [];
     const pin = () => send(`ATCRA${this.pinFilter()}`, 1000, true);
     const heard: Record<"open" | "pinned" | Reopen, number> = { open: 0, pinned: 0, bare: 0, wildcard: 0, setup: 0 };
+    // A way that lets the other ids through too fills the link with them (and the stop's drain).
+    const flooded = new Set<Reopen>();
     let l = await this.listen(send);
     heard.open = l.frames;
     parts.push(`setup ${this.heardText(l)}`);
@@ -336,11 +341,12 @@ export class CanShadow implements IdleMonitor {
     l = await this.listen(send);
     heard.pinned = l.frames;
     parts.push(`pinned ${this.heardText(l)}`);
-    for (const way of ["bare", "wildcard"] as const) {
+    for (const way of ["wildcard", "bare"] as const) {
       const command = this.reopenCommand(way);
       const r = await send(command, 1000, true);
       l = await this.listen(send);
       heard[way] = r.status === "ok" ? l.frames : 0;
+      if (l.other > l.frames) flooded.add(way);
       parts.push(`${command} ${quote(r.raw)} ${this.heardText(l)}`);
       await pin();
     }
@@ -361,7 +367,7 @@ export class CanShadow implements IdleMonitor {
       this.retestLater = true;
       verdict = "nothing heard with the filter open: no verdict";
     } else {
-      const chosen = REOPENS.find((way) => heard[way] >= Math.max(1, TEST_MIN_SHARE * open)) ?? "setup";
+      const chosen = REOPENS.find((way) => !flooded.has(way) && heard[way] >= Math.max(1, TEST_MIN_SHARE * open)) ?? "setup";
       this.reopen = chosen;
       verdict = `opens by ${this.reopenName(chosen)} from now on`;
       if (heard.pinned >= Math.max(1, TEST_MIN_SHARE * open)) verdict += `; the pinned filter doesn't stop the monitor`;
