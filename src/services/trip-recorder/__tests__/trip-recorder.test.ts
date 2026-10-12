@@ -161,6 +161,21 @@ test("engine start → recording → key off → complete ULog trip", async () =
   expect(log.data.link_stats.length).toBeGreaterThanOrEqual(1);
   expect(written).toEqual(["on start"]);
   expect(log.data.nav_route?.map((r) => r.plan_id)).toEqual([1]);
+
+  // Stopped while recording (a restart of the recorder): the trip ends as "manual", and a new start records again.
+  emu.setVehicle({ ignition: true, rpm: 900 });
+  await until(() => recorder.getSnapshot().state === "recording");
+  recorder.stop();
+  expect(recorder.getSnapshot().trips[0]).toMatchObject({ complete: true, endReason: "manual" });
+  expect(recorder.getSnapshot().state).not.toBe("recording");
+  recorder.start();
+  emu.setVehicle({ ignition: false, rpm: 0 });
+  await until(() => link.getSnapshot().engine === "ignition-off");
+  emu.setVehicle({ ignition: true, rpm: 900 });
+  await until(() => recorder.getSnapshot().state === "recording");
+  // The new log (open), the one stopped by hand, the first drive.
+  expect(recorder.getSnapshot().trips.map((t) => [t.complete, t.endReason])).toEqual([[false, undefined], [true, "manual"], [true, "ignition-off"]]);
+  expect(recorder.getSnapshot().current).not.toBeNull();
   } finally {
     recorder.stop();
     await link.disconnect();

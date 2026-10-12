@@ -22,7 +22,7 @@ export class NativeDiscovery implements DiscoveryBackend {
 
   constructor(private readonly includeEmulators: () => boolean) {}
 
-  start(onUpdate: (devices: ScannedDevice[]) => void): void {
+  start(onUpdate: (devices: ScannedDevice[]) => void, onStopped?: () => void): void {
     if (this.includeEmulators()) onUpdate(EMULATOR_DEVICES.map((d) => ({ ...d, lastSeenUs: VehicleLinkModule.nowUs() })));
     onUpdate(mfiDevices(VehicleLinkModule.getMfiAccessories()));
     this.subscriptions.push(
@@ -30,7 +30,11 @@ export class NativeDiscovery implements DiscoveryBackend {
       VehicleLinkModule.addListener("onMfiChange", (e) => onUpdate(mfiDevices(e.accessories))),
     );
     void VehicleLinkModule.initialize(null).then(() => VehicleLinkModule.startScan(GATT_PROFILES.map((p) => p.service)));
-    this.stopTimer = setTimeout(() => VehicleLinkModule.stopScan(), SCAN_LIMIT_MS);
+    // Scanning ends by itself after a while: the owner's "discovering" ends with it.
+    this.stopTimer = setTimeout(() => {
+      this.stop();
+      onStopped?.();
+    }, SCAN_LIMIT_MS);
   }
 
   stop(): void {

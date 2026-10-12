@@ -66,6 +66,17 @@ describe("shown trust (jamming, NAVIGATOR-SPEC §8)", () => {
     expect(t.lastTrustedFixUs).toBe(1_000_000);
   });
 
+  test("a fix delivered late keeps its place: it is not the last one seen, and doesn't start a segment", () => {
+    const t = new GnssIntegrity();
+    feed(t, [[8, 0], [8, 1], [8, 2]]);
+    const seenBefore = t.lastSeenUs;
+    // 1.5 s, delivered after the 2 s fix: judged like its neighbours, and the next fix's gap is measured from 2 s.
+    expect(t.check(fix(1.5, 0, 8), phoneOnly(1.5)).verdict).toBe("ok");
+    expect(t.lastSeenUs).toBe(seenBefore);
+    expect(t.check(fix(3, 0, 8), phoneOnly(3)).verdict).toBe("ok");
+    expect(t.lastSeenUs).toBe(3_000_000);
+  });
+
   test("intermittent jamming: leaked GPS fixes between coarse ones don't regain trust", () => {
     const t = new GnssIntegrity();
     feed(t, [[8, 0]]);

@@ -61,6 +61,13 @@ describe("Announcer", () => {
     expect(a.update(at(2000, { state: "arrived" }, 2))).toEqual([]);
   });
 
+  test("an alternative the driver took is not 'route recalculated'; a re-plan after it still is", () => {
+    const a = new Announcer();
+    expect(a.update({ ...at(0), planReason: "new" })).toEqual([]);
+    expect(a.update({ ...at(0, {}, 2), planReason: "alternative" })).toEqual([]);
+    expect(a.update({ ...at(0, {}, 3), planReason: "off-route" })).toEqual([{ kind: "replanned" }]);
+  });
+
   test("a maneuver already closer than the spoken distance (a route starting near it): the nearest", () => {
     const a = new Announcer();
     expect(a.update({ ...at(780), planId: 3 })).toEqual([expect.objectContaining({ stage: "prepare", distanceM: 200 })]);

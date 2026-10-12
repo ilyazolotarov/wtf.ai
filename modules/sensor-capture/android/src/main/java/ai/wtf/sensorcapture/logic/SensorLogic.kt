@@ -58,7 +58,11 @@ object SensorLogic {
   /**
    * One `motion` row (14 values) in the iOS convention the TS navigator assumes: t µs, rotation rate rad/s,
    * user acceleration m/s², **gravity as the true gravity direction** (flat on a table: z = −9.81), attitude
-   * quaternion w x y z. Android's TYPE_GRAVITY points the other way (flat: z = +9.81), so it is negated here.
+   * quaternion w x y z. Android's TYPE_GRAVITY points the other way (flat: z = +9.81), so it is negated here, and
+   * so is TYPE_LINEAR_ACCELERATION: CoreMotion's `total = gravity + userAcceleration` with its gravity pointing
+   * down puts a push upward at a *negative* z, where Android's linear acceleration has it positive. The navigator's
+   * phone-only speed forms `gravity + userAccel` and integrates `userAccel` along the car's axis: both signs must be
+   * the iOS ones, or Android reads acceleration as braking.
    */
   fun motionRow(
     tUs: Double,
@@ -69,7 +73,7 @@ object SensorLogic {
   ): DoubleArray = doubleArrayOf(
     tUs,
     gyro[0], gyro[1], gyro[2],
-    linearAccel[0], linearAccel[1], linearAccel[2],
+    0.0 - linearAccel[0], 0.0 - linearAccel[1], 0.0 - linearAccel[2], // `0.0 -`: no -0.0 for a zero reading
     -androidGravity[0], -androidGravity[1], -androidGravity[2],
     quaternion[0], quaternion[1], quaternion[2], quaternion[3],
   )

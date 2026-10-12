@@ -412,6 +412,11 @@ const networkReachM = (hAccM: number, sigmas = 3) => Math.max(hAccM, sigmas * Ma
  */
 const LOST_TURN_SIGMA_SCALE = 2;
 /**
+ * Without a speed sample the anchored radius grows at the last speed for this long after it: a link gone for longer
+ * says nothing about the car any more, and the next fix re-anchors.
+ */
+const ANCHOR_GROW_WITHOUT_SPEED_US = 60_000_000;
+/**
  * OBD reads 0 while reversing (and below ~3 km/h): a turn of this much while it does is the car manoeuvring, as out of
  * a parking space, by an unknown distance in an unknown direction. When it drives on, the position widens by
  * `MANOEUVRE_M_PER_RAD` per radian turned (a car's turning radius) and map matching starts again around it with the
@@ -464,6 +469,8 @@ export class Navigator {
   private lastTUs: number | null = null;
   private lastYaw: { tUs: number; rate: number; valid: boolean } | null = null;
   private lastObd: ObdSpeedSample | null = null;
+  /** A filter restart in progress (`startMapMatch`): a lost turn found while it flushes widens it, not a second restart. */
+  private restartScale: number | null = null;
   private quietSinceUs: number | null = null;
   /** Net gyro turn while OBD read 0 and the phone wasn't still, since the car last drove (a manoeuvre: reversing). */
   private manoeuvreRad = 0;
@@ -906,7 +913,7 @@ export class Navigator {
         mode: "anchored",
         ...this.anchor.coord,
         accuracyM: SQRT_68 * this.anchor.sigma + this.anchor.distanceM,
-        speedMps: this.lastObd?.speedMps,
+        ...(this.freshObdSpeed(this.lastTUs) === null ? {} : { speedMps: this.freshObdSpeed(this.lastTUs)! }),
         ...(this.pf?.isActive && this.frame ? { mapMatch: this.mapMatchEstimate(this.frame) } : {}),
       };
     }
@@ -1048,8 +1055,10 @@ export class Navigator {
     if (this.standstill) this.stats.standstillS += dt;
     this.stats.obdDistanceM += Math.abs(speed) * dt;
     if (!obdFresh) this.stats.unknownSpeedS += dt;
-    // Without speed the car may still move: grow the radius at the last known speed.
-    if (this.anchor) this.anchor.distanceM += Math.abs(this.lastObd?.speedMps ?? 0) * dt;
+    // Without speed the car may still move: grow the radius at the last known speed, for a while.
+    if (this.anchor && this.lastObd !== null && tUs - this.lastObd.tUs < ANCHOR_GROW_WITHOUT_SPEED_US) {
+      this.anchor.distanceM += Math.abs(this.lastObd.speedMps) * dt;
+    }
 
     const relRate = hold || yaw === null ? 0 : yaw - this.rel.bias;
     // Signed: idling, the gyro's noise averages out; a manoeuvre turns the car one way.
@@ -1155,7 +1164,11 @@ export class Navigator {
   private startMapMatch(sigmaScale = 1): void {
     const ekf = this.ekf;
     if (!this.pf || !ekf) return;
+    // The flush may find a lost turn: that widens this restart rather than starting the filter twice.
+    this.restartScale = sigmaScale;
     this.flushOdometry();
+    sigmaScale = this.restartScale;
+    this.restartScale = null;
     this.offRoadFromM = null;
     this.trackingFromM = null;
     this.alongFromTurnM = null;
@@ -1242,7 +1255,8 @@ export class Navigator {
       // The car turned where (almost) no road hypothesis could: it wasn't where they were along the road, and the EKF,
       // which takes its position along the road from them, was as far off as they were.
       this.stats.lostTurns++;
-      this.startMapMatch(LOST_TURN_SIGMA_SCALE);
+      if (this.restartScale !== null) this.restartScale = Math.max(this.restartScale, LOST_TURN_SIGMA_SCALE);
+      else this.startMapMatch(LOST_TURN_SIGMA_SCALE);
       return;
     }
     if (step.stopped) return;
@@ -1433,6 +1447,12 @@ export class Navigator {
   }
 
   /** Start the EKF at the current relative-track position mapped by rot(θ) + t. */
+  /** The OBD speed when recent enough to stand for the car's speed at `tUs`; null when stale or none. */
+  private freshObdSpeed(tUs: number | null): number | null {
+    const o = this.lastObd;
+    return o !== null && tUs !== null && tUs - o.tUs < this.config.obdStaleUs ? o.speedMps : null;
+  }
+
   private initEkf(theta: number, tE: number, tN: number, posSigma: number, psiSigma: number, method: InitMethod): void {
     const cs = Math.cos(theta);
     const sn = Math.sin(theta);
@@ -1441,7 +1461,7 @@ export class Navigator {
         east: cs * this.rel.e - sn * this.rel.n + tE,
         north: sn * this.rel.e + cs * this.rel.n + tN,
         psi: wrapAngle(this.rel.psi - theta),
-        speed: this.lastObd?.speedMps ?? 0,
+        speed: this.freshObdSpeed(this.lastTUs ?? -Infinity) ?? 0,
         posSigma,
         psiSigma,
         speedSigma: 0.5,

@@ -396,6 +396,7 @@ export const en = {
   tripUploadMalformed: "A code is three short words, like bakim-tuvod-segap.",
   tripUploadRejected: "This code isn't valid. Check it with the developer.",
   tripUploadOffline: "Couldn't reach the server. Try again when online.",
+  tripUploadServerError: "The server answered with an error. Try again later.",
   tripUploadAs: "Sending as",
   tripUploadSent: "Sent",
   tripUploadWaiting: "Waiting",

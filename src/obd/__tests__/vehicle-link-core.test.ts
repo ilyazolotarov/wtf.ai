@@ -31,10 +31,15 @@ class FakeDiscovery implements DiscoveryBackend {
   devices: ScannedDevice[] = [];
   /** MFi accessories iOS has connected. */
   mfi: string[] = [];
-  start(onUpdate: (d: ScannedDevice[]) => void) {
+  /** The scan's own end (its time limit), as the native backend reports it. */
+  onStopped: (() => void) | null = null;
+  start(onUpdate: (d: ScannedDevice[]) => void, onStopped?: () => void) {
+    this.onStopped = onStopped ?? null;
     onUpdate(this.devices);
   }
-  stop() {}
+  stop() {
+    this.onStopped = null;
+  }
   mfiPresent() {
     return this.mfi;
   }
@@ -96,6 +101,21 @@ describe("VehicleLinkCore", () => {
       ["emu-1", "known-name"],
       ["headphones", "unknown"],
     ]);
+  });
+
+  test("the scan ending by itself ends discovering; an old scan's end doesn't touch a new one", () => {
+    const { core, discovery } = setup();
+    core.startDiscovery();
+    expect(core.getSnapshot().discovering).toBe(true);
+    const first = discovery.onStopped!;
+    first();
+    expect(core.getSnapshot().discovering).toBe(false);
+    // Scan again: the first scan's end, reported late, doesn't stop this one.
+    core.startDiscovery();
+    first();
+    expect(core.getSnapshot().discovering).toBe(true);
+    core.stopDiscovery();
+    expect(core.getSnapshot().discovering).toBe(false);
   });
 
   test("connect → probe → init → polling, remembered for auto-connect", async () => {
@@ -174,6 +194,37 @@ describe("VehicleLinkCore", () => {
     await core.disconnect();
   });
 
+  // The ECU answers the standby check with its last breath (the car switched off just then): the init finds no car.
+  test("an init that finds no car after the standby check: back to the checks, polling once the car answers", async () => {
+    const { core, emulators, states } = setup();
+    core.startDiscovery();
+    void core.connect("emu-1");
+    await until(() => emulators.has("emu-1"));
+    const emu = emulators.get("emu-1")!;
+    emu.setVehicle({ ignition: false, rpm: 0 });
+    await until(() => core.getSnapshot().link === "standby");
+    let tricked = 0;
+    const off = core.onExchange((e) => {
+      // The standby check is answered; the car is off again before the init asks.
+      if (e.command === "0100" && e.status === "ok" && core.getSnapshot().link === "standby" && tricked < 2) {
+        tricked++;
+        emu.setVehicle({ ignition: false, rpm: 0 });
+      }
+    });
+    emu.setVehicle({ ignition: true, rpm: 800 });
+    await until(() => tricked === 1 && states.filter((s) => s === "initializing").length === 1 && core.getSnapshot().link === "standby");
+    emu.setVehicle({ ignition: true, rpm: 800 });
+    await until(() => tricked === 2 && states.filter((s) => s === "initializing").length === 2 && core.getSnapshot().link === "standby");
+    off();
+    emu.setVehicle({ ignition: true, rpm: 800 });
+    await until(() => core.getSnapshot().link === "polling");
+    // Two inits that found no car, each back to standby; the third polls (via the usual "standby" until the RPM confirms).
+    const seq = states.slice(states.indexOf("standby"));
+    expect(seq.slice(0, 6)).toEqual(["standby", "initializing", "standby", "initializing", "standby", "initializing"]);
+    expect(seq.at(-1)).toBe("polling");
+    await core.disconnect();
+  });
+
   test("link loss → reconnecting → polling again", async () => {
     const { core, emulators, states } = setup();
     core.startDiscovery();
@@ -181,6 +232,31 @@ describe("VehicleLinkCore", () => {
     await until(() => core.getSnapshot().link === "polling");
     emulators.get("emu-1")!.dropLink();
     await until(() => states.includes("reconnecting") && core.getSnapshot().link === "polling");
+    await core.disconnect();
+  });
+
+  // A BLE adapter flapping while the car wakes up: the link drops again while the reconnect's session is probing.
+  test("a second link loss during the reconnect: one session on the adapter afterwards, not two", async () => {
+    const { core, emulators, states, events } = setup();
+    core.startDiscovery();
+    void core.connect("emu-1");
+    await until(() => core.getSnapshot().link === "polling");
+    const emu = emulators.get("emu-1")!;
+    emu.dropLink();
+    await until(() => states.includes("reconnecting") && core.getSnapshot().link === "probing");
+    emu.dropLink("again");
+    await until(() => core.getSnapshot().link === "polling" && events.filter((e) => e.type === "link-restored").length >= 2);
+    expect(events.filter((e) => e.type === "link-lost").map((e) => e.detail)).toEqual(["emulated link loss", "again"]);
+    // One poller: the speed polls come at the configured rate, not twice as often.
+    const polls: number[] = [];
+    const off = core.onExchange((e) => {
+      if (e.pollPid === 0x0d) polls.push(e.txUs);
+    });
+    await until(() => polls.length >= 12);
+    off();
+    const gaps = polls.slice(1).map((t, i) => t - polls[i]);
+    const meanGapUs = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+    expect(meanGapUs).toBeGreaterThanOrEqual((1e6 / OBD_SPEED_HZ) * 0.9);
     await core.disconnect();
   });
 
@@ -390,6 +466,21 @@ describe("VehicleLinkCore", () => {
       await until(() => t.core.getSnapshot().link === "polling");
       expect(t.core.getSnapshot().activeDeviceId).toBe("mfi-1");
       expect(notReachable(t.events)).toHaveLength(2); // logged on the first round only
+      await t.core.disconnect();
+    });
+
+    test("an MFi adapter iOS lists but can't open takes one turn per round, not every slot", async () => {
+      const t = twoAdapters({ ble: false, mfi: false });
+      void t.core.autoConnect();
+      await until(() => notReachable(t.events).length === 2);
+      // The MX+ is listed (present) but its session can't be opened: still unreachable.
+      t.discovery.mfi = ["mfi-1"];
+      const from = t.events.length;
+      await until(() => t.events.slice(from).filter((e) => e.type === "connect").length >= 6);
+      const tried = t.events.slice(from).filter((e) => e.type === "connect").map((e) => e.detail).slice(0, 6);
+      // The MX+ goes first in each round (so it may follow itself across a round's end), the vLinker gets its turn.
+      expect(tried.filter((name) => name === "vLinker FD").length).toBeGreaterThanOrEqual(2);
+      expect(tried.some((name, i) => i >= 2 && name === "OBDLink MX+" && tried[i - 1] === name && tried[i - 2] === name)).toBe(false);
       await t.core.disconnect();
     });
 

@@ -32,6 +32,7 @@ function dosDateTime(date: Date): { time: number; date: number } {
   };
 }
 
+const MAX_ENTRIES = 0xffff;
 const MAX_U32 = 0xffffffff;
 const FLAGS = 0x0808; // bit 3: data descriptor follows; bit 11: UTF-8 names
 const VERSION = 20;
@@ -76,6 +77,8 @@ export class ZipWriter {
     }
     if (entry.size > MAX_U32) throw new Error(`zip: ${name} is larger than 4 GB`);
 
+    // The end record counts entries in 16 bits (no Zip64): refuse rather than wrap into a corrupt archive.
+    if (this.entries.length >= MAX_ENTRIES) throw new Error(`zip: more than ${MAX_ENTRIES} entries`);
     const descriptor = new DataView(new ArrayBuffer(16));
     descriptor.setUint32(0, 0x08074b50, true);
     descriptor.setUint32(4, entry.crc, true);

@@ -91,7 +91,8 @@ export class TripUploader {
   };
 
   /** Checks a typed code with the Worker and keeps it; uploads start right away. */
-  async connect(typed: string): Promise<"ok" | "malformed" | "rejected" | "offline"> {
+  /** `failed`: the server answered, but not with the name (an error there, or the URL is wrong). */
+  async connect(typed: string): Promise<"ok" | "malformed" | "rejected" | "offline" | "failed"> {
     const code = normalizeCode(typed);
     if (!code) return "malformed";
     let res: HttpResult;
@@ -101,7 +102,7 @@ export class TripUploader {
       return "offline";
     }
     if (res.status === 401) return "rejected";
-    if (res.status !== 200) return "offline";
+    if (res.status !== 200) return "failed";
     const name = (JSON.parse(res.body) as { name: string }).name;
     await this.deps.secrets.set(code);
     this.update({ name, status: "idle", lastError: null });

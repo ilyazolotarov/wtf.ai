@@ -185,7 +185,8 @@ class LinkCore(private val context: Context, private val emit: (String, Map<Stri
           BluetoothAdapter.ACTION_DISCOVERY_FINISHED -> if (scanning) adapter?.startDiscovery()
           BluetoothDevice.ACTION_BOND_STATE_CHANGED -> if (device != null) {
             if (bondState == BluetoothDevice.BOND_BONDED || bondState == BluetoothDevice.BOND_NONE) {
-              bondWaiters[device.address.uppercase()]?.countDown()
+              // Written under the lock from the IO thread: read under it too, or a resize can hide the latch.
+              synchronized(bondWaiters) { bondWaiters[device.address.uppercase()] }?.countDown()
             }
             if (bondState == BluetoothDevice.BOND_BONDED) addBonded(device)
           }
@@ -309,6 +310,8 @@ class LinkCore(private val context: Context, private val emit: (String, Map<Stri
 
   fun connect(request: ConnectRequest, promise: Promise) {
     handler.post {
+      // A connect still pending is superseded: its promise settles, never left hanging.
+      failConnect("cancelled", "superseded by a new connection")
       closeLink("new connection", false)
       connectRequest = request
       connectPromise = promise

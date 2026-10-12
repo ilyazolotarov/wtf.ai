@@ -399,6 +399,15 @@ export class RouteSearch {
   }
 
   /** Leaving in direction `dir` along a road heading `roadHeadingRad` turns the car around. */
+  /**
+   * Leaving the start edge against the car's heading costs the turnaround (§4): a search preference, so that going
+   * round the block wins while driving. Only a U-turn's worth of it is time the car spends (`plan`).
+   */
+  private turnaroundS(roadHeadingRad: number, dir: 1 | -1): number {
+    if (!this.againstHeading(roadHeadingRad, dir)) return 0;
+    return (this.from.speedMps ?? 0) > MOVING_MPS ? this.costs.turnaroundMovingS : this.costs.turnaroundS;
+  }
+
   private againstHeading(roadHeadingRad: number, dir: 1 | -1): boolean {
     const heading = this.from.headingRad;
     const travel = dir === 1 ? roadHeadingRad : roadHeadingRad + Math.PI;
@@ -407,16 +416,10 @@ export class RouteSearch {
 
   private addStart(start: End): void {
     if (!this.startEnds.includes(start)) this.startEnds.push(start);
-    const c = this.costs;
     const { edge, alongM, headingRad } = start.near;
     for (const dir of [1, -1] as const) {
       if (!allowed(edge, dir)) continue;
-      const turnaround = this.againstHeading(headingRad, dir)
-        ? (this.from.speedMps ?? 0) > MOVING_MPS
-          ? c.turnaroundMovingS
-          : c.turnaroundS
-        : 0;
-      const g0 = start.extraS + turnaround;
+      const g0 = start.extraS + this.turnaroundS(headingRad, dir);
       // Straight to a destination ahead on the same edge.
       const dest = this.dests.get(edge.id);
       if (dest && (dir === 1 ? dest.near.alongM >= alongM : dest.near.alongM <= alongM)) {
@@ -535,8 +538,9 @@ export class RouteSearch {
     const coordinates: Coordinate[] = [];
     let lengthM = 0;
     // The duration is the search's cost without its penalties: fallback ends, the entry penalties of the legs
-    // between the first and the last (those two never pay one), and the avoid factors.
-    let penaltyS = start!.extraS + goal.dest.extraS;
+    // between the first and the last (those two never pay one), the avoid factors, and the turnaround preference
+    // beyond the U-turn it stands for.
+    let penaltyS = start!.extraS + goal.dest.extraS + Math.max(0, this.turnaroundS(start!.near.headingRad, legs[0].dir) - this.costs.uTurnS);
     for (const [i, leg] of legs.entries()) {
       const edge = this.graph.edge(leg.edge);
       if (i > 0 && i < legs.length - 1) penaltyS += entrySeconds(edge, this.costs);

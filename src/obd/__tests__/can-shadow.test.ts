@@ -135,10 +135,39 @@ describe("CanShadow", () => {
     for (let i = 0; i < 3; i++) {
       await s.start(send);
       s.onText("2152710271027102710\rBUFFER FULL\r\r>", 100);
+      expect(s.status.state).toBe(i < 2 ? "waiting" : "failed");
+      // Still "running" for the session: the filter is open and needs pinning before the next poll.
+      expect(s.running).toBe(true);
+      await s.stop(send);
       expect(s.running).toBe(false);
     }
     expect(windows.every((w) => w.endedItself && w.bufferFull === 1)).toBe(true);
     expect(s.status.state).toBe("failed");
     expect(s.wanted()).toBe(false);
+  });
+
+  test("a window that ended by itself leaves the filter open: the next stop only pins it, then listening resumes", async () => {
+    const { s, windows } = shadow();
+    const sent: string[] = [];
+    const send: RawSend = async (command) => {
+      sent.push(command);
+      return { command, status: "ok", lines: ["OK"], raw: command === "" ? "STOPPED\r\r>" : "OK\r\r>", txUs: 0, rxUs: 0 };
+    };
+    await s.start(send);
+    s.onText("2152710271027102710\rBUFFER FULL\r\r>", 100);
+    expect(windows).toEqual([expect.objectContaining({ endedItself: true })]);
+    const n = sent.length;
+    // The session's next command: no stop character (nothing runs), the pin for the poll, no second window closed.
+    await s.stop(send);
+    expect(sent.slice(n)).toEqual(["ATCRA7E8"]);
+    expect(windows).toHaveLength(1);
+    expect(s.running).toBe(false);
+    // The next window opens the filter again, as after a normal stop.
+    const m = sent.length;
+    await s.start(send);
+    expect(sent.slice(m)).toEqual(["ATCRA"]);
+    expect(s.running).toBe(true);
+    await s.stop(send);
+    expect(windows).toHaveLength(2);
   });
 });

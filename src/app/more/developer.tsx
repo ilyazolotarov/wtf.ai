@@ -13,13 +13,11 @@ import { useDevSettings, useRuntime, useVehicleLinkSnapshot } from "@/providers/
 /** Test switches and knobs; the trip recording ones live in the Trip recorder sheet. */
 export default function DeveloperScreen() {
   const { t } = useT();
-  const { link, setDevSettings } = useRuntime();
+  const { setDevSettings } = useRuntime();
   const snapshot = useVehicleLinkSnapshot();
   const activeDeviceId = snapshot.activeDeviceId;
   const canShadow = snapshot.canShadow ?? null;
   const dev = useDevSettings();
-  const [speedCap, setSpeedCap] = useState<number | null>(null);
-  const [rpmPeriod, setRpmPeriod] = useState<number>(5);
   const [canIds, setCanIds] = useState(dev.canShadowIds);
   const palette = Colors[useColorScheme() === "dark" ? "dark" : "light"];
 
@@ -74,24 +72,12 @@ export default function DeveloperScreen() {
         )}
         <CycleRow
           labelKey="speedCap"
-          value={speedCap}
+          value={dev.speedCapHz}
           options={[null, 5, 10, 20, 30]}
           format={(v) => (v === null ? "auto" : `${v} Hz`)}
-          onChange={(v) => {
-            setSpeedCap(v);
-            link.setSpeedCapOverride(v);
-          }}
+          onChange={(v) => setDevSettings({ speedCapHz: v })}
         />
-        <CycleRow
-          labelKey="rpmPeriod"
-          value={rpmPeriod}
-          options={[2, 5, 10]}
-          format={(v) => `${v} s`}
-          onChange={(v) => {
-            setRpmPeriod(v);
-            link.setRpmPeriods({ rpmPeriodRunningMs: v * 1000 });
-          }}
-        />
+        <CycleRow labelKey="rpmPeriod" value={dev.rpmPeriodS} options={[2, 5, 10]} format={(v) => `${v} s`} onChange={(v) => setDevSettings({ rpmPeriodS: v })} />
         <CycleRow
           labelKey="mapMatchLoop"
           value={dev.mapMatchLoop}

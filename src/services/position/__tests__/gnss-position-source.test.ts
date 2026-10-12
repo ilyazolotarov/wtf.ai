@@ -1,4 +1,4 @@
-import { mapFixToPosition } from "@/services/position/gnss-position-source";
+import { isSatelliteRecord, mapFixToPosition } from "@/services/position/gnss-position-source";
 import type { GnssRecord } from "@/triplog/schema";
 
 function fix(overrides: Partial<GnssRecord> = {}): GnssRecord {
@@ -46,5 +46,12 @@ describe("GNSS position mapping", () => {
     expect(p.headingRad).toBeUndefined();
     expect(p.speedMps).toBeUndefined();
     expect(p.accuracyM).toBe(9999);
+  });
+
+  test("a satellite fix has a speed and claims under 50 m; a degraded one is coarse, as the navigator has it", () => {
+    expect(isSatelliteRecord(fix())).toBe(true);
+    expect(isSatelliteRecord(fix({ speedMps: 0 }))).toBe(true);
+    expect(isSatelliteRecord(fix({ speedMps: NaN }))).toBe(false);
+    expect(isSatelliteRecord(fix({ hAccM: 80 }))).toBe(false);
   });
 });

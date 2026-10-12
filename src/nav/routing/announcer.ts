@@ -71,6 +71,8 @@ export type Announcement =
 
 export interface AnnouncerInput {
   planId: number;
+  /** Why this plan replaced the last: an alternative taken is the driver's choice, not a re-plan to announce. */
+  planReason?: "new" | "off-route" | "resume" | "alternative";
   maneuvers: Maneuver[];
   guidance: GuidanceStep;
   speedMps: number;
@@ -107,8 +109,9 @@ export class Announcer {
     const out: Announcement[] = [];
     const { guidance: g, maneuvers } = input;
     if (input.planId !== this.planId) {
-      // A new plan: the first is the route starting (its first maneuver says enough), later ones are re-plans.
-      if (this.planId !== null) out.push({ kind: "replanned" });
+      // A new plan: the first is the route starting (its first maneuver says enough), later ones are re-plans,
+      // unless the driver took an alternative (by a tap, or by driving onto it).
+      if (this.planId !== null && input.planReason !== "alternative") out.push({ kind: "replanned" });
       this.planId = input.planId;
       this.said.clear();
     }

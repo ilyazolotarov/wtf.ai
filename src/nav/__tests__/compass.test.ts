@@ -145,6 +145,32 @@ describe("Compass", () => {
     expect(kept.map((c) => Math.round(Math.acos(c.up[2]) / DEG))).toEqual([60, 40, 20]);
   });
 
+  test("a phone re-seated three times on one drive doesn't push out a stored calibration", () => {
+    const compass = new Compass();
+    const stored = compass.calibrations;
+    const learned = new Compass();
+    let t = 0;
+    for (let i = 0; i < 12; i++) {
+      t = hold(learned, t, i * 30 * DEG);
+      learned.observe(i * 30 * DEG);
+    }
+    expect(stored).toHaveLength(0);
+    // Another drive: the flat mounting is stored, confirmed. The phone then sits in three new tilts, a few samples each.
+    const next = new Compass();
+    next.setCalibrations(learned.calibrations);
+    t = 0;
+    for (const tiltDeg of [25, 50, 75]) {
+      const up: Vec3 = [0, Math.sin(tiltDeg * DEG), Math.cos(tiltDeg * DEG)];
+      for (let i = 0; i < 3; i++) {
+        t = hold(next, t, i * 10 * DEG, up);
+        next.observe(i * 10 * DEG);
+      }
+    }
+    const kept = next.calibrations;
+    expect(kept).toHaveLength(3);
+    expect(kept.some((c) => Math.round(Math.acos(c.up[2]) / DEG) === 0)).toBe(true);
+  });
+
   test("no heading while the phone is tilted away from its mounting, or handled", () => {
     const compass = new Compass();
     compass.setCalibration(syntheticCompassCalibration());

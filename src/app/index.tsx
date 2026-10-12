@@ -130,7 +130,11 @@ export default function HomeScreen() {
     turn,
   );
   const headingUp = useHeadingUp(position, compass);
+  const turnNoted = useRef(false);
   useEffect(() => {
+    // Upright at mount is not a turn; back to upright after one is.
+    if (turn === 0 && !turnNoted.current) return;
+    turnNoted.current = true;
     runtime.recorder.note(`map turned ${turn}°`);
   }, [turn, runtime]);
   useVoiceGuidance(route, position?.speedMps, voiceMuted || voiceOff);

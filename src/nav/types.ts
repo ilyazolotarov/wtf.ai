@@ -49,6 +49,9 @@ export interface GnssFix {
  * Satellite fix vs Wi-Fi/cell fallback. Under jamming iOS reports positions without
  * speed; those are coarse, often repeated, and their errors are correlated.
  */
+/** A fix claiming worse than this is coarse whatever its source: it is weighed like a Wi-Fi/cell one. */
+export const SATELLITE_MAX_HACC_M = 50;
+
 export function isSatelliteFix(fix: GnssFix): boolean {
-  return fix.speedMps !== undefined && fix.hAccM < 50;
+  return fix.speedMps !== undefined && fix.hAccM < SATELLITE_MAX_HACC_M;
 }

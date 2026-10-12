@@ -58,6 +58,14 @@ describe("ULog encoder/reader", () => {
     expect(readULog(enc.take()).info.vin).toBe("JM3KFBDM1J0123456");
   });
 
+  test("an info key over 255 bytes is refused (one byte of length in the format)", () => {
+    const enc = new ULogEncoder(0);
+    // The key is "char[1] <name>": 8 bytes before the name.
+    expect(() => enc.infoString("x".repeat(248), "v")).toThrow(/over 255/);
+    enc.infoString("x".repeat(247), "v");
+    expect(readULog(enc.take()).info["x".repeat(247)]).toBe("v");
+  });
+
   test("truncated file is still readable", () => {
     const bytes = buildFixture();
     const f = readULog(bytes.slice(0, bytes.length - 7));

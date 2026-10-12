@@ -72,6 +72,8 @@ export interface RouteSnapshot {
   status: "planning" | "active" | "failed";
   failure?: RouteProblem;
   planId: number;
+  /** Why the plan with this id was made (`alternative`: the driver took one; no re-plan). */
+  planReason?: Reason;
   plan?: RoutePlan;
   maneuvers?: Maneuver[];
   guidance?: GuidanceStep;
@@ -209,7 +211,7 @@ export class RouteService {
       `route ${resumed ? "resumed after an app restart, " : ""}to ${destination.lat.toFixed(5)},${destination.lon.toFixed(5)}` +
         (destination.name ? ` (${destination.name})` : ""),
     );
-    this.set({ destination, status: "planning", planId: 0, replanning: false });
+    this.set({ destination, status: "planning", planId: 0, planReason: "new", replanning: false });
     this.unsubscribe = this.deps.position.subscribe(this.onPosition);
     this.plan("new");
   }
@@ -345,7 +347,7 @@ export class RouteService {
       this.notedState = null;
       this.trip ??= { startedAt, plannedS: r.plan.durationS, plannedM: r.plan.lengthM, drivenM: 0, lastAt: null };
       const cur = this.snapshot!;
-      this.set({ ...cur, status: "active", failure: undefined, replanFailure: undefined, planId: id, plan: r.plan, maneuvers, guidance: undefined, replanning: false });
+      this.set({ ...cur, status: "active", failure: undefined, replanFailure: undefined, planId: id, planReason: reason, plan: r.plan, maneuvers, guidance: undefined, replanning: false });
       this.logPlan(id, reason, r.plan, maneuvers, { states: r.stats.states, tiles: r.stats.tilesRead, planMs: r.stats.ms, wallMs, slices, fellBackAt: r.stats.fellBackAt }, position);
       this.deps.onRoute?.(r.plan);
       this.onPosition();
@@ -421,7 +423,7 @@ export class RouteService {
       this.trip.plannedM = next.plan.lengthM;
     }
     this.note(`route alternative taken (${why}): ${km(next.plan.lengthM)}, ${Math.round(next.plan.durationS / 60)} min, was ${Math.round(s.plan.durationS / 60)} min`);
-    this.set({ ...s, planId: id, plan: next.plan, maneuvers: next.maneuvers, guidance: next.guidance.step ?? undefined, replanning: false, replanFailure: undefined });
+    this.set({ ...s, planId: id, planReason: "alternative", plan: next.plan, maneuvers: next.maneuvers, guidance: next.guidance.step ?? undefined, replanning: false, replanFailure: undefined });
     this.logPlan(id, "alternative", next.plan, next.maneuvers, null, this.deps.position.getSnapshot() ?? undefined);
     this.publishAlternatives();
     this.deps.onRoute?.(next.plan);

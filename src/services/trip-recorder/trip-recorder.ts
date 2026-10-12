@@ -30,6 +30,7 @@ import { TripLogWriter } from "@/triplog/trip-log-writer";
 
 import type { SensorService } from "../sensor-capture/sensor-service";
 import type { TripFiles } from "./trip-files";
+import { isSatelliteRecord } from "@/services/position/gnss-position-source";
 
 export interface TripSettings {
   imuRateHz: 50 | 100;
@@ -136,7 +137,6 @@ function fileStamp(d: Date): string {
 }
 
 /** Satellite fix: iOS reports no speed for Wi-Fi/cell fallback positions (e.g. under GNSS jamming). */
-const isSatelliteFix = (f: GnssRecord) => f.speedMps >= 0 && f.hAccM < 50;
 
 const escapeRaw = (s: string) => s.replace(/\r/g, "\\r").replace(/\n/g, "\\n").replace(/\0/g, "");
 
@@ -244,7 +244,9 @@ export class TripRecorder {
     this.timer = null;
     this.unsubscribers.forEach((u) => u());
     this.unsubscribers = [];
-    if (this.writer) this.endTrip("manual", this.deps.nowUs());
+    // Through the detector, which ends the trip (`endTrip`) and leaves `recording`: a later `start` can begin one.
+    if (this.detector.state === "recording") this.detector.manualStop(this.deps.nowUs());
+    else if (this.writer) this.endTrip("manual", this.deps.nowUs());
     this.deps.sensors.want(false, false);
   }
 
@@ -395,7 +397,7 @@ export class TripRecorder {
   }
 
   private onGnss(fix: GnssRecord): void {
-    if (this.writer && this.current && this.lastFix && isSatelliteFix(fix) && isSatelliteFix(this.lastFix)) {
+    if (this.writer && this.current && this.lastFix && isSatelliteRecord(fix) && isSatelliteRecord(this.lastFix)) {
       this.current.distanceM += haversineM(
         { lat: this.lastFix.latDeg, lon: this.lastFix.lonDeg },
         { lat: fix.latDeg, lon: fix.lonDeg },

@@ -42,7 +42,8 @@ export interface ScannedDevice {
 }
 
 export interface DiscoveryBackend {
-  start(onUpdate: (devices: ScannedDevice[]) => void): void;
+  /** `onStopped`: the backend ended the scan by itself (its time limit). */
+  start(onUpdate: (devices: ScannedDevice[]) => void, onStopped?: () => void): void;
   stop(): void;
   pairMfi?(): Promise<void>;
   /** Ids of the MFi adapters iOS has connected right now (no scan, no prompt). */
@@ -118,6 +119,7 @@ export const OBD_SPEED_HZ = 2;
 const CAN_STATUS_INTERVAL_US = 1_000_000;
 
 type OpenOutcome = "connected" | "unreachable" | "stopped";
+type InitOutcome = "polling" | "no-vehicle" | "error";
 
 class Cancelled extends Error {}
 
@@ -145,7 +147,11 @@ export class VehicleLinkCore implements VehicleLink {
   private linkEvents = new Emitter<[LinkEvent]>();
 
   private scanned = new Map<string, ScannedDevice>();
+  /** Bumped by every scan start and stop: a backend's "stopped" belongs to the scan it started. */
+  private discoveryRun = 0;
   private gen = 0;
+  /** The `gen` a reconnect loop runs for (§6.2): a second link loss meanwhile doesn't start another. */
+  private reconnecting: number | null = null;
   private transport: Transport | null = null;
   private session: Elm327Session | null = null;
   private poller: ObdPoller | null = null;
@@ -206,14 +212,22 @@ export class VehicleLinkCore implements VehicleLink {
   startDiscovery(): void {
     if (this.snapshot.discovering) return;
     this.update({ discovering: true });
-    this.deps.discovery.start((devices) => {
-      for (const d of devices) this.scanned.set(d.id, d);
-      this.refreshDevices();
-    });
+    const run = ++this.discoveryRun;
+    this.deps.discovery.start(
+      (devices) => {
+        for (const d of devices) this.scanned.set(d.id, d);
+        this.refreshDevices();
+      },
+      () => {
+        // The scan this call started ran out; a later one is its own.
+        if (run === this.discoveryRun && this.snapshot.discovering) this.update({ discovering: false });
+      },
+    );
   }
 
   stopDiscovery(): void {
     if (!this.snapshot.discovering) return;
+    this.discoveryRun++;
     this.deps.discovery.stop();
     this.update({ discovering: false });
   }
@@ -343,9 +357,13 @@ export class VehicleLinkCore implements VehicleLink {
     this.roundRun = run;
     try {
       for (let round = 0; run === this.autoRun; round++) {
+        // Everyone once per round: a present MFi adapter jumps the queue, but takes one turn, not every slot.
+        const tried = new Set<string>();
         for (let i = 0; i < list.length && run === this.autoRun; i++) {
           const present = round > 0 ? (this.deps.discovery.mfiPresent?.() ?? []) : [];
-          const next = list.find((a) => a.transport === "mfi" && present.includes(a.id)) ?? list[i];
+          const next =
+            list.find((a) => a.transport === "mfi" && present.includes(a.id) && !tried.has(a.id)) ?? list.find((a) => !tried.has(a.id))!;
+          tried.add(next.id);
           const startedUs = this.deps.clock.nowUs();
           const outcome = await this.open(next.id, { wait: true, windowMs: AUTO_CONNECT_WINDOW_MS });
           if (outcome !== "unreachable" || run !== this.autoRun) return;
@@ -530,8 +548,13 @@ export class VehicleLinkCore implements VehicleLink {
     this.event("verified", probe.elmVersion ?? undefined);
 
     if (probe.foundProtocol !== null) this.adoptProtocol(remembered?.protocolNumber ?? 0, probe.foundProtocol);
-    if (probe.vehiclePresent) await this.initAndPoll(gen);
-    else await this.standby(gen, remembered?.protocolNumber ?? 0);
+    if (probe.vehiclePresent && (await this.initAndPoll(gen)) !== "no-vehicle") return;
+    await this.standby(gen, this.cachedProtocol());
+  }
+
+  /** The protocol the active adapter remembers for its car; 0: none. */
+  private cachedProtocol(): number {
+    return this.remembered().find((a) => a.id === this.snapshot.activeDeviceId)?.protocolNumber ?? 0;
   }
 
   /**
@@ -539,8 +562,7 @@ export class VehicleLinkCore implements VehicleLink {
    * another car's: every few checks, all protocols are searched.
    */
   private async standby(gen: number, cachedProtocol: number = 0): Promise<void> {
-    this.engine.onObdResponse(false, this.deps.clock.nowUs());
-    this.update({ link: "standby" });
+    this.enterStandby();
     const period = this.deps.standbyProbeMs ?? 5000;
     const send = (command: string, opts?: { timeoutMs?: number }) => this.requireSession().send(command, { ...opts, priority: Priority.Rpm });
     let wrong = 0;
@@ -561,12 +583,19 @@ export class VehicleLinkCore implements VehicleLink {
         wrong = wrongBus(r.status) ? wrong + 1 : 0;
       }
       this.check(gen);
+      // An init that finds no car after all (the ECU's last answer was the one to 0100): back to the checks, in
+      // this loop, not a nested one.
       if (found) {
-        await this.initAndPoll(gen);
-        return;
-      }
-      if (search) await send(`ATSP${cachedProtocol.toString(16).toUpperCase()}`, { timeoutMs: 1000 });
+        if ((await this.initAndPoll(gen)) !== "no-vehicle") return;
+        this.enterStandby();
+      } else if (search) await send(`ATSP${cachedProtocol.toString(16).toUpperCase()}`, { timeoutMs: 1000 });
     }
+  }
+
+  /** The ECU is silent (no answer, or an init that found no car): waiting for it. */
+  private enterStandby(): void {
+    this.engine.onObdResponse(false, this.deps.clock.nowUs());
+    this.update({ link: "standby" });
   }
 
   /**
@@ -579,7 +608,11 @@ export class VehicleLinkCore implements VehicleLink {
     this.patchRemembered({ protocolNumber: found || null });
   }
 
-  private async initAndPoll(gen: number): Promise<void> {
+  /**
+   * Init the car and start the poller. "no-vehicle": the init found no car; the caller goes (back) to standby.
+   * "error": the link is in error (the car has no speed PID).
+   */
+  private async initAndPoll(gen: number): Promise<InitOutcome> {
     const session = this.requireSession();
     this.update({ link: "initializing" });
     const remembered = this.remembered().find((a) => a.id === this.snapshot.activeDeviceId);
@@ -589,10 +622,9 @@ export class VehicleLinkCore implements VehicleLink {
     if (!init.ok) {
       if (init.error === "no-speed-pid") {
         this.update({ link: "error", error: { code: "no-speed-pid", message: "vehicle doesn't report speed (PID 0D)" } });
-        return;
+        return "error";
       }
-      await this.standby(gen, remembered?.protocolNumber ?? 0);
-      return;
+      return "no-vehicle";
     }
     const adapter = this.snapshot.adapter ? { ...this.snapshot.adapter, capabilities: init.capabilities } : null;
     const vehicle = this.identify(init.vehicle, init.protocolNumber);
@@ -629,6 +661,7 @@ export class VehicleLinkCore implements VehicleLink {
     this.update({ link: this.engine.state === "ignition-off" ? "standby" : "polling" });
     this.attachShadow();
     if (vehicle.vinSource !== "read") void this.retryVin(gen, seq, init.pinnedEcu, init.protocolNumber);
+    return "polling";
   }
 
   /**
@@ -679,6 +712,7 @@ export class VehicleLinkCore implements VehicleLink {
     this.reiniting = true;
     this.event("reinit", reason);
     this.shadow?.disable();
+    let outcome: InitOutcome | null = null;
     try {
       // The car was moving: it didn't switch off, the adapter or its link froze (§10.5).
       const moving = frozen || (this.snapshot.lastSpeed?.raw ?? 0) > 0;
@@ -709,47 +743,66 @@ export class VehicleLinkCore implements VehicleLink {
         this.onLinkLost(gen, "adapter silent");
         return;
       }
-      await this.initAndPoll(gen);
+      outcome = await this.initAndPoll(gen);
     } catch (error) {
       this.handleFailure(gen, error);
     } finally {
       this.reiniting = false;
     }
+    // The reinit is over; waiting for the car is not part of it (another reinit may be needed meanwhile).
+    if (outcome === "no-vehicle") await this.standby(gen, this.cachedProtocol()).catch((error) => this.handleFailure(gen, error));
   }
 
   private onLinkLost(gen: number, reason: string): void {
     if (gen !== this.gen) return;
     this.event("link-lost", reason);
+    if (this.reconnecting === gen) {
+      // Lost again while the reconnect loop's session was probing or initializing: that session is over (its
+      // pending command rejects, and the loop connects again); a second loop would run two sessions on one adapter.
+      void this.teardownSession();
+      this.update({ link: "reconnecting", stats: null });
+      return;
+    }
+    this.reconnecting = gen;
     void (async () => {
       await this.teardownSession();
       this.engine.reset(this.deps.clock.nowUs());
       this.update({ link: "reconnecting", stats: null });
-      let delayMs = 1000;
-      while (gen === this.gen) {
-        try {
-          const info = await this.transport!.connect();
-          if (gen !== this.gen) return;
-          this.event("link-restored");
-          const device = this.snapshot.adapter;
-          const remembered = this.remembered().find((a) => a.id === this.snapshot.activeDeviceId);
-          await this.runSession(
-            gen,
-            info,
-            { id: this.snapshot.activeDeviceId!, transport: device?.transport ?? this.transport!.kind, name: device?.name ?? null },
-            remembered,
-            true,
-          );
-          return;
-        } catch (error) {
-          if (error instanceof Cancelled || gen !== this.gen) return;
-          if (error instanceof SessionClosedError) continue;
-          // A probe that failed left its session behind.
-          await this.teardownSession();
-          await this.deps.clock.sleep(delayMs);
-          delayMs = Math.min(delayMs * 2, 30000);
-        }
+      try {
+        await this.reconnectLoop(gen);
+      } finally {
+        if (this.reconnecting === gen) this.reconnecting = null;
       }
     })();
+  }
+
+  /** Connect the transport again and run a session on it, until one holds or the link is closed. */
+  private async reconnectLoop(gen: number): Promise<void> {
+    let delayMs = 1000;
+    while (gen === this.gen) {
+      try {
+        const info = await this.transport!.connect();
+        if (gen !== this.gen) return;
+        this.event("link-restored");
+        const device = this.snapshot.adapter;
+        const remembered = this.remembered().find((a) => a.id === this.snapshot.activeDeviceId);
+        await this.runSession(
+          gen,
+          info,
+          { id: this.snapshot.activeDeviceId!, transport: device?.transport ?? this.transport!.kind, name: device?.name ?? null },
+          remembered,
+          true,
+        );
+        return;
+      } catch (error) {
+        if (error instanceof Cancelled || gen !== this.gen) return;
+        if (error instanceof SessionClosedError) continue;
+        // A probe that failed left its session behind.
+        await this.teardownSession();
+        await this.deps.clock.sleep(delayMs);
+        delayMs = Math.min(delayMs * 2, 30000);
+      }
+    }
   }
 
   private async teardownSession(): Promise<void> {

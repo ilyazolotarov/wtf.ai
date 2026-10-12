@@ -101,6 +101,11 @@ export class CanShadow implements IdleMonitor {
   private configured = false;
   /** The receive filter is pinned to the speed ECU (after a stop): open it before the next window. */
   private pinned = false;
+  /**
+   * The window ended by itself with the filter open: pin it before the next poll (`stop()` does, as after every
+   * window; the session calls it while `running`).
+   */
+  private pinDue = false;
   private failure: string | null = null;
   private disabled = false;
   /** Inside our own exchanges: they don't reset the setup. */
@@ -134,8 +139,9 @@ export class CanShadow implements IdleMonitor {
     this.wantedIds = new Set(deps.ids);
   }
 
+  /** The session must stop (or pin after) the monitor before its next command. */
   get running(): boolean {
-    return this.live;
+    return this.live || this.pinDue;
   }
 
   get status(): CanShadowStatus {
@@ -194,7 +200,10 @@ export class CanShadow implements IdleMonitor {
   }
 
   async stop(send: RawSend): Promise<void> {
-    if (!this.live) return;
+    if (!this.live) {
+      if (this.pinDue) await this.pinAfterSelfEnd(send);
+      return;
+    }
     this.own = true;
     try {
       // Any character stops it: the rest of the output, STOPPED, the prompt.
@@ -204,6 +213,9 @@ export class CanShadow implements IdleMonitor {
       const retried = r.status === "timeout";
       // A CR reaching an adapter that had just stopped by itself repeats its last command, STM: stop that one too.
       if (retried) {
+        // What the first one drained is the window's output too.
+        this.collector?.push(r.raw, r.rxUs);
+        this.windowBytes += r.raw.length;
         r = await send("", 1000, true);
         silent &&= r.raw === "";
       }
@@ -227,12 +239,29 @@ export class CanShadow implements IdleMonitor {
         this.wrong(`stop: no prompt, ${quote(r.raw)}`);
         if (++this.stopFailures >= STOP_FAILURES_TO_FAIL) this.fail(`no prompt after stopping the monitor ${this.stopFailures} times`);
       }
-      // Broadcast frames would reach the poll's answer through the pass filters.
-      const pin = await send(`ATCRA${this.pinFilter()}`, 1000, this.logs("pin"));
-      if (pin.status === "ok") this.pinned = true;
-      else this.wrong(`ATCRA${this.pinFilter()} answered ${quote(pin.raw)}`);
+      await this.pin(send);
     } finally {
       this.live = false;
+      this.own = false;
+    }
+  }
+
+  /** Broadcast frames would reach the poll's answer through the pass filters: pin the speed ECU's filter. */
+  private async pin(send: RawSend): Promise<void> {
+    const pin = await send(`ATCRA${this.pinFilter()}`, 1000, this.logs("pin"));
+    this.pinDue = false;
+    if (pin.status === "ok") this.pinned = true;
+    else this.wrong(`ATCRA${this.pinFilter()} answered ${quote(pin.raw)}`);
+  }
+
+  /** The adapter stopped by itself and is at its prompt with the filter open: pin it, nothing to stop. */
+  private async pinAfterSelfEnd(send: RawSend): Promise<void> {
+    this.own = true;
+    try {
+      await this.pin(send);
+    } catch {
+      this.pinDue = false;
+    } finally {
       this.own = false;
     }
   }
@@ -249,8 +278,10 @@ export class CanShadow implements IdleMonitor {
     this.collector.push(text, rxUs);
     this.flush();
     if (!text.includes(">")) return;
-    // Back at the prompt without being stopped: BUFFER FULL, or the adapter reset.
+    // Back at the prompt without being stopped: BUFFER FULL, or the adapter reset. The filter is still open: the
+    // next command (a poll) first has `stop()` pin it.
     this.live = false;
+    this.pinDue = true;
     this.closeWindow(rxUs, true, null, false);
     this.selfEnds++;
     if (this.selfEnds >= SELF_ENDS_TO_FAIL) this.fail(`the monitor ended by itself ${this.selfEnds} times`);

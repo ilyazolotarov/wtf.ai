@@ -135,6 +135,8 @@ export class ULogEncoder {
 
   private info(key: string, writeValue: (w: ByteWriter) => void): void {
     const keyBytes = utf8(key);
+    // One byte of key length in the format: a longer key would wrap and leave pyulog a file it can't parse.
+    if (keyBytes.length > 255) throw new Error(`ulog: info key is ${keyBytes.length} bytes, over 255: ${key}`);
     this.message(MSG.info, () => {
       this.out.u8(keyBytes.length);
       this.out.bytes(keyBytes);

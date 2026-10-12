@@ -908,8 +908,17 @@ export class ParticleFilter {
 
   /** The car drove straight over the last `straightWindowM` (turned less than `straightTurnRad`). */
   get isStraight(): boolean {
-    const c = this.config;
-    return Math.abs(this.turnRad - this.turnSince(c.straightWindowM)) < c.straightTurnRad;
+    return this.straightOver(this.config.straightWindowM);
+  }
+
+  /**
+   * Turned less than `straightTurnRad` over the last `distanceM`. Not until that much has been driven since the
+   * start: a few metres say nothing about a window they don't fill.
+   */
+  private straightOver(distanceM: number): boolean {
+    const r = this.recentTurns;
+    if (r.length === 0 || r[0].d > this.distanceM - distanceM) return false;
+    return Math.abs(this.turnRad - this.turnSince(distanceM)) < this.config.straightTurnRad;
   }
 
   /**
@@ -1181,7 +1190,7 @@ export class ParticleFilter {
     const c = this.config;
     const p = this.p;
     this.movedSinceEval = false;
-    const straight = halted || Math.abs(this.turnRad - this.turnSince(c.straightWindowM)) < c.straightTurnRad;
+    const straight = halted || this.straightOver(c.straightWindowM);
     const sinceAnchor = this.distanceM - this.anchorM;
     const compare = straight || sinceAnchor >= c.maxCompareM;
     const gyroValid = this.lastYawUnknownM < this.anchorM;

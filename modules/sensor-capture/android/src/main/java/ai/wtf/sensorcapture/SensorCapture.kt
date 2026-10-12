@@ -116,7 +116,8 @@ class SensorCapture(private val context: Context, private val emit: (String, Map
 
   // Only touched on the sensor thread (batchers are created there too).
   private var batcher = ImuBatcher(100.0, 0.0)
-  private val assembler = MotionAssembler()
+  /** New for every start: the last run's gravity and attitude must not open the next one's `motion` rows. */
+  private var assembler = MotionAssembler()
 
   /**
    * `motion` rows need a gyroscope (the yaw source) and gravity. Gravity and linear acceleration come from their
@@ -129,6 +130,7 @@ class SensorCapture(private val context: Context, private val emit: (String, Map
     if (derived && sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) == null) return false
     stopImu()
     imuBatches = 0
+    assembler = MotionAssembler()
     Log.i(TAG, "startImu rate=$rateHz raw=$raw derivedGravity=$derived")
 
     val t = HandlerThread("ai.wtf.sensorcapture.imu").also { it.start() }

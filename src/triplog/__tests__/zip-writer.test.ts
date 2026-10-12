@@ -66,6 +66,12 @@ describe("ZipWriter", () => {
     expect(entries[0].date).toBe((46 << 9) | (10 << 5) | 3);
   });
 
+  test("refuses the 65 536th entry instead of wrapping the count", () => {
+    const zip = new ZipWriter({ write: () => undefined, close: () => undefined });
+    for (let i = 0; i < 0xffff; i++) zip.addFile(`${i}`, new Date(2026, 9, 3), []);
+    expect(() => zip.addFile("one more", new Date(2026, 9, 3), [])).toThrow(/entries/);
+  });
+
   test("empty archive is just the end record", () => {
     const { out } = build([]);
     expect(out.length).toBe(22);

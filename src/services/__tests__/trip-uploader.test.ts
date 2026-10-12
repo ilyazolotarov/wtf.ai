@@ -16,7 +16,7 @@ const A = "20261003-100247_aaaaaa.ulg";
 const B = "20261004-100247_bbbbbb.ulg";
 const C = "20261005-100247_cccccc.ulg";
 
-function setup(opts: { trips?: TripIndexEntry[]; current?: string; network?: NetworkKind; answers?: Record<string, number | Error> } = {}) {
+function setup(opts: { trips?: TripIndexEntry[]; current?: string; network?: NetworkKind; answers?: Record<string, number | Error>; meStatus?: number } = {}) {
   const kv = new Map<string, unknown>();
   let code: string | null = null;
   let network: NetworkKind = opts.network ?? "wifi";
@@ -50,7 +50,11 @@ function setup(opts: { trips?: TripIndexEntry[]; current?: string; network?: Net
         return { status: a, body: a >= 400 ? JSON.stringify({ error: `e${a}` }) : "{}" };
       },
       get: async (url, headers) =>
-        headers.Authorization === "Bearer bakimtuvodsegap" ? { status: 200, body: JSON.stringify({ name: "tester-a" }) } : { status: 401, body: "{}" },
+        opts.meStatus !== undefined
+          ? { status: opts.meStatus, body: "{}" }
+          : headers.Authorization === "Bearer bakimtuvodsegap"
+            ? { status: 200, body: JSON.stringify({ name: "tester-a" }) }
+            : { status: 401, body: "{}" },
       now: () => 42,
     });
   return { make, sent, removed, keepDeletes: () => (keepFiles = true), setNetwork: (n: NetworkKind) => (network = n), snapshot, getCode: () => code };
@@ -78,6 +82,13 @@ describe("TripUploader", () => {
     expect(up.getSnapshot()).toMatchObject({ name: "tester-a", status: "idle", sentCount: 2, uploaded: {} });
     await up.run();
     expect(s.sent).toEqual([A, B]);
+  });
+
+  it("a Worker error at the code check is a failure, not 'offline'", async () => {
+    const s = setup({ meStatus: 500 });
+    const up = s.make();
+    expect(await up.connect("bakimtuvodsegap")).toBe("failed");
+    expect(s.getCode()).toBeNull();
   });
 
   it("never sends the log being written", async () => {

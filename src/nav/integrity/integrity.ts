@@ -201,6 +201,11 @@ export class GnssIntegrity {
   }
 
   /** A satellite fix: may the navigator use it? */
+  /** When the last fix judged was taken (replay statistics, tests). */
+  get lastSeenUs(): number | null {
+    return this.lastSeen?.tUs ?? null;
+  }
+
   check(fix: GnssFix, ctx: IntegrityContext): IntegrityResult {
     const c = this.config;
     const seen: Seen = {
@@ -214,8 +219,10 @@ export class GnssIntegrity {
       segment: this.segment,
     };
     const prev = this.lastSeen;
-    if (!prev || fix.tUs - prev.tUs > c.continuityUs || haversineM(prev, fix) > this.reach(prev, seen)) seen.segment = ++this.segment;
-    this.lastSeen = seen;
+    // A fix delivered late (older than the last one seen) joins the segment of its time; it never becomes "the last".
+    const late = prev !== null && fix.tUs < prev.tUs;
+    if (!prev || (!late && (fix.tUs - prev.tUs > c.continuityUs || haversineM(prev, fix) > this.reach(prev, seen)))) seen.segment = ++this.segment;
+    if (!late) this.lastSeen = seen;
 
     if (!insideUkraine(fix)) return this.refuse("outside", seen, fix.hAccM, "outside Ukraine");
     const last = this.lastTrusted;

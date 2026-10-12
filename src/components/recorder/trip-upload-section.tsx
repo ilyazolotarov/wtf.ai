@@ -26,7 +26,7 @@ export function TripUploadSection({ uploader }: { uploader: TripUploader }) {
     const result = await uploader.connect(typed);
     setChecking(false);
     if (result === "ok") setTyped("");
-    else setError(t(result === "malformed" ? "tripUploadMalformed" : result === "rejected" ? "tripUploadRejected" : "tripUploadOffline"));
+    else setError(t(result === "malformed" ? "tripUploadMalformed" : result === "rejected" ? "tripUploadRejected" : result === "failed" ? "tripUploadServerError" : "tripUploadOffline"));
   };
 
   const waiting = uploader.pending().length;

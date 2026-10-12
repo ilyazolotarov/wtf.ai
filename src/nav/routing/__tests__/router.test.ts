@@ -182,6 +182,24 @@ describe("planRoute", () => {
     expect(driving.plan.legs.length).toBeGreaterThan(1);
   });
 
+  test("the turnaround is a search preference: the plan's time has only a U-turn's worth of it", () => {
+    // Without a heading the same stretch starts free: the time it takes to drive.
+    const free = planRoute(graph(), frame, at(0.8, 0), at(0.2, 0));
+    if (free.status !== "done") throw new Error("no route");
+    // Turning on the spot costs 10 s in the search, less than a U-turn's time: all of it is time the car spends.
+    const cheap = planRoute(graph(), frame, { ...at(0.8, 0, 90), speedMps: 0 }, at(0.2, 0), { costs: { turnaroundS: 10, turnaroundMovingS: 300 } });
+    if (cheap.status !== "done") throw new Error("no route");
+    expect(cheap.plan.startTurnaround).toBe(true);
+    expect(cheap.plan.durationS).toBeCloseTo(free.plan.durationS + 10, 3);
+    // 40 s in the search with a 15 s U-turn: the plan's time has the U-turn, not the 25 s that made the search prefer
+    // going round (there was no cheaper way round here).
+    const costs = { turnaroundS: 40, turnaroundMovingS: 300, uTurnS: 15 };
+    const parked = planRoute(graph(), frame, { ...at(0.8, 0, 90), speedMps: 0 }, at(0.2, 0), { costs });
+    if (parked.status !== "done") throw new Error("no route");
+    if (parked.plan.startTurnaround) expect(parked.plan.durationS).toBeCloseTo(free.plan.durationS + costs.uTurnS, 3);
+    else expect(parked.plan.durationS).toBeLessThan(free.plan.durationS + costs.turnaroundS);
+  });
+
   test("a destination on a road island ends on the nearest connected road, without the penalty in its time", () => {
     // The parking-aisle loop 108 isn't connected to anything; road 103 runs 2 → 5, ~70 m east of it.
     const p = plan(at(0.5, 0, 90), at(0, 3.5));

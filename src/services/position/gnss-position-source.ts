@@ -5,11 +5,16 @@
 
 import type { PositionEstimate, TrustState } from "@/nav/position/types";
 import type { GnssRecord } from "@/triplog/schema";
+import { SATELLITE_MAX_HACC_M } from "@/nav/types";
 
 const finite = (v: number) => (Number.isFinite(v) ? v : undefined);
 
-/** Satellite fix vs Wi-Fi/cell fallback: only satellite fixes carry a speed (0 when standing). */
-export const isSatelliteRecord = (fix: GnssRecord) => Number.isFinite(fix.speedMps) && fix.speedMps >= 0;
+/**
+ * Satellite fix vs Wi-Fi/cell fallback: only satellite fixes carry a speed (0 when standing), and one claiming worse
+ * than `SATELLITE_MAX_HACC_M` counts as coarse, as the navigator's `isSatelliteFix` has it: one rule for the dot,
+ * the status and the trip distance.
+ */
+export const isSatelliteRecord = (fix: GnssRecord) => Number.isFinite(fix.speedMps) && fix.speedMps >= 0 && fix.hAccM < SATELLITE_MAX_HACC_M;
 
 /** `lastTrustedFixAt`: integrity's, undefined while no fix has been trusted (never this fix's own time). */
 export function mapFixToPosition(fix: GnssRecord, trust: TrustState = "TRUSTED", lastTrustedFixAt?: number): PositionEstimate {

@@ -1,7 +1,7 @@
 import { VirtualClock, yieldMacrotask } from "@/obd/clock";
 import { initVehicle } from "@/obd/elm327/init";
 import { probeAdapter, warmReset } from "@/obd/elm327/probe";
-import { Elm327Session, Priority } from "@/obd/elm327/session";
+import { Elm327Session, Priority, SessionClosedError } from "@/obd/elm327/session";
 import { CLONE_PROFILE, Elm327Emulator, STN_PROFILE } from "@/obd/emulator";
 import { EngineStateMachine } from "@/obd/engine-state";
 import { ObdPoller } from "@/obd/poller";
@@ -48,6 +48,26 @@ describe("Elm327Session", () => {
     const other = session.send("010D", { priority: Priority.Speed }).then(() => order.push("poll"));
     await Promise.all([ex, other]);
     expect(order).toEqual(["ex1", "ex2", "poll"]);
+  });
+
+  test("a closed session rejects commands and exclusive sections alike, instead of hanging them", async () => {
+    const { session } = await setup();
+    session.close();
+    await expect(session.send("ATI")).rejects.toBeInstanceOf(SessionClosedError);
+    await expect(session.exclusive(async () => "ran")).rejects.toBeInstanceOf(SessionClosedError);
+    // Waiting for the lock when the session closes: rejected too, the section never runs.
+    const open = await setup();
+    const first = open.session.exclusive(async (send) => {
+      await send("ATI");
+    });
+    let ran = false;
+    const second = open.session.exclusive(async () => {
+      ran = true;
+    });
+    open.session.close();
+    await expect(second).rejects.toBeInstanceOf(SessionClosedError);
+    await first.catch(() => undefined);
+    expect(ran).toBe(false);
   });
 });
 

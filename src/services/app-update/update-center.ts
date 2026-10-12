@@ -197,10 +197,15 @@ async function withTimeout<T>(run: (signal: AbortSignal) => Promise<T>): Promise
  */
 export async function checkForUpdates(reason: "launch" | "resume" | "manual"): Promise<void> {
   if (state.checking) return;
+  // Taken before the first await: a foreground return and a network change fire together on resume.
+  setState({ checking: true });
   const unmetered = await isUnmetered().catch(() => false);
   setState({ unmetered });
-  if (reason === "resume" && (!unmetered || (state.lastCheck != null && Date.now() - state.lastCheck < RESUME_CHECK_MS))) return;
-  setState({ checking: true, checkError: null });
+  if (reason === "resume" && (!unmetered || (state.lastCheck != null && Date.now() - state.lastCheck < RESUME_CHECK_MS))) {
+    setState({ checking: false });
+    return;
+  }
+  setState({ checkError: null });
   let error: string | null = null;
   try {
     const latest = await withTimeout(fetchLatestBuild);

@@ -86,7 +86,8 @@ class RowTest {
     assertEquals(14, row.size)
     assertEquals(12_500_000.0, row[0])
     assertEquals(listOf(0.1, 0.2, 0.3), row.slice(1..3))
-    assertEquals(g, row[4], 1e-12)
+    // User acceleration in the iOS sign too (see the parity test below).
+    assertEquals(-g, row[4], 1e-12)
     assertEquals(0.0, row[8], 0.0)
     assertEquals(-g, row[9], 1e-12)
     assertEquals(listOf(1.0, 0.0, 0.0, 0.0), row.slice(10..13))
@@ -105,6 +106,25 @@ class RowTest {
     val yaw = (0..2).sumOf { gyro[it] * (-grav[it] / norm) }
     // iOS reference: gravity (0, 0, -1 g) gives up (0, 0, 1), so yaw = gyro.z. Same value here.
     assertEquals(0.5, yaw, 1e-12)
+  }
+
+  @Test
+  fun aPushUpwardIsANegativeUserAccelerationAsOnIos() {
+    // Phone flat, pushed upward at 2 m/s²: Android's accelerometer reads 9.81 + 2 on z, its linear acceleration +2.
+    // CoreMotion: total = gravity + userAcceleration with gravity (0, 0, -9.81), the total -(9.81 + 2), so
+    // userAcceleration.z = -2. The navigator's phone-only speed forms gravity + userAccel and must get the same total.
+    val row = SensorLogic.motionRow(
+      0.0, doubleArrayOf(0.0, 0.0, 0.0), doubleArrayOf(0.0, 0.0, 2.0), doubleArrayOf(0.0, 0.0, g), doubleArrayOf(1.0, 0.0, 0.0, 0.0),
+    )
+    assertEquals(-2.0, row[6], 1e-12)
+    assertEquals(-(g + 2.0), row[6] + row[9], 1e-12)
+    // The derived mode (no gravity sensor) comes out the same: the assembler's remainder goes through the same row.
+    val assembler = MotionAssembler()
+    assembler.onAccelerometer(0.0, 0.0, 0.0, g)
+    assembler.onAccelerometer(10_000.0, 0.0, 0.0, g + 2.0)
+    val derived = assembler.onGyro(10_000.0, 0.0, 0.0, 0.0)!!
+    assertTrue(derived[6] < 0.0, "a push upward must be a negative user acceleration z, was ${derived[6]}")
+    assertTrue(derived[9] < 0.0)
   }
 
   @Test
@@ -160,7 +180,8 @@ class MotionAssemblerTest {
     m.onLinearAcceleration(1.0, 2.0, 3.0)
     m.onRotationVector(floatArrayOf(0f, 0f, 0f, 1f))
     val next = m.onGyro(3.0, 0.0, 0.0, 0.3)!!
-    assertEquals(listOf(1.0, 2.0, 3.0), next.slice(4..6))
+    // In the iOS sign (RowTest.aPushUpwardIsANegativeUserAccelerationAsOnIos).
+    assertEquals(listOf(-1.0, -2.0, -3.0), next.slice(4..6))
   }
 }
 
@@ -173,10 +194,10 @@ class DerivedGravityTest {
     val rest = m.onGyro(3_000_000.0, 0.0, 0.0, 0.0)!!
     assertEquals(-9.80665, rest[9], 1e-9) // true gravity direction, as with the dedicated sensor
     assertEquals(0.0, rest[4], 1e-9)
-    // A 2 m/s2 push along x: shows up as linear acceleration at once, gravity barely moves.
+    // A 2 m/s2 push along x: shows up as linear acceleration at once (in the iOS sign), gravity barely moves.
     m.onAccelerometer(3_010_000.0, 2.0, 0.0, 9.80665)
     val push = m.onGyro(3_010_000.0, 0.0, 0.0, 0.0)!!
-    assertTrue(push[4] > 1.9)
+    assertTrue(push[4] < -1.9)
     assertEquals(0.0, push[7], 0.05)
   }
 

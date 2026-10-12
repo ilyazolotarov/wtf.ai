@@ -286,6 +286,8 @@ describe("RouteService", () => {
       const s = h.service.getSnapshot()!;
       expect(south(s.plan!.coordinates)).toBe(true);
       expect(s.planId).toBeGreaterThan(before.planId);
+      expect(before.planReason).toBe("new");
+      expect(s.planReason).toBe("alternative");
       expect(s.alternatives).toHaveLength(1);
       expect(s.alternatives![0].deltaS).toBeLessThan(0);
       expect(h.routes.map((r) => r.reason)).toEqual(["new", "alternative"]);

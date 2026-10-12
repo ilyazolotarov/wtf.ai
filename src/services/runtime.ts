@@ -49,6 +49,10 @@ export interface DevSettings {
   canShadow: boolean;
   /** Hex ids, separated by spaces or commas. */
   canShadowIds: string;
+  /** OBD speed poll cap, Hz; null: automatic (`OBD_SPEED_HZ`, or the per-car cap). */
+  speedCapHz: number | null;
+  /** RPM poll period while the engine runs, s. */
+  rpmPeriodS: number;
 }
 
 const DEV_SETTINGS_KEY = "dev.settings";
@@ -87,6 +91,8 @@ export function getRuntime(): Runtime {
     phoneOnly: false,
     canShadow: false,
     canShadowIds: "",
+    speedCapHz: null,
+    rpmPeriodS: 5,
     ...(kvStore.getJson<Partial<DevSettings>>(DEV_SETTINGS_KEY) ?? {}),
   };
   const devListeners = new Set<() => void>();
@@ -130,6 +136,11 @@ export function getRuntime(): Runtime {
   recorder.start();
   const syncCanShadow = () => link.setCanShadow(dev.canShadow ? parseCanIds(dev.canShadowIds) : null);
   syncCanShadow();
+  const syncPolling = () => {
+    link.setSpeedCapOverride(dev.speedCapHz);
+    link.setRpmPeriods({ rpmPeriodRunningMs: dev.rpmPeriodS * 1000 });
+  };
+  syncPolling();
 
   const uploader = TRIP_UPLOAD_URL
     ? new TripUploader({
@@ -304,6 +315,7 @@ export function getRuntime(): Runtime {
       if (patch.mapMatchLoop) position.setMapMatchLoop(patch.mapMatchLoop);
       if (patch.phoneOnly !== undefined) position.setPhoneOnly(patch.phoneOnly);
       if (patch.canShadow !== undefined || patch.canShadowIds !== undefined) syncCanShadow();
+      if (patch.speedCapHz !== undefined || patch.rpmPeriodS !== undefined) syncPolling();
       if (patch.routeHint !== undefined) {
         const plan = routes.getSnapshot()?.plan;
         position.setRouteHint(patch.routeHint && plan ? plan.legs.map((l) => l.edge) : null);

@@ -61,7 +61,7 @@ export class Elm327Session {
   private closed = false;
   /** Owner of the running exclusive section, if any. */
   private lockOwner: symbol | null = null;
-  private lockWaiters: { owner: symbol; priority: Priority; seq: number; grant(): void }[] = [];
+  private lockWaiters: { owner: symbol; priority: Priority; seq: number; grant(): void; reject(e: unknown): void }[] = [];
   private monitor: IdleMonitor | null = null;
   /** A replaced monitor still running: the next command stops it. */
   private stale: IdleMonitor | null = null;
@@ -85,9 +85,10 @@ export class Elm327Session {
     fn: (send: (command: string, opts?: SendOptions) => Promise<ElmResponse>) => Promise<T>,
     priority: Priority = Priority.Control,
   ): Promise<T> {
+    if (this.closed) throw new SessionClosedError();
     const owner = Symbol("exclusive");
-    await new Promise<void>((grant) => {
-      this.lockWaiters.push({ owner, priority, seq: this.seq++, grant });
+    await new Promise<void>((grant, reject) => {
+      this.lockWaiters.push({ owner, priority, seq: this.seq++, grant, reject });
       this.pump();
     });
     try {
@@ -103,8 +104,14 @@ export class Elm327Session {
     const pending = this.queue;
     this.queue = [];
     pending.forEach((item) => item.reject(new SessionClosedError()));
-    this.lockWaiters.forEach((w) => w.grant());
+    this.rejectWaiters();
+  }
+
+  /** Closed: nobody gets the lock any more (a waiter that was granted would only see its sends rejected). */
+  private rejectWaiters(): void {
+    const waiters = this.lockWaiters;
     this.lockWaiters = [];
+    waiters.forEach((w) => w.reject(new SessionClosedError()));
   }
 
   get isClosed(): boolean {
@@ -135,7 +142,11 @@ export class Elm327Session {
   }
 
   private pump(): void {
-    if (this.busy || this.closed) return;
+    if (this.closed) {
+      this.rejectWaiters();
+      return;
+    }
+    if (this.busy) return;
     if (this.lockOwner === null && this.lockWaiters.length > 0) {
       // Grant the lock unless a more urgent plain command is waiting.
       this.lockWaiters.sort((a, b) => a.priority - b.priority || a.seq - b.seq);

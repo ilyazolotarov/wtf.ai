@@ -86,6 +86,7 @@ export function useVoiceGuidance(route: RouteSnapshot | null, speedMps: number |
     if (route.status !== "active" || !route.guidance || !route.maneuvers) return;
     const said = announcer.current.announcer.update({
       planId: route.planId,
+      planReason: route.planReason,
       maneuvers: route.maneuvers,
       guidance: route.guidance,
       speedMps: speedMps ?? 0,

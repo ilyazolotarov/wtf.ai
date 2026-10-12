@@ -631,7 +631,8 @@ the hex ids (`can_shadow` in the log's info).
   command, e.g. a VIN read or the survey): `ATH1`, `ATAR`, `STCMM0`, `STFPA` per id (`STFAP` fallback). Headers stay
   on (the poll parser reads them).
 - **A break** is: stop, `ATCRA<pinned ECU>` (`7EX` / `18DAF1XX` with functional addressing), the polls, then `ATCRA`
-  (the receive filter open again) and `STM`. The STN pass filters also pass broadcast frames into request answers: on
+  (the receive filter open again) and `STM`. A window the adapter ends by itself (`BUFFER FULL`, a reset) leaves the
+  filter open: the next command still pins it first (the shadow stays "running" for the session until it has). The STN pass filters also pass broadcast frames into request answers: on
   the MX+, `010D1` with the filters set answered with a wheel-speed frame (with the response count the adapter returns
   the first message it passes). Pinning the receive filter keeps poll answers clean on any adapter, for two short
   commands per break; the vLinker is an STN too.

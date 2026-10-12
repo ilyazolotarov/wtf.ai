@@ -101,6 +101,25 @@ describe("Navigator on a synthetic drive", () => {
     expect(est.lat).toBe(51.52);
   });
 
+  test("anchored, the link lost while driving: the last speed is not reported as current, and the radius stops growing", () => {
+    const drive = syntheticDrive({
+      segments: [{ durationS: 3, speedMps: 0, yawRateDegS: 0 }, { durationS: 20, speedMps: 10, yawRateDegS: 0 }, { durationS: 120, speedMps: 10, yawRateDegS: 0 }],
+      gnss: "none",
+    });
+    drive.trip.gnss = [{ tUs: drive.trip.imu[0].tUs, lat: 51.52, lon: 30.76, hAccM: 30 }];
+    // The adapter drops out 23 s in: no speed samples after that, the phone keeps measuring.
+    const cutUs = drive.trip.imu[0].tUs + 23_000_000;
+    drive.trip.obdSpeed = drive.trip.obdSpeed.filter((s) => s.tUs < cutUs);
+    const track = replayTrip(drive.trip).track;
+    const atCut = track.find((e) => e.tUs >= cutUs + 1_000_000)!;
+    const end = track.at(-1)!;
+    expect(end.mode).toBe("anchored");
+    expect(end.speedMps).toBeUndefined();
+    // Grows at the last speed for a minute after the last sample (~600 m), then holds.
+    expect(end.accuracyM - atCut.accuracyM).toBeGreaterThan(500);
+    expect(end.accuracyM - atCut.accuracyM).toBeLessThan(700);
+  });
+
   test("standing still: heading holds despite gyro bias, and the bias is learned", () => {
     const drive = syntheticDrive({
       segments: [

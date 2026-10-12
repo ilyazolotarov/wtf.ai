@@ -175,6 +175,12 @@ interface Mounting {
 /** The frame a mounting's samples are levelled in: the stored calibration's, else this drive's. */
 const frameOf = (m: Mounting): CompassCalibration | null => m.stored ?? m.session;
 const samplesOf = (m: Mounting) => (m.stored?.samples ?? 0) + (m.session?.samples ?? 0);
+/**
+ * How much a mounting is worth keeping when a new one needs room: a rejected one least, then one learned on this
+ * drive alone (a phone re-seated three times must not push out another regular mount's calibration), then a stored
+ * one, a confirmed stored one most.
+ */
+const keepRank = (m: Mounting) => (m.trust === "rejected" ? 0 : !m.stored ? 1 : m.stored.confirmed ? 3 : 2);
 const tiltBetween = (a: Vec3, b: Vec3) => Math.acos(Math.min(1, dot(a, b)));
 const combined = (m: Mounting): CompassCalibration | null =>
   m.stored && m.session ? mergeCalibrations(m.stored, m.session) : (m.stored ?? m.session);
@@ -194,6 +200,8 @@ export class Compass {
   private yaw: { tUs: number; turn: number }[] = [];
   private yawSum = 0;
   private lastImuUs: number | null = null;
+  /** The phone axis the window is levelled on while no mounting is active: fixed for the window, not per sample. */
+  private windowAxis: 0 | 1 | 2 | null = null;
   /** Compass minus known heading at every trust check (replay statistics). */
   readonly checkDiffs: number[] = [];
 
@@ -259,7 +267,8 @@ export class Compass {
     const up = this.up;
     if (!up) return;
     const frame = this.active ? frameOf(this.active) : null;
-    const axis = (frame?.refAxis ?? horizontalAxis(up)) as number;
+    // Near a 45° tilt the most horizontal axis flips between samples: the window keeps the one it started with.
+    const axis = (frame?.refAxis ?? (this.windowAxis ??= horizontalAxis(up))) as number;
     // e1 = the reference axis projected onto the horizontal, e2 = up × e1 (right-handed, like forward/left).
     const r: Vec3 = [axis === 0 ? 1 : 0, axis === 1 ? 1 : 0, axis === 2 ? 1 : 0];
     const k = dot(r, up);
@@ -385,11 +394,11 @@ export class Compass {
   /** A new mounting, learned from scratch in the current tilt; the least useful one makes room. */
   private addMounting(up: Vec3): Mounting {
     if (this.mountings.length >= this.config.maxMountings) {
-      const spare = [...this.mountings].sort((a, b) => Number(a.used) - Number(b.used) || samplesOf(a) - samplesOf(b))[0];
+      const spare = [...this.mountings].sort((a, b) => keepRank(a) - keepRank(b) || Number(a.used) - Number(b.used) || samplesOf(a) - samplesOf(b))[0];
       this.mountings = this.mountings.filter((m) => m !== spare);
     }
     // The window is already levelled on this axis (no mounting was active).
-    const m: Mounting = { stored: null, session: emptyCalibration(horizontalAxis(up), up), trust: "none", checks: [], fit: null, used: true };
+    const m: Mounting = { stored: null, session: emptyCalibration(this.windowAxis ?? horizontalAxis(up), up), trust: "none", checks: [], fit: null, used: true };
     this.mountings.push(m);
     this.active = m;
     this.lastActive = m;
@@ -417,6 +426,7 @@ export class Compass {
     this.window = [];
     this.sumX = 0;
     this.sumY = 0;
+    this.windowAxis = null;
   }
 
   private straight(): boolean {

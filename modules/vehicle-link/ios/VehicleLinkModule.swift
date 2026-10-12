@@ -245,6 +245,11 @@ final class LinkCore: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
     if central.state != .poweredOn && kind == .ble {
       closeLink(reason: "bluetooth \(state)", notify: true)
     }
+    // A connect waiting for the adapter (auto-connect, no timeout) lost its peripheral when Bluetooth went off:
+    // connect again now that it is back, rather than wait for a "Stop searching".
+    if central.state == .poweredOn, connectPromise != nil, kind == .ble, peripheral == nil, let options = connectOptions {
+      connectBle(options: options)
+    }
   }
 
   func centralManager(_ central: CBCentralManager, willRestoreState dict: [String: Any]) {
@@ -381,6 +386,8 @@ final class LinkCore: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
 
   func connect(options: ConnectOptions, promise: Promise) {
     queue.async {
+      // A connect still pending is superseded: its promise settles, never left hanging.
+      self.failConnect(code: "cancelled", message: "superseded by a new connection")
       self.closeLink(reason: "new connection", notify: false)
       self.connectOptions = options
       self.connectPromise = promise

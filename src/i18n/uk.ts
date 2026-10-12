@@ -395,6 +395,7 @@ export const uk = {
   tripUploadMalformed: "Код — це три короткі слова, як-от bakim-tuvod-segap.",
   tripUploadRejected: "Цей код недійсний. Уточніть його в розробника.",
   tripUploadOffline: "Не вдалося з’єднатися із сервером. Спробуйте ще раз, коли з’явиться інтернет.",
+  tripUploadServerError: "Сервер відповів помилкою. Спробуйте пізніше.",
   tripUploadAs: "Від імені",
   tripUploadSent: "Надіслано",
   tripUploadWaiting: "У черзі",
