@@ -30,7 +30,7 @@ import { NativeDiscovery } from "./vehicle-link/discovery";
 import { TelemetryReporter } from "./telemetry";
 import { jsSourceInfo } from "./js-source";
 import { setTripService } from "./trip-service";
-import { CanAutoIds, type CanAutoStatus } from "./vehicle-link/can-auto-ids";
+import { CanAutoIds, idsAfterBufferFull, type CanAutoStatus } from "./vehicle-link/can-auto-ids";
 import { CanSpeedFeed } from "./vehicle-link/can-speed-feed";
 import { DrivingEmulator } from "./vehicle-link/driving-emulator";
 import { NativeTransport } from "./vehicle-link/native-transport";
@@ -176,6 +176,14 @@ export function getRuntime(): Runtime {
   });
   // A new car (another VIN, or the VIN read late) gets its own ids.
   link.subscribe(() => canAuto.refresh());
+  // More ids than the link carries without the polls' breaks (CAN primary, VEHICLE-LINK-SPEC §16.3): the ones
+  // navigation needs only, for the rest of the session.
+  link.onCanBufferFull(() => {
+    const fewer = idsAfterBufferFull(canIds, canSpeed.profile);
+    if (!fewer) return;
+    recorder.note(`can: buffer full with ${canIds!.length} ids, listening to the ${fewer.length} navigation needs`);
+    listenCan(fewer);
+  });
   const syncCanShadow = () => {
     // Typed ids as typed (a typo: none); nothing typed: picked for the car.
     if (dev.can === "off" || dev.canShadowIds.trim()) {
@@ -372,6 +380,8 @@ export function getRuntime(): Runtime {
       if (patch.outageButton === false) position.setSimulatedOutage(false);
       if (patch.mapMatchLoop) position.setMapMatchLoop(patch.mapMatchLoop);
       if (patch.phoneOnly !== undefined) position.setPhoneOnly(patch.phoneOnly);
+      // The log's info has the setting the drive started with; a change mid-drive is a note (replay reads it).
+      if (patch.can !== undefined) recorder.note(`can bus ${dev.can}`);
       if (patch.can !== undefined || patch.canShadowIds !== undefined) syncCanShadow();
       if (patch.speedCapHz !== undefined || patch.rpmPeriodS !== undefined) syncPolling();
       if (patch.routeHint !== undefined) {

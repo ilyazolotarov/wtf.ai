@@ -1,6 +1,6 @@
 import { allProfiles, makeForVin, type Profile } from "@/nav/odometry/can/profile";
 import type { CanFrame } from "@/obd/can-monitor";
-import { CAN_AUTO_IDS_KEY, CanAutoIds, candidateIds, navigationIds, type CanAutoStatus } from "@/services/vehicle-link/can-auto-ids";
+import { CAN_AUTO_IDS_KEY, CanAutoIds, candidateIds, idsAfterBufferFull, navigationIds, type CanAutoStatus } from "@/services/vehicle-link/can-auto-ids";
 
 // Made-up VINs: only the maker prefix (WMI) matters.
 const MAZDA = "JM1AAAAAA00000000";
@@ -85,5 +85,20 @@ describe("CAN ids picked for the car (VEHICLE-LINK-SPEC §16.4)", () => {
     expect(status(h.auto)).toEqual({ state: "unknown-make" });
     expect(h.listens).toEqual([null]);
     expect(h.notes).toHaveLength(1);
+  });
+});
+
+describe("after BUFFER FULL (VEHICLE-LINK-SPEC §16.3)", () => {
+  const mazda = () => allProfiles().find((p) => p.make === "mazda" && p.wheels)!;
+
+  // 2026-10-13: five typed ids (wheels, gear, steering, accel, engine) outran the MX+'s link without the polls' breaks.
+  test("more ids than navigation needs: down to its own", () => {
+    expect(idsAfterBufferFull([0x215, 0x228, 0x82, 0x78, 0x202], mazda())?.sort()).toEqual([0x215, 0x228]);
+  });
+
+  test("already only those, or the car's profile not known yet: nothing to drop", () => {
+    expect(idsAfterBufferFull([0x228, 0x215], mazda())).toBeNull();
+    expect(idsAfterBufferFull([0x215, 0x228, 0x82], null)).toBeNull();
+    expect(idsAfterBufferFull(null, mazda())).toBeNull();
   });
 });

@@ -188,6 +188,7 @@ export class VehicleLinkCore implements VehicleLink {
   private lastCanStatusUs = 0;
   private canFrames = new Emitter<[CanFrame[]]>();
   private canWindows = new Emitter<[CanWindow]>();
+  private canBufferFull = new Emitter<[CanWindow]>();
   /** CAN primary (developer setting, §16.3): CAN wheel speed for the navigator, OBD polled only standing. */
   private canPrimary = false;
   private lastCanSpeed: { tUs: number; raw: number } | null = null;
@@ -217,6 +218,8 @@ export class VehicleLinkCore implements VehicleLink {
   onCanFrames = (l: (frames: CanFrame[]) => void) => this.canFrames.on(l);
   /** Each CAN shadow listening window, when it closes. */
   onCanWindow = (l: (w: CanWindow) => void) => this.canWindows.on(l);
+  /** A CAN shadow window ended with BUFFER FULL: its ids send more than the link carries (§16.3). */
+  onCanBufferFull = (l: (w: CanWindow) => void) => this.canBufferFull.on(l);
 
   // ---- VehicleLink: discovery ----
 
@@ -912,6 +915,7 @@ export class VehicleLinkCore implements VehicleLink {
           awake: () => this.engine.state === "engine-running" || this.engine.state === "engine-off",
           onFrames: (frames) => this.canFrames.emit(frames),
           onWindow: (w) => this.canWindows.emit(w),
+          onBufferFull: (w) => this.canBufferFull.emit(w),
           onEvent: (detail) => this.event("can-shadow", detail),
           onStatus: (status) => this.onCanStatus(status),
           onFailed: (_reason, silent) => {

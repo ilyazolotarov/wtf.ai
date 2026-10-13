@@ -24,6 +24,16 @@ export function navigationIds(p: Profile): number[] {
   return [...ids];
 }
 
+/**
+ * After BUFFER FULL (the ids send more than the link carries without the polls' breaks, VEHICLE-LINK-SPEC §16.3): the
+ * ids navigation needs, when those listened to are more; null: nothing to drop (or the profile not known yet).
+ */
+export function idsAfterBufferFull(listened: number[] | null, profile: Profile | null): number[] | null {
+  if (!listened || !profile) return null;
+  const needed = navigationIds(profile);
+  return listened.every((id) => needed.includes(id)) ? null : needed;
+}
+
 /** Every id any platform of the VIN's make needs for navigation; empty when the make isn't known. */
 export function candidateIds(vin: string | null): number[] {
   const make = makeForVin(vin);

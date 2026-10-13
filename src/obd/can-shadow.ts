@@ -55,12 +55,24 @@ export interface CanShadowDeps {
   onStatus(status: CanShadowStatus): void;
   /** `silent`: the adapter stopped answering altogether while monitoring. */
   onFailed(reason: string, silent: boolean): void;
+  /**
+   * The monitor ended with BUFFER FULL: the ids send more than the link carries, not the adapter failing. The owner
+   * may listen to fewer ids (§16.3).
+   */
+  onBufferFull?(window: CanWindow): void;
   /** The filter self-test at the first setup (default on; off in unit tests that script the answers). */
   selfTest?: boolean;
 }
 
-/** The monitor ending by itself this many times: back to plain polling for the session. */
+/**
+ * The monitor ending by itself this many times, BUFFER FULL apart: back to plain polling for the session. BUFFER FULL
+ * is the link's capacity, not the adapter failing: with CAN primary the monitor listens without the polls' breaks,
+ * and five ids (~7.3 KB/s) outran the MX+'s link in 2–50 s, three times a drive (2026-10-13), which turned the shadow
+ * off as the car drove off. It is the owner's to answer (`onBufferFull`).
+ */
 const SELF_ENDS_TO_FAIL = 3;
+/** BUFFER FULL events into the link events, up to this many a session. */
+const BUFFER_FULL_EVENTS = 5;
 const SILENT = "no answer at all after stopping the monitor";
 /**
  * Listening this long in a row without a frame of the ids: the receive filter (pinned for the polls) didn't open
@@ -131,6 +143,7 @@ export class CanShadow implements IdleMonitor {
   private frames = 0;
   private windows = 0;
   private selfEnds = 0;
+  private bufferFulls = 0;
   private stopFailures = 0;
   private garbled = 0;
   private windowFrames = 0;
@@ -307,7 +320,15 @@ export class CanShadow implements IdleMonitor {
     // next command (a poll) first has `stop()` pin it.
     this.live = false;
     this.pinDue = true;
-    this.closeWindow(rxUs, true, null, false);
+    const w = this.closeWindow(rxUs, true, null, false);
+    if (w.bufferFull > 0) {
+      const kbps = (w.bytes / Math.max(1, w.endUs - w.startUs)) * 1000;
+      if (++this.bufferFulls <= BUFFER_FULL_EVENTS) {
+        this.deps.onEvent(`buffer full (${this.bufferFulls}) after ${((w.endUs - w.startUs) / 1e6).toFixed(1)} s at ${kbps.toFixed(1)} KB/s`);
+      }
+      this.deps.onBufferFull?.(w);
+      return;
+    }
     this.selfEnds++;
     if (this.selfEnds >= SELF_ENDS_TO_FAIL) this.fail(`the monitor ended by itself ${this.selfEnds} times`);
     else this.deps.onEvent(`the monitor ended by itself (${this.selfEnds}): ${quote(text.slice(-60))}`);

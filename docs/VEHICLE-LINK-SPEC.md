@@ -714,7 +714,15 @@ between them (~45 % of the time with five ids) wheel yaw lost the peaks of sharp
   no speed, RPM or battery reads. A moving car's engine state needs none: the frames themselves say the ECU is awake.
   Standing, or without fresh CAN speed (a deaf monitor, an unknown car), the polls run as always, and with them the
   engine state and ignition-off.
-- **The log** says `can_primary: on` (TRIP-LOGGER-SPEC §6.2): OBD speed only while standing. Replay through the app
+- **BUFFER FULL** (the monitor ending by itself with it) is the link's capacity, not the adapter failing: it doesn't
+  count towards the three self-endings that turn the shadow off (§16.2), and with more ids listened to than navigation
+  needs, the shadow drops to those for the session (note `can: buffer full with 5 ids, listening to the 2 navigation
+  needs`). 2026-10-13: five ids (~7.3 KB/s) without the polls' breaks outran the MX+'s link in 2–50 s, the adapter
+  delivering 361–367 of the 370 frames/s; three times a drive turned the shadow off as the car drove off. The two
+  navigation ids are ~2.9 KB/s.
+- **The log** says `can_primary: on` (TRIP-LOGGER-SPEC §6.2): OBD speed only while standing. A change of the
+  setting mid-drive is the note `can bus off|log|primary`, and the feed's `can primary: speed from the wheels` note
+  marks where the wheels took over. Replay through the app
   (`replayTripInApp`, the viewer, `replay:regress`) then drives the navigator on the decoded wheels
   (`canPrimaryInput`), as the phone did.
 - The developer setting is one row, *CAN bus*: off (default) / log only (§16.2: frames into the log, navigation on

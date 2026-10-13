@@ -193,8 +193,10 @@ export function withWheelYaw(
 
 /**
  * The input the app's navigator had: a log recorded with CAN primary (`can_primary: on`, VEHICLE-LINK-SPEC §16.3) has
- * OBD speed only while standing, the navigator drove on the wheels.
+ * OBD speed only while standing, the navigator drove on the wheels. Turned on mid-drive, the log has the feed's note
+ * instead (`can primary: speed from the wheels`); before it no CAN was heard, so the whole log is as the phone had it.
  */
 export function canPrimaryInput(trip: TripLog): TripLog {
-  return trip.info.can_primary === "on" ? (withCanSpeed(trip) ?? trip) : trip;
+  const primary = trip.info.can_primary === "on" || trip.messages.some((m) => m.text.startsWith("can primary: speed from the wheels"));
+  return primary ? (withCanSpeed(trip) ?? trip) : trip;
 }

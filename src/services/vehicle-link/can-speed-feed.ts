@@ -3,7 +3,7 @@
 // 0.1 s, negative in reverse gear.
 import { CanSpeedAverager, canSpeedReading, type CanSpeedSample } from "@/nav/odometry/can/can-speed";
 import { CarStateDecoder } from "@/nav/odometry/can/car-state";
-import { matchProfiles, seenIds } from "@/nav/odometry/can/profile";
+import { matchProfiles, seenIds, type Profile } from "@/nav/odometry/can/profile";
 import type { CanFrame } from "@/obd/can-monitor";
 import type { SpeedSample } from "@/obd/types";
 
@@ -34,6 +34,11 @@ export class CanSpeedFeed {
   private off: (() => void) | null = null;
 
   constructor(private readonly deps: CanSpeedFeedDeps) {}
+
+  /** The car's profile the speed comes from, once chosen. */
+  get profile(): Profile | null {
+    return this.decoder?.profile ?? null;
+  }
 
   start(): void {
     this.off ??= this.deps.onFrames((frames) => this.onFrames(frames));

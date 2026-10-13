@@ -6,6 +6,7 @@ import type { RawSend } from "@/obd/elm327/session";
 function shadow() {
   const frames: CanFrame[] = [];
   const windows: CanWindow[] = [];
+  const bufferFull: CanWindow[] = [];
   const s = new CanShadow({
     clock: new VirtualClock(),
     writeRaw: async () => undefined,
@@ -18,6 +19,7 @@ function shadow() {
     onEvent: () => undefined,
     onStatus: () => undefined,
     onFailed: () => undefined,
+    onBufferFull: (w) => bufferFull.push(w),
     selfTest: false,
   });
   // OK to every setup command; the stop gets the prompt.
@@ -29,7 +31,7 @@ function shadow() {
     txUs: 0,
     rxUs: 0,
   });
-  return { s, send, frames, windows };
+  return { s, send, frames, windows, bufferFull };
 }
 
 describe("CanShadow", () => {
@@ -130,20 +132,36 @@ describe("CanShadow", () => {
     expect(s.status).toMatchObject({ frames: 2, windows: 1, garbled: 1 });
   });
 
-  test("the monitor ending by itself closes the window; three times turns the shadow off", async () => {
+  test("the monitor ending by itself (not BUFFER FULL) closes the window; three times turns the shadow off", async () => {
     const { s, send, windows } = shadow();
     for (let i = 0; i < 3; i++) {
       await s.start(send);
-      s.onText("2152710271027102710\rBUFFER FULL\r\r>", 100);
+      // The adapter reset under the monitor: its banner and a prompt.
+      s.onText("2152710271027102710\r\rELM327 v1.4b\r\r>", 100);
       expect(s.status.state).toBe(i < 2 ? "waiting" : "failed");
       // Still "running" for the session: the filter is open and needs pinning before the next poll.
       expect(s.running).toBe(true);
       await s.stop(send);
       expect(s.running).toBe(false);
     }
-    expect(windows.every((w) => w.endedItself && w.bufferFull === 1)).toBe(true);
+    expect(windows.every((w) => w.endedItself && w.bufferFull === 0)).toBe(true);
     expect(s.status.state).toBe("failed");
     expect(s.wanted()).toBe(false);
+  });
+
+  // 2026-10-13, CAN primary: five ids without the polls' breaks outran the MX+'s link three times a drive, and the
+  // shadow went off as the car drove off.
+  test("BUFFER FULL is the link's capacity, not the adapter failing: the owner hears of it, the shadow stays on", async () => {
+    const { s, send, windows, bufferFull } = shadow();
+    for (let i = 0; i < 5; i++) {
+      await s.start(send);
+      s.onText("2152710271027102710\rBUFFER FULL\r\r>", 100);
+      expect(s.status.state).toBe("waiting");
+      await s.stop(send);
+    }
+    expect(windows.every((w) => w.endedItself && w.bufferFull === 1)).toBe(true);
+    expect(bufferFull).toHaveLength(5);
+    expect(s.wanted()).toBe(true);
   });
 
   test("a window that ended by itself leaves the filter open: the next stop only pins it, then listening resumes", async () => {
