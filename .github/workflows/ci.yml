@@ -116,6 +116,27 @@ jobs:
       - name: Unit tests
         run: npx jest --ci
 
+  # A job of its own that nothing waits for: expo-doctor compares the dependencies with the newest patch releases
+  # online, so the same commit fails the day Expo publishes one (2026-10-13: 9 packages a patch behind held back the
+  # OTA update and both builds). It still shows red here; `npx expo install --fix` is a deliberate step.
+  doctor:
+    needs: plan
+    if: ${{ needs.plan.outputs.checks == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
       - name: Expo doctor
         run: npx expo-doctor
 

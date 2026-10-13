@@ -13,7 +13,8 @@ covered again by the next run.
 
 | Job                                   | Runs when these changed                                                     |
 | ------------------------------------- | --------------------------------------------------------------------------- |
-| `checks` (lint, tsc, Jest, doctor)    | anything except docs (`docs/`, `*.md`, `.claude/`, …), or a build runs      |
+| `checks` (lint, tsc, Jest)            | anything except docs (`docs/`, `*.md`, `.claude/`, …), or a build runs      |
+| `doctor` (expo-doctor)                | as `checks`; nothing waits for it: it compares the dependencies with Expo's newest patch releases online, so the same commit fails the day one is published. Red here means `npx expo install --fix`, a step of its own (a native change) |
 | `python` (pytest)                     | `tools/triplog/`, `tools/tiles/`                                            |
 | `native-logic` (Swift tests)          | `modules/*/ios/`, `native-tests/`, `Package.swift`                          |
 | `native-logic-android` (Kotlin tests) | `modules/*/android/`, `native-tests-android/`                               |
