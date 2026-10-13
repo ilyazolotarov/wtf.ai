@@ -15,6 +15,9 @@ import { FUSED_WINDOW_US, puckAccuracyM, puckHypothesis } from "@/nav/position/p
 import type { PositionEstimate, PositionSourceKind, RawGnssFix } from "@/nav/position/types";
 import type { CompassTrust } from "@/nav/compass/compass";
 import type { GnssFix, ImuSample, MagSample, ObdSpeedSample } from "@/nav/types";
+import type { CanSpeedSample } from "@/nav/odometry/can/can-speed";
+import { WheelYawSource } from "@/nav/odometry/can/wheel-yaw-source";
+import { ImuProcessor } from "@/nav/odometry/imu/imu-processor";
 import type { EngineState, SpeedSample, VehicleLinkSnapshot } from "@/obd/types";
 import { isSatelliteRecord, mapFixToPosition } from "@/services/position/gnss-position-source";
 import type { RoadGraphSource } from "@/services/offline-map/road-graph-file";
@@ -42,6 +45,13 @@ export const STORAGE_NOTE = "nav storage ";
 const TICK_MS = 500;
 /** Inputs are held this long and fed in time order: IMU arrives in 100 ms batches, fixes ~50 ms late. */
 export const REORDER_US = 300_000;
+/**
+ * With CAN wheel samples (speed, turning): they come at the bus's time (frame-timing.ts), up to ~0.4 s before they
+ * arrive, and one arriving after the navigator passed its time would be dropped.
+ */
+export const CAN_REORDER_US = 500_000;
+/** CAN speed this recent: the inputs are held `CAN_REORDER_US`. */
+const CAN_RECENT_US = 5_000_000;
 /** A fix delivered later than this behind the navigator is dropped (its state history spans 3 s). */
 const LATE_FIX_MAX_US = 2_000_000;
 /** Without OBD speed for this long the map falls back to phone GNSS (the EKF's speed has drifted). */
@@ -152,6 +162,8 @@ export interface NavigatorServiceDeps {
   observer?: NavigatorObserver;
   /** A reader of the active region's road graph of its own, for phone-only mode (§9.6); null: none. */
   openPhoneGraph?(): { key: string; graph: PhoneGraph; close(): void } | null;
+  /** The CAN wheel samples (CAN primary), for the navigator's turning with `setWheelYaw` (NAVIGATOR-SPEC §5.4). */
+  canSpeed?: { onSample(listener: (s: CanSpeedSample) => void): () => void };
 }
 
 export interface ServiceClock {
@@ -179,6 +191,7 @@ type Input =
   | { tUs: number; imu: ImuSample }
   | { tUs: number; mag: MagSample }
   | { tUs: number; obd: ObdSpeedSample }
+  | { tUs: number; wheels: CanSpeedSample }
   | { tUs: number; fix: GnssFix; record: GnssRecord };
 
 /** CoreLocation record → navigator fix (as the trip-log reader does); null for unusable fixes. */
@@ -208,6 +221,11 @@ export class NavigatorService implements PositionSource {
 
   private nav: Navigator | null = null;
   private pending: Input[] = [];
+  /** The navigator's turning from the wheels (§5.4): the source, while on. */
+  private wheelYaw: WheelYawSource | null = null;
+  /** The gyro as the navigator would read it, for the wheels to learn from. */
+  private readonly gyroProc = new ImuProcessor();
+  private lastCanUs = -Infinity;
   /** Time of the last input fed to the navigator. */
   private fedUs = -Infinity;
   /** The latest fix (the ghost marker), and the latest the navigator took (phone GNSS shows it: not a refused one). */
@@ -283,6 +301,37 @@ export class NavigatorService implements PositionSource {
     if (this.timer) this.publish();
   }
 
+  /**
+   * The navigator's turning from the rear wheels, not the phone's gyro (NAVIGATOR-SPEC §5.4): with CAN primary the
+   * phone may be in a hand, a pocket or on a seat. The gyro teaches the wheels wherever the two agree.
+   */
+  setWheelYaw(on: boolean): void {
+    if (on === (this.wheelYaw !== null)) return;
+    this.note(`nav wheel yaw ${on ? "on" : "off"}`);
+    if (!on) this.noteWheelYaw();
+    // The defaults turn the wheels; what the gyro teaches is only noted for now (WheelYawSource).
+    this.wheelYaw = on ? new WheelYawSource(null, undefined, false) : null;
+  }
+
+  /** Held this long and fed in time order (`REORDER_US`; `CAN_REORDER_US` with CAN wheel samples). */
+  private get reorderUs(): number {
+    return this.wheelYaw || this.deps.nowUs() - this.lastCanUs < CAN_RECENT_US ? CAN_REORDER_US : REORDER_US;
+  }
+
+  private onWheels(s: CanSpeedSample): void {
+    const w = this.wheelYaw;
+    if (!w) return;
+    w.addWheels(s);
+    this.pending.push({ tUs: s.tUs, wheels: s });
+  }
+
+  private noteWheelYaw(): void {
+    const w = this.wheelYaw;
+    if (!w || w.calibration.learnedS <= 0) return;
+    const c = w.calibration;
+    this.note(`nav wheel yaw: tyres ${(c.tyre * 100).toFixed(3)} % ±${(c.tyreSigma * 100).toFixed(3)}, track ${c.trackM.toFixed(3)} m, learned from ${Math.round(c.learnedS)} s`);
+  }
+
   /** The route the driver follows, for map matching (ROUTING-SPEC §8.6); null: none. Kept for a new navigator. */
   setRouteHint(edges: number[] | null): void {
     if (edges === this.routeHint || (!edges && !this.routeHint)) return;
@@ -315,7 +364,7 @@ export class NavigatorService implements PositionSource {
       this.phone.started = true;
       this.note("nav phone-only start (the driver's placing)");
     }
-    this.flush(this.deps.nowUs() - REORDER_US);
+    this.flush(this.deps.nowUs() - this.reorderUs);
     this.publish();
     return true;
   }
@@ -515,10 +564,11 @@ export class NavigatorService implements PositionSource {
       sensors.gnss.on((r) => this.onGnss(r)),
       sensors.imu.on((batch) => this.onImu(batch.motion, batch.mag)),
       link.onSpeed((s) => this.onSpeed(s)),
+      this.deps.canSpeed?.onSample((s) => this.onWheels(s)) ?? (() => {}),
       link.onEngineState((state) => {
         // Parked: keep the pose for the next start, even if the app is killed later.
         if (state !== "engine-off" && state !== "ignition-off") return;
-        this.flush(this.deps.nowUs() - REORDER_US);
+        this.flush(this.deps.nowUs() - this.reorderUs);
         this.saveCalibration();
         this.noteDrive();
       }),
@@ -727,7 +777,7 @@ export class NavigatorService implements PositionSource {
     // One the navigator never gets (a simulated location, no accuracy) is shown as it was before integrity.
     else this.lastShownFix = r;
     // Process now, so the map doesn't wait for the next tick.
-    this.flush(this.deps.nowUs() - REORDER_US);
+    this.flush(this.deps.nowUs() - this.reorderUs);
     this.publish();
   }
 
@@ -750,13 +800,14 @@ export class NavigatorService implements PositionSource {
         this.held.drop();
       }
     }
-    this.flush(this.deps.nowUs() - REORDER_US);
+    this.flush(this.deps.nowUs() - this.reorderUs);
     // A fix the navigator just took: phone GNSS shows it now rather than at the next tick.
     if (this.shownChanged && this.deps.nowUs() - this.lastObdUs >= OBD_TIMEOUT_US) this.publish();
   }
 
   private onSpeed(s: SpeedSample): void {
     this.lastObdUs = s.tUs;
+    if (s.source === "can") this.lastCanUs = this.deps.nowUs();
     if (s.raw > 0 && this.manual) {
       // Driving: the navigator carries the placing on (it started from it, or from something newer).
       this.note("nav manual position released: the car drives");
@@ -824,10 +875,21 @@ export class NavigatorService implements PositionSource {
         }
       } else if (late) {
         continue;
+      } else if ("wheels" in input) {
+        // In time order with the IMU's: the gyro around it is in.
+        this.wheelYaw?.learn(input.wheels);
+        continue;
       } else if ("imu" in input) {
-        nav.onImu(input.imu);
+        const w = this.wheelYaw;
+        if (w) {
+          const o = this.gyroProc.process(input.imu);
+          w.addGyro(input.tUs, o.valid ? o.yawRate : null);
+          nav.onImu(w.substitute(input.imu) ?? input.imu);
+        } else nav.onImu(input.imu);
       } else if ("mag" in input) {
-        nav.onMag(input.mag);
+        // The compass reads the phone's field against the IMU's "up": with the car's IMU in its place (wheel yaw) it
+        // would learn a mounting from the field turned with the phone, and keep it. Off meanwhile.
+        if (!this.wheelYaw) nav.onMag(input.mag);
       } else {
         nav.onObdSpeed(input.obd);
       }
@@ -840,7 +902,7 @@ export class NavigatorService implements PositionSource {
     this.checkVehicle();
     const ask = this.held.askNote();
     if (ask) this.note(ask);
-    this.flush(this.deps.nowUs() - REORDER_US);
+    this.flush(this.deps.nowUs() - this.reorderUs);
     this.publish();
     if (this.nav) this.notes.compassTrustChange(this.nav);
     if (this.clock.nowMs() - this.lastSaveAt >= SAVE_EVERY_MS) this.saveCalibration();
@@ -852,6 +914,7 @@ export class NavigatorService implements PositionSource {
    */
   private noteDrive(): void {
     if (this.nav) this.notes.compassSummary(this.nav);
+    this.noteWheelYaw();
     this.drainUpdateTimes();
     const timing = this.timing.endDrive();
     if (timing) this.note(timing);
@@ -867,7 +930,7 @@ export class NavigatorService implements PositionSource {
     const fix = this.lastFix;
     const nav = this.nav;
     // Integrity's trust (SPEC §3.3), at the navigator's time: it runs `REORDER_US` behind.
-    const trust = nav ? nav.trustAt(nowUs - REORDER_US) : "NO_FIX";
+    const trust = nav ? nav.trustAt(nowUs - this.reorderUs) : "NO_FIX";
     const trustedUs = nav?.lastTrustedFixUs;
     const lastTrustedFixAt = trustedUs === undefined ? undefined : now - (nowUs - trustedUs) / 1000;
     const estimate = nav?.estimate() ?? null;

@@ -7,6 +7,7 @@ import { LocalFrame } from "@/nav/geo/local-frame";
 import { bufferByteSource } from "@/nav/mapmatch/graph/byte-source";
 import { TiledRoadGraph } from "@/nav/mapmatch/graph/road-graph";
 import type { GnssFix } from "@/nav/types";
+import type { CanSpeedSample } from "@/nav/odometry/can/can-speed";
 import { Emitter } from "@/obd/emitter";
 import type { EngineState, SpeedSample } from "@/obd/types";
 import type { KeyValueStore } from "@/obd/vehicle-link-core";
@@ -81,6 +82,7 @@ function harness(
   const imu = new Emitter<[ReturnType<typeof decodeImuBatch>]>();
   const speed = new Emitter<[SpeedSample]>();
   const engine = new Emitter<[EngineState, number]>();
+  const wheels = new Emitter<[CanSpeedSample]>();
   const want = jest.fn();
   const notes: string[] = [];
   const logged: NavEstimateRecord[] = [];
@@ -104,11 +106,19 @@ function harness(
     log: (r) => logged.push(r),
     logMapMatch: (r) => loggedMapMatch.push(r),
     roadGraph: options.roadGraph,
+    canSpeed: { onSample: (l) => wheels.on(l) },
     ...(options.phoneGraph ? { openPhoneGraph: () => ({ key: "fixture", graph: options.phoneGraph!(), close: () => {} }) } : {}),
   });
 
   /** Deliver a trip the way the phone does: IMU in 100 ms batches, OBD live, fixes 50 ms late. */
-  function play(drive: SyntheticDrive, opts: { untilS?: number; withoutGnssFromS?: number; withoutObd?: boolean; onStep?: (tUs: number) => void } = {}) {
+  /**
+   * `pocketFromS`: from then the phone turns on its own, 3 °/s more than the car (its gyro about "up").
+   * `wheels`: CAN wheel samples from the true path every 0.1 s (rear track 1.6 m), as CAN primary sends them.
+   */
+  function play(
+    drive: SyntheticDrive,
+    opts: { untilS?: number; withoutGnssFromS?: number; withoutObd?: boolean; onStep?: (tUs: number) => void; pocketFromS?: number; wheels?: boolean } = {},
+  ) {
     const { trip } = drive;
     const endUs = trip.startUs + (opts.untilS ?? Infinity) * 1e6;
     const lastUs = Math.min(endUs, trip.imu.at(-1)!.tUs);
@@ -126,7 +136,23 @@ function harness(
       const batch = [];
       while (i < trip.imu.length && trip.imu[i].tUs <= nowUs) {
         const s = trip.imu[i++];
-        batch.push({ timestampUs: s.tUs, gyro: s.gyro, gravity: s.gravity, userAccel: s.userAccel, attitude: [1, 0, 0, 0] as [number, number, number, number] });
+        let gyro = s.gyro;
+        if (opts.pocketFromS !== undefined && s.tUs >= trip.startUs + opts.pocketFromS * 1e6) {
+          const g = Math.hypot(...s.gravity);
+          const extra = (3 * Math.PI) / 180;
+          gyro = [gyro[0] - (s.gravity[0] / g) * extra, gyro[1] - (s.gravity[1] / g) * extra, gyro[2] - (s.gravity[2] / g) * extra];
+        }
+        batch.push({ timestampUs: s.tUs, gyro, gravity: s.gravity, userAccel: s.userAccel, attitude: [1, 0, 0, 0] as [number, number, number, number] });
+      }
+      if (opts.wheels && nowUs - 200_000 > trip.startUs) {
+        // The sample for the 0.1 s that ended 0.1 s ago (the link's delay), its yaw from the true heading's change.
+        const t = nowUs - 200_000;
+        const a = drive.truthAt(t - 50_000);
+        const b = drive.truthAt(t + 50_000);
+        const yaw = -Math.atan2(Math.sin(b.psi - a.psi), Math.cos(b.psi - a.psi)) / 0.1;
+        const v = drive.truthAt(t).speedMps;
+        const diff = 1.6 * yaw;
+        wheels.emit({ tUs: t, speedMps: v, wheelsMps: [v, v, v - diff / 2, v + diff / 2], gear: "D", reverse: false });
       }
       const mag = [];
       while (k < trip.mag.length && trip.mag[k].tUs <= nowUs) {
@@ -280,6 +306,27 @@ describe("NavigatorService", () => {
     expect(last.behindUs).toBeLessThanOrEqual(500_000);
     expect(logged.some((r) => r.source === "fused")).toBe(true);
     service.stop();
+  });
+
+  // NAVIGATOR-SPEC §5.4: a phone in a pocket turns with the driver; the wheels turn with the car.
+  test("the phone in a pocket through a GNSS outage: lost on its gyro, on track with the turning from the wheels", async () => {
+    const errorAtEnd = async (wheelYaw: boolean) => {
+      const drive = syntheticDrive({ segments: cityDrive(4), gnss: "clean", obdScale: 0.985, startHeadingRad: 1 });
+      const { service, play, notes } = harness();
+      await service.start();
+      service.setWheelYaw(wheelYaw);
+      const durationS = (drive.trip.imu.at(-1)!.tUs - drive.trip.startUs) / 1e6;
+      play(drive, { withoutGnssFromS: durationS - 60, pocketFromS: durationS - 60, wheels: true });
+      const err = haversineM(service.getSnapshot()!, drive.truthAt(drive.trip.imu.at(-1)!.tUs));
+      service.stop();
+      return { err, notes };
+    };
+    const off = await errorAtEnd(false);
+    const on = await errorAtEnd(true);
+    // 60 s and ~650 m: 3 °/s of the phone's own turning is 180° of heading.
+    expect(off.err).toBeGreaterThan(100);
+    expect(on.err).toBeLessThan(15);
+    expect(on.notes).toContain("nav wheel yaw on");
   });
 
   test("falls back to phone GNSS when OBD speed stops", async () => {
@@ -720,6 +767,20 @@ describe("compass in shadow", () => {
     expect(Math.abs(parseFloat(atStart.slice("nav compass at start: ".length)))).toBeLessThan(10);
     expect(second.service.getDebug().compassOffDeg).not.toBeNull();
     second.service.stop();
+  });
+
+  // The compass reads the phone's field against the IMU's "up"; with the turning from the wheels the IMU is the car's.
+  test("with the turning from the wheels it learns nothing, and keeps nothing", async () => {
+    const store = memoryStore();
+    const drive = syntheticDrive({ segments: ROUND, gnss: "clean", magnetometer: {}, seed: 5 });
+    const h = harness({ store });
+    await h.service.start();
+    h.service.setWheelYaw(true);
+    h.play(drive, { wheels: true });
+    h.engine.emit("engine-off", h.now());
+    h.service.stop();
+    expect(h.notes.some((n) => n.startsWith("nav compass none → confirmed"))).toBe(false);
+    expect(new CalibrationStore(store, PHONE).compassCalibrations(VIN)).toHaveLength(0);
   });
 
   test("another car doesn't get it", async () => {

@@ -221,6 +221,7 @@ export const en = {
   canModeOff: "off",
   canModeLog: "log only",
   canModePrimary: "speed from wheels",
+  wheelYawSetting: "Turning from the wheels (the phone may be anywhere)",
   canShadowIds: "CAN ids (hex), empty: automatic",
   canAutoNoVin: "Automatic ids: waiting for the VIN",
   canAutoUnknown: "Automatic ids: no CAN profile for this make",

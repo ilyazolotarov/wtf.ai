@@ -61,6 +61,9 @@ export default function DeveloperScreen() {
           format={(v) => t(v === "off" ? "canModeOff" : v === "log" ? "canModeLog" : "canModePrimary")}
           onChange={(v) => setDevSettings({ can: v })}
         />
+        {dev.can === "primary" && (
+          <SwitchRow value={dev.wheelYaw} onValueChange={(v) => setDevSettings({ wheelYaw: v })} label={t("wheelYawSetting")} />
+        )}
         {dev.can !== "off" && (
           <TextInput
             value={canIds}

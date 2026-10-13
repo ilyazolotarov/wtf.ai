@@ -7,7 +7,8 @@
 // result has the same track, fixes, particles and summary as `replayTrip`.
 // Drives replayed in order with one CalibrationStore carry what the app keeps from drive to drive.
 
-import { canPrimaryInput } from "@/nav/replay/can";
+import { canPrimaryInput, decodeTripCan } from "@/nav/replay/can";
+import { canSpeedSamples, type CanSpeedSample } from "@/nav/odometry/can/can-speed";
 import type { MapMatchConfig } from "@/nav/mapmatch/particle-filter";
 import type { NavConfig } from "@/nav/navigator";
 import type { PhoneGraph } from "@/nav/phone/phone-navigator";
@@ -100,6 +101,11 @@ export interface AppReplayOptions extends Pick<RecorderOptions, "trackStepS" | "
   placings?: boolean;
   /** The routes the driver follows, each from `fromS` (s since the log's start); the app's route service doesn't run. */
   phoneRoutes?: { fromS: number; points: { lat: number; lon: number }[] | null }[];
+  /**
+   * The navigator's turning from the CAN wheels (NAVIGATOR-SPEC §5.4), as the app's `setWheelYaw`, for the whole
+   * drive. Default: as the log says, from the start (`nav_wheel_yaw: on`) and at each note `nav wheel yaw on|off`.
+   */
+  wheelYaw?: boolean;
 }
 
 export interface AppReplayResult extends ReplayResult {
@@ -196,8 +202,10 @@ export function replayTripInApp(logged: TripLog, o: AppReplayOptions): AppReplay
     ...(graph ? { mapMatch: { graph: graph.graph, ...o.mapMatch } } : {}),
   });
 
+  const wheelSamples = new Channel<[CanSpeedSample]>();
   const service = new NavigatorService({
     sensors: { gnss, imu, want: () => {} } as never,
+    canSpeed: { onSample: wheelSamples.on },
     link: {
       onSpeed: speed.on,
       onEngineState: engine.on,
@@ -230,6 +238,11 @@ export function replayTripInApp(logged: TripLog, o: AppReplayOptions): AppReplay
   });
   if (o.loop) service.setMapMatchLoop(o.loop);
   if (o.phoneOnly) service.setPhoneOnly(true);
+  const wheelYaw = o.wheelYaw ?? trip.info.nav_wheel_yaw === "on";
+  const yawSwitches =
+    o.wheelYaw !== undefined ? [] : trip.messages.flatMap((m) => (m.text === "nav wheel yaw on" || m.text === "nav wheel yaw off" ? [{ tUs: m.tUs, on: m.text.endsWith(" on") }] : []));
+  const wheels = wheelYaw || yawSwitches.some((s) => s.on) ? canSpeedSamples(decodeTripCan(trip)?.samples ?? []) : [];
+  if (wheelYaw) service.setWheelYaw(true);
 
   // The inputs, each at the time the app would get it.
   const records = (() => {
@@ -260,12 +273,15 @@ export function replayTripInApp(logged: TripLog, o: AppReplayOptions): AppReplay
   let en = 0;
   let pr = 0;
   let pl = 0;
+  let wh = 0;
+  let ys = 0;
   const placings = o.placings === false ? [] : driverPlacings(trip);
   while (nowUs < endUs + IMU_BATCH_US) {
     nowUs += IMU_BATCH_US;
     // The scenario's outage, as the developer switch would set it.
     service.setSimulatedOutage(rec.inCut(tS(nowUs)));
     while (o.phoneRoutes && pr < o.phoneRoutes.length && o.phoneRoutes[pr].fromS <= tS(nowUs)) service.setPhoneRoute(o.phoneRoutes[pr++].points);
+    while (ys < yawSwitches.length && yawSwitches[ys].tUs <= nowUs) service.setWheelYaw(yawSwitches[ys++].on);
     while (pl < placings.length && placings[pl].tUs <= nowUs) {
       const p = placings[pl++];
       service.setUserPosition(p, p.headingRad);
@@ -280,6 +296,7 @@ export function replayTripInApp(logged: TripLog, o: AppReplayOptions): AppReplay
       speed.emit({ txUs: 2 * s.tUs - rx, rxUs: rx, tUs: s.tUs, speedMps: s.speedMps, raw: s.rawKph, ...(s.source ? { source: s.source } : {}) });
     }
     while (g < fixes.length && arrival(fixes[g]) <= nowUs) gnss.emit(fixes[g++]);
+    while (wh < wheels.length && wheels[wh].tUs <= nowUs) wheelSamples.emit(wheels[wh++]);
     const motion: ImuMotionRecord[] = [];
     while (i < trip.imu.length && trip.imu[i].tUs <= nowUs) {
       const s = trip.imu[i++];

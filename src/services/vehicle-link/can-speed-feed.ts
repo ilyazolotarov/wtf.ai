@@ -37,8 +37,15 @@ export class CanSpeedFeed {
   private gaveUp = false;
   private vin: string | null = null;
   private off: (() => void) | null = null;
+  private readonly samples = new Set<(s: CanSpeedSample) => void>();
 
   constructor(private readonly deps: CanSpeedFeedDeps) {}
+
+  /** Each wheel sample (0.1 s of frames, at the bus's time), for the navigator's turning (NAVIGATOR-SPEC §5.4). */
+  onSample(listener: (s: CanSpeedSample) => void): () => void {
+    this.samples.add(listener);
+    return () => this.samples.delete(listener);
+  }
 
   /** The car's profile the speed comes from, once chosen. */
   get profile(): Profile | null {
@@ -100,6 +107,7 @@ export class CanSpeedFeed {
       for (const s of this.decoder.push(f.tUs, f.id, f.data)) {
         for (const c of this.averager.push(s)) {
           this.deps.push(toSpeedSample(c));
+          this.samples.forEach((l) => l(c));
         }
       }
     }

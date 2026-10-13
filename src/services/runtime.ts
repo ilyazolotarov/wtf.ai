@@ -55,6 +55,11 @@ export interface DevSettings {
   can: CanMode;
   /** Hex ids, separated by spaces or commas; empty: picked for the car from its VIN (§16.4). */
   canShadowIds: string;
+  /**
+   * With `can: "primary"`: the navigator's turning from the rear wheels, not the phone's gyro (NAVIGATOR-SPEC §5.4),
+   * so the phone may be in a hand, a pocket or on a seat.
+   */
+  wheelYaw: boolean;
   /** OBD speed poll cap, Hz; null: automatic (`OBD_SPEED_HZ`, or the per-car cap). */
   speedCapHz: number | null;
   /** RPM poll period while the engine runs, s. */
@@ -108,6 +113,7 @@ export function getRuntime(): Runtime {
     phoneOnly: false,
     can: "off",
     canShadowIds: "",
+    wheelYaw: false,
     speedCapHz: null,
     rpmPeriodS: 5,
     ...loadDevSettings(kvStore.getJson(DEV_SETTINGS_KEY)),
@@ -149,6 +155,7 @@ export function getRuntime(): Runtime {
       nav_phone_only: dev.phoneOnly ? "on" : "off",
       can_shadow: dev.can === "off" ? "off" : dev.canShadowIds.trim() || "auto",
       can_primary: dev.can === "primary" ? "on" : "off",
+      nav_wheel_yaw: dev.can === "primary" && dev.wheelYaw ? "on" : "off",
     }),
   });
   recorder.start();
@@ -266,12 +273,16 @@ export function getRuntime(): Runtime {
     logMapMatch: (record) => recorder.navMapMatch(record),
     // Map matching on the active offline region's road graph (MAPMATCH-SPEC §11).
     roadGraph: activeRoadGraph,
+    // The wheels' samples for the navigator's turning (NAVIGATOR-SPEC §5.4, `setWheelYaw`).
+    canSpeed: canSpeed,
     // Phone-only mode reads the graph in a frame of its own (NAVIGATOR-SPEC §9.6).
     openPhoneGraph: () => openActiveRoadGraph(PHONE_GRAPH_CACHE_TILES),
     permission: { get: Location.getForegroundPermissionsAsync, request: Location.requestForegroundPermissionsAsync },
   });
   position.setMapMatchLoop(dev.mapMatchLoop);
   position.setPhoneOnly(dev.phoneOnly);
+  const syncWheelYaw = () => position.setWheelYaw(dev.can === "primary" && dev.wheelYaw);
+  syncWheelYaw();
   // During a trip the navigator keeps running with the map off screen, so dead reckoning
   // doesn't start over each time the app comes back.
   const syncKeepAlive = () => position.setKeepAlive(recorder.getSnapshot().state === "recording");
@@ -384,6 +395,8 @@ export function getRuntime(): Runtime {
       // The log's info has the setting the drive started with; a change mid-drive is a note (replay reads it).
       if (patch.can !== undefined) recorder.note(`can bus ${dev.can}`);
       if (patch.can !== undefined || patch.canShadowIds !== undefined) syncCanShadow();
+      // The service notes the change (`nav wheel yaw on|off`): only with CAN primary does the setting turn anything on.
+      if (patch.can !== undefined || patch.wheelYaw !== undefined) syncWheelYaw();
       if (patch.speedCapHz !== undefined || patch.rpmPeriodS !== undefined) syncPolling();
       if (patch.routeHint !== undefined) {
         const plan = routes.getSnapshot()?.plan;

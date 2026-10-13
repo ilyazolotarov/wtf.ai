@@ -136,6 +136,7 @@ modules/sensor-capture ─▶ src/services/sensor-capture ──(SensorStream)�
 | `char[] nav_route_hint`           | `on` / `off`: map matching told the active route (ROUTING-SPEC §8.6, developer setting); a change is the note `nav route hint …` |
 | `char[] nav_phone_only`           | `on` / `off`: navigation without an adapter (NAVIGATOR-SPEC §9.6, developer setting); a change is the note `nav phone-only …` |
 | `char[] can_shadow`               | the CAN shadow's ids as typed (VEHICLE-LINK-SPEC §16.2, developer setting), `auto` (picked for the car, §16.4; `no ids` before 2026-10-13), or `off` |
+| `char[] nav_wheel_yaw`            | `on` / `off`: the navigator's turning from the CAN wheels (NAVIGATOR-SPEC §5.4, developer setting, with CAN primary only); a switch is the note `nav wheel yaw on` / `off`; absent before 2026-10-13 |
 | `char[] can_primary`              | `on` / `off`: the navigator's speed from the CAN wheels, OBD polled only standing (VEHICLE-LINK-SPEC §16.3); absent before 2026-10-13 |
 
 ### 6.3 Data messages (`F` + `D`)

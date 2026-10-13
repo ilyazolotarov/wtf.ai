@@ -121,32 +121,43 @@ jammed:
   5 s. Laid one period after the last frame across a poll's break instead, every frame after it came up to 0.3 s
   early: the wheels' turning 20–120 ms ahead of the gyro, the speed samples 0.2 s old as they came out.
 
-### 5.4 Wheel yaw (SPEC §2.1 Stage 2; replay only for now)
+### 5.4 Wheel yaw (SPEC §2.1 Stage 2; developer setting with CAN primary, off by default)
 
-- The rear wheels aren't steered: (right − left) / track is the car's yaw rate (`odometry/can/wheel-yaw.ts`,
-  track 1.60 m, opposite in reverse), whatever the phone does — the way to navigate with the phone in a hand, a
-  pocket or on a seat. Against the mounted phone's gyro on the drives of 2026-10-11/12: correlation 0.95–0.98,
-  0.1 s behind it, |difference| median 0.3–0.5 °/s, 99 % under 2.4–3.5 °/s; the track fitted 1.60–1.63 m (the car's
-  spec: 1.595 m). The one handling while driving differed by 51 °/s: a consistency check between the two is how the
-  app would know the phone moves on its own, wherever it lies (the handling flag only sees it picked up).
-- Replay: `withWheelYaw` (`nav/replay/can.ts`) puts the wheel yaw in the gyro's place from `fromS`;
-  `replay:regress --speed can --yaw wheels [--yaw-from s --yaw-cal]`. Wheels alone, against the drawn truth
-  (2026-10-12, 8 seeds): the three MX+ drives as with the gyro; the vLinker drive off the drawn road 7 s (median)
-  against 1, one seed lost.
-- **What's left:** the vLinker's unanswered stops (VEHICLE-LINK-SPEC §16.2) left 1.1 s of a turn unheard; the rear
-  tyres' radii a few hundredths of a percent apart read as 0.2–0.9 °/s of turning at 60–67 km/h on a straight road.
-  Learning track and tyre from the gyro while both agree (`wheel-yaw-calibration.ts`) found 1.59–1.61 m and
-  −0.005…−0.02 % within a drive, and the wheels' heading after the gyro stopped was no better than with the defaults
-  (worst 7–22° against 6–14° over 1–4 min): the rest is turn-by-turn noise, not calibration. Not in the app.
-- **Phone on the seat, in a pocket** (2026-10-13, drawn, jammed, 8 seeds): lying on the seat the gyro follows the
-  car as in the mount (0–5 s off the drawn road); in a trouser pocket it doesn't (78–198 s off, 35–53 jumps, ends
-  260–450 m out), and the handling flag saw 2–15 % of that time. Gyro and wheels apart, over the heard time only:
-  mount 2.5–4.9 °/min, seat 6–7, pocket 7.6–18.
-- **Wheels need to be heard all the time:** between windows (the polls' breaks, ~45 % of the time with five ids)
-  the yaw is drawn straight across and a sharp turn's peak is cut, so the wheels came out 5–10 % short of the gyro
-  in town; on wheels alone the seat drive went 52–135 s off the drawn road, and with the gyro in the breaks
-  (`--yaw-gaps gyro`) it was as with the gyro. In the pocket the wheels alone were off 54–238 s. Navigating on wheel
-  yaw needs the monitor without the 2 Hz speed polls: CAN speed in their place (VEHICLE-LINK-SPEC §16.2).
+The rear wheels aren't steered: (right − left) / track is the car's yaw rate, whatever the phone does — the way to
+navigate with the phone in a hand, a pocket or on a seat. A phone lying on the seat follows the car as in the mount
+(0–5 s off the drawn road, 2026-10-13); in a trouser pocket it turns with the driver (78–198 s off, ends 260–450 m
+out), and the handling flag saw 2–15 % of that time.
+
+- **The source** (`odometry/can/wheel-yaw-source.ts`, one code for the app's `NavigatorService.setWheelYaw` and
+  replay's `withWheelYaw`): the CAN wheel samples (CAN primary, VEHICLE-LINK-SPEC §16.3) give the yaw, track 1.60 m,
+  opposite in reverse, placed 0.1 s earlier (the wheels lag the gyro by −40…+100 ms, drive by drive; the
+  correlation is flat across that). Each IMU sample becomes the car's: the wheels' yaw about a vertical "up", the
+  phone's acceleration kept, its tilt and turning left out — so its movements don't read as handling, which takes
+  the turning for unknown 1.5 s each time. In a break in listening the phone's own turning, still in the car's frame
+  (switching frames at every break read as handling twice a second: 12–88 s off the road on drives the gyro had
+  0–2); no wheel sample within 1 s: the phone's sample as it is.
+- **The compass gets no field** meanwhile (§7.6): it reads the phone's field against the IMU's "up", and with the
+  car's IMU in its place it would learn, and keep, a mounting from a field that turns with the phone.
+- **The service** holds its inputs 0.5 s instead of 0.3 while CAN speed comes or wheel yaw is on: a wheel sample
+  comes out of the feed 0.07–0.15 s after its time at the median, one in ten over 0.3 s (the 0.1 s average waits for
+  the next frame; the link's bursts). One later than the hold is dropped; for the turning the sample before it
+  stands in.
+- **The tyres' difference** is learned (`odometry/can/wheel-yaw-calibration.ts`): over 5 s stretches, ∫ difference =
+  track · ∫ gyro yaw + tyre · distance, a stretch that differs from the gyro by over 3° + 10 % (the phone moving on
+  its own) teaching nothing; the track stays 1.60 m. The right rear read slow by 0.025 % one day, 0.056 % and
+  0.119 % the next morning and afternoon: 0.55 °/s of turning that isn't, at 46 km/h. **Noted, not applied**
+  (`nav wheel yaw: tyres …` at a drive's end): applied, it put a mounted drive back on the drawn road (0 s on 6
+  seeds of 8, against 11–74), but with the phone in a pocket for the whole drive the stretches that agreed by chance
+  taught it wrong (252–408 s off against 217–249).
+- **Measured** (`replay:regress --speed can --yaw wheels`, the app's path, against the gyro; 2026-10-12/13, drawn,
+  8 seeds): the pocket drive 217–249 s off the drawn road against 312–382; with CAN primary and the phone mounted
+  7–8 s against 5–40. **What's left:** mounted drives recorded with the polls' breaks came out 11–117 s off against
+  0–37: the tyres' difference (the wheels' heading 22° from the gyro's over 4 min on one) and the breaks' gaps. With
+  CAN primary the monitor listens without breaks while the car moves; the tyres' term still needs learning that the
+  pocket can't spoil.
+- Replay: the log says `nav_wheel_yaw: on` and each switch is the note `nav wheel yaw on|off`; `replayTripInApp`
+  turns the wheels on and off as the phone did. Experiments: `--yaw wheels --yaw-from s` (the phone off the mount
+  from then), `--yaw-cal` (the learned tyre term applied), `--yaw-gaps gyro`.
 
 ## 6. EKF (`ekf/dr-ekf.ts`) and heading initialization
 
@@ -402,7 +413,8 @@ Measured on the 7 drives of 2026-10-04 (`mag_raw`, 19.4 Hz):
 ### 7.6 Compass (`compass/compass.ts`; in the app in shadow only)
 
 - **Input:** `Navigator.onMag` (raw field), the IMU's gravity and yaw rate, `setCompassCalibrations` from earlier
-  drives; `compassCalibrations` is what to keep for the next drive.
+  drives; `compassCalibrations` is what to keep for the next drive. No field while the turning comes from the wheels
+  (§5.4): the IMU is then the car's, not the phone's.
 - **Model** (§7.5): levelled horizontal field = offset + rotation and scale of Earth's field, in a frame fixed to
   the phone (the axis nearest the horizontal, projected). Kept as the fit's normal equations, so drives add up.
   Holds only for the mounting it was learned in.

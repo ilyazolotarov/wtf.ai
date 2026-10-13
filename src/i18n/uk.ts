@@ -233,6 +233,7 @@ export const uk = {
   canModeOff: "вимкнено",
   canModeLog: "лише запис",
   canModePrimary: "швидкість із датчиків коліс",
+  wheelYawSetting: "Повороти з датчиків коліс (телефон може бути будь-де)",
   canShadowIds: "CAN ID (шістнадцяткові); порожньо — автоматично",
   canAutoNoVin: "Автовибір CAN ID: чекаємо на VIN",
   canAutoUnknown: "Автовибір CAN ID: немає профілю для цієї марки авто",

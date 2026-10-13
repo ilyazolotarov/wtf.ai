@@ -200,7 +200,10 @@ function runJob(job: Job): DriveResult[] {
         : job.speed === "can"
           ? (withCanSpeed(obd) ?? obd)
           : obd;
-      const input = job.yaw === "wheels" ? (withWheelYaw(speedInput, { fromS: job.yawFromS, calibrate: job.yawCal, gaps: job.yawGaps })?.trip ?? speedInput) : speedInput;
+      // Wheels as the app turns on them (the service's `setWheelYaw`), or an experiment of the IMU's rewrite:
+      // the phone off the mount from a time, the learned tyre term applied, the gyro in the polls' breaks.
+      const experiment = job.yaw === "wheels" && (job.yawFromS !== undefined || job.yawCal || job.yawGaps === "gyro");
+      const input = experiment ? (withWheelYaw(speedInput, { fromS: job.yawFromS, calibrate: job.yawCal, gaps: job.yawGaps })?.trip ?? speedInput) : speedInput;
       const r = replayTripInApp(input, {
         calibration,
         loop: (job.nav.mapMatchLoop ?? APP_NAV_DEFAULTS.mapMatchLoop ?? "closed") as MapMatchLoop,
@@ -209,6 +212,7 @@ function runJob(job: Job): DriveResult[] {
         cuts: appOutageCuts(trip),
         nav: job.nav,
         mapMatchConfig: { ...job.mm, seed: job.seed },
+        ...(job.yaw === "wheels" && !experiment ? { wheelYaw: true } : {}),
         ...(phoneApp
           ? {
               phoneOnly: {
