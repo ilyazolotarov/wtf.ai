@@ -303,7 +303,16 @@ next maneuver and the distance to it, and the one after when it follows within 1
   drawn, faded. A failed re-plan keeps the old route and retries at the next `off` after the cooldown. A failed
   first plan ends in `failed` with the reason.
 - **Not while map matching is `offroad`**: the filter itself says the dot is on no road, so `off` means "the car is
-  lost", not "the car turned", and a plan from a dot beside the road starts off it and goes off again at once.
+  lost", not "the car turned", and a plan from a dot beside the road starts off it and goes off again at once —
+  unless the driver vouched for the dot: within 500 m of putting the car on the map (the navigator's
+  `DRIVER_WORD_M`, `PositionEstimate.sinceDriverM`), or standing where it parked off the roads (`parkedOffRoad`).
+  There `offroad` is a car on a lot. 2026-10-13: placed on a lot, the car drove off it, and the route waited for a
+  road 50 s.
+- **The driver puts the car on the map** off the route (not `on`): planned from there at once, whatever the wait or
+  map matching says (reason `placed`). A placing is a new `manual.placedAt` on the position (NAVIGATOR-SPEC §6.3),
+  each one counts, standing or not; the driver's "still here: yes" isn't one. One made before the route started is
+  where it was planned from, and one made while a plan is on its way is planned from once that plan is in.
+  2026-10-13: placed 501 m from a lost dot, the route stayed "unsure, 378 m off" for 7 minutes.
 - **The wait** starts at 10 s and doubles for each off-route plan whose route goes `off` again within a minute of
   being made, up to 160 s; a route that stays on for a minute clears the streak. A plan that did not survive its
   own first seconds did not fix anything: the route was never the problem, the position was. A route the car was on

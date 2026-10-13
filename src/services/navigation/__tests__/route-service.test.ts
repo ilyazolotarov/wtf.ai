@@ -133,6 +133,74 @@ describe("RouteService", () => {
     expect(h.routes.map((r) => r.reason)).toEqual(["new", "off-route"]);
   });
 
+  /** The position's manual position: the driver placed the car at `placedAt` (ms). */
+  const placing = (placedAt: number, confirmedAt = placedAt) => ({ manual: { placedAt, confirmedAt, asking: false }, sinceDriverM: 0, speedMps: 0 });
+
+  // 2026-10-13: placed 501 m from a lost dot, on a lot; the route stayed "unsure, 378 m off" for 7 minutes.
+  test("the driver places the car off the route: a new route from there at once, on a lot or not", () => {
+    const h = harness();
+    h.move(0.2, 0);
+    h.service.start(at(1, -0.6));
+    h.flush();
+    // A second later (well inside the wait), the car put on the map off the route, beside the road.
+    h.tick(1000);
+    h.move(3, 0.4, { mapMatch: "offroad", ...placing(1) });
+    h.flush();
+    expect(h.routes.map((r) => r.reason)).toEqual(["new", "placed"]);
+    // On the new route, the same placing, and the driver's "still here: yes" to it, change nothing.
+    h.tick(1000);
+    h.move(3, 0.4, { mapMatch: "offroad", ...placing(1, 2) });
+    h.tick(1000);
+    h.move(3, 0.4, { mapMatch: "tracking", ...placing(1, 2), sinceDriverM: 0.5 });
+    h.flush();
+    expect(h.routes.map((r) => r.reason)).toEqual(["new", "placed"]);
+    // Placed again elsewhere, not having moved (in a car park ~50 m off the road): from there too.
+    h.tick(1000);
+    h.move(0.2, 1.6, { mapMatch: "offroad", ...placing(3) });
+    h.flush();
+    expect(h.routes.map((r) => r.reason)).toEqual(["new", "placed", "placed"]);
+  });
+
+  test("a placing from before the route is where it starts: not planned again at once, off the road or not", () => {
+    const h = harness();
+    // Placed in a car park ~50 m from the road, then the destination set.
+    h.move(0.2, 1.6, placing(1));
+    h.service.start(at(1, -0.6));
+    h.flush();
+    h.tick(1000);
+    h.move(0.2, 1.6, placing(1));
+    h.flush();
+    expect(h.routes.map((r) => r.reason)).toEqual(["new"]);
+  });
+
+  test("placed while the route is being planned: planned again from the placing once that plan is in", () => {
+    const h = harness();
+    h.move(0.2, 0);
+    h.service.start(at(1, -0.6));
+    h.move(3, 0.4, { mapMatch: "offroad", ...placing(1) });
+    h.flush();
+    expect(h.routes.map((r) => r.reason)).toEqual(["new", "placed"]);
+  });
+
+  test("map matching off-road within 500 m of the driver's placing doesn't hold a new route back; farther it does", () => {
+    for (const [fromM, expected] of [
+      [0, ["new", "off-route"]],
+      [800, ["new"]],
+    ] as const) {
+      const h = harness();
+      h.move(0.2, 0, { sinceDriverM: fromM });
+      h.service.start(at(1, -0.6));
+      h.flush();
+      // Straight on east past the turn, across a lot: the filter says off the roads.
+      for (let i = 1; i <= 12; i++) {
+        h.tick(1000);
+        h.move(1 + 0.25 * i, 0, { mapMatch: "offroad", sinceDriverM: fromM + 10 * i });
+      }
+      h.flush();
+      expect(h.routes.map((r) => r.reason)).toEqual(expected);
+    }
+  });
+
   test("a plan that goes off route again at once doubles the wait, and a plan that lasts clears it", () => {
     const h = harness();
     h.move(0.2, 0);

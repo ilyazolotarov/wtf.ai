@@ -40,6 +40,8 @@ export interface PositionEstimate {
   mapMatch?: MapMatchState;
   /** Standing where it was parked off the roads, started from there: `offroad` is where the car is, not lost. */
   parkedOffRoad?: boolean;
+  /** Driven since the driver put the car on the map (or confirmed the parked pose), m (NAVIGATOR-SPEC §6.2). */
+  sinceDriverM?: number;
   /** Other roads the car may be on while map matching is ambiguous, heaviest first. */
   alternatives?: { lat: number; lon: number; weight: number }[];
   simulatedOutage?: SimulatedOutage;

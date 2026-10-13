@@ -261,6 +261,11 @@ export interface NavEstimate {
    * not a lost track (the map doesn't ask to place the car for it).
    */
   parkedOffRoad?: boolean;
+  /**
+   * Driven since the driver put the car on the map (or confirmed the parked pose), m: the placing vouches for the dot
+   * for `DRIVER_WORD_M`. Absent without one this session.
+   */
+  sinceDriverM?: number;
 }
 
 export interface MapMatchEstimate {
@@ -442,7 +447,7 @@ const RELOCATE_GPS_WITHIN_M = 1000;
 /** The fixes that move a lost track lie within this share of their mean residual from it. */
 const RELOCATE_AGREE_SHARE = 0.5;
 /** Fixes don't move a track the driver confirmed or placed until the car has driven this far from there. */
-const DRIVER_WORD_M = 500;
+export const DRIVER_WORD_M = 500;
 
 export interface NavStats {
   imuInvalidS: number;
@@ -917,6 +922,7 @@ export class Navigator {
         ...(this.pf?.isActive ? { mapMatch: this.mapMatchEstimate(this.frame) } : {}),
         ...(this.doubtM === null ? {} : { doubtM: this.doubtM }),
         ...(this.atParkedOffRoadSpot() && this.pf?.output().state === "offroad" ? { parkedOffRoad: true } : {}),
+        ...(this.driverSaidAtM === null ? {} : { sinceDriverM: this.stats.obdDistanceM - this.driverSaidAtM }),
       };
     }
     if (this.anchor) {

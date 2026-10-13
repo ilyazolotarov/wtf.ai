@@ -985,6 +985,7 @@ export class NavigatorService implements PositionSource {
       accuracyM: puckAccuracyM(estimate, top),
       ...(mm ? { mapMatch: mm.state } : {}),
       ...(estimate.parkedOffRoad ? { parkedOffRoad: true } : {}),
+      ...(estimate.sinceDriverM === undefined ? {} : { sinceDriverM: estimate.sinceDriverM }),
       ...(alternatives?.length ? { alternatives } : {}),
       source,
       trust,

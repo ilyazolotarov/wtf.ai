@@ -72,7 +72,7 @@ export type Announcement =
 export interface AnnouncerInput {
   planId: number;
   /** Why this plan replaced the last: an alternative taken is the driver's choice, not a re-plan to announce. */
-  planReason?: "new" | "off-route" | "resume" | "alternative";
+  planReason?: "new" | "off-route" | "resume" | "alternative" | "placed";
   maneuvers: Maneuver[];
   guidance: GuidanceStep;
   speedMps: number;

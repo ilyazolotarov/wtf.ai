@@ -3,6 +3,7 @@
 // and the guidance into the trip log. After a new route is on its way, alternatives are searched the same way
 // (§8.7): never before the route itself, so they never hold up the start.
 
+import { DRIVER_WORD_M } from "@/nav/navigator";
 import type { Coordinate } from "@/nav/geo";
 import { LocalFrame } from "@/nav/geo/local-frame";
 import type { GraphStats, RoadGraph } from "@/nav/mapmatch/graph/road-graph";
@@ -184,6 +185,10 @@ export class RouteService {
   private offSincePlanAt: number | null = null;
   /** How far along the last plan's route the car has been on it. */
   private followedM = 0;
+  /** The driver's placing (`manual.placedAt`) last seen: another one is a new placing. */
+  private seenPlacedAt: number | undefined = undefined;
+  /** A placing not planned from yet (it came while a plan was on its way). */
+  private placedPending = false;
   private unsubscribe: (() => void) | null = null;
   private notedState: GuidanceState | null = null;
   /** For the arrival note: when the route started, the first plan's time and length, and the distance driven. */
@@ -221,6 +226,9 @@ export class RouteService {
         (destination.name ? ` (${destination.name})` : ""),
     );
     this.set({ destination, status: "planning", planId: 0, planReason: "new", replanning: false });
+    // A placing from before is where this route is planned from, not a reason to plan it again.
+    this.seenPlacedAt = this.deps.position.getSnapshot()?.manual?.placedAt;
+    this.placedPending = false;
     this.unsubscribe = this.deps.position.subscribe(this.onPosition);
     this.plan("new");
   }
@@ -332,7 +340,7 @@ export class RouteService {
     this.lastPlanAt = startedAt;
     this.offSincePlanAt = null;
     this.followedM = 0;
-    if (reason === "off-route") this.set({ ...this.snapshot!, replanning: true });
+    if (reason === "off-route" || reason === "placed") this.set({ ...this.snapshot!, replanning: true });
     const step = () => {
       if (this.planning?.id !== id) return;
       slices++;
@@ -353,7 +361,7 @@ export class RouteService {
       }
       const maneuvers = routeManeuvers(graph.graph, r.plan);
       // A re-plan starts where the car drives: it is on the new route, not on its way to it from a car park.
-      this.guidance = new RouteGuidance(r.plan, maneuvers, {}, { joined: reason === "off-route" });
+      this.guidance = new RouteGuidance(r.plan, maneuvers, {}, { joined: reason === "off-route" || reason === "placed" });
       this.notedState = null;
       this.trip ??= { startedAt, plannedS: r.plan.durationS, plannedM: r.plan.lengthM, drivenM: 0, lastAt: null };
       const cur = this.snapshot!;
@@ -560,6 +568,11 @@ export class RouteService {
     const s = this.snapshot;
     const guidance = this.guidance;
     const p = this.deps.position.getSnapshot();
+    const placedAt = p?.manual?.placedAt;
+    if (placedAt !== undefined && placedAt !== this.seenPlacedAt) {
+      this.seenPlacedAt = placedAt;
+      this.placedPending = true;
+    }
     if (!s || !guidance || !p || s.status !== "active") return;
     const trip = this.trip;
     if (trip) {
@@ -602,7 +615,12 @@ export class RouteService {
     this.set({ ...s, guidance: step, ...(this.others.length ? {} : { alternatives: undefined }) });
     if (step.state === "on" && !this.planning) this.followedM = Math.max(this.followedM, step.alongM);
     if (step.state === "off" && !this.planning) this.offSincePlanAt ??= this.now();
-    if (step.state === "off" && !this.planning && this.mayReplan(p)) this.plan("off-route");
+    // The driver just put the car on the map, off this route: plan from there now, whatever the wait or map matching
+    // says (2026-10-13: placed 501 m from the dot on a lot, the route stayed "unsure, 378 m off" for 7 minutes).
+    const placed = this.placedPending && !this.planning;
+    if (placed) this.placedPending = false;
+    if (placed && step.state !== "on" && step.state !== "arrived") this.plan("placed");
+    else if (step.state === "off" && !this.planning && this.mayReplan(p)) this.plan("off-route");
     if (step.state === "arrived" && !this.arrivedTimer) {
       this.dropAlternatives();
       this.arrivedTimer = this.defer(() => this.stop(), ARRIVED_LINGER_MS);
@@ -618,7 +636,10 @@ export class RouteService {
    * the junction, the filter went off-road, and four plans went out in 31 s while it recovered on its own.
    */
   private mayReplan(p: PositionEstimate): boolean {
-    if (p.mapMatch === "offroad") return false;
+    // Unless the driver vouched for the dot lately (`DRIVER_WORD_M`, the navigator's), or the car stands where it parked
+    // off the roads: map matching `offroad` there is a car on a lot, not a lost dot.
+    const vouched = p.parkedOffRoad === true || (p.sinceDriverM !== undefined && p.sinceDriverM < DRIVER_WORD_M);
+    if (p.mapMatch === "offroad" && !vouched) return false;
     const wait = Math.min(REPLAN_COOLDOWN_MS * 2 ** this.replanStreak, REPLAN_COOLDOWN_MAX_MS);
     return this.now() - this.lastPlanAt >= wait;
   }
