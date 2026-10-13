@@ -9,6 +9,11 @@ export interface ProbeResult {
   ok: boolean;
   /** Probe step that failed, for the dev UI. */
   failedStep?: string;
+  /**
+   * Not a byte came back to the reset, nor to ATWS or ATI: nothing at the other end talks. For an adapter that worked
+   * before, most likely another phone holds it (VEHICLE-LINK-SPEC §8.1), or it locked up.
+   */
+  silent?: boolean;
   elmVersion: string | null;
   description: string | null;
   chip: string | null;
@@ -62,19 +67,28 @@ export async function probeAdapter(send: Send, opts: ProbeOptions = {}): Promise
     warnings: [],
   };
 
+  // Whether anything at all came back while resetting.
+  let heard = false;
+  const resetSend: Send = async (command, o) => {
+    const r = await send(command, o);
+    if (r.raw !== "") heard = true;
+    return r;
+  };
+
   // 2. Flush half-typed input; some clones drop the first command after connect.
-  await send("", { timeoutMs: 1000 });
+  await resetSend("", { timeoutMs: 1000 });
 
   // 3. Reset.
-  let reset = await send("ATZ", { timeoutMs: 3000 });
+  let reset = await resetSend("ATZ", { timeoutMs: 3000 });
   if (reset.status === "timeout" || !BANNER.test(text(reset))) {
-    reset = await send("ATWS", { timeoutMs: 3000 });
+    reset = await resetSend("ATWS", { timeoutMs: 3000 });
   }
   if (reset.status === "timeout" || !BANNER.test(text(reset))) {
     // Some adapters answer ATZ with a bare prompt; accept if ATI identifies them.
-    const ati = await send("ATI", { timeoutMs: 1000 });
+    const ati = await resetSend("ATI", { timeoutMs: 1000 });
     if (ati.status !== "ok" || !BANNER.test(text(ati))) {
       result.failedStep = "reset";
+      result.silent = !heard;
       return result;
     }
     reset = ati;

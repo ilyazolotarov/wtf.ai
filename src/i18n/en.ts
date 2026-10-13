@@ -160,6 +160,7 @@ export const en = {
   tripNotificationTitle: "wtf.ai is recording your trip",
   tripNotificationText: "Tap to open the map.",
   tripNotificationChannel: "Trip in progress",
+  adapterSilent: "The adapter doesn't answer. It may be connected to another phone: close the app there, or turn off its Bluetooth. Otherwise unplug the adapter for a few seconds.",
   mfiNotFound: "No adapter found. Put the adapter in pairing mode (OBDLink MX+: press the button; vLinker: plug it into the car) and try again.",
   remembered: "Remembered",
   obdAdapters: "OBD adapters",

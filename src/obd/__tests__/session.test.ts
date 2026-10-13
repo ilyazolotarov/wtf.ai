@@ -93,7 +93,13 @@ describe("probe", () => {
 
   test("non-ELM device fails at reset", async () => {
     const { send } = await setup({ isElm: false });
-    expect(await probeAdapter(send)).toMatchObject({ ok: false, failedStep: "reset" });
+    // Not a byte back: nothing there talks (another phone holding the adapter looks the same).
+    expect(await probeAdapter(send)).toMatchObject({ ok: false, failedStep: "reset", silent: true });
+  });
+
+  test("something answering, but not an ELM327: fails at reset, not silent", async () => {
+    const send = async (command: string) => ({ command, status: "unknown-command" as const, lines: ["?"], raw: "?\r\r>", txUs: 0, rxUs: 0 });
+    expect(await probeAdapter(send)).toMatchObject({ ok: false, failedStep: "reset", silent: false });
   });
 });
 

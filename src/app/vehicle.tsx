@@ -94,7 +94,11 @@ function CarDetails() {
   const active = snap.devices.find((d) => d.id === snap.activeDeviceId);
   const adapterName = adapter?.name ?? active?.name ?? remembered?.name ?? t("obdAdapter");
   const gattDump = snap.error?.code === "other" && snap.error.message?.startsWith("[") ? snap.error.message : null;
-  const errorText = snap.error ? `${snap.error.code}${snap.error.message && !gattDump ? `: ${snap.error.message}` : ""}` : null;
+  const errorText = !snap.error
+    ? null
+    : snap.error.code === "adapter-silent"
+      ? t("adapterSilent")
+      : `${snap.error.code}${snap.error.message && !gattDump ? `: ${snap.error.message}` : ""}`;
   const caps = adapter?.capabilities;
   const capText = caps
     ? [caps.responseCount && "count", caps.adaptiveTiming2 && "AT2", caps.physicalAddressing && "ATSH"].filter(Boolean).join(", ") || dash

@@ -279,7 +279,7 @@ interface ElmResponse {
 }
 
 type LinkError =
-  | { code: "bluetooth-off" | "bluetooth-unauthorized" | "device-not-found" | "no-uart-service" | "not-elm327" | "link-lost" }
+  | { code: "bluetooth-off" | "bluetooth-unauthorized" | "device-not-found" | "no-uart-service" | "not-elm327" | "adapter-silent" | "link-lost" }
   | { code: "other"; message: string };
 
 interface VehicleLink {
@@ -340,7 +340,7 @@ Rules:
 | - | ----------------------- | ----------------------------------- | ------- | ---------------------------------------------------------------------------------------------------- |
 | 1 | Find the UART (BLE)     | service/characteristic discovery    | 10 s    | A profile matches (§8.2) → continue; none → `no-uart-service`, GATT dump logged for the catalog.       |
 | 2 | Flush                   | write `"\r"`, wait for `>`          | 1 s     | Ignore result (clears half-typed input; some clones drop the first command after connect).             |
-| 3 | Reset                   | `ATZ`                               | 3 s     | Banner contains `ELM327`, `ELM`, or `STN`. No answer → try `ATWS` (3 s). Still nothing → `not-elm327`. |
+| 3 | Reset                   | `ATZ`                               | 3 s     | Banner contains `ELM327`, `ELM`, or `STN`. No answer → try `ATWS` (3 s), then `ATI`. Still nothing → `not-elm327`; for an adapter this phone used before that sent not a byte back to any of them, `adapter-silent`: the Vehicle screen says it may be connected to another phone (close the app there, or its Bluetooth), else to unplug it for a few seconds. 2026-10-13: two phones with the app in one car took the MX+ from each other; the one left without it read `not-elm327`. |
 | 4 | Echo off                | `ATE0`                              | 1 s     | `OK` (the response may still echo the command once).                                                  |
 | 5 | Identify                | `ATI`                               | 1 s     | `ELM327 vX.Y` → `elmVersion`. `v2.1` → `suspectedClone` (informational only).                          |
 | 6 | Describe (optional)     | `AT@1`                              | 1 s     | Text → `description`; `?` is fine.                                                                    |

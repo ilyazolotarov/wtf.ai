@@ -207,6 +207,8 @@ export type LinkErrorCode =
   | "device-not-found"
   | "no-uart-service"
   | "not-elm327"
+  /** An adapter that worked before answers nothing at all: another phone holds it, or it locked up (§8.1). */
+  | "adapter-silent"
   | "no-speed-pid"
   | "link-lost"
   | "other";

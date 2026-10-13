@@ -182,6 +182,19 @@ describe("VehicleLinkCore", () => {
     expect(core.getSnapshot()).toMatchObject({ link: "error", error: { code: "not-elm327" } });
   });
 
+  // 2026-10-13: two phones with the app in one car took the MX+ from each other; the one left without it read
+  // "not-elm327: probe failed at reset".
+  test("an adapter used before that answers nothing at all: adapter-silent (another phone may hold it)", async () => {
+    const { core, emulators } = setup();
+    core.startDiscovery();
+    void core.connect("emu-1");
+    await until(() => core.getSnapshot().link === "polling" || core.getSnapshot().link === "standby");
+    await core.disconnect();
+    emulators.get("emu-1")!.freeze(false);
+    await core.connect("emu-1");
+    expect(core.getSnapshot()).toMatchObject({ link: "error", error: { code: "adapter-silent" } });
+  });
+
   test("standby while ignition is off, polls once the car starts", async () => {
     const { core, emulators } = setup();
     core.startDiscovery();
@@ -797,6 +810,60 @@ describe("VehicleLinkCore", () => {
         const k = toNav.length;
         can(40);
         expect(toNav.slice(k).some((s) => s.source === "can")).toBe(false);
+      } finally {
+        await core.disconnect();
+      }
+    });
+
+    // 2026-10-13: an MX+ silent from the init on, with CAN off: off must mean not a CAN command, primary or not.
+    test("CAN off (after CAN primary was on): not one CAN command, the init and the polls as without it", async () => {
+      const s = setup({ ...STN_PROFILE, broadcast: BROADCAST, passFiltersLeak: true });
+      s.core.setCanShadow([0x215, 0x228]);
+      s.core.setCanPrimary(true);
+      s.core.setCanShadow(null);
+      s.core.setCanPrimary(false);
+      s.core.startDiscovery();
+      void s.core.connect("emu-1");
+      try {
+        await until(() => s.core.getSnapshot().link === "polling" && s.core.getSnapshot().engine === "engine-running");
+        const emu = s.emulators.get("emu-1")!;
+        const n = emu.log.length;
+        const t0 = s.clock.nowUs();
+        await until(() => s.clock.nowUs() - t0 > 5_000_000);
+        const can = emu.log.filter((c) => /^(STM|STF|STCMM|ATCRAX|ATCS$)/.test(c));
+        expect(can).toEqual([]);
+        expect(emu.log.slice(n).filter((c) => c.startsWith("010D")).length).toBeGreaterThan(5);
+        expect(s.core.getSnapshot().canShadow).toBeNull();
+        expect(s.events.some((e) => e.type === "probe-failed")).toBe(false);
+      } finally {
+        await s.core.disconnect();
+      }
+    });
+
+    // CAN primary keeps the monitor running while the car moves: a link lost then leaves the adapter monitoring, and
+    // the next connection's probe meets it mid-monitor.
+    test("CAN primary: the link lost with the monitor running, the reconnect's probe stops it and polls again", async () => {
+      const { core, emu, clock, events, windows } = await shadowOn({});
+      const can = (kph: number) => {
+        const tUs = clock.nowUs();
+        core.pushCanSpeed({ txUs: tUs, rxUs: tUs, tUs, speedMps: kph / 3.6, raw: kph, source: "can" });
+      };
+      try {
+        core.setCanPrimary(true);
+        emu.setVehicle({ speedKph: 40 });
+        await until(() => windows.length >= 3);
+        for (let i = 0; i < 30; i++) {
+          can(40);
+          await clock.sleep(100);
+        }
+        expect(core.getSnapshot().canShadow?.state).toBe("listening");
+        emu.dropLink();
+        await until(() => events.some((e) => e.type === "link-restored"));
+        expect(events.some((e) => e.type === "probe-failed")).toBe(false);
+        // CAN speed stopped coming with the link: OBD's polls and the monitor's windows are back.
+        const n = windows.length;
+        await until(() => core.getSnapshot().link === "polling" && windows.length >= n + 3);
+        expect(core.getSnapshot().error).toBeNull();
       } finally {
         await core.disconnect();
       }

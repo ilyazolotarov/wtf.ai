@@ -558,7 +558,13 @@ export class VehicleLinkCore implements VehicleLink {
       this.event("probe-failed", probe.failedStep);
       if (reconnect) throw new Error(`probe failed at ${probe.failedStep}`);
       await this.transport?.disconnect().catch(() => undefined);
-      this.update({ link: "error", error: { code: "not-elm327", message: `probe failed at ${probe.failedStep}` } });
+      // An adapter this phone used before that answers nothing at all: most likely another phone with the app holds
+      // it (2026-10-13: two phones in one car took the MX+ from each other), or it locked up.
+      const silent = probe.silent && remembered?.adapter !== undefined;
+      this.update({
+        link: "error",
+        error: silent ? { code: "adapter-silent", message: "no answer to the reset" } : { code: "not-elm327", message: `probe failed at ${probe.failedStep}` },
+      });
       return;
     }
     probe.warnings.forEach((w) => this.event("probe-warning", w));
