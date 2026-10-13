@@ -47,6 +47,7 @@ const FRAME_PADDING = { top: 300, bottom: 260, left: 60, right: 60 };
  * Hand `cameraRef` to `<Camera>` and the two region handlers to `<Map>`.
  */
 export function useMapCamera({
+  mapReady,
   mode,
   headingUpRad,
   position,
@@ -59,6 +60,8 @@ export function useMapCamera({
   onUserInteraction,
   logCamera,
 }: {
+  /** The map's style has loaded: MapLibre drops a camera command sent before, and then shows its initial view. */
+  mapReady: boolean;
   mode: CameraMode;
   headingUpRad: number | null;
   position: PositionEstimate | null;
@@ -145,13 +148,22 @@ export function useMapCamera({
   // Where the follow camera was last sent; cleared when it stops following, so coming back
   // to follow still eases in from wherever the map was left.
   const followCenter = useRef<Coordinate | null>(null);
+  // Followed since the map loaded. The first follow waits for it and jumps: sent before, it was dropped, and a dot that
+  // stands still (a held or parked position) sends no other, so the map stayed on its initial view until the button.
+  const followed = useRef(false);
   useEffect(() => {
+    if (!mapReady) {
+      followed.current = false;
+      followCenter.current = null;
+      return;
+    }
     if (!position || !follow || ghostView) {
       followCenter.current = null;
       return;
     }
     const was = followCenter.current;
-    const snapped = was !== null && haversineM(was, position) > FOLLOW_JUMP_M;
+    const snapped = !followed.current || (was !== null && haversineM(was, position) > FOLLOW_JUMP_M);
+    followed.current = true;
     followCenter.current = { lat: position.lat, lon: position.lon };
     const stop = {
       center: [position.lon, position.lat] as [number, number],
@@ -161,7 +173,7 @@ export function useMapCamera({
     };
     if (snapped) cameraRef.current?.jumpTo(stop);
     else cameraRef.current?.easeTo({ ...stop, duration: FOLLOW_EASE_MS });
-  }, [follow, position, ghostView, followBearing]);
+  }, [mapReady, follow, position, ghostView, followBearing]);
 
   // The route and its alternatives at once (ROUTING-SPEC §8.7), north up: framed once when asked.
   useEffect(() => {

@@ -9,6 +9,7 @@ import { Colors } from "@/constants/theme";
 import type { Coordinate } from "@/nav/geo";
 import { usePosition } from "@/providers/position-provider";
 import { useRoute } from "@/providers/route-provider";
+import { useMapPacks } from "@/services/offline-map/map-packs";
 
 import type { CameraView } from "./map-features";
 import { DebugLayers, MarkLayers, PositionLayers, PuckLayers, RouteLayers } from "./map-layers";
@@ -17,7 +18,7 @@ import type { CompassHeading } from "./use-compass-heading";
 import { useMapCamera } from "./use-map-camera";
 import type { PlacingStep } from "./use-placing";
 
-/** The camera's zoom before the first follow. */
+/** The camera's zoom until the map reports one (and the start without a region's bounds). */
 const INITIAL_ZOOM = 15.4;
 
 // MapLibre's own errors (a tile it can't read, a style it can't load) reach JS only as console lines, which Sentry
@@ -92,9 +93,15 @@ export function MapSurface({
   const scheme = useColorScheme() === "dark" ? "dark" : "light";
   const palette = Colors[scheme];
   const mapStyle = useMapStyle(scheme);
+  const { installed } = useMapPacks();
+  const region = installed.active ? installed.regions[installed.active] : null;
   const position = usePosition();
   const { route, chooseAlternative } = useRoute();
+  // Camera commands wait for the style (`useMapCamera`); a new map (after none) waits again.
+  const [mapReady, setMapReady] = useState(false);
+  if (mapStyle == null && mapReady) setMapReady(false);
   const { cameraRef, onRegionIsChanging, onRegionDidChange } = useMapCamera({
+    mapReady,
     mode,
     headingUpRad,
     position,
@@ -157,15 +164,16 @@ export function MapSurface({
         onRegionDidChange(event);
         trackView(event);
       }}
+      onDidFinishLoadingStyle={() => setMapReady(true)}
     >
+      {/* Until the first position: the downloaded region, never a place outside it (an empty black map). */}
       <Camera
         ref={cameraRef}
-        initialViewState={{
-          center: [30.5234, 50.4501],
-          zoom: INITIAL_ZOOM,
-          pitch: 0,
-          bearing: 0,
-        }}
+        initialViewState={
+          region
+            ? { bounds: region.bounds, pitch: 0, bearing: 0 }
+            : { zoom: INITIAL_ZOOM, pitch: 0, bearing: 0 }
+        }
       />
       {/* Bottom to top: MapLibre stacks layers in the order they are declared. */}
       <RouteLayers route={route} palette={palette} onChoose={chooseAlternative} />
