@@ -31,6 +31,10 @@ const AVOID: [RegExp, string][] = [
 ];
 
 describe("Ukrainian strings", () => {
+  test("have the same keys as English", () => {
+    expect(Object.keys(uk).sort()).toEqual(Object.keys(en).sort());
+  });
+
   test("keep every placeholder of the English", () => {
     const wrong = entries.filter(([key, text]) => placeholders(text).join() !== placeholders(en[key]).join());
     expect(wrong.map(([key]) => key)).toEqual([]);
