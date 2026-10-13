@@ -3,6 +3,7 @@
 // 0.1 s, negative in reverse gear.
 import { CanSpeedAverager, canSpeedReading, type CanSpeedSample } from "@/nav/odometry/can/can-speed";
 import { CarStateDecoder } from "@/nav/odometry/can/car-state";
+import { FrameRetimer } from "@/nav/odometry/can/frame-timing";
 import { matchProfiles, seenIds, type Profile } from "@/nav/odometry/can/profile";
 import type { CanFrame } from "@/obd/can-monitor";
 import type { SpeedSample } from "@/obd/types";
@@ -15,6 +16,8 @@ const GIVE_UP_AFTER_FRAMES = 3000;
 export interface CanSpeedFeedDeps {
   /** The CAN shadow's frames, in arrival batches. */
   onFrames(listener: (frames: CanFrame[]) => void): () => void;
+  /** Each listening window's end, after its frames: a break, the frames until the next went unheard. */
+  onWindow(listener: () => void): () => void;
   /** The car's VIN (the make narrows the profiles), null unknown. */
   vin(): string | null;
   /** The ids the shadow listens for. */
@@ -27,8 +30,10 @@ export interface CanSpeedFeedDeps {
 export class CanSpeedFeed {
   private decoder: CarStateDecoder | null = null;
   private averager = new CanSpeedAverager();
-  /** Frames kept until the profile is chosen, then decoded. */
-  private early: CanFrame[] = [];
+  /** The link delivers frames in bursts: each id laid on its period, as replay does (frame-timing.ts). */
+  private retimer = new FrameRetimer();
+  /** Frames (at the bus's time) kept until the profile is chosen, then decoded. */
+  private early: TimedFrame[] = [];
   private gaveUp = false;
   private vin: string | null = null;
   private off: (() => void) | null = null;
@@ -41,7 +46,13 @@ export class CanSpeedFeed {
   }
 
   start(): void {
-    this.off ??= this.deps.onFrames((frames) => this.onFrames(frames));
+    if (this.off) return;
+    const offFrames = this.deps.onFrames((frames) => this.onFrames(frames));
+    const offWindows = this.deps.onWindow(() => this.retimer.break());
+    this.off = () => {
+      offFrames();
+      offWindows();
+    };
   }
 
   stop(): void {
@@ -53,6 +64,7 @@ export class CanSpeedFeed {
   private reset(): void {
     this.decoder = null;
     this.averager = new CanSpeedAverager();
+    this.retimer = new FrameRetimer();
     this.early = [];
     this.gaveUp = false;
   }
@@ -64,8 +76,10 @@ export class CanSpeedFeed {
       this.reset();
     }
     if (this.gaveUp) return;
+    // Retimed as they come, in order with the windows' breaks.
+    let timed = frames.map((f) => ({ id: f.id, data: f.data, tUs: this.retimer.retime(f.id, f.rxUs) }));
     if (!this.decoder) {
-      this.early.push(...frames);
+      this.early.push(...timed);
       if (this.early.length < PROFILE_AFTER_FRAMES) return;
       const listened = this.deps.listened();
       const match = matchProfiles(seenIds(this.early), vin, listened ? new Set(listened) : undefined).find((m) => m.speed && m.profile.wheels);
@@ -79,14 +93,20 @@ export class CanSpeedFeed {
       }
       this.decoder = new CarStateDecoder(match.profile);
       this.deps.note(`can primary: speed from the wheels, profile ${match.profile.key}`);
-      frames = this.early;
+      timed = this.early;
       this.early = [];
     }
-    for (const f of frames) {
-      for (const s of this.decoder.push(f.rxUs, f.id, f.data)) for (const c of this.averager.push(s)) this.deps.push(toSpeedSample(c));
+    for (const f of timed) {
+      for (const s of this.decoder.push(f.tUs, f.id, f.data)) {
+        for (const c of this.averager.push(s)) {
+          this.deps.push(toSpeedSample(c));
+        }
+      }
     }
   }
 }
+
+type TimedFrame = { id: number; data: number[]; tUs: number };
 
 export function toSpeedSample(c: CanSpeedSample): SpeedSample {
   const { speedMps, rawKph } = canSpeedReading(c);

@@ -26,10 +26,12 @@ function drive(fromUs: number, seconds: number, kph: number, gear: number): CanF
 
 function feed(vin: string | null) {
   let listener: ((frames: CanFrame[]) => void) | null = null;
+  let windowEnd: (() => void) | null = null;
   const pushed: SpeedSample[] = [];
   const notes: string[] = [];
   const f = new CanSpeedFeed({
     onFrames: (l) => ((listener = l), () => (listener = null)),
+    onWindow: (l) => ((windowEnd = l), () => (windowEnd = null)),
     vin: () => vin,
     listened: () => [0x215, 0x228],
     push: (s) => pushed.push(s),
@@ -39,7 +41,7 @@ function feed(vin: string | null) {
   const send = (frames: CanFrame[]) => {
     for (let i = 0; i < frames.length; i += 25) listener?.(frames.slice(i, i + 25));
   };
-  return { f, pushed, notes, send, listening: () => listener !== null };
+  return { f, pushed, notes, send, endWindow: () => windowEnd?.(), listening: () => listener !== null || windowEnd !== null };
 }
 
 // A VIN with a Mazda WMI, made up.
@@ -70,6 +72,19 @@ describe("CAN speed feed (VEHICLE-LINK-SPEC §16.3)", () => {
     send(other);
     expect(pushed).toHaveLength(0);
     expect(notes).toEqual(["can primary: no car profile with wheel speeds for the ids heard, OBD speed stays"]);
+  });
+
+  // 2026-10-12: laid one period after the last frame before a poll's break, every frame after it came that much early.
+  test("a listening window's end is a break: the frames after it at their own time, not one period after the last", () => {
+    const { pushed, send, endWindow } = feed(VIN);
+    send(drive(0, 3, 36, 4));
+    endWindow();
+    // The poll: 0.2 s unheard, then listening again.
+    const n = pushed.length;
+    send(drive(3_200_000, 1, 36, 4));
+    const after = pushed.slice(n + 1);
+    expect(after.length).toBeGreaterThanOrEqual(8);
+    expect(Math.min(...after.map((s) => s.tUs))).toBeGreaterThanOrEqual(3_200_000);
   });
 
   test("stopped: no more samples", () => {

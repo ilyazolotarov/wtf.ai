@@ -160,6 +160,7 @@ export function getRuntime(): Runtime {
   };
   const canSpeed = new CanSpeedFeed({
     onFrames: (listener) => link.onCanFrames(listener),
+    onWindow: (listener) => link.onCanWindow(() => listener()),
     vin: () => link.getSnapshot().vehicle?.vin ?? null,
     listened: () => canIds,
     push: (s) => link.pushCanSpeed(s),

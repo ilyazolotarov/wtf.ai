@@ -1,6 +1,7 @@
 // A trip log's CAN shadow frames decoded through the car's profile (SPEC §2.1: decoded in replay).
 import { CarStateDecoder, type CarStateSample } from "../odometry/can/car-state";
 import { CAN_SPEED_PERIOD_US, canSpeedReading, canSpeedSamples, type CanSpeedSample } from "../odometry/can/can-speed";
+import { retimeFrames } from "../odometry/can/frame-timing";
 import { wheelYawSamples } from "../odometry/can/wheel-yaw";
 import { WheelYawCalibrator, type WheelYawCalibration, type WheelYawCalibrationConfig } from "../odometry/can/wheel-yaw-calibration";
 import { ImuProcessor } from "../odometry/imu/imu-processor";
@@ -45,7 +46,9 @@ export function busTimedFrames(trip: TripLog): NonNullable<TripLog["can"]> {
 /** Null when the log has no CAN frames. `profileKey` overrides the choice ("make/mapping/dbc"). */
 export function decodeTripCan(trip: TripLog, profileKey?: string): TripCan | null {
   if (!trip.can?.length) return null;
-  const frames = busTimedFrames(trip);
+  // At the bus's times: drained frames at their window's end, each id on its period, a break at each window's end
+  // (frame-timing.ts), as the app.
+  const frames = retimeFrames(busTimedFrames(trip), trip.canWindows ?? []);
   const seen = seenIds(frames);
   const listened = listenedIds(trip);
   const vin = typeof trip.info.vehicle_vin === "string" ? trip.info.vehicle_vin : null;

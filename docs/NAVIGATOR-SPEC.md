@@ -112,6 +112,14 @@ jammed:
   or one changed faster than 50 km/h/s: a monitor line that lost characters, 4–23 a drive); the per-wheel means
   are kept exact (their differences are the yaw rate), only the speed is rounded; a frame that arrived after its
   window ended is put at the window's end (the stop's drain, captured before the stop character).
+- **Frames at bus time** (`odometry/can/frame-timing.ts`, the app's feed and replay alike): each id laid on its
+  period (a least-squares line through its last 200 arrivals, each listening window its own line), one period after
+  the last frame, never after its arrival nor over 0.3 s before it. A break in listening — each window's end (the
+  monitor stopped for a poll; its drained frames are still the window's), or 0.5 s without the id — starts the id
+  again at its next frame's arrival. The MX+'s MFi link delivers in bursts (half the frames within 1 ms of the one
+  before, 0–23 of 10 in a 0.1 s slot); timed by arrival, a turn's yaw was squeezed into the bursts, 10–20 % off over
+  5 s. Laid one period after the last frame across a poll's break instead, every frame after it came up to 0.3 s
+  early: the wheels' turning 20–120 ms ahead of the gyro, the speed samples 0.2 s old as they came out.
 
 ### 5.4 Wheel yaw (SPEC §2.1 Stage 2; replay only for now)
 
