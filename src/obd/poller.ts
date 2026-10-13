@@ -45,7 +45,15 @@ export interface PollerHooks {
   onBattery(volts: number, tUs: number): void;
   /** Adapter stopped answering or reset itself: the owner must re-init (§10.5). */
   onNeedsReinit(reason: string): void;
+  /**
+   * Nothing to poll now: CAN carries the speed while the car moves (CAN primary, §16.3), and the monitor keeps the
+   * adapter. Asked before every poll; while true the poller waits `PAUSED_RECHECK_MS` and asks again.
+   */
+  paused?(): boolean;
 }
+
+/** How often a paused poller asks again (a stop shows in CAN speed within ~0.1 s). */
+const PAUSED_RECHECK_MS = 100;
 
 export interface PollOutcome {
   pid: number;
@@ -145,6 +153,11 @@ export class ObdPoller {
     let lastSpeedTxUs = -Infinity;
 
     while (this.running) {
+      if (this.hooks.paused?.()) {
+        this.stats.pause();
+        await this.clock.sleep(PAUSED_RECHECK_MS);
+        continue;
+      }
       const now = this.clock.nowUs();
       const state = this.engine.state;
       const speedActive = state === "engine-running" || state === "engine-off";

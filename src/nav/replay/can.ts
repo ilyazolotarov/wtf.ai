@@ -1,10 +1,10 @@
 // A trip log's CAN shadow frames decoded through the car's profile (SPEC §2.1: decoded in replay).
 import { CarStateDecoder, type CarStateSample } from "../odometry/can/car-state";
-import { canSpeedSamples, type CanSpeedSample } from "../odometry/can/can-speed";
+import { CAN_SPEED_PERIOD_US, canSpeedReading, canSpeedSamples, type CanSpeedSample } from "../odometry/can/can-speed";
 import { wheelYawSamples } from "../odometry/can/wheel-yaw";
 import { WheelYawCalibrator, type WheelYawCalibration, type WheelYawCalibrationConfig } from "../odometry/can/wheel-yaw-calibration";
 import { ImuProcessor } from "../odometry/imu/imu-processor";
-import { matchProfiles, profileByKey, type Profile, type ProfileMatch, type SeenId } from "../odometry/can/profile";
+import { matchProfiles, profileByKey, seenIds, type Profile, type ProfileMatch, type SeenId } from "../odometry/can/profile";
 import type { TripLog } from "../../triplog/trip-log-reader";
 
 export interface TripCan {
@@ -23,25 +23,6 @@ export function listenedIds(trip: TripLog): Set<number> | null {
   return ids.length ? new Set(ids.map((p) => parseInt(p.replace(/^0x/i, ""), 16))) : null;
 }
 
-export function seenIds(frames: { id: number; data: number[] }[]): Map<number, SeenId> {
-  const lens = new Map<number, Map<number, number>>();
-  for (const f of frames) {
-    let byLen = lens.get(f.id);
-    if (!byLen) lens.set(f.id, (byLen = new Map()));
-    byLen.set(f.data.length, (byLen.get(f.data.length) ?? 0) + 1);
-  }
-  const out = new Map<number, SeenId>();
-  for (const [id, byLen] of lens) {
-    let best = { len: 0, n: -1 };
-    let frames = 0;
-    for (const [len, n] of byLen) {
-      frames += n;
-      if (n > best.n) best = { len, n };
-    }
-    out.set(id, { frames, len: best.len });
-  }
-  return out;
-}
 
 /**
  * The frames at when the bus carried them, as near as the log tells: one that arrived after its window ended (the
@@ -79,8 +60,7 @@ export function decodeTripCan(trip: TripLog, profileKey?: string): TripCan | nul
 }
 
 function canSample(s: CanSpeedSample): TripLog["obdSpeed"][number] {
-  const rawKph = Math.round(s.speedMps * 360) / 100;
-  return { tUs: s.tUs, rxUs: s.tUs, speedMps: s.reverse ? -s.speedMps : s.speedMps, rawKph, source: "can" };
+  return { tUs: s.tUs, rxUs: s.tUs, ...canSpeedReading(s), source: "can" };
 }
 
 /** OBD speed fills in when the last CAN speed is older than this (the monitor's breaks for polls are ~0.16 s). */
@@ -93,6 +73,8 @@ const CAN_FRESH_US = 300_000;
  * the car backwards. Null when the log has no wheel speeds.
  */
 export function withCanSpeed(trip: TripLog, profileKey?: string): TripLog | null {
+  // Already on CAN speed (`canPrimaryInput`, or twice asked): as it is.
+  if (trip.obdSpeed.some((s) => s.source === "can")) return trip;
   const can = decodeTripCan(trip, profileKey);
   const speeds = can ? canSpeedSamples(can.samples) : [];
   if (!speeds.length) return null;
@@ -125,6 +107,11 @@ export interface WheelYawOptions {
   /** Learn the wheels' calibration from the gyro while it is used (WheelYawCalibrator), and turn on it after. */
   calibrate?: boolean;
   calibration?: Partial<WheelYawCalibrationConfig>;
+  /**
+   * Between listening windows (the polls' breaks): `interpolate` the wheel yaw across (default), or keep the phone's
+   * gyro there — what listening without breaks would give, on a drive whose gyro was good.
+   */
+  gaps?: "interpolate" | "gyro";
 }
 
 /**
@@ -183,6 +170,10 @@ export function withWheelYaw(
     const a = yaw[k];
     const b = yaw[k + 1];
     let radps: number | null = null;
+    if (options.gaps === "gyro" && !(a.tUs <= s.tUs && b && b.tUs - a.tUs <= 2 * CAN_SPEED_PERIOD_US)) {
+      kept++;
+      return s;
+    }
     if (a.tUs <= s.tUs && b && b.tUs - a.tUs <= 2 * YAW_FRESH_US) {
       radps = a.radps + ((b.radps - a.radps) * (s.tUs - a.tUs)) / (b.tUs - a.tUs);
     } else {
@@ -198,4 +189,12 @@ export function withWheelYaw(
     return { ...s, gyro: [up[0] * radps, up[1] * radps, up[2] * radps] as [number, number, number] };
   });
   return { trip: { ...trip, imu }, gyroShare: after ? kept / after : 0, calibration: calibrator?.calibration ?? null };
+}
+
+/**
+ * The input the app's navigator had: a log recorded with CAN primary (`can_primary: on`, VEHICLE-LINK-SPEC §16.3) has
+ * OBD speed only while standing, the navigator drove on the wheels.
+ */
+export function canPrimaryInput(trip: TripLog): TripLog {
+  return trip.info.can_primary === "on" ? (withCanSpeed(trip) ?? trip) : trip;
 }

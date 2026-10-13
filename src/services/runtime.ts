@@ -30,6 +30,8 @@ import { NativeDiscovery } from "./vehicle-link/discovery";
 import { TelemetryReporter } from "./telemetry";
 import { jsSourceInfo } from "./js-source";
 import { setTripService } from "./trip-service";
+import { CanAutoIds, type CanAutoStatus } from "./vehicle-link/can-auto-ids";
+import { CanSpeedFeed } from "./vehicle-link/can-speed-feed";
 import { DrivingEmulator } from "./vehicle-link/driving-emulator";
 import { NativeTransport } from "./vehicle-link/native-transport";
 
@@ -45,9 +47,13 @@ export interface DevSettings {
   routeHint: boolean;
   /** Experimental navigation without an OBD adapter (NAVIGATOR-SPEC §9.6). */
   phoneOnly: boolean;
-  /** CAN shadow (VEHICLE-LINK-SPEC §16.2): raw CAN frames of these ids into the trip log, STN adapters only. */
-  canShadow: boolean;
-  /** Hex ids, separated by spaces or commas. */
+  /**
+   * The CAN bus (VEHICLE-LINK-SPEC §16), STN adapters on a CAN car: `log` the shadow's frames into the trip log while
+   * navigation stays on OBD (§16.2); `primary` also the navigator's speed from the wheel frames, negative in reverse,
+   * OBD polled only while the car stands (§16.3).
+   */
+  can: CanMode;
+  /** Hex ids, separated by spaces or commas; empty: picked for the car from its VIN (§16.4). */
   canShadowIds: string;
   /** OBD speed poll cap, Hz; null: automatic (`OBD_SPEED_HZ`, or the per-car cap). */
   speedCapHz: number | null;
@@ -55,7 +61,16 @@ export interface DevSettings {
   rpmPeriodS: number;
 }
 
+export type CanMode = "off" | "log" | "primary";
+
 const DEV_SETTINGS_KEY = "dev.settings";
+
+/** Settings as stored, from before `can` too (a `canShadow` switch, then `canPrimary` beside it). */
+function loadDevSettings(stored: (Partial<DevSettings> & { canShadow?: boolean; canPrimary?: boolean }) | null): Partial<DevSettings> {
+  if (!stored) return {};
+  const { canShadow, canPrimary, ...rest } = stored;
+  return rest.can === undefined && canShadow !== undefined ? { ...rest, can: canShadow ? (canPrimary ? "primary" : "log") : "off" } : rest;
+}
 /** Tiles the phone-only navigator's own graph reader keeps decoded (a few km around the car). */
 const PHONE_GRAPH_CACHE_TILES = 64;
 
@@ -70,6 +85,8 @@ export interface Runtime {
   /** Route planning and guidance (ROUTING-SPEC §8). */
   routes: RouteService;
   getDevSettings(): DevSettings;
+  /** How the CAN ids are being picked for the car, when they aren't typed (VEHICLE-LINK-SPEC §16.4). */
+  canAuto: { status(): CanAutoStatus; subscribe(listener: () => void): () => void };
   setDevSettings(patch: Partial<DevSettings>): void;
   subscribeDevSettings(listener: () => void): () => void;
 }
@@ -89,11 +106,11 @@ export function getRuntime(): Runtime {
     mapMatchLoop: APP_NAV_DEFAULTS.mapMatchLoop!,
     routeHint: APP_ROUTE_HINT,
     phoneOnly: false,
-    canShadow: false,
+    can: "off",
     canShadowIds: "",
     speedCapHz: null,
     rpmPeriodS: 5,
-    ...(kvStore.getJson<Partial<DevSettings>>(DEV_SETTINGS_KEY) ?? {}),
+    ...loadDevSettings(kvStore.getJson(DEV_SETTINGS_KEY)),
   };
   const devListeners = new Set<() => void>();
   const nowUs = () => VehicleLinkModule.nowUs();
@@ -130,11 +147,45 @@ export function getRuntime(): Runtime {
       nav_mapmatch_loop: dev.mapMatchLoop,
       nav_route_hint: dev.routeHint ? "on" : "off",
       nav_phone_only: dev.phoneOnly ? "on" : "off",
-      can_shadow: dev.canShadow ? dev.canShadowIds.trim() || "no ids" : "off",
+      can_shadow: dev.can === "off" ? "off" : dev.canShadowIds.trim() || "auto",
+      can_primary: dev.can === "primary" ? "on" : "off",
     }),
   });
   recorder.start();
-  const syncCanShadow = () => link.setCanShadow(dev.canShadow ? parseCanIds(dev.canShadowIds) : null);
+  // The ids the shadow listens to now: typed, or picked for the car (§16.4).
+  let canIds: number[] | null = null;
+  const listenCan = (ids: number[] | null) => {
+    canIds = ids;
+    link.setCanShadow(ids);
+  };
+  const canSpeed = new CanSpeedFeed({
+    onFrames: (listener) => link.onCanFrames(listener),
+    vin: () => link.getSnapshot().vehicle?.vin ?? null,
+    listened: () => canIds,
+    push: (s) => link.pushCanSpeed(s),
+    note: (text) => recorder.note(text),
+  });
+  const canAutoListeners = new Set<() => void>();
+  const canAuto = new CanAutoIds({
+    vin: () => link.getSnapshot().vehicle?.vin ?? null,
+    listen: listenCan,
+    onFrames: (listener) => link.onCanFrames(listener),
+    store: kvStore,
+    note: (text) => recorder.note(text),
+    onStatus: () => canAutoListeners.forEach((l) => l()),
+  });
+  // A new car (another VIN, or the VIN read late) gets its own ids.
+  link.subscribe(() => canAuto.refresh());
+  const syncCanShadow = () => {
+    // Typed ids as typed (a typo: none); nothing typed: picked for the car.
+    if (dev.can === "off" || dev.canShadowIds.trim()) {
+      canAuto.stop();
+      listenCan(dev.can === "off" ? null : parseCanIds(dev.canShadowIds));
+    } else canAuto.start();
+    link.setCanPrimary(dev.can === "primary");
+    if (dev.can === "primary") canSpeed.start();
+    else canSpeed.stop();
+  };
   syncCanShadow();
   const syncPolling = () => {
     link.setSpeedCapOverride(dev.speedCapHz);
@@ -306,6 +357,13 @@ export function getRuntime(): Runtime {
     position,
     routes,
     getDevSettings: () => dev,
+    canAuto: {
+      status: () => canAuto.status,
+      subscribe: (listener) => {
+        canAutoListeners.add(listener);
+        return () => canAutoListeners.delete(listener);
+      },
+    },
     setDevSettings: (patch) => {
       dev = { ...dev, ...patch };
       kvStore.setJson(DEV_SETTINGS_KEY, dev);
@@ -314,7 +372,7 @@ export function getRuntime(): Runtime {
       if (patch.outageButton === false) position.setSimulatedOutage(false);
       if (patch.mapMatchLoop) position.setMapMatchLoop(patch.mapMatchLoop);
       if (patch.phoneOnly !== undefined) position.setPhoneOnly(patch.phoneOnly);
-      if (patch.canShadow !== undefined || patch.canShadowIds !== undefined) syncCanShadow();
+      if (patch.can !== undefined || patch.canShadowIds !== undefined) syncCanShadow();
       if (patch.speedCapHz !== undefined || patch.rpmPeriodS !== undefined) syncPolling();
       if (patch.routeHint !== undefined) {
         const plan = routes.getSnapshot()?.plan;

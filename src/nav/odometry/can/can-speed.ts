@@ -54,32 +54,53 @@ export function plausibleWheels(v: readonly number[], last: { v: readonly number
   return v.every((x, i) => Math.abs(Math.abs(x) - Math.abs(last.v[i])) <= allowed);
 }
 
+/**
+ * Wheel samples averaged per `periodUs`, each with the gear then, as they come (the app) or all at once
+ * (`canSpeedSamples`, replay): one code, so both drive the navigator alike. A sample is out when the next period's
+ * first wheel sample arrives, or at `flush`.
+ */
+export class CanSpeedAverager {
+  private gear: { gear: Gear | null; tUs: number } | null = null;
+  private bin: { key: number; n: number; tUs: number; w: [number, number, number, number] } | null = null;
+  private kept: { v: readonly number[]; tUs: number } | null = null;
+
+  constructor(private readonly periodUs = CAN_SPEED_PERIOD_US) {}
+
+  push(s: CarStateSample): CanSpeedSample[] {
+    if (s.q === "gear") this.gear = { gear: s.gear, tUs: s.tUs };
+    if (s.q !== "wheels") return [];
+    if (!plausibleWheels(s.v, this.kept, s.tUs)) return [];
+    this.kept = { v: s.v, tUs: s.tUs };
+    const key = Math.floor(s.tUs / this.periodUs);
+    const out = this.bin && this.bin.key !== key ? this.flush() : [];
+    this.bin ??= { key, n: 0, tUs: 0, w: [0, 0, 0, 0] };
+    this.bin.n++;
+    this.bin.tUs += s.tUs;
+    for (let i = 0; i < 4; i++) this.bin.w[i] += s.v[i];
+    return out;
+  }
+
+  flush(): CanSpeedSample[] {
+    const bin = this.bin;
+    if (!bin) return [];
+    this.bin = null;
+    const w = bin.w.map((x) => Math.abs(x / bin.n)) as [number, number, number, number];
+    const tUs = bin.tUs / bin.n;
+    const g = this.gear && tUs - this.gear.tUs <= GEAR_FRESH_US ? this.gear.gear : null;
+    return [{ tUs, speedMps: round((w[0] + w[1] + w[2] + w[3]) / 4), wheelsMps: w, gear: g, reverse: g === "R" }];
+  }
+}
+
 /** Wheel samples (time-ordered) averaged per `periodUs`, each with the gear then. */
 export function canSpeedSamples(samples: CarStateSample[], periodUs = CAN_SPEED_PERIOD_US): CanSpeedSample[] {
-  const out: CanSpeedSample[] = [];
-  let gear: { gear: Gear | null; tUs: number } | null = null;
-  let bin: { key: number; n: number; tUs: number; w: [number, number, number, number] } | null = null;
-  let kept: { v: readonly number[]; tUs: number } | null = null;
-  const close = () => {
-    if (!bin) return;
-    const w = bin.w.map((x) => Math.abs(x / bin!.n)) as [number, number, number, number];
-    const tUs = bin.tUs / bin.n;
-    const g = gear && tUs - gear.tUs <= GEAR_FRESH_US ? gear.gear : null;
-    out.push({ tUs, speedMps: round((w[0] + w[1] + w[2] + w[3]) / 4), wheelsMps: w, gear: g, reverse: g === "R" });
-    bin = null;
-  };
-  for (const s of samples) {
-    if (s.q === "gear") gear = { gear: s.gear, tUs: s.tUs };
-    if (s.q !== "wheels") continue;
-    if (!plausibleWheels(s.v, kept, s.tUs)) continue;
-    kept = { v: s.v, tUs: s.tUs };
-    const key = Math.floor(s.tUs / periodUs);
-    if (bin && bin.key !== key) close();
-    bin ??= { key, n: 0, tUs: 0, w: [0, 0, 0, 0] };
-    bin.n++;
-    bin.tUs += s.tUs;
-    for (let i = 0; i < 4; i++) bin.w[i] += s.v[i];
-  }
-  close();
-  return out;
+  const avg = new CanSpeedAverager(periodUs);
+  return [...samples.flatMap((s) => avg.push(s)), ...avg.flush()];
+}
+
+/**
+ * As the navigator reads it: negative in reverse (the car and the map matching move backwards), and the unsigned
+ * reading in km/h at the wheels' 0.01 km/h steps.
+ */
+export function canSpeedReading(s: CanSpeedSample): { speedMps: number; rawKph: number } {
+  return { speedMps: s.reverse ? -s.speedMps : s.speedMps, rawKph: Math.round(s.speedMps * 360) / 100 };
 }

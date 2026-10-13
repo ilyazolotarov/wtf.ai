@@ -228,14 +228,15 @@ export class CanShadow implements IdleMonitor {
       const retried = r.status === "timeout";
       // A CR reaching an adapter that had just stopped by itself repeats its last command, STM: stop that one too.
       if (retried) {
-        // What the first one drained is the window's output too.
-        this.collector?.push(r.raw, r.rxUs);
+        // What the first one drained is the window's output too; captured before the stop character, timed at it
+        // (as replay times a log's drained frames, `busTimedFrames`).
+        this.collector?.push(r.raw, Math.min(r.rxUs, t0));
         this.windowBytes += r.raw.length;
         r = await send("", 1000, true);
         silent &&= r.raw === "";
       }
       this.live = false;
-      this.collector?.push(r.raw, r.rxUs);
+      this.collector?.push(r.raw, Math.min(r.rxUs, t0));
       this.windowBytes += r.raw.length;
       const stopMs = r.status !== "timeout" ? Math.round((r.rxUs - t0) / 1000) : null;
       if (stopMs !== null && !retried) {

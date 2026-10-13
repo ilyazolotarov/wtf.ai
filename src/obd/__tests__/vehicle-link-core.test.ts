@@ -12,7 +12,7 @@ import {
   type RememberedAdapter,
   type ScannedDevice,
 } from "@/obd/vehicle-link-core";
-import type { ExchangeEvent, LinkEvent, LinkState } from "@/obd/types";
+import type { ExchangeEvent, LinkEvent, LinkState, SpeedSample } from "@/obd/types";
 
 jest.setTimeout(60_000);
 
@@ -750,6 +750,53 @@ describe("VehicleLinkCore", () => {
         const late = windows.slice(n).find((w) => w.stopRetried)!;
         expect(late.stopMs).toBeLessThan(400);
         expect(core.getSnapshot().canShadow?.state).not.toBe("failed");
+      } finally {
+        await core.disconnect();
+      }
+    });
+
+    // §16.3: the wheels carry the speed while the car moves; OBD only standing, so the monitor listens without breaks.
+    test("CAN primary: no polls while CAN speed shows the car moving, polls again standing or when it stops coming", async () => {
+      const { core, emu, clock, speeds } = await shadowOn({});
+      const toNav: SpeedSample[] = [];
+      core.onSpeed((s) => toNav.push(s));
+      const can = (kph: number) => {
+        const tUs = clock.nowUs();
+        core.pushCanSpeed({ txUs: tUs, rxUs: tUs, tUs, speedMps: kph / 3.6, raw: kph, source: "can" });
+      };
+      const pushFor = async (ms: number, kph: number) => {
+        for (let t = 0; t < ms; t += 100) {
+          can(kph);
+          await clock.sleep(100);
+        }
+      };
+      const polls = () => emu.log.filter((c) => c.startsWith("010D") || c.startsWith("010C") || c === "ATRV").length;
+      try {
+        core.setCanPrimary(true);
+        emu.setVehicle({ speedKph: 40 });
+        await until(() => speeds.length >= 3);
+        await pushFor(500, 40);
+        const before = polls();
+        const n = toNav.length;
+        await pushFor(10_000, 40);
+        // Moving on CAN: not a poll in 10 s, the navigator fed from CAN only, the engine still running.
+        expect(polls()).toBe(before);
+        expect(toNav.slice(n).every((s) => s.source === "can")).toBe(true);
+        expect(core.getSnapshot().engine).toBe("engine-running");
+        // Standing: the polls are back (the engine state needs them); CAN still feeds the navigator.
+        emu.setVehicle({ speedKph: 0 });
+        await pushFor(3000, 0);
+        expect(polls()).toBeGreaterThan(before + 3);
+        // CAN goes quiet while moving: OBD's speed is the navigator's again.
+        emu.setVehicle({ speedKph: 40 });
+        await pushFor(500, 40);
+        const m = toNav.length;
+        await until(() => toNav.slice(m).some((s) => s.source !== "can"));
+        // Off: nothing from CAN is taken.
+        core.setCanPrimary(false);
+        const k = toNav.length;
+        can(40);
+        expect(toNav.slice(k).some((s) => s.source === "can")).toBe(false);
       } finally {
         await core.disconnect();
       }

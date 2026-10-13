@@ -263,6 +263,7 @@ npm run replay:bench -- tools/triplog/logs/*.ulg --jam-start --compass   # …an
 npm run replay:compass -- tools/triplog/logs/*.ulg                        # what the app logged about the compass in shadow (NAVIGATOR-SPEC §7.6)
 npm run replay:bench -- tools/triplog/logs/*.ulg --speed can --mm        # the navigator on CAN wheel speeds where heard (NAVIGATOR-SPEC §5.3)
 npm run replay:regress -- --speed can --yaw wheels                       # and turning on the rear wheels' yaw, not the gyro: a phone in a pocket (can.ts withWheelYaw)
+npm run replay:regress -- --speed can --yaw wheels --yaw-gaps gyro       # … the gyro between listening windows: what listening without breaks would give
 npm run replay:voice -- tools/triplog/logs/*.ulg                          # "turn now" vs when the car turned (gyro), per followed turn (ROUTING-SPEC §8.5)
 npm run replay:can -- tools/triplog/logs/*.ulg                            # CAN shadow frames decoded: wheel/CAN speed vs 010D and GNSS, gear, steering (SPEC §3.2); the adapter's stops, throughput, filter test
 npm run replay:can -- trip.ulg --profile toyota/toyota/toyota_nodsu_pt_generated # …through a given profile (make/mapping/DBC)

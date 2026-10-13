@@ -7,6 +7,7 @@
 // result has the same track, fixes, particles and summary as `replayTrip`.
 // Drives replayed in order with one CalibrationStore carry what the app keeps from drive to drive.
 
+import { canPrimaryInput } from "@/nav/replay/can";
 import type { MapMatchConfig } from "@/nav/mapmatch/particle-filter";
 import type { NavConfig } from "@/nav/navigator";
 import type { PhoneGraph } from "@/nav/phone/phone-navigator";
@@ -155,7 +156,9 @@ function wallClock(trip: TripLog): (tUs: number) => number {
   };
 }
 
-export function replayTripInApp(trip: TripLog, o: AppReplayOptions): AppReplayResult {
+export function replayTripInApp(logged: TripLog, o: AppReplayOptions): AppReplayResult {
+  // Speed as the app's navigator had it: the wheels, on a log recorded with CAN primary.
+  const trip = canPrimaryInput(logged);
   const utcAt = wallClock(trip);
   const tS = (tUs: number) => (tUs - trip.startUs) / 1e6;
   let nowUs = trip.startUs;

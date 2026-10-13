@@ -693,5 +693,44 @@ the hex ids (`can_shadow` in the log's info).
   iOS Settings → Bluetooth.
 - **Off:** turning the setting off restores the adapter the same way. A reinit drops the shadow; the next init sets it
   up again.
-- **Not decoded on the phone.** Replay decodes the frames; counter and checksum signals rebuild frame timing and catch
-  lines garbled in transport. Frames outside the `can_window`s weren't heard.
+- **Not decoded on the phone** unless CAN primary is on (§16.3). Replay decodes the frames; counter and checksum
+  signals rebuild frame timing and catch lines garbled in transport. Frames outside the `can_window`s weren't heard.
+  Frames the stop drained are timed at the stop character (captured before it).
+
+### 16.3 CAN primary (developer setting, off by default)
+
+With the shadow on, the navigator's speed comes from the wheels and the monitor listens without the polls' breaks:
+between them (~45 % of the time with five ids) wheel yaw lost the peaks of sharp turns (NAVIGATOR-SPEC §5.4).
+
+- **Decoded on the phone** (`services/vehicle-link/can-speed-feed.ts`) as replay decodes a log (`withCanSpeed`): the
+  profile from the VIN's make and the ids heard, after 200 frames (none with wheel speeds after 3000: noted, OBD
+  stays); wheel samples averaged per 0.1 s (`CanSpeedAverager`, the same code); negative in reverse gear, so the
+  navigator and the map matching move the car backwards (NAVIGATOR-SPEC §5.3). Noted `can primary: speed from the
+  wheels, profile …`.
+- **The link** (`VehicleLinkCore.pushCanSpeed`): CAN speed goes to the navigator and the trip detector, and to the
+  engine state as a speed read (it proves the ECU awake while no poll asks). OBD's speed is passed on only when the
+  last CAN speed is over 0.3 s old (replay's rule).
+- **No polls while the car moves:** the poller waits while the last CAN speed is under 0.5 s old and at least 1 km/h —
+  no speed, RPM or battery reads. A moving car's engine state needs none: the frames themselves say the ECU is awake.
+  Standing, or without fresh CAN speed (a deaf monitor, an unknown car), the polls run as always, and with them the
+  engine state and ignition-off.
+- **The log** says `can_primary: on` (TRIP-LOGGER-SPEC §6.2): OBD speed only while standing. Replay through the app
+  (`replayTripInApp`, the viewer, `replay:regress`) then drives the navigator on the decoded wheels
+  (`canPrimaryInput`), as the phone did.
+- The developer setting is one row, *CAN bus*: off (default) / log only (§16.2: frames into the log, navigation on
+  OBD — how data is gathered without risking the drive, and the safe choice on an adapter that froze in the monitor)
+  / speed from wheels (this section). Settings stored as the earlier two switches carry over.
+
+### 16.4 Ids picked for the car
+
+With the ids field empty (`can_shadow: auto` in the log), `services/vehicle-link/can-auto-ids.ts` picks them:
+
+- **Candidates from the VIN's make:** every platform's ids that navigation needs — the wheel speeds (and their
+  direction signals), else the speed; the gear. Up to 11 for a make (Volkswagen); Mazda's are `215 228`.
+- **Probing:** the shadow listens to up to 8 at a time; after 2 s of frames the profiles of the make are matched
+  against the ids heard (with their DBC lengths), and the first with a speed id heard wins. The shadow then listens to
+  that platform's ids only (unless it already does: no second setup), and they are kept per VIN and tried first
+  next time. Noted `can auto: mazda/…, ids 215 228`.
+- **Nothing to pick:** no VIN yet (it waits; the VIN read late starts it), a make without a CAN profile, or none of
+  the candidates heard: noted, the shadow stays off and the navigator on OBD. Another VIN starts over.
+- Typed ids are used as typed; a typo turns the shadow off.

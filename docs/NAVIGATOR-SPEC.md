@@ -93,7 +93,7 @@ jammed:
   the dead reckoning forward instead of back (~2× the reverse distance) and the turn isn't a manoeuvre; it needs
   reverse detected from the accelerometer along the car's axis, which nothing learns yet.
 
-### 5.3 CAN wheel speed (SPEC §2.1 Stage 2; replay only for now)
+### 5.3 CAN wheel speed (SPEC §2.1 Stage 2; the app with CAN primary on, VEHICLE-LINK-SPEC §16.3)
 
 - A speed sample may come from CAN (`ObdSpeedSample.source: "can"`): the mean of the four wheel speeds
   (`odometry/can/can-speed.ts`, ~10 Hz, 0.01 km/h steps rounded so a standing car reads exactly 0), and the log's OBD
@@ -130,6 +130,15 @@ jammed:
   Learning track and tyre from the gyro while both agree (`wheel-yaw-calibration.ts`) found 1.59–1.61 m and
   −0.005…−0.02 % within a drive, and the wheels' heading after the gyro stopped was no better than with the defaults
   (worst 7–22° against 6–14° over 1–4 min): the rest is turn-by-turn noise, not calibration. Not in the app.
+- **Phone on the seat, in a pocket** (2026-10-13, drawn, jammed, 8 seeds): lying on the seat the gyro follows the
+  car as in the mount (0–5 s off the drawn road); in a trouser pocket it doesn't (78–198 s off, 35–53 jumps, ends
+  260–450 m out), and the handling flag saw 2–15 % of that time. Gyro and wheels apart, over the heard time only:
+  mount 2.5–4.9 °/min, seat 6–7, pocket 7.6–18.
+- **Wheels need to be heard all the time:** between windows (the polls' breaks, ~45 % of the time with five ids)
+  the yaw is drawn straight across and a sharp turn's peak is cut, so the wheels came out 5–10 % short of the gyro
+  in town; on wheels alone the seat drive went 52–135 s off the drawn road, and with the gyro in the breaks
+  (`--yaw-gaps gyro`) it was as with the gyro. In the pocket the wheels alone were off 54–238 s. Navigating on wheel
+  yaw needs the monitor without the 2 Hz speed polls: CAN speed in their place (VEHICLE-LINK-SPEC §16.2).
 
 ## 6. EKF (`ekf/dr-ekf.ts`) and heading initialization
 

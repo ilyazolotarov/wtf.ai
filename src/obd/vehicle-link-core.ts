@@ -117,6 +117,14 @@ export const AUTO_CONNECT_WINDOW_MS = 8_000;
 export const OBD_SPEED_HZ = 2;
 /** The shadow's counts in the snapshot at most this often (its state changes go at once). */
 const CAN_STATUS_INTERVAL_US = 1_000_000;
+/**
+ * CAN primary (§16.3): OBD speed is passed on only when the last CAN speed is older than this (the replay's rule,
+ * `withCanSpeed`).
+ */
+const CAN_FRESH_US = 300_000;
+/** The polls wait while the last CAN speed is this fresh and at least `CAN_MOVING_KPH`: the car moves. */
+const CAN_PAUSE_FRESH_US = 500_000;
+const CAN_MOVING_KPH = 1;
 
 type OpenOutcome = "connected" | "unreachable" | "stopped";
 type InitOutcome = "polling" | "no-vehicle" | "error";
@@ -180,6 +188,9 @@ export class VehicleLinkCore implements VehicleLink {
   private lastCanStatusUs = 0;
   private canFrames = new Emitter<[CanFrame[]]>();
   private canWindows = new Emitter<[CanWindow]>();
+  /** CAN primary (developer setting, §16.3): CAN wheel speed for the navigator, OBD polled only standing. */
+  private canPrimary = false;
+  private lastCanSpeed: { tUs: number; raw: number } | null = null;
 
   constructor(private readonly deps: VehicleLinkDeps) {
     this.engine = new EngineStateMachine((state, tUs) => this.onEngineChange(state, tUs));
@@ -432,6 +443,30 @@ export class VehicleLinkCore implements VehicleLink {
     if (this.poller) this.attachShadow();
   }
 
+  /**
+   * CAN primary (§16.3): speed decoded from the CAN shadow's wheel frames (`pushCanSpeed`) goes to the navigator
+   * instead of OBD's, and while it shows the car moving nothing is polled: the monitor listens without breaks. Standing
+   * (or without fresh CAN speed) the polls run as always, and with them the engine state.
+   */
+  setCanPrimary(on: boolean): void {
+    this.canPrimary = on;
+    if (!on) this.lastCanSpeed = null;
+  }
+
+  /** A CAN speed sample (`source: "can"`, negative in reverse), from the frames this link's shadow heard. */
+  pushCanSpeed(s: SpeedSample): void {
+    if (!this.canPrimary || !this.poller?.isRunning) return;
+    this.lastCanSpeed = { tUs: s.tUs, raw: s.raw };
+    // Speed proves the ECU awake, and while the car moves no poll would tell the engine state otherwise.
+    this.engine.onSpeed(s.tUs, s.raw);
+    this.onSpeedSample({ ...s, source: "can" });
+  }
+
+  /** CAN speed fresh within `maxAgeUs` of `tUs`. */
+  private canSpeedFresh(tUs: number, maxAgeUs: number): boolean {
+    return this.canPrimary && this.lastCanSpeed !== null && tUs - this.lastCanSpeed.tUs <= maxAgeUs;
+  }
+
   setRpmPeriods(periods: Partial<Pick<PollerConfig, "rpmPeriodRunningMs" | "rpmPeriodEngineOffMs" | "rpmPeriodIgnitionOffMs">>): void {
     this.rpmPeriods = { ...this.rpmPeriods, ...periods };
     this.poller?.setRpmPeriods(periods);
@@ -654,6 +689,7 @@ export class VehicleLinkCore implements VehicleLink {
           if (this.snapshot.adapter) this.update({ adapter: { ...this.snapshot.adapter, batteryV: v } });
         },
         onNeedsReinit: (reason) => void this.reinit(gen, reason),
+        paused: () => this.canSpeedFresh(this.deps.clock.nowUs(), CAN_PAUSE_FRESH_US) && this.lastCanSpeed!.raw >= CAN_MOVING_KPH,
       },
     );
     this.poller = poller;
@@ -948,6 +984,11 @@ export class VehicleLinkCore implements VehicleLink {
   }
 
   private onSpeedSample(s: SpeedSample): void {
+    // CAN primary: OBD's speed only fills in where CAN's is stale (the poll of a standing car, a monitor gone deaf).
+    if (s.source !== "can" && this.canSpeedFresh(s.tUs, CAN_FRESH_US)) {
+      this.update(this.maybeStats(s.rxUs));
+      return;
+    }
     this.speed.emit(s);
     this.update({ lastSpeed: s, ...this.maybeStats(s.rxUs) });
   }

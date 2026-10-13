@@ -84,6 +84,8 @@ interface Job {
   /** With `yaw: "wheels"`: the gyro until this time (s), the wheels after; `yawCal`: learning the wheels from the gyro. */
   yawFromS?: number;
   yawCal?: boolean;
+  /** `--yaw-gaps gyro`: the gyro between listening windows (what listening without breaks would give). */
+  yawGaps?: "interpolate" | "gyro";
 }
 
 /** One drive, one start, one seed. Distances in m, times in s. */
@@ -198,7 +200,7 @@ function runJob(job: Job): DriveResult[] {
         : job.speed === "can"
           ? (withCanSpeed(obd) ?? obd)
           : obd;
-      const input = job.yaw === "wheels" ? (withWheelYaw(speedInput, { fromS: job.yawFromS, calibrate: job.yawCal })?.trip ?? speedInput) : speedInput;
+      const input = job.yaw === "wheels" ? (withWheelYaw(speedInput, { fromS: job.yawFromS, calibrate: job.yawCal, gaps: job.yawGaps })?.trip ?? speedInput) : speedInput;
       const r = replayTripInApp(input, {
         calibration,
         loop: (job.nav.mapMatchLoop ?? APP_NAV_DEFAULTS.mapMatchLoop ?? "closed") as MapMatchLoop,
@@ -348,6 +350,7 @@ async function main() {
   const yaw = (arg("--yaw") ?? "gyro") as NonNullable<Job["yaw"]>;
   const yawFromS = arg("--yaw-from") ? Number(arg("--yaw-from")) : undefined;
   const yawCal = process.argv.includes("--yaw-cal");
+  const yawGaps = arg("--yaw-gaps") as Job["yawGaps"];
 
   const all = readdirSync(LOGS).filter((f) => f.endsWith(".ulg")).sort();
   const picked = only ? all.filter((f) => f.startsWith(only) || f.includes(only)) : all;
@@ -355,8 +358,8 @@ async function main() {
   // The parked chain replays every log up to the last one picked: those before it set its storage.
   const chain = all.filter((f) => f <= picked.at(-1)!);
   const jobs: Job[] = [];
-  for (let seed = 1; seed <= seeds; seed++) for (const start of ["drawn", "parked"] as const) if (starts.includes(start)) jobs.push({ start, seed, logs: chain, nav, mm, speed, scoreMapMatch, phoneRoute, obdHz, yaw, yawFromS, yawCal });
-  for (let seed = 1; seed <= seeds; seed++) if (starts.includes("cold")) for (const log of picked) jobs.push({ start: "cold", seed, logs: [log], nav, mm, speed, scoreMapMatch, phoneRoute, obdHz, yaw, yawFromS, yawCal });
+  for (let seed = 1; seed <= seeds; seed++) for (const start of ["drawn", "parked"] as const) if (starts.includes(start)) jobs.push({ start, seed, logs: chain, nav, mm, speed, scoreMapMatch, phoneRoute, obdHz, yaw, yawFromS, yawCal, yawGaps });
+  for (let seed = 1; seed <= seeds; seed++) if (starts.includes("cold")) for (const log of picked) jobs.push({ start: "cold", seed, logs: [log], nav, mm, speed, scoreMapMatch, phoneRoute, obdHz, yaw, yawFromS, yawCal, yawGaps });
   const started = Date.now();
   let results: DriveResult[];
   if (fromRun) results = fromRun.results.filter((r) => picked.includes(r.log));

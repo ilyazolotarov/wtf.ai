@@ -231,6 +231,27 @@ export interface ProfileMatch {
   speed: boolean;
 }
 
+/** Each id heard: how many frames, and their most common data length. */
+export function seenIds(frames: { id: number; data: number[] }[]): Map<number, SeenId> {
+  const lens = new Map<number, Map<number, number>>();
+  for (const f of frames) {
+    let byLen = lens.get(f.id);
+    if (!byLen) lens.set(f.id, (byLen = new Map()));
+    byLen.set(f.data.length, (byLen.get(f.data.length) ?? 0) + 1);
+  }
+  const out = new Map<number, SeenId>();
+  for (const [id, byLen] of lens) {
+    let best = { len: 0, n: -1 };
+    let frames = 0;
+    for (const [len, n] of byLen) {
+      frames += n;
+      if (n > best.n) best = { len, n };
+    }
+    out.set(id, { frames, len: best.len });
+  }
+  return out;
+}
+
 /**
  * Profiles that fit the ids seen on the OBD port, best first. `listened` limits the comparison to the ids the monitor
  * passed (the CAN shadow's filters); without it every id counts. With a VIN, only its make's profiles.
