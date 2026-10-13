@@ -1,5 +1,5 @@
 import { router } from "expo-router";
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { StyleSheet, TextInput, useColorScheme } from "react-native";
 
 import { ScreenAction, ScreenContent, ScreenNote, ScreenSection } from "@/components/screens/screen-ui";
@@ -24,6 +24,27 @@ export default function DeveloperScreen() {
   const dev = useDevSettings();
   const canAuto = useSyncExternalStore(runtime.canAuto.subscribe, runtime.canAuto.status);
   const [canIds, setCanIds] = useState(dev.canShadowIds);
+  // Saved a second after typing stops and when the screen closes, not only when editing ends: leaving the screen with
+  // the keyboard up skips that on iOS, and a cleared field kept the old ids (2026-10-13: five typed ids on every drive).
+  const pendingIds = useRef<string | null>(null);
+  useEffect(() => {
+    if (canIds === dev.canShadowIds) {
+      pendingIds.current = null;
+      return;
+    }
+    pendingIds.current = canIds;
+    const timer = setTimeout(() => {
+      pendingIds.current = null;
+      setDevSettings({ canShadowIds: canIds });
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [canIds, dev.canShadowIds, setDevSettings]);
+  useEffect(
+    () => () => {
+      if (pendingIds.current !== null) setDevSettings({ canShadowIds: pendingIds.current });
+    },
+    [setDevSettings],
+  );
   const palette = Colors[useColorScheme() === "dark" ? "dark" : "light"];
 
   return (
@@ -68,7 +89,10 @@ export default function DeveloperScreen() {
           <TextInput
             value={canIds}
             onChangeText={setCanIds}
-            onEndEditing={() => setDevSettings({ canShadowIds: canIds })}
+            onEndEditing={() => {
+              pendingIds.current = null;
+              setDevSettings({ canShadowIds: canIds });
+            }}
             placeholder={t("canShadowIds")}
             placeholderTextColor={palette.textSecondary}
             autoCapitalize="characters"
