@@ -197,6 +197,13 @@ export function withWheelYaw(
  * instead (`can primary: speed from the wheels`); before it no CAN was heard, so the whole log is as the phone had it.
  */
 export function canPrimaryInput(trip: TripLog): TripLog {
+  const cached = primaryInputs.get(trip);
+  if (cached) return cached;
   const primary = trip.info.can_primary === "on" || trip.messages.some((m) => m.text.startsWith("can primary: speed from the wheels"));
-  return primary ? (withCanSpeed(trip) ?? trip) : trip;
+  const input = primary ? (withCanSpeed(trip) ?? trip) : trip;
+  primaryInputs.set(trip, input);
+  return input;
 }
+
+/** Decoding a log's frames takes a second: once per log (the truth's odometer and the replay both ask). */
+const primaryInputs = new WeakMap<TripLog, TripLog>();

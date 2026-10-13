@@ -5,6 +5,7 @@
 // distance doesn't). Replay only; not used by the navigator.
 
 import type { TripLog } from "../../triplog/trip-log-reader";
+import { canPrimaryInput } from "./can";
 import { LocalFrame } from "../geo/local-frame";
 import type { EdgeId, RoadEdge, RoadGraph, TiledRoadGraph } from "../mapmatch/graph/road-graph";
 import { isSatelliteFix, type GnssFix } from "../types";
@@ -119,14 +120,18 @@ interface Route {
 const angleDiff = (a: number, b: number) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
 const edgeLength = (e: RoadEdge) => e.cum[e.cum.length - 1];
 
-/** Cumulative OBD distance at any time (speed held up to 2.5 s, like the navigator). */
+/**
+ * Cumulative distance at any time (speed held up to 2.5 s, like the navigator), from the speed the app drove on: the
+ * CAN wheels on a log recorded with CAN primary, which has OBD speed only standing (the drawn truth timed by it stood
+ * still while the car drove, 2026-10-13); distance either way, reversing too.
+ */
 export function obdOdometer(trip: TripLog): (tUs: number) => number {
   const t: number[] = [];
   const d: number[] = [];
   let total = 0;
-  const s = trip.obdSpeed;
+  const s = canPrimaryInput(trip).obdSpeed;
   for (let k = 0; k < s.length; k++) {
-    if (k > 0) total += s[k - 1].speedMps * Math.min(2.5, (s[k].tUs - s[k - 1].tUs) / 1e6);
+    if (k > 0) total += Math.abs(s[k - 1].speedMps) * Math.min(2.5, (s[k].tUs - s[k - 1].tUs) / 1e6);
     t.push(s[k].tUs);
     d.push(total);
   }
@@ -140,7 +145,7 @@ export function obdOdometer(trip: TripLog): (tUs: number) => number {
       if (t[mid] <= tUs) lo = mid;
       else hi = mid;
     }
-    return d[lo] + s[lo].speedMps * Math.min(2.5, (tUs - t[lo]) / 1e6);
+    return d[lo] + Math.abs(s[lo].speedMps) * Math.min(2.5, (tUs - t[lo]) / 1e6);
   };
 }
 

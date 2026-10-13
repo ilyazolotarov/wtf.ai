@@ -160,8 +160,9 @@ says so.
     on the way is on its road. Shift-click draws a straight stretch anyway, or toggles it on a point; drag a point
     to move it, right-click to delete it, click the line to add one in between; Ctrl+Z undoes, Esc ends. Every
     change is saved at once as `<log>.truth.json` beside the log (git-ignored with it).
-  - The car's place on it every second comes from the OBD odometer, pinned at the drive's ends (start where it was
-    parked, end where it parked) and at any clean fix. *Drawn* against *odometer* checks the drawing: they agree
+  - The car's place on it every second comes from the odometer — the speed the app drove on: OBD, or the CAN wheels
+    on a log recorded with CAN primary, which polls OBD only standing — pinned at the drive's ends (start where it
+    was parked, end where it parked) and at any clean fix. *Drawn* against *odometer* checks the drawing: they agree
     within a few % when it is right. Where they don't, the straight stretches take most of it (their length is a
     guess; a road's isn't). The timing's doubt grows by 3 % of the odometer distance to the nearest pin.
   - Each track is scored against it while the car moves: seconds more than 30 m from the drawn road (near where the
