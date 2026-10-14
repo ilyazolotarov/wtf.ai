@@ -204,6 +204,17 @@ describe("the navigator under spoofing (synthetic drive)", () => {
     expect(r.summary.fixes.rejected).toBeGreaterThan(0);
   });
 
+  // 2026-10-14: the dot 1.5 km off when GPS came back; the EKF's five rejections took 3.6 s more after integrity.
+  test("fixes held far after jamming, then trusted for moving like the car: the navigator starts over on the first", () => {
+    const lost = syntheticDrive({ segments: [...CITY, { durationS: 40, speedMps: 14, yawRateDegS: 0 }], gnss: "clean", gyroBiasRadS: 0.02, startHeadingRad: 1 });
+    const r = replayTrip(lost.trip, { jam: [{ fromS: 30, toS: 110 }] });
+    const back = r.fixes.filter((f) => f.tS >= 110);
+    const first = back.findIndex((f) => f.integrity === "ok");
+    expect(back.slice(0, first).every((f) => f.integrity === "far")).toBe(true);
+    expect(back[first].status).toBe("rejected");
+    expect(back[first + 1].status).toBe("init");
+  });
+
   test("without OBD speed, a spoof abroad and a jump are still refused", () => {
     const r = replayTrip({ ...drive.trip, obdSpeed: [] }, { spoof: [{ kind: "outside", fromS: 60, toS: 80 }, { kind: "static", distanceM: 50_000, fromS: 100, toS: 120 }] });
     const spoofed = r.fixes.filter((f) => f.spoofed);

@@ -46,6 +46,8 @@ export interface IntegrityResult {
   verdict: IntegrityVerdict;
   /** What decided it, for the trip log. */
   detail?: string;
+  /** `ok` because the fixes moved like the car, away from the dead reckoning: it is the dead reckoning that is wrong. */
+  verified?: boolean;
 }
 
 export interface IntegrityConfig {
@@ -266,7 +268,8 @@ export class GnssIntegrity {
     const verifyM = ep.kind === "spoof" && ep.drConfirmed ? c.verifyConfirmedM : c.verifyM;
     const close = ep.kind === "far" || ep.drConfirmed || within(h, seen, c.farSigmas, c.farFloorM);
     if (close && driven >= verifyM && ep.verify.tests >= c.verifyTests) {
-      return this.accept(seen, fix.hAccM, `moved like the car for ${km(driven)}${nearest === null ? "" : `, ${km(nearest)} from the dead reckoning`}`);
+      const ok = this.accept(seen, fix.hAccM, `moved like the car for ${km(driven)}${nearest === null ? "" : `, ${km(nearest)} from the dead reckoning`}`);
+      return { ...ok, verified: true };
     }
     this.see(fix.hAccM, fix.tUs, false);
     return { verdict: ep.streak ? "reacquiring" : ep.kind === "far" ? "far" : "untrusted" };

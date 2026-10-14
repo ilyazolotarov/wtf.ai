@@ -834,9 +834,11 @@ export class Navigator {
     const tRef = fix.tUs - this.gnssLagS * 1e6;
     // Integrity first (SPEC §3.3): a refused satellite fix moves nothing, not even the lag estimate.
     let verdict: Pick<FixOutcome, "integrity" | "integrityDetail"> = {};
+    let verified = false;
     if (isSatelliteFix(fix)) {
       const ctx = this.integrityContext(fE, fN, tRef);
       const check = this.integrity.check(fix, ctx);
+      verified = check.verified === true;
       verdict = { integrity: check.verdict, ...(check.detail ? { integrityDetail: check.detail } : {}) };
       if (check.verdict !== "ok") {
         const nearest = ctx.hypotheses?.length ? Math.min(...ctx.hypotheses.map((h) => h.distanceM)) : undefined;
@@ -849,7 +851,7 @@ export class Navigator {
     const sigma = fixSigma(fix);
     // The filter must be at the fix time before it weighs the fix.
     if (this.pf) this.flushOdometry();
-    const outcome = this.ekf ? this.updateEkf(fix, fE, fN, tRef, sigma) : this.updateBeforeInit(fix, fE, fN, tRef, sigma);
+    const outcome = this.ekf ? this.updateEkf(fix, fE, fN, tRef, sigma, verified) : this.updateBeforeInit(fix, fE, fN, tRef, sigma);
     if (verdict.integrity) this.integrity.onUsed(outcome.status === "accepted" || outcome.status === "init");
     const pf = this.pf;
     if (pf && outcome.status === "anchored") {
@@ -1518,7 +1520,8 @@ export class Navigator {
     if (method !== "map" && !this.mapMatchAgrees()) this.startMapMatch();
   }
 
-  private updateEkf(fix: GnssFix, fE: number, fN: number, tRef: number, sigma: number): FixOutcome {
+  /** `verified`: integrity has just trusted these fixes for moving like the car away from the dead reckoning. */
+  private updateEkf(fix: GnssFix, fE: number, fN: number, tRef: number, sigma: number, verified = false): FixOutcome {
     if (this.twin) this.updateTwin(fix, fE, fN, tRef, sigma);
     const c = this.config;
     const ekf = this.ekf!;
@@ -1564,7 +1567,9 @@ export class Navigator {
       }
     }
     if (!pos.accepted) {
-      if (sat && ++this.rejectedSat >= c.resetAfterRejected) this.reset(fix, sigma);
+      // Fixes integrity verified away from the dead reckoning need no more rejections to say it is lost: 3.6 s more
+      // on the drive home (2026-10-14), the dot 1.5 km off meanwhile.
+      if (sat && (verified || ++this.rejectedSat >= c.resetAfterRejected)) this.reset(fix, sigma);
       return outcome;
     }
     if (sat) {

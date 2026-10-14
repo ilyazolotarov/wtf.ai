@@ -485,7 +485,8 @@ Measured on the 7 drives of 2026-10-04 (`mag_raw`, 19.4 Hz):
 - **Moved like the car:** a held or refused stream whose fixes kept the car's shape for 200 m (≥ 3 tests) is
   trusted again when the dead reckoning may be wrong: after a gap (`far`), or when the EKF didn't agree with the
   last trusted fix as the spoofing began. When it did agree, only after 2 km: a stream that jumped away from a
-  dead reckoning that agreed with it is a spoof, however it moves.
+  dead reckoning that agreed with it is a spoof, however it moves. The fix that earns the trust resets the EKF if
+  it gates it out: verified, it needs no five rejections more to say the dead reckoning is lost.
 - **Divergence without a jump** (the phone walking off with the driver, wrong dead reckoning) passes: it continues
   a trusted stream. The EKF's rule (5 rejected satellite fixes reset it, §4) acts on such fixes only, so a spoofed
   stream can no longer reset the navigator onto itself. On the logs, the resets of q8tfjs and 9qw8wn (walking off)
