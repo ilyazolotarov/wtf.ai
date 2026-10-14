@@ -92,7 +92,8 @@ runs `.github/workflows/build-android.yml` with it.
   announced.
 - App Store: Actions → **Build App Store iOS App** (`build-ios-store.yml`, by hand only): the store build, signed and
   uploaded to App Store Connect when the `ASC_KEY_*` secrets or the certificate, profile and app-specific password
-  secrets exist, else unsigned as a compile check;
+  secrets exist, else unsigned as a compile check. Run from `main`, a signed build registers its runtime, and the
+  JS updates of `main` reach it ([OTA.md](OTA.md) → Store builds);
   fails on a library's generic purpose string or a missing privacy manifest
   ([STORE-REVIEW.md](STORE-REVIEW.md) §3.1).
 

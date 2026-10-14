@@ -119,6 +119,13 @@ describe("/publish", () => {
     expect((await publish(`builds/${RUNTIME}/ios`, "GET", null as unknown as BodyInit)).status).toBe(404);
     expect((await publish(`builds/${RUNTIME}/ios`, "PUT", JSON.stringify({ commit: "abc" }))).status).toBe(201);
     const res = await publish(`builds/${RUNTIME}/ios`, "GET", null as unknown as BodyInit);
-    expect(await res.json()).toMatchObject({ commit: "abc" });
+    expect(await res.json()).toMatchObject({ commit: "abc", distribution: "sideload" });
+  });
+
+  it("records a store build as one", async () => {
+    expect((await publish(`builds/${RUNTIME}/ios`, "PUT", JSON.stringify({ commit: "abc", distribution: "testflight" }))).status).toBe(400);
+    expect((await publish(`builds/${RUNTIME}/ios`, "PUT", JSON.stringify({ commit: "abc", distribution: "store" }))).status).toBe(201);
+    const res = await publish(`builds/${RUNTIME}/ios`, "GET", null as unknown as BodyInit);
+    expect(await res.json()).toMatchObject({ commit: "abc", distribution: "store" });
   });
 });

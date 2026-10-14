@@ -19,6 +19,16 @@ fingerprint it embedded, and `ci.yml`'s `publish-builds` job registers it with t
 later JS updates go to it. The same job uploads the IPA/APK (UPDATES-SPEC §3). A build started by hand from **Build
 Unsigned iOS App** is neither registered nor published: start it from **CI** instead.
 
+### Store builds
+
+A store build (TestFlight, the App Store: `build-ios-store.yml`, by hand) has `DISTRIBUTION=store` in its config, which is
+part of the runtime version, so no sideloaded build's update fits it. After a signed build run from `main`, its
+`register` job registers the runtime as a store build (`--distribution store`). `publish-ota.yml` then exports, signs and
+publishes every update a second time with `DISTRIBUTION=store`, so the update also carries the config the store app
+reads (`Constants.expoConfig`: no AltStore, no trip upload). That publish uses `--if-built`: a store runtime no store
+build has yet (a native change since the last one) is left out, never an error. A store build from a branch is not
+registered. The Google Play bundle is never published, so it registers nothing.
+
 ## Rules
 
 - **Release builds only.** `expo-updates` is off in Debug builds (the dev client loads its JS itself), so `main`
@@ -45,8 +55,8 @@ Unsigned iOS App** is neither registered nor published: start it from **CI** ins
 - **Files are immutable.** `assets/<key>` is the file's SHA-256; a file is uploaded once and never changed or
   removed while a kept update uses it (the client checks each download against the hash in the signed manifest).
 - **Pruned.** The Worker removes what no phone needs, daily and after each publish (UPDATES-SPEC §2.1): JS of all but
-  the newest 3 runtimes per platform (each keeps only its latest update), all but the newest 3 builds, map releases but
-  the newest (and the one before it for 2 days). `POST /publish/prune?dry=1` lists what it would remove.
+  the newest 3 runtimes per platform and distribution, sideloaded and store (each keeps only its latest update), all
+  but the newest 3 builds, map releases but the newest (and the one before it for 2 days). `POST /publish/prune?dry=1` lists what it would remove.
 
 ## Recovery
 

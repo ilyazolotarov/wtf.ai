@@ -29,10 +29,19 @@ export interface RollbackRecord {
 
 export type PublishedRecord = UpdateRecord | RollbackRecord;
 
+/**
+ * How a build reaches phones (app.config.js `DISTRIBUTION`): AltStore and the APK installer, or an app store
+ * (TestFlight, the App Store). Its runtime differs, so it takes JS updates of its own.
+ */
+export type Distribution = "sideload" | "store";
+export const isDistribution = (s: unknown): s is Distribution => s === "sideload" || s === "store";
+
 /** A native build CI made for a runtime: an update for a runtime without one reaches no phone. */
 export interface BuildRecord {
   commit: string;
   built: string;
+  /** Absent: sideload (registered before store builds took updates). */
+  distribution?: Distribution;
 }
 
 /** The fields of a manifest the Worker checks before publishing it. */

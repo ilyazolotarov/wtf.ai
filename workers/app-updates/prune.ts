@@ -2,7 +2,16 @@
 // no phone needs. Run by the daily cron and by the CLIs after a publish, each time as a request of its own, so a
 // failed prune never fails a publish. Never touches what a `latest` points at, and leaves files of a publish in
 // progress alone (younger than a day).
-import { isPlatform, MAPS_LATEST_KEY, PLATFORMS, type MapsLatest, type Platform, type UpdateManifestRef } from "../../tools/ota/protocol";
+import {
+  isPlatform,
+  MAPS_LATEST_KEY,
+  PLATFORMS,
+  type BuildRecord,
+  type Distribution,
+  type MapsLatest,
+  type Platform,
+  type UpdateManifestRef,
+} from "../../tools/ota/protocol";
 
 import { deleteKeys, listAll, readJson, type Env, type R2Object } from "./bucket";
 
@@ -44,13 +53,23 @@ async function pruneUpdates(env: Env, now: Date): Promise<string[]> {
     const target = `${runtime}/${file.replace(/\.json$/, "")}`;
     touched.set(target, Math.max(touched.get(target) ?? 0, o.uploaded.getTime()));
   }
+  // Per platform and distribution: a store build's runtime never takes the place of a sideloaded one's. A runtime
+  // with no build record (only published to) counts as sideloaded.
+  const distribution = new Map<string, Distribution>();
+  for (const o of builds) {
+    const [, runtime, file] = o.key.split("/");
+    const record = await readJson<BuildRecord>(env.BUCKET, o.key);
+    if (record?.distribution === "store") distribution.set(`${runtime}/${file.replace(/\.json$/, "")}`, "store");
+  }
   const kept = new Set<string>();
   for (const platform of PLATFORMS) {
-    [...touched]
-      .filter(([target]) => target.endsWith(`/${platform}`))
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, KEEP_RUNTIMES)
-      .forEach(([target]) => kept.add(target));
+    for (const d of ["sideload", "store"] satisfies Distribution[]) {
+      [...touched]
+        .filter(([target]) => target.endsWith(`/${platform}`) && (distribution.get(target) ?? "sideload") === d)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, KEEP_RUNTIMES)
+        .forEach(([target]) => kept.add(target));
+    }
   }
   const remove: string[] = [];
   const isKept = (runtime: string, platform: string) => isPlatform(platform) && kept.has(`${runtime}/${platform}`);

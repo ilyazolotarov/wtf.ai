@@ -86,6 +86,16 @@ describe("prune", () => {
     expect(bucket.objects.has("assets/in-flight")).toBe(true);
   });
 
+  it("keeps the newest 3 runtimes of store builds apart from the sideloaded ones", async () => {
+    // One store runtime, registered first: four sideloaded runtimes after it still leave it alone.
+    await put("builds/store1/ios.json", { commit: "s", distribution: "store" }, 0);
+    for (const [i, r] of ["r1", "r2", "r3", "r4"].entries()) await put(`builds/${r}/ios.json`, { commit: r, distribution: "sideload" }, 1 + i);
+    expect((await run(10)).sort()).toEqual(["builds/r1/ios.json"]);
+    // Four store runtimes: the oldest goes, the sideloaded ones stay.
+    for (const [i, r] of ["store2", "store3", "store4"].entries()) await put(`builds/${r}/ios.json`, { commit: r, distribution: "store" }, 20 + i);
+    expect((await run(30)).sort()).toEqual(["builds/store1/ios.json"]);
+  });
+
   it("keeps a runtime whose latest publish is recent even without a registered build", async () => {
     await put("latest/old/android.json", update("old", "android", "x", ["k"]), 0);
     await put("updates/old/android/x.json", update("old", "android", "x", ["k"]), 0);

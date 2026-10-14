@@ -1,18 +1,20 @@
 // Uploads what `npm run ota:prepare` wrote to the update Worker, and makes it what phones get (docs/OTA.md).
 //
-//   OTA_PUBLISH_TOKEN=... npm run ota:publish -- [--out ota-out] [--require-build] [--url <worker, default: app.json>]
+//   OTA_PUBLISH_TOKEN=... npm run ota:publish -- [--out ota-out] [--require-build | --if-built] [--url <worker, default: app.json>]
 //   OTA_PUBLISH_TOKEN=... npm run ota:publish -- --register-build --platform ios [--runtime <v>] [--commit <sha>]
+//                                                [--distribution sideload|store]
 //
 // Files go first (only those the bucket lacks), then each update record; the Worker refuses an update whose files
 // are not all there. --require-build stops before anything is published when a runtime has no native build: its
 // update would reach no phone, which means the fingerprint changed without a build (a native change CI missed).
-// --register-build is run by the build jobs after a Release build.
+// --if-built leaves those records out instead: a store build is made by hand, so its runtime often has none yet.
+// --register-build is run by the build jobs after a Release build; a store build adds --distribution store.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import { expectOk, flag, inParallel, publishCall as call, requestPrune, resolveRuntimeVersion, runMain } from "./cli";
 import type { UpdateManifest } from "./manifest";
-import { isPlatform, isRollback, parseRecord, type Platform, type PublishedRecord } from "./protocol";
+import { isDistribution, isPlatform, isRollback, parseRecord, type Platform, type PublishedRecord } from "./protocol";
 
 interface Found {
   runtime: string;
@@ -45,13 +47,15 @@ async function main() {
     if (!isPlatform(platform)) throw new Error("--register-build needs --platform ios|android");
     const runtime = flag("runtime") ?? resolveRuntimeVersion(platform);
     const commit = flag("commit") ?? process.env.GITHUB_SHA ?? "unknown";
-    await expectOk(call("PUT", `builds/${runtime}/${platform}`, token, JSON.stringify({ commit })), "registering the build");
-    console.log(`${platform}: build of runtime ${runtime} registered (commit ${commit.slice(0, 7)})`);
+    const distribution = flag("distribution") ?? "sideload";
+    if (!isDistribution(distribution)) throw new Error("--distribution is sideload or store");
+    await expectOk(call("PUT", `builds/${runtime}/${platform}`, token, JSON.stringify({ commit, distribution })), "registering the build");
+    console.log(`${platform}: ${distribution} build of runtime ${runtime} registered (commit ${commit.slice(0, 7)})`);
     return;
   }
 
   const out = path.resolve(flag("out") ?? "ota-out");
-  const records = findRecords(out);
+  let records = findRecords(out);
   if (!records.length) throw new Error(`no update records in ${out}`);
   // One record per runtime and platform: with two, which one ends up live would depend on the file order.
   const targets = records.map((r) => `${r.runtime}/${r.platform}`);
@@ -69,6 +73,17 @@ async function main() {
       }
       if (!res.ok) throw new Error(`checking the ${platform} build: HTTP ${res.status}`);
     }
+  }
+  if (process.argv.includes("--if-built")) {
+    const built: Found[] = [];
+    for (const found of records) {
+      const res = await call("GET", `builds/${found.runtime}/${found.platform}`, token);
+      if (res.ok) built.push(found);
+      else if (res.status === 404) console.log(`${found.platform}: no build has runtime ${found.runtime}, left out`);
+      else throw new Error(`checking the ${found.platform} build: HTTP ${res.status}`);
+    }
+    records = built;
+    if (!records.length) return;
   }
 
   // The content type of each file comes from the manifests that use it.

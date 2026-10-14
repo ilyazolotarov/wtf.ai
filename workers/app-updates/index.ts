@@ -10,7 +10,8 @@
 //   GET  /maps/latest.json                      the current map release; /maps/<osm_date>/<file> its files (Range)
 //   POST /publish/missing  {keys}               → {missing}: which asset keys the bucket lacks
 //   PUT  /publish/assets/<key>                  stores a file; its SHA-256 must be the key
-//   PUT  /publish/builds/<runtime>/<platform>   a native build of that runtime exists (written by the build jobs)
+//   PUT  /publish/builds/<runtime>/<platform>   a native build of that runtime exists (written by the build jobs);
+//                                               {commit, distribution?: sideload | store}
 //   GET  /publish/builds/<runtime>/<platform>   200 the build record, 404 none
 //   PUT  /publish/updates/<runtime>/<platform>/<id>  stores the record and makes it the latest; an update's assets must
 //                                               all be stored already
@@ -25,6 +26,7 @@ import {
   ASSET_KEY_RE,
   assetKey,
   buildKey,
+  isDistribution,
   isPlatform,
   isRollback,
   latestKey,
@@ -129,7 +131,14 @@ async function publish(request: Request, env: Env, parts: string[]): Promise<Res
     if (request.method === "PUT") {
       const record = (await request.json()) as Partial<BuildRecord>;
       if (typeof record.commit !== "string") return json(400, { error: "commit required" });
-      const stored: BuildRecord = { commit: record.commit, built: new Date().toISOString() };
+      if (record.distribution !== undefined && !isDistribution(record.distribution)) {
+        return json(400, { error: "distribution is sideload or store" });
+      }
+      const stored: BuildRecord = {
+        commit: record.commit,
+        built: new Date().toISOString(),
+        distribution: record.distribution ?? "sideload",
+      };
       await env.BUCKET.put(buildKey(a, b), JSON.stringify(stored));
       return json(201, stored);
     }

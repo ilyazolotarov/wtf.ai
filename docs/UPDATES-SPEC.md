@@ -33,8 +33,9 @@ its own, so a failed prune never fails a publish. It never removes what `latest`
 
 - **Builds**: per platform, the newest 3 (by build number); their files go with them. Files in `apps/` that no kept
   build names are removed a day after upload (a publish that failed halfway).
-- **JS updates**: the runtimes kept are the newest 3 per platform, by their build's registration or their latest
-  publish, whichever is newer. For each, only the latest record. A runtime not kept loses its records: its phones get "no update" and keep the
+- **JS updates**: the runtimes kept are the newest 3 per platform and distribution (a store build's runtime never
+  takes a sideloaded one's place; one with no build record counts as sideloaded), by their build's registration or
+  their latest publish, whichever is newer. For each, only the latest record. A runtime not kept loses its records: its phones get "no update" and keep the
   JS they have. A file (`assets/`) that no kept record uses is removed a day after upload, so a publish in progress
   never loses its files.
 - **Maps**: the release `maps/latest.json` names, and the one before it for 2 days after the switch (downloads in
@@ -64,7 +65,9 @@ its own, so a failed prune never fails a publish. It never removes what `latest`
   - AltStore refuses an IPA whose entitlements and `…UsageDescription` texts differ from the source's
     `appPermissions`, so CI reads them from the IPA it built (`codesign`, `Info.plist`).
 - **Store builds** (`DISTRIBUTION=store`, [STORE-REVIEW.md](STORE-REVIEW.md)) never look for a native build: their store
-  updates them. No APK installer, no AltStore; JS updates as above.
+  updates them. No APK installer, no AltStore. JS updates as above, each exported and signed a second time with
+  `DISTRIBUTION=store`: that is in the store build's config, so its runtime is another one, and the update carries the
+  config it reads ([OTA.md](OTA.md) → Store builds).
 - **Telegram** gets a message per build, never the file: on `main`, `publish-builds` sends the download links (APK,
   AltStore source); a branch build (`[build]`) sends the link to its run, whose artifacts hold the files.
 

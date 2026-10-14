@@ -89,6 +89,18 @@ jobs:
         # Refuses a runtime no build has: the update would reach no phone.
         run: npm run -s ota:publish -- --out ota-out --require-build
 
+      - name: Export, sign and publish for the store builds
+        # TestFlight and the App Store run a store build (build-ios-store.yml): DISTRIBUTION=store is in its config, so
+        # its runtime is another one and its JS update is exported and signed again, with the config it reads as
+        # Constants.expoConfig. Made by hand, a store build often has no build of this runtime: then nothing goes out.
+        env:
+          DISTRIBUTION: store
+          EXPO_PUBLIC_BUILD_SHA: ${{ github.sha }}
+        run: |
+          npx expo export $(printf -- '--platform %s ' $PLATFORMS) --output-dir dist-store
+          npm run -s ota:prepare -- --dist dist-store --out ota-out-store
+          npm run -s ota:publish -- --out ota-out-store --if-built
+
       - name: Tell Telegram
         if: ${{ env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != '' }}
         continue-on-error: true

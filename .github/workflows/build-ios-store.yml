@@ -10,6 +10,8 @@ name: Build App Store iOS App
 #   Secrets IOS_DIST_P12_BASE64, IOS_DIST_P12_PASSWORD, IOS_PROFILE_BASE64, ASC_APPLE_ID (the Apple ID's email),
 #   ASC_APP_PASSWORD (app-specific). Variables APPLE_TEAM_ID, ASC_APP_ID (the app's Apple ID in App Store Connect).
 # Without either it builds the same app unsigned: a compile check of the store build.
+# Run from main, a signed build registers its runtime with the update Worker (the register job), and the JS updates of
+# main reach it from then on (publish-ota.yml, docs/OTA.md).
 on:
   workflow_dispatch:
 
@@ -25,6 +27,8 @@ jobs:
   build-ios-store:
     runs-on: macos-26
     timeout-minutes: 75
+    outputs:
+      runtime: ${{ steps.runtime.outputs.runtime }}
     env:
       SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
       SENTRY_ORG: ${{ vars.SENTRY_ORG }}
@@ -228,6 +232,21 @@ jobs:
             -destination 'generic/platform=iOS' -derivedDataPath build \
             CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO build
 
+      - name: OTA runtime of the build
+        # The fingerprint the uploaded build embedded (docs/OTA.md): the register job below makes the JS updates of main
+        # go to it. Not for the unsigned compile check, which no phone runs.
+        id: runtime
+        if: ${{ env.SIGNING != 'none' }}
+        run: |
+          APP=$(ls -d "$RUNNER_TEMP"/wtfai.xcarchive/Products/Applications/*.app | head -n 1)
+          FINGERPRINT=$(find "$APP" -path '*EXUpdates.bundle*' -name fingerprint | head -n 1)
+          if [ -n "$FINGERPRINT" ]; then
+            echo "runtime=$(cat "$FINGERPRINT")" >> "$GITHUB_OUTPUT"
+            echo "Runtime: $(cat "$FINGERPRINT")"
+          else
+            echo "::warning::No embedded fingerprint in the app: this build will take no JS updates"
+          fi
+
       - name: Remove the key, certificate and profile
         if: ${{ always() }}
         run: |
@@ -238,3 +257,31 @@ jobs:
           rm -rf "$RUNNER_TEMP/signing"
           [ -z "$PROFILE_UUID" ] || rm -f "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision" \
             "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
+
+  register:
+    # The JS updates of main go to the runtimes registered with the update Worker (docs/OTA.md). A job of its own: the
+    # token lives in the ota environment, which only main may use. A store build from a branch takes main's updates
+    # only while its runtime is one main registered.
+    needs: build-ios-store
+    if: ${{ github.ref == 'refs/heads/main' && needs.build-ios-store.outputs.runtime != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: ota
+    env:
+      OTA_PUBLISH_TOKEN: ${{ secrets.OTA_PUBLISH_TOKEN }}
+      RUNTIME: ${{ needs.build-ios-store.outputs.runtime }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Register the build
+        # ota:publish needs no dependencies.
+        run: |
+          [ -n "$OTA_PUBLISH_TOKEN" ] || { echo "::error::OTA_PUBLISH_TOKEN is missing from the ota environment (docs/OTA.md)"; exit 1; }
+          [ -n "$UPDATES_ORIGIN" ] || { echo "::error::The UPDATES_ORIGIN repository variable is not set (docs/OTA.md)"; exit 1; }
+          npm run -s ota:publish -- --register-build --platform ios --runtime "$RUNTIME" --distribution store
