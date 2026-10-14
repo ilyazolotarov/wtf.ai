@@ -1,0 +1,146 @@
+---
+layout: null
+---
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>wtf.ai — Where the f* am I?</title>
+  <meta name="description" content="Offline car navigation that keeps your position when GPS is jammed or spoofed.">
+  <meta property="og:title" content="wtf.ai — Where the f* am I?">
+  <meta property="og:description" content="Offline car navigation that keeps your position when GPS is jammed or spoofed.">
+  <meta property="og:image" content="assets/icon.png">
+  <link rel="icon" href="assets/icon.png">
+  <link rel="alternate" hreflang="uk" href="./">
+  <link rel="alternate" hreflang="en" href="en.html">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/landing.css?v={{ site.github.build_revision }}">
+  <script>try{if(localStorage.getItem("theme")==="light")document.documentElement.setAttribute("data-theme","light")}catch(e){}</script>
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <a class="brand" href="en.html">wtf.ai</a>
+      <nav>
+        <a href="#how">How it works</a>
+        <a href="#adapter">Adapter</a>
+        <a href="https://github.com/{{ site.github.repository_nwo }}/wiki">Guide</a>
+        <a href="./" lang="uk" hreflang="uk">Українська</a>
+        <button class="theme-toggle" type="button" data-to-light="Light" data-to-dark="Dark">Light</button>
+      </nav>
+    </header>
+
+    <div class="hero">
+      <div>
+        <h1>Where the f* am&nbsp;I?</h1>
+        <p class="lead">Offline car navigation that keeps knowing where you are when GPS is jammed or spoofed.</p>
+        <div class="badges">
+          <span class="badge soon">App Store · coming soon</span>
+          <span class="badge soon">Google Play · coming soon</span>
+          <a class="badge" href="https://github.com/{{ site.github.repository_nwo }}/wiki/Getting-started">Getting started</a>
+        </div>
+      </div>
+      <div class="phone"><img src="assets/screens/dark/01-guidance.png" data-dark="assets/screens/dark/01-guidance.png" data-light="assets/screens/01-guidance.png" alt="The wtf.ai map guiding a route"></div>
+    </div>
+  </div>
+
+  <section>
+    <div class="wrap">
+      <h2>When the dot on your map lies</h2>
+      <p class="sub">During air raids, satellite positioning is jammed or spoofed: an ordinary map freezes, or throws you
+        hundreds of kilometres away. wtf.ai keeps following the car from its own speed and turns.</p>
+      <div class="grid">
+        <div class="card"><h3>Keeps your position</h3><p>From the last trusted fix it goes on with the car's wheel speed
+          and the phone's sense of turning, and keeps the car on the roads.</p></div>
+        <div class="card"><h3>Spots fake positions</h3><p>A satellite position that disagrees with how the car actually
+          moves is refused. You see where GPS claims you are, in grey.</p></div>
+        <div class="card"><h3>Fully offline</h3><p>Download your region once. The map, address search, routes and voice
+          guidance then need no internet.</p></div>
+        <div class="card"><h3>Turn-by-turn voice</h3><p>Spoken directions in English or Ukrainian, through the phone or
+          the car's speakers. It re-plans by itself after a wrong turn.</p></div>
+        <div class="card"><h3>Learns your car</h3><p>Nothing to calibrate: the app learns your car and phone on the
+          way, and remembers where you park.</p></div>
+        <div class="card"><h3>Private</h3><p>No account. Your position, routes and trips never leave the phone.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="how">
+    <div class="wrap">
+      <h2>How it works</h2>
+      <p class="sub">Every GPS position is checked against the car before it is used.</p>
+      <div class="steps">
+        <div class="card"><h3><span class="dot" style="background:var(--ok)"></span>GPS ok</h3><p>GPS agrees with the
+          car's speed and turns: the status is green.</p></div>
+        <div class="card"><h3><span class="dot" style="background:var(--bad)"></span>Jammed</h3><p>Satellites go. The
+          dot keeps moving on wheel speed and the phone's turns, kept on the roads.</p></div>
+        <div class="card"><h3>A turn</h3><p>Unsure between two roads? The next turn fits only one of them, and the
+          circle shrinks again.</p></div>
+        <div class="card"><h3>GPS back</h3><p>Fixes are checked against the car for a few seconds before they are
+          trusted again.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>See it drive</h2>
+      <p class="sub">A drive on the emulated adapter: GPS is spoofed halfway, and the car carries on along the road on its own speed.</p>
+      <div class="demo">
+        <video src="assets/demo-dark.mp4" poster="assets/screens/dark/01-guidance.png" data-dark="assets/demo-dark.mp4" data-light="assets/demo.mp4" data-dark-poster="assets/screens/dark/01-guidance.png" data-light-poster="assets/screens/01-guidance.png" controls muted playsinline loop preload="metadata" aria-label="Demo drive: guidance, then GPS spoofed"></video>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>In the app</h2>
+      <p class="sub">Light and dark, English and Ukrainian, built for a phone in a holder.</p>
+      <div class="shots">
+        <img src="assets/screens/dark/01-guidance.png" data-dark="assets/screens/dark/01-guidance.png" data-light="assets/screens/01-guidance.png" alt="Guidance with trusted GPS" loading="lazy">
+        <img src="assets/screens/dark/04-spoofed.png" data-dark="assets/screens/dark/04-spoofed.png" data-light="assets/screens/04-spoofed.png" alt="GPS spoofed: the car keeps its position" loading="lazy">
+        <img src="assets/screens/dark/03-search.png" data-dark="assets/screens/dark/03-search.png" data-light="assets/screens/03-search.png" alt="Offline address search" loading="lazy">
+        <img src="assets/screens/dark/02-route.png" data-dark="assets/screens/dark/02-route.png" data-light="assets/screens/02-route.png" alt="A destination" loading="lazy">
+        <img src="assets/screens/dark/05-lesson.png" data-dark="assets/screens/dark/05-lesson.png" data-light="assets/screens/05-lesson.png" alt="Lesson: driving through jamming" loading="lazy">
+        <img src="assets/screens/dark/06-maps.png" data-dark="assets/screens/dark/06-maps.png" data-light="assets/screens/06-maps.png" alt="Offline maps" loading="lazy">
+      </div>
+    </div>
+  </section>
+
+  <section id="adapter">
+    <div class="wrap">
+      <h2>Add a car adapter</h2>
+      <p class="sub">A small OBD-II Bluetooth plug under the dashboard tells the app exactly how fast the car goes. With
+        it, the position holds for hours without GPS. Without it, the app works while GPS is good.</p>
+      <div class="grid">
+        <div class="card"><h3>Android</h3><p>Any Bluetooth ELM327 adapter: Bluetooth LE, or classic Bluetooth like most
+          inexpensive ones.</p></div>
+        <div class="card"><h3>iPhone</h3><p>Bluetooth LE ELM327 adapters, plus OBDLink MX+ and vLinker FS / MS.
+          Classic-only adapters can't work with any iPhone app.</p></div>
+        <div class="card"><h3>Which to buy</h3><p>Tested: OBDLink MX+, vLinker FD-IOS. Also good: OBDLink CX, vLinker
+          MC+ / FD+ / FS / MS. Skip cheap "v1.5" clones, which answer with gaps, and dongles made for their own
+          app.</p></div>
+      </div>
+      <p class="sub" style="margin: 20px 0 0">Connect once; after that it connects by itself whenever you open the app in
+        the car. <a href="https://github.com/{{ site.github.repository_nwo }}/wiki/Car-adapter">Which adapter, and
+        connecting</a></p>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap">
+      <p>
+        <a href="https://github.com/{{ site.github.repository_nwo }}/wiki">Guide</a>
+        <a href="privacy.html">Privacy policy</a>
+        <a href="https://github.com/{{ site.github.repository_nwo }}">Source</a>
+        {% if site.support_email %}<a href="mailto:{{ site.support_email }}">Support: {{ site.support_email }}</a>{% endif %}
+      </p>
+      <p>Map data © OpenStreetMap contributors · Tiles schema © OpenMapTiles</p>
+    </div>
+  </footer>
+  <script src="assets/theme.js?v={{ site.github.build_revision }}"></script>
+</body>
+</html>

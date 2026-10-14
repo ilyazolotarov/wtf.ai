@@ -2,18 +2,18 @@
 layout: null
 ---
 <!doctype html>
-<html lang="en">
+<html lang="uk">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>wtf.ai — Where the f* am I?</title>
-  <meta name="description" content="Offline car navigation that keeps your position when GPS is jammed or spoofed.">
+  <meta name="description" content="Офлайн-навігатор для авто, який відстежує вашу позицію, навіть коли GPS заглушено або підмінено.">
   <meta property="og:title" content="wtf.ai — Where the f* am I?">
-  <meta property="og:description" content="Offline car navigation that keeps your position when GPS is jammed or spoofed.">
+  <meta property="og:description" content="Офлайн-навігатор для авто, який відстежує вашу позицію, навіть коли GPS заглушено або підмінено.">
   <meta property="og:image" content="assets/icon.png">
   <link rel="icon" href="assets/icon.png">
-  <link rel="alternate" hreflang="uk" href="uk.html">
-  <link rel="alternate" hreflang="en" href="./">
+  <link rel="alternate" hreflang="en" href="en.html">
+  <link rel="alternate" hreflang="uk" href="./">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -25,120 +25,109 @@ layout: null
     <header class="top">
       <a class="brand" href="./">wtf.ai</a>
       <nav>
-        <a href="#how">How it works</a>
-        <a href="#adapter">Adapter</a>
-        <a href="https://github.com/{{ site.github.repository_nwo }}/wiki">Guide</a>
-        <a href="uk.html" lang="uk" hreflang="uk">Українська</a>
-        <button class="theme-toggle" type="button" data-to-light="Light" data-to-dark="Dark">Light</button>
+        <a href="#how">Як працює</a>
+        <a href="#adapter">Адаптер</a>
+        <a href="https://github.com/{{ site.github.repository_nwo }}/wiki/Home-uk">Довідка</a>
+        <a href="en.html" lang="en" hreflang="en">English</a>
+        <button class="theme-toggle" type="button" data-to-light="Світла" data-to-dark="Темна">Світла</button>
       </nav>
     </header>
 
     <div class="hero">
       <div>
         <h1>Where the f* am&nbsp;I?</h1>
-        <p class="lead">Offline car navigation that keeps knowing where you are when GPS is jammed or spoofed.</p>
+        <p class="lead">Офлайн-навігатор для авто, який знає, де ви, навіть коли GPS заглушено або підмінено.</p>
         <div class="badges">
-          <span class="badge soon">App Store · coming soon</span>
-          <span class="badge soon">Google Play · coming soon</span>
-          <a class="badge" href="https://github.com/{{ site.github.repository_nwo }}/wiki/Getting-started">Getting started</a>
+          <span class="badge soon">App Store · незабаром</span>
+          <span class="badge soon">Google Play · незабаром</span>
+          <a class="badge" href="https://github.com/{{ site.github.repository_nwo }}/wiki/Getting-started-uk">Перші кроки</a>
         </div>
       </div>
-      <div class="phone"><img src="assets/screens/dark/01-guidance.png" data-dark="assets/screens/dark/01-guidance.png" data-light="assets/screens/01-guidance.png" alt="The wtf.ai map guiding a route"></div>
+      <div class="phone"><img src="assets/screens/uk/dark/01-guidance.png" data-dark="assets/screens/uk/dark/01-guidance.png" data-light="assets/screens/uk/01-guidance.png" alt="wtf.ai веде маршрутом на мапі"></div>
     </div>
   </div>
 
   <section>
     <div class="wrap">
-      <h2>When the dot on your map lies</h2>
-      <p class="sub">During air raids, satellite positioning is jammed or spoofed: an ordinary map freezes, or throws you
-        hundreds of kilometres away. wtf.ai keeps following the car from its own speed and turns.</p>
+      <h2>Коли мітка на мапі помиляється</h2>
+      <p class="sub">Під час повітряних тривог супутниковий сигнал може зникнути або вказати зовсім інше місце. wtf.ai продовжує відстежувати авто за його швидкістю та поворотами.</p>
       <div class="grid">
-        <div class="card"><h3>Keeps your position</h3><p>From the last trusted fix it goes on with the car's wheel speed
-          and the phone's sense of turning, and keeps the car on the roads.</p></div>
-        <div class="card"><h3>Spots fake positions</h3><p>A satellite position that disagrees with how the car actually
-          moves is refused. You see where GPS claims you are, in grey.</p></div>
-        <div class="card"><h3>Fully offline</h3><p>Download your region once. The map, address search, routes and voice
-          guidance then need no internet.</p></div>
-        <div class="card"><h3>Turn-by-turn voice</h3><p>Spoken directions in English or Ukrainian, through the phone or
-          the car's speakers. It re-plans by itself after a wrong turn.</p></div>
-        <div class="card"><h3>Learns your car</h3><p>Nothing to calibrate: the app learns your car and phone on the
-          way, and remembers where you park.</p></div>
-        <div class="card"><h3>Private</h3><p>No account. Your position, routes and trips never leave the phone.</p></div>
+        <div class="card"><h3>Зберігає позицію</h3><p>Від останньої надійної позиції програма рухається далі за швидкістю авто та поворотами телефона, утримуючи мітку на дорогах.</p></div>
+        <div class="card"><h3>Розпізнає підміну</h3><p>Програма ігнорує супутникову позицію, що суперечить руху авто. Місце, яке показує GPS, ви побачите сірим.</p></div>
+        <div class="card"><h3>Працює офлайн</h3><p>Завантажте свій регіон один раз. Мапа, пошук адрес, маршрути й голосові підказки працюватимуть без інтернету.</p></div>
+        <div class="card"><h3>Підказує повороти голосом</h3><p>Українською або англійською, через телефон чи динаміки авто. Після неправильного повороту маршрут перебудовується автоматично.</p></div>
+        <div class="card"><h3>Вивчає ваше авто</h3><p>Нічого калібрувати не потрібно: програма пристосовується до авто й телефона під час руху та запам’ятовує місце паркування.</p></div>
+        <div class="card"><h3>Береже приватність</h3><p>Без реєстрації. Геопозиція, маршрути й поїздки залишаються на телефоні.</p></div>
       </div>
     </div>
   </section>
 
   <section id="how">
     <div class="wrap">
-      <h2>How it works</h2>
-      <p class="sub">Every GPS position is checked against the car before it is used.</p>
+      <h2>Як це працює</h2>
+      <p class="sub">Перед використанням кожної позиції GPS програма звіряє її з рухом авто.</p>
       <div class="steps">
-        <div class="card"><h3><span class="dot" style="background:var(--ok)"></span>GPS ok</h3><p>GPS agrees with the
-          car's speed and turns: the status is green.</p></div>
-        <div class="card"><h3><span class="dot" style="background:var(--bad)"></span>Jammed</h3><p>Satellites go. The
-          dot keeps moving on wheel speed and the phone's turns, kept on the roads.</p></div>
-        <div class="card"><h3>A turn</h3><p>Unsure between two roads? The next turn fits only one of them, and the
-          circle shrinks again.</p></div>
-        <div class="card"><h3>GPS back</h3><p>Fixes are checked against the car for a few seconds before they are
-          trusted again.</p></div>
+        <div class="card"><h3><span class="dot" style="background:var(--ok)"></span>Надійний GPS</h3><p>Позиція GPS узгоджується зі швидкістю та поворотами авто: індикатор зелений.</p></div>
+        <div class="card"><h3><span class="dot" style="background:var(--bad)"></span>Сигнал заглушено</h3><p>Супутників немає, але мітка далі рухається за швидкістю авто та поворотами телефона вздовж доріг.</p></div>
+        <div class="card"><h3>Поворот</h3><p>Неясно, якою з двох доріг їде авто? Наступний поворот допоможе визначити правильну, і коло невизначеності зменшиться.</p></div>
+        <div class="card"><h3>GPS повернувся</h3><p>Програма кілька секунд звіряє нові позиції з рухом авто, перш ніж знову їм довіряти.</p></div>
       </div>
     </div>
   </section>
 
   <section>
     <div class="wrap">
-      <h2>See it drive</h2>
-      <p class="sub">A drive on the emulated adapter: GPS is spoofed halfway, and the car carries on along the road on its own speed.</p>
+      <h2>Подивіться, як це працює</h2>
+      <p class="sub">Демо-поїздка з імітованим адаптером: посеред маршруту GPS починає показувати хибну позицію, але мітка авто продовжує рухатися дорогою за даними про його швидкість.</p>
       <div class="demo">
-        <video src="assets/demo-dark.mp4" poster="assets/screens/dark/01-guidance.png" data-dark="assets/demo-dark.mp4" data-light="assets/demo.mp4" data-dark-poster="assets/screens/dark/01-guidance.png" data-light-poster="assets/screens/01-guidance.png" controls muted playsinline loop preload="metadata" aria-label="Demo drive: guidance, then GPS spoofed"></video>
+        <video src="assets/demo-uk-dark.mp4" poster="assets/screens/uk/dark/01-guidance.png" data-dark="assets/demo-uk-dark.mp4" data-light="assets/demo-uk.mp4" data-dark-poster="assets/screens/uk/dark/01-guidance.png" data-light-poster="assets/screens/uk/01-guidance.png" controls muted playsinline loop preload="metadata" aria-label="Демо-поїздка: навігація, потім підміна GPS"></video>
       </div>
     </div>
   </section>
 
   <section>
     <div class="wrap">
-      <h2>In the app</h2>
-      <p class="sub">Light and dark, English and Ukrainian, built for a phone in a holder.</p>
+      <h2>У програмі</h2>
+      <p class="sub">Світла й темна теми, українська й англійська мови — для телефона в тримачі.</p>
       <div class="shots">
-        <img src="assets/screens/dark/01-guidance.png" data-dark="assets/screens/dark/01-guidance.png" data-light="assets/screens/01-guidance.png" alt="Guidance with trusted GPS" loading="lazy">
-        <img src="assets/screens/dark/04-spoofed.png" data-dark="assets/screens/dark/04-spoofed.png" data-light="assets/screens/04-spoofed.png" alt="GPS spoofed: the car keeps its position" loading="lazy">
-        <img src="assets/screens/dark/03-search.png" data-dark="assets/screens/dark/03-search.png" data-light="assets/screens/03-search.png" alt="Offline address search" loading="lazy">
-        <img src="assets/screens/dark/02-route.png" data-dark="assets/screens/dark/02-route.png" data-light="assets/screens/02-route.png" alt="A destination" loading="lazy">
-        <img src="assets/screens/dark/05-lesson.png" data-dark="assets/screens/dark/05-lesson.png" data-light="assets/screens/05-lesson.png" alt="Lesson: driving through jamming" loading="lazy">
-        <img src="assets/screens/dark/06-maps.png" data-dark="assets/screens/dark/06-maps.png" data-light="assets/screens/06-maps.png" alt="Offline maps" loading="lazy">
+        <img src="assets/screens/uk/dark/01-guidance.png" data-dark="assets/screens/uk/dark/01-guidance.png" data-light="assets/screens/uk/01-guidance.png" alt="Навігація з надійним GPS" loading="lazy">
+        <img src="assets/screens/uk/dark/04-spoofed.png" data-dark="assets/screens/uk/dark/04-spoofed.png" data-light="assets/screens/uk/04-spoofed.png" alt="GPS підмінено: авто залишається на правильній дорозі" loading="lazy">
+        <img src="assets/screens/uk/dark/03-search.png" data-dark="assets/screens/uk/dark/03-search.png" data-light="assets/screens/uk/03-search.png" alt="Офлайн-пошук адрес" loading="lazy">
+        <img src="assets/screens/uk/dark/02-route.png" data-dark="assets/screens/uk/dark/02-route.png" data-light="assets/screens/uk/02-route.png" alt="Вибране місце призначення" loading="lazy">
+        <img src="assets/screens/uk/dark/05-lesson.png" data-dark="assets/screens/uk/dark/05-lesson.png" data-light="assets/screens/uk/05-lesson.png" alt="Урок про поїздку без GPS" loading="lazy">
+        <img src="assets/screens/uk/dark/06-maps.png" data-dark="assets/screens/uk/dark/06-maps.png" data-light="assets/screens/uk/06-maps.png" alt="Офлайн-мапи" loading="lazy">
       </div>
     </div>
   </section>
 
   <section id="adapter">
     <div class="wrap">
-      <h2>Add a car adapter</h2>
-      <p class="sub">A small OBD-II Bluetooth plug under the dashboard tells the app exactly how fast the car goes. With
-        it, the position holds for hours without GPS. Without it, the app works while GPS is good.</p>
+      <h2>Підключіть адаптер до авто</h2>
+      <p class="sub">Невеликий Bluetooth-адаптер OBD-II під панеллю приладів передає програмі точну швидкість авто. З ним програма продовжує визначати позицію авто годинами без GPS. Без адаптера програма працює, поки GPS надійний.</p>
       <div class="grid">
-        <div class="card"><h3>Android</h3><p>Any Bluetooth ELM327 adapter: Bluetooth LE, or classic Bluetooth like most
-          inexpensive ones.</p></div>
-        <div class="card"><h3>iPhone</h3><p>Bluetooth LE ELM327 adapters, plus OBDLink MX+ and vLinker FS / MS.
-          Classic-only adapters can't work with any iPhone app.</p></div>
-        <div class="card"><h3>Which to buy</h3><p>Tested: OBDLink MX+, vLinker FD-IOS. Also good: OBDLink CX, vLinker
-          MC+ / FD+ / FS / MS. Skip cheap "v1.5" clones, which answer with gaps, and dongles made for their own
-          app.</p></div>
+        <div class="card"><h3>Android</h3><p>Будь-який Bluetooth-адаптер ELM327: Bluetooth LE або звичайний Bluetooth, як
+          більшість недорогих.</p></div>
+        <div class="card"><h3>iPhone</h3><p>Адаптери ELM327 з Bluetooth LE, а також OBDLink MX+ і vLinker FS / MS.
+          Адаптери лише зі звичайним Bluetooth не працюють із жодною програмою на iPhone.</p></div>
+        <div class="card"><h3>Який купити</h3><p>Перевірено: OBDLink MX+, vLinker FD-IOS. Також добрі: OBDLink CX,
+          vLinker MC+ / FD+ / FS / MS. Оминайте дешеві клони «v1.5», що відповідають із пропусками, і адаптери,
+          створені для власної програми.</p></div>
       </div>
-      <p class="sub" style="margin: 20px 0 0">Connect once; after that it connects by itself whenever you open the app in
-        the car. <a href="https://github.com/{{ site.github.repository_nwo }}/wiki/Car-adapter">Which adapter, and
-        connecting</a></p>
+      <p class="sub" style="margin: 20px 0 0">Підключіть один раз — далі програма сама з’єднуватиметься з адаптером, коли
+        ви відкриєте її в авто. <a href="https://github.com/{{ site.github.repository_nwo }}/wiki/Car-adapter-uk">Який
+        адаптер обрати і як підключити</a></p>
     </div>
   </section>
 
   <footer>
     <div class="wrap">
       <p>
-        <a href="https://github.com/{{ site.github.repository_nwo }}/wiki">Guide</a>
-        <a href="privacy.html">Privacy policy</a>
-        <a href="https://github.com/{{ site.github.repository_nwo }}">Source</a>
-        {% if site.support_email %}<a href="mailto:{{ site.support_email }}">Support: {{ site.support_email }}</a>{% endif %}
+        <a href="https://github.com/{{ site.github.repository_nwo }}/wiki/Home-uk">Довідка</a>
+        <a href="privacy.uk.html">Політика приватності</a>
+        <a href="https://github.com/{{ site.github.repository_nwo }}">Вихідний код</a>
+        {% if site.support_email %}<a href="mailto:{{ site.support_email }}">Підтримка: {{ site.support_email }}</a>{% endif %}
       </p>
-      <p>Map data © OpenStreetMap contributors · Tiles schema © OpenMapTiles</p>
+      <p>Дані мапи © учасники OpenStreetMap · Схема тайлів © OpenMapTiles</p>
     </div>
   </footer>
   <script src="assets/theme.js?v={{ site.github.build_revision }}"></script>

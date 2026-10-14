@@ -30,7 +30,7 @@
 <body>
   <div class="wrap">
     <header>
-      <a href="{% if page.lang == 'uk' %}uk.html{% else %}./{% endif %}">wtf.ai</a>
+      <a href="{% if page.lang == 'uk' %}./{% else %}en.html{% endif %}">wtf.ai</a>
       {% if page.lang == 'uk' %}<a class="language" href="privacy.html" lang="en" hreflang="en">English</a>{% else %}<a class="language" href="privacy.uk.html" lang="uk" hreflang="uk">Українська</a>{% endif %}
     </header>
     {{ content }}

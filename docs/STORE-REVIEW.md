@@ -232,7 +232,7 @@ Metadata policy). Character limits in brackets. No other app, store or competito
   website shows the dark set and video by default and the light ones with its theme switch (`site/assets/screens/`,
   `site/assets/demo*.mp4`, re-encoded smaller). The current Play set and videos are in `store-assets/play/`
   (`light`, `dark`, `promo.mp4`, `promo-dark.mp4`; `uk-light`, `uk-dark`, `promo-uk.mp4`, `promo-uk-dark.mp4` from
-  `--lang uk`, the app in Ukrainian from its first screen, for the Ukrainian listing and `site/uk.html`), in
+  `--lang uk`, the app in Ukrainian from its first screen, for the Ukrainian listing and the website, whose home page is Ukrainian (`site/index.html`; English: `site/en.html`)), in
   Git LFS like every screenshot and video (`.gitattributes`).
 - **App Store**: screenshots of the iOS app (2.3.3), so not from the emulator: take them on an iPhone with a store or
   sideloaded build, same scenes. Sizes: 6.9" (1320×2868) or 6.5" (1284×2778); no iPad (`supportsTablet` unset).
