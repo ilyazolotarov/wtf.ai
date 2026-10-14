@@ -91,7 +91,8 @@ runs `.github/workflows/build-android.yml` with it.
   `REQUEST_INSTALL_PACKAGES` or background location ([STORE-REVIEW.md](STORE-REVIEW.md) §4.2). Never published or
   announced.
 - App Store: Actions → **Build App Store iOS App** (`build-ios-store.yml`, by hand only): the store build, signed and
-  uploaded to App Store Connect when the `ASC_*` secrets and `APPLE_TEAM_ID` exist, else unsigned as a compile check;
+  uploaded to App Store Connect when the `ASC_KEY_*` secrets or the certificate, profile and app-specific password
+  secrets exist, else unsigned as a compile check;
   fails on a library's generic purpose string or a missing privacy manifest
   ([STORE-REVIEW.md](STORE-REVIEW.md) §3.1).
 

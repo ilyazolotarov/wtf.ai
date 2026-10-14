@@ -52,8 +52,20 @@ never contains `REQUEST_INSTALL_PACKAGES` (`build-store.yml` fails if it does).
 - An App Store Connect API key with the Admin role (Users and Access → Integrations), stored as the secrets
   `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8` (the .p8 file's text), and the team id as the variable
   `APPLE_TEAM_ID`. Then Actions → **Build App Store iOS App** (`build-ios-store.yml`) archives with cloud-managed
-  signing on the macOS runner and uploads to App Store Connect; no Mac, no certificate files. Without the key it builds
-  the store app unsigned (a compile check) and checks its Info.plist and privacy manifest either way.
+  signing on the macOS runner and uploads to App Store Connect; no Mac, no certificate files.
+- Without an API key (App Store Connect can refuse to create one, citing the Program License Agreement), the same
+  workflow signs with files made in the developer portal and uploads with an app-specific password:
+  - Secrets `IOS_DIST_P12_BASE64` and `IOS_DIST_P12_PASSWORD`: an Apple Distribution certificate with its private
+    key, as a `.p12` exported with `openssl pkcs12 -export -legacy` (the runner's keychain refuses OpenSSL 3's default
+    encryption), base64 on one line. The certificate request and key can be made with OpenSSL on Windows.
+  - Secret `IOS_PROFILE_BASE64`: an App Store provisioning profile for `ai.wtf.navigator`, base64. The workflow fails
+    early if the profile is for another app or lists devices.
+  - Secrets `ASC_APPLE_ID` (the email of an Apple ID with access to the app) and `ASC_APP_PASSWORD` (an app-specific
+    password from account.apple.com). Variables `APPLE_TEAM_ID` and `ASC_APP_ID` (App Information → Apple ID in App
+    Store Connect, so the app record must exist first).
+  The certificate and profile expire after a year; renew both and replace the secrets.
+- With neither, it builds the store app unsigned (a compile check). It checks the Info.plist and privacy manifest
+  every time.
 - Screenshots (6.9" and 6.5" iPhone at least), description, keywords, support URL (the GitHub repo), privacy policy
   URL, age rating: 13+ (answer "Infrequent/Mild Profanity or Crude Humor": the name stands for "Where the f\* am I?"; a driving app has no audience below that anyway).
 

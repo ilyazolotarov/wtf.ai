@@ -1,10 +1,15 @@
 name: Build App Store iOS App
 
 # The App Store build (docs/STORE-REVIEW.md §3.1), run by hand. DISTRIBUTION=store (app.config.js): no AltStore, no
-# tester upload, the Developer screen hidden. With the App Store Connect API key (Admin role) in the secrets below,
-# Xcode signs with cloud-managed certificates and profiles, archives, and uploads the build to App Store Connect, where
-# it goes to TestFlight and review. Without them it builds the same app unsigned: a compile check of the store build.
-# Secrets: ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8 (the .p8 file's text). Variable: APPLE_TEAM_ID.
+# tester upload, the Developer screen hidden. Signed and uploaded to App Store Connect, where it goes to TestFlight and
+# review, in one of two ways, chosen by which secrets exist:
+# - key: the App Store Connect API key (Admin role). Xcode signs with cloud-managed certificates and profiles.
+#   Secrets ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8 (the .p8 file's text). Variable APPLE_TEAM_ID.
+# - manual: an Apple Distribution certificate and an App Store provisioning profile made in the developer portal, and an
+#   Apple ID with an app-specific password for the upload. For an account that cannot create API keys.
+#   Secrets IOS_DIST_P12_BASE64, IOS_DIST_P12_PASSWORD, IOS_PROFILE_BASE64, ASC_APPLE_ID (the Apple ID's email),
+#   ASC_APP_PASSWORD (app-specific). Variables APPLE_TEAM_ID, ASC_APP_ID (the app's Apple ID in App Store Connect).
+# Without either it builds the same app unsigned: a compile check of the store build.
 on:
   workflow_dispatch:
 
@@ -29,7 +34,12 @@ jobs:
       ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
       ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
       APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
-      SIGNED: ${{ secrets.ASC_KEY_ID != '' && secrets.ASC_ISSUER_ID != '' && secrets.ASC_KEY_P8 != '' && vars.APPLE_TEAM_ID != '' }}
+      ASC_APP_ID: ${{ vars.ASC_APP_ID }}
+      SIGNING: >-
+        ${{ (secrets.ASC_KEY_ID != '' && secrets.ASC_ISSUER_ID != '' && secrets.ASC_KEY_P8 != '' && vars.APPLE_TEAM_ID != '') && 'key'
+        || (secrets.IOS_DIST_P12_BASE64 != '' && secrets.IOS_PROFILE_BASE64 != '' && secrets.ASC_APPLE_ID != ''
+        && secrets.ASC_APP_PASSWORD != '' && vars.APPLE_TEAM_ID != '' && vars.ASC_APP_ID != '') && 'manual'
+        || 'none' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -59,8 +69,13 @@ jobs:
           SCHEME=$(basename "$(ls -d ios/*.xcworkspace | head -n 1)" .xcworkspace)
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD" "ios/$SCHEME/Info.plist"
           /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "ios/$SCHEME/Info.plist"
-          echo "SCHEME=$SCHEME" >> "$GITHUB_ENV"
-          echo "Version $VERSION, build $BUILD"
+          {
+            echo "SCHEME=$SCHEME"
+            echo "BUILD=$BUILD"
+            echo "VERSION=$VERSION"
+            echo "BUNDLE_ID=$(jq -r .expo.ios.bundleIdentifier app.json)"
+          } >> "$GITHUB_ENV"
+          echo "Version $VERSION, build $BUILD, signing: $SIGNING"
 
       - name: Check the store Info.plist
         # App Review 5.1.1: every purpose string is ours, none a library default; the privacy manifest is there.
@@ -74,14 +89,14 @@ jobs:
           test -f "ios/$SCHEME/PrivacyInfo.xcprivacy" || { echo "::error::No PrivacyInfo.xcprivacy"; exit 1; }
 
       - name: App Store Connect key
-        if: ${{ env.SIGNED == 'true' }}
+        if: ${{ env.SIGNING == 'key' }}
         run: |
           mkdir -p "$RUNNER_TEMP/asc"
           printf '%s' "$ASC_KEY_P8" > "$RUNNER_TEMP/asc/AuthKey_${ASC_KEY_ID}.p8"
           echo "ASC_KEY_PATH=$RUNNER_TEMP/asc/AuthKey_${ASC_KEY_ID}.p8" >> "$GITHUB_ENV"
 
       - name: Archive and upload to App Store Connect
-        if: ${{ env.SIGNED == 'true' }}
+        if: ${{ env.SIGNING == 'key' }}
         env:
           EXPO_PUBLIC_BUILD_SHA: ${{ github.sha }}
         run: |
@@ -105,17 +120,121 @@ jobs:
           xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/wtfai.xcarchive" \
             -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" -exportPath "$RUNNER_TEMP/export" "${AUTH[@]}"
 
-      - name: Build unsigned (no App Store Connect key)
-        if: ${{ env.SIGNED != 'true' }}
+      - name: Install certificate and profile
+        # A keychain of its own for the Apple Distribution certificate, and the profile where Xcode looks for it.
+        if: ${{ env.SIGNING == 'manual' }}
+        env:
+          P12_BASE64: ${{ secrets.IOS_DIST_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.IOS_DIST_P12_PASSWORD }}
+          PROFILE_BASE64: ${{ secrets.IOS_PROFILE_BASE64 }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/signing"
+          KEYCHAIN="$RUNNER_TEMP/signing/build.keychain-db"
+          KEYCHAIN_PASSWORD=$(openssl rand -hex 16)
+          printf '%s' "$P12_BASE64" | base64 --decode > "$RUNNER_TEMP/signing/dist.p12"
+          printf '%s' "$PROFILE_BASE64" | base64 --decode > "$RUNNER_TEMP/signing/app.mobileprovision"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/signing/dist.p12" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          security find-identity -v -p codesigning "$KEYCHAIN"
+
+          security cms -D -i "$RUNNER_TEMP/signing/app.mobileprovision" > "$RUNNER_TEMP/signing/profile.plist"
+          PROFILE_UUID=$(plutil -extract UUID raw -o - "$RUNNER_TEMP/signing/profile.plist")
+          PROFILE_APP_ID=$(plutil -extract Entitlements.application-identifier raw -o - "$RUNNER_TEMP/signing/profile.plist")
+          if [ "$PROFILE_APP_ID" != "$APPLE_TEAM_ID.$BUNDLE_ID" ]; then
+            echo "::error::The profile is for $PROFILE_APP_ID, the app is $APPLE_TEAM_ID.$BUNDLE_ID"; exit 1
+          fi
+          if plutil -extract ProvisionedDevices raw -o - "$RUNNER_TEMP/signing/profile.plist" > /dev/null 2>&1; then
+            echo "::error::The profile lists devices: an Ad Hoc or development profile, not App Store"; exit 1
+          fi
+          for DIR in "$HOME/Library/MobileDevice/Provisioning Profiles" "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"; do
+            mkdir -p "$DIR"
+            cp "$RUNNER_TEMP/signing/app.mobileprovision" "$DIR/$PROFILE_UUID.mobileprovision"
+          done
+          rm "$RUNNER_TEMP/signing/dist.p12"
+          echo "PROFILE_UUID=$PROFILE_UUID" >> "$GITHUB_ENV"
+          echo "Profile $PROFILE_UUID for $PROFILE_APP_ID, expires $(plutil -extract ExpirationDate raw -o - "$RUNNER_TEMP/signing/profile.plist")"
+
+      - name: Manual signing on the app target
+        # Only the app target: a profile set on the command line reaches the Pods targets too, and they refuse one.
+        if: ${{ env.SIGNING == 'manual' }}
+        run: |
+          ruby -rxcodeproj -e '
+            project = Xcodeproj::Project.open("ios/#{ENV["SCHEME"]}.xcodeproj")
+            target = project.native_targets.find { |t| t.name == ENV["SCHEME"] } or abort "No target #{ENV["SCHEME"]}"
+            target.build_configurations.each do |config|
+              s = config.build_settings
+              s.delete("PROVISIONING_PROFILE")
+              s["CODE_SIGN_STYLE"] = "Manual"
+              s["DEVELOPMENT_TEAM"] = ENV["APPLE_TEAM_ID"]
+              s["CODE_SIGN_IDENTITY"] = "Apple Distribution"
+              s["CODE_SIGN_IDENTITY[sdk=iphoneos*]"] = "Apple Distribution"
+              s["PROVISIONING_PROFILE_SPECIFIER"] = ENV["PROFILE_UUID"]
+            end
+            project.save
+          '
+
+      - name: Archive and export with the certificate
+        if: ${{ env.SIGNING == 'manual' }}
         env:
           EXPO_PUBLIC_BUILD_SHA: ${{ github.sha }}
         run: |
-          echo "::warning::No ASC_KEY_ID / ASC_ISSUER_ID / ASC_KEY_P8 / APPLE_TEAM_ID: building unsigned, nothing uploaded"
+          set -o pipefail
+          xcodebuild -workspace "ios/$SCHEME.xcworkspace" -scheme "$SCHEME" -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/wtfai.xcarchive" archive
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>export</string>
+            <key>teamID</key><string>${APPLE_TEAM_ID}</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>signingCertificate</key><string>Apple Distribution</string>
+            <key>provisioningProfiles</key><dict>
+              <key>${BUNDLE_ID}</key><string>${PROFILE_UUID}</string>
+            </dict>
+            <key>uploadSymbols</key><true/>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict></plist>
+          EOF
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/wtfai.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" -exportPath "$RUNNER_TEMP/export"
+          IPA=$(ls "$RUNNER_TEMP"/export/*.ipa | head -n 1)
+          codesign -d --entitlements :- "$(ls -d "$RUNNER_TEMP"/wtfai.xcarchive/Products/Applications/*.app)" || true
+          echo "IPA=$IPA" >> "$GITHUB_ENV"
+
+      - name: Upload to App Store Connect with an app-specific password
+        if: ${{ env.SIGNING == 'manual' }}
+        env:
+          ASC_APPLE_ID: ${{ secrets.ASC_APPLE_ID }}
+          ASC_APP_PASSWORD: ${{ secrets.ASC_APP_PASSWORD }}
+        run: |
+          xcrun altool --upload-package "$IPA" --type ios --apple-id "$ASC_APP_ID" --bundle-id "$BUNDLE_ID" \
+            --bundle-version "$BUILD" --bundle-short-version-string "$VERSION" \
+            --username "$ASC_APPLE_ID" --password "@env:ASC_APP_PASSWORD" --output-format normal
+
+      - name: Build unsigned (no signing secrets)
+        if: ${{ env.SIGNING == 'none' }}
+        env:
+          EXPO_PUBLIC_BUILD_SHA: ${{ github.sha }}
+        run: |
+          echo "::warning::Neither the App Store Connect key nor the certificate secrets: building unsigned, nothing uploaded"
           set -o pipefail
           xcodebuild -workspace "ios/$SCHEME.xcworkspace" -scheme "$SCHEME" -configuration Release -sdk iphoneos \
             -destination 'generic/platform=iOS' -derivedDataPath build \
             CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO build
 
-      - name: Remove the key
+      - name: Remove the key, certificate and profile
         if: ${{ always() }}
-        run: rm -rf "$RUNNER_TEMP/asc"
+        run: |
+          rm -rf "$RUNNER_TEMP/asc"
+          if [ -f "$RUNNER_TEMP/signing/build.keychain-db" ]; then
+            security delete-keychain "$RUNNER_TEMP/signing/build.keychain-db" || true
+          fi
+          rm -rf "$RUNNER_TEMP/signing"
+          [ -z "$PROFILE_UUID" ] || rm -f "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision" \
+            "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
