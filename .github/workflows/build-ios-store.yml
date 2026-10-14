@@ -1,0 +1,120 @@
+name: Build App Store iOS App
+
+# The App Store build (docs/STORE-REVIEW.md §3.1), run by hand. DISTRIBUTION=store (app.config.js): no AltStore, no
+# tester upload, the Developer screen hidden. With the App Store Connect API key (Admin role) in the secrets below,
+# Xcode signs with cloud-managed certificates and profiles, archives, and uploads the build to App Store Connect, where
+# it goes to TestFlight and review. Without them it builds the same app unsigned: a compile check of the store build.
+# Secrets: ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8 (the .p8 file's text). Variable: APPLE_TEAM_ID.
+on:
+  workflow_dispatch:
+
+env:
+  DISTRIBUTION: store
+  UPDATES_ORIGIN: ${{ vars.UPDATES_ORIGIN }}
+  SENTRY_DSN: ${{ vars.SENTRY_DSN }}
+  SENTRY_URL: ${{ vars.SENTRY_URL }}
+  PRIVACY_POLICY_URL: ${{ vars.PRIVACY_POLICY_URL }}
+
+jobs:
+  build-ios-store:
+    runs-on: macos-26
+    timeout-minutes: 75
+    env:
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+      SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+      SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
+      SENTRY_DISABLE_AUTO_UPLOAD: ${{ secrets.SENTRY_AUTH_TOKEN == '' && 'true' || 'false' }}
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+      APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+      SIGNED: ${{ secrets.ASC_KEY_ID != '' && secrets.ASC_ISSUER_ID != '' && secrets.ASC_KEY_P8 != '' && vars.APPLE_TEAM_ID != '' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Expo Prebuild
+        run: npx expo prebuild --platform ios --clean
+
+      - name: Build number
+        # The same CFBundleVersion scheme as the sideloaded build (docs/UPDATES-SPEC.md §3): it only grows.
+        run: |
+          BUILD=$(( ($(git log -1 --format=%ct) - 1577836800) / 60 ))
+          VERSION=$(jq -r .expo.version app.json)
+          SCHEME=$(basename "$(ls -d ios/*.xcworkspace | head -n 1)" .xcworkspace)
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD" "ios/$SCHEME/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "ios/$SCHEME/Info.plist"
+          echo "SCHEME=$SCHEME" >> "$GITHUB_ENV"
+          echo "Version $VERSION, build $BUILD"
+
+      - name: Check the store Info.plist
+        # App Review 5.1.1: every purpose string is ours, none a library default; the privacy manifest is there.
+        run: |
+          PLIST="ios/$SCHEME/Info.plist"
+          /usr/libexec/PlistBuddy -c Print "$PLIST" | grep -E "UsageDescription|ExternalAccessory|UIBackgroundModes" -A6 || true
+          if /usr/libexec/PlistBuddy -c Print "$PLIST" | grep -E 'UsageDescription = Allow \$\(PRODUCT_NAME\) to access'; then
+            echo "::error::A library's generic purpose string is in the store build"; exit 1
+          fi
+          # NSLocalNetworkUsageDescription is expo-dev-launcher's: its build phase strips it from every non-Debug build.
+          test -f "ios/$SCHEME/PrivacyInfo.xcprivacy" || { echo "::error::No PrivacyInfo.xcprivacy"; exit 1; }
+
+      - name: App Store Connect key
+        if: ${{ env.SIGNED == 'true' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/asc"
+          printf '%s' "$ASC_KEY_P8" > "$RUNNER_TEMP/asc/AuthKey_${ASC_KEY_ID}.p8"
+          echo "ASC_KEY_PATH=$RUNNER_TEMP/asc/AuthKey_${ASC_KEY_ID}.p8" >> "$GITHUB_ENV"
+
+      - name: Archive and upload to App Store Connect
+        if: ${{ env.SIGNED == 'true' }}
+        env:
+          EXPO_PUBLIC_BUILD_SHA: ${{ github.sha }}
+        run: |
+          set -o pipefail
+          AUTH=(-allowProvisioningUpdates -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" -authenticationKeyPath "$ASC_KEY_PATH")
+          xcodebuild -workspace "ios/$SCHEME.xcworkspace" -scheme "$SCHEME" -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/wtfai.xcarchive" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" CODE_SIGN_STYLE=Automatic "${AUTH[@]}" archive
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>${APPLE_TEAM_ID}</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>uploadSymbols</key><true/>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict></plist>
+          EOF
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/wtfai.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" -exportPath "$RUNNER_TEMP/export" "${AUTH[@]}"
+
+      - name: Build unsigned (no App Store Connect key)
+        if: ${{ env.SIGNED != 'true' }}
+        env:
+          EXPO_PUBLIC_BUILD_SHA: ${{ github.sha }}
+        run: |
+          echo "::warning::No ASC_KEY_ID / ASC_ISSUER_ID / ASC_KEY_P8 / APPLE_TEAM_ID: building unsigned, nothing uploaded"
+          set -o pipefail
+          xcodebuild -workspace "ios/$SCHEME.xcworkspace" -scheme "$SCHEME" -configuration Release -sdk iphoneos \
+            -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO build
+
+      - name: Remove the key
+        if: ${{ always() }}
+        run: rm -rf "$RUNNER_TEMP/asc"

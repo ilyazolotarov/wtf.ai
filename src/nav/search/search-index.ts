@@ -37,6 +37,28 @@ export interface SearchResult {
   score: number;
 }
 
+/** Two results that read the same this close are one place on the screen (§5.3). */
+const REPEAT_M = 150;
+
+/**
+ * Drops a result that reads the same as a better one nearby: OSM often maps one address several times (the
+ * building, its entrances, a shop's address), which listed four identical "вулиця Хрещатик, 22" rows. `ranked`:
+ * best first.
+ */
+export function withoutRepeats(ranked: SearchResult[]): SearchResult[] {
+  const kept: SearchResult[] = [];
+  for (const r of ranked) {
+    const same = (k: SearchResult) =>
+      k.kind === r.kind &&
+      k.name === r.name &&
+      k.house === r.house &&
+      k.settlement?.name === r.settlement?.name &&
+      haversineM(k, r) < REPEAT_M;
+    if (!kept.some(same)) kept.push(r);
+  }
+  return kept;
+}
+
 export interface SearchOptions {
   /** Ranks nearer results higher (the car's position). */
   near?: Coordinate | null;
@@ -186,9 +208,10 @@ export class SearchIndex {
       this.entityBlocks.clear();
     }
     if (this.strings.size > CACHE_LIMIT) this.strings.clear();
-    return [...best.values()]
-      .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name) || a.key.localeCompare(b.key))
-      .slice(0, limit);
+    const sorted = [...best.values()].sort(
+      (a, b) => b.score - a.score || a.name.localeCompare(b.name) || a.key.localeCompare(b.key),
+    );
+    return withoutRepeats(sorted).slice(0, limit);
   }
 
   private run(tokens: QueryToken[], house: string | null, near: Coordinate | null): SearchResult[] {

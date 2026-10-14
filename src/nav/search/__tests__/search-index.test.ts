@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { bufferByteSource } from "@/nav/mapmatch/graph/byte-source";
 import { fold, foldHouse, parseQuery } from "@/nav/search/fold";
-import { SearchIndex, type SearchResult } from "@/nav/search/search-index";
+import { SearchIndex, withoutRepeats, type SearchResult } from "@/nav/search/search-index";
 
 import foldCases from "../__fixtures__/fold-cases.json";
 
@@ -125,5 +125,37 @@ describe("SearchIndex", () => {
   it("keeps the matching words of a settlement from matching all its streets", () => {
     // "Чернігів" alone: the city, not every street in it.
     expect(search("Чернігів").filter((r) => r.startsWith("street:"))).toEqual([]);
+  });
+});
+
+describe("withoutRepeats", () => {
+  const address = (key: string, lat: number, lon: number, score: number): SearchResult => ({
+    key,
+    kind: "address",
+    name: "вулиця Хрещатик",
+    nameEn: "Khreshchatyk Street",
+    house: "22",
+    tag: "addr:street",
+    settlement: { name: "Київ", nameEn: "Kyiv" },
+    lat,
+    lon,
+    score,
+  });
+
+  it("keeps the best of one address mapped several times, and the same address elsewhere", () => {
+    // The building and its entrances, ~60 m apart (Kyiv, OSM 2026-10-12); a namesake 2 km away stays.
+    const ranked = [
+      address("a1", 50.44927, 30.52257, 30.7),
+      address("a2", 50.44979, 30.52277, 30.6),
+      address("a3", 50.44991, 30.52316, 30.6),
+      address("a4", 50.4699, 30.5228, 20),
+    ];
+    expect(withoutRepeats(ranked).map((r) => r.key)).toEqual(["a1", "a4"]);
+  });
+
+  it("keeps different houses and kinds at the same spot", () => {
+    const street: SearchResult = { ...address("e1", 50.44927, 30.52257, 14), kind: "street", house: null };
+    const next = { ...address("a2", 50.44927, 30.52257, 29), house: "24" };
+    expect(withoutRepeats([address("a1", 50.44927, 30.52257, 30), next, street]).map((r) => r.key)).toEqual(["a1", "a2", "e1"]);
   });
 });

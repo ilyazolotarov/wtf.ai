@@ -1,0 +1,57 @@
+name: Website
+
+# The project's website on GitHub Pages: site/ (the landing page, screenshots from scripts/store-screenshots.py) and
+# the privacy policy, copied from docs/PRIVACY.md so the stores' privacy URL always shows the current one
+# (docs/STORE-REVIEW.md §2). Needs Settings → Pages → Source: GitHub Actions.
+on:
+  push:
+    branches: [main]
+    paths: ["site/**", "docs/PRIVACY.md", "docs/PRIVACY.uk.md", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          # The screenshots are in Git LFS (.gitattributes): without it the site would serve pointer files.
+          lfs: true
+
+      - name: Privacy policy page
+        run: |
+          { printf -- '---\nlayout: page\ntitle: Privacy policy\nlang: en\npermalink: /privacy.html\n---\n\n'; cat docs/PRIVACY.md; } > site/privacy.md
+          { printf -- '---\nlayout: page\ntitle: Політика приватності\nlang: uk\npermalink: /privacy.uk.html\n---\n\n'; cat docs/PRIVACY.uk.md; } > site/privacy.uk.md
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Build with Jekyll
+        uses: actions/jekyll-build-pages@v1
+        with:
+          source: ./site
+          destination: ./_site
+
+      - name: Upload site
+        uses: actions/upload-pages-artifact@v3
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

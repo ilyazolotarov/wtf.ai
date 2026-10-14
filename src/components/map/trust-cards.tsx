@@ -2,7 +2,7 @@ import { StyleSheet, View } from "react-native";
 
 import { cardinal, formatDistance, toDegrees } from "@/components/status/format-geo";
 import { formatDuration } from "@/components/status/format-time";
-import { useAgeText } from "@/components/status/use-age-text";
+import { useAgeMs, useAgeText } from "@/components/status/use-age-text";
 import type { useNavStatus } from "@/components/status/use-nav-status";
 import { GlassFill } from "@/components/ui/glass-fill";
 import { Icon } from "@/components/ui/icon";
@@ -19,6 +19,8 @@ type Translate = ReturnType<typeof useT>["t"];
 
 /** Driven less than this since the last trusted fix, the strip gives only its age. */
 const SINCE_TRUSTED_MIN_M = 50;
+/** The strip waits this long after the last trusted fix: "just now" says nothing the status pill doesn't. */
+const SINCE_TRUSTED_SHOW_MS = 60_000;
 
 /** What the trust alert under the status pill says, or null when GPS is fine (or there is no position). */
 export function trustAlertText(
@@ -125,7 +127,8 @@ export function SinceTrustedStrip({ position }: { position: PositionEstimate }) 
       ? position.lastTrustedFixAt
       : undefined;
   const age = useAgeText(trustedAt);
-  if (trustedAt === undefined) return null;
+  const ageMs = useAgeMs(trustedAt);
+  if (trustedAt === undefined || ageMs < SINCE_TRUSTED_SHOW_MS) return null;
   const backM = position.distanceSinceTrustedM;
   const text =
     backM !== undefined && backM >= SINCE_TRUSTED_MIN_M

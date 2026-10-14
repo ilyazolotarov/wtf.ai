@@ -1,0 +1,6 @@
+# The project's website (GitHub Pages, .github/workflows/pages.yml). privacy.md is copied from docs/PRIVACY.md at build.
+title: wtf.ai
+description: Offline car navigation that keeps your position when GPS is jammed or spoofed.
+markdown: kramdown
+plugins:
+  - jekyll-github-metadata

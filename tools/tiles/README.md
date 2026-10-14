@@ -19,7 +19,6 @@ python -m tiles.cli graph-check out/release/kyiv.graph.bin
 python -m tiles.cli search kyiv            # address search index only (+ index.json)
 python -m tiles.cli search-check out/release/kyiv.search.bin
 python -m tiles.cli index                      # shared files + index.json
-python -m tiles.cli serve                      # http://<PC IP>:8765/ — app: Downloads → Map source
 python -m tiles.cli osm-date                   # date of the current Geofabrik extract
 python -m pytest
 ```
@@ -48,8 +47,7 @@ go-pmtiles and Planetiler's Natural Earth / water polygon sources. Later builds 
 
 ## Release (`out/release/`)
 
-One flat directory, published as-is to the update Worker (`maps/<osm_date>/`) and as GitHub release assets
-(release assets can't have folders):
+One flat directory, published as-is to the update Worker's R2 bucket (`maps/<osm_date>/`):
 
 | Asset | |
 |---|---|
@@ -67,8 +65,7 @@ app's dark re-tint (`src/config/map-dark.ts`).
 `.github/workflows/map-packs.yml` runs weekly (and by hand: Actions → *Build Offline Map Packs*,
 *force* to rebuild). If Geofabrik's extract is newer than the maps on the update Worker it runs
 `build-all`, uploads `out/release/` to the Worker (`npm run ota:upload -- --maps …`, docs/OTA.md) and makes it the
-current release there, then also publishes it as GitHub release `maps-<osm_date>`, keeping the last 3, for app JS
-older than the Worker's maps (docs/UPDATES-SPEC.md §4). The Worker keeps one release (UPDATES-SPEC §2.1).
+current release there (docs/UPDATES-SPEC.md §4). The Worker keeps one release (UPDATES-SPEC §2.1).
 Adding a region = an entry in `regions.json` + its `.poly`.
 
 ## Road graph (`tiles/graph.py`)
@@ -111,13 +108,9 @@ through. A pack without `world.geojson` gets the plain style.
 
 ## In the app
 
-Downloads lists the regions of the update Worker's current release (`maps/latest.json` → `index.json`; the newest
-GitHub release `maps-*` while the Worker has none). It
+Downloads lists the regions of the update Worker's current release (`maps/latest.json` → `index.json`). It
 downloads the shared files once (again when their MD5s change, even under the same OSM
 date) and a region's `.pmtiles`, `.graph.bin` and `.search.bin` (iOS background session,
 pause/resume across restarts), checks size and MD5, and stores them in `Documents/maps/`
 (`src/services/offline-map/`). One downloaded region is active; the map uses only it, with no
 online requests. Without a downloaded region the app asks for one before showing the map.
-
-For testing, Downloads → *Map source* takes `http://<PC IP>:8765/` from `tiles serve`. Windows
-Firewall may need to allow Python on private networks for the phone to connect.

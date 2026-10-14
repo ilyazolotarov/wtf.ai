@@ -255,7 +255,7 @@ export class NavigatorService implements PositionSource {
   private loop: MapMatchLoop = "open";
   /** The route's edges for the filter (ROUTING-SPEC §8.6), or null. */
   private routeHint: number[] | null = null;
-  /** The active route's polyline, for phone-only mode to follow (§9.6); and the state it last noted. */
+  /** The active route's polyline (phone-only mode follows it, §9.6; it tips the dot's direction, puck.ts); and the state it last noted. */
   private phoneRoute: { lat: number; lon: number }[] | null = null;
   private phoneRouteState: PhoneRouteState = "none";
   private overlayStale = true;
@@ -1017,7 +1017,8 @@ export class NavigatorService implements PositionSource {
     this.notes.doubt(estimate.doubtM);
     // Dead-reckoning on the map, or anchored once the filter found the road: the dominant hypothesis is the puck, the
     // others its alternatives (MAPMATCH-SPEC §6.2). With GNSS the EKF stays the puck: it is within a few metres there.
-    const top = puckHypothesis(estimate, estimate.mode === "dr" && !fused);
+    // The active route tips a near-even contest between the two directions of a road (position/puck.ts).
+    const top = puckHypothesis(estimate, estimate.mode === "dr" && !fused, this.phoneRoute);
     // The map's guess is dead reckoning too: the engine off keeps it, as a dot the navigator drew.
     const dr = estimate.mode === "dr" || !!top;
     const source: PositionSourceKind = !dr ? "gnss" : fused ? "fused" : "dr";
@@ -1035,7 +1036,7 @@ export class NavigatorService implements PositionSource {
     const alternatives =
       top && mm?.state === "multimodal"
         ? mm.clusters
-            .slice(1)
+            .filter((c) => c !== (mm.clusters.includes(top) ? top : mm.clusters[0]))
             .filter((c) => c.weight >= ALTERNATIVE_MIN_WEIGHT)
             .map((c) => ({ ...ahead(c, c.headingRad, aheadM), weight: c.weight }))
         : undefined;

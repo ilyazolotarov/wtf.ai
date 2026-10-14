@@ -1,16 +1,19 @@
 import Constants from "expo-constants";
-import { useState } from "react";
-import { StyleSheet, View } from "react-native";
+import { useRef, useState } from "react";
+import { Linking, Pressable, StyleSheet, View } from "react-native";
 
 import {
+    ScreenAction,
     ScreenCard,
     ScreenContent,
+    ScreenNote,
     ScreenRow,
     ScreenSection,
     SectionLabel,
     Segmented,
 } from "@/components/screens/screen-ui";
 import { VoiceVolumeSection } from "@/components/route/voice-volume-section";
+import { privacyPolicyUrl, STORE_BUILD } from "@/config/distribution";
 import { appCode } from "@/components/update/app-code";
 import { Icon } from "@/components/ui/icon";
 import { installId } from "@/services/telemetry";
@@ -18,15 +21,28 @@ import { T } from "@/components/ui/text";
 import { usePalette } from "@/constants/theme";
 import { useT, type LanguagePreference } from "@/i18n/provider";
 import {
+    isDeveloperUnlocked,
     loadAppearance,
     setAppearance,
+    unlockDeveloper,
     type AppearancePreference,
 } from "@/services/preferences";
 
+/** Taps on the version that show the Developer screen in a store build. */
+const DEVELOPER_TAPS = 7;
+
 export default function SettingsScreen() {
-  const { t, preference, setPreference } = useT();
+  const { t, language, preference, setPreference } = useT();
   const palette = usePalette();
   const [appearance, setAppearanceState] = useState(loadAppearance);
+  const policyUrl = privacyPolicyUrl(language);
+  const versionTaps = useRef(0);
+  const [developerShown, setDeveloperShown] = useState(false);
+  const tapVersion = () => {
+    if (!STORE_BUILD || isDeveloperUnlocked() || ++versionTaps.current < DEVELOPER_TAPS) return;
+    unlockDeveloper();
+    setDeveloperShown(true);
+  };
 
   return (
     <ScreenContent title={t("settings")}>
@@ -63,19 +79,31 @@ export default function SettingsScreen() {
         <ScreenCard style={styles.privacy}>
           <Icon name="lock" size={20} color={palette.ok.c} />
           <T size={14} style={styles.privacyText}>
-            {t("privacyMessage")}
+            {t(STORE_BUILD ? "privacyMessageStore" : "privacyMessage")}
           </T>
         </ScreenCard>
+        {policyUrl && (
+          <ScreenAction
+            labelKey="privacyPolicy"
+            icon="open_in_new"
+            secondary
+            compact
+            onPress={() => void Linking.openURL(policyUrl)}
+          />
+        )}
       </View>
       <ScreenSection title={t("about")}>
         {/* The build number beside the version: what App update and AltStore name a build by. */}
-        <ScreenRow
-          labelKey="appVersion"
-          value={
-            (Constants.expoConfig?.version ?? t("unavailableValue")) +
-            (Constants.nativeBuildVersion ? ` (${Constants.nativeBuildVersion})` : "")
-          }
-        />
+        <Pressable onPress={tapVersion} accessible={false}>
+          <ScreenRow
+            labelKey="appVersion"
+            value={
+              (Constants.expoConfig?.version ?? t("unavailableValue")) +
+              (Constants.nativeBuildVersion ? ` (${Constants.nativeBuildVersion})` : "")
+            }
+          />
+        </Pressable>
+        {developerShown && <ScreenNote>{t("developerUnlocked")}</ScreenNote>}
         <ScreenRow labelKey="appCode" value={appCode(t)} />
         <ScreenRow labelKey="supportCode" value={installId()} />
         <ScreenRow labelKey="mapData" value="© OpenStreetMap contributors · © OpenMapTiles" />

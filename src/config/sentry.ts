@@ -1,12 +1,12 @@
 import * as Sentry from "@sentry/react-native";
-import Constants from "expo-constants";
 
 import { deviceTags, sentryEnvironment, type MetricSink } from "@/services/telemetry";
+import { extraString } from "./extra";
 import { scrubBreadcrumb, scrubEvent, scrubLog } from "./sentry-scrub";
 
 // Crash and error reporting (SPEC §2 privacy exception). The DSN (a public client key) comes from the build's
 // environment, SENTRY_DSN (app.config.js), so the source names no Sentry account. Without it nothing is sent.
-export const SENTRY_DSN: string | null = (Constants.expoConfig?.extra as { sentryDsn?: string | null } | undefined)?.sentryDsn ?? null;
+export const SENTRY_DSN: string | null = extraString("sentryDsn");
 
 export function initSentry(): void {
   Sentry.init({

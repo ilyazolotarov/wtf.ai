@@ -15,7 +15,7 @@ What works:
 - **Spoofing:** fixes outside Ukraine, or ones that jump away from where the car could be, are refused, and the map says so.
 - **Map matching:** a particle filter holds the position on the road network while GPS is out, and shows other roads the car may be on.
 - **Putting the car on the map:** the driver can set the position and heading by hand while the car stands.
-- **Offline maps** per region, downloaded from GitHub releases, with **address search**.
+- **Offline maps** per region, downloaded from the project's update server, with **address search**.
 - **Routing:** turn-by-turn with spoken directions (Ukrainian, English), re-planning when the car leaves the route, alternative routes, and travel times from speed limits, settlements, traffic lights and rush hours in big cities. No live traffic: none is available for Ukraine.
 - **Trip logs:** every drive is recorded automatically and can be replayed on a PC, the same code the app runs; opt-in upload for testers.
 - **In-app guide:** onboarding, a map tour and interactive lessons.
@@ -34,11 +34,10 @@ locally, `.env.local` (git-ignored, loaded by Expo). Every one is optional: with
 
 | Variable | What | Without it |
 | --- | --- | --- |
-| `UPDATES_ORIGIN` | the update Worker (`workers/app-updates`): JS updates, builds, AltStore source, maps ([docs/OTA.md](docs/OTA.md)) | no OTA updates, no update checks; maps from the repo's GitHub releases |
+| `UPDATES_ORIGIN` | the update Worker (`workers/app-updates`): JS updates, builds, AltStore source, maps ([docs/OTA.md](docs/OTA.md)) | no OTA updates, no update checks, no maps |
 | `TRIP_UPLOAD_ORIGIN` | the trip log upload Worker (`workers/triplog-upload`) | no upload in the Trip recorder |
 | `SENTRY_DSN` | where crash reports go | no crash reports |
 | `SENTRY_URL`, `SENTRY_ORG`, `SENTRY_PROJECT` (+ secret `SENTRY_AUTH_TOKEN`) | source map / dSYM uploads (`SENTRY_URL` is the region, e.g. the EU one) | minified JS stack traces |
-| `MAP_RELEASES_REPO` (local only) | `owner/repo` of the `maps-*` releases; CI uses its own repo | — |
 
 They are built into the app and are part of the OTA runtime version (`app.config.js`): changing one needs a native
 build. The Workers get their own domains at deploy, on every deploy (`--domain`, not through `npm run`: PowerShell eats
@@ -99,7 +98,7 @@ CI runs these plus `expo-doctor` and the iOS and Android builds, each when what 
 
 ## Privacy
 
-Position data stays on the device; there is no position upload. Trip logs leave the phone only when the user shares them, or with the opt-in upload to the project's private bucket. Crash and error reports go to Sentry with personal data, coordinates and VINs removed. The map is offline only: a region is downloaded once from GitHub releases, and the app asks for one before it can be used.
+Position data stays on the device; there is no position upload. Trip logs leave the phone only when the user shares them, or with the opt-in upload to the project's private bucket. Crash and error reports go to Sentry with personal data, coordinates and VINs removed. The map is offline only: a region is downloaded once from the project's update server, and the app asks for one before it can be used.
 
 ## Project documents
 

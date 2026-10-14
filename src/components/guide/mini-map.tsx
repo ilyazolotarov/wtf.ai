@@ -264,7 +264,7 @@ export function StatusPillMock({
   );
 }
 
-/** A small chip over a lesson map ("Trusted GPS 4 min ago, 2.3 km back"). */
+/** A small chip over a lesson map ("Last trusted GPS: 4 min ago, 2.3 km back"). */
 export function MapChip({ text, accent, style }: { text: string; accent?: boolean; style?: object }) {
   const palette = usePalette();
   return (

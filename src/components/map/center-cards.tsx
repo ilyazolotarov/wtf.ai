@@ -5,7 +5,10 @@ import { Icon } from "@/components/ui/icon";
 import { T } from "@/components/ui/text";
 import { Radius, usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
+import { insideUkraine } from "@/nav/integrity/border";
 import { usePositionPermission } from "@/providers/position-provider";
+import { useSensorValue } from "@/providers/runtime-provider";
+import { isSatelliteRecord } from "@/services/position/gnss-position-source";
 
 import { hud } from "./hud-card";
 
@@ -47,10 +50,36 @@ export function PermissionCard() {
   );
 }
 
-/** "Waiting for GPS…" before the first position. */
-export function NoFixCard() {
+/**
+ * "Waiting for GPS…" before the first position. When satellites answer from outside Ukraine, integrity refuses every
+ * fix as spoofed (SPEC §3.3) and there never is a first position: say so, and offer placing the car instead.
+ */
+export function NoFixCard({ onPlace }: { onPlace: () => void }) {
   const { t } = useT();
   const palette = usePalette();
+  const abroad = useSensorValue(({ lastFix }) => lastFix != null && isSatelliteRecord(lastFix) && !insideUkraine({ lat: lastFix.latDeg, lon: lastFix.lonDeg }));
+  if (abroad) {
+    return (
+      <CenterCard>
+        <Icon name="gpp_maybe" size={34} color={palette.warn.c} />
+        <T w="semibold" size={19} style={styles.title}>
+          {t("gpsAbroadTitle")}
+        </T>
+        <T size={14} color={palette.text2} style={styles.body}>
+          {t("gpsAbroadBody")}
+        </T>
+        <Pressable
+          onPress={onPlace}
+          style={({ pressed }) => [styles.button, { backgroundColor: palette.accent }, pressed && hud.pressed]}
+          accessibilityRole="button"
+        >
+          <T w="semibold" size={15} color={palette.onAccent}>
+            {t("noAdapterRouteSetButton")}
+          </T>
+        </Pressable>
+      </CenterCard>
+    );
+  }
   return (
     <CenterCard>
       <Pulse>

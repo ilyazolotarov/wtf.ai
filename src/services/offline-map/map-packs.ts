@@ -123,7 +123,6 @@ const INSTALLED = () => new File(ROOT(), "installed.json");
 const JOB_KEY = "map-download-job";
 /** Key of the earlier tiles-only pause state; dropped on start. */
 const LEGACY_PAUSED_KEY = "map-download-paused";
-const CATALOG_URL_KEY = "map-catalog-url";
 /** Files below this size are fetched `PARALLEL` at a time over a normal session. */
 const SMALL_FILE = 4e6;
 const PARALLEL = 6;
@@ -218,15 +217,12 @@ export function useMapPacks(): MapPacksState {
   return useSyncExternalStore(subscribeMapPacks, getState);
 }
 
-export const getCatalogUrl = () => kvStore.getJson<string>(CATALOG_URL_KEY) ?? "";
-export const setCatalogUrl = (url: string) => kvStore.setJson(CATALOG_URL_KEY, url.trim());
-
 /** Fetches the catalog; resolves with it (null when it failed: `catalogError` says why). */
 export async function loadCatalog(): Promise<MapCatalog | null> {
   if (getState().catalogLoading) return null;
   setState({ catalogLoading: true, catalogError: null });
   try {
-    const catalog = await fetchCatalog(getCatalogUrl());
+    const catalog = await fetchCatalog();
     setState({ catalog, catalogLoading: false, catalogTooNew: false });
     return catalog;
   } catch (e) {

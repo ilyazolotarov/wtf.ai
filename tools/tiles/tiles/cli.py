@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import argparse
-import functools
-import http.server
 from pathlib import Path
 
-from .build import RELEASE, REGIONS, ROOT, WORLD, build_all, build_common, build_graphs, build_searches, remote_osm_date, write_index
+from .build import REGIONS, ROOT, WORLD, build_all, build_common, build_graphs, build_searches, remote_osm_date, write_index
 from .graph import read_graph, validate
 from .region import border_ts, load_registry, write_regions
 from .search import build_region_search, read_search
@@ -66,9 +64,6 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("index", help="rewrite shared files and index.json in out/release/")
     sub.add_parser("osm-date", help="print the date of the current Geofabrik Ukraine extract")
 
-    p = sub.add_parser("serve", help="serve out/release/ over HTTP (app: Downloads → catalog source)")
-    p.add_argument("--port", type=int, default=8765)
-
     args = parser.parse_args(argv)
     if args.cmd == "regions":
         for path in write_regions(REGIONS, args.names or None, buffer_m=args.buffer_m):
@@ -113,10 +108,6 @@ def main(argv: list[str] | None = None) -> None:
         write_index(build_common())
     elif args.cmd == "osm-date":
         print(remote_osm_date())
-    elif args.cmd == "serve":
-        handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(RELEASE))
-        print(f"Serving {RELEASE} on http://0.0.0.0:{args.port}/")
-        http.server.ThreadingHTTPServer(("0.0.0.0", args.port), handler).serve_forever()
 
 
 if __name__ == "__main__":

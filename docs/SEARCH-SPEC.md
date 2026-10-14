@@ -110,6 +110,8 @@ ids (binary search) or children ranges. At most 3 000 matches.
    word left out; plus kind and distance as above.
 3. House numbers: exact +12, a number it starts +5 (≤ 5 per street), scored at the house; the
    street itself follows 4 below its houses (the number may be unmapped).
+4. A result that reads the same as a better one (kind, name, house number, settlement) within 150 m is dropped:
+   OSM maps one address on the building, its entrances and its shops (`withoutRepeats`).
 
 ### 5.4 Measured (`npm run search`, Node, synthetic Ukraine-sized index)
 

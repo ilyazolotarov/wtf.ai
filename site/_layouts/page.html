@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="{{ page.lang | default: 'en' }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ page.title }} · wtf.ai</title>
+  <link rel="icon" href="assets/icon.png">
+  <link rel="alternate" hreflang="en" href="privacy.html">
+  <link rel="alternate" hreflang="uk" href="privacy.uk.html">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root { --bg: #F5F4F1; --text: #1D1C1A; --text2: #6B675F; --accent: #4371B7; --line: #E4E1DA; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #121211; --text: #F2F0EC; --text2: #A6A29B; --accent: #90BAF1; --line: #34322F; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 17px/1.6 Onest, system-ui, sans-serif; }
+    a { color: var(--accent); }
+    .wrap { max-width: 760px; margin: 0 auto; padding: 0 16px 64px; }
+    header { display: flex; justify-content: space-between; align-items: center; padding: 20px 0; border-bottom: 1px solid var(--line); margin-bottom: 24px; }
+    header a { font-weight: 700; font-size: 22px; text-decoration: none; }
+    header a.language { font-size: 16px; }
+    h1 { font-size: 36px; line-height: 1.15; }
+    h2 { margin-top: 36px; }
+    li { margin: 4px 0; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <a href="{% if page.lang == 'uk' %}uk.html{% else %}./{% endif %}">wtf.ai</a>
+      {% if page.lang == 'uk' %}<a class="language" href="privacy.html" lang="en" hreflang="en">English</a>{% else %}<a class="language" href="privacy.uk.html" lang="uk" hreflang="uk">Українська</a>{% endif %}
+    </header>
+    {{ content }}
+  </div>
+</body>
+</html>

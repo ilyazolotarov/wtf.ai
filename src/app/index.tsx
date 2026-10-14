@@ -27,7 +27,7 @@ import { useAudioOutput } from "@/components/route/use-audio-output";
 import { useVoiceGuidance, useVoiceMuted, useVoiceVolume } from "@/components/route/use-voice-guidance";
 import { UpdatePrompts } from "@/components/update/update-prompts";
 import { useNavStatus } from "@/components/status/use-nav-status";
-import { ANDROID_BLURS, BlurTarget } from "@/components/ui/glass-fill";
+import { ANDROID_BLURS, BlurScope, BlurTarget } from "@/components/ui/glass-fill";
 import { FontScaleLimit, MAP_MAX_FONT_SCALE } from "@/components/ui/text";
 import { useHasUsableMap } from "@/config/map";
 import { usePalette } from "@/constants/theme";
@@ -85,8 +85,12 @@ const OVERLAY_GUTTER = 14;
 
 /** MapLibre's attribution (i) button: a system info button on iOS (22 pt), the SDK's icon on Android (24 dp). */
 const ATTRIBUTION_BUTTON = Platform.OS === "ios" ? 22 : 24;
-/** iOS MapLibre places its ornaments from the safe area, not the screen's edge: the home indicator inset is already in. */
-const ATTRIBUTION_INSET = (bottomInset: number) => (Platform.OS === "ios" ? bottomInset : 0);
+/**
+ * MapLibre places its ornaments from the system bars, not the screen's edge: iOS from the safe area (the home
+ * indicator), Android above the navigation bar (2026-10-14: the (i) sat 46 dp above the camera button with a 48 dp
+ * three-button bar). The bottom inset is already in.
+ */
+const ATTRIBUTION_INSET = (bottomInset: number) => bottomInset;
 
 export default function HomeScreen() {
   useKeepAwake();
@@ -205,185 +209,187 @@ export default function HomeScreen() {
   }, [screenFocused, mapReady]);
 
   return (
-    <View style={[styles.root, { backgroundColor: palette.bg }]}>
-      <BlurTarget>
-        <View style={mapFrame(turn, window)}>
-          <MapSurface
-            mode={cameraMode}
-            ghostView={showingGhost}
-            compass={compass}
-            headingUpRad={headingUp}
-            onUserInteraction={onGesture}
-            onLongPress={setPin}
-            pin={placing ? null : pin}
-            logCamera={(text) => runtime.recorder.note(text)}
-            placing={placing}
-            placeFrom={place.placeFrom}
-            onCenter={place.setCenter}
-            onTap={place.aim}
-            overview={overview}
-            attributionPosition={attributionAt(
-              turn,
-              cameraCentre - ATTRIBUTION_BUTTON / 2 - ATTRIBUTION_INSET(insets.bottom),
-              window.height,
-            )}
-            placedMark={place.mark}
-          />
-        </View>
-      </BlurTarget>
-      {/* Its point on the map's centre, the spot placed: the lesson's pin (placing-pin.tsx). */}
-      {placing === "position" && <PlacingPin />}
-      <FontScaleLimit max={MAP_MAX_FONT_SCALE}>
-        <View
-          pointerEvents="box-none"
-          style={[
-            styles.overlay,
-            // Sideways (landscape, a tablet ignoring the portrait lock) the navigation bar and cutouts are at the sides.
-            {
-              paddingTop: insets.top + 10,
-              paddingBottom: bottomPadding,
-              paddingLeft: insets.left + OVERLAY_GUTTER,
-              paddingRight: insets.right + OVERLAY_GUTTER,
-            },
-          ]}
-        >
-          <View pointerEvents="box-none" style={styles.topStack}>
-            <StatusRow
-              ref={statusRef}
-              nav={nav}
-              expandable={hasDetails}
-              expanded={detailsOpen}
-              onToggle={() => setDetailsOpen((open) => !open)}
+    <BlurScope>
+      <View style={[styles.root, { backgroundColor: palette.bg }]}>
+        <BlurTarget>
+          <View style={mapFrame(turn, window)}>
+            <MapSurface
+              mode={cameraMode}
+              ghostView={showingGhost}
+              compass={compass}
+              headingUpRad={headingUp}
+              onUserInteraction={onGesture}
+              onLongPress={setPin}
+              pin={placing ? null : pin}
+              logCamera={(text) => runtime.recorder.note(text)}
+              placing={placing}
+              placeFrom={place.placeFrom}
+              onCenter={place.setCenter}
+              onTap={place.aim}
+              overview={overview}
+              attributionPosition={attributionAt(
+                turn,
+                cameraCentre - ATTRIBUTION_BUTTON / 2 - ATTRIBUTION_INSET(insets.bottom),
+                window.height,
+              )}
+              placedMark={place.mark}
             />
-
-            {outage && detailsOpen && (
-              <OutageCard outage={outage} nowMs={position.timestamp} onRestore={() => navigator.setSimulatedOutage(false)} />
-            )}
-
-            {!placing && <RegionPrompt panelStyle={panel} />}
-
-            {placing && (
-              <PlacingCard
-                step={placing}
-                hasHeading={place.hasHeading}
-                onCancel={place.stop}
-                onNext={placing === "position" ? place.placeHere : place.finish}
-              />
-            )}
-
-            {placeOffered && (
-              <HudChip icon="location_on" label={t("placeOffer")} color={palette.accent} onPress={() => place.start()} />
-            )}
-
-            {!placing && manual && !manual.asking && (
-              <ManualChip
-                manual={manual}
-                onPlace={place.standing ? () => place.start() : undefined}
-                onForget={() => place.forgetManual()}
-              />
-            )}
-
-            {!placing && manual?.asking && (
-              <ManualQuestionCard
-                manual={manual}
-                onAnswer={(here) => (here ? navigator.answerManual(true) : place.forgetManual(true))}
-              />
-            )}
-
-            {!placing && position?.poseQuestion && (
-              <PoseQuestionCard
-                distanceM={position.poseQuestion.distanceM}
-                onAnswer={(here) => {
-                  navigator.answerPose(here);
-                  // Not there: show where it is instead, if it stands.
-                  if (!here && place.standing) place.start();
-                }}
-              />
-            )}
-
-            {nav.protocolSearch && (
-              <HudChip icon="bluetooth" label={t("obdFindingProtocol")} color={palette.warn.c} />
-            )}
-
-            {!placing && position && <SinceTrustedStrip position={position} />}
-
-            {showCutGps && detailsOpen && (
-              <HudChip
-                icon="gps_off"
-                label={t("cutGps")}
-                color={palette.accent}
-                onPress={() => navigator.setSimulatedOutage(true)}
-              />
-            )}
-
-            {alertText && !outage && detailsOpen && (
-              <TrustAlertCard
+          </View>
+        </BlurTarget>
+        {/* Its point on the map's centre, the spot placed: the lesson's pin (placing-pin.tsx). */}
+        {placing === "position" && <PlacingPin />}
+        <FontScaleLimit max={MAP_MAX_FONT_SCALE}>
+          <View
+            pointerEvents="box-none"
+            style={[
+              styles.overlay,
+              // Sideways (landscape, a tablet ignoring the portrait lock) the navigation bar and cutouts are at the sides.
+              {
+                paddingTop: insets.top + 10,
+                paddingBottom: bottomPadding,
+                paddingLeft: insets.left + OVERLAY_GUTTER,
+                paddingRight: insets.right + OVERLAY_GUTTER,
+              },
+            ]}
+          >
+            <View pointerEvents="box-none" style={styles.topStack}>
+              <StatusRow
+                ref={statusRef}
                 nav={nav}
-                text={alertText}
-                ghost={ghost}
-                showingGhost={showingGhost}
-                onToggleGhost={() => setGhostView(!showingGhost)}
+                expandable={hasDetails}
+                expanded={detailsOpen}
+                onToggle={() => setDetailsOpen((open) => !open)}
               />
-            )}
 
-            {route && (
-              <RouteBanner route={route} nowMs={position?.timestamp ?? 0} onStop={stopRoute} muted={voiceMuted} onToggleVoice={voiceOff ? undefined : toggleVoice} offPhone={audioOutput.offPhone} />
-            )}
+              {outage && detailsOpen && (
+                <OutageCard outage={outage} nowMs={position.timestamp} onRestore={() => navigator.setSimulatedOutage(false)} />
+              )}
+
+              {!placing && <RegionPrompt panelStyle={panel} />}
+
+              {placing && (
+                <PlacingCard
+                  step={placing}
+                  hasHeading={place.hasHeading}
+                  onCancel={place.stop}
+                  onNext={placing === "position" ? place.placeHere : place.finish}
+                />
+              )}
+
+              {placeOffered && (
+                <HudChip icon="location_on" label={t("placeOffer")} color={palette.accent} onPress={() => place.start()} />
+              )}
+
+              {!placing && manual && !manual.asking && (
+                <ManualChip
+                  manual={manual}
+                  onPlace={place.standing ? () => place.start() : undefined}
+                  onForget={() => place.forgetManual()}
+                />
+              )}
+
+              {!placing && manual?.asking && (
+                <ManualQuestionCard
+                  manual={manual}
+                  onAnswer={(here) => (here ? navigator.answerManual(true) : place.forgetManual(true))}
+                />
+              )}
+
+              {!placing && position?.poseQuestion && (
+                <PoseQuestionCard
+                  distanceM={position.poseQuestion.distanceM}
+                  onAnswer={(here) => {
+                    navigator.answerPose(here);
+                    // Not there: show where it is instead, if it stands.
+                    if (!here && place.standing) place.start();
+                  }}
+                />
+              )}
+
+              {nav.protocolSearch && (
+                <HudChip icon="bluetooth" label={t("obdFindingProtocol")} color={palette.warn.c} />
+              )}
+
+              {!placing && position && <SinceTrustedStrip position={position} />}
+
+              {showCutGps && detailsOpen && (
+                <HudChip
+                  icon="gps_off"
+                  label={t("cutGps")}
+                  color={palette.accent}
+                  onPress={() => navigator.setSimulatedOutage(true)}
+                />
+              )}
+
+              {alertText && !outage && detailsOpen && (
+                <TrustAlertCard
+                  nav={nav}
+                  text={alertText}
+                  ghost={ghost}
+                  showingGhost={showingGhost}
+                  onToggleGhost={() => setGhostView(!showingGhost)}
+                />
+              )}
+
+              {route && (
+                <RouteBanner route={route} nowMs={position?.timestamp ?? 0} onStop={stopRoute} muted={voiceMuted} onToggleVoice={voiceOff ? undefined : toggleVoice} offPhone={audioOutput.offPhone} />
+              )}
+            </View>
+
+            {!position && !placing && (permission != null && !permission.granted ? <PermissionCard /> : <NoFixCard onPlace={() => place.start()} />)}
+
+            <View pointerEvents="box-none" style={styles.bottomStack}>
+              {held.destination && !placing && (
+                <HeldRouteCard
+                  manual={manual}
+                  trusted={trust === "TRUSTED"}
+                  mayPlace={place.mayPlace}
+                  onPlace={() => place.start()}
+                  onCancel={held.cancel}
+                  onConfirm={held.confirm}
+                />
+              )}
+              {pin && (
+                <PinCard
+                  pin={pin}
+                  position={position}
+                  onClose={() => setPin(null)}
+                  // The car is here, not a destination: the same placing as from the chip, starting at the pin.
+                  onPlace={place.mayPlace ? () => place.start(pin) : undefined}
+                  onRoute={() => {
+                    startRoute({ lat: pin.lat, lon: pin.lon });
+                    setPin(null);
+                  }}
+                />
+              )}
+              {mapReady && !tourOffered && !touring && !pin && !placing && !position?.poseQuestion && (
+                <TourInvite panelStyle={panel} onStart={() => answerTour(true)} onDismiss={() => answerTour(false)} />
+              )}
+              <CameraButton ref={followRef} mode={cameraMode} onPress={toggleCameraMode} />
+              <BottomBar ref={toolbarRef} recording={recording} onLayout={(e) => setBarHeight(e.nativeEvent.layout.height)} />
+            </View>
           </View>
-
-          {!position && !placing && (permission != null && !permission.granted ? <PermissionCard /> : <NoFixCard />)}
-
-          <View pointerEvents="box-none" style={styles.bottomStack}>
-            {held.destination && !placing && (
-              <HeldRouteCard
-                manual={manual}
-                trusted={trust === "TRUSTED"}
-                mayPlace={place.mayPlace}
-                onPlace={() => place.start()}
-                onCancel={held.cancel}
-                onConfirm={held.confirm}
-              />
-            )}
-            {pin && (
-              <PinCard
-                pin={pin}
-                position={position}
-                onClose={() => setPin(null)}
-                // The car is here, not a destination: the same placing as from the chip, starting at the pin.
-                onPlace={place.mayPlace ? () => place.start(pin) : undefined}
-                onRoute={() => {
-                  startRoute({ lat: pin.lat, lon: pin.lon });
-                  setPin(null);
-                }}
-              />
-            )}
-            {mapReady && !tourOffered && !touring && !pin && !placing && !position?.poseQuestion && (
-              <TourInvite panelStyle={panel} onStart={() => answerTour(true)} onDismiss={() => answerTour(false)} />
-            )}
-            <CameraButton ref={followRef} mode={cameraMode} onPress={toggleCameraMode} />
-            <BottomBar ref={toolbarRef} recording={recording} onLayout={(e) => setBarHeight(e.nativeEvent.layout.height)} />
-          </View>
-        </View>
-        {/* Asked for from the Guide, it waits for the pages to close. */}
-        {touring && screenFocused && <MapTour targets={tourTargets} onClose={() => setTouring(false)} />}
-        {/* Update prompts only while nothing else goes on (docs/UPDATES-SPEC.md §5.3). */}
-        <UpdatePrompts
-          busy={
-            recording ||
-            route != null ||
-            nav.adapter === "on" ||
-            (position?.speedMps ?? 0) > MOVING_MPS ||
-            !screenFocused ||
-            !mapReady ||
-            touring ||
-            !tourOffered ||
-            pin != null ||
-            placing != null
-          }
-        />
-      </FontScaleLimit>
-      <SheetBlur />
-    </View>
+          {/* Asked for from the Guide, it waits for the pages to close. */}
+          {touring && screenFocused && <MapTour targets={tourTargets} onClose={() => setTouring(false)} />}
+          {/* Update prompts only while nothing else goes on (docs/UPDATES-SPEC.md §5.3). */}
+          <UpdatePrompts
+            busy={
+              recording ||
+              route != null ||
+              nav.adapter === "on" ||
+              (position?.speedMps ?? 0) > MOVING_MPS ||
+              !screenFocused ||
+              !mapReady ||
+              touring ||
+              !tourOffered ||
+              pin != null ||
+              placing != null
+            }
+          />
+        </FontScaleLimit>
+        <SheetBlur />
+      </View>
+    </BlurScope>
   );
 }
 

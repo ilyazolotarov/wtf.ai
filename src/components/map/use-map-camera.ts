@@ -51,6 +51,7 @@ export function useMapCamera({
   mode,
   headingUpRad,
   position,
+  smoothing = false,
   route,
   ghostView,
   placing,
@@ -65,6 +66,8 @@ export function useMapCamera({
   mode: CameraMode;
   headingUpRad: number | null;
   position: PositionEstimate | null;
+  /** `position` is redrawn every frame (use-smoothed-position.ts): follow it frame by frame, without easing. */
+  smoothing?: boolean;
   route: RouteSnapshot | null;
   ghostView: boolean;
   placing: PlacingStep | null;
@@ -171,9 +174,10 @@ export function useMapCamera({
       ...(followBearing !== undefined ? { bearing: followBearing } : {}),
       pitch: follow.pitch,
     };
-    if (snapped) cameraRef.current?.jumpTo(stop);
+    // Smoothed, every frame is a small step: an ease per frame would lag and restart 30 times a second.
+    if (snapped || smoothing) cameraRef.current?.jumpTo(stop);
     else cameraRef.current?.easeTo({ ...stop, duration: FOLLOW_EASE_MS });
-  }, [mapReady, follow, position, ghostView, followBearing]);
+  }, [mapReady, follow, position, ghostView, followBearing, smoothing]);
 
   // The route and its alternatives at once (ROUTING-SPEC §8.7), north up: framed once when asked.
   useEffect(() => {

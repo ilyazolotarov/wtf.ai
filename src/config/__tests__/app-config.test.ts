@@ -6,7 +6,16 @@ const appConfig = require("../../../app.config.js") as (ctx: { config: typeof ap
   extra: Record<string, unknown>;
 };
 
-const NAMES = ["UPDATES_ORIGIN", "TRIP_UPLOAD_ORIGIN", "MAP_RELEASES_REPO", "GITHUB_REPOSITORY", "SENTRY_DSN"];
+const NAMES = [
+  "UPDATES_ORIGIN",
+  "TRIP_UPLOAD_ORIGIN",
+  "GITHUB_REPOSITORY",
+  "SENTRY_DSN",
+  "PRIVACY_POLICY_URL",
+  "DISTRIBUTION",
+];
+const INSTALL_PACKAGES = "android.permission.REQUEST_INSTALL_PACKAGES";
+type Android = { permissions?: string[]; blockedPermissions?: string[] };
 const saved = Object.fromEntries(NAMES.map((n) => [n, process.env[n]]));
 afterEach(() => {
   for (const n of NAMES) {
@@ -22,7 +31,13 @@ describe("app.config.js", () => {
     const config = appConfig({ config: app.expo });
     expect(config.updates).toMatchObject({ enabled: false, codeSigningCertificate: "./certs/certificate.pem" });
     expect(config.updates.url).toBeUndefined();
-    expect(config.extra).toMatchObject({ updatesOrigin: null, tripUploadUrl: null, mapReleasesRepo: null, sentryDsn: null });
+    expect(config.extra).toMatchObject({
+      updatesOrigin: null,
+      tripUploadUrl: null,
+      sentryDsn: null,
+      privacyPolicyUrl: null,
+      distribution: "sideload",
+    });
   });
 
   test("takes the servers from the environment", () => {
@@ -35,9 +50,65 @@ describe("app.config.js", () => {
     expect(config.extra).toMatchObject({
       updatesOrigin: "https://updates.example",
       tripUploadUrl: "https://logs.example",
-      mapReleasesRepo: "someone/fork",
+      privacyPolicyUrl: "https://github.com/someone/fork/blob/main/docs/PRIVACY.md",
     });
-    process.env.MAP_RELEASES_REPO = "someone/maps";
-    expect(appConfig({ config: app.expo }).extra.mapReleasesRepo).toBe("someone/maps");
+  });
+
+  test("the privacy policy: the variable, else docs/PRIVACY.md in the CI repo", () => {
+    process.env.GITHUB_REPOSITORY = "someone/fork";
+    expect(appConfig({ config: app.expo }).extra.privacyPolicyUrl).toBe("https://github.com/someone/fork/blob/main/docs/PRIVACY.md");
+    process.env.PRIVACY_POLICY_URL = "https://example.org/privacy/";
+    expect(appConfig({ config: app.expo }).extra.privacyPolicyUrl).toBe("https://example.org/privacy");
+  });
+
+  test("the sideloaded build installs its own updates and keeps the tester upload", () => {
+    process.env.TRIP_UPLOAD_ORIGIN = "https://logs.example";
+    const config = appConfig({ config: app.expo });
+    expect((config.android as Android).permissions).toContain(INSTALL_PACKAGES);
+    expect(config.extra).toMatchObject({ distribution: "sideload", tripUploadUrl: "https://logs.example" });
+  });
+
+  test("a store build cannot install packages and has no tester upload (docs/STORE-REVIEW.md §1)", () => {
+    process.env.DISTRIBUTION = "store";
+    process.env.TRIP_UPLOAD_ORIGIN = "https://logs.example";
+    const config = appConfig({ config: app.expo });
+    const android = config.android as Android;
+    expect(android.permissions).not.toContain(INSTALL_PACKAGES);
+    expect(android.blockedPermissions).toEqual(
+      expect.arrayContaining([INSTALL_PACKAGES, "android.permission.SYSTEM_ALERT_WINDOW", "android.permission.ACTIVITY_RECOGNITION"]),
+    );
+    expect(android.permissions).toContain("android.permission.ACCESS_FINE_LOCATION");
+    expect(config.extra).toMatchObject({ distribution: "store", tripUploadUrl: null });
+  });
+});
+
+describe("app.json for review", () => {
+  const plugins = app.expo.plugins as (string | [string, Record<string, unknown>])[];
+  const options = (name: string) => (plugins.find((p) => Array.isArray(p) && p[0] === name) as [string, Record<string, unknown>])?.[1];
+
+  test("no library's generic purpose string reaches the build (App Review 5.1.1)", () => {
+    expect(options("expo-location")).toMatchObject({
+      locationAlwaysAndWhenInUsePermission: expect.any(String),
+      locationAlwaysPermission: expect.any(String),
+      motionUsagePermission: expect.any(String),
+    });
+    expect(options("expo-sensors")).toMatchObject({ motionPermission: expect.any(String) });
+    expect(options("expo-audio")).toMatchObject({ microphonePermission: expect.any(String) });
+    expect(options("expo-secure-store")).toMatchObject({ faceIDPermission: false });
+  });
+
+  test("every localized Info.plist string exists in every language", () => {
+    const en = Object.keys(require("../../../locales/en.json")).sort();
+    const uk = Object.keys(require("../../../locales/uk.json")).sort();
+    expect(uk).toEqual(en);
+  });
+
+  test("the privacy manifest declares no tracking and covers our own systemUptime", () => {
+    const manifest = app.expo.ios.privacyManifests;
+    expect(manifest.NSPrivacyTracking).toBe(false);
+    expect(manifest.NSPrivacyAccessedAPITypes).toContainEqual({
+      NSPrivacyAccessedAPIType: "NSPrivacyAccessedAPICategorySystemBootTime",
+      NSPrivacyAccessedAPITypeReasons: ["35F9.1"],
+    });
   });
 });

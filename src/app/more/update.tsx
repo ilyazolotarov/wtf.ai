@@ -14,6 +14,7 @@ import {
 } from "@/components/screens/screen-ui";
 import { T } from "@/components/ui/text";
 import { appCode } from "@/components/update/app-code";
+import { STORE_BUILD } from "@/config/distribution";
 import { usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
 import type { AppBuildInfo } from "@/services/app-update/decide";
@@ -91,7 +92,8 @@ export default function UpdateScreen() {
         )
       )}
 
-      {platform === "ios" && (
+      {/* A store build is updated by its store: never point at another one (App Review Guideline 3.2.2). */}
+      {platform === "ios" && !STORE_BUILD && (
         <>
           <ScreenNote>{t("appUpdateAltStoreNote")}</ScreenNote>
           {!native && <ScreenAction labelKey="appUpdateOpenAltStore" secondary compact onPress={() => void altStore()} />}

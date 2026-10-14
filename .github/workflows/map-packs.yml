@@ -5,8 +5,7 @@ name: Build Offline Map Packs
 # from them (pmtiles extract), clip the extract per region (osmium) for the road graphs and
 # search indexes (built in parallel), and publish tools/tiles/out/release/ (index.json, one
 # <region>.pmtiles per region and the shared files) to the update Worker, where the app reads
-# it (docs/UPDATES-SPEC.md §4); the Worker keeps one release. Also as GitHub release
-# `maps-<osm_date>` for app JS older than the Worker's maps; older releases are pruned.
+# it (docs/UPDATES-SPEC.md §4); the Worker keeps one release.
 on:
   schedule:
     - cron: "0 4 * * 1" # Monday; Geofabrik refreshes extracts around 01–02 UTC
@@ -18,16 +17,14 @@ on:
         default: false
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: map-packs
   cancel-in-progress: false
 
 env:
-  KEEP_RELEASES: 3
-  # The update Worker's address (app.config.js): a repository variable, so the repo names no server. Unset: the maps go
-  # to GitHub releases only.
+  # The update Worker's address (app.config.js): a repository variable, so the repo names no server.
   UPDATES_ORIGIN: ${{ vars.UPDATES_ORIGIN }}
 
 jobs:
@@ -54,14 +51,10 @@ jobs:
         id: check
         env:
           FORCE: ${{ inputs.force }}
-          GH_TOKEN: ${{ github.token }}
         run: |
+          [ -n "$UPDATES_ORIGIN" ] || { echo "::error::No UPDATES_ORIGIN repository variable: nowhere to publish maps"; exit 1; }
           date=$(tiles osm-date)
-          if [ -n "$UPDATES_ORIGIN" ]; then
-            current=$(curl -fsS "${UPDATES_ORIGIN%/}/maps/latest.json" | jq -r .osm_date || echo none)
-          else
-            current=$(gh release view "maps-$date" --json tagName -q .tagName 2>/dev/null | sed 's/^maps-//' || echo none)
-          fi
+          current=$(curl -fsS "${UPDATES_ORIGIN%/}/maps/latest.json" | jq -r .osm_date || echo none)
           if [ "$FORCE" != "true" ] && [ "$current" = "$date" ]; then
             echo "maps $date already published"
             echo "build=false" >> "$GITHUB_OUTPUT"
@@ -105,43 +98,16 @@ jobs:
           ls -l out/release/*.pmtiles
 
       - name: Setup Node.js
-        if: steps.check.outputs.build == 'true' && env.UPDATES_ORIGIN != ''
+        if: steps.check.outputs.build == 'true'
         uses: actions/setup-node@v7
         with:
           node-version: 24
 
       - name: Publish to the update Worker
         # Files the Worker has (same size and MD5) are skipped, index.json goes last, then the release becomes current.
-        if: steps.check.outputs.build == 'true' && env.UPDATES_ORIGIN != ''
+        if: steps.check.outputs.build == 'true'
         env:
           OTA_PUBLISH_TOKEN: ${{ secrets.OTA_PUBLISH_TOKEN }}
         run: |
           [ -n "$OTA_PUBLISH_TOKEN" ] || { echo "::error::OTA_PUBLISH_TOKEN is missing from the ota environment (docs/OTA.md)"; exit 1; }
           npm run -s ota:upload -- --maps tools/tiles/out/release
-
-      - name: Publish release
-        # For app JS older than the Worker's maps (docs/UPDATES-SPEC.md §4).
-        if: steps.check.outputs.build == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          date=$(jq -r .osm_date tools/tiles/out/release/index.json)
-          tag="maps-$date"
-          gh release delete "$tag" --yes --cleanup-tag 2>/dev/null || true
-          gh release create "$tag" tools/tiles/out/release/* \
-            --target "$GITHUB_SHA" --latest=false \
-            --title "Offline maps $date" \
-            --notes "Offline maps for Ukraine and each oblast, built by tools/tiles ($GITHUB_SHA). OSM data $date from Geofabrik. Catalog: index.json; one <region>.pmtiles per region (tools/tiles/regions/regions.json) plus shared style, sprites and fonts.
-
-          Map data © OpenStreetMap contributors (ODbL). Tiles schema © OpenMapTiles."
-
-      - name: Prune old releases
-        if: steps.check.outputs.build == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release list --limit 200 --json tagName \
-            --jq '.[].tagName | select(test("^maps-[0-9]{4}-[0-9]{2}-[0-9]{2}$"))' \
-            | sort -r | tail -n +$((KEEP_RELEASES + 1)) | while read -r old; do
-              gh release delete "$old" --yes --cleanup-tag
-            done

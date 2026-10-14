@@ -17,7 +17,7 @@ type Stage = 0 | 1 | 2 | 3 | 4;
 
 /**
  * The drive: up the main road, then right at the junction. Positions are distances along it, map units. The junction
- * sits below the status pill and the "Trusted GPS …" strip (to ~120 even wrapped), so the turn stays in sight.
+ * sits below the status pill and the "Last trusted GPS: …" strip (to ~120 even wrapped), so the turn stays in sight.
  */
 const START = { x: 120, y: 380 };
 const CORNER = { x: 120, y: 180 };
@@ -48,7 +48,7 @@ interface StageView {
   source: keyof Strings;
   accuracyM: number;
   r: number;
-  /** The "Trusted GPS …" chip: how long ago, and (with odometry) how far back. */
+  /** The "Last trusted GPS: …" chip: how long ago, and (with odometry) how far back. */
   since?: { minutes: number; backM?: number };
   /** Without the adapter the dot holds the last good fix. */
   hold?: boolean;

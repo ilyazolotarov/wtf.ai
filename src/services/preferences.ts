@@ -43,3 +43,26 @@ export function isOnboardingDone(): boolean {
 export function markOnboardingDone(): void {
   Storage.setItemSync(ONBOARDING_KEY, "1");
 }
+
+// Store builds hide the Developer screen until seven taps on the version in Settings (docs/STORE-REVIEW.md §3):
+// reviewers and drivers never meet test switches, a tester still can.
+const DEVELOPER_KEY = "developer-unlocked";
+const developerListeners = new Set<() => void>();
+
+export function isDeveloperUnlocked(): boolean {
+  try {
+    return Storage.getItemSync(DEVELOPER_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function unlockDeveloper(): void {
+  Storage.setItemSync(DEVELOPER_KEY, "1");
+  for (const listener of developerListeners) listener();
+}
+
+export function subscribeDeveloperUnlocked(listener: () => void): () => void {
+  developerListeners.add(listener);
+  return () => developerListeners.delete(listener);
+}

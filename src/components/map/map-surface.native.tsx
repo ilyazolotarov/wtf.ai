@@ -8,6 +8,8 @@ import { Sentry } from "@/config/sentry";
 import { Colors } from "@/constants/theme";
 import type { Coordinate } from "@/nav/geo";
 import { usePosition } from "@/providers/position-provider";
+
+import { useSmoothedPosition } from "./use-smoothed-position";
 import { useRoute } from "@/providers/route-provider";
 import { useMapPacks } from "@/services/offline-map/map-packs";
 
@@ -96,6 +98,9 @@ export function MapSurface({
   const { installed } = useMapPacks();
   const region = installed.active ? installed.regions[installed.active] : null;
   const position = usePosition();
+  // Drawn and followed smoothly between the navigator's 2 Hz positions (pose-smoother.ts).
+  const shown = useSmoothedPosition(position);
+  const smoothing = shown !== position;
   const { route, chooseAlternative } = useRoute();
   // Camera commands wait for the style (`useMapCamera`); a new map (after none) waits again.
   const [mapReady, setMapReady] = useState(false);
@@ -103,8 +108,10 @@ export function MapSurface({
   const { cameraRef, onRegionIsChanging, onRegionDidChange } = useMapCamera({
     mapReady,
     mode,
-    headingUpRad,
-    position,
+    // Heading-up turns with the smoothed heading too, unless the walking compass leads.
+    headingUpRad: smoothing && !compass && shown?.headingRad != null ? shown.headingRad : headingUpRad,
+    position: shown,
+    smoothing,
     route,
     ghostView,
     placing,
@@ -178,9 +185,9 @@ export function MapSurface({
       {/* Bottom to top: MapLibre stacks layers in the order they are declared. */}
       <RouteLayers route={route} palette={palette} onChoose={chooseAlternative} />
       <MarkLayers pin={pin} placedMark={placedMark} palette={palette} scheme={scheme} />
-      <PositionLayers position={position} compass={compass} palette={palette} scheme={scheme} view={view} />
+      <PositionLayers position={shown} compass={compass} palette={palette} scheme={scheme} view={view} />
       <DebugLayers position={position} palette={palette} />
-      <PuckLayers position={position} palette={palette} />
+      <PuckLayers position={shown} palette={palette} />
     </Map>
   );
 }

@@ -151,6 +151,17 @@ describe("VehicleLinkCore", () => {
     await second.core.disconnect();
   });
 
+  test("auto-connect leaves adapters on a skipped transport to the driver", async () => {
+    const { core, store } = setup();
+    core.startDiscovery();
+    void core.connect("emu-1");
+    await until(() => core.getSnapshot().link === "polling");
+    await core.disconnect();
+    const second = setup({}, store);
+    expect(await second.core.autoConnect(["emulator"])).toBe(false);
+    expect(second.core.getSnapshot().link).toBe("idle");
+  });
+
   test("auto-connect waits for the adapter and retries after a failed attempt", async () => {
     const { core, store, emulators } = setup();
     core.startDiscovery();

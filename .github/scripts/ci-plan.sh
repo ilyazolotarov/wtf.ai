@@ -20,7 +20,7 @@ ZERO_SHA=0000000000000000000000000000000000000000
 # Never affects the app or its tests.
 is_docs() {
   case "$1" in
-    docs/* | *.md | LICENSE | .claude/* | vibeview.json | skills-lock.json | eas.json) return 0 ;;
+    docs/* | *.md | site/* | store-assets/* | LICENSE | .claude/* | vibeview.json | skills-lock.json | eas.json) return 0 ;;
   esac
   return 1
 }
@@ -238,6 +238,7 @@ self_test() {
   }
   expect "docs only on a branch" "false false false - - false -" push b "" docs/SPEC.md README.md
   expect "docs only on main" "false false false - - false -" push main "" docs/SPEC.md
+  expect "website and wiki only" "false false false - - false -" push main "" site/index.html wiki/Home.md
   expect "JS on a branch: checks only" "true false false - - false -" push b "" src/app/index.tsx
   expect "JS on a branch with [build]" "true false false Debug ci true -" push b "Fix x [build]" src/app/index.tsx
   expect "JS on a branch with [build ios]" "true false false Debug - true -" push b "x [Build iOS]" src/a.ts

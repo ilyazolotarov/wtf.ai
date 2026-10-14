@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, TextInput, View } from "react-native";
+import { useEffect } from "react";
+import { ActivityIndicator, Pressable, StyleSheet, View } from "react-native";
 
 import {
     ScreenAction,
@@ -9,7 +9,7 @@ import {
     ScreenSection,
 } from "@/components/screens/screen-ui";
 import { Icon, type IconName } from "@/components/ui/icon";
-import { INPUT_MAX_FONT_SCALE, T } from "@/components/ui/text";
+import { T } from "@/components/ui/text";
 import { usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
 import { skipMap } from "@/services/app-update/update-center";
@@ -17,14 +17,12 @@ import {
     cancelDownload,
     downloadRegion,
     type MapDownload,
-    getCatalogUrl,
     loadCatalog,
     pauseDownload,
     regionNeedsUpdate,
     removeRegion,
     resumeDownload,
     setActiveRegion,
-    setCatalogUrl,
     useMapPacks,
 } from "@/services/offline-map/map-packs";
 
@@ -102,8 +100,8 @@ function DownloadProgress({ download, osmDate }: { download: MapDownload; osmDat
 }
 
 /**
- * Offline maps (SPEC §3.8): regions from the published map release (the update Worker's; or a custom
- * catalog URL, e.g. `tiles serve` on a PC), downloaded one at a time; one installed region is active.
+ * Offline maps (SPEC §3.8): regions from the published map release (the update Worker's), downloaded one at a
+ * time; one installed region is active.
  * Each region bundles its road graph and search index; progress and pause/cancel controls show
  * in the region's row. The body of the Downloads sheet and of the first-run `map-setup` screen.
  */
@@ -111,7 +109,6 @@ export function RegionDownloads() {
   const { t, language } = useT();
   const palette = usePalette();
   const { installed, catalog, catalogLoading, catalogError, catalogTooNew, download, downloadError } = useMapPacks();
-  const [source, setSource] = useState(getCatalogUrl);
 
   useEffect(() => {
     if (!catalog) void loadCatalog();
@@ -136,11 +133,6 @@ export function RegionDownloads() {
   const switchRegion = (region: string) => {
     setActiveRegion(region);
     if (catalog && !download && regionNeedsUpdate(installed, catalog, region)) void downloadRegion(region);
-  };
-
-  const applySource = () => {
-    setCatalogUrl(source);
-    void loadCatalog();
   };
 
   return (
@@ -223,26 +215,6 @@ export function RegionDownloads() {
         </View>
       )}
 
-      <ScreenCard style={styles.card}>
-        <T w="semibold" size={14}>
-          {t("catalogSource")}
-        </T>
-        <TextInput
-          value={source}
-          onChangeText={setSource}
-          onSubmitEditing={applySource}
-          placeholder={t("catalogSourceGithub")}
-          placeholderTextColor={palette.text2}
-          autoCapitalize="none"
-          autoCorrect={false}
-          keyboardType="url"
-          returnKeyType="done"
-          maxFontSizeMultiplier={INPUT_MAX_FONT_SCALE}
-          style={[styles.input, { color: palette.text, backgroundColor: palette.surface }]}
-        />
-        <ScreenAction labelKey="apply" compact secondary onPress={applySource} />
-        <ScreenNote>{t("catalogSourceNote")}</ScreenNote>
-      </ScreenCard>
     </>
   );
 }
@@ -260,5 +232,4 @@ const styles = StyleSheet.create({
   bar: { height: 6, borderRadius: 3, overflow: "hidden" },
   barFill: { height: 6, borderRadius: 3 },
   errorRow: { flexDirection: "row", alignItems: "center", gap: 12 },
-  input: { borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14 },
 });

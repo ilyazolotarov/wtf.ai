@@ -419,5 +419,7 @@ export async function autoConnect(): Promise<void> {
   if (Platform.OS === "web") return;
   if (VehicleLinkModule.getBluetoothState() === "notDetermined") return;
   await VehicleLinkModule.initialize(null);
-  await link.autoConnect();
+  // Never the emulated adapters: their scripted drive would start by itself whenever the app opens, and fake speed under
+  // a real drive if a driver ever tapped one (2026-10-14: the emulator drove off before any destination was set).
+  await link.autoConnect(["emulator"]);
 }

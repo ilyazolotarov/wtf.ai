@@ -63,6 +63,8 @@ its own, so a failed prune never fails a publish. It never removes what `latest`
   anywhere. Without AltStore, "Share IPA" downloads the IPA and opens the share sheet.
   - AltStore refuses an IPA whose entitlements and `…UsageDescription` texts differ from the source's
     `appPermissions`, so CI reads them from the IPA it built (`codesign`, `Info.plist`).
+- **Store builds** (`DISTRIBUTION=store`, [STORE-REVIEW.md](STORE-REVIEW.md)) never look for a native build: their store
+  updates them. No APK installer, no AltStore; JS updates as above.
 - **Telegram** gets a message per build, never the file: on `main`, `publish-builds` sends the download links (APK,
   AltStore source); a branch build (`[build]`) sends the link to its run, whose artifacts hold the files.
 
@@ -71,10 +73,7 @@ its own, so a failed prune never fails a publish. It never removes what `latest`
 - `map-packs.yml` uploads `tools/tiles/out/release/` to `maps/<osm_date>/` (`index.json` last), then publishes it:
   `maps/latest.json` names it. A forced rebuild of the same date uploads over it; the app's MD5 check catches a
   download that mixed the two.
-- The app reads `maps/latest.json`, then `maps/<osm_date>/index.json`, and downloads from that directory. While the
-  Worker has no maps it falls back to the newest GitHub release `maps-*`, which `map-packs.yml` still publishes for
-  builds whose JS predates the Worker.
-- A Developer catalog URL (`tiles serve` on a PC) replaces both, as before.
+- The app reads `maps/latest.json`, then `maps/<osm_date>/index.json`, and downloads from that directory.
 
 ## 5. In the app
 

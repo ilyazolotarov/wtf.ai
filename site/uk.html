@@ -1,0 +1,122 @@
+---
+layout: null
+---
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>wtf.ai — Where the f* am I?</title>
+  <meta name="description" content="Офлайн-навігатор для авто, який відстежує вашу позицію, навіть коли GPS заглушено або підмінено.">
+  <meta property="og:title" content="wtf.ai — Where the f* am I?">
+  <meta property="og:description" content="Офлайн-навігатор для авто, який відстежує вашу позицію, навіть коли GPS заглушено або підмінено.">
+  <meta property="og:image" content="assets/icon.png">
+  <link rel="icon" href="assets/icon.png">
+  <link rel="alternate" hreflang="en" href="./">
+  <link rel="alternate" hreflang="uk" href="uk.html">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/landing.css">
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <a class="brand" href="uk.html">wtf.ai</a>
+      <nav>
+        <a href="#how">Як працює</a>
+        <a href="#adapter">Адаптер</a>
+        <a href="https://github.com/{{ site.github.repository_nwo }}/wiki/Home-uk">Довідка</a>
+        <a href="./" lang="en" hreflang="en">English</a>
+      </nav>
+    </header>
+
+    <div class="hero">
+      <div>
+        <h1>Where the f* am&nbsp;I?</h1>
+        <p class="lead">Офлайн-навігатор для авто, який знає, де ви, навіть коли GPS заглушено або підмінено.</p>
+        <div class="badges">
+          <span class="badge soon">App Store · незабаром</span>
+          <span class="badge soon">Google Play · незабаром</span>
+          <a class="badge" href="https://github.com/{{ site.github.repository_nwo }}/wiki/Getting-started-uk">Перші кроки</a>
+        </div>
+      </div>
+      <div class="phone"><img src="assets/screens/uk/01-guidance.png" alt="wtf.ai веде маршрутом на мапі"></div>
+    </div>
+  </div>
+
+  <section>
+    <div class="wrap">
+      <h2>Коли мітка на мапі помиляється</h2>
+      <p class="sub">Під час повітряних тривог супутниковий сигнал може зникнути або вказати зовсім інше місце. wtf.ai продовжує відстежувати авто за його швидкістю та поворотами.</p>
+      <div class="grid">
+        <div class="card"><h3>Зберігає позицію</h3><p>Від останньої надійної позиції програма рухається далі за швидкістю авто та поворотами телефона, утримуючи мітку на дорогах.</p></div>
+        <div class="card"><h3>Розпізнає підміну</h3><p>Програма ігнорує супутникову позицію, що суперечить руху авто. Місце, яке показує GPS, ви побачите сірим.</p></div>
+        <div class="card"><h3>Працює офлайн</h3><p>Завантажте свій регіон один раз. Мапа, пошук адрес, маршрути й голосові підказки працюватимуть без інтернету.</p></div>
+        <div class="card"><h3>Підказує повороти голосом</h3><p>Українською або англійською, через телефон чи динаміки авто. Після неправильного повороту маршрут перебудовується автоматично.</p></div>
+        <div class="card"><h3>Вивчає ваше авто</h3><p>Нічого калібрувати не потрібно: програма пристосовується до авто й телефона під час руху та запам’ятовує місце паркування.</p></div>
+        <div class="card"><h3>Береже приватність</h3><p>Без реєстрації. Геопозиція, маршрути й поїздки залишаються на телефоні.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="how">
+    <div class="wrap">
+      <h2>Як це працює</h2>
+      <p class="sub">Перед використанням кожної позиції GPS програма звіряє її з рухом авто.</p>
+      <div class="steps">
+        <div class="card"><h3><span class="dot" style="background:var(--ok)"></span>Надійний GPS</h3><p>Позиція GPS узгоджується зі швидкістю та поворотами авто: індикатор зелений.</p></div>
+        <div class="card"><h3><span class="dot" style="background:var(--bad)"></span>Сигнал заглушено</h3><p>Супутників немає, але мітка далі рухається за швидкістю авто та поворотами телефона вздовж доріг.</p></div>
+        <div class="card"><h3>Поворот</h3><p>Неясно, якою з двох доріг їде авто? Наступний поворот допоможе визначити правильну, і коло невизначеності зменшиться.</p></div>
+        <div class="card"><h3>GPS повернувся</h3><p>Програма кілька секунд звіряє нові позиції з рухом авто, перш ніж знову їм довіряти.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>У програмі</h2>
+      <p class="sub">Світла й темна теми, українська й англійська мови — для телефона в тримачі.</p>
+      <div class="shots">
+        <img src="assets/screens/uk/01-guidance.png" alt="Навігація з надійним GPS" loading="lazy">
+        <img src="assets/screens/uk/04-spoofed.png" alt="GPS підмінено: авто залишається на правильній дорозі" loading="lazy">
+        <img src="assets/screens/uk/03-search.png" alt="Офлайн-пошук адрес" loading="lazy">
+        <img src="assets/screens/uk/02-route.png" alt="Вибране місце призначення" loading="lazy">
+        <img src="assets/screens/uk/05-lesson.png" alt="Урок про поїздку без GPS" loading="lazy">
+        <img src="assets/screens/uk/06-maps.png" alt="Офлайн-мапи" loading="lazy">
+      </div>
+    </div>
+  </section>
+
+  <section id="adapter">
+    <div class="wrap">
+      <h2>Підключіть адаптер до авто</h2>
+      <p class="sub">Невеликий Bluetooth-адаптер OBD-II під панеллю приладів передає програмі точну швидкість авто. З ним програма продовжує визначати позицію авто годинами без GPS. Без адаптера програма працює, поки GPS надійний.</p>
+      <div class="grid">
+        <div class="card"><h3>Android</h3><p>Будь-який Bluetooth-адаптер ELM327: Bluetooth LE або звичайний Bluetooth, як
+          більшість недорогих.</p></div>
+        <div class="card"><h3>iPhone</h3><p>Адаптери ELM327 з Bluetooth LE, а також OBDLink MX+ і vLinker FS / MS.
+          Адаптери лише зі звичайним Bluetooth не працюють із жодною програмою на iPhone.</p></div>
+        <div class="card"><h3>Який купити</h3><p>Перевірено: OBDLink MX+, vLinker FD-IOS. Також добрі: OBDLink CX,
+          vLinker MC+ / FD+ / FS / MS. Оминайте дешеві клони «v1.5», що відповідають із пропусками, і адаптери,
+          створені для власної програми.</p></div>
+      </div>
+      <p class="sub" style="margin: 20px 0 0">Підключіть один раз — далі програма сама з’єднуватиметься з адаптером, коли
+        ви відкриєте її в авто. <a href="https://github.com/{{ site.github.repository_nwo }}/wiki/Car-adapter-uk">Який
+        адаптер обрати і як підключити</a></p>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap">
+      <p>
+        <a href="https://github.com/{{ site.github.repository_nwo }}/wiki/Home-uk">Довідка</a>
+        <a href="privacy.uk.html">Політика приватності</a>
+        <a href="https://github.com/{{ site.github.repository_nwo }}">Вихідний код</a>
+        <a href="https://github.com/{{ site.github.repository_nwo }}/issues">Підтримка</a>
+      </p>
+      <p>Дані мапи © учасники OpenStreetMap · Схема тайлів © OpenMapTiles</p>
+    </div>
+  </footer>
+</body>
+</html>

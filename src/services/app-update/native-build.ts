@@ -8,6 +8,7 @@ import * as Updates from "expo-updates";
 import { Linking, Platform } from "react-native";
 
 import { ALTSTORE_SOURCE_URL, UPDATES_ORIGIN } from "@/config/app-updates";
+import { STORE_BUILD } from "@/config/distribution";
 
 import type { AppBuildInfo, OwnBuild } from "./decide";
 
@@ -27,11 +28,11 @@ export function ownBuild(): OwnBuild {
 }
 
 /**
- * The newest published build of this platform; null before the first, or when the build has no update server
- * (UPDATES_ORIGIN). Throws when the Worker can't be reached.
+ * The newest published build of this platform; null before the first, when the build has no update server
+ * (UPDATES_ORIGIN), or in a store build, which only its store updates. Throws when the Worker can't be reached.
  */
 export async function fetchLatestBuild(signal?: AbortSignal): Promise<AppBuildInfo | null> {
-  if (!UPDATES_ORIGIN) return null;
+  if (!UPDATES_ORIGIN || STORE_BUILD) return null;
   const res = await fetch(`${UPDATES_ORIGIN}/apps/${platform}/latest.json`, { signal, headers: { "cache-control": "no-cache" } });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`Latest build: HTTP ${res.status}`);

@@ -37,3 +37,34 @@ describe("the dot while anchored (heading unknown)", () => {
     expect(puckHypothesis(estimate("init", 8, onRoad, "anchored"), false)).toBeUndefined();
   });
 });
+
+describe("the route tips which way the dot goes on a road", () => {
+  // One road running north; the car somewhere on it, both directions alive (a jammed start, no turn yet).
+  const north: Cluster = { weight: 0.3, lat: 50.432, lon: 30.516, headingRad: 0, spreadM: 5, edge: 7, particles: 150 };
+  const south: Cluster = { ...north, weight: 0.7, headingRad: Math.PI, lat: 50.4318 };
+  const clusters = (...c: Cluster[]) =>
+    ({ mode: "anchored", speedMps: 15, mapMatch: { state: "multimodal", clusters: c, particles: 500, updateMs: 1 } }) as unknown as NavEstimate;
+  const routeNorth = [
+    { lat: 50.43, lon: 30.516 },
+    { lat: 50.44, lon: 30.516 },
+  ];
+
+  test("a route north draws the northbound hypothesis though the other leans heavier", () => {
+    expect(puckHypothesis(clusters(south, north), false, routeNorth)).toBe(north);
+  });
+
+  test("without a route, the heaviest; against a hypothesis more than four times likelier, the route gives way", () => {
+    expect(puckHypothesis(clusters(south, north), false)).toBe(south);
+    expect(puckHypothesis(clusters({ ...south, weight: 0.85 }, { ...north, weight: 0.15 }), false, routeNorth)).toMatchObject({ headingRad: Math.PI });
+  });
+
+  test("behind the route's start (where the car stood) a hypothesis heading away from it counts as against it", () => {
+    const behind = (c: Cluster) => ({ ...c, lat: 50.43 - 66 / 111_320 });
+    expect(puckHypothesis(clusters(behind(south), behind(north)), false, routeNorth)).toMatchObject({ headingRad: 0 });
+  });
+
+  test("a route elsewhere changes nothing", () => {
+    const far = routeNorth.map((p) => ({ ...p, lon: p.lon + 0.01 }));
+    expect(puckHypothesis(clusters(south, north), false, far)).toBe(south);
+  });
+});

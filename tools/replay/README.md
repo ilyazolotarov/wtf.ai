@@ -202,7 +202,8 @@ npm run replay:sim -- --route arterial --trace               # main roads, strai
 Per drive: distance, junctions, stops; per version the dot's error (median, p90, max, at the end), the share of
 time more than 50 m off and the longest such stretch, the navigator's own error, and the road corrections sent. Then
 the error by time without GPS (`--every` minutes). Graphs: `--graph`, else the smallest built one covering `--at`
-(`gh release download maps-<date> -p <region>.graph.bin -D tools/tiles/out/release` fetches a published one).
+(`curl -fo tools/tiles/out/release/<region>.graph.bin "$UPDATES_ORIGIN/maps/<date>/<region>.graph.bin"` fetches a
+published one).
 It is optimistic: no parking, reversing, yards, unmapped roads or traffic jams.
 
 ## Routes

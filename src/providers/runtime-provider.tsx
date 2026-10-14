@@ -49,6 +49,13 @@ export function useSensorSnapshot(): SensorSnapshot {
   return useSyncExternalStore(sensors.subscribe, sensors.getSnapshot, sensors.getSnapshot);
 }
 
+/** One value derived from the sensor snapshot: re-renders only when it changes, not with every IMU batch. */
+export function useSensorValue<T>(select: (s: SensorSnapshot) => T): T {
+  const { sensors } = getRuntime();
+  const get = () => select(sensors.getSnapshot());
+  return useSyncExternalStore(sensors.subscribe, get, get);
+}
+
 export function useDevSettings(): DevSettings {
   const { subscribeDevSettings, getDevSettings } = getRuntime();
   return useSyncExternalStore(subscribeDevSettings, getDevSettings, getDevSettings);

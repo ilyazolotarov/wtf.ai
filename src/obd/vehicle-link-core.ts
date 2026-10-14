@@ -261,12 +261,14 @@ export class VehicleLinkCore implements VehicleLink {
    * to become reachable: an MFi adapter joins iOS only a few seconds after the car wakes it, often
    * after the app is opened. A failed attempt is retried. With one adapter remembered it waits for
    * it; with several, the most recently verified goes first and each gets `AUTO_CONNECT_WINDOW_MS`,
-   * round after round, until one is reachable.
+   * round after round, until one is reachable. Adapters on a `skip` transport are left for the driver to connect.
    */
-  async autoConnect(): Promise<boolean> {
+  async autoConnect(skip: readonly TransportKind[] = []): Promise<boolean> {
     if (this.roundRun === this.autoRun) return true;
     if (this.snapshot.activeDeviceId && this.snapshot.link !== "error") return true;
-    const list = [...this.remembered()].sort((a, b) => b.lastVerifiedAt - a.lastVerifiedAt);
+    const list = this.remembered()
+      .filter((a) => !skip.includes(a.transport))
+      .sort((a, b) => b.lastVerifiedAt - a.lastVerifiedAt);
     if (list.length === 0) return false;
     if (list.length === 1) await this.connect(list[0].id, { wait: true });
     else {

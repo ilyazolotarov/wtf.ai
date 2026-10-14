@@ -37,7 +37,7 @@ describe("GNSS position mapping", () => {
   });
 
   test("no trusted fix yet: no time since trusted, not this fix's time", () => {
-    // A jammed start: integrity has trusted nothing, so the "Trusted GPS …" chip must not say "just now".
+    // A jammed start: integrity has trusted nothing, so the "Last trusted GPS: …" chip must not say "just now".
     expect(mapFixToPosition(fix({ hAccM: 2000 }), "NO_FIX", undefined).lastTrustedFixAt).toBeUndefined();
   });
 

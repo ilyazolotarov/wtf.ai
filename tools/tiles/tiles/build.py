@@ -9,7 +9,7 @@ multipolygons crossing the border stay whole) for the road graphs and search ind
 parallel processes.
 
 Output is one flat directory, published as-is as GitHub release assets (`maps-<osm_date>`)
-and served by `tiles serve` for LAN testing. The app downloads the shared files once and
+and to the update Worker. The app downloads the shared files once and
 any number of regions:
 
     out/release/

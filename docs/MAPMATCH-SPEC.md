@@ -177,7 +177,7 @@ tiles              per non-empty tile, in tile order:
   builds only the graphs (from the cached extracts) and rewrites `index.json`.
 - `index.json` gains an optional per-region `graph` entry: `{ asset, size, md5, sha256 }`. `INDEX_FORMAT` stays 2.
   A region without `graph` is display-only.
-- The `maps-*` workflow publishes the graph files as release assets like the rest.
+- `map-packs.yml` publishes the graph files to the update Worker like the rest.
 - `tools/tiles/tests/test_graph.py` covers the tag rules, splitting (shared nodes, closed ways, loops, missing
   nodes), simplification, node flags, restriction mapping, spatial lists across tiles, the file round trip, and the
   speed attributes (limits, surface, lights and signs, urban / city / big city).
@@ -1002,6 +1002,16 @@ drives worse, the ones the viewer showed, and 3 better.
     with radius max(spread, 5 m). With GNSS the EKF stays the puck: it is within a few metres there (NAVIGATOR-SPEC
     §9.1), and the filter's position was measured only in outages (§7.7). This narrows §6.2. Alternatives (weight
     ≥ 0.05) are drawn in state `multimodal`.
+  - **The route tips the dot's direction** (`position/puck.ts`): with a route active, a cluster within 30 m of the
+    route's first 1 km (and of its first segment carried 300 m back: the route starts where the car stood, so a hypothesis that set off the other way is behind it) travelling against it counts 4 times less when the dot is chosen; the cluster drawn may then be
+    one other than the heaviest, and the heaviest becomes an alternative. On a straight road with no GPS course, no
+    turn and no parked pose both directions are near even, and the dot (and heading-up) set off whichever way the
+    particles leaned. Only the choice: the filter's weights never see the route. Tried in them, as a per-particle
+    factor like the compass (§8.2, inlier 0.75): `replay:bench --jam-start`, the 7 drives of 2026-10-04, 30 jammed
+    sessions × 3 seeds, the route being the roads the driver took from the jam (and the same roads reversed):
+    truth survival min 47 → 69 % (reversed 56 %), but map starts 26 → 19 and two wrong starts, 178° and 344–369 m off
+    (nvrm4q from 60 s, with the route either way: the factor thinned the hypotheses until a wrong one reached 0.9),
+    and on 94zf2q from 180 s the true route blocked a right map start and let a 43° alignment start win. Dropped.
   - **On a road while it drives:** in state `offroad` at 15 km/h or more, the dominant hypothesis is drawn at the
     nearest point of a road it could be driving along — within 80 m, its heading within 60°, not against a one-way
     (`MapMatchEstimate.clusters[0].road`, `position/puck.ts`) — and as it is when there is none. Off the roads a car

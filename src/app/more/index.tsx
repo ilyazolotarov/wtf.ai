@@ -1,4 +1,5 @@
 import { router, type Href } from "expo-router";
+import { useSyncExternalStore } from "react";
 import { Pressable, StyleSheet, useColorScheme, View } from "react-native";
 
 import { AVAILABLE_LESSONS } from "@/components/guide/lesson-bodies";
@@ -7,11 +8,13 @@ import { useNavStatus } from "@/components/status/use-nav-status";
 import { Icon, type IconName } from "@/components/ui/icon";
 import { T } from "@/components/ui/text";
 import { fmtBytes } from "@/components/vehicle/format";
+import { STORE_BUILD } from "@/config/distribution";
 import { usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
 import { useRecorderSnapshot } from "@/providers/runtime-provider";
 import { useUpdateCenter, useUpdateBadges } from "@/services/app-update/update-center";
 import { useLessonsDone } from "@/services/guide/guide-progress";
+import { isDeveloperUnlocked, subscribeDeveloperUnlocked } from "@/services/preferences";
 import { useMapPacks } from "@/services/offline-map/map-packs";
 
 /** `badge`: the red update dot (docs/UPDATES-SPEC.md §5.4). */
@@ -27,6 +30,7 @@ export default function MoreScreen() {
   const lessonsDone = useLessonsDone();
   const updates = useUpdateBadges();
   const { found } = useUpdateCenter();
+  const developerUnlocked = useSyncExternalStore(subscribeDeveloperUnlocked, isDeveloperUnlocked);
   // A region holds everything offline: the map, the road graph and the search index.
   const ready = installed.active != null;
   const logBytes = rec.trips.reduce((sum, trip) => sum + (trip.id === rec.current?.id ? (rec.current?.bytes ?? 0) : trip.bytes), 0);
@@ -81,13 +85,10 @@ export default function MoreScreen() {
       subColor: rec.state === "recording" ? palette.bad.c : undefined,
       href: "/more/recorder",
     },
-    {
-      icon: "tune",
-      label: t("developer"),
-      sub: t("developerSub"),
-      href: "/more/developer",
-    },
   ];
+  if (!STORE_BUILD || developerUnlocked) {
+    diagnostics.push({ icon: "tune", label: t("developer"), sub: t("developerSub"), href: "/more/developer" });
+  }
 
   const row = (item: Item) => (
     <Pressable

@@ -96,14 +96,14 @@ export interface PuckPoint extends ShownPoint {
 }
 
 /** `replayShownTrack` with the rest of what NavigatorService publishes. */
-export function replayPuck(result: ReplayResult): PuckPoint[] {
+export function replayPuck(result: ReplayResult, route: readonly { lat: number; lon: number }[] | null = null): PuckPoint[] {
   const accepted = result.fixes.filter((f) => f.status === "accepted" && f.satellite).map((f) => f.tS);
   let k = -1;
   return result.track.map((p) => {
     while (k + 1 < accepted.length && accepted[k + 1] <= p.tS) k++;
     // "fused" as the app has it: GPS trusted (integrity) and a satellite fix accepted within the window.
     const dr = p.mode === "dr" && (p.trust !== "TRUSTED" || k < 0 || (p.tS - accepted[k]) * 1e6 >= FUSED_WINDOW_US);
-    const top = puckHypothesis(p, dr);
+    const top = puckHypothesis(p, dr, route);
     const common = { t: p.tS, speedMps: p.speedMps, mapMatch: p.mapMatch?.state, dr: dr || !!top };
     return top
       ? { ...common, lat: top.lat, lon: top.lon, acc: puckAccuracyM(p, top), headingRad: top.headingRad }

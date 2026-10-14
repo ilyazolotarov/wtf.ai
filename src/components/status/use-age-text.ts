@@ -10,8 +10,14 @@ const AGE_REFRESH_MS = 15_000;
 /** How long ago `sinceMs` (wall clock) was, in words, kept current; "" without one. */
 export function useAgeText(sinceMs: number | undefined): string {
   const { t } = useT();
+  const ageMs = useAgeMs(sinceMs);
+  return sinceMs === undefined ? "" : formatAge(ageMs, t);
+}
+
+/** How long ago `sinceMs` was, redrawn like `useAgeText`; 0 while it is undefined. */
+export function useAgeMs(sinceMs: number | undefined): number {
   const now = useNowMs(sinceMs !== undefined, AGE_REFRESH_MS);
-  return sinceMs === undefined ? "" : formatAge(now - sinceMs, t);
+  return sinceMs === undefined ? 0 : now - sinceMs;
 }
 
 /** Wall clock, ms, redrawn every `everyMs` while `on`. */
