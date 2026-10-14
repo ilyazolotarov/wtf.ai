@@ -38,12 +38,14 @@ locally, `.env.local` (git-ignored, loaded by Expo). Every one is optional: with
 | `TRIP_UPLOAD_ORIGIN` | the trip log upload Worker (`workers/triplog-upload`) | no upload in the Trip recorder |
 | `SENTRY_DSN` | where crash reports go | no crash reports |
 | `SUPPORT_EMAIL` | the support address: Settings › Contact support, the privacy policy's contact (website), the wiki | no Contact support; the website build fails |
+| `PRIVACY_POLICY_URL` | the privacy policy Settings links to and the stores list: the website's `privacy.html` on its custom domain | the GitHub Pages address of the repository |
 | `SENTRY_URL`, `SENTRY_ORG`, `SENTRY_PROJECT` (+ secret `SENTRY_AUTH_TOKEN`) | source map / dSYM uploads (`SENTRY_URL` is the region, e.g. the EU one) | minified JS stack traces |
 
 They are built into the app and are part of the OTA runtime version (`app.config.js`): changing one needs a native
 build. The Workers get their own domains at deploy, on every deploy (`--domain`, not through `npm run`: PowerShell eats
 its `--`): `npx wrangler deploy --config workers/app-updates/wrangler.toml --domain <host>`, and the same with
-`workers/triplog-upload/wrangler.toml` (each keeps its `workers.dev` address for builds made without a domain).
+`workers/triplog-upload/wrangler.toml` (each keeps its `workers.dev` address for builds made without a domain). A
+Worker can have several: `--domain` once per host, so builds made with an earlier origin keep theirs.
 
 ## Run the app
 
