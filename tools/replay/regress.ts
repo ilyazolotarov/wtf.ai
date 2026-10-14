@@ -13,6 +13,7 @@
 //   npm run replay:regress -- --obd-hz 5             # OBD speed thinned to 5 Hz (the CAN monitor's time-slicing)
 //   npm run replay:regress -- --speed can            # CAN wheel speeds where the shadow heard them (can.ts); drives without, as logged
 //   npm run replay:regress -- --speed can --yaw wheels   # and the rear wheels' yaw instead of the gyro's (a phone in a pocket)
+//   npm run replay:regress -- --yaw gyro             # the gyro's yaw on drives recorded with the wheels'
 //   npm run replay:regress -- --speed can --yaw wheels --yaw-from 120 --yaw-cal   # the gyro until 120 s, learning the wheels from it
 //
 // Truth per drive, best first: the roads drawn for it in the viewer (`<log>.truth.json`, drawn-truth.ts), else its
@@ -212,7 +213,7 @@ function runJob(job: Job): DriveResult[] {
         cuts: appOutageCuts(trip),
         nav: job.nav,
         mapMatchConfig: { ...job.mm, seed: job.seed },
-        ...(job.yaw === "wheels" && !experiment ? { wheelYaw: true } : {}),
+        ...(job.yaw === "wheels" && !experiment ? { wheelYaw: true } : job.yaw === "gyro" ? { wheelYaw: false } : {}),
         ...(phoneApp
           ? {
               phoneOnly: {
@@ -351,7 +352,8 @@ async function main() {
   const scoreMapMatch = argv.includes("--score-mm");
   const phoneRoute = argv.includes("--phone-route");
   const obdHz = arg("--obd-hz") ? Number(arg("--obd-hz")) : undefined;
-  const yaw = (arg("--yaw") ?? "gyro") as NonNullable<Job["yaw"]>;
+  // Default: as each log says (`nav_wheel_yaw`); `--yaw gyro` keeps the gyro on a drive recorded with the wheels.
+  const yaw = arg("--yaw") as Job["yaw"];
   const yawFromS = arg("--yaw-from") ? Number(arg("--yaw-from")) : undefined;
   const yawCal = process.argv.includes("--yaw-cal");
   const yawGaps = arg("--yaw-gaps") as Job["yawGaps"];

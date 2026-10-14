@@ -44,6 +44,12 @@ describe("CAN speed samples", () => {
     expect(s[0].speedMps * 3.6).toBeCloseTo(50.1, 6);
   });
 
+  // 2026-10-14: dropped there, the navigator lost the turning in the middle of the roundabout.
+  test("a tight roundabout at walking pace, the outer front wheel 50 % faster than the inner rear, is kept", () => {
+    const turn = (tUs: number): CarStateSample => ({ q: "wheels", tUs, v: [4.69, 3.73, 4.28, 3.03] });
+    expect(canSpeedSamples([turn(0), turn(10_000)])).toHaveLength(1);
+  });
+
   test("the wheels keep their exact mean: the yaw rate is in their differences", () => {
     const k = (kph: number) => kph / 3.6;
     const s = canSpeedSamples([

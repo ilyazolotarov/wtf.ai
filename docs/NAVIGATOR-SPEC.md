@@ -108,8 +108,9 @@ jammed:
   viewer's *Adapter: CAN wheel speeds*. On the drive from home (2026-10-11, jammed, after a placing) the shown dot
   went back 9.9 and 6.1 m when the wheels reversed 7.8 and 4.2 m; on OBD it stood still.
 - **Frames as decoded:** one wheel sample per frame once all its wheels are read (a sample per wheel mixed one
-  frame's wheels with the last one's); a sample no car makes is dropped (the wheels more than 3 km/h + 10 % apart,
-  or one changed faster than 50 km/h/s: a monitor line that lost characters, 4–23 a drive); the per-wheel means
+  frame's wheels with the last one's); a sample no car makes is dropped (one wheel changed faster than 50 km/h/s,
+  or the wheels more than 3 km/h + half their mean apart: a monitor line that lost characters, 4–23 a drive). A
+  tight roundabout at 12 km/h spreads them by 40 %, and a sample dropped there is turning lost; the per-wheel means
   are kept exact (their differences are the yaw rate), only the speed is rounded; a frame that arrived after its
   window ended is put at the window's end (the stop's drain, captured before the stop character).
 - **Frames at bus time** (`odometry/can/frame-timing.ts`, the app's feed and replay alike): each id laid on its

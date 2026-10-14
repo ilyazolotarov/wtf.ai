@@ -26,12 +26,15 @@ const round = (v: number) => Math.round(v / STEP_MPS) * STEP_MPS;
 /**
  * A wheel sample no car makes: a monitor line that lost characters on the way still parses as 8 bytes (4 in 15 000
  * frames on the vLinker over BLE, 23 in 28 000 on the MX+, 2026-10-12), and one such frame in a sample moved the
- * left/right difference by metres per second. Rejected: the wheels further apart than `SPREAD_MPS` plus
- * `SPREAD_SHARE` of their mean (a tight turn at walking pace spreads them by under 1 m/s), or one changed by more
- * than `JUMP_MPS` plus `JUMP_MPS2` per second since the last sample kept, within `JUMP_WITHIN_US`.
+ * left/right difference by metres per second. Rejected: one changed by more than `JUMP_MPS` plus `JUMP_MPS2` per
+ * second since the last sample kept, within `JUMP_WITHIN_US` (nearly all of them), or the wheels further apart than
+ * `SPREAD_MPS` plus `SPREAD_SHARE` of their mean. In a roundabout at 12 km/h the outer front wheel turns 40 % faster
+ * than the inner rear one (1.7 m/s apart, 2026-10-14): a tenth of the mean rejected 741 real frames on 19 CAN drives,
+ * and the navigator lost its turning in the middle of that roundabout. With half of it the jumps still reject every
+ * garbled frame; the 32 more the tenth rejected were turns too.
  */
 const SPREAD_MPS = 3 / 3.6;
-const SPREAD_SHARE = 0.1;
+const SPREAD_SHARE = 0.5;
 const JUMP_MPS = 2 / 3.6;
 const JUMP_MPS2 = 14;
 const JUMP_WITHIN_US = 300_000;
