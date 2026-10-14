@@ -9,6 +9,10 @@ on:
     paths: ["site/**", "docs/PRIVACY.md", "docs/PRIVACY.uk.md", ".github/workflows/pages.yml"]
   workflow_dispatch:
 
+# The support address (a repository variable, so the repo names none): the policy's contact and the site's footer.
+env:
+  SUPPORT_EMAIL: ${{ vars.SUPPORT_EMAIL }}
+
 permissions:
   contents: read
   pages: write
@@ -32,6 +36,12 @@ jobs:
         run: |
           { printf -- '---\nlayout: page\ntitle: Privacy policy\nlang: en\npermalink: /privacy.html\n---\n\n'; cat docs/PRIVACY.md; } > site/privacy.md
           { printf -- '---\nlayout: page\ntitle: Політика приватності\nlang: uk\npermalink: /privacy.uk.html\n---\n\n'; cat docs/PRIVACY.uk.md; } > site/privacy.uk.md
+
+      - name: Support address
+        run: |
+          [ -n "$SUPPORT_EMAIL" ] || { echo "::error::No SUPPORT_EMAIL repository variable: the policy would have no contact"; exit 1; }
+          sed -i "s|SUPPORT_EMAIL|[$SUPPORT_EMAIL](mailto:$SUPPORT_EMAIL)|g" site/privacy.md site/privacy.uk.md
+          printf 'support_email: %s\n' "$SUPPORT_EMAIL" >> site/_config.yml
 
       - name: Setup Pages
         uses: actions/configure-pages@v5

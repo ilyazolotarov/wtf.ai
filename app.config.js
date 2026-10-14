@@ -5,7 +5,9 @@
 //   TRIP_UPLOAD_ORIGIN   the trip log upload Worker. Unset: no upload in the Trip recorder.
 //   SENTRY_DSN           where crash reports go (src/config/sentry.ts). Unset: no reports. The source map upload has its
 //                        own: SENTRY_URL (the region), SENTRY_ORG, SENTRY_PROJECT, SENTRY_AUTH_TOKEN, read by sentry-cli.
-//   PRIVACY_POLICY_URL   the privacy policy Settings links to. Unset: docs/PRIVACY.md of GITHUB_REPOSITORY (set in CI).
+//   PRIVACY_POLICY_URL   the privacy policy Settings links to. Unset: the website's (GitHub Pages of GITHUB_REPOSITORY, set in
+//                        CI; .github/workflows/pages.yml), which carries SUPPORT_EMAIL.
+//   SUPPORT_EMAIL        where Settings › Contact support writes. Unset: no such row.
 //   DISTRIBUTION         `store` for an App Store / Google Play build (docs/STORE-REVIEW.md): no self-installed
 //                        updates (no REQUEST_INSTALL_PACKAGES, no APK installer, no AltStore), no tester trip upload, the
 //                        Developer screen hidden until unlocked. Anything else, or unset: the sideloaded build.
@@ -29,8 +31,8 @@ module.exports = ({ config }) => {
       updatesOrigin,
       tripUploadUrl: store ? null : env("TRIP_UPLOAD_ORIGIN"),
       sentryDsn: env("SENTRY_DSN"),
-      privacyPolicyUrl:
-        env("PRIVACY_POLICY_URL") ?? (repo ? `https://github.com/${repo}/blob/main/docs/PRIVACY.md` : null),
+      privacyPolicyUrl: env("PRIVACY_POLICY_URL") ?? (repo ? pagesUrl(repo, "privacy.html") : null),
+      supportEmail: env("SUPPORT_EMAIL"),
     },
   };
 };
@@ -53,4 +55,10 @@ function storeAndroid(android = {}) {
     // Also drops it when a library's manifest adds it.
     blockedPermissions: [...(android.blockedPermissions ?? []), INSTALL_PACKAGES, ...UNUSED],
   };
+}
+
+/** A page of `owner/repo`'s GitHub Pages site. */
+function pagesUrl(repo, page) {
+  const [owner, name] = repo.split("/");
+  return `https://${owner.toLowerCase()}.github.io/${name}/${page}`;
 }

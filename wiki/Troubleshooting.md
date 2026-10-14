@@ -26,5 +26,4 @@ Later connections are quick.
 **No voice.** Check the voice button under the route's ×, the volume in Settings, and where the voice plays (press and
 hold the voice button).
 
-**Something else?** Open an issue in this project's GitHub repository and quote the *Support code* from
-More › Settings.
+**Something else?** Write to SUPPORT_EMAIL and quote the *Support code* from More › Settings.

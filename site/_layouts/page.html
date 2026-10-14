@@ -10,11 +10,11 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script>try{if(localStorage.getItem("theme")==="light")document.documentElement.setAttribute("data-theme","light")}catch(e){}</script>
   <style>
-    :root { --bg: #F5F4F1; --text: #1D1C1A; --text2: #6B675F; --accent: #4371B7; --line: #E4E1DA; }
-    @media (prefers-color-scheme: dark) {
-      :root { --bg: #121211; --text: #F2F0EC; --text2: #A6A29B; --accent: #90BAF1; --line: #34322F; }
-    }
+    /* Dark by default, light when chosen on the landing page (assets/theme.js keeps the choice). */
+    :root { --bg: #121211; --text: #F2F0EC; --text2: #A6A29B; --accent: #90BAF1; --line: #34322F; color-scheme: dark; }
+    :root[data-theme="light"] { --bg: #F5F4F1; --text: #1D1C1A; --text2: #6B675F; --accent: #4371B7; --line: #E4E1DA; color-scheme: light; }
     * { box-sizing: border-box; }
     body { margin: 0; background: var(--bg); color: var(--text); font: 17px/1.6 Onest, system-ui, sans-serif; }
     a { color: var(--accent); }

@@ -54,6 +54,7 @@ env:
   UPDATES_ORIGIN: ${{ vars.UPDATES_ORIGIN }}
   TRIP_UPLOAD_ORIGIN: ${{ vars.TRIP_UPLOAD_ORIGIN }}
   SENTRY_DSN: ${{ vars.SENTRY_DSN }}
+  SUPPORT_EMAIL: ${{ vars.SUPPORT_EMAIL }}
   SENTRY_URL: ${{ vars.SENTRY_URL }}
 
 jobs:

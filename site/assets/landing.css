@@ -1,12 +1,13 @@
+/* Dark by default; the theme switch sets data-theme="light" on <html> (assets/theme.js). */
 :root {
+  --bg: #121211; --card: #232220; --text: #F2F0EC; --text2: #A6A29B; --accent: #90BAF1;
+  --accentA: #90BAF133; --ok: #82CB9B; --bad: #ED8C80; --line: #34322F;
+  color-scheme: dark;
+}
+:root[data-theme="light"] {
   --bg: #F5F4F1; --card: #FFFFFF; --text: #1D1C1A; --text2: #6B675F; --accent: #4371B7;
   --accentA: #4371B729; --ok: #3D865A; --bad: #BC4A3F; --line: #E4E1DA;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #121211; --card: #232220; --text: #F2F0EC; --text2: #A6A29B; --accent: #90BAF1;
-    --accentA: #90BAF133; --ok: #82CB9B; --bad: #ED8C80; --line: #34322F;
-  }
+  color-scheme: light;
 }
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
@@ -49,3 +50,9 @@ footer a { color: var(--text2); margin-right: 16px; }
   nav a:not(:last-child) { display: none; }
   .shots img { height: 380px; }
 }
+.theme-toggle { margin-left: 18px; padding: 6px 14px; border-radius: 999px; border: 1px solid var(--line);
+  background: transparent; color: var(--text2); font: 500 15px Onest, system-ui, sans-serif; cursor: pointer; }
+.theme-toggle:hover { color: var(--text); }
+.demo { display: flex; justify-content: center; }
+.demo video { width: min(340px, 86vw); aspect-ratio: 1 / 2; border-radius: 28px; background: var(--card);
+  box-shadow: 0 30px 60px #0004; }

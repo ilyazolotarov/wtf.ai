@@ -13,6 +13,7 @@ const NAMES = [
   "SENTRY_DSN",
   "PRIVACY_POLICY_URL",
   "DISTRIBUTION",
+  "SUPPORT_EMAIL",
 ];
 const INSTALL_PACKAGES = "android.permission.REQUEST_INSTALL_PACKAGES";
 type Android = { permissions?: string[]; blockedPermissions?: string[] };
@@ -50,13 +51,13 @@ describe("app.config.js", () => {
     expect(config.extra).toMatchObject({
       updatesOrigin: "https://updates.example",
       tripUploadUrl: "https://logs.example",
-      privacyPolicyUrl: "https://github.com/someone/fork/blob/main/docs/PRIVACY.md",
+      privacyPolicyUrl: "https://someone.github.io/fork/privacy.html",
     });
   });
 
-  test("the privacy policy: the variable, else docs/PRIVACY.md in the CI repo", () => {
+  test("the privacy policy: the variable, else the CI repo's website", () => {
     process.env.GITHUB_REPOSITORY = "someone/fork";
-    expect(appConfig({ config: app.expo }).extra.privacyPolicyUrl).toBe("https://github.com/someone/fork/blob/main/docs/PRIVACY.md");
+    expect(appConfig({ config: app.expo }).extra.privacyPolicyUrl).toBe("https://someone.github.io/fork/privacy.html");
     process.env.PRIVACY_POLICY_URL = "https://example.org/privacy/";
     expect(appConfig({ config: app.expo }).extra.privacyPolicyUrl).toBe("https://example.org/privacy");
   });

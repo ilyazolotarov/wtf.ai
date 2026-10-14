@@ -14,6 +14,10 @@ trap 'rm -rf "$work"' EXIT
 
 git clone --quiet --depth 1 "$wiki_url" "$work/wiki"
 cp "$root"/wiki/*.md "$work/wiki/"
+# The support address is a repository variable (the repo names none): SUPPORT_EMAIL in the pages becomes a mail link.
+email="${SUPPORT_EMAIL:-$(gh variable get SUPPORT_EMAIL 2>/dev/null || true)}"
+[ -n "$email" ] || { echo "no SUPPORT_EMAIL (environment or repository variable)" >&2; exit 1; }
+sed -i "s|SUPPORT_EMAIL|[$email](mailto:$email)|g" "$work"/wiki/*.md
 cd "$work/wiki"
 git add -A
 if git diff --cached --quiet; then

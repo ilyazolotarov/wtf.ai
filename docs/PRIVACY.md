@@ -74,4 +74,4 @@ Changes to this policy are published at this address, with a new effective date.
 
 ## Contact
 
-Questions and requests: open an issue in this project's GitHub repository, where this policy is published.
+Questions and requests: SUPPORT_EMAIL.

@@ -13,7 +13,7 @@ import {
     Segmented,
 } from "@/components/screens/screen-ui";
 import { VoiceVolumeSection } from "@/components/route/voice-volume-section";
-import { privacyPolicyUrl, STORE_BUILD } from "@/config/distribution";
+import { privacyPolicyUrl, STORE_BUILD, SUPPORT_EMAIL } from "@/config/distribution";
 import { appCode } from "@/components/update/app-code";
 import { Icon } from "@/components/ui/icon";
 import { installId } from "@/services/telemetry";
@@ -108,6 +108,22 @@ export default function SettingsScreen() {
         <ScreenRow labelKey="supportCode" value={installId()} />
         <ScreenRow labelKey="mapData" value="© OpenStreetMap contributors · © OpenMapTiles" />
       </ScreenSection>
+      {SUPPORT_EMAIL && (
+        <ScreenAction
+          labelKey="contactSupport"
+          icon="open_in_new"
+          secondary
+          compact
+          // The support code and version in the subject: they find the reports and the build behind the question.
+          onPress={() =>
+            void Linking.openURL(
+              `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(
+                `wtf.ai ${Constants.expoConfig?.version ?? ""} (${Constants.nativeBuildVersion ?? "dev"}) · ${installId()}`,
+              )}`,
+            )
+          }
+        />
+      )}
     </ScreenContent>
   );
 }

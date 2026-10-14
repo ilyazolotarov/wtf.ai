@@ -28,8 +28,8 @@ never contains `REQUEST_INSTALL_PACKAGES` (`build-store.yml` fails if it does).
 
 - **Privacy policy**: [PRIVACY.md](PRIVACY.md) and its Ukrainian twin [PRIVACY.uk.md](PRIVACY.uk.md), on the website as
   `privacy.html` / `privacy.uk.html` (`pages.yml`). Settings → Privacy opens the one in the app's language
-  (`PRIVACY_POLICY_URL`, by default the file on GitHub in the CI's repository; `privacyPolicyUrl()` swaps in the
-  Ukrainian one). Both stores need the URL in each listing: the Ukrainian listing gets the Ukrainian policy. Change
+  (`PRIVACY_POLICY_URL`, by default the website's `privacy.html`, which the Pages build fills with the support address `SUPPORT_EMAIL`; `privacyPolicyUrl()` swaps in the
+  Ukrainian one). Both stores need the URL, and `SUPPORT_EMAIL` as the support contact, in each listing: the Ukrainian listing gets the Ukrainian policy. Change
   both whenever data handling changes (Sentry fields, a new upload, a new permission).
 - **iOS privacy manifest**: `ios.privacyManifests` in app.json. Required-reason APIs: the union of every dependency's
   `PrivacyInfo.xcprivacy` (Apple misses those of static pods) plus our modules' `systemUptime` (SystemBootTime

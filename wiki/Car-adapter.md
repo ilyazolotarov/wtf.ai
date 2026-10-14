@@ -56,7 +56,7 @@ keeps the connection for the whole drive: branded adapters do, cheap clones ofte
 - From Vgate vLinker, take a **"+"** model (MC+, FD+, BM+), or FS / MS.
 - A "v1.5" or "v2.1" adapter for the price of a coffee is exactly the class we don't recommend.
 
-Tried an adapter that isn't listed? Tell us in an issue how it went.
+Tried an adapter that isn't listed? Write to SUPPORT_EMAIL how it went.
 
 ## Connecting
 

@@ -136,6 +136,7 @@ export const en = {
   privacyMessageStore:
     "Position data stays on this phone. No account needed. Crash reports carry no location or personal data. Maps are downloaded and then used offline; maps and app updates come from the project's own server, which learns nothing about where you look or drive. Trip logs leave the phone only when you share them yourself.",
   privacyPolicy: "Privacy policy",
+  contactSupport: "Contact support",
   developerUnlocked: "Developer settings are now in More.",
   about: "About",
   appVersion: "Version",

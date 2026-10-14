@@ -18,6 +18,7 @@ layout: null
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="assets/landing.css">
+  <script>try{if(localStorage.getItem("theme")==="light")document.documentElement.setAttribute("data-theme","light")}catch(e){}</script>
 </head>
 <body>
   <div class="wrap">
@@ -28,6 +29,7 @@ layout: null
         <a href="#adapter">Adapter</a>
         <a href="https://github.com/{{ site.github.repository_nwo }}/wiki">Guide</a>
         <a href="uk.html" lang="uk" hreflang="uk">Українська</a>
+        <button class="theme-toggle" type="button" data-to-light="Light" data-to-dark="Dark">Light</button>
       </nav>
     </header>
 
@@ -41,7 +43,7 @@ layout: null
           <a class="badge" href="https://github.com/{{ site.github.repository_nwo }}/wiki/Getting-started">Getting started</a>
         </div>
       </div>
-      <div class="phone"><img src="assets/screens/01-guidance.png" alt="The wtf.ai map guiding a route"></div>
+      <div class="phone"><img src="assets/screens/dark/01-guidance.png" data-dark="assets/screens/dark/01-guidance.png" data-light="assets/screens/01-guidance.png" alt="The wtf.ai map guiding a route"></div>
     </div>
   </div>
 
@@ -85,15 +87,25 @@ layout: null
 
   <section>
     <div class="wrap">
+      <h2>See it drive</h2>
+      <p class="sub">A drive on the emulated adapter: GPS is spoofed halfway, and the car carries on along the road on its own speed.</p>
+      <div class="demo">
+        <video src="assets/demo.mp4" poster="assets/screens/01-guidance.png" controls muted playsinline loop preload="metadata" aria-label="Demo drive: guidance, then GPS spoofed"></video>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
       <h2>In the app</h2>
       <p class="sub">Light and dark, English and Ukrainian, built for a phone in a holder.</p>
       <div class="shots">
-        <img src="assets/screens/01-guidance.png" alt="Guidance with trusted GPS" loading="lazy">
-        <img src="assets/screens/04-spoofed.png" alt="GPS spoofed: the car keeps its position" loading="lazy">
-        <img src="assets/screens/03-search.png" alt="Offline address search" loading="lazy">
-        <img src="assets/screens/02-route.png" alt="A destination" loading="lazy">
-        <img src="assets/screens/05-lesson.png" alt="Lesson: driving through jamming" loading="lazy">
-        <img src="assets/screens/06-maps.png" alt="Offline maps" loading="lazy">
+        <img src="assets/screens/dark/01-guidance.png" data-dark="assets/screens/dark/01-guidance.png" data-light="assets/screens/01-guidance.png" alt="Guidance with trusted GPS" loading="lazy">
+        <img src="assets/screens/dark/04-spoofed.png" data-dark="assets/screens/dark/04-spoofed.png" data-light="assets/screens/04-spoofed.png" alt="GPS spoofed: the car keeps its position" loading="lazy">
+        <img src="assets/screens/dark/03-search.png" data-dark="assets/screens/dark/03-search.png" data-light="assets/screens/03-search.png" alt="Offline address search" loading="lazy">
+        <img src="assets/screens/dark/02-route.png" data-dark="assets/screens/dark/02-route.png" data-light="assets/screens/02-route.png" alt="A destination" loading="lazy">
+        <img src="assets/screens/dark/05-lesson.png" data-dark="assets/screens/dark/05-lesson.png" data-light="assets/screens/05-lesson.png" alt="Lesson: driving through jamming" loading="lazy">
+        <img src="assets/screens/dark/06-maps.png" data-dark="assets/screens/dark/06-maps.png" data-light="assets/screens/06-maps.png" alt="Offline maps" loading="lazy">
       </div>
     </div>
   </section>
@@ -124,10 +136,11 @@ layout: null
         <a href="https://github.com/{{ site.github.repository_nwo }}/wiki">Guide</a>
         <a href="privacy.html">Privacy policy</a>
         <a href="https://github.com/{{ site.github.repository_nwo }}">Source</a>
-        <a href="https://github.com/{{ site.github.repository_nwo }}/issues">Support</a>
+        {% if site.support_email %}<a href="mailto:{{ site.support_email }}">Support: {{ site.support_email }}</a>{% endif %}
       </p>
       <p>Map data © OpenStreetMap contributors · Tiles schema © OpenMapTiles</p>
     </div>
   </footer>
+  <script src="assets/theme.js"></script>
 </body>
 </html>

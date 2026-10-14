@@ -18,6 +18,7 @@ layout: null
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="assets/landing.css">
+  <script>try{if(localStorage.getItem("theme")==="light")document.documentElement.setAttribute("data-theme","light")}catch(e){}</script>
 </head>
 <body>
   <div class="wrap">
@@ -28,6 +29,7 @@ layout: null
         <a href="#adapter">Адаптер</a>
         <a href="https://github.com/{{ site.github.repository_nwo }}/wiki/Home-uk">Довідка</a>
         <a href="./" lang="en" hreflang="en">English</a>
+        <button class="theme-toggle" type="button" data-to-light="Світла" data-to-dark="Темна">Світла</button>
       </nav>
     </header>
 
@@ -41,7 +43,7 @@ layout: null
           <a class="badge" href="https://github.com/{{ site.github.repository_nwo }}/wiki/Getting-started-uk">Перші кроки</a>
         </div>
       </div>
-      <div class="phone"><img src="assets/screens/uk/01-guidance.png" alt="wtf.ai веде маршрутом на мапі"></div>
+      <div class="phone"><img src="assets/screens/uk/dark/01-guidance.png" data-dark="assets/screens/uk/dark/01-guidance.png" data-light="assets/screens/uk/01-guidance.png" alt="wtf.ai веде маршрутом на мапі"></div>
     </div>
   </div>
 
@@ -75,15 +77,25 @@ layout: null
 
   <section>
     <div class="wrap">
+      <h2>Подивіться в дорозі</h2>
+      <p class="sub">Поїздка з емульованим адаптером: посеред дороги GPS підміняють, а авто далі їде дорогою за власною швидкістю.</p>
+      <div class="demo">
+        <video src="assets/demo-uk.mp4" poster="assets/screens/uk/01-guidance.png" controls muted playsinline loop preload="metadata" aria-label="Демо-поїздка: навігація, потім підміна GPS"></video>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
       <h2>У програмі</h2>
       <p class="sub">Світла й темна теми, українська й англійська мови — для телефона в тримачі.</p>
       <div class="shots">
-        <img src="assets/screens/uk/01-guidance.png" alt="Навігація з надійним GPS" loading="lazy">
-        <img src="assets/screens/uk/04-spoofed.png" alt="GPS підмінено: авто залишається на правильній дорозі" loading="lazy">
-        <img src="assets/screens/uk/03-search.png" alt="Офлайн-пошук адрес" loading="lazy">
-        <img src="assets/screens/uk/02-route.png" alt="Вибране місце призначення" loading="lazy">
-        <img src="assets/screens/uk/05-lesson.png" alt="Урок про поїздку без GPS" loading="lazy">
-        <img src="assets/screens/uk/06-maps.png" alt="Офлайн-мапи" loading="lazy">
+        <img src="assets/screens/uk/dark/01-guidance.png" data-dark="assets/screens/uk/dark/01-guidance.png" data-light="assets/screens/uk/01-guidance.png" alt="Навігація з надійним GPS" loading="lazy">
+        <img src="assets/screens/uk/dark/04-spoofed.png" data-dark="assets/screens/uk/dark/04-spoofed.png" data-light="assets/screens/uk/04-spoofed.png" alt="GPS підмінено: авто залишається на правильній дорозі" loading="lazy">
+        <img src="assets/screens/uk/dark/03-search.png" data-dark="assets/screens/uk/dark/03-search.png" data-light="assets/screens/uk/03-search.png" alt="Офлайн-пошук адрес" loading="lazy">
+        <img src="assets/screens/uk/dark/02-route.png" data-dark="assets/screens/uk/dark/02-route.png" data-light="assets/screens/uk/02-route.png" alt="Вибране місце призначення" loading="lazy">
+        <img src="assets/screens/uk/dark/05-lesson.png" data-dark="assets/screens/uk/dark/05-lesson.png" data-light="assets/screens/uk/05-lesson.png" alt="Урок про поїздку без GPS" loading="lazy">
+        <img src="assets/screens/uk/dark/06-maps.png" data-dark="assets/screens/uk/dark/06-maps.png" data-light="assets/screens/uk/06-maps.png" alt="Офлайн-мапи" loading="lazy">
       </div>
     </div>
   </section>
@@ -113,10 +125,11 @@ layout: null
         <a href="https://github.com/{{ site.github.repository_nwo }}/wiki/Home-uk">Довідка</a>
         <a href="privacy.uk.html">Політика приватності</a>
         <a href="https://github.com/{{ site.github.repository_nwo }}">Вихідний код</a>
-        <a href="https://github.com/{{ site.github.repository_nwo }}/issues">Підтримка</a>
+        {% if site.support_email %}<a href="mailto:{{ site.support_email }}">Підтримка: {{ site.support_email }}</a>{% endif %}
       </p>
       <p>Дані мапи © учасники OpenStreetMap · Схема тайлів © OpenMapTiles</p>
     </div>
   </footer>
+  <script src="assets/theme.js"></script>
 </body>
 </html>

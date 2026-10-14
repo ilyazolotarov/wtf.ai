@@ -37,6 +37,7 @@ locally, `.env.local` (git-ignored, loaded by Expo). Every one is optional: with
 | `UPDATES_ORIGIN` | the update Worker (`workers/app-updates`): JS updates, builds, AltStore source, maps ([docs/OTA.md](docs/OTA.md)) | no OTA updates, no update checks, no maps |
 | `TRIP_UPLOAD_ORIGIN` | the trip log upload Worker (`workers/triplog-upload`) | no upload in the Trip recorder |
 | `SENTRY_DSN` | where crash reports go | no crash reports |
+| `SUPPORT_EMAIL` | the support address: Settings › Contact support, the privacy policy's contact (website), the wiki | no Contact support; the website build fails |
 | `SENTRY_URL`, `SENTRY_ORG`, `SENTRY_PROJECT` (+ secret `SENTRY_AUTH_TOKEN`) | source map / dSYM uploads (`SENTRY_URL` is the region, e.g. the EU one) | minified JS stack traces |
 
 They are built into the app and are part of the OTA runtime version (`app.config.js`): changing one needs a native

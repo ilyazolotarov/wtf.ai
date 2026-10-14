@@ -7,6 +7,9 @@ import { extraString } from "./extra";
  */
 export const STORE_BUILD: boolean = extraString("distribution") === "store";
 
+/** Where Settings › Contact support writes (SUPPORT_EMAIL); null: no such row. */
+export const SUPPORT_EMAIL: string | null = extraString("supportEmail");
+
 /** The privacy policy (docs/PRIVACY.md) Settings links to; null when the build names none. */
 export const PRIVACY_POLICY_URL: string | null = extraString("privacyPolicyUrl");
 
