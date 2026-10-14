@@ -154,6 +154,9 @@ export function useMapCamera({
   // Followed since the map loaded. The first follow waits for it and jumps: sent before, it was dropped, and a dot that
   // stands still (a held or parked position) sends no other, so the map stayed on its initial view until the button.
   const followed = useRef(false);
+  // The last follow stop, and whether the map has since been put back on it once (`onRegionDidChange`).
+  const followStop = useRef<{ center: [number, number]; zoom: number; bearing?: number; pitch: number } | null>(null);
+  const followRestored = useRef(false);
   useEffect(() => {
     if (!mapReady) {
       followed.current = false;
@@ -174,6 +177,8 @@ export function useMapCamera({
       ...(followBearing !== undefined ? { bearing: followBearing } : {}),
       pitch: follow.pitch,
     };
+    followStop.current = stop;
+    followRestored.current = false;
     // Smoothed, every frame is a small step: an ease per frame would lag and restart 30 times a second.
     if (snapped || smoothing) cameraRef.current?.jumpTo(stop);
     else cameraRef.current?.easeTo({ ...stop, duration: FOLLOW_EASE_MS });
@@ -227,10 +232,29 @@ export function useMapCamera({
     onUserInteraction();
   };
   const onRegionDidChange = (
-    event: NativeSyntheticEvent<{ pitch: number; zoom?: number; bearing?: number; center?: [number, number] }>,
+    event: NativeSyntheticEvent<{
+      pitch: number;
+      zoom?: number;
+      bearing?: number;
+      center?: [number, number];
+      userInteraction?: boolean;
+    }>,
   ) => {
     const { bearing, center } = event.nativeEvent;
     if (placing === "position" && center) onCenter?.({ lat: center[1], lon: center[0] });
+    // Following, the map settled by itself far from the dot: iOS applies the initial view (the region's bounds) at the
+    // map's first layout, which can come after the style has loaded and the first follow has jumped. A dot that stands
+    // still sends no other, so the map stayed on the whole region (2026-10-14). Jump back, once per follow stop.
+    const stop = followStop.current;
+    const sent = followCenter.current;
+    if (center && stop && sent && follow && !ghostView && !event.nativeEvent.userInteraction && !followRestored.current) {
+      const offM = haversineM({ lat: center[1], lon: center[0] }, sent);
+      if (offM > FOLLOW_JUMP_M) {
+        followRestored.current = true;
+        logCamera?.(`camera follow: the map settled ${Math.round(offM)} m from the dot by itself, back to it`);
+        cameraRef.current?.jumpTo(stop);
+      }
+    }
     if (logCamera && camera === "follow-heading" && bearing !== undefined && followBearing !== undefined) {
       const off = Math.abs(((bearing - followBearing + 540) % 360) - 180);
       // Tilt too: a flat heading-up view with the right bearing looks north-up and leaves no other trace.
