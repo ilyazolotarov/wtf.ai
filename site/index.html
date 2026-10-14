@@ -17,7 +17,7 @@ layout: null
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="assets/landing.css">
+  <link rel="stylesheet" href="assets/landing.css?v={{ site.github.build_revision }}">
   <script>try{if(localStorage.getItem("theme")==="light")document.documentElement.setAttribute("data-theme","light")}catch(e){}</script>
 </head>
 <body>
@@ -90,7 +90,7 @@ layout: null
       <h2>See it drive</h2>
       <p class="sub">A drive on the emulated adapter: GPS is spoofed halfway, and the car carries on along the road on its own speed.</p>
       <div class="demo">
-        <video src="assets/demo.mp4" poster="assets/screens/01-guidance.png" controls muted playsinline loop preload="metadata" aria-label="Demo drive: guidance, then GPS spoofed"></video>
+        <video src="assets/demo-dark.mp4" poster="assets/screens/dark/01-guidance.png" data-dark="assets/demo-dark.mp4" data-light="assets/demo.mp4" data-dark-poster="assets/screens/dark/01-guidance.png" data-light-poster="assets/screens/01-guidance.png" controls muted playsinline loop preload="metadata" aria-label="Demo drive: guidance, then GPS spoofed"></video>
       </div>
     </div>
   </section>
@@ -141,6 +141,6 @@ layout: null
       <p>Map data © OpenStreetMap contributors · Tiles schema © OpenMapTiles</p>
     </div>
   </footer>
-  <script src="assets/theme.js"></script>
+  <script src="assets/theme.js?v={{ site.github.build_revision }}"></script>
 </body>
 </html>

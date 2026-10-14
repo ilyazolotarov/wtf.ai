@@ -229,8 +229,10 @@ Metadata policy). Character limits in brackets. No other app, store or competito
   search, the spoofed state at 60 km/h on the app's emulated OBD adapter (the car carries on along the road on its own
   speed), the jamming lesson and Offline maps, at 1080×2160 with a clean status bar; `--video`
   records the spoofing and the lesson for the promo video (Play takes a YouTube link). Re-run after UI changes. The
-  website uses the light set (`site/assets/screens/`). The current Play set and video are in `store-assets/play/`
-  (`light`, `dark`, `promo.mp4`; `uk-light`, `uk-dark`, `promo-uk.mp4` from `--lang uk`, the app in Ukrainian from its first screen, for the Ukrainian listing and `site/uk.html`), in
+  website shows the dark set and video by default and the light ones with its theme switch (`site/assets/screens/`,
+  `site/assets/demo*.mp4`, re-encoded smaller). The current Play set and videos are in `store-assets/play/`
+  (`light`, `dark`, `promo.mp4`, `promo-dark.mp4`; `uk-light`, `uk-dark`, `promo-uk.mp4`, `promo-uk-dark.mp4` from
+  `--lang uk`, the app in Ukrainian from its first screen, for the Ukrainian listing and `site/uk.html`), in
   Git LFS like every screenshot and video (`.gitattributes`).
 - **App Store**: screenshots of the iOS app (2.3.3), so not from the emulator: take them on an iPhone with a store or
   sideloaded build, same scenes. Sizes: 6.9" (1320×2868) or 6.5" (1284×2778); no iPad (`supportsTablet` unset).

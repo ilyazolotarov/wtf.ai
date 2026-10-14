@@ -17,7 +17,7 @@ layout: null
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="assets/landing.css">
+  <link rel="stylesheet" href="assets/landing.css?v={{ site.github.build_revision }}">
   <script>try{if(localStorage.getItem("theme")==="light")document.documentElement.setAttribute("data-theme","light")}catch(e){}</script>
 </head>
 <body>
@@ -77,10 +77,10 @@ layout: null
 
   <section>
     <div class="wrap">
-      <h2>Подивіться в дорозі</h2>
-      <p class="sub">Поїздка з емульованим адаптером: посеред дороги GPS підміняють, а авто далі їде дорогою за власною швидкістю.</p>
+      <h2>Подивіться, як це працює</h2>
+      <p class="sub">Демо-поїздка з імітованим адаптером: посеред маршруту GPS починає показувати хибну позицію, але мітка авто продовжує рухатися дорогою за даними про його швидкість.</p>
       <div class="demo">
-        <video src="assets/demo-uk.mp4" poster="assets/screens/uk/01-guidance.png" controls muted playsinline loop preload="metadata" aria-label="Демо-поїздка: навігація, потім підміна GPS"></video>
+        <video src="assets/demo-uk-dark.mp4" poster="assets/screens/uk/dark/01-guidance.png" data-dark="assets/demo-uk-dark.mp4" data-light="assets/demo-uk.mp4" data-dark-poster="assets/screens/uk/dark/01-guidance.png" data-light-poster="assets/screens/uk/01-guidance.png" controls muted playsinline loop preload="metadata" aria-label="Демо-поїздка: навігація, потім підміна GPS"></video>
       </div>
     </div>
   </section>
@@ -130,6 +130,6 @@ layout: null
       <p>Дані мапи © учасники OpenStreetMap · Схема тайлів © OpenMapTiles</p>
     </div>
   </footer>
-  <script src="assets/theme.js"></script>
+  <script src="assets/theme.js?v={{ site.github.build_revision }}"></script>
 </body>
 </html>
