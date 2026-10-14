@@ -18,6 +18,10 @@ const NAMES = [
 const INSTALL_PACKAGES = "android.permission.REQUEST_INSTALL_PACKAGES";
 type Android = { permissions?: string[]; blockedPermissions?: string[] };
 const saved = Object.fromEntries(NAMES.map((n) => [n, process.env[n]]));
+// Each test sets what it needs: CI's own repository variables must not leak in.
+beforeEach(() => {
+  for (const n of NAMES) delete process.env[n];
+});
 afterEach(() => {
   for (const n of NAMES) {
     if (saved[n] === undefined) delete process.env[n];
