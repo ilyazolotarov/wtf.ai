@@ -153,6 +153,9 @@ export function MapSurface({
       // Two-finger rotation fires during pinch zoom and can't be given a threshold; the map
       // still turns in heading-up mode.
       touchRotate={false}
+      // Tilt is the camera's (heading-up's navigator view): a two-finger drag, easily set off by a pinch, tilted the
+      // map while placing the car.
+      touchPitch={false}
       onLongPress={(event: NativeSyntheticEvent<PressEvent>) => {
         if (placing) return;
         const [lon, lat] = event.nativeEvent.lngLat;

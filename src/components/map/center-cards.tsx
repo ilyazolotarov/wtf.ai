@@ -8,7 +8,6 @@ import { useT } from "@/i18n/provider";
 import { insideUkraine } from "@/nav/integrity/border";
 import { usePositionPermission } from "@/providers/position-provider";
 import { useSensorValue } from "@/providers/runtime-provider";
-import { isSatelliteRecord } from "@/services/position/gnss-position-source";
 
 import { hud } from "./hud-card";
 
@@ -51,13 +50,15 @@ export function PermissionCard() {
 }
 
 /**
- * "Waiting for GPS…" before the first position. When satellites answer from outside Ukraine, integrity refuses every
- * fix as spoofed (SPEC §3.3) and there never is a first position: say so, and offer placing the car instead.
+ * "Waiting for GPS…" before the first position. When the phone's location is outside Ukraine, it is never used:
+ * integrity refuses a satellite fix there as spoofed (SPEC §3.3), and the navigator drops a Wi-Fi/cell one (iOS gave
+ * one on another continent under jamming, 2026-10-15). There never is a first position: say so, and offer placing the
+ * car instead, not "looking for satellites".
  */
 export function NoFixCard({ onPlace }: { onPlace: () => void }) {
   const { t } = useT();
   const palette = usePalette();
-  const abroad = useSensorValue(({ lastFix }) => lastFix != null && isSatelliteRecord(lastFix) && !insideUkraine({ lat: lastFix.latDeg, lon: lastFix.lonDeg }));
+  const abroad = useSensorValue(({ lastFix }) => lastFix != null && !insideUkraine({ lat: lastFix.latDeg, lon: lastFix.lonDeg }));
   if (abroad) {
     return (
       <CenterCard>

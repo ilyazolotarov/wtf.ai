@@ -97,6 +97,8 @@ export function useMapCamera({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, camera, noDirection]);
   const lastCameraLog = useRef(0);
+  // Where the map last settled: placing logs the view it starts from.
+  const lastView = useRef<{ pitch: number; bearing: number; zoom: number } | null>(null);
   // Both put the map flat and north up (the GNSS ghost framed; placing the car).
   const loggedViews = useRef({ ghostView, placing });
   useEffect(() => {
@@ -108,36 +110,43 @@ export function useMapCamera({
   }, [ghostView, placing]);
 
   // Placing starts at the dot, the pin or the search result it came from (or wherever the map was), flat and north
-  // up, close in.
+  // up, close in. Its step for the direction is flat and north up too, around the spot placed (the map's centre).
   useEffect(() => {
-    if (placing !== "position") return;
+    if (!placing) return;
+    if (placing === "position") {
+      const v = lastView.current;
+      logCamera?.(`camera placing from ${v ? `tilt ${Math.round(v.pitch)}°, bearing ${Math.round(v.bearing)}°, zoom ${v.zoom.toFixed(1)}` : "an unknown view"}`);
+    }
     void cameraRef.current?.setStop({
-      ...(placeFrom ? { center: [placeFrom.lon, placeFrom.lat] as [number, number] } : {}),
-      zoom: PLACE_ZOOM,
+      ...(placing === "position" && placeFrom ? { center: [placeFrom.lon, placeFrom.lat] as [number, number] } : {}),
+      ...(placing === "position" ? { zoom: PLACE_ZOOM } : {}),
       pitch: 0,
       bearing: 0,
       duration: 500,
       easing: "ease",
     });
-    // Once per placing (`placeFrom` is set when it starts), not on every position update.
+    // Once per step (`placeFrom` is set when a placing starts), not on every position update.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [placing, placeFrom]);
 
   // A gesture that drops follow keeps the zoom the finger chose; only the button zooms out.
   const leftByGesture = useRef(false);
-  // Free is flat, but nothing may animate under the finger: a gesture that leaves a tilted
-  // follow mode flattens once the map settles. Holds the pitch that mode had.
-  const flattenFrom = useRef<number | null>(null);
+  // Free is flat (the map has no tilt gesture), but nothing may animate under the finger: a gesture that leaves a
+  // tilted follow mode flattens once the map settles.
+  const flattenPending = useRef(false);
   const flattenTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(flattenTimer.current), []);
   useEffect(() => {
     if (mode !== "free") {
-      flattenFrom.current = null;
+      flattenPending.current = false;
       clearTimeout(flattenTimer.current);
       return;
     }
     const byGesture = leftByGesture.current;
     leftByGesture.current = false;
-    if (byGesture || ghostView) return;
+    // Placing and the ghost view set their own camera: a second command now would cancel theirs and start from the
+    // map as it is, keeping heading-up's bearing (placing came out rotated at zoom 16, not north up at 18).
+    if (byGesture || ghostView || placing) return;
     void cameraRef.current?.setStop({
       zoom: FREE_ZOOM,
       pitch: 0,
@@ -227,7 +236,7 @@ export function useMapCamera({
     if (!event.nativeEvent.userInteraction) return;
     if (follow) {
       leftByGesture.current = true;
-      flattenFrom.current = follow.pitch > 0 ? follow.pitch : null;
+      flattenPending.current = follow.pitch > 0;
     }
     onUserInteraction();
   };
@@ -240,7 +249,8 @@ export function useMapCamera({
       userInteraction?: boolean;
     }>,
   ) => {
-    const { bearing, center } = event.nativeEvent;
+    const { bearing, center, pitch, zoom } = event.nativeEvent;
+    if (bearing !== undefined && zoom !== undefined) lastView.current = { pitch, bearing, zoom };
     if (placing === "position" && center) onCenter?.({ lat: center[1], lon: center[0] });
     // Following, the map settled by itself far from the dot: iOS applies the initial view (the region's bounds) at the
     // map's first layout, which can come after the style has loaded and the first follow has jumped. A dot that stands
@@ -258,7 +268,6 @@ export function useMapCamera({
     if (logCamera && camera === "follow-heading" && bearing !== undefined && followBearing !== undefined) {
       const off = Math.abs(((bearing - followBearing + 540) % 360) - 180);
       // Tilt too: a flat heading-up view with the right bearing looks north-up and leaves no other trace.
-      const { pitch, zoom } = event.nativeEvent;
       const flat = follow && Math.abs(pitch - follow.pitch) > 10;
       const now = Date.now();
       if (now - lastCameraLog.current >= (off > CAMERA_LOG_OFF_DEG || flat ? 3000 : CAMERA_LOG_EVERY_MS)) {
@@ -269,15 +278,11 @@ export function useMapCamera({
         );
       }
     }
-    const from = flattenFrom.current;
-    if (from == null) return;
-    const { pitch } = event.nativeEvent;
+    if (!flattenPending.current) return;
     // A pan cancelling the follow ease reports did-change at its start, so wait for quiet.
     clearTimeout(flattenTimer.current);
     flattenTimer.current = setTimeout(() => {
-      flattenFrom.current = null;
-      // A deliberate two-finger tilt sticks.
-      if (Math.abs(pitch - from) > 2) return;
+      flattenPending.current = false;
       void cameraRef.current?.setStop({ pitch: 0, duration: 300, easing: "ease" });
     }, 80);
   };
