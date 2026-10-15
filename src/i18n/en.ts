@@ -246,7 +246,7 @@ export const en = {
   rpmPeriod: "RPM period (engine on)",
   parkedTimeout: "End trip after standing with engine off",
   lingerTime: "Wait for the next trip",
-  recordingTimesNote: "Switching the ignition off ends a trip at once; the first setting covers a stop with the ignition still on. The second keeps the app running in the background after a trip, so the next one starts by itself; after that time it turns GPS off and the phone may pause the app.",
+  recordingTimesNote: "A trip ends once the car has stood with the engine off for the first setting, with the ignition off too, so a short stop stays one trip. The second keeps the app running in the background after a trip, so the next one starts by itself; after that time it turns GPS off and the phone may pause the app.",
   trips: "Trips",
   freeSpace: "Free space",
   share: "Share",

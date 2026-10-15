@@ -35,6 +35,8 @@ export class TripDetector {
   private parkedSinceUs: number | null = null;
   private linkLostSinceUs: number | null = null;
   private lingerSinceUs: number | null = null;
+  /** The ignition went off during the parked wait: the trip's end reason. */
+  private ignitionOff = false;
   private manual = false;
 
   constructor(
@@ -60,7 +62,9 @@ export class TripDetector {
     if (up === this.linkUp) return;
     this.linkUp = up;
     if (this.current === "recording") {
-      this.linkLostSinceUs = up ? null : tUs;
+      // Lost while parked: the adapter asleep with the car (the MX+ drops Bluetooth about a minute after the engine
+      // stops), not a link lost on the road. The parked timeout ends the trip, as with an adapter that stays on.
+      this.linkLostSinceUs = up || this.parkedSinceUs !== null ? null : tUs;
       return;
     }
     if (this.current === "idle" && up) this.set("armed", tUs);
@@ -70,12 +74,16 @@ export class TripDetector {
   onEngine(state: EngineState, tUs: number): void {
     this.engine = state;
     if (this.current === "recording" && !this.manual) {
+      // Ignition off waits the parked timeout too: a short stop with the key out stays one trip.
       if (state === "ignition-off") {
-        this.end("ignition-off", tUs);
+        this.ignitionOff = true;
+        this.parkedSinceUs ??= tUs;
         return;
       }
-      if (state === "engine-running") this.parkedSinceUs = null;
-      else if (state === "engine-off" && this.movingSamples === 0) this.parkedSinceUs ??= tUs;
+      if (state === "engine-running") {
+        this.parkedSinceUs = null;
+        this.ignitionOff = false;
+      } else if (state === "engine-off" && this.movingSamples === 0) this.parkedSinceUs ??= tUs;
       return;
     }
     if ((this.current === "armed" || this.current === "lingering") && state === "engine-running") {
@@ -89,8 +97,10 @@ export class TripDetector {
     else this.movingSamples = 0;
 
     if (this.current === "recording") {
-      if (rawKph > 0) this.parkedSinceUs = null;
-      else if (this.engine !== "engine-running") this.parkedSinceUs ??= tUs;
+      if (rawKph > 0) {
+        this.parkedSinceUs = null;
+        this.ignitionOff = false;
+      } else if (this.engine !== "engine-running") this.parkedSinceUs ??= tUs;
       return;
     }
     if ((this.current === "armed" || this.current === "lingering") && this.movingSamples >= this.config.speedStartSamples) {
@@ -101,7 +111,7 @@ export class TripDetector {
   tick(tUs: number): void {
     if (this.current === "recording" && !this.manual) {
       if (this.parkedSinceUs !== null && tUs - this.parkedSinceUs >= this.config.parkedTimeoutUs) {
-        this.end("parked-timeout", tUs);
+        this.end(this.ignitionOff ? "ignition-off" : "parked-timeout", tUs);
       } else if (this.linkLostSinceUs !== null && tUs - this.linkLostSinceUs >= this.config.linkTimeoutUs) {
         this.end("link-timeout", tUs);
       }
@@ -127,6 +137,7 @@ export class TripDetector {
 
   private begin(reason: StartReason, tUs: number): void {
     this.parkedSinceUs = null;
+    this.ignitionOff = false;
     this.linkLostSinceUs = this.linkUp || reason === "manual" ? null : tUs;
     this.set("recording", tUs);
     this.hooks.onStart(reason, tUs);
@@ -135,6 +146,7 @@ export class TripDetector {
   private end(reason: EndReason, tUs: number): void {
     this.manual = false;
     this.parkedSinceUs = null;
+    this.ignitionOff = false;
     this.linkLostSinceUs = null;
     this.lingerSinceUs = tUs;
     this.hooks.onEnd(reason, tUs);

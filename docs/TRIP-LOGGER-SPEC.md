@@ -62,12 +62,12 @@ modules/sensor-capture ─▶ src/services/sensor-capture ──(SensorStream)�
 | Transition               | Condition                                                                                                                                  |
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | `armed` → `recording`    | `engine-running`, **or** 2 consecutive speed samples > 0 (hybrid pulling away in EV mode).                                                 |
-| `recording` → end        | (a) `ignition-off` (ECU silent ≥ 10 s), or (b) `engine-off` with speed 0 for ≥ 5 min (parked with ignition on), or (c) adapter link lost and not back within 2 min, or (d) manual stop. |
+| `recording` → end        | (a) parked ≥ 5 min (the setting): `engine-off` with speed 0, or `ignition-off` (ECU silent ≥ 10 s), so a short stop with the key out stays one trip (end reason `ignition_off` when the ignition went off); or (b) adapter link lost and not back within 2 min — lost while parked as in (a), it is the adapter asleep with the car (the MX+ drops Bluetooth about a minute after the engine stops) and (a) ends the trip; or (c) manual stop. |
 | end → `lingering`        | Close the log (`trip_event` end + reason), start the linger timer.                                                                         |
 | `lingering` → `recording` | A new trip starts (new file).                                                                                                             |
 | `lingering` → `armed`    | After 15 min; stop GNSS so iOS may suspend the app.                                                                                        |
 
-- Auto stop-start stops (`engine-off` at a red light) do **not** end a trip; only ignition off or a long parked stop does.
+- Auto stop-start stops (`engine-off` at a red light) do **not** end a trip; only a long parked stop does, ignition on or off.
 - During link loss inside a trip, GNSS and IMU keep recording; `trip_event link_lost/link_restored` mark the gap.
 - **Pre-roll**: from the moment the ECU wakes (`engine-off`/`engine-running` after `ignition-off`) sensors run into a 30 s in-memory ring buffer, written at the start of the trip file. This captures the standstill before pulling away (gyro bias, SPEC §3.6).
 - Manual start/stop in the dev UI (works without an adapter, e.g. to log GNSS + IMU only). Manual trips carry `start_reason = manual`.

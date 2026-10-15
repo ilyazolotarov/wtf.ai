@@ -14,16 +14,34 @@ function setup() {
 }
 
 describe("TripDetector", () => {
-  test("engine start → recording; ignition off → end → linger → armed", () => {
+  test("engine start → recording; ignition off waits the parked timeout → end → linger → armed", () => {
     const { d, events } = setup();
     d.onLink(true, s(0));
     d.onEngine("engine-off", s(1));
     expect(d.wantsPreroll).toBe(true);
     d.onEngine("engine-running", s(3));
     d.onSpeed(30, s(10));
+    d.onSpeed(0, s(590));
     d.onEngine("ignition-off", s(600));
-    d.tick(s(600 + 15 * 60));
+    d.tick(s(600 + 299));
+    expect(d.state).toBe("recording");
+    d.tick(s(600 + 301));
+    d.tick(s(600 + 301 + 15 * 60));
     expect(events).toEqual(["armed", "recording", "start:engine", "end:ignition-off", "lingering", "armed"]);
+  });
+
+  test("ignition off and on again within the parked timeout: one trip", () => {
+    const { d, events } = setup();
+    d.onLink(true, s(0));
+    d.onEngine("engine-running", s(1));
+    d.onSpeed(30, s(10));
+    d.onSpeed(0, s(100));
+    d.onEngine("ignition-off", s(110));
+    d.tick(s(250));
+    d.onEngine("engine-running", s(260));
+    d.tick(s(110 + 400));
+    expect(d.state).toBe("recording");
+    expect(events.filter((e) => e.startsWith("start") || e.startsWith("end"))).toEqual(["start:engine"]);
   });
 
   test("stop-start at a light doesn't end the trip; long parked stop does", () => {
@@ -68,6 +86,22 @@ describe("TripDetector", () => {
     expect(events).toContain("end:link-timeout");
   });
 
+  // 2026-10-15: the MX+ sleeps a minute after the engine stops; its trips ended 2 min later, before the parked 5 min.
+  test("the adapter asleep after the car parked: the parked timeout ends the trip, not the link's", () => {
+    const { d, events } = setup();
+    d.onLink(true, s(0));
+    d.onEngine("engine-running", s(1));
+    d.onSpeed(30, s(10));
+    d.onSpeed(0, s(500));
+    d.onEngine("engine-off", s(516));
+    d.onLink(false, s(587));
+    d.onEngine("unknown", s(587));
+    d.tick(s(587 + 121));
+    expect(d.state).toBe("recording");
+    d.tick(s(516 + 301));
+    expect(events).toContain("end:parked-timeout");
+  });
+
   test("manual trip ignores auto end and starts without an adapter", () => {
     const { d, events } = setup();
     d.manualStart(s(0));
@@ -83,7 +117,8 @@ describe("TripDetector", () => {
     d.onLink(true, s(0));
     d.onEngine("engine-running", s(1));
     d.onEngine("ignition-off", s(100));
-    d.onEngine("engine-running", s(400));
+    d.tick(s(100 + 301));
+    d.onEngine("engine-running", s(700));
     expect(events.filter((e) => e.startsWith("start"))).toHaveLength(2);
   });
 });
