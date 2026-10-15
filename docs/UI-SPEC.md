@@ -251,7 +251,8 @@ One small component each; the screen (`src/app/index.tsx`) only places them and 
   audio glyph instead of the speaker. The two buttons are 38 pt, the × at the top and the voice at the bottom, at
   least 20 pt apart, their touch areas not overlapping (a mis-tap on × ended the route). The map draws the route ahead of the car (from its
   progress point, ROUTING-SPEC §8.1: what is driven disappears; faded while planning again; the stretch from the
-  progress point to the next route vertex is dashed in the accent blue), its next maneuver and the destination.
+  progress point to the next route vertex is the route dashed, each dash edged in the route's outline: the accent
+  blue without an edge vanished on the dark theme's amber roads), its next maneuver and the destination.
   In light the route is indigo #3D5CBC with an off-white outline. In the dark (Night Drive) it is azure #47B2FF with a
   near-black #001428 outline: opposite the map's amber and orange roads, far lighter than its ground and water, and
   light enough for 3:1 on the grey minor roads; the next maneuver's dot is white ringed in #001428.

@@ -89,9 +89,16 @@ export function RouteLayers({
   const opacity = route?.replanning ? 0.4 : 1;
   const routeCasing = { "line-color": palette.routeCasing, "line-width": 9, "line-opacity": route?.replanning ? 0.4 : 0.9 };
   const routePaint = { "line-color": palette.route, "line-width": 6, "line-opacity": opacity };
+  // Dashes in line widths: the casing's 9 pt dash and 6 pt gap are the line's, so each dash gets its own edge.
+  const routeHeadCasing = {
+    "line-color": palette.routeCasing,
+    "line-width": 9,
+    "line-dasharray": [1, 2 / 3],
+    "line-opacity": route?.replanning ? 0.4 : 0.9,
+  };
   const routeHeadPaint = {
-    "line-color": palette.accent,
-    "line-width": 5,
+    "line-color": palette.route,
+    "line-width": 6,
     "line-dasharray": [1.5, 1],
     "line-opacity": opacity,
   };
@@ -123,8 +130,12 @@ export function RouteLayers({
         <Layer id="active-route-casing" type="line" layout={ROUTE_LAYOUT} paint={routeCasing} />
         <Layer id="active-route-line" type="line" layout={ROUTE_LAYOUT} paint={routePaint} />
       </GeoJSONSource>
-      {/* The stretch the car is on: dashed accent, no casing (a casing reads as a grey or dark bar here). */}
+      {/*
+        The stretch the car is on: the route dashed. Its casing is dashed with it (a solid one reads
+        as a grey or dark bar): on the dark map the dashes alone vanish on the amber and orange roads.
+      */}
       <GeoJSONSource id="active-route-head" data={routeHead}>
+        <Layer id="active-route-head-casing" type="line" layout={ROUTE_HEAD_LAYOUT} paint={routeHeadCasing} />
         <Layer id="active-route-head-line" type="line" layout={ROUTE_HEAD_LAYOUT} paint={routeHeadPaint} />
       </GeoJSONSource>
       <GeoJSONSource id="route-next-maneuver" data={maneuverPoint}>

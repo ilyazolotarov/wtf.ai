@@ -161,6 +161,7 @@ describe.each(SCHEMES)("%s theme: the rest of what the app draws on the map", (s
   const arrow = CONE_OUTLINE[scheme].ring > 0 ? [p.puckEdge, p.puckRing] : [p.puckEdge];
   const marks: [string, string[], [string, Rgb][]][] = [
     ["the route", [withAlpha(p.routeCasing, 0.9), p.route], mapOnly],
+    ["the dashed stretch the car is on", [withAlpha(p.routeCasing, 0.9), p.route], mapOnly],
     ["an alternative route", [p.routeAltCasing, p.routeAlt], mapOnly],
     ["the next maneuver's dot", [p.maneuverEdge, p.maneuver], all],
     ["the destination", [p.routeCasing, p.route], all],
