@@ -91,11 +91,19 @@ export class EngineStateMachine {
     }
   }
 
-  /** Every speed read. Speed > 0 proves the ECU is awake (hybrids may move with the engine off). */
-  onSpeed(tUs: number, rawKph: number): void {
-    this.silentSinceUs = null;
+  /**
+   * Every speed read. Speed > 0 proves the ECU is awake (hybrids may move with the engine off). `fromBus`: CAN wheel
+   * speeds, which the body's bus keeps sending at 0 after the engine ECU is off; a 0 from it proves nothing, else
+   * the ECU's silence never reaches `ignition-off` (2026-10-15: 45 s of NO DATA, the monitor kept opening until the
+   * adapter slept in it, and woke streaming the bus).
+   */
+  onSpeed(tUs: number, rawKph: number, fromBus = false): void {
     this.moving = rawKph > 0;
-    if (!this.moving) return;
+    if (!this.moving) {
+      if (!fromBus) this.silentSinceUs = null;
+      return;
+    }
+    this.silentSinceUs = null;
     if (this.current === "unknown" || this.current === "ignition-off") this.set("engine-off", tUs);
   }
 

@@ -120,6 +120,27 @@ describe("EngineStateMachine", () => {
     expect(m.state).toBe("ignition-off");
   });
 
+  // 2026-10-15: the body's bus sent the wheels at 0 for 45 s after the engine ECU went silent.
+  test("CAN wheels at 0 after the ECU went silent don't keep it awake; moving ones do", () => {
+    const { m } = machine();
+    m.onRpm(800, s(0));
+    m.onRpm(810, s(0.5));
+    m.onSpeed(s(1), 0);
+    for (let t = 2; t <= 14; t++) {
+      m.onObdResponse(false, s(t));
+      m.onSpeed(s(t + 0.1), 0, true);
+    }
+    expect(m.state).toBe("ignition-off");
+    const moving = machine().m;
+    moving.onRpm(800, s(0));
+    moving.onRpm(810, s(0.5));
+    for (let t = 2; t <= 14; t++) {
+      moving.onObdResponse(false, s(t));
+      moving.onSpeed(s(t + 0.1), 30, true);
+    }
+    expect(moving.state).toBe("engine-running");
+  });
+
   // Real log 20261003-101005_vwaz7t (Mazda CX-5, OBDLink MX+): parked ~2 min after the
   // previous trip, the ECU woke with the engine off and answered 010C with 796.50 for
   // 280 s; the engine started at ~279 s; after it stopped at ~544 s the ECU kept

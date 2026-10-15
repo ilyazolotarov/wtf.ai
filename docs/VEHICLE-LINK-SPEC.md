@@ -711,9 +711,18 @@ between them (~45 % of the time with five ids) wheel yaw lost the peaks of sharp
   engine state as a speed read (it proves the ECU awake while no poll asks). OBD's speed is passed on only when the
   last CAN speed is over 0.3 s old (replay's rule).
 - **No polls while the car moves:** the poller waits while the last CAN speed is under 0.5 s old and at least 1 km/h —
-  no speed, RPM or battery reads. A moving car's engine state needs none: the frames themselves say the ECU is awake.
+  no speed, RPM or battery reads. A moving car's engine state needs none: its wheel speeds say the ECU is awake. A
+  standing car's don't: the body's bus keeps sending the wheels at 0 after the engine ECU is off (45 s of `NO DATA`
+  with them on 2026-10-15), so only the polls' silence tells `ignition-off`, and with it the monitor stops. Counted as
+  awake, the monitor kept opening until the MX+ slept in it, and it woke still streaming the bus: those starts took
+  49–219 s to connect.
   Standing, or without fresh CAN speed (a deaf monitor, an unknown car), the polls run as always, and with them the
   engine state and ignition-off.
+- **One long window for a moving car:** an OBD speed of at least 1 km/h without a fresh CAN speed pauses the polls
+  1.2 s once, so the monitor gets a window that can bring a CAN speed; one that comes keeps them paused as above. On
+  a slow link (polls answered in 60–240 ms, stops in 120–290 ms) the 2 Hz polls left it 0–70 ms, no CAN speed came
+  fresh, and the polls never paused: 50 s of driving without the wheels. No CAN speed in the window (a monitor gone
+  deaf): the polls run at 2 Hz, and the next window comes after 10 s.
 - **BUFFER FULL** (the monitor ending by itself with it) is the link's capacity, not the adapter failing: it doesn't
   count towards the three self-endings that turn the shadow off (§16.2), and with more ids listened to than navigation
   needs, the shadow drops to those for the session (note `can: buffer full with 5 ids, listening to the 2 navigation

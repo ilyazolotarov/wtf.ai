@@ -826,6 +826,54 @@ describe("VehicleLinkCore", () => {
       }
     });
 
+    // 2026-10-15: on a slow link the 2 Hz polls left the monitor 0–70 ms, never enough for a CAN speed to pause them.
+    test("CAN primary: a moving car on OBD gets the monitor one long window; no CAN speed in it, 2 Hz polls", async () => {
+      const { core, emu, clock, speeds } = await shadowOn({});
+      const gaps = (from: number) => speeds.slice(from + 1).map((p, i) => (p.tUs - speeds[from + i].tUs) / 1e6);
+      try {
+        core.setCanPrimary(true);
+        emu.setVehicle({ speedKph: 40 });
+        await until(() => speeds.length >= 3);
+        // No CAN speed ever (a monitor gone deaf): polls at their rate, a long window every 10 s.
+        const n = speeds.length;
+        const t0 = clock.nowUs();
+        await until(() => clock.nowUs() - t0 > 25_000_000);
+        expect(speeds.length - n).toBeGreaterThanOrEqual(35);
+        const long = gaps(n - 1).filter((g) => g >= 1);
+        expect(long.length).toBeGreaterThanOrEqual(1);
+        expect(long.length).toBeLessThanOrEqual(3);
+      } finally {
+        await core.disconnect();
+      }
+    });
+
+    test("CAN primary: a CAN speed in that long window keeps the polls paused", async () => {
+      const { core, emu, clock, speeds } = await shadowOn({});
+      try {
+        core.setCanPrimary(true);
+        emu.setVehicle({ speedKph: 40 });
+        await until(() => speeds.length >= 3);
+        // The CAN speed comes only once the monitor has a window long enough for it (the slow link's case).
+        let flowing = false;
+        const t0 = clock.nowUs();
+        while (clock.nowUs() - t0 < 15_000_000 && !flowing) {
+          if (clock.nowUs() - speeds.at(-1)!.tUs > 600_000) flowing = true;
+          await clock.sleep(100);
+        }
+        expect(flowing).toBe(true);
+        const n = speeds.length;
+        for (let i = 0; i < 50; i++) {
+          const tUs = clock.nowUs();
+          core.pushCanSpeed({ txUs: tUs, rxUs: tUs, tUs, speedMps: 40 / 3.6, raw: 40, source: "can" });
+          await clock.sleep(100);
+        }
+        // At most the poll already on its way when the first CAN speed came.
+        expect(speeds.length).toBeLessThanOrEqual(n + 1);
+      } finally {
+        await core.disconnect();
+      }
+    });
+
     // 2026-10-13: an MX+ silent from the init on, with CAN off: off must mean not a CAN command, primary or not.
     test("CAN off (after CAN primary was on): not one CAN command, the init and the polls as without it", async () => {
       const s = setup({ ...STN_PROFILE, broadcast: BROADCAST, passFiltersLeak: true });
