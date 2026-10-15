@@ -370,6 +370,15 @@ describe("Navigator from a parked pose", () => {
     expect(haversineM(end, parked.truth.at(-1)!)).toBeLessThan(10);
   });
 
+  test("a Wi-Fi/cell fix from another continent is no position of the car: the pose stands", () => {
+    const nav = new Navigator();
+    expect(nav.startFromPose(pose)).toBe(true);
+    nav.onImu(drive.trip.imu[0]);
+    const out = nav.onGnss({ tUs: drive.trip.imu[0].tUs + 1, lat: -12.04, lon: -77.05, hAccM: 1414 });
+    expect(out.status).toBe("skipped");
+    expect(out.pose).toBeUndefined();
+  });
+
   test("refused when a satellite fix so far disagrees, not a Wi-Fi one alone (jamming)", () => {
     const nav = new Navigator();
     nav.onGnss({ tUs: 1, lat: pose.lat + 0.01, lon: pose.lon, hAccM: 20, speedMps: 0 });

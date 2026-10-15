@@ -210,6 +210,8 @@ after a gap, being checked), `NO_FIX` (no good satellite fix for 8 s).
 5. **Jamming:** iOS falls back to Wi-Fi/cell positions. They have no speed, claim ±7 m … 150 km, and are often
    repeated.
    - They are not GNSS: they never make the state `TRUSTED`.
+   - One outside Ukraine is no position of the car either: the navigator drops it (iOS gave one ±1.4 km on another
+     continent, which doubted the parked pose).
    - The EKF still uses them at their reported accuracy (NAVIGATOR-SPEC §6). They stayed honest in real jammed
      drives, and spoofing doesn't move them.
    - A fix is a satellite fix when it has a speed. Accuracy alone can't tell the two kinds apart.

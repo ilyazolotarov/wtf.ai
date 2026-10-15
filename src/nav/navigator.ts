@@ -16,6 +16,7 @@ import { DEFAULT_EKF_CONFIG, DrEkf, wrapAngle, type EkfConfig } from "./ekf/dr-e
 import { alignHeading, type AlignConfig, type AlignPoint } from "./ekf/heading-align";
 import { haversineM, type Coordinate } from "./geo";
 import { LocalFrame } from "./geo/local-frame";
+import { insideUkraine } from "./integrity/border";
 import { GnssIntegrity, type IntegrityConfig, type IntegrityContext, type IntegrityVerdict } from "./integrity/integrity";
 import type { EdgeId, RoadGraph } from "./mapmatch/graph/road-graph";
 import { ParticleFilter, type MapMatchConfig, type MapMatchState } from "./mapmatch/particle-filter";
@@ -822,6 +823,9 @@ export class Navigator {
   onGnss(fix: GnssFix): FixOutcome {
     const c = this.config;
     if (fix.hAccM > c.maxFixAccuracyM || !(fix.hAccM > 0)) return { status: "skipped" };
+    // A Wi-Fi/cell position abroad isn't the car's, as a satellite one there isn't (integrity): iOS gave one ±1.4 km
+    // on another continent (2026-10-15), and the parked pose was doubted for it.
+    if (!isSatelliteFix(fix) && !insideUkraine(fix)) return { status: "skipped" };
     // Under jamming iOS repeats the same Wi-Fi position; repeats carry no new information.
     // (A parked satellite fix repeats too, but that one is a real measurement.)
     if (!isSatelliteFix(fix) && this.lastFix && haversineM(this.lastFix, fix) < c.coarseRepeatShare * fix.hAccM) {
