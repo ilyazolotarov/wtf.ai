@@ -8,6 +8,7 @@ import { wrapAngle } from "../../src/nav/ekf/dr-ekf";
 import { bearingRad } from "../../src/nav/geo";
 import type { ParkedPose } from "../../src/nav/navigator";
 import { drawnTruthTrack, type DrawnTruth } from "../../src/nav/replay/drawn-truth";
+import { decodeTripCan } from "../../src/nav/replay/can";
 import { obdOdometer } from "../../src/nav/replay/truth-match";
 import { LocalFrame } from "../../src/nav/geo/local-frame";
 import { planRoute } from "../../src/nav/routing/router";
@@ -53,7 +54,12 @@ const DRAWN_HEADING = { afterM: 120, withinM: 1500, windowM: 30, straightRad: (5
 /**
  * Where the drawing starts, and how the car stood there: the drawing's direction once the car drives straight on it
  * (`DRAWN_HEADING`), less what the gyro turned since the log started (backing out of a bay included). The parked spot
- * the app should have saved.
+ * the app should have saved. The gyro only while the car moves (the odometer) or is in reverse (the CAN gear: OBD reads
+ * 0 there on some cars, and backing out of a bay is a turn): a parked car doesn't turn, and the phone handled while
+ * it stood turned 180° on one drive (2026-10-15: the start 80° off, the replay hundreds of metres from the road).
+ * Against the driver's placed and the phone's stored headings on 18 drives it fits better than the gyro all along
+ * (fwx8ms 269 → 16°, stored 24°; 2nzmpn 357 → 104°, stored 105°) and than skipping only the handled samples, which
+ * missed the phone turned flat in a hand.
  */
 export function drawnStartPose(trip: TripLog, drawn: DrawnTruth | null): ParkedPose | null {
   if (!drawn || drawn.path.length < 2) return null;
@@ -71,8 +77,17 @@ export function drawnStartPose(trip: TripLog, drawn: DrawnTruth | null): ParkedP
   let sum = 0;
   let k = 0;
   const imu = trip.imu;
+  const gears = (decodeTripCan(trip)?.samples ?? []).filter((x) => x.q === "gear");
+  let gi = 0;
+  const reverse = (tUs: number) => {
+    while (gi + 1 < gears.length && gears[gi + 1].tUs <= tUs) gi++;
+    const g = gears[gi];
+    return g?.q === "gear" && g.tUs <= tUs && tUs - g.tUs < 2e6 && g.gear === "R";
+  };
+  const turning = (tUs: number) => odo(tUs + 1e6) - odo(tUs - 1e6) > 0.5 || reverse(tUs);
   for (const [t] of timed.points) {
     for (const tUs = trip.startUs + t * 1e6; k + 1 < imu.length && imu[k + 1].tUs <= tUs; k++) {
+      if (!turning(imu[k].tUs)) continue;
       const { gyro, gravity } = imu[k];
       const g = Math.hypot(...gravity) || 1;
       sum += ((gyro[0] * gravity[0] + gyro[1] * gravity[1] + gyro[2] * gravity[2]) / g) * ((imu[k + 1].tUs - imu[k].tUs) / 1e6);
