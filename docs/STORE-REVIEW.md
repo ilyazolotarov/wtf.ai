@@ -84,8 +84,10 @@ string from `mfiProtocols` before submitting:
 >
 > The app works in Ukraine only. Outside it, a GPS position is what spoofing looks like there, so the app refuses it
 > and says "GPS puts you outside Ukraine". To review from abroad, without a car adapter:
-> 1. On first launch, pick a small region, for example Kyiv (the city), and download it.
-> 2. On the map, tap "Set position", move the map to any street in Kyiv, tap "Here", then tap the road ahead.
+> 1. On first launch, scroll the region list to "Kyiv" (the city, about 35 MB, not "Ukraine") and tap its download
+>    button.
+> 2. On the map, tap "Set position", move the map to any street in Kyiv, tap "Here", then tap the road ahead of
+>    the car and tap "Confirm".
 >    The status then reads "GPS looks spoofed · Set on the map": the app keeps the position you gave it.
 > 3. Tap Route, search "Khreshchatyk", choose Khreshchatyk Street and tap Start guidance.
 > 4. More › How to use? has interactive lessons, including "Driving through jamming", which plays a jammed drive.
