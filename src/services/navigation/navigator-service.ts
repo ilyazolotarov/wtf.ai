@@ -927,6 +927,23 @@ export class NavigatorService implements PositionSource {
   // ---- output ----
 
   private publish(): void {
+    this.publishPosition();
+    // The pose question is drawn with the position (`set`), but parked on the phone's GPS an unchanged position isn't
+    // published again (no new fix): an answered question stayed on the map, "Yes" doing nothing (2026-10-15).
+    const p = this.position;
+    if (p && (p.poseQuestion?.distanceM ?? null) !== (this.shownPoseQuestion(p)?.distanceM ?? null)) this.set(p);
+  }
+
+  /**
+   * "Is the car where the dot is?" only while the dot is the navigator's (from the parked pose the question is about).
+   * The phone's own fix drawn instead (no adapter, a placing just cancelled) is where the phone is: asked there, "yes"
+   * confirmed a spot 800 m off the one on the screen (2026-10-15). The question waits for the navigator's dot.
+   */
+  private shownPoseQuestion(p: Pick<PositionEstimate, "source">): { distanceM: number } | null {
+    return p.source === "dr" || p.source === "fused" ? this.poseQuestion : null;
+  }
+
+  private publishPosition(): void {
     this.shownChanged = false;
     const now = this.clock.nowMs();
     const nowUs = this.deps.nowUs();
@@ -1093,7 +1110,7 @@ export class NavigatorService implements PositionSource {
     this.position = {
       ...rest,
       ...(outage ? { simulatedOutage: outage } : {}),
-      ...(this.poseQuestion ? { poseQuestion: this.poseQuestion } : {}),
+      ...(this.shownPoseQuestion(rest) ? { poseQuestion: this.poseQuestion! } : {}),
       ...(m ? { manual: { placedAt: m.placedAt, confirmedAt: m.confirmedAt, asking: this.held.asking() } } : {}),
     };
     this.overlayStale = true;

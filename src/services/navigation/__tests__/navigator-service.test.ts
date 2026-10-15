@@ -513,6 +513,42 @@ describe("parked pose", () => {
     no.service.stop();
   });
 
+  test("placed in the wrong spot, the placing cancelled, a Wi-Fi fix doubts the parked pose: asked on the car's dot", async () => {
+    // The driver's steps (2026-10-15): place the car wrong, cancel the placing, a Wi-Fi fix far off. The map then
+    // shows that fix (no adapter), so "is the car where the dot is?" would be about a spot it doesn't show: asked once
+    // the dot is the navigator's (the adapter back). Either answer takes the card off at once.
+    const { store, pose } = await parkFirst();
+    const drive = syntheticDrive({ segments: [{ durationS: 40, speedMps: 0, yawRateDegS: 0 }], gnss: "none", origin: pose, startHeadingRad: pose.headingRad, seed: 7 });
+    let k = 0;
+    const far = (tUs: number) => record({ tUs, lat: pose.lat + 0.0027 + 0.0004 * k, lon: pose.lon + 0.011 - 0.0006 * k++, hAccM: 55 });
+    // Each harness starts its clock at the same time: the parked pose is from before the placing.
+    let clockMs = Date.now() + 10 * 60_000;
+    for (const here of [true, false]) {
+      const h = harness({ store });
+      await h.service.start();
+      h.play(drive, { untilS: 2, withoutObd: true });
+      jest.setSystemTime((clockMs += 10 * 60_000));
+      h.service.setUserPosition({ lat: pose.lat + 0.02, lon: pose.lon }, 0);
+      h.play(drive, { untilS: 4, withoutObd: true });
+      h.service.discardManualPosition();
+      h.play(drive, { untilS: 6, withoutObd: true });
+      h.gnss.emit(far(h.now()));
+      h.play(drive, { untilS: 8, withoutObd: true });
+      expect(h.notes.some((n) => n.startsWith("nav parked pose doubted: Wi-Fi fix"))).toBe(true);
+      expect(h.service.getSnapshot()).toMatchObject({ source: "gnss" });
+      expect(h.service.getSnapshot()?.poseQuestion).toBeUndefined();
+      // The adapter answers: the dot is the parked pose, and the question is about it.
+      h.play(drive, { untilS: 12 });
+      expect(h.service.getSnapshot()?.source).toBe("dr");
+      expect(haversineM(h.service.getSnapshot()!, pose)).toBeLessThan(50);
+      expect(h.service.getSnapshot()?.poseQuestion).toBeDefined();
+      h.service.answerPose(here);
+      expect(h.service.getSnapshot()?.poseQuestion).toBeUndefined();
+      expect(h.notes.some((n) => n.startsWith(`nav parked pose ${here ? "confirmed" : "rejected"} by the driver`))).toBe(true);
+      h.service.stop();
+    }
+  });
+
   test("another car doesn't use it", async () => {
     const { store } = await parkFirst();
     const other = harness({ store, vin: "OTHERVIN000000000" });
