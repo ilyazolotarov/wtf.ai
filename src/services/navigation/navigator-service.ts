@@ -953,6 +953,7 @@ export class NavigatorService implements PositionSource {
           lat: m.lat,
           lon: m.lon,
           headingRad: m.headingRad,
+          headingSigmaRad: USER_HEADING_SIGMA_RAD,
           accuracyM: USER_POSITION_SIGMA_M,
           source: "manual",
           trust,
@@ -1049,6 +1050,8 @@ export class NavigatorService implements PositionSource {
       lat,
       lon,
       headingRad: heading,
+      // The navigator's heading (a hypothesis on the map inherits it); a GNSS course has none.
+      ...(dr && estimate.headingSigmaRad !== undefined ? { headingSigmaRad: estimate.headingSigmaRad } : {}),
       speedMps: speed,
       accuracyM: puckAccuracyM(estimate, top),
       ...(mm ? { mapMatch: mm.state } : {}),

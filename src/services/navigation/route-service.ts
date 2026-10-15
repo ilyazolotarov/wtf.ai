@@ -155,13 +155,17 @@ export interface RouteServiceDeps {
 
 type Reason = (typeof ROUTE_REASON_CODES)[number];
 
-/** Route start from the published position: on the road while map-matched, with its heading and speed when known. */
+/**
+ * Route start from the published position: on the road while map-matched, with its heading (and how sure) and speed
+ * when known.
+ */
 function startOf(p: PositionEstimate) {
   return {
     lat: p.lat,
     lon: p.lon,
     accuracyM: p.accuracyM,
     ...(p.headingRad !== undefined ? { headingRad: p.headingRad } : {}),
+    ...(p.headingSigmaRad !== undefined ? { headingSigmaRad: p.headingSigmaRad } : {}),
     ...(p.speedMps !== undefined ? { speedMps: p.speedMps } : {}),
   };
 }

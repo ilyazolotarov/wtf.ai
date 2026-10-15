@@ -11,6 +11,8 @@ import { MinHeap } from "./min-heap";
 export interface RouteStart extends Coordinate {
   /** The car's heading, clockwise from north; unknown: both directions start free. */
   headingRad?: number;
+  /** How far off the heading may be; parked, over `HEADING_KNOWN_SIGMA_RAD` it is unknown. Absent: as good as known. */
+  headingSigmaRad?: number;
   /** How far off the position may be, m: start candidates within max(25 m, this). */
   accuracyM?: number;
   /** The car's speed, m/s: driving (over `MOVING_MPS`), turning around costs `turnaroundMovingS`. */
@@ -81,6 +83,18 @@ export type RouteStatus =
 const START_RADIUS_M = 25;
 /** Faster than this the car is driving, not parked or creeping out of a space. */
 const MOVING_MPS = 3;
+/**
+ * A parked car's heading less sure than this is no heading: a parked pose the navigator barely knew (±57°) sent the
+ * car round the block to avoid a turnaround it didn't need (2026-10-15). While driving, the heading counts however
+ * rough: without it a re-plan could turn the car around mid-street.
+ */
+const HEADING_KNOWN_SIGMA_RAD = (30 * Math.PI) / 180;
+/**
+ * A parked car turns around only for a direction more than this off its heading. One standing across the road (nose
+ * into a bay, a driveway) leaves either way at the same cost: a hard 90° made a 1–2° difference send it round the block.
+ * While driving, 90°.
+ */
+const PARKED_AGAINST_RAD = (120 * Math.PI) / 180;
 /** Start candidates: the nearest edge and any within this of it. */
 const START_MARGIN_M = 10;
 /** A candidate's closest point this near its end is that end's node. */
@@ -398,20 +412,27 @@ export class RouteSearch {
     return seen;
   }
 
-  /** Leaving in direction `dir` along a road heading `roadHeadingRad` turns the car around. */
   /**
    * Leaving the start edge against the car's heading costs the turnaround (§4): a search preference, so that going
    * round the block wins while driving. Only a U-turn's worth of it is time the car spends (`plan`).
    */
   private turnaroundS(roadHeadingRad: number, dir: 1 | -1): number {
     if (!this.againstHeading(roadHeadingRad, dir)) return 0;
-    return (this.from.speedMps ?? 0) > MOVING_MPS ? this.costs.turnaroundMovingS : this.costs.turnaroundS;
+    return this.moving() ? this.costs.turnaroundMovingS : this.costs.turnaroundS;
   }
 
+  private moving(): boolean {
+    return (this.from.speedMps ?? 0) > MOVING_MPS;
+  }
+
+  /** Leaving in direction `dir` along a road heading `roadHeadingRad` turns the car around. */
   private againstHeading(roadHeadingRad: number, dir: 1 | -1): boolean {
-    const heading = this.from.headingRad;
+    const { headingRad: heading, headingSigmaRad: sigma } = this.from;
+    if (heading === undefined) return false;
     const travel = dir === 1 ? roadHeadingRad : roadHeadingRad + Math.PI;
-    return heading !== undefined && Math.abs(wrap(travel - heading)) > Math.PI / 2;
+    const off = Math.abs(wrap(travel - heading));
+    if (this.moving()) return off > Math.PI / 2;
+    return (sigma ?? 0) <= HEADING_KNOWN_SIGMA_RAD && off > PARKED_AGAINST_RAD;
   }
 
   private addStart(start: End): void {

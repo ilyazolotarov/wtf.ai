@@ -28,6 +28,8 @@ export interface PositionEstimate {
   lat: number;
   lon: number;
   headingRad?: number;
+  /** How far off the heading may be (the navigator's); absent: as good as its source gives it (a GNSS course). */
+  headingSigmaRad?: number;
   speedMps?: number;
   accuracyM: number;
   source: PositionSourceKind;

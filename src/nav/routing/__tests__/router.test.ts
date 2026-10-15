@@ -182,6 +182,31 @@ describe("planRoute", () => {
     expect(driving.plan.legs.length).toBeGreaterThan(1);
   });
 
+  test("parked across the road (nose into a bay) the car leaves either way free; driving, 90° off turns it around", () => {
+    // Road 101 runs east; the destination is west. Heading 10°: west is 100° off.
+    const across = { ...at(0.8, 0, 10), speedMps: 0 };
+    const parked = planRoute(graph(), frame, across, at(0.2, 0));
+    const driving = planRoute(graph(), frame, { ...across, speedMps: 10 }, at(0.2, 0));
+    if (parked.status !== "done" || driving.status !== "done") throw new Error("no route");
+    expect(parked.plan.startTurnaround).toBeFalsy();
+    expect(parked.plan.legs).toHaveLength(1);
+    expect(driving.plan.legs.length).toBeGreaterThan(1);
+  });
+
+  test("a parked heading the navigator barely knows is no heading; driving, a rough heading still counts", () => {
+    const costs = { turnaroundS: 10, turnaroundMovingS: 300 };
+    const behind = (headingSigmaDeg: number, speedMps: number) => {
+      const r = planRoute(graph(), frame, { ...at(0.8, 0, 90), headingSigmaRad: headingSigmaDeg * DEG, speedMps }, at(0.2, 0), { costs });
+      if (r.status !== "done") throw new Error("no route");
+      return r.plan;
+    };
+    expect(behind(10, 0).startTurnaround).toBe(true);
+    const unsure = behind(60, 0);
+    expect(unsure.startTurnaround).toBeFalsy();
+    expect(unsure.legs).toHaveLength(1);
+    expect(behind(60, 10).legs.length).toBeGreaterThan(1);
+  });
+
   test("the turnaround is a search preference: the plan's time has only a U-turn's worth of it", () => {
     // Without a heading the same stretch starts free: the time it takes to drive.
     const free = planRoute(graph(), frame, at(0.8, 0), at(0.2, 0));

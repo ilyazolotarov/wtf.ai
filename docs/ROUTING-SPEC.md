@@ -70,7 +70,10 @@ from the class alone (km/h, MAPMATCH-SPEC §4.3):
 - **U-turn**: 30 s, only at a dead end (no other legal exit). Starting against the car's heading counts as a U-turn
   on the road: 60 s; 300 s while the car drives (over 3 m/s: a re-plan after a wrong turn), as turning mid-street
   needs a gap and is often not allowed. On 2026-10-06 a re-plan at 40 km/h said "turn around" (131 s + 60 s) where
-  going round the block was 243 s: the route the driver then took.
+  going round the block was 243 s: the route the driver then took. "Against" while driving is more than 90° off the
+  heading; parked, more than 120°: a car standing across the road (nose into a bay, a driveway) leaves either way at
+  the same cost, and a hard 90° sent one round the block over a 1–2° difference. A parked heading less sure than
+  ±30° (the navigator's heading σ) is no heading; while driving the heading counts however rough.
 - **Entry penalties** (on entering the edge, not for the start or destination edge): private access 600 s, minor
   service (driveway, parking aisle) 60 s, track 120 s.
 - Forbidden: against a one-way, a restricted turn (`no_*`, or not the `only_*` exit).
@@ -150,8 +153,9 @@ planned km/h by class, setting and limit; `--costs '<json>'` tries other values;
 - **Start**: the car's position and, when known, heading (the puck: map-matched while dead-reckoning). Candidate
   edges: the nearest, plus any within `max(25 m, accuracy)` and within 10 m of the nearest (a parallel road), but
   not those that only meet the nearest at its end node (a junction just ahead or behind). Each allowed direction is
-  a start state costing the rest of the edge from the projected point. With the heading known, the direction more
-  than 90° off it costs the turnaround (60 s, 300 s while driving: §4).
+  a start state costing the rest of the edge from the projected point. With the heading known, the direction against
+  it costs the turnaround (§4: more than 90° off and 300 s while driving; parked, more than 120° off, 60 s, and only
+  with the heading within ±30°).
 - **Destination**: the nearest edge to the point within 500 m, preferring a public road (not private, not minor
   service) when one is within 50 m of the nearest. Reached in either allowed direction, at the projected point.
 - Start and destination on the same edge with the destination ahead: the route is that stretch.
@@ -296,8 +300,8 @@ next maneuver and the distance to it, and the one after when it follows within 1
 
 ### 8.2 Route service (`src/services/navigation/route-service.ts`, `runtime.routes`)
 
-- `start(destination)` plans from the published position (with its heading and accuracy) on its own reader of the
-  active region's graph (2048 tiles), framed at the start. The search runs in slices of ~12 ms (the slice size
+- `start(destination)` plans from the published position (with its heading, how sure, and accuracy) on its own
+  reader of the active region's graph (2048 tiles), framed at the start. The search runs in slices of ~12 ms (the slice size
   adapts to the phone's speed), yielding to the UI in between.
 - `off` (and not planning, and the wait below elapsed) plans again from where the car is; the old route stays
   drawn, faded. A failed re-plan keeps the old route and retries at the next `off` after the cooldown. A failed
