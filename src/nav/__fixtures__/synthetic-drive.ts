@@ -107,9 +107,12 @@ export function syntheticDrive(o: SyntheticOptions): SyntheticDrive {
 
       const h = o.handling && tS >= o.handling.fromS && tS < o.handling.toS ? o.handling : null;
       const tilt = h ? h.tiltRad * Math.sin(Math.PI * (tS - h.fromS)) : 0;
+      // The tilt is the phone rotating about its x axis: the gyro sees it (a world vertical seen from the phone
+      // turns by −ω × it), as a real phone's does.
+      const tiltRate = h ? h.tiltRad * Math.PI * Math.cos(Math.PI * (tS - h.fromS)) : 0;
       imu.push({
         tUs,
-        gyro: [0, 0, yawCcw + bias + gyroNoise * r.gauss() + (h?.yawRateRadS ?? 0)],
+        gyro: [-tiltRate, 0, yawCcw + bias + gyroNoise * r.gauss() + (h?.yawRateRadS ?? 0)],
         gravity: [0, 9.80665 * Math.sin(tilt), -9.80665 * Math.cos(tilt)],
         userAccel: o.phoneAccel
           ? [

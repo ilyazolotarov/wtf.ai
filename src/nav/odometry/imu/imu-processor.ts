@@ -3,8 +3,20 @@
 import type { ImuSample, Vec3 } from "../../types";
 
 export interface ImuConfig {
-  /** Gravity direction vs its slow average beyond this = phone moved (mounted driving stays < 4°). */
+  /**
+   * The phone's tilt off its slow average beyond this = phone moved. The tilt is the vertical carried by the gyro
+   * (`upTauS`), not the gravity estimate: Android's leans with the car's sideways acceleration, 16° in a turn at
+   * 25 km/h (2026-10-14), and read as handling it dropped 12–48 % of a drive's turning; iOS's stays < 4°.
+   */
   handlingTiltRad: number;
+  /** The gyro's vertical is pulled to gravity's this slowly: it keeps the gyro from drifting, not a turn's lean. */
+  upTauS: number;
+  /**
+   * Gravity's vertical jumping this far from one sample to the next, the gyro not turning the phone, is a change of
+   * frame (the navigator's IMU switching between the car's, from the wheels, and the phone's): both verticals start
+   * over from it. No phone moves so in 10 ms without the gyro seeing it, and a turn's lean builds over seconds.
+   */
+  frameJumpRad: number;
   /** Rotation off the vertical, averaged as a vector over 0.1 s, beyond this = phone moved. A bump
    *  shakes the phone back and forth, so the vector mean stays ≤ 0.7 rad/s (its magnitude averaged
    *  reached 1.8); handling turns it one way, ≥ 1.4 rad/s (14 real drives). */
@@ -21,6 +33,8 @@ export interface ImuConfig {
 
 export const DEFAULT_IMU_CONFIG: ImuConfig = {
   handlingTiltRad: (8 * Math.PI) / 180,
+  upTauS: 30,
+  frameJumpRad: (10 * Math.PI) / 180,
   handlingRateRadS: 1.0,
   handlingHoldUs: 1_500_000,
   gravityTauS: 3,
@@ -85,6 +99,10 @@ class RollingStats {
 export class ImuProcessor {
   private readonly config: ImuConfig;
   private gravityRef: [number, number, number] | null = null;
+  /** The world's vertical in the phone's frame, carried by the gyro. */
+  private upGyro: [number, number, number] | null = null;
+  /** Gravity's vertical at the last sample. */
+  private lastUp: Vec3 | null = null;
   private lastTUs: number | null = null;
   private handlingUntilUs = -Infinity;
   private yawLp = new RollingStats(10);
@@ -109,16 +127,29 @@ export class ImuProcessor {
 
     const dt = this.lastTUs === null ? 0 : Math.max(0, (s.tUs - this.lastTUs) / 1e6);
     this.lastTUs = s.tUs;
-    if (this.gravityRef === null || dt > 1) {
+    const jump = this.lastUp ? Math.acos(Math.min(1, Math.max(-1, dot(up, this.lastUp)))) : 0;
+    this.lastUp = up;
+    const frameChanged = jump > c.frameJumpRad && jump > 2 * norm(s.gyro) * dt;
+    if (this.upGyro === null || this.gravityRef === null || dt > 1 || frameChanged) {
+      this.upGyro = [up[0], up[1], up[2]];
       this.gravityRef = [up[0], up[1], up[2]];
     } else {
+      // A vertical fixed in the world, seen from the rotating phone: du/dt = −ω × u. A car's turn is about it and
+      // leaves it be; a phone picked up or tilted turns it.
+      const u = this.upGyro;
+      const w = s.gyro;
+      const cross: Vec3 = [w[1] * u[2] - w[2] * u[1], w[2] * u[0] - w[0] * u[2], w[0] * u[1] - w[1] * u[0]];
+      const b = Math.min(1, dt / c.upTauS);
+      for (let i = 0; i < 3; i++) u[i] += -cross[i] * dt + (up[i] - u[i]) * b;
+      const nu = norm(u);
+      for (let i = 0; i < 3; i++) u[i] /= nu;
       const a = Math.min(1, dt / c.gravityTauS);
       const r = this.gravityRef;
-      for (let i = 0; i < 3; i++) r[i] += (up[i] - r[i]) * a;
+      for (let i = 0; i < 3; i++) r[i] += (u[i] - r[i]) * a;
       const n = norm(r);
       for (let i = 0; i < 3; i++) r[i] /= n;
     }
-    const tilt = Math.acos(Math.min(1, Math.max(-1, dot(up, this.gravityRef))));
+    const tilt = Math.acos(Math.min(1, Math.max(-1, dot(this.upGyro, this.gravityRef))));
     const off: Vec3 = [s.gyro[0] - yawRate * up[0], s.gyro[1] - yawRate * up[1], s.gyro[2] - yawRate * up[2]];
     for (let i = 0; i < 3; i++) this.offLp[i].push(off[i]);
     const offMean = norm([this.offLp[0].mean, this.offLp[1].mean, this.offLp[2].mean]);

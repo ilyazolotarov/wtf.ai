@@ -128,7 +128,7 @@ A common `OdometrySource` interface feeds the EKF with timestamped speed and yaw
 #### Stage 1+: phone IMU (`odometry/imu/`)
 
 - Vertical yaw rate `ω = gyro · ĝ` (independent of how the phone is mounted), from CoreMotion `CMDeviceMotion` (`xArbitraryZVertical`, no magnetometer) at 100 Hz via `modules/sensor-capture`, batched (TRIP-LOGGER-SPEC §5.2).
-- **Handling detection**: mark gyro samples invalid when the gravity direction in the phone frame changes (phone moved on/in the mount) or the phone rotates fast about a horizontal axis (NAVIGATOR-SPEC §5.1). In Stage 2+, also when the gyro disagrees with the wheel yaw. During invalid windows the EKF propagates heading without a yaw input and with inflated covariance; at standstill (OBD 0) the heading is held instead.
+- **Handling detection**: mark gyro samples invalid when the phone's vertical, carried by the gyro, tilts (phone moved on/in the mount; gravity's own estimate leans with a turn's acceleration on Android) or the phone rotates fast about a horizontal axis (NAVIGATOR-SPEC §5.1). In Stage 2+, also when the gyro disagrees with the wheel yaw. During invalid windows the EKF propagates heading without a yaw input and with inflated covariance; at standstill (OBD 0) the heading is held instead.
 
 #### Stage 2+: vehicle profiles (`odometry/can/`)
 

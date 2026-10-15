@@ -61,7 +61,13 @@ jammed:
 - Yaw rate = gyro · up (up = −gravity), so it doesn't depend on how the phone sits in the mount. Counter-clockwise
   is positive.
 - **Handling detection:** the gyro is invalid while the phone moves in the mount or in a hand. Triggers:
-  - Gravity direction differs from its 3 s average by more than 8°.
+  - The phone's vertical differs from its 3 s average by more than 8°. The vertical is carried by the gyro (a
+    world vertical seen from the phone turns by −ω × it) and pulled to gravity's over 30 s, so the gyro's drift
+    doesn't build up. Not gravity's own: Android's estimate leans with the car's sideways acceleration (16° in a
+    turn at 25 km/h), and read as handling it dropped 12–48 % of a drive's turning on one phone (missed turns, the
+    dot on the wrong road); with the gyro's, 0–5 %, iPhone drives as before. Gravity's vertical jumping ≥ 10°
+    between two samples without the gyro turning is a change of frame (§5.4's IMU between the car's and the
+    phone's), not handling: both verticals start over from it.
   - The rotation off the vertical, averaged as a vector over 0.1 s, exceeds 1.0 rad/s.
 
   Each trigger holds for 1.5 s. Thresholds come from mounted driving, which stays under 4°.

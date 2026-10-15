@@ -125,14 +125,29 @@ describe("ImuProcessor", () => {
     expect(out.yawRate).toBeCloseTo(0.2, 6);
   });
 
-  test("handling: a tilt change invalidates the gyro; a single-sample spike doesn't", () => {
+  test("handling: the phone tilted slowly (the gyro turning it off the vertical) invalidates the gyro; a spike doesn't", () => {
     const p = new ImuProcessor();
     let t = 0;
     for (let i = 0; i < 300; i++) expect(p.process(sample((t += 10_000), [0, 0, 0])).valid).toBe(true);
     expect(p.process(sample((t += 10_000), [1.9, 0, 0])).valid).toBe(true);
+    // 0.4 rad/s about x for 1 s: under the rate test, 23° of tilt. (A vertical seen from the phone turns by −ω × it.)
     let invalid = false;
-    for (let i = 0; i < 50; i++) invalid ||= !p.process(sample((t += 10_000), [0, 0, 0], 0.4)).valid;
+    let tilt = 0;
+    for (let i = 0; i < 100; i++) invalid ||= !p.process(sample((t += 10_000), [-0.4, 0, 0], (tilt += 0.004))).valid;
     expect(invalid).toBe(true);
+  });
+
+  // 2026-10-14: Android's gravity estimate leans with the car's sideways acceleration, 16° in a turn at 25 km/h;
+  // read as handling, it dropped 12–48 % of a drive's turning.
+  test("a turn leaning the gravity estimate without turning the phone off the vertical is no handling", () => {
+    const p = new ImuProcessor();
+    let t = 0;
+    for (let i = 0; i < 300; i++) p.process(sample((t += 10_000), [0, 0, 0]));
+    const lean = (16 * Math.PI) / 180;
+    for (let i = 0; i < 500; i++) {
+      const tilt = lean * Math.sin((Math.PI * i) / 500);
+      expect(p.process(sample((t += 10_000), [0, 0, 0.4], tilt)).valid).toBe(true);
+    }
   });
 
   test("quiet after a still second; a slow turn isn't quiet", () => {
