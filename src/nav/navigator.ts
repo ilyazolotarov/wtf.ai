@@ -280,7 +280,7 @@ export interface MapMatchEstimate {
     spreadM: number;
     edge: EdgeId | null;
     particles: number;
-    /** The top cluster while `offroad`: the nearest road it could be driving along (position/puck.ts draws it there). */
+    /** An off-road cluster: the nearest road it could be driving along (position/puck.ts draws it there at speed). */
     road?: { lat: number; lon: number; headingRad: number };
   }[];
   particles: number;
@@ -293,6 +293,12 @@ export type MapMatchGraph = RoadGraph & { setFrame(frame: LocalFrame): void };
 /** A travel direction, for the map-start checks: particles within this of the start's heading. */
 /** How far, and how far off its heading, an off-road top hypothesis looks for the road it could be on (MAPMATCH-SPEC §11). */
 const ROAD_SNAP_REACH_M = 80;
+/**
+ * The road an off-road hypothesis was drawn on stays its road while it is at most this farther than the nearest one:
+ * between a road and a parking lane 30 m apart the nearest changed every second or two, and the dot jumped 23–32 m
+ * between them, through the buildings (2026-10-15).
+ */
+const ROAD_SNAP_KEEP_M = 20;
 const ROAD_SNAP_HEADING_RAD = (60 * Math.PI) / 180;
 
 const MAP_START_DIRECTION_RAD = Math.PI / 4;
@@ -509,6 +515,8 @@ export class Navigator {
   private doubtM: number | null = null;
   /** OBD distance when the driver last confirmed the pose or placed the car (null: never this session). */
   private driverSaidAtM: number | null = null;
+  /** The road the off-road hypothesis was last drawn on (`ROAD_SNAP_KEEP_M`). */
+  private snapEdge: EdgeId | null = null;
   /** The fixes counted in `coarseDoubted`: residual from the track, reach, and whether narrow. */
   private doubting: { dE: number; dN: number; reachM: number; narrow: boolean }[] = [];
   /** Speed scale for the next EKF start: a stored per-car value, or the one learned before a reset. */
@@ -1434,7 +1442,10 @@ export class Navigator {
     return {
       ...out,
       clusters: out.clusters.map(({ e, n, ...c }, k) => {
-        const road = k === 0 && out.state === "offroad" ? pf.nearestRoad(e, n, c.headingRad, ROAD_SNAP_REACH_M, ROAD_SNAP_HEADING_RAD) : null;
+        // An off-road hypothesis: the road it could be on (the dot at speed, position/puck.ts).
+        const prefer = this.snapEdge === null ? null : { edge: this.snapEdge, slackM: ROAD_SNAP_KEEP_M };
+        const road = c.edge === null ? pf.nearestRoad(e, n, c.headingRad, ROAD_SNAP_REACH_M, ROAD_SNAP_HEADING_RAD, prefer) : null;
+        if (road && k === 0) this.snapEdge = road.edge;
         return { ...c, ...frame.toCoordinate(e, n), ...(road ? { road: { ...frame.toCoordinate(road.e, road.n), headingRad: road.headingRad } } : {}) };
       }),
     };

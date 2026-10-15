@@ -1012,9 +1012,13 @@ drives worse, the ones the viewer showed, and 3 better.
     truth survival min 47 → 69 % (reversed 56 %), but map starts 26 → 19 and two wrong starts, 178° and 344–369 m off
     (nvrm4q from 60 s, with the route either way: the factor thinned the hypotheses until a wrong one reached 0.9),
     and on 94zf2q from 180 s the true route blocked a right map start and let a 43° alignment start win. Dropped.
-  - **On a road while it drives:** in state `offroad` at 15 km/h or more, the dominant hypothesis is drawn at the
-    nearest point of a road it could be driving along — within 80 m, its heading within 60°, not against a one-way
-    (`MapMatchEstimate.clusters[0].road`, `position/puck.ts`) — and as it is when there is none. Off the roads a car
+  - **On a road while it drives:** an off-road dominant hypothesis (its heaviest edge none), at 15 km/h or more, is
+    drawn at the nearest point of a road it could be driving along — within 80 m, its heading within 60°, not
+    against a one-way (`MapMatchEstimate.clusters[].road`, `position/puck.ts`) — and as it is when there is none.
+    Whatever the state: `offroad` (over half the weight off-road) flickered around half, and the dot jumped 20–30 m
+    between the hypothesis and its road every second or two (2026-10-15, pulling out of a parking area beside a lane
+    30 m from the road). The road it was drawn on stays while at most 20 m farther than the nearest one (between two
+    roads the nearest changed as often). Off the roads a car
     only parks, and nobody parks at 15 km/h; a dot crossing a block at city speed is wrong whichever road is right.
     The filter keeps its off-road hypothesis — following the car's own path off the map is how it finds the road
     again — so only the drawing changes, and the trip log's `nav_mapmatch` still records the hypothesis itself.
@@ -1023,6 +1027,12 @@ drives worse, the ones the viewer showed, and 3 better.
     227 → 149 s — the worst are the seeds where the filter has lost the car by more than the reach. On real drives
     jammed after the start the dot is > 50 m off 4.0 → 3.4 % of the time; the simulated drives, which never leave a
     road, are unchanged.
+  - **Continuity:** the dot stays with the hypothesis it was drawn on (the one within 15 m of where the last dot
+    has driven to since, at the car's speed on its heading) while that keeps half the leader's weight, instead of
+    following every change of leader on a near-even contest. Over the corpus (8 seeds, parked and drawn starts)
+    jumps 246 → 178 and 234 → 182, no drive worse; nearest the last dot itself, rather than where it drove to, a
+    hypothesis 18 m behind on the highway was there half a second later, and the dot stalled and jumped back and
+    forth (gc6xib 10 → 28 jumps).
   - **At the spot it parked in off the roads** (`NavEstimate.parkedOffRoad`: started from such a pose, not 20 m
     driven since, state `offroad`): the EKF is the puck, not the dominant hypothesis. The off-road particles spread
     over the pose's σ in clusters lighter than a road's within it.

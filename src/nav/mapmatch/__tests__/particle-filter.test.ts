@@ -437,6 +437,34 @@ describe("the nearest road a car could be driving along (the dot at speed, MAPMA
     expect(Math.abs(pf.nearestRoad(0, 30, -88 * DEG, 80, 60 * DEG)!.headingRad + Math.PI / 2)).toBeLessThan(0.1);
   });
 
+  // 2026-10-15: between a road and a parking lane 30 m apart the nearest changed every second or two.
+  test("the road it was drawn on stays while it is at most the slack farther than the nearest", () => {
+    const graph = new TiledRoadGraph(bufferByteSource(new Uint8Array(FIXTURE)), new LocalFrame({ lat: 51.53, lon: 30.76 }));
+    const pf = new ParticleFilter(graph);
+    // A spot beside two roads a car could be driving along (either way), the farther one 5–20 m farther.
+    const fitsAt = (e: number, n: number, psi: number) =>
+      graph.edgesNear(e, n, 80).filter((x) => {
+        const d = Math.abs(Math.atan2(Math.sin(x.headingRad - psi), Math.cos(x.headingRad - psi)));
+        return (d <= 60 * DEG || d >= 120 * DEG) && x.edge.oneway === 0;
+      });
+    let spot: { e: number; n: number; psi: number; first: number; second: number } | null = null;
+    for (let e = -800; e <= -300 && !spot; e += 10) {
+      for (let n = -1200; n <= -800 && !spot; n += 10) {
+        for (const psi of [0, Math.PI / 2]) {
+          const fits = fitsAt(e, n, psi);
+          const gap = fits.length >= 2 ? fits[1].distanceM - fits[0].distanceM : Infinity;
+          if (fits[1] && fits[1].edge.wayId !== fits[0].edge.wayId && gap >= 5 && gap <= 20) spot = { e, n, psi, first: fits[0].edge.id, second: fits[1].edge.id };
+          if (spot) break;
+        }
+      }
+    }
+    expect(spot).not.toBeNull();
+    const { e, n, psi, first, second } = spot!;
+    expect(pf.nearestRoad(e, n, psi, 80, 60 * DEG)!.edge).toBe(first);
+    expect(pf.nearestRoad(e, n, psi, 80, 60 * DEG, { edge: second, slackM: 20 })!.edge).toBe(second);
+    expect(pf.nearestRoad(e, n, psi, 80, 60 * DEG, { edge: second, slackM: 2 })!.edge).toBe(first);
+  });
+
   test("not across the road, not out of reach, not against a one-way", () => {
     const pf = filterAt(51.53, 30.76);
     expect(pf.nearestRoad(0, 30, 0, 80, 60 * DEG)).toBeNull();

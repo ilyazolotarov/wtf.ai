@@ -14,6 +14,26 @@ export const MAP_MATCH_PUCK: ReadonlySet<MapMatchState> = new Set(["tracking", "
  * the roads the car only parks, and no parking manoeuvre is driven at 15 km/h.
  */
 export const DRAW_ON_ROAD_MPS = 15 / 3.6;
+/**
+ * The dot stays with the hypothesis it was drawn on while that one keeps this share of the leader's weight: on a
+ * near-even contest the leader changed hands every second or two, and the dot jumped 14–39 m between them, through
+ * the buildings (2026-10-15, a car pulling out of a parking area beside a parallel lane).
+ */
+export const KEEP_SHARE = 0.5;
+/**
+ * The hypothesis it was drawn on: the one nearest where the last dot has driven to since (at the car's speed, on its
+ * heading), within this. Not nearest the last dot itself: at 126 km/h a hypothesis 18 m behind on the same road is
+ * there half a second later, and the dot stalled and jumped back and forth between the two (2026-10-06 replayed).
+ */
+const KEEP_REACH_M = 15;
+/** The dot drawn last (`puckHypothesis` returned it at `tUs`), for its continuity. */
+export interface LastPuck {
+  lat: number;
+  lon: number;
+  headingRad: number;
+  tUs: number;
+}
+
 /** The dot's radius from a hypothesis' spread is at least this (a tight cluster isn't a perfect one). */
 export const MAP_MATCH_MIN_ACCURACY_M = 5;
 /**
@@ -43,15 +63,46 @@ export function puckHypothesis(
   estimate: NavEstimate,
   deadReckoning: boolean,
   route: readonly Coordinate[] | null = null,
+  last: LastPuck | null = null,
 ): MapMatchEstimate["clusters"][number] | undefined {
   const mm = estimate.mapMatch;
   if (!(deadReckoning || estimate.mode === "anchored") || !mm || !MAP_MATCH_PUCK.has(mm.state) || estimate.parkedOffRoad) return undefined;
-  const top = route?.length ? routeChoice(mm.clusters, route) : mm.clusters[0];
+  const leader = route?.length ? routeChoice(mm.clusters, route) : mm.clusters[0];
+  const top = leader && last ? (kept(mm.clusters, leader, last, estimate) ?? leader) : leader;
   // The filter keeps its off-road hypothesis (it is how it finds the road again), but a car at speed is drawn on a road.
-  if (top?.road && mm.state === "offroad" && (estimate.speedMps ?? 0) >= DRAW_ON_ROAD_MPS) {
+  // Whenever the hypothesis is off-road, not only in state `offroad` (off-road weight over half): that flickered on
+  // and off around half, and the dot jumped 20–30 m between the hypothesis and its road (2026-10-15).
+  if (top?.road && (estimate.speedMps ?? 0) >= DRAW_ON_ROAD_MPS) {
     return { ...top, lat: top.road.lat, lon: top.road.lon, headingRad: top.road.headingRad };
   }
   return top;
+}
+
+/** The hypothesis the dot was drawn on, while it keeps `KEEP_SHARE` of the leader's weight; null: none. */
+function kept(
+  clusters: MapMatchEstimate["clusters"],
+  leader: MapMatchEstimate["clusters"][number],
+  last: LastPuck,
+  estimate: NavEstimate,
+): MapMatchEstimate["clusters"][number] | null {
+  const dtS = Math.max(0, Math.min(2, (estimate.tUs - last.tUs) / 1e6));
+  const movedM = Math.abs(estimate.speedMps ?? 0) * dtS;
+  const kx = 111_320 * Math.cos((last.lat * Math.PI) / 180);
+  // Where the last dot has driven to, metres east and north of it.
+  const toE = movedM * Math.sin(last.headingRad);
+  const toN = movedM * Math.cos(last.headingRad);
+  let best: MapMatchEstimate["clusters"][number] | null = null;
+  let bestM = Infinity;
+  for (const c of clusters) {
+    // An off-road one may have been drawn on its road (`DRAW_ON_ROAD_MPS`): either place is where it was.
+    const at = [c, ...(c.road ? [c.road] : [])];
+    const d = Math.min(...at.map((p) => Math.hypot((p.lon - last.lon) * kx - toE, (p.lat - last.lat) * 111_320 - toN)));
+    if (d < bestM) {
+      best = c;
+      bestM = d;
+    }
+  }
+  return best && best !== leader && bestM <= KEEP_REACH_M && best.weight >= KEEP_SHARE * leader.weight ? best : null;
 }
 
 /**

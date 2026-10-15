@@ -4,7 +4,7 @@
 import type { TripLog } from "../../triplog/trip-log-reader";
 import { haversineM } from "../geo";
 import type { MapMatchState } from "../mapmatch/particle-filter";
-import { FUSED_WINDOW_US, puckAccuracyM, puckHypothesis } from "../position/puck";
+import { FUSED_WINDOW_US, puckAccuracyM, puckHypothesis, type LastPuck } from "../position/puck";
 import { isSatelliteFix } from "../types";
 import type { ReplayResult } from "./replay";
 
@@ -99,11 +99,13 @@ export interface PuckPoint extends ShownPoint {
 export function replayPuck(result: ReplayResult, route: readonly { lat: number; lon: number }[] | null = null): PuckPoint[] {
   const accepted = result.fixes.filter((f) => f.status === "accepted" && f.satellite).map((f) => f.tS);
   let k = -1;
+  let last: LastPuck | null = null;
   return result.track.map((p) => {
     while (k + 1 < accepted.length && accepted[k + 1] <= p.tS) k++;
     // "fused" as the app has it: GPS trusted (integrity) and a satellite fix accepted within the window.
     const dr = p.mode === "dr" && (p.trust !== "TRUSTED" || k < 0 || (p.tS - accepted[k]) * 1e6 >= FUSED_WINDOW_US);
-    const top = puckHypothesis(p, dr, route);
+    const top = puckHypothesis(p, dr, route, last);
+    last = top ? { lat: top.lat, lon: top.lon, headingRad: top.headingRad, tUs: p.tUs } : null;
     const common = { t: p.tS, speedMps: p.speedMps, mapMatch: p.mapMatch?.state, dr: dr || !!top };
     return top
       ? { ...common, lat: top.lat, lon: top.lon, acc: puckAccuracyM(p, top), headingRad: top.headingRad }

@@ -11,7 +11,7 @@ import type { FixOutcome, MapMatchEstimate, NavConfig, NavMode, ParkedPose } fro
 import { Navigator } from "@/nav/navigator";
 import { PhoneNavigator, type PhoneGraph, type PhonePose, type PhoneRouteState } from "@/nav/phone/phone-navigator";
 import { haversineM } from "@/nav/geo";
-import { FUSED_WINDOW_US, puckAccuracyM, puckHypothesis } from "@/nav/position/puck";
+import { FUSED_WINDOW_US, puckAccuracyM, puckHypothesis, type LastPuck } from "@/nav/position/puck";
 import type { PositionEstimate, PositionSourceKind, RawGnssFix } from "@/nav/position/types";
 import type { CompassTrust } from "@/nav/compass/compass";
 import type { GnssFix, ImuSample, MagSample, ObdSpeedSample } from "@/nav/types";
@@ -235,6 +235,8 @@ export class NavigatorService implements PositionSource {
   private shownChanged = false;
   private lastObdUs = -Infinity;
   private lastAcceptedSatUs = -Infinity;
+  /** The hypothesis the dot was drawn on last, for its continuity (position/puck.ts). */
+  private lastPuck: LastPuck | null = null;
   private mode: NavMode = "none";
   private vin: string | null = null;
   private lastSaveAt = 0;
@@ -657,6 +659,7 @@ export class NavigatorService implements PositionSource {
     this.note(`${STORAGE_NOTE}${JSON.stringify(calibration.snapshot(null))}`);
     const nav = new Navigator({ ...this.deps.nav, mapMatchLoop: this.loop, ...(lag ? { gnssLagS: lag.lagS } : {}) });
     this.nav = nav;
+    this.lastPuck = null;
     this.deps.observer?.navigator?.(nav);
     if (lag) this.note(`nav gnss lag ${lag.lagS} s from storage (${lag.windows} turn windows)`);
     this.fedUs = -Infinity;
@@ -1018,7 +1021,8 @@ export class NavigatorService implements PositionSource {
     // Dead-reckoning on the map, or anchored once the filter found the road: the dominant hypothesis is the puck, the
     // others its alternatives (MAPMATCH-SPEC §6.2). With GNSS the EKF stays the puck: it is within a few metres there.
     // The active route tips a near-even contest between the two directions of a road (position/puck.ts).
-    const top = puckHypothesis(estimate, estimate.mode === "dr" && !fused, this.phoneRoute);
+    const top = puckHypothesis(estimate, estimate.mode === "dr" && !fused, this.phoneRoute, this.lastPuck);
+    this.lastPuck = top ? { lat: top.lat, lon: top.lon, headingRad: top.headingRad, tUs: estimate.tUs } : null;
     // The map's guess is dead reckoning too: the engine off keeps it, as a dot the navigator drew.
     const dr = estimate.mode === "dr" || !!top;
     const source: PositionSourceKind = !dr ? "gnss" : fused ? "fused" : "dr";

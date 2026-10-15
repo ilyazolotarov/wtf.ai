@@ -859,17 +859,29 @@ export class ParticleFilter {
 
   /**
    * The nearest point on a road within `reachM` that a car heading `psi` could be driving along: within `headingRad`
-   * of it, not against a one-way (§11: where an off-road hypothesis is drawn while the car drives).
+   * of it, not against a one-way (§11: where an off-road hypothesis is drawn while the car drives). `prefer`: that
+   * road while it is at most `slackM` farther than the nearest one.
    */
-  nearestRoad(e: number, n: number, psi: number, reachM: number, headingRad: number): { e: number; n: number; headingRad: number } | null {
+  nearestRoad(
+    e: number,
+    n: number,
+    psi: number,
+    reachM: number,
+    headingRad: number,
+    prefer: { edge: EdgeId; slackM: number } | null = null,
+  ): { e: number; n: number; headingRad: number; edge: EdgeId } | null {
+    let nearest: { e: number; n: number; headingRad: number; edge: EdgeId; distanceM: number } | null = null;
     for (const near of this.graph.edgesNear(e, n, reachM)) {
+      if (nearest && (!prefer || near.distanceM > nearest.distanceM + prefer.slackM)) break;
       const dir: 1 | -1 = Math.abs(wrap(near.headingRad - psi)) <= Math.PI / 2 ? 1 : -1;
       if ((dir === 1 && near.edge.oneway === Oneway.backward) || (dir === -1 && near.edge.oneway === Oneway.forward)) continue;
       const h = dir === 1 ? near.headingRad : near.headingRad + Math.PI;
       if (Math.abs(wrap(h - psi)) > headingRad) continue;
-      return { e: near.e, n: near.n, headingRad: wrap(h) };
+      const road = { e: near.e, n: near.n, headingRad: wrap(h), edge: near.edge.id, distanceM: near.distanceM };
+      if (prefer && near.edge.id === prefer.edge) return road;
+      nearest ??= road;
     }
-    return null;
+    return nearest;
   }
 
   /**
