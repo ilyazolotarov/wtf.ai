@@ -4,6 +4,9 @@ import {
   mapAction,
   nativeUpdate,
   nextPrompt,
+  RELOAD_BACKGROUND_MS,
+  reloadBlocker,
+  updateNotice,
   type AppBuildInfo,
   type Found,
   type MapUpdate,
@@ -98,5 +101,52 @@ describe("badges", () => {
     // Coming by itself, or skipped: nothing to do.
     expect(badges({ ...NONE, map: MAP, mapAction: "auto" }).any).toBe(false);
     expect(badges({ ...NONE, map: MAP, mapAction: "none" }).any).toBe(false);
+  });
+});
+
+describe("updateNotice", () => {
+  it("announces each new build once, and takes the notice back when it is no longer an update", () => {
+    expect(updateNotice(build(101), null)).toEqual({ show: 101, cancel: false });
+    expect(updateNotice(build(101), 101)).toEqual({ show: null, cancel: false });
+    expect(updateNotice(build(102), 101)).toEqual({ show: 102, cancel: false });
+    expect(updateNotice(null, 101)).toEqual({ show: null, cancel: true });
+    expect(updateNotice(null, null)).toEqual({ show: null, cancel: false });
+  });
+});
+
+describe("reloadBlocker", () => {
+  const idle = {
+    jsPending: true,
+    recorder: "idle" as const,
+    route: false,
+    link: "idle",
+    speedMps: 0,
+    downloading: false,
+    backgroundSinceMs: 0,
+    now: RELOAD_BACKGROUND_MS,
+  };
+
+  it("restarts into the update only in the background, with nothing going on", () => {
+    expect(reloadBlocker(idle)).toBeNull();
+    // Auto-connect looking for an adapter, a failed link, or one retrying after the adapter went quiet at a stop.
+    expect(reloadBlocker({ ...idle, link: "discovering" })).toBeNull();
+    expect(reloadBlocker({ ...idle, link: "error", speedMps: undefined })).toBeNull();
+    expect(reloadBlocker({ ...idle, link: "reconnecting" })).toBeNull();
+  });
+
+  it("waits while the driver looks, drives, guides or links, and without an update", () => {
+    expect(reloadBlocker({ ...idle, jsPending: false })).toBe("no update");
+    expect(reloadBlocker({ ...idle, backgroundSinceMs: null })).toBe("in front");
+    expect(reloadBlocker({ ...idle, now: RELOAD_BACKGROUND_MS - 1 })).toBe("in front");
+    expect(reloadBlocker({ ...idle, recorder: "recording" })).toBe("trip recording");
+    // The parked minutes after the engine stops are still the trip; an adapter up arms the next one.
+    expect(reloadBlocker({ ...idle, recorder: "lingering" })).toBe("trip lingering");
+    expect(reloadBlocker({ ...idle, recorder: "armed" })).toBe("trip armed");
+    expect(reloadBlocker({ ...idle, route: true })).toBe("route");
+    expect(reloadBlocker({ ...idle, link: "standby" })).toBe("adapter standby");
+    expect(reloadBlocker({ ...idle, link: "connecting" })).toBe("adapter connecting");
+    expect(reloadBlocker({ ...idle, link: "polling" })).toBe("adapter polling");
+    expect(reloadBlocker({ ...idle, speedMps: 5 })).toBe("moving");
+    expect(reloadBlocker({ ...idle, downloading: true })).toBe("download");
   });
 });

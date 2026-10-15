@@ -97,3 +97,59 @@ export function badges(found: Found): { app: boolean; maps: boolean; any: boolea
   const maps = found.map != null && (found.mapAction === "prompt" || found.mapAction === "dot");
   return { app, maps, any: app || maps };
 }
+
+/**
+ * The notification for a native update (Android, §5.3): the build to announce once, or null; `cancel` when the one
+ * shown is no longer an update (installed, or withdrawn). A driver who opens the app only in the car never sees the
+ * prompt there (busy), so the notification waits for them at home (2026-10-14: a tester drove 3 days and 7 builds
+ * behind, the dot on More unnoticed).
+ */
+export function updateNotice(native: AppBuildInfo | null, noticed: number | null): { show: number | null; cancel: boolean } {
+  if (!native) return { show: null, cancel: noticed != null };
+  return { show: native.build === noticed ? null : native.build, cancel: false };
+}
+
+/** What the app is doing that a reload would cut short (the update center's own downloads are added to it). */
+export interface ReloadContext {
+  /** A JS update is downloaded and waits for a restart. */
+  jsPending: boolean;
+  recorder: "idle" | "armed" | "recording" | "lingering";
+  route: boolean;
+  /** The vehicle link's state (`LinkState`). */
+  link: string;
+  speedMps: number | undefined;
+  /** A map or app download in progress. */
+  downloading: boolean;
+  /** The app has been in the background since. */
+  backgroundSinceMs: number | null;
+  now: number;
+}
+
+/**
+ * In the background at least this long before the restart: not on a glance at another app. Under Android's ~10 s
+ * before it freezes a cached app, after which the timer would only fire as the app opens again.
+ */
+export const RELOAD_BACKGROUND_MS = 5000;
+/**
+ * The adapter connecting, or the car answering: a driver getting in or sitting in it. Not `reconnecting` after a
+ * trip: the adapter goes quiet about a minute after the engine stops, and its link retries while the car stands.
+ */
+const LINK_BUSY = new Set(["connecting", "probing", "initializing", "standby", "polling"]);
+
+/**
+ * Why the downloaded JS update can't run yet by itself, or null: it may (§5.2). Only in the background, so nobody
+ * sees the restart, and only with nothing going on: the trip recorder idle (not armed by an adapter, recording, or in
+ * its parked minutes), no route, the adapter not connecting or answering, not moving, no download. A trip's end in
+ * the background is a chance too (the update center checks again on every change of these). Otherwise it runs from
+ * the next start, as before.
+ */
+export function reloadBlocker(c: ReloadContext): string | null {
+  if (!c.jsPending) return "no update";
+  if (c.backgroundSinceMs == null || c.now - c.backgroundSinceMs < RELOAD_BACKGROUND_MS) return "in front";
+  if (c.recorder !== "idle") return `trip ${c.recorder}`;
+  if (c.route) return "route";
+  if (LINK_BUSY.has(c.link)) return `adapter ${c.link}`;
+  if ((c.speedMps ?? 0) > MOVING_MPS) return "moving";
+  if (c.downloading) return "download";
+  return null;
+}

@@ -120,7 +120,9 @@ jobs:
 
   # A job of its own that nothing waits for: expo-doctor compares the dependencies with the newest patch releases
   # online, so the same commit fails the day Expo publishes one (2026-10-13: 9 packages a patch behind held back the
-  # OTA update and both builds). It still shows red here; `npx expo install --fix` is a deliberate step.
+  # OTA update and both builds). Patch releases alone are a warning, not a failure: `npx expo install --fix` changes
+  # the runtime version, so every installed build loses its JS updates until a new one is installed. Bump them with
+  # the next native change instead (docs/OTA.md). Any other finding fails.
   doctor:
     needs: plan
     if: ${{ needs.plan.outputs.checks == 'true' }}
@@ -140,7 +142,20 @@ jobs:
         run: npm ci
 
       - name: Expo doctor
-        run: npx expo-doctor
+        run: |
+          set +e
+          npx expo-doctor 2>&1 | tee doctor.log
+          status=${PIPESTATUS[0]}
+          set -e
+          [ "$status" = 0 ] && exit 0
+          # Only the SDK version check failed, and only by patch releases: a warning.
+          failed=$(grep -c '^✖' doctor.log || true)
+          if [ "$failed" = 1 ] && grep -q '^✖ Check that packages match versions required by installed Expo SDK' doctor.log \
+            && grep -q 'Patch version mismatches' doctor.log && ! grep -qE 'Major version mismatches|Minor version mismatches' doctor.log; then
+            echo "::warning::Expo patch releases are out: bump them (npx expo install --fix) with the next native change, not alone"
+            exit 0
+          fi
+          exit "$status"
 
   python:
     needs: plan

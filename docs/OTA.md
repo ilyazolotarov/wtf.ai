@@ -34,11 +34,15 @@ registered. The Google Play bundle is never published, so it registers nothing.
 - **Release builds only.** `expo-updates` is off in Debug builds (the dev client loads its JS itself), so `main`
   builds Release; a branch with `[build]` still gives a Debug dev client for Metro.
 - **Runtime version = fingerprint** (`runtimeVersion.policy` in `app.json`): a hash of everything native (Expo SDK,
-  native modules, config plugins, `patches/`, `app.json`, …; `fingerprint.config.js` leaves out package.json scripts
-  and `.gitignore`). An update goes only to builds with exactly its runtime version, so JS can never land on a
+  native modules, config plugins, `patches/`, `app.json`, …; `fingerprint.config.js` leaves out package.json scripts,
+  `.gitignore` and app.config's `extra`, which an update carries itself, but keeps the distribution). An update goes only to builds with exactly its runtime version, so JS can never land on a
   binary without the native code it needs. Resolve it in CI (Linux/macOS), never on Windows: line endings change it.
   `.fingerprintignore` leaves out the library `AndroidManifest.xml` files in `node_modules`: React Native's Gradle
   plugin rewrites some of them during the build, so the build and an export would never agree on Android's runtime.
+- **Few runtimes.** Each new runtime leaves every installed build without JS updates until its driver installs a
+  new one. Batch native changes; Expo patch releases
+  are a warning in CI, bumped with the next native change, never alone. Config that native code doesn't read goes in
+  app.config's `extra`, outside the runtime.
 - **No update for a runtime no build has.** `--require-build` fails the publish when the fingerprint changed without
   a native build (a native input `ci-plan.sh` does not know): the fix is a build, then publish again.
 - **Signed.** The app accepts only updates signed with the key of `certs/certificate.pem` (`rsa-v1_5-sha256`, keyid
@@ -49,7 +53,8 @@ registered. The Google Play bundle is never published, so it registers nothing.
   them (`publish-ota`, `publish-builds`, `map-packs`) run in the environment.
   The Worker holds no key: a leaked publish token can replace what phones get only with something CI signed.
   A new certificate means a new native build, and phones on the old one take no updates until they install it.
-- **Never mid-drive.** `fallbackToCacheTimeout: 0`; the app never calls `reloadAsync()` on its own.
+- **Never mid-drive.** `fallbackToCacheTimeout: 0`; the app calls `reloadAsync()` on its own only in the background
+  with nothing going on (UPDATES-SPEC §5.2).
 - **Which JS ran is known.** About shows the JS commit and whether it is built in or an update; trip logs carry
   `ver_update` and `ver_runtime` (TRIP-LOGGER-SPEC §6.2); Sentry events the `js_source` tag next to `build_sha`.
 - **Files are immutable.** `assets/<key>` is the file's SHA-256; a file is uploaded once and never changed or

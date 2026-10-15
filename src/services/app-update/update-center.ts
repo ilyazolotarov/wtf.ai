@@ -1,10 +1,12 @@
 // The app's update checks (docs/UPDATES-SPEC.md §5): what is new for the app and the active region's map, the
 // automatic map updates, and what the prompts and dots need. The prompts themselves are `UpdatePrompts` (map screen).
 import * as Updates from "expo-updates";
-import { AppState } from "react-native";
+import { AppState, PermissionsAndroid, Platform } from "react-native";
 import { useSyncExternalStore } from "react";
 
+import AppNotice from "../../../modules/app-notice/src/AppNoticeModule";
 import { Sentry } from "@/config/sentry";
+import { stringsNow } from "@/i18n/strings-now";
 import { kvStore } from "@/services/kv-store";
 import {
   downloadRegion,
@@ -18,7 +20,20 @@ import {
   subscribeMapPacks,
 } from "@/services/offline-map/map-packs";
 
-import { badges, mapAction, nativeUpdate, SNOOZE_MS, type AppBuildInfo, type Found, type MapUpdate } from "./decide";
+import {
+  badges,
+  mapAction,
+  MOVING_MPS,
+  nativeUpdate,
+  RELOAD_BACKGROUND_MS,
+  reloadBlocker,
+  SNOOZE_MS,
+  updateNotice,
+  type AppBuildInfo,
+  type Found,
+  type MapUpdate,
+  type ReloadContext,
+} from "./decide";
 import {
   clearDownloads,
   downloadBuild,
@@ -38,6 +53,10 @@ const CATALOG_CHECK_MS = 6 * 3600 * 1000;
 const LAUNCH_DELAY_MS = 5000;
 const FETCH_TIMEOUT_MS = 15000;
 const STORE_KEY = "app-update";
+/** The background restart's timer firing this much later than asked: the app was frozen, and wakes as it opens. */
+const RELOAD_LATE_MS = 5000;
+/** A tap on the update notification opens the App update page. */
+const UPDATE_PAGE_URL = "wtfai://more/update";
 
 interface Saved {
   /** promptKey → until when "Later" holds it back. */
@@ -47,6 +66,12 @@ interface Saved {
   lastCatalogCheck: number;
   /** The active region's update at the last catalog check: the dots stay across restarts without a new fetch. */
   map: MapUpdate | null;
+  /** The native build the notification announced (Android). */
+  noticedBuild: number | null;
+  /** Android 13+ asked once whether the app may notify. */
+  askedNotifications: boolean;
+  /** The native update the last check found ("build date"), or null: a trip that starts before this launch's check. */
+  waitingBuild: string | null;
 }
 
 /** The IPA/APK download for the App update page. */
@@ -71,10 +96,16 @@ export interface UpdateCenterState {
   unmetered: boolean;
 }
 
-/** What the update center needs from the rest of the app: is a trip or a route on (the install gate). */
+/**
+ * What the update center needs from the rest of the app: is a trip or a route on (the map install gate), and what
+ * a restart into a downloaded JS update would cut short.
+ */
 export interface UpdateCenterDeps {
   driving(): boolean;
   subscribeDriving(listener: () => void): () => void;
+  activity(): Pick<ReloadContext, "recorder" | "route" | "link" | "speedMps">;
+  /** Any of `activity` changed: the trip, the route, the vehicle link. */
+  subscribeActivity(listener: () => void): () => void;
 }
 
 let saved: Saved = {
@@ -82,6 +113,9 @@ let saved: Saved = {
   skippedMap: null,
   lastCatalogCheck: 0,
   map: null,
+  noticedBuild: null,
+  askedNotifications: false,
+  waitingBuild: null,
   ...(kvStore.getJson<Partial<Saved>>(STORE_KEY) ?? {}),
 };
 let state: UpdateCenterState = {
@@ -97,6 +131,13 @@ let state: UpdateCenterState = {
 const listeners = new Set<() => void>();
 let started = false;
 let downloadAbort: AbortController | null = null;
+let deps: UpdateCenterDeps | null = null;
+/** In the background since (ms), or null in front. */
+let backgroundSince: number | null = null;
+let reloadTimer: ReturnType<typeof setTimeout> | undefined;
+let reloading = false;
+/** A system dialog of ours is up: Android calls that the background too, but the driver is looking. */
+let asking = false;
 
 function setState(patch: Partial<UpdateCenterState>) {
   state = { ...state, ...patch };
@@ -129,6 +170,14 @@ export function useUpdateBadges(): ReturnType<typeof badges> {
     if (next.app !== lastBadges.app || next.maps !== lastBadges.maps) lastBadges = next;
     return lastBadges;
   });
+}
+
+/**
+ * For the trip log (TRIP-LOGGER-SPEC §6.2): an app build the driver hasn't installed, and a downloaded JS update
+ * waiting for a restart. Empty: none known.
+ */
+export function waitingUpdateInfo(): { upd_build: string; upd_js: string } {
+  return { upd_build: saved.waitingBuild ?? "", upd_js: state.found.js ?? "" };
 }
 
 /** "Later": no prompt for this version for 3 days; the dots stay. */
@@ -209,7 +258,10 @@ export async function checkForUpdates(reason: "launch" | "resume" | "manual"): P
   let error: string | null = null;
   try {
     const latest = await withTimeout(fetchLatestBuild);
-    setState({ latest, found: { ...state.found, native: nativeUpdate(latest, ownBuild()) } });
+    const native = nativeUpdate(latest, ownBuild());
+    setState({ latest, found: { ...state.found, native } });
+    save({ waitingBuild: native ? `${native.build} ${native.date.slice(0, 10)}` : null });
+    void notifyNativeUpdate();
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);
   }
@@ -272,14 +324,88 @@ export async function openBuild(): Promise<void> {
 }
 
 /**
+ * Android: a notification for a native update, once per build (§5.3), taken back once it is installed. Android 13+
+ * asks once whether the app may notify: in front and not while the car moves.
+ */
+async function notifyNativeUpdate(): Promise<void> {
+  if (Platform.OS !== "android" || !AppNotice) return;
+  const notice = updateNotice(state.found.native, saved.noticedBuild);
+  if (notice.cancel) {
+    AppNotice.cancelUpdateNotice();
+    save({ noticedBuild: null });
+  }
+  if (notice.show == null) return;
+  const moving = (deps?.activity().speedMps ?? 0) > MOVING_MPS;
+  if (Number(Platform.Version) >= 33 && !saved.askedNotifications && AppState.currentState === "active" && !moving) {
+    save({ askedNotifications: true });
+    asking = true;
+    await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS).catch(() => undefined);
+    asking = false;
+  }
+  const strings = stringsNow();
+  try {
+    if (AppNotice.showUpdateNotice(strings.updateNoticeTitle, strings.updateNoticeText, strings.updateNoticeChannel, UPDATE_PAGE_URL)) {
+      save({ noticedBuild: notice.show });
+    }
+  } catch (e) {
+    Sentry.captureException(e, { tags: { feature: "app-update" } });
+  }
+}
+
+/**
+ * A downloaded JS update runs at once, in the background, when nothing would be cut short (§5.2, `reloadBlocker`);
+ * otherwise from the next start. Android keeps the app's process for days, so the next start can be far off.
+ */
+function considerReload(): void {
+  if (!deps || reloading || asking || AppState.currentState === "active") return;
+  const map = getMapPacks().download;
+  const blocker = reloadBlocker({
+    jsPending: state.found.js != null,
+    ...deps.activity(),
+    downloading: state.download?.phase === "downloading" || (map != null && map.phase !== "paused"),
+    backgroundSinceMs: backgroundSince,
+    now: Date.now(),
+  });
+  if (blocker) return;
+  reloading = true;
+  Sentry.addBreadcrumb({ category: "app-update", message: `restart into JS update ${state.found.js} in the background` });
+  Updates.reloadAsync().catch((e) => {
+    reloading = false;
+    Sentry.captureException(e, { tags: { feature: "app-update" } });
+  });
+}
+
+/** In the background: the restart's chance, after `RELOAD_BACKGROUND_MS`; in front: none. */
+function onAppState(appState: string): void {
+  clearTimeout(reloadTimer);
+  if (appState === "active") {
+    backgroundSince = null;
+    void checkForUpdates("resume");
+    return;
+  }
+  if (appState !== "background") return;
+  backgroundSince = Date.now();
+  const due = backgroundSince + RELOAD_BACKGROUND_MS;
+  reloadTimer = setTimeout(() => {
+    // Late: the process was frozen and wakes now, most likely because the driver opens the app.
+    if (Date.now() - due > RELOAD_LATE_MS) return;
+    considerReload();
+  }, RELOAD_BACKGROUND_MS);
+}
+
+/**
  * Starts the checks: at launch, on return to the foreground, and the automatic map update's network rule (an update
  * started on Wi-Fi pauses on mobile data and goes on back on Wi-Fi). Once per app life.
  */
-export function startUpdateCenter(deps: UpdateCenterDeps): void {
+export function startUpdateCenter(appDeps: UpdateCenterDeps): void {
   if (started) return;
   started = true;
+  deps = appDeps;
   clearDownloads();
-  setInstallGate({ allowed: () => !deps.driving(), subscribe: deps.subscribeDriving });
+  setInstallGate({ allowed: () => !appDeps.driving(), subscribe: appDeps.subscribeDriving });
+  // A trip that ends (its parked minutes over), a route that stops or the adapter going quiet while the app is in the
+  // background: the restart's chance.
+  appDeps.subscribeActivity(considerReload);
   // A download starts or ends, another region becomes active, a catalog arrives: the map update changes too. Not on
   // every progress tick.
   let seen: unknown[] = [];
@@ -298,6 +424,6 @@ export function startUpdateCenter(deps: UpdateCenterDeps): void {
     if (download?.auto && download.phase === "paused" && unmetered) void resumeDownload();
     refreshMap({ start: unmetered });
   });
-  AppState.addEventListener("change", (s) => s === "active" && void checkForUpdates("resume"));
+  AppState.addEventListener("change", onAppState);
   setTimeout(() => void checkForUpdates("launch"), LAUNCH_DELAY_MS);
 }

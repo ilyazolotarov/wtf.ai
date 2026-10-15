@@ -95,8 +95,18 @@ its own, so a failed prune never fails a publish. It never removes what `latest`
 
 ### 5.2 What it does with what it finds
 
-- **JS update downloaded** (`isUpdatePending`): prompt "Restart" (§5.3). Otherwise it runs from the next start.
-- **Native update**: prompt.
+- **JS update downloaded** (`isUpdatePending`): prompt "Restart" (§5.3). Otherwise it runs from the next start, or
+  sooner: 5 s after the app goes to the background, it restarts into the update by itself when nothing would be cut
+  short (`reloadBlocker`): the trip recorder idle (not armed by an adapter, recording, or in its parked minutes after
+  the engine stops), no route, the adapter not connecting or answering (retrying after it went quiet at a stop is
+  fine), not moving, no map or app download, none of the app's own system dialogs up. Any change of these while the
+  app is in the background is that chance too: typically the trip ending when its parked minutes are over. Android keeps the app's process for days, so "the next start" could be after many
+  drives. Not when the timer fires more than 5 s late: the process was frozen and wakes because the driver opens it.
+- **Native update**: prompt. On Android also a notification (local: the app posts it when its own check finds the
+  build, no push server), once per build ("wtf.ai update ready"; a tap opens App
+  update), taken back once it is installed: a driver who opens the app only in the car, where the prompt waits, sees
+  it at home. Android 13+ asks once whether the app may
+  notify, in front and not while moving. Builds before 2026-10-15 lack the notification.
 - **The active region's map is outdated** (tiles, graph, search index or shared files differ from the catalog):
   - on an unmetered network and the download is at most **300 MB**: download it in the background, no prompt. It is
     installed once no trip records and no route is active; until then it waits, verified, and the old map stays in use.
@@ -125,7 +135,8 @@ A system alert, one per check, the most important first: native update, then JS 
   the dots only, and the prompt waits for a later check. Each prompt shows at most once per launch.
 - **Later**: no prompt for that version for 3 days; the dots stay. **Skip** (maps): no prompt and no dot for that OSM
   date; Offline maps still offers it.
-- The app never restarts, installs or opens AltStore by itself.
+- The app never installs or opens AltStore by itself; it restarts by itself only into a downloaded JS update, in the
+  background, with nothing going on (§5.2).
 
 ### 5.4 Dots
 

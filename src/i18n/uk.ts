@@ -171,6 +171,9 @@ export const uk = {
   tripNotificationTitle: "wtf.ai записує вашу поїздку",
   tripNotificationText: "Натисніть, щоб відкрити мапу.",
   tripNotificationChannel: "Поїздка триває",
+  updateNoticeTitle: "Оновлення wtf.ai готове",
+  updateNoticeText: "Нова версія застосунку готова. Натисніть, щоб установити, краще до наступної поїздки.",
+  updateNoticeChannel: "Оновлення застосунку",
   mfiNotFound:
     "Адаптер не знайдено. Переведіть його в режим створення пари (OBDLink MX+: натисніть кнопку; vLinker: вставте в авто) і спробуйте ще раз.",
   remembered: "Відомі адаптери",

@@ -17,7 +17,7 @@ import { kvStore } from "./kv-store";
 import { CalibrationStore } from "./navigation/calibration-store";
 import { NavigatorService, type MapMatchLoop } from "./navigation/navigator-service";
 import { ROUTER_CACHE_TILES, RouteService } from "./navigation/route-service";
-import { startUpdateCenter } from "./app-update/update-center";
+import { startUpdateCenter, waitingUpdateInfo } from "./app-update/update-center";
 import { onMapDownloadFailed } from "./offline-map/map-packs";
 import { activeRoadGraph, openActiveRoadGraph } from "./offline-map/road-graph-file";
 import { SensorService } from "./sensor-capture/sensor-service";
@@ -147,6 +147,8 @@ export function getRuntime(): Runtime {
       ver_sw: `${Constants.expoConfig?.version ?? "?"} (${Constants.nativeBuildVersion ?? "dev"}${process.env.EXPO_PUBLIC_BUILD_SHA ? ` ${process.env.EXPO_PUBLIC_BUILD_SHA.slice(0, 7)}` : ""})`,
       // The OTA update the drive ran, when the JS is newer than the build.
       ...jsSourceInfo(),
+      // An app build or JS update waiting to be installed: a drive on old code says so.
+      ...waitingUpdateInfo(),
       sys_hw: sysHw,
       sys_os_ver: sysOsVer,
       // The navigator version this drive starts with (a change mid-drive is a note).
@@ -359,6 +361,16 @@ export function getRuntime(): Runtime {
   // map in use only while no trip records and no route is on.
   startUpdateCenter({
     driving: () => recorder.getSnapshot().state === "recording" || routes.getSnapshot() != null,
+    activity: () => ({
+      recorder: recorder.getSnapshot().state,
+      route: routes.getSnapshot() != null,
+      link: link.getSnapshot().link,
+      speedMps: position.getSnapshot()?.speedMps,
+    }),
+    subscribeActivity: (listener) => {
+      const off = [recorder.subscribe(listener), routes.subscribe(listener), link.subscribe(listener)];
+      return () => off.forEach((o) => o());
+    },
     subscribeDriving: (listener) => {
       const offRecorder = recorder.subscribe(listener);
       const offRoutes = routes.subscribe(listener);
