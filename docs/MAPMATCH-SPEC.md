@@ -1103,7 +1103,9 @@ incident reports, the detector is fixed first, and shown to fire on that log, be
     a jump to the eye. Real drives (79, 8 seeds): incidents 134 → 97 (drawn) and 206 → 154 (parked), major jumps
     1269 → 579, the other kinds unchanged, no drive worse; off the roads above 20 km/h 41 → 48 s and 47 → 54 s (it
     cuts the corner it glides round). Simulated drives (6 scenarios × 60 × 4 seeds): 80 better, none worse, jumps
-    359 → 125. 40 m/s scores as 25.
+    359 → 125. 40 m/s scores as 25. Back within 15 m of the hypothesis along its road it glides too (it was put
+    there at once, a step back to the eye): real incidents 97 → 94 and 154 → 145, simulated 10 better, 1 worse by one
+    seed. Gliding gaps up to 150 m, not 80: real incidents −3 each, off the roads at speed 48 → 65 s; not kept.
   - **At the spot it parked in off the roads** (`NavEstimate.parkedOffRoad`: started from such a pose, not 20 m
     driven since, state `offroad`): the EKF is the puck, not the dominant hypothesis. The off-road particles spread
     over the pose's σ in clusters lighter than a road's within it.

@@ -125,6 +125,13 @@ describe("the dot keeps steady along its road", () => {
     expect((d.lon - 30.52) * 111_320 * Math.cos((50.45 * Math.PI) / 180)).toBeCloseTo(5, 0);
   });
 
+  test("a hypothesis well behind on its road is glided back to, not jumped", () => {
+    // 0.2 s at 10 m/s from 0: the dot would be at 2 m; the hypothesis 40 m behind it. Held 15 m from it would be
+    // 23 m back at once; gliding, 0.2 s × (1 + 25) m/s back at most.
+    const d = steadyDot(north(-38), last(0), 10, 200_000);
+    expect((d.lat - 50.45) * 111_320).toBeCloseTo(2 - 0.2 - 5, 0);
+  });
+
   test("a hypothesis far away is drawn as it is", () => {
     expect(steadyDot(north(200), last(0), 10, 1_000_000)).toMatchObject({ lat: north(200).lat });
   });

@@ -76,7 +76,8 @@ export const puckTuning = {
    */
   steadyHoldM: 15,
   /**
-   * Across its road, onto another road or round a turn (within `steadyMaxM`), the dot glides there at most this fast
+   * Across its road, onto another road, round a turn (within `steadyMaxM`) and back within `steadyHoldM` of the
+   * hypothesis along its road, the dot glides there at most this fast
    * (m/s) instead of jumping: the filter's corrections come as the car turns or a rival takes the lead, 30–80 m at
    * once, and the map eased each over a quarter of a second, a jump to the eye. 0: at once.
    */
@@ -124,7 +125,9 @@ export function steadyDot(target: { lat: number; lon: number; headingRad: number
   }
   const along = de * ue + dn * un;
   const limited = Math.max(-t.steadyBackMps * dtS, Math.min(t.steadyCatchMps * dtS, along));
-  const kept = Math.max(along - t.steadyHoldM, Math.min(along + t.steadyHoldM, limited));
+  // Held within `steadyHoldM` of the hypothesis along the road, gliding there too.
+  const held = Math.max(along - t.steadyHoldM, Math.min(along + t.steadyHoldM, limited));
+  const kept = slideM > 0 ? limited + Math.max(-slideM, Math.min(slideM, held - limited)) : held;
   // Across the road at once, or no faster than the slide.
   const acrossE = de - along * ue;
   const acrossN = dn - along * un;
