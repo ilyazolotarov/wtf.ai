@@ -151,7 +151,7 @@ says so.
     the next `npm run logs:push` (tools/triplog/README.md).
   - The replay runs the navigator the drive was recorded with (the log header; the app runs full correction,
     MAPMATCH-SPEC §9).
-  - *Adapter*: *OBD, as recorded*, or *None: phone only*: the app in phone-only mode (NAVIGATOR-SPEC §9.6), fed
+  - *Adapter*: *As recorded* (the speed the app took, OBD or the CAN wheels), or *None: phone only*: the app in phone-only mode (NAVIGATOR-SPEC §9.6), fed
     no OBD speed or engine states. The blue dot is then the phone's own dead reckoning wherever GPS isn't good; the
     timeline draws its speed (blue, scaled by what its map matching learned) over OBD's (grey), rings around the dot
     are the other roads its tracker holds (label = weight), and *At the cursor* says its speed and what the dot is
@@ -201,6 +201,15 @@ says so.
     on the way is on its road. Shift-click draws a straight stretch anyway, or toggles it on a point; drag a point
     to move it, right-click to delete it, click the line to add one in between; Ctrl+Z undoes, Esc ends. Every
     change is saved at once as `<log>.truth.json` beside the log (git-ignored with it).
+  - *Off the roads* (O): clicks stay exactly where you put them however near a road (`free` points, filled), joined
+    straight — a car park beside the road; Alt-click a point toggles it. *Add at the start* (S): clicks go before the
+    first point, to draw a start you missed without redrawing the drive.
+  - *Gyro path* (Layers, dashed violet): where the car's own gyro and wheels say it went, 90 s either side of the
+    cursor, laid on the drawing at the cursor and turned to its direction there (`odometryTrack`, app-chain.ts). Put
+    the cursor where the drawing is surely right and check the car park or yard next to it; against GPS it was
+    within ~10 m 30 s from the cursor and ~15 m at 60 s (median).
+  - *Your placings* (Layers): where you put the car during the drive, its heading, and a dashed line to where the
+    drawing has the car then; the panel lists each with that distance (click one to go there).
   - The car's place on it every second comes from the odometer — the speed the app drove on: OBD, or the CAN wheels
     on a log recorded with CAN primary, which polls OBD only standing — pinned at the drive's ends (start where it
     was parked, end where it parked) and at any clean fix. *Drawn* against *odometer* checks the drawing: they agree

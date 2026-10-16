@@ -11,9 +11,13 @@ import { isSatelliteFix } from "../types";
 import { TRUTH_ACCURACY_M, trackAt, type ShownPoint } from "./drive-report";
 import { obdOdometer, sliceAlong } from "./truth-match";
 
-/** A point clicked on the map. `straight`: the stretch from the previous point is a straight line, not along roads. */
+/**
+ * A point clicked on the map. `straight`: the stretch from the previous point is a straight line, not along roads.
+ * `free`: off the roads where it was clicked, however near one (a car park beside the road).
+ */
 export interface DrawnPoint extends Coordinate {
   straight?: boolean;
+  free?: boolean;
 }
 
 /** The stretch from one point to the next. */
@@ -93,9 +97,9 @@ export function drawPath(graph: RoadGraph | null, frame: LocalFrame, points: rea
   });
   // Off the roads takes two clicks in a row, or a drive's end (where it parked): one alone beside a road on the way
   // was meant on it.
-  const far = (i: number) => i >= 0 && i < points.length && !(snaps[i] && snaps[i]!.distanceM <= ON_ROAD_M);
+  const far = (i: number) => i >= 0 && i < points.length && (!!points[i].free || !(snaps[i] && snaps[i]!.distanceM <= ON_ROAD_M));
   const alone = (i: number) => i > 0 && i + 1 < points.length && !far(i - 1) && !far(i + 1);
-  const onRoad = snaps.map((s, i) => !far(i) || (!!s && s.distanceM <= SNAP_M && alone(i)));
+  const onRoad = snaps.map((s, i) => !points[i].free && (!far(i) || (!!s && s.distanceM <= SNAP_M && alone(i))));
   const clicked = (i: number): [number, number] => [points[i].lat, points[i].lon];
   // A point on a road is drawn on it when a road stretch arrives or leaves there, else where it was clicked.
   const place = (i: number): [number, number] => {

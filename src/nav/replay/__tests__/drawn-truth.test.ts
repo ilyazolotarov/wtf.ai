@@ -72,6 +72,26 @@ describe("drawPath", () => {
     expect(p.at(-1)).toEqual([51.527, 30.765]);
   });
 
+  test("a point drawn off the roads stays where it was clicked, however near a road", () => {
+    // Two clicks in a car park 6 m beside 160, then one on the road: the car park is straight, the road after it along it.
+    const { path: p, legs } = drawPath(graph(), frame, [
+      { lat: 51.53005, lon: 30.762, free: true },
+      { lat: 51.53005, lon: 30.763, free: true },
+      { lat: 51.5301, lon: 30.77 },
+    ]);
+    expect(legs[0]).toMatchObject({ kind: "straight", reason: "off the roads" });
+    expect(p[0]).toEqual([51.53005, 30.762]);
+    expect(p).toContainEqual([51.53005, 30.763]);
+    expect(legs[1].kind).toBe("road");
+    // Without `free`, both were on the road.
+    const snapped = drawPath(graph(), frame, [
+      { lat: 51.53005, lon: 30.762 },
+      { lat: 51.53005, lon: 30.763 },
+      { lat: 51.5301, lon: 30.77 },
+    ]);
+    expect(near(snapped.path, { lat: 51.53005, lon: 30.762 })).toBeGreaterThan(4);
+  });
+
   // 1 m of latitude, and of longitude along 51.53 N.
   const latM = 1 / 111_195;
   const lonM = 1 / (111_195 * Math.cos((51.53 * Math.PI) / 180));

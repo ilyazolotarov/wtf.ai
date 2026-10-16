@@ -12,7 +12,7 @@
     --gps: #16a34a; --phone: #7c3aed; --pred: #2563eb; --cmp: #ea580c;
     --coarse: #d97706; --rej: #dc2626; --cut: #8b93a1; --ok: #16a34a; --warn: #d97706; --bad: #dc2626;
     --road: #a21caf; --road-end: #ea580c; --truth: #0f766e; --mm: #111827; --accent: #2563eb;
-    --nogps: #8b93a1; --appcut: #d97706; --replaycut: #2563eb; --route: #db2777; --drawn: #111827; --can: #0d9488;
+    --nogps: #8b93a1; --appcut: #d97706; --replaycut: #2563eb; --route: #db2777; --drawn: #111827; --can: #0d9488; --odo: #7c3aed; --placing: #e11d48;
     color-scheme: light;
   }
   @media (prefers-color-scheme: dark) {
@@ -21,7 +21,7 @@
       --gps: #4ade80; --phone: #c4b5fd; --pred: #60a5fa; --cmp: #fb923c;
       --coarse: #fbbf24; --rej: #f87171; --cut: #8b93a1; --ok: #4ade80; --warn: #fbbf24; --bad: #f87171;
       --road: #e879f9; --road-end: #fb923c; --truth: #2dd4bf; --mm: #fde047; --accent: #60a5fa;
-      --nogps: #8b93a1; --appcut: #fbbf24; --replaycut: #60a5fa; --route: #f472b6; --drawn: #f8fafc; --can: #2dd4bf;
+      --nogps: #8b93a1; --appcut: #fbbf24; --replaycut: #60a5fa; --route: #f472b6; --drawn: #f8fafc; --can: #2dd4bf; --odo: #c4b5fd; --placing: #fb7185;
       color-scheme: dark;
     }
   }
@@ -130,11 +130,10 @@
       <ul id="driveList" role="listbox" aria-label="Drives"></ul>
     </div>
   </div>
-  <label title="OBD as recorded; CAN wheel speeds where the CAN shadow heard them (OBD between; SPEC §2.1 Stage 2); or none: the app in phone-only mode (Developer settings → Navigate without an adapter, NAVIGATOR-SPEC §9.6), its dot from the phone's own speed and gyro; GPS still takes over when it is good">Adapter
+  <label title="As recorded: the speed the app took, OBD or the CAN wheels; or none: the app in phone-only mode (Developer settings → Navigate without an adapter, NAVIGATOR-SPEC §9.6), its dot from the phone's own speed and gyro; GPS still takes over when it is good">Adapter
     <select id="adapter">
-      <option value="">OBD, as recorded</option>
+      <option value="">As recorded</option>
       <option value="none">None: phone only</option>
-      <option value="can">CAN wheel speeds (where heard)</option>
     </select></label>
   <label title="What the replay gets of GPS. As in the app = your Cut GPS moments withheld, like on the phone">GPS
     <select id="gps">
@@ -185,6 +184,8 @@
       <label title="Road graph used for map matching: lines by class, arrows on one-ways"><input id="showRoads" type="checkbox" /> roads (map matching)</label>
       <label title="The road the car was on, matched offline from clean GPS (MAPMATCH-SPEC §10.1); × marks breaks"><input id="showTruth" type="checkbox" /> true path</label>
       <label title="The roads you drew in Ground truth, and where they put the car at the cursor (ring)"><input id="showDrawn" type="checkbox" checked /> ground truth (drawn)</label>
+      <label title="Where the car's own gyro and wheels say it went, 90 s either side of the cursor (dashed): laid on the drawing at the cursor and turned to its direction there. Put the cursor where the drawing is surely right (on a road, driving straight) to check a car park or a yard next to it. Against GPS it was within ~10 m 30 s from the cursor and ~15 m at 60 s (median), farther on the worst stretches"><input id="showOdo" type="checkbox" checked /> gyro path (around the cursor)</label>
+      <label title="Where the driver put the car on the map during the drive (the log's notes), its heading, and the drawing's place at that moment"><input id="showPlacings" type="checkbox" checked /> your placings</label>
       <label title="Map matching inside the replay: particles (size by weight; hollow = off-road) and its hypotheses (ring = spread, label = weight)"><input id="showMm" type="checkbox" /> map-matching particles</label>
       <label title="The route the phone planned (pink), its maneuvers, and the routes it replaced (grey)"><input id="showRoute" type="checkbox" checked /> planned route</label>
     </details>
@@ -258,6 +259,8 @@ let drawing = false;
 let draft = [];
 const undo = [];
 let drawnSeq = 0;
+/** While drawing: new clicks off the roads where clicked (`free`), and added before the first point instead of after the last. */
+const drawMode = { free: false, atStart: false };
 let drawnStatus = "";
 let drawnScores = {};
 let drawnErrors = {};
@@ -366,7 +369,7 @@ map.on("error", (e) => showError(`map: ${e.error?.message ?? e.error}`));
 function addLayers() {
   const empty = fc([]);
   const sources = ["roads", "roadNodes", "truth", "truthBreaks", "particles", "clusters", "fixes", "gpsTrack", "gpsNow", "gpsAcc", "routeOld", "routeLine", "routeManeuvers",
-    "drawnPath", "drawnStraight", "drawnPoints", "drawnNow"];
+    "drawnPath", "drawnStraight", "drawnPoints", "drawnNow", "odoPath", "odoNow", "placings", "placingHeads", "placingGaps"];
   for (const tr of TRACKS) sources.push(`${tr.key}Line`, `${tr.key}Jumps`, `${tr.key}Now`, `${tr.key}Acc`, `${tr.key}Err`);
   for (const id of sources) map.addSource(id, { type: "geojson", data: empty });
   addRoadLayers();
@@ -420,8 +423,27 @@ function addLayers() {
   map.addLayer({ id: "drawnNow", type: "circle", source: "drawnNow",
     paint: { "circle-radius": 9, "circle-color": "transparent", "circle-stroke-color": css("--drawn"), "circle-stroke-width": 3 } });
   map.addLayer({ id: "drawnPoints", type: "circle", source: "drawnPoints",
-    paint: { "circle-radius": 6, "circle-color": ["case", ["get", "straight"], css("--warn"), css("--panel")],
+    paint: { "circle-radius": 6, "circle-color": ["case", ["get", "free"], css("--drawn"), ["get", "straight"], css("--warn"), css("--panel")],
       "circle-stroke-color": css("--drawn"), "circle-stroke-width": 2.5 } });
+  // The gyro and wheels' path around the cursor, and where it has the car now.
+  map.addLayer({ id: "odoPath", type: "line", source: "odoPath", layout: { "line-cap": "round", "line-join": "round" },
+    paint: { "line-color": css("--odo"), "line-width": 3, "line-dasharray": [1, 1.5], "line-opacity": 0.9 } });
+  map.addLayer({ id: "odoNow", type: "circle", source: "odoNow",
+    paint: { "circle-radius": 4, "circle-color": css("--odo") } });
+  // The driver's placings: the spot, its heading, and a line to where the drawing has the car then.
+  map.addLayer({ id: "placingGaps", type: "line", source: "placingGaps",
+    paint: { "line-color": css("--placing"), "line-width": 1.5, "line-dasharray": [2, 2] } });
+  map.addLayer({ id: "placingHeads", type: "line", source: "placingHeads", layout: { "line-cap": "round" },
+    paint: { "line-color": css("--placing"), "line-width": 3 } });
+  map.addLayer({ id: "placings", type: "circle", source: "placings",
+    paint: { "circle-radius": 7, "circle-color": css("--panel"), "circle-stroke-color": css("--placing"), "circle-stroke-width": 3 } });
+  map.on("click", "placings", (e) => { if (!drawing) seek(+e.features[0].properties.t); });
+  map.on("mousemove", "placings", (e) => {
+    const f = e.features[0].properties;
+    map.getCanvas().style.cursor = drawing ? "crosshair" : "pointer";
+    popup.setLngLat(e.lngLat).setHTML(`You placed the car here at ${fmtT(+f.t)}${f.gap ? ` · ${esc(f.gap)} from the drawing then` : ""}`).addTo(map);
+  });
+  map.on("mouseleave", "placings", () => { map.getCanvas().style.cursor = drawing ? "crosshair" : ""; popup.remove(); });
   addDrawingHandlers();
   const popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false });
   map.on("mouseenter", "fixes", (e) => {
@@ -557,6 +579,7 @@ async function setStatic() {
   map.getSource("gpsTrack").setData(fc(sats.length > 1 ? [line(sats.map((f) => [f.lon, f.lat]))] : []));
   map.getSource("fixes").setData(fc($("showFixes").checked
     ? data.fixes.map((f) => pt(f, { t: f.t, sat: f.sat, acc: f.acc, status: f.status, kind: !f.sat ? "coarse" : f.acc <= TRUTH_ACC_M ? "truth" : "weak" })) : []));
+  setPlacings();
 }
 
 /** Dots, circles and distance lines at the cursor. */
@@ -572,6 +595,7 @@ function updateMap() {
     map.getSource(`${tr.key}Err`).setData(fc(p && to && $("showErr").checked ? [line([[p.lon, p.lat], [to.lon, to.lat]])] : []));
   }
   map.getSource("drawnNow").setData(fc(drawnNow ? [pt(drawnNow)] : []));
+  updateOdo(drawnAt(t));
   map.getSource("gpsNow").setData(fc(fix ? [pt(fix, { opacity: age < 3 ? 1 : age < 15 ? 0.5 : 0.2 })] : []));
   map.getSource("gpsAcc").setData(fc(fix && age < 3 ? [circle(fix, Math.max(1, fix.acc))] : []));
   updateMapMatch();
@@ -674,6 +698,66 @@ function drawnAt(time) {
   return { lat: a[1] + (b[1] - a[1]) * f, lon: a[2] + (b[2] - a[2]) * f, s: a[3] + (b[3] - a[3]) * f };
 }
 
+/** The drawing's direction (rad clockwise from north) at s m along it, over ±10 m. */
+function drawnBearingAt(s) {
+  const path = drawn?.truth?.path, cum = drawn?.timed?.cum;
+  if (!path?.length || !cum?.length) return null;
+  const pointAt = (m) => {
+    const i = Math.max(0, Math.min(path.length - 2, indexAt(cum, m, (c) => c)));
+    const f = cum[i + 1] > cum[i] ? Math.max(0, Math.min(1, (m - cum[i]) / (cum[i + 1] - cum[i]))) : 0;
+    return [path[i][0] + (path[i + 1][0] - path[i][0]) * f, path[i][1] + (path[i + 1][1] - path[i][1]) * f];
+  };
+  const a = pointAt(Math.max(0, s - 10)), b = pointAt(Math.min(cum.at(-1), s + 10));
+  const dx = (b[1] - a[1]) * Math.cos(rad(a[0])), dy = b[0] - a[0];
+  return dx === 0 && dy === 0 ? null : Math.atan2(dx, dy);
+}
+
+const ODO_WINDOW_S = 90;
+/**
+ * The gyro and wheels' path (data.odo: its own frame) 90 s either side of the cursor, laid on the drawing there: moved
+ * to where the drawing has the car and turned to the drawing's direction. A dashed line where the car went by its own
+ * sensors; where it parts from the drawing, one of them is wrong — near the cursor, the drawing.
+ */
+function updateOdo(here) {
+  const odo = data?.odo;
+  const at = odo && here && $("showOdo").checked ? indexAt(odo, t, (x) => x[0]) : -1;
+  const heading = at >= 0 ? drawnBearingAt(here.s) : null;
+  if (at < 0 || heading == null) {
+    map.getSource("odoPath").setData(fc([]));
+    map.getSource("odoNow").setData(fc([]));
+    return;
+  }
+  const [, e0, n0, psi0] = odo[at];
+  const turn = heading - psi0, c = Math.cos(turn), sn = Math.sin(turn);
+  const kx = 111195 * Math.cos(rad(here.lat));
+  const place = ([, e, n]) => {
+    const x = e - e0, y = n - n0;
+    return [here.lon + (x * c + y * sn) / kx, here.lat + (-x * sn + y * c) / 111195];
+  };
+  const coords = [];
+  for (let i = Math.max(0, indexAt(odo, t - ODO_WINDOW_S, (x) => x[0])); i < odo.length && odo[i][0] <= t + ODO_WINDOW_S; i++) coords.push(place(odo[i]));
+  map.getSource("odoPath").setData(fc(coords.length > 1 ? [line(coords)] : []));
+  const [lon, lat] = place(odo[at]);
+  map.getSource("odoNow").setData(fc([pt({ lat, lon })]));
+}
+
+/** The driver's placings: each with a heading stroke, and a line to where the drawing has the car at that moment. */
+function setPlacings() {
+  const on = data?.placings?.length && $("showPlacings").checked;
+  const spots = [], heads = [], gaps = [];
+  for (const p of on ? data.placings : []) {
+    const d = drawnAt(p.t);
+    const gap = d ? haversine(p, d) : null;
+    spots.push(pt(p, { t: p.t, gap: gap == null ? "" : fmtM(gap) }));
+    const kx = 111195 * Math.cos(rad(p.lat));
+    heads.push(line([[p.lon, p.lat], [p.lon + (12 * Math.sin(p.headingRad)) / kx, p.lat + (12 * Math.cos(p.headingRad)) / 111195]]));
+    if (d) gaps.push(line([[p.lon, p.lat], [d.lon, d.lat]]));
+  }
+  map.getSource("placings").setData(fc(spots));
+  map.getSource("placingHeads").setData(fc(heads));
+  map.getSource("placingGaps").setData(fc(gaps));
+}
+
 /** From p to the drawn path near s along it (300 m plus twice the timing's doubt), as drawn-truth.ts measures it. */
 function offPath(p, s, doubt) {
   const path = drawn.truth.path, cum = drawn.timed.cum;
@@ -740,7 +824,7 @@ async function setDrawn() {
   map.getSource("drawnPath").setData(fc(roads));
   map.getSource("drawnStraight").setData(fc(straight));
   map.getSource("drawnPoints").setData(fc(drawing && $("showDrawn").checked
-    ? draft.map((p, i) => pt(p, { i, straight: !!p.straight && i > 0 })) : []));
+    ? draft.map((p, i) => pt(p, { i, straight: !!p.straight && i > 0, free: !!p.free })) : []));
 }
 
 function renderDrawn() {
@@ -754,7 +838,11 @@ function renderDrawn() {
       `are off them (a car park, a yard): the line goes straight between them and to the nearest road. ` +
       `<b>Shift-click</b>: straight from the last point anyway; on a point, it toggles that. ` +
       `Drag a point to move it, <b>right-click</b> it to delete it, click the line to add a point in between. ` +
-      `Ctrl+Z undoes, Esc ends.</div>`;
+      `<b>O</b>: off the roads — clicks stay exactly where you put them (a car park, a yard), joined straight; ` +
+      `<b>Alt-click</b> a point to toggle that. <b>S</b>: clicks go before the first point, to draw a start you missed. ` +
+      `The dashed violet line is the car's own gyro and wheels around the cursor (Layers). Ctrl+Z undoes, Esc ends.</div>` +
+      `<div class="drawn-actions"><button id="drawFree" aria-pressed="${drawMode.free}">${drawMode.free ? "☑" : "☐"} Off the roads (O)</button>` +
+      `<button id="drawAtStart" aria-pressed="${drawMode.atStart}">${drawMode.atStart ? "☑" : "☐"} Add at the start (S)</button></div>`;
   }
   if (timed) {
     const diff = (timed.pathM / Math.max(1, timed.odometerM) - 1) * 100;
@@ -786,13 +874,24 @@ function renderDrawn() {
   } else if (!drawing) {
     html += `<div class="muted">Not drawn. Draw the roads you drove, and every track is scored against them all along the drive, with or without GPS.</div>`;
   }
+  if (data.placings?.length) {
+    html += `<div class="facts">Your placings: ` + data.placings.map((p, i) => {
+      const d = drawnAt(p.t);
+      const gap = d ? haversine(p, d) : null;
+      const cls = gap == null ? "" : gap < 15 ? "good" : gap < 40 ? "meh" : "poor";
+      return `<a href="#" data-placing="${i}">${fmtT(p.t)}</a>` + (gap == null ? "" : ` <span class="num ${cls}">${fmtM(gap)}</span> from the drawing`);
+    }).join(" · ") + `</div>`;
+  }
   html += `<div class="drawn-actions">` + (drawing
     ? `<button id="drawnDone">Done</button><button id="drawnUndo" ${undo.length ? "" : "disabled"}>Undo</button>`
     : `<button id="drawnEdit">${drawn?.truth ? "Edit" : "Draw"}</button>`) +
     (drawn?.truth || draft.length ? `<button id="drawnClear">Delete</button>` : "") +
     `<span class="muted">${esc(drawnStatus)}</span></div>`;
   el.innerHTML = html;
+  for (const a of el.querySelectorAll("a[data-placing]")) a.onclick = (ev) => { ev.preventDefault(); const p = data.placings[+a.dataset.placing]; seek(p.t); map.easeTo({ center: [p.lon, p.lat] }); };
   if ($("drawnDone")) $("drawnDone").onclick = () => setDrawing(false);
+  if ($("drawFree")) $("drawFree").onclick = () => { drawMode.free = !drawMode.free; renderDrawn(); };
+  if ($("drawAtStart")) $("drawAtStart").onclick = () => { drawMode.atStart = !drawMode.atStart; renderDrawn(); };
   if ($("drawnUndo")) $("drawnUndo").onclick = undoDrawn;
   if ($("drawnEdit")) $("drawnEdit").onclick = () => setDrawing(true);
   if ($("drawnClear")) $("drawnClear").onclick = clearDrawn;
@@ -802,6 +901,7 @@ function afterDrawn() {
   if (drawnFor) markDrawn(drawnFor, !!drawn?.truth);
   computeDrawnScores();
   setDrawn();
+  if (data) setPlacings();
   renderDrawn();
   updateDynamic();
 }
@@ -903,15 +1003,19 @@ function addDrawingHandlers() {
     if (swallowClick) { swallowClick = false; return; }
     const hit = map.queryRenderedFeatures(e.point, { layers: ["drawnPoints"] })[0];
     const shift = e.originalEvent.shiftKey;
+    const alt = e.originalEvent.altKey;
     if (hit) {
       const i = +hit.properties.i;
-      if (shift && i > 0) commitDraft(draft.map((p, k) => (k === i ? { ...p, straight: !p.straight } : p)));
+      if (alt) commitDraft(draft.map((p, k) => (k === i ? { ...p, free: !p.free } : p)));
+      else if (shift && i > 0) commitDraft(draft.map((p, k) => (k === i ? { ...p, straight: !p.straight } : p)));
       return;
     }
-    const p = { lat: e.lngLat.lat, lon: e.lngLat.lng, ...(shift ? { straight: true } : {}) };
+    const p = { lat: e.lngLat.lat, lon: e.lngLat.lng, ...(shift ? { straight: true } : {}), ...(drawMode.free ? { free: true } : {}) };
     const leg = legNear(e.point);
     const next = draft.slice();
-    if (leg >= 0) next.splice(leg + 1, 0, p); else next.push(p);
+    if (leg >= 0) next.splice(leg + 1, 0, p);
+    else if (drawMode.atStart) next.unshift(p);
+    else next.push(p);
     commitDraft(next);
   });
   map.on("contextmenu", "drawnPoints", (e) => {
@@ -1288,6 +1392,8 @@ $("showErr").onchange = () => updateDynamic();
 $("showRoads").onchange = () => setRoads();
 $("showTruth").onchange = () => setTruth();
 $("showDrawn").onchange = () => { setDrawn(); updateDynamic(); };
+$("showOdo").onchange = () => updateDynamic();
+$("showPlacings").onchange = () => data && setPlacings();
 $("showMm").onchange = () => updateDynamic();
 $("showRoute").onchange = () => updateDynamic();
 $("allEvents").onchange = () => data && renderEvents();
@@ -1295,6 +1401,8 @@ document.addEventListener("keydown", (e) => {
   if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
   if (drawing && (e.ctrlKey || e.metaKey) && e.code === "KeyZ") { e.preventDefault(); undoDrawn(); return; }
   if (drawing && e.code === "Escape") { setDrawing(false); return; }
+  if (drawing && e.code === "KeyO" && !e.ctrlKey && !e.metaKey) { drawMode.free = !drawMode.free; renderDrawn(); return; }
+  if (drawing && e.code === "KeyS" && !e.ctrlKey && !e.metaKey) { drawMode.atStart = !drawMode.atStart; renderDrawn(); return; }
   if (e.key === "/") { e.preventDefault(); openPicker(); return; }
   if (e.code === "Space") { e.preventDefault(); setPlaying(!playing); }
   if (e.code === "ArrowLeft") seek(t - (e.shiftKey ? 30 : 5));

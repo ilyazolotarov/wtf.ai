@@ -18,13 +18,12 @@ import { puckTuning } from "../../../src/nav/position/puck";
 import { drawnTruthTrack, drawPath, type DrawnPoint, type DrawnTruth } from "../../../src/nav/replay/drawn-truth";
 import { findIncidents, INCIDENT_STEP_S } from "../../../src/nav/replay/incidents";
 import { appOutageCuts, replayTrip, type ReplayOptions } from "../../../src/nav/replay/replay";
-import { withCanSpeed } from "../../../src/nav/replay/can";
 import { buildViewerData } from "../../../src/nav/replay/viewer-data";
-import { replayTripInApp, MemoryKeyValueStore, phoneOf, seedFromLog } from "../../../src/services/navigation/app-replay";
+import { driverPlacings, replayTripInApp, MemoryKeyValueStore, phoneOf, seedFromLog } from "../../../src/services/navigation/app-replay";
 import { CalibrationStore } from "../../../src/services/navigation/calibration-store";
 import { PHONE_CAR, STORAGE_NOTE, type MapMatchLoop } from "../../../src/services/navigation/navigator-service";
 import { readTripLog, type TripLog } from "../../../src/triplog/trip-log-reader";
-import { carOf, drawnStartPose, graphFor as graphForTrip, phoneRouteFor, regionPoint, routeBeforeLog } from "../app-chain";
+import { carOf, drawnStartPose, graphFor as graphForTrip, odometryTrack, phoneRouteFor, regionPoint, routeBeforeLog } from "../app-chain";
 import { deleteLog } from "../../triplog/deleted";
 import { findGraph, openGraph, roadsAround, truthRoute } from "../graph-file";
 
@@ -257,18 +256,16 @@ const server = createServer((req, res) => {
       // Start: from what the phone had stored (in the log), from where this navigator would have parked the car after
       // its previous drive (every earlier drive replayed), where the drawn truth starts, or cold.
       const startFrom = q("from") || "phone";
-      // Adapter: the log's OBD as recorded, or none (phone-only mode, NAVIGATOR-SPEC §9.6: no OBD speed or engine).
+      // Adapter: as recorded (OBD or CAN, whichever the app took its speed from), or none (phone-only mode,
+      // NAVIGATOR-SPEC §9.6: no OBD speed or engine).
       const phoneOnly = q("adapter") === "none";
-      // CAN: wheel speeds where the CAN shadow heard them, OBD between (SPEC §2.1 Stage 2; replay only).
-      const canSpeed = q("adapter") === "can";
       const compareLoop = q("compare") === "before" ? BEFORE_DOT : (LOOPS[q("compare")] ?? null);
       // Compass: off, or calibrated on the other logs, optionally turned (a wrong calibration).
       const compassArg = url.searchParams.get("compass") ?? "";
       const compass = compassArg ? compassFromOtherLogs(file) : null;
       const rotateDeg = Number(compassArg) || 0;
       const started = Date.now();
-      const logged0 = loadTrip(file);
-      const trip = (canSpeed && withCanSpeed(logged0)) || logged0;
+      const trip = loadTrip(file);
       // The navigator version the phone ran (trip log header, from the app's developer setting); default open.
       const phoneLoop = typeof trip.info.nav_mapmatch_loop === "string" ? trip.info.nav_mapmatch_loop : null;
       const loopKey = q("loop") || phoneLoop || "closed";
@@ -377,7 +374,7 @@ const server = createServer((req, res) => {
             maneuvers: [],
           });
         }
-        send(res, 200, "application/json", JSON.stringify({ ...data, incidents, compassInfo, startNote, phoneRouteSource: phoneRoute?.source ?? null, loopLabel: phoneOnly ? "Phone only (no adapter)" : loop.label, phoneLoopLabel: phoneLoop ? (LOOPS[phoneLoop]?.label ?? phoneLoop) : null, appCuts: appCuts.length, parkedFrom: state && chained ? { file: state.parkedAfter, status: data.summary.startPose?.status ?? null } : null, inApp }));
+        send(res, 200, "application/json", JSON.stringify({ ...data, incidents, compassInfo, placings: driverPlacings(trip).map((p) => ({ t: Math.round((p.tUs - trip.startUs) / 1e5) / 10, lat: p.lat, lon: p.lon, headingRad: p.headingRad })), odo: odometryTrack(trip), startNote, phoneRouteSource: phoneRoute?.source ?? null, loopLabel: phoneOnly ? "Phone only (no adapter)" : loop.label, phoneLoopLabel: phoneLoop ? (LOOPS[phoneLoop]?.label ?? phoneLoop) : null, appCuts: appCuts.length, parkedFrom: state && chained ? { file: state.parkedAfter, status: data.summary.startPose?.status ?? null } : null, inApp }));
       } finally {
         opened?.close();
       }
@@ -433,8 +430,8 @@ const server = createServer((req, res) => {
       readBody(req)
         .then((body) => {
           const points = (JSON.parse(body) as { points?: unknown }).points;
-          if (!Array.isArray(points) || !points.every(isPoint) || points.length > 5000) return send(res, 400, "text/plain", "points: [{lat, lon, straight?}]");
-          const clean = points.map((p) => ({ lat: p.lat, lon: p.lon, ...(p.straight ? { straight: true } : {}) }));
+          if (!Array.isArray(points) || !points.every(isPoint) || points.length > 5000) return send(res, 400, "text/plain", "points: [{lat, lon, straight?, free?}]");
+          const clean = points.map((p) => ({ lat: p.lat, lon: p.lon, ...(p.straight ? { straight: true } : {}), ...(p.free ? { free: true } : {}) }));
           if (!clean.length) {
             if (existsSync(drawnFile(file))) unlinkSync(drawnFile(file));
             return send(res, 200, "application/json", JSON.stringify(drawnPayload(trip, null)));

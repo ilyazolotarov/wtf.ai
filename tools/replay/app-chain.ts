@@ -111,6 +111,50 @@ export function drawnStartPose(trip: TripLog, drawn: DrawnTruth | null): ParkedP
   return null;
 }
 
+/**
+ * Where the car's own gyro and wheels say it went, in a frame of their own: [t s, east m, north m, heading rad] every
+ * `stepS`, from (0, 0) heading north at the log's start. Only its shape is known: the viewer lays it on the drawing at
+ * a moment and turns it to the drawing's direction there, so a car park or a yard the drawing guessed can be checked
+ * against what the car did. The gyro as `drawnStartPose` takes it (about gravity, while the wheels turn or in reverse),
+ * backwards in reverse gear (the CAN gear; without it, a car whose OBD reads 0 in reverse doesn't move back here).
+ */
+export function odometryTrack(trip: TripLog, stepS = 0.5): [number, number, number, number][] {
+  const odo = obdOdometer(trip);
+  const imu = trip.imu;
+  const gears = (decodeTripCan(trip)?.samples ?? []).filter((x) => x.q === "gear");
+  let gi = 0;
+  const reverse = (tUs: number) => {
+    while (gi + 1 < gears.length && gears[gi + 1].tUs <= tUs) gi++;
+    const g = gears[gi];
+    return g?.q === "gear" && g.tUs <= tUs && tUs - g.tUs < 2e6 && g.gear === "R";
+  };
+  const endUs = Math.max(imu.at(-1)?.tUs ?? 0, trip.obdSpeed.at(-1)?.tUs ?? 0);
+  const out: [number, number, number, number][] = [[0, 0, 0, 0]];
+  let e = 0;
+  let n = 0;
+  let psi = 0;
+  let k = 0;
+  const r = (v: number, d: number) => Math.round(v * d) / d;
+  for (let tUs = trip.startUs + stepS * 1e6; tUs <= endUs; tUs += stepS * 1e6) {
+    const back = reverse(tUs);
+    const moving = odo(tUs + 1e6) - odo(tUs - 1e6) > 0.5 || back;
+    let turn = 0;
+    for (; k + 1 < imu.length && imu[k + 1].tUs <= tUs; k++) {
+      if (!moving) continue;
+      const { gyro, gravity } = imu[k];
+      const g = Math.hypot(...gravity) || 1;
+      turn += ((gyro[0] * gravity[0] + gyro[1] * gravity[1] + gyro[2] * gravity[2]) / g) * ((imu[k + 1].tUs - imu[k].tUs) / 1e6);
+    }
+    const ds = (odo(tUs) - odo(tUs - stepS * 1e6)) * (back ? -1 : 1);
+    const mid = psi + turn / 2;
+    e += ds * Math.sin(mid);
+    n += ds * Math.cos(mid);
+    psi += turn;
+    out.push([r((tUs - trip.startUs) / 1e6, 10), r(e, 10), r(n, 10), r(psi, 1000)]);
+  }
+  return out;
+}
+
 /** A route the replay hands the app (phone-only mode follows it), from `fromS` on (null points: none from then). */
 export interface ReplayRoute {
   fromS: number;
