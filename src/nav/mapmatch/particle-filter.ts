@@ -88,7 +88,9 @@ export interface MapMatchConfig {
    * put back on the nearest aligned road within this reach and no off-road population is kept. The penalty alone
    * cannot do that: it moves weight from the off-road particles onto on-road ones, and when the cloud has drifted
    * beyond `onRoadProjectM` from every road there are none for the weight to go to, so it spreads over the
-   * off-road particles and normalisation cancels it.
+   * off-road particles and normalisation cancels it. A cloud that left the map on a road it lacks drifts 45–90 m
+   * from the road it comes back onto before the car reaches road speed: within 45 m those particles stayed off the
+   * roads and the dot with them (MAPMATCH-SPEC §7.5).
    */
   onRoadRecoverProjectM: number;
   /** Share re-injected near the clusters at each resampling (recovers a pruned hypothesis). */
@@ -228,7 +230,7 @@ export const DEFAULT_MAP_MATCH: MapMatchConfig = {
   onRoadShare: 0.1,
   onRoadProjectM: 15,
   onRoadProjectHeadingRad: 30 * DEG,
-  onRoadRecoverProjectM: 45,
+  onRoadRecoverProjectM: 90,
   reinjectShare: 0.02,
   evalIntervalM: 10,
   straightTurnRad: 8 * DEG,

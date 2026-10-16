@@ -439,9 +439,12 @@ Every 10 m of travel, plus each accepted fix. All terms are log-likelihoods, sum
   the filter now runs from the first fix). Resampling makes fresh off-road copies of the on-road particles.
 - Off-road share kept ≥ 5 %, except **at road speed** (`offRoadSpeed.fullMps`, 40 km/h, and above): no yard is
   driven that fast, so no off-road particles are kept and every off-road particle is put back on the nearest
-  aligned road within `onRoadRecoverProjectM` (45 m). The penalty alone (§7.4) could not do it: it moves weight
+  aligned road within `onRoadRecoverProjectM` (90 m). The penalty alone (§7.4) could not do it: it moves weight
   from off-road particles onto on-road ones, and with the cloud past 15 m from every road there are none, so it
-  spreads over the off-road particles and normalisation cancels it.
+  spreads over the off-road particles and normalisation cancels it. The reach is 90 m, not 45: a cloud that left
+  the map on a road it lacks comes back 45–90 m from the road the car is on, and stayed off the roads. Against
+  45 m (79 drawn real drives × 8 seeds, drawn and parked starts): incidents 190 → 178 and 252 → 245, none worse;
+  simulated drives (6 scenarios × 60 × 4 seeds) 11 better, 1 worse by one seed. 65 m and 135 m score as 90 m.
 - On-road share kept ≥ 10 %: off-road particles are projected onto the nearest edge within 15 m whose direction
   fits within 30°. While off-road dominates, on-road hypotheses stay where the car will come back onto a road.
 - 2 % of particles re-injected around the clusters: nearby edges, both directions when the cluster is new.
@@ -1163,7 +1166,7 @@ M1–M3 can partly overlap. M4 needs M1–M3. M5 and M6 are independent of each 
 | EKF position prior | σ = max(2σ, 10 m), scale 0.3 | open loop only (§9) |
 | Off-road penalty | × 0.5 per 10 m, exponent × 1 → 12 from 20 to 40 km/h (not in `init`) | §7.4 |
 | On-road floor while off-road | 10 %, projection ≤ 15 m, ≤ 30° | §7.5 |
-| At road speed (≥ 40 km/h) | no off-road particles; all projected, ≤ 45 m (`onRoadRecoverProjectM`) | §7.5 |
+| At road speed (≥ 40 km/h) | no off-road particles; all projected, ≤ 90 m (`onRoadRecoverProjectM`) | §7.5 |
 | `dks` prior / jitter | 0.02 / 0.002 | per-particle distance scale |
 | Off-road share / re-injection | 5 % / 2 % | §7.5 |
 | Stale off-road resampling | off-road weight < 10⁻⁵ | §7.5 |
@@ -1282,7 +1285,7 @@ M1–M3 can partly overlap. M4 needs M1–M3. M5 and M6 are independent of each 
 
     **Fixed across the road** by §7.5: at or above `offRoadSpeed.fullMps` the off-road hypothesis is not a
     hypothesis — no yard is driven at 40 km/h — so the filter keeps no off-road population there and `keepOnRoad`
-    puts every off-road particle back on the nearest aligned road within `onRoadRecoverProjectM` (45 m). The
+    puts every off-road particle back on the nearest aligned road within `onRoadRecoverProjectM` (90 m). The
     penalty alone cannot do that, for the reason above. Off-road above 40 km/h on the drive: 52 s → **0 s**.
     `offRoadSpeed.factor` 1 turns this off with the rest of the speed evidence.
 
