@@ -11,6 +11,7 @@ import type { TripLog } from "../../triplog/trip-log-reader";
 import type { LocalFrame } from "../geo/local-frame";
 import { EdgeFlag, RoadClass } from "../mapmatch/graph/format";
 import type { EdgeId, RoadGraph } from "../mapmatch/graph/road-graph";
+import type { RouteLeg } from "../routing/router";
 import type { GnssFix, ImuSample, ObdSpeedSample } from "../types";
 
 export interface CityDriveOptions {
@@ -32,6 +33,11 @@ export interface CityDriveOptions {
    * and up) whenever there is one, straight on nearly always: long avenues and ring roads, few turns.
    */
   route?: "city" | "arterial";
+  /**
+   * Drive this planned route (the router's legs) instead of a random one, from its start to its end, and stop there;
+   * `durationS` then caps the drive. `start` and `route` are ignored.
+   */
+  legs?: readonly RouteLeg[];
 }
 
 export interface SensorErrors {
@@ -41,7 +47,11 @@ export interface SensorErrors {
   /** Gyro scale (measured 1.007 on the iPhone 13). */
   gyroScale: number;
   gyroNoiseRadS: number;
-  /** OBD reads true km/h × scale + offset, rounded, 0 below `obdZeroKph` (CX-5: 1.019⁻¹, −0.23 km/h). */
+  /**
+   * OBD reads true km/h × scale + offset, rounded, 0 below `obdZeroKph`. The test car's GNSS − OBD fit is
+   * v = 1.019·s − 0.23 km/h (NAVIGATOR-SPEC §13.2), so s = v / 1.019 + 0.23 / 1.019: the adapter reads a little high
+   * at town speeds.
+   */
   obdScale: number;
   obdOffsetKph: number;
   obdZeroKph: number;
@@ -61,7 +71,7 @@ export const DEFAULT_SENSOR_ERRORS: SensorErrors = {
   gyroScale: 1.007,
   gyroNoiseRadS: 0.003,
   obdScale: 0.981,
-  obdOffsetKph: -0.23,
+  obdOffsetKph: 0.226,
   obdZeroKph: 2.5,
   gnssSigmaM: 2.5,
   gnssCorrelationS: 30,
@@ -97,6 +107,8 @@ const DT = 0.01;
 const START_US = 1_000_000_000;
 /** Standing still at the start, s: the gyro bias is learned at stops, as in a real session. */
 const START_STOP_S = 20;
+/** Standing at a planned route's destination before the log ends, s. */
+const END_STOP_S = 10;
 /** Cruise speed by road class, km/h (city). */
 const CLASS_KPH = [90, 70, 55, 50, 45, 40, 30, 15, 20, 20, 30];
 const MAX_LAT_ACCEL = 2.5;
@@ -179,6 +191,43 @@ function buildRoute(graph: RoadGraph, start: { e: number; n: number }, lengthM: 
   return { pts, junctionAt };
 }
 
+/** A planned route as points every vertex, its legs' stretches in driving order, with the turn at each leg's end. */
+function legsRoute(graph: RoadGraph, legs: readonly RouteLeg[]) {
+  const pts: RoutePoint[] = [];
+  const junctionAt: { index: number; turnRad: number }[] = [];
+  const bearing = (a: { e: number; n: number }, b: { e: number; n: number }) => Math.atan2(b.e - a.e, b.n - a.n);
+  for (const leg of legs) {
+    const edge = graph.edge(leg.edge);
+    const at = (m: number) => {
+      let i = 0;
+      while (i + 2 < edge.cum.length && edge.cum[i + 1] < m) i++;
+      const span = edge.cum[i + 1] - edge.cum[i];
+      const f = span > 0 ? Math.min(1, Math.max(0, (m - edge.cum[i]) / span)) : 0;
+      return { e: edge.xy[2 * i] + f * (edge.xy[2 * i + 2] - edge.xy[2 * i]), n: edge.xy[2 * i + 1] + f * (edge.xy[2 * i + 3] - edge.xy[2 * i + 1]) };
+    };
+    const lo = Math.min(leg.fromM, leg.toM);
+    const hi = Math.max(leg.fromM, leg.toM);
+    const stretch = [at(lo)];
+    for (let i = 0; i < edge.cum.length; i++) if (edge.cum[i] > lo && edge.cum[i] < hi) stretch.push({ e: edge.xy[2 * i], n: edge.xy[2 * i + 1] });
+    stretch.push(at(hi));
+    if (leg.fromM > leg.toM) stretch.reverse();
+    if (pts.length > 1) {
+      // The turn from the last leg's end onto this one: last few metres against the first few.
+      const a = pts[Math.max(0, pts.length - 4)];
+      const b = pts[pts.length - 1];
+      const c = stretch[Math.min(stretch.length - 1, 1)];
+      junctionAt.push({ index: pts.length - 1, turnRad: wrap(bearing(b, c) - bearing(a, b)) });
+    }
+    for (const q of stretch) {
+      const p = { ...q, cls: edge.cls, edge: edge.id, oneway: edge.oneway !== 0 };
+      const last = pts.at(-1);
+      if (last && Math.hypot(p.e - last.e, p.n - last.n) < 0.05) continue;
+      pts.push(p);
+    }
+  }
+  return { pts, junctionAt };
+}
+
 /** Resample a polyline at `step` m; keep each point's attributes from the segment it lies on. */
 function resample(pts: RoutePoint[], step: number): { e: Float64Array; n: Float64Array; at: RoutePoint[]; src: Int32Array } {
   const e: number[] = [];
@@ -210,7 +259,7 @@ export function cityDrive(o: CityDriveOptions): CityDrive {
 
   // The route, longer than the car can drive in the time; then the line the car aims for: the
   // road's centre line, a lane to the right on two-way roads, and a slow wander for map error.
-  const route = buildRoute(o.graph, o.start ?? { e: 0, n: 0 }, o.durationS * 25 + 2000, r, o.route ?? "city");
+  const route = o.legs ? legsRoute(o.graph, o.legs) : buildRoute(o.graph, o.start ?? { e: 0, n: 0 }, o.durationS * 25 + 2000, r, o.route ?? "city");
   const path = resample(route.pts, RESAMPLE_M);
   const count = path.e.length;
   const heading = new Float64Array(count);
@@ -254,6 +303,8 @@ export function cityDrive(o: CityDriveOptions): CityDrive {
     const kappa = Math.abs(wrap(heading[b] - heading[a])) / Math.max(1, b - a);
     vmax[i] = Math.min(CLASS_KPH[path.at[i].cls] / 3.6, Math.sqrt(MAX_LAT_ACCEL / Math.max(kappa, 1e-4)));
   }
+  // A planned route ends at its destination: the car stops there.
+  if (o.legs) vmax[count - 1] = 0;
   for (let i = count - 2; i >= 0; i--) vmax[i] = Math.min(vmax[i], Math.sqrt(vmax[i + 1] ** 2 + 2 * BRAKE * RESAMPLE_M));
   // Junctions on the resampled path (first point at or after the junction vertex).
   const atOrAfter = (index: number) => {
@@ -296,6 +347,7 @@ export function cityDrive(o: CityDriveOptions): CityDrive {
   const gK = Math.exp(-1 / s.gnssCorrelationS);
   let distance = 0;
   let mood = 1;
+  let arrivedAt: number | null = null;
   const totalS = START_STOP_S + o.durationS;
   for (let step = 0; step * DT < totalS; step++) {
     const t = step * DT;
@@ -308,7 +360,11 @@ export function cityDrive(o: CityDriveOptions): CityDrive {
       if (d < bestD) [best, bestD] = [k, d];
     }
     idx = best;
-    if (idx >= count - 50) break;
+    if (o.legs) {
+      // Stand at the destination a while (the drive's end), then stop the log.
+      if (idx >= count - 3 && v === 0) arrivedAt ??= t;
+      if (arrivedAt !== null && t - arrivedAt > END_STOP_S) break;
+    } else if (idx >= count - 50) break;
     while (nextStop < stopIdx.length && stopIdx[nextStop] < idx) nextStop++;
 
     // Speed: the limit, a driver's slow variation, braking for the next stop, and the stops themselves.

@@ -7,6 +7,8 @@
 //   npm run replay:regress -- --save before          # keep this run (tools/triplog/logs/regress/before.json)
 //   npm run replay:regress -- --against before       # every drive against it: what got worse, what got better
 //   npm run replay:regress -- --seeds 5 --starts parked --logs 20261005 --nav '<json>' --mm '<json>' --threads 8
+//   npm run replay:regress -- --testers              # testers' drawn drives too, each on their phone's own chain
+//   npm run replay:regress -- --puck '{"headingCueFactor":1}'   # the dot's cues (puck.ts) for an experiment
 //   npm run replay:regress -- --from after --against before   # two saved runs, nothing replayed
 //   npm run replay:regress -- --speed phone          # no adapter: OBD speed replaced by the phone's (phone-speed.ts)
 //   npm run replay:regress -- --speed phone-app --phone-route   # the app without an adapter, the driver on a route
@@ -31,8 +33,11 @@ import { bearingRad, haversineM } from "../../src/nav/geo";
 import { LocalFrame } from "../../src/nav/geo/local-frame";
 import type { MapMatchConfig } from "../../src/nav/mapmatch/particle-filter";
 import type { NavConfig, ParkedPose } from "../../src/nav/navigator";
+import { puckTuning } from "../../src/nav/position/puck";
+import { wheelYawTuning } from "../../src/nav/odometry/can/wheel-yaw-source";
 import { driveOutages, estimateTrack, obdDistanceM, type ShownPoint } from "../../src/nav/replay/drive-report";
 import { drawnTruthTrack, scoreDrawn, type DrawnTruth } from "../../src/nav/replay/drawn-truth";
+import { findIncidents, INCIDENT_STEP_S, type DotSample, type Incident } from "../../src/nav/replay/incidents";
 import type { PhoneMount } from "../../src/nav/odometry/imu/imu-speed";
 import { withCanSpeed, withWheelYaw } from "../../src/nav/replay/can";
 import { withPhoneSpeed } from "../../src/nav/replay/phone-speed";
@@ -87,6 +92,10 @@ interface Job {
   yawCal?: boolean;
   /** `--yaw-gaps gyro`: the gyro between listening windows (what listening without breaks would give). */
   yawGaps?: "interpolate" | "gyro";
+  /** The dot's cues (puck.ts) for an experiment. */
+  puck?: Partial<typeof puckTuning>;
+  /** The wheels' yaw (wheel-yaw-source.ts) for an experiment. */
+  wheel?: Partial<typeof wheelYawTuning>;
 }
 
 /** One drive, one start, one seed. Distances in m, times in s. */
@@ -97,6 +106,10 @@ export interface DriveResult {
   km: number;
   truth: "drawn" | "gps" | "wifi" | "none";
   drawn?: { offPathS: number; movingS: number; errorMedianM: number | null; endErrorM: number | null };
+  /** Against the drawn truth: the major incidents a driver would see (incidents.ts), not those while lost. */
+  incidents?: Incident[];
+  /** Where clean GPS put the car more than 40 m from the drawing, s: not judged there (the drawing may be off). */
+  disputed?: [number, number][];
   /** Real gaps: the dot when GPS came back; the app's Cut GPS stretches: the dot at its worst inside. */
   gps?: { gaps: number; afterMaxM: number | null; afterMedianM: number | null; cutMaxM: number | null };
   wifi?: { fixes: number; medianM: number | null };
@@ -115,6 +128,8 @@ export interface DriveResult {
   error?: string;
 }
 
+type TrustedFix = { t: number; lat: number; lon: number; hAccM: number };
+
 const median = (v: number[]) => (v.length ? [...v].sort((a, b) => a - b)[Math.floor(v.length / 2)] : null);
 
 function readDrawn(log: string): DrawnTruth | null {
@@ -123,7 +138,7 @@ function readDrawn(log: string): DrawnTruth | null {
 }
 
 /** A drive's scores from the dot the service published. */
-function score(trip: TripLog, log: string, track: ShownPoint[], graph: ReturnType<typeof graphFor>): Omit<DriveResult, "start" | "seed" | "startGapM" | "pose"> {
+function score(trip: TripLog, log: string, track: ShownPoint[], graph: ReturnType<typeof graphFor>, dots: DotSample[], fixes: TrustedFix[] = []): Omit<DriveResult, "start" | "seed" | "startGapM" | "pose"> {
   const durationS = Math.max(0, ...[trip.imu.at(-1), trip.obdSpeed.at(-1), trip.gnss.at(-1)].map((x) => (x ? (x.tUs - trip.startUs) / 1e6 : 0)));
   const km = Math.round(obdDistanceM(trip, 0, durationS)) / 1000;
   const out: Omit<DriveResult, "start" | "seed" | "startGapM" | "pose"> = { log, km, truth: "none", offRoadS: 0, fastS: 0, jumps: 0 };
@@ -132,6 +147,10 @@ function score(trip: TripLog, log: string, track: ShownPoint[], graph: ReturnTyp
     const s = scoreDrawn(trip, drawnTruthTrack(trip, drawn), track);
     out.truth = "drawn";
     out.drawn = { offPathS: s.offPathS, movingS: s.movingS, errorMedianM: s.errorMedianM, endErrorM: s.endErrorM };
+    const found = findIncidents(drawnTruthTrack(trip, drawn, INCIDENT_STEP_S), dots, fixes);
+    // A drawing the odometer can't time (no OBD speed logged) judges nothing: no count, rather than a made-up one.
+    if (!found.unjudged) out.incidents = found.incidents.filter((i) => i.major && !i.whileLost);
+    if (found.coverage.disputed.length) out.disputed = found.coverage.disputed;
   }
   const outages = driveOutages(trip, durationS, appOutageCuts(trip).map((c) => ({ kind: "app-cut" as const, fromS: c.fromS, toS: c.toS })), { dot: track });
   const after = outages.flatMap((o) => (o.kind === "no-gps" && o.scores.dot?.afterErrorM != null ? [o.scores.dot.afterErrorM] : []));
@@ -177,7 +196,12 @@ function score(trip: TripLog, log: string, track: ShownPoint[], graph: ReturnTyp
   return out;
 }
 
+const PUCK_DEFAULTS = { ...puckTuning };
+const WHEEL_DEFAULTS = { ...wheelYawTuning };
+
 function runJob(job: Job): DriveResult[] {
+  Object.assign(puckTuning, PUCK_DEFAULTS, job.puck);
+  Object.assign(wheelYawTuning, WHEEL_DEFAULTS, job.wheel);
   const store = new MemoryKeyValueStore();
   const byProtocol = new Map<string, string>();
   const lastDot = new Map<string, { lat: number; lon: number }>();
@@ -224,7 +248,8 @@ function runJob(job: Job): DriveResult[] {
               },
               ...(job.phoneRoute ? { phoneRoutes: phoneRouteFor(trip, readDrawn(log)).routes } : {}),
             }
-          : {}),
+          : // The routes the driver had, as the app gives them to the service (the dot leans on the route, puck.ts).
+            { phoneRoutes: phoneRouteFor(trip, null).routes }),
       });
       let mi = 0;
       const mmTop = (tUs: number) => {
@@ -237,16 +262,25 @@ function runJob(job: Job): DriveResult[] {
         r.published.map((p) => ({ tUs: p.timestampUs, latDeg: p.latDeg, lonDeg: p.lonDeg, accuracyM: p.accuracyM, ...(job.scoreMapMatch ? mmTop(p.timestampUs) : {}) })),
         trip.startUs,
       );
+      // The dot as drawn, with its arrow, for the incidents.
+      const dots: DotSample[] = r.published
+        .filter((p) => Number.isFinite(p.latDeg))
+        .map((p) => ({ t: (p.timestampUs - trip.startUs) / 1e6, lat: p.latDeg, lon: p.lonDeg, headingRad: Number.isFinite(p.headingRad) ? p.headingRad : undefined }));
+      // The satellite fixes the navigator took (integrity passed them): where a clean one disagrees with the drawing,
+      // the drawing doesn't judge the dot.
+      const fixes: TrustedFix[] = r.fixes
+        .filter((f) => f.satellite && f.status === "accepted")
+        .map((f) => ({ t: f.tS, lat: f.fix.lat, lon: f.fix.lon, hAccM: f.fix.hAccM }));
       const before = vin ? lastDot.get(vin) : undefined;
       const startGapM = job.start === "parked" && before && track[0] ? Math.round(haversineM(before, track[0])) : null;
       if (vin && track.length) lastDot.set(vin, track.at(-1)!);
       if (job.start === "cold") {
         const first = trip.gnss.find((f) => f.hAccM <= COLD_FROM_FIX_M);
         const fromS = first ? (first.tUs - trip.startUs) / 1e6 : null;
-        const scored = score(trip, log, fromS === null ? [] : track.filter((p) => p.t >= fromS), graph);
+        const scored = score(trip, log, fromS === null ? [] : track.filter((p) => p.t >= fromS), graph, fromS === null ? [] : dots.filter((p) => p.t >= fromS), fixes);
         results.push({ ...scored, ...(fromS === null ? { truth: "none" as const, drawn: undefined, gps: undefined, wifi: undefined } : {}), start: job.start, seed: job.seed, startGapM, pose: r.summary.startPose?.status ?? null, fromS });
       } else {
-        results.push({ ...score(trip, log, track, graph), start: job.start, seed: job.seed, startGapM, pose: r.summary.startPose?.status ?? null });
+        results.push({ ...score(trip, log, track, graph, dots, fixes), start: job.start, seed: job.seed, startGapM, pose: r.summary.startPose?.status ?? null });
       }
     } catch (e) {
       results.push({ log, start: job.start, seed: job.seed, km: 0, truth: "none", offRoadS: 0, fastS: 0, jumps: 0, startGapM: null, pose: null, error: String(e) });
@@ -292,7 +326,11 @@ function groups(results: DriveResult[]): Map<string, Group> {
 
 const fmt = (v: number | null, unit: string) => (v === null ? "—" : unit === "s" ? `${Math.round(v)}` : v >= 1000 ? `${(v / 1000).toFixed(1)}k` : `${Math.round(v)}`);
 const seedsOf = (g: Group, f: (r: DriveResult) => number | null, unit: string) => g.runs.map((r) => fmt(f(r), unit)).join("/");
-const name = (log: string) => log.slice(0, 15) + " " + log.slice(16, 22);
+const name = (log: string) => {
+  const f = path.basename(log);
+  const who = path.dirname(log) === "." ? "" : `${path.basename(path.dirname(log))}/`;
+  return who + f.slice(0, 15) + " " + f.slice(16, 22);
+};
 
 /** Worse beyond what seeds move by: half again as much plus a floor. */
 const worse = (a: number | null, b: number | null, floor: number) => a !== null && b !== null && b > a * 1.5 + floor;
@@ -304,6 +342,7 @@ function compare(before: Group, now: Group): { worse: string[]; better: string[]
   const m = mainScore(now.runs[0]);
   if (mainScore(before.runs[0]).what === m.what && m.value !== null) checks.push([m.what, (r) => mainScore(r).value, m.unit === "s" ? 10 : 20, m.unit]);
   checks.push(["off the roads above 20 km/h", (r) => r.offRoadS, 10, "s"], ["jumps", (r) => r.jumps, 2, ""]);
+  if (now.runs[0].incidents && before.runs[0].incidents) checks.push(["incidents", (r) => r.incidents?.length ?? null, 1, ""]);
   for (const [what, f, floor, unit] of checks) {
     const a = before.runs.map(f).filter((v): v is number => v !== null);
     const c = now.runs.map(f).filter((v): v is number => v !== null);
@@ -328,6 +367,7 @@ function totals(results: DriveResult[]) {
     wifiM: sum(med((r) => r.wifi?.medianM)),
     offRoadS: sum(med((r) => r.offRoadS)),
     jumps: sum(med((r) => r.jumps)),
+    incidents: sum(med((r) => r.incidents?.length)),
   };
 }
 
@@ -357,15 +397,25 @@ async function main() {
   const yawFromS = arg("--yaw-from") ? Number(arg("--yaw-from")) : undefined;
   const yawCal = process.argv.includes("--yaw-cal");
   const yawGaps = arg("--yaw-gaps") as Job["yawGaps"];
+  const puck = arg("--puck") ? (JSON.parse(arg("--puck")!) as Job["puck"]) : undefined;
+  const wheel = arg("--wheel") ? (JSON.parse(arg("--wheel")!) as Job["wheel"]) : undefined;
 
   const all = readdirSync(LOGS).filter((f) => f.endsWith(".ulg")).sort();
   const picked = only ? all.filter((f) => f.startsWith(only) || f.includes(only)) : all;
   if (!picked.length) throw new Error(`no logs match ${only}`);
   // The parked chain replays every log up to the last one picked: those before it set its storage.
   const chain = all.filter((f) => f <= picked.at(-1)!);
+  // `--testers`: each tester's drawn drives too, on their phone's own chain (testers/<name>/, its storage apart).
+  const testerChains = argv.includes("--testers") && existsSync(path.join(LOGS, "testers"))
+    ? readdirSync(path.join(LOGS, "testers"), { withFileTypes: true })
+        .filter((d) => d.isDirectory())
+        .map((d) => readdirSync(path.join(LOGS, "testers", d.name)).filter((f) => f.endsWith(".ulg")).sort().map((f) => `testers/${d.name}/${f}`))
+        .filter((logs) => logs.some((l) => existsSync(path.join(LOGS, l.replace(/\.ulg$/, ".truth.json")))))
+    : [];
+  for (const logs of testerChains) picked.push(...logs.filter((l) => !only || l.includes(only)));
   const jobs: Job[] = [];
-  for (let seed = 1; seed <= seeds; seed++) for (const start of ["drawn", "parked"] as const) if (starts.includes(start)) jobs.push({ start, seed, logs: chain, nav, mm, speed, scoreMapMatch, phoneRoute, obdHz, yaw, yawFromS, yawCal, yawGaps });
-  for (let seed = 1; seed <= seeds; seed++) if (starts.includes("cold")) for (const log of picked) jobs.push({ start: "cold", seed, logs: [log], nav, mm, speed, scoreMapMatch, phoneRoute, obdHz, yaw, yawFromS, yawCal, yawGaps });
+  for (let seed = 1; seed <= seeds; seed++) for (const start of ["drawn", "parked"] as const) if (starts.includes(start)) for (const logs of [chain, ...testerChains]) jobs.push({ start, seed, logs, nav, mm, speed, scoreMapMatch, phoneRoute, obdHz, yaw, yawFromS, yawCal, yawGaps, puck, wheel });
+  for (let seed = 1; seed <= seeds; seed++) if (starts.includes("cold")) for (const log of picked) jobs.push({ start: "cold", seed, logs: [log], nav, mm, speed, scoreMapMatch, phoneRoute, obdHz, yaw, yawFromS, yawCal, yawGaps, puck, wheel });
   const started = Date.now();
   let results: DriveResult[];
   if (fromRun) results = fromRun.results.filter((r) => picked.includes(r.log));
@@ -417,11 +467,11 @@ async function main() {
       if (!saved.results.some((r) => r.start === start)) continue;
       console.log(
         `  ${start.padEnd(6)} off the drawn road ${ta.drawnOffS} → ${tb.drawnOffS} s · GPS back / cut worst ${ta.gpsWorstM} → ${tb.gpsWorstM} m · ` +
-          `from Wi-Fi fixes ${ta.wifiM} → ${tb.wifiM} m · off the roads above 20 km/h ${ta.offRoadS} → ${tb.offRoadS} s · jumps ${ta.jumps} → ${tb.jumps}`,
+          `from Wi-Fi fixes ${ta.wifiM} → ${tb.wifiM} m · off the roads above 20 km/h ${ta.offRoadS} → ${tb.offRoadS} s · jumps ${ta.jumps} → ${tb.jumps} · incidents ${ta.incidents} → ${tb.incidents}`,
       );
     }
   } else {
-    console.log("drive                  start   km    truth: main score per seed          off the roads >20 km/h s   jumps   start gap m   pose");
+    console.log("drive                  start   km    truth: main score per seed          off the roads >20 km/h s   jumps   incidents   start gap m   pose");
     for (const g of now.values()) {
       const m = mainScore(g.runs[0]);
       const from = g.runs[0].fromS;
@@ -431,14 +481,20 @@ async function main() {
           : (m.value === null ? "no truth" : `${g.runs[0].truth}: ${m.what} ${seedsOf(g, (r) => mainScore(r).value, m.unit)} ${m.unit}`) + (from ? ` from ${Math.round(from)} s` : "");
       console.log(
         `  ${name(g.log)} ${g.start.padEnd(6)} ${g.runs[0].km.toFixed(1).padStart(5)}  ${truth.padEnd(46)} ${seedsOf(g, (r) => r.offRoadS, "s").padEnd(26)} ` +
-          `${seedsOf(g, (r) => r.jumps, "").padEnd(7)} ${g.start === "parked" ? seedsOf(g, (r) => r.startGapM, "m").padEnd(13) : "".padEnd(13)} ${g.runs.map((r) => r.pose ?? "-").join("/")}`,
+          `${seedsOf(g, (r) => r.jumps, "").padEnd(7)} ${seedsOf(g, (r) => r.incidents?.length ?? null, "").padEnd(11)} ${g.start === "parked" ? seedsOf(g, (r) => r.startGapM, "m").padEnd(13) : "".padEnd(13)} ${g.runs.map((r) => r.pose ?? "-").join("/")}`,
       );
     }
     console.log("totals (median over seeds, summed over drives):");
     for (const start of starts) {
       const t = totals(results.filter((r) => r.start === start));
-      console.log(`  ${start.padEnd(6)} off the drawn road ${t.drawnOffS} s · GPS back / cut worst ${t.gpsWorstM} m · from Wi-Fi fixes ${t.wifiM} m · off the roads above 20 km/h ${t.offRoadS} s · jumps ${t.jumps}`);
+      console.log(`  ${start.padEnd(6)} off the drawn road ${t.drawnOffS} s · GPS back / cut worst ${t.gpsWorstM} m · from Wi-Fi fixes ${t.wifiM} m · off the roads above 20 km/h ${t.offRoadS} s · jumps ${t.jumps} · incidents ${t.incidents}`);
     }
+  }
+  // Drawings clean GPS disagrees with (the drawn start's first seed: GPS is the same on every replay).
+  const disputes = results.filter((r) => r.start === "drawn" && r.seed === 1 && r.disputed?.length);
+  if (disputes.length) {
+    console.log("drawings clean GPS disagrees with (> 40 m; not judged there — redraw if the GPS is right):");
+    for (const r of disputes) console.log(`  ${name(r.log)}  ${r.disputed!.map(([a, b]) => `${Math.round(a)}–${Math.round(b)} s`).join(", ")}`);
   }
   if (saveAs) {
     mkdirSync(SAVED, { recursive: true });

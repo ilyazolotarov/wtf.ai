@@ -260,7 +260,7 @@ function endS(trip: TripLog): number {
 }
 
 /** The point of the path nearest to `p` between `fromM` and `toM` along it. */
-function nearestOnPath(path: readonly [number, number][], cum: readonly number[], p: Coordinate, fromM: number, toM: number): { s: number; distanceM: number } | null {
+export function nearestOnPath(path: readonly [number, number][], cum: readonly number[], p: Coordinate, fromM: number, toM: number): { s: number; distanceM: number } | null {
   const kx = 111_195 * Math.cos((p.lat * Math.PI) / 180);
   const ky = 111_195;
   let lo = 0;
@@ -288,7 +288,7 @@ function nearestOnPath(path: readonly [number, number][], cum: readonly number[]
   return best;
 }
 
-function pointAlong(path: readonly [number, number][], cum: readonly number[], s: number): [number, number] {
+export function pointAlong(path: readonly [number, number][], cum: readonly number[], s: number): [number, number] {
   if (path.length === 1 || s <= 0) return path[0];
   let lo = 0;
   let hi = cum.length - 1;

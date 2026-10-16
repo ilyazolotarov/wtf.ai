@@ -96,6 +96,11 @@
   .now-row { display: grid; grid-template-columns: 14px 1fr; gap: 6px; align-items: center; padding: 2px 0; }
   .big { font-size: 15px; }
   details.box { margin-top: 14px; }
+  #driveDelete.armed { color: var(--bad); border-color: var(--bad); }
+  #incidents { list-style: none; margin: 6px 0 0; padding: 0; }
+  #incidents li { padding: 2px 0; cursor: pointer; display: grid; grid-template-columns: 52px 1fr; gap: 6px; color: var(--text2); }
+  #incidents li.major { color: var(--text); }
+  #incidents li span:first-child { font-variant-numeric: tabular-nums; text-align: right; }
   details.box > summary { cursor: pointer; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--text2); }
   #events { list-style: none; margin: 6px 0 0; padding: 0; }
   #events li { padding: 2px 0; cursor: pointer; display: grid; grid-template-columns: 52px 1fr; gap: 6px; color: var(--text2); }
@@ -119,18 +124,12 @@
     <button id="drivePrev" title="Older drive">‹</button>
     <button id="drivePick" aria-haspopup="listbox" aria-expanded="false" title="Pick a drive (/)">—</button>
     <button id="driveNext" title="Newer drive">›</button>
+    <button id="driveDelete" title="Delete this log and its drawing: here now, from the bucket on the next npm run logs:push (click twice)">Delete</button>
     <div id="drivePop" hidden>
       <input id="driveSearch" type="search" placeholder="id, date, time, tester · drawn / undrawn · mine / testers" autocomplete="off" aria-label="Find a drive" />
       <ul id="driveList" role="listbox" aria-label="Drives"></ul>
     </div>
   </div>
-  <label title="The navigator the replay runs. Open loop = what the app runs now; the others close the loop from map matching (MAPMATCH-SPEC §9)">Navigator
-    <select id="loop">
-      <option value="">As on the phone</option>
-      <option value="open">Open loop</option>
-      <option value="heading">Road heading</option>
-      <option value="closed">Full correction</option>
-    </select></label>
   <label title="OBD as recorded; CAN wheel speeds where the CAN shadow heard them (OBD between; SPEC §2.1 Stage 2); or none: the app in phone-only mode (Developer settings → Navigate without an adapter, NAVIGATOR-SPEC §9.6), its dot from the phone's own speed and gyro; GPS still takes over when it is good">Adapter
     <select id="adapter">
       <option value="">OBD, as recorded</option>
@@ -153,12 +152,11 @@
       <option value="drawn">Where the drawing starts</option>
       <option value="cold">Cold</option>
     </select></label>
-  <label title="Run a second navigator version and draw it in orange">Compare
+  <label title="Replay a second version and draw it in orange. Before 2026-10-16: the dot without the heading cue or the steadying along its road, and the wheels' turning at a crawl (MAPMATCH-SPEC §11, NAVIGATOR-SPEC §5.4). Open loop: no corrections from the map into the navigator (MAPMATCH-SPEC §9)">Compare
     <select id="compare">
       <option value="">—</option>
+      <option value="before">Before 2026-10-16</option>
       <option value="open">Open loop</option>
-      <option value="heading">Road heading</option>
-      <option value="closed">Full correction</option>
     </select></label>
   <details class="more">
     <summary>More</summary>
@@ -205,6 +203,11 @@
     <div id="outages"></div>
     <h2>At the cursor</h2>
     <div id="now"></div>
+    <details class="box" id="incidentsBox" open hidden>
+      <summary>Incidents <span id="incidentCount"></span></summary>
+      <label><input id="minorIncidents" type="checkbox" /> include minor ones</label>
+      <ul id="incidents"></ul>
+    </details>
     <details class="box" id="eventsBox">
       <summary>Events</summary>
       <label><input id="allEvents" type="checkbox" /> include link and sensor messages</label>
@@ -1084,6 +1087,24 @@ function renderEvents() {
   for (const li of $("events").children) li.onclick = () => seek(+li.dataset.t);
 }
 
+/** What a driver would see go wrong, against the drawing (src/nav/replay/incidents.ts): click one to go there. */
+const INCIDENT_WORDS = { lost: "lost", "wrong-way": "arrow against the car", heading: "arrow well off", "wrong-road": "on another road", far: "far along the road", jump: "jump", backwards: "steps back" };
+function renderIncidents() {
+  const inc = data.incidents;
+  $("incidentsBox").hidden = !inc;
+  if (!inc) return;
+  const minor = $("minorIncidents").checked;
+  const list = inc.list.filter((i) => minor || (i.major && !i.whileLost));
+  const majors = inc.list.filter((i) => i.major && !i.whileLost).length;
+  $("incidentCount").textContent = inc.unjudged ? "· not judged" : `· ${majors} major`;
+  const unit = (i) => (i.kind === "wrong-way" || i.kind === "heading" ? "°" : " m");
+  $("incidents").innerHTML = inc.unjudged ? `<li><span></span><span>${esc(inc.unjudged)}</span></li>`
+    : list.map((i) => `<li data-t="${i.fromS}" class="${i.major ? "major" : ""}"><span>${fmtT(i.fromS)}</span><span>${esc(INCIDENT_WORDS[i.kind] ?? i.kind)}${i.whileLost ? " (while lost)" : ""}, ${(i.toS - i.fromS).toFixed(1)} s, ${i.worst}${unit(i)}</span></li>`).join("")
+      || `<li><span></span><span>none: the dot stayed with the car</span></li>`;
+  for (const li of $("incidents").children) if (li.dataset.t) li.onclick = () => seek(Math.max(0, +li.dataset.t - 3));
+}
+$("minorIncidents").onchange = () => data && renderIncidents();
+
 function renderSummary() {
   const s = data.summary, fx = s.fixes;
   $("summary").textContent = [
@@ -1282,7 +1303,7 @@ document.addEventListener("keydown", (e) => {
 window.addEventListener("resize", drawTimeline);
 
 // ---------- loading ----------
-const PARAMS = ["file", "loop", "adapter", "gps", "cut", "from", "compare", "lag", "start", "compass", "placings"];
+const PARAMS = ["file", "adapter", "gps", "cut", "from", "compare", "lag", "start", "compass", "placings"];
 function syncCutInput() {
   const g = $("gps").value;
   $("cut").hidden = g !== "cut" && g !== "jam";
@@ -1357,6 +1378,30 @@ function markDrawn(file, has) {
   l.drawn = has;
   showPicked();
 }
+/** Delete the current log: the first click asks, a second within 4 s deletes, then the next drive opens. */
+let deleteArmed = 0;
+$("driveDelete").onclick = async () => {
+  const file = $("file").value;
+  if (!file) return;
+  if (Date.now() - deleteArmed > 4000) {
+    deleteArmed = Date.now();
+    $("driveDelete").textContent = `Delete ${driveName(file)}?`;
+    $("driveDelete").classList.add("armed");
+    setTimeout(() => { if (Date.now() - deleteArmed >= 4000) { $("driveDelete").textContent = "Delete"; $("driveDelete").classList.remove("armed"); } }, 4100);
+    return;
+  }
+  deleteArmed = 0;
+  $("driveDelete").textContent = "Delete";
+  $("driveDelete").classList.remove("armed");
+  const res = await fetch(`/api/delete?file=${encodeURIComponent(file)}`, { method: "POST" });
+  if (!res.ok) { $("status").textContent = await res.text(); return; }
+  const i = logs.findIndex((l) => l.file === file);
+  logs.splice(i, 1);
+  $("status").textContent = `deleted ${driveName(file)}: gone from the bucket on the next push`;
+  $("file").value = logs[Math.min(i, logs.length - 1)]?.file ?? "";
+  showPicked();
+  run();
+};
 $("drivePick").onclick = () => ($("drivePop").hidden ? openPicker() : closePicker());
 $("drivePrev").onclick = () => pickDrive(logs[logs.findIndex((l) => l.file === $("file").value) + 1]?.file);
 $("driveNext").onclick = () => pickDrive(logs[logs.findIndex((l) => l.file === $("file").value) - 1]?.file);
@@ -1444,6 +1489,7 @@ async function run() {
   renderDrive();
   renderOutages();
   renderEvents();
+  renderIncidents();
   renderRoute();
   renderSummary();
   loadRoads(file);
@@ -1457,7 +1503,7 @@ async function run() {
   }
   seek(0);
 }
-for (const id of ["loop", "adapter", "from", "compare", "compass", "placings"]) $(id).onchange = run;
+for (const id of ["adapter", "from", "compare", "compass", "placings"]) $(id).onchange = run;
 $("gps").onchange = () => { syncCutInput(); if ($("gps").value !== "cut") run(); else $("cut").focus(); };
 for (const id of ["cut", "lag", "start"]) $(id).addEventListener("keydown", (e) => e.key === "Enter" && run());
 loadList();

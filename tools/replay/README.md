@@ -56,7 +56,43 @@ npm run replay:regress -- --from after --against before   # two saved runs, noth
 - One seed in three going bad is often the filter's luck: before keeping or dropping a change on such lines, run
   `--seeds 8` on both.
 - About 2 min for every log, three starts, three seeds on 32 cores, at low priority. It replays the app's settings (`app-defaults.ts`), not
-  the version a log was recorded with.
+  the version a log was recorded with, and gives the dot the routes the log planned, as the app does.
+- **Incidents** on drawn drives: the moments a driver would see go wrong (next section), counted per seed; a drive
+  is worse when they grow.
+- `--testers` adds the testers' drawn drives, each folder on its own chain (its phone's storage).
+- **Memory:** each worker holds a road graph and a drive (~0.5–1 GB). Pass `--threads 8` and run one benchmark at a
+  time: four side by side ran a 32 GB laptop out of memory.
+- `--puck '{"headingCueFactor":1}'` switches the dot's heading cue off (`position/puck.ts`) for a before.
+
+## Incidents and simulated Kyiv drives
+
+What a driver would see go wrong with the dot, moment by moment, against the truth (MAPMATCH-SPEC §10.2): lost,
+arrow against the car, another road, far along the road, jumps, steps back. A replay that judged nothing fails.
+
+```bash
+npm run sim:drives -- --seeds 1-3 --threads 6             # 20 Kyiv trips × 3 drives × GPS all along / lost / spoofed
+npm run replay:incidents -- tools/triplog/logs/synthetic --threads 10 --json runs/before.json
+npm run replay:incidents -- tools/triplog/logs/synthetic --threads 10 --json runs/after.json --against runs/before.json
+npm run replay:incidents -- tools/triplog/logs/synthetic --only lost --seeds 4 --mm '{"maxCompareM":15}'   # an experiment
+npm run replay:incidents -- tools/triplog/logs/emulator/*.ulg --exact-timing --minor   # emulated drives, every incident
+npm run replay:view -- --logs tools/triplog/logs/synthetic
+```
+
+- **Simulated drives** (`sim-drives.ts`): each trip on the route the app's router plans, driven by
+  `src/nav/sim/city-drive.ts` (speeds, stops, lanes, the phone's sensor errors), saved as trip logs in
+  `tools/triplog/logs/synthetic/` (git-ignored) with `.truth.json` (the path, for the viewer) and `.sim.json` (where
+  the car was every 0.2 s: exact timing). GPS goes wrong 200 s in; spoofed and lost score the same while the
+  integrity check refuses every spoofed fix.
+- **Scenarios** (the log name's last part): `gps`, `lost` (no fixes from 200 s), `spoof`, `jam` (Wi-Fi/cell-like fixes
+  from 200 s, `src/nav/replay/jam.ts`), `jamstart` (jammed from the start, the replay given the parked pose and the
+  speed scale a car that drove before has), `unmapped` (jamstart, and two short roads of the route missing from the
+  navigator's map, `hidden-roads.ts`). Judge a change on `jam`/`jamstart` before the real drives: changes that won on
+  `lost` and lost on the real drives came out worse there too (2026-10-16). Not yet on how many Wi-Fi fixes may move
+  a lost track: every simulated scenario prefers more, the real drives need three (MAPMATCH-SPEC §9, NAVIGATOR-SPEC §7).
+- Pass a folder, not `*.ulg`: 180 paths are past a Windows command line. `--only lost,demo` keeps logs whose names
+  contain one of them. About 15 min for all 180 × 8 seeds on 10 threads, 3 min for the 60 lost ones × 4.
+- **When a driver sees something no incident reports,** fix the detector first and show it fires on that log, then
+  the navigator.
 
 ## Spoofing benchmark
 
@@ -111,10 +147,10 @@ compass at a jammed start) replay the navigator alone (`replayTrip`), as the ben
 says so.
 
 - **Header:**
-  - *Drive*: newest first.
-  - *Navigator*: the version the replay runs. *As on the phone* (default) is the one the drive was recorded with
-    (the app's developer setting, in the log header); *Open loop* is what the app runs; *Road heading* and *Full correction*
-    send map matching back into the navigator (MAPMATCH-SPEC §9).
+  - *Drive*: newest first. *Delete* (click twice) removes a junk log and its drawing here, and from the bucket on
+    the next `npm run logs:push` (tools/triplog/README.md).
+  - The replay runs the navigator the drive was recorded with (the log header; the app runs full correction,
+    MAPMATCH-SPEC §9).
   - *Adapter*: *OBD, as recorded*, or *None: phone only*: the app in phone-only mode (NAVIGATOR-SPEC §9.6), fed
     no OBD speed or engine states. The blue dot is then the phone's own dead reckoning wherever GPS isn't good; the
     timeline draws its speed (blue, scaled by what its map matching learned) over OBD's (grey), rings around the dot
@@ -134,7 +170,12 @@ says so.
     restarts (it restarts by itself when the code changes). *Where the drawing starts*: empty storage but the parked pose, at the drawn ground
     truth's start heading along it. *Cold*: empty storage, as after a fresh install. The status line says which drive
     the parked pose came from and what the first fixes made of it.
-  - *Compare*: a second navigator version, drawn in orange.
+  - *Compare*: a second version, drawn in orange. *Before 2026-10-16*: the dot without the heading cue or the
+    steadying along its road, the wheels' turning at a crawl (MAPMATCH-SPEC §11, NAVIGATOR-SPEC §5.4). *Open loop*:
+    no corrections from the map into the navigator.
+- **Incidents** (side panel, on a drawn drive): what a driver would see go wrong with the dot against the drawing
+  (MAPMATCH-SPEC §10.2), each with its time and how bad; click one to go a few seconds before it. *Minor* adds the
+  small ones and those while lost.
   - *More*: clock times local or UTC (hover a time for the other; the drive list, the time bar and the panel),
     GPS lag (empty = learned on the drive, as in the app), start the session later, compass at a jammed
     start (MAPMATCH-SPEC §8.2), and the driver's placings: every app replay puts the car where the driver put it on

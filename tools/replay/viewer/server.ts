@@ -13,7 +13,10 @@ import { mergeCalibrations, type CompassCalibration } from "../../../src/nav/com
 import { LocalFrame } from "../../../src/nav/geo/local-frame";
 import type { TiledRoadGraph } from "../../../src/nav/mapmatch/graph/road-graph";
 import type { NavConfig } from "../../../src/nav/navigator";
+import { wheelYawTuning } from "../../../src/nav/odometry/can/wheel-yaw-source";
+import { puckTuning } from "../../../src/nav/position/puck";
 import { drawnTruthTrack, drawPath, type DrawnPoint, type DrawnTruth } from "../../../src/nav/replay/drawn-truth";
+import { findIncidents, INCIDENT_STEP_S } from "../../../src/nav/replay/incidents";
 import { appOutageCuts, replayTrip, type ReplayOptions } from "../../../src/nav/replay/replay";
 import { withCanSpeed } from "../../../src/nav/replay/can";
 import { buildViewerData } from "../../../src/nav/replay/viewer-data";
@@ -22,6 +25,7 @@ import { CalibrationStore } from "../../../src/services/navigation/calibration-s
 import { PHONE_CAR, STORAGE_NOTE, type MapMatchLoop } from "../../../src/services/navigation/navigator-service";
 import { readTripLog, type TripLog } from "../../../src/triplog/trip-log-reader";
 import { carOf, drawnStartPose, graphFor as graphForTrip, phoneRouteFor, regionPoint, routeBeforeLog } from "../app-chain";
+import { deleteLog } from "../../triplog/deleted";
 import { findGraph, openGraph, roadsAround, truthRoute } from "../graph-file";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -202,12 +206,29 @@ function logParam(url: URL): string | null {
   return /^(testers\/[a-z0-9][a-z0-9-]*\/)?[\w-]+\.ulg$/.test(file) ? file : null;
 }
 
-/** Navigator versions (MAPMATCH-SPEC §9): the open-loop baseline (what the app runs), and the closed-loop steps. */
+/** Navigator versions (MAPMATCH-SPEC §9): full correction is what the app runs; open loop draws the map's part. */
 const LOOPS: Record<string, { label: string; nav: Partial<NavConfig> }> = {
   open: { label: "Open loop", nav: { mapMatchLoop: "open" } },
   heading: { label: "Road heading", nav: { mapMatchLoop: "heading" } },
   closed: { label: "Full correction", nav: { mapMatchLoop: "closed" } },
 };
+/**
+ * Compare with the dot as it was before 2026-10-16: no heading cue, not steady along its road (position/puck.ts), the
+ * wheels' turning at a crawl too (wheel-yaw-source.ts). Run with those settings, then put back.
+ */
+const BEFORE_DOT = { label: "Before 2026-10-16", nav: { mapMatchLoop: "closed" } as Partial<NavConfig> };
+function withDotBefore<T>(run: () => T): T {
+  const puck = { ...puckTuning };
+  const wheel = { ...wheelYawTuning };
+  Object.assign(puckTuning, { headingCueFactor: 1, steady: false });
+  Object.assign(wheelYawTuning, { gyroBelowMps: 0 });
+  try {
+    return run();
+  } finally {
+    Object.assign(puckTuning, puck);
+    Object.assign(wheelYawTuning, wheel);
+  }
+}
 
 function parseCuts(s: string | null): { fromS: number; toS: number }[] {
   if (!s) return [];
@@ -240,7 +261,7 @@ const server = createServer((req, res) => {
       const phoneOnly = q("adapter") === "none";
       // CAN: wheel speeds where the CAN shadow heard them, OBD between (SPEC §2.1 Stage 2; replay only).
       const canSpeed = q("adapter") === "can";
-      const compareLoop = LOOPS[q("compare")] ?? null;
+      const compareLoop = q("compare") === "before" ? BEFORE_DOT : (LOOPS[q("compare")] ?? null);
       // Compass: off, or calibrated on the other logs, optionally turned (a wrong calibration).
       const compassArg = url.searchParams.get("compass") ?? "";
       const compass = compassArg ? compassFromOtherLogs(file) : null;
@@ -250,7 +271,7 @@ const server = createServer((req, res) => {
       const trip = (canSpeed && withCanSpeed(logged0)) || logged0;
       // The navigator version the phone ran (trip log header, from the app's developer setting); default open.
       const phoneLoop = typeof trip.info.nav_mapmatch_loop === "string" ? trip.info.nav_mapmatch_loop : null;
-      const loopKey = q("loop") || phoneLoop || "open";
+      const loopKey = q("loop") || phoneLoop || "closed";
       const loop = LOOPS[loopKey] ?? LOOPS.open;
       // The app replay unless a research option asks for the navigator alone (a later start, a fixed GNSS lag, a compass).
       const inApp = phoneOnly || (!(start > 0) && !lag && !compassArg);
@@ -285,9 +306,14 @@ const server = createServer((req, res) => {
           ...(compass ? { compass: { calibration: compass.calibration, rotateRad: (rotateDeg * Math.PI) / 180 } } : {}),
         };
         const navFor = (nav: Partial<NavConfig>): Partial<NavConfig> => ({ ...nav, ...(lag ? { gnssLagS: Number(lag), estimateGnssLag: false } : {}) });
+        const mainNav = navFor(loop.nav);
+        const compareNav = compareLoop ? navFor(compareLoop.nav) : null;
+        // The main replay's dots, for the incidents against the drawing.
+        let mainPublished: { timestampUs: number; latDeg: number; lonDeg: number; headingRad: number }[] | null = null;
+        let mainFixes: { t: number; lat: number; lon: number; hAccM: number }[] = [];
         // Through the app: the service publishes the dot, starts from the stored parked pose, and runs the outages.
-        const replay = (o: ReplayOptions) =>
-          replayTripInApp(trip, {
+        const replay = (o: ReplayOptions) => {
+          const run = () => replayTripInApp(trip, {
             calibration: new CalibrationStore(state!.store.copy(), phoneOf(trip)),
             loop: (o.nav?.mapMatchLoop ?? appLoop) as MapMatchLoop,
             roadGraph: opened ? { key: graphFile!, region: path.basename(graphFile!, ".graph.bin"), graph: opened.graph } : null,
@@ -298,6 +324,8 @@ const server = createServer((req, res) => {
             trackStepS: o.trackStepS,
             mapMatch: { particlesEveryS: o.mapMatch?.particlesEveryS },
             placings: q("placings") !== "off",
+            // The routes the driver had, as the app gives them to the service (the dot leans on them, puck.ts).
+            ...(phoneOnly ? {} : { phoneRoutes: phoneRouteFor(trip, null).routes }),
             ...(phoneOnly
               ? {
                   phoneOnly: {
@@ -310,12 +338,32 @@ const server = createServer((req, res) => {
                 }
               : {}),
           });
-        const data = buildViewerData(file, trip, { ...common, nav: navFor(loop.nav) }, {
+          const r = o.nav === compareNav && compareLoop === BEFORE_DOT ? withDotBefore(run) : run();
+          if (o.nav === mainNav) {
+            mainPublished = r.published;
+            mainFixes = r.fixes.filter((f) => f.satellite && f.status === "accepted").map((f) => ({ t: f.tS, lat: f.fix.lat, lon: f.fix.lon, hAccM: f.fix.hAccM }));
+          }
+          return r;
+        };
+        const data = buildViewerData(file, trip, { ...common, nav: mainNav }, {
           appCuts,
           ...(inApp ? { replay } : {}),
           phoneOnly,
-          ...(compareLoop ? { compare: { label: compareLoop.label, options: { ...common, nav: navFor(compareLoop.nav) } } } : {}),
+          ...(compareLoop && compareNav ? { compare: { label: compareLoop.label, options: { ...common, nav: compareNav } } } : {}),
         });
+        // What a driver would see go wrong (incidents.ts), against the drawing: each with its time, to jump to.
+        const drawnNow = readDrawn(file);
+        const found =
+          drawnNow && drawnNow.path.length > 1 && mainPublished
+            ? findIncidents(
+                drawnTruthTrack(trip, drawnNow, INCIDENT_STEP_S),
+                (mainPublished as { timestampUs: number; latDeg: number; lonDeg: number; headingRad: number }[])
+                  .filter((p) => Number.isFinite(p.latDeg))
+                  .map((p) => ({ t: (p.timestampUs - trip.startUs) / 1e6, lat: p.latDeg, lon: p.lonDeg, headingRad: Number.isFinite(p.headingRad) ? p.headingRad : undefined })),
+                mainFixes,
+              )
+            : null;
+        const incidents = found ? { list: found.incidents, coverage: found.coverage, unjudged: found.unjudged ?? null } : null;
         const compassInfo = compassArg ? { logs: compass?.logs ?? 0, rotateDeg, trust: data.summary.compass.trust } : null;
         const startNote =
           startFrom === "drawn" ? (drawnPose ? "drawn" : "no drawing: cold") : startFrom === "phone" && inApp ? (logged ? "phone" : "phone-missing") : null;
@@ -329,7 +377,7 @@ const server = createServer((req, res) => {
             maneuvers: [],
           });
         }
-        send(res, 200, "application/json", JSON.stringify({ ...data, compassInfo, startNote, phoneRouteSource: phoneRoute?.source ?? null, loopLabel: phoneOnly ? "Phone only (no adapter)" : loop.label, phoneLoopLabel: phoneLoop ? (LOOPS[phoneLoop]?.label ?? phoneLoop) : null, appCuts: appCuts.length, parkedFrom: state && chained ? { file: state.parkedAfter, status: data.summary.startPose?.status ?? null } : null, inApp }));
+        send(res, 200, "application/json", JSON.stringify({ ...data, incidents, compassInfo, startNote, phoneRouteSource: phoneRoute?.source ?? null, loopLabel: phoneOnly ? "Phone only (no adapter)" : loop.label, phoneLoopLabel: phoneLoop ? (LOOPS[phoneLoop]?.label ?? phoneLoop) : null, appCuts: appCuts.length, parkedFrom: state && chained ? { file: state.parkedAfter, status: data.summary.startPose?.status ?? null } : null, inApp }));
       } finally {
         opened?.close();
       }
@@ -360,6 +408,16 @@ const server = createServer((req, res) => {
       send(res, 200, "application/json", JSON.stringify(payload));
       const s = payload.summary;
       console.log(`truth for ${file}: ${s.matched} of ${s.fixes} clean fixes matched, ${s.breaks} breaks, ${Date.now() - started} ms`);
+    } else if (url.pathname === "/api/delete") {
+      // Junk logs: the log and everything named after it go, listed so the next `logs:push` deletes them from the
+      // bucket too (tools/triplog/deleted.ts). POST only, asked twice on the page.
+      const file = logParam(url);
+      if (!file) return send(res, 400, "text/plain", "file must be a .ulg in the logs folder");
+      if (req.method !== "POST") return send(res, 405, "text/plain", "POST");
+      if (lastTrip?.file === file) lastTrip = null;
+      const keys = deleteLog(LOG_DIR, file);
+      console.log(`deleted ${keys.join(", ")}`);
+      send(res, 200, "application/json", JSON.stringify({ deleted: keys }));
     } else if (url.pathname === "/api/drawn") {
       // Ground truth drawn by hand: GET it, POST the clicked points (the server lays the path on the roads and saves
       // it), DELETE it.
