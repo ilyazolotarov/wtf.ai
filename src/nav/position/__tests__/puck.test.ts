@@ -1,5 +1,5 @@
 import type { MapMatchEstimate, NavEstimate } from "@/nav/navigator";
-import { DRAW_ON_ROAD_MPS, puckHypothesis } from "@/nav/position/puck";
+import { DRAW_ON_ROAD_MPS, puckHypothesis, steadyDot, type DrawnDot } from "@/nav/position/puck";
 
 type Cluster = MapMatchEstimate["clusters"][number];
 const field: Cluster = { weight: 0.9, lat: 51.5, lon: 31.3, headingRad: 1.6, spreadM: 8, edge: null, particles: 400, road: { lat: 51.5003, lon: 31.3, headingRad: 1.57 } };
@@ -74,5 +74,43 @@ describe("the route tips which way the dot goes on a road", () => {
   test("a route elsewhere changes nothing", () => {
     const far = routeNorth.map((p) => ({ ...p, lon: p.lon + 0.01 }));
     expect(puckHypothesis(clusters(south, north), false, far)).toBe(south);
+  });
+});
+
+describe("the car's own heading tips which way the dot goes", () => {
+  // Mid-turn at a T-junction: right-turn and left-turn particles on the same cross street, travelling opposite ways.
+  const right: Cluster = { weight: 0.45, lat: 50.432, lon: 30.516, headingRad: 0.3, spreadM: 5, edge: 7, particles: 150 };
+  const left: Cluster = { ...right, weight: 0.55, headingRad: 0.3 + Math.PI };
+  const turning = (headingRad: number, headingSigmaRad: number) =>
+    ({ mode: "dr", speedMps: 6, headingRad, headingSigmaRad, mapMatch: { state: "multimodal", clusters: [left, right], particles: 500, updateMs: 1 } }) as unknown as NavEstimate;
+
+  test("the navigator turning right (gyro) draws the right-turn hypothesis though the other leans heavier", () => {
+    // Half-way through the turn from 288° to 17°.
+    expect(puckHypothesis(turning(-0.6, 0.05), true)).toBe(right);
+  });
+
+  test("a heading the navigator isn't sure of is no cue", () => {
+    expect(puckHypothesis(turning(-0.6, 1), true)).toBe(left);
+  });
+});
+
+describe("the dot keeps steady along its road", () => {
+  const north = (m: number) => ({ lat: 50.45 + m / 111_320, lon: 30.52, headingRad: 0 });
+  const last = (m: number, tUs = 0): DrawnDot => ({ ...north(m), tUs });
+
+  test("a hypothesis a few metres behind where the dot has driven to doesn't pull it back", () => {
+    // 1 s at 10 m/s from 0: the dot is at 10 m; the hypothesis at 4 m (the cloud resampled back).
+    const d = steadyDot(north(4), last(0), 10, 1_000_000);
+    expect((d.lat - 50.45) * 111_320).toBeCloseTo(9, 0); // back 1 m/s at most: 10 − 1
+  });
+
+  test("ahead, it catches up at 8 m/s faster than it drove, held at most 15 m behind the hypothesis", () => {
+    const d = steadyDot(north(40), last(0), 10, 1_000_000);
+    expect((d.lat - 50.45) * 111_320).toBeCloseTo(25, 0); // 18 m by the rate, but never more than 15 m behind it
+  });
+
+  test("another direction, or a hypothesis far away, is drawn as it is", () => {
+    expect(steadyDot({ ...north(4), headingRad: Math.PI / 2 }, last(0), 10, 1_000_000)).toMatchObject({ lat: north(4).lat });
+    expect(steadyDot(north(200), last(0), 10, 1_000_000)).toMatchObject({ lat: north(200).lat });
   });
 });

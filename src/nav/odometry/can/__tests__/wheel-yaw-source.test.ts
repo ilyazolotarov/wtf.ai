@@ -57,3 +57,41 @@ describe("turning from the wheels (NAVIGATOR-SPEC §5.4)", () => {
     expect(Math.abs(src.yawAt(700_000_000 - WHEEL_LAG_US)!)).toBeLessThan(0.001);
   });
 });
+
+describe("at a crawl, the phone's turning while it sits in its mount", () => {
+  // At speed for a while: wheels and gyro both 0.1 rad/s (mounted), or the gyro 0.3 rad/s off them (a pocket).
+  const drive = (src: WheelYawSource, gyroOff: number) => {
+    for (let t = 0; t < 30_000_000; t += 100_000) {
+      src.addGyro(t - WHEEL_LAG_US, 0.1 + gyroOff * Math.sin(t / 1e6));
+      const w = wheels(t, 0.1);
+      src.addWheels(w);
+      src.learn(w);
+    }
+  };
+  // Then pulling out of a space at 1 m/s: the wheels read no turning, the car (and phone) turns 0.4 rad/s.
+  const crawl = (src: WheelYawSource) => {
+    const t = 31_000_000;
+    src.addWheels({ ...wheels(t + WHEEL_LAG_US, 0, 1) });
+    src.addGyro(t, 0.4);
+    return WheelYawSource.gyroYaw(src.substitute(imu(t, 0.4))!);
+  };
+
+  test("mounted: the gyro's turning, not the wheels' nothing", () => {
+    const src = new WheelYawSource(null, undefined, false);
+    drive(src, 0);
+    expect(crawl(src)).toBeCloseTo(0.4, 6);
+  });
+
+  test("in a pocket (the gyro didn't turn with the wheels): still the wheels", () => {
+    const src = new WheelYawSource(null, undefined, false);
+    drive(src, 0.3);
+    expect(crawl(src)).toBeCloseTo(0, 6);
+  });
+
+  test("what was learned at speed carries over to a new source (the wheels lost and back)", () => {
+    const before = new WheelYawSource(null, undefined, false);
+    drive(before, 0);
+    const after = new WheelYawSource(null, undefined, false, before.agreement);
+    expect(crawl(after)).toBeCloseTo(0.4, 6);
+  });
+});

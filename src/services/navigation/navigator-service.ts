@@ -11,12 +11,12 @@ import type { FixOutcome, MapMatchEstimate, NavConfig, NavMode, ParkedPose } fro
 import { Navigator } from "@/nav/navigator";
 import { PhoneNavigator, type PhoneGraph, type PhonePose, type PhoneRouteState } from "@/nav/phone/phone-navigator";
 import { haversineM } from "@/nav/geo";
-import { FUSED_WINDOW_US, puckAccuracyM, puckHypothesis, type LastPuck } from "@/nav/position/puck";
+import { FUSED_WINDOW_US, puckAccuracyM, puckHypothesis, steadyDot, type DrawnDot, type LastPuck } from "@/nav/position/puck";
 import type { PositionEstimate, PositionSourceKind, RawGnssFix } from "@/nav/position/types";
 import type { CompassTrust } from "@/nav/compass/compass";
 import type { GnssFix, ImuSample, MagSample, ObdSpeedSample } from "@/nav/types";
 import type { CanSpeedSample } from "@/nav/odometry/can/can-speed";
-import { WheelYawSource } from "@/nav/odometry/can/wheel-yaw-source";
+import { WheelYawSource, type WheelGyroAgreement } from "@/nav/odometry/can/wheel-yaw-source";
 import { ImuProcessor } from "@/nav/odometry/imu/imu-processor";
 import type { EngineState, SpeedSample, VehicleLinkSnapshot } from "@/obd/types";
 import { isSatelliteRecord, mapFixToPosition } from "@/services/position/gnss-position-source";
@@ -223,6 +223,8 @@ export class NavigatorService implements PositionSource {
   private pending: Input[] = [];
   /** The navigator's turning from the wheels (§5.4): the source, while on. */
   private wheelYaw: WheelYawSource | null = null;
+  /** The gyro against the wheels from the wheel-yaw source before this one (`WheelYawSource.agreement`). */
+  private wheelAgreement: readonly WheelGyroAgreement[] = [];
   /** The gyro as the navigator would read it, for the wheels to learn from. */
   private readonly gyroProc = new ImuProcessor();
   private lastCanUs = -Infinity;
@@ -237,6 +239,8 @@ export class NavigatorService implements PositionSource {
   private lastAcceptedSatUs = -Infinity;
   /** The hypothesis the dot was drawn on last, for its continuity (position/puck.ts). */
   private lastPuck: LastPuck | null = null;
+  /** The dot drawn last from a hypothesis, before extrapolation (`steadyDot`). */
+  private lastDot: DrawnDot | null = null;
   private mode: NavMode = "none";
   private vin: string | null = null;
   private lastSaveAt = 0;
@@ -311,8 +315,10 @@ export class NavigatorService implements PositionSource {
     if (on === (this.wheelYaw !== null)) return;
     this.note(`nav wheel yaw ${on ? "on" : "off"}`);
     if (!on) this.noteWheelYaw();
-    // The defaults turn the wheels; what the gyro teaches is only noted for now (WheelYawSource).
-    this.wheelYaw = on ? new WheelYawSource(null, undefined, false) : null;
+    // The defaults turn the wheels; what the gyro teaches is only noted for now (WheelYawSource). Whether the phone sits
+    // in its mount carries over a break in the wheels (the link lost while parked).
+    if (this.wheelYaw) this.wheelAgreement = this.wheelYaw.agreement;
+    this.wheelYaw = on ? new WheelYawSource(null, undefined, false, this.wheelAgreement) : null;
   }
 
   /** Held this long and fed in time order (`REORDER_US`; `CAN_REORDER_US` with CAN wheel samples). */
@@ -660,6 +666,7 @@ export class NavigatorService implements PositionSource {
     const nav = new Navigator({ ...this.deps.nav, mapMatchLoop: this.loop, ...(lag ? { gnssLagS: lag.lagS } : {}) });
     this.nav = nav;
     this.lastPuck = null;
+    this.lastDot = null;
     this.deps.observer?.navigator?.(nav);
     if (lag) this.note(`nav gnss lag ${lag.lagS} s from storage (${lag.windows} turn windows)`);
     this.fedUs = -Infinity;
@@ -1054,7 +1061,9 @@ export class NavigatorService implements PositionSource {
           : undefined;
     // The navigator runs a reorder window behind: draw the car where it is now.
     const aheadM = dr && speed !== undefined ? speed * Math.min(Math.max(0, (nowUs - estimate.tUs) / 1e6), MAX_EXTRAPOLATE_S) : 0;
-    const { lat, lon } = ahead(top ?? estimate, heading, aheadM);
+    const drawn = top ? steadyDot(top, this.lastDot, speed, estimate.tUs) : null;
+    this.lastDot = top && drawn ? { ...drawn, headingRad: top.headingRad, tUs: estimate.tUs } : null;
+    const { lat, lon } = ahead(drawn ?? estimate, heading, aheadM);
     const alternatives =
       top && mm?.state === "multimodal"
         ? mm.clusters

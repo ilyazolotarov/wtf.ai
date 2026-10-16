@@ -50,6 +50,72 @@ const ROUTE_CUE_NEAR_M = 30;
  * south 66 m behind a route north, until the filter itself turned it round with a 237 m jump).
  */
 const ROUTE_CUE_BACK_M = 300;
+/**
+ * The car's own heading as a cue (MAPMATCH-SPEC §11): a hypothesis travelling more than `HEADING_CUE_RAD` off the
+ * navigator's heading counts this many times less when choosing the dot. Through a turn the filter compares the car's
+ * turn with the road's only once the car drives straight again, so mid-turn at a T-junction the particles that turned
+ * left and those that turned right weigh about the same; they are on the same cross street, travelling opposite ways,
+ * and the dot drew whichever led: for 1–2.5 s it ran the wrong way down the street (emulated and simulated drives,
+ * 2026-10-16). The gyro knows which way the car turned. Only the choice, as with the route.
+ */
+export const HEADING_CUE_FACTOR = 8;
+const HEADING_CUE_RAD = Math.PI / 2;
+/** Replay tools only: the cues for an experiment (factor 1 switches one off). The app never changes them. */
+export const puckTuning = {
+  headingCueFactor: HEADING_CUE_FACTOR,
+  headingCueRad: HEADING_CUE_RAD,
+  routeCueFactor: ROUTE_CUE_FACTOR,
+  /** `steadyDot`: on, how fast the dot may step back along its road and catch up ahead (m/s), beyond which it jumps (m). */
+  steady: true,
+  steadyBackMps: 1,
+  steadyCatchMps: 8,
+  steadyMaxM: 80,
+  /**
+   * …and never held farther than this from the hypothesis along its road: on a bend the road leaves the straight
+   * line it is held along (unlimited, the dot was off the roads at speed 16 → 30 s over the corpus).
+   */
+  steadyHoldM: 15,
+};
+
+/** The dot drawn last after `steadyDot` (before extrapolation), for the next one. */
+export interface DrawnDot {
+  lat: number;
+  lon: number;
+  headingRad: number;
+  tUs: number;
+}
+
+/**
+ * Where to draw a hypothesis that continues the last dot's road: the last dot carried on at the car's speed, then
+ * moved toward the hypothesis across the road at once but along it at most `steadyBackMps` back and `steadyCatchMps`
+ * ahead. The hypothesis' position along a road wanders with the filter's resampling (a second's worth of metres back
+ * and forth), which the driver sees as the dot jumping and stepping back. Another road, another direction or a gap
+ * past `steadyMaxM`: the hypothesis itself.
+ */
+export function steadyDot(target: { lat: number; lon: number; headingRad: number }, last: DrawnDot | null, speedMps: number | undefined, tUs: number): { lat: number; lon: number } {
+  const t = puckTuning;
+  if (!t.steady || !last) return target;
+  const dtS = (tUs - last.tUs) / 1e6;
+  if (!(dtS > 0 && dtS <= 2) || angle(target.headingRad, last.headingRad) > Math.PI / 4) return target;
+  const kx = 111_320 * Math.cos((last.lat * Math.PI) / 180);
+  const ue = Math.sin(target.headingRad);
+  const un = Math.cos(target.headingRad);
+  // Where the last dot has driven to, and the hypothesis from there: along the road and across it.
+  const moved = Math.max(0, speedMps ?? 0) * dtS;
+  const pe = moved * Math.sin(last.headingRad);
+  const pn = moved * Math.cos(last.headingRad);
+  const de = (target.lon - last.lon) * kx - pe;
+  const dn = (target.lat - last.lat) * 111_320 - pn;
+  if (Math.hypot(de, dn) > t.steadyMaxM) return target;
+  const along = de * ue + dn * un;
+  const limited = Math.max(-t.steadyBackMps * dtS, Math.min(t.steadyCatchMps * dtS, along));
+  const kept = Math.max(along - t.steadyHoldM, Math.min(along + t.steadyHoldM, limited));
+  const e = pe + de - (along - kept) * ue;
+  const n = pn + dn - (along - kept) * un;
+  return { lat: last.lat + n / 111_320, lon: last.lon + e / kx };
+}
+/** The navigator's heading counts as a cue only while it is this sure. */
+const HEADING_CUE_SIGMA_RAD = (30 * Math.PI) / 180;
 
 /**
  * The dominant map-matching hypothesis when it places the car (undefined: the navigator's own position is the dot):
@@ -67,8 +133,9 @@ export function puckHypothesis(
 ): MapMatchEstimate["clusters"][number] | undefined {
   const mm = estimate.mapMatch;
   if (!(deadReckoning || estimate.mode === "anchored") || !mm || !MAP_MATCH_PUCK.has(mm.state) || estimate.parkedOffRoad) return undefined;
-  const leader = route?.length ? routeChoice(mm.clusters, route) : mm.clusters[0];
-  const top = leader && last ? (kept(mm.clusters, leader, last, estimate) ?? leader) : leader;
+  const score = cueScore(estimate, route);
+  const leader = mm.clusters.reduce<MapMatchEstimate["clusters"][number] | undefined>((best, c) => (!best || score(c) > score(best) ? c : best), undefined);
+  const top = leader && last ? (kept(mm.clusters, leader, last, estimate, score) ?? leader) : leader;
   // The filter keeps its off-road hypothesis (it is how it finds the road again), but a car at speed is drawn on a road.
   // Whenever the hypothesis is off-road, not only in state `offroad` (off-road weight over half): that flickered on
   // and off around half, and the dot jumped 20–30 m between the hypothesis and its road (2026-10-15).
@@ -84,6 +151,7 @@ function kept(
   leader: MapMatchEstimate["clusters"][number],
   last: LastPuck,
   estimate: NavEstimate,
+  score: (c: MapMatchEstimate["clusters"][number]) => number,
 ): MapMatchEstimate["clusters"][number] | null {
   const dtS = Math.max(0, Math.min(2, (estimate.tUs - last.tUs) / 1e6));
   const movedM = Math.abs(estimate.speedMps ?? 0) * dtS;
@@ -102,7 +170,7 @@ function kept(
       bestM = d;
     }
   }
-  return best && best !== leader && bestM <= KEEP_REACH_M && best.weight >= KEEP_SHARE * leader.weight ? best : null;
+  return best && best !== leader && bestM <= KEEP_REACH_M && score(best) >= KEEP_SHARE * score(leader) ? best : null;
 }
 
 /**
@@ -116,24 +184,26 @@ export function puckAccuracyM(estimate: NavEstimate, hypothesis: MapMatchEstimat
   return Math.max(spread, estimate.doubtM ?? 0);
 }
 
+const angle = (a: number, b: number) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+
 /**
- * The heaviest cluster once those travelling against the route's start count `ROUTE_CUE_FACTOR` times less: on a
- * straight road under jamming, with no course, turn or parked pose, both directions were near even and the dot set
- * off whichever way the particles leaned (2026-10-14, the emulator drove the car backwards).
+ * A hypothesis' weight for choosing the dot: `ROUTE_CUE_FACTOR` times less travelling against the route's start (on a
+ * straight road under jamming, with no course, turn or parked pose, both directions were near even and the dot set off
+ * whichever way the particles leaned: 2026-10-14, the emulator drove the car backwards), and `HEADING_CUE_FACTOR`
+ * times less travelling against the navigator's heading.
  */
-function routeChoice(clusters: MapMatchEstimate["clusters"], route: readonly Coordinate[]): MapMatchEstimate["clusters"][number] | undefined {
-  let best = clusters[0];
-  let bestScore = -1;
-  for (const c of clusters) {
-    const along = routeBearingNear(route, c);
-    const against = along !== null && Math.abs(Math.atan2(Math.sin(c.headingRad - along), Math.cos(c.headingRad - along))) > Math.PI / 2;
-    const score = against ? c.weight / ROUTE_CUE_FACTOR : c.weight;
-    if (score > bestScore) {
-      best = c;
-      bestScore = score;
+function cueScore(estimate: NavEstimate, route: readonly Coordinate[] | null) {
+  const heading = estimate.headingRad;
+  const headingCue = heading !== undefined && Number.isFinite(heading) && (estimate.headingSigmaRad ?? Infinity) <= HEADING_CUE_SIGMA_RAD;
+  return (c: MapMatchEstimate["clusters"][number]): number => {
+    let score = c.weight;
+    if (route?.length) {
+      const along = routeBearingNear(route, c);
+      if (along !== null && angle(c.headingRad, along) > Math.PI / 2) score /= puckTuning.routeCueFactor;
     }
-  }
-  return best;
+    if (headingCue && angle(c.headingRad, heading) > puckTuning.headingCueRad) score /= puckTuning.headingCueFactor;
+    return score;
+  };
 }
 
 /** The route's bearing (clockwise from north) at its nearest point to `p` within its first `ROUTE_CUE_M`, if that is near. */

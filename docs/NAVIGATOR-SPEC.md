@@ -143,6 +143,15 @@ out), and the handling flag saw 2–15 % of that time.
   the turning for unknown 1.5 s each time. In a break in listening the phone's own turning, still in the car's frame
   (switching frames at every break read as handling twice a second: 12–88 s off the road on drives the gyro had
   0–2); no wheel sample within 1 s: the phone's sample as it is.
+- **At a crawl, the phone's turning while it sits in its mount:** below 1.5 m/s of wheel speed the gyro's yaw about
+  "up" replaces the wheels', if over the last 600 wheel samples above 3 m/s (however old: a stop doesn't empty them,
+  nor does the link dropping out, the next source takes them over) the gyro turned with the wheels, RMS of the
+  difference under 0.05 rad/s (in the mount 0.03–0.04, in a pocket 0.09–0.11). Wheel speed sensors read nothing at a
+  crawl: pulling out of a parking space with no GPS (nnz5ff, 2026-10-16) the wheels had the car go straight, the dot
+  set off on another road and was 100–115 s off the drawn one on every seed; with the gyro there 0–4 s. Over the
+  corpus (8 seeds) none worse, off the drawn road 730 → 627 s (drawn starts) and 1202 → 1049 s (parked). Without the
+  mount check the phone in a pocket turned on its own at every crawl: four drives 30–225 s off. The raw gyro, not the
+  IMU processor's: that takes tight manoeuvring for the phone being handled. At 3 m/s one drive was worse on a seed.
 - **The compass gets no field** meanwhile (§7.6): it reads the phone's field against the IMU's "up", and with the
   car's IMU in its place it would learn, and keep, a mounting from a field that turns with the phone.
 - **The service** holds its inputs 0.5 s instead of 0.3 while CAN speed comes or wheel yaw is on: a wheel sample
@@ -265,6 +274,12 @@ out), and the handling flag saw 2–15 % of that time.
   within 1 km of a trusted satellite fix (on the highway the Wi-Fi/cell fixes are the ones off), not while a parked
   pose is unconfirmed (it has its own rule), not within 500 m of the driver confirming the pose or placing the car.
   On 2026-10-06 four such fixes 28–92 m from the car said the dot 230–560 m away was lost, and nothing listened.
+  Three, not more: on simulated jammed drives (MAPMATCH-SPEC §10.2, Wi-Fi/cell-like fixes whose error wanders over
+  two minutes) three in a row 150 m off together moved tracks that were right (losses 14 in 240 replays; with 4 in a
+  row 9, with 5 2), but on the real drives 5–7 got worse with 4 or 5 (2026-10-16): there the tracks are lost for real
+  more often than the fixes agree on a wrong place. Nor 5 only while map matching tracks one road with over 0.9 of
+  the weight: simulated losses 14 → 2, but 3 real drives worse (fwx8ms parked up to 225 s off) — a track lost on a
+  wrong road is as sure of itself as a right one (§9).
 - The original rule (2× the claim) is kept in spirit below. A coarse fix is a kilometre-wide blob under jamming, so a
   dot inside one says nothing and a single one outside says little; three agreeing that the car is several blobs
   away is the only evidence available that the track is lost. Satellite fixes are not counted (integrity and the EKF
@@ -819,4 +834,9 @@ needed to check them (`replay:bench`).
     learns only the scale `k_s`. Built: an offset state `o_s` (v = k_s·s_OBD + o_s above the zero cutoff; `ekf.
     initSpeedOffsetSigma`, carried with `k_s`), **off by default**: the EKF can't tell it from the scale with town
     speeds and GNSS speed (a simulated drive learned 0.5 km/h for a true 0.23); neutral on the 14 logs (`replay:bench
-    --mm`, closed loop: 240 s 16.7 vs 17.2 m), mixed on simulated highways (MAPMATCH-SPEC §9.4).
+    --mm`, closed loop: 240 s 16.7 vs 17.2 m), mixed on simulated highways (MAPMATCH-SPEC §9.4). Measured again
+    by incidents (MAPMATCH-SPEC §10.2, 2026-10-16), on simulated Kyiv drives that lose GPS at 200 s — where a scale
+    learned in the first slow minutes is 1–2 % off at cruising speed and the dot drifts 50–100 m along avenues — the
+    offset state, and instead not learning `k_s` from OBD readings under 5–11 m/s: both much better simulated (dot far
+    along the road 68 → 47–50, losses 7 → 4), both worse on the real drives (offset: wrong roads ×6; under 5 m/s 7
+    drives worse, under 11 m/s 13). Off.

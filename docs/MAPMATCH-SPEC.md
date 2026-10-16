@@ -840,6 +840,15 @@ the filter follows a drifting position onto wrong roads. The main EKF's prior is
 was only claiming to know the position along the road, fixed by the growing floor (§9). Kept, off, for the third
 use, not built: a tripwire that stops the road corrections when the corrected track's shape over the last few
 hundred metres stops matching the twin's.
+Measured again by incidents (§10.2) on simulated Kyiv drives with GPS lost from 200 s, and on the real corpus, the
+position prior from the twin: losses 7 → 133 and real-drive incidents 174 → 430; a looser pull to the main EKF (its
+σ floored at 30 m, or widened by 1–2 % of the distance since the last trusted fix) kept more hypotheses where the
+car was on the simulated drives, but the dot then hopped along the road (jumps and steps back × 5–30) and the real
+drives got worse (incidents 174 → 186–229). Kept as it is. Nor once the dot was steady along its road (§11), with
+the pull loosened only after 1–3 km without a fix of any kind (σ at least 10–15 m): on the simulated drives jumps
+60 → 26–29 and the wrong-way arrows to 0–4, but on the real ones 5–7 drives worse (a parked chain lost for minutes)
+and incidents up. Real jammed drives drive kilometres without a fix too, and there the map the simulation drives on
+is not the road the car does: the tight pull is what keeps the filter on it.
 - **Optimistic:** the map is the road network the car drives (topology exact, only the geometry wanders), and there
   is no parking, reversing, yard, unmapped road, traffic jam, tunnel or phone handling. Real long drives with Cut GPS
   (NAVIGATOR-SPEC §9) are the check.
@@ -917,6 +926,32 @@ drive gone from 15 to 490 m off, and most jammed drives have no satellite fix at
 scored against GPS, skips exactly them. Two changes measured on their own drive and on these benchmarks were
 reverted for that (2026-10-07): §15, item 14, and NAVIGATOR-SPEC §6.1. Run against the reverts, the check lists 8
 drives worse, the ones the viewer showed, and 3 better.
+
+**Incidents: what a driver would see go wrong** (`src/nav/replay/incidents.ts`). Medians and percentiles over a
+drive drown a dot that points the wrong way for a second and a half after a turn: it was the driver who saw it, not
+a metric. Every 0.2 s the dot as drawn (position and arrow, the published `nav_estimate`) is set against the truth,
+and each moment that goes wrong is an incident of its own, with its times:
+
+| Incident | When (major) |
+| --- | --- |
+| lost | > 100 m from the car (+ twice the truth's timing doubt) for ≥ 20 s, stretches less than 30 s apart one; what happens inside is its consequence |
+| wrong-way | arrow > 120° off the car's heading for ≥ 0.6 s (the path's direction there, over the timing's doubt, ≤ 25 m) |
+| wrong-road | > 30 m from every part of the path near the car for ≥ 5 s, or > 60 m |
+| far | on the path, but > 50 m (+ twice the doubt) along it from the car |
+| jump | a step ≥ 30 m longer than the car drove in it |
+| backwards | on the path, ≥ 15 m back along it within 1.5 s while the car goes forward |
+
+The dot is placed on the stretch of path nearest the car along it (a route round a block passes a place twice, 80 m
+apart along it and 5 m apart on the map). A replay that judged nothing (no dot while the car moved) fails rather than
+passing clean, and so does a drawing the odometer can't time (an odometer under half the drawn path: no OBD speed
+logged), which gets no count at all rather than a made-up one. Where a satellite fix the navigator took (integrity
+passed it; ±10 m or better) is more than 40 m from the drawn roads, or from where the drawing's timing has the car
+beyond twice its doubt, the drawing is what is off there: those seconds aren't judged, and `replay:regress` lists them
+to redraw (9qw8wn 405–441 s; j5m8tq 490–544 s, the car further along than the odometer timed it). `replay:regress` counts the major incidents per drive and seed next to its other scores, and
+`npm run replay:incidents` lists them with their times for any logs with a truth: the drawn ones, and simulated
+drives (`npm run sim:drives`: Kyiv trips planned by the router, driven by `src/nav/sim/city-drive.ts` along the plan,
+GPS all along, lost or spoofed from 200 s; their truth is exact, timing doubt 0). When a driver sees something no
+incident reports, the detector is fixed first, and shown to fire on that log, before the navigator.
 
 ### 10.3 Tooling (`tools/replay`)
 
@@ -1012,6 +1047,19 @@ drives worse, the ones the viewer showed, and 3 better.
     truth survival min 47 → 69 % (reversed 56 %), but map starts 26 → 19 and two wrong starts, 178° and 344–369 m off
     (nvrm4q from 60 s, with the route either way: the factor thinned the hypotheses until a wrong one reached 0.9),
     and on 94zf2q from 180 s the true route blocked a right map start and let a 43° alignment start win. Dropped.
+  - **The car's own heading tips it too** (`position/puck.ts`): a cluster travelling more than 90° off the
+    navigator's heading, while that is sure to 30°, counts 8 times less when the dot is chosen (with the route's
+    factor, both apply). Through a turn the filter compares the car's turn with the road's only at the next straight
+    moment (`straightTurnRad`), so mid-turn at a T-junction the particles that turned left and those that turned right
+    weigh about the same, on the same cross street travelling opposite ways; the dot drew whichever led and ran 20–35 m
+    the wrong way for 1–2.5 s (an emulated drive, then simulated ones, §9.4). The gyro knows which way the car turned.
+    Only the choice, as with the route. Simulated Kyiv drives (180: 20 trips × 3, GPS all along, lost or spoofed from
+    200 s; 8 seeds): arrow against the car 174 → 30 times, jumps 328 → 266, drives with no major incident 122 → 140,
+    none worse; real drives (8 seeds, drawn and parked starts): incidents 178 → 173 and 241 → 220, none worse
+    (incidents, §10.2). Factor 4 left twice as many wrong-way arrows on the simulated drives; a 60° threshold
+    instead of 90° changed nothing. Tried instead, in the filter: comparing the turns mid-turn sooner (`maxCompareM`
+    10 or 15 m for 20): fewer wrong-way arrows on the simulated drives at 10 m, but 19 real drives worse
+    (incidents 174 → 209 and 221 → 248); at 15 m mixed. Not kept.
   - **On a road while it drives:** an off-road dominant hypothesis (its heaviest edge none), at 15 km/h or more, is
     drawn at the nearest point of a road it could be driving along — within 80 m, its heading within 60°, not
     against a one-way (`MapMatchEstimate.clusters[].road`, `position/puck.ts`) — and as it is when there is none.
@@ -1033,6 +1081,19 @@ drives worse, the ones the viewer showed, and 3 better.
     jumps 246 → 178 and 234 → 182, no drive worse; nearest the last dot itself, rather than where it drove to, a
     hypothesis 18 m behind on the highway was there half a second later, and the dot stalled and jumped back and
     forth (gc6xib 10 → 28 jumps).
+  - **Steady along its road** (`steadyDot`, `position/puck.ts`): while the hypothesis drawn continues the last dot's
+    road (heading within 45°, within 80 m of where the last dot has driven to), the dot is that point moved toward the
+    hypothesis across the road at once, but along it at most 1 m/s back and 8 m/s ahead, and never more than 15 m from
+    it. A hypothesis' position along its road wanders with each resampling, and the driver saw the dot step back and
+    jump. Another road, another direction or a larger gap: the hypothesis itself. Real drives (8 seeds): incidents
+    173 → 160 (drawn) and 220 → 196 (parked), jumps 158 → 137; simulated drives with GPS lost: jumps 74 → 60, steps
+    back 25 → 18; no drive worse on either. Held without the 15 m limit, the dot left the road on bends (off the roads
+    at speed 16 → 30 s); with 8 m, less gained; 0 or 2 m/s back, 12 m/s ahead or 25 m changed nothing beyond the
+    seeds. With the heading cue, against neither (57 drawn drives, 8 seeds): incidents 202 → 172 (drawn) and
+    286 → 231 (parked), jumps 155 → 126; simulated drives (180 × 8 seeds): arrow against the car 170 → 30, jumps
+    316 → 220, steps back 78 → 65, drives with no major incident 122 → 141; no drive worse on either. Tried, not
+    kept: steadying the hand-over from the GPS dot to the hypothesis too (no change on either), and widening the
+    filter's restart after a lost turn to 1–2 % of the distance since the last trusted fix (simulated jumps 57 → 75).
   - **At the spot it parked in off the roads** (`NavEstimate.parkedOffRoad`: started from such a pose, not 20 m
     driven since, state `offroad`): the EKF is the puck, not the dominant hypothesis. The off-road particles spread
     over the pose's σ in clusters lighter than a road's within it.
