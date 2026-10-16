@@ -208,6 +208,8 @@ says so.
     cursor, laid on the drawing at the cursor and turned to its direction there (`odometryTrack`, app-chain.ts). Put
     the cursor where the drawing is surely right and check the car park or yard next to it; against GPS it was
     within ~10 m 30 s from the cursor and ~15 m at 60 s (median).
+  - *Layers* also turns the tracks on and off (as the side panel's *Tracks*) and lays satellite photos (Esri World
+    Imagery) under them: where the map lacks a yard, a car park or a new road.
   - *Your placings* (Layers): where you put the car during the drive, its heading, and a dashed line to where the
     drawing has the car then; the panel lists each with that distance (click one to go there).
   - The car's place on it every second comes from the odometer — the speed the app drove on: OBD, or the CAN wheels

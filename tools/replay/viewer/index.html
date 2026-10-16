@@ -179,6 +179,8 @@
       <span>Building the replay… <span id="loadingTime"></span><small id="loadingNote"></small></span></div></div>
     <details class="layers">
       <summary>Layers</summary>
+      <label title="Satellite photos under the tracks: where the map lacks a yard, a car park or a new road"><input id="showSat" type="checkbox" /> satellite photo</label>
+      <div id="trackLayers"></div>
       <label><input id="showFixes" type="checkbox" checked /> every GPS fix</label>
       <label title="From each dot to where GPS says the car is"><input id="showErr" type="checkbox" checked /> distance lines</label>
       <label title="Road graph used for map matching: lines by class, arrows on one-ways"><input id="showRoads" type="checkbox" /> roads (map matching)</label>
@@ -372,6 +374,11 @@ function addLayers() {
     "drawnPath", "drawnStraight", "drawnPoints", "drawnNow", "odoPath", "odoNow", "placings", "placingHeads", "placingGaps"];
   for (const tr of TRACKS) sources.push(`${tr.key}Line`, `${tr.key}Jumps`, `${tr.key}Now`, `${tr.key}Acc`, `${tr.key}Err`);
   for (const id of sources) map.addSource(id, { type: "geojson", data: empty });
+  // Satellite photos over the street map, under everything drawn here: yards, car parks and new roads the map lacks.
+  map.addSource("satellite", { type: "raster", tileSize: 256, maxzoom: 19,
+    tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
+    attribution: "Imagery © Esri, Maxar, Earthstar Geographics" });
+  map.addLayer({ id: "satellite", type: "raster", source: "satellite", layout: { visibility: $("showSat").checked ? "visible" : "none" } });
   addRoadLayers();
   // The phone's planned route (ROUTING-SPEC §8): the one in force at the cursor, and those it replaced.
   map.addLayer({ id: "routeOld", type: "line", source: "routeOld", layout: { "line-cap": "round", "line-join": "round" },
@@ -1065,9 +1072,12 @@ function renderDrive() {
     ...TRACKS.filter(present).map((tr) =>
       `<label><input type="checkbox" data-track="${tr.key}" ${trackOn[tr.key] ? "checked" : ""} /><span class="swatch" style="background:var(${tr.color})"></span>${esc(tr.label())}</label>`),
   ].join("");
-  for (const box of $("tracks").querySelectorAll("input[data-track]")) {
+  $("trackLayers").innerHTML = TRACKS.filter(present).map((tr) =>
+    `<label><input type="checkbox" data-track="${tr.key}" ${trackOn[tr.key] ? "checked" : ""} /><span class="swatch" style="background:var(${tr.color})"></span>${esc(tr.label())}</label>`).join("");
+  for (const box of document.querySelectorAll("#tracks input[data-track], #trackLayers input[data-track]")) {
     box.onchange = () => {
       trackOn[box.dataset.track] = box.checked;
+      for (const other of document.querySelectorAll(`input[data-track="${box.dataset.track}"]`)) other.checked = box.checked;
       try { localStorage.setItem("replay.tracks", JSON.stringify(trackOn)); } catch {}
       setStatic(); renderOutages(); renderDrawn(); updateDynamic();
     };
@@ -1393,6 +1403,11 @@ $("showRoads").onchange = () => setRoads();
 $("showTruth").onchange = () => setTruth();
 $("showDrawn").onchange = () => { setDrawn(); updateDynamic(); };
 $("showOdo").onchange = () => updateDynamic();
+$("showSat").onchange = () => {
+  try { localStorage.setItem("replay.satellite", $("showSat").checked ? "1" : ""); } catch {}
+  map.ready.then(() => map.setLayoutProperty("satellite", "visibility", $("showSat").checked ? "visible" : "none"));
+};
+try { $("showSat").checked = localStorage.getItem("replay.satellite") === "1"; } catch {}
 $("showPlacings").onchange = () => data && setPlacings();
 $("showMm").onchange = () => updateDynamic();
 $("showRoute").onchange = () => updateDynamic();
