@@ -15,7 +15,7 @@
     --coarse: #d97706; --rej: #dc2626; --cut: #8b93a1; --ok: #0e7a4f; --warn: #8a5300; --bad: #a12436;
     --ok-bg: #eef8f2; --warn-bg: #fff8ee; --warn-line: #f3ddbe; --bad-bg: #fdf4f5; --bad-line: #f0c9cf;
     --road: #a21caf; --road-end: #ea580c; --truth: #0f766e; --mm: #111827; --accent: #1f4fd1; --accent-bg: #eef3ff;
-    --nogps: #8b93a1; --appcut: #d97706; --replaycut: #1f4fd1; --route: #db2777; --drawn: #15181c; --can: #0d9488; --odo: #7a3fd8; --placing: #d1364a;
+    --nogps: #8b93a1; --appcut: #d97706; --replaycut: #1f4fd1; --route: #db2777; --drawn: #f5c518; --drawn-edge: #15181c; --can: #0d9488; --odo: #7a3fd8; --placing: #d1364a;
     color-scheme: light;
   }
   @media (prefers-color-scheme: dark) {
@@ -25,7 +25,7 @@
       --coarse: #fbbf24; --rej: #f87171; --cut: #8b93a1; --ok: #4ade80; --warn: #fbbf24; --bad: #f87171;
       --ok-bg: #12261c; --warn-bg: #2a2111; --warn-line: #4a3a1c; --bad-bg: #2c1519; --bad-line: #5a2630;
       --road: #e879f9; --road-end: #fb923c; --truth: #2dd4bf; --mm: #fde047; --accent: #6b9bff; --accent-bg: #1b2440;
-      --nogps: #8b93a1; --appcut: #fbbf24; --replaycut: #6b9bff; --route: #f472b6; --drawn: #f8fafc; --can: #2dd4bf; --odo: #c4b5fd; --placing: #fb7185;
+      --nogps: #8b93a1; --appcut: #fbbf24; --replaycut: #6b9bff; --route: #f472b6; --drawn: #f5c518; --drawn-edge: #0b0d10; --can: #2dd4bf; --odo: #c4b5fd; --placing: #fb7185;
       color-scheme: dark;
     }
   }
@@ -123,7 +123,7 @@
   #drawLegend { position: absolute; left: 12px; bottom: 12px; z-index: 2; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
     padding: 10px 14px; display: flex; flex-direction: column; gap: 5px; max-width: 380px; font-size: 12px; }
   #drawLegend span { display: flex; gap: 8px; align-items: center; }
-  .pt-road, .pt-free { flex: none; width: 13px; height: 13px; border: 2px solid var(--drawn); background: var(--panel); }
+  .pt-road, .pt-free { flex: none; width: 13px; height: 13px; border: 2px solid var(--drawn-edge); background: var(--panel); }
   .pt-road { border-radius: 50%; }
   .pt-free { border-radius: 3px; background: var(--drawn); }
   body:not([data-mode="draw"]) .draw-only { display: none !important; }
@@ -231,7 +231,7 @@
         </fieldset>
         <fieldset>
           <legend>Where the car really was</legend>
-          <label title="The roads you drew, and where they put the car at the cursor (ring)"><input id="showDrawn" type="checkbox" checked /><span class="key" style="background:var(--drawn)"></span> your drawing</label>
+          <label title="The roads you drew, and where they put the car at the cursor (ring)"><input id="showDrawn" type="checkbox" checked /><span class="key" style="background:var(--drawn);outline:1px solid var(--drawn-edge)"></span> your drawing</label>
           <label title="Where the car's own gyro and wheels say it went, 90 s either side of the cursor: laid on the drawing at the cursor and turned to its direction there. Put the cursor where the drawing is surely right (on a road, driving straight) to check a car park or a yard next to it. Against GPS it was within ~10 m 30 s from the cursor and ~15 m at 60 s (median), farther on the worst stretches"><input id="showOdo" type="checkbox" checked /><span class="key dash" style="border-color:var(--odo)"></span> car’s own gyro path</label>
           <label title="Where you put the car on the phone during the drive, its heading, and a dashed line to where the drawing has it then"><input id="showPlacings" type="checkbox" checked /><span class="key ring" style="border-color:var(--placing)"></span> your placings</label>
           <label title="Every fix the phone got: green = satellite, amber = Wi-Fi/cell"><input id="showFixes" type="checkbox" checked /><span class="key dot" style="background:var(--gps)"></span> GPS fixes</label>
@@ -487,9 +487,21 @@ function driveName(file) {
 }
 
 // ---------- map ----------
-const map = new maplibregl.Map({ container: "map", style: STYLE, center: [30.76, 51.52], zoom: 13, attributionControl: { compact: true } });
+// Dark mode draws the basemap as the app does: Liberty re-tinted by the app's palette (the server's /api/style/dark).
+const darkQuery = matchMedia("(prefers-color-scheme: dark)");
+const isDark = () => document.documentElement.dataset.theme === "dark" || (document.documentElement.dataset.theme !== "light" && darkQuery.matches);
+const styleUrl = () => (isDark() ? `${location.origin}/api/style/dark` : STYLE);
+const map = new maplibregl.Map({ container: "map", style: styleUrl(), center: [30.76, 51.52], zoom: 13, attributionControl: { compact: true } });
 map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
-map.ready = new Promise((resolve) => map.once("style.load", () => { addLayers(); resolve(); }));
+// Every style load (the first, and each switch of theme) adds this page's layers again, in the theme's colours.
+let styleLoads = 0;
+map.ready = new Promise((resolve) => map.on("style.load", () => {
+  addLayers();
+  if (styleLoads++ === 0) { resolve(); return; }
+  if (!data) return;
+  setStatic(); setDrawn(); setRoads(); setTruth(); updateDynamic();
+}));
+darkQuery.addEventListener("change", () => map.setStyle(styleUrl()));
 map.on("dragstart", () => setFollow(false));
 map.on("error", (e) => showError(`map: ${e.error?.message ?? e.error}`));
 
@@ -522,11 +534,13 @@ function addLayers() {
       "circle-opacity": ["case", ["==", ["get", "kind"], "weak"], 0.35, 0.75] } });
   // The drawn truth under the tracks: along the roads solid, straight stretches dashed (amber: no road route).
   map.addLayer({ id: "drawnCasing", type: "line", source: "drawnPath", layout: { "line-cap": "round", "line-join": "round" },
-    paint: { "line-color": css("--panel"), "line-width": 8, "line-opacity": 0.8 } });
+    paint: { "line-color": css("--drawn-edge"), "line-width": 8, "line-opacity": 0.85 } });
   map.addLayer({ id: "drawnPath", type: "line", source: "drawnPath", layout: { "line-cap": "round", "line-join": "round" },
-    paint: { "line-color": css("--drawn"), "line-width": 4, "line-opacity": 0.75 } });
+    paint: { "line-color": css("--drawn"), "line-width": 4, "line-opacity": 0.95 } });
+  map.addLayer({ id: "drawnStraightCasing", type: "line", source: "drawnStraight",
+    paint: { "line-color": css("--drawn-edge"), "line-width": 6, "line-opacity": 0.85 } });
   map.addLayer({ id: "drawnStraight", type: "line", source: "drawnStraight",
-    paint: { "line-color": ["case", ["get", "noRoute"], css("--warn"), css("--drawn")], "line-width": 3, "line-dasharray": [1.5, 1.2] } });
+    paint: { "line-color": ["case", ["get", "noRoute"], css("--placing"), css("--drawn")], "line-width": 3, "line-dasharray": [1.5, 1.2] } });
   addMapMatchLayers();
   for (const tr of TRACKS) {
     const c = css(tr.color);
@@ -556,7 +570,7 @@ function addLayers() {
     paint: { "circle-radius": 9, "circle-color": "transparent", "circle-stroke-color": css("--drawn"), "circle-stroke-width": 3 } });
   map.addLayer({ id: "drawnPoints", type: "circle", source: "drawnPoints",
     paint: { "circle-radius": 6, "circle-color": ["case", ["get", "free"], css("--drawn"), ["get", "straight"], css("--warn"), css("--panel")],
-      "circle-stroke-color": css("--drawn"), "circle-stroke-width": 2.5 } });
+      "circle-stroke-color": css("--drawn-edge"), "circle-stroke-width": 2.5 } });
   // The gyro and wheels' path around the cursor, and where it has the car now.
   map.addLayer({ id: "odoPath", type: "line", source: "odoPath", layout: { "line-cap": "round", "line-join": "round" },
     paint: { "line-color": css("--odo"), "line-width": 3, "line-dasharray": [1, 1.5], "line-opacity": 0.9 } });
@@ -1077,9 +1091,9 @@ function renderDrawn() {
         `<button class="linkish" data-show="${w.from}">Show</button></span></div>`);
     }
     const noRoute = drawn.truth.legs.filter((l) => l.reason === "no route").length;
-    if (noRoute) checks.push(`<div class="check warn"><b aria-hidden="true">!</b><span>${noRoute} stretch${noRoute > 1 ? "es" : ""} drawn straight because the roads don’t join their points (amber dashes): add a point on the road between them, or shift-click it if straight is right.</span></div>`);
+    if (noRoute) checks.push(`<div class="check warn"><b aria-hidden="true">!</b><span>${noRoute} stretch${noRoute > 1 ? "es" : ""} drawn straight because the roads don’t join their points (red dashes): add a point on the road between them, or shift-click it if straight is right.</span></div>`);
     const detours = drawn.truth.legs.filter((l) => l.reason === "detour").length;
-    if (detours) checks.push(`<div class="check warn"><b aria-hidden="true">!</b><span>${detours} stretch${detours > 1 ? "es" : ""} drawn straight because the roads join their points only the long way round (amber dashes): a way the map lacks, as into a yard. If the car did go round, add a point on the way.</span></div>`);
+    if (detours) checks.push(`<div class="check warn"><b aria-hidden="true">!</b><span>${detours} stretch${detours > 1 ? "es" : ""} drawn straight because the roads join their points only the long way round (red dashes): a way the map lacks, as into a yard. If the car did go round, add a point on the way.</span></div>`);
     checks.push(`<div class="muted">Timed by ${timed.anchors ? `the odometer and ${timed.anchors} clean GPS fixes` : "the odometer"}, ±${fmtM(timed.doubtM)} at worst.</div>`);
   } else {
     checks.push(`<div class="muted">Not drawn yet. Draw the roads you drove and every replay of this drive is scored against them, with or without GPS.</div>`);

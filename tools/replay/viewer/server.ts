@@ -9,6 +9,8 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { tintDarkStyle, type MapStyleJson } from "../../../src/config/map-dark";
+
 import { mergeCalibrations, type CompassCalibration } from "../../../src/nav/compass/compass";
 import { LocalFrame } from "../../../src/nav/geo/local-frame";
 import type { TiledRoadGraph } from "../../../src/nav/mapmatch/graph/road-graph";
@@ -140,6 +142,22 @@ function drawnPayload(trip: TripLog, truth: DrawnTruth | null) {
   const round = (v: number, i: number) => (i === 1 || i === 2 ? Math.round(v * 1e6) / 1e6 : Math.round(v * 10) / 10);
   return { truth, timed: { points: points.map((p) => p.map(round)), cum, pathM, odometerM, anchors, doubtM } };
 }
+/** Liberty, tinted for dark mode as the app does it (src/config/map-dark.ts); fetched once per server run. */
+const LIBERTY = "https://tiles.openfreemap.org/styles/liberty";
+let darkStyleCache: Promise<MapStyleJson> | null = null;
+function darkStyle(): Promise<MapStyleJson> {
+  darkStyleCache ??= fetch(LIBERTY)
+    .then((r) => {
+      if (!r.ok) throw new Error(`${LIBERTY}: ${r.status}`);
+      return r.json() as Promise<MapStyleJson>;
+    })
+    .then((style) => tintDarkStyle(style))
+    .catch((error: unknown) => {
+      darkStyleCache = null;
+      throw error;
+    });
+  return darkStyleCache;
+}
 /** One graph kept open for drawing, so a click doesn't reopen the file and reread its tiles. */
 let drawGraph: { file: string; graph: TiledRoadGraph; close(): void } | null = null;
 function graphForDrawing(trip: TripLog): { file: string; graph: TiledRoadGraph } | null {
@@ -243,6 +261,11 @@ const server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
     if (url.pathname === "/") {
       send(res, 200, "text/html; charset=utf-8", readFileSync(path.join(HERE, "index.html")));
+    } else if (url.pathname === "/api/style/dark") {
+      // The basemap in dark mode as the app draws it: OpenFreeMap Liberty re-tinted by the app's own palette.
+      darkStyle()
+        .then((style) => send(res, 200, "application/json", JSON.stringify(style)))
+        .catch((error: unknown) => send(res, 502, "text/plain", `the dark map style: ${String(error)}`));
     } else if (url.pathname === "/api/logs") {
       send(res, 200, "application/json", JSON.stringify(listLogs()));
     } else if (url.pathname === "/api/replay") {
