@@ -32,6 +32,18 @@
   :root[data-theme="dark"] { color-scheme: dark; }
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
+  /* Map popups (a fix, a placing, a break): dark in both themes, legible over streets and satellite photos alike. */
+  .maplibregl-popup-content { background: #15181c; color: #f2f4f7; border-radius: 8px; padding: 8px 12px;
+    box-shadow: 0 4px 14px #0006; font: 12px/1.45 "IBM Plex Sans", system-ui, sans-serif; }
+  .maplibregl-popup-content b, .maplibregl-popup-content strong { color: #ffffff; }
+  .maplibregl-popup-content .muted { color: #b7bec9; }
+  .maplibregl-popup-close-button { color: #f2f4f7; }
+  .maplibregl-popup-anchor-top .maplibregl-popup-tip, .maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
+  .maplibregl-popup-anchor-top-right .maplibregl-popup-tip { border-bottom-color: #15181c; }
+  .maplibregl-popup-anchor-bottom .maplibregl-popup-tip, .maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip,
+  .maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip { border-top-color: #15181c; }
+  .maplibregl-popup-anchor-left .maplibregl-popup-tip { border-right-color: #15181c; }
+  .maplibregl-popup-anchor-right .maplibregl-popup-tip { border-left-color: #15181c; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
     font: 13px/1.45 "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif; }
   body { display: grid; grid-template-rows: auto 1fr auto auto; height: 100vh; }
