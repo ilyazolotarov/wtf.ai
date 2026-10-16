@@ -6,42 +6,54 @@
 <title>Drive Replay</title>
 <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.css" />
 <script src="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
 <style>
   :root {
-    --bg: #f6f7f9; --panel: #ffffff; --text: #16181d; --text2: #5b6270; --line: #e3e6eb;
-    --gps: #16a34a; --phone: #7c3aed; --pred: #2563eb; --cmp: #ea580c;
-    --coarse: #d97706; --rej: #dc2626; --cut: #8b93a1; --ok: #16a34a; --warn: #d97706; --bad: #dc2626;
-    --road: #a21caf; --road-end: #ea580c; --truth: #0f766e; --mm: #111827; --accent: #2563eb;
-    --nogps: #8b93a1; --appcut: #d97706; --replaycut: #2563eb; --route: #db2777; --drawn: #111827; --can: #0d9488; --odo: #7c3aed; --placing: #e11d48;
+    --bg: #eef0f2; --panel: #ffffff; --text: #15181c; --text2: #5a626e; --line: #d9dde2; --soft: #f4f6f8;
+    --gps: #16a34a; --phone: #0891b2; --pred: #1f4fd1; --cmp: #d9731a;
+    --coarse: #d97706; --rej: #dc2626; --cut: #8b93a1; --ok: #0e7a4f; --warn: #8a5300; --bad: #a12436;
+    --ok-bg: #eef8f2; --warn-bg: #fff8ee; --warn-line: #f3ddbe; --bad-bg: #fdf4f5; --bad-line: #f0c9cf;
+    --road: #a21caf; --road-end: #ea580c; --truth: #0f766e; --mm: #111827; --accent: #1f4fd1; --accent-bg: #eef3ff;
+    --nogps: #8b93a1; --appcut: #d97706; --replaycut: #1f4fd1; --route: #db2777; --drawn: #15181c; --can: #0d9488; --odo: #7a3fd8; --placing: #d1364a;
     color-scheme: light;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
-      --bg: #0f1115; --panel: #171a21; --text: #e8eaee; --text2: #9aa2b1; --line: #2a2f3a;
-      --gps: #4ade80; --phone: #c4b5fd; --pred: #60a5fa; --cmp: #fb923c;
+      --bg: #0f1115; --panel: #171a21; --text: #e8eaee; --text2: #9aa2b1; --line: #2a2f3a; --soft: #1e222b;
+      --gps: #4ade80; --phone: #22d3ee; --pred: #6b9bff; --cmp: #fb923c;
       --coarse: #fbbf24; --rej: #f87171; --cut: #8b93a1; --ok: #4ade80; --warn: #fbbf24; --bad: #f87171;
-      --road: #e879f9; --road-end: #fb923c; --truth: #2dd4bf; --mm: #fde047; --accent: #60a5fa;
-      --nogps: #8b93a1; --appcut: #fbbf24; --replaycut: #60a5fa; --route: #f472b6; --drawn: #f8fafc; --can: #2dd4bf; --odo: #c4b5fd; --placing: #fb7185;
+      --ok-bg: #12261c; --warn-bg: #2a2111; --warn-line: #4a3a1c; --bad-bg: #2c1519; --bad-line: #5a2630;
+      --road: #e879f9; --road-end: #fb923c; --truth: #2dd4bf; --mm: #fde047; --accent: #6b9bff; --accent-bg: #1b2440;
+      --nogps: #8b93a1; --appcut: #fbbf24; --replaycut: #6b9bff; --route: #f472b6; --drawn: #f8fafc; --can: #2dd4bf; --odo: #c4b5fd; --placing: #fb7185;
       color-scheme: dark;
     }
   }
+  :root[data-theme="dark"] { color-scheme: dark; }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
-    font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+    font: 13px/1.45 "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif; }
   body { display: grid; grid-template-rows: auto 1fr auto auto; height: 100vh; }
-  header, .controls { display: flex; gap: 10px; align-items: center; padding: 8px 12px; background: var(--panel);
+  .mono, .num, kbd { font-family: "IBM Plex Mono", ui-monospace, Consolas, monospace; }
+  header, .controls { display: flex; gap: 12px; align-items: center; padding: 8px 16px; background: var(--panel);
     border-bottom: 1px solid var(--line); flex-wrap: wrap; }
   .controls { border-top: 1px solid var(--line); border-bottom: none; }
-  header h1 { font-size: 14px; margin: 0 6px 0 0; }
-  select, input, button { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line);
-    border-radius: 6px; padding: 4px 8px; }
+  select, input, button { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 6px 10px; min-height: 34px; }
   button { cursor: pointer; }
-  button[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: transparent; }
-  label { color: var(--text2); display: flex; gap: 5px; align-items: center; }
-  .picker { position: relative; display: flex; gap: 2px; }
-  #drivePick { min-width: 230px; text-align: left; font-variant-numeric: tabular-nums; }
-  #drivePop { position: absolute; z-index: 6; top: 32px; left: 0; width: 340px; background: var(--panel); border: 1px solid var(--line);
-    border-radius: 8px; box-shadow: 0 6px 24px #0003; padding: 8px; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--text); color: var(--panel); border-color: transparent; font-weight: 600; }
+  button[aria-pressed="true"] { background: var(--accent-bg); border: 2px solid var(--accent); }
+  label { color: var(--text2); display: flex; gap: 6px; align-items: center; }
+  kbd { font-size: 11px; color: var(--text2); }
+  .picker { position: relative; display: flex; gap: 6px; align-items: center; }
+  #drivePick { min-width: 260px; text-align: left; display: flex; flex-direction: column; align-items: flex-start; padding: 4px 12px; }
+  #drivePick .l1 { font-weight: 600; font-size: 14px; }
+  #drivePick .l2 { font-size: 12px; color: var(--text2); }
+  #drivePrev, #driveNext { width: 38px; font-size: 16px; }
+  #drivePop { position: absolute; z-index: 6; top: 46px; left: 0; width: 360px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; box-shadow: 0 6px 24px #0003; padding: 8px; }
   #drivePop[hidden] { display: none; }
   #driveSearch { width: 100%; }
   #driveList { list-style: none; margin: 6px 0 0; padding: 0; max-height: min(60vh, 520px); overflow: auto; }
@@ -50,11 +62,20 @@
     cursor: pointer; font-variant-numeric: tabular-nums; }
   #driveList .drv.hl { background: color-mix(in srgb, var(--accent) 15%, transparent); }
   #driveList .drv.cur { font-weight: 600; }
-  #driveList .id { font-family: ui-monospace, Consolas, monospace; }
-  #driveList .who { font-family: system-ui, sans-serif; font-size: 11px; color: var(--accent); border: 1px solid currentColor;
+  #driveList .id { font-family: "IBM Plex Mono", ui-monospace, Consolas, monospace; }
+  #driveList .who { font-family: inherit; font-size: 11px; color: var(--accent); border: 1px solid currentColor;
     border-radius: 4px; padding: 0 4px; margin-left: 4px; }
   #driveList .empty { color: var(--text2); padding: 6px; }
-  #status { color: var(--text2); margin-left: auto; }
+  .pop-actions { display: flex; justify-content: flex-end; margin-top: 6px; border-top: 1px solid var(--line); padding-top: 6px; }
+  #driveDelete { color: var(--bad); }
+  #driveDelete.armed { border-color: var(--bad); background: var(--bad-bg); }
+  nav.modes { display: flex; gap: 4px; padding: 4px; background: var(--bg); border-radius: 10px; }
+  nav.modes button { border: 0; background: transparent; color: var(--text2); font-weight: 500; font-size: 14px; padding: 8px 16px; border-radius: 7px; }
+  nav.modes button[aria-selected="true"] { background: var(--panel); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px #0002; }
+  .header-note { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; max-width: 46%; }
+  #changed { font-size: 13px; font-weight: 500; color: var(--warn); }
+  #changed:empty { display: none; }
+  #status { color: var(--text2); font-size: 12px; text-align: right; }
   #loading { position: absolute; inset: 0; z-index: 4; display: grid; place-items: center; background: color-mix(in srgb, var(--bg) 55%, transparent); }
   #loading[hidden] { display: none; }
   #loading > div { display: flex; gap: 12px; align-items: center; background: var(--panel); border: 1px solid var(--line);
@@ -64,176 +85,268 @@
     animation: spin 0.8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 3s; } }
-  details.more { position: relative; }
-  details.more > summary { cursor: pointer; color: var(--text2); list-style: none; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; }
-  details.more > div { position: absolute; z-index: 5; top: 32px; right: 0; background: var(--panel); border: 1px solid var(--line);
-    border-radius: 8px; padding: 10px; display: grid; gap: 8px; min-width: 260px; box-shadow: 0 6px 24px #0003; }
-  main { display: grid; grid-template-columns: 1fr 380px; min-height: 0; }
+  main { display: grid; grid-template-columns: 1fr 420px; min-height: 0; }
   .mapwrap { position: relative; min-height: 0; }
   #map { position: absolute; inset: 0; }
-  details.layers { position: absolute; top: 10px; left: 10px; z-index: 2; background: var(--panel); border: 1px solid var(--line);
-    border-radius: 8px; padding: 6px 10px; }
-  details.layers > summary { cursor: pointer; font-weight: 600; }
-  details.layers label { padding: 2px 0; }
-  aside { background: var(--panel); border-left: 1px solid var(--line); overflow: auto; padding: 12px 14px; }
-  aside h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--text2); margin: 16px 0 6px; }
-  aside h2:first-child { margin-top: 0; }
+  details.layers { position: absolute; top: 12px; left: 12px; z-index: 2; width: 260px; max-height: calc(100% - 24px); overflow: auto;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 2px 8px #0002; }
+  details.layers > summary { cursor: pointer; font-weight: 600; padding: 9px 14px; }
+  details.layers > div { padding: 0 14px 12px; display: flex; flex-direction: column; gap: 12px; }
+  .layers fieldset { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+  .layers legend, .eyebrow { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text2); margin: 0 0 4px; padding: 0; }
+  .layers label { color: var(--text); min-height: 26px; }
+  .layers .bg { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+  .layers .bg label { justify-content: center; border: 1px solid var(--line); border-radius: 7px; min-height: 34px; }
+  .layers .bg label:has(input:checked) { border: 2px solid var(--accent); font-weight: 500; }
+  .layers details summary { cursor: pointer; color: var(--text2); }
+  .key { display: inline-block; flex: none; width: 18px; height: 4px; border-radius: 2px; }
+  .key.dash { height: 0; border-top: 3px dashed; background: none !important; }
+  .key.ring { width: 11px; height: 11px; border-radius: 50%; border: 2px solid; background: none !important; }
+  .key.dot { width: 9px; height: 9px; border-radius: 50%; }
+  .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  #drawTools { position: absolute; top: 12px; left: 160px; right: 56px; width: max-content; max-width: calc(100% - 216px); margin: 0 auto; z-index: 3; display: flex; flex-wrap: wrap; gap: 4px; padding: 6px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 4px 14px #0003; }
+  #drawTools button { min-height: 40px; display: flex; align-items: center; gap: 8px; }
+  #drawTools .sep { width: 1px; background: var(--line); margin: 4px 2px; }
+  #drawLegend { position: absolute; left: 12px; bottom: 12px; z-index: 2; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 10px 14px; display: flex; flex-direction: column; gap: 5px; max-width: 380px; font-size: 12px; }
+  #drawLegend span { display: flex; gap: 8px; align-items: center; }
+  .pt-road, .pt-free { flex: none; width: 13px; height: 13px; border: 2px solid var(--drawn); background: var(--panel); }
+  .pt-road { border-radius: 50%; }
+  .pt-free { border-radius: 3px; background: var(--drawn); }
+  body:not([data-mode="draw"]) .draw-only { display: none !important; }
+  body:not([data-mode="review"]) .review-only { display: none !important; }
+  body:not([data-mode="experiment"]) .exp-only { display: none !important; }
+  aside { background: var(--panel); border-left: 1px solid var(--line); overflow: auto; padding: 18px 20px; display: flex; flex-direction: column; gap: 20px; }
+  aside section { display: flex; flex-direction: column; gap: 8px; }
+  aside h2 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--text2); margin: 0; }
+  .headline { font-size: 20px; font-weight: 600; line-height: 1.3; margin: 0; }
+  .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .stat { background: var(--soft); border-radius: 8px; padding: 9px 10px; }
+  .stat b { display: block; font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 19px; font-weight: 500; }
+  .stat span { font-size: 12px; color: var(--text2); }
   .facts { color: var(--text2); }
   .facts b { color: var(--text); font-weight: 600; }
-  .drive-title { font-size: 15px; font-weight: 600; margin-bottom: 2px; }
-  .tracks label { color: var(--text); padding: 1px 0; }
-  .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex: none; }
-  .outage { border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; margin-bottom: 6px; cursor: pointer; }
+  .tile { width: 100%; text-align: left; display: grid; grid-template-columns: 48px 1fr; gap: 10px; align-items: start; padding: 9px 12px;
+    border-radius: 8px; border: 1px solid var(--line); background: var(--panel); }
+  .tile .when { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12px; padding-top: 1px; }
+  .tile strong { font-weight: 600; }
+  .tile small { display: block; color: var(--text2); font-size: 12px; }
+  .tile.bad { background: var(--bad-bg); border-color: var(--bad-line); } .tile.bad .when { color: var(--bad); }
+  .tile.warn { background: var(--warn-bg); border-color: var(--warn-line); } .tile.warn .when { color: var(--warn); }
+  .check { display: grid; grid-template-columns: 16px 1fr; gap: 8px; padding: 9px 12px; border-radius: 8px; }
+  .check > b { font-weight: 700; }
+  .check.ok { background: var(--ok-bg); } .check.ok > b { color: var(--ok); }
+  .check.warn { background: var(--warn-bg); } .check.warn > b { color: var(--warn); }
+  .check.bad { background: var(--bad-bg); } .check.bad > b { color: var(--bad); }
+  .linkish { border: 0; background: none; padding: 0; min-height: 0; color: var(--accent); text-decoration: underline; cursor: pointer; }
+  ul.plain { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  ol.steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; line-height: 1.45; }
+  .outage { border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; cursor: pointer; }
   .outage:hover { border-color: var(--accent); }
   .outage.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
   .outage .head { display: flex; gap: 6px; align-items: baseline; }
   .outage .kind { font-weight: 600; }
   .outage .when { margin-left: auto; color: var(--text2); font-variant-numeric: tabular-nums; }
   .outage .row { display: grid; grid-template-columns: 14px 1fr; gap: 6px; align-items: center; margin-top: 3px; }
-  .num { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .outage + .outage { margin-top: 6px; }
+  .num { font-variant-numeric: tabular-nums; font-weight: 500; }
   .good { color: var(--ok); } .meh { color: var(--warn); } .poor { color: var(--bad); }
   .muted { color: var(--text2); }
   .now-row { display: grid; grid-template-columns: 14px 1fr; gap: 6px; align-items: center; padding: 2px 0; }
   .big { font-size: 15px; }
-  details.box { margin-top: 14px; }
-  #driveDelete.armed { color: var(--bad); border-color: var(--bad); }
-  #incidents { list-style: none; margin: 6px 0 0; padding: 0; }
-  #incidents li { padding: 2px 0; cursor: pointer; display: grid; grid-template-columns: 52px 1fr; gap: 6px; color: var(--text2); }
-  #incidents li.major { color: var(--text); }
-  #incidents li span:first-child { font-variant-numeric: tabular-nums; text-align: right; }
-  details.box > summary { cursor: pointer; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--text2); }
+  details.box > summary { cursor: pointer; font-weight: 600; }
+  details.box > *:not(summary) { margin-top: 8px; }
+  #incidents li, #events li { cursor: pointer; }
   #events { list-style: none; margin: 6px 0 0; padding: 0; }
-  #events li { padding: 2px 0; cursor: pointer; display: grid; grid-template-columns: 52px 1fr; gap: 6px; color: var(--text2); }
+  #events li { padding: 2px 0; display: grid; grid-template-columns: 52px 1fr; gap: 6px; color: var(--text2); }
   #events li.past { color: var(--text); }
   #events li.marker { font-weight: 600; }
   #events li span:first-child { font-variant-numeric: tabular-nums; text-align: right; }
-  #summary { white-space: pre-wrap; font-size: 12px; color: var(--text2); margin-top: 6px; }
+  #summary { white-space: pre-wrap; font-size: 12px; color: var(--text2); }
+  fieldset.q { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+  fieldset.q legend { font-size: 15px; font-weight: 600; margin-bottom: 6px; padding: 0; }
+  fieldset.q label { color: var(--text); align-items: flex-start; gap: 10px; min-height: 30px; }
+  fieldset.q label input[type="radio"] { margin-top: 3px; }
+  fieldset.q small { display: block; color: var(--text2); font-size: 12px; }
+  .research { display: flex; flex-direction: column; gap: 10px; }
   #timeline { width: 100%; height: 174px; display: block; background: var(--panel); cursor: crosshair; touch-action: none;
     border-top: 1px solid var(--line); }
-  #time { font-variant-numeric: tabular-nums; min-width: 190px; }
-  .drawn-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
-  .hint { color: var(--text2); font-size: 12px; margin-bottom: 6px; }
-  @media (max-width: 860px) { main { grid-template-columns: 1fr; } aside { display: none; } }
+  #time { font-variant-numeric: tabular-nums; min-width: 190px; font-family: "IBM Plex Mono", ui-monospace, monospace; }
+  .drawn-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .danger { color: var(--bad); }
+  @media (max-width: 960px) {
+    body { height: auto; }
+    main { grid-template-columns: 1fr; }
+    .mapwrap { height: 60vh; }
+    aside { border-left: 0; border-top: 1px solid var(--line); }
+    .header-note { max-width: 100%; margin-left: 0; align-items: flex-start; }
+  }
 </style>
 </head>
-<body>
+<body data-mode="review">
 <header>
-  <h1>Drive replay</h1>
   <div class="picker">
     <input id="file" type="hidden" />
-    <button id="drivePrev" title="Older drive">‹</button>
-    <button id="drivePick" aria-haspopup="listbox" aria-expanded="false" title="Pick a drive (/)">—</button>
-    <button id="driveNext" title="Newer drive">›</button>
-    <button id="driveDelete" title="Delete this log and its drawing: here now, from the bucket on the next npm run logs:push (click twice)">Delete</button>
+    <button id="drivePrev" aria-label="Older drive" title="Older drive">‹</button>
+    <button id="drivePick" aria-haspopup="listbox" aria-expanded="false" title="Pick a drive (/)"><span class="l1">—</span><span class="l2"></span></button>
+    <button id="driveNext" aria-label="Newer drive" title="Newer drive">›</button>
     <div id="drivePop" hidden>
       <input id="driveSearch" type="search" placeholder="id, date, time, tester · drawn / undrawn · mine / testers" autocomplete="off" aria-label="Find a drive" />
       <ul id="driveList" role="listbox" aria-label="Drives"></ul>
+      <div class="pop-actions"><button id="driveDelete" title="Delete this log and its drawing: here now, from the bucket on the next npm run logs:push (click twice)">Delete this drive…</button></div>
     </div>
   </div>
-  <label title="As recorded: the speed the app took, OBD or the CAN wheels; or none: the app in phone-only mode (Developer settings → Navigate without an adapter, NAVIGATOR-SPEC §9.6), its dot from the phone's own speed and gyro; GPS still takes over when it is good">Adapter
-    <select id="adapter">
-      <option value="">As recorded</option>
-      <option value="none">None: phone only</option>
-    </select></label>
-  <label title="What the replay gets of GPS. As in the app = your Cut GPS moments withheld, like on the phone">GPS
-    <select id="gps">
-      <option value="app">As in the app</option>
-      <option value="all">All of it</option>
-      <option value="cut">Cut at…</option>
-      <option value="jam">Jammed (Wi-Fi/cell only)</option>
-      <option value="nogps">None after the start</option>
-    </select></label>
-  <input id="cut" placeholder="start:length s, e.g. 120:240" size="20" hidden />
-  <label title="Where the replay starts. As stored on the phone = what the app had stored when the drive started (parked pose, speed scale, compass, GNSS lag), read from the log: instant; a log from before 2026-10-11 doesn't have it and falls back to the next. Where it parked last = where this navigator version would have parked the car before (every earlier log replayed in order, the car by its VIN, else its OBD protocol): use it to judge a navigator change on its own chain; the first load replays them all; cold = no position or heading, as after a fresh install or a lost pose; drawing = where your drawn ground truth starts, heading along it (as if the driver placed the car there)">Start
-    <select id="from">
-      <option value="phone">As stored on the phone</option>
-      <option value="parked">Where it parked last (replays earlier drives)</option>
-      <option value="drawn">Where the drawing starts</option>
-      <option value="cold">Cold</option>
-    </select></label>
-  <label title="Replay a second version and draw it in orange. Before 2026-10-16: the dot without the heading cue or the steadying along its road, and the wheels' turning at a crawl (MAPMATCH-SPEC §11, NAVIGATOR-SPEC §5.4). Open loop: no corrections from the map into the navigator (MAPMATCH-SPEC §9)">Compare
-    <select id="compare">
-      <option value="">—</option>
-      <option value="before">Before 2026-10-16</option>
-      <option value="open">Open loop</option>
-    </select></label>
-  <details class="more">
-    <summary>More</summary>
-    <div>
-      <label title="GPS timing offset. Empty = learned on the drive, as in the app">GPS lag <input id="lag" type="number" step="0.05" placeholder="learned" style="width:80px" /> s</label>
-      <label title="Where the driver put the car on the map during the drive (the log's notes) is put there again in the replay at the same moment, as on the phone; off: the replay ignores them">Driver's placings
-        <select id="placings"><option value="">as logged</option><option value="off">ignored</option></select></label>
-      <label title="Start the session this far into the log, as if the app started then">Start at <input id="start" type="number" step="10" min="0" placeholder="0" style="width:80px" /> s</label>
-      <label title="Clock times on the page (drive list, time bar, the panel): this computer's local time, or UTC. Hover a time to see the other.">Times
-        <select id="tz"><option value="local">local</option><option value="utc">UTC</option></select></label>
-      <label title="Compass at a jammed start (MAPMATCH-SPEC §8.2), calibrated on the other logs; turned = a wrong calibration">Compass
-        <select id="compass"><option value="">off</option><option value="on">from other logs</option><option value="90">turned 90°</option><option value="180">turned 180°</option></select></label>
-    </div>
-  </details>
-  <span id="status"></span>
+  <nav class="modes" role="tablist" aria-label="Mode">
+    <button role="tab" id="modeReview" data-mode="review" aria-selected="true">Review</button>
+    <button role="tab" id="modeDraw" data-mode="draw" aria-selected="false">Draw the truth</button>
+    <button role="tab" id="modeExp" data-mode="experiment" aria-selected="false">Experiment</button>
+  </nav>
+  <div class="header-note"><span id="changed"></span><span id="status"></span></div>
 </header>
 <main>
   <div class="mapwrap">
     <div id="map"></div>
     <div id="loading" hidden role="status" aria-live="polite"><div><span class="spinner" aria-hidden="true"></span>
       <span>Building the replay… <span id="loadingTime"></span><small id="loadingNote"></small></span></div></div>
-    <details class="layers">
+    <details class="layers" id="layersBox" open>
       <summary>Layers</summary>
-      <label title="Satellite photos under the tracks: where the map lacks a yard, a car park or a new road"><input id="showSat" type="checkbox" /> satellite photo</label>
-      <div id="trackLayers"></div>
-      <label><input id="showFixes" type="checkbox" checked /> every GPS fix</label>
-      <label title="From each dot to where GPS says the car is"><input id="showErr" type="checkbox" checked /> distance lines</label>
-      <label title="Road graph used for map matching: lines by class, arrows on one-ways"><input id="showRoads" type="checkbox" /> roads (map matching)</label>
-      <label title="The road the car was on, matched offline from clean GPS (MAPMATCH-SPEC §10.1); × marks breaks"><input id="showTruth" type="checkbox" /> true path</label>
-      <label title="The roads you drew in Ground truth, and where they put the car at the cursor (ring)"><input id="showDrawn" type="checkbox" checked /> ground truth (drawn)</label>
-      <label title="Where the car's own gyro and wheels say it went, 90 s either side of the cursor (dashed): laid on the drawing at the cursor and turned to its direction there. Put the cursor where the drawing is surely right (on a road, driving straight) to check a car park or a yard next to it. Against GPS it was within ~10 m 30 s from the cursor and ~15 m at 60 s (median), farther on the worst stretches"><input id="showOdo" type="checkbox" checked /> gyro path (around the cursor)</label>
-      <label title="Where the driver put the car on the map during the drive (the log's notes), its heading, and the drawing's place at that moment"><input id="showPlacings" type="checkbox" checked /> your placings</label>
-      <label title="Map matching inside the replay: particles (size by weight; hollow = off-road) and its hypotheses (ring = spread, label = weight)"><input id="showMm" type="checkbox" /> map-matching particles</label>
-      <label title="The route the phone planned (pink), its maneuvers, and the routes it replaced (grey)"><input id="showRoute" type="checkbox" checked /> planned route</label>
+      <div>
+        <fieldset>
+          <legend>Where the dot was</legend>
+          <div id="trackLayers"></div>
+          <label title="From each dot to where the car was (clean GPS, else your drawing)"><input id="showErr" type="checkbox" checked /> distance lines</label>
+        </fieldset>
+        <fieldset>
+          <legend>Where the car really was</legend>
+          <label title="The roads you drew, and where they put the car at the cursor (ring)"><input id="showDrawn" type="checkbox" checked /><span class="key" style="background:var(--drawn)"></span> your drawing</label>
+          <label title="Where the car's own gyro and wheels say it went, 90 s either side of the cursor: laid on the drawing at the cursor and turned to its direction there. Put the cursor where the drawing is surely right (on a road, driving straight) to check a car park or a yard next to it. Against GPS it was within ~10 m 30 s from the cursor and ~15 m at 60 s (median), farther on the worst stretches"><input id="showOdo" type="checkbox" checked /><span class="key dash" style="border-color:var(--odo)"></span> car’s own gyro path</label>
+          <label title="Where you put the car on the phone during the drive, its heading, and a dashed line to where the drawing has it then"><input id="showPlacings" type="checkbox" checked /><span class="key ring" style="border-color:var(--placing)"></span> your placings</label>
+          <label title="Every fix the phone got: green = satellite, amber = Wi-Fi/cell"><input id="showFixes" type="checkbox" checked /><span class="key dot" style="background:var(--gps)"></span> GPS fixes</label>
+          <label title="The road the car was on, matched offline from clean GPS (MAPMATCH-SPEC §10.1); × marks breaks"><input id="showTruth" type="checkbox" /><span class="key" style="background:var(--truth)"></span> path matched from GPS</label>
+        </fieldset>
+        <fieldset>
+          <legend>Background</legend>
+          <div class="bg" role="radiogroup" aria-label="Background map">
+            <label><input type="radio" name="bg" id="showStreets" checked /> Streets</label>
+            <label title="Satellite photos: where the map lacks a yard, a car park or a new road"><input type="radio" name="bg" id="showSat" /> Satellite</label>
+          </div>
+        </fieldset>
+        <details>
+          <summary>For debugging the navigator</summary>
+          <div style="display:flex;flex-direction:column;gap:2px;padding-top:6px">
+            <label title="Road graph used for map matching: lines by class, arrows on one-ways"><input id="showRoads" type="checkbox" /> roads the navigator knows</label>
+            <label title="Map matching inside the replay: particles (size by weight; hollow = off-road) and its hypotheses (ring = spread, label = weight)"><input id="showMm" type="checkbox" /> map-matching particles</label>
+            <label title="The route the phone planned (pink), its maneuvers, and the routes it replaced (grey)"><input id="showRoute" type="checkbox" checked /> planned route</label>
+          </div>
+        </details>
+      </div>
     </details>
+    <div id="drawTools" class="draw-only" role="toolbar" aria-label="Drawing tools">
+      <button id="toolRoads" aria-pressed="true" title="Clicks on a road join the next along the roads"><span class="pt-road" aria-hidden="true"></span>Along roads <kbd>R</kbd></button>
+      <button id="toolFree" aria-pressed="false" title="Clicks stay exactly where you put them, joined straight: a car park, a yard"><span class="pt-free" aria-hidden="true"></span>Off the roads <kbd>O</kbd></button>
+      <span class="sep" aria-hidden="true"></span>
+      <button id="toolStart" aria-pressed="false" title="New clicks go before the first point: draw a start you missed">Add before the start <kbd>S</kbd></button>
+      <button id="toolUndo" title="Ctrl+Z">Undo</button>
+      <button id="toolDone" class="primary" title="Esc">Done</button>
+    </div>
+    <div id="drawLegend" class="draw-only">
+      <strong>On the map</strong>
+      <span><span class="pt-road" aria-hidden="true"></span> point on a road — the line follows the roads to the next</span>
+      <span><span class="pt-free" aria-hidden="true"></span> point off the roads — stays where you put it, straight lines</span>
+      <span><span class="key dash" style="border-color:var(--odo)"></span> the car’s own gyro path around the cursor</span>
+      <span><span class="key ring" style="border-color:var(--placing)"></span> where you placed the car on the phone</span>
+      <span class="muted">Drag a point to move it · right-click to delete · click the line to add one between · Shift-click: straight from the last point · Alt-click a point: on/off the roads</span>
+    </div>
   </div>
   <aside>
-    <div id="drive"></div>
-    <h2>Tracks</h2>
-    <div class="tracks" id="tracks"></div>
-    <h2>Ground truth</h2>
-    <div id="drawn"></div>
-    <div id="routeBox" hidden>
+    <!-- Review -->
+    <section class="review-only" id="verdict" aria-live="polite"></section>
+    <section class="review-only" id="incidentsBox">
+      <h2>What went wrong <span id="incidentCount"></span></h2>
+      <ul class="plain" id="incidents"></ul>
+      <label><input id="minorIncidents" type="checkbox" /> show small ones too</label>
+    </section>
+    <section class="review-only">
+      <h2>At the cursor</h2>
+      <div id="now"></div>
+    </section>
+    <section class="review-only" id="routeBox" hidden>
       <h2>Route</h2>
       <div id="route"></div>
-    </div>
-    <h2>Without GPS</h2>
-    <div id="outages"></div>
-    <h2>At the cursor</h2>
-    <div id="now"></div>
-    <details class="box" id="incidentsBox" open hidden>
-      <summary>Incidents <span id="incidentCount"></span></summary>
-      <label><input id="minorIncidents" type="checkbox" /> include minor ones</label>
-      <ul id="incidents"></ul>
-    </details>
-    <details class="box" id="eventsBox">
-      <summary>Events</summary>
+    </section>
+    <section class="review-only">
+      <h2>Without GPS</h2>
+      <div id="outages"></div>
+    </section>
+    <details class="box review-only" id="eventsBox">
+      <summary>Everything the replay logged</summary>
       <label><input id="allEvents" type="checkbox" /> include link and sensor messages</label>
       <ul id="events"></ul>
-    </details>
-    <details class="box">
-      <summary>Replay details</summary>
       <div id="summary"></div>
     </details>
+    <!-- Draw -->
+    <div class="draw-only" id="drawn" style="display:flex;flex-direction:column;gap:20px"></div>
+    <!-- Experiment -->
+    <section class="exp-only">
+      <p style="margin:0;color:var(--text2);font-size:14px">Replay this drive as if something had been different. The phone’s own track never changes; the replay re-runs at once.</p>
+    </section>
+    <fieldset class="q exp-only" id="gpsGroup">
+      <legend>What if GPS had been…</legend>
+      <label><input type="radio" name="gps" value="app" checked /><span>as on the phone<small>your “Cut GPS” moments withheld, as they were</small></span></label>
+      <label><input type="radio" name="gps" value="cut" /><span>cut for a while<small>from a moment, for a while (below, then Enter)</small></span></label>
+      <label><input type="radio" name="gps" value="jam" /><span>jammed<small>only Wi-Fi and cell fixes, as during air raids (all drive, or a window below)</small></span></label>
+      <label id="cutRow" hidden style="margin-left:26px">from:for, seconds <input id="cut" placeholder="e.g. 120:240" size="12" /></label>
+      <label><input type="radio" name="gps" value="nogps" /><span>gone after the start</span></label>
+      <label><input type="radio" name="gps" value="all" /><span>good all along<small>every fix the phone had, cuts ignored</small></span></label>
+    </fieldset>
+    <fieldset class="q exp-only">
+      <legend>Where the car started</legend>
+      <label><input type="radio" name="from" value="phone" checked /><span>where the phone remembered it<small>as it really happened (older logs: as below, from the earlier drives)</small></span></label>
+      <label><input type="radio" name="from" value="drawn" /><span>where your drawing starts<small>as if you had placed the car there</small></span></label>
+      <label><input type="radio" name="from" value="parked" /><span>where today’s navigator would have parked it<small>replays your earlier drives first: slow the first time</small></span></label>
+      <label><input type="radio" name="from" value="cold" /><span>nowhere: a fresh install</span></label>
+    </fieldset>
+    <fieldset class="q exp-only">
+      <legend>Compare with</legend>
+      <select id="compare" aria-label="Compare with">
+        <option value="">nothing</option>
+        <option value="before">the navigator before 16 Oct (orange)</option>
+        <option value="open">no map corrections: open loop (orange)</option>
+      </select>
+    </fieldset>
+    <fieldset class="q exp-only">
+      <legend>Adapter</legend>
+      <label><input type="radio" name="adapter" value="" checked /><span>as recorded<small>the speed the app took: OBD or the CAN wheels</small></span></label>
+      <label><input type="radio" name="adapter" value="none" /><span>none — the phone on its own<small>phone-only mode: its own speed and gyro; GPS still takes over when good</small></span></label>
+    </fieldset>
+    <details class="box exp-only">
+      <summary>Research options</summary>
+      <div class="research">
+        <label title="Where you put the car during the drive is put there again at the same moment, as on the phone">Your placings <select id="placings"><option value="">replayed</option><option value="off">ignored</option></select></label>
+        <label title="GPS timing offset. Empty = learned on the drive, as in the app">GPS lag <input id="lag" type="number" step="0.05" placeholder="learned" style="width:90px" /> s</label>
+        <label title="Start the session this far into the log, as if the app started then">Start later, at <input id="start" type="number" step="10" min="0" placeholder="0" style="width:90px" /> s</label>
+        <label title="Compass at a jammed start (MAPMATCH-SPEC §8.2), calibrated on the other logs; turned = a wrong calibration">Compass at a jammed start
+          <select id="compass"><option value="">off</option><option value="on">from other drives</option><option value="90">turned 90°</option><option value="180">turned 180°</option></select></label>
+        <span class="muted">These run the navigator alone, not the whole app.</span>
+        <label title="Clock times on the page: this computer's local time, or UTC. Hover a time to see the other.">Clock times <select id="tz"><option value="local">local</option><option value="utc">UTC</option></select></label>
+      </div>
+    </details>
+    <button id="asItHappened" class="exp-only">Back to as it happened</button>
   </aside>
 </main>
 <canvas id="timeline" aria-label="Timeline: click or drag to seek"></canvas>
 <div class="controls">
-  <button id="play" title="Space">▶ Play</button>
-  <select id="speed" aria-label="Playback speed">
+  <button id="play" class="primary" title="Space">▶ Play</button>
+  <label>Speed <select id="speed" aria-label="Playback speed">
     <option value="1">1×</option><option value="2">2×</option><option value="5">5×</option>
     <option value="10" selected>10×</option><option value="30">30×</option><option value="60">60×</option>
-  </select>
+  </select></label>
   <button id="back" title="← (Shift: 30 s)">−5 s</button>
   <button id="fwd" title="→ (Shift: 30 s)">+5 s</button>
   <span id="time"></span>
-  <button id="follow" aria-pressed="true">Follow</button>
-  <span class="muted" style="margin-left:auto">Map: OpenFreeMap (online)</span>
+  <button id="follow" aria-pressed="true">Follow the dot</button>
+  <span class="muted" style="margin-left:auto">Space play · ← → 5 s · / pick a drive · click the timeline to jump</span>
 </div>
 
 <script>
@@ -273,9 +386,9 @@ const OUTAGE_NAMES = { "no-gps": "No GPS", "app-cut": "Cut GPS (app)", "replay-c
 
 // The tracks the map can show: what the phone showed, the replay, and a second replay to compare.
 const TRACKS = [
-  { key: "phone", color: "--phone", label: () => "Phone (as driven)", points: () => data.phone },
-  { key: "replay", color: "--pred", label: () => `Replay · ${data.loopLabel}`, points: () => data.shown },
-  { key: "compare", color: "--cmp", label: () => `Compare · ${data.compare?.label ?? ""}`, points: () => data.compare?.shown ?? [] },
+  { key: "phone", color: "--phone", label: () => "On the phone that day", points: () => data.phone },
+  { key: "replay", color: "--pred", label: () => (data.phoneOnly ? "Replay: the phone on its own" : "Replay (today’s navigator)"), points: () => data.shown },
+  { key: "compare", color: "--cmp", label: () => `Compared: ${data.compare?.label ?? ""}`, points: () => data.compare?.shown ?? [] },
 ];
 const trackOn = { phone: true, replay: true, compare: true };
 try { Object.assign(trackOn, JSON.parse(localStorage.getItem("replay.tracks") ?? "{}")); } catch {}
@@ -834,79 +947,163 @@ async function setDrawn() {
     ? draft.map((p, i) => pt(p, { i, straight: !!p.straight && i > 0, free: !!p.free })) : []));
 }
 
+const wrapRad = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+const turnWords = (r, straight) => Math.abs(r) < Math.PI / 9 ? straight : `turns ${Math.round(Math.abs(r) * 180 / Math.PI)}° ${r >= 0 ? "right" : "left"}`;
+
+/**
+ * Where the drawing turns differently from the car's own gyro: over 24 s around each moment, the gyro's change of
+ * direction against the drawing's, more than 60° apart for 4 s or more, and the drawing doesn't make that turn within
+ * 20 s either side (its timing can be that far off: a turn drawn right but timed late isn't a wrong shape). Not where the
+ * timing is in doubt by more than 40 m, nor where the car barely moved. A car park or a yard drawn from memory shows here.
+ */
+function gyroChecks() {
+  const odo = data?.odo, pts = drawn?.timed?.points;
+  if (!odo?.length || !pts?.length) return [];
+  const W = 12, out = [];
+  let cur = null;
+  const psiAt = (tt) => { const i = indexAt(odo, tt, (x) => x[0]); return i < 0 ? null : odo[i][3]; };
+  const close = () => { if (cur && cur.to - cur.from >= 4) out.push(cur); cur = null; };
+  for (let tt = W; tt <= pts.at(-1)[0] - W; tt += 2) {
+    const a = drawnAt(tt - W), b = drawnAt(tt + W);
+    const doubt = pts[Math.max(0, indexAt(pts, tt, (x) => x[0]))][4];
+    if (!a || !b || doubt > 40 || b.s - a.s < 20) { close(); continue; }
+    const pa = psiAt(tt - W), pb = psiAt(tt + W);
+    if (pa == null || pb == null) { close(); continue; }
+    const carTurn = wrapRad(pb - pa);
+    // The drawing's turn over the same 24 s, shifted up to 20 s either way: the closest to the car's.
+    let diff = Infinity, drawnTurn = null;
+    for (let k = -20; k <= 20; k += 2) {
+      const a2 = drawnAt(tt + k - W), b2 = drawnAt(tt + k + W);
+      const ha = a2 && drawnBearingAt(a2.s), hb = b2 && drawnBearingAt(b2.s);
+      if (ha == null || hb == null) continue;
+      const d = Math.abs(wrapRad(wrapRad(hb - ha) - carTurn));
+      if (d < diff) { diff = d; if (k === 0 || drawnTurn === null) drawnTurn = wrapRad(hb - ha); }
+      if (k === 0) drawnTurn = wrapRad(hb - ha);
+    }
+    if (drawnTurn === null) { close(); continue; }
+    if (diff > Math.PI / 3) {
+      cur ??= { from: tt, to: tt, worst: 0 };
+      cur.to = tt;
+      if (diff > cur.worst) Object.assign(cur, { worst: diff, at: tt, drawnTurn, carTurn });
+    } else close();
+  }
+  close();
+  return out;
+}
+
+/** Nearest point of the whole drawing to p: { d m, s m along }. */
+function nearestOnDrawing(p) {
+  const path = drawn.truth.path, cum = drawn.timed.cum;
+  const kx = 111195 * Math.cos(rad(p.lat)), ky = 111195;
+  let best = { d: Infinity, s: 0 };
+  for (let i = 0; i + 1 < path.length; i++) {
+    const ax = (path[i][1] - p.lon) * kx, ay = (path[i][0] - p.lat) * ky;
+    const dx = (path[i + 1][1] - p.lon) * kx - ax, dy = (path[i + 1][0] - p.lat) * ky - ay;
+    const len2 = dx * dx + dy * dy;
+    const f = len2 > 0 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / len2)) : 0;
+    const d = Math.hypot(ax + f * dx, ay + f * dy);
+    if (d < best.d) best = { d, s: cum[i] + f * (cum[i + 1] - cum[i]) };
+  }
+  return best;
+}
+
+/**
+ * Where Wi-Fi/cell fixes keep disagreeing with the drawing: 3 or more in a row either far from every part of it, or
+ * beside it but far along from where its timing has the car (a stretch missing, or drawn twice). Their median error is
+ * ~24 m, so 150 m and 3× their claim, beyond the timing's doubt, is not their noise.
+ */
+function wifiChecks() {
+  const pts = drawn?.timed?.points;
+  if (!pts?.length || !data?.fixes) return [];
+  const out = [];
+  let cur = null, last = "";
+  const close = () => { if (cur && cur.n >= 3) out.push(cur); cur = null; };
+  for (const f of data.fixes) {
+    if (f.sat || f.acc > 150) continue;
+    const key = `${f.lat},${f.lon}`;
+    if (key === last) continue;
+    last = key;
+    const car = drawnAt(f.t);
+    if (!car) continue;
+    const doubt = pts[Math.max(0, indexAt(pts, f.t, (x) => x[0]))][4];
+    const reach = Math.max(150, 3 * f.acc) + 2 * doubt;
+    const near = nearestOnDrawing(f);
+    const off = haversine(f, car) > reach && (near.d > reach || Math.abs(near.s - car.s) > reach + 300);
+    if (!off) { close(); continue; }
+    cur ??= { from: f.t, to: f.t, n: 0, nearS: near.s, nearD: near.d, carS: car.s };
+    cur.to = f.t;
+    cur.n++;
+  }
+  close();
+  return out;
+}
+
 function renderDrawn() {
   const el = $("drawn");
+  updateDrawTools();
   if (!data) { el.innerHTML = ""; return; }
   const timed = drawn?.timed;
-  let html = "";
-  if (drawing) {
-    html += `<div class="hint">Click along the roads you drove, in order: the path follows the roads between two clicks ` +
-      `(one-ways don't count). Clicks more than 12 m from the map's roads, two in a row or at the drive's start or end, ` +
-      `are off them (a car park, a yard): the line goes straight between them and to the nearest road. ` +
-      `<b>Shift-click</b>: straight from the last point anyway; on a point, it toggles that. ` +
-      `Drag a point to move it, <b>right-click</b> it to delete it, click the line to add a point in between. ` +
-      `<b>O</b>: off the roads — clicks stay exactly where you put them (a car park, a yard), joined straight; ` +
-      `<b>Alt-click</b> a point to toggle that. <b>S</b>: clicks go before the first point, to draw a start you missed. ` +
-      `The dashed violet line is the car's own gyro and wheels around the cursor (Layers). Ctrl+Z undoes, Esc ends.</div>` +
-      `<div class="drawn-actions"><button id="drawFree" aria-pressed="${drawMode.free}">${drawMode.free ? "☑" : "☐"} Off the roads (O)</button>` +
-      `<button id="drawAtStart" aria-pressed="${drawMode.atStart}">${drawMode.atStart ? "☑" : "☐"} Add at the start (S)</button></div>`;
-  }
+  let html = `<section><h2>How to draw</h2><ol class="steps">` +
+    `<li>Click along the roads you drove, in order. The line follows the roads between clicks.</li>` +
+    `<li>For a car park or a yard, switch to <b>Off the roads</b> (O) and click the way you went.</li>` +
+    `<li>Put the cursor on a stretch you are sure of, on a road: the violet dashes show what the car’s own gyro did around it. Move points until your line agrees.</li>` +
+    `</ol><div class="muted">${esc(drawnStatus || (timed ? "Saved · every change saves at once" : "Every change saves at once"))}</div></section>`;
+  const checks = [];
   if (timed) {
     const diff = (timed.pathM / Math.max(1, timed.odometerM) - 1) * 100;
-    html += `<div class="facts">Drawn <b>${fmtKm(timed.pathM)}</b> · odometer <b>${fmtKm(timed.odometerM)}</b> ` +
-      `(${diff >= 0 ? "+" : ""}${diff.toFixed(1)} %) · timed by ${timed.anchors ? `the odometer and ${timed.anchors} clean fixes` : "the odometer"}, ` +
-      `±${fmtM(timed.doubtM)} at worst</div>`;
-    if (Math.abs(diff) > 8 && timed.odometerM > 300) {
-      html += `<div class="poor">The drawing and the odometer disagree by ${Math.abs(diff).toFixed(0)} %: a stretch is missing, doubled or cut short.</div>`;
+    const ok = !(Math.abs(diff) > 8 && timed.odometerM > 300);
+    checks.push(`<div class="check ${ok ? "ok" : "bad"}"><b aria-hidden="true">${ok ? "✓" : "!"}</b><span>${ok ? "Length matches the car’s odometer" : "The drawing and the odometer disagree: a stretch is missing, doubled or cut short"}: ` +
+      `${fmtKm(timed.pathM)} drawn, ${fmtKm(timed.odometerM)} driven (${diff >= 0 ? "+" : ""}${diff.toFixed(1)} %)</span></div>`);
+    for (const g of gyroChecks()) {
+      checks.push(`<div class="check warn"><b aria-hidden="true">!</b><span>Around ${fmtT(g.at).replace(/\.\d$/, "")} your line ${turnWords(g.drawnTurn, "goes straight")}, the car’s gyro ${turnWords(g.carTurn, "went straight")}. ` +
+        `<button class="linkish" data-show="${g.at}">Show</button></span></div>`);
+    }
+    for (const w of wifiChecks()) {
+      const where = w.nearD < 100 ? `beside your line at its ${fmtKm(w.nearS)} mark, where your timing has the car at ${fmtKm(w.carS)}: a stretch may be missing or drawn twice`
+        : `${fmtM(w.nearD)} from any of your line`;
+      checks.push(`<div class="check bad"><b aria-hidden="true">!</b><span>${fmtT(w.from).replace(/\.\d$/, "")}–${fmtT(w.to).replace(/\.\d$/, "")}: ${w.n} Wi-Fi fixes put the car ${where}. ` +
+        `<button class="linkish" data-show="${w.from}">Show</button></span></div>`);
     }
     const noRoute = drawn.truth.legs.filter((l) => l.reason === "no route").length;
-    if (noRoute) {
-      html += `<div class="meh">${noRoute} stretch${noRoute > 1 ? "es" : ""} drawn straight because the roads don't join their points (amber dashes): ` +
-        `add a point on the road between them, or shift-click it if straight is right.</div>`;
-    }
+    if (noRoute) checks.push(`<div class="check warn"><b aria-hidden="true">!</b><span>${noRoute} stretch${noRoute > 1 ? "es" : ""} drawn straight because the roads don’t join their points (amber dashes): add a point on the road between them, or shift-click it if straight is right.</span></div>`);
     const detours = drawn.truth.legs.filter((l) => l.reason === "detour").length;
-    if (detours) {
-      html += `<div class="meh">${detours} stretch${detours > 1 ? "es" : ""} drawn straight because the roads join their points only the long way round (amber dashes): ` +
-        `a way the map lacks, as into a yard. If the car did go round, add a point on the way.</div>`;
-    }
-    html += TRACKS.filter((tr) => present(tr) && trackOn[tr.key]).map((tr) => {
-      const sc = drawnScores[tr.key];
-      if (!sc || !sc.movingS) return `<div class="now-row"><span class="swatch" style="background:var(${tr.color})"></span><span class="muted">no data</span></div>`;
-      const share = sc.offS / sc.movingS;
-      const cls = share < 0.02 ? "good" : share < 0.1 ? "meh" : "poor";
-      return `<div class="now-row"><span class="swatch" style="background:var(${tr.color})"></span><span>off the drawn road ` +
-        `<span class="num ${cls}">${fmtMin(sc.offS)}</span> of ${fmtMin(sc.movingS)} driving · ` +
-        `median <span class="num ${grade(sc.errMedian)}">${fmtM(sc.errMedian)}</span> from the car · end <span class="num ${grade(sc.end)}">${fmtM(sc.end)}</span></span></div>`;
-    }).join("");
-  } else if (!drawing) {
-    html += `<div class="muted">Not drawn. Draw the roads you drove, and every track is scored against them all along the drive, with or without GPS.</div>`;
+    if (detours) checks.push(`<div class="check warn"><b aria-hidden="true">!</b><span>${detours} stretch${detours > 1 ? "es" : ""} drawn straight because the roads join their points only the long way round (amber dashes): a way the map lacks, as into a yard. If the car did go round, add a point on the way.</span></div>`);
+    checks.push(`<div class="muted">Timed by ${timed.anchors ? `the odometer and ${timed.anchors} clean GPS fixes` : "the odometer"}, ±${fmtM(timed.doubtM)} at worst.</div>`);
+  } else {
+    checks.push(`<div class="muted">Not drawn yet. Draw the roads you drove and every replay of this drive is scored against them, with or without GPS.</div>`);
   }
+  html += `<section><h2>Checks</h2>${checks.join("")}</section>`;
   if (data.placings?.length) {
-    html += `<div class="facts">Your placings: ` + data.placings.map((p, i) => {
+    html += `<section><h2>Your placings</h2><ul class="plain">` + data.placings.map((p, i) => {
       const d = drawnAt(p.t);
       const gap = d ? haversine(p, d) : null;
-      const cls = gap == null ? "" : gap < 15 ? "good" : gap < 40 ? "meh" : "poor";
-      return `<a href="#" data-placing="${i}">${fmtT(p.t)}</a>` + (gap == null ? "" : ` <span class="num ${cls}">${fmtM(gap)}</span> from the drawing`);
-    }).join(" · ") + `</div>`;
+      const say = gap == null ? "no drawing at that moment" : gap < 15 ? `${fmtM(gap)} from your drawing` : `${fmtM(gap)} from your drawing — one of them is wrong`;
+      return `<li><button class="tile ${gap == null || gap < 15 ? "" : gap < 40 ? "warn" : "bad"}" data-placing="${i}"><span class="when">${fmtT(p.t).replace(/\.\d$/, "")}</span><span>${esc(say)}</span></button></li>`;
+    }).join("") + `</ul></section>`;
   }
-  html += `<div class="drawn-actions">` + (drawing
-    ? `<button id="drawnDone">Done</button><button id="drawnUndo" ${undo.length ? "" : "disabled"}>Undo</button>`
-    : `<button id="drawnEdit">${drawn?.truth ? "Edit" : "Draw"}</button>`) +
-    (drawn?.truth || draft.length ? `<button id="drawnClear">Delete</button>` : "") +
-    `<span class="muted">${esc(drawnStatus)}</span></div>`;
+  if (drawn?.truth || draft.length) html += `<section><div class="drawn-actions"><button id="drawnClear" class="danger">Delete the drawing…</button></div></section>`;
   el.innerHTML = html;
-  for (const a of el.querySelectorAll("a[data-placing]")) a.onclick = (ev) => { ev.preventDefault(); const p = data.placings[+a.dataset.placing]; seek(p.t); map.easeTo({ center: [p.lon, p.lat] }); };
-  if ($("drawnDone")) $("drawnDone").onclick = () => setDrawing(false);
-  if ($("drawFree")) $("drawFree").onclick = () => { drawMode.free = !drawMode.free; renderDrawn(); };
-  if ($("drawAtStart")) $("drawAtStart").onclick = () => { drawMode.atStart = !drawMode.atStart; renderDrawn(); };
-  if ($("drawnUndo")) $("drawnUndo").onclick = undoDrawn;
-  if ($("drawnEdit")) $("drawnEdit").onclick = () => setDrawing(true);
+  for (const b of el.querySelectorAll("[data-placing]")) b.onclick = () => { const p = data.placings[+b.dataset.placing]; seek(p.t); map.easeTo({ center: [p.lon, p.lat] }); };
+  for (const b of el.querySelectorAll("[data-show]")) b.onclick = () => { const tt = +b.dataset.show; seek(tt); const d = drawnAt(tt); if (d) map.easeTo({ center: [d.lon, d.lat], zoom: Math.max(map.getZoom(), 16) }); };
   if ($("drawnClear")) $("drawnClear").onclick = clearDrawn;
 }
+
+function updateDrawTools() {
+  $("toolRoads").setAttribute("aria-pressed", String(!drawMode.free));
+  $("toolFree").setAttribute("aria-pressed", String(drawMode.free));
+  $("toolStart").setAttribute("aria-pressed", String(drawMode.atStart));
+  $("toolUndo").disabled = !undo.length;
+}
+$("toolRoads").onclick = () => { drawMode.free = false; updateDrawTools(); };
+$("toolFree").onclick = () => { drawMode.free = true; updateDrawTools(); };
+$("toolStart").onclick = () => { drawMode.atStart = !drawMode.atStart; updateDrawTools(); };
+$("toolUndo").onclick = () => undoDrawn();
+$("toolDone").onclick = () => setMode("review");
 
 function afterDrawn() {
   if (drawnFor) markDrawn(drawnFor, !!drawn?.truth);
   computeDrawnScores();
+  renderVerdict();
   setDrawn();
   if (data) setPlacings();
   renderDrawn();
@@ -1056,38 +1253,79 @@ function addDrawingHandlers() {
 }
 
 // ---------- side panel ----------
+/** The picker's second line: how long, how far, how GPS was. */
+function driveLine() {
+  if (!data) return "";
+  const gpsGood = Math.max(0, 1 - data.noGpsS / Math.max(1, data.durationS));
+  const gps = gpsGood > 0.95 ? "GPS good all along" : gpsGood < 0.05 ? "no GPS" : gpsGood < 0.5 ? `GPS jammed or off ${Math.round(100 * (1 - gpsGood))} % of the time` : `GPS good ${Math.round(100 * gpsGood)} % of the time`;
+  return `${fmtMin(data.durationS)} · ${fmtKm(data.obdDistanceM ?? data.summary.obdDistanceM)} · ${gps}`;
+}
 function renderDrive() {
-  const s = data.summary;
-  const appCuts = data.outages.filter((o) => o.kind === "app-cut").length;
-  const gpsGood = Math.max(0, 100 * (1 - data.noGpsS / Math.max(1, data.durationS)));
-  const scenario = $("gps").selectedOptions[0].textContent;
-  $("drive").innerHTML = `<div class="drive-title">${esc(driveName(data.file))}</div><div class="facts">` +
-    `<b>${fmtMin(data.durationS)}</b> · <b>${fmtKm(data.obdDistanceM ?? s.obdDistanceM)}</b> driven (OBD)<br>` +
-    `GPS good <b>${Math.round(gpsGood)} %</b> of the time` + (appCuts ? ` · <b>${appCuts}</b>× Cut GPS in the app` : "") + `<br>` +
-    (data.phoneLoopLabel ? `Phone ran: ${esc(data.phoneLoopLabel)}<br>` : "") +
-    `Replay: ${esc(data.loopLabel)} · GPS ${esc(scenario.toLowerCase())}` +
-    (data.phone.length ? "" : `<br><span class="muted">This log predates recording what the phone showed: replay only.</span>`) + `</div>`;
-  $("tracks").innerHTML = [
-    `<label><span class="swatch" style="background:var(--gps)"></span>GPS (green dots: where the car really was)</label>`,
-    ...TRACKS.filter(present).map((tr) =>
-      `<label><input type="checkbox" data-track="${tr.key}" ${trackOn[tr.key] ? "checked" : ""} /><span class="swatch" style="background:var(${tr.color})"></span>${esc(tr.label())}</label>`),
-  ].join("");
+  showPicked();
   $("trackLayers").innerHTML = TRACKS.filter(present).map((tr) =>
-    `<label><input type="checkbox" data-track="${tr.key}" ${trackOn[tr.key] ? "checked" : ""} /><span class="swatch" style="background:var(${tr.color})"></span>${esc(tr.label())}</label>`).join("");
-  for (const box of document.querySelectorAll("#tracks input[data-track], #trackLayers input[data-track]")) {
+    `<label><input type="checkbox" data-track="${tr.key}" ${trackOn[tr.key] ? "checked" : ""} /><span class="key" style="background:var(${tr.color})"></span>${esc(tr.label())}</label>`).join("") +
+    (data.phone.length ? "" : `<span class="muted">This log predates recording what the phone showed: replay only.</span>`);
+  for (const box of document.querySelectorAll("#trackLayers input[data-track]")) {
     box.onchange = () => {
       trackOn[box.dataset.track] = box.checked;
-      for (const other of document.querySelectorAll(`input[data-track="${box.dataset.track}"]`)) other.checked = box.checked;
       try { localStorage.setItem("replay.tracks", JSON.stringify(trackOn)); } catch {}
-      setStatic(); renderOutages(); renderDrawn(); updateDynamic();
+      setStatic(); renderOutages(); renderVerdict(); renderDrawn(); updateDynamic();
     };
   }
+}
+
+// ---------- modes ----------
+/** review: did the dot get this drive right; draw: the truth to judge it by; experiment: replay it differently. */
+let mode = "review";
+let layersWasOpen = null;
+function setMode(m) {
+  const was = mode;
+  mode = m;
+  document.body.dataset.mode = m;
+  for (const b of document.querySelectorAll("nav.modes button")) b.setAttribute("aria-selected", String(b.dataset.mode === m));
+  if (m === "draw" && !drawing) { layersWasOpen = $("layersBox").open; $("layersBox").open = false; setDrawing(true); }
+  else if (m !== "draw" && was === "draw" && layersWasOpen != null) { $("layersBox").open = layersWasOpen; layersWasOpen = null; }
+  if (m !== "draw" && drawing) setDrawing(false);
+  if (data) { const h = new URLSearchParams(location.hash.slice(1)); if (m === "review") h.delete("mode"); else h.set("mode", m); history.replaceState(null, "", "#" + h.toString()); }
+  renderDrawn();
+}
+for (const b of document.querySelectorAll("nav.modes button")) b.onclick = () => setMode(b.dataset.mode);
+
+/** The drive in a sentence and three numbers: against the drawing when there is one, else the stretches without GPS. */
+function renderVerdict() {
+  const el = $("verdict");
+  if (!data) { el.innerHTML = ""; return; }
+  const inc = data.incidents;
+  const majors = inc && !inc.unjudged ? inc.list.filter((i) => i.major && !i.whileLost).length : null;
+  const sc = drawnScores.replay;
+  let html = `<h2>Verdict</h2>`;
+  if (drawn?.timed && sc?.movingS) {
+    html += `<p class="headline">${majors == null ? "Not judged: " + esc(inc?.unjudged ?? "no incidents computed")
+      : majors === 0 ? "The dot stayed with the car all drive" : `${majors} place${majors > 1 ? "s" : ""} where a driver would have noticed the dot wrong`}</p>`;
+    const right = Math.round(100 * (1 - sc.offS / sc.movingS));
+    html += `<div class="stats">` +
+      `<div class="stat"><b class="${right >= 98 ? "good" : right >= 90 ? "meh" : "poor"}">${right}%</b><span>of driving on the right road</span></div>` +
+      `<div class="stat"><b class="${grade(sc.errMedian)}">${fmtM(sc.errMedian)}</b><span>typical distance from the car</span></div>` +
+      `<div class="stat"><b class="${grade(sc.end)}">${fmtM(sc.end)}</b><span>off where it parked</span></div></div>`;
+    html += `<p class="muted" style="margin:0">Scored against your drawing. <button class="linkish" data-go="draw">Check the drawing</button> if a verdict looks wrong.</p>`;
+  } else if (data.outages.length) {
+    html += `<p class="headline">Not drawn yet: only the stretches without GPS can be scored</p>` +
+      `<p class="muted" style="margin:0">They are below, by how far off the dot was when GPS came back. <button class="linkish" data-go="draw">Draw the roads you drove</button> to score the whole drive.</p>`;
+  } else if (data.noGpsS > data.durationS / 2) {
+    html += `<p class="headline">No GPS and no drawing: nothing to judge the dot against</p>` +
+      `<p class="muted" style="margin:0"><button class="linkish" data-go="draw">Draw the roads you drove</button> to score this drive.</p>`;
+  } else {
+    html += `<p class="headline">GPS was good all drive: the dot followed it</p>` +
+      `<p class="muted" style="margin:0">Nothing to judge. Try it without GPS under <button class="linkish" data-go="experiment">Experiment</button>.</p>`;
+  }
+  el.innerHTML = html;
+  for (const b of el.querySelectorAll("[data-go]")) b.onclick = () => setMode(b.dataset.go);
 }
 
 /** Did this track have GPS in this window (so its score says nothing)? */
 function hadGps(key, o) {
   if (key === "phone") return o.kind === "replay-cut";
-  return o.kind === "app-cut" && $("gps").value !== "app";
+  return o.kind === "app-cut" && param("gps") !== "app";
 }
 
 function scoreRow(tr, sc, o) {
@@ -1106,9 +1344,13 @@ function scoreRow(tr, sc, o) {
 
 function renderOutages() {
   const shown = TRACKS.filter((tr) => present(tr) && trackOn[tr.key]);
+  if (!data.outages.length && data.noGpsS > data.durationS / 2) {
+    $("outages").innerHTML = `<div class="muted">No GPS on this drive at all: only a drawing can score it.</div>`;
+    return;
+  }
   if (!data.outages.length) {
     $("outages").innerHTML = `<div class="muted">GPS was good the whole drive, so there is nothing to compare: the dot followed GPS. ` +
-      `Use Cut GPS in the app on your next drive, or pick “Cut at…” above to try it here.</div>`;
+      `Use Cut GPS in the app on your next drive, or cut it here under Experiment.</div>`;
     return;
   }
   $("outages").innerHTML = data.outages.map((o, i) => {
@@ -1202,7 +1444,15 @@ function renderEvents() {
 }
 
 /** What a driver would see go wrong, against the drawing (src/nav/replay/incidents.ts): click one to go there. */
-const INCIDENT_WORDS = { lost: "lost", "wrong-way": "arrow against the car", heading: "arrow well off", "wrong-road": "on another road", far: "far along the road", jump: "jump", backwards: "steps back" };
+const INCIDENT_WORDS = { lost: "Lost", "wrong-way": "Arrow against the car", heading: "Arrow well off the car's way", "wrong-road": "On another road", far: "Far along the road from the car", jump: "Jumped", backwards: "Stepped back" };
+function incidentText(i) {
+  const dur = i.toS - i.fromS;
+  const angle = i.kind === "wrong-way" || i.kind === "heading";
+  const head = i.kind === "jump" ? `Jumped ${i.worst} m` : i.kind === "backwards" ? `Stepped back ${i.worst} m`
+    : `${INCIDENT_WORDS[i.kind] ?? i.kind}${dur >= 1 ? ` for ${fmtMin(dur)}` : ""}`;
+  const sub = i.kind === "jump" || i.kind === "backwards" ? "" : angle ? `up to ${i.worst}° off` : `up to ${i.worst} m away`;
+  return { head, sub: [sub, i.whileLost ? "while lost" : ""].filter(Boolean).join(" · ") };
+}
 function renderIncidents() {
   const inc = data.incidents;
   $("incidentsBox").hidden = !inc;
@@ -1210,12 +1460,15 @@ function renderIncidents() {
   const minor = $("minorIncidents").checked;
   const list = inc.list.filter((i) => minor || (i.major && !i.whileLost));
   const majors = inc.list.filter((i) => i.major && !i.whileLost).length;
-  $("incidentCount").textContent = inc.unjudged ? "· not judged" : `· ${majors} major`;
-  const unit = (i) => (i.kind === "wrong-way" || i.kind === "heading" ? "°" : " m");
-  $("incidents").innerHTML = inc.unjudged ? `<li><span></span><span>${esc(inc.unjudged)}</span></li>`
-    : list.map((i) => `<li data-t="${i.fromS}" class="${i.major ? "major" : ""}"><span>${fmtT(i.fromS)}</span><span>${esc(INCIDENT_WORDS[i.kind] ?? i.kind)}${i.whileLost ? " (while lost)" : ""}, ${(i.toS - i.fromS).toFixed(1)} s, ${i.worst}${unit(i)}</span></li>`).join("")
-      || `<li><span></span><span>none: the dot stayed with the car</span></li>`;
-  for (const li of $("incidents").children) if (li.dataset.t) li.onclick = () => seek(Math.max(0, +li.dataset.t - 3));
+  $("incidentCount").textContent = inc.unjudged ? "· not judged" : `· ${majors}`;
+  $("incidents").innerHTML = inc.unjudged ? `<li class="muted">${esc(inc.unjudged)}</li>`
+    : list.map((i) => {
+      const { head, sub } = incidentText(i);
+      const cls = i.major && !i.whileLost ? (i.kind === "lost" || i.kind === "wrong-road" || i.kind === "wrong-way" ? "bad" : "warn") : "";
+      return `<li><button class="tile ${cls}" data-t="${i.fromS}"><span class="when">${fmtT(i.fromS).replace(/\.\d$/, "")}</span><span><strong>${esc(head)}</strong>${sub ? `<small>${esc(sub)}</small>` : ""}</span></button></li>`;
+    }).join("")
+      || `<li class="muted">Nothing: the dot stayed with the car.</li>`;
+  for (const b of $("incidents").querySelectorAll("button[data-t]")) b.onclick = () => seek(Math.max(0, +b.dataset.t - 3));
 }
 $("minorIncidents").onchange = () => data && renderIncidents();
 
@@ -1403,11 +1656,11 @@ $("showRoads").onchange = () => setRoads();
 $("showTruth").onchange = () => setTruth();
 $("showDrawn").onchange = () => { setDrawn(); updateDynamic(); };
 $("showOdo").onchange = () => updateDynamic();
-$("showSat").onchange = () => {
+$("showSat").onchange = $("showStreets").onchange = () => {
   try { localStorage.setItem("replay.satellite", $("showSat").checked ? "1" : ""); } catch {}
   map.ready.then(() => map.setLayoutProperty("satellite", "visibility", $("showSat").checked ? "visible" : "none"));
 };
-try { $("showSat").checked = localStorage.getItem("replay.satellite") === "1"; } catch {}
+try { if (localStorage.getItem("replay.satellite") === "1") $("showSat").checked = true; } catch {}
 $("showPlacings").onchange = () => data && setPlacings();
 $("showMm").onchange = () => updateDynamic();
 $("showRoute").onchange = () => updateDynamic();
@@ -1415,9 +1668,11 @@ $("allEvents").onchange = () => data && renderEvents();
 document.addEventListener("keydown", (e) => {
   if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
   if (drawing && (e.ctrlKey || e.metaKey) && e.code === "KeyZ") { e.preventDefault(); undoDrawn(); return; }
-  if (drawing && e.code === "Escape") { setDrawing(false); return; }
-  if (drawing && e.code === "KeyO" && !e.ctrlKey && !e.metaKey) { drawMode.free = !drawMode.free; renderDrawn(); return; }
-  if (drawing && e.code === "KeyS" && !e.ctrlKey && !e.metaKey) { drawMode.atStart = !drawMode.atStart; renderDrawn(); return; }
+  if (drawing && e.code === "Escape") { setMode("review"); return; }
+  const plain = !e.ctrlKey && !e.metaKey && !e.altKey;
+  if (drawing && plain && e.code === "KeyR") { drawMode.free = false; updateDrawTools(); return; }
+  if (drawing && plain && e.code === "KeyO") { drawMode.free = true; updateDrawTools(); return; }
+  if (drawing && plain && e.code === "KeyS") { drawMode.atStart = !drawMode.atStart; updateDrawTools(); return; }
   if (e.key === "/") { e.preventDefault(); openPicker(); return; }
   if (e.code === "Space") { e.preventDefault(); setPlaying(!playing); }
   if (e.code === "ArrowLeft") seek(t - (e.shiftKey ? 30 : 5));
@@ -1427,10 +1682,46 @@ window.addEventListener("resize", drawTimeline);
 
 // ---------- loading ----------
 const PARAMS = ["file", "adapter", "gps", "cut", "from", "compare", "lag", "start", "compass", "placings"];
+/** The replay settings: three are radio groups (by name), the rest inputs and selects (by id). */
+const RADIOS = ["adapter", "gps", "from"];
+/** What each setting is when the replay runs as it happened. */
+const AS_IT_HAPPENED = { adapter: "", gps: "app", cut: "", from: "phone", compare: "", lag: "", start: "", compass: "", placings: "" };
+function param(k) {
+  if (RADIOS.includes(k)) return document.querySelector(`input[name="${k}"]:checked`)?.value ?? "";
+  return $(k).value;
+}
+function setParam(k, v) {
+  if (!RADIOS.includes(k)) { $(k).value = v; return; }
+  const r = document.querySelector(`input[name="${k}"][value="${CSS.escape(v)}"]`);
+  if (r) r.checked = true;
+}
 function syncCutInput() {
-  const g = $("gps").value;
-  $("cut").hidden = g !== "cut" && g !== "jam";
-  $("cut").placeholder = g === "jam" ? "start:length s, empty = all drive" : "start:length s, e.g. 120:240";
+  const g = param("gps");
+  $("cutRow").hidden = g !== "cut" && g !== "jam";
+  $("cut").placeholder = g === "jam" ? "from:for s, empty = all drive" : "from:for s, e.g. 120:240";
+}
+/** What this replay does differently from the drive as it happened, in words (header and Experiment). */
+function changedFromApp() {
+  const out = [];
+  const g = param("gps"), cut = $("cut").value.trim();
+  if (g === "cut") out.push(`GPS cut ${cut || "(set a window)"}`);
+  if (g === "jam") out.push(`GPS jammed${cut ? ` ${cut}` : ""}`);
+  if (g === "nogps") out.push("no GPS after the start");
+  if (g === "all") out.push("GPS good all along");
+  if (param("from") === "drawn") out.push("started where the drawing starts");
+  if (param("from") === "parked") out.push("started where today’s navigator parked it");
+  if (param("from") === "cold") out.push("cold start");
+  if (param("adapter") === "none") out.push("no adapter");
+  if ($("compare").value) out.push(`compared with ${$("compare").selectedOptions[0].textContent.replace(/ \(orange\)$/, "")}`);
+  if ($("placings").value) out.push("placings ignored");
+  if ($("lag").value) out.push(`GPS lag ${$("lag").value} s`);
+  if (Number($("start").value) > 0) out.push(`started at ${$("start").value} s`);
+  if ($("compass").value) out.push("compass at the start");
+  return out;
+}
+function renderChanged() {
+  const c = changedFromApp();
+  $("changed").textContent = c.length ? `Changed from the app: ${c.join(" · ")}` : "";
 }
 
 // ---------- drive picker ----------
@@ -1482,7 +1773,8 @@ function closePicker() {
 }
 function showPicked() {
   const l = logs.find((x) => x.file === $("file").value);
-  $("drivePick").textContent = l ? `${driveName(l.file)}${l.drawn ? " ✎" : ""}` : "—";
+  $("drivePick").querySelector(".l1").textContent = l ? `${driveName(l.file)}${l.drawn ? " · drawn ✎" : ""}` : "—";
+  $("drivePick").querySelector(".l2").textContent = data && l && data.file === l.file ? driveLine() : "";
   const i = logs.indexOf(l);
   $("driveNext").disabled = i <= 0;
   $("drivePrev").disabled = i < 0 || i >= logs.length - 1;
@@ -1552,7 +1844,8 @@ $("tz").onchange = () => {
 async function loadList() {
   logs = await (await fetch("/api/logs")).json();
   const params = new URLSearchParams(location.hash.slice(1));
-  for (const k of PARAMS) if (params.get(k)) $(k).value = params.get(k);
+  for (const k of PARAMS) if (params.get(k)) setParam(k, params.get(k));
+  if (["review", "draw", "experiment"].includes(params.get("mode"))) setMode(params.get("mode"));
   if (!logs.some((l) => l.file === $("file").value)) $("file").value = logs[0]?.file ?? "";
   showPicked();
   syncCutInput();
@@ -1579,9 +1872,10 @@ function showLoading(chained, from) {
 async function run() {
   const file = $("file").value;
   if (!file) return;
-  const q = Object.fromEntries(PARAMS.map((k) => [k, $(k).value.replace(/\s+/g, "")]));
+  const q = Object.fromEntries(PARAMS.map((k) => [k, param(k).replace(/\s+/g, "")]));
   if (q.gps !== "cut" && q.gps !== "jam") q.cut = "";
-  history.replaceState(null, "", "#" + new URLSearchParams(q).toString());
+  history.replaceState(null, "", "#" + new URLSearchParams({ ...q, ...(mode !== "review" ? { mode } : {}) }).toString());
+  renderChanged();
   setPlaying(false);
   activeOutage = -1;
   if (drawnFor !== file) { drawn = null; drawnFor = null; undo.length = 0; setDrawing(false); }
@@ -1613,11 +1907,13 @@ async function run() {
   renderOutages();
   renderEvents();
   renderIncidents();
+  renderVerdict();
   renderRoute();
   renderSummary();
   loadRoads(file);
   loadTruth(file);
   await loadDrawn(file);
+  if (mode === "draw" && !drawing) setDrawing(true);
   await setStatic();
   const pts = [...data.shown.map((p) => ({ lon: p[2], lat: p[1] })), ...data.fixes.filter((f) => f.sat && f.acc <= 50)];
   if (pts.length) {
@@ -1626,8 +1922,16 @@ async function run() {
   }
   seek(0);
 }
-for (const id of ["adapter", "from", "compare", "compass", "placings"]) $(id).onchange = run;
-$("gps").onchange = () => { syncCutInput(); if ($("gps").value !== "cut") run(); else $("cut").focus(); };
+for (const id of ["compare", "compass", "placings"]) $(id).onchange = run;
+for (const r of document.querySelectorAll('input[name="adapter"], input[name="from"]')) r.onchange = run;
+for (const r of document.querySelectorAll('input[name="gps"]')) {
+  r.onchange = () => { syncCutInput(); if (param("gps") !== "cut") run(); else { renderChanged(); $("cut").focus(); } };
+}
+$("asItHappened").onclick = () => {
+  for (const [k, v] of Object.entries(AS_IT_HAPPENED)) setParam(k, v);
+  syncCutInput();
+  run();
+};
 for (const id of ["cut", "lag", "start"]) $(id).addEventListener("keydown", (e) => e.key === "Enter" && run());
 loadList();
 </script>

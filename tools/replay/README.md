@@ -142,100 +142,94 @@ navigator alone: inputs arrive as on the phone (IMU in 100 ms batches, OBD when 
 CoreLocation's delivery delay) on a virtual clock, and the blue track is what the service publishes, the record the
 phone writes as `nav_estimate`. So the replay can't drift from the app: the reorder window, the parked pose per car
 (started from, confirmed, saved every 30 s, dropped once the car moves), the speed scale, GNSS lag and compass from
-storage, and the "Cut GPS" outages are the app's code. *More*'s research options (a later start, a fixed GPS lag, the
-compass at a jammed start) replay the navigator alone (`replayTrip`), as the benchmarks do; the status line then
-says so.
+storage, and the "Cut GPS" outages are the app's code. *Experiment*'s research options (a later start, a fixed GPS
+lag, the compass at a jammed start) replay the navigator alone (`replayTrip`), as the benchmarks do; the status
+line then says so.
 
-- **Header:**
-  - *Drive*: newest first. *Delete* (click twice) removes a junk log and its drawing here, and from the bucket on
-    the next `npm run logs:push` (tools/triplog/README.md).
-  - The replay runs the navigator the drive was recorded with (the log header; the app runs full correction,
-    MAPMATCH-SPEC §9).
-  - *Adapter*: *As recorded* (the speed the app took, OBD or the CAN wheels), or *None: phone only*: the app in phone-only mode (NAVIGATOR-SPEC §9.6), fed
-    no OBD speed or engine states. The blue dot is then the phone's own dead reckoning wherever GPS isn't good; the
-    timeline draws its speed (blue, scaled by what its map matching learned) over OBD's (grey), rings around the dot
-    are the other roads its tracker holds (label = weight), and *At the cursor* says its speed and what the dot is
-    drawn from. Best with *Start: where the drawing starts* (as if the driver placed the car there); *As stored on the
-    phone* and *Where it parked last* start it where the phone, or the earlier drives replayed with OBD, parked it.
-  - *GPS*: what the replay gets. *As in the app* withholds your "Cut GPS" moments, as the phone did; *All of it*;
-    *Cut at…* (`120:240`, several with commas); *Jammed* (Wi-Fi/cell-like fixes only, `0:inf` or a window;
-    `src/nav/replay/jam.ts`); *None after the start* (pure dead reckoning once the heading is known).
-  - *Start*: *As stored on the phone* (default) starts with what the app had stored when the drive started (parked
-    pose, speed scale, compass, GNSS lag, a manual position the driver set before the drive), read from the log's `nav storage` notes, which the app writes at every
-    trip start: instant. A log from an app before 2026-10-11 doesn't have them and falls back to the next one.
-    *Where it parked last* starts with the storage this navigator version would have had: every earlier log
-    replayed in order through the app with one storage across them (NAVIGATOR-SPEC §6.1); use it to judge a
-    navigator change on its own chain. The car is its VIN, else the car last seen on the same OBD protocol, as the
-    app identifies it. The first load replays them all (~35 s for 48 logs), then they are kept until the viewer
-    restarts (it restarts by itself when the code changes). *Where the drawing starts*: empty storage but the parked pose, at the drawn ground
-    truth's start heading along it. *Cold*: empty storage, as after a fresh install. The status line says which drive
-    the parked pose came from and what the first fixes made of it.
-  - *Compare*: a second version, drawn in orange. *Before 2026-10-16*: the dot without the heading cue or the
+- **Header:** the drive (newest first; ‹ › step, the name opens the list, `/` too; its second line says how long,
+  how far and how GPS was), the three modes, and the status: how the replay started, and in amber what it does
+  differently from the drive as it happened. *Delete this drive…* in the list (click twice) removes a junk log and
+  its drawing here, and from the bucket on the next `npm run logs:push` (tools/triplog/README.md). The replay runs
+  the navigator the drive was recorded with (the log header; the app runs full correction, MAPMATCH-SPEC §9).
+- **Review** — did the dot get this drive right:
+  - *Verdict*: against your drawing, how many places a driver would have noticed the dot wrong, the share of
+    driving on the right road (within 30 m of the drawn road, near where the car was), the typical distance from the
+    car and where it parked. Not drawn: the stretches without GPS are all it can score.
+  - *What went wrong*: the incidents (MAPMATCH-SPEC §10.2) in words, each with its time and how bad; click one to go
+    a few seconds before it; *show small ones too* adds the minor ones and those while lost.
+  - *At the cursor*: the GPS state, and each dot's distance from the newest clean GPS fix (or from the drawing
+    without one), inside its circle or not.
+  - *Without GPS*: every stretch without good GPS. *No GPS*: no clean satellite fix for over 15 s (jamming,
+    tunnels) while the car moved at least 30 m; scored by how far off each dot was when GPS came back, and whether
+    that was inside its circle. *Cut GPS (app)* and *Cut in replay*: GPS was there but withheld, so each dot is
+    scored all through: at the end, at worst, and how often the real position was inside its circle (honest ≈ 68 %).
+    Click one to zoom to it and jump to its end. Code: `src/nav/replay/drive-report.ts`.
+  - *Everything the replay logged* (folded): events (markers, starts, navigator and map-matching changes, GPS
+    trust; link and sensor messages on request) and the replay's internals.
+- **Draw the truth** — the roads the car took, for a drive GPS can't score (MAPMATCH-SPEC §10.1). Every change is
+  saved at once as `<log>.truth.json` beside the log (git-ignored with it); Esc or *Done* goes back to Review.
+  - The toolbar on the map: *Along roads* (R) — the server lays the shortest way along the roads between two
+    clicks, one-ways ignored (the car went where it went, and OSM is sometimes wrong). Clicks more than 12 m from the
+    map's roads, two in a row or at the drive's start or end, are off them anyway: the line goes straight between
+    them and to the nearest road. *Off the roads* (O): clicks stay exactly where you put them however near a road
+    (`free` points, filled squares), joined straight — a car park beside the road. *Add before the start* (S): clicks
+    go before the first point, to draw a start you missed. Shift-click draws a straight stretch anyway (or toggles
+    it on a point), Alt-click toggles a point on or off the roads; drag a point to move it, right-click to delete it,
+    click the line to add one in between; Ctrl+Z or *Undo* undoes. Layers fold away while drawing.
+  - *Gyro path* (dashed violet; a layer, on in every mode): where the car's own gyro and wheels say it went, 90 s
+    either side of the cursor, laid on the drawing at the cursor and turned to its direction there (`odometryTrack`,
+    app-chain.ts). Put the cursor where the drawing is surely right and check the car park or yard next to it;
+    against GPS it was within ~10 m 30 s from the cursor and ~15 m at 60 s (median).
+  - *Checks*: the drawing against the odometer (they agree within a few % when it is right); where the drawing
+    turns differently from the gyro (more than 60° over 24 s, the drawing's timing allowed 20 s either way); where
+    3+ Wi-Fi fixes in a row are far from the drawing, or beside it far along from where its timing has the car (a
+    stretch missing or drawn twice); stretches drawn straight for want of a road route. *Show* goes there.
+  - *Your placings*: where you put the car on the phone, with its heading on the map, a dashed line to where the
+    drawing has the car then, and that distance: far apart, one of them is wrong.
+  - The car's place on the drawing every second comes from the odometer — the speed the app drove on: OBD, or the
+    CAN wheels on a log recorded with CAN primary, which polls OBD only standing — pinned at the drive's ends
+    (start where it was parked, end where it parked) and at any clean fix. Where the drawing and the odometer
+    disagree, the straight stretches take most of it (their length is a guess; a road's isn't). The timing's doubt
+    grows by 3 % of the odometer distance to the nearest pin. Code: `src/nav/replay/drawn-truth.ts`.
+- **Experiment** — replay the drive as if something had been different (the phone's own track never changes);
+  *Back to as it happened* undoes it all:
+  - *What if GPS had been…*: as on the phone (your "Cut GPS" moments withheld); cut for a while (`120:240`, several
+    with commas); jammed (Wi-Fi/cell-like fixes only, all drive or a window; `src/nav/replay/jam.ts`); gone after the
+    start (pure dead reckoning once the heading is known); good all along.
+  - *Where the car started*: where the phone remembered it (default: what the app had stored when the drive
+    started — parked pose, speed scale, compass, GNSS lag, a manual position — from the log's `nav storage` notes;
+    a log from before 2026-10-11 falls back to the next); where your drawing starts (its parked pose at the drawn
+    start, heading along it); where today's navigator would have parked it (every earlier log replayed in order
+    through the app with one storage across them, NAVIGATOR-SPEC §6.1, the car by its VIN, else the car last seen on
+    the same OBD protocol: ~35 s the first time, kept until the viewer restarts); nowhere (a fresh install).
+  - *Compare with*: a second version, drawn in orange. *Before 16 Oct*: the dot without the heading cue or the
     steadying along its road, the wheels' turning at a crawl (MAPMATCH-SPEC §11, NAVIGATOR-SPEC §5.4). *Open loop*:
     no corrections from the map into the navigator.
-- **Incidents** (side panel, on a drawn drive): what a driver would see go wrong with the dot against the drawing
-  (MAPMATCH-SPEC §10.2), each with its time and how bad; click one to go a few seconds before it. *Minor* adds the
-  small ones and those while lost.
-  - *More*: clock times local or UTC (hover a time for the other; the drive list, the time bar and the panel),
-    GPS lag (empty = learned on the drive, as in the app), start the session later, compass at a jammed
-    start (MAPMATCH-SPEC §8.2), and the driver's placings: every app replay puts the car where the driver put it on
-    the map, at the moment they did (the log's `nav position set by the driver` notes); *ignored* replays without.
-- **Tracks** (side panel, each can be hidden): GPS in green (where the car really was), what the phone showed in
-  purple (from the log's `nav_estimate`; older logs don't have it), the replay in blue, the compare replay in
-  orange. A replay track is what the app would have shown (what its service published). Where
-  the dot jumped (farther between two samples than 45 m/s + 10 m: a new Wi-Fi fix while the heading is unknown, a
-  fix's correction, the map match switching roads) the line breaks and both ends get a hollow circle: where it went
-  in between is unknown, and a straight line would read as a path through the buildings. The server's replay shows
-  a spinner over the map (the first parked-pose start of a session replays the earlier drives, ~25 s).
-- **Without GPS:** every stretch without good GPS:
-  - *No GPS*: no clean satellite fix for over 15 s (jamming, tunnels) while the car moved at least 30 m; scored by
-    how far off each dot was when GPS came back, and whether that was inside its circle.
-  - *Cut GPS (app)* and *Cut in replay*: GPS was there but withheld, so each dot is scored all through: at the end,
-    at worst, and how often the real position was inside its circle (honest ≈ 68 %).
-  - Click one to zoom to it and jump to its end. Code: `src/nav/replay/drive-report.ts`.
-- **Ground truth:** draw the roads the car took, for a drive GPS can't score (MAPMATCH-SPEC §10.1).
-  - *Draw*, then click along the roads in order: the server lays the shortest way along the roads between two
-    clicks, one-ways ignored (the car went where it went, and OSM is sometimes wrong). Clicks more than 12 m from
-    the map's roads, two in a row or at the drive's start or end, are off them (a car park, a yard, a lane the map
-    lacks): the line goes straight between them and to the nearest road; a cloud of them marks a car park. One alone
-    on the way is on its road. Shift-click draws a straight stretch anyway, or toggles it on a point; drag a point
-    to move it, right-click to delete it, click the line to add one in between; Ctrl+Z undoes, Esc ends. Every
-    change is saved at once as `<log>.truth.json` beside the log (git-ignored with it).
-  - *Off the roads* (O): clicks stay exactly where you put them however near a road (`free` points, filled), joined
-    straight — a car park beside the road; Alt-click a point toggles it. *Add at the start* (S): clicks go before the
-    first point, to draw a start you missed without redrawing the drive.
-  - *Gyro path* (Layers, dashed violet): where the car's own gyro and wheels say it went, 90 s either side of the
-    cursor, laid on the drawing at the cursor and turned to its direction there (`odometryTrack`, app-chain.ts). Put
-    the cursor where the drawing is surely right and check the car park or yard next to it; against GPS it was
-    within ~10 m 30 s from the cursor and ~15 m at 60 s (median).
-  - *Layers* also turns the tracks on and off (as the side panel's *Tracks*) and lays satellite photos (Esri World
-    Imagery) under them: where the map lacks a yard, a car park or a new road.
-  - *Your placings* (Layers): where you put the car during the drive, its heading, and a dashed line to where the
-    drawing has the car then; the panel lists each with that distance (click one to go there).
-  - The car's place on it every second comes from the odometer — the speed the app drove on: OBD, or the CAN wheels
-    on a log recorded with CAN primary, which polls OBD only standing — pinned at the drive's ends (start where it
-    was parked, end where it parked) and at any clean fix. *Drawn* against *odometer* checks the drawing: they agree
-    within a few % when it is right. Where they don't, the straight stretches take most of it (their length is a
-    guess; a road's isn't). The timing's doubt grows by 3 % of the odometer distance to the nearest pin.
-  - Each track is scored against it while the car moves: seconds more than 30 m from the drawn road (near where the
-    car was, whatever the timing), the median distance from where the car was, and at the end. A ring on the map
-    and dashed lines on the timeline show where it puts the car. Code: `src/nav/replay/drawn-truth.ts`.
-- **At the cursor:** the GPS state, and each dot's distance from the newest clean GPS fix (or from the drawn truth
-  without one), inside its circle or not.
-- **Map:** dots with their circles and dashed distance lines to the GPS fix. *Layers* adds every GPS fix, the
-  road graph, the true path (the road matched offline from clean GPS) and the replay's map-matching particles.
-  Hover a fix for details; click it to jump there.
+  - *Adapter*: as recorded (the speed the app took, OBD or the CAN wheels), or none: phone-only mode
+    (NAVIGATOR-SPEC §9.6), fed no OBD speed or engine states; the dot is the phone's own dead reckoning wherever GPS
+    isn't good, the timeline draws its speed over OBD's, rings around the dot are the other roads its tracker holds.
+  - *Research options*: your placings replayed (as on the phone: the car put where you put it, at that moment) or
+    ignored, GPS lag (empty = learned), a later start, the compass at a jammed start (MAPMATCH-SPEC §8.2), and clock
+    times local or UTC.
+- **Layers** (on the map): *Where the dot was* — the replay in blue, what the phone showed in cyan (from the log's
+  `nav_estimate`; older logs don't have it), the compare replay in orange, and distance lines to where the car was;
+  *Where the car really was* — your drawing, the gyro path, your placings, GPS fixes (green satellite, amber
+  Wi-Fi/cell; hover for details, click to jump), the path matched from GPS; *Background* — streets or satellite
+  photos (Esri World Imagery: where the map lacks a yard, a car park or a new road); *For debugging the navigator* —
+  its road graph, its map-matching particles, the planned route. A replay track is what the app would have shown
+  (what its service published). Where the dot jumped (farther between two samples than 45 m/s + 10 m) the line
+  breaks and both ends get a hollow circle: where it went in between is unknown.
 - **Timeline:** click or drag to seek; Space plays and pauses; ← and → step 5 s (Shift: 30 s).
-  - *Off by*: each dot's distance from every clean GPS fix (log scale, 1–300 m); dots on a line mark moments
-    outside its circle. Shaded: stretches without GPS (grey no GPS, amber Cut GPS, blue cut in the replay).
+  - *Off by*: each dot's distance from every clean GPS fix (log scale, 1–300 m), dashed from the drawing; dots on a
+    line mark moments outside its circle. Shaded: stretches without GPS (grey no GPS, amber Cut GPS, blue cut in the
+    replay).
   - Speed (OBD), and GPS quality (green good, pale weak, amber Wi-Fi/cell only; red ticks are your markers).
-- **Events** and **Replay details** are folded at the bottom of the side panel.
-- **Links:** the URL keeps the drive, every setting and `t` (seconds), so a link reopens the same view.
+- **Links:** the URL keeps the drive, the mode, every setting and `t` (seconds), so a link reopens the same view.
 - The server runs under `node --watch`, so it restarts itself when `src/nav` or the viewer code changes; reload
   the page afterwards. A server started before this change has to be stopped by hand once.
 
 The server only listens on localhost. The basemap is the online OpenFreeMap Liberty style, so your browser
-sends the map viewport to OpenFreeMap.
+sends the map viewport to OpenFreeMap (and to Esri with the satellite background on).
 
 ## Simulated city drives
 
