@@ -132,6 +132,11 @@ describe("the dot keeps steady along its road", () => {
     expect((d.lat - 50.45) * 111_320).toBeCloseTo(2 - 0.2 - 5, 0);
   });
 
+  test("published again at the same moment, it stays where it was", () => {
+    const east = { lat: 50.45, lon: 30.52 + 40 / (111_320 * Math.cos((50.45 * Math.PI) / 180)), headingRad: Math.PI / 2 };
+    expect(steadyDot(east, last(0, 5_000_000), 10, 5_000_000)).toMatchObject({ lat: 50.45, lon: 30.52 });
+  });
+
   test("a hypothesis far away is drawn as it is", () => {
     expect(steadyDot(north(200), last(0), 10, 1_000_000)).toMatchObject({ lat: north(200).lat });
   });

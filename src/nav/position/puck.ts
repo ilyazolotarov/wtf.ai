@@ -103,6 +103,9 @@ export function steadyDot(target: { lat: number; lon: number; headingRad: number
   const t = puckTuning;
   if (!t.steady || !last) return target;
   const dtS = (tUs - last.tUs) / 1e6;
+  // Published again at the same moment (a fix came, the navigator's clock didn't move): where it was. Drawn as the
+  // hypothesis, every fix — a refused one too — let the dot jump past the limits here.
+  if (dtS === 0) return { lat: last.lat, lon: last.lon };
   if (!(dtS > 0 && dtS <= 2)) return target;
   const turned = angle(target.headingRad, last.headingRad) > Math.PI / 4;
   if (turned && !(t.slideMps > 0)) return target;

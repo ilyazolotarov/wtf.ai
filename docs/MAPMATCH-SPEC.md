@@ -1106,6 +1106,10 @@ incident reports, the detector is fixed first, and shown to fire on that log, be
     359 → 125. 40 m/s scores as 25. Back within 15 m of the hypothesis along its road it glides too (it was put
     there at once, a step back to the eye): real incidents 97 → 94 and 154 → 145, simulated 10 better, 1 worse by one
     seed. Gliding gaps up to 150 m, not 80: real incidents −3 each, off the roads at speed 48 → 65 s; not kept.
+  - **Published again at the same moment** (a fix came, refused ones too; the navigator's clock didn't move) the dot
+    stays where it was: drawn as the hypothesis, each fix let it jump past the limits above, and a spoofed drive scored
+    worse than the same drive without GPS on 38 runs in 240. Simulated drives: 39 better, none worse, jumps 110 → 34,
+    spoofed now as without GPS; real incidents 94 → 92 and 145 → 143.
   - **At the spot it parked in off the roads** (`NavEstimate.parkedOffRoad`: started from such a pose, not 20 m
     driven since, state `offroad`): the EKF is the puck, not the dominant hypothesis. The off-road particles spread
     over the pose's σ in clusters lighter than a road's within it.
