@@ -139,4 +139,26 @@ describe("findIncidents: a drawing clean GPS disagrees with", () => {
     expect(r.coverage.disputed).toEqual([]);
     expect(r.incidents.some((i) => i.kind === "wrong-road")).toBe(true);
   });
+
+  it("judges a dot across a hairpin by how far it is from the car, not round the path", () => {
+    // 200 m north, round a hairpin, 200 m back south 25 m to the east; at 10 m/s.
+    const hairpin = (s: number): [number, number] => (s <= 200 ? [LAT0 + s * M_LAT, LON0] : [LAT0 + (400 - s) * M_LAT, LON0 + 25 * M_LON]);
+    const path: [number, number][] = [];
+    const cum: number[] = [];
+    for (let s = 0; s <= 400; s += 5) {
+      path.push(hairpin(s));
+      cum.push(s);
+    }
+    const points: DrawnTruthTrack["points"] = [];
+    for (let t = 0; t <= 40 + 1e-9; t += INCIDENT_STEP_S) points.push([t, ...hairpin(Math.min(400, t * 10)), Math.min(400, t * 10), 0]);
+    const track: DrawnTruthTrack = { path, cum, points, pathM: 400, odometerM: 400, anchors: 0, doubtM: 0 };
+    // From 28 s the dot is level with the car on the way up, 25 m across: 200 m round the path, 25 m away.
+    const dots: DotSample[] = [];
+    for (let t = 0; t <= 40; t += 0.1) {
+      const s = Math.min(400, t * 10);
+      dots.push({ t, lat: hairpin(t >= 28 && t < 33 ? 400 - s : s)[0], lon: hairpin(t >= 28 && t < 33 ? 400 - s : s)[1] });
+    }
+    // (It jumps there and back, and drives the other way: those it is judged for.)
+    expect(findIncidents(track, dots).incidents.map((i) => i.kind)).not.toContain("far");
+  });
 });

@@ -7,7 +7,7 @@
 // The truth is a path the car drove and where on it the car was when (`DrawnTruthTrack`): drawn in the viewer and
 // timed by the odometer (± its doubt), or a simulated drive's exact one (doubt 0).
 
-import { bearingRad, haversineM } from "../geo";
+import { bearingRad, haversineM, type Coordinate } from "../geo";
 import { nearestOnPath, pointAlong, type DrawnTruthTrack } from "./drawn-truth";
 
 export type IncidentKind = "lost" | "wrong-way" | "heading" | "wrong-road" | "far" | "jump" | "backwards";
@@ -80,14 +80,21 @@ const WRONG_ROAD_M = 30;
 const WRONG_ROAD_S = 2;
 const WRONG_ROAD_MAJOR_S = 5;
 const WRONG_ROAD_MAJOR_M = 60;
-/** On the dot's road but away from the car, beyond this plus twice the timing's doubt, this long. */
+/**
+ * On the dot's road but away from the car, beyond this plus twice the timing's doubt, this long: along the path, and
+ * as the crow flies too. Round a tight loop or a hairpin a point 13 m from the car is 90 m on along the path, and the
+ * driver sees 13 m.
+ */
 const FAR_M = 30;
 const FAR_S = 1;
 const FAR_MAJOR_M = 50;
 /** A step of the dot longer than the car went in it, by more than this: a jump; major beyond the second. */
 const JUMP_M = 15;
 const JUMP_MAJOR_M = 30;
-/** The dot on the path going back along it while the car goes forward, by this much within `BACKWARDS_WINDOW_S`. */
+/**
+ * The dot on the path going back along it while the car goes forward, by this much within `BACKWARDS_WINDOW_S` —
+ * and as far from where it was: on a loop its nearest place on the path can flip back a whole lap while it barely moves.
+ */
 const BACKWARDS_M = 8;
 const BACKWARDS_MAJOR_M = 15;
 const BACKWARDS_WINDOW_S = 1.5;
@@ -203,7 +210,7 @@ export function findIncidents(
   const half = Math.max(1, Math.round(0.5 / step));
   let di = 0;
   // Backwards: recent dots on the path, (t, s along it).
-  const onPath: { t: number; s: number }[] = [];
+  const onPath: { t: number; s: number; dot: Coordinate }[] = [];
   let prevDot: DotSample | null = null;
   let prevCarS = 0;
   for (let k = 0; k < pts.length; k++) {
@@ -251,15 +258,15 @@ export function findIncidents(
     if (offM > WRONG_ROAD_M) flags.push({ kind: "wrong-road", t, value: offM });
     else {
       // On the path: how far along it from the car, beyond the timing's doubt.
-      const along = Math.abs(near!.s - s);
+      const along = Math.min(Math.abs(near!.s - s), errorM);
       const allowed = FAR_M + 2 * doubt;
       if (along > allowed) flags.push({ kind: "far", t, value: along, majorAt: FAR_MAJOR_M + 2 * doubt });
     }
 
     if (moving && near && offM <= ON_PATH_M) {
-      onPath.push({ t, s: near.s });
+      onPath.push({ t, s: near.s, dot });
       while (onPath.length && t - onPath[0].t > BACKWARDS_WINDOW_S) onPath.shift();
-      const back = Math.max(...onPath.map((p) => p.s)) - near.s;
+      const back = Math.max(...onPath.map((p) => Math.min(p.s - near.s, haversineM(p.dot, dot))));
       if (back >= BACKWARDS_M) flags.push({ kind: "backwards", t, value: back });
     } else onPath.length = 0;
 

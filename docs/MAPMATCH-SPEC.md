@@ -940,9 +940,9 @@ and each moment that goes wrong is an incident of its own, with its times:
 | lost | > 100 m from the car (+ twice the truth's timing doubt) for ≥ 20 s, stretches less than 30 s apart one; what happens inside is its consequence |
 | wrong-way | arrow > 120° off the car's heading for ≥ 0.6 s (the path's direction there, over the timing's doubt, ≤ 25 m) |
 | wrong-road | > 30 m from every part of the path near the car for ≥ 5 s, or > 60 m |
-| far | on the path, but > 50 m (+ twice the doubt) along it from the car |
+| far | on the path, but > 50 m (+ twice the doubt) along it from the car, and as far in a straight line (round a loop or a hairpin the path is longer than what the driver sees) |
 | jump | a step ≥ 30 m longer than the car drove in it |
-| backwards | on the path, ≥ 15 m back along it within 1.5 s while the car goes forward |
+| backwards | on the path, ≥ 15 m back along it within 1.5 s while the car goes forward, and as far from where it was (on a loop its nearest place on the path flips back a lap) |
 
 The dot is placed on the stretch of path nearest the car along it (a route round a block passes a place twice, 80 m
 apart along it and 5 m apart on the map). A replay that judged nothing (no dot while the car moved) fails rather than
