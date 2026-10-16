@@ -109,8 +109,23 @@ describe("the dot keeps steady along its road", () => {
     expect((d.lat - 50.45) * 111_320).toBeCloseTo(25, 0); // 18 m by the rate, but never more than 15 m behind it
   });
 
-  test("another direction, or a hypothesis far away, is drawn as it is", () => {
-    expect(steadyDot({ ...north(4), headingRad: Math.PI / 2 }, last(0), 10, 1_000_000)).toMatchObject({ lat: north(4).lat });
+  test("round a turn it glides to the hypothesis at 25 m/s instead of jumping", () => {
+    // Standing at 0, the hypothesis 40 m east on a road east: 0.4 s later the dot is 10 m toward it.
+    const east = { lat: 50.45, lon: 30.52 + 40 / (111_320 * Math.cos((50.45 * Math.PI) / 180)), headingRad: Math.PI / 2 };
+    const d = steadyDot(east, last(0), 0, 400_000);
+    expect((d.lon - 30.52) * 111_320 * Math.cos((50.45 * Math.PI) / 180)).toBeCloseTo(10, 0);
+    // Within reach, it is there.
+    expect(steadyDot(east, last(0), 0, 2_000_000)).toMatchObject({ lon: east.lon });
+  });
+
+  test("across its road it glides at 25 m/s too", () => {
+    // The hypothesis 20 m to the side, on the dot's road heading: 0.2 s later 5 m across.
+    const side = { lat: 50.45, lon: 30.52 + 20 / (111_320 * Math.cos((50.45 * Math.PI) / 180)), headingRad: 0 };
+    const d = steadyDot(side, last(0), 0, 200_000);
+    expect((d.lon - 30.52) * 111_320 * Math.cos((50.45 * Math.PI) / 180)).toBeCloseTo(5, 0);
+  });
+
+  test("a hypothesis far away is drawn as it is", () => {
     expect(steadyDot(north(200), last(0), 10, 1_000_000)).toMatchObject({ lat: north(200).lat });
   });
 });

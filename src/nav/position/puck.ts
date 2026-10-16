@@ -75,6 +75,12 @@ export const puckTuning = {
    * line it is held along (unlimited, the dot was off the roads at speed 16 → 30 s over the corpus).
    */
   steadyHoldM: 15,
+  /**
+   * Across its road, onto another road or round a turn (within `steadyMaxM`), the dot glides there at most this fast
+   * (m/s) instead of jumping: the filter's corrections come as the car turns or a rival takes the lead, 30–80 m at
+   * once, and the map eased each over a quarter of a second, a jump to the eye. 0: at once.
+   */
+  slideMps: 25,
 };
 
 /** The dot drawn last after `steadyDot` (before extrapolation), for the next one. */
@@ -87,16 +93,18 @@ export interface DrawnDot {
 
 /**
  * Where to draw a hypothesis that continues the last dot's road: the last dot carried on at the car's speed, then
- * moved toward the hypothesis across the road at once but along it at most `steadyBackMps` back and `steadyCatchMps`
- * ahead. The hypothesis' position along a road wanders with the filter's resampling (a second's worth of metres back
- * and forth), which the driver sees as the dot jumping and stepping back. Another road, another direction or a gap
- * past `steadyMaxM`: the hypothesis itself.
+ * moved toward the hypothesis across the road at up to `slideMps` but along it at most `steadyBackMps` back and
+ * `steadyCatchMps` ahead. The hypothesis' position along a road wanders with the filter's resampling (a second's worth
+ * of metres back and forth), which the driver sees as the dot jumping and stepping back. Another direction: straight
+ * toward the hypothesis at up to `slideMps`. A gap past `steadyMaxM`: the hypothesis itself.
  */
 export function steadyDot(target: { lat: number; lon: number; headingRad: number }, last: DrawnDot | null, speedMps: number | undefined, tUs: number): { lat: number; lon: number } {
   const t = puckTuning;
   if (!t.steady || !last) return target;
   const dtS = (tUs - last.tUs) / 1e6;
-  if (!(dtS > 0 && dtS <= 2) || angle(target.headingRad, last.headingRad) > Math.PI / 4) return target;
+  if (!(dtS > 0 && dtS <= 2)) return target;
+  const turned = angle(target.headingRad, last.headingRad) > Math.PI / 4;
+  if (turned && !(t.slideMps > 0)) return target;
   const kx = 111_320 * Math.cos((last.lat * Math.PI) / 180);
   const ue = Math.sin(target.headingRad);
   const un = Math.cos(target.headingRad);
@@ -106,12 +114,24 @@ export function steadyDot(target: { lat: number; lon: number; headingRad: number
   const pn = moved * Math.cos(last.headingRad);
   const de = (target.lon - last.lon) * kx - pe;
   const dn = (target.lat - last.lat) * 111_320 - pn;
-  if (Math.hypot(de, dn) > t.steadyMaxM) return target;
+  const gapM = Math.hypot(de, dn);
+  if (gapM > t.steadyMaxM) return target;
+  const slideM = t.slideMps * dtS;
+  if (turned) {
+    // Round a turn: straight toward the hypothesis, no faster than the slide.
+    const f = gapM > slideM ? slideM / gapM : 1;
+    return { lat: last.lat + (pn + f * dn) / 111_320, lon: last.lon + (pe + f * de) / kx };
+  }
   const along = de * ue + dn * un;
   const limited = Math.max(-t.steadyBackMps * dtS, Math.min(t.steadyCatchMps * dtS, along));
   const kept = Math.max(along - t.steadyHoldM, Math.min(along + t.steadyHoldM, limited));
-  const e = pe + de - (along - kept) * ue;
-  const n = pn + dn - (along - kept) * un;
+  // Across the road at once, or no faster than the slide.
+  const acrossE = de - along * ue;
+  const acrossN = dn - along * un;
+  const acrossM = Math.hypot(acrossE, acrossN);
+  const g = slideM > 0 && acrossM > slideM ? slideM / acrossM : 1;
+  const e = pe + kept * ue + g * acrossE;
+  const n = pn + kept * un + g * acrossN;
   return { lat: last.lat + n / 111_320, lon: last.lon + e / kx };
 }
 /** The navigator's heading counts as a cue only while it is this sure. */

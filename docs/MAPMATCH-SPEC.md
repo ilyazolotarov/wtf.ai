@@ -1097,6 +1097,13 @@ incident reports, the detector is fixed first, and shown to fire on that log, be
     316 → 220, steps back 78 → 65, drives with no major incident 122 → 141; no drive worse on either. Tried, not
     kept: steadying the hand-over from the GPS dot to the hypothesis too (no change on either), and widening the
     filter's restart after a lost turn to 1–2 % of the distance since the last trusted fix (simulated jumps 57 → 75).
+  - **Glides instead of jumping** (`slideMps`, 25 m/s): across its road, onto another road or round a turn, within
+    80 m, the dot goes to the hypothesis no faster than that. The filter's corrections come as the car turns or a rival
+    takes the lead, 30–80 m at once, and the map's smoothing (pose-smoother.ts) took a quarter of a second over each:
+    a jump to the eye. Real drives (79, 8 seeds): incidents 134 → 97 (drawn) and 206 → 154 (parked), major jumps
+    1269 → 579, the other kinds unchanged, no drive worse; off the roads above 20 km/h 41 → 48 s and 47 → 54 s (it
+    cuts the corner it glides round). Simulated drives (6 scenarios × 60 × 4 seeds): 80 better, none worse, jumps
+    359 → 125. 40 m/s scores as 25.
   - **At the spot it parked in off the roads** (`NavEstimate.parkedOffRoad`: started from such a pose, not 20 m
     driven since, state `offroad`): the EKF is the puck, not the dominant hypothesis. The off-road particles spread
     over the pose's σ in clusters lighter than a road's within it.
