@@ -1041,7 +1041,7 @@ incident reports, the detector is fixed first, and shown to fire on that log, be
     §9.1), and the filter's position was measured only in outages (§7.7). This narrows §6.2. Alternatives (weight
     ≥ 0.05) are drawn in state `multimodal`.
   - **The route tips the dot's direction** (`position/puck.ts`): with a route active, a cluster within 30 m of the
-    route's first 1 km (and of its first segment carried 300 m back: the route starts where the car stood, so a hypothesis that set off the other way is behind it) travelling against it counts 4 times less when the dot is chosen; the cluster drawn may then be
+    route (and of its first segment carried 300 m back: the route starts where the car stood, so a hypothesis that set off the other way is behind it) travelling against it counts 4 times less when the dot is chosen; the cluster drawn may then be
     one other than the heaviest, and the heaviest becomes an alternative. On a straight road with no GPS course, no
     turn and no parked pose both directions are near even, and the dot (and heading-up) set off whichever way the
     particles leaned. Only the choice: the filter's weights never see the route. Tried in them, as a per-particle
@@ -1050,6 +1050,10 @@ incident reports, the detector is fixed first, and shown to fire on that log, be
     truth survival min 47 → 69 % (reversed 56 %), but map starts 26 → 19 and two wrong starts, 178° and 344–369 m off
     (nvrm4q from 60 s, with the route either way: the factor thinned the hypotheses until a wrong one reached 0.9),
     and on 94zf2q from 180 s the true route blocked a right map start and let a 43° alignment start win. Dropped.
+    All along the route, not only its first 1 km as at first: simulated drives arrow against the car 52 → 20, steps
+    back 74 → 51, failing with roads missing from the map 24 → 21 of 60, 16 better, 5 worse by one incident on one
+    seed; real drives unchanged. Not applied where the route passes both ways within 30 m: that lost the start's cue
+    on routes that leave the way they came (jammed starts 4 → 6 failing).
   - **The car's own heading tips it too** (`position/puck.ts`): a cluster travelling more than 90° off the
     navigator's heading, while that is sure to 30°, counts 100 times less when the dot is chosen (with the route's
     factor, both apply). Through a turn the filter compares the car's turn with the road's only at the next straight

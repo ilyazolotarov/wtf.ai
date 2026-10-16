@@ -37,12 +37,14 @@ export interface LastPuck {
 /** The dot's radius from a hypothesis' spread is at least this (a tight cluster isn't a perfect one). */
 export const MAP_MATCH_MIN_ACCURACY_M = 5;
 /**
- * The route as a cue to which way the car goes (MAPMATCH-SPEC §11): a hypothesis on the route's first `ROUTE_CUE_M`
- * (within `ROUTE_CUE_NEAR_M` of it) travelling against it counts this many times less when choosing the dot. Only the
+ * The route as a cue to which way the car goes (MAPMATCH-SPEC §11): a hypothesis on the route (within
+ * `ROUTE_CUE_NEAR_M` of it) travelling against it counts this many times less when choosing the dot. Only the
  * choice: the filter's weights never see the route (in them it thinned the hypotheses into wrong map starts, 2026-10-14).
+ * All along it, not only its first kilometre: hypotheses turned back at a dead end or off a road the map lacks
+ * travel against it there too.
  */
 export const ROUTE_CUE_FACTOR = 4;
-const ROUTE_CUE_M = 1_000;
+const ROUTE_CUE_M = Infinity;
 const ROUTE_CUE_NEAR_M = 30;
 /**
  * The route's first segment also counts this far back from where it starts: the route begins where the car stood,
@@ -232,7 +234,7 @@ function cueScore(estimate: NavEstimate, route: readonly Coordinate[] | null) {
   };
 }
 
-/** The route's bearing (clockwise from north) at its nearest point to `p` within its first `ROUTE_CUE_M`, if that is near. */
+/** The route's bearing (clockwise from north) at its nearest point to `p`, if that is near. */
 function routeBearingNear(route: readonly Coordinate[], p: Coordinate): number | null {
   const kx = 111_320 * Math.cos((p.lat * Math.PI) / 180);
   const local = (c: Coordinate) => [(c.lon - p.lon) * kx, (c.lat - p.lat) * 111_320] as const;
