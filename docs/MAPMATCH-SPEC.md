@@ -1051,7 +1051,7 @@ incident reports, the detector is fixed first, and shown to fire on that log, be
     (nvrm4q from 60 s, with the route either way: the factor thinned the hypotheses until a wrong one reached 0.9),
     and on 94zf2q from 180 s the true route blocked a right map start and let a 43° alignment start win. Dropped.
   - **The car's own heading tips it too** (`position/puck.ts`): a cluster travelling more than 90° off the
-    navigator's heading, while that is sure to 30°, counts 30 times less when the dot is chosen (with the route's
+    navigator's heading, while that is sure to 30°, counts 100 times less when the dot is chosen (with the route's
     factor, both apply). Through a turn the filter compares the car's turn with the road's only at the next straight
     moment (`straightTurnRad`), so mid-turn at a T-junction the particles that turned left and those that turned right
     weigh about the same, on the same cross street travelling opposite ways; the dot drew whichever led and ran 20–35 m
@@ -1061,7 +1061,8 @@ incident reports, the detector is fixed first, and shown to fire on that log, be
     none worse; real drives (8 seeds, drawn and parked starts): incidents 178 → 173 and 241 → 220, none worse
     (incidents, §10.2). Factor 4 left twice as many wrong-way arrows on the simulated drives; 30 instead of 8
     (after the dot glides, §11): simulated drives with roads missing from the map failing 35 → 27 of 60, arrows
-    against the car 120 → 73, 35 better and 3 worse by one incident on one seed; real drives unchanged; a 60° threshold
+    against the car 120 → 73, 35 better and 3 worse by one incident on one seed; 100: failing 27 → 24, arrows
+    73 → 52, 13 better, 2 worse by one; real drives unchanged by either; a 60° threshold
     instead of 90° changed nothing. Tried instead, in the filter: comparing the turns mid-turn sooner (`maxCompareM`
     10 or 15 m for 20): fewer wrong-way arrows on the simulated drives at 10 m, but 19 real drives worse
     (incidents 174 → 209 and 221 → 248); at 15 m mixed. Not kept.
