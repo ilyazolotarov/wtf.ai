@@ -58,7 +58,7 @@ const ROUTE_CUE_BACK_M = 300;
  * and the dot drew whichever led: for 1–2.5 s it ran the wrong way down the street (emulated and simulated drives,
  * 2026-10-16). The gyro knows which way the car turned. Only the choice, as with the route.
  */
-export const HEADING_CUE_FACTOR = 8;
+export const HEADING_CUE_FACTOR = 30;
 const HEADING_CUE_RAD = Math.PI / 2;
 /** Replay tools only: the cues for an experiment (factor 1 switches one off). The app never changes them. */
 export const puckTuning = {
