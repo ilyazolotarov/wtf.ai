@@ -6,8 +6,8 @@
 //   gps      GPS all the way
 //   lost     GPS gone from `CUT_S` on (jammed to nothing)
 //   spoof    GPS from `CUT_S` on reports a place abroad, standing (the app must refuse it and drive on without)
-//   jam      GPS from `CUT_S` on jammed as iOS reports it: Wi-Fi/cell-like fixes tens of metres off every 5–10 s
-//            (src/nav/replay/jam.ts), as on the real jammed drives; `lost` has none at all
+//   jam      GPS from `CUT_S` on jammed as iOS reports it: Wi-Fi/cell-like fixes every 5–10 s, as far off and for as
+//            long as on the real jammed drives (src/nav/replay/jam.ts `MEASURED_JAM`); `lost` has none at all
 //   jamstart jammed from the first second, the car starting from where it was parked (the replays give the app that
 //            parked pose, as after the drive before): the start the real jammed drives fail on
 //   unmapped jamstart, and two short roads the car drives are missing from the navigator's map (`hidden` in the
@@ -28,7 +28,7 @@ import { fileURLToPath } from "node:url";
 
 import { haversineM, type Coordinate } from "../../src/nav/geo";
 import { LocalFrame } from "../../src/nav/geo/local-frame";
-import { jamFixes } from "../../src/nav/replay/jam";
+import { jamFixes, MEASURED_JAM } from "../../src/nav/replay/jam";
 import { spoofFixes } from "../../src/nav/replay/spoof";
 import { planRoute, type RoutePlan } from "../../src/nav/routing/router";
 import { cityDrive, type CityDrive } from "../../src/nav/sim/city-drive";
@@ -84,8 +84,8 @@ function scenarioFixes(drive: CityDrive, scenario: Scenario): GnssFix[] {
   const { gnss, startUs } = drive.trip;
   if (scenario === "lost") return gnss.filter((f) => f.tUs - startUs < CUT_S * 1e6);
   if (scenario === "spoof") return spoofFixes(gnss, startUs, [{ fromS: CUT_S, toS: Infinity, kind: "outside" }]).fixes;
-  if (scenario === "jam") return jamFixes(gnss, startUs, [{ fromS: CUT_S, toS: Infinity }], { seed: drive.distanceM | 0 });
-  if (scenario === "jamstart" || scenario === "unmapped") return jamFixes(gnss, startUs, [{ fromS: 0, toS: Infinity }], { seed: drive.distanceM | 0 });
+  if (scenario === "jam") return jamFixes(gnss, startUs, [{ fromS: CUT_S, toS: Infinity }], { ...MEASURED_JAM, seed: drive.distanceM | 0 });
+  if (scenario === "jamstart" || scenario === "unmapped") return jamFixes(gnss, startUs, [{ fromS: 0, toS: Infinity }], { ...MEASURED_JAM, seed: drive.distanceM | 0 });
   return gnss;
 }
 
