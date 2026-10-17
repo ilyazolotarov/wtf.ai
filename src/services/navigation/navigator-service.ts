@@ -77,6 +77,12 @@ const OVERLAY_PARTICLES = 200;
  */
 const HELD_FIX_GROWTH_MPS = 15;
 /**
+ * A fix this much older than its delivery is CoreLocation's cache, not where the car is: started again mid-drive (iOS
+ * killed the app), the app was handed the last real fix from before the jamming, 29 min and 33 km back, anchored the dot
+ * there and kept it under the ±5 km fixes that followed (2026-10-16). Fixes in the logs arrive within 4 s.
+ */
+const STALE_FIX_US = 10_000_000;
+/**
  * Phone-only mode (§9.6): the key its phone mount is kept under when no car was ever connected, and its own parked
  * pose (also kept per car): without an adapter the phone doesn't know which car it is in, and the pose is where its
  * navigation left off.
@@ -775,6 +781,10 @@ export class NavigatorService implements PositionSource {
 
   private onGnss(r: GnssRecord): void {
     if (!Number.isFinite(r.latDeg) || !Number.isFinite(r.lonDeg)) return;
+    if (r.deliveryDelayUs > STALE_FIX_US) {
+      this.note(`gnss fix ${Math.round(r.deliveryDelayUs / 1e6)} s old ignored (±${Math.round(r.hAccM)} m)`);
+      return;
+    }
     if (this.outage.on) {
       this.deps.observer?.withheld?.(r);
       this.outage.withhold(r);

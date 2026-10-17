@@ -254,6 +254,19 @@ describe("NavigatorService", () => {
     service.stop();
   });
 
+  test("a fix from CoreLocation's cache is ignored: started mid-drive, it was the last real fix 29 min back", async () => {
+    const { service, gnss, now, advance, notes } = harness({ vin: null });
+    await service.start();
+    const ageUs = 29 * 60 * 1e6;
+    gnss.emit(record({ tUs: now() - ageUs, lat: 51.462, lon: 30.739, hAccM: 64 }, { deliveryDelayUs: ageUs }));
+    expect(service.getSnapshot()).toBeNull();
+    expect(notes.some((n) => n.startsWith("gnss fix 1740 s old ignored"))).toBe(true);
+    advance(1_000_000);
+    gnss.emit(record({ tUs: now() - LATE_US, lat: 51.467, lon: 31.2, hAccM: 12 }));
+    expect(service.getSnapshot()).toMatchObject({ lat: 51.467, lon: 31.2 });
+    service.stop();
+  });
+
   test("without an OBD adapter a spoofed fix isn't shown: the map holds the last good one, the spoof is the ghost", async () => {
     const { service, gnss, now, advance, notes } = harness({ vin: null });
     await service.start();

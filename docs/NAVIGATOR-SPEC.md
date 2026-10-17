@@ -538,6 +538,10 @@ Measured on the 7 drives of 2026-10-04 (`mag_raw`, 19.4 Hz):
     mid-trip. When it stops, the next start begins with a fresh navigator (the car may have moved).
   - **Input order:** inputs are held 300 ms and fed in time order, because IMU arrives in 100 ms batches and fixes
     ~50 ms late (p90 on the real logs; outliers take seconds). A fix more than 2 s behind is dropped.
+  - **A fix more than 10 s old on delivery** is dropped before all that, with a note: it is CoreLocation's cache, not
+    where the car is. It comes first after a start, when the navigator has no clock to be behind: started again
+    mid-drive, the app anchored on the last real fix from before the jamming, 33 km back, and the ±5 km fixes after
+    it never replaced it. Fixes in the logs arrive within 4 s.
   - **Display:** the DR position is extrapolated along the heading to "now" (≤ 1 s), since the navigator runs
     300 ms behind.
   - A new VIN starts a new navigator. At start the VIN is `VehicleLinkCore.expectedVin()`: the connected car's,
