@@ -51,6 +51,50 @@ describe("TurnTracker", () => {
   });
 });
 
+describe("TurnTracker and coarse fixes", () => {
+  // The long road east, no turn: the phone reads 60 % of the speed. Wi-Fi fixes (±35 m, on the truth) every 8 s.
+  const STRAIGHT: DriveSegment[] = [
+    { durationS: 5, speedMps: 0, yawRateDegS: 0 },
+    { durationS: 120, speedMps: 12, yawRateDegS: 0 },
+  ];
+  const run = (config: ConstructorParameters<typeof TurnTracker>[1], startAt: "truth" | "north road") => {
+    const g = graph();
+    const drive = syntheticDrive({ segments: startAt === "truth" ? STRAIGHT : DRIVE, origin: ORIGIN, startHeadingRad: Math.PI / 2, gnss: "none" });
+    const frame = new LocalFrame(ORIGIN);
+    const tracker = new TurnTracker(g, config);
+    const imu = drive.trip.imu;
+    // "north road": the tracker believes the car is where this drive ends, on 162 heading north.
+    const [e0, n0] = frame.toEnu(drive.truthAt(startAt === "truth" ? imu[0].tUs : imu.at(-1)!.tUs));
+    tracker.start(e0, n0, startAt === "truth" ? Math.PI / 2 : 0, 10, 0.1);
+    const end = startAt === "truth" ? imu.length : Math.floor(imu.length * 0.8);
+    for (let i = 10; i < end; i += 10) {
+      const t = drive.truthAt(imu[i].tUs);
+      tracker.step({ tUs: imu[i].tUs, dtS: 0.1, speedMps: 0.6 * t.speedMps, yawRate: imu[i].gyro[2], valid: true, stopped: t.speedMps === 0 });
+      if (i % 800 === 0) {
+        const [fe, fn] = frame.toEnu(t);
+        tracker.fix(imu[i].tUs, fe, fn, 35);
+      }
+    }
+    const [te, tn] = frame.toEnu(drive.truthAt(imu[end - 10].tUs));
+    const est = tracker.estimate()!;
+    return { off: Math.hypot(est.e - te, est.n - tn), relocated: tracker.stats.relocated };
+  };
+
+  test("Wi-Fi fixes move a hypothesis along its road: a phone reading 60 % stays with the car", () => {
+    // 1.4 km at 0.6× is ~250 m behind without them (the scale it may learn is bounded).
+    expect(run({ fixAlongMaxAccM: 0, relocFixes: 0 }, "truth").off).toBeGreaterThan(150);
+    expect(run({}, "truth").off).toBeLessThan(60);
+  });
+
+  test("three Wi-Fi fixes in a row far from every hypothesis put it on the roads around them", () => {
+    // Believed on the north road; the car drives the long road east, 1–2 km away.
+    expect(run({ relocFixes: 0 }, "north road").off).toBeGreaterThan(500);
+    const r = run({}, "north road");
+    expect(r.relocated).toBeGreaterThan(0);
+    expect(r.off).toBeLessThan(80);
+  });
+});
+
 describe("PhoneNavigator", () => {
   test("follows a drive from its parked pose on the phone's IMU alone", () => {
     const drive = syntheticDrive({ segments: DRIVE, origin: ORIGIN, startHeadingRad: Math.PI / 2, gnss: "none", phoneAccel: {} });

@@ -3,9 +3,11 @@
 // corners, keeping to a lane, stopping at some junctions), and the sensors the phone would log
 // (IMU, OBD speed, CoreLocation) with realistic errors. Pure TS; the ground truth is exact.
 //
-// It is optimistic where the world is messy: no parking, reversing, yards, unmapped roads, traffic
-// jams or phone handling. It finds what goes wrong on the roads themselves over hours: grids and
-// parallel streets, long straights, drift between turns.
+// It is optimistic where the world is messy: no parking, reversing, yards, unmapped roads or phone
+// handling. It finds what goes wrong on the roads themselves over hours: grids and parallel streets,
+// long straights, drift between turns. The driver and the phone are the measured ones by default
+// (`driver`, `phone`): speeds that wobble with the traffic, smooth accelerations, queues and crawls,
+// and a phone tilted in a holder that shakes (phone-imu.ts), so the phone alone can be judged too.
 
 import type { TripLog } from "../../triplog/trip-log-reader";
 import type { LocalFrame } from "../geo/local-frame";
@@ -13,6 +15,7 @@ import { EdgeFlag, RoadClass } from "../mapmatch/graph/format";
 import type { EdgeId, RoadGraph } from "../mapmatch/graph/road-graph";
 import type { RouteLeg } from "../routing/router";
 import type { GnssFix, ImuSample, ObdSpeedSample } from "../types";
+import { PhoneImuModel, type PhoneImuModelConfig } from "./phone-imu";
 
 export interface CityDriveOptions {
   /** The graph to drive on, in `frame`. Use a reader of its own: the navigator moves its reader's frame. */
@@ -38,7 +41,54 @@ export interface CityDriveOptions {
    * `durationS` then caps the drive. `start` and `route` are ignored.
    */
   legs?: readonly RouteLeg[];
+  /**
+   * `measured` (default): a driver as on the real drives (`MEASURED_DRIVER`): smooth accelerations of their own,
+   * speeds that wobble with the traffic, crawls, queues before the junctions it stops at (creeping up in steps),
+   * stops between junctions. `simple`: the class speed, 1.5 m/s² up and 3.5 down, stops at the junction itself.
+   */
+  driver?: "measured" | "simple";
+  /**
+   * `measured` (default): the phone tilted in a holder, the car pitching and rolling, the holder shaking, the gyro
+   * drifting, CoreMotion's leaning gravity (phone-imu.ts); `SensorErrors`' gyro bias and noise are then unused.
+   * `flat`: the phone lies flat and still, the gyro reads the yaw rate with `SensorErrors`, nothing else moves.
+   */
+  phone?: "measured" | "flat";
+  phoneImu?: Partial<PhoneImuModelConfig>;
 }
+
+/**
+ * The real drives' driver (63 drives, OBD at 1 s, 2026-10-17): accelerations 0.42 m/s² at the median, 1.1 at p90
+ * (braking 0.40 / 1.5); speed while cruising above 25 km/h wobbles 12 % (σ/mean over 20 s, median), 23 % at p75;
+ * 1.6 crawls below 10 km/h per km; stops 9 s at the median, 39 s at p75, 70 s at p90, many of them a queue's steps
+ * (median 53 m between stops); a third of the stops within 20 m before a junction (a sixth of random places are).
+ */
+export const MEASURED_DRIVER = {
+  /** A pull-away's acceleration, and a stop's braking, per stop: lognormal median and σ, and bounds, m/s². */
+  accelMS2: [1.0, 0.3, 0.5, 2.2],
+  brakeMS2: [1.4, 0.3, 0.7, 3],
+  /** How fast the driver closes on the speed they want, s (speeding up, slowing down), and the jerk, m/s³. */
+  responseS: 1.5,
+  slowResponseS: 0.5,
+  jerkMS3: 2.5,
+  /** Traffic: the speed wanted wobbles by this (σ of the factor) over this many s, within the bounds. */
+  wobbleSigma: 0.15,
+  wobbleTauS: 12,
+  wobbleBounds: [0.45, 1.15],
+  /** Crawls: per km, how long (m) and how slow (km/h). */
+  crawlPerKm: 0.4,
+  crawlM: [30, 150],
+  crawlKph: [4, 18],
+  /** Stops between junctions (crossings, jams): per km, duration s (lognormal median, σ, bounds). */
+  midStopPerKm: 0.25,
+  midStopS: [6, 0.8, 2, 40],
+  /** A stop at a junction: the queue before it (mean m, exponential, at most), the wait (lognormal), then creeping up
+   *  (chance per step, step m, wait s) to the junction. */
+  queueM: [18, 120],
+  stopS: [20, 0.9, 3, 90],
+  creepChance: 0.35,
+  creepM: [4, 25],
+  creepS: [2, 8],
+};
 
 export interface SensorErrors {
   /** Gyro bias at the start, °/s, and its random walk, °/s per √h. */
@@ -115,6 +165,8 @@ const MAX_LAT_ACCEL = 2.5;
 const ACCEL = 1.5;
 const BRAKE = 2.5;
 const MAX_YAW_RATE = 0.7;
+/** The measured driver brakes for a curve this hard (the planned speed profile). */
+const BRAKE_MEASURED = 1.6;
 const RESAMPLE_M = 1;
 
 function rng(seed: number) {
@@ -255,7 +307,12 @@ export function cityDrive(o: CityDriveOptions): CityDrive {
   const r = rng(o.seed ?? 1);
   const s = { ...DEFAULT_SENSOR_ERRORS, ...o.sensors };
   const stops = o.stops ?? { share: 0.25, minS: 5, maxS: 45 };
-  const imuEvery = Math.max(1, Math.round(1 / ((o.imuHz ?? 100) * DT)));
+  const imuHz = o.imuHz ?? 100;
+  const imuEvery = Math.max(1, Math.round(1 / (imuHz * DT)));
+  const measured = (o.driver ?? "measured") === "measured";
+  const D = MEASURED_DRIVER;
+  const lognormal = ([median, sigma, lo, hi]: number[]) => Math.min(hi, Math.max(lo, median * Math.exp(sigma * r.gauss())));
+  const between = ([lo, hi]: number[]) => lo + r.uniform() * (hi - lo);
 
   // The route, longer than the car can drive in the time; then the line the car aims for: the
   // road's centre line, a lane to the right on two-way roads, and a slow wander for map error.
@@ -305,7 +362,8 @@ export function cityDrive(o: CityDriveOptions): CityDrive {
   }
   // A planned route ends at its destination: the car stops there.
   if (o.legs) vmax[count - 1] = 0;
-  for (let i = count - 2; i >= 0; i--) vmax[i] = Math.min(vmax[i], Math.sqrt(vmax[i + 1] ** 2 + 2 * BRAKE * RESAMPLE_M));
+  const planBrake = measured ? BRAKE_MEASURED : BRAKE;
+  for (let i = count - 2; i >= 0; i--) vmax[i] = Math.min(vmax[i], Math.sqrt(vmax[i + 1] ** 2 + 2 * planBrake * RESAMPLE_M));
   // Junctions on the resampled path (first point at or after the junction vertex).
   const atOrAfter = (index: number) => {
     let lo = 0;
@@ -320,10 +378,39 @@ export function cityDrive(o: CityDriveOptions): CityDrive {
   const junctions = route.junctionAt.map((j) => ({ k: atOrAfter(j.index), turnRad: j.turnRad })).filter((j) => j.k >= 0);
   // Stops: at turns more often than going straight.
   const stopAt = new Map<number, number>();
+  let lastK = 0;
   for (const j of junctions) {
     const k = j.k;
     const p = Math.abs(j.turnRad) > Math.PI / 6 ? stops.share * 1.6 : stops.share * 0.6;
-    if (r.uniform() < p) stopAt.set(k, stops.minS + r.uniform() * (stops.maxS - stops.minS));
+    if (r.uniform() < p) {
+      if (!measured) stopAt.set(k, stops.minS + r.uniform() * (stops.maxS - stops.minS));
+      else {
+        // The back of a queue, a wait there, then creeping up to the line in steps.
+        let at = Math.max(lastK + 5, k - Math.round(Math.min(D.queueM[1], -D.queueM[0] * Math.log(1 - r.uniform())) / RESAMPLE_M));
+        stopAt.set(at, lognormal(D.stopS));
+        while (at < k - 3 && r.uniform() < D.creepChance) {
+          at = Math.min(k - 2, at + Math.round(between(D.creepM) / RESAMPLE_M));
+          stopAt.set(at, between(D.creepS));
+        }
+      }
+    }
+    lastK = k;
+  }
+  // Between junctions: stops (crossings, jams) and crawls, at random along the path.
+  const crawls: { from: number; to: number; mps: number }[] = [];
+  if (measured) {
+    const km = (count * RESAMPLE_M) / 1000;
+    const nearJunction = new Uint8Array(count);
+    for (const j of junctions) for (let i = Math.max(0, j.k - 30); i < Math.min(count, j.k + 30); i++) nearJunction[i] = 1;
+    for (let n = Math.round(km * D.midStopPerKm * (0.5 + r.uniform())); n > 0; n--) {
+      const at = Math.floor(r.uniform() * count);
+      if (!nearJunction[at] && at > 50) stopAt.set(at, lognormal(D.midStopS));
+    }
+    for (let n = Math.round(km * D.crawlPerKm * (0.5 + r.uniform())); n > 0; n--) {
+      const from = Math.floor(r.uniform() * count);
+      crawls.push({ from, to: from + Math.round(between(D.crawlM) / RESAMPLE_M), mps: between(D.crawlKph) / 3.6 });
+    }
+    crawls.sort((a, b) => a.from - b.from);
   }
   const stopIdx = [...stopAt.keys()].sort((a, b) => a - b);
 
@@ -348,6 +435,15 @@ export function cityDrive(o: CityDriveOptions): CityDrive {
   let distance = 0;
   let mood = 1;
   let arrivedAt: number | null = null;
+  // The measured driver: acceleration now, this stop's pull-away and braking, the traffic's wobble.
+  let accel = 0;
+  // (The simple driver draws nothing more from the generator: its drives stay as they were.)
+  let accelUp = measured ? lognormal(D.accelMS2) : 0;
+  let brakeDown = measured ? lognormal(D.brakeMS2) : 0;
+  let wobble = 0;
+  const wobbleK = Math.exp(-DT / D.wobbleTauS);
+  let crawlI = 0;
+  const phone = (o.phone ?? "measured") === "measured" ? new PhoneImuModel(r, 1 / (imuEvery * DT), o.phoneImu) : null;
   const totalS = START_STOP_S + o.durationS;
   for (let step = 0; step * DT < totalS; step++) {
     const t = step * DT;
@@ -368,20 +464,66 @@ export function cityDrive(o: CityDriveOptions): CityDrive {
     while (nextStop < stopIdx.length && stopIdx[nextStop] < idx) nextStop++;
 
     // Speed: the limit, a driver's slow variation, braking for the next stop, and the stops themselves.
-    mood = 0.999 * mood + 0.001 * (1 + 0.08 * r.gauss());
-    let target = vmax[idx] * Math.min(1.1, Math.max(0.85, mood));
-    if (nextStop < stopIdx.length) {
-      const toStop = (stopIdx[nextStop] - idx) * RESAMPLE_M - 2;
-      target = Math.min(target, Math.sqrt(2 * BRAKE * Math.max(0, toStop)));
-      if (toStop <= 0.5 && v < 0.3 && t >= stoppedUntil) {
-        stoppedUntil = t + stopAt.get(stopIdx[nextStop])!;
-        nextStop++;
-        stopsMade++;
+    const vBefore = v;
+    if (!measured) {
+      mood = 0.999 * mood + 0.001 * (1 + 0.08 * r.gauss());
+      let target = vmax[idx] * Math.min(1.1, Math.max(0.85, mood));
+      if (nextStop < stopIdx.length) {
+        const toStop = (stopIdx[nextStop] - idx) * RESAMPLE_M - 2;
+        target = Math.min(target, Math.sqrt(2 * BRAKE * Math.max(0, toStop)));
+        if (toStop <= 0.5 && v < 0.3 && t >= stoppedUntil) {
+          stoppedUntil = t + stopAt.get(stopIdx[nextStop])!;
+          nextStop++;
+          stopsMade++;
+        }
+      }
+      if (t < stoppedUntil) target = 0;
+      v = target > v ? Math.min(target, v + ACCEL * DT) : Math.max(target, v - (BRAKE + 1) * DT);
+      if (v < 0.05 && target === 0) v = 0;
+    } else {
+      wobble = wobbleK * wobble + Math.sqrt(1 - wobbleK * wobbleK) * D.wobbleSigma * r.gauss();
+      let target = vmax[idx] * Math.min(D.wobbleBounds[1], Math.max(D.wobbleBounds[0], 1 + wobble));
+      while (crawlI < crawls.length && crawls[crawlI].to < idx) crawlI++;
+      for (let c = crawlI; c < crawls.length && crawls[c].from <= idx; c++) if (crawls[c].to >= idx) target = Math.min(target, crawls[c].mps);
+      // Braking for the next stop: comfortably if there is room, harder if the driver left it late.
+      let mustBrake = 0;
+      if (nextStop < stopIdx.length) {
+        const toStop = (stopIdx[nextStop] - idx) * RESAMPLE_M - 2;
+        target = Math.min(target, Math.sqrt(2 * brakeDown * Math.max(0, toStop)));
+        if (v > 0 && toStop < (v * v) / (2 * brakeDown) + v * 0.5) mustBrake = Math.min(4, (v * v) / (2 * Math.max(0.3, toStop)));
+        if (toStop <= 0.7 && v < 0.5 && t >= stoppedUntil) {
+          v = 0;
+          accel = 0;
+          stoppedUntil = t + stopAt.get(stopIdx[nextStop])!;
+          nextStop++;
+          stopsMade++;
+          accelUp = lognormal(D.accelMS2);
+          brakeDown = lognormal(D.brakeMS2);
+        }
+      }
+      if (t < stoppedUntil) {
+        target = 0;
+        v = 0;
+        accel = 0;
+      } else {
+        // Close on the speed wanted within the driver's own limits, smoothly (jerk-limited), unless a stop forces it.
+        // Slowing down for a curve or a car ahead comes sooner than speeding up; well over a curve's speed, harder.
+        let want = Math.max(-brakeDown, Math.min(accelUp, (target - v) / (target < v ? D.slowResponseS : D.responseS)));
+        if (v > vmax[idx] + 1) mustBrake = Math.max(mustBrake, 3);
+        if (mustBrake > 0) want = Math.min(want, -mustBrake);
+        const jerk = (mustBrake > 0 ? 3 : 1) * D.jerkMS3 * DT;
+        accel += Math.max(-jerk, Math.min(jerk, want - accel));
+        v = Math.max(0, v + accel * DT);
+        if (v === 0) accel = Math.max(0, accel);
+        // Rolling to a halt (a stop, the destination): the last cm/s are a standstill.
+        const atEnd = o.legs !== undefined && idx >= count - 6;
+        if ((target < 0.1 && v < 0.1) || (atEnd && v < 0.5)) {
+          v = 0;
+          accel = 0;
+        }
       }
     }
-    if (t < stoppedUntil) target = 0;
-    v = target > v ? Math.min(target, v + ACCEL * DT) : Math.max(target, v - (BRAKE + 1) * DT);
-    if (v < 0.05 && target === 0) v = 0;
+    const aLong = (v - vBefore) / DT;
 
     // Steering: pure pursuit, within yaw-rate and lateral-acceleration limits.
     let yawCw = 0;
@@ -400,7 +542,9 @@ export function cityDrive(o: CityDriveOptions): CityDrive {
 
     // Sensors. Gyro: counter-clockwise positive about up, as the IMU processor expects (synthetic-drive.ts).
     bias += biasWalk * r.gauss();
-    if (step % imuEvery === 0) {
+    if (step % imuEvery === 0 && phone) {
+      imu.push(phone.sample({ tUs, speedMps: v, accelMS2: aLong, headingRad: psi, yawRateRadS: -yawCw, distanceM: distance }));
+    } else if (step % imuEvery === 0) {
       imu.push({
         tUs,
         gyro: [0, 0, -yawCw * s.gyroScale + bias + s.gyroNoiseRadS * r.gauss()],

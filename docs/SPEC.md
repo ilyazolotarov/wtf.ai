@@ -356,8 +356,9 @@ Screens and the map in detail: [UI-SPEC.md](UI-SPEC.md); the trip-log pages: [TR
 - Stage comparison: Stage 2 logs can be degraded to Stage 1 inputs (wheel speed → quantized to 1 km/h, resampled at the measured PID rate; yaw → phone gyro) to compare stages on the same drive.
 - **Phone-only mode** (experimental, a developer setting; NAVIGATOR-SPEC §9.6): navigation without an adapter from
   the phone's own speed estimate and turn-anchored map matching, with the driver placing the car. Not usable
-  unattended: off the drawn route 27–28 % of the moving time on the 13 jammed city drives (3 % when following a
-  planned route). Research results and dead ends: NAVIGATOR-SPEC §9.7.
+  unattended: off the drawn route 44 % of the moving time on the 45 jammed drives, 44 % on simulated jammed Kyiv
+  trips with Wi-Fi fixes (3 % when following a planned route). Research results and dead ends: NAVIGATOR-SPEC §9.7;
+  the simulator's measured phone and driver: §9.8.
 
 ## 4. Repository layout
 

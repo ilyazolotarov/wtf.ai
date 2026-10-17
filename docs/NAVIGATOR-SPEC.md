@@ -582,10 +582,14 @@ Measured on the 7 drives of 2026-10-04 (`mag_raw`, 19.4 Hz):
 - **What:** without OBD speed (no adapter, or none for 10 s) and while GNSS isn't trusted (no satellite fix accepted
   in the last 3 s), the map shows `PhoneNavigator` (`src/nav/phone/`): the phone's own speed (`imu-speed.ts`) on the
   turn-anchored map matching (`turn-tracker.ts`), §9.7. `source: 'dr'`; the circle is the shown hypothesis'
-  along-road σ combined with the spread of the others (≤ 1 km); other roads it may be on are `alternatives`.
-- **Not good enough to go unattended:** on the 13 jammed city drives it is off the drawn route 27 % of the moving time
-  from their drawn starts (`replay:regress --speed phone-app`), and starting each drive where it ended the one before
-  it compounds to most of the time. The driver's placing (§6.2) is part of using it: a placing every ~4 min when the
+  along-road σ combined with the spread of the others (≤ 1 km); other roads it may be on are `alternatives`. The dot
+  is drawn as the navigator's is (`steadyDot`, position/puck.ts): a fix or a turn moving the hypothesis along its
+  road glides there instead of hopping (63 drawn drives: jumps 1196 → 809, incidents 760 → 501).
+- **Not good enough to go unattended:** on the 45 jammed drives (mostly a small town's, cell fixes only) it is off the
+  drawn route 44 % of the moving time from their drawn starts (`replay:regress --speed phone-app`; 26 / 43 / 59 /
+  96 % at 0–5 / 5–10 / 10–20 / 20+ min, `replay:incidents --phone-only`), and starting each drive where it ended the
+  one before it compounds to most of the time. On the 20 simulated Kyiv trips jammed from the start, with Wi-Fi
+  fixes as the real jams give them (§9.8): 44 % (11 / 18 / 35 / 58 %). The driver's placing (§6.2) is part of using it: a placing every ~4 min when the
   dot is 100 m off brings it to ~9 % (simulated, `replay:turns --taps`). Placing is offered only while the car
   stands.
 - **Graph:** its own reader of the active region's graph (`openActiveRoadGraph`), moved into a frame of its own at
@@ -595,7 +599,16 @@ Measured on the 7 drives of 2026-10-04 (`mag_raw`, 19.4 Hz):
   satellite fix with a course (≥ 3 m/s). Without one it waits (`nav phone-only waits for a start …`) and the map
   shows phone GNSS as without the mode.
 - **Fixes:** a trusted satellite fix (integrity passed, GNSS trusted, ≤ 20 m) re-anchors it at most every 2 s, with
-  its course when moving; Wi-Fi/cell fixes weigh its hypotheses; untrusted satellite fixes are ignored.
+  its course when moving; untrusted satellite fixes are ignored. Wi-Fi/cell fixes weigh its hypotheses, and one
+  claiming ≤ 200 m also moves each road hypothesis along its road towards it (a Kalman update of its position and
+  speed scale, as a road jolt does). Three fixes in a row claiming ≤ 100 m (Wi-Fi, not a cell), each farther than
+  max(80 m, 3σ) from the best hypothesis, add hypotheses on the roads around the latest one, heading the way the best
+  one does (± 45°), at 0.3 of its weight; the old ones stay, and the turns and fixes after decide. Without these, a
+  tracker on another road stayed there for the rest of the drive whatever the fixes said: on the simulated jammed
+  Kyiv trips 75 % of the moving time off the route before, 44 % after (after 20 min: 95 → 58 %). The real jammed
+  drives barely change (7873 → 7864 s off the drawn route; their fixes are mostly cells); worse: i7qmk4 (121 → 202 s,
+  its fixes ~30 m ahead of the drawn timing), better: q8tfjs 20 → 1 s, wq3y8u 24 → 1 s. Taking the fixes as less
+  precise for the along-road move (σ × 2, × 3) cost the drives it helps more than it saved i7qmk4.
 - **The driver's placing** restarts it there (keeping the learned speed scale) and is shown as the manual position
   (§6.3) while the car stands; once the phone measured 30 m of driving it is released (`nav manual position
   released: the car drives (phone)`), as OBD speed releases it otherwise.
@@ -646,7 +659,11 @@ every 4 min under jamming). Measured in replay on the logged drives:
 - Its limit is the vertical: carried by the gyro it is 1.4° off at the next stop (median, 3° p90); the last stop's
   is 2° off (road slope). That is 0.2–0.5 m/s² of false acceleration, so the distance per stop-to-stop stretch reads
   0.89× OBD at the median and 0.55× at p10. Measured on 30 drives: speed error median 2.5 km/h below 30 km/h,
-  5 km/h at 30–60, 15 km/h above 90.
+  5 km/h at 30–60, 15 km/h above 90. Carried by the gyro alone between stops (no levelling) the vertical drifts
+  0.6–1° a minute while driving (0.9° median at the next stop, 2° p90; 63 drives), ten times what CoreMotion's gyro
+  bias at the stops (~0.01 °/s) would give, and neither the turns nor the integration scheme explain it. The levelling
+  that bounds it acts as a 60 s high-pass on the speed: the distance between turns reads ~7 % short (−11 m over
+  150 m, −45 m over 600 m, −240 m beyond 800 m).
 - Map matching: `src/nav/mapmatch/turn-tracker.ts` (`replay:turns`): road hypotheses, each a position along a road
   with its own uncertainty and speed scale; a turn the gyro sees snaps each to the junctions around where it
   expected the turn whose exit turns that way (which teaches the scale); a free hypothesis dead-reckons off the
@@ -674,9 +691,46 @@ every 4 min under jamming). Measured in replay on the logged drives:
   distances, more hypotheses, absolute heading kept from the start (a phone handled on its mount loses it), coarse
   fixes weighted less (the test town's are mostly cell-level: 130–460 m off), choosing per second between the tracker
   and the particle filter (18 % even with perfect choice), re-injecting hypotheses around the best one, a
-  road-bend correction of the along-road position.
+  road-bend correction of the along-road position. On the speed (`replay:imuspeed`, 2026-10-17): levelling over
+  20 / 120 / 300 s or not at all, levelling to the stops' vertical instead of the specific force (real slopes matter:
+  even a 5 s pull to it doubled the error), a bias random walk 10–40× larger, and each curve measuring the speed once
+  over the whole curve (∫a_lat dt / ∫ω dt: 0.81–1.06× OBD at p10–p90 on its own against 0.38–1.51 per sample, but
+  the per-sample updates already carry what it knows). A stop as a cue to the junction ahead: a third of the real
+  stops are within 20 m before one, a sixth of random places are, and the test towns' graphs have no traffic lights.
+- `replay:turns` feeds every fix to the tracker as a coarse one, satellite fixes too (±5 m at least): its results on
+  drives with GPS are not the app's, which re-anchors on trusted satellite fixes and ignores the rest.
 - Reverse (leaving a stop backwards) is not validated: most manoeuvres the main test car's OBD can't see come before the
   axis is known, and 7 of 8 reverses it reported were forward driving.
+
+### 9.8 The measured phone and driver in simulation (`src/nav/sim/phone-imu.ts`, `city-drive.ts`)
+
+Simulated drives (MAPMATCH-SPEC §9.4, §10.2) judge phone-only mode only if the phone and the driver behave like the
+real ones; a phone lying flat that reads the yaw rate, and a car that accelerates at 1.5 m/s² to a constant speed,
+make the phone's speed trivially good. Measured on the 63 real drives (`MEASURED_PHONE_IMU`, `MEASURED_DRIVER`,
+`MEASURED_JAM_ARRIVALS`) and reproduced by the simulator (seed 1 of the 20 Kyiv trips; real / simulated):
+
+- **Mount:** the holder tilts the screen ~20° back from vertical (σ 7°), turned up to ±25° and sitting ~0.7 m ahead of
+  the point the car turns about (the lever a whole curve's ∫a_lat / ∫ω puts it at).
+- **Car body:** pitch 0.25 / 0.33° per m/s² along the car (nose up accelerating), roll 0.30 / 0.37° per m/s²
+  sideways (outwards), on roads whose slope is ±1.2 % (σ, over ~150 m) and camber ±1.1°.
+- **Vibration** in the car frame, the median 5 s segment's spectrum per octave by speed (0 to 70+ km/h); RMS above
+  10 Hz forward / left / up: standing 0.10 / 0.09 / 0.07 (0.09 / 0.10 / 0.06) m/s², 10–30 km/h 0.64 / 0.39 / 0.51
+  (0.61 / 0.37 / 0.47), 70+ km/h 1.62 / 0.83 / 1.13 (1.60 / 0.78 / 1.08); the holder's pitch shakes the gyro 5–18 °/s
+  at 8–16 Hz. Per drive and along the road the level varies (lognormal σ 0.25, 0.3 over 150 m).
+- **Gyro and gravity:** bias ~0.01 °/s per axis drifting 0.015 °/s over 5 min: the vertical carried from one stop to
+  the next is 0.9 / 0.8° off at the median; scale 1.007. CoreMotion's gravity is a 20 s complementary filter (0.9°
+  RMS against the real one while moving), so it leans into long accelerations and curves.
+- **Driver:** accelerations 0.42 / 0.69 m/s² at the median, 1.1 / 1.2 at p90; speed wobbling 12 / 10 % while
+  cruising; crawls below 10 km/h 1.6 / 2.0 per km; stops 9 / 14 s at the median, often in a queue's steps (Kyiv's
+  2.4 stops per km against the small town's 1.0).
+- **Under jamming:** Wi-Fi-grade fixes 1.85 / 2.3 a minute in bursts (gaps 5 s at the median, 40 s at p90, minutes
+  at times), cell fixes 4.1 a minute claiming ~1.4 km and off by ~20 % of it.
+- **What the phone makes of it:** distance error at a turn since the last stop or turn, 200–400 m on: 28 / 34 m at
+  the median, short by 20 / 31 m. Phone-only off the route by time since the start, jammed: 26 / 43 / 59 / 96 %
+  (real) against 11 / 18 / 35 / 58 % (simulated, §9.6): the real drives start in yards and car parks, which the
+  simulator has none of, and their fixes are mostly cells.
+- Not reproduced: the phone handled on its mount, yards and car parks, the speed's long-stretch drift sign (the real
+  phone under-reads beyond 800 m without a stop, the simulated one over-reads).
 
 ### 9.1 Field results (2026-10-04, 7 drives, `nav_estimate`)
 

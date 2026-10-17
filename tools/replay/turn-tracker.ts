@@ -2,6 +2,7 @@
 // drawing starts, scored against the drawing like replay:regress (seconds the dot was > 30 m off the drawn route).
 //
 //   npm run replay:turns -- [--cfg '<tracker json>'] [--speed '<imu-speed json>'] [--logs <substr>] [--trace <id>]
+//   npm run replay:turns -- --dir tools/triplog/logs/simphone --logs jamstart   # simulated drives (all count as city)
 //
 // Best city setting so far: --speed '{"priorSigmaMps":5,"priorSpeedMps":12}'. Experiments on what limits it:
 //   --obd                    OBD speed instead (what the tracker does with a good speed)
@@ -33,7 +34,8 @@ import { CalibrationStore } from "../../src/services/navigation/calibration-stor
 import { carOf, drawnStartPose, graphFor, regionPoint } from "./app-chain";
 import { findGraph, openGraph } from "./graph-file";
 
-const LOGS = path.resolve(import.meta.dirname, "../triplog/logs");
+const ARGV_DIR = process.argv.indexOf("--dir");
+const LOGS = ARGV_DIR >= 0 ? path.resolve(process.argv[ARGV_DIR + 1]) : path.resolve(import.meta.dirname, "../triplog/logs");
 const argv = process.argv.slice(2);
 const value = (f: string) => {
   const i = argv.indexOf(f);
@@ -200,7 +202,9 @@ const gauss = () => {
 };
 
 /** Jammed city drives (no satellite fix while moving), the target; the rest are shown apart. */
-const CITY = ["ng2n9z", "vwaz7t", "3afby6", "udvwff", "h5ivxa", "jyxdtb", "i7qmk4", "w6zckw", "df8nsk", "pxpcgw", "gaz9bc", "sfz6nv", "p7qgih"];
+const CITY_IDS = ["ng2n9z", "vwaz7t", "3afby6", "udvwff", "h5ivxa", "jyxdtb", "i7qmk4", "w6zckw", "df8nsk", "pxpcgw", "gaz9bc", "sfz6nv", "p7qgih"];
+/** With `--dir` (simulated drives), every drive is a target. */
+const CITY = { includes: (id: string) => ARGV_DIR >= 0 || CITY_IDS.includes(id), length: CITY_IDS.length };
 
 interface Result {
   id: string;
@@ -455,7 +459,7 @@ if (bumpCfg)
 const mounts = new Map<string, PhoneMount>();
 const results: Result[] = [];
 for (const f of readdirSync(LOGS).filter((x) => x.endsWith(".ulg")).sort()) {
-  const id = f.slice(16, 22);
+  const id = ARGV_DIR >= 0 ? f.replace(/^sim-|\.ulg$/g, "") : f.slice(16, 22);
   const truthFile = path.join(LOGS, f.replace(/\.ulg$/, ".truth.json"));
   const trip = readTripLog(new Uint8Array(readFileSync(path.join(LOGS, f))));
   if (!existsSync(truthFile) || (only && !f.includes(only))) {

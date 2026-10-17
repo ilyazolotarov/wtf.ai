@@ -107,6 +107,28 @@ export interface TurnTrackerConfig {
    */
   unusedExitLog: number;
   unusedLogPerM: number;
+  /**
+   * A coarse fix also moves each road hypothesis along its road (a Kalman update of its position and speed scale with
+   * the fix's σ, as a jolt does), when it claims `fixAlongMaxAccM` or better and lies within `fixAlongAcrossSigmas` σ
+   * of the road. 0: weights only.
+   */
+  fixAlongMaxAccM: number;
+  fixAlongAcrossSigmas: number;
+  /** The along-road update takes the fix this much less precisely than its weight does (real Wi-Fi errors last
+   *  minutes: correlated fixes must not pull like independent ones). */
+  fixAlongSigmaScale: number;
+  /**
+   * Relocation by coarse fixes: `relocFixes` fixes in a row claiming `relocMaxAccM` or better (Wi-Fi, not a cell), each
+   * farther than max(`relocMinM`, `relocSigmas` σ) from the best hypothesis, add hypotheses on the roads around the
+   * latest (heading the way the best one does, ± `relocHeadingRad`), `relocLog` below the best; the old ones stay.
+   * 0 fixes: off. Without it, a tracker on another road stayed there for the rest of a drive whatever the fixes said.
+   */
+  relocFixes: number;
+  relocMaxAccM: number;
+  relocMinM: number;
+  relocSigmas: number;
+  relocHeadingRad: number;
+  relocLog: number;
 }
 
 const DEG = Math.PI / 180;
@@ -166,6 +188,15 @@ export const DEFAULT_TURN_TRACKER_CONFIG: TurnTrackerConfig = {
   bumpSnap: true,
   unusedExitLog: Math.log(0.3),
   unusedLogPerM: Math.log(0.7) / 100,
+  fixAlongMaxAccM: 200,
+  fixAlongAcrossSigmas: 3,
+  fixAlongSigmaScale: 1,
+  relocFixes: 3,
+  relocMaxAccM: 100,
+  relocMinM: 80,
+  relocSigmas: 3,
+  relocHeadingRad: 45 * DEG,
+  relocLog: Math.log(0.3),
 };
 
 /** Whether earlier drives used a road (edge). */
@@ -285,7 +316,9 @@ export class TurnTracker {
   private rateLp = 0;
   private turn: { startPsi: number; startPhoneM: number; startUs: number; midPhoneM: number | null; snapshot: Hyp[] } | null = null;
   private lastFixUs = -Infinity;
-  readonly stats = { turns: 0, snaps: 0, emptied: 0 };
+  /** Fixes in a row far from the best hypothesis (relocation). */
+  private farFixes = 0;
+  readonly stats = { turns: 0, snaps: 0, emptied: 0, relocated: 0 };
 
   constructor(
     private readonly graph: RoadGraph,
@@ -365,26 +398,32 @@ export class TurnTracker {
       const s2 = c.bumpSigmaM ** 2 + Math.min(h.pss, 100 ** 2);
       credit(h, "bump", Math.log(c.bumpOutlier + (1 - c.bumpOutlier) * Math.exp(-0.5 * (bd * bd) / s2)));
       if (!c.bumpSnap || h.free || !best || bd > 3 * Math.sqrt(s2)) continue;
-      // Along the road: the place's offset from here in the direction of travel.
-      const along = (best.e - p.e) * Math.sin(p.heading) + (best.n - p.n) * Math.cos(p.heading);
-      const across = Math.abs(-(best.e - p.e) * Math.cos(p.heading) + (best.n - p.n) * Math.sin(p.heading));
-      if (across > 2 * c.bumpSigmaM) continue;
-      const sv = h.pss + c.bumpSigmaM ** 2;
-      const ks = h.pss / sv;
-      const kk = h.psk / sv;
-      const len = edgeLen(this.graph.edge(h.edge));
-      const fwd = h.dir === 1 ? len - h.offset : h.offset;
-      const back = h.dir === 1 ? h.offset : len - h.offset;
-      const move = Math.max(-back, Math.min(fwd, ks * along));
-      h.offset += h.dir * move;
-      h.k = Math.max(c.scaleMin, Math.min(c.scaleMax, h.k + kk * along));
-      const pss = h.pss;
-      const psk = h.psk;
-      h.pkk -= kk * psk;
-      h.psk = psk - ks * psk;
-      h.pss = pss - ks * pss;
+      this.alongUpdate(h, p, best.e, best.n, c.bumpSigmaM, 2 * c.bumpSigmaM);
     }
     this.normalise();
+  }
+
+  /** Moves a road hypothesis along its road towards a place measured with σ (within its edge), teaching its scale. */
+  private alongUpdate(h: Hyp, p: { e: number; n: number; heading: number }, e: number, n: number, sigmaM: number, maxAcrossM: number): void {
+    const c = this.config;
+    // Along the road: the place's offset from here in the direction of travel.
+    const along = (e - p.e) * Math.sin(p.heading) + (n - p.n) * Math.cos(p.heading);
+    const across = Math.abs(-(e - p.e) * Math.cos(p.heading) + (n - p.n) * Math.sin(p.heading));
+    if (across > maxAcrossM) return;
+    const sv = h.pss + sigmaM ** 2;
+    const ks = h.pss / sv;
+    const kk = h.psk / sv;
+    const len = edgeLen(this.graph.edge(h.edge));
+    const fwd = h.dir === 1 ? len - h.offset : h.offset;
+    const back = h.dir === 1 ? h.offset : len - h.offset;
+    const move = Math.max(-back, Math.min(fwd, ks * along));
+    h.offset += h.dir * move;
+    h.k = Math.max(c.scaleMin, Math.min(c.scaleMax, h.k + kk * along));
+    const pss = h.pss;
+    const psk = h.psk;
+    h.pkk -= kk * psk;
+    h.psk = psk - ks * psk;
+    h.pss = pss - ks * pss;
   }
 
   /** A coarse fix (Wi-Fi/cell) in the graph frame. */
@@ -397,7 +436,26 @@ export class TurnTracker {
       const p = this.position(h);
       const d2 = ((p.e - e) ** 2 + (p.n - n) ** 2) / sigma ** 2;
       credit(h, "fix", Math.log((1 - c.fixOutlier) * Math.exp(-0.5 * d2) + c.fixOutlier * Math.exp(-0.5 * 9)));
+      if (accM <= c.fixAlongMaxAccM && !h.free) this.alongUpdate(h, p, e, n, sigma * c.fixAlongSigmaScale, c.fixAlongAcrossSigmas * sigma);
     }
+    this.normalise();
+    if (c.relocFixes <= 0 || accM > c.relocMaxAccM) return;
+    const best = this.bestHyp()!;
+    const p = this.position(best);
+    const far = Math.hypot(p.e - e, p.n - n) > Math.max(c.relocMinM, c.relocSigmas * Math.sqrt(sigma ** 2 + best.pss));
+    this.farFixes = far ? this.farFixes + 1 : 0;
+    if (this.farFixes < c.relocFixes) return;
+    this.farFixes = 0;
+    this.stats.relocated++;
+    const kept = this.hyps;
+    this.seed(e, n, p.heading, sigma, c.relocHeadingRad, 0, best.k, Math.max(best.pkk, (c.scaleSigma / 2) ** 2));
+    const top = best.logW + c.relocLog;
+    for (const h of this.hyps) {
+      h.logW += top;
+      credit(h, "reloc", top);
+    }
+    this.hyps = [...kept, ...this.hyps];
+    this.prune();
     this.normalise();
   }
 

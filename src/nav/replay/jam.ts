@@ -26,7 +26,25 @@ export interface JamOptions {
   /** Chance that a fix repeats the previous position. */
   repeatShare: number;
   seed: number;
+  /**
+   * Instead of `intervalS`: the gaps between fixes as quantiles at `GAP_QUANTILES` (s), interpolated: real fixes come
+   * in bursts with minutes between them.
+   */
+  gapQuantilesS?: readonly number[];
+  /**
+   * Cell fixes besides (0: none): per minute, their claimed accuracy as quantiles at `CELL_QUANTILES` (m), and their
+   * error as a share of it (quantiles at `CELL_QUANTILES` too), its direction and size held over `cellCorrelationS`.
+   */
+  cellPerMin?: number;
+  cellAccQuantilesM?: readonly number[];
+  cellErrorQuantiles?: readonly number[];
+  cellCorrelationS?: number;
 }
+
+/** The probabilities `gapQuantilesS` are given at. */
+export const GAP_QUANTILES = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 1] as const;
+/** The probabilities `cellAccQuantilesM` and `cellErrorQuantiles` are given at. */
+export const CELL_QUANTILES = [0, 0.1, 0.25, 0.5, 0.75, 0.9, 1] as const;
 
 export const DEFAULT_JAM: JamOptions = {
   errorSigmaM: 45,
@@ -47,6 +65,30 @@ export const DEFAULT_JAM: JamOptions = {
  * further than real fixes do.
  */
 export const MEASURED_JAM: Partial<JamOptions> = { errorSigmaM: 20, hAccM: 35, correlationS: 10, slowShare: 0.35, slowCorrelationS: 300 };
+
+/**
+ * `MEASURED_JAM` with the fixes arriving as on the 45 jammed real drives (2026-10-17, 450 min): Wi-Fi-grade fixes
+ * (≤ 100 m) 1.85 a minute in bursts (gaps 0.4 / 5.1 / 39.8 / 76.9 s at p10 / p50 / p90 / p95; 32 s on average, the
+ * last 5 % up to 15 min), 3 % repeats; and 4.06 cell fixes a minute claiming 158 / 1414 / 3412 m (p10 / p50 / p90),
+ * off by 0.11 / 0.20 / 0.38 / 0.60 of that (p25 / p50 / p75 / p90; 1824 fixes against the drawings).
+ */
+export const MEASURED_JAM_ARRIVALS: Partial<JamOptions> = {
+  ...MEASURED_JAM,
+  repeatShare: 0.03,
+  gapQuantilesS: [0.2, 0.4, 0.8, 1.6, 2.7, 5.1, 6.1, 9.7, 18.7, 39.8, 76.9, 900],
+  cellPerMin: 4.06,
+  cellAccQuantilesM: [100, 158, 644, 1414, 2000, 3412, 5000],
+  cellErrorQuantiles: [0, 0.05, 0.11, 0.2, 0.38, 0.6, 1.2],
+  cellCorrelationS: 120,
+};
+
+/** Linear interpolation of a quantile table at probability u. */
+function quantileAt(ps: readonly number[], values: readonly number[], u: number): number {
+  for (let i = 1; i < ps.length; i++) {
+    if (u <= ps[i]) return values[i - 1] + ((values[i] - values[i - 1]) * (u - ps[i - 1])) / (ps[i] - ps[i - 1]);
+  }
+  return values[values.length - 1];
+}
 
 function rng(seed: number) {
   let a = seed >>> 0;
@@ -92,18 +134,19 @@ export function jamFixes(gnss: GnssFix[], startUs: number, windows: JamWindow[],
       if (!isSatelliteFix(f)) out.push(f);
       continue;
     }
-    const gapS = errTUs === null ? Infinity : (f.tUs - errTUs) / 1e6;
+    const sinceS = errTUs === null ? Infinity : (f.tUs - errTUs) / 1e6;
     // Ornstein–Uhlenbeck errors: correlated over `correlationS` and `slowCorrelationS`, stationary σ `errorSigmaM` together.
-    const a = Number.isFinite(gapS) ? Math.exp(-gapS / o.correlationS) : 0;
+    const a = Number.isFinite(sinceS) ? Math.exp(-sinceS / o.correlationS) : 0;
     const b = fastSigma * Math.sqrt(1 - a * a);
     err = [a * err[0] + b * r.gauss(), a * err[1] + b * r.gauss()];
     if (o.slowShare > 0) {
-      const as = Number.isFinite(gapS) ? Math.exp(-gapS / o.slowCorrelationS) : 0;
+      const as = Number.isFinite(sinceS) ? Math.exp(-sinceS / o.slowCorrelationS) : 0;
       const bs = slowSigma * Math.sqrt(1 - as * as);
       slow = [as * slow[0] + bs * r.gauss(), as * slow[1] + bs * r.gauss()];
     }
     errTUs = f.tUs;
-    nextUs = f.tUs + (o.intervalS[0] + (o.intervalS[1] - o.intervalS[0]) * r.uniform()) * 1e6;
+    const gapS = o.gapQuantilesS ? quantileAt(GAP_QUANTILES, o.gapQuantilesS, r.uniform()) : o.intervalS[0] + (o.intervalS[1] - o.intervalS[0]) * r.uniform();
+    nextUs = f.tUs + gapS * 1e6;
     if (last && r.uniform() < o.repeatShare) {
       out.push({ ...last, tUs: f.tUs });
       continue;
@@ -113,5 +156,30 @@ export function jamFixes(gnss: GnssFix[], startUs: number, windows: JamWindow[],
     last = { tUs: f.tUs, lat: c.lat, lon: c.lon, hAccM: o.hAccM };
     out.push(last);
   }
-  return out;
+  return o.cellPerMin ? withCells(out, gnss, inJam, frame, o, r) : out;
+}
+
+/** Cell fixes inside the jam, from the satellite fixes' true positions: a tower's error, held for a while. */
+function withCells(out: GnssFix[], gnss: GnssFix[], inJam: (f: GnssFix) => boolean, frame: LocalFrame | null, o: JamOptions, r: ReturnType<typeof rng>): GnssFix[] {
+  if (!frame || !o.cellAccQuantilesM || !o.cellErrorQuantiles) return out;
+  const cells: GnssFix[] = [];
+  let nextUs = -Infinity;
+  let heldUs = -Infinity;
+  let acc = 0;
+  let dir = 0;
+  let share = 0;
+  for (const f of gnss) {
+    if (!isSatelliteFix(f) || !inJam(f) || f.tUs < nextUs) continue;
+    nextUs = f.tUs - (60 / o.cellPerMin!) * Math.log(1 - r.uniform()) * 1e6;
+    if (f.tUs - heldUs > (o.cellCorrelationS ?? 120) * 1e6 * -Math.log(1 - r.uniform())) {
+      heldUs = f.tUs;
+      acc = quantileAt(CELL_QUANTILES, o.cellAccQuantilesM, r.uniform());
+      dir = 2 * Math.PI * r.uniform();
+      share = quantileAt(CELL_QUANTILES, o.cellErrorQuantiles, r.uniform());
+    }
+    const [e, n] = frame.toEnu(f);
+    const c = frame.toCoordinate(e + acc * share * Math.sin(dir), n + acc * share * Math.cos(dir));
+    cells.push({ tUs: f.tUs, lat: c.lat, lon: c.lon, hAccM: Math.round(acc) });
+  }
+  return [...out, ...cells].sort((a, b) => a.tUs - b.tUs);
 }

@@ -780,12 +780,20 @@ share of held-out fixes within the circle the map draws (1.5 σ, the ~68 % radiu
 
 The logs are 4–12 min of driving in a small town. `src/nav/sim/city-drive.ts` drives a random route on a real road
 graph for hours: drivable roads only (not service or private), straight on three times as often as turning, cruise
-speed by road class, slowing for turns (2.5 m/s² lateral), stopping at a quarter of the junctions for 5–45 s, pure
+speed by road class, slowing for turns (2.5 m/s² lateral), stopping at a quarter of the junctions, pure
 pursuit on a line 1.5–3.5 m right of the centre line on two-way roads (±2 m on one-ways) with a slow lateral wander
-for map error (σ 1.5 m over 150 m). The phone's sensors come from the truth with the errors measured on the main test car and
-test phone: gyro bias 0.05 °/s with a random walk of 0.03 °/s per √h, scale 1.007, noise 0.003 rad/s; OBD × 0.981
-− 0.23 km/h, rounded, 0 below 2.5 km/h; GNSS errors σ 2.5 m correlated over 30 s. The truth is exact, scored every
-second. `tools/replay/simulate.ts` runs it: GPS for the first 3 minutes, then none to the end.
+for map error (σ 1.5 m over 150 m). OBD × 0.981 − 0.23 km/h, rounded, 0 below 2.5 km/h; GNSS errors σ 2.5 m
+correlated over 30 s. The truth is exact, scored every second. `tools/replay/simulate.ts` runs it: GPS for the first
+3 minutes, then none to the end.
+
+The driver and the phone are the measured ones (NAVIGATOR-SPEC §9.8): speeds wobbling with the traffic, smooth
+accelerations, crawls, queues before the junctions it stops at, stops between them; and a phone tilted in a shaking
+holder whose gyro drifts (`src/nav/sim/phone-imu.ts`). `driver: "simple"`, `phone: "flat"` (`sim:drives --simple`)
+are the simulator the results below were measured with: the class speed, 1.5 m/s² up and 3.5 down, stops of 5–45 s
+at the junction itself, a phone lying flat whose gyro reads the yaw rate (bias 0.05 °/s, random walk 0.03 °/s per √h,
+scale 1.007, noise 0.003 rad/s) and nothing else. The adapter navigator on the 20 Kyiv trips jammed from the start
+(seed 1, 3 filter seeds): 0 of 20 drives with a major incident on the simple simulator, 4 of 20 on the measured one
+(9 wrong-road, 3 backwards, 1 far; 0.1 % of the moving time off the route).
 
 Three 3-hour drives per case (seeds 1–3, IMU 50 Hz; GNSS speed 1.0 s late, as CoreLocation's). Per seed:
 
@@ -956,7 +964,10 @@ beyond twice its doubt, the drawing is what is off there: those seconds aren't j
 to redraw (9qw8wn 405–441 s; j5m8tq 490–544 s, the car further along than the odometer timed it). `replay:regress` counts the major incidents per drive and seed next to its other scores, and
 `npm run replay:incidents` lists them with their times for any logs with a truth: the drawn ones, and simulated
 drives (`npm run sim:drives`: Kyiv trips planned by the router, driven by `src/nav/sim/city-drive.ts` along the plan,
-GPS all along, lost or spoofed from 200 s; their truth is exact, timing doubt 0). When a driver sees something no
+GPS all along, lost or spoofed from 200 s, or jammed: Wi-Fi fixes in bursts and cell fixes besides, as on the real
+jammed drives, `jam.ts` `MEASURED_JAM_ARRIVALS`; their truth is exact, timing doubt 0). `replay:incidents
+--phone-only` judges the app without an adapter (NAVIGATOR-SPEC §9.6) and prints the time off the route by time since
+the start (0–5, 5–10, 10–20, 20+ min): errors compound, so a long drive is not many short ones. When a driver sees something no
 incident reports, the detector is fixed first, and shown to fire on that log, before the navigator.
 
 ### 10.3 Tooling (`tools/replay`)

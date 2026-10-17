@@ -7,7 +7,8 @@
 //   lost     GPS gone from `CUT_S` on (jammed to nothing)
 //   spoof    GPS from `CUT_S` on reports a place abroad, standing (the app must refuse it and drive on without)
 //   jam      GPS from `CUT_S` on jammed as iOS reports it: Wi-Fi/cell-like fixes every 5–10 s, as far off and for as
-//            long as on the real jammed drives (src/nav/replay/jam.ts `MEASURED_JAM`); `lost` has none at all
+//            long as on the real jammed drives (src/nav/replay/jam.ts `MEASURED_JAM_ARRIVALS`: in bursts, cells
+//            besides; `--simple`: `MEASURED_JAM`, every 5–10 s); `lost` has none at all
 //   jamstart jammed from the first second, the car starting from where it was parked (the replays give the app that
 //            parked pose, as after the drive before): the start the real jammed drives fail on
 //   unmapped jamstart, and two short roads the car drives are missing from the navigator's map (`hidden` in the
@@ -19,6 +20,8 @@
 //
 //   npm run sim:drives                         # every trip, seed 1
 //   npm run sim:drives -- --trips north-south --seeds 2-3
+//   npm run sim:drives -- --out tools/triplog/logs/sim2 --scenarios gps,jamstart   # elsewhere, some scenarios
+//   npm run sim:drives -- --simple             # the old driver and a flat, still phone (city-drive.ts)
 //   npm run replay:incidents -- tools/triplog/logs/synthetic/*.ulg
 //   npm run replay:view -- --logs tools/triplog/logs/synthetic
 
@@ -28,7 +31,7 @@ import { fileURLToPath } from "node:url";
 
 import { haversineM, type Coordinate } from "../../src/nav/geo";
 import { LocalFrame } from "../../src/nav/geo/local-frame";
-import { jamFixes, MEASURED_JAM } from "../../src/nav/replay/jam";
+import { jamFixes, MEASURED_JAM, MEASURED_JAM_ARRIVALS, type JamOptions } from "../../src/nav/replay/jam";
 import { spoofFixes } from "../../src/nav/replay/spoof";
 import { planRoute, type RoutePlan } from "../../src/nav/routing/router";
 import { cityDrive, type CityDrive } from "../../src/nav/sim/city-drive";
@@ -78,14 +81,18 @@ const PLAN_AT_S = 10;
 interface Job {
   trip: string;
   seed: number;
+  out: string;
+  scenarios: readonly Scenario[];
+  /** The simulator's driver and phone (city-drive.ts); both measured unless `--simple`. */
+  simple: boolean;
 }
 
-function scenarioFixes(drive: CityDrive, scenario: Scenario): GnssFix[] {
+function scenarioFixes(drive: CityDrive, scenario: Scenario, jam: Partial<JamOptions>): GnssFix[] {
   const { gnss, startUs } = drive.trip;
   if (scenario === "lost") return gnss.filter((f) => f.tUs - startUs < CUT_S * 1e6);
   if (scenario === "spoof") return spoofFixes(gnss, startUs, [{ fromS: CUT_S, toS: Infinity, kind: "outside" }]).fixes;
-  if (scenario === "jam") return jamFixes(gnss, startUs, [{ fromS: CUT_S, toS: Infinity }], { ...MEASURED_JAM, seed: drive.distanceM | 0 });
-  if (scenario === "jamstart" || scenario === "unmapped") return jamFixes(gnss, startUs, [{ fromS: 0, toS: Infinity }], { ...MEASURED_JAM, seed: drive.distanceM | 0 });
+  if (scenario === "jam") return jamFixes(gnss, startUs, [{ fromS: CUT_S, toS: Infinity }], { ...jam, seed: drive.distanceM | 0 });
+  if (scenario === "jamstart" || scenario === "unmapped") return jamFixes(gnss, startUs, [{ fromS: 0, toS: Infinity }], { ...jam, seed: drive.distanceM | 0 });
   return gnss;
 }
 
@@ -197,15 +204,16 @@ function runJob(job: Job): { trip: string; lines: string[] } {
     const planned = planRoute(g.graph, frame, trip.from, trip.to);
     if (planned.status !== "done") return { trip: trip.name, lines: [`${trip.name}: no route (${planned.reason})`] };
     const plan = planned.plan;
-    const drive = cityDrive({ graph: g.graph, frame, legs: plan.legs, durationS: 4 * 3600, seed: job.seed });
+    const drive = cityDrive({ graph: g.graph, frame, legs: plan.legs, durationS: 4 * 3600, seed: job.seed, ...(job.simple ? { driver: "simple", phone: "flat" } : {}) });
+    const OUT = job.out;
     const { path: truth, timeline } = truthPath(drive);
     mkdirSync(OUT, { recursive: true });
     const lines: string[] = [];
     const minutes = (drive.truth.at(-1)!.tUs - drive.trip.startUs) / 60e6;
-    for (const scenario of SCENARIOS) {
+    for (const scenario of job.scenarios) {
       const name = `sim-${trip.name}-s${job.seed}-${scenario}`;
       const file = `${name}.ulg`;
-      writeFileSync(path.join(OUT, file), writeLog(drive, plan, scenarioFixes(drive, scenario), { sim_trip: trip.name, sim_seed: job.seed, sim_scenario: scenario, vehicle_vin: "SIMULATED0000000" }));
+      writeFileSync(path.join(OUT, file), writeLog(drive, plan, scenarioFixes(drive, scenario, job.simple ? MEASURED_JAM : MEASURED_JAM_ARRIVALS), { sim_trip: trip.name, sim_seed: job.seed, sim_scenario: scenario, vehicle_vin: "SIMULATED0000000" }));
       const drawn = {
         version: 1, file, points: [{ lat: truth[0][0], lon: truth[0][1] }, { lat: truth.at(-1)![0], lon: truth.at(-1)![1] }], path: truth,
         legs: [{ lengthM: Math.round(timeline.at(-1)![1]), start: 0, kind: "road" }], graph: path.basename(graphFile), updatedAt: new Date().toISOString(),
@@ -232,19 +240,25 @@ async function main() {
     return i >= 0 ? argv[i + 1] : undefined;
   };
   const names = arg("--trips")?.split(",") ?? TRIPS.map((t) => t.name);
+  // --out <dir>: elsewhere than synthetic/ (whose drives the saved incident runs were made on).
+  const out = arg("--out") ? path.resolve(arg("--out")!) : OUT;
+  const scenarios = (arg("--scenarios")?.split(",") ?? SCENARIOS) as Scenario[];
+  for (const s of scenarios) if (!SCENARIOS.includes(s)) throw new Error(`unknown scenario ${s}: ${SCENARIOS.join(", ")}`);
+  const simple = argv.includes("--simple");
   // Each seed is another drive of the same route: other stops, lanes, speeds and sensor errors.
   const [lo, hi = lo] = (arg("--seeds") ?? "1").split("-").map(Number);
   const seeds = Array.from({ length: hi - lo + 1 }, (_, i) => lo + i);
   for (const n of names) if (!TRIPS.some((t) => t.name === n)) throw new Error(`unknown trip ${n}: ${TRIPS.map((t) => t.name).join(", ")}`);
   const pool = new Pool(import.meta.url, threads);
   try {
-    const results = await pool.map<Job, { trip: string; lines: string[] }>(names.flatMap((trip) => seeds.map((seed) => ({ trip, seed }))));
+    const results = await pool.map<Job, { trip: string; lines: string[] }>(names.flatMap((trip) => seeds.map((seed) => ({ trip, seed, out, scenarios, simple }))));
     for (const r of results) for (const l of r.lines) console.log(l);
   } finally {
     await pool.close();
   }
-  console.log(`→ ${path.relative(process.cwd(), OUT)}`);
+  console.log(`→ ${path.relative(process.cwd(), out)}`);
 }
 
 serveJobs(import.meta.url, runJob);
-if (isMainThread) await main();
+// Only when run, not when imported for `TRIPS` (importing it once rewrote synthetic/ from a script).
+if (isMainThread && process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();

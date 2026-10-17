@@ -982,10 +982,13 @@ export class NavigatorService implements PositionSource {
     }
     const gpsGood = trust === "TRUSTED" && nowUs - this.lastAcceptedSatUs < FUSED_WINDOW_US;
     if (phone && !gpsGood) {
-      // Phone-only (§9.6): its dead reckoning, the circle as wide as its doubt, other roads it may be on.
+      // Phone-only (§9.6): its dead reckoning, the circle as wide as its doubt, other roads it may be on. Drawn as the
+      // navigator's dot is (puck.ts `steadyDot`): a Wi-Fi fix or a turn moving it along its road glides, not hops.
+      const drawn = steadyDot(phone, this.lastDot, phone.speedMps, phone.tUs);
+      this.lastDot = { ...drawn, headingRad: phone.headingRad, tUs: phone.tUs };
       this.set({
-        lat: phone.lat,
-        lon: phone.lon,
+        lat: drawn.lat,
+        lon: drawn.lon,
         headingRad: phone.headingRad,
         ...(phone.speedMps !== undefined ? { speedMps: phone.speedMps } : {}),
         accuracyM: phone.accuracyM,

@@ -12,6 +12,9 @@
 //   npm run replay:incidents -- <logs> --puck '{"headingCueFactor":1}'   # the dot's cues off (puck.ts), for a before
 //   npm run replay:incidents -- tools/triplog/logs/synthetic --only lost,demo   # logs whose names contain one of these
 //   npm run replay:incidents -- <logs> --exact-timing   # the truth's timing has no doubt (simulated, emulated drives)
+//   npm run replay:incidents -- <logs> --phone-only [--phone-route]   # the app without an adapter (NAVIGATOR-SPEC
+//                                                        # §9.6), the driver promising the route or not; seed 1 is
+//                                                        # enough (it has no random filter)
 //
 // A drive passes with no major incident on any seed.
 
@@ -22,7 +25,8 @@ import type { MapMatchConfig } from "../../src/nav/mapmatch/particle-filter";
 import type { NavConfig } from "../../src/nav/navigator";
 import { puckTuning } from "../../src/nav/position/puck";
 import { haversineM } from "../../src/nav/geo";
-import { drawnTruthTrack, pointAlong, type DrawnTruth, type DrawnTruthTrack } from "../../src/nav/replay/drawn-truth";
+import { drawnTruthTrack, pointAlong, scoreDrawn, type DrawnTruth, type DrawnTruthTrack } from "../../src/nav/replay/drawn-truth";
+import { estimateTrack } from "../../src/nav/replay/drive-report";
 import { describeIncident, findIncidents, INCIDENT_STEP_S, type DotSample, type Incident, type IncidentCoverage } from "../../src/nav/replay/incidents";
 import { appOutageCuts } from "../../src/nav/replay/replay";
 import { MemoryKeyValueStore, phoneOf, replayTripInApp } from "../../src/services/navigation/app-replay";
@@ -42,6 +46,9 @@ interface Job {
   nav?: Partial<NavConfig>;
   mm?: Partial<MapMatchConfig>;
   puck?: Partial<typeof puckTuning>;
+  /** The app without an adapter (phone-only mode), and whether the driver follows the logged route. */
+  phoneOnly?: boolean;
+  phoneRoute?: boolean;
 }
 
 interface JobResult {
@@ -49,9 +56,14 @@ interface JobResult {
   seed: number | null;
   incidents: Incident[];
   coverage?: IncidentCoverage;
+  /** Seconds the dot was > 30 m off the true route while moving, as replay:regress scores drawn drives. */
+  drawn?: { offPathS: number; movingS: number; windows: { offPathS: number; movingS: number }[] };
   unjudged?: string;
   error?: string;
 }
+
+/** Off-route shares by time since the drive's start, s. */
+const WINDOWS_S = [0, 300, 600, 1200, Infinity];
 
 /** The speed scale the app stores for the simulated car after a drive with GPS (sim-drives.ts `gps` scenario). */
 const SIM_LEARNED_KS = 1.016;
@@ -114,7 +126,8 @@ function runJob(job: Job): JobResult {
       // A simulated jammed start: the car where the app parked it after the drive before (the truth's start), as the
       // regression check's drawn start.
       const vin = carOf(trip, new Map());
-      const jamStart = trip.info.sim_scenario === "jamstart" || trip.info.sim_scenario === "unmapped";
+      // Phone-only on a real drive: started where its drawing starts, as replay:regress's drawn start.
+      const jamStart = trip.info.sim_scenario === "jamstart" || trip.info.sim_scenario === "unmapped" || (job.phoneOnly === true && !sim);
       const parked = jamStart && vin ? drawnStartPose(trip, drawn) : null;
       if (parked && vin) {
         calibration.saveParkedPose(vin, parked);
@@ -129,13 +142,32 @@ function runJob(job: Job): JobResult {
         nav: job.nav,
         mapMatchConfig: { ...job.mm, seed: job.seed },
         // The routes the driver had, as the app gives them to the service (the puck leans on the route).
-        phoneRoutes: phoneRouteFor(trip, null).routes,
+        // Phone-only: its own engine on its own graph reader; the route only if the driver promised to follow it.
+        ...(job.phoneOnly
+          ? {
+              phoneOnly: {
+                openGraph: () => {
+                  const g = graphFor(trip);
+                  return g ? { key: g.active.key, graph: g.active.graph, close: g.close } : null;
+                },
+              },
+              ...(job.phoneRoute ? { phoneRoutes: phoneRouteFor(trip, null).routes } : {}),
+            }
+          : { phoneRoutes: phoneRouteFor(trip, null).routes }),
       });
       const dots = dotsOf(r.published.map((p) => ({ ...p, tUs: p.timestampUs })), trip.startUs);
       const fixes = simFile(job.file)
         ? []
         : r.fixes.filter((f) => f.satellite && f.status === "accepted").map((f) => ({ t: f.tS, lat: f.fix.lat, lon: f.fix.lon, hAccM: f.fix.hAccM }));
-      return { file: job.file, seed: job.seed, ...findIncidents(truth, dots, fixes) };
+      const track = estimateTrack(r.published.map((p) => ({ tUs: p.timestampUs, latDeg: p.latDeg, lonDeg: p.lonDeg, accuracyM: p.accuracyM })), trip.startUs);
+      const score = scoreDrawn(trip, truth, track);
+      // …and by time since the drive's first truth point (errors compound: a long drive is not many short ones).
+      const t0 = truth.points[0]?.[0] ?? 0;
+      const windows = WINDOWS_S.slice(0, -1).map((from, i) => {
+        const w = scoreDrawn(trip, { ...truth, points: truth.points.filter(([t]) => t - t0 >= from && t - t0 < WINDOWS_S[i + 1]) }, track);
+        return { offPathS: w.offPathS, movingS: w.movingS };
+      });
+      return { file: job.file, seed: job.seed, ...findIncidents(truth, dots, fixes), drawn: { offPathS: score.offPathS, movingS: score.movingS, windows } };
     } finally {
       graph?.close();
     }
@@ -161,6 +193,8 @@ async function main() {
   const mm = arg("--mm") ? (JSON.parse(arg("--mm")!) as Partial<MapMatchConfig>) : undefined;
   const only = arg("--only");
   const puck = arg("--puck") ? (JSON.parse(arg("--puck")!) as Partial<typeof puckTuning>) : undefined;
+  const phoneOnly = argv.includes("--phone-only");
+  const phoneRoute = argv.includes("--phone-route");
   // Logs, or folders of them (a long list of paths is past what a Windows command line takes).
   const files = argv
     .filter((a, i) => !a.startsWith("--") && !["--seeds", "--json", "--against", "--nav", "--mm", "--only", "--puck"].includes(argv[i - 1]))
@@ -168,7 +202,7 @@ async function main() {
     .filter((a) => a.endsWith(".ulg") && (!only || only.split(",").some((o) => a.includes(o))));
   const withTruth = files.filter((f) => existsSync(truthFile(f)));
   for (const f of files) if (!withTruth.includes(f)) console.log(`${path.basename(f)}: no truth (${path.basename(truthFile(f))}), skipped`);
-  const jobs: Job[] = withTruth.flatMap((file) => [{ file, seed: null, exactTiming }, ...Array.from({ length: seeds }, (_, i) => ({ file, seed: i + 1, exactTiming, nav, mm, puck }))]);
+  const jobs: Job[] = withTruth.flatMap((file) => [{ file, seed: null, exactTiming }, ...Array.from({ length: seeds }, (_, i) => ({ file, seed: i + 1, exactTiming, nav, mm, puck, phoneOnly, phoneRoute }))]);
   const pool = new Pool(import.meta.url, threads);
   let results: JobResult[];
   try {
@@ -217,6 +251,18 @@ function summary(results: JobResult[]) {
     const files = [...new Set(rs.map((r) => r.file))];
     const failing = files.filter((f) => rs.some((r) => r.file === f && (r.error || r.unjudged || !r.coverage?.movingS || r.incidents.some((i) => i.major)))).length;
     console.log(`  ${sc.padEnd(8)}${counts.map((c) => String(c).padStart(12)).join("")}${`${failing} of ${files.length}`.padStart(16)}`);
+  }
+  console.log("off the true route (> 30 m) while moving, all seeds:");
+  for (const sc of scenarios) {
+    const rs = replays.filter((r) => scenarioOf(r.file) === sc && r.drawn);
+    const off = rs.reduce((n, r) => n + r.drawn!.offPathS, 0);
+    const moving = rs.reduce((n, r) => n + r.drawn!.movingS, 0);
+    const byWindow = WINDOWS_S.slice(0, -1).map((from, i) => {
+      const o = rs.reduce((n, r) => n + r.drawn!.windows[i].offPathS, 0);
+      const m = rs.reduce((n, r) => n + r.drawn!.windows[i].movingS, 0);
+      return `${from / 60}–${Number.isFinite(WINDOWS_S[i + 1]) ? WINDOWS_S[i + 1] / 60 : "…"} min ${m ? ((100 * o) / m).toFixed(0) : "—"} % of ${Math.round(m)} s`;
+    });
+    console.log(`  ${sc.padEnd(8)} ${Math.round(off)} of ${Math.round(moving)} s (${moving ? ((100 * off) / moving).toFixed(1) : "—"} %); ${byWindow.join(", ")}`);
   }
 }
 

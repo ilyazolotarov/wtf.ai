@@ -5,6 +5,7 @@ import { haversineM } from "@/nav/geo";
 import { LocalFrame } from "@/nav/geo/local-frame";
 import { bufferByteSource } from "@/nav/mapmatch/graph/byte-source";
 import { TiledRoadGraph } from "@/nav/mapmatch/graph/road-graph";
+import { ImuSpeedEstimator } from "@/nav/odometry/imu/imu-speed";
 import { cityDrive } from "@/nav/sim/city-drive";
 
 // The fixture graph (src/nav/mapmatch/__tests__/particle-filter.test.ts): a long road with branches.
@@ -42,6 +43,33 @@ describe("cityDrive", () => {
     // GNSS within a few metres of the truth.
     const errors = trip.gnss.map((f) => haversineM(f, drive.truthAt(f.tUs))).sort((a, b) => a - b);
     expect(errors[Math.floor(errors.length / 2)]).toBeLessThan(6);
+  });
+
+  test("the measured phone: the phone-only speed estimator finds the stops and the speed", () => {
+    // The drive stands 20 s at the start and stops at junctions; the phone must look like a real one doing it.
+    const est = new ImuSpeedEstimator();
+    let stoppedRight = 0;
+    let standing = 0;
+    const errors: number[] = [];
+    for (const s of drive.trip.imu) {
+      const o = est.process(s);
+      const truth = drive.truthAt(s.tUs).speedMps;
+      if (truth === 0) {
+        standing++;
+        if (o.stopped) stoppedRight++;
+      } else if (Number.isFinite(o.speedMps)) errors.push(Math.abs(o.speedMps - truth));
+    }
+    expect(stoppedRight / standing).toBeGreaterThan(0.5);
+    errors.sort((a, b) => a - b);
+    expect(errors.length).toBeGreaterThan(drive.trip.imu.length / 3);
+    // One long straight with few stops or turns to correct it: the phone's worst case (simulated Kyiv drives 2.2 m/s at
+    // the median, real drives 1.1), here a bound against a broken model, not a target.
+    expect(errors[Math.floor(errors.length / 2)]).toBeLessThan(6);
+  });
+
+  test("the simple driver and the flat phone: the class speed, a phone reading only the yaw", () => {
+    const simple = cityDrive({ graph: g, frame, start: { e: 300, n: 0 }, durationS: 120, seed: 2, driver: "simple", phone: "flat" });
+    expect(simple.trip.imu.every((s) => s.gravity[2] === -9.80665 && s.gyro[0] === 0)).toBe(true);
   });
 
   test("is repeatable for a seed", () => {
