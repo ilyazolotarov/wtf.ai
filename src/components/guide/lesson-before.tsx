@@ -11,9 +11,12 @@ import type { Strings } from "@/i18n/en";
 import { useT } from "@/i18n/provider";
 import { useMapPacks } from "@/services/offline-map/map-packs";
 
-type Tick = "holder" | "open" | "charge";
+type Tick = "holder" | "open" | "dot" | "charge";
 
-/** Lesson 1: a checklist before driving. The map and the adapter are read from the app; the rest the driver ticks. */
+/**
+ * Lesson 1: a checklist before driving. The map and the adapter are read from the app, the dot too while GPS checks
+ * out; the rest the driver ticks. A dot not on the car leads to the placing lesson: a first drive may start jammed.
+ */
 export function LessonBefore() {
   const { t, language } = useT();
   const palette = usePalette();
@@ -21,6 +24,7 @@ export function LessonBefore() {
   const { installed } = useMapPacks();
   const [ticked, setTicked] = useState<ReadonlySet<Tick>>(new Set());
   const region = installed.active ? installed.regions[installed.active] : null;
+  const gpsOk = nav.trust === "TRUSTED";
   const toggle = (key: Tick) =>
     setTicked((was) => {
       const next = new Set(was);
@@ -67,6 +71,16 @@ export function LessonBefore() {
       onToggle: () => toggle(key),
     })),
   ];
+  // Before charging: the last look before setting off.
+  rows.splice(rows.length - 1, 0, {
+    key: "dot",
+    title: t("beforeDot"),
+    sub: gpsOk ? t("beforeDotOk") : t("beforeDotSub"),
+    done: gpsOk || ticked.has("dot"),
+    subOk: gpsOk,
+    onToggle: gpsOk ? undefined : () => toggle("dot"),
+    action: gpsOk || ticked.has("dot") ? undefined : { label: t("beforeDotShow"), onPress: () => router.push("/guide/lesson?id=place") },
+  });
   const doneCount = rows.filter((row) => row.done).length;
   const allDone = doneCount === rows.length;
 

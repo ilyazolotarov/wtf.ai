@@ -1,6 +1,7 @@
-import { createContext, Fragment, useContext, useEffect, useState, type PropsWithChildren } from "react";
+import { createContext, Fragment, useContext, useEffect, useRef, useState, type PropsWithChildren } from "react";
 import { Animated, Pressable, StyleSheet, View, type DimensionValue } from "react-native";
 
+import { Segmented } from "@/components/screens/screen-ui";
 import { T } from "@/components/ui/text";
 import { Radius, usePalette } from "@/constants/theme";
 
@@ -19,6 +20,30 @@ export function ExplainCard({ rows }: { rows: { label: string; text: string; str
             </T>
             <T w={row.strong ? "medium" : "regular"} size={14} style={styles.explainText}>
               {row.text}
+            </T>
+          </View>
+        </Fragment>
+      ))}
+    </View>
+  );
+}
+
+/** Numbered steps under a lesson's map: what to do, in order. */
+export function StepsCard({ steps }: { steps: string[] }) {
+  const palette = usePalette();
+  return (
+    <View style={[styles.card, { backgroundColor: palette.groupBg }]}>
+      {steps.map((step, i) => (
+        <Fragment key={step}>
+          {i > 0 && <View style={[styles.line, { backgroundColor: palette.line }]} />}
+          <View style={styles.stepRow}>
+            <View style={[styles.stepNumber, { backgroundColor: palette.accentA }]}>
+              <T w="semibold" size={13} color={palette.accent}>
+                {String(i + 1)}
+              </T>
+            </View>
+            <T size={14} style={styles.stepText}>
+              {step}
             </T>
           </View>
         </Fragment>
@@ -79,6 +104,55 @@ export function LessonIntro({ children }: { children: string }) {
   );
 }
 
+/** A lesson's tab not seen yet: its name, where the tabs are in the page, and showing it. */
+export interface NextTab {
+  label: string;
+  /** The tabs' top in the page's scrolling content. */
+  y: number;
+  show(): void;
+}
+
+/** Lets a lesson with tabs tell the lesson screen which tab is still to see (null: all seen). */
+export const NextTabContext = createContext<(next: NextTab | null) => void>(() => undefined);
+
+/**
+ * A lesson's tabs. Until each has been seen, the lesson screen's button offers the next one before the next lesson.
+ * Placed straight in the lesson's body, so its layout `y` is the page's.
+ */
+export function LessonTabs<K extends string>({
+  value,
+  options,
+  onChange,
+}: {
+  value: K;
+  options: { value: K; label: string }[];
+  onChange(value: K): void;
+}) {
+  const setNext = useContext(NextTabContext);
+  const [seen, setSeen] = useState<ReadonlySet<K>>(() => new Set([value]));
+  const [y, setY] = useState(0);
+  const pick = (next: K) => {
+    setSeen((was) => new Set([...was, next]));
+    onChange(next);
+  };
+  const unseen = options.find((option) => !seen.has(option.value));
+  // The page keeps what it was given; showing goes through the latest `pick`.
+  const show = useRef<() => void>(() => undefined);
+  useEffect(() => {
+    show.current = () => unseen && pick(unseen.value);
+  });
+  const label = unseen?.label;
+  useEffect(() => {
+    setNext(label ? { label, y, show: () => show.current() } : null);
+    return () => setNext(null);
+  }, [label, y, setNext]);
+  return (
+    <View onLayout={(event) => setY(event.nativeEvent.layout.y)}>
+      <Segmented<K> value={value} options={options} onChange={pick} />
+    </View>
+  );
+}
+
 /** Lets a lesson stop its screen scrolling while a finger drags its map (the lesson screen provides it). */
 export const ScrollLockContext = createContext<(locked: boolean) => void>(() => undefined);
 
@@ -129,6 +203,9 @@ const styles = StyleSheet.create({
   explainRow: { gap: 4, paddingVertical: 12 },
   explainLabel: { letterSpacing: 0.3 },
   explainText: { lineHeight: 20 },
+  stepRow: { flexDirection: "row", alignItems: "flex-start", gap: 12, paddingVertical: 12 },
+  stepNumber: { width: 24, height: 24, borderRadius: 12, alignItems: "center", justifyContent: "center" },
+  stepText: { flex: 1, lineHeight: 20, paddingTop: 2 },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   chip: {
     height: 42,

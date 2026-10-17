@@ -22,7 +22,7 @@ const STATES: Record<State, { chip: keyof Strings; color: "ok" | "warn" | "bad";
 
 const RED_CHECKS = ["carCheckPort", "carCheckIgnition", "carCheckBluetooth", "carCheckConnect"] as const;
 
-/** Lesson 3: the vehicle button's connection dot (UI-SPEC §6.2). */
+/** Lesson 4: the vehicle button's connection dot (UI-SPEC §6.2). */
 export function LessonCar() {
   const { t } = useT();
   const palette = usePalette();

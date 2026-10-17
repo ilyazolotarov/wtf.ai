@@ -39,8 +39,8 @@ const LOT = { x: 56, y: 196, w: 100, h: 74 };
  */
 const VIEW = { top: -130, height: 480 };
 
-/** Lesson 6: the parked-pose question (UI-SPEC §6.2) and what each answer does; "No" goes on to placing the car. */
-export function LessonPose() {
+/** Lesson 3's second tab: the parked-pose question (UI-SPEC §6.2) and what each answer does; "No" goes on to placing. */
+export function PoseTab() {
   const { t, language } = useT();
   const palette = usePalette();
   const c = useMapColors();

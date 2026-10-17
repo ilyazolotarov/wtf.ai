@@ -26,6 +26,9 @@ its state logic in the `<script type="text/x-dc">` block at the bottom.
 | `LessonVoice.dc.html` | 8 · Spoken directions: mute, hold for the speaker picker, volume |
 | `LessonMaps.dc.html` | 9 · Offline maps: download, switch, leaving the region |
 
+The app's lessons no longer follow this numbering: placing (5 and 6 here) is one lesson with two tabs, third, right
+after the dot. [UI-SPEC §7.7](../../UI-SPEC.md) has the current list.
+
 Notes for implementing it:
 
 - Colours, type and radii are the app's Calm theme (`src/constants/theme.ts`, Onest). The lesson maps are SVG and

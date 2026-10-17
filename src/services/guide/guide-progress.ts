@@ -1,11 +1,14 @@
-// The in-app guide (UI-SPEC §7.7): which lessons the driver finished, whether the map tour was offered, and the
-// hand-off that starts the tour on the map from the Guide sheet.
+// The in-app guide (UI-SPEC §7.7): which lessons the driver finished, whether the map tour and the lessons were
+// offered, and the hand-off that starts the tour on the map from the Guide sheet.
 
 import Storage from "expo-sqlite/kv-store";
 import { useSyncExternalStore } from "react";
 
 const DONE_KEY = "guide.done";
 const TOUR_OFFERED_KEY = "guide.tour-offered";
+const LESSONS_DISMISSED_KEY = "guide.lessons-invite-dismissed";
+/** "Not now" on the lessons' offer this many times and the map stops offering them. */
+const LESSONS_INVITE_MAX = 3;
 
 let done: ReadonlySet<string> = loadDone();
 const doneListeners = new Set<() => void>();
@@ -30,6 +33,11 @@ export function useLessonsDone(): ReadonlySet<string> {
   );
 }
 
+/** The lessons finished now, outside React. */
+export function lessonsDone(): ReadonlySet<string> {
+  return done;
+}
+
 export function markLessonDone(id: string): void {
   if (done.has(id)) return;
   done = new Set([...done, id]);
@@ -48,6 +56,23 @@ export function isTourOffered(): boolean {
 
 export function markTourOffered(): void {
   Storage.setItemSync(TOUR_OFFERED_KEY, "1");
+}
+
+/**
+ * The map offers the lessons after the tour until one is done; "Not now" hides the offer until the app starts again,
+ * up to three times.
+ */
+export function isLessonsInviteDue(): boolean {
+  try {
+    return done.size === 0 && Number(Storage.getItemSync(LESSONS_DISMISSED_KEY) ?? "0") < LESSONS_INVITE_MAX;
+  } catch {
+    return false;
+  }
+}
+
+export function dismissLessonsInvite(): void {
+  const times = Number(Storage.getItemSync(LESSONS_DISMISSED_KEY) ?? "0") || 0;
+  Storage.setItemSync(LESSONS_DISMISSED_KEY, String(times + 1));
 }
 
 let tourPending = false;

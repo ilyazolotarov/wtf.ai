@@ -1,6 +1,6 @@
 import type { Strings } from "@/i18n/en";
 
-export type LessonId = "before" | "dot" | "car" | "jamming" | "place" | "pose" | "route" | "voice" | "maps";
+export type LessonId = "before" | "dot" | "car" | "jamming" | "place" | "route" | "voice" | "maps";
 
 export interface Lesson {
   id: LessonId;
@@ -15,17 +15,12 @@ export const LESSON_GROUPS: { title: keyof Strings; lessons: Lesson[] }[] = [
     lessons: [
       { id: "before", title: "lessonBeforeTitle", sub: "lessonBeforeSub" },
       { id: "dot", title: "lessonDotTitle", sub: "lessonDotSub" },
+      // Early: a first drive may well start with GPS jammed or spoofed.
+      { id: "place", title: "lessonPlaceTitle", sub: "lessonPlaceSub" },
       { id: "car", title: "lessonCarTitle", sub: "lessonCarSub" },
     ],
   },
-  {
-    title: "guideGroupGpsFails",
-    lessons: [
-      { id: "jamming", title: "lessonJammingTitle", sub: "lessonJammingSub" },
-      { id: "place", title: "lessonPlaceTitle", sub: "lessonPlaceSub" },
-      { id: "pose", title: "lessonPoseTitle", sub: "lessonPoseSub" },
-    ],
-  },
+  { title: "guideGroupGpsFails", lessons: [{ id: "jamming", title: "lessonJammingTitle", sub: "lessonJammingSub" }] },
   {
     title: "guideGroupRoutes",
     lessons: [

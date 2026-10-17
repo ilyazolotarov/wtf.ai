@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { StyleSheet, View } from "react-native";
 
-import { TourInvite } from "@/components/guide/map-tour";
+import { LessonsInvite, TourInvite } from "@/components/guide/map-tour";
 import { BottomBar } from "@/components/map/bottom-bar";
 import { CameraButton } from "@/components/map/camera-button";
 import { NoFixCard, PermissionCard } from "@/components/map/center-cards";
@@ -388,6 +388,9 @@ export default function UiGalleryScreen() {
       >
         <Item name={label("tour invite", "запрошення до огляду")}>
           <TourInvite panelStyle={panel} onStart={none} onDismiss={none} />
+        </Item>
+        <Item name={label("lessons invite", "запрошення до уроків")}>
+          <LessonsInvite panelStyle={panel} onStart={none} onDismiss={none} />
         </Item>
         <Item
           name={label(

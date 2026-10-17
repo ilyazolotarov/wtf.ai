@@ -23,13 +23,13 @@ const DESTINATION = { x: 330, y: TOP + 200 };
 const SAID_TOP = `${((TOP + 232) / H) * 100}%` as const;
 
 /**
- * Lesson 8: the route banner's voice button (UI-SPEC §6.3), the real banner on a planned route: a tap mutes, a long
+ * Lesson 7: the route banner's voice button (UI-SPEC §6.3), the real banner on a planned route: a tap mutes, a long
  * press opens the phone's own speaker list. The volume is the Settings slider, here only for the lesson.
  */
 export function LessonVoice() {
   const { t, language } = useT();
   const palette = usePalette();
-  const [route] = useState(() => plan(CAR, DESTINATION, true, 1));
+  const [route] = useState(() => plan(CAR, DESTINATION, 0, 1));
   const [muted, setMuted] = useState(false);
   const [stop, setStop] = useState(8);
   const { offPhone } = useAudioOutput(true);
