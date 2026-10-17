@@ -13,6 +13,7 @@ import {
     Segmented,
 } from "@/components/screens/screen-ui";
 import { VoiceVolumeSection } from "@/components/route/voice-volume-section";
+import { SwitchRow } from "@/components/screens/setting-rows";
 import { privacyPolicyUrl, STORE_BUILD, SUPPORT_EMAIL } from "@/config/distribution";
 import { appCode } from "@/components/update/app-code";
 import { Icon } from "@/components/ui/icon";
@@ -20,6 +21,7 @@ import { installId } from "@/services/telemetry";
 import { T } from "@/components/ui/text";
 import { usePalette } from "@/constants/theme";
 import { useT, type LanguagePreference } from "@/i18n/provider";
+import { useDevSettings, useRuntime } from "@/providers/runtime-provider";
 import {
     isDeveloperUnlocked,
     loadAppearance,
@@ -34,6 +36,8 @@ const DEVELOPER_TAPS = 7;
 export default function SettingsScreen() {
   const { t, language, preference, setPreference } = useT();
   const palette = usePalette();
+  const { setDevSettings } = useRuntime();
+  const settings = useDevSettings();
   const [appearance, setAppearanceState] = useState(loadAppearance);
   const policyUrl = privacyPolicyUrl(language);
   const versionTaps = useRef(0);
@@ -74,6 +78,28 @@ export default function SettingsScreen() {
         />
       </View>
       <VoiceVolumeSection />
+      {/* The car's own sensors through the adapter (VEHICLE-LINK-SPEC §16.3, NAVIGATOR-SPEC §5.4). */}
+      <View style={styles.group}>
+        <SectionLabel>{t("vehicle")}</SectionLabel>
+        <ScreenCard style={styles.car}>
+          <SwitchRow
+            value={settings.wheelSpeed}
+            onValueChange={(v) => setDevSettings({ wheelSpeed: v })}
+            label={t("wheelSpeedSetting")}
+          />
+          <ScreenNote>{t("wheelSpeedNote")}</ScreenNote>
+          {settings.wheelSpeed && (
+            <>
+              <SwitchRow
+                value={settings.wheelYaw}
+                onValueChange={(v) => setDevSettings({ wheelYaw: v })}
+                label={t("wheelYawSetting")}
+              />
+              <ScreenNote>{t("wheelYawNote")}</ScreenNote>
+            </>
+          )}
+        </ScreenCard>
+      </View>
       <View style={styles.group}>
         <SectionLabel>{t("privacy")}</SectionLabel>
         <ScreenCard style={styles.privacy}>
@@ -130,6 +156,7 @@ export default function SettingsScreen() {
 
 const styles = StyleSheet.create({
   group: { gap: 8 },
+  car: { gap: 8 },
   privacy: { flexDirection: "row", gap: 12 },
   privacyText: { flex: 1, lineHeight: 20 },
 });

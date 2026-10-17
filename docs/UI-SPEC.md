@@ -222,7 +222,7 @@ One small component each; the screen (`src/app/index.tsx`) only places them and 
 | Top      | `StatusRow`                                | Status pill: trust state in words, coloured by it (`GPS OK`, "GPS looks spoofed", "GPS is back — verifying", no fix); the speed in km/h beside it |
 | Top      | `SinceTrustedStrip`                        | While GNSS isn't trusted, from a minute after the last trusted fix: "Last trusted GPS: 4 min ago, 2.3 km back" |
 | Top      | `RouteBanner`                              | Only with a route: next maneuver, distance, what is left (below, and §7.1)                 |
-| Top      | `trust-cards.tsx`, `placing-cards.tsx`     | Trust alert, simulated outage, parked-pose question, set your position (`usePlacing`), the manual position |
+| Top      | `trust-cards.tsx`, `placing-cards.tsx`     | Trust alert, simulated outage, parked-pose question, set your position (`usePlacing`), "are you still here?"; folded under the status pill until it is tapped: the alert, the outage and "Cut GPS", the manual position's chip |
 | Top      | `RegionPrompt`, `HudChip`                  | Outside the region (below), protocol search                                                |
 | Bottom   | `destination-cards.tsx`                    | Dropped pin, a route held without an adapter (below)                                       |
 | Bottom   | `CameraButton`                             | Camera mode cycle (§6.2)                                                                   |
@@ -301,15 +301,16 @@ One small component each; the screen (`src/app/index.tsx`) only places them and 
 
 ### 7.2 `vehicle`
 
-The car only: the adapter list and connection, the connected adapter's details, live OBD signals, VIN, engine state
-and odometry stage; specified in [TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md) §9.1 and
-[VEHICLE-LINK-SPEC.md](VEHICLE-LINK-SPEC.md) §7. The learned calibration shows in its developer section (SPEC §3.6).
+The car only: the adapter list and connection, then whether the adapter is connected and the car answers, its speed
+now and where the speed comes from (the wheels, or OBD and why); specified in [TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md)
+§9.1 and [VEHICLE-LINK-SPEC.md](VEHICLE-LINK-SPEC.md) §7. Adapter details, live poll statistics and the learned
+calibration are in the trip log, not on the page.
 
 ### 7.3 `more`
 
 The list: How to use? (the Guide, §7.7), Offline maps (`more/downloads`, §7.4), App update (`more/update`:
 UPDATES-SPEC §5.5; its row and Offline maps' carry the update dot, §5.4), Settings (§7.6), then the diagnostic
-pages `position` (integrity, live GNSS, EKF and map matching state, routing timings), `recorder` (Trip recorder:
+pages `recorder` (Trip recorder:
 everything about trip logs, TRIP-LOGGER-SPEC §9.2) and `developer` (test switches and knobs, the ELM terminal, and the **UI gallery**: every panel the map shows only in
 some state, drawn at once with made-up data, to see them all at a large text size and in both languages).
 
@@ -332,6 +333,8 @@ calibration is learned while driving (SPEC §3.6).
 - Language: System / English / Українська (persisted).
 - Appearance: System / Light / Dark (persisted).
 - Voice volume for the spoken maneuvers (ROUTING-SPEC §8.5).
+- Car: **Speed from the wheels** (on by default; VEHICLE-LINK-SPEC §16.3), and with it **Turns from the wheels
+  (experimental)** (off by default; NAVIGATOR-SPEC §5.4), each with a line on what it does.
 - Privacy statement (position data on device; maps and app updates fetched from the project's own server; crash reports carry no location or
   personal data; the opt-in trip log upload, in the `recorder` page).
 - About: app version with its build number ("1.0.0 (3563887)", as App update and AltStore name builds), support code

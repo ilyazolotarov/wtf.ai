@@ -24,7 +24,7 @@ import { appOutageCuts, replayTrip, type ReplayOptions } from "../../../src/nav/
 import { buildViewerData } from "../../../src/nav/replay/viewer-data";
 import { driverPlacings, replayTripInApp, MemoryKeyValueStore, phoneOf, seedFromLog } from "../../../src/services/navigation/app-replay";
 import { CalibrationStore } from "../../../src/services/navigation/calibration-store";
-import { PHONE_CAR, STORAGE_NOTE, type MapMatchLoop } from "../../../src/services/navigation/navigator-service";
+import { PHONE_CAR, STORAGE_NOTE } from "../../../src/services/navigation/navigator-service";
 import { readTripLog, type TripLog } from "../../../src/triplog/trip-log-reader";
 import { carOf, drawnStartPose, graphFor as graphForTrip, odometryTrack, phoneRouteFor, regionPoint, routeBeforeLog } from "../app-chain";
 import { deleteLog } from "../../triplog/deleted";
@@ -78,12 +78,10 @@ interface AppState {
 
 /**
  * The app's state before a log (NAVIGATOR-SPEC §6.1): every earlier log replayed in order through the app's own
- * NavigatorService (app-replay.ts) with this navigator version and one storage across them, as on the phone. Kept
- * per navigator version; each log's state is a copy.
+ * NavigatorService (app-replay.ts) with one storage across them, as on the phone. Each log's state is a copy.
  */
-const appStates = new Map<string, Map<string, AppState>>();
-function appStateBefore(file: string, loop: MapMatchLoop): AppState {
-  const states = appStates.get(loop) ?? appStates.set(loop, new Map()).get(loop)!;
+const states = new Map<string, AppState>();
+function appStateBefore(file: string): AppState {
   if (states.has(file)) return states.get(file)!;
   const store = new MemoryKeyValueStore();
   const byProtocol = new Map<string, string>();
@@ -99,7 +97,7 @@ function appStateBefore(file: string, loop: MapMatchLoop): AppState {
     try {
       const calibration = new CalibrationStore(store, phoneOf(trip));
       const before = vin ? calibration.parkedPose(vin)?.savedAt : undefined;
-      replayTripInApp(trip, { calibration, loop, roadGraph: graph?.active, vin });
+      replayTripInApp(trip, { calibration, roadGraph: graph?.active, vin });
       const after = vin ? calibration.parkedPose(vin)?.savedAt : undefined;
       if (vin && after === undefined) parkedAfter.delete(vin);
       else if (vin && after !== before) parkedAfter.set(vin, log);
@@ -224,17 +222,11 @@ function logParam(url: URL): string | null {
   return /^(testers\/[a-z0-9][a-z0-9-]*\/)?[\w-]+\.ulg$/.test(file) ? file : null;
 }
 
-/** Navigator versions (MAPMATCH-SPEC §9): full correction is what the app runs; open loop draws the map's part. */
-const LOOPS: Record<string, { label: string; nav: Partial<NavConfig> }> = {
-  open: { label: "Open loop", nav: { mapMatchLoop: "open" } },
-  heading: { label: "Road heading", nav: { mapMatchLoop: "heading" } },
-  closed: { label: "Full correction", nav: { mapMatchLoop: "closed" } },
-};
 /**
  * Compare with the dot as it was before 2026-10-16: no heading cue, not steady along its road (position/puck.ts), the
  * wheels' turning at a crawl too (wheel-yaw-source.ts). Run with those settings, then put back.
  */
-const BEFORE_DOT = { label: "Before 2026-10-16", nav: { mapMatchLoop: "closed" } as Partial<NavConfig> };
+const BEFORE_DOT = { label: "Before 2026-10-16", nav: {} as Partial<NavConfig> };
 function withDotBefore<T>(run: () => T): T {
   const puck = { ...puckTuning };
   const wheel = { ...wheelYawTuning };
@@ -284,25 +276,20 @@ function replayReply(url: URL): Reply {
   // Adapter: as recorded (OBD or CAN, whichever the app took its speed from), or none (phone-only mode,
   // NAVIGATOR-SPEC §9.6: no OBD speed or engine).
   const phoneOnly = q("adapter") === "none";
-  const compareLoop = q("compare") === "before" ? BEFORE_DOT : (LOOPS[q("compare")] ?? null);
+  const compareLoop = q("compare") === "before" ? BEFORE_DOT : null;
   // Compass: off, or calibrated on the other logs, optionally turned (a wrong calibration).
   const compassArg = url.searchParams.get("compass") ?? "";
   const compass = compassArg ? compassFromOtherLogs(file) : null;
   const rotateDeg = Number(compassArg) || 0;
   const started = Date.now();
   const trip = loadTrip(file);
-  // The navigator version the phone ran (trip log header, from the app's developer setting); default open.
-  const phoneLoop = typeof trip.info.nav_mapmatch_loop === "string" ? trip.info.nav_mapmatch_loop : null;
-  const loopKey = q("loop") || phoneLoop || "closed";
-  const loop = LOOPS[loopKey] ?? LOOPS.open;
   // The app replay unless a research option asks for the navigator alone (a later start, a fixed GNSS lag, a compass).
   const inApp = phoneOnly || (!(start > 0) && !lag && !compassArg);
-  const appLoop = (loop.nav.mapMatchLoop ?? "open") as MapMatchLoop;
   const fresh = (): AppState => ({ store: new MemoryKeyValueStore(), vin: carOf(trip, new Map()), parkedAfter: null });
   const logged = inApp && startFrom === "phone" ? appStateFromLog(trip) : null;
   // A log without the stored state: the chain, as "parked".
   const chained = inApp && (startFrom === "parked" || (startFrom === "phone" && !logged));
-  const state = !inApp ? null : logged ?? (chained ? appStateBefore(file, appLoop) : fresh());
+  const state = !inApp ? null : logged ?? (chained ? appStateBefore(file) : fresh());
   // From the drawn start: its place and heading as the car's parked pose (and phone-only's own), nothing else kept.
   const drawnPose = inApp && startFrom === "drawn" ? drawnStartPose(trip, readDrawn(file)) : null;
   // Phone-only: the driver follows the routes the app planned, or the drawn one where they didn't (app-chain.ts).
@@ -328,7 +315,7 @@ function replayReply(url: URL): Reply {
       ...(compass ? { compass: { calibration: compass.calibration, rotateRad: (rotateDeg * Math.PI) / 180 } } : {}),
     };
     const navFor = (nav: Partial<NavConfig>): Partial<NavConfig> => ({ ...nav, ...(lag ? { gnssLagS: Number(lag), estimateGnssLag: false } : {}) });
-    const mainNav = navFor(loop.nav);
+    const mainNav = navFor({});
     const compareNav = compareLoop ? navFor(compareLoop.nav) : null;
     // The main replay's dots, for the incidents against the drawing.
     let mainPublished: { timestampUs: number; latDeg: number; lonDeg: number; headingRad: number }[] | null = null;
@@ -337,7 +324,6 @@ function replayReply(url: URL): Reply {
     const replay = (o: ReplayOptions) => {
       const run = () => replayTripInApp(trip, {
         calibration: new CalibrationStore(state!.store.copy(), phoneOf(trip)),
-        loop: (o.nav?.mapMatchLoop ?? appLoop) as MapMatchLoop,
         roadGraph: opened ? { key: graphFile!, region: path.basename(graphFile!, ".graph.bin"), graph: opened.graph } : null,
         vin: state!.vin,
         cuts: o.cuts ?? [],
@@ -399,7 +385,7 @@ function replayReply(url: URL): Reply {
         maneuvers: [],
       });
     }
-    reply = { status: 200, type: "application/json", body: JSON.stringify({ ...data, incidents, compassInfo, placings: driverPlacings(trip).map((p) => ({ t: Math.round((p.tUs - trip.startUs) / 1e5) / 10, lat: p.lat, lon: p.lon, headingRad: p.headingRad })), odo: odometryTrack(trip), startNote, phoneRouteSource: phoneRoute?.source ?? null, loopLabel: phoneOnly ? "Phone only (no adapter)" : loop.label, phoneLoopLabel: phoneLoop ? (LOOPS[phoneLoop]?.label ?? phoneLoop) : null, appCuts: appCuts.length, parkedFrom: state && chained ? { file: state.parkedAfter, status: data.summary.startPose?.status ?? null } : null, inApp }) };
+    reply = { status: 200, type: "application/json", body: JSON.stringify({ ...data, incidents, compassInfo, placings: driverPlacings(trip).map((p) => ({ t: Math.round((p.tUs - trip.startUs) / 1e5) / 10, lat: p.lat, lon: p.lon, headingRad: p.headingRad })), odo: odometryTrack(trip), startNote, phoneRouteSource: phoneRoute?.source ?? null, appCuts: appCuts.length, parkedFrom: state && chained ? { file: state.parkedAfter, status: data.summary.startPose?.status ?? null } : null, inApp }) };
   } finally {
     opened?.close();
   }

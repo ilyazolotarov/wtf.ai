@@ -110,22 +110,13 @@ export interface NavConfig {
   compassMinSpeedMps: number;
   align: Partial<AlignConfig>;
   /**
-   * Map matching back into the EKF (MAPMATCH-SPEC §9). `open`: the filter only watches (its output
-   * is reported, nothing goes back). `heading`: on straight roads the road's direction corrects the
-   * EKF heading, also while GNSS is trusted. `closed`: that, and while GNSS isn't trusted the road
-   * position corrects the EKF position.
-   */
-  mapMatchLoop: "open" | "heading" | "closed";
-  /**
-   * A map-free twin EKF (MAPMATCH-SPEC §9.5): the same sensors and GNSS, never a road correction. With the loop
-   * closed it can give the filter its position prior (`prior`) and its odometry (`odometry`), so the filter's
-   * evidence doesn't carry its own corrections back to it. Off: the main EKF, as before.
+   * A map-free twin EKF (MAPMATCH-SPEC §9.5): the same sensors and GNSS, never a road correction. It can give the
+   * filter its position prior (`prior`) and its odometry (`odometry`), so the filter's evidence doesn't carry its
+   * own corrections back to it. Off: the main EKF, as before.
    */
   mapMatchTwin: { prior?: boolean; odometry?: boolean };
   roadHeading: Partial<RoadHeadingConfig>;
   roadPosition: Partial<RoadPositionConfig>;
-  /** With a route hint set (`setRouteHint`), how much likelier the filter takes the route's exit at a junction. */
-  routeHintFactor: number;
   /** GNSS integrity (SPEC §3.3): which satellite fixes the navigator may use. */
   integrity: Partial<IntegrityConfig>;
 }
@@ -206,11 +197,9 @@ export const DEFAULT_NAV_CONFIG: NavConfig = {
   compassLearnSigmaRad: (3 * Math.PI) / 180,
   compassMinSpeedMps: 4,
   align: {},
-  mapMatchLoop: "open",
   mapMatchTwin: {},
   roadHeading: {},
   roadPosition: {},
-  routeHintFactor: 3,
   integrity: {},
 };
 
@@ -466,7 +455,7 @@ export interface NavStats {
   /** Road-heading pseudo-measurements (MAPMATCH-SPEC §9): accepted by the EKF, and rejected by its gate. */
   roadHeadingAccepted: number;
   roadHeadingRejected: number;
-  /** Road-position pseudo-measurements (`mapMatchLoop: "closed"`). */
+  /** Road-position pseudo-measurements, while GNSS isn't trusted (MAPMATCH-SPEC §9). */
   roadPositionAccepted: number;
   roadPositionRejected: number;
   /** Tracks moved to Wi-Fi/cell fixes that kept saying they were lost (`noteCoarseDoubt`). */
@@ -541,8 +530,6 @@ export class Navigator {
   private readonly odometry = new OdometryChunker();
   private mapGraph: MapMatchGraph | null = null;
   private pf: ParticleFilter | null = null;
-  /** The route the driver follows, for the filter (`setRouteHint`). */
-  private routeHint: EdgeId[] | null = null;
   private mapMatchListening = false;
   /** Odometry distance where the filter's weight went mostly off-road (null: on the roads). */
   private offRoadFromM: number | null = null;
@@ -627,7 +614,6 @@ export class Navigator {
   setRoadGraph(graph: MapMatchGraph | null, config: Partial<MapMatchConfig> = {}): void {
     this.mapGraph = graph;
     this.pf = graph ? new ParticleFilter(graph, config) : null;
-    this.pf?.setRouteHint(this.routeHint, this.config.routeHintFactor);
     this.offRoadFromM = null;
     this.trackingFromM = null;
     if (!graph) return;
@@ -637,25 +623,10 @@ export class Navigator {
     else this.startMapMatchAtAnchor();
   }
 
-  /** Switch how map matching feeds back into the EKF (MAPMATCH-SPEC §9); takes effect at the next odometry chunk. */
-  /**
-   * The route the driver follows (ROUTING-SPEC §8.6): the edges of the graph the filter runs on (null: none). At a
-   * junction the filter then sends more particles onto the route's exit; turns still decide.
-   */
-  setRouteHint(edges: EdgeId[] | null): void {
-    this.routeHint = edges;
-    this.pf?.setRouteHint(edges, this.config.routeHintFactor);
-  }
-
-  setMapMatchLoop(loop: NavConfig["mapMatchLoop"]): void {
-    this.config.mapMatchLoop = loop;
-    this.syncTwin();
-  }
-
   /** The twin exists while it is used: a copy of the main EKF when it starts (they agree until a road correction). */
   private syncTwin(): void {
     const t = this.config.mapMatchTwin;
-    const wanted = !!this.ekf && this.config.mapMatchLoop !== "open" && !!(t.prior || t.odometry);
+    const wanted = !!this.ekf && !!(t.prior || t.odometry);
     if (wanted && !this.twin) {
       this.twin = this.ekf!.clone();
       this.twinHistory = this.ekfHistory.copy();
@@ -1307,8 +1278,10 @@ export class Navigator {
     }
     if (step.stopped) return;
     this.noteTurn(step);
-    if (ekf && this.config.mapMatchLoop !== "open" && step.distanceM >= this.nextRoadHeadingM) this.roadHeadingUpdate(step.distanceM);
-    if (ekf && this.config.mapMatchLoop === "closed" && step.distanceM >= this.nextRoadPositionM) this.roadPositionUpdate(step);
+    // Map matching back into the EKF (MAPMATCH-SPEC §9): on straight roads the road's direction corrects the heading,
+    // also while GNSS is trusted; while it isn't, the road position corrects the position.
+    if (ekf && step.distanceM >= this.nextRoadHeadingM) this.roadHeadingUpdate(step.distanceM);
+    if (ekf && step.distanceM >= this.nextRoadPositionM) this.roadPositionUpdate(step);
     if (!ekf && step.distanceM >= this.nextMapStartCheckM) {
       // Heading unknown: a heading settled over `mapStartTrackingM` starts the EKF.
       this.nextMapStartCheckM = step.distanceM + pf.config.evalIntervalM;

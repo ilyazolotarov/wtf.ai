@@ -6,7 +6,6 @@
 //   npm run route:sim -- --minutes 120 --seeds 2
 //   npm run route:sim -- --at 50.4501,30.5234 --graph tools/tiles/out/release/kyiv-city.graph.bin
 //   npm run route:sim -- --gps                            # with GPS all along (the baseline)
-//   npm run route:sim -- --hint 3                         # map matching told the route (ROUTING-SPEC §8.6), factor 3
 //
 // Follow: the route is the car's own path from the cut on, so every "off" is false. Divert: every few minutes a route
 // is planned from where the car is to a point 2–4 km away; the car keeps driving its own way, so it leaves the route
@@ -34,7 +33,6 @@ function parseArgs(argv: string[]) {
   let gpsMin = 3;
   let gps = false;
   let divertEveryMin = 6;
-  let hint = 1;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--at") {
@@ -46,13 +44,12 @@ function parseArgs(argv: string[]) {
     else if (a === "--gps-min") gpsMin = Number(argv[++i]);
     else if (a === "--gps") gps = true;
     else if (a === "--divert-every") divertEveryMin = Number(argv[++i]);
-    else if (a === "--hint") hint = Number(argv[++i]);
     else if (a === "-h" || a === "--help") {
-      console.log("route:sim [--at lat,lon] [--graph <file>] [--minutes 60] [--seeds 3] [--gps-min 3] [--gps] [--divert-every 6] [--hint <factor>]");
+      console.log("route:sim [--at lat,lon] [--graph <file>] [--minutes 60] [--seeds 3] [--gps-min 3] [--gps] [--divert-every 6]");
       process.exit(0);
     }
   }
-  return { at, graph, minutes, seeds, gpsMin, gps, divertEveryMin, hint };
+  return { at, graph, minutes, seeds, gpsMin, gps, divertEveryMin };
 }
 
 const quantile = (v: number[], q: number) => {
@@ -141,8 +138,7 @@ if (!graphFile) throw new Error("no road graph covers --at: build one with `tile
 console.log(
   `${path.basename(graphFile)}: ${args.minutes} min drives, seeds 1–${args.seeds}, ` +
     (args.gps ? "GPS all along" : `GPS for the first ${args.gpsMin} min, then none`) +
-    `; a diversion every ${args.divertEveryMin} min` +
-    (args.hint !== 1 ? `; map matching told the route (factor ${args.hint})` : ""),
+    `; a diversion every ${args.divertEveryMin} min`,
 );
 
 const follow = {
@@ -168,23 +164,13 @@ for (let seed = 1; seed <= args.seeds; seed++) {
   const cutS = 20 + args.gpsMin * 60;
   const startUs = drive.trip.startUs;
   const t0 = performance.now();
-  /** A replay of the drive, map matching told `hints` (with `--hint`). */
-  const replay = (hints: { fromS: number; edges: number[] | null }[], untilS?: number) => {
-    const navGraph = openGraph(graphFile, args.at);
-    const result = replayTrip(drive.trip, {
-      nav: { mapMatchLoop: "closed", routeHintFactor: args.hint },
-      mapMatch: { graph: navGraph.graph },
-      cuts: args.gps ? [] : [{ fromS: cutS, toS: Infinity }],
-      trackStepS: 1,
-      ...(args.hint !== 1 ? { routeHints: hints } : {}),
-      ...(untilS !== undefined ? { untilS } : {}),
-    });
-    navGraph.close();
-    return result;
-  };
-  // Following: the hint is the car's own way from the cut on.
-  const ownEdges = [...new Set(drive.truth.filter((p) => (p.tUs - startUs) / 1e6 >= cutS).map((p) => p.edge))];
-  const result = replay([{ fromS: cutS, edges: ownEdges }]);
+  const navGraph = openGraph(graphFile, args.at);
+  const result = replayTrip(drive.trip, {
+    mapMatch: { graph: navGraph.graph },
+    cuts: args.gps ? [] : [{ fromS: cutS, toS: Infinity }],
+    trackStepS: 1,
+  });
+  navGraph.close();
   const puck = replayPuck(result).filter((p) => p.t >= cutS);
   for (const p of result.track) {
     if (p.tS < cutS) continue;
@@ -243,10 +229,6 @@ for (let seed = 1; seed <= args.seeds; seed++) {
     if (r.status !== "done") continue;
     divert.planned++;
     const maneuvers = routeManeuvers(routeGraph.graph, r.plan);
-    // With a hint, map matching is told this route from now on (a replay of its own, to the end of the window).
-    const divertPuck = args.hint !== 1
-      ? replayPuck(replay([{ fromS: tS, edges: r.plan.legs.map((l) => l.edge) }], tS + 600)).filter((p) => p.t >= tS)
-      : puck;
     // Where the car really left it: the true position more than 25 m off the route, by guidance on the truth.
     const onTruth = new RouteGuidance(r.plan, maneuvers, { offMinM: 25, offHoldS: 0, offHoldM: 0 });
     const onPuck = new RouteGuidance(r.plan, maneuvers);
@@ -254,7 +236,7 @@ for (let seed = 1; seed <= args.seeds; seed++) {
     let detectedAt: number | null = null;
     let arrived = false;
     let lastPuckState: GuidanceState | null = null;
-    for (const p of divertPuck) {
+    for (const p of puck) {
       if (p.t < tS) continue;
       if (p.t > tS + 600) break;
       const tr = truthAtS(p.t);

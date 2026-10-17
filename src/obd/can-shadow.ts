@@ -498,7 +498,8 @@ export class CanShadow implements IdleMonitor {
     };
     this.deps.onWindow(w);
     this.deps.onStatus(this.status);
-    if (this.windowFrames > 0) this.deafUs = 0;
+    // A replaced monitor (other ids, `disable`) doesn't judge its filter: the probe moved on (can-auto-ids.ts).
+    if (this.windowFrames > 0 || this.disabled) this.deafUs = 0;
     else if ((this.deafUs += endUs - this.windowStartUs) >= DEAF_US) {
       this.deafUs = 0;
       this.nextReopen(`${DEAF_US / 1e6} s of listening heard none of the ids after ${this.reopenName(this.reopen)}`);

@@ -123,8 +123,7 @@ export interface NavigatorDebug {
   compassOffDeg: number | null;
   /** Map matching: the region whose graph is set (null: none), the filter's state and cost. */
   mapMatchRegion: string | null;
-  /** How map matching feeds back into the navigator, and the road corrections it sent this drive. */
-  mapMatchLoop: MapMatchLoop;
+  /** The road corrections map matching sent the navigator this drive. */
   roadHeading: { accepted: number; rejected: number } | null;
   roadPosition: { accepted: number; rejected: number } | null;
   mapMatch: MapMatchEstimate | null;
@@ -140,8 +139,6 @@ export interface MapMatchOverlay {
   particles: [number, number, number, number][];
   clusters: MapMatchEstimate["clusters"];
 }
-
-export type MapMatchLoop = NavConfig["mapMatchLoop"];
 
 export interface NavigatorServiceDeps {
   sensors: Pick<SensorService, "gnss" | "imu" | "want">;
@@ -263,10 +260,6 @@ export class NavigatorService implements PositionSource {
   /** Test tool: GNSS withheld from the navigator. */
   private readonly outage = new SimulatedOutageTool();
   private overlay: MapMatchOverlay | null = null;
-  /** Developer setting: how map matching feeds back into the navigator (MAPMATCH-SPEC §9). */
-  private loop: MapMatchLoop = "open";
-  /** The route's edges for the filter (ROUTING-SPEC §8.6), or null. */
-  private routeHint: number[] | null = null;
   /** The active route's polyline (phone-only mode follows it, §9.6; it tips the dot's direction, puck.ts); and the state it last noted. */
   private phoneRoute: { lat: number; lon: number }[] | null = null;
   private phoneRouteState: PhoneRouteState = "none";
@@ -291,14 +284,6 @@ export class NavigatorService implements PositionSource {
   }
 
   getSnapshot = (): PositionEstimate | null => this.position;
-
-  /** Switch the navigator version (developer setting); the running navigator follows at once. */
-  setMapMatchLoop(loop: MapMatchLoop): void {
-    if (loop === this.loop) return;
-    this.loop = loop;
-    this.nav?.setMapMatchLoop(loop);
-    this.note(`nav map-match loop ${loop}`);
-  }
 
   /**
    * Experimental (§9.6): without OBD speed, show the phone's own dead reckoning on the map (its speed from the IMU,
@@ -344,14 +329,6 @@ export class NavigatorService implements PositionSource {
     if (!w || w.calibration.learnedS <= 0) return;
     const c = w.calibration;
     this.note(`nav wheel yaw: tyres ${(c.tyre * 100).toFixed(3)} % ±${(c.tyreSigma * 100).toFixed(3)}, track ${c.trackM.toFixed(3)} m, learned from ${Math.round(c.learnedS)} s`);
-  }
-
-  /** The route the driver follows, for map matching (ROUTING-SPEC §8.6); null: none. Kept for a new navigator. */
-  setRouteHint(edges: number[] | null): void {
-    if (edges === this.routeHint || (!edges && !this.routeHint)) return;
-    this.routeHint = edges;
-    this.nav?.setRouteHint(edges);
-    this.note(edges ? `nav route hint: ${edges.length} edges` : "nav route hint off");
   }
 
   /** The active route's polyline (null: none): phone-only mode takes the car to follow it (§9.6). */
@@ -547,7 +524,6 @@ export class NavigatorService implements PositionSource {
       compassTrust: nav ? nav.compassTrust : "off",
       compassOffDeg: nav ? compassOff(nav) : null,
       mapMatchRegion: this.graph?.region ?? null,
-      mapMatchLoop: this.loop,
       roadHeading: nav ? { accepted: nav.stats.roadHeadingAccepted, rejected: nav.stats.roadHeadingRejected } : null,
       roadPosition: nav ? { accepted: nav.stats.roadPositionAccepted, rejected: nav.stats.roadPositionRejected } : null,
       mapMatch: e?.mapMatch ?? null,
@@ -669,7 +645,7 @@ export class NavigatorService implements PositionSource {
     const lag = calibration.gnssLag();
     // What this navigator starts from, raw, so a replay can start from the same (app-replay.ts).
     this.note(`${STORAGE_NOTE}${JSON.stringify(calibration.snapshot(null))}`);
-    const nav = new Navigator({ ...this.deps.nav, mapMatchLoop: this.loop, ...(lag ? { gnssLagS: lag.lagS } : {}) });
+    const nav = new Navigator({ ...this.deps.nav, ...(lag ? { gnssLagS: lag.lagS } : {}) });
     this.nav = nav;
     this.lastPuck = null;
     this.lastDot = null;
@@ -686,7 +662,6 @@ export class NavigatorService implements PositionSource {
     this.graph = null;
     this.timing.resetInterval();
     this.applyRoadGraph();
-    nav.setRouteHint(this.routeHint);
     this.held.setApplied(false);
     // Known before the adapter connects: the last car seen.
     const vin = link.expectedVin();
@@ -938,7 +913,7 @@ export class NavigatorService implements PositionSource {
     this.drainUpdateTimes();
     const timing = this.timing.endDrive();
     if (timing) this.note(timing);
-    if (this.nav) this.notes.roadCorrections(this.nav, this.loop);
+    if (this.nav) this.notes.roadCorrections(this.nav);
   }
 
   // ---- output ----

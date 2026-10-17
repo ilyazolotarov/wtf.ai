@@ -1,5 +1,5 @@
 import { useLocalSearchParams } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { Alert, Linking, Platform, Share, StyleSheet, View } from "react-native";
 
 import {
@@ -14,7 +14,7 @@ import { useLinkBadge, useNavStatus } from "@/components/status/use-nav-status";
 import { Icon } from "@/components/ui/icon";
 import { T } from "@/components/ui/text";
 import { DeviceList } from "@/components/vehicle/device-list";
-import { dash, fmt } from "@/components/vehicle/format";
+import { carStateText, speedFromText } from "@/components/vehicle/car-status";
 import { usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
 import type { DiscoveredDevice } from "@/obd/types";
@@ -47,10 +47,12 @@ export default function VehicleScreen() {
 function CarDetails() {
   const { t } = useT();
   const palette = usePalette();
-  const { link } = useRuntime();
+  const runtime = useRuntime();
+  const { link } = runtime;
   const nav = useNavStatus();
   const snap = useVehicleLinkSnapshot();
-  const { adapter, vehicle, stats } = snap;
+  const { adapter } = snap;
+  const canAuto = useSyncExternalStore(runtime.canAuto.subscribe, runtime.canAuto.status);
 
   // With an adapter connected the list stays hidden until the driver asks to switch.
   const [switching, setSwitching] = useState(false);
@@ -102,10 +104,14 @@ function CarDetails() {
     : snap.error.code === "adapter-silent"
       ? t("adapterSilent")
       : `${snap.error.code}${snap.error.message && !gattDump ? `: ${snap.error.message}` : ""}`;
-  const caps = adapter?.capabilities;
-  const capText = caps
-    ? [caps.responseCount && "count", caps.adaptiveTiming2 && "AT2", caps.physicalAddressing && "ATSH"].filter(Boolean).join(", ") || dash
-    : dash;
+  // Does the car answer, and what it reads (UI-SPEC §7.2): the rest (chip, protocol, timing) is in the trip log.
+  const answering = snap.link === "polling" || snap.link === "standby";
+  const car = answering ? carStateText(snap.engine, palette, t) : null;
+  const speed = snap.lastSpeed;
+  const speedValue = speed
+    ? `${Math.round(Math.abs(speed.raw))} ${t("speed")}${speed.raw < 0 ? ` · ${t("reverseGear")}` : ""}`
+    : t("unavailableValue");
+  const speedFrom = speedFromText({ wheelSpeed: devSettings.wheelSpeed, speed, canOff: snap.canOff ?? null, canShadow: snap.canShadow ?? null, canAuto }, t);
 
   return (
     <>
@@ -143,17 +149,15 @@ function CarDetails() {
             </View>
           ) : null}
         </View>
-        {snap.activeDeviceId && (
+        {car && (
           <>
-            <ScreenRow labelKey="linkState" value={snap.link} />
-            <ScreenRow labelKey="transport" value={adapter?.transport ?? dash} />
-            <ScreenRow labelKey="elmVersion" value={adapter?.elmVersion ?? dash} />
-            <ScreenRow labelKey="chip" value={adapter?.chip ?? adapter?.description ?? dash} />
-            <ScreenRow labelKey="suspectedClone" value={adapter ? (adapter.suspectedClone ? t("yes") : t("no")) : dash} />
-            <ScreenRow labelKey="batteryVoltage" value={fmt(adapter?.batteryV, 1, "V")} />
-            <ScreenRow labelKey="obdProtocol" value={vehicle?.protocol ?? dash} />
-            <ScreenRow labelKey="capabilities" value={capText} />
-            <ScreenRow labelKey="gattProfile" value={adapter?.connected?.gatt?.profileId ?? adapter?.connected?.protocol ?? dash} />
+            <ScreenRow labelKey="carState" value={car.text} valueColor={car.color} />
+            {snap.engine !== "ignition-off" && (
+              <>
+                <ScreenRow labelKey="carSpeed" value={speedValue} />
+                <ScreenRow labelKey="speedFrom" value={speedFrom} />
+              </>
+            )}
           </>
         )}
         {errorText && <ScreenRow labelKey="lastError" value={errorText} valueColor={palette.bad.c} />}
@@ -199,21 +203,6 @@ function CarDetails() {
         </>
       )}
 
-      <ScreenSection title={t("odometry")}>
-        <ScreenRow labelKey="vin" value={vehicle?.vin ?? dash} />
-        <ScreenRow labelKey="odometryStage" value={t("odometryStageOne")} />
-        <ScreenRow labelKey="yawSource" value={t("phoneGyro")} />
-      </ScreenSection>
-
-      <ScreenSection title={t("liveSignals")}>
-        <ScreenRow labelKey="obdSpeed" value={snap.lastSpeed ? `${snap.lastSpeed.raw} km/h` : dash} />
-        <ScreenRow labelKey="rpm" value={snap.lastRpm ? fmt(snap.lastRpm.rpm, 0) : dash} />
-        <ScreenRow labelKey="engineState" value={snap.engine} />
-        <ScreenRow labelKey="pollRate" value={fmt(stats?.speedHz, 1, "Hz")} />
-        <ScreenRow labelKey="latency" value={stats ? `${fmt(stats.latencyP50Ms, 0)} / ${fmt(stats.latencyP95Ms, 0)} ms` : dash} />
-        <ScreenRow labelKey="errorsPerMinute" value={stats ? String(stats.errorsLastMinute) : dash} />
-        <ScreenRow labelKey="speedCap" value={stats ? fmt(stats.speedCapHz, 0, "Hz") : dash} />
-      </ScreenSection>
     </>
   );
 }

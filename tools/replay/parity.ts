@@ -13,7 +13,6 @@ import { haversineM } from "../../src/nav/geo";
 import { estimateTrack, trackAt } from "../../src/nav/replay/drive-report";
 import { MemoryKeyValueStore, phoneOf, replayTripInApp, seedFromLog } from "../../src/services/navigation/app-replay";
 import { CalibrationStore } from "../../src/services/navigation/calibration-store";
-import type { MapMatchLoop } from "../../src/services/navigation/navigator-service";
 import { readTripLog } from "../../src/triplog/trip-log-reader";
 import { findGraph, openGraph } from "./graph-file";
 import { isMainThread, Pool, serveJobs, threadsArg } from "./pool";
@@ -41,7 +40,8 @@ function compare(file: string): Row {
   const trip = readTripLog(new Uint8Array(readFileSync(file)));
   const name = path.basename(file);
   const build = /\b([0-9a-f]{7})\)$/.exec(String(trip.info.ver_sw ?? ""))?.[1] ?? null;
-  const loop = (typeof trip.info.nav_mapmatch_loop === "string" ? trip.info.nav_mapmatch_loop : "open") as MapMatchLoop;
+  // The phone's navigator version (logs before 2026-10-17 could run another; the replay runs full correction).
+  const loop = typeof trip.info.nav_mapmatch_loop === "string" ? trip.info.nav_mapmatch_loop : "open";
   const base = { file: name, build, loop, storage: 0, compared: 0, p50: NaN, p90: NaN, max: NaN, worstS: NaN };
   if (!trip.navEstimate.length) return { ...base, error: "no dot in the log (older than nav_estimate)" };
   const calibration = new CalibrationStore(new MemoryKeyValueStore(), phoneOf(trip));
@@ -52,7 +52,6 @@ function compare(file: string): Row {
   try {
     const r = replayTripInApp(trip, {
       calibration,
-      loop,
       roadGraph: opened ? { key: graphFile!, region: path.basename(graphFile!, ".graph.bin"), graph: opened.graph } : null,
     });
     const replay = estimateTrack(r.published.map((p) => ({ ...p, tUs: p.timestampUs })), trip.startUs);

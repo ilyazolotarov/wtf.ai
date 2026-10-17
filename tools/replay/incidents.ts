@@ -18,7 +18,6 @@
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-import { APP_NAV_DEFAULTS } from "../../src/nav/app-defaults";
 import type { MapMatchConfig } from "../../src/nav/mapmatch/particle-filter";
 import type { NavConfig } from "../../src/nav/navigator";
 import { puckTuning } from "../../src/nav/position/puck";
@@ -28,7 +27,6 @@ import { describeIncident, findIncidents, INCIDENT_STEP_S, type DotSample, type 
 import { appOutageCuts } from "../../src/nav/replay/replay";
 import { MemoryKeyValueStore, phoneOf, replayTripInApp } from "../../src/services/navigation/app-replay";
 import { CalibrationStore } from "../../src/services/navigation/calibration-store";
-import type { MapMatchLoop } from "../../src/services/navigation/navigator-service";
 import type { NavEstimateRecord } from "../../src/triplog/schema";
 import { readTripLog, type TripLog } from "../../src/triplog/trip-log-reader";
 import { carOf, drawnStartPose, graphFor, phoneRouteFor } from "./app-chain";
@@ -125,7 +123,6 @@ function runJob(job: Job): JobResult {
       }
       const r = replayTripInApp(trip, {
         calibration,
-        loop: (APP_NAV_DEFAULTS.mapMatchLoop ?? "closed") as MapMatchLoop,
         roadGraph: graph?.active && hidden.length ? { ...graph.active, graph: withHiddenRoads(graph.active.graph, hidden) } : graph?.active,
         vin: carOf(trip, new Map()),
         cuts: appOutageCuts(trip),

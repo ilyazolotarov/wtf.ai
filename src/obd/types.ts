@@ -68,6 +68,8 @@ export type LinkState =
   | "reconnecting"
   | "error";
 
+export type CanOff = "adapter" | "car" | "firmware";
+
 export type EngineState =
   | "unknown"
   | "ignition-off"
@@ -245,8 +247,13 @@ export interface VehicleLinkSnapshot {
    * reconnects; null when ready (polling, VIN known) or stopped by the user. The UI badge times out on it.
    */
   tryingSinceMs: number | null;
-  /** The CAN shadow on this session (VEHICLE-LINK-SPEC §16.2); null: off. */
+  /** The CAN monitor on this session (VEHICLE-LINK-SPEC §16.2); null: off. */
   canShadow?: CanShadowStatus | null;
+  /**
+   * Why this session can't read the wheels (§16.3): not an STN adapter, a car not on CAN, or the adapter froze in the
+   * monitor on its firmware; null: it can (or no session).
+   */
+  canOff?: CanOff | null;
 }
 
 export type SendFn = (

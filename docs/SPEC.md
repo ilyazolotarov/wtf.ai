@@ -51,16 +51,18 @@ Odometry is built up in stages (§2.1). Stage 1 uses the minimum that works on a
   stops the monitor). Stage 2 shares the adapter by time-slicing (VEHICLE-LINK-SPEC §16): the monitor runs while the
   ECU is awake and breaks for OBD requests. Engine and ignition state stay on OBD (`010C`, the `0100` probe) in every
   stage.
-- Per car (VIN), CAN data goes through three levels:
+- CAN data has two levels, one setting for every car (Settings → Car → *Speed from the wheels*, on by default;
+  VEHICLE-LINK-SPEC §16.3):
 
-  | Level       | Navigation speed                    | CAN frames                     | OBD `010D`                                                          |
-  | ----------- | ----------------------------------- | ------------------------------ | ------------------------------------------------------------------- |
-  | OBD         | `010D` at 2 Hz                      | not read                       | the speed source                                                    |
-  | CAN shadow  | `010D`, at the time-sliced rate     | logged raw, decoded in replay  | the speed source, and the reference for the CAN mapping             |
-  | CAN primary | wheel speeds                        | decoded on the phone           | ~1 Hz cross-check; a disagreement or missing frames → back to OBD   |
+  | Level                 | Navigation speed | CAN frames                     | OBD `010D`                                             |
+  | --------------------- | ---------------- | ------------------------------ | ------------------------------------------------------ |
+  | OBD                   | `010D` at 2 Hz   | not read                       | the speed source                                       |
+  | CAN primary (default) | wheel speeds     | decoded on the phone, logged   | polled only while the car stands, or with no CAN speed |
 
-  A car moves to CAN primary when its drives, each on its own, show the CAN speed matching `010D` within its 1 km/h
-  step, the wheel speeds matching GNSS, and the gear reading R while reversing.
+  CAN primary falls back to OBD by itself: an adapter that isn't an STN, a car not on CAN, a make without a profile,
+  none of its ids heard, or the monitor failing. The wheel and gear mappings are opendbc's, trusted as they are; the
+  speed scale is learned against GNSS as with OBD (`k_s`). Logging the frames while navigating on OBD ("CAN shadow",
+  until 2026-10-17) is gone: the polls' breaks (~160 ms each) cost both the polls and the monitor.
 
 ## 3. Architecture
 
@@ -148,15 +150,16 @@ A common `OdometrySource` interface feeds the EKF with timestamped speed and yaw
   - CAN FD platforms are left out: the STN adapters receive classic CAN only.
   - Not yet in a profile: the track width the wheel-differential yaw (Stage 2) needs. The wheel scale isn't stored:
     the navigator learns it (`k_s`).
-- A mapping is trusted only after the CAN shadow comparison (§2.1): `010D` is km/h on every car, so a wrong unit or
+- A mapping is checked in replay against `010D` (`replay:can`, the polls of a standing car and logs before CAN primary): `010D` is km/h on every car, so a wrong unit or
   factor shows as a constant ratio.
 - Profile selection: the VIN's make (WMI) gives the candidate profiles; the ids heard on the OBD port with the DBC's
   length (only those the monitor listened for, when it was filtered) pick one, and a profile needs a wheel or speed
   message among them. openpilot's CAN fingerprints aren't used: they are recorded at its camera harness, behind any
   gateway, not at the OBD port.
-- Navigation on CAN speed, replay only so far: wheel speeds as the navigator's speed, reverse gear moving the car
-  and the map matching backwards (NAVIGATOR-SPEC §5.3, MAPMATCH-SPEC §7.3); `--speed can` in `replay:bench` and
-  `replay:regress`, *Adapter: CAN wheel speeds* in the viewer. Wheel-differential yaw is next.
+- Navigation on CAN speed (the app's default, VEHICLE-LINK-SPEC §16.3): wheel speeds as the navigator's speed
+  (a profile without them: its speed message), reverse gear moving the car and the map matching backwards (NAVIGATOR-SPEC §5.3, MAPMATCH-SPEC §7.3); in replay
+  `--speed can` in `replay:bench` and `replay:regress`, *Adapter: CAN wheel speeds* in the viewer. Wheel-differential
+  yaw (NAVIGATOR-SPEC §5.4) is an experimental setting, off by default.
 - Replay: `npm run replay:can` decodes a log's frames and compares wheel and CAN speed with `010D` and satellite GNSS
   speed, gear with motion, and shows steering, brake and the share of the drive the monitor heard; the replay viewer
   draws the CAN wheel speed under the OBD speed and shows speed, gear and steering at the cursor.
@@ -331,13 +334,12 @@ Screens and the map in detail: [UI-SPEC.md](UI-SPEC.md); the trip-log pages: [TR
 - `onboarding` — first-run flow (welcome, location permission, adapter, phone holder). No calibration step (§3.6).
 - `map-setup` — the first map download (full-screen, until a region is installed).
 - Pages: everything below is pushed on the root stack from the map and goes back by the system's back swipe or gesture (UI-SPEC §7).
-- `more/` — the list linking the Guide, Offline maps (`more/downloads`), App update (`more/update`, UPDATES-SPEC §5.5) and `settings`, then the diagnostic pages `position`, `recorder` (Trip recorder) and `developer`.
+- `more/` — the list linking the Guide, Offline maps (`more/downloads`), App update (`more/update`, UPDATES-SPEC §5.5) and `settings`, then the diagnostic pages `recorder` (Trip recorder) and `developer`.
 - Update checks, prompts and the dots on More: UPDATES-SPEC §5.
 - `guide/` — the in-app guide: the map tour and the interactive lessons (`guide/lesson`, UI-SPEC §7.7).
-- `vehicle` — the car only: adapter discovery list and connection (transport, ELM version, protocol, poll rate), VIN, engine state, active odometry stage.
-- `position` — integrity, live GNSS, EKF state, map matching and routing timings.
-- `recorder` — everything about trip logs: the trip now (start / stop / marker), the `trips` list, recording settings (trip end and linger times, raw IMU, IMU rate), the opt-in upload code and the storage limit.
-- `developer` — test switches and knobs (emulated adapters, particles, GPS outage button, route hint, speed cap, RPM period, navigator version), the ELM terminal and the UI gallery (every conditional map panel at once, for large-text checks: UI-SPEC §4.7).
+- `vehicle` — the car only: adapter discovery list and connection, whether the car answers, its speed and where it comes from (the wheels or OBD, and why).
+- `recorder` — everything about trip logs: the trip now (start / stop / marker), the `trips` list, recording settings (trip end and linger times), the opt-in upload code and the storage limit.
+- `developer` — test switches and knobs (emulated adapters, particles, GPS outage button, phone-only mode, RPM period), the ELM terminal and the UI gallery (every conditional map panel at once, for large-text checks: UI-SPEC §4.7).
 - `downloads` — Offline maps: the regions to download (map, road graph and search index together).
 - `route` — destination search, saved places and recents, and starting guidance (ROUTING-SPEC, SEARCH-SPEC).
 - `trips` (log list, share, delete) and `debug-terminal` (ELM terminal), opened from the recorder and developer pages.

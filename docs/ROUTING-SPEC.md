@@ -23,7 +23,7 @@ Plan a drive to a destination offline and guide the driver along it, so that:
   (`src/services/navigation/route-service.ts`), trip-log records, and the app: long press → Route here, the city list,
   the banner and the route on the map, spoken maneuvers (§8, UI-SPEC §6.3, §7.1). Checked on simulated drives
   (§8.4); routes and guidance show in `replay:view`.
-- **R5 built, off:** the route as a hint for map matching, a developer switch; measured in §8.6.
+- **R5 measured, removed:** the route as a hint for map matching (§8.6).
 - **Cost model from the map (2026-10-10):** speed limits, settlement, surface, traffic lights and rush hours from
   the graph's speed attributes (§4.1–4.3), checked on 26 drives (§4.4). Takes effect with map packs built from then.
 - **Long routes (2026-10-10, §7):** a search past 150 k states starts again at weight 2: a 923 km route to Mariupol in
@@ -272,7 +272,7 @@ Node on the Windows PC, cold tile cache (2026-10-05):
   the candidates are a routing-only tile decode (no geometry arrays) and skipping minor roads far from both ends.
 - ETA: checked against drives in §4.4.
 
-## 8. App and the route hint (R4, R5)
+## 8. App (R4)
 
 ### 8.1 Guidance (`src/nav/routing/guidance.ts`)
 
@@ -424,25 +424,13 @@ waiting` when queued), `voice muted: …` for one not said, and what went wrong:
 never finishing (given up after 4 s + 0.12 s a character), a clip paused by the system and played again. Whatever
 the player does, the next announcement is said.
 
-### 8.6 Route hint (R5, built, off)
+### 8.6 Route hint (R5, measured, removed)
 
-`Navigator.setRouteHint(edges)` (`NavConfig.routeHintFactor`, 3): at a junction the particle filter sends that many
-times more particles onto an exit along the route. Only the proposal at junctions changes, never the weights, so
-the turns still decide (a test drives a 10:1 hint the wrong way and the filter follows the car). In the app it is a
-developer switch, **off by default** ("Tell map matching the route"; trip-log info `nav_route_hint`, note
-`nav route hint …`). `npm run route:sim -- --hint <factor>`, same drives as §8.4 (regional city / Kyiv):
-
-| Hint | Dot off the truth p50 / p90 / max | Progress error max | Top hypothesis on the car's edge | Departures: median, worst | False "off" before leaving |
-| --- | --- | --- | --- | --- | --- |
-| off | 5 / 9 / 48 m; 4 / 8 / 33 m | 90 m; 123 m | 81.3 %; 82.0 % | 5 s / 51 m, 59 s / 173 m; 6 s / 50 m, 43 s / 177 m | 0; 0 |
-| 3× | 4 / 9 / 43 m; 4 / 8 / 31 m | 46 m; 20 m | 80.9 %; 82.1 % | 5 s / 53 m, 59 s / 173 m; 6 s / 52 m, 43 s / 177 m | 0; 0 |
-| 10× | 4 / 9 / 55 m; 4 / 9 / 28 m | 46 m; 18 m | 83.8 %; 82.6 % | 9 s / 71 m, 117 s / 925 m; 6 s / 62 m, 10 s / 105 m | 1; 0 |
-
-- 3× changes little: the simulated filter already holds the road (dot median 4–5 m), so a prior adds almost nothing
-  but trims the worst progress errors. 10× starts to hide real departures (925 m before the regional city's slowest was
-  noticed). Hence off, 3× when on.
-- Worth trying on the road only where map matching struggles without it (multimodal for long stretches, MAPMATCH-SPEC
-  §9.4's long arterials); the simulator is optimistic there.
+At a junction the particle filter could favour the route's exit (a prior on the proposal, never the weights). In the
+simulator (`route:sim`, the drives of §8.4) a factor of 3 changed little: the filter already held the road (dot
+median 4–5 m) and only the worst progress errors shrank (90 → 46 m, 123 → 20 m); 10 hid real departures (925 m before
+the slowest was noticed). It never ran on the road and was removed on 2026-10-17. Don't bring it back without a
+road case where map matching fails without it.
 
 ### 8.7 Alternative routes (`src/nav/routing/alternatives.ts`)
 
@@ -488,7 +476,7 @@ One short Kyiv route's "alternative" was 27 % faster than the main route: what t
 | R2 | Planner (§4–5), `npm run route` with timings on a regional city and Kyiv |
 | R3 | Turn instructions (§6) |
 | R4 | App: destination, route line, banner, re-plan |
-| R5 | The route as a map-matching hint, measured in the simulator (built, off: §8.6) |
+| R5 | The route as a map-matching hint, measured in the simulator, removed (§8.6) |
 | R6 | Route times from the map's speed attributes, rush hours, checked on drives (§4) |
 | R7 | Alternative routes (§8.7) |
 

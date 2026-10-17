@@ -4,7 +4,6 @@ import { Pressable, StyleSheet, useColorScheme, View } from "react-native";
 
 import { AVAILABLE_LESSONS } from "@/components/guide/lesson-bodies";
 import { ScreenContent, ScreenSection } from "@/components/screens/screen-ui";
-import { useNavStatus } from "@/components/status/use-nav-status";
 import { Icon, type IconName } from "@/components/ui/icon";
 import { T } from "@/components/ui/text";
 import { fmtBytes } from "@/components/vehicle/format";
@@ -25,7 +24,6 @@ export default function MoreScreen() {
   const palette = usePalette();
   const dark = useColorScheme() === "dark";
   const { installed } = useMapPacks();
-  const nav = useNavStatus();
   const rec = useRecorderSnapshot();
   const lessonsDone = useLessonsDone();
   const updates = useUpdateBadges();
@@ -68,13 +66,6 @@ export default function MoreScreen() {
     },
   ];
   const diagnostics: Item[] = [
-    {
-      icon: "my_location",
-      label: t("position"),
-      sub: `${nav.label} · ${nav.source}`,
-      subColor: nav.color.c,
-      href: "/more/position",
-    },
     {
       icon: "radio_button_checked",
       label: t("tripRecorder"),

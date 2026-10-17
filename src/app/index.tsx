@@ -169,9 +169,10 @@ export default function HomeScreen() {
   const alertText = trustAlertText(nav, t);
 
   // The explanation under the status pill stays folded to leave room for the map; a tap on the
-  // pill opens it.
+  // pill opens it. The manual position's chip is part of it: the pill already says the position is set by hand.
   const showCutGps = outageButton && position != null && !outage;
-  const hasDetails = outage != null || alertText != null || showCutGps;
+  const showManual = !placing && manual != null && !manual.asking;
+  const hasDetails = outage != null || alertText != null || showCutGps || showManual;
   const [detailsToggled, setDetailsOpen] = useState(false);
   const detailsOpen = detailsToggled && hasDetails;
 
@@ -245,7 +246,9 @@ export default function HomeScreen() {
               styles.overlay,
               // Sideways (landscape, a tablet ignoring the portrait lock) the navigation bar and cutouts are at the sides.
               {
-                paddingTop: insets.top + 10,
+                // Just under the status bar: its inset (time, signal, the camera cutout) is never covered, and only a
+                // shadow's width more is kept, so the map gets the rest.
+                paddingTop: insets.top + 2,
                 paddingBottom: bottomPadding,
                 paddingLeft: insets.left + OVERLAY_GUTTER,
                 paddingRight: insets.right + OVERLAY_GUTTER,
@@ -280,7 +283,7 @@ export default function HomeScreen() {
                 <HudChip icon="location_on" label={t("placeOffer")} color={palette.accent} onPress={() => place.start()} />
               )}
 
-              {!placing && manual && !manual.asking && (
+              {showManual && detailsOpen && (
                 <ManualChip
                   manual={manual}
                   onPlace={place.standing ? () => place.start() : undefined}

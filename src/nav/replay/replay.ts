@@ -5,9 +5,7 @@ import type { GnssLagEstimate } from "../calibration/gnss-lag";
 import { rotateCalibration, type CompassCalibration, type CompassTrust } from "../compass/compass";
 import type { TripLog } from "../../triplog/trip-log-reader";
 import { haversineM } from "../geo";
-import type { EdgeId } from "../mapmatch/graph/road-graph";
 import type { MapMatchConfig } from "../mapmatch/particle-filter";
-import { APP_NAV_DEFAULTS } from "../app-defaults";
 import { deepCopy } from "../deep-copy";
 import { Navigator, SQRT_68, type FixOutcome, type InitMethod, type MapMatchGraph, type NavConfig, type NavEstimate, type ParkedPose } from "../navigator";
 import type { OdometryStep } from "../odometry/odometry-output";
@@ -82,8 +80,6 @@ export interface ReplayOptions {
    * the §10.2 metrics; `particlesEveryS` keeps particle snapshots for the viewer.
    */
   mapMatch?: { graph: MapMatchGraph; truth?: TruthMatch; config?: Partial<MapMatchConfig>; particlesEveryS?: number };
-  /** Route hints for the filter (ROUTING-SPEC §8.6) from these times on (log-relative s, ascending); null clears. */
-  routeHints?: { fromS: number; edges: EdgeId[] | null }[];
   /** Stop the replay at this time (log-relative s). */
   untilS?: number;
 }
@@ -152,8 +148,6 @@ export interface ReplayInit {
 const INIT_NAMES: Record<InitMethod, string> = { course: "course", alignment: "alignment", pose: "parked pose", map: "map", user: "driver" };
 
 export interface ReplaySummary {
-  /** The settings the replay ran, so a tool can show that it matched the app's (app-defaults.ts). */
-  nav: Pick<NavConfig, "mapMatchLoop">;
   durationS: number;
   obdDistanceM: number;
   init: ReplayInit | null;
@@ -173,9 +167,9 @@ export interface ReplaySummary {
   imuInvalidS: number;
   standstillS: number;
   resets: number;
-  /** Road-heading pseudo-measurements into the EKF (`mapMatchLoop: "heading"`, MAPMATCH-SPEC §9). */
+  /** Road-heading pseudo-measurements into the EKF (MAPMATCH-SPEC §9). */
   roadHeading: { accepted: number; rejected: number };
-  /** Road-position pseudo-measurements (`mapMatchLoop: "closed"`). */
+  /** Road-position pseudo-measurements, while GNSS isn't trusted. */
   roadPosition: { accepted: number; rejected: number };
   cuts: CutResult[];
   /** Map-matching metrics (with `mapMatch.truth`). */
@@ -397,7 +391,6 @@ export class ReplayRecorder {
       fixes,
       particles: this.particles,
       summary: {
-        nav: { mapMatchLoop: nav.config.mapMatchLoop },
         durationS,
         obdDistanceM: this.distanceM(),
         init: this.init,
@@ -486,7 +479,6 @@ interface ReplayInputs {
   obdSpeed: TripLog["obdSpeed"];
   gnss: GnssFix[];
   mag: MagSample[];
-  hints: NonNullable<ReplayOptions["routeHints"]>;
   /** The navigator that last used the road graph (forks share it, each in its own frame). */
   graphUser: Navigator | null;
 }
@@ -502,15 +494,15 @@ export class TripReplay {
     private readonly inputs: ReplayInputs,
     private readonly nav: Navigator,
     private readonly rec: ReplayRecorder,
-    /** Next input of each stream; route hints applied; log time (s) of the last input fed. */
-    private readonly at: { i: number; o: number; g: number; k: number; h: number; fedS: number },
+    /** Next input of each stream; log time (s) of the last input fed. */
+    private readonly at: { i: number; o: number; g: number; k: number; fedS: number },
   ) {}
 
   static start(trip: TripLog, options: ReplayOptions = {}): TripReplay {
     // With a compass option the particle filter uses it (`on`); otherwise it runs in shadow, as in the app.
     // The app's settings first, so a replay measures the system the phone runs (app-defaults.ts); `nav` overrides
     // them for an experiment.
-    const nav = new Navigator({ ...APP_NAV_DEFAULTS, ...(options.compass ? { compassUse: "on" as const } : {}), ...options.nav });
+    const nav = new Navigator({ ...(options.compass ? { compassUse: "on" as const } : {}), ...options.nav });
     const cal = options.compass?.calibration;
     if (cal) nav.setCompassCalibration(options.compass?.rotateRad ? rotateCalibration(cal, options.compass.rotateRad) : cal);
     if (options.odometry) nav.subscribeOdometry(options.odometry);
@@ -532,10 +524,9 @@ export class TripReplay {
       obdSpeed: from(trip.obdSpeed),
       gnss: from(spoofed),
       mag: from(trip.mag ?? []),
-      hints: options.routeHints ?? [],
       graphUser: nav,
     };
-    return new TripReplay(inputs, nav, rec, { i: 0, o: 0, g: 0, k: 0, h: 0, fedS: -Infinity });
+    return new TripReplay(inputs, nav, rec, { i: 0, o: 0, g: 0, k: 0, fedS: -Infinity });
   }
 
   /** Feed the inputs up to log time `untilS` (s), inclusive (as `ReplayOptions.untilS`). */
@@ -590,7 +581,7 @@ export class TripReplay {
   /** Merge the streams in time order until `stop` (at the next input's log time, s). */
   private feed(stop: (tS: number) => boolean): void {
     this.useGraph();
-    const { imu, obdSpeed, gnss, mag, hints } = this.inputs;
+    const { imu, obdSpeed, gnss, mag } = this.inputs;
     const { nav, rec, at } = this;
     while (at.i < imu.length || at.o < obdSpeed.length || at.g < gnss.length || at.k < mag.length) {
       const ti = at.i < imu.length ? imu[at.i].tUs : Infinity;
@@ -600,7 +591,6 @@ export class TripReplay {
       const tNext = this.tS(Math.min(ti, to, tg, tm));
       if (stop(tNext)) break;
       at.fedS = tNext;
-      while (at.h < hints.length && hints[at.h].fromS <= tNext) nav.setRouteHint(hints[at.h++].edges);
       if (tm < ti && tm < to && tm < tg) {
         nav.onMag(mag[at.k++]);
       } else if (ti <= to && ti <= tg) {

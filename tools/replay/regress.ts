@@ -28,7 +28,6 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { APP_NAV_DEFAULTS } from "../../src/nav/app-defaults";
 import { bearingRad, haversineM } from "../../src/nav/geo";
 import { LocalFrame } from "../../src/nav/geo/local-frame";
 import type { MapMatchConfig } from "../../src/nav/mapmatch/particle-filter";
@@ -47,7 +46,6 @@ import { obdOdometer } from "../../src/nav/replay/truth-match";
 import { wrapAngle } from "../../src/nav/ekf/dr-ekf";
 import { MemoryKeyValueStore, phoneOf, replayTripInApp } from "../../src/services/navigation/app-replay";
 import { CalibrationStore } from "../../src/services/navigation/calibration-store";
-import type { MapMatchLoop } from "../../src/services/navigation/navigator-service";
 import { readTripLog, type TripLog } from "../../src/triplog/trip-log-reader";
 import { carOf, drawnStartPose, graphFor, phoneRouteFor } from "./app-chain";
 import { isMainThread, Pool, serveJobs, threadsArg } from "./pool";
@@ -231,7 +229,6 @@ function runJob(job: Job): DriveResult[] {
       const input = experiment ? (withWheelYaw(speedInput, { fromS: job.yawFromS, calibrate: job.yawCal, gaps: job.yawGaps })?.trip ?? speedInput) : speedInput;
       const r = replayTripInApp(input, {
         calibration,
-        loop: (job.nav.mapMatchLoop ?? APP_NAV_DEFAULTS.mapMatchLoop ?? "closed") as MapMatchLoop,
         roadGraph: graph?.active,
         vin,
         cuts: appOutageCuts(trip),

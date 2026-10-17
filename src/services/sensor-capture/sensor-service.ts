@@ -13,10 +13,8 @@ import { GNSS_FLAGS, type GnssRecord, type ImuMotionRecord, type Vec3Record } fr
 /** Raw magnetometer, always logged with the IMU; never used for navigation (SPEC §2). */
 export const MAG_RATE_HZ = 20;
 
-export interface ImuSettings {
-  rateHz: number;
-  raw: boolean;
-}
+/** The phone's motion sensors (CMDeviceMotion), what the navigator and the log are tuned on (TRIP-LOGGER-SPEC §3.2). */
+export const IMU_RATE_HZ = 100;
 
 export interface SensorSnapshot {
   permission: LocationPermission | null;
@@ -112,7 +110,6 @@ export class SensorService {
   private gnssRate = new RateMeter();
   private imuRate = new RateMeter();
   private lastNotifyUs = 0;
-  private imuSettings: ImuSettings = { rateHz: 100, raw: false };
   private wanted = { gnss: false, imu: false };
   /** What each consumer (trip recorder, map position) needs; capture runs for their union. */
   private owners = new Map<string, { gnss: boolean; imu: boolean }>();
@@ -158,19 +155,6 @@ export class SensorService {
     return p;
   }
 
-  setImuSettings(settings: ImuSettings): void {
-    const changed = settings.rateHz !== this.imuSettings.rateHz || settings.raw !== this.imuSettings.raw;
-    this.imuSettings = settings;
-    if (changed && this.snapshot.imuRunning) {
-      // Stop and start again with the new options, then back to what the owners want.
-      this.wanted = { ...this.wanted, imu: false };
-      void this.apply().then(() => {
-        this.wanted = this.union();
-        return this.apply();
-      });
-    }
-  }
-
   /**
    * Declare what `owner` needs running; capture runs for the union of all owners.
    * Idempotent, but retries a start that failed (e.g. before location permission was granted).
@@ -209,7 +193,7 @@ export class SensorService {
           this.update({ gnssRunning: false, gnssHz: 0 });
         }
         if (imu && !this.snapshot.imuRunning) {
-          const started = await SensorCaptureModule.startImu({ ...this.imuSettings, batchMs: 100, magRateHz: MAG_RATE_HZ });
+          const started = await SensorCaptureModule.startImu({ rateHz: IMU_RATE_HZ, raw: false, batchMs: 100, magRateHz: MAG_RATE_HZ });
           this.update({ imuRunning: started });
         } else if (!imu && this.snapshot.imuRunning) {
           await SensorCaptureModule.stopImu();

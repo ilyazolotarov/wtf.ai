@@ -34,7 +34,7 @@ Place the car on the offline road network, so that:
   on the map, and trip logs carry `nav_mapmatch` (§11), with a particle overlay and a simulated outage for testing
   on the road (NAVIGATOR-SPEC §9). It works on the road. Open: the update time on the iPhone is over the 5 ms
   budget (§15.9).
-- **M6 done in replay:** the road heading and position go back into the EKF (`mapMatchLoop: "closed"`, §9.2,
+- **M6 done in replay:** the road heading and position go back into the EKF (full correction, §9.2,
   §9.3); the 240 s max error median falls from 59 to 17 m, its p90 from 124 to 20 m, with the truth inside the drawn
   circle 61–65 % of the time. Simulated 3 h city drives without GPS (§9.4): dot median 4–6 m, never lost. A developer
   setting picks it in the app (§11); Full correction is the app's default since 2026-10-05 (replay tools keep the
@@ -673,7 +673,7 @@ NAVIGATOR-SPEC §4, §5.1):
     2° was the first value; it made the EKF overconfident (§9.2).
   - Sent also while GNSS is trusted. It is the candidate fix for the ~2° heading error at outage start
     (NAVIGATOR-SPEC §13.1).
-- **Position** (`mapMatchLoop: "closed"`, `roadPositionUpdate`):
+- **Position** (`roadPositionUpdate`, while GNSS isn't trusted):
   - The dominant cluster's mean, in state `tracking` on a road, at most every 200 m.
   - Its weighted covariance (`MapMatchCluster.covariance`), floored at 12 m along the road and 5 m across it, as a
     full 2×2 measurement (`DrEkf.updatePositionCovariance`). 25 m with 5 / 3 m floors, the first values, made the
@@ -693,8 +693,11 @@ NAVIGATOR-SPEC §4, §5.1):
   inside the circle. Kept at 0.3. §15.10 and §15.12 stay open: they are about starts, not the loop.
 - **Order:** road heading alone first (it targets the heading at outage start, NAVIGATOR-SPEC §13.1, §13.8, and
   adds little double counting: the filter weighs GNSS positions, not courses), then position, then the term above.
-- Replay switch: `--nav '{"mapMatchLoop":"open"|"heading"|"closed"}'` (`replay:bench`, `replay:view`'s
-  *Navigator*). Open loop = the PF runs and is scored but sends nothing.
+- **Full correction is the only version** (the app, replay and the tools): the open loop (the PF runs and is scored
+  but sends nothing) and road heading alone, measured below, are gone from the code. For a baseline without the
+  road heading, a test sets `roadHeading.minShare` above 1; without the road position, `roadPosition.trustedWindowUs`
+  to infinity, which holds only once a satellite fix was accepted (an EKF the map started has none: GNSS is
+  untrusted from the start, and the road position runs).
 
 ### 9.1 Baseline: open loop (2026-10-04, 14 logs, seeds 1–3 pooled)
 
@@ -710,9 +713,9 @@ NAVIGATOR-SPEC §4, §5.1):
 - The map-match end error is a third to a half of the EKF's: turns reset the along-track error, which the EKF
   keeps. That is what closing the loop should hand to the EKF.
 
-### 9.2 Road heading into the EKF (`mapMatchLoop: "heading"`, same logs and seeds)
+### 9.2 Road heading into the EKF (road heading alone, same logs and seeds)
 
-`npm run replay:bench -- tools/triplog/logs/*.ulg --mm --nav '{"mapMatchLoop":"heading"}'`
+`npm run replay:bench -- tools/triplog/logs/*.ulg --mm`, with the road heading alone (a version since removed, §9)
 (`src/nav/navigator.ts` `roadHeadingUpdate`, `ParticleFilter.roadHeading`). EKF max error median / p90, and max
 error ÷ σ, against open loop (§9.1):
 
@@ -737,7 +740,7 @@ error ÷ σ, against open loop (§9.1):
 - Synthetic drive (`particle-filter.test.ts`): 1.2 km cut on a straight road with an unlearned 0.05 °/s gyro bias,
   heading 2.9° off open loop, 0.2° with the road heading (σ 2°; still < 1° at 4°).
 
-### 9.3 Road position into the EKF (`mapMatchLoop: "closed"`, same logs and seeds)
+### 9.3 Road position into the EKF (full correction, same logs and seeds)
 
 Max error ÷ σ is the wrong yardstick here. It divides the worst moment of a window by the mean σ: fair while the
 error grows through an outage (open loop), but with map corrections the error stays bounded and wanders, and the
@@ -958,15 +961,12 @@ incident reports, the detector is fixed first, and shown to fire on that log, be
 
 ### 10.3 Tooling (`tools/replay`)
 
-> **A replay runs what the app runs.** The settings the app ships that differ from the library defaults live in
-> `src/nav/app-defaults.ts`, `replayTrip` starts from them, and `services/runtime.ts` reads the same constant, so
-> the two cannot drift; `app-defaults.test.ts` fails if a listed default stops differing (it would then be dead)
-> or if a replay stops taking them. `--nav '<json>'` still overrides one for an experiment, and `replay:mm` prints
-> which loop it ran. This exists because they did drift: `DEFAULT_NAV_CONFIG.mapMatchLoop` is `open` and the app
-> has shipped `closed` since the switch was added, so every replay measured a different filter from the one in the
-> car — on 2026-10-06 the phone's dot drove through a field for 52 s at 130 km/h while the open-loop replay of
-> that same log never left the road, which made the bug look unreproducible and its fix look worthless (§15,
-> item 14). Anything else the app turns on by default belongs in that file.
+> **A replay runs what the app runs.** The navigator has no setting the app runs differently from the library
+> defaults: `DEFAULT_NAV_CONFIG` is the app's, and `--nav '<json>'` overrides one for an experiment. A navigator
+> setting the app ships other than its default would let them drift again: once `DEFAULT_NAV_CONFIG` was the open
+> loop while the app ran full correction, and on 2026-10-06 the phone's dot drove through a field for 52 s at
+> 130 km/h while the replay of that same log never left the road, which made the bug look unreproducible and its fix
+> look worthless (§15, item 14). Change the default instead.
 
 - `npm run replay:mm -- [--graph <file>] [--cut s:len]… [--open-loop] [--mm '<json config>'] [--trace from:to] <logs>`
   (M4): the §10.2 metrics per drive, wrong-road and lost stretches, update time, filter vs EKF error in cuts;
@@ -1146,15 +1146,13 @@ incident reports, the detector is fixed first, and shown to fire on that log, be
 - **Parked pose:** stays position + heading. Edge ids change between graph versions; the PF snaps onto the graph
   at start.
 - **Map:** the dominant hypothesis as the puck and alternatives as hollow markers, fainter the lighter they are
-  (§6.2). The Vehicle sheet's diagnostics show the graph's region, state, particle count, hypothesis weights and
-  update time. Developer settings → "Map matching on the map (particles)" draws the 200 heaviest particles (size
+  (§6.2). The trip log has the filter's state, hypotheses and update time (`nav_map_match`, `mm timing` notes).
+  Developer settings → "Map matching on the map (particles)" draws the 200 heaviest particles (size
   by weight, amber off-road) and each hypothesis as a dashed ring of its spread labelled with its weight. They
   are the navigator's state ~300 ms back, not extrapolated like the puck.
-- **Navigator version** (Developer settings, `mapMatchLoop`, §9): default *Full correction* (`closed`); *Open loop*
-  and *Road heading* for comparing on the road. Applied to the running navigator at once. The trip log header records
-  the version a drive started with (`nav_mapmatch_loop`), a change is the note `nav map-match loop <v>`, and at engine off
-  `mm loop <v>: road heading N (k refused), road position M (k refused)`. The Vehicle sheet shows the counts live.
-  `replay:view` replays a drive with the phone's version by default.
+- **Road corrections** (§9, full correction, the only version): the trip log header says `nav_mapmatch_loop: closed`
+  (logs before 2026-10-17 may say `open` or `heading`: the replay runs full correction all the same), and at engine
+  off the note `mm loop closed: road heading N (k refused), road position M (k refused)`.
 
 ## 12. Milestones
 

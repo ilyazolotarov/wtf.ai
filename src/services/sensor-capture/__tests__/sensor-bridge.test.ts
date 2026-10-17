@@ -156,13 +156,10 @@ describe("SensorService", () => {
     expect(s.getSnapshot().lastError).toBe("denied");
   });
 
-  test("changing IMU settings while running restarts capture with the new options", async () => {
+  test("the IMU starts at 100 Hz without the raw streams", async () => {
     const s = new SensorService();
     s.want(false, true);
     await flush();
-    s.setImuSettings({ rateHz: 50, raw: true });
-    await flush();
-    expect(mockNative.stopImu).toHaveBeenCalledTimes(1);
-    expect(mockNative.startImu).toHaveBeenLastCalledWith({ rateHz: 50, raw: true, batchMs: 100, magRateHz: 20 });
+    expect(mockNative.startImu).toHaveBeenLastCalledWith({ rateHz: 100, raw: false, batchMs: 100, magRateHz: 20 });
   });
 });

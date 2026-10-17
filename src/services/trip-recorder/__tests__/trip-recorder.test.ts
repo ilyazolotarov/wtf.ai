@@ -55,7 +55,6 @@ function fakeSensors() {
     gnss,
     imu,
     want: (g: boolean, i: boolean) => Object.assign(wanted, { gnss: g, imu: i }),
-    setImuSettings: () => undefined,
   } as unknown as SensorService;
   return { sensors, gnss, wanted };
 }

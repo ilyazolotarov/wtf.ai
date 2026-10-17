@@ -907,7 +907,8 @@ describe("map matching", () => {
     expect(service.getDebug().mapMatchStarts).toEqual({ count: expect.any(Number), maxMs: expect.any(Number) });
     expect(service.getDebug().mapMatchStarts!.count).toBeGreaterThanOrEqual(1);
     engine.emit("engine-off", now());
-    expect(notes.at(-1)).toMatch(
+    // The drive's road corrections are noted after it (the test below).
+    expect(notes.findLast((n) => n.startsWith("mm timing"))).toMatch(
       /^mm timing: \d+ updates, p50 [\d.]+ ms, p99 [\d.]+ ms, max [\d.]+ ms, [\d.]+ % of the time, \d+ over 5 ms; \d+ starts?, slowest [\d.]+ ms$/,
     );
     expect(service.getDebug()).toMatchObject({ mapMatchTiming: null, mapMatchStarts: null }); // counting afresh for the next drive
@@ -972,17 +973,12 @@ describe("map matching", () => {
     service.stop();
   });
 
-  test("the navigator version switch: the running navigator follows, and the drive's road corrections are noted", async () => {
+  test("map matching corrects the navigator, and the drive's road corrections are noted", async () => {
     const drive = syntheticDrive({ segments: JUNCTION_DRIVE, origin: GRAPH_ORIGIN, startHeadingRad: Math.PI / 2, gnss: "clean", obdScale: 0.99 });
     const { service, play, notes, engine, now } = harness({ roadGraph: fixtureGraphSource() });
     await service.start();
-    expect(service.getDebug().mapMatchLoop).toBe("open");
-    play(drive, { untilS: 30 });
-    service.setMapMatchLoop("closed");
-    expect(notes.at(-1)).toBe("nav map-match loop closed");
     play(drive, { withoutGnssFromS: 100 });
     const debug = service.getDebug();
-    expect(debug.mapMatchLoop).toBe("closed");
     expect(debug.roadHeading!.accepted).toBeGreaterThan(10);
     expect(debug.roadPosition!.accepted).toBeGreaterThanOrEqual(1);
     engine.emit("engine-off", now());

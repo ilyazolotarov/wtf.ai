@@ -1,8 +1,8 @@
 // Hours of simulated city driving without GPS (MAPMATCH-SPEC §9.4): random routes on a real road
-// graph (src/nav/sim/city-drive.ts), GPS for the first minutes, then none to the end. Each
-// navigator version is scored against the exact truth every second.
+// graph (src/nav/sim/city-drive.ts), GPS for the first minutes, then none to the end. The
+// navigator is scored against the exact truth every second.
 //
-//   npm run replay:sim                                   # Chernihiv, 60 min, seeds 1–3, open vs closed loop
+//   npm run replay:sim                                   # Chernihiv, 60 min, seeds 1–3
 //   npm run replay:sim -- --minutes 180 --seeds 2 --imu-hz 50
 //   npm run replay:sim -- --at 50.4501,30.5234 --graph tools/tiles/out/release/kyiv-city.graph.bin
 
@@ -22,7 +22,6 @@ function parseArgs(argv: string[]) {
   let graph: string | undefined;
   let minutes = 60;
   let seeds = 3;
-  let loops: NavConfig["mapMatchLoop"][] = ["open", "closed"];
   let gpsMin = 3;
   let imuHz = 100;
   let bucketMin = 10;
@@ -38,7 +37,6 @@ function parseArgs(argv: string[]) {
     } else if (a === "--graph") graph = argv[++i];
     else if (a === "--minutes") minutes = Number(argv[++i]);
     else if (a === "--seeds") seeds = Number(argv[++i]);
-    else if (a === "--loops") loops = argv[++i].split(",") as NavConfig["mapMatchLoop"][];
     else if (a === "--gps-min") gpsMin = Number(argv[++i]);
     else if (a === "--imu-hz") imuHz = Number(argv[++i]);
     else if (a === "--every") bucketMin = Number(argv[++i]);
@@ -47,11 +45,11 @@ function parseArgs(argv: string[]) {
     else if (a === "--nav") nav = JSON.parse(argv[++i]) as Partial<NavConfig>;
     else if (a === "--mm-config") mmConfig = JSON.parse(argv[++i]) as Partial<MapMatchConfig>;
     else if (a === "-h" || a === "--help") {
-      console.log("replay:sim [--at lat,lon] [--graph <file>] [--minutes 60] [--seeds 3] [--loops open,heading,closed] [--gps-min 3] [--imu-hz 100] [--every 10] [--route city|arterial] [--trace] [--nav '<json NavConfig>'] [--mm-config '<json>']");
+      console.log("replay:sim [--at lat,lon] [--graph <file>] [--minutes 60] [--seeds 3] [--gps-min 3] [--imu-hz 100] [--every 10] [--route city|arterial] [--trace] [--nav '<json NavConfig>'] [--mm-config '<json>']");
       process.exit(0);
     }
   }
-  return { at, graph, minutes, seeds, loops, gpsMin, imuHz, bucketMin, route, trace, nav, mmConfig };
+  return { at, graph, minutes, seeds, gpsMin, imuHz, bucketMin, route, trace, nav, mmConfig };
 }
 
 const quantile = (v: number[], q: number) => {
@@ -68,8 +66,10 @@ console.log(
     `GPS for the first ${args.gpsMin} min, then none; IMU ${args.imuHz} Hz; ${args.route} routes`,
 );
 
-/** Per loop: [minutes since the cut, dot error m][] pooled over seeds, and per-seed summaries. */
-const pooled = new Map<string, { t: number; dot: number; ekf: number }[]>(args.loops.map((l) => [l, []]));
+/** The navigator's runs (one; a column per run in the tables). */
+const RUNS = ["navigator"];
+/** Per run: [minutes since the cut, dot error m][] pooled over seeds, and per-seed summaries. */
+const pooled = new Map<string, { t: number; dot: number; ekf: number }[]>(RUNS.map((l) => [l, []]));
 for (let seed = 1; seed <= args.seeds; seed++) {
   const frame = new LocalFrame(args.at);
   const simGraph = openGraph(graphFile, args.at);
@@ -82,11 +82,11 @@ for (let seed = 1; seed <= args.seeds; seed++) {
       `(one per ${(drive.distanceM / Math.max(1, drive.turns) / 1000).toFixed(1)} km), ${drive.stopsMade} stops ` +
       `(generated in ${((performance.now() - started) / 1000).toFixed(1)} s)`,
   );
-  for (const loop of args.loops) {
+  for (const loop of RUNS) {
     const navGraph = openGraph(graphFile, args.at);
     const t0 = performance.now();
     const result = replayTrip(drive.trip, {
-      nav: { ...args.nav, mapMatchLoop: loop },
+      nav: args.nav,
       mapMatch: { graph: navGraph.graph, config: args.mmConfig },
       cuts: [{ fromS: cutS, toS: Infinity }],
       trackStepS: 1,
@@ -135,10 +135,10 @@ for (let seed = 1; seed <= args.seeds; seed++) {
 
 console.log(`\nDot error by time without GPS (all seeds): median / p90 / max per ${args.bucketMin} min`);
 const buckets = Math.ceil(args.minutes / args.bucketMin);
-console.log(`${"minutes".padEnd(10)}${args.loops.map((l) => l.padStart(30)).join("")}`);
+console.log(`${"minutes".padEnd(10)}${RUNS.map((l) => l.padStart(30)).join("")}`);
 for (let b = 0; b < buckets; b++) {
   const from = b * args.bucketMin;
-  const cells = args.loops.map((l) => {
+  const cells = RUNS.map((l) => {
     const d = pooled.get(l)!.filter((r) => r.t >= from && r.t < from + args.bucketMin).map((r) => r.dot);
     return d.length ? `${m(quantile(d, 0.5))} / ${m(quantile(d, 0.9))} / ${m(Math.max(...d))}`.padStart(30) : "—".padStart(30);
   });

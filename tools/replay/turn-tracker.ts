@@ -147,7 +147,6 @@ function navigatorTrack(trip: TripLog, drawn: DrawnTruth, mounts: Map<string, Ph
   try {
     const r = replayTripInApp(withPhoneSpeed(trip, {}, new Map(mounts)), {
       calibration,
-      loop: "closed",
       roadGraph: graph?.active,
       vin,
       cuts: appOutageCuts(trip),

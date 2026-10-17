@@ -6,8 +6,8 @@ import { CanSpeedFeed } from "@/services/vehicle-link/can-speed-feed";
 
 const SIGNALS = signalsJson as unknown as { dbcs: Record<string, { msgs: Record<string, { id: number; size: number; sigs: Record<string, never> }> }> };
 
-function frame(msg: string, values: Record<string, number>, rxUs: number): CanFrame {
-  const m = SIGNALS.dbcs.mazda_2017.msgs[msg];
+function frame(msg: string, values: Record<string, number>, rxUs: number, dbc = "mazda_2017"): CanFrame {
+  const m = SIGNALS.dbcs[dbc].msgs[msg];
   const data = new Array<number>(m.size).fill(0);
   for (const [sig, v] of Object.entries(values)) writeSignal(signal(m.sigs[sig]), data, v);
   return { id: m.id, data, rxUs };
@@ -24,7 +24,7 @@ function drive(fromUs: number, seconds: number, kph: number, gear: number): CanF
   return out;
 }
 
-function feed(vin: string | null) {
+function feed(vin: string | null, listened = [0x215, 0x228]) {
   let listener: ((frames: CanFrame[]) => void) | null = null;
   let windowEnd: (() => void) | null = null;
   const pushed: SpeedSample[] = [];
@@ -33,15 +33,17 @@ function feed(vin: string | null) {
     onFrames: (l) => ((listener = l), () => (listener = null)),
     onWindow: (l) => ((windowEnd = l), () => (windowEnd = null)),
     vin: () => vin,
-    listened: () => [0x215, 0x228],
+    listened: () => listened,
     push: (s) => pushed.push(s),
     note: (t) => notes.push(t),
   });
+  const wheelSamples: unknown[] = [];
+  f.onSample((s) => wheelSamples.push(s));
   f.start();
   const send = (frames: CanFrame[]) => {
     for (let i = 0; i < frames.length; i += 25) listener?.(frames.slice(i, i + 25));
   };
-  return { f, pushed, notes, send, endWindow: () => windowEnd?.(), listening: () => listener !== null || windowEnd !== null };
+  return { f, pushed, notes, wheelSamples, send, endWindow: () => windowEnd?.(), listening: () => listener !== null || windowEnd !== null };
 }
 
 // A VIN with a Mazda WMI, made up.
@@ -71,7 +73,18 @@ describe("CAN speed feed (VEHICLE-LINK-SPEC §16.3)", () => {
     const other: CanFrame[] = Array.from({ length: 3100 }, (_, i) => ({ id: 0x4f0, data: [1, 2, 3], rxUs: i * 10_000 }));
     send(other);
     expect(pushed).toHaveLength(0);
-    expect(notes).toEqual(["can primary: no car profile with wheel speeds for the ids heard, OBD speed stays"]);
+    expect(notes).toEqual(["can primary: no car profile with a wheel or speed message for the ids heard, OBD speed stays"]);
+  });
+
+  // VW PQ has no wheel speeds in its profile (Bremse_3 isn't on every car): its ABS speed, Bremse_1, at 0.01 km/h.
+  test("a car without wheel speeds: the speed message, and nothing for the turning from the wheels", () => {
+    const bremse1 = SIGNALS.dbcs.vw_pq.msgs.Bremse_1.id;
+    const { pushed, notes, wheelSamples, send } = feed("WVWAAAAAA00000000", [bremse1]);
+    send(Array.from({ length: 300 }, (_, i) => frame("Bremse_1", { BR1_Rad_kmh: 54.32 }, i * 10_000, "vw_pq")));
+    expect(notes).toEqual([expect.stringMatching(/^can primary: speed from the wheels, profile volkswagen\/pq\/.*\(its speed message: no wheel speeds\)$/)]);
+    expect(pushed.length).toBeGreaterThanOrEqual(28);
+    expect(pushed.every((s) => s.source === "can" && s.raw === 54.32)).toBe(true);
+    expect(wheelSamples).toHaveLength(0);
   });
 
   // 2026-10-12: laid one period after the last frame before a poll's break, every frame after it came that much early.

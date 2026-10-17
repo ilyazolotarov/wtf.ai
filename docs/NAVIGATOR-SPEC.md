@@ -128,7 +128,7 @@ jammed:
   5 s. Laid one period after the last frame across a poll's break instead, every frame after it came up to 0.3 s
   early: the wheels' turning 20–120 ms ahead of the gyro, the speed samples 0.2 s old as they came out.
 
-### 5.4 Wheel yaw (SPEC §2.1 Stage 2; developer setting with CAN primary, off by default)
+### 5.4 Wheel yaw (SPEC §2.1 Stage 2; Settings, experimental, with the wheels' speed; off by default)
 
 The rear wheels aren't steered: (right − left) / track is the car's yaw rate, whatever the phone does — the way to
 navigate with the phone in a hand, a pocket or on a seat. A phone lying on the seat follows the car as in the mount
@@ -342,8 +342,9 @@ out), and the handling flag saw 2–15 % of that time.
 - **Shown:** with no OBD speed for 10 s, the service publishes it instead of the fixes: `source: "manual"`, ±10 m,
   its heading, no speed, the latest fix still as `rawGnss`. Routing takes it as a reliable start, with its heading.
   With OBD speed the navigator is published as usual (it started from the placing). While held, the snapshot carries
-  `manual: { placedAt, confirmedAt, asking }`; the map shows a chip "Position set manually · 12 min ago" with ✕ to
-  forget it; a tap on the chip places the car again (while it stands).
+  `manual: { placedAt, confirmedAt, asking }`; the status pill says "Set on the map", and its details (a tap on the
+  pill) hold a chip "Position set manually · 12 min ago" with ✕ to forget it; a tap on the chip places the car again
+  (while it stands). Folded with the other details, so it takes no room on the map until asked for.
 - **Asked:** 15 min after it was placed or last confirmed, the map asks "Are you still here?". Yes confirms it again
   (15 min more, and a navigator started without it starts from it now); No forgets it. Until answered it is still
   shown. Note `nav manual position 15 min old: asking …`, `… confirmed by the driver`.

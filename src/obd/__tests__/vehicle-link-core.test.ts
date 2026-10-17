@@ -796,7 +796,6 @@ describe("VehicleLinkCore", () => {
       };
       const polls = () => emu.log.filter((c) => c.startsWith("010D") || c.startsWith("010C") || c === "ATRV").length;
       try {
-        core.setCanPrimary(true);
         emu.setVehicle({ speedKph: 40 });
         await until(() => speeds.length >= 3);
         await pushFor(500, 40);
@@ -817,7 +816,7 @@ describe("VehicleLinkCore", () => {
         const m = toNav.length;
         await until(() => toNav.slice(m).some((s) => s.source !== "can"));
         // Off: nothing from CAN is taken.
-        core.setCanPrimary(false);
+        core.setCanShadow(null);
         const k = toNav.length;
         can(40);
         expect(toNav.slice(k).some((s) => s.source === "can")).toBe(false);
@@ -831,7 +830,6 @@ describe("VehicleLinkCore", () => {
       const { core, emu, clock, speeds } = await shadowOn({});
       const gaps = (from: number) => speeds.slice(from + 1).map((p, i) => (p.tUs - speeds[from + i].tUs) / 1e6);
       try {
-        core.setCanPrimary(true);
         emu.setVehicle({ speedKph: 40 });
         await until(() => speeds.length >= 3);
         // No CAN speed ever (a monitor gone deaf): polls at their rate, a long window every 10 s.
@@ -850,7 +848,6 @@ describe("VehicleLinkCore", () => {
     test("CAN primary: a CAN speed in that long window keeps the polls paused", async () => {
       const { core, emu, clock, speeds } = await shadowOn({});
       try {
-        core.setCanPrimary(true);
         emu.setVehicle({ speedKph: 40 });
         await until(() => speeds.length >= 3);
         // The CAN speed comes only once the monitor has a window long enough for it (the slow link's case).
@@ -874,13 +871,36 @@ describe("VehicleLinkCore", () => {
       }
     });
 
+    // The wheels' speed is on by default: an adapter that can't monitor (a clone, a K-line car) must poll as without it.
+    test("CAN asked for on an adapter without a monitor: the polls never pause for a CAN window", async () => {
+      const s = setup({});
+      s.core.setCanShadow([0x215, 0x228]);
+      const speeds: number[] = [];
+      s.core.onExchange((e) => {
+        if (e.pollPid === 0x0d && e.status === "ok") speeds.push(e.txUs);
+      });
+      s.core.startDiscovery();
+      void s.core.connect("emu-1");
+      try {
+        await until(() => s.core.getSnapshot().engine === "engine-running");
+        s.emulators.get("emu-1")!.setVehicle({ speedKph: 40 });
+        const t0 = s.clock.nowUs();
+        await until(() => s.clock.nowUs() - t0 > 25_000_000);
+        const gaps = speeds.slice(1).map((t, i) => (t - speeds[i]) / 1e6);
+        expect(gaps.length).toBeGreaterThan(30);
+        // A CAN window would leave over 1.7 s (its 1.2 s on top of the 0.5 s period); an RPM read makes ~1 s.
+        expect(Math.max(...gaps)).toBeLessThan(1.5);
+        expect(s.core.getSnapshot().canShadow ?? null).toBeNull();
+      } finally {
+        await s.core.disconnect();
+      }
+    });
+
     // 2026-10-13: an MX+ silent from the init on, with CAN off: off must mean not a CAN command, primary or not.
     test("CAN off (after CAN primary was on): not one CAN command, the init and the polls as without it", async () => {
       const s = setup({ ...STN_PROFILE, broadcast: BROADCAST, passFiltersLeak: true });
       s.core.setCanShadow([0x215, 0x228]);
-      s.core.setCanPrimary(true);
       s.core.setCanShadow(null);
-      s.core.setCanPrimary(false);
       s.core.startDiscovery();
       void s.core.connect("emu-1");
       try {
@@ -908,7 +928,6 @@ describe("VehicleLinkCore", () => {
         core.pushCanSpeed({ txUs: tUs, rxUs: tUs, tUs, speedMps: kph / 3.6, raw: kph, source: "can" });
       };
       try {
-        core.setCanPrimary(true);
         emu.setVehicle({ speedKph: 40 });
         await until(() => windows.length >= 3);
         for (let i = 0; i < 30; i++) {

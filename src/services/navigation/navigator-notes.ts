@@ -1,6 +1,6 @@
 import type { CompassTrust } from "@/nav/compass/compass";
 import type { MapMatchState } from "@/nav/mapmatch/particle-filter";
-import type { FixOutcome, NavConfig, Navigator } from "@/nav/navigator";
+import type { FixOutcome, Navigator } from "@/nav/navigator";
 import type { GnssFix } from "@/nav/types";
 
 const DEG = 180 / Math.PI;
@@ -99,15 +99,14 @@ export class NavigatorNotes {
   }
 
   /** At the end of a drive: the road corrections map matching sent the navigator, and how many it refused. */
-  roadCorrections(nav: Navigator, loop: NavConfig["mapMatchLoop"]): void {
+  roadCorrections(nav: Navigator): void {
     const s = nav.stats;
-    if (loop === "open") return;
     const heading = s.roadHeadingAccepted + s.roadHeadingRejected;
     const position = s.roadPositionAccepted + s.roadPositionRejected;
     if (heading === this.road.heading && position === this.road.position) return;
     this.road = { heading, position };
     this.note(
-      `mm loop ${loop}: road heading ${s.roadHeadingAccepted} (${s.roadHeadingRejected} refused), ` +
+      `mm loop closed: road heading ${s.roadHeadingAccepted} (${s.roadHeadingRejected} refused), ` +
         `road position ${s.roadPositionAccepted} (${s.roadPositionRejected} refused)`,
     );
   }

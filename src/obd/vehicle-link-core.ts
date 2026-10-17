@@ -15,6 +15,7 @@ import { EngineStateMachine } from "./engine-state";
 import { ObdPoller, interpretPoll, type PollerConfig } from "./poller";
 import type {
   AdapterInfo,
+  CanOff,
   ConnectedInfo,
   DiscoveredDevice,
   ElmResponse,
@@ -81,7 +82,6 @@ export interface VehicleLinkDeps {
 }
 
 const ADAPTERS_KEY = "vehicleLink.adapters";
-const SPEED_CAPS_KEY = "vehicleLink.speedCapsByVin";
 /**
  * Adapters whose CAN monitor froze them, with the firmware it happened on (§16.2). (The first key also held a car
  * switched off taken for a freeze: not read.)
@@ -180,7 +180,6 @@ export class VehicleLinkCore implements VehicleLink {
   private reiniting = false;
   /** The CAN monitor went silent while standing: a freeze, or the car switched off (§16.2). */
   private shadowFrozeSuspect: { deviceId: string; chip: string; sinceUs: number } | null = null;
-  private speedCapOverride: number | null = null;
   private rpmPeriods: Partial<PollerConfig> = {};
   /** Bumped by every init: a VIN retry belongs to the init that started it. */
   private initSeq = 0;
@@ -191,7 +190,7 @@ export class VehicleLinkCore implements VehicleLink {
   private pinnedEcu: number | null = null;
   /** While the CAN monitor runs, the adapter's output goes here instead of the link events. */
   private monitorSink: ((text: string, rxUs: number) => void) | null = null;
-  /** Ids the CAN shadow listens to (developer setting); null: off. */
+  /** Ids the CAN monitor listens to (picked for the car, §16.4); null: off. */
   private canShadowIds: number[] | null = null;
   private shadow: CanShadow | null = null;
   /** A replaced shadow still listening: its output is its own until the next command stops it. */
@@ -200,8 +199,6 @@ export class VehicleLinkCore implements VehicleLink {
   private canFrames = new Emitter<[CanFrame[]]>();
   private canWindows = new Emitter<[CanWindow]>();
   private canBufferFull = new Emitter<[CanWindow]>();
-  /** CAN primary (developer setting, §16.3): CAN wheel speed for the navigator, OBD polled only standing. */
-  private canPrimary = false;
   private lastCanSpeed: { tUs: number; raw: number } | null = null;
   /** The last OBD speed (arrival), for CAN primary's pause. */
   private lastObdSpeed: { rxUs: number; raw: number } | null = null;
@@ -335,6 +332,7 @@ export class VehicleLinkCore implements VehicleLink {
       lastSpeed: null,
       lastRpm: null,
       stats: null,
+      canOff: null,
     });
     this.event("connect", device.name ?? deviceId);
     const transport = this.deps.createTransport(
@@ -438,24 +436,11 @@ export class VehicleLinkCore implements VehicleLink {
 
   // ---- Dev knobs ----
 
-  /** Override the speed cap (null → per-VIN cap or the safety ceiling). */
-  setSpeedCapOverride(hz: number | null): void {
-    this.speedCapOverride = hz;
-    this.poller?.setSpeedCap(this.speedCapFor(this.snapshot.vehicle?.vin ?? null));
-  }
-
-  /** Store the per-VIN cap derived from ECU refresh analysis (§10.2). */
-  setSpeedCapForVin(vin: string, hz: number | null): void {
-    const caps = this.deps.store.getJson<Record<string, number>>(SPEED_CAPS_KEY) ?? {};
-    if (hz === null) delete caps[vin];
-    else caps[vin] = hz;
-    this.deps.store.setJson(SPEED_CAPS_KEY, caps);
-    this.poller?.setSpeedCap(this.speedCapFor(this.snapshot.vehicle?.vin ?? null));
-  }
-
   /**
-   * CAN shadow (§16.2): listen to these ids between OBD polls while the ECU is awake, frames to the trip log; OBD
-   * speed polls stay at `OBD_SPEED_HZ`. Null or empty: off. STN adapters on a CAN car only.
+   * CAN primary (§16.2–16.3): listen to these ids while the ECU is awake, frames to the trip log, the speed decoded
+   * from them (`pushCanSpeed`) to the navigator instead of OBD's; while it shows the car moving nothing is polled, so
+   * the monitor listens without breaks. Standing (or without fresh CAN speed) the polls run as always, the monitor in
+   * their breaks, and with them the engine state. Null or empty: off. STN adapters on a CAN car only.
    */
   setCanShadow(ids: number[] | null): void {
     const next = ids && ids.length > 0 ? ids : null;
@@ -465,16 +450,11 @@ export class VehicleLinkCore implements VehicleLink {
   }
 
   /**
-   * CAN primary (§16.3): speed decoded from the CAN shadow's wheel frames (`pushCanSpeed`) goes to the navigator
-   * instead of OBD's, and while it shows the car moving nothing is polled: the monitor listens without breaks. Standing
-   * (or without fresh CAN speed) the polls run as always, and with them the engine state.
+   * The monitor is on this session and hasn't failed: only then can CAN carry the speed. Otherwise (no ids, an adapter
+   * or car that can't, a failed monitor) the polls are all there is, and nothing pauses them.
    */
-  setCanPrimary(on: boolean): void {
-    this.canPrimary = on;
-    if (!on) {
-      this.lastCanSpeed = null;
-      this.listenUntilUs = null;
-    }
+  private get canPrimary(): boolean {
+    return this.shadow !== null && this.shadow.status.state !== "failed";
   }
 
   /** A CAN speed sample (`source: "can"`, negative in reverse), from the frames this link's shadow heard. */
@@ -492,6 +472,10 @@ export class VehicleLinkCore implements VehicleLink {
    * one long window to bring a CAN speed (`CAN_LISTEN_WINDOW_US`).
    */
   private canCarriesSpeed(nowUs: number): boolean {
+    if (!this.canPrimary) {
+      this.listenUntilUs = null;
+      return false;
+    }
     if (this.canSpeedFresh(nowUs, CAN_PAUSE_FRESH_US) && this.lastCanSpeed!.raw >= CAN_MOVING_KPH) {
       this.listenUntilUs = null;
       return true;
@@ -503,7 +487,7 @@ export class VehicleLinkCore implements VehicleLink {
       return false;
     }
     const o = this.lastObdSpeed;
-    if (!this.canPrimary || o === null || o.raw < CAN_MOVING_KPH || nowUs - o.rxUs > OBD_MOVING_FRESH_US) return false;
+    if (o === null || o.raw < CAN_MOVING_KPH || nowUs - o.rxUs > OBD_MOVING_FRESH_US) return false;
     if (nowUs - this.listenFailedUs < CAN_LISTEN_RETRY_US) return false;
     this.listenUntilUs = nowUs + CAN_LISTEN_WINDOW_US;
     return true;
@@ -733,7 +717,7 @@ export class VehicleLinkCore implements VehicleLink {
         ...this.rpmPeriods,
         speedCommand: init.poll.speedCommand,
         rpmCommand: init.poll.rpmCommand,
-        maxSpeedHz: this.speedCapFor(init.vehicle.vin),
+        maxSpeedHz: OBD_SPEED_HZ,
       },
       {
         onSpeed: (s) => this.onSpeedSample(s),
@@ -936,16 +920,17 @@ export class VehicleLinkCore implements VehicleLink {
     const ids = this.canShadowIds;
     const protocol = this.remembered().find((a) => a.id === this.snapshot.activeDeviceId)?.protocolNumber ?? null;
     let shadow: CanShadow | null = null;
+    const transport = this.transport;
+    const why = !transport?.writeRaw || !/^STN/i.test(this.snapshot.adapter?.chip ?? "")
+      ? "needs an STN adapter"
+      : protocol === null || protocol < 6 || protocol > 9
+        ? "needs a car on CAN"
+        : null;
+    const adapter = this.snapshot.adapter;
+    const froze = adapter && this.shadowFroze()[adapter.deviceId];
+    const firmware = froze && froze === adapter.chip ? froze : null;
+    const canOff: CanOff | null = why === "needs an STN adapter" ? "adapter" : why ? "car" : firmware ? "firmware" : null;
     if (ids) {
-      const transport = this.transport;
-      const why = !transport?.writeRaw || !/^STN/i.test(this.snapshot.adapter?.chip ?? "")
-        ? "needs an STN adapter"
-        : protocol === null || protocol < 6 || protocol > 9
-          ? "needs a car on CAN"
-          : null;
-      const adapter = this.snapshot.adapter;
-      const froze = adapter && this.shadowFroze()[adapter.deviceId];
-      const firmware = froze && froze === adapter.chip ? froze : null;
       if (why) this.event("can-shadow", `off: ${why}`);
       else if (firmware) this.event("can-shadow", `off: the adapter froze in the monitor on this firmware (${firmware})`);
       else {
@@ -963,7 +948,6 @@ export class VehicleLinkCore implements VehicleLink {
           onEvent: (detail) => this.event("can-shadow", detail),
           onStatus: (status) => this.onCanStatus(status),
           onFailed: (_reason, silent) => {
-            this.poller?.setSpeedCap(this.speedCapFor(this.snapshot.vehicle?.vin ?? null));
             if (!silent) {
               void this.restoreAfterShadow();
               return;
@@ -984,8 +968,7 @@ export class VehicleLinkCore implements VehicleLink {
     this.shadow = shadow;
     session.setIdleMonitor(shadow);
     if (old && !shadow) void this.restoreAfterShadow();
-    this.update({ canShadow: shadow?.status ?? null });
-    this.poller?.setSpeedCap(this.speedCapFor(this.snapshot.vehicle?.vin ?? null));
+    this.update({ canShadow: shadow?.status ?? null, canOff });
   }
 
   /** Adapter id → the chip and firmware (`STN2255 v5.10.3`) it froze on in the CAN monitor. */
@@ -996,6 +979,7 @@ export class VehicleLinkCore implements VehicleLink {
   private markShadowFroze(froze: { deviceId: string; chip: string }): void {
     this.shadowFrozeSuspect = null;
     this.event("can-shadow", `froze the adapter: off on ${froze.chip} from now on`);
+    this.update({ canOff: "firmware" });
     this.deps.store.setJson(SHADOW_FROZE_KEY, { ...this.shadowFroze(), [froze.deviceId]: froze.chip });
   }
 
@@ -1068,13 +1052,6 @@ export class VehicleLinkCore implements VehicleLink {
       patch.stats = this.poller.stats.snapshot(tUs);
     }
     this.update(patch);
-  }
-
-  private speedCapFor(vin: string | null): number {
-    if (this.speedCapOverride !== null) return this.speedCapOverride;
-    const caps = this.deps.store.getJson<Record<string, number>>(SPEED_CAPS_KEY) ?? {};
-    // A per-VIN cap (ECU refresh analysis) can only lower the rate.
-    return Math.min((vin && caps[vin]) || Infinity, OBD_SPEED_HZ);
   }
 
   /** Cars seen, most recent first; before the list existed, the VINs adapters remembered. */

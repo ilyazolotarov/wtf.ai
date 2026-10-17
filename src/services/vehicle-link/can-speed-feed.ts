@@ -1,7 +1,7 @@
-// CAN primary (VEHICLE-LINK-SPEC §16.3): the CAN shadow's wheel frames decoded into speed for the navigator, as
-// replay decodes a log's (`withCanSpeed`): the profile from the VIN and the ids heard, wheel samples averaged per
-// 0.1 s, negative in reverse gear.
-import { CanSpeedAverager, canSpeedReading, type CanSpeedSample } from "@/nav/odometry/can/can-speed";
+// CAN primary (VEHICLE-LINK-SPEC §16.3): the CAN shadow's frames decoded into speed for the navigator, as replay
+// decodes a log's (`withCanSpeed`): the profile from the VIN and the ids heard, its wheel samples (a profile without
+// wheel speeds: its speed message) averaged per 0.1 s, negative in reverse gear.
+import { CAN_SPEED_PERIOD_US, CanSpeedAverager, canSpeedFrom, canSpeedReading, type CanSpeed, type CanSpeedSample } from "@/nav/odometry/can/can-speed";
 import { CarStateDecoder } from "@/nav/odometry/can/car-state";
 import { FrameRetimer } from "@/nav/odometry/can/frame-timing";
 import { matchProfiles, seenIds, type Profile } from "@/nav/odometry/can/profile";
@@ -10,7 +10,7 @@ import type { SpeedSample } from "@/obd/types";
 
 /** Frames heard before the profile is chosen (1–2 s of listening). */
 const PROFILE_AFTER_FRAMES = 200;
-/** Still no profile with wheel speeds after this many: the ids or the car aren't known, OBD stays. */
+/** Still no profile with a wheel or speed message after this many: the ids or the car aren't known, OBD stays. */
 const GIVE_UP_AFTER_FRAMES = 3000;
 
 export interface CanSpeedFeedDeps {
@@ -41,7 +41,10 @@ export class CanSpeedFeed {
 
   constructor(private readonly deps: CanSpeedFeedDeps) {}
 
-  /** Each wheel sample (0.1 s of frames, at the bus's time), for the navigator's turning (NAVIGATOR-SPEC §5.4). */
+  /**
+   * Each wheel sample (0.1 s of frames, at the bus's time), for the navigator's turning (NAVIGATOR-SPEC §5.4). None
+   * from a car whose speed comes from its speed message: the phone's gyro keeps the turning.
+   */
   onSample(listener: (s: CanSpeedSample) => void): () => void {
     this.samples.add(listener);
     return () => this.samples.delete(listener);
@@ -89,17 +92,20 @@ export class CanSpeedFeed {
       this.early.push(...timed);
       if (this.early.length < PROFILE_AFTER_FRAMES) return;
       const listened = this.deps.listened();
-      const match = matchProfiles(seenIds(this.early), vin, listened ? new Set(listened) : undefined).find((m) => m.speed && m.profile.wheels);
+      const match = matchProfiles(seenIds(this.early), vin, listened ? new Set(listened) : undefined).find((m) => m.speed);
       if (!match) {
         if (this.early.length >= GIVE_UP_AFTER_FRAMES) {
           this.gaveUp = true;
           this.early = [];
-          this.deps.note("can primary: no car profile with wheel speeds for the ids heard, OBD speed stays");
+          this.deps.note("can primary: no car profile with a wheel or speed message for the ids heard, OBD speed stays");
         }
         return;
       }
       this.decoder = new CarStateDecoder(match.profile);
-      this.deps.note(`can primary: speed from the wheels, profile ${match.profile.key}`);
+      const from = canSpeedFrom(match.profile);
+      this.averager = new CanSpeedAverager(CAN_SPEED_PERIOD_US, from);
+      // Replay looks for this note's start (`canPrimaryInput`): the same for the speed message.
+      this.deps.note(`can primary: speed from the wheels, profile ${match.profile.key}${from === "speed" ? " (its speed message: no wheel speeds)" : ""}`);
       timed = this.early;
       this.early = [];
     }
@@ -107,7 +113,7 @@ export class CanSpeedFeed {
       for (const s of this.decoder.push(f.tUs, f.id, f.data)) {
         for (const c of this.averager.push(s)) {
           this.deps.push(toSpeedSample(c));
-          this.samples.forEach((l) => l(c));
+          if (c.wheelsMps) this.samples.forEach((l) => l(c as CanSpeedSample));
         }
       }
     }
@@ -116,7 +122,7 @@ export class CanSpeedFeed {
 
 type TimedFrame = { id: number; data: number[]; tUs: number };
 
-export function toSpeedSample(c: CanSpeedSample): SpeedSample {
+export function toSpeedSample(c: CanSpeed): SpeedSample {
   const { speedMps, rawKph } = canSpeedReading(c);
   return { txUs: c.tUs, rxUs: c.tUs, tUs: c.tUs, speedMps, raw: rawKph, source: "can" };
 }

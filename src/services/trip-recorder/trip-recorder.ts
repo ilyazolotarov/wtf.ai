@@ -33,8 +33,6 @@ import type { TripFiles } from "./trip-files";
 import { isSatelliteRecord } from "@/services/position/gnss-position-source";
 
 export interface TripSettings {
-  imuRateHz: 50 | 100;
-  rawImu: boolean;
   parkedTimeoutMin: number;
   linkTimeoutMin: number;
   lingerMin: number;
@@ -43,8 +41,6 @@ export interface TripSettings {
 }
 
 export const DEFAULT_TRIP_SETTINGS: TripSettings = {
-  imuRateHz: 100,
-  rawImu: false,
   parkedTimeoutMin: DEFAULT_TRIP_CONFIG.parkedTimeoutUs / 60e6,
   linkTimeoutMin: DEFAULT_TRIP_CONFIG.linkTimeoutUs / 60e6,
   lingerMin: DEFAULT_TRIP_CONFIG.lingerUs / 60e6,
@@ -172,7 +168,10 @@ export class TripRecorder {
   private loggedVin = "";
 
   constructor(private readonly deps: TripRecorderDeps) {
-    const settings = { ...DEFAULT_TRIP_SETTINGS, ...(deps.store.getJson<Partial<TripSettings>>(SETTINGS_KEY) ?? {}) };
+    const stored = deps.store.getJson<Record<string, unknown>>(SETTINGS_KEY) ?? {};
+    // Only today's settings (the IMU rate and raw IMU switches are gone).
+    const settings = { ...DEFAULT_TRIP_SETTINGS };
+    for (const key of Object.keys(settings) as (keyof TripSettings)[]) if (key in stored) settings[key] = stored[key] as number;
     this.detector = new TripDetector(
       {
         onStart: (reason, tUs) => this.beginTrip(reason, tUs),
@@ -189,7 +188,6 @@ export class TripRecorder {
       freeBytes: this.safeFreeBytes(),
       lastError: null,
     };
-    deps.sensors.setImuSettings({ rateHz: settings.imuRateHz, raw: settings.rawImu });
   }
 
   getSnapshot = (): RecorderSnapshot => this.snapshot;
@@ -303,7 +301,6 @@ export class TripRecorder {
     const settings = { ...this.snapshot.settings, ...patch };
     this.deps.store.setJson(SETTINGS_KEY, settings);
     this.detector.config = this.detectorConfig(settings);
-    this.deps.sensors.setImuSettings({ rateHz: settings.imuRateHz, raw: settings.rawImu });
     this.update({ settings });
   }
 

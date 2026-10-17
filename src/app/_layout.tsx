@@ -80,7 +80,6 @@ const PAGES = [
   "more/downloads",
   "more/update",
   "more/settings",
-  "more/position",
   "more/recorder",
   "more/developer",
   "more/ui-gallery",

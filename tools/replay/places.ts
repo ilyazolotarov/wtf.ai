@@ -88,8 +88,7 @@ async function main() {
   const seeds = Number(arg("--seeds") ?? 5);
   const spec = JSON.parse(readFileSync(file, "utf8")) as PlacesFile;
   const place = (p: string | Coordinate): Coordinate => (typeof p === "string" ? spec.places[p] : p);
-  // The app's own loop unless the caller says otherwise.
-  const navConfig: Partial<NavConfig> = { mapMatchLoop: "closed", ...nav };
+  const navConfig: Partial<NavConfig> = { ...nav };
 
   const rows: string[] = [];
   const jobs: Job[] = [];

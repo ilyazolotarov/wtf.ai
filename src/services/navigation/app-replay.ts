@@ -23,7 +23,7 @@ import { ENGINE_STATE_CODES, type GnssRecord, type ImuMotionRecord, type NavEsti
 import type { KeyValueStore } from "@/obd/vehicle-link-core";
 
 import type { CalibrationStore, PhoneKey, StoredSnapshot } from "./calibration-store";
-import { NavigatorService, STORAGE_NOTE, toNavFix, type MapMatchLoop, type ServiceClock } from "./navigator-service";
+import { NavigatorService, STORAGE_NOTE, toNavFix, type ServiceClock } from "./navigator-service";
 
 /** The app's key-value storage in memory: one carried through drives replayed in order, copied to try variants. */
 export class MemoryKeyValueStore implements KeyValueStore {
@@ -75,7 +75,6 @@ const DEFAULT_DELIVERY_US = 50_000;
 export interface AppReplayOptions extends Pick<RecorderOptions, "trackStepS" | "truthAccuracyM" | "truthLagS"> {
   /** What the app keeps between drives: parked poses, speed scales, compass calibrations, GNSS lag. */
   calibration: CalibrationStore;
-  loop?: MapMatchLoop;
   nav?: Partial<NavConfig>;
   /** The active region's road graph (map matching off without it). */
   roadGraph?: ActiveRoadGraph | null;
@@ -236,7 +235,6 @@ export function replayTripInApp(logged: TripLog, o: AppReplayOptions): AppReplay
       },
     },
   });
-  if (o.loop) service.setMapMatchLoop(o.loop);
   if (o.phoneOnly) service.setPhoneOnly(true);
   const wheelYaw = o.wheelYaw ?? trip.info.nav_wheel_yaw === "on";
   const yawSwitches =

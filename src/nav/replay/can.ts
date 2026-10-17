@@ -1,6 +1,6 @@
 // A trip log's CAN shadow frames decoded through the car's profile (SPEC §2.1: decoded in replay).
 import { CarStateDecoder, type CarStateSample } from "../odometry/can/car-state";
-import { CAN_SPEED_PERIOD_US, canSpeedReading, canSpeedSamples, type CanSpeedSample } from "../odometry/can/can-speed";
+import { CAN_SPEED_PERIOD_US, canSpeedReading, canSpeedSamples, navigatorSpeeds, type CanSpeed } from "../odometry/can/can-speed";
 import { retimeFrames } from "../odometry/can/frame-timing";
 import type { WheelYawCalibration, WheelYawCalibrationConfig } from "../odometry/can/wheel-yaw-calibration";
 import { WheelYawSource } from "../odometry/can/wheel-yaw-source";
@@ -62,7 +62,7 @@ export function decodeTripCan(trip: TripLog, profileKey?: string): TripCan | nul
   return { matches, profile, samples, listened, seen };
 }
 
-function canSample(s: CanSpeedSample): TripLog["obdSpeed"][number] {
+function canSample(s: CanSpeed): TripLog["obdSpeed"][number] {
   return { tUs: s.tUs, rxUs: s.tUs, ...canSpeedReading(s), source: "can" };
 }
 
@@ -70,16 +70,17 @@ function canSample(s: CanSpeedSample): TripLog["obdSpeed"][number] {
 const CAN_FRESH_US = 300_000;
 
 /**
- * The trip as the navigator would drive it on CAN wheel speeds (SPEC §2.1 Stage 2, replay only): ~10 Hz samples of
- * the mean wheel speed, `source: "can"`, where the monitor heard them, and the log's OBD speed where it didn't. In
- * reverse gear the speed is negative (`rawKph` stays the unsigned reading): the navigator and the map matching move
- * the car backwards. Null when the log has no wheel speeds.
+ * The trip as the navigator would drive it on CAN speed (SPEC §2.1 Stage 2): ~10 Hz samples of the mean wheel speed
+ * (a profile without wheel speeds: of its speed message), `source: "can"`, where the monitor heard them, and the
+ * log's OBD speed where it didn't. In reverse gear the speed is negative (`rawKph` stays the unsigned reading): the
+ * navigator and the map matching move the car backwards. Null when the log has neither.
  */
 export function withCanSpeed(trip: TripLog, profileKey?: string): TripLog | null {
   // Already on CAN speed (`canPrimaryInput`, or twice asked): as it is.
   if (trip.obdSpeed.some((s) => s.source === "can")) return trip;
   const can = decodeTripCan(trip, profileKey);
-  const speeds = can ? canSpeedSamples(can.samples) : [];
+  // The wheels, else the speed message: what the app's feed decodes (can-speed-feed.ts).
+  const speeds = can?.profile ? navigatorSpeeds(can.samples, can.profile) : [];
   if (!speeds.length) return null;
   const merged: TripLog["obdSpeed"] = [];
   let ci = 0;

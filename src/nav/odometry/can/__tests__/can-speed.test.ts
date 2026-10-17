@@ -1,4 +1,5 @@
-import { CAN_SPEED_PERIOD_US, canSpeedSamples } from "../can-speed";
+import { CAN_SPEED_PERIOD_US, canSpeedSamples, navigatorSpeeds } from "../can-speed";
+import { allProfiles } from "../profile";
 import { wheelYawSamples } from "../wheel-yaw";
 import type { CarStateSample } from "../car-state";
 
@@ -11,6 +12,21 @@ describe("CAN speed samples", () => {
     expect(s[0].tUs).toBe(10_000);
     expect(s[0].speedMps * 3.6).toBeCloseTo(36.2, 6);
     expect(s[1].speedMps * 3.6).toBeCloseTo(40, 6);
+  });
+
+  // A profile without wheel speeds (VW PQ, Ford, Tesla…): its speed message, the same averaging and gear.
+  test("the navigator's speed: the wheels where the profile has them, else its speed message", () => {
+    const speed = (tUs: number, kph: number): CarStateSample => ({ q: "speed", tUs, v: kph / 3.6 });
+    const samples = [{ q: "gear", tUs: 0, gear: "R", raw: 2 } as CarStateSample, speed(0, 10), wheels(5_000, 20), speed(10_000, 10.2), wheels(15_000, 20)];
+    const withWheels = allProfiles().find((p) => p.wheels)!;
+    const speedOnly = allProfiles().find((p) => !p.wheels && p.speedIds.length)!;
+    const w = navigatorSpeeds(samples, withWheels);
+    expect(w).toHaveLength(1);
+    expect(w[0].speedMps * 3.6).toBeCloseTo(20, 6);
+    const s = navigatorSpeeds(samples, speedOnly);
+    expect(s).toHaveLength(1);
+    expect(s[0]).toMatchObject({ wheelsMps: null, tUs: 5_000, reverse: true });
+    expect(s[0].speedMps * 3.6).toBeCloseTo(10.1, 6);
   });
 
   test("a standing car is exactly 0 (0.01·raw − 100 in floating point isn't)", () => {

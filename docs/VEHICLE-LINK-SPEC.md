@@ -453,9 +453,8 @@ Not used: bare-CR "repeat last command" (it saves nothing on BLE and breaks when
   gap, 1.75 Hz instead of 2 (2026-10-12).
 - Fewer exchanges load the phone and the link less (the car's bus hardly notices either way) and leave the adapter to
   the CAN shadow between polls (§16.2).
-- A 50 Hz safety ceiling stops runaway loops when the cap is raised. A per-VIN cap from the ECU refresh analysis
-  (`tools/triplog` `refresh`, TRIP-LOGGER-SPEC §8; `setSpeedCapForVin`) can only lower the rate.
-- Dev UI can override the cap (for experiments).
+- The rate is fixed: the developer override and the per-VIN cap (never set by anything) were removed on 2026-10-17.
+  `tools/triplog refresh` still estimates an ECU's refresh period from a log, for analysis.
 - Every poll is logged, so the rate decision can always be revisited from data.
 
 ### 10.3 RPM schedule and ignition probe
@@ -612,11 +611,12 @@ Measured on the main test car, parked, engine running (2026-10-11):
   for up to ~7 s. It stays a 3 s survey, never a drive mode.
 - A frame shorter or longer than its id's usual length is a transport error: replay's decoding drops it.
 
-### 16.2 CAN shadow (developer setting)
+### 16.2 The CAN monitor between polls ("the shadow")
 
 The monitor runs between OBD polls while the ECU is awake; its raw frames go to the trip log (TRIP-LOGGER-SPEC §6.3
-`can_frame`, `can_window`). Navigation keeps OBD speed (SPEC §2.1, level *CAN shadow*). Developer setting: on/off and
-the hex ids (`can_shadow` in the log's info).
+`can_frame`, `can_window`). It is the mechanism under CAN primary (§16.3): standing, and while the car moves without
+fresh CAN speed, the polls run and the monitor listens in their breaks. A mode with the monitor on and navigation on
+OBD ("log only") existed until 2026-10-17 and is gone: the breaks cost both sides.
 
 - **Where it runs.** `CanShadow` (`src/obd/can-shadow.ts`) is the session's *idle monitor*
   (`Elm327Session.setIdleMonitor`): it starts once the queue is empty, no exclusive section is open and a macrotask
@@ -697,16 +697,21 @@ the hex ids (`can_shadow` in the log's info).
   signals rebuild frame timing and catch lines garbled in transport. Frames outside the `can_window`s weren't heard.
   Frames the stop drained are timed at the stop character (captured before it).
 
-### 16.3 CAN primary (developer setting, off by default)
+### 16.3 CAN primary (developer setting, on by default)
 
 With the shadow on, the navigator's speed comes from the wheels and the monitor listens without the polls' breaks:
 between them (~45 % of the time with five ids) wheel yaw lost the peaks of sharp turns (NAVIGATOR-SPEC §5.4).
 
 - **Decoded on the phone** (`services/vehicle-link/can-speed-feed.ts`) as replay decodes a log (`withCanSpeed`): the
-  profile from the VIN's make and the ids heard, after 200 frames (none with wheel speeds after 3000: noted, OBD
-  stays); wheel samples averaged per 0.1 s (`CanSpeedAverager`, the same code); negative in reverse gear, so the
-  navigator and the map matching move the car backwards (NAVIGATOR-SPEC §5.3). Noted `can primary: speed from the
-  wheels, profile …`.
+  profile from the VIN's make and the ids heard, after 200 frames (none with a wheel or speed message after 3000:
+  noted, OBD stays); wheel samples averaged per 0.1 s (`CanSpeedAverager`, the same code); negative in reverse gear,
+  so the navigator and the map matching move the car backwards (NAVIGATOR-SPEC §5.3). Noted `can primary: speed from
+  the wheels, profile …`.
+- **A profile without wheel speeds** (9 of 41: VW PQ, Ford, Tesla Model 3, MG, BYD, Chrysler/Ram, Rivian) gives its
+  speed message instead (`CanSpeedFrom`: VW PQ's `Bremse_1`, Ford's `BrakeSysFeatures`, mostly the ABS module's, in
+  0.01–0.26 km/h steps against `010D`'s 1 km/h), averaged and signed by the gear the same way; the note adds `(its
+  speed message: no wheel speeds)`. Turns stay on the phone's gyro: wheel yaw needs each rear wheel. Without it such a
+  car kept the monitor on and the long window below every 10 s with nothing to decode.
 - **The link** (`VehicleLinkCore.pushCanSpeed`): CAN speed goes to the navigator and the trip detector, and to the
   engine state as a speed read (it proves the ECU awake while no poll asks). OBD's speed is passed on only when the
   last CAN speed is over 0.3 s old (replay's rule).
@@ -734,13 +739,18 @@ between them (~45 % of the time with five ids) wheel yaw lost the peaks of sharp
   marks where the wheels took over. Replay through the app
   (`replayTripInApp`, the viewer, `replay:regress`) then drives the navigator on the decoded wheels
   (`canPrimaryInput`), as the phone did.
-- The developer setting is one row, *CAN bus*: off (default) / log only (§16.2: frames into the log, navigation on
-  OBD — how data is gathered without risking the drive, and the safe choice on an adapter that froze in the monitor)
-  / speed from wheels (this section). Settings stored as the earlier two switches carry over.
+- **Only with a live monitor:** nothing pauses the polls unless the monitor is on this session and hasn't failed
+  (`VehicleLinkCore.canPrimary`). With the setting on and an adapter or car that can't (not an STN, not CAN, the
+  firmware froze before) the link polls as without it: the long window (above) would otherwise drop 1.2 s of OBD
+  speed every 10 s with nothing listening. The snapshot says why the wheels can't be read (`canOff`: `adapter`,
+  `car`, `firmware`), and the Car page shows it (TRIP-LOGGER-SPEC §9.1).
+- **The setting** is Settings → Car → *Speed from the wheels*, **on by default**: other cars' logs show how the
+  wheels go only if it is on. Off: no CAN command at all. Settings stored before (`can` off / log / primary, typed
+  ids) are dropped on load, so every phone starts on the default.
 
 ### 16.4 Ids picked for the car
 
-With the ids field empty (`can_shadow: auto` in the log), `services/vehicle-link/can-auto-ids.ts` picks them:
+With the setting on (`can_shadow: auto` in the log), `services/vehicle-link/can-auto-ids.ts` picks them:
 
 - **Candidates from the VIN's make:** every platform's ids that navigation needs — the wheel speeds (and their
   direction signals), else the speed; the gear. Up to 11 for a make (Volkswagen); Mazda's are `215 228`.
@@ -748,6 +758,18 @@ With the ids field empty (`can_shadow: auto` in the log), `services/vehicle-link
   against the ids heard (with their DBC lengths), and the first with a speed id heard wins. The shadow then listens to
   that platform's ids only (unless it already does: no second setup), and they are kept per VIN and tried first
   next time. Noted `can auto: mazda/…, ids 215 228`.
+- **A batch not heard:** none of its ids in 3 s of listening (`PROBE_SILENT_US`): the port doesn't carry them (a
+  gateway), and the next batch is tried. Under the monitor's own 5 s backstop (§16.2), which would blame the adapter's
+  filter and turn the monitor off before the next batch; a replaced monitor no longer runs that backstop.
 - **Nothing to pick:** no VIN yet (it waits; the VIN read late starts it), a make without a CAN profile, or none of
-  the candidates heard: noted, the shadow stays off and the navigator on OBD. Another VIN starts over.
-- Typed ids are used as typed; a typo turns the shadow off.
+  the candidates heard: noted, the monitor stays off and the navigator on OBD. Another VIN starts over.
+- **Remembered per VIN** (`vehicleLink.canAutoNone`): none heard on 2 drives (with the same candidate ids) and the
+  car is OBD only from the start, no monitor, no probing. A drive counts only if OBD showed the car moving (a fresh
+  speed of at least 1 km/h) during some of that silent listening: parked with the ECU awake (the main test car's
+  answers with the engine off), the wheels may not be on the bus yet; that drive is OBD only, noted `not counted`.
+  (Waiting for the car to move instead would leave a standing car to the monitor's backstop above, which turns it
+  off after ~15 s of silence.) New candidates (profiles from a newer app) or turning
+  *Speed from the wheels* off and on try again; ids heard later forget it. Two drives, not one: a single deaf session
+  must not take the wheels from a car that has them.
+- Typing ids (a developer field until 2026-10-17) is gone: the ELM terminal's survey (§16.1) is the tool for a car
+  without a profile.

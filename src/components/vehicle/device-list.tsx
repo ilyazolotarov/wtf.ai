@@ -30,7 +30,6 @@ function DeviceRow({
   const subtitle = [
     device.transport.toUpperCase(),
     device.brandHint,
-    device.profileId ? `GATT ${device.profileId}` : undefined,
     device.rank === "non-elm" ? t("nonElmWarning") : undefined,
   ]
     .filter(Boolean)

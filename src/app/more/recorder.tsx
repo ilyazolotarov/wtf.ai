@@ -4,7 +4,7 @@ import { StyleSheet, View } from "react-native";
 import { TripStorageSection } from "@/components/recorder/trip-storage-section";
 import { TripUploadSection } from "@/components/recorder/trip-upload-section";
 import { ScreenAction, ScreenContent, ScreenNote, ScreenRow, ScreenSection } from "@/components/screens/screen-ui";
-import { CycleRow, SwitchRow } from "@/components/screens/setting-rows";
+import { CycleRow } from "@/components/screens/setting-rows";
 import { dash, fmt, fmtBytes, fmtDuration } from "@/components/vehicle/format";
 import { usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
@@ -58,16 +58,6 @@ export default function RecorderScreen() {
           onChange={(v) => recorder.updateSettings({ lingerMin: v })}
         />
         <ScreenNote>{t("recordingTimesNote")}</ScreenNote>
-        <SwitchRow
-          value={rec.settings.rawImu}
-          onValueChange={(v) => recorder.updateSettings({ rawImu: v })}
-          label={t("rawImu")}
-        />
-        <SwitchRow
-          value={rec.settings.imuRateHz === 100}
-          onValueChange={(v) => recorder.updateSettings({ imuRateHz: v ? 100 : 50 })}
-          label={t("imuRate100")}
-        />
       </ScreenSection>
 
       {uploader && <TripUploadSection uploader={uploader} />}

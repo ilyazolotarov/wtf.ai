@@ -86,22 +86,6 @@ describe("ParticleFilter in the navigator (synthetic drives on the fixture graph
     expect(Math.hypot(dE, dN)).toBeLessThan(25);
   });
 
-  test("a route hint the driver doesn't follow never overrides the turn (ROUTING-SPEC §8.6)", () => {
-    const g = graph();
-    const drive = syntheticDrive({ segments: junctionDrive(20), origin: ORIGIN, startHeadingRad: Math.PI / 2, gnss: "clean", obdScale: 0.99 });
-    // The route goes straight on along 161; the car turns onto 162.
-    const straightOn = g.edgesInTiles(g.tilesInBounds(-180, -85, 180, 85)).filter((e) => e.wayId === 160 || e.wayId === 161).map((e) => e.id);
-    const result = replayTrip(drive.trip, {
-      nav: { routeHintFactor: 10 },
-      mapMatch: { graph: g },
-      cuts: [{ fromS: 100, toS: 1e9 }],
-      routeHints: [{ fromS: 0, edges: straightOn }],
-    });
-    const end = result.track.at(-1)!.mapMatch!;
-    expect(wayOf(g, end.clusters[0].edge)).toBe(162);
-    expect(end.clusters[0].weight).toBeGreaterThan(0.8);
-  });
-
   // Off the map at a yard's pace (a parking lot, a lane the map lacks): the off-road particles take over.
   test("a turn into open country at 18 km/h hands over to the off-road particles", () => {
     const g = graph();
@@ -253,10 +237,18 @@ describe("ParticleFilter in the navigator (synthetic drives on the fixture graph
   });
 });
 
+// The road heading switched off: a straight-road share no road reaches.
+const NO_ROAD_HEADING = { roadHeading: { minShare: 2 } };
+// And the road position: GNSS counted as trusted for ever after a satellite fix was accepted. Only after one: an EKF
+// the map started never had one, GNSS is untrusted from the start, and the road position runs all the same.
+const NO_ROAD_CORRECTIONS = { ...NO_ROAD_HEADING, roadPosition: { trustedWindowUs: Infinity } };
+
 // MAPMATCH-SPEC §9: the road's direction back into the EKF heading.
 describe("road heading into the EKF", () => {
   // East along the fixture's long road, GNSS cut after 40 s, with a gyro bias the EKF hasn't learned
-  // (one 3 s stop): open loop the heading drifts with it, the road holds it.
+  // (one 3 s stop): without the road heading the heading drifts with it, the road holds it. No satellite fix is ever
+  // accepted here (no course, no turn to align on: the map starts the EKF after the cut), so the road position runs
+  // in both runs.
   const straightDrive = () =>
     syntheticDrive({
       segments: [
@@ -269,24 +261,29 @@ describe("road heading into the EKF", () => {
       obdScale: 0.99,
       gyroBiasRadS: (0.05 * Math.PI) / 180,
     });
-  const headingErrorDeg = (loop: "open" | "heading") => {
+  const headingErrorDeg = (roadHeading: boolean) => {
     const result = replayTrip(straightDrive().trip, {
-      nav: { mapMatchLoop: loop },
+      ...(roadHeading ? {} : { nav: NO_ROAD_HEADING }),
       mapMatch: { graph: graph() },
       cuts: [{ fromS: 40, toS: 1e9 }],
     });
     const end = result.track.at(-1)!;
-    return { errorDeg: Math.abs(end.headingRad! - Math.PI / 2) * (180 / Math.PI), roadHeading: result.summary.roadHeading };
+    const { roadHeading: heading, roadPosition: position } = result.summary;
+    return { errorDeg: Math.abs(end.headingRad! - Math.PI / 2) * (180 / Math.PI), roadHeading: heading, roadPosition: position };
   };
 
-  test("open loop sends nothing and the heading drifts with the gyro bias", () => {
-    const open = headingErrorDeg("open");
-    expect(open.roadHeading).toEqual({ accepted: 0, rejected: 0 });
-    expect(open.errorDeg).toBeGreaterThan(2);
+  test("without the road heading the heading drifts further with the gyro bias", () => {
+    const without = headingErrorDeg(false);
+    const withRoad = headingErrorDeg(true);
+    expect(without.roadHeading).toEqual({ accepted: 0, rejected: 0 });
+    // The road heading is all that differs.
+    expect(without.roadPosition).toEqual(withRoad.roadPosition);
+    // 0.86° against 0.61° (seeds 2 and 3, and biases to 0.15°/s: 23–29 % less with the road).
+    expect(without.errorDeg).toBeGreaterThan(1.25 * withRoad.errorDeg);
   });
 
   test("on a straight road it holds the heading, about every 25 m", () => {
-    const closed = headingErrorDeg("heading");
+    const closed = headingErrorDeg(true);
     // ~1.5 km of straight road: one update per 25 m once the filter tracks, minus the junction margins.
     expect(closed.roadHeading.accepted).toBeGreaterThan(20);
     expect(closed.roadHeading.rejected).toBe(0);
@@ -297,7 +294,7 @@ describe("road heading into the EKF", () => {
 describe("road position into the EKF", () => {
   // The junction drive with GNSS cut 50 s before the turn, a gyro bias the EKF hasn't learned and OBD
   // reading 3 % low: the EKF drifts off the road; the filter knows where it is once the car has turned.
-  const run = (loop: "open" | "closed", cut = true) => {
+  const run = (corrections: boolean, cut = true) => {
     const drive = syntheticDrive({
       segments: junctionDrive(20),
       origin: ORIGIN,
@@ -306,7 +303,11 @@ describe("road position into the EKF", () => {
       obdScale: 0.97,
       gyroBiasRadS: (0.05 * Math.PI) / 180,
     });
-    const result = replayTrip(drive.trip, { nav: { mapMatchLoop: loop }, mapMatch: { graph: graph() }, cuts: cut ? [{ fromS: 100, toS: 1e9 }] : [] });
+    const result = replayTrip(drive.trip, {
+      ...(corrections ? {} : { nav: NO_ROAD_CORRECTIONS }),
+      mapMatch: { graph: graph() },
+      cuts: cut ? [{ fromS: 100, toS: 1e9 }] : [],
+    });
     const end = result.track.at(-1)!;
     const truth = drive.truthAt(drive.trip.imu.at(-1)!.tUs);
     const dN = (end.lat - truth.lat) * 111_195;
@@ -315,8 +316,8 @@ describe("road position into the EKF", () => {
   };
 
   test("only while GNSS is cut, and it brings the EKF back to the road the car turned onto", () => {
-    const open = run("open");
-    const closed = run("closed");
+    const open = run(false);
+    const closed = run(true);
     expect(open.summary.roadPosition).toEqual({ accepted: 0, rejected: 0 });
     // ~0.9 km without GNSS, one every 200 m.
     expect(closed.summary.roadPosition.accepted).toBeGreaterThanOrEqual(3);
@@ -326,13 +327,13 @@ describe("road position into the EKF", () => {
     expect(closed.sigmaM).toBeLessThan(open.sigmaM);
     expect(closed.errorM).toBeLessThan(2 * closed.sigmaM);
     // With GNSS throughout, the filter weighs the same fixes: no road position.
-    expect(run("closed", false).summary.roadPosition).toEqual({ accepted: 0, rejected: 0 });
+    expect(run(true, false).summary.roadPosition).toEqual({ accepted: 0, rejected: 0 });
   });
 
   test("the map-free twin (off by default) runs alongside and can feed the filter", () => {
     const drive = syntheticDrive({ segments: junctionDrive(20), origin: ORIGIN, startHeadingRad: Math.PI / 2, gnss: "clean", obdScale: 0.97 });
     const result = replayTrip(drive.trip, {
-      nav: { mapMatchLoop: "closed", mapMatchTwin: { prior: true, odometry: true } },
+      nav: { mapMatchTwin: { prior: true, odometry: true } },
       mapMatch: { graph: graph() },
       cuts: [{ fromS: 100, toS: 1e9 }],
     });

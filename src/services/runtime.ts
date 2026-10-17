@@ -9,19 +9,17 @@ import { AppState, Platform } from "react-native";
 import VehicleLinkModule from "../../modules/vehicle-link/src/VehicleLinkModule";
 import { Sentry, sentryMetricSink } from "@/config/sentry";
 import { TRIP_UPLOAD_URL } from "@/config/trip-upload";
-import { parseCanIds } from "@/obd/can-monitor";
 import { createClock } from "@/obd/clock";
 import { VehicleLinkCore } from "@/obd/vehicle-link-core";
 
 import { kvStore } from "./kv-store";
 import { CalibrationStore } from "./navigation/calibration-store";
-import { NavigatorService, type MapMatchLoop } from "./navigation/navigator-service";
+import { NavigatorService } from "./navigation/navigator-service";
 import { ROUTER_CACHE_TILES, RouteService } from "./navigation/route-service";
 import { startUpdateCenter, waitingUpdateInfo } from "./app-update/update-center";
 import { onMapDownloadFailed } from "./offline-map/map-packs";
 import { activeRoadGraph, openActiveRoadGraph } from "./offline-map/road-graph-file";
 import { SensorService } from "./sensor-capture/sensor-service";
-import { APP_NAV_DEFAULTS, APP_ROUTE_HINT } from "@/nav/app-defaults";
 import { createTripFiles } from "./trip-recorder/trip-files";
 import { TripRecorder, tripsOverLimit } from "./trip-recorder/trip-recorder";
 import { get, networkKind, onNetworkChange, putFile, uploadSecrets } from "./trip-upload/native";
@@ -30,6 +28,7 @@ import { NativeDiscovery } from "./vehicle-link/discovery";
 import { TelemetryReporter } from "./telemetry";
 import { jsSourceInfo } from "./js-source";
 import { setTripService } from "./trip-service";
+import { loadDevSettings } from "./dev-settings-load";
 import { CanAutoIds, idsAfterBufferFull, type CanAutoStatus } from "./vehicle-link/can-auto-ids";
 import { CanSpeedFeed } from "./vehicle-link/can-speed-feed";
 import { DrivingEmulator } from "./vehicle-link/driving-emulator";
@@ -41,41 +40,23 @@ export interface DevSettings {
   showParticles: boolean;
   /** A "Cut GPS" button on the map that simulates a GNSS outage. */
   outageButton: boolean;
-  /** How map matching feeds back into the navigator (MAPMATCH-SPEC §9): open, heading, closed. */
-  mapMatchLoop: MapMatchLoop;
-  /** Map matching told the route (ROUTING-SPEC §8.6): at junctions it favours the route's exit. */
-  routeHint: boolean;
   /** Experimental navigation without an OBD adapter (NAVIGATOR-SPEC §9.6). */
   phoneOnly: boolean;
   /**
-   * The CAN bus (VEHICLE-LINK-SPEC §16), STN adapters on a CAN car: `log` the shadow's frames into the trip log while
-   * navigation stays on OBD (§16.2); `primary` also the navigator's speed from the wheel frames, negative in reverse,
-   * OBD polled only while the car stands (§16.3).
+   * Settings → Car: the navigator's speed from the CAN wheel frames, negative in reverse, OBD polled only while the car
+   * stands (VEHICLE-LINK-SPEC §16.3). Where the adapter or the car can't (not an STN, not CAN, no profile), OBD.
    */
-  can: CanMode;
-  /** Hex ids, separated by spaces or commas; empty: picked for the car from its VIN (§16.4). */
-  canShadowIds: string;
+  wheelSpeed: boolean;
   /**
-   * With `can: "primary"`: the navigator's turning from the rear wheels, not the phone's gyro (NAVIGATOR-SPEC §5.4),
-   * so the phone may be in a hand, a pocket or on a seat.
+   * Settings → Car, experimental: with `wheelSpeed`, the navigator's turning from the rear wheels, not the phone's gyro
+   * (NAVIGATOR-SPEC §5.4), so the phone may be in a hand, a pocket or on a seat.
    */
   wheelYaw: boolean;
-  /** OBD speed poll cap, Hz; null: automatic (`OBD_SPEED_HZ`, or the per-car cap). */
-  speedCapHz: number | null;
   /** RPM poll period while the engine runs, s. */
   rpmPeriodS: number;
 }
 
-export type CanMode = "off" | "log" | "primary";
-
 const DEV_SETTINGS_KEY = "dev.settings";
-
-/** Settings as stored, from before `can` too (a `canShadow` switch, then `canPrimary` beside it). */
-function loadDevSettings(stored: (Partial<DevSettings> & { canShadow?: boolean; canPrimary?: boolean }) | null): Partial<DevSettings> {
-  if (!stored) return {};
-  const { canShadow, canPrimary, ...rest } = stored;
-  return rest.can === undefined && canShadow !== undefined ? { ...rest, can: canShadow ? (canPrimary ? "primary" : "log") : "off" } : rest;
-}
 /** Tiles the phone-only navigator's own graph reader keeps decoded (a few km around the car). */
 const PHONE_GRAPH_CACHE_TILES = 64;
 
@@ -90,7 +71,7 @@ export interface Runtime {
   /** Route planning and guidance (ROUTING-SPEC §8). */
   routes: RouteService;
   getDevSettings(): DevSettings;
-  /** How the CAN ids are being picked for the car, when they aren't typed (VEHICLE-LINK-SPEC §16.4). */
+  /** How the CAN ids are being picked for the car (VEHICLE-LINK-SPEC §16.4). */
   canAuto: { status(): CanAutoStatus; subscribe(listener: () => void): () => void };
   setDevSettings(patch: Partial<DevSettings>): void;
   subscribeDevSettings(listener: () => void): () => void;
@@ -101,23 +82,17 @@ let runtime: Runtime | null = null;
 export function getRuntime(): Runtime {
   if (runtime) return runtime;
 
-  // Full correction by default (MAPMATCH-SPEC §9): replay and simulation beat the open loop everywhere; the open loop
-  // stays one tap away in the developer settings for comparing on the road. The navigator's share of these lives in
-  // `nav/app-defaults.ts`, which the replay tools start from, so a replay runs the system the phone does.
-  let dev: DevSettings = {
+  const defaults: DevSettings = {
     showEmulators: __DEV__,
     showParticles: false,
     outageButton: false,
-    mapMatchLoop: APP_NAV_DEFAULTS.mapMatchLoop!,
-    routeHint: APP_ROUTE_HINT,
     phoneOnly: false,
-    can: "off",
-    canShadowIds: "",
+    // On by default, so other cars' logs show how the wheels go (VEHICLE-LINK-SPEC §16.3).
+    wheelSpeed: true,
     wheelYaw: false,
-    speedCapHz: null,
     rpmPeriodS: 5,
-    ...loadDevSettings(kvStore.getJson(DEV_SETTINGS_KEY)),
   };
+  let dev: DevSettings = loadDevSettings(kvStore.getJson(DEV_SETTINGS_KEY), defaults);
   const devListeners = new Set<() => void>();
   const nowUs = () => VehicleLinkModule.nowUs();
   const clock = createClock(nowUs);
@@ -152,16 +127,15 @@ export function getRuntime(): Runtime {
       sys_hw: sysHw,
       sys_os_ver: sysOsVer,
       // The navigator version this drive starts with (a change mid-drive is a note).
-      nav_mapmatch_loop: dev.mapMatchLoop,
-      nav_route_hint: dev.routeHint ? "on" : "off",
+      nav_mapmatch_loop: "closed",
       nav_phone_only: dev.phoneOnly ? "on" : "off",
-      can_shadow: dev.can === "off" ? "off" : dev.canShadowIds.trim() || "auto",
-      can_primary: dev.can === "primary" ? "on" : "off",
-      nav_wheel_yaw: dev.can === "primary" && dev.wheelYaw ? "on" : "off",
+      can_shadow: dev.wheelSpeed ? "auto" : "off",
+      can_primary: dev.wheelSpeed ? "on" : "off",
+      nav_wheel_yaw: dev.wheelSpeed && dev.wheelYaw ? "on" : "off",
     }),
   });
   recorder.start();
-  // The ids the shadow listens to now: typed, or picked for the car (§16.4).
+  // The ids the shadow listens to now: picked for the car (§16.4), or fewer after BUFFER FULL.
   let canIds: number[] | null = null;
   const listenCan = (ids: number[] | null) => {
     canIds = ids;
@@ -180,6 +154,11 @@ export function getRuntime(): Runtime {
     vin: () => link.getSnapshot().vehicle?.vin ?? null,
     listen: listenCan,
     onFrames: (listener) => link.onCanFrames(listener),
+    onWindow: (listener) => link.onCanWindow(listener),
+    moving: () => {
+      const s = link.getSnapshot().lastSpeed;
+      return s !== null && Math.abs(s.raw) >= 1 && nowUs() - s.rxUs <= 2_000_000;
+    },
     store: kvStore,
     note: (text) => recorder.note(text),
     onStatus: () => canAutoListeners.forEach((l) => l()),
@@ -194,19 +173,19 @@ export function getRuntime(): Runtime {
     recorder.note(`can: buffer full with ${canIds!.length} ids, listening to the ${fewer.length} navigation needs`);
     listenCan(fewer);
   });
-  const syncCanShadow = () => {
-    // Typed ids as typed (a typo: none); nothing typed: picked for the car.
-    if (dev.can === "off" || dev.canShadowIds.trim()) {
+  // The ids picked for the car (§16.4); the link's monitor listens while they are set.
+  const syncWheelSpeed = () => {
+    if (dev.wheelSpeed) {
+      canAuto.start();
+      canSpeed.start();
+    } else {
       canAuto.stop();
-      listenCan(dev.can === "off" ? null : parseCanIds(dev.canShadowIds));
-    } else canAuto.start();
-    link.setCanPrimary(dev.can === "primary");
-    if (dev.can === "primary") canSpeed.start();
-    else canSpeed.stop();
+      listenCan(null);
+      canSpeed.stop();
+    }
   };
-  syncCanShadow();
+  syncWheelSpeed();
   const syncPolling = () => {
-    link.setSpeedCapOverride(dev.speedCapHz);
     link.setRpmPeriods({ rpmPeriodRunningMs: dev.rpmPeriodS * 1000 });
   };
   syncPolling();
@@ -281,9 +260,8 @@ export function getRuntime(): Runtime {
     openPhoneGraph: () => openActiveRoadGraph(PHONE_GRAPH_CACHE_TILES),
     permission: { get: Location.getForegroundPermissionsAsync, request: Location.requestForegroundPermissionsAsync },
   });
-  position.setMapMatchLoop(dev.mapMatchLoop);
   position.setPhoneOnly(dev.phoneOnly);
-  const syncWheelYaw = () => position.setWheelYaw(dev.can === "primary" && dev.wheelYaw);
+  const syncWheelYaw = () => position.setWheelYaw(dev.wheelSpeed && dev.wheelYaw);
   syncWheelYaw();
   // During a trip the navigator keeps running with the map off screen, so dead reckoning
   // doesn't start over each time the app comes back.
@@ -306,7 +284,6 @@ export function getRuntime(): Runtime {
     nowUs,
     store: kvStore,
     onRoute: (plan) => {
-      position.setRouteHint(dev.routeHint && plan ? plan.legs.map((l) => l.edge) : null);
       position.setPhoneRoute(plan ? plan.coordinates : null);
       // The store video drives the car along the app's own route (scripts/store-screenshots.py reads it in logcat).
       if (dev.showEmulators && plan) {
@@ -406,18 +383,17 @@ export function getRuntime(): Runtime {
       devListeners.forEach((listener) => listener());
       // Hiding the button ends a simulated outage, so it can't be left on unseen.
       if (patch.outageButton === false) position.setSimulatedOutage(false);
-      if (patch.mapMatchLoop) position.setMapMatchLoop(patch.mapMatchLoop);
       if (patch.phoneOnly !== undefined) position.setPhoneOnly(patch.phoneOnly);
-      // The log's info has the setting the drive started with; a change mid-drive is a note (replay reads it).
-      if (patch.can !== undefined) recorder.note(`can bus ${dev.can}`);
-      if (patch.can !== undefined || patch.canShadowIds !== undefined) syncCanShadow();
-      // The service notes the change (`nav wheel yaw on|off`): only with CAN primary does the setting turn anything on.
-      if (patch.can !== undefined || patch.wheelYaw !== undefined) syncWheelYaw();
-      if (patch.speedCapHz !== undefined || patch.rpmPeriodS !== undefined) syncPolling();
-      if (patch.routeHint !== undefined) {
-        const plan = routes.getSnapshot()?.plan;
-        position.setRouteHint(patch.routeHint && plan ? plan.legs.map((l) => l.edge) : null);
+      // The log's info has the setting the drive started with; a change mid-drive is a note.
+      if (patch.wheelSpeed !== undefined) {
+        recorder.note(`can bus ${dev.wheelSpeed ? "primary" : "off"}`);
+        // Turned on again: cars taken for OBD only get another try.
+        if (dev.wheelSpeed) canAuto.forgetNone();
+        syncWheelSpeed();
       }
+      // The service notes the change (`nav wheel yaw on|off`): only with the wheels' speed does the setting turn it on.
+      if (patch.wheelSpeed !== undefined || patch.wheelYaw !== undefined) syncWheelYaw();
+      if (patch.rpmPeriodS !== undefined) syncPolling();
     },
     subscribeDevSettings: (listener) => {
       devListeners.add(listener);

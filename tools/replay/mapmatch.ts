@@ -91,7 +91,7 @@ function runFile({ file, args }: { file: string; args: Args }): string[] {
   const s = r.summary.mapMatch!;
   log(
     `== ${basename(file)}  (${r.summary.durationS.toFixed(0)} s, ${(r.summary.obdDistanceM / 1000).toFixed(2)} km, ` +
-      `graph ${basename(graphFile)}, ${r.summary.nav.mapMatchLoop} loop, replay ${(ms / 1000).toFixed(1)} s)`,
+      `graph ${basename(graphFile)}, replay ${(ms / 1000).toFixed(1)} s)`,
   );
   const init = r.summary.init;
   log(

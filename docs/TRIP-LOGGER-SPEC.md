@@ -91,7 +91,9 @@ modules/sensor-capture ─▶ src/services/sensor-capture ──(SensorStream)�
 ### 5.2 IMU (CoreMotion)
 
 - `CMDeviceMotion` at **100 Hz**, reference frame `xArbitraryZVertical` (no magnetometer). Fields: `rotationRate` (rad/s, bias-corrected), `userAcceleration` and `gravity` (converted from g to m/s², × 9.80665), `attitude.quaternion`. Timestamp = `CMLogItem.timestamp` (uptime).
-- Optional raw streams, **off by default** (dev toggle): `CMGyroData` and `CMAccelerometerData` at 100 Hz.
+- The rate is fixed: the navigator is tuned on 100 Hz. The raw streams (`CMGyroData`, `CMAccelerometerData`, the
+  native module's `raw` option) are no longer asked for (2026-10-17: never used); `gyro_raw` / `accel_raw` stay
+  readable in older logs.
 - Raw magnetometer, **always on** with the IMU: `CMMagnetometerData` at 20 Hz, µT in the device frame, uncalibrated
   (includes the phone's own and the car's fields; calibrate offline, e.g. from turns measured by the gyro). Logged
   only, not used for navigation (SPEC §2). It doesn't change the `CMDeviceMotion` reference frame.
@@ -134,12 +136,11 @@ modules/sensor-capture ─▶ src/services/sensor-capture ──(SensorStream)�
 | `char[] vehicle_vin`              | VIN or empty; repeated in the data section if read later |
 | `char[] vehicle_vin_source`       | `read` (from the car), `remembered` (the read missed: the last car seen on this protocol, VEHICLE-LINK-SPEC §9.1), empty with no VIN; repeated with `vehicle_vin` |
 | `char[] imu_frame`                | `xArbitraryZVertical`                                  |
-| `char[] nav_mapmatch_loop`        | navigator version at trip start: `open` / `heading` / `closed` (MAPMATCH-SPEC §9); a change mid-drive is the note `nav map-match loop <v>` |
-| `char[] nav_route_hint`           | `on` / `off`: map matching told the active route (ROUTING-SPEC §8.6, developer setting); a change is the note `nav route hint …` |
+| `char[] nav_mapmatch_loop`        | `closed` (MAPMATCH-SPEC §9, the only version since 2026-10-17; older logs may say `open` or `heading`) |
 | `char[] nav_phone_only`           | `on` / `off`: navigation without an adapter (NAVIGATOR-SPEC §9.6, developer setting); a change is the note `nav phone-only …` |
-| `char[] can_shadow`               | the CAN shadow's ids as typed (VEHICLE-LINK-SPEC §16.2, developer setting), `auto` (picked for the car, §16.4; `no ids` before 2026-10-13), or `off` |
-| `char[] nav_wheel_yaw`            | `on` / `off`: the navigator's turning from the CAN wheels (NAVIGATOR-SPEC §5.4, developer setting, with CAN primary only); a switch is the note `nav wheel yaw on` / `off`; absent before 2026-10-13 |
-| `char[] can_primary`              | `on` / `off`: the navigator's speed from the CAN wheels, OBD polled only standing (VEHICLE-LINK-SPEC §16.3); absent before 2026-10-13 |
+| `char[] can_shadow`               | `auto` (the CAN ids picked for the car, VEHICLE-LINK-SPEC §16.4) or `off` (Settings → speed from the wheels off); before 2026-10-17 also ids as typed (`no ids` before 2026-10-13) |
+| `char[] nav_wheel_yaw`            | `on` / `off`: the navigator's turning from the CAN wheels (NAVIGATOR-SPEC §5.4, Settings, experimental, with the wheels' speed only); a switch is the note `nav wheel yaw on` / `off`; absent before 2026-10-13 |
+| `char[] can_primary`              | `on` / `off`: Settings → speed from the wheels (VEHICLE-LINK-SPEC §16.3, on by default; where the adapter or car can't, OBD); absent before 2026-10-13; `off` with `can_shadow` ids: the log-only mode, gone since 2026-10-17 |
 
 ### 6.3 Data messages (`F` + `D`)
 
@@ -198,7 +199,6 @@ modules/sensor-capture ─▶ src/services/sensor-capture ──(SensorStream)�
 | `can_frame` @ 285/s (CAN shadow on) | 7,400             |
 | other                  | < 100                          |
 | **Total**              | **≈ 7.8 KB/s ≈ 28 MB/h**       |
-| + raw IMU (optional)   | + 5 KB/s → ≈ 44 MB/h           |
 
 The trip list shows free space; recording refuses to start below 200 MB free.
 
@@ -262,7 +262,7 @@ trip.transcript      # tagged strings (level, tag, text)
   - `triplog export <file> --csv|--parquet <dir>` — one file per stream.
   - `triplog plot <file>` — OBD speed vs GNSS speed, vertical yaw rate, GNSS track with accuracy, poll rate/latency.
   - `triplog check <file>` — monotonic timestamps, expected rates, OBD vs GNSS speed agreement, incomplete trip.
-  - `triplog refresh <file…>` — estimates the ECU refresh period P of PID `0D` from value-change timing (phase coherence over 30 s windows) and suggests a speed cap of 2/P (VEHICLE-LINK-SPEC §10.2).
+  - `triplog refresh <file…>` — estimates the ECU refresh period P of PID `0D` from value-change timing (phase coherence over 30 s windows) (VEHICLE-LINK-SPEC §10.2), for analysis.
 - Cross-language golden test: `src/triplog/__fixtures__/trip-fixture.ts` builds `tools/triplog/tests/data/fixture.ulg` from synthetic records (regenerate with `UPDATE_TRIPLOG_FIXTURE=1 npx jest src/triplog`); the TS unit test checks the bytes match, and the Python tests load it and check values. Both sides break if the schema drifts.
 - A TS reader (`src/triplog/trip-log-reader.ts`) feeds the replay harness (SPEC §3.10, NAVIGATOR-SPEC §10).
 - Put real logs in `tools/triplog/logs/`; it is git-ignored (VIN, GPS tracks).
@@ -275,19 +275,22 @@ Pages on the root stack (UI-SPEC §5): `vehicle` from the map's bar, the rest fr
 ### 9.1 `vehicle`
 
 - Device list per VEHICLE-LINK-SPEC §7: sections, RSSI, brand hint, rank, scanning indicator, "Pair MFi adapter", "Try anyway" for unknown devices, "Forget".
-- Connected adapter: link state, transport, name, ELM version, chip, suspected clone, battery voltage, protocol, VIN, capabilities, chosen GATT profile.
-- Live: OBD speed (km/h), RPM, engine state, speed poll rate (Hz), latency p50/p95, errors/min.
-- Probe result details on failure (which step failed, GATT dump for unknown devices, with a "copy" action so it can be added to the catalog).
+- Connected adapter: its name and whether it is connected, then whether the car answers (engine running, ignition on
+  with the engine off, ignition off, or waiting for it), its speed now, and where the speed comes from: the wheels, or
+  OBD and why not the wheels (off in Settings, an adapter or car that can't, the monitor stopped, the car's ids not
+  found yet: `components/vehicle/car-status.ts`). The adapter's details (chip, firmware, protocol, timing) are in
+  the trip log, not on the page.
+- The last error; a GATT dump for unknown devices on failure, with a "copy" action so it can be added to the catalog.
 - Emulated adapters, listed when Developer → Show emulated adapters is on (VEHICLE-LINK-SPEC §13).
 
-### 9.2 `recorder`, `position`, `developer` (from More)
+### 9.2 `recorder`, `developer` (from More)
 
 - `recorder` holds all of trip logging in one place: state, current trip id, duration, file size, start reason;
-  buttons Start (manual) / Stop / Marker; the `trips` list; recording settings (trip thresholds §4.2, raw IMU
-  toggle, IMU rate 50/100 Hz); the upload code (§7.1); the storage limit (§7.2).
-- `position`: GNSS rate, last accuracy, speed accuracy; IMU rate (measured); EKF and map matching state.
-- `developer`: speed cap override, RPM period and the other test switches; the CAN shadow (switch, hex ids, and its
-  state: waiting / listening / off with the reason, frames heard); the ELM terminal.
+  buttons Start (manual) / Stop / Marker; the `trips` list; recording settings (trip thresholds §4.2); the upload
+  code (§7.1); the storage limit (§7.2).
+- `developer`: emulated adapters, the particles, the GPS outage button, phone-only mode, RPM
+  period; the ELM terminal and the UI gallery. The live EKF, map matching and routing state (once a `position` page)
+  is read from the trip log.
 
 ### 9.3 `debug-terminal` (from Developer)
 
