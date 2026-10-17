@@ -72,3 +72,7 @@ native-tests-android/.kotlin/
 
 # Wrangler local state (upload Worker dev runs)
 .wrangler/
+
+# The website's screenshots and demo videos: made from store-assets/play/ by scripts/site-media.sh.
+/site/assets/screens/
+/site/assets/demo*.mp4

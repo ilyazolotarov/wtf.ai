@@ -6,7 +6,7 @@ adapter (ELM327 type) plugged into the car to try the full thing; without one th
 
 ## 1. Install
 
-1. Open the link you were given and download the `.apk` file.
+1. Download the newest `.apk` from the [website](https://wtf-ai.uk/en.html) (**Android · APK**), or open the link you were given.
 2. Open the downloaded file. Android asks to allow installing apps from this source (your browser or Telegram): allow it
    for this one install.
 3. If Google Play Protect says "unrecognized app" or "app scan recommended", choose **More details → Install anyway**.

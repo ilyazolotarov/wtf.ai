@@ -1,17 +1,19 @@
 name: Website
 
-# The project's website on GitHub Pages: site/ (the landing page, screenshots from scripts/store-screenshots.py) and
+# The project's website on GitHub Pages: site/ (the landing page; its screenshots and videos made from store-assets/play/ by scripts/site-media.sh) and
 # the privacy policy, copied from docs/PRIVACY.md so the stores' privacy URL always shows the current one
 # (docs/STORE-REVIEW.md §2). Needs Settings → Pages → Source: GitHub Actions.
 on:
   push:
     branches: [main]
-    paths: ["site/**", "docs/PRIVACY.md", "docs/PRIVACY.uk.md", ".github/workflows/pages.yml"]
+    paths: ["site/**", "store-assets/play/**", "scripts/site-media.sh", "docs/PRIVACY.md", "docs/PRIVACY.uk.md", ".github/workflows/pages.yml"]
   workflow_dispatch:
 
 # The support address (a repository variable, so the repo names none): the policy's contact and the site's footer.
+# The update Worker (docs/OTA.md): the site's Android link is its /apps/android/latest.apk, the newest main build.
 env:
   SUPPORT_EMAIL: ${{ vars.SUPPORT_EMAIL }}
+  UPDATES_ORIGIN: ${{ vars.UPDATES_ORIGIN }}
 
 permissions:
   contents: read
@@ -26,11 +28,33 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      # Only the LFS files the site needs: the store screenshots always, the promo videos when the site's encodes of
+      # them are not cached. The rest of store-assets/ (and its LFS bandwidth) stays out.
       - name: Checkout repository
         uses: actions/checkout@v7
+
+      - name: ffmpeg
+        run: command -v ffmpeg || { sudo apt-get update -q && sudo apt-get install -y -q ffmpeg; }
+
+      # The site's screenshots and demo videos are made from the store set (scripts/site-media.sh): one copy in the repo.
+      - name: Screenshots
+        run: |
+          git lfs pull --include "store-assets/play/*/*.png"
+          bash scripts/site-media.sh screens
+
+      # Keyed on the videos' LFS pointers (their content hash) and the script: a new recording or recipe encodes again.
+      - name: Cached demo videos
+        id: videos
+        uses: actions/cache@v6
         with:
-          # The screenshots are in Git LFS (.gitattributes): without it the site would serve pointer files.
-          lfs: true
+          path: site/assets/demo*.mp4
+          key: site-videos-${{ hashFiles('store-assets/play/promo*.mp4', 'scripts/site-media.sh') }}
+
+      - name: Demo videos
+        if: steps.videos.outputs.cache-hit != 'true'
+        run: |
+          git lfs pull --include "store-assets/play/promo*.mp4"
+          bash scripts/site-media.sh videos
 
       - name: Privacy policy page
         run: |
@@ -42,6 +66,11 @@ jobs:
           [ -n "$SUPPORT_EMAIL" ] || { echo "::error::No SUPPORT_EMAIL repository variable: the policy would have no contact"; exit 1; }
           sed -i "s|SUPPORT_EMAIL|[$SUPPORT_EMAIL](mailto:$SUPPORT_EMAIL)|g" site/privacy.md site/privacy.uk.md
           printf 'support_email: %s\n' "$SUPPORT_EMAIL" >> site/_config.yml
+
+      - name: Android download link
+        run: |
+          [ -n "$UPDATES_ORIGIN" ] || { echo "::error::No UPDATES_ORIGIN repository variable: the site would have no APK link"; exit 1; }
+          printf 'apk_url: %s/apps/android/latest.apk\n' "${UPDATES_ORIGIN%/}" >> site/_config.yml
 
       - name: Setup Pages
         uses: actions/configure-pages@v5

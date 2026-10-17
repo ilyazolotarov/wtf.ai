@@ -4,8 +4,10 @@
 
 ## 1. Встановлення
 
-- **iPhone**: App Store (незабаром) або тестова збірка через AltStore.
-- **Android**: Google Play (незабаром) або тестовий APK.
+- **iPhone**: публічна бета в [TestFlight](https://testflight.apple.com/join/nCHCN441) (App Store незабаром). Відкрийте
+  посилання на iPhone: спершу воно запропонує встановити застосунок Apple TestFlight, а з нього — wtf.ai.
+- **Android**: APK за посиланням на [сайті](https://wtf-ai.uk/), завжди найновіша збірка
+  (Google Play незабаром). Першого разу Android попросить дозволити встановлення програм із браузера.
 
 ## 2. Перший запуск
 

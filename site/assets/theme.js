@@ -22,6 +22,16 @@
     }
   }
 
+  // The hero's demo plays by itself, unless the reader asked the system for less motion: then it waits, with controls.
+  if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    var videos = document.querySelectorAll("video[autoplay]");
+    for (var v = 0; v < videos.length; v++) {
+      videos[v].removeAttribute("autoplay");
+      videos[v].setAttribute("controls", "");
+      videos[v].pause();
+    }
+  }
+
   var stored = null;
   try {
     stored = localStorage.getItem("theme");

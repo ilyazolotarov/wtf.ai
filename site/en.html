@@ -38,12 +38,12 @@ layout: null
         <h1>Where the f* am&nbsp;I?</h1>
         <p class="lead">Offline car navigation that keeps knowing where you are when GPS is jammed or spoofed.</p>
         <div class="badges">
-          <span class="badge soon">App Store · coming soon</span>
-          <span class="badge soon">Google Play · coming soon</span>
+          <a class="badge" href="{{ site.testflight_url }}">iPhone · public beta</a>
+          {% if site.apk_url %}<a class="badge" href="{{ site.apk_url }}">Android · APK</a>{% endif %}
           <a class="badge" href="https://github.com/{{ site.github.repository_nwo }}/wiki/Getting-started">Getting started</a>
         </div>
       </div>
-      <div class="phone"><img src="assets/screens/dark/01-guidance.png" data-dark="assets/screens/dark/01-guidance.png" data-light="assets/screens/01-guidance.png" alt="The wtf.ai map guiding a route"></div>
+      <div class="phone"><video src="assets/demo-dark.mp4" poster="assets/screens/dark/01-guidance.png" data-dark="assets/demo-dark.mp4" data-light="assets/demo.mp4" data-dark-poster="assets/screens/dark/01-guidance.png" data-light-poster="assets/screens/01-guidance.png" autoplay muted loop playsinline preload="auto" aria-label="A demo drive: guidance, then GPS spoofed and the car carrying on along the road"></video></div>
     </div>
   </div>
 
@@ -85,15 +85,6 @@ layout: null
     </div>
   </section>
 
-  <section>
-    <div class="wrap">
-      <h2>See it drive</h2>
-      <p class="sub">A drive on the emulated adapter: GPS is spoofed halfway, and the car carries on along the road on its own speed.</p>
-      <div class="demo">
-        <video src="assets/demo-dark.mp4" poster="assets/screens/dark/01-guidance.png" data-dark="assets/demo-dark.mp4" data-light="assets/demo.mp4" data-dark-poster="assets/screens/dark/01-guidance.png" data-light-poster="assets/screens/01-guidance.png" controls muted playsinline loop preload="metadata" aria-label="Demo drive: guidance, then GPS spoofed"></video>
-      </div>
-    </div>
-  </section>
 
   <section>
     <div class="wrap">

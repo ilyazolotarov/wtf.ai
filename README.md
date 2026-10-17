@@ -4,6 +4,8 @@
 
 wtf.ai is a navigation app for drivers in Ukraine that keeps a trustworthy car position when GNSS is jammed or spoofed. Maps, routing and address search work offline from one downloaded region.
 
+**Try it:** iPhone, the [public beta on TestFlight](https://testflight.apple.com/join/nCHCN441); Android, the newest APK from the [website](https://wtf-ai.uk/en.html) ([tester guide](docs/ANDROID-TESTING.md)).
+
 ## Project status
 
 A development build, field-tested in one car (and a few drives in a second) with one phone. It is not a production navigation system: do not rely on it for emergency navigation.

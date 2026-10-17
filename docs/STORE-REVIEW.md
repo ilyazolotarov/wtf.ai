@@ -244,7 +244,8 @@ Metadata policy). Character limits in brackets. No other app, store or competito
   speed), the jamming lesson and Offline maps, at 1080×2160 with a clean status bar; `--video`
   records the spoofing and the lesson for the promo video (Play takes a YouTube link). Re-run after UI changes. The
   website shows the dark set and video by default and the light ones with its theme switch (`site/assets/screens/`,
-  `site/assets/demo*.mp4`, re-encoded smaller). The current Play set and videos are in `store-assets/play/`
+  `site/assets/demo*.mp4`, not in git: `scripts/site-media.sh` makes them from the store set, in the website build and
+  before a local preview). The current Play set and videos are in `store-assets/play/`
   (`light`, `dark`, `promo.mp4`, `promo-dark.mp4`; `uk-light`, `uk-dark`, `promo-uk.mp4`, `promo-uk-dark.mp4` from
   `--lang uk`, the app in Ukrainian from its first screen, for the Ukrainian listing and the website, whose home page is Ukrainian (`site/index.html`; English: `site/en.html`)), in
   Git LFS like every screenshot and video (`.gitattributes`).

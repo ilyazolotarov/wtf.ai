@@ -38,12 +38,12 @@ layout: null
         <h1>Where the f* am&nbsp;I?</h1>
         <p class="lead">Офлайн-навігатор для авто, який знає, де ви, навіть коли GPS заглушено або підмінено.</p>
         <div class="badges">
-          <span class="badge soon">App Store · незабаром</span>
-          <span class="badge soon">Google Play · незабаром</span>
+          <a class="badge" href="{{ site.testflight_url }}">iPhone · публічна бета</a>
+          {% if site.apk_url %}<a class="badge" href="{{ site.apk_url }}">Android · APK</a>{% endif %}
           <a class="badge" href="https://github.com/{{ site.github.repository_nwo }}/wiki/Getting-started-uk">Перші кроки</a>
         </div>
       </div>
-      <div class="phone"><img src="assets/screens/uk/dark/01-guidance.png" data-dark="assets/screens/uk/dark/01-guidance.png" data-light="assets/screens/uk/01-guidance.png" alt="wtf.ai веде маршрутом на мапі"></div>
+      <div class="phone"><video src="assets/demo-uk-dark.mp4" poster="assets/screens/uk/dark/01-guidance.png" data-dark="assets/demo-uk-dark.mp4" data-light="assets/demo-uk.mp4" data-dark-poster="assets/screens/uk/dark/01-guidance.png" data-light-poster="assets/screens/uk/01-guidance.png" autoplay muted loop playsinline preload="auto" aria-label="Демо-поїздка: навігація, потім підміна GPS, а авто їде далі дорогою"></video></div>
     </div>
   </div>
 
@@ -75,15 +75,6 @@ layout: null
     </div>
   </section>
 
-  <section>
-    <div class="wrap">
-      <h2>Подивіться, як це працює</h2>
-      <p class="sub">Демо-поїздка з імітованим адаптером: посеред маршруту GPS починає показувати хибну позицію, але мітка авто продовжує рухатися дорогою за даними про його швидкість.</p>
-      <div class="demo">
-        <video src="assets/demo-uk-dark.mp4" poster="assets/screens/uk/dark/01-guidance.png" data-dark="assets/demo-uk-dark.mp4" data-light="assets/demo-uk.mp4" data-dark-poster="assets/screens/uk/dark/01-guidance.png" data-light-poster="assets/screens/uk/01-guidance.png" controls muted playsinline loop preload="metadata" aria-label="Демо-поїздка: навігація, потім підміна GPS"></video>
-      </div>
-    </div>
-  </section>
 
   <section>
     <div class="wrap">

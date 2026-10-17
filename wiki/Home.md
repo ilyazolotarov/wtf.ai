@@ -9,6 +9,8 @@ anyway, from its wheel speed and the phone's own sense of turning, and keeps it 
 It works **offline**: you download your region once, and the map, address search, routes and spoken directions need
 no internet after that. No account, and your position never leaves the phone.
 
+**Get the app:** iPhone, the [public beta on TestFlight](https://testflight.apple.com/join/nCHCN441); Android, the newest APK from the [website](https://wtf-ai.uk/en.html).
+
 ## Start here
 
 1. [[Getting started]]: install, first run, download a map.

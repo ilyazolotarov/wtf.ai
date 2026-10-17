@@ -4,8 +4,10 @@
 
 ## 1. Install
 
-- **iPhone**: App Store (coming), or a test build installed with AltStore.
-- **Android**: Google Play (coming), or a test APK.
+- **iPhone**: the public beta on [TestFlight](https://testflight.apple.com/join/nCHCN441) (App Store coming). Open the
+  link on the iPhone: it asks you to install Apple's TestFlight app first, then wtf.ai from it.
+- **Android**: the APK linked on the [website](https://wtf-ai.uk/en.html), always the newest build
+  (Google Play coming). The first time, Android asks to allow installing apps from your browser.
 
 ## 2. First run
 

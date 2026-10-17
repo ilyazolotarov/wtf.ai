@@ -1,6 +1,5 @@
 *.ulg binary
 *.sh text eol=lf
-# Heavy binaries in Git LFS: store screenshots and videos (scripts/store-screenshots.py), the website's screenshots.
+# Heavy binaries in Git LFS: store screenshots and videos (scripts/store-screenshots.py). The website makes its own from
+# them (scripts/site-media.sh).
 store-assets/** filter=lfs diff=lfs merge=lfs -text
-site/assets/screens/** filter=lfs diff=lfs merge=lfs -text
-site/assets/*.mp4 filter=lfs diff=lfs merge=lfs -text

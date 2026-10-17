@@ -111,6 +111,8 @@ Public:
 
 - `GET /manifest`, `GET /assets/<key>`: JS updates (above).
 - `GET /apps/<platform>/latest.json`: the newest build (`AppBuild`, UPDATES-SPEC §3); 404 before the first.
+- `GET /apps/ios/latest.ipa`, `GET /apps/android/latest.apk`: a redirect (302) to the newest build's file, the link
+  that never goes stale (the website's APK download).
 - `GET /apps/<platform>/<file>`: an IPA or APK. `GET /maps/latest.json`: `{osm_date}` of the current map release;
   `GET /maps/<osm_date>/<file>`: its files. Both answer `Range` and `If-Range`.
 - `GET /altstore.json`: the AltStore source, built from the kept iOS builds.
