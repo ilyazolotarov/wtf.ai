@@ -96,6 +96,17 @@ describe("builds", () => {
     expect((await call("/apps/ios/wtfai-100.ipa", { method: "HEAD" })).headers.get("content-length")).toBe(String(IPA.byteLength));
   });
 
+  it("redirects latest.ipa to the newest build's file", async () => {
+    expect((await call("/apps/ios/latest.ipa")).status).toBe(404);
+    await publishBuild(100);
+    await publishBuild(101);
+    const res = await call("/apps/ios/latest.ipa");
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("https://updates.example/apps/ios/wtfai-101.ipa");
+    // Not the other platform's extension.
+    expect((await call("/apps/ios/latest.apk")).status).toBe(404);
+  });
+
   it("refuses a record before its file, or with another size, platform or file type", async () => {
     expect((await publish("apps/ios", "PUT", JSON.stringify(buildRecord(100)))).status).toBe(409);
     await putFile("apps/ios/wtfai-100.ipa", IPA);

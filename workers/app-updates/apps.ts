@@ -104,3 +104,11 @@ export async function serveLatestApp(env: Env, platform: Platform): Promise<Resp
   if (!stored) return json(404, { error: "no build published" });
   return new Response(stored.body, { headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-cache" } });
 }
+
+/** `/apps/<platform>/latest.<ipa|apk>`: a link that always downloads the newest build (the website's APK link). */
+export async function redirectLatestApp(request: Request, env: Env, platform: Platform): Promise<Response> {
+  const latest = parseAppBuild(await readJson(env.BUCKET, appLatestKey(platform)));
+  if (!latest) return json(404, { error: "no build published" });
+  const location = `${new URL(request.url).origin}/${appFileKey(platform, latest.file)}`;
+  return new Response(null, { status: 302, headers: { location, "cache-control": "no-cache" } });
+}

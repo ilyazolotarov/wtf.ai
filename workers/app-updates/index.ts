@@ -6,6 +6,7 @@
 //   GET  /manifest                              the latest update or rollback for the phone's runtime and platform
 //   GET  /assets/<key>                          a file of an update (immutable)
 //   GET  /apps/<platform>/latest.json           the newest native build; /apps/<platform>/<file> its IPA/APK (Range)
+//   GET  /apps/<platform>/latest.<ipa|apk>      a redirect to the newest build's file
 //   GET  /altstore.json                         the AltStore source (the kept iOS builds)
 //   GET  /maps/latest.json                      the current map release; /maps/<osm_date>/<file> its files (Range)
 //   POST /publish/missing  {keys}               → {missing}: which asset keys the bucket lacks
@@ -41,7 +42,7 @@ import {
   type UpdateManifestRef,
 } from "../../tools/ota/protocol";
 
-import { publishApp, serveAltStoreSource, serveLatestApp } from "./apps";
+import { publishApp, redirectLatestApp, serveAltStoreSource, serveLatestApp } from "./apps";
 import { json, listAll, type Env } from "./bucket";
 import { filesMissing, serveFile, upload } from "./files";
 import { publishMaps, serveMapsLatest } from "./maps";
@@ -194,6 +195,7 @@ export default {
     if (first === "altstore.json" && read && rest.length === 0) return serveAltStoreSource(request, env);
     if (first === "apps" && read && rest.length === 2 && isPlatform(rest[0])) {
       if (rest[1] === "latest.json") return serveLatestApp(env, rest[0]);
+      if (rest[1] === `latest.${rest[0] === "ios" ? "ipa" : "apk"}`) return redirectLatestApp(request, env, rest[0]);
       return serveFile(request, env, appFileKey(rest[0], rest[1]), BUILD_CACHE);
     }
     if (first === "maps" && read && rest.length === 1 && rest[0] === "latest.json") return serveMapsLatest(env);
