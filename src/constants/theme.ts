@@ -91,18 +91,19 @@ export const Colors = {
     shadow: "0 10px 30px rgba(0,0,0,0.4)",
     cardShadow: "0 12px 40px rgba(0,0,0,0.25)",
     grab: "rgba(255,255,255,0.25)",
-    // Night Drive: azure, opposite the map's amber and orange roads and far lighter than its ground and water (~8:1),
-    // with a near-black outline where it runs along an amber road; light enough for 3:1 on the grey minor roads.
-    route: "#47B2FF",
+    // Night Drive: cyan, opposite the map's amber and orange roads and far lighter than its ground and water (~11:1),
+    // in a black outline where it runs along an amber road; 4:1 on the grey minor roads. Azure (#47B2FF) sank into the
+    // map's blue-grey buildings, blue icons and the blue dot: testers lost it.
+    route: "#00D4FF",
     // Grey-blue: as light as the route (the minor roads leave no darker line room), quieter by its colour.
     routeAlt: "#93ABC4",
-    routeAltCasing: "#001428",
-    routeCasing: "#001428",
+    routeAltCasing: "#000000",
+    routeCasing: "#000000",
     maneuver: "#FFFFFF",
-    maneuverEdge: "#001428",
-    // Periwinkle: apart from the azure route by its hue, and 3:1 inside its white ring; the black edge holds the ring
-    // off the amber roads.
-    puck: "#6B8CFF",
+    maneuverEdge: "#000000",
+    // Deep blue: saturated and darker than the cyan route, so the line doesn't run into it, 4.4:1 inside its white ring;
+    // its glow (puck-style.ts) and the black edge hold it off the dark ground and the amber roads.
+    puck: "#3D6BFF",
     puckDoubt: "#E4B572",
     puckRing: "#FFFFFF",
     puckEdge: "#000000",

@@ -148,10 +148,11 @@ scaling: large text grows less; test at 200 %).
 - **Custom puck** from `usePosition()` via GeoJSON source + layers: dot + heading arrow (arrow only when heading known) + accuracy circle (`circlePolygon`). Do **not** use MapLibre's built-in user location — it bypasses the abstraction.
   The dot (`puck-style.ts`, theme `puck*`): an 8 pt fill, a 3.5 pt ring and a 1.5 pt dark edge outside it (light: 90 %
   black; dark: black). Trusted GPS: a blue fill in a white ring (light #0A84FF, brighter and more cyan than the
-  route's indigo; dark periwinkle #6B8CFF, apart from the azure route by hue). Otherwise: the theme background in an
+  route's indigo; dark a deep #3D6BFF, saturated and darker than the cyan route). Otherwise: the theme background in an
   amber ring (`puckDoubt`: light #B47D38, deeper than `warn` for 3:1 against its centre). Wherever it sits, one band
   stands out: the dark edge against yellow and orange roads and light land, the ring against the blue route and the
-  dark ground.
+  dark ground. In dark the trusted dot also glows: a soft disc of its blue, 10 pt past the edge at 45 % (on the near-black
+  map the dot alone read small); light has none, nor does the dot in doubt.
   The heading cone is part of the dot: 34 pt long, 28° each side, the same on screen at every zoom and camera tilt
   (built in screen points and laid on the ground for the camera's zoom, bearing and tilt), filled at 32 % and outlined
   as the dot (light: the dark edge; dark: the ring's colour on a black edge). Pins and marks are banded the same way:
@@ -251,11 +252,15 @@ One small component each; the screen (`src/app/index.tsx`) only places them and 
   audio glyph instead of the speaker. The two buttons are 38 pt, the × at the top and the voice at the bottom, at
   least 20 pt apart, their touch areas not overlapping (a mis-tap on × ended the route). The map draws the route ahead of the car (from its
   progress point, ROUTING-SPEC §8.1: what is driven disappears; faded while planning again; the stretch from the
-  progress point to the next route vertex is the route dashed, each dash edged in the route's outline: the accent
-  blue without an edge vanished on the dark theme's amber roads), its next maneuver and the destination.
-  In light the route is indigo #3D5CBC with an off-white outline. In the dark (Night Drive) it is azure #47B2FF with a
-  near-black #001428 outline: opposite the map's amber and orange roads, far lighter than its ground and water, and
-  light enough for 3:1 on the grey minor roads; the next maneuver's dot is white ringed in #001428.
+  progress point to the next route vertex is the route dashed over its solid outline, the route at 35 % in the gaps:
+  dashes without an edge vanished on the dark theme's amber roads, and the road showed through plain gaps), its next
+  maneuver and the destination.
+  In light the route is indigo #3D5CBC with an off-white outline. In the dark (Night Drive) it is cyan #00D4FF with a
+  black outline: opposite the map's amber and orange roads, far lighter than its ground and water, 4:1 on the grey
+  minor roads, and apart from the map's blue-grey buildings, its blue icons and the dot (an azure route sank into
+  them); the next maneuver's dot is white ringed in black. Widths, both
+  themes (`ROUTE_LINE`, points): a 9 pt line in a 13 pt outline, wider than the main roads so the line covers them
+  (6 pt read as a thin stripe inside them), dashes 18 on 8 off.
   **Alternatives** (ROUTING-SPEC §8.7) are quieter solid lines under it: light, the route's inverse, a light #B8C7EE
   line in a #53618A casing (a light line in a light casing vanished on the map); dark, grey-blue #93ABC4 in the
   route's outline (a translucent route colour turned muddy on the dark map). Each is labelled on its own stretch

@@ -4,7 +4,17 @@ import { StyleSheet, useColorScheme, View, type LayoutChangeEvent } from "react-
 import Svg, { Circle, G, Path, Rect } from "react-native-svg";
 
 import { CAR_COLOR, FALLBACK_PALETTE, type MapColors } from "@/components/guide/map-colors";
-import { CONE, CONE_FILL_OPACITY, CONE_OUTLINE, DESTINATION_DOT, PIN_DOT, PUCK, PUCK_OUTER } from "@/components/map/puck-style";
+import {
+  CONE,
+  CONE_FILL_OPACITY,
+  CONE_OUTLINE,
+  DESTINATION_DOT,
+  PIN_DOT,
+  PUCK,
+  PUCK_HALO,
+  PUCK_OUTER,
+  ROUTE_LINE,
+} from "@/components/map/puck-style";
 import { GlassFill } from "@/components/ui/glass-fill";
 import { DRAWING_MAX_FONT_SCALE, FontScaleLimit, T } from "@/components/ui/text";
 import { useMapPalette } from "@/config/map";
@@ -81,8 +91,8 @@ export function RouteLine({ d }: { d: string }) {
   const palette = usePalette();
   return (
     <G fill="none" strokeLinecap="round" strokeLinejoin="round">
-      <Path d={d} stroke={palette.routeCasing} strokeOpacity={0.9} strokeWidth={9} />
-      <Path d={d} stroke={palette.route} strokeWidth={6} />
+      <Path d={d} stroke={palette.routeCasing} strokeOpacity={0.9} strokeWidth={ROUTE_LINE.casing} />
+      <Path d={d} stroke={palette.route} strokeWidth={ROUTE_LINE.line} />
     </G>
   );
 }
@@ -106,7 +116,9 @@ export function Puck({
   headingDeg?: number | null;
 }) {
   const palette = usePalette();
-  const coneOutline = CONE_OUTLINE[useColorScheme() === "dark" ? "dark" : "light"];
+  const scheme = useColorScheme() === "dark" ? "dark" : "light";
+  const coneOutline = CONE_OUTLINE[scheme];
+  const halo = PUCK_HALO[scheme];
   const tint = trusted ? palette.puck : palette.puckDoubt;
   let cone: string | null = null;
   if (headingDeg != null) {
@@ -134,6 +146,7 @@ export function Puck({
         </G>
       )}
       <Circle cx={x} cy={y + 2} r={PUCK_OUTER} fill="#000000" fillOpacity={0.12} />
+      {trusted && halo.opacity > 0 && <Circle cx={x} cy={y} r={halo.r} fill={palette.puck} fillOpacity={halo.opacity} />}
       <Circle cx={x} cy={y} r={PUCK_OUTER} fill={palette.puckEdge} />
       {/* An SVG stroke straddles its circle: radius to the ring's middle, as MapLibre's stroke outside the fill. */}
       <Circle

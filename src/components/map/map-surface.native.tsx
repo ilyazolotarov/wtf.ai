@@ -190,7 +190,7 @@ export function MapSurface({
       <MarkLayers pin={pin} placedMark={placedMark} palette={palette} scheme={scheme} />
       <PositionLayers position={shown} compass={compass} palette={palette} scheme={scheme} view={view} />
       <DebugLayers position={position} palette={palette} />
-      <PuckLayers position={shown} palette={palette} />
+      <PuckLayers position={shown} palette={palette} scheme={scheme} />
     </Map>
   );
 }

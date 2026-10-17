@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { Animated, Easing, Pressable, StyleSheet, View } from "react-native";
-import { Circle, Path } from "react-native-svg";
+import { Circle, G, Path } from "react-native-svg";
 
 import { ExplainCard, FadeIn, LessonIntro } from "@/components/guide/lesson-ui";
-import { CarGlyph, MapChip, MiniMap, Puck, StatusPillMock } from "@/components/guide/mini-map";
+import { CarGlyph, MapChip, MiniMap, Puck, StatusPillMock, useMapColors } from "@/components/guide/mini-map";
 import { useTween } from "@/components/guide/use-tween";
 import { Segmented } from "@/components/screens/screen-ui";
 import { formatDistance } from "@/components/status/format-geo";
@@ -79,6 +79,7 @@ const WITHOUT: StageView[] = [
 export function LessonJamming() {
   const { t, language } = useT();
   const palette = usePalette();
+  const mapColors = useMapColors();
   const [stage, setStage] = useState<Stage>(0);
   const [adapter, setAdapter] = useState(true);
   const [playing, setPlaying] = useState(false);
@@ -159,8 +160,12 @@ export function LessonJamming() {
           </>
         }
       >
+        {/* The car's own colour in a casing of the background: a faint accent line vanished on the dark amber road. */}
         {adapter && (
-          <Path d={trail(carAlong)} fill="none" stroke={palette.accent} strokeWidth={4} strokeLinecap="round" strokeLinejoin="round" opacity={0.35} />
+          <G fill="none" strokeLinecap="round" strokeLinejoin="round" opacity={0.8}>
+            <Path d={trail(carAlong)} stroke={palette.bg} strokeWidth={7} />
+            <Path d={trail(carAlong)} stroke={mapColors.car} strokeWidth={3} />
+          </G>
         )}
         {carOpacity > 0 && <CarGlyph x={car.x} y={car.y} rotate={car.headingDeg} opacity={carOpacity} />}
         {altOpacity > 0 && <Circle cx={210} cy={dot.y} r={9} fill="none" stroke={palette.warn.c} strokeWidth={2.5} opacity={altOpacity} />}

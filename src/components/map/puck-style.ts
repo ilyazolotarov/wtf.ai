@@ -31,5 +31,23 @@ export const CONE_FILL_OPACITY = 0.32;
 /** A dropped pin on the map (ROUTING-SPEC §8), banded as the dot: fill, white ring, dark edge, a faint halo; points. */
 export const PIN_DOT = { r: 7, ring: 3, halo: 16 } as const;
 
+/**
+ * The trusted dot's glow, points, opacity: dark only. Night Drive's ground is near black and its main roads amber,
+ * and the dot alone read small there; a halo of its own blue sets it off. Light has none (opacity 0, the layer kept
+ * so the order holds across a theme change).
+ */
+export const PUCK_HALO = {
+  light: { r: PUCK_OUTER, opacity: 0 },
+  dark: { r: PUCK_OUTER + 10, opacity: 0.45 },
+} as const;
+
 /** The route's destination: the route's colour in its casing; points. */
 export const DESTINATION_DOT = { r: 8, ring: 3 } as const;
+
+/**
+ * The route line and its casing, points, and the dashed stretch the car is on (dash and gap, points; `underlay`: the
+ * route's opacity in the gaps, over the solid casing). Wider than the main roads, so the route covers the road and the
+ * casing edges it (6 pt read as a thin stripe inside them), and the dashed stretch is a dim bar of the route with
+ * bright dashes (with plain gaps the road showed through every one).
+ */
+export const ROUTE_LINE = { line: 9, casing: 13, dash: 18, gap: 8, underlay: 0.35 } as const;

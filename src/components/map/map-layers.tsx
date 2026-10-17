@@ -25,7 +25,17 @@ import {
   sectorFeatures,
   type CameraView,
 } from "./map-features";
-import { CONE, CONE_FILL_OPACITY, CONE_OUTLINE, DESTINATION_DOT, PIN_DOT, PUCK, PUCK_OUTER } from "./puck-style";
+import {
+  CONE,
+  CONE_FILL_OPACITY,
+  CONE_OUTLINE,
+  DESTINATION_DOT,
+  PIN_DOT,
+  PUCK,
+  PUCK_HALO,
+  PUCK_OUTER,
+  ROUTE_LINE,
+} from "./puck-style";
 import type { CompassHeading } from "./use-compass-heading";
 
 /**
@@ -87,19 +97,20 @@ export function RouteLayers({
         ])
       : emptyLines();
   const opacity = route?.replanning ? 0.4 : 1;
-  const routeCasing = { "line-color": palette.routeCasing, "line-width": 9, "line-opacity": route?.replanning ? 0.4 : 0.9 };
-  const routePaint = { "line-color": palette.route, "line-width": 6, "line-opacity": opacity };
-  // Dashes in line widths: the casing's 9 pt dash and 6 pt gap are the line's, so each dash gets its own edge.
+  const size = ROUTE_LINE;
+  const routeCasing = { "line-color": palette.routeCasing, "line-width": size.casing, "line-opacity": route?.replanning ? 0.4 : 0.9 };
+  const routePaint = { "line-color": palette.route, "line-width": size.line, "line-opacity": opacity };
+  // Dashes are in line widths: each layer's dash and gap come to the same points, so each dash gets its own edge.
   const routeHeadCasing = {
     "line-color": palette.routeCasing,
-    "line-width": 9,
-    "line-dasharray": [1, 2 / 3],
+    "line-width": size.casing,
     "line-opacity": route?.replanning ? 0.4 : 0.9,
   };
+  const routeHeadUnderlay = { "line-color": palette.route, "line-width": size.line, "line-opacity": size.underlay * opacity };
   const routeHeadPaint = {
     "line-color": palette.route,
-    "line-width": 6,
-    "line-dasharray": [1.5, 1],
+    "line-width": size.line,
+    "line-dasharray": [size.dash / size.line, size.gap / size.line],
     "line-opacity": opacity,
   };
   const nextManeuver =
@@ -131,11 +142,13 @@ export function RouteLayers({
         <Layer id="active-route-line" type="line" layout={ROUTE_LAYOUT} paint={routePaint} />
       </GeoJSONSource>
       {/*
-        The stretch the car is on: the route dashed. Its casing is dashed with it (a solid one reads
-        as a grey or dark bar): on the dark map the dashes alone vanish on the amber and orange roads.
+        The stretch the car is on: the route dashed over its solid casing, the route dimmed in the gaps (the dashes
+        alone vanish on the dark map's amber and orange roads, and the road showed through plain gaps; puck-style.ts
+        `ROUTE_LINE`).
       */}
       <GeoJSONSource id="active-route-head" data={routeHead}>
         <Layer id="active-route-head-casing" type="line" layout={ROUTE_HEAD_LAYOUT} paint={routeHeadCasing} />
+        <Layer id="active-route-head-underlay" type="line" layout={ROUTE_HEAD_LAYOUT} paint={routeHeadUnderlay} />
         <Layer id="active-route-head-line" type="line" layout={ROUTE_HEAD_LAYOUT} paint={routeHeadPaint} />
       </GeoJSONSource>
       <GeoJSONSource id="route-next-maneuver" data={maneuverPoint}>
@@ -445,8 +458,17 @@ export function DebugLayers({ position, palette }: { position: PositionEstimate 
 }
 
 /** On top: the other roads the car may be on while map matching can't tell (MAPMATCH-SPEC §6.2), then the puck. */
-export function PuckLayers({ position, palette }: { position: PositionEstimate | null; palette: Palette }) {
+export function PuckLayers({
+  position,
+  palette,
+  scheme,
+}: {
+  position: PositionEstimate | null;
+  palette: Palette;
+  scheme: "light" | "dark";
+}) {
   const dr = deadReckoning(position);
+  const halo = PUCK_HALO[scheme];
   const alternatives = alternativeFeatures(position?.alternatives ?? []);
   const puck = position ? pointFeatures(position) : emptyPoints();
   return (
@@ -485,6 +507,17 @@ export function PuckLayers({ position, palette }: { position: PositionEstimate |
             "circle-opacity": 0.22,
             "circle-blur": 0.8,
             "circle-translate": [0, 2],
+          }}
+        />
+        {/* The trusted dot's glow (dark only, puck-style.ts). */}
+        <Layer
+          id="position-halo"
+          type="circle"
+          paint={{
+            "circle-radius": halo.r,
+            "circle-color": palette.puck,
+            "circle-opacity": dr ? 0 : halo.opacity,
+            "circle-blur": 0.4,
           }}
         />
         {/* The dark edge (puck-style.ts): a disc under the dot, showing past its ring (strokes are drawn outside). */}
