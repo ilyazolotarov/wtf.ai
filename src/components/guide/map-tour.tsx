@@ -1,4 +1,3 @@
-import { router } from "expo-router";
 import { useEffect, useEffectEvent, useState, type RefObject } from "react";
 import {
   Animated,
@@ -18,8 +17,9 @@ import { Radius, usePalette } from "@/constants/theme";
 import type { Strings } from "@/i18n/en";
 import { useT } from "@/i18n/provider";
 
-/** The map controls the tour points at, measured in window coordinates when it starts. */
+/** The map controls the tour points at, measured in window coordinates when it starts and as their layout changes. */
 export interface TourTargets {
+  /** The top stack: the status pill, and its explanation once unfolded. */
   status: RefObject<View | null>;
   follow: RefObject<View | null>;
   /** The bottom bar: Route, Vehicle, More in equal thirds (padding 6, gap 4). */
@@ -33,7 +33,12 @@ interface Box {
   h: number;
 }
 
+/** The stops a driver can try for real: the hole lets touches through to the control under it. */
+export type TourTry = "status" | "hold" | "follow";
+
 interface Stop {
+  /** Tried for real: what it is, and the line once done. */
+  tries?: { id: TourTry; done: keyof Strings };
   title: keyof Strings;
   body: keyof Strings;
   hole: Box;
@@ -45,19 +50,55 @@ interface Stop {
 
 const TOOLBAR_PADDING = 6;
 const TOOLBAR_GAP = 4;
-/** The finished note stays this long. */
-const FINISHED_MS = 6000;
+/**
+ * The dimmed screen's touches: taken and dropped. An empty view alone would not do it on Android, where a view with
+ * only layout is left out of the native tree and the control under it gets the tap.
+ */
+const BLOCK = { onStartShouldSetResponder: () => true } as const;
 
 /** The map's offer of the tour, once after onboarding and the first map. */
-export function TourInvite({
+export function TourInvite(props: { panelStyle: StyleProp<ViewStyle>; onStart(): void; onDismiss(): void }) {
+  return <InviteCard {...props} title="tourInviteTitle" body="tourInviteBody" start="tourShowMe" />;
+}
+
+/**
+ * The map's offer of the lessons, after the tour's (UI-SPEC §7.7): practice before the first drives. Right after the
+ * tour it is the tour's end too (`afterTour`).
+ */
+export function LessonsInvite({
+  afterTour = false,
+  ...props
+}: {
+  panelStyle: StyleProp<ViewStyle>;
+  afterTour?: boolean;
+  onStart(): void;
+  onDismiss(): void;
+}) {
+  return (
+    <InviteCard
+      {...props}
+      title={afterTour ? "lessonsInviteAfterTour" : "lessonsInviteTitle"}
+      body="lessonsInviteBody"
+      start="lessonsInviteStart"
+    />
+  );
+}
+
+function InviteCard({
   panelStyle,
   onStart,
   onDismiss,
+  title,
+  body,
+  start,
 }: {
   /** The map's panel style (shadow), as its other cards have. */
   panelStyle: StyleProp<ViewStyle>;
   onStart(): void;
   onDismiss(): void;
+  title: keyof Strings;
+  body: keyof Strings;
+  start: keyof Strings;
 }) {
   const { t } = useT();
   const palette = usePalette();
@@ -70,10 +111,10 @@ export function TourInvite({
         </View>
         <View style={styles.inviteCopy}>
           <T w="semibold" size={15}>
-            {t("tourInviteTitle")}
+            {t(title)}
           </T>
           <T size={13} color={palette.text2}>
-            {t("tourInviteBody")}
+            {t(body)}
           </T>
         </View>
       </View>
@@ -93,7 +134,7 @@ export function TourInvite({
           style={({ pressed }) => [styles.button, { backgroundColor: palette.accent }, pressed && styles.pressed]}
         >
           <T w="semibold" size={14} color={palette.onAccent} fit>
-            {t("tourShowMe")}
+            {t(start)}
           </T>
         </Pressable>
       </View>
@@ -103,15 +144,35 @@ export function TourInvite({
 
 /**
  * Coach marks over the map (UI-SPEC §7.7): the screen dims except one control at a time, with a card saying what
- * it does. The dot's stop is the screen centre: the tour starts the follow camera, which centres the car.
+ * it does. The dot's stop is the screen centre: the tour starts the follow camera, which centres the car. Three stops
+ * are tried for real through their hole (the status pill unfolds, a long press drops a pin, the camera button
+ * switches); the map says which were (`tried`), and hears of each stop shown (`onStop`). Done ends it: the map then
+ * offers the lessons in the same breath.
  */
-export function MapTour({ targets, onClose }: { targets: TourTargets; onClose(): void }) {
+export function MapTour({
+  targets,
+  step,
+  onStep,
+  layoutVersion,
+  tried,
+  onStop,
+  onClose,
+}: {
+  targets: TourTargets;
+  /** The stop shown, kept by the map: the tour unmounts while a page is over the map and goes on where it was. */
+  step: number;
+  onStep(step: number): void;
+  /** Changes when a target's layout does (the status unfolding): measured again. */
+  layoutVersion: number;
+  tried: ReadonlySet<TourTry>;
+  onStop(id: TourTry | null): void;
+  /** Skip, or Done after the last stop (`finished`). */
+  onClose(finished: boolean): void;
+}) {
   const { t } = useT();
   const palette = usePalette();
   const { width, height } = useWindowDimensions();
   const [boxes, setBoxes] = useState<{ status?: Box; follow?: Box; toolbar?: Box } | null>(null);
-  const [step, setStep] = useState(0);
-  const [finished, setFinished] = useState(false);
 
   useEffect(() => {
     const keys = ["status", "follow", "toolbar"] as const;
@@ -125,51 +186,26 @@ export function MapTour({ targets, onClose }: { targets: TourTargets; onClose():
           }),
       ),
     ).then(([status, follow, toolbar]) => setBoxes({ status, follow, toolbar }));
-  }, [targets]);
+  }, [targets, layoutVersion]);
 
-  // The map redraws twice a second with a new `onClose`; the note's timer must not restart each time.
-  const close = useEffectEvent(onClose);
-  useEffect(() => {
-    if (!finished) return;
-    const timer = setTimeout(() => close(), FINISHED_MS);
-    return () => clearTimeout(timer);
-  }, [finished]);
+  const stops = boxes ? tourStops(boxes, width, height) : [];
+  const shown = stops.length === 0 ? null : stops[Math.min(step, stops.length - 1)];
+  const shownTry = shown?.tries?.id ?? null;
+  const stopChanged = useEffectEvent(onStop);
+  useEffect(() => stopChanged(shownTry), [shownTry]);
 
-  if (!boxes) return null;
-  const stops = tourStops(boxes, width, height);
-
-  if (finished || stops.length === 0) {
-    return (
-      <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
-        <View style={[styles.toast, { bottom: height - (boxes.toolbar?.y ?? height - 100) + 84 }]}>
-          <T size={14} color="#F2F0EC" style={styles.toastText}>
-            {t("tourFinished")}
-          </T>
-          <Pressable
-            onPress={() => {
-              onClose();
-              router.push("/guide");
-            }}
-            accessibilityRole="button"
-            style={({ pressed }) => [styles.toastButton, pressed && styles.pressed]}
-          >
-            <T w="semibold" size={14} color="#0E1220">
-              {t("guideTitle")}
-            </T>
-          </Pressable>
-        </View>
-      </View>
-    );
-  }
+  // Nothing measured to show (no stops): there is no tour to give.
+  if (!boxes || stops.length === 0) return null;
 
   const stop = stops[Math.min(step, stops.length - 1)];
   const last = step >= stops.length - 1;
   const { hole } = stop;
   const above = hole.y + hole.h / 2 > height / 2;
+  const done = stop.tries && tried.has(stop.tries.id);
 
   return (
-    <View style={StyleSheet.absoluteFill} accessibilityViewIsModal>
-      <Svg width={width} height={height} style={StyleSheet.absoluteFill}>
+    <View pointerEvents="box-none" style={StyleSheet.absoluteFill} accessibilityViewIsModal>
+      <Svg pointerEvents="none" width={width} height={height} style={StyleSheet.absoluteFill}>
         <Path
           d={`M0 0 H${width} V${height} H0 Z ${roundedRect(hole, stop.radius)}`}
           fill="rgba(14,13,12,0.62)"
@@ -177,7 +213,18 @@ export function MapTour({ targets, onClose }: { targets: TourTargets; onClose():
         />
         <Path d={roundedRect(hole, stop.radius)} fill="none" stroke="#FFFFFF" strokeWidth={2} />
       </Svg>
-      {stop.ring && <PulseRing box={hole} color={palette.accent} />}
+      {/* Touches stop at the dimmed screen; a stop to try lets them through its hole. */}
+      {stop.tries ? (
+        <>
+          <View {...BLOCK} style={[styles.block, { left: 0, top: 0, width, height: Math.max(0, hole.y) }]} />
+          <View {...BLOCK} style={[styles.block, { left: 0, top: hole.y + hole.h, width, bottom: 0 }]} />
+          <View {...BLOCK} style={[styles.block, { left: 0, top: hole.y, width: Math.max(0, hole.x), height: hole.h }]} />
+          <View {...BLOCK} style={[styles.block, { left: hole.x + hole.w, top: hole.y, right: 0, height: hole.h }]} />
+        </>
+      ) : (
+        <View {...BLOCK} style={StyleSheet.absoluteFill} />
+      )}
+      {stop.ring && !done && <PulseRing box={hole} color={palette.accent} />}
       <View
         style={[
           styles.card,
@@ -189,7 +236,7 @@ export function MapTour({ targets, onClose }: { targets: TourTargets; onClose():
           <T w="semibold" size={12} color={palette.accent} style={styles.kicker}>
             {t("tourStep").replace("{n}", String(step + 1)).replace("{total}", String(stops.length))}
           </T>
-          <Pressable onPress={onClose} hitSlop={10} accessibilityRole="button">
+          <Pressable onPress={() => onClose(false)} hitSlop={10} accessibilityRole="button">
             <T w="medium" size={13} color={palette.text2}>
               {t("tourSkip")}
             </T>
@@ -201,10 +248,18 @@ export function MapTour({ targets, onClose }: { targets: TourTargets; onClose():
         <T size={14} color={palette.text2} style={styles.cardBody}>
           {t(stop.body)}
         </T>
+        {done && stop.tries && (
+          <View style={styles.doneRow}>
+            <Icon name="check" size={18} color={palette.ok.c} />
+            <T size={14} style={styles.doneText}>
+              {t(stop.tries.done)}
+            </T>
+          </View>
+        )}
         <View style={styles.buttons}>
           {step > 0 && (
             <Pressable
-              onPress={() => setStep(step - 1)}
+              onPress={() => onStep(step - 1)}
               accessibilityRole="button"
               style={({ pressed }) => [styles.button, { backgroundColor: palette.surface }, pressed && styles.pressed]}
             >
@@ -214,7 +269,7 @@ export function MapTour({ targets, onClose }: { targets: TourTargets; onClose():
             </Pressable>
           )}
           <Pressable
-            onPress={() => (last ? setFinished(true) : setStep(step + 1))}
+            onPress={() => (last ? onClose(true) : onStep(step + 1))}
             accessibilityRole="button"
             style={({ pressed }) => [styles.button, { backgroundColor: palette.accent }, pressed && styles.pressed]}
           >
@@ -235,10 +290,17 @@ function tourStops(boxes: { status?: Box; follow?: Box; toolbar?: Box }, width: 
   const circle = (cx: number, cy: number, r: number): Box => ({ x: cx - r, y: cy - r, w: 2 * r, h: 2 * r });
   if (boxes.status) {
     const hole = pad(boxes.status, 6);
-    stops.push({ title: "tourStatusTitle", body: "tourStatusBody", hole, radius: hole.h / 2 });
+    stops.push({
+      tries: { id: "status", done: "tourStatusTried" },
+      title: "tourStatusTitle",
+      body: "tourStatusBody",
+      hole,
+      radius: Math.min(hole.h / 2, 34),
+    });
   }
   stops.push({ title: "tourDotTitle", body: "tourDotBody", hole: circle(width / 2, height / 2, 70), radius: 70 });
   stops.push({
+    tries: { id: "hold", done: "tourHoldTried" },
     title: "tourHoldTitle",
     body: "tourHoldBody",
     hole: circle(width * 0.72, height * 0.34, 46),
@@ -248,7 +310,7 @@ function tourStops(boxes: { status?: Box; follow?: Box; toolbar?: Box }, width: 
   if (boxes.follow) {
     const r = Math.max(boxes.follow.w, boxes.follow.h) / 2 + 8;
     const hole = circle(boxes.follow.x + boxes.follow.w / 2, boxes.follow.y + boxes.follow.h / 2, r);
-    stops.push({ title: "tourFollowTitle", body: "tourFollowBody", hole, radius: r });
+    stops.push({ tries: { id: "follow", done: "tourFollowTried" }, title: "tourFollowTitle", body: "tourFollowBody", hole, radius: r });
   }
   if (boxes.toolbar) {
     const bar = boxes.toolbar;
@@ -330,26 +392,7 @@ const styles = StyleSheet.create({
   cardTitle: { lineHeight: 23 },
   cardBody: { lineHeight: 20 },
   ring: { position: "absolute", borderWidth: 3 },
-  toast: {
-    position: "absolute",
-    left: 16,
-    right: 16,
-    borderRadius: Radius.rL,
-    borderCurve: "continuous",
-    backgroundColor: "rgba(29,28,26,0.94)",
-    paddingVertical: 10,
-    paddingLeft: 18,
-    paddingRight: 10,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  toastText: { flex: 1, lineHeight: 19 },
-  toastButton: {
-    height: 40,
-    paddingHorizontal: 18,
-    borderRadius: Radius.pill,
-    backgroundColor: "#90BAF1",
-    justifyContent: "center",
-  },
+  block: { position: "absolute" },
+  doneRow: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
+  doneText: { flex: 1, lineHeight: 20 },
 });

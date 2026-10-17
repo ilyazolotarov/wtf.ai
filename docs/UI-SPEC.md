@@ -347,44 +347,63 @@ Onboarding"). Strings in `src/i18n/guide-en.ts` / `guide-uk.ts`; driver advice i
 normally"), never "Nothing".
 
 - **Onboarding** ends with a phone holder step (the gyro is the only yaw source without GPS, SPEC §2): a firm
-  holder, any angle, a phone picked up catches up; the Guide is in More.
+  holder, any angle, a phone picked up catches up; a note asks for the lessons (More › How to use?) before the
+  first drive.
 - **Map tour** (`src/components/guide/map-tour.tsx`): offered once on the map after onboarding and the first map
   (a card above the camera button, hidden while a pin, a placing or the parked-pose question is up; kv-store
   `guide.tour-offered`), and from the Guide at any time (the pages close first). The screen dims except one control
   at a time, with a card (step, title, text, Back / Next, Skip): the status pill, the dot (the screen centre: the
   tour starts the follow camera), press and hold (a pulsing ring), the camera button, Vehicle and More (thirds of
-  the bottom bar). Done leaves a note for 6 s with a link to the Guide.
-- **Guide** page: the first row of More, "How to use? · {done} of {total} done". The tour card, the lessons
-  in groups (Getting started, When GPS fails, Routes, Maps) with a tick once done (kv-store `guide.done`), "Show the
-  first-run screens again".
+  the bottom bar). Three stops are tried for real: their hole lets touches through, the rest of the screen takes
+  none, and the card adds a ticked line once done. The status hole is the whole top stack (it grows as the pill
+  unfolds); on its stop the pill unfolds even with nothing to explain, then saying what green means. A long press in
+  the ring drops a real pin (its card stays hidden; the pin goes when the stop does); the camera button switches
+  for real. Done ends it with the lessons offer (below), titled as the tour's end ("Tour done. Now practise…").
+- **Lessons offer** on the map, after the tour's (taken or not), in its place: practise before the first drive,
+  Not now / Start lessons (the Guide with the first lesson not done open over it). Only while no lesson is done,
+  the car stands with no trip or route, and nothing else is up; Not now hides it until the app starts again, at
+  most three times (kv-store `guide.lessons-invite-dismissed`).
+- **Guide** page: the first row of More, "How to use? · {done} of {total} done" ("Start here before your first
+  drive", in the accent colour, until a lesson is done). The tour card; until all are done, a card asking to practise
+  before the first drive with Start lessons / Continue: {next lesson}; the lessons in groups (Getting started, When
+  GPS fails, Routes, Maps) with a tick once done (kv-store `guide.done`), "Show the first-run screens again".
 - **Lessons** (`guide/lesson?id=`), full pages pushed from the Guide, each interactive, on drawn maps (`react-native-svg`, `src/components/guide/mini-map.tsx`)
   in the map's colours, read from the style the map draws now (`useMapPalette`, `src/config/map-palette.ts`: Liberty's
   ground, buildings, parks, water, minor and main streets in light; the same re-tinted for Night Drive in dark; built-in
   copies only without a usable region): never the live map, so practising never moves the car. The button at the bottom marks the
   lesson done and opens the next. The Guide lists only lessons that exist (`lesson-bodies.tsx`).
-  1. Before you drive: the map and the adapter read from the app, the holder, opening the app first and charging
-     ticked by the driver.
+  1. Before you drive: the map and the adapter read from the app, the holder, opening the app first, the dot on the
+     car and charging. The dot ticks itself while GPS is trusted; otherwise the driver ticks it, and until then Show
+     me opens lesson 3 (a first drive may well start jammed or spoofed).
   2. What the dot is telling you: the five trust states on one map.
-  3. The car button: its four states, a checklist when red.
-  4. Driving through jamming: a drive played in five stages (GPS ok, jammed, 4 min, a turn, GPS back; 4 s each, the
+  3. Put the car on the map: placing is taught once, early, in two tabs, each with numbered steps under its map:
+     stop safely (not when setting off: the car already stands), find where you are by a house number, sign or
+     landmark or by asking, place the car and its heading as precisely as possible (setting off: answer No first),
+     drive off safely: the app goes on from there.
+     - Set the position (no GPS, or the dot on the wrong road): placing starts as on the map, from the chip, or a long
+       press anywhere (a pulsing ring on the car invites it) drops a pin whose card's I'm here starts placing at it.
+       Then the map dragged under the centre pin, Here, a tap for the heading, Confirm. It leads to the right answer:
+       a target circle around the car (the area that counts), Here only with the pin's point in it (it snaps onto the
+       car), a circle ahead of the car, Confirm only with the arrow along the road the way the car faces.
+     - When you set off: "Is the car where the dot is?", both answers. No moves the dot to Wi-Fi's guess and starts
+       placing there, as on the map; the car is up the street.
+
+     The lesson's pin is drawn so its point is exactly the placed spot; the cards sit at the bottom of the lesson's
+     small map, leaving the road ahead free to tap (`placing-map.tsx`, both tabs). While placing, the page's back
+     swipe is off (a drag from the map's edge moves the map) and Android's back cancels the placing instead of
+     leaving the lesson.
+  4. The car button: its four states, a checklist when red.
+  5. Driving through jamming: a drive played in five stages (GPS ok, jammed, 4 min, a turn, GPS back; 4 s each, the
      stage's button filling as its time runs, the car moving between them), with or without the adapter (without,
      the dot holds the last fix and the circle grows).
-  5. Put the car on the map: as on the map, the map dragged under the centre pin, Here, a tap for the heading,
-     Confirm. It leads to the right answer: a target circle around the car (the area that counts), Here only with the
-     pin's point in it (it snaps onto the car), a circle ahead of the car, Confirm only with the arrow along the road
-     the way the car faces. The lesson's pin is drawn so its point is exactly the placed spot; the cards sit at the
-     bottom of the lesson's small map, leaving the road ahead free to tap (`placing-map.tsx`, shared with lesson 6).
-     While placing, the page's back swipe is off (a drag from the map's edge moves the map) and Android's back cancels
-     the placing instead of leaving the lesson.
-  6. "Is the car where the dot is?": both answers. No moves the dot to Wi-Fi's guess and starts placing there, as on
-     the map; the car is up the street.
-  7. Plan a route: a long press anywhere drops the pin (I'm here moves the dot there; Route here plans), or search a
-     saved place. The drawn map is a real road network (`route-map.ts`, `MemoryRoadGraph`): the app's router plans
+  6. Plan a route: a long press anywhere drops the pin (I'm here moves the dot there, then asks which way the car
+     faces, a tap ahead and Confirm as on the map, so routes start that way; Route here plans), or search a saved
+     place. The drawn map is a real road network (`route-map.ts`, `MemoryRoadGraph`): the app's router plans
      on it, the real route banner shows the maneuvers and the voice says the first one (unless muted).
-  8. Spoken directions: the real banner on a planned route (a tap mutes, a long press opens the phone's audio
+  7. Spoken directions: the real banner on a planned route (a tap mutes, a long press opens the phone's audio
      output list) and the Settings volume slider, for the lesson only (0 hides the button; let go, it says the
      route's instruction at that volume).
-  9. Offline maps: the Offline maps screen as drawn there, with the phone's own regions when it has them (only the map
+  8. Offline maps: the Offline maps screen as drawn there, with the phone's own regions when it has them (only the map
      in use starts downloaded, so there is one to try); downloads, switching and deleting are pretend.
 
   The lessons draw the map's own pieces: its status pill, puck (blue when trusted, else yellow with a dashed circle;

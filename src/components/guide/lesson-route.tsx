@@ -1,14 +1,14 @@
 import { Fragment, useEffect, useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
+import { G, Path } from "react-native-svg";
 
-import { ExplainCard, LessonIntro, PulseRing } from "@/components/guide/lesson-ui";
+import { ExplainCard, LessonIntro, LessonTabs, PulseRing } from "@/components/guide/lesson-ui";
 import { sayFirstInstruction } from "@/components/guide/lesson-voice-sample";
-import { MapCard, MapCardHeader, MapChipButton } from "@/components/guide/map-ui";
+import { MapCard, MapCardButtons, MapCardHeader, MapChipButton } from "@/components/guide/map-ui";
 import { MiniMap, PinDot, Puck, RouteLine, useNudgedHeading } from "@/components/guide/mini-map";
-import { BLOCKS, CAR, H, PARKS, PLACES, plan, roadHeadingDeg, roads, toCoordinate, TOP, W, type Planned, type Point } from "@/components/guide/route-map";
+import { BLOCKS, CAR, H, PARKS, PLACES, plan, roads, toCoordinate, TOP, W, type Planned, type Point } from "@/components/guide/route-map";
 import { RouteBanner } from "@/components/route/route-banner";
 import { hushVoice } from "@/components/route/voice-player";
-import { Segmented } from "@/components/screens/screen-ui";
 import { cardinal, formatDistance, toDegrees } from "@/components/status/format-geo";
 import { Icon } from "@/components/ui/icon";
 import { T } from "@/components/ui/text";
@@ -19,16 +19,20 @@ import { RoadClass } from "@/nav/mapmatch/graph/format";
 
 type Tab = "hold" | "search";
 
-/** Lesson 7: a route to anywhere, by a long press or a search (ROUTING-SPEC §8, UI-SPEC §7.1), planned for real. */
+/** Lesson 6: a route to anywhere, by a long press or a search (ROUTING-SPEC §8, UI-SPEC §7.1), planned for real. */
 export function LessonRoute() {
   const { t, language } = useT();
   const palette = usePalette();
   const [tab, setTab] = useState<Tab>("hold");
   const [scale, setScale] = useState(1);
   const [dot, setDot] = useState<Point>(CAR);
-  // Along the road the dot is on (or nearest to, set on the map off the roads).
-  const heading = useNudgedHeading(roadHeadingDeg(dot));
+  // The car starts facing up its road; once placed, the way the driver said it faces.
+  const [dotHeadingDeg, setDotHeadingDeg] = useState(0);
+  const heading = useNudgedHeading(dotHeadingDeg);
   const [placed, setPlaced] = useState(false);
+  // I'm here, as on the map: then which way the car faces, a tap ahead of it (the route starts that way).
+  const [aiming, setAiming] = useState<Point | null>(null);
+  const [aimDeg, setAimDeg] = useState<number | null>(null);
   const [pin, setPin] = useState<Point | null>(null);
   const [chosen, setChosen] = useState<(typeof PLACES)[number] | null>(null);
   const [route, setRoute] = useState<Planned | null>(null);
@@ -39,7 +43,7 @@ export function LessonRoute() {
   useEffect(() => () => hushVoice(), []);
 
   const routeTo = (to: Point) => {
-    const planned = plan(dot, to, !placed, plans + 1);
+    const planned = plan(dot, to, dotHeadingDeg, plans + 1);
     setRoute(planned);
     setPlans(plans + 1);
     setPin(to);
@@ -51,6 +55,7 @@ export function LessonRoute() {
     setRoute(null);
     setPin(null);
     setChosen(null);
+    setAiming(null);
   };
   const searching = tab === "search" && !route;
   const fromDot = (to: Point) => {
@@ -62,7 +67,7 @@ export function LessonRoute() {
   return (
     <>
       <LessonIntro>{t("routeIntro")}</LessonIntro>
-      <Segmented<Tab>
+      <LessonTabs<Tab>
         value={tab}
         onChange={(value) => {
           setTab(value);
@@ -83,7 +88,19 @@ export function LessonRoute() {
         onLayout={(event) => setScale(event.nativeEvent.layout.width / W)}
         overlay={
           <>
-            {!searching && (
+            {aiming && (
+              // A tap sets the arrow from the placed spot that way; another turns it.
+              <Pressable
+                style={StyleSheet.absoluteFill}
+                onPress={(event) => {
+                  const dx = event.nativeEvent.locationX / scale - aiming.x;
+                  const dy = event.nativeEvent.locationY / scale - aiming.y;
+                  if (Math.hypot(dx, dy) > 4) setAimDeg((Math.atan2(dx, -dy) * 180) / Math.PI);
+                }}
+                accessibilityLabel={t("placeHeadingHint")}
+              />
+            )}
+            {!searching && !aiming && (
               <Pressable
                 style={StyleSheet.absoluteFill}
                 onLongPress={(event) => {
@@ -95,7 +112,7 @@ export function LessonRoute() {
                 accessibilityLabel={t("routeHoldHint")}
               />
             )}
-            {!searching && !pin && !route && (
+            {!searching && !pin && !route && !aiming && (
               <>
                 <PulseRing left={`${(280 / W) * 100}%`} top={`${((TOP + 150) / H) * 100}%`} />
                 <View pointerEvents="none" style={[styles.hint, placed && styles.hintBelowChip, { backgroundColor: palette.text }]}>
@@ -105,12 +122,13 @@ export function LessonRoute() {
                 </View>
               </>
             )}
-            {placed && !route && (
+            {placed && !route && !aiming && (
               <MapChipButton
                 icon="location_on"
                 label={t("manualChip").replace("{age}", t("ageJustNow"))}
                 onClose={() => {
                   setDot(CAR);
+                  setDotHeadingDeg(0);
                   setPlaced(false);
                 }}
                 closeLabel={t("manualForget")}
@@ -123,10 +141,10 @@ export function LessonRoute() {
                 <MapCardHeader icon="place" title={t("droppedPin")} body={fromDot(pin)} onClose={() => setPin(null)} closeLabel={t("cancel")} />
                 <View style={styles.pinActions}>
                   <Pressable
-                    // As the map: "I'm here" puts the car where the pin is.
+                    // As the map: "I'm here" puts the car where the pin is, then asks which way it faces.
                     onPress={() => {
-                      setDot(pin);
-                      setPlaced(true);
+                      setAiming(pin);
+                      setAimDeg(null);
                       setPin(null);
                     }}
                     accessibilityRole="button"
@@ -148,6 +166,31 @@ export function LessonRoute() {
                     </T>
                   </Pressable>
                 </View>
+              </MapCard>
+            )}
+
+            {aiming && (
+              <MapCard style={styles.bottom}>
+                <MapCardHeader
+                  icon="navigation"
+                  title={t("placeHeadingTitle")}
+                  body={t(aimDeg == null ? "placeHeadingHint" : "placeHeadingConfirm")}
+                />
+                <MapCardButtons
+                  buttons={[
+                    { label: t("placeCancel"), muted: true, onPress: () => setAiming(null) },
+                    {
+                      label: t("placeConfirm"),
+                      disabled: aimDeg == null,
+                      onPress: () => {
+                        setDot(aiming);
+                        setDotHeadingDeg(aimDeg ?? 0);
+                        setPlaced(true);
+                        setAiming(null);
+                      },
+                    },
+                  ]}
+                />
               </MapCard>
             )}
 
@@ -223,7 +266,20 @@ export function LessonRoute() {
         {route?.path ? <RouteLine d={route.path} /> : null}
         {/* As the map: a dropped pin's dot, then the destination's once the route goes there. */}
         {pin && <PinDot x={pin.x} y={pin.y} destination={route != null} />}
-        <Puck x={dot.x} y={dot.y} r={12} headingDeg={heading} />
+        {aiming ? (
+          <>
+            <PinDot x={aiming.x} y={aiming.y} />
+            {aimDeg != null && (
+              // The arrow from the placed spot, as the map's placing draws it.
+              <G transform={`rotate(${aimDeg} ${aiming.x} ${aiming.y})`}>
+                <Path d={`M${aiming.x} ${aiming.y} V${aiming.y - 44}`} stroke={palette.accent} strokeWidth={4} strokeLinecap="round" />
+                <Path d={`M${aiming.x - 9} ${aiming.y - 38} L${aiming.x} ${aiming.y - 56} L${aiming.x + 9} ${aiming.y - 38} Z`} fill={palette.accent} />
+              </G>
+            )}
+          </>
+        ) : (
+          <Puck x={dot.x} y={dot.y} r={12} headingDeg={heading} />
+        )}
       </MiniMap>
 
       <ExplainCard

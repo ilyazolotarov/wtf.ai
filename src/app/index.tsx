@@ -8,7 +8,7 @@ import { BottomBar } from "@/components/map/bottom-bar";
 import { CAMERA_BUTTON_SIZE, CameraButton } from "@/components/map/camera-button";
 import { NoFixCard, PermissionCard } from "@/components/map/center-cards";
 import { HeldRouteCard, PinCard } from "@/components/map/destination-cards";
-import { HudChip, usePanelStyle } from "@/components/map/hud-card";
+import { HudCard, HudChip, usePanelStyle } from "@/components/map/hud-card";
 import { MapSurface } from "@/components/map/map-surface";
 import { useMapTurn, type MapTurn } from "@/components/map/map-turn";
 import { PlacingPin } from "@/components/map/placing-pin";
@@ -21,14 +21,15 @@ import { useCameraMode } from "@/components/map/use-camera-mode";
 import { usePlaceReminder } from "@/components/map/use-place-reminder";
 import { useCompassHeading, useHeadingUp, walkingCompass } from "@/components/map/use-compass-heading";
 import { isLost, usePlacing } from "@/components/map/use-placing";
-import { MapTour, TourInvite } from "@/components/guide/map-tour";
+import { openLessons } from "@/components/guide/lesson-bodies";
+import { LessonsInvite, MapTour, TourInvite, type TourTry } from "@/components/guide/map-tour";
 import { RouteBanner } from "@/components/route/route-banner";
 import { useAudioOutput } from "@/components/route/use-audio-output";
 import { useVoiceGuidance, useVoiceMuted, useVoiceVolume } from "@/components/route/use-voice-guidance";
 import { UpdatePrompts } from "@/components/update/update-prompts";
 import { useNavStatus } from "@/components/status/use-nav-status";
 import { ANDROID_BLURS, BlurScope, BlurTarget } from "@/components/ui/glass-fill";
-import { FontScaleLimit, MAP_MAX_FONT_SCALE } from "@/components/ui/text";
+import { FontScaleLimit, MAP_MAX_FONT_SCALE, T } from "@/components/ui/text";
 import { useHasUsableMap } from "@/config/map";
 import { usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
@@ -38,7 +39,14 @@ import { usePositionPermission } from "@/providers/position-provider";
 import { useHeldRoute, useRoute } from "@/providers/route-provider";
 import { useDevSettings, useRecorderSnapshot, useRuntime } from "@/providers/runtime-provider";
 import { isOnboardingDone } from "@/services/preferences";
-import { isTourOffered, markTourOffered, onTourRequest, takeTourRequest } from "@/services/guide/guide-progress";
+import {
+  dismissLessonsInvite,
+  isLessonsInviteDue,
+  isTourOffered,
+  markTourOffered,
+  onTourRequest,
+  takeTourRequest,
+} from "@/services/guide/guide-progress";
 
 /**
  * The map turns with a phone held sideways where it is a view that can be rotated: iOS, and Android's TextureView
@@ -144,6 +152,14 @@ export default function HomeScreen() {
   useVoiceGuidance(route, position?.speedMps, voiceMuted || voiceOff);
   const audioOutput = useAudioOutput(route?.status === "active");
 
+  // The map tour (UI-SPEC §7.7): offered once after the first map, or asked for from the Guide. Three of its stops
+  // are tried for real on the map; which were, and the stop shown.
+  const [touring, setTouring] = useState(false);
+  const [tourTried, setTourTried] = useState<ReadonlySet<TourTry>>(new Set());
+  const [tourStop, setTourStop] = useState<TourTry | null>(null);
+  const [tourStep, setTourStep] = useState(0);
+  const tryTour = (id: TourTry) => setTourTried((tried) => new Set([...tried, id]));
+
   const { cameraMode, setCameraMode, onGesture, toggleCameraMode: toggleMode, overview } = useCameraMode({
     recording,
     // A linger after engine off is still the same drive for the camera.
@@ -156,6 +172,7 @@ export default function HomeScreen() {
   const toggleCameraMode = () => {
     setGhostView(false);
     toggleMode();
+    if (touring) tryTour("follow");
   };
 
   const place = usePlacing({ position, navigator, setCameraMode, onStart: () => setPin(null) });
@@ -172,16 +189,18 @@ export default function HomeScreen() {
   // pill opens it. The manual position's chip is part of it: the pill already says the position is set by hand.
   const showCutGps = outageButton && position != null && !outage;
   const showManual = !placing && manual != null && !manual.asking;
-  const hasDetails = outage != null || alertText != null || showCutGps || showManual;
+  // On the tour's status stop the pill unfolds even with nothing to explain: then the tour says what it means.
+  const tourStatus = touring && tourStop === "status";
+  const hasDetails = outage != null || alertText != null || showCutGps || showManual || tourStatus;
   const [detailsToggled, setDetailsOpen] = useState(false);
   const detailsOpen = detailsToggled && hasDetails;
 
   const screenFocused = useIsFocused();
   const mapReady = useHasUsableMap();
 
-  // The map tour (UI-SPEC §7.7): offered once after the first map, or asked for from the Guide.
-  const [touring, setTouring] = useState(false);
   const [tourOffered, setTourOffered] = useState(isTourOffered);
+  // The status stop's hole follows the top stack as it unfolds.
+  const [tourLayout, setTourLayout] = useState(0);
   const statusRef = useRef<View>(null);
   const followRef = useRef<View>(null);
   const toolbarRef = useRef<View>(null);
@@ -194,8 +213,40 @@ export default function HomeScreen() {
     setPin(null);
     setDetailsOpen(false);
     setCameraMode("follow");
+    setTourTried(new Set());
+    setTourStep(0);
     setTouring(true);
   };
+  // Done (not skipped): the lessons' offer, which follows, is the tour's end too.
+  const [tourFinished, setTourFinished] = useState(false);
+  const endTour = (finished: boolean) => {
+    setTourFinished(finished);
+    // Its end is the lessons' offer, even when Not now hid it earlier in this run.
+    if (finished) setLessonsDue(isLessonsInviteDue());
+    setTouring(false);
+    setTourStop(null);
+    setPin(null);
+    setDetailsOpen(false);
+  };
+  // Then the lessons (UI-SPEC §7.7): practice on drawn maps before the first drives, offered while the car stands.
+  const [lessonsDue, setLessonsDue] = useState(isLessonsInviteDue);
+  const answerLessons = (take: boolean) => {
+    setLessonsDue(false);
+    if (take) openLessons();
+    else dismissLessonsInvite();
+  };
+  const showLessonsInvite =
+    mapReady &&
+    tourOffered &&
+    lessonsDue &&
+    !touring &&
+    !pin &&
+    !placing &&
+    !position?.poseQuestion &&
+    !held.destination &&
+    !recording &&
+    route == null &&
+    (position?.speedMps ?? 0) <= MOVING_MPS;
   const takeTour = useEffectEvent(() => {
     if (takeTourRequest()) answerTour(true);
   });
@@ -220,7 +271,10 @@ export default function HomeScreen() {
               compass={compass}
               headingUpRad={headingUp}
               onUserInteraction={onGesture}
-              onLongPress={setPin}
+              onLongPress={(at) => {
+                setPin(at);
+                if (touring) tryTour("hold");
+              }}
               pin={placing ? null : pin}
               logCamera={(text) => runtime.recorder.note(text)}
               placing={placing}
@@ -255,14 +309,25 @@ export default function HomeScreen() {
               },
             ]}
           >
-            <View pointerEvents="box-none" style={styles.topStack}>
+            <View
+              ref={statusRef}
+              pointerEvents="box-none"
+              style={styles.topStack}
+              onLayout={touring ? () => setTourLayout((n) => n + 1) : undefined}
+            >
               <StatusRow
-                ref={statusRef}
                 nav={nav}
                 expandable={hasDetails}
                 expanded={detailsOpen}
-                onToggle={() => setDetailsOpen((open) => !open)}
+                onToggle={() => {
+                  setDetailsOpen((open) => !open);
+                  if (tourStatus) tryTour("status");
+                }}
               />
+
+              {tourStatus && detailsOpen && !alertText && !outage && (
+                <HudCard icon={nav.icon} tone={nav.color} lines={<T size={14} style={styles.tourExplain}>{t("tourStatusExplain")}</T>} />
+              )}
 
               {outage && detailsOpen && (
                 <OutageCard outage={outage} nowMs={position.timestamp} onRestore={() => navigator.setSimulatedOutage(false)} />
@@ -352,7 +417,8 @@ export default function HomeScreen() {
                   onConfirm={held.confirm}
                 />
               )}
-              {pin && (
+              {/* On the tour the pin is only tried: its card would sit under the dimmed screen. */}
+              {pin && !touring && (
                 <PinCard
                   pin={pin}
                   position={position}
@@ -368,12 +434,30 @@ export default function HomeScreen() {
               {mapReady && !tourOffered && !touring && !pin && !placing && !position?.poseQuestion && (
                 <TourInvite panelStyle={panel} onStart={() => answerTour(true)} onDismiss={() => answerTour(false)} />
               )}
+              {showLessonsInvite && (
+                <LessonsInvite panelStyle={panel} afterTour={tourFinished} onStart={() => answerLessons(true)} onDismiss={() => answerLessons(false)} />
+              )}
               <CameraButton ref={followRef} mode={cameraMode} onPress={toggleCameraMode} />
               <BottomBar ref={toolbarRef} recording={recording} onLayout={(e) => setBarHeight(e.nativeEvent.layout.height)} />
             </View>
           </View>
           {/* Asked for from the Guide, it waits for the pages to close. */}
-          {touring && screenFocused && <MapTour targets={tourTargets} onClose={() => setTouring(false)} />}
+          {touring && screenFocused && (
+            <MapTour
+              targets={tourTargets}
+              step={tourStep}
+              onStep={setTourStep}
+              layoutVersion={tourLayout}
+              tried={tourTried}
+              onStop={(id) => {
+                setTourStop(id);
+                // A pin tried on the press-and-hold stop goes with it, and the status folds once past its stop.
+                if (id !== "hold") setPin(null);
+                if (id !== "status") setDetailsOpen(false);
+              }}
+              onClose={endTour}
+            />
+          )}
           {/* Update prompts only while nothing else goes on (docs/UPDATES-SPEC.md §5.3). */}
           <UpdatePrompts
             busy={
@@ -385,6 +469,7 @@ export default function HomeScreen() {
               !mapReady ||
               touring ||
               !tourOffered ||
+              showLessonsInvite ||
               pin != null ||
               placing != null
             }
@@ -403,5 +488,6 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   topStack: { gap: 10 },
+  tourExplain: { lineHeight: 20 },
   bottomStack: { gap: 12 },
 });

@@ -32,7 +32,7 @@ const STEP_MS = 250;
 const STEPS = 14;
 
 /**
- * Lesson 9: the Offline maps screen (UI-SPEC §7.4), drawn as the app draws it, with the phone's own regions when it
+ * Lesson 8: the Offline maps screen (UI-SPEC §7.4), drawn as the app draws it, with the phone's own regions when it
  * has them; downloads, switching and deleting are pretend and never touch the real maps.
  */
 export function LessonMaps() {

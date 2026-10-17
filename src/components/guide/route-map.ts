@@ -52,13 +52,6 @@ const WAYS: MemoryWay[] = [
   })),
 ];
 const graph = new MemoryRoadGraph(frame, WAYS);
-/** Along the road nearest to `p`, clockwise from up: north on a north–south road, east on a west–east one. */
-export function roadHeadingDeg(p: Point): number {
-  const toVertical = Math.min(...VERTICAL.map((v) => Math.abs(p.x - v.x)));
-  const toHorizontal = Math.min(...HORIZONTAL.map((h) => Math.abs(p.y - h.y)));
-  return toVertical <= toHorizontal ? 0 : 90;
-}
-
 export const roads = (cls: number) =>
   [
     ...VERTICAL.filter((v) => v.cls === cls).map((v) => `M${v.x} -10 V${H + 10}`),
@@ -99,10 +92,13 @@ export interface Planned {
   nowMs: number;
 }
 
-/** Plan from the dot to `to` with the app's router and maneuvers, as a route snapshot for the real banner. */
-export function plan(from: Point, to: Point, facingUp: boolean, planId: number): Planned {
+/**
+ * Plan from the dot, the car facing `headingDeg` (clockwise from up), to `to` with the app's router and maneuvers, as
+ * a route snapshot for the real banner.
+ */
+export function plan(from: Point, to: Point, headingDeg: number, planId: number): Planned {
   const destination = toCoordinate(to);
-  const result = planRoute(graph, frame, { ...toCoordinate(from), ...(facingUp ? { headingRad: 0 } : {}) }, destination);
+  const result = planRoute(graph, frame, { ...toCoordinate(from), headingRad: (headingDeg * Math.PI) / 180 }, destination);
   const nowMs = Date.now();
   if (result.status !== "done") {
     return { snapshot: { destination, status: "failed", failure: result.reason, planId, replanning: false }, path: "", nowMs };

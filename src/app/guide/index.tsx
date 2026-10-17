@@ -1,7 +1,7 @@
 import { router } from "expo-router";
 import { Pressable, StyleSheet, View } from "react-native";
 
-import { AVAILABLE_GROUPS, AVAILABLE_LESSONS } from "@/components/guide/lesson-bodies";
+import { AVAILABLE_GROUPS, AVAILABLE_LESSONS, nextLesson } from "@/components/guide/lesson-bodies";
 import { ScreenContent, ScreenSection } from "@/components/screens/screen-ui";
 import { Icon } from "@/components/ui/icon";
 import { T } from "@/components/ui/text";
@@ -15,6 +15,7 @@ export default function GuideScreen() {
   const palette = usePalette();
   const done = useLessonsDone();
   const doneCount = AVAILABLE_LESSONS.filter((lesson) => done.has(lesson.id)).length;
+  const next = nextLesson(done);
 
   const startTour = () => {
     markTourOffered();
@@ -48,6 +49,27 @@ export default function GuideScreen() {
           <Icon name="play_arrow" size={20} color={palette.accent} />
         </View>
       </Pressable>
+
+      {doneCount < AVAILABLE_LESSONS.length && (
+        // The lessons' call: practice before the first drives, where the next one is a tap away.
+        <View style={[styles.practice, { backgroundColor: palette.groupBg }]}>
+          <T w="semibold" size={17}>
+            {t("lessonsInviteTitle")}
+          </T>
+          <T size={14} color={palette.text2} style={styles.practiceBody}>
+            {t("lessonsInviteBody")}
+          </T>
+          <Pressable
+            onPress={() => router.push(`/guide/lesson?id=${next.id}`)}
+            accessibilityRole="button"
+            style={({ pressed }) => [styles.practiceButton, { backgroundColor: palette.accent }, pressed && styles.pressed]}
+          >
+            <T w="semibold" size={15} color={palette.onAccent} fit>
+              {doneCount === 0 ? t("lessonsInviteStart") : t("guideContinue").replace("{title}", t(next.title))}
+            </T>
+          </Pressable>
+        </View>
+      )}
 
       {AVAILABLE_GROUPS.map((group) => (
         <ScreenSection key={group.title} title={t(group.title)}>
@@ -112,6 +134,16 @@ const styles = StyleSheet.create({
   kicker: { letterSpacing: 0.4, opacity: 0.85 },
   tourBody: { lineHeight: 18, opacity: 0.9 },
   play: { width: 48, height: 48, borderRadius: 24, alignItems: "center", justifyContent: "center" },
+  practice: { borderRadius: Radius.rL, padding: 18, gap: 8, borderCurve: "continuous" },
+  practiceBody: { lineHeight: 20 },
+  practiceButton: {
+    marginTop: 6,
+    minHeight: 46,
+    paddingHorizontal: 16,
+    borderRadius: Radius.pill,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   row: { minHeight: 64, flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 8 },
   badge: { width: 30, height: 30, borderRadius: 15, alignItems: "center", justifyContent: "center" },
   copy: { flex: 1, gap: 2 },

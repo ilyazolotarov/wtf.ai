@@ -1,4 +1,3 @@
-import type { Ref } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 
 import type { useNavStatus } from "@/components/status/use-nav-status";
@@ -25,14 +24,11 @@ export function StatusRow({
   expandable,
   expanded,
   onToggle,
-  ref,
 }: {
   nav: ReturnType<typeof useNavStatus>;
   expandable: boolean;
   expanded: boolean;
   onToggle(): void;
-  /** The pill, for the map tour. */
-  ref?: Ref<View>;
 }) {
   const { t } = useT();
   const palette = usePalette();
@@ -49,7 +45,6 @@ export function StatusRow({
         disabled={!expandable}
         accessibilityRole="button"
         accessibilityState={{ expanded }}
-        ref={ref}
         style={[panel, styles.pill]}
       >
         <GlassFill radius={Radius.pill} />

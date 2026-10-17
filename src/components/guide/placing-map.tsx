@@ -50,6 +50,7 @@ export function PlacingMap({
   dotHeadingDeg = null,
   startAt,
   overlay,
+  onLongPress,
   view,
 }: {
   step: PlaceStep;
@@ -69,6 +70,8 @@ export function PlacingMap({
   startAt?: Point;
   /** Views over the map before placing (chips, cards, tags); `at` turns map units into points. */
   overlay?: (at: (p: Point) => { left: number; top: number }) => ReactNode;
+  /** A long press on the map before placing, where (map units), as the map screen's dropped pin. */
+  onLongPress?(p: Point): void;
   /**
    * The map rows the frame shows before it is dragged (default 0 to `PLACING_FRAME.h`): a taller view starting
    * higher keeps the scene below a card over the top of the map.
@@ -245,6 +248,16 @@ export function PlacingMap({
           </Svg>
         )}
 
+        {step === "idle" && onLongPress && (
+          // Before placing the map has not moved: a point in the frame is the map's.
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onLongPress={(event) => onLongPress({ x: event.nativeEvent.locationX / scale, y: event.nativeEvent.locationY / scale + top })}
+            delayLongPress={400}
+            accessibilityRole="button"
+            accessibilityLabel={t("placeHoldHint")}
+          />
+        )}
         {step === "idle" && overlay?.(at)}
 
         {step === "position" && (

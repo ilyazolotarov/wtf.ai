@@ -2,10 +2,9 @@ import { useEffect, useState } from "react";
 import { Animated, Easing, Pressable, StyleSheet, View } from "react-native";
 import { Circle, G, Path } from "react-native-svg";
 
-import { ExplainCard, FadeIn, LessonIntro } from "@/components/guide/lesson-ui";
+import { ExplainCard, FadeIn, LessonIntro, LessonTabs } from "@/components/guide/lesson-ui";
 import { CarGlyph, MapChip, MiniMap, Puck, StatusPillMock, useMapColors } from "@/components/guide/mini-map";
 import { useTween } from "@/components/guide/use-tween";
-import { Segmented } from "@/components/screens/screen-ui";
 import { formatDistance } from "@/components/status/format-geo";
 import { Icon } from "@/components/ui/icon";
 import { T } from "@/components/ui/text";
@@ -75,7 +74,7 @@ const WITHOUT: StageView[] = [
   { ...WITH[4], app: "jamNoAdBackApp" },
 ];
 
-/** Lesson 4: a drive under jamming played in five stages, with and without the adapter (SPEC §3.3–3.7). */
+/** Lesson 5: a drive under jamming played in five stages, with and without the adapter (SPEC §3.3–3.7). */
 export function LessonJamming() {
   const { t, language } = useT();
   const palette = usePalette();
@@ -118,7 +117,7 @@ export function LessonJamming() {
   return (
     <>
       <LessonIntro>{t("jamIntro")}</LessonIntro>
-      <Segmented<"with" | "without">
+      <LessonTabs<"with" | "without">
         value={adapter ? "with" : "without"}
         onChange={(value) => setAdapter(value === "with")}
         options={[

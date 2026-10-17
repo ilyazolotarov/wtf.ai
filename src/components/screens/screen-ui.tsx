@@ -1,5 +1,5 @@
 import { router, useNavigation, useRoute } from "expo-router";
-import { Children, Fragment, isValidElement } from "react";
+import { Children, Fragment, isValidElement, type Ref } from "react";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   Platform,
@@ -27,8 +27,9 @@ export function ScreenContent({
   title,
   scrollEnabled = true,
   fullScreen = false,
+  scrollRef,
   children,
-}: React.PropsWithChildren<{ title?: string; scrollEnabled?: boolean; fullScreen?: boolean }>) {
+}: React.PropsWithChildren<{ title?: string; scrollEnabled?: boolean; fullScreen?: boolean; scrollRef?: Ref<ScrollView> }>) {
   const palette = usePalette();
   const insets = useSafeAreaInsets();
   if (title)
@@ -44,6 +45,7 @@ export function ScreenContent({
           <PageHeader title={title} />
         </View>
         <ScrollView
+          ref={scrollRef}
           keyboardShouldPersistTaps="handled"
           scrollEnabled={scrollEnabled}
           contentContainerStyle={[styles.content, { paddingBottom: styles.content.paddingBottom + insets.bottom }]}
@@ -58,6 +60,7 @@ export function ScreenContent({
   const android = Platform.OS === "android";
   const body = (
     <ScrollView
+      ref={scrollRef}
       style={{ backgroundColor: palette.sheetBg }}
       contentInsetAdjustmentBehavior="automatic"
       keyboardShouldPersistTaps="handled"

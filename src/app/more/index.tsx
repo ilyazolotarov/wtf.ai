@@ -26,6 +26,7 @@ export default function MoreScreen() {
   const { installed } = useMapPacks();
   const rec = useRecorderSnapshot();
   const lessonsDone = useLessonsDone();
+  const lessonsStarted = AVAILABLE_LESSONS.some((lesson) => lessonsDone.has(lesson.id));
   const updates = useUpdateBadges();
   const { found } = useUpdateCenter();
   const developerUnlocked = useSyncExternalStore(subscribeDeveloperUnlocked, isDeveloperUnlocked);
@@ -37,9 +38,13 @@ export default function MoreScreen() {
     {
       icon: "menu_book",
       label: t("guideTitle"),
-      sub: t("guideProgress")
-        .replace("{done}", String(AVAILABLE_LESSONS.filter((lesson) => lessonsDone.has(lesson.id)).length))
-        .replace("{total}", String(AVAILABLE_LESSONS.length)),
+      // Until a lesson is done, a call to start there.
+      sub: lessonsStarted
+        ? t("guideProgress")
+            .replace("{done}", String(AVAILABLE_LESSONS.filter((lesson) => lessonsDone.has(lesson.id)).length))
+            .replace("{total}", String(AVAILABLE_LESSONS.length))
+        : t("guideMoreStart"),
+      subColor: lessonsStarted ? undefined : palette.accent,
       href: "/guide",
     },
     {
