@@ -52,6 +52,22 @@ is_android_native() {
   return 1
 }
 
+# Native inputs the runtime version (fingerprint) does not hash: a change still needs a build when the runtime
+# versions agree. The certificate the app checks updates with, and how the platform is built.
+is_ios_forced() {
+  case "$1" in
+    certs/* | .github/workflows/build-ios.yml) return 0 ;;
+  esac
+  return 1
+}
+
+is_android_forced() {
+  case "$1" in
+    certs/* | .github/workflows/build-android.yml) return 0 ;;
+  esac
+  return 1
+}
+
 # Code that ends up in the app (JS bundle or native): a change here means a new build for `main`.
 is_app() {
   is_ios_native "$1" || is_android_native "$1" && return 0
@@ -82,9 +98,11 @@ is_python() {
   return 1
 }
 
-# classify <files on stdin> → sets CHECKS PYTHON SWIFT KOTLIN IOS_NATIVE ANDROID_NATIVE APP (true/false)
+# classify <files on stdin> → sets CHECKS PYTHON SWIFT KOTLIN IOS_NATIVE ANDROID_NATIVE IOS_FORCED ANDROID_FORCED APP
+# (true/false)
 classify() {
   CHECKS=false PYTHON=false SWIFT=false KOTLIN=false IOS_NATIVE=false ANDROID_NATIVE=false APP=false
+  IOS_FORCED=false ANDROID_FORCED=false
   local f
   while IFS= read -r f; do
     [ -z "$f" ] && continue
@@ -94,9 +112,60 @@ classify() {
     is_kotlin_logic "$f" && KOTLIN=true
     is_ios_native "$f" && IOS_NATIVE=true
     is_android_native "$f" && ANDROID_NATIVE=true
+    is_ios_forced "$f" && IOS_FORCED=true
+    is_android_forced "$f" && ANDROID_FORCED=true
     is_app "$f" && APP=true
   done
   return 0
+}
+
+# --- Runtime versions ---------------------------------------------------------------------------
+# The file classes above guess; the runtime version (the fingerprint, docs/OTA.md) is what decides whether installed
+# builds can take the JS. A package.json script or a tool's dependency changes no runtime, while an app icon (assets/)
+# or eas.json does. So on a push the runtime versions of the base and of HEAD replace the guess.
+
+# needs_runtime_check → true when a push could change a runtime: on the default branch anything that reaches the
+# phone (it decides build vs OTA), on other branches a native guess (it can only drop a needless compile check).
+needs_runtime_check() {
+  [ "$EVENT" = push ] || return 1
+  if $IOS_FORCED && $ANDROID_FORCED; then return 1; fi
+  if [ "$REF_NAME" = "$DEFAULT_BRANCH" ]; then $APP; else $IOS_NATIVE || $ANDROID_NATIVE; fi
+}
+
+# runtime_of <dir> <platform> → the runtime version a build of <dir> embeds (as tools/ota resolves it)
+runtime_of() {
+  (cd "$1" && node node_modules/expo-updates/bin/cli.js runtimeversion:resolve --platform "$2" 2>/dev/null) |
+    sed -n 's/^{"runtimeVersion":"\([^"]*\)".*/\1/p'
+}
+
+# apply_runtimes <ios base> <ios head> <android base> <android head> → sets IOS_NATIVE / ANDROID_NATIVE
+apply_runtimes() {
+  IOS_NATIVE=$IOS_FORCED ANDROID_NATIVE=$ANDROID_FORCED
+  [ "$1" != "$2" ] && IOS_NATIVE=true
+  [ "$3" != "$4" ] && ANDROID_NATIVE=true
+  return 0
+}
+
+# compare_runtimes <base> → apply_runtimes with the runtime versions of <base> and HEAD; fails (flags untouched) when
+# one cannot be resolved.
+compare_runtimes() {
+  local base=$1 dir=${RUNNER_TEMP:-/tmp}/ci-plan-base p
+  local -A rt=()
+  echo "Resolving the runtime versions of $base and HEAD"
+  npm ci --no-audit --no-fund --loglevel=error >&2 || return 1
+  rm -rf "$dir"
+  git worktree prune
+  # LFS files (store videos) are not needed to resolve a fingerprint.
+  GIT_LFS_SKIP_SMUDGE=1 git worktree add --detach "$dir" "$base" >/dev/null 2>&1 || return 1
+  (cd "$dir" && npm ci --no-audit --no-fund --loglevel=error) >&2 || return 1
+  for p in ios android; do
+    rt[$p.base]=$(runtime_of "$dir" "$p")
+    rt[$p.head]=$(runtime_of . "$p")
+    [ -n "${rt[$p.base]}" ] && [ -n "${rt[$p.head]}" ] || return 1
+    echo "  $p: ${rt[$p.base]} → ${rt[$p.head]}"
+  done
+  git worktree remove --force "$dir" >/dev/null 2>&1 || true
+  apply_runtimes "${rt[ios.base]}" "${rt[ios.head]}" "${rt[android.base]}" "${rt[android.head]}"
 }
 
 # Build keyword in commit messages: [build] = both platforms, [build ios], [build android].
@@ -206,6 +275,10 @@ main() {
       git diff --name-only "$base" HEAD | sed 's/^/  /'
       classify < <(git diff --name-only "$base" HEAD)
       MESSAGES=$(git log --format=%B "$base..HEAD")
+      if needs_runtime_check; then
+        # A failure keeps the guess from the file names: a needless build beats an update no phone can run.
+        compare_runtimes "$base" || echo "::warning::Could not resolve the runtime versions: native changes guessed from file names"
+      fi
     fi
   fi
   decide
@@ -266,6 +339,34 @@ self_test() {
 ' "${kt#* }")
     if [ "$KOTLIN" = "${kt%% *}" ]; then echo "ok   kotlin=$KOTLIN for ${kt#* }"; else echo "FAIL kotlin for ${kt#* }: want ${kt%% *}"; fails=$((fails + 1)); fi
   done
+  # With the runtime versions resolved (expect_rt <description> <expected as above> <ref> <ios: same|new>
+  # <android: same|new> <files...>).
+  expect_rt() {
+    local desc=$1 want=$2 ref=$3 ios=$4 android=$5
+    shift 5
+    EVENT=push REF_NAME=$ref MESSAGES='' DEFAULT_BRANCH=main
+    classify < <(printf '%s\n' "$@")
+    if needs_runtime_check; then
+      apply_runtimes a "$([ "$ios" = new ] && echo b || echo a)" a "$([ "$android" = new ] && echo b || echo a)"
+    fi
+    decide
+    local ota=${OTA// /+}
+    local got="$CHECKS $PYTHON $SWIFT ${BUILD_IOS:--} ${BUILD_ANDROID:--} $NOTIFY ${ota:--}"
+    if [ "$got" = "$want" ]; then
+      echo "ok   $desc"
+    else
+      echo "FAIL $desc: want '$want', got '$got'"
+      fails=$((fails + 1))
+    fi
+  }
+  expect_rt "package.json scripts on main: an OTA update" "true false false - - true ios+android" main same same package.json src/a.ts
+  expect_rt "a new dependency on main: builds" "true false false Release ci true -" main new new package.json package-lock.json
+  expect_rt "app icon on main: builds" "true false false Release ci true -" main new new assets/images/icon.png
+  expect_rt "Swift module on main, runtimes resolved" "true false true Release - true android" main new same modules/a/ios/A.swift
+  expect_rt "certificate on main, same runtimes: builds" "true false false Release ci true -" main same same certs/certificate.pem
+  expect_rt "iOS build workflow on main: iOS build" "true false false Release - true android" main same same .github/workflows/build-ios.yml
+  expect_rt "package.json scripts on a branch: no compile check" "true false false - - false -" b same same package.json
+  expect_rt "app icon on a branch: not resolved, no build" "true false false - - false -" b new new assets/images/icon.png
   DISPATCH_IOS=Release DISPATCH_ANDROID=none
   expect "manual Release" "true false false Release - true -" workflow_dispatch b ""
   if [ "$fails" -ne 0 ]; then

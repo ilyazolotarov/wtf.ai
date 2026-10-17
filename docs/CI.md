@@ -30,6 +30,12 @@ covered again by the next run.
 `app.plugin.js` / `expo-module.config.json`, `fingerprint.config.js`, `.fingerprintignore`, `certs/` and the
 platform's build workflow.
 
+That list is only a guess. On a push the plan resolves the runtime version ([OTA.md](OTA.md)) of the base and of HEAD
+per platform, and a platform is native when its runtime version changed, or `certs/` or its build workflow changed (the
+fingerprint hashes neither). On `main` it does this for any app change, so a new package.json script goes out as an
+update while a new app icon builds. On a branch it does this only for a native guess, and can only drop a needless
+compile check. It costs the plan two `npm ci`. If a runtime version cannot be resolved, the guess stands.
+
 | Event                                  | Build                                    | Telegram | Kept    |
 | -------------------------------------- | ---------------------------------------- | -------- | ------- |
 | Push to a branch, native change        | Debug, as a compile check                | no       | 7 days  |

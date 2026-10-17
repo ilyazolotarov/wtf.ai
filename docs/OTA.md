@@ -7,7 +7,8 @@ the app does with them is [UPDATES-SPEC.md](UPDATES-SPEC.md).
 
 ## How an update travels
 
-1. A push to `main` changes app code but nothing native for a platform (`ci-plan.sh`: `ota=ios android`).
+1. A push to `main` changes app code but not a platform's runtime version (`ci-plan.sh` resolves it at the base
+   and at HEAD, [CI.md](CI.md#builds): `ota=ios android`).
 2. `publish-ota.yml` exports the JS (`expo export`, `EXPO_PUBLIC_BUILD_SHA` = the commit), signs one update per
    platform (`npm run ota:prepare`) and uploads it (`npm run ota:publish -- --require-build`): first the files the
    bucket lacks, then the record that makes it live. Telegram gets a message.
@@ -44,7 +45,8 @@ registered. The Google Play bundle is never published, so it registers nothing.
   are a warning in CI, bumped with the next native change, never alone. Config that native code doesn't read goes in
   app.config's `extra`, outside the runtime.
 - **No update for a runtime no build has.** `--require-build` fails the publish when the fingerprint changed without
-  a native build (a native input `ci-plan.sh` does not know): the fix is a build, then publish again.
+  a native build (the plan could not resolve the runtime versions and guessed from file names): the fix is a build,
+  then publish again.
 - **Signed.** The app accepts only updates signed with the key of `certs/certificate.pem` (`rsa-v1_5-sha256`, keyid
   `main`). The private key never enters the repo: it lives with the owner and in the `OTA_SIGNING_KEY` secret.
 - **Secrets only on main.** `OTA_SIGNING_KEY` and `OTA_PUBLISH_TOKEN` are secrets of the GitHub environment `ota`,
