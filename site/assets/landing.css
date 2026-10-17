@@ -61,3 +61,9 @@ footer a { color: var(--text2); margin-right: 16px; }
 /* The icon of the theme it switches to: the sun in dark, the moon in light. */
 :root { --theme-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='5'/%3E%3Cg stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M12 1v3M12 20v3M1 12h3M20 12h3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1'/%3E%3C/g%3E%3C/svg%3E"); }
 :root[data-theme="light"] { --theme-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z'/%3E%3C/svg%3E"); }
+.hero p.note { color: var(--text2); font-size: 15px; margin: 14px 0 0; max-width: 34em; }
+.card ol { margin: 0; padding-left: 20px; color: var(--text2); font-size: 16px; }
+.card ol li { margin: 4px 0; }
+.card ol b, .card p b { color: var(--text); font-weight: 600; }
+.contact { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; margin-bottom: 24px; }
+.contact .badge { font-size: 18px; }

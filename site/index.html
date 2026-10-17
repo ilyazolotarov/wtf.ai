@@ -25,8 +25,9 @@ layout: null
     <header class="top">
       <a class="brand" href="./">wtf.ai</a>
       <nav>
-        <a href="#how">Як працює</a>
         <a href="#adapter">Адаптер</a>
+        <a href="#install">Встановлення</a>
+        <a href="#contact">Контакти</a>
         <a href="https://github.com/{{ site.github.repository_nwo }}/wiki/Home-uk">Довідка</a>
         <a href="en.html" lang="en" hreflang="en">English</a>
         <button class="theme-toggle" type="button" data-to-light="Світла" data-to-dark="Темна">Світла</button>
@@ -38,14 +39,62 @@ layout: null
         <h1>Where the f* am&nbsp;I?</h1>
         <p class="lead">Офлайн-навігатор для авто, який знає, де ви, навіть коли GPS заглушено або підмінено.</p>
         <div class="badges">
-          <a class="badge" href="{{ site.testflight_url }}">iPhone · публічна бета</a>
-          {% if site.apk_url %}<a class="badge" href="{{ site.apk_url }}">Android · APK</a>{% endif %}
-          <a class="badge" href="https://github.com/{{ site.github.repository_nwo }}/wiki/Getting-started-uk">Перші кроки</a>
+          <a class="badge" href="#install">iPhone · публічна бета</a>
+          <a class="badge" href="#install">Android · APK</a>
         </div>
+        <p class="note"><b>Для навігації без GPS потрібен адаптер:</b> невеликий пристрій із Bluetooth, з яким програма
+          продовжує працювати навіть під час глушіння GPS. <a href="#adapter">Який обрати</a></p>
       </div>
       <div class="phone"><video src="assets/demo-uk-dark.mp4" poster="assets/screens/uk/dark/01-guidance.png" data-dark="assets/demo-uk-dark.mp4" data-light="assets/demo-uk.mp4" data-dark-poster="assets/screens/uk/dark/01-guidance.png" data-light-poster="assets/screens/uk/01-guidance.png" autoplay muted loop playsinline preload="auto" aria-label="Демо-поїздка: навігація, потім підміна GPS, а авто їде далі дорогою"></video></div>
     </div>
   </div>
+
+  <section id="adapter">
+    <div class="wrap">
+      <h2>Підключіть адаптер до авто</h2>
+      <p class="sub">Невеликий Bluetooth-адаптер OBD-II підключається до роз’єму під панеллю приладів і передає програмі
+        швидкість авто. З ним програма може визначати місцеположення авто годинами без GPS. Без адаптера вона працює,
+        доки сигнал GPS надійний.</p>
+      <div class="grid">
+        <div class="card"><h3>Android</h3><p>Будь-який адаптер ELM327 із Bluetooth LE або звичайним Bluetooth —
+          останній використовує більшість недорогих моделей.</p></div>
+        <div class="card"><h3>iPhone</h3><p>Адаптери ELM327 з Bluetooth LE, а також OBDLink MX+ і vLinker FS / MS.
+          Адаптери лише зі звичайним Bluetooth не працюють із жодною програмою на iPhone.</p></div>
+        <div class="card"><h3>Який купити</h3><p>Рекомендуємо OBDLink MX+ і vLinker FD-IOS (перевірені нами), а також
+          OBDLink CX і vLinker MC+ / FD+ / FS / MS. Дешевий клон «v1.5» теж пройшов перевірку, але він, як і більшість
+          клонів зі звичайним Bluetooth, працює лише з Android. Не купуйте адаптери, які працюють лише з програмою
+          виробника.</p></div>
+      </div>
+      <p class="sub" style="margin: 20px 0 0">Підключіть один раз — далі програма сама з’єднуватиметься з адаптером, коли
+        ви відкриватимете її в авто. <a href="https://github.com/{{ site.github.repository_nwo }}/wiki/Car-adapter-uk">Який
+        адаптер обрати і як підключити</a></p>
+    </div>
+  </section>
+
+  <section id="install">
+    <div class="wrap">
+      <h2>Встановлення</h2>
+      <p class="sub">Безкоштовно, без реєстрації.</p>
+      <div class="grid">
+        <div class="card"><h3>iPhone</h3><ol>
+          <li>На iPhone відкрийте <a href="{{ site.testflight_url }}">запрошення до TestFlight</a>.</li>
+          <li>Встановіть з App Store <b>TestFlight</b> — програму Apple для тестування бета-версій.</li>
+          <li><b>Код запрошення не потрібен.</b> Якщо TestFlight просить ввести код, закрийте його, поверніться на
+            цю сторінку й ще раз відкрийте запрошення.</li>
+          <li>Натисніть <b>Прийняти</b> (Accept), потім <b>Встановити</b> (Install).</li>
+        </ol></div>
+        <div class="card"><h3>Android</h3><ol>
+          <li>На телефоні завантажте <a href="{{ site.apk_url }}">програму (файл APK)</a>.</li>
+          <li>Відкрийте завантажений файл.</li>
+          <li>Якщо Android попросить, дозвольте браузеру встановлювати програми, а потім натисніть
+            <b>Встановити</b>.</li>
+        </ol></div>
+        <div class="card"><h3>Перша поїздка</h3><p>Завантажте в програмі мапу свого регіону, вставте адаптер у роз’єм
+          авто й підключіть його до програми. <a href="https://github.com/{{ site.github.repository_nwo }}/wiki/Getting-started-uk">Перші
+          кроки</a></p></div>
+      </div>
+    </div>
+  </section>
 
   <section>
     <div class="wrap">
@@ -75,7 +124,6 @@ layout: null
     </div>
   </section>
 
-
   <section>
     <div class="wrap">
       <h2>У програмі</h2>
@@ -91,22 +139,32 @@ layout: null
     </div>
   </section>
 
-  <section id="adapter">
+  <section id="contact">
     <div class="wrap">
-      <h2>Підключіть адаптер до авто</h2>
-      <p class="sub">Невеликий Bluetooth-адаптер OBD-II під панеллю приладів передає програмі точну швидкість авто. З ним програма продовжує визначати позицію авто годинами без GPS. Без адаптера програма працює, поки GPS надійний.</p>
+      <h2>Поділіться враженнями</h2>
+      <p class="sub">wtf.ai поки що в бета-версії, і ваші відгуки допомагають покращувати програму. Розкажіть про поїздку,
+        під час якої програма неправильно визначила ваше місцеположення, поставте запитання чи поділіться ідеєю.
+        Можна написати й про цю сторінку: що було незрозуміло або через що ви припинили читати. Ми читаємо кожне
+        повідомлення.</p>
+      {% if site.support_email %}<div class="contact">
+        <a class="badge" href="mailto:{{ site.support_email }}?subject=wtf.ai%20%D0%B2%D1%96%D0%B4%D0%B3%D1%83%D0%BA">{{ site.support_email }}</a>
+      </div>{% endif %}
       <div class="grid">
-        <div class="card"><h3>Android</h3><p>Будь-який Bluetooth-адаптер ELM327: Bluetooth LE або звичайний Bluetooth, як
-          більшість недорогих.</p></div>
-        <div class="card"><h3>iPhone</h3><p>Адаптери ELM327 з Bluetooth LE, а також OBDLink MX+ і vLinker FS / MS.
-          Адаптери лише зі звичайним Bluetooth не працюють із жодною програмою на iPhone.</p></div>
-        <div class="card"><h3>Який купити</h3><p>Перевірено: OBDLink MX+, vLinker FD-IOS. Також добрі: OBDLink CX,
-          vLinker MC+ / FD+ / FS / MS. Оминайте дешеві клони «v1.5», що відповідають із пропусками, і адаптери,
-          створені для власної програми.</p></div>
+        <div class="card"><h3>Щось пішло не так</h3><p>Опишіть, що сталося і приблизно де, та вкажіть моделі телефона
+          й адаптера. Знімок екрана допоможе розібратися.</p></div>
+        <div class="card"><h3>Про цей сайт</h3><p>Не знайшли інформації про те, як встановити програму чи який адаптер купити?
+          Напишіть — ми виправимо сторінку.</p></div>
+        <div class="card"><h3>На GitHub</h3><p>Про помилки та ідеї можна також написати в <a
+          href="https://github.com/{{ site.github.repository_nwo }}/issues">розділі Issues на GitHub</a>.</p></div>
       </div>
-      <p class="sub" style="margin: 20px 0 0">Підключіть один раз — далі програма сама з’єднуватиметься з адаптером, коли
-        ви відкриєте її в авто. <a href="https://github.com/{{ site.github.repository_nwo }}/wiki/Car-adapter-uk">Який
-        адаптер обрати і як підключити</a></p>
+    </div>
+  </section>
+
+  <section id="share">
+    <div class="wrap">
+      <h2>Сподобалося? Розкажіть про нас!</h2>
+      <p class="sub">Поділіться посиланням на wtf.ai у соцмережах або розкажіть друзям про свій досвід.
+        Так більше водіїв дізнаються про навігацію, яка працює навіть під час тривог.</p>
     </div>
   </section>
 

@@ -25,8 +25,9 @@ layout: null
     <header class="top">
       <a class="brand" href="en.html">wtf.ai</a>
       <nav>
-        <a href="#how">How it works</a>
         <a href="#adapter">Adapter</a>
+        <a href="#install">Install</a>
+        <a href="#contact">Contact</a>
         <a href="https://github.com/{{ site.github.repository_nwo }}/wiki">Guide</a>
         <a href="./" lang="uk" hreflang="uk">Українська</a>
         <button class="theme-toggle" type="button" data-to-light="Light" data-to-dark="Dark">Light</button>
@@ -38,14 +39,59 @@ layout: null
         <h1>Where the f* am&nbsp;I?</h1>
         <p class="lead">Offline car navigation that keeps knowing where you are when GPS is jammed or spoofed.</p>
         <div class="badges">
-          <a class="badge" href="{{ site.testflight_url }}">iPhone · public beta</a>
-          {% if site.apk_url %}<a class="badge" href="{{ site.apk_url }}">Android · APK</a>{% endif %}
-          <a class="badge" href="https://github.com/{{ site.github.repository_nwo }}/wiki/Getting-started">Getting started</a>
+          <a class="badge" href="#install">iPhone · public beta</a>
+          <a class="badge" href="#install">Android · APK</a>
         </div>
+        <p class="note"><b>You'll want a car adapter:</b> a small Bluetooth plug that keeps the app going when GPS
+          is jammed. <a href="#adapter">Which one</a></p>
       </div>
       <div class="phone"><video src="assets/demo-dark.mp4" poster="assets/screens/dark/01-guidance.png" data-dark="assets/demo-dark.mp4" data-light="assets/demo.mp4" data-dark-poster="assets/screens/dark/01-guidance.png" data-light-poster="assets/screens/01-guidance.png" autoplay muted loop playsinline preload="auto" aria-label="A demo drive: guidance, then GPS spoofed and the car carrying on along the road"></video></div>
     </div>
   </div>
+
+  <section id="adapter">
+    <div class="wrap">
+      <h2>Add a car adapter</h2>
+      <p class="sub">A small OBD-II Bluetooth plug under the dashboard tells the app exactly how fast the car goes. With
+        it, the position holds for hours without GPS. Without it, the app works while GPS is good.</p>
+      <div class="grid">
+        <div class="card"><h3>Android</h3><p>Any Bluetooth ELM327 adapter: Bluetooth LE, or classic Bluetooth like most
+          inexpensive ones.</p></div>
+        <div class="card"><h3>iPhone</h3><p>Bluetooth LE ELM327 adapters, plus OBDLink MX+ and vLinker FS / MS.
+          Classic-only adapters can't work with any iPhone app.</p></div>
+        <div class="card"><h3>Which to buy</h3><p>Best: OBDLink MX+, vLinker FD-IOS (tested), OBDLink CX, vLinker MC+ /
+          FD+ / FS / MS. A cheap "v1.5" clone works too (tested; Android only, like most
+          classic-Bluetooth clones). Skip dongles made for their own app.</p></div>
+      </div>
+      <p class="sub" style="margin: 20px 0 0">Connect once; after that it connects by itself whenever you open the app in
+        the car. <a href="https://github.com/{{ site.github.repository_nwo }}/wiki/Car-adapter">Which adapter, and
+        connecting</a></p>
+    </div>
+  </section>
+
+  <section id="install">
+    <div class="wrap">
+      <h2>Install</h2>
+      <p class="sub">Free, no account.</p>
+      <div class="grid">
+        <div class="card"><h3>iPhone</h3><ol>
+          <li>On the iPhone, open <a href="{{ site.testflight_url }}">the TestFlight invitation</a>.</li>
+          <li>Install <b>TestFlight</b>, Apple's app for beta versions, from the App Store.</li>
+          <li><b>Don't look for a code.</b> If TestFlight opens asking to redeem one, close it, come back to this page
+            and open the invitation again.</li>
+          <li>Tap <b>Accept</b>, then <b>Install</b>.</li>
+        </ol></div>
+        <div class="card"><h3>Android</h3><ol>
+          <li>On the phone, download <a href="{{ site.apk_url }}">the app (APK file)</a>.</li>
+          <li>Open the downloaded file.</li>
+          <li>If Android asks, allow installing apps from your browser, then tap <b>Install</b>.</li>
+        </ol></div>
+        <div class="card"><h3>First drive</h3><p>Download your region's map in the app, plug in the adapter and
+          connect it once. <a href="https://github.com/{{ site.github.repository_nwo }}/wiki/Getting-started">Getting
+          started</a></p></div>
+      </div>
+    </div>
+  </section>
 
   <section>
     <div class="wrap">
@@ -85,7 +131,6 @@ layout: null
     </div>
   </section>
 
-
   <section>
     <div class="wrap">
       <h2>In the app</h2>
@@ -101,23 +146,30 @@ layout: null
     </div>
   </section>
 
-  <section id="adapter">
+  <section id="contact">
     <div class="wrap">
-      <h2>Add a car adapter</h2>
-      <p class="sub">A small OBD-II Bluetooth plug under the dashboard tells the app exactly how fast the car goes. With
-        it, the position holds for hours without GPS. Without it, the app works while GPS is good.</p>
+      <h2>Tell us what you think</h2>
+      <p class="sub">wtf.ai is in beta, and your feedback shapes it. Write about a drive where the app got lost, a
+        question, an idea, or this page: what was unclear, what made you stop reading. Every message gets read.</p>
+      {% if site.support_email %}<div class="contact">
+        <a class="badge" href="mailto:{{ site.support_email }}?subject=wtf.ai%20feedback">{{ site.support_email }}</a>
+      </div>{% endif %}
       <div class="grid">
-        <div class="card"><h3>Android</h3><p>Any Bluetooth ELM327 adapter: Bluetooth LE, or classic Bluetooth like most
-          inexpensive ones.</p></div>
-        <div class="card"><h3>iPhone</h3><p>Bluetooth LE ELM327 adapters, plus OBDLink MX+ and vLinker FS / MS.
-          Classic-only adapters can't work with any iPhone app.</p></div>
-        <div class="card"><h3>Which to buy</h3><p>Tested: OBDLink MX+, vLinker FD-IOS. Also good: OBDLink CX, vLinker
-          MC+ / FD+ / FS / MS. Skip cheap "v1.5" clones, which answer with gaps, and dongles made for their own
-          app.</p></div>
+        <div class="card"><h3>Something went wrong</h3><p>Say what you saw, where roughly, and which phone and
+          adapter. A screenshot helps.</p></div>
+        <div class="card"><h3>About this website</h3><p>Couldn't find how to install, or which adapter to buy?
+          Tell us, and we'll fix the page.</p></div>
+        <div class="card"><h3>On GitHub</h3><p>Bug reports and ideas are also welcome as <a
+          href="https://github.com/{{ site.github.repository_nwo }}/issues">issues</a>.</p></div>
       </div>
-      <p class="sub" style="margin: 20px 0 0">Connect once; after that it connects by itself whenever you open the app in
-        the car. <a href="https://github.com/{{ site.github.repository_nwo }}/wiki/Car-adapter">Which adapter, and
-        connecting</a></p>
+    </div>
+  </section>
+
+  <section id="share">
+    <div class="wrap">
+      <h2>Like it? Spread the word!</h2>
+      <p class="sub">Share a link to wtf.ai on social media or tell your friends about your experience.
+        Help more drivers discover navigation that keeps working even during air raid alerts.</p>
     </div>
   </section>
 

@@ -13,7 +13,7 @@ a route exactly (see [[When GPS fails]]), but an adapter is what makes the app u
 ## Which adapter
 
 The app reads the speed twice a second. What matters is that the adapter answers **every time, without gaps**, and
-keeps the connection for the whole drive: branded adapters do, cheap clones often don't.
+keeps the connection for the whole drive: all the adapters we tested do, a cheap clone included.
 
 | Phone   | What connects                                                                                               |
 | ------- | ----------------------------------------------------------------------------------------------------------- |
@@ -25,6 +25,8 @@ keeps the connection for the whole drive: branded adapters do, cheap clones ofte
 - **OBDLink MX+**: road-tested on two cars, one of them an older car on K-line. iPhone through Apple MFi, Android
   through classic Bluetooth. Press its button to pair.
 - **vLinker FD-IOS** (Bluetooth LE): road-tested; steady speed, connects by itself.
+- **A no-name "ELM327 v1.5"** (classic Bluetooth, so Android only): road-tested on an older car on K-line. It gave
+  the speed every time the app asked, including on a drive with no GPS at all.
 
 ### Recommended, not road-tested yet
 
@@ -34,10 +36,10 @@ keeps the connection for the whole drive: branded adapters do, cheap clones ofte
 - **vLinker MC+, FD+, BM+** (Bluetooth LE): the "+" models of the family we tested.
 - **vLinker FS, MS**: on iPhone through Apple MFi (we have the maker's authorization), on Android through Bluetooth.
 
-### Works, but not recommended
+### Should work, not road-tested
 
-- **Cheap ELM327 clones** ("v1.5", "v2.1", no-name, Konnwei): many are classic Bluetooth only, so Android only. On
-  our test the first connection to a car took over two minutes, and answers are slower and can come with gaps.
+- **Other cheap ELM327 clones** ("v1.5", "v2.1", no-name, Konnwei): most are classic Bluetooth only, so Android only.
+  The one we drove with worked, but clones differ from batch to batch: a branded adapter is the safer buy.
 - **Simpler branded ELM327 adapters**: Vgate iCar Pro BLE / iCar2, Veepeak OBDCheck BLE / BLE+, LELink, Carista,
   Viecar, FIXD. They connect, but we haven't driven with them.
 
@@ -54,7 +56,7 @@ keeps the connection for the whole drive: branded adapters do, cheap clones ofte
 - iPhone: the box says **"Bluetooth LE"** or **"BLE"**, or it is one of the MFi models above. Plain "Bluetooth" means
   classic: Android only.
 - From Vgate vLinker, take a **"+"** model (MC+, FD+, BM+), or FS / MS.
-- A "v1.5" or "v2.1" adapter for the price of a coffee is exactly the class we don't recommend.
+- A "v1.5" or "v2.1" clone for the price of a coffee can work on Android; a branded adapter is the safer buy.
 
 Tried an adapter that isn't listed? Write to SUPPORT_EMAIL how it went.
 
