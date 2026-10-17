@@ -308,6 +308,10 @@ export function getRuntime(): Runtime {
     onRoute: (plan) => {
       position.setRouteHint(dev.routeHint && plan ? plan.legs.map((l) => l.edge) : null);
       position.setPhoneRoute(plan ? plan.coordinates : null);
+      // The store video drives the car along the app's own route (scripts/store-screenshots.py reads it in logcat).
+      if (dev.showEmulators && plan) {
+        console.log(`wtf-demo-route ${JSON.stringify(plan.coordinates.map((c) => [+c.lat.toFixed(6), +c.lon.toFixed(6)]))}`);
+      }
     },
     note: (text) => recorder.note(text),
     log: {

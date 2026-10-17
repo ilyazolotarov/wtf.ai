@@ -18,6 +18,7 @@ import { dash, fmt } from "@/components/vehicle/format";
 import { usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
 import type { DiscoveredDevice } from "@/obd/types";
+import { driveProfileNext, parseSpeedProfile } from "@/services/vehicle-link/driving-emulator";
 import {
   useDevSettings,
   useRuntime,
@@ -26,13 +27,15 @@ import {
 
 export default function VehicleScreen() {
   const { t } = useT();
-  const params = useLocalSearchParams<{ emulators?: string }>();
+  const params = useLocalSearchParams<{ emulators?: string; cycle?: string }>();
   const { setDevSettings: setDev } = useRuntime();
   // `wtfai://vehicle?emulators=1` lists the simulated adapters: the emulator smoke test (scripts/android-smoke.sh)
   // has no Bluetooth and drives the real app against them. Same switch as Developer → Show emulated adapters.
+  // `&cycle=0:0,10:0,22:50,…` (seconds:km/h): the emulator connected next drives that speed profile (the store video).
   useEffect(() => {
     if (params.emulators === "1") setDev({ showEmulators: true });
-  }, [params.emulators, setDev]);
+    if (params.cycle) driveProfileNext(parseSpeedProfile(params.cycle));
+  }, [params.emulators, params.cycle, setDev]);
 
   return (
     <ScreenContent title={t("vehicle")}>
