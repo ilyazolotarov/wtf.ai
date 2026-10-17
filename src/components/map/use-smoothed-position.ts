@@ -7,6 +7,9 @@ import { PoseSmoother, smoothable, type Pose } from "./pose-smoother";
 
 /** Redraws per second while moving: smooth to the eye, and light on the JS thread and MapLibre's sources. */
 const FRAME_MS = 1000 / 30;
+/** Display frames come a hair early or late: two 60 Hz frames are 33.3 ms ± jitter. Without the slack, one a hair
+ * early waited a third frame (50 ms), and the dot and camera stepped 33/50 ms unevenly: visible jitter. */
+const FRAME_SLACK_MS = 4;
 /** A drawn pose older than this (by its position's time) is from before a stop: not shown. */
 const STALE_FRAME_MS = 1_500;
 
@@ -37,7 +40,7 @@ export function useSmoothedPosition(position: PositionEstimate | null): Position
     let drawnAt = 0;
     const tick = (now: number) => {
       raf = requestAnimationFrame(tick);
-      if (now - drawnAt < FRAME_MS) return;
+      if (now - drawnAt < FRAME_MS - FRAME_SLACK_MS) return;
       drawnAt = now;
       const pose = s.at(performance.now());
       if (pose) setFrame({ of: position, pose });
