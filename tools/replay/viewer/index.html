@@ -70,7 +70,7 @@
   #driveSearch { width: 100%; }
   #driveList { list-style: none; margin: 6px 0 0; padding: 0; max-height: min(60vh, 520px); overflow: auto; }
   #driveList .day { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--text2); padding: 8px 6px 2px; }
-  #driveList .drv { display: grid; grid-template-columns: 44px 1fr auto 14px; gap: 8px; padding: 4px 6px; border-radius: 6px;
+  #driveList .drv { display: grid; grid-template-columns: 18px 44px 1fr auto 14px; gap: 8px; align-items: center; padding: 4px 6px; border-radius: 6px;
     cursor: pointer; font-variant-numeric: tabular-nums; }
   #driveList .drv.hl { background: color-mix(in srgb, var(--accent) 15%, transparent); }
   #driveList .drv.cur { font-weight: 600; }
@@ -78,9 +78,11 @@
   #driveList .who { font-family: inherit; font-size: 11px; color: var(--accent); border: 1px solid currentColor;
     border-radius: 4px; padding: 0 4px; margin-left: 4px; }
   #driveList .empty { color: var(--text2); padding: 6px; }
-  .pop-actions { display: flex; justify-content: flex-end; margin-top: 6px; border-top: 1px solid var(--line); padding-top: 6px; }
-  #driveDelete { color: var(--bad); }
-  #driveDelete.armed { border-color: var(--bad); background: var(--bad-bg); }
+  .pop-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; border-top: 1px solid var(--line); padding-top: 6px; }
+  .pop-actions .grow { margin-left: auto; }
+  #driveList input.sel { margin: 0; min-height: 0; }
+  #driveDelete, #deleteSelected { color: var(--bad); }
+  #driveDelete.armed, #deleteSelected.armed { border-color: var(--bad); background: var(--bad-bg); }
   nav.modes { display: flex; gap: 4px; padding: 4px; background: var(--bg); border-radius: 10px; }
   nav.modes button { border: 0; background: transparent; color: var(--text2); font-weight: 500; font-size: 14px; padding: 8px 16px; border-radius: 7px; }
   nav.modes button[aria-selected="true"] { background: var(--panel); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px #0002; }
@@ -206,7 +208,13 @@
     <div id="drivePop" hidden>
       <input id="driveSearch" type="search" placeholder="id, date, time, tester · drawn / undrawn · mine / testers" autocomplete="off" aria-label="Find a drive" />
       <ul id="driveList" role="listbox" aria-label="Drives"></ul>
-      <div class="pop-actions"><button id="driveDelete" title="Delete this log and its drawing: here now, from the bucket on the next npm run logs:push (click twice)">Delete this drive…</button></div>
+      <div class="pop-actions">
+        <button id="selectShown" class="linkish" title="Tick every drive the search shows (search “undrawn”, a day, a tester…)">Select all shown</button>
+        <button id="selectNone" class="linkish" hidden>Clear</button>
+        <span class="grow"></span>
+        <button id="deleteSelected" hidden title="Delete the ticked logs and their drawings: here now, from the bucket on the next npm run logs:push (click twice)">Delete selected…</button>
+        <button id="driveDelete" title="Delete this log and its drawing: here now, from the bucket on the next npm run logs:push (click twice)">Delete this drive…</button>
+      </div>
     </div>
   </div>
   <nav class="modes" role="tablist" aria-label="Mode">
@@ -1780,10 +1788,12 @@ function renderPicker() {
     const p = driveParts(l.file);
     const head = p.day !== day ? `<li class="day">${esc((day = p.day))}</li>` : "";
     return head + `<li class="drv${i === pickHl ? " hl" : ""}${l.file === $("file").value ? " cur" : ""}" role="option" data-i="${i}">` +
+      `<input type="checkbox" class="sel" aria-label="Select ${esc(p.id)}" ${selected.has(l.file) ? "checked" : ""} />` +
       `<span title="${esc(p.other)}">${esc(p.time)}</span><span class="id">${esc(p.id)}${l.who ? ` <span class="who">${esc(l.who)}</span>` : ""}</span><span class="muted">${l.sizeMb} MB</span>` +
       `<span title="${l.drawn ? "Ground truth drawn" : ""}">${l.drawn ? "✎" : ""}</span></li>`;
   }).join("") || `<li class="empty">No drive matches.</li>`;
   $("driveList").querySelector(".hl")?.scrollIntoView({ block: "nearest" });
+  renderSelection();
 }
 function openPicker() {
   $("drivePop").hidden = false;
@@ -1819,29 +1829,56 @@ function markDrawn(file, has) {
   l.drawn = has;
   showPicked();
 }
-/** Delete the current log: the first click asks, a second within 4 s deletes, then the next drive opens. */
-let deleteArmed = 0;
-$("driveDelete").onclick = async () => {
-  const file = $("file").value;
-  if (!file) return;
-  if (Date.now() - deleteArmed > 4000) {
-    deleteArmed = Date.now();
-    $("driveDelete").textContent = `Delete ${driveName(file)}?`;
-    $("driveDelete").classList.add("armed");
-    setTimeout(() => { if (Date.now() - deleteArmed >= 4000) { $("driveDelete").textContent = "Delete"; $("driveDelete").classList.remove("armed"); } }, 4100);
-    return;
+/** Ticked in the drive list, to delete together. */
+const selected = new Set();
+function renderSelection() {
+  for (const f of [...selected]) if (!logs.some((l) => l.file === f)) selected.delete(f);
+  $("deleteSelected").hidden = !selected.size;
+  $("selectNone").hidden = !selected.size;
+  if (!$("deleteSelected").classList.contains("armed")) $("deleteSelected").textContent = `Delete ${selected.size} selected…`;
+}
+/** A delete button that asks first: the first click arms it for 4 s, a second deletes. */
+function armed(button, question, idle) {
+  if (button.dataset.armedAt && Date.now() - Number(button.dataset.armedAt) < 4000) {
+    delete button.dataset.armedAt;
+    button.classList.remove("armed");
+    button.textContent = idle();
+    return true;
   }
-  deleteArmed = 0;
-  $("driveDelete").textContent = "Delete";
-  $("driveDelete").classList.remove("armed");
-  const res = await fetch(`/api/delete?file=${encodeURIComponent(file)}`, { method: "POST" });
-  if (!res.ok) { $("status").textContent = await res.text(); return; }
-  const i = logs.findIndex((l) => l.file === file);
-  logs.splice(i, 1);
-  $("status").textContent = `deleted ${driveName(file)}: gone from the bucket on the next push`;
-  $("file").value = logs[Math.min(i, logs.length - 1)]?.file ?? "";
-  showPicked();
-  run();
+  button.dataset.armedAt = String(Date.now());
+  button.classList.add("armed");
+  button.textContent = question;
+  setTimeout(() => { if (button.dataset.armedAt && Date.now() - Number(button.dataset.armedAt) >= 4000) { delete button.dataset.armedAt; button.classList.remove("armed"); button.textContent = idle(); } }, 4100);
+  return false;
+}
+/** Deletes these logs (and their drawings), then shows the nearest drive left if the one open went too. */
+async function deleteLogs(files) {
+  const current = $("file").value;
+  const at = logs.findIndex((l) => l.file === current);
+  const gone = [];
+  for (const file of files) {
+    $("status").textContent = `deleting ${driveName(file)}…`;
+    const res = await fetch(`/api/delete?file=${encodeURIComponent(file)}`, { method: "POST" });
+    if (!res.ok) { $("status").textContent = `${driveName(file)}: ${await res.text()}`; break; }
+    gone.push(file);
+    selected.delete(file);
+  }
+  logs = logs.filter((l) => !gone.includes(l.file));
+  $("status").textContent = gone.length === 1 ? `deleted ${driveName(gone[0])}: gone from the bucket on the next push` : `deleted ${gone.length} drives: gone from the bucket on the next push`;
+  if (!$("drivePop").hidden) renderPicker();
+  if (gone.includes(current)) {
+    // The nearest drive left: the next older one, else the newest.
+    $("file").value = logs[Math.min(Math.max(0, at), logs.length - 1)]?.file ?? "";
+    showPicked();
+    if ($("file").value) run(); else { data = null; $("status").textContent += " · no drives left"; }
+  } else showPicked();
+}
+$("driveDelete").onclick = () => {
+  const file = $("file").value;
+  if (file && armed($("driveDelete"), `Delete ${driveName(file)}?`, () => "Delete this drive…")) deleteLogs([file]);
+};
+$("deleteSelected").onclick = () => {
+  if (selected.size && armed($("deleteSelected"), `Delete ${selected.size} drive${selected.size > 1 ? "s" : ""}? Click again`, () => `Delete ${selected.size} selected…`)) deleteLogs([...selected]);
 };
 $("drivePick").onclick = () => ($("drivePop").hidden ? openPicker() : closePicker());
 $("drivePrev").onclick = () => pickDrive(logs[logs.findIndex((l) => l.file === $("file").value) + 1]?.file);
@@ -1855,7 +1892,19 @@ $("driveSearch").addEventListener("keydown", (e) => {
   } else if (e.key === "Enter") pickDrive(pickRows[pickHl]?.file);
   else if (e.key === "Escape") { closePicker(); $("drivePick").focus(); }
 });
-$("driveList").onclick = (e) => { const li = e.target.closest(".drv"); if (li) pickDrive(pickRows[Number(li.dataset.i)].file); };
+$("driveList").onclick = (e) => {
+  const li = e.target.closest(".drv");
+  if (!li) return;
+  const file = pickRows[Number(li.dataset.i)].file;
+  if (e.target.closest("input.sel")) {
+    if (e.target.checked) selected.add(file); else selected.delete(file);
+    renderSelection();
+    return;
+  }
+  pickDrive(file);
+};
+$("selectShown").onclick = () => { for (const l of pickRows) selected.add(l.file); renderPicker(); };
+$("selectNone").onclick = () => { selected.clear(); renderPicker(); };
 document.addEventListener("mousedown", (e) => { if (!$("drivePop").hidden && !e.target.closest(".picker")) closePicker(); });
 
 $("tz").value = useUtc ? "utc" : "local";
@@ -1895,6 +1944,7 @@ function showLoading(chained, from) {
   return { done() { clearInterval(timer); if (id === loadingRun) $("loading").hidden = true; } };
 }
 
+let replayAbort = null;
 async function run() {
   const file = $("file").value;
   if (!file) return;
@@ -1907,15 +1957,23 @@ async function run() {
   if (drawnFor !== file) { drawn = null; drawnFor = null; undo.length = 0; setDrawing(false); }
   $("status").textContent = "replaying…";
   const started = performance.now();
+  // A replay still running for the drive before is abandoned: the server stops it as the request closes.
+  replayAbort?.abort();
+  const abort = (replayAbort = new AbortController());
   const loading = showLoading((q.from === "parked" || q.from === "phone") && !(Number(q.start) > 0), q.from);
-  let res;
+  let res, payload;
   try {
-    res = await fetch(`/api/replay?${new URLSearchParams(q)}`);
+    res = await fetch(`/api/replay?${new URLSearchParams(q)}`, { signal: abort.signal });
+    if (res.ok) payload = await res.json();
+  } catch (e) {
+    if (abort.signal.aborted) return;
+    throw e;
   } finally {
     loading.done();
   }
+  if (abort.signal.aborted || $("file").value !== file) return;
+  if (res.status === 499) return;
   if (!res.ok) { $("status").textContent = await res.text(); return; }
-  const payload = await res.json();
   if (!payload.outages) { $("status").textContent = "The viewer server is older than this page: stop it and run npm run replay:view again."; return; }
   if ($("file").value !== file) return;
   data = payload;

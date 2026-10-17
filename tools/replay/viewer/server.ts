@@ -8,6 +8,7 @@ import { existsSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileS
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isMainThread, parentPort, Worker, workerData } from "node:worker_threads";
 
 import { tintDarkStyle, type MapStyleJson } from "../../../src/config/map-dark";
 
@@ -256,6 +257,223 @@ function parseCuts(s: string | null): { fromS: number; toS: number }[] {
     .map(([a, b]) => ({ fromS: a, toS: a + b }));
 }
 
+/** A reply: status, content type, body. */
+interface Reply {
+  status: number;
+  type: string;
+  body: string;
+}
+
+/**
+ * One drive replayed for the page (/api/replay): the app replay, its incidents against the drawing, the placings, the
+ * gyro path. Runs in the replay worker (below), so the server answers everything else meanwhile and a replay nobody
+ * waits for any more is stopped at once.
+ */
+function replayReply(url: URL): Reply {
+  const file = logParam(url);
+  if (!file) return { status: 400, type: "text/plain", body: "file must be a .ulg in the logs folder" };
+  let reply: Reply = { status: 500, type: "text/plain", body: "no reply" };
+  const q = (name: string) => url.searchParams.get(name) ?? "";
+  const lag = q("lag");
+  const start = Number(q("start") || 0);
+  // GPS scenario: as in the app (its "Cut GPS" windows withheld), all of it, cut where asked, jammed, or none.
+  const gps = q("gps") || "app";
+  // Start: from what the phone had stored (in the log), from where this navigator would have parked the car after
+  // its previous drive (every earlier drive replayed), where the drawn truth starts, or cold.
+  const startFrom = q("from") || "phone";
+  // Adapter: as recorded (OBD or CAN, whichever the app took its speed from), or none (phone-only mode,
+  // NAVIGATOR-SPEC §9.6: no OBD speed or engine).
+  const phoneOnly = q("adapter") === "none";
+  const compareLoop = q("compare") === "before" ? BEFORE_DOT : (LOOPS[q("compare")] ?? null);
+  // Compass: off, or calibrated on the other logs, optionally turned (a wrong calibration).
+  const compassArg = url.searchParams.get("compass") ?? "";
+  const compass = compassArg ? compassFromOtherLogs(file) : null;
+  const rotateDeg = Number(compassArg) || 0;
+  const started = Date.now();
+  const trip = loadTrip(file);
+  // The navigator version the phone ran (trip log header, from the app's developer setting); default open.
+  const phoneLoop = typeof trip.info.nav_mapmatch_loop === "string" ? trip.info.nav_mapmatch_loop : null;
+  const loopKey = q("loop") || phoneLoop || "closed";
+  const loop = LOOPS[loopKey] ?? LOOPS.open;
+  // The app replay unless a research option asks for the navigator alone (a later start, a fixed GNSS lag, a compass).
+  const inApp = phoneOnly || (!(start > 0) && !lag && !compassArg);
+  const appLoop = (loop.nav.mapMatchLoop ?? "open") as MapMatchLoop;
+  const fresh = (): AppState => ({ store: new MemoryKeyValueStore(), vin: carOf(trip, new Map()), parkedAfter: null });
+  const logged = inApp && startFrom === "phone" ? appStateFromLog(trip) : null;
+  // A log without the stored state: the chain, as "parked".
+  const chained = inApp && (startFrom === "parked" || (startFrom === "phone" && !logged));
+  const state = !inApp ? null : logged ?? (chained ? appStateBefore(file, appLoop) : fresh());
+  // From the drawn start: its place and heading as the car's parked pose (and phone-only's own), nothing else kept.
+  const drawnPose = inApp && startFrom === "drawn" ? drawnStartPose(trip, readDrawn(file)) : null;
+  // Phone-only: the driver follows the routes the app planned, or the drawn one where they didn't (app-chain.ts).
+  const phoneRoute = phoneOnly ? phoneRouteFor(trip, readDrawn(file)) : null;
+  if (state && drawnPose) {
+    const cal = new CalibrationStore(state.store, phoneOf(trip));
+    if (state.vin) cal.saveParkedPose(state.vin, drawnPose);
+    cal.saveParkedPose(PHONE_CAR, drawnPose);
+  }
+  // Map matching on the trip's road graph, when there is one.
+  const first = regionPoint(trip);
+  const graphFile = first ? (GRAPH ?? findGraph(first)) : null;
+  const opened = graphFile && first ? openGraph(graphFile, first) : null;
+  try {
+    const appCuts = appOutageCuts(trip);
+    const asked = parseCuts(q("cut"));
+    const common: ReplayOptions = {
+      cuts: gps === "app" ? appCuts : gps === "cut" ? asked : [],
+      ...(gps === "nogps" ? { openLoop: { delayS: 0 } } : {}),
+      ...(gps === "jam" ? { jam: asked.length ? asked : [{ fromS: 0, toS: Infinity }] } : {}),
+      ...(opened ? { mapMatch: { graph: opened.graph } } : {}),
+      ...(start > 0 ? { startAtS: start } : {}),
+      ...(compass ? { compass: { calibration: compass.calibration, rotateRad: (rotateDeg * Math.PI) / 180 } } : {}),
+    };
+    const navFor = (nav: Partial<NavConfig>): Partial<NavConfig> => ({ ...nav, ...(lag ? { gnssLagS: Number(lag), estimateGnssLag: false } : {}) });
+    const mainNav = navFor(loop.nav);
+    const compareNav = compareLoop ? navFor(compareLoop.nav) : null;
+    // The main replay's dots, for the incidents against the drawing.
+    let mainPublished: { timestampUs: number; latDeg: number; lonDeg: number; headingRad: number }[] | null = null;
+    let mainFixes: { t: number; lat: number; lon: number; hAccM: number }[] = [];
+    // Through the app: the service publishes the dot, starts from the stored parked pose, and runs the outages.
+    const replay = (o: ReplayOptions) => {
+      const run = () => replayTripInApp(trip, {
+        calibration: new CalibrationStore(state!.store.copy(), phoneOf(trip)),
+        loop: (o.nav?.mapMatchLoop ?? appLoop) as MapMatchLoop,
+        roadGraph: opened ? { key: graphFile!, region: path.basename(graphFile!, ".graph.bin"), graph: opened.graph } : null,
+        vin: state!.vin,
+        cuts: o.cuts ?? [],
+        jam: o.jam,
+        openLoop: o.openLoop,
+        trackStepS: o.trackStepS,
+        mapMatch: { particlesEveryS: o.mapMatch?.particlesEveryS },
+        placings: q("placings") !== "off",
+        // The routes the driver had, as the app gives them to the service (the dot leans on them, puck.ts).
+        ...(phoneOnly ? {} : { phoneRoutes: phoneRouteFor(trip, null).routes }),
+        ...(phoneOnly
+          ? {
+              phoneOnly: {
+                openGraph: () => {
+                  const g = graphFor(trip);
+                  return g ? { key: g.active.key, graph: g.active.graph, close: g.close } : null;
+                },
+              },
+              phoneRoutes: phoneRoute?.routes ?? [],
+            }
+          : {}),
+      });
+      const r = o.nav === compareNav && compareLoop === BEFORE_DOT ? withDotBefore(run) : run();
+      if (o.nav === mainNav) {
+        mainPublished = r.published;
+        mainFixes = r.fixes.filter((f) => f.satellite && f.status === "accepted").map((f) => ({ t: f.tS, lat: f.fix.lat, lon: f.fix.lon, hAccM: f.fix.hAccM }));
+      }
+      return r;
+    };
+    const data = buildViewerData(file, trip, { ...common, nav: mainNav }, {
+      appCuts,
+      ...(inApp ? { replay } : {}),
+      phoneOnly,
+      ...(compareLoop && compareNav ? { compare: { label: compareLoop.label, options: { ...common, nav: compareNav } } } : {}),
+    });
+    // What a driver would see go wrong (incidents.ts), against the drawing: each with its time, to jump to.
+    const drawnNow = readDrawn(file);
+    const found =
+      drawnNow && drawnNow.path.length > 1 && mainPublished
+        ? findIncidents(
+            drawnTruthTrack(trip, drawnNow, INCIDENT_STEP_S),
+            (mainPublished as { timestampUs: number; latDeg: number; lonDeg: number; headingRad: number }[])
+              .filter((p) => Number.isFinite(p.latDeg))
+              .map((p) => ({ t: (p.timestampUs - trip.startUs) / 1e6, lat: p.latDeg, lon: p.lonDeg, headingRad: Number.isFinite(p.headingRad) ? p.headingRad : undefined })),
+            mainFixes,
+          )
+        : null;
+    const incidents = found ? { list: found.incidents, coverage: found.coverage, unjudged: found.unjudged ?? null } : null;
+    const compassInfo = compassArg ? { logs: compass?.logs ?? 0, rotateDeg, trust: data.summary.compass.trust } : null;
+    const startNote =
+      startFrom === "drawn" ? (drawnPose ? "drawn" : "no drawing: cold") : startFrom === "phone" && inApp ? (logged ? "phone" : "phone-missing") : null;
+    // A route guided along before its plan reached the log: planned again and drawn as the plan then (reason
+    // "rebuilt"), so the map has the route the driver followed.
+    const rebuilt = routeBeforeLog(trip, readDrawn(file) ? drawnStartPose(trip, readDrawn(file)) : null);
+    if (rebuilt) {
+      data.routes.plans.unshift({
+        t: 0, id: 0, reason: "rebuilt", status: "done", lengthM: rebuilt.lengthM, durationS: null, planMs: 0, wallMs: 0, states: 0, slices: 0,
+        points: rebuilt.points.map((q): [number, number] => [Math.round(q.lat * 1e6) / 1e6, Math.round(q.lon * 1e6) / 1e6]),
+        maneuvers: [],
+      });
+    }
+    reply = { status: 200, type: "application/json", body: JSON.stringify({ ...data, incidents, compassInfo, placings: driverPlacings(trip).map((p) => ({ t: Math.round((p.tUs - trip.startUs) / 1e5) / 10, lat: p.lat, lon: p.lon, headingRad: p.headingRad })), odo: odometryTrack(trip), startNote, phoneRouteSource: phoneRoute?.source ?? null, loopLabel: phoneOnly ? "Phone only (no adapter)" : loop.label, phoneLoopLabel: phoneLoop ? (LOOPS[phoneLoop]?.label ?? phoneLoop) : null, appCuts: appCuts.length, parkedFrom: state && chained ? { file: state.parkedAfter, status: data.summary.startPose?.status ?? null } : null, inApp }) };
+  } finally {
+    opened?.close();
+  }
+  console.log(`replayed ${file} in ${Date.now() - started} ms`);
+  return reply;
+}
+
+// ---------- the replay worker ----------
+// One worker replays, and keeps its caches (the earlier drives replayed for a parked start, the compass learned on
+// the other logs) from one replay to the next. A new replay request while one runs, or the page closing the request,
+// terminates it and starts a fresh worker: replays are synchronous, and only a worker can be stopped mid-way.
+let replayWorker: Worker | null = null;
+let replayJob: { id: number; worker: Worker; resolve: (r: Reply) => void } | null = null;
+let replaySeq = 0;
+const CANCELLED: Reply = { status: 499, type: "text/plain", body: "cancelled: another replay was asked for" };
+
+function startReplayWorker(): Worker {
+  const w = new Worker(fileURLToPath(import.meta.url), { workerData: { role: "replay" }, argv: process.argv.slice(2) });
+  w.on("message", (m: Reply & { id: number }) => {
+    if (replayJob?.id !== m.id) return;
+    const job = replayJob;
+    replayJob = null;
+    job.resolve({ status: m.status, type: m.type, body: m.body });
+  });
+  // A worker that failed or died fails its own job only: one terminated on purpose has none left.
+  const lost = (why: string) => {
+    if (replayWorker === w) replayWorker = null;
+    if (replayJob?.worker === w) {
+      const job = replayJob;
+      replayJob = null;
+      job.resolve({ status: 500, type: "text/plain", body: `the replay worker ${why}` });
+    }
+  };
+  w.on("error", (e) => lost(`failed: ${String(e)}`));
+  w.on("exit", (code) => code !== 0 && lost(`exited (${code})`));
+  return w;
+}
+
+/** Stops the replay running (only `id`'s, when given): its request gets "cancelled", the worker starts afresh. */
+function cancelReplay(id?: number): void {
+  if (!replayJob || (id !== undefined && replayJob.id !== id)) return;
+  const job = replayJob;
+  replayJob = null;
+  job.resolve(CANCELLED);
+  const w = replayWorker;
+  replayWorker = null;
+  void w?.terminate();
+  console.log("replay cancelled");
+}
+
+function runReplay(href: string): { id: number; reply: Promise<Reply> } {
+  cancelReplay();
+  replayWorker ??= startReplayWorker();
+  const id = ++replaySeq;
+  const reply = new Promise<Reply>((resolve) => {
+    replayJob = { id, worker: replayWorker!, resolve };
+    replayWorker!.postMessage({ id, href });
+  });
+  return { id, reply };
+}
+
+if (!isMainThread && (workerData as { role?: string } | null)?.role === "replay") {
+  parentPort!.on("message", ({ id, href }: { id: number; href: string }) => {
+    let r: Reply;
+    try {
+      r = replayReply(new URL(href));
+    } catch (error) {
+      console.error(error);
+      r = { status: 500, type: "text/plain", body: String(error) };
+    }
+    parentPort!.postMessage({ id, ...r });
+  });
+}
+
 const server = createServer((req, res) => {
   try {
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
@@ -269,139 +487,14 @@ const server = createServer((req, res) => {
     } else if (url.pathname === "/api/logs") {
       send(res, 200, "application/json", JSON.stringify(listLogs()));
     } else if (url.pathname === "/api/replay") {
-      const file = logParam(url);
-      if (!file) return send(res, 400, "text/plain", "file must be a .ulg in the logs folder");
-      const q = (name: string) => url.searchParams.get(name) ?? "";
-      const lag = q("lag");
-      const start = Number(q("start") || 0);
-      // GPS scenario: as in the app (its "Cut GPS" windows withheld), all of it, cut where asked, jammed, or none.
-      const gps = q("gps") || "app";
-      // Start: from what the phone had stored (in the log), from where this navigator would have parked the car after
-      // its previous drive (every earlier drive replayed), where the drawn truth starts, or cold.
-      const startFrom = q("from") || "phone";
-      // Adapter: as recorded (OBD or CAN, whichever the app took its speed from), or none (phone-only mode,
-      // NAVIGATOR-SPEC §9.6: no OBD speed or engine).
-      const phoneOnly = q("adapter") === "none";
-      const compareLoop = q("compare") === "before" ? BEFORE_DOT : (LOOPS[q("compare")] ?? null);
-      // Compass: off, or calibrated on the other logs, optionally turned (a wrong calibration).
-      const compassArg = url.searchParams.get("compass") ?? "";
-      const compass = compassArg ? compassFromOtherLogs(file) : null;
-      const rotateDeg = Number(compassArg) || 0;
-      const started = Date.now();
-      const trip = loadTrip(file);
-      // The navigator version the phone ran (trip log header, from the app's developer setting); default open.
-      const phoneLoop = typeof trip.info.nav_mapmatch_loop === "string" ? trip.info.nav_mapmatch_loop : null;
-      const loopKey = q("loop") || phoneLoop || "closed";
-      const loop = LOOPS[loopKey] ?? LOOPS.open;
-      // The app replay unless a research option asks for the navigator alone (a later start, a fixed GNSS lag, a compass).
-      const inApp = phoneOnly || (!(start > 0) && !lag && !compassArg);
-      const appLoop = (loop.nav.mapMatchLoop ?? "open") as MapMatchLoop;
-      const fresh = (): AppState => ({ store: new MemoryKeyValueStore(), vin: carOf(trip, new Map()), parkedAfter: null });
-      const logged = inApp && startFrom === "phone" ? appStateFromLog(trip) : null;
-      // A log without the stored state: the chain, as "parked".
-      const chained = inApp && (startFrom === "parked" || (startFrom === "phone" && !logged));
-      const state = !inApp ? null : logged ?? (chained ? appStateBefore(file, appLoop) : fresh());
-      // From the drawn start: its place and heading as the car's parked pose (and phone-only's own), nothing else kept.
-      const drawnPose = inApp && startFrom === "drawn" ? drawnStartPose(trip, readDrawn(file)) : null;
-      // Phone-only: the driver follows the routes the app planned, or the drawn one where they didn't (app-chain.ts).
-      const phoneRoute = phoneOnly ? phoneRouteFor(trip, readDrawn(file)) : null;
-      if (state && drawnPose) {
-        const cal = new CalibrationStore(state.store, phoneOf(trip));
-        if (state.vin) cal.saveParkedPose(state.vin, drawnPose);
-        cal.saveParkedPose(PHONE_CAR, drawnPose);
-      }
-      // Map matching on the trip's road graph, when there is one.
-      const first = regionPoint(trip);
-      const graphFile = first ? (GRAPH ?? findGraph(first)) : null;
-      const opened = graphFile && first ? openGraph(graphFile, first) : null;
-      try {
-        const appCuts = appOutageCuts(trip);
-        const asked = parseCuts(q("cut"));
-        const common: ReplayOptions = {
-          cuts: gps === "app" ? appCuts : gps === "cut" ? asked : [],
-          ...(gps === "nogps" ? { openLoop: { delayS: 0 } } : {}),
-          ...(gps === "jam" ? { jam: asked.length ? asked : [{ fromS: 0, toS: Infinity }] } : {}),
-          ...(opened ? { mapMatch: { graph: opened.graph } } : {}),
-          ...(start > 0 ? { startAtS: start } : {}),
-          ...(compass ? { compass: { calibration: compass.calibration, rotateRad: (rotateDeg * Math.PI) / 180 } } : {}),
-        };
-        const navFor = (nav: Partial<NavConfig>): Partial<NavConfig> => ({ ...nav, ...(lag ? { gnssLagS: Number(lag), estimateGnssLag: false } : {}) });
-        const mainNav = navFor(loop.nav);
-        const compareNav = compareLoop ? navFor(compareLoop.nav) : null;
-        // The main replay's dots, for the incidents against the drawing.
-        let mainPublished: { timestampUs: number; latDeg: number; lonDeg: number; headingRad: number }[] | null = null;
-        let mainFixes: { t: number; lat: number; lon: number; hAccM: number }[] = [];
-        // Through the app: the service publishes the dot, starts from the stored parked pose, and runs the outages.
-        const replay = (o: ReplayOptions) => {
-          const run = () => replayTripInApp(trip, {
-            calibration: new CalibrationStore(state!.store.copy(), phoneOf(trip)),
-            loop: (o.nav?.mapMatchLoop ?? appLoop) as MapMatchLoop,
-            roadGraph: opened ? { key: graphFile!, region: path.basename(graphFile!, ".graph.bin"), graph: opened.graph } : null,
-            vin: state!.vin,
-            cuts: o.cuts ?? [],
-            jam: o.jam,
-            openLoop: o.openLoop,
-            trackStepS: o.trackStepS,
-            mapMatch: { particlesEveryS: o.mapMatch?.particlesEveryS },
-            placings: q("placings") !== "off",
-            // The routes the driver had, as the app gives them to the service (the dot leans on them, puck.ts).
-            ...(phoneOnly ? {} : { phoneRoutes: phoneRouteFor(trip, null).routes }),
-            ...(phoneOnly
-              ? {
-                  phoneOnly: {
-                    openGraph: () => {
-                      const g = graphFor(trip);
-                      return g ? { key: g.active.key, graph: g.active.graph, close: g.close } : null;
-                    },
-                  },
-                  phoneRoutes: phoneRoute?.routes ?? [],
-                }
-              : {}),
-          });
-          const r = o.nav === compareNav && compareLoop === BEFORE_DOT ? withDotBefore(run) : run();
-          if (o.nav === mainNav) {
-            mainPublished = r.published;
-            mainFixes = r.fixes.filter((f) => f.satellite && f.status === "accepted").map((f) => ({ t: f.tS, lat: f.fix.lat, lon: f.fix.lon, hAccM: f.fix.hAccM }));
-          }
-          return r;
-        };
-        const data = buildViewerData(file, trip, { ...common, nav: mainNav }, {
-          appCuts,
-          ...(inApp ? { replay } : {}),
-          phoneOnly,
-          ...(compareLoop && compareNav ? { compare: { label: compareLoop.label, options: { ...common, nav: compareNav } } } : {}),
-        });
-        // What a driver would see go wrong (incidents.ts), against the drawing: each with its time, to jump to.
-        const drawnNow = readDrawn(file);
-        const found =
-          drawnNow && drawnNow.path.length > 1 && mainPublished
-            ? findIncidents(
-                drawnTruthTrack(trip, drawnNow, INCIDENT_STEP_S),
-                (mainPublished as { timestampUs: number; latDeg: number; lonDeg: number; headingRad: number }[])
-                  .filter((p) => Number.isFinite(p.latDeg))
-                  .map((p) => ({ t: (p.timestampUs - trip.startUs) / 1e6, lat: p.latDeg, lon: p.lonDeg, headingRad: Number.isFinite(p.headingRad) ? p.headingRad : undefined })),
-                mainFixes,
-              )
-            : null;
-        const incidents = found ? { list: found.incidents, coverage: found.coverage, unjudged: found.unjudged ?? null } : null;
-        const compassInfo = compassArg ? { logs: compass?.logs ?? 0, rotateDeg, trust: data.summary.compass.trust } : null;
-        const startNote =
-          startFrom === "drawn" ? (drawnPose ? "drawn" : "no drawing: cold") : startFrom === "phone" && inApp ? (logged ? "phone" : "phone-missing") : null;
-        // A route guided along before its plan reached the log: planned again and drawn as the plan then (reason
-        // "rebuilt"), so the map has the route the driver followed.
-        const rebuilt = routeBeforeLog(trip, readDrawn(file) ? drawnStartPose(trip, readDrawn(file)) : null);
-        if (rebuilt) {
-          data.routes.plans.unshift({
-            t: 0, id: 0, reason: "rebuilt", status: "done", lengthM: rebuilt.lengthM, durationS: null, planMs: 0, wallMs: 0, states: 0, slices: 0,
-            points: rebuilt.points.map((q): [number, number] => [Math.round(q.lat * 1e6) / 1e6, Math.round(q.lon * 1e6) / 1e6]),
-            maneuvers: [],
-          });
-        }
-        send(res, 200, "application/json", JSON.stringify({ ...data, incidents, compassInfo, placings: driverPlacings(trip).map((p) => ({ t: Math.round((p.tUs - trip.startUs) / 1e5) / 10, lat: p.lat, lon: p.lon, headingRad: p.headingRad })), odo: odometryTrack(trip), startNote, phoneRouteSource: phoneRoute?.source ?? null, loopLabel: phoneOnly ? "Phone only (no adapter)" : loop.label, phoneLoopLabel: phoneLoop ? (LOOPS[phoneLoop]?.label ?? phoneLoop) : null, appCuts: appCuts.length, parkedFrom: state && chained ? { file: state.parkedAfter, status: data.summary.startPose?.status ?? null } : null, inApp }));
-      } finally {
-        opened?.close();
-      }
-      console.log(`replayed ${file} in ${Date.now() - started} ms`);
+      // In the replay worker: a newer replay, or the page giving up on this one, stops it at once.
+      const job = runReplay(url.href);
+      res.on("close", () => {
+        if (!res.writableEnded) cancelReplay(job.id);
+      });
+      void job.reply.then((r) => {
+        if (!res.writableEnded && !res.destroyed) send(res, r.status, r.type, r.body);
+      });
     } else if (url.pathname === "/api/roads") {
       const file = logParam(url);
       if (!file) return send(res, 400, "text/plain", "file must be a .ulg in the logs folder");
@@ -435,6 +528,10 @@ const server = createServer((req, res) => {
       if (!file) return send(res, 400, "text/plain", "file must be a .ulg in the logs folder");
       if (req.method !== "POST") return send(res, 405, "text/plain", "POST");
       if (lastTrip?.file === file) lastTrip = null;
+      // The replay worker's caches (earlier drives replayed for a parked start) may hold this log: start it afresh.
+      cancelReplay();
+      void replayWorker?.terminate();
+      replayWorker = null;
       const keys = deleteLog(LOG_DIR, file);
       console.log(`deleted ${keys.join(", ")}`);
       send(res, 200, "application/json", JSON.stringify({ deleted: keys }));
@@ -482,14 +579,17 @@ const server = createServer((req, res) => {
   }
 });
 
-server.on("error", (error: NodeJS.ErrnoException) => {
-  if (error.code !== "EADDRINUSE") throw error;
-  console.error(`port ${PORT} is busy: is the viewer already running? Stop it, or use --port <n>.`);
-  process.exit(1);
-});
+// The replay worker loads this file too: only the main thread serves.
+if (isMainThread) {
+  server.on("error", (error: NodeJS.ErrnoException) => {
+    if (error.code !== "EADDRINUSE") throw error;
+    console.error(`port ${PORT} is busy: is the viewer already running? Stop it, or use --port <n>.`);
+    process.exit(1);
+  });
 
-server.listen(PORT, "127.0.0.1", () => {
-  const url = `http://127.0.0.1:${PORT}`;
-  console.log(`trip replay viewer: ${url}  (logs: ${LOG_DIR})`);
-  if (args.includes("--open")) exec(process.platform === "win32" ? `start "" ${url}` : `open ${url}`);
-});
+  server.listen(PORT, "127.0.0.1", () => {
+    const url = `http://127.0.0.1:${PORT}`;
+    console.log(`trip replay viewer: ${url}  (logs: ${LOG_DIR})`);
+    if (args.includes("--open")) exec(process.platform === "win32" ? `start "" ${url}` : `open ${url}`);
+  });
+}

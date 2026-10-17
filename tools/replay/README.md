@@ -148,9 +148,12 @@ line then says so.
 
 - **Header:** the drive (newest first; ‹ › step, the name opens the list, `/` too; its second line says how long,
   how far and how GPS was), the three modes, and the status: how the replay started, and in amber what it does
-  differently from the drive as it happened. *Delete this drive…* in the list (click twice) removes a junk log and
-  its drawing here, and from the bucket on the next `npm run logs:push` (tools/triplog/README.md). The replay runs
-  the navigator the drive was recorded with (the log header; the app runs full correction, MAPMATCH-SPEC §9).
+  differently from the drive as it happened. In the list, *Delete this drive…*, or tick drives (*Select all shown*
+  ticks what the search shows: "undrawn", a day, a tester) and *Delete selected…* — each asks once more — removes
+  junk logs and their drawings here, and from the bucket on the next `npm run logs:push` (tools/triplog/README.md);
+  deleting the drive open moves to the nearest one left. The replay runs the navigator the drive was recorded with
+  (the log header; the app runs full correction, MAPMATCH-SPEC §9). It runs in a worker thread on the server: picking
+  another drive (or setting) while one replays stops it at once, and the server answers the rest of the page meanwhile.
 - **Review** — did the dot get this drive right:
   - *Verdict*: against your drawing, how many places a driver would have noticed the dot wrong, the share of
     driving on the right road (within 30 m of the drawn road, near where the car was), the typical distance from the
