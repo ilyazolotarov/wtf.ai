@@ -1064,10 +1064,13 @@ export class Navigator {
     const obdFresh = this.lastObd !== null && tUs - this.lastObd.tUs < this.config.obdStaleUs;
     const speed = obdFresh ? this.lastObd!.speedMps : 0;
     // A gap in the IMU stream or a handled phone means the rotation is unknown, unless the
-    // car stands (OBD 0): then it isn't turning, whatever the phone does.
+    // car stands (OBD 0): then it isn't turning, whatever the phone does. Last seen standing with
+    // the speed unknown since (the link lost: the driver walked off with the phone) it stands still
+    // as the position does: the phone turned in a hand, not read as handled, turned parked cars
+    // 17–88° (qfger8, nnz5ff).
     const parked = this.lastObd !== null && this.lastObd.rawKph === 0;
     const yaw = dt > 0.2 ? null : yawRate;
-    const hold = this.standstill || (yaw === null && parked);
+    const hold = this.standstill || (parked && (yaw === null || !obdFresh));
     if (yaw === null && !parked) this.stats.imuInvalidS += dt;
     if (this.standstill) this.stats.standstillS += dt;
     this.stats.obdDistanceM += Math.abs(speed) * dt;

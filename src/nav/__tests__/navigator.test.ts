@@ -370,6 +370,29 @@ describe("Navigator from a parked pose", () => {
     expect(haversineM(end, parked.truth.at(-1)!)).toBeLessThan(10);
   });
 
+  test("the link lost while parked: the phone turning in the driver's hand doesn't turn the car", () => {
+    const parked = syntheticDrive({
+      segments: [
+        { durationS: 30, speedMps: 12, yawRateDegS: 0 },
+        { durationS: 5, speedMps: 0, yawRateDegS: 0 },
+        { durationS: 60, speedMps: 0, yawRateDegS: 0 },
+      ],
+      gnss: "clean",
+      // Turned about the vertical, not tilted: nothing reads it as handled.
+      handling: { fromS: 50, toS: 80, tiltRad: 0, yawRateRadS: 0.5 },
+    });
+    // No speed from 40 s to 90 s: the driver walked out of Bluetooth range and back.
+    const at = (s: number) => parked.trip.startUs + s * 1e6;
+    parked.trip.obdSpeed = parked.trip.obdSpeed.filter((o) => o.tUs < at(40) || o.tUs >= at(90));
+    const track = replayTrip(parked.trip).track;
+    const at94 = track.filter((p) => p.tS <= 94).at(-1)!;
+    const at39 = track.filter((p) => p.tS <= 39).at(-1)!;
+    // Turned with the phone, the dead reckoning went to 73° within 20 s and was given up.
+    expect(at94.mode).toBe("dr");
+    const turned = Math.abs(((at94.headingRad! - at39.headingRad! + 3 * Math.PI) % (2 * Math.PI)) - Math.PI);
+    expect(turned).toBeLessThan((2 * Math.PI) / 180);
+  });
+
   test("a Wi-Fi/cell fix from another continent is no position of the car: the pose stands", () => {
     const nav = new Navigator();
     expect(nav.startFromPose(pose)).toBe(true);

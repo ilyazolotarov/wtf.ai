@@ -73,7 +73,8 @@ Built, wired into the app and field-tested on two cars and testers' phones; the 
 - Each sample updates `v = k_s · s_OBD` with σ 0.3 m/s; a raw 0 gets σ 0.8 m/s (the ECU cuts off below ~2–3 km/h).
 - At standstill a zero-velocity update (σ 0.02 m/s) replaces the OBD update.
 - OBD speed older than 2.5 s (link lost) is unknown: the relative track breaks, the anchored radius keeps growing at
-  the last speed, the EKF speed random-walks.
+  the last speed, the EKF speed random-walks. Last seen standing, the car stands still until a speed comes: the heading
+  is held whatever the phone does (the driver walking off with it turns it in a hand without its reading as handled).
 - **Manoeuvres:** speed is unsigned and what an ECU reports in reverse is up to the car (the main test car reads 0).
   A net gyro turn of ≥ 30° while OBD reads 0 and the phone isn't quiet is the car manoeuvring (out of a parking
   space) by a distance the odometry didn't see: when OBD reads > 0 again the EKF position σ grows by 6 m per radian
