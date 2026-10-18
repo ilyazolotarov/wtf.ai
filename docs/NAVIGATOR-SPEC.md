@@ -898,4 +898,8 @@ needed to check them (`replay:bench`).
     learned in the first slow minutes is 1–2 % off at cruising speed and the dot drifts 50–100 m along avenues — the
     offset state, and instead not learning `k_s` from OBD readings under 5–11 m/s: both much better simulated (dot far
     along the road 68 → 47–50, losses 7 → 4), both worse on the real drives (offset: wrong roads ×6; under 5 m/s 7
-    drives worse, under 11 m/s 13). Off.
+    drives worse, under 11 m/s 13). Off. Under jamming `k_s` doesn't sink on real drives (logged over 42 jammed drives:
+    end − start −0.011 / −0.0005 / +0.008 at p10 / p50 / p90), and holding it is worse there (at its prior, or at 1.008:
+    off the drawn road 725 → 768–869 s drawn, 1242 → 1343–1479 s parked; 63 drives × 8 seeds). The offset stored with
+    `k_s` and learned only from satellite fixes (held as known while jammed, so a car never seen with GPS drives as
+    without it) was drawn better, parked worse (incidents 134 → 141–147). The scale-only model stays.
