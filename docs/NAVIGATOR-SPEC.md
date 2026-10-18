@@ -1,905 +1,504 @@
-# wtf.ai — Stage 1 Navigator Specification
+# wtf.ai — Navigator Specification
 
-Status: v4 (2026-10-10), field-tested. Implements SPEC.md Phase 2 (TS EKF + replay) and the parts of Phase 4 (calibration) that
-need no UI. Source of truth for coding agents. Inputs come from [TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md) streams;
-the vehicle link is specified in [VEHICLE-LINK-SPEC.md](VEHICLE-LINK-SPEC.md).
+The sensor fusion in `src/nav`: the EKF, heading initialization, online calibration, GNSS integrity, and how the app
+and the replay drive it. Inputs come from [TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md) streams; the adapter is
+[VEHICLE-LINK-SPEC.md](VEHICLE-LINK-SPEC.md); map matching is [MAPMATCH-SPEC.md](MAPMATCH-SPEC.md). Source of truth
+for coding agents.
 
 ## 1. Goal
 
-Turn OBD speed, phone gyro and CoreLocation fixes into one position with an honest uncertainty, including while GNSS is
-jammed:
+Turn the car's speed, the phone gyro and the phone's location fixes into one position with an honest uncertainty,
+including while GNSS is jammed:
 
 1. Keep the position moving by dead reckoning (DR) when GNSS is lost, with a radius that grows the way the error does.
-2. Start without a GNSS course, which jamming takes away, by using whatever coarse fixes iOS still gives.
+2. Start without a GNSS course, which jamming takes away, using whatever coarse fixes the phone still gives.
 3. Calibrate itself online (gyro bias, speed scale, GNSS timing), so tuning doesn't depend on one phone or car.
-4. Be developed and measured on Windows by replaying real trip logs.
+4. Be developed and measured on Windows by replaying real trip logs: the replay runs what the app runs.
 
 ## 2. Status
 
-- **Implemented:** `src/nav` (pure TS), the app's `NavigatorService`, replay CLI, browser viewer and benchmarks
-  (`tools/replay`), with unit tests.
-- **Measured** on 14 real drives: the main test car, OBDLink MX+, one iPhone in a mount, one small town. Of these,
-  10 have clean GNSS, 1 is jammed then clean, and 3 are jammed throughout.
-- **Wired into the app** (§9) and **field-tested** on the 7 drives of 2026-10-04 (§9.1), one of them jammed
-  throughout; 43 logs by 2026-10-10, most of them with a drawn ground truth (MAPMATCH-SPEC §10.1).
+Built, wired into the app and field-tested on two cars and testers' phones; the replay reproduces the phone's dot
+(§10). Open items: §13.
 
 ## 3. Inputs (`src/nav/types.ts`)
 
-| Input            | Source                                                | Rate          | Notes                                                    |
-| ---------------- | ----------------------------------------------------- | ------------- | -------------------------------------------------------- |
-| `ImuSample`      | CoreMotion device motion (`xArbitraryZVertical`)      | 100 Hz        | gyro, gravity, user acceleration; device frame           |
-| `ObdSpeedSample` | PID `0D`; time = midpoint of tx and rx                | ~27 Hz moving, 1 Hz parked | raw km/h byte kept (1 km/h resolution, 0 below ~2–3 km/h) |
-| `GnssFix`        | CoreLocation via `modules/sensor-capture`             | ~1 Hz; jammed: ~0.1 Hz | invalid fields absent; simulated fixes dropped by the reader |
+| Input | Source | Rate | Notes |
+| --- | --- | --- | --- |
+| `ImuSample` | CoreMotion device motion (`xArbitraryZVertical`) / Android SensorManager normalized to it | 100 Hz | gyro, gravity, user acceleration; device frame |
+| `ObdSpeedSample` | PID `0D`, time = midpoint of tx and rx; or CAN wheel speeds (`source: "can"`) | OBD 2 Hz moving, 1 Hz parked; CAN ~10 Hz | raw km/h kept (1 km/h resolution, 0 below ~2–3 km/h) |
+| `GnssFix` | `modules/sensor-capture` | ~1 Hz; jammed ~0.1 Hz | invalid fields absent; simulated fixes dropped by the reader |
+| `MagSample` | raw magnetometer | 20 Hz | compass in shadow mode only (§7.6) |
 
-- **Satellite fix vs coarse fix:** a satellite fix has a speed (0 when standing) and `h_acc < 50 m`. Under jamming iOS
-  falls back to Wi-Fi/cell positions with no speed. Their claimed accuracy ranges from ±7 m (dense Wi-Fi) to 150 km.
-  They're often repeated and their errors are correlated. Accuracy alone can't tell the two kinds apart.
-- All timestamps are monotonic uptime µs. Every input must be fed in time order (`Navigator.onImu / onObdSpeed /
-  onGnss`).
+- **Satellite fix vs coarse fix:** a satellite fix has a speed (0 when standing). Under jamming the phone falls back
+  to Wi-Fi/cell positions with no speed, claiming ±7 m … 150 km, often repeated, with correlated errors. Accuracy
+  alone can't tell the two kinds apart.
+- All timestamps are monotonic uptime µs. Inputs are fed in time order (`Navigator.onImu / onObdSpeed / onGnss /
+  onMag`).
 
 ## 4. Modes (`src/nav/navigator.ts`)
 
-| Mode       | Position                                    | Uncertainty                                  | Leaves when                                   |
-| ---------- | ------------------------------------------- | -------------------------------------------- | --------------------------------------------- |
-| `none`     | —                                           | —                                            | first usable fix → `anchored`; parked pose (§6.1) → `dr` |
-| `anchored` | best recent fix (heading unknown)           | fix accuracy + OBD distance driven since it  | heading known (§6) → `dr`                     |
-| `dr`       | EKF                                         | EKF covariance (reported as a 68 % radius)   | 5 satellite fixes in a row fail the gate → `anchored` at the latest fix |
+| Mode | Position | Uncertainty | Leaves when |
+| --- | --- | --- | --- |
+| `none` | — | — | first usable fix → `anchored`; parked pose (§6.1) or manual position (§6.3) → `dr` |
+| `anchored` | best recent fix (heading unknown) | fix accuracy + distance driven since it | heading known (§6) → `dr` |
+| `dr` | EKF | EKF covariance (reported as a 68 % radius) | 5 satellite fixes in a row fail the gate → `anchored` at the latest fix |
 
 - **Fix filtering:** fixes worse than 2 km are ignored. A coarse fix that moved less than 2 % of its accuracy since
-  the previous fix is a repeat and is skipped.
-  - iOS repeats Wi-Fi positions with sub-metre jitter (≤ 0.8 % of their accuracy in the logs). Counted as new, six
-    of them turned the heading by 22° on a jammed drive.
-  - Dense-area Wi-Fi at ±7–15 m moves 0.4–1.7 m between fixes, which is new information: an absolute 2 m rule
-    skipped 52 such fixes on one drive and cost outage accuracy.
-  - Satellite repeats while parked are kept, because they are real measurements.
+  the previous fix is a repeat and is skipped (the phone repeats Wi-Fi positions with sub-metre jitter; counted as new
+  they turned the heading). Satellite repeats while parked are kept: they are real measurements.
 - **Frame:** local ENU plane, re-anchored when the position is more than 5 km from its origin.
 
 ## 5. Odometry inputs
 
 ### 5.1 Gyro (`odometry/imu/imu-processor.ts`)
 
-- Yaw rate = gyro · up (up = −gravity), so it doesn't depend on how the phone sits in the mount. Counter-clockwise
-  is positive.
+- Yaw rate = gyro · up (up = −gravity), independent of how the phone sits. Counter-clockwise is positive.
 - **Handling detection:** the gyro is invalid while the phone moves in the mount or in a hand. Triggers:
-  - The phone's vertical differs from its 3 s average by more than 8°. The vertical is carried by the gyro (a
-    world vertical seen from the phone turns by −ω × it) and pulled to gravity's over 30 s, so the gyro's drift
-    doesn't build up. Not gravity's own: Android's estimate leans with the car's sideways acceleration (16° in a
-    turn at 25 km/h), and read as handling it dropped 12–48 % of a drive's turning on one phone (missed turns, the
-    dot on the wrong road); with the gyro's, 0–5 %, iPhone drives as before. Gravity's vertical jumping ≥ 10°
-    between two samples without the gyro turning is a change of frame (§5.4's IMU between the car's and the
-    phone's), not handling: both verticals start over from it.
-  - The rotation off the vertical, averaged as a vector over 0.1 s, exceeds 1.0 rad/s.
+  - the phone's vertical differs from its 3 s average by more than 8°. The vertical is carried by the gyro and
+    pulled to gravity's over 30 s. Not gravity's own: Android's estimate leans with the car's sideways acceleration
+    (16° in a turn) and read as handling it dropped up to half a drive's turning. Gravity's vertical jumping ≥ 10°
+    between two samples without the gyro turning is a change of frame (§5.4), not handling;
+  - the rotation off the vertical, averaged as a vector over 0.1 s, exceeds 1.0 rad/s (the vector mean: bumps shake
+    the phone back and forth and stay under 0.7 rad/s; a magnitude mean triggered on bumps).
 
-  Each trigger holds for 1.5 s. Thresholds come from mounted driving, which stays under 4°.
-  - Bumps shake the phone back and forth: the vector mean stays ≤ 0.7 rad/s with ≤ 4° net rotation. Every real
-    handling in 14 drives reached ≥ 1.4 rad/s and ≥ 7.6°.
-  - The first version averaged the magnitude, which bumps pushed to 1.6–2.0 rad/s: 6 false triggers while driving
-    in 4 of 14 drives. Each added ~20° of heading σ (0.3 rad/√s over 1.5 s). On the jammed drive the radius reached
-    370 m instead of 90 m, while the heading stayed within ~5° (§7.5).
-- While the gyro is invalid: if the car stands (OBD 0) the heading is held, because the car can't be turning.
-  Otherwise the EKF propagates without yaw input and with heading noise 0.3 rad/√s.
-- **Quiet:** over 1 s, the yaw-rate std is below 0.01 rad/s, the mean yaw below 0.005 rad/s, and the acceleration std
-  below 0.2 m/s². Standstill = OBD 0 + quiet for 2 s.
+  Each trigger holds for 1.5 s. Mounted driving stays under 4° and 0.7 rad/s; real handling reaches ≥ 1.4 rad/s and
+  ≥ 7.6°.
+- While the gyro is invalid: if the car stands (speed 0) the heading is held; otherwise the EKF propagates without
+  yaw input and with heading noise 0.3 rad/√s.
+- **Quiet:** over 1 s, yaw-rate std < 0.01 rad/s, mean yaw < 0.005 rad/s, acceleration std < 0.2 m/s².
+  Standstill = speed 0 + quiet for 2 s.
 
 ### 5.2 OBD speed
 
-- Each sample updates `v = k_s · s_OBD` with σ 0.3 m/s. A raw 0 gets σ 0.8 m/s, because the ECU cuts off below
-  ~2–3 km/h.
+- Each sample updates `v = k_s · s_OBD` with σ 0.3 m/s; a raw 0 gets σ 0.8 m/s (the ECU cuts off below ~2–3 km/h).
 - At standstill a zero-velocity update (σ 0.02 m/s) replaces the OBD update.
-- OBD speed older than 2.5 s (link lost) is unknown: the relative track breaks (alignment and lag windows start
-  over), and the anchored radius keeps growing at the last speed. The EKF's own speed random-walks meanwhile.
-- Main test car: OBD reads about 2 % below GNSS. Direct comparison gives 1.016–1.021; `k_s` learns 1.00–1.03 per drive.
-- **Manoeuvres:** speed is unsigned, and what an ECU reports in reverse is up to the car: the main test car reads 0 (and 0
-  below ~3 km/h). A net gyro turn of ≥ 30° while OBD reads 0 and the phone isn't quiet is the car manoeuvring, as
-  out of a parking space, by a distance and in a direction the odometry didn't see. When OBD reads > 0 again the
-  EKF position σ grows by 6 m per radian turned (a car's turning radius) and map matching starts again around it
-  with the heading the gyro now gives (`Navigator.stats.manoeuvres`). Net, not summed: idling, gyro noise averages
-  out. vwaz7t (out of a space ~90° to the road, 78° in reverse) took a road 55 m off on 1 of 8 seeds and showed it
-  for 115 s; now 0 s on 8 of 8 (`replay:regress`). Not handled: an ECU that reports reverse speed as positive moves
-  the dead reckoning forward instead of back (~2× the reverse distance) and the turn isn't a manoeuvre; it needs
-  reverse detected from the accelerometer along the car's axis, which nothing learns yet.
+- OBD speed older than 2.5 s (link lost) is unknown: the relative track breaks, the anchored radius keeps growing at
+  the last speed, the EKF speed random-walks.
+- **Manoeuvres:** speed is unsigned and what an ECU reports in reverse is up to the car (the main test car reads 0).
+  A net gyro turn of ≥ 30° while OBD reads 0 and the phone isn't quiet is the car manoeuvring (out of a parking
+  space) by a distance the odometry didn't see: when OBD reads > 0 again the EKF position σ grows by 6 m per radian
+  turned and map matching starts again around it with the gyro's heading. Not handled: an ECU reporting reverse as
+  positive speed (the dead reckoning moves forward instead of back).
 
-### 5.3 CAN wheel speed (SPEC §2.1 Stage 2; the app with CAN primary on, VEHICLE-LINK-SPEC §16.3)
+### 5.3 CAN wheel speed (Stage 2; `odometry/can/`)
 
-- A speed sample may come from CAN (`ObdSpeedSample.source: "can"`): the mean of the four wheel speeds
-  (`odometry/can/can-speed.ts`, ~10 Hz, 0.01 km/h steps rounded so a standing car reads exactly 0), and the log's OBD
-  speed where the monitor didn't hear them (its breaks for polls: OBD fills in when the last CAN sample is over 0.3 s
-  old). It updates the same `v = k_s · s` with σ 0.1 m/s (a zero 0.3 m/s). σ 0.1–0.3 scored the same on the one drive
-  with clean GNSS (`replay:bench --speed can`, 8 seeds), so the physical value stays: timing jitter at city
-  acceleration, not resolution.
-- **Reverse gear** (CAN `GEAR` R) makes the speed negative: the EKF and the relative track move the car backwards,
-  and the odometry chunk is `reverse` (MAPMATCH-SPEC §6.1). The §5.2 manoeuvre handling then doesn't run (the speed
-  isn't 0). OBD's speed is never negative, so nothing changes without CAN.
+- A speed sample from CAN is the mean of the four wheel speeds (`can-speed.ts`), averaged per 0.1 s, rounded in
+  0.01 km/h steps so a standing car reads exactly 0; σ 0.1 m/s (a zero 0.3 m/s). Where the monitor didn't hear the
+  wheels (its breaks for polls), OBD fills in when the last CAN sample is over 0.3 s old.
+- **Reverse gear** (CAN `GEAR` R) makes the speed negative: the EKF and the relative track move the car backwards
+  and the odometry chunk is `reverse` (MAPMATCH-SPEC §6.1). The §5.2 manoeuvre handling then doesn't run.
+- **Frames as decoded:** one wheel sample per frame once all its wheels are read; a sample no car makes is dropped
+  (one wheel changed faster than 50 km/h/s, or the wheels more than 3 km/h + half their mean apart: a line that lost
+  characters). Only the mean speed is rounded; the per-wheel values stay exact (their differences are the yaw rate).
+- **Frames at bus time** (`frame-timing.ts`, the app and replay alike): each id is laid on its period (a least-squares
+  line through its last 200 arrivals per listening window), one period after the last frame, never after its
+  arrival nor over 0.3 s before it. A break in listening (a window's end, or 0.5 s without the id) starts the id
+  again at its next arrival. The MFi link delivers in bursts, so arrival times squeezed a turn's yaw into the bursts.
 - Replay: `withCanSpeed` (`nav/replay/can.ts`); `replay:bench --speed can`, `replay:regress --speed can`, the
-  viewer's *Adapter: CAN wheel speeds*. On the drive from home (2026-10-11, jammed, after a placing) the shown dot
-  went back 9.9 and 6.1 m when the wheels reversed 7.8 and 4.2 m; on OBD it stood still.
-- **Frames as decoded:** one wheel sample per frame once all its wheels are read (a sample per wheel mixed one
-  frame's wheels with the last one's); a sample no car makes is dropped (one wheel changed faster than 50 km/h/s,
-  or the wheels more than 3 km/h + half their mean apart: a monitor line that lost characters, 4–23 a drive). A
-  tight roundabout at 12 km/h spreads them by 40 %, and a sample dropped there is turning lost; the per-wheel means
-  are kept exact (their differences are the yaw rate), only the speed is rounded; a frame that arrived after its
-  window ended is put at the window's end (the stop's drain, captured before the stop character).
-- **Frames at bus time** (`odometry/can/frame-timing.ts`, the app's feed and replay alike): each id laid on its
-  period (a least-squares line through its last 200 arrivals, each listening window its own line), one period after
-  the last frame, never after its arrival nor over 0.3 s before it. A break in listening — each window's end (the
-  monitor stopped for a poll; its drained frames are still the window's), or 0.5 s without the id — starts the id
-  again at its next frame's arrival. The MX+'s MFi link delivers in bursts (half the frames within 1 ms of the one
-  before, 0–23 of 10 in a 0.1 s slot); timed by arrival, a turn's yaw was squeezed into the bursts, 10–20 % off over
-  5 s. Laid one period after the last frame across a poll's break instead, every frame after it came up to 0.3 s
-  early: the wheels' turning 20–120 ms ahead of the gyro, the speed samples 0.2 s old as they came out.
+  viewer's *Adapter: CAN wheel speeds*.
 
-### 5.4 Wheel yaw (SPEC §2.1 Stage 2; Settings, experimental, with the wheels' speed; off by default)
+### 5.4 Wheel yaw (Stage 2; Settings → Car → *Turns from the wheels*, experimental, off by default)
 
-The rear wheels aren't steered: (right − left) / track is the car's yaw rate, whatever the phone does — the way to
-navigate with the phone in a hand, a pocket or on a seat. A phone lying on the seat follows the car as in the mount
-(0–5 s off the drawn road, 2026-10-13); in a trouser pocket it turns with the driver (78–198 s off, ends 260–450 m
-out), and the handling flag saw 2–15 % of that time.
+The rear wheels aren't steered: (right − left) / track is the car's yaw rate whatever the phone does: the way to
+navigate with the phone in a hand, a pocket or on a seat.
 
-- **The source** (`odometry/can/wheel-yaw-source.ts`, one code for the app's `NavigatorService.setWheelYaw` and
-  replay's `withWheelYaw`): the CAN wheel samples (CAN primary, VEHICLE-LINK-SPEC §16.3) give the yaw, track 1.60 m,
-  opposite in reverse, placed 0.1 s earlier (the wheels lag the gyro by −40…+100 ms, drive by drive; the
-  correlation is flat across that). Each IMU sample becomes the car's: the wheels' yaw about a vertical "up", the
-  phone's acceleration kept, its tilt and turning left out — so its movements don't read as handling, which takes
-  the turning for unknown 1.5 s each time. In a break in listening the phone's own turning, still in the car's frame
-  (switching frames at every break read as handling twice a second: 12–88 s off the road on drives the gyro had
-  0–2); no wheel sample within 1 s: the phone's sample as it is.
-- **At a crawl, the phone's turning while it sits in its mount:** below 1.5 m/s of wheel speed the gyro's yaw about
-  "up" replaces the wheels', if over the last 600 wheel samples above 3 m/s (however old: a stop doesn't empty them,
-  nor does the link dropping out, the next source takes them over) the gyro turned with the wheels, RMS of the
-  difference under 0.05 rad/s (in the mount 0.03–0.04, in a pocket 0.09–0.11). Wheel speed sensors read nothing at a
-  crawl: pulling out of a parking space with no GPS (nnz5ff, 2026-10-16) the wheels had the car go straight, the dot
-  set off on another road and was 100–115 s off the drawn one on every seed; with the gyro there 0–4 s. Over the
-  corpus (8 seeds) none worse, off the drawn road 730 → 627 s (drawn starts) and 1202 → 1049 s (parked). Without the
-  mount check the phone in a pocket turned on its own at every crawl: four drives 30–225 s off. The raw gyro, not the
-  IMU processor's: that takes tight manoeuvring for the phone being handled. At 3 m/s one drive was worse on a seed.
-- **The compass gets no field** meanwhile (§7.6): it reads the phone's field against the IMU's "up", and with the
-  car's IMU in its place it would learn, and keep, a mounting from a field that turns with the phone.
+- **The source** (`wheel-yaw-source.ts`, one code for `NavigatorService.setWheelYaw` and replay's `withWheelYaw`):
+  the CAN wheel samples give the yaw, track 1.60 m, opposite in reverse, placed 0.1 s earlier (the wheels lag the
+  gyro by −40…+100 ms). Each IMU sample becomes the car's: the wheels' yaw about a vertical "up", the phone's
+  acceleration kept, its tilt and turning left out, so its movements don't read as handling. In a break in listening
+  the phone's own turning is used, still in the car's frame; with no wheel sample within 1 s, the phone's sample as it
+  is.
+- **At a crawl** (wheel speed below 1.5 m/s) the raw gyro's yaw replaces the wheels', if over the last 600 wheel
+  samples above 3 m/s the gyro turned with the wheels (RMS difference under 0.05 rad/s: in the mount 0.03–0.04, in a
+  pocket 0.09–0.11). Wheel speed sensors read nothing at a crawl, and the phone in a pocket must not turn the car.
+- **The compass gets no field** meanwhile (§7.6): the IMU is then the car's, not the phone's.
 - **The service** holds its inputs 0.5 s instead of 0.3 while CAN speed comes or wheel yaw is on: a wheel sample
-  comes out of the feed 0.07–0.15 s after its time at the median, one in ten over 0.3 s (the 0.1 s average waits for
-  the next frame; the link's bursts). One later than the hold is dropped; for the turning the sample before it
-  stands in.
-- **The tyres' difference** is learned (`odometry/can/wheel-yaw-calibration.ts`): over 5 s stretches, ∫ difference =
-  track · ∫ gyro yaw + tyre · distance, a stretch that differs from the gyro by over 3° + 10 % (the phone moving on
-  its own) teaching nothing; the track stays 1.60 m. The right rear read slow by 0.025 % one day, 0.056 % and
-  0.119 % the next morning and afternoon: 0.55 °/s of turning that isn't, at 46 km/h. **Noted, not applied**
-  (`nav wheel yaw: tyres …` at a drive's end): applied, it put a mounted drive back on the drawn road (0 s on 6
-  seeds of 8, against 11–74), but with the phone in a pocket for the whole drive the stretches that agreed by chance
-  taught it wrong (252–408 s off against 217–249).
-- **Measured** (`replay:regress --speed can --yaw wheels`, the app's path, against the gyro; 2026-10-12/13, drawn,
-  8 seeds): the pocket drive 217–249 s off the drawn road against 312–382; with CAN primary and the phone mounted
-  7–8 s against 5–40. **What's left:** mounted drives recorded with the polls' breaks came out 11–117 s off against
-  0–37: the tyres' difference (the wheels' heading 22° from the gyro's over 4 min on one) and the breaks' gaps. With
-  CAN primary the monitor listens without breaks while the car moves; the tyres' term still needs learning that the
-  pocket can't spoil.
+  comes out of the feed 0.07–0.15 s after its time, one in ten over 0.3 s.
+- **The tyres' difference** is learned (`wheel-yaw-calibration.ts`: over 5 s stretches, ∫ difference = track · ∫ gyro
+  yaw + tyre · distance, stretches that differ from the gyro by over 3° + 10 % teaching nothing) and **noted, not
+  applied** (`nav wheel yaw: tyres …`): applied, a phone in a pocket for a whole drive taught it wrong. A rear wheel
+  reading slow by 0.1 % is 0.5 °/s of turning that isn't, at 46 km/h; this is what keeps the setting experimental.
 - Replay: the log says `nav_wheel_yaw: on` and each switch is the note `nav wheel yaw on|off`; `replayTripInApp`
-  turns the wheels on and off as the phone did. Experiments: `--yaw wheels --yaw-from s` (the phone off the mount
-  from then), `--yaw-cal` (the learned tyre term applied), `--yaw-gaps gyro`.
+  follows them. Experiments: `--yaw wheels --yaw-from s`, `--yaw-cal`, `--yaw-gaps gyro`.
 
-## 6. EKF (`ekf/dr-ekf.ts`) and heading initialization
+## 6. EKF (`ekf/dr-ekf.ts`), heading initialization, and where the car starts
 
-- **State:** `E, N, ψ` (clockwise from north), `v`, `k_s`, `b_ω`, `k_ω`.
-- **Prediction:** at the IMU rate, `ψ̇ = −k_ω (ω − b_ω)`, with `v` as a random walk. Joseph-form updates are used.
+- **State:** `E, N, ψ` (clockwise from north), `v`, `k_s`, `b_ω`, `k_ω`. Prediction at the IMU rate,
+  `ψ̇ = −k_ω (ω − b_ω)`, `v` a random walk. Joseph-form updates.
 - **GNSS updates** (satellite fixes only once integrity passes them, §8):
-  - **Position:** σ = `h_acc / 1.5` for satellite fixes and `h_acc` for coarse ones, with a χ² gate of 16.
+  - **Position:** σ = `h_acc / 1.5` for satellite fixes, `h_acc` for coarse ones, χ² gate 16.
   - **Speed** (satellite only): compared with the state 1.0 s earlier (Doppler smoothing).
-  - **Course** (satellite only): when ≥ 4 m/s, with σ = max(course accuracy, 2°).
-  - **Timing:** position and course are compared with the state at fix time − GNSS lag (§7.3), taken from a 3 s
-    history; the correction applies to the current state.
-- **Why coarse fixes are used:** in real jammed drives they were honest about their accuracy. 79–90 % landed inside
-  their own radius around the DR prediction. They are also the only absolute position available, and GNSS spoofing
-  doesn't move Wi-Fi/cell positions. They never count as trusted GNSS (§8).
-- **Heading initialization:**
-  - **Course:** from a satellite course at ≥ 5 m/s with course accuracy ≤ 10°. When pulling away, CoreLocation's
-    course can be tens of degrees off while claiming ±18°.
-  - **Alignment** (`ekf/heading-align.ts`): a relative OBD + gyro track, in an unknown rotation, is fitted to the
-    fixes with a weighted 2D rotation + translation. Outliers beyond 3σ are dropped one at a time.
-    - Fixes less than 25 m apart along the track count as one, because errors at one place are correlated.
-    - It starts the EKF when the fitted heading σ ≤ 10° and the fixes span ≥ 150 m (unweighted extent).
-    - Position σ = fit noise + heading σ × the lever arm to the fixes.
-    - On the jammed drives it started after about 450–600 m. One drive never got enough distinct fixes and stayed
-      anchored, which is correct.
-  - **Parked pose** (§6.1): from the previous session, before any fix.
+  - **Course** (satellite only): at ≥ 4 m/s, σ = max(course accuracy, 2°).
+  - **Timing:** position and course are compared with the state at fix time − GNSS lag (§7.3) from a 3 s history;
+    the correction applies to the current state.
+- **Coarse fixes are used** at their claimed accuracy: in real jammed drives 79–90 % landed inside their own radius
+  around the DR prediction, they are the only absolute position available, and spoofing doesn't move them. They
+  never count as trusted GNSS (§8).
+- **Heading initialization**, whichever comes first:
+  - **Course:** a satellite course at ≥ 5 m/s with course accuracy ≤ 10° (pulling away, the course can be tens of
+    degrees off while claiming ±18°).
+  - **Alignment** (`ekf/heading-align.ts`): the relative OBD + gyro track, in an unknown rotation, is fitted to the
+    fixes (weighted 2D rotation + translation, outliers beyond 3σ dropped one at a time; fixes less than 25 m apart
+    along the track count as one). Starts the EKF when the fitted heading σ ≤ 10° and the fixes span ≥ 150 m; on
+    jammed drives that is after about 500 m. Position σ = fit noise + heading σ × the lever arm to the fixes.
+  - **Map** (MAPMATCH-SPEC §8): the particle filter's settled road heading, usually sooner than alignment.
+  - **Parked pose** (§6.1) or **manual position** (§6.3): before any fix.
 
-### 6.1 Parked pose (SPEC §3.3 startup)
 
-- **Why:** a session otherwise has no heading until a GNSS course (≥ 5 m/s) or, under jamming, alignment after
-  ~500 m. The car usually starts where it was parked, facing the same way.
-- **Saved** (`Navigator.parkedPose`): position, heading and their σ while the car stands (standstill, or OBD 0) in
-  mode `dr`, and `offRoad` when map matching had it off every road (a lot, a yard): the next start keeps it there
-  rather than on the roads around it (MAPMATCH-SPEC §7.2), and standing there the map doesn't take `offroad` for
-  lost (UI-SPEC §6.2; note `nav parked pose saved (…, off the roads)`). The service stores it per VIN at engine/ignition off, every 30 s while parked, and when it stops.
-  The first OBD speed > 0 clears it, so a pose never outlives a drive. The pose is the EKF's, not the map's dot.
-  Dead-reckoned there without a trusted satellite fix in the last 300 m, its σ is at least 30 m: against the drawn
-  truth the jammed drives of 2026-10-06 ended 12–80 m from where the car parked while the EKF said 5–7 m, and the
-  next drive's map matching, searching 3σ around it, missed the street 34 m away and took a parallel one.
-  Tried and reverted (2026-10-07): saving where the map drew the car (the dominant map-matching hypothesis while
-  dead-reckoning). Over 2026-10-06's chain of trips it removed the jumps between them (≤ 13 m instead of up to
-  1.4 km), and where the dot was the one that was wrong it carried a wrong street into the next drive: replayed
-  through the app from the parked chain (3 filter seeds), one drive of 2026-10-05 started 700 m off, and two others
-  ended up 120 and 490 m from their Wi-Fi fixes at the median, against 10–17 m (MAPMATCH-SPEC §10.2).
-- **Frozen** at the first handling while parked. The driver often takes the phone out and walks off with it while
-  the ECU is still awake (2 of 7 drives on 2026-10-04). The fixes then follow the driver, and without the freeze
-  the saved pose would follow them too. A fix that rejects an unverified pose also drops the frozen one.
-- **Needs the VIN.** On 2026-10-04 it was never used: the VIN was read on 1 of 7 drives (VEHICLE-LINK-SPEC §9.1).
-  Every drive started anchored for 72–264 s, though the car always stood within 3–9 m of where the last one ended.
-  On 2026-10-05 again 1 of 4: a missed read erased the remembered VIN, so the drive home (jammed, Wi-Fi fixes
-  ±300–1400 m) stood anchored for 2 min / 1.2 km of driving, heading-up pointing north. Now a missed read assumes the
-  last car on the protocol and retries (VEHICLE-LINK-SPEC §9.1); `npm run replay -- --chain` of the two drives starts
-  the second from its parked pose at 0 s (confirmed by a Wi-Fi fix at 357 s) where the recorded one aligned at 486 s.
-- **VIN known late** (read on a retry): the service then starts from the pose if the navigator has no position yet
-  or the fixes agree (`startFromPose` accounts for the motion since the start); note `… VIN known late)`. A car the
-  link doesn't know (VIN null: another protocol than the last car's) restarts the navigator without the expected
-  car's pose and calibration (note `nav vehicle unknown, not the one expected: restart`).
-- **Reversing:** the main test car reads OBD 0 while reversing (VEHICLE-LINK-SPEC §10.4). Reversing into a parking space
-  turns the saved heading in place without moving the position (5–15 m).
-- **Used** (`Navigator.startFromPose`): when the app starts and the VIN matches, the car of the adapter auto-connect
-  will use, known before it connects. The EKF starts at once with σ widened by 5 m and 2°. Refused if the fixes so
-  far disagree with it.
-- **Checked:** until confirmed, a satellite fix that fails the EKF gate drops it (the car was moved or turned), and
-  so do 3 Wi-Fi/cell fixes in a row that fail it (`poseRejectCoarse`): reset to `anchored` at that fix, and the stored
-  pose is deleted. One Wi-Fi fix isn't enough: on 2026-10-05 a single one claiming ±55 m, 850 m from where the second car
-  really stood, threw away its correct pose, and the drive never found the road after. Likewise a Wi-Fi anchor
-  doesn't refuse a pose at `startFromPose`, a satellite one does.
-- **Asked:** the first Wi-Fi fix that disagrees (`pose: "doubted"`) makes the map ask "Is the car where the dot
-  is?" (`PositionEstimate.poseQuestion`, with how far the fix is). Yes confirms the pose (`Navigator.answerPose`), and
-  later Wi-Fi fixes only go through the EKF gate; no drops it and anchors at that fix. Unanswered, the 3-in-a-row
-  rule applies. Notes `nav parked pose doubted …`, `… confirmed / rejected by the driver`. It is confirmed by an agreeing fix ≤ 100 m after
-  150 m of driving, because a fix while parked says nothing about the heading. A live VIN other than the expected
-  one restarts the navigator without it.
-- **One per car** (`nav.parkedPoses`, by VIN): with one slot, the second car's pose replaced the main car's on 2026-10-05,
-  and the main car drove off anchored with no heading for 5 min.
+### 6.1 Parked pose
+
+- **Saved** (`Navigator.parkedPose`): position, heading and their σ while the car stands in mode `dr`, and `offRoad`
+  when map matching had it off every road (a lot, a yard: the next start keeps it there, MAPMATCH-SPEC §7.2, and the
+  map doesn't take `offroad` for lost there). The service stores it per VIN (`nav.parkedPoses`) at engine/ignition
+  off, every 30 s while parked, and when it stops. The first speed > 0 clears it. Dead-reckoned there without a
+  trusted satellite fix in the last 300 m, its σ is at least 30 m (the EKF claimed 5–7 m where the car was 12–80 m
+  off, and the next drive's map matching missed the street). The pose is the EKF's, not the map's dot: saving the
+  dominant map-matching hypothesis carried a wrong street into the next drive.
+- **Frozen** at the first handling while parked: the driver often takes the phone out and walks off while the ECU
+  is still awake, and the fixes then follow the driver.
+- **Needs the VIN.** A missed VIN read assumes the last car on the protocol and retries (VEHICLE-LINK-SPEC §9.1). A
+  VIN known late starts from the pose if the navigator has no position yet or the fixes agree (`startFromPose`
+  accounts for the motion since the start). A car the link doesn't know (another protocol) restarts the navigator
+  without the expected car's pose and calibration.
+- **Used** (`Navigator.startFromPose`) when the app starts and the VIN matches (the car auto-connect will use, known
+  before it connects). The EKF starts at once with σ widened by 5 m and 2°. Refused if the fixes so far disagree.
+- **Checked:** until confirmed, a satellite fix that fails the EKF gate drops it, and so do 3 Wi-Fi/cell fixes in a
+  row that fail it (`poseRejectCoarse`; one Wi-Fi fix isn't enough: a single ±55 m fix 850 m off threw away a correct
+  pose): reset to `anchored` at that fix, the stored pose deleted. A Wi-Fi anchor doesn't refuse a pose at
+  `startFromPose`; a satellite one does. Confirmed by an agreeing fix ≤ 100 m after 150 m of driving.
+- **Asked:** the first Wi-Fi fix that disagrees (`pose: "doubted"`) makes the map ask "Is the car where the dot is?"
+  (`PositionEstimate.poseQuestion`, with the distance). Yes confirms it (`Navigator.answerPose`); No drops it and
+  anchors at that fix; unanswered, the 3-in-a-row rule applies. Notes `nav parked pose doubted …`, `… confirmed /
+  rejected by the driver`.
+- **One per car** (by VIN): with one slot, a second car's pose replaced the main car's.
 - **Not checked:** with no fix at all, nothing can tell that the car was moved while the app was off.
-- **Measured** (`replay --chain`, 3 consecutive pairs of the real drives):
-  - q8tfjs, jammed for its first 10 min: DR from 0 s instead of alignment at 613 s; coarse fixes median 9 m from
-    the prediction, 90 % inside their radius.
-  - 6vccgr: DR from 0 s instead of a course at 136 s; 49 m off at the first satellite fix after 850 m.
-  - s4fkdm: DR from 0 s instead of a course at 162 s.
-  - Wrong poses: 300 m off is dropped by the first fix; a heading turned 180° is dropped on all 3; 90° on 2 of 3
-    (on the jammed one, coarse fixes pulled the heading round instead).
 
 ### 6.1a The track doubted
 
-- **Why:** the pose checks above stop at 150 m, and after that nothing asks whether the dot is still anywhere near
-  the car. `accuracyM` cannot: it is the filter's own spread (the EKF's σ, or the dominant hypothesis'), which stays
-  a few metres however wrong the dot is. On 2026-10-06 the dot ran away over one 12-minute drive (2.8 → 10.5 km from
-  the coarse fixes), then stood 10 km out at ±5 m for 12 min at a filling station, and nothing in the app — map,
-  routing, or the chip that would have let the driver fix it — had any reason to think otherwise.
-- **Raised** (`Navigator.positionDoubtM`): `coarseDoubtFixes` (3) Wi-Fi/cell fixes in a row land further from the
-  track than such fixes usually are from the car: one claiming up to 450 m, farther than its claim and 150 m (about
-  one in seven by chance, against the drawn truth of 2026-10-03..06); a wider one, past its reach (its claim, the
-  most town cell fixes were off). A wide fix inside its reach neither counts nor clears.
-- **Acted on:** when the three are narrow and agree with each other (within half their mean distance), the track
-  moves to them: the EKF's position becomes their mean ± half their reach, heading, speed and calibration kept, and
-  map matching starts over there (`DrEkf.relocate`, note `nav track lost: moved to the Wi-Fi/cell fixes …`). Not
-  within 1 km of a trusted satellite fix (on the highway the Wi-Fi/cell fixes are the ones off), not while a parked
-  pose is unconfirmed (it has its own rule), not within 500 m of the driver confirming the pose or placing the car.
-  On 2026-10-06 four such fixes 28–92 m from the car said the dot 230–560 m away was lost, and nothing listened.
-  Three, not more: on simulated jammed drives (MAPMATCH-SPEC §10.2, Wi-Fi/cell-like fixes whose error wanders over
-  two minutes) three in a row 150 m off together moved tracks that were right (losses 14 in 240 replays; with 4 in a
-  row 9, with 5 2), but on the real drives 5–7 got worse with 4 or 5 (2026-10-16): there the tracks are lost for real
-  more often than the fixes agree on a wrong place. Nor 5 only while map matching tracks one road with over 0.9 of
-  the weight: simulated losses 14 → 2, but 3 real drives worse (fwx8ms parked up to 225 s off) — a track lost on a
-  wrong road is as sure of itself as a right one (§9).
-- The original rule (2× the claim) is kept in spirit below. A coarse fix is a kilometre-wide blob under jamming, so a
-  dot inside one says nothing and a single one outside says little; three agreeing that the car is several blobs
-  away is the only evidence available that the track is lost. Satellite fixes are not counted (integrity and the EKF
-  gate judge those); one the EKF takes clears the doubt, as does a coarse fix that agrees, as does any restart of
-  the track.
+- **Why:** the pose checks stop at 150 m, and `accuracyM` is the filter's own spread, which stays a few metres
+  however wrong the dot is. A dot can run kilometres away and stand there at ±5 m.
+- **Raised** (`Navigator.positionDoubtM`): 3 Wi-Fi/cell fixes in a row (`coarseDoubtFixes`) land farther from the
+  track than such fixes usually are from the car: one claiming up to 450 m, farther than its claim and 150 m; a
+  wider one, past its reach (`coarseDoubtShare` 2 × the claim). A wide fix inside its reach neither counts nor
+  clears.
+- **Acted on:** when the three are narrow and agree (within half their mean distance), the track moves to them: the
+  EKF's position becomes their mean ± half their reach, heading, speed and calibration kept, map matching starting
+  over there (`DrEkf.relocate`, note `nav track lost: moved to the Wi-Fi/cell fixes …`). Not within 1 km of a trusted
+  satellite fix (on the highway the Wi-Fi/cell fixes are the ones off), not while a parked pose is unconfirmed, not
+  within 500 m of the driver confirming the pose or placing the car. Three, not more: on real jammed drives tracks
+  are lost for real more often than three fixes agree on a wrong place; nor only while map matching tracks one road
+  (a track lost on a wrong road is as sure of itself as a right one).
+- Satellite fixes are not counted (integrity and the gate judge those); one the EKF takes clears the doubt, as does
+  a coarse fix that agrees, or any restart of the track.
 - **Published** as the dot's radius (`puckAccuracyM`, shared with the replay tools): the larger of the filter's
-  spread and the doubt. The circle then reads honestly, and the "Set your position on the map" chip is offered
-  (§6.2).
-- **Measured** (`replay:doubt`, every log kept: 36 drives, 35 833 published positions, 453 coarse fixes weighed,
-  20 of them jammed throughout) against the dot the app itself published, because a fresh single-trip replay
-  cannot reproduce an error carried in from earlier trips, which is how 2026-10-06's 10 km came about. A run of 3
-  at 2× fires on **one** drive — p7qgih, the one whose dot ran away, raised at 248 s already 8.1 km out, 8 min
-  before the car parked and 20 before GPS came back — and on no other, with no false positive anywhere. The longest
-  run elsewhere is 1, including the 58 km drive that dead reckoned the whole way with its dot inside the coarse
-  circles throughout (4 of 331 fixes outside, worst 3.8 km).
-- Notes `nav position doubted: Wi-Fi/cell fixes put the car N m from the dead reckoning`, `… doubt cleared: …`.
+  spread and the doubt. Measured on every log kept (`replay:doubt`): fires on the one drive whose dot ran away, on no
+  other.
+- Notes `nav position doubted: …`, `… doubt cleared: …`.
 
 ### 6.2 Placed by the driver
 
-- **Why:** under jamming nothing else may say where the car is: no parked pose (a new car, or it was moved), Wi-Fi
-  fixes hundreds of metres off. The driver knows.
-- **Offered** only while the car stands (speed < 1 m/s): a chip "Set your position on the map" when there is no GPS
-  and nothing vouches for the dot — it is rougher than 75 m, or has no direction, or map matching is `offroad`, or
-  more than 5 km have been driven since the last trusted fix; and after answering "No" to "Is the car where the dot
-  is?" (§6.1). Driving off cancels it. Never offered while moving.
-- **Asked for** by the driver at any time the car stands, or before any position at all (the manual position is
-  shown without a fix, §6.3): **I'm here** on a dropped pin or on a place picked in the route screen's search
-  (UI-SPEC §6, §7.1). The placing then starts at that point instead of the dot; the steps are the same.
-  > `accuracyM` alone was the whole rule until 2026-10-06, and it is the filter's own spread, which stays a few
-  > metres however wrong the dot is. Over that day's 2 h 11 min without a satellite fix — the dot up to 10 km out,
-  > 12 min of it standing at a filling station at ±5 m — the chip was offerable in 3 of 20 792 position samples,
-  > so the driver could not correct it and gave up on the app. `offroad` and the dead-reckoning distance are the
-  > honest signals. Over every log kept (`replay:doubt`, 36 drives, 35 833 published positions, 30 % of them
-  > standing) the offer goes from 3.4 % of positions to 14.6 %, and every bit of that is on a jammed drive: the
-  > clean ones are unchanged (0–2.3 %, and 0 % on the five with full satellite coverage), while the filling-station
-  > stop goes 0.1 → 97.5 %, the crawl before it 0 → 98.6 %, and the two long drives sit at 2.8 % and 5.4 %.
-- **Placing:** the map zooms in (18, flat, north up) on the dot (or the point it was asked for at) with a pin fixed at the screen centre; the driver drags
-  the map until the pin is on the car, "Here". Then "tap where the front of the car points": an arrow from the pin
-  shows the heading, another tap turns it, "Confirm" applies it. A placing always has a heading: Confirm is disabled
-  until the first tap (there used to be a "Skip", which left the car anchored with no direction, and a route start
-  without one). The confirmed spot and arrow stay drawn, fainter, until the dot is 50 m from them (the car drove off)
-  or the car is placed again.
+- **Offered** only while the car stands (speed < 1 m/s): the chip "Set your position on the map" when there is no
+  GPS and nothing vouches for the dot: rougher than 75 m, no direction, map matching `offroad` (not at the spot it
+  parked in off the roads), or more than 5 km driven since the last trusted fix; and after "No" to "Is the car where
+  the dot is?". Driving off cancels it. `accuracyM` alone was the rule once, and the chip was offerable in 3 of 20 792
+  samples over two hours with the dot up to 10 km out.
+- **Asked for** by the driver at any time the car stands, or before any position: **I'm here** on a dropped pin or
+  on a place picked in the route screen (UI-SPEC §6, §7.1). The placing then starts at that point.
+- **Placing** (UI-SPEC §6.2): the map zooms in with a centre pin; the driver drags the map until the pin is on the
+  car, "Here", then taps where the front of the car points, "Confirm". A placing always has a heading: without one
+  the car stayed anchored and a route started without a direction.
 - **Applied** (`Navigator.setPosition`): everything about the old track is dropped except the speed scale. The EKF
-  starts there (σ 10 m, 15°, init method `user`), confirmed: later fixes only pass its gate, so Wi-Fi can't move it,
-  five rejected satellite fixes still reset it. (`Navigator.setPosition` still takes no heading, anchoring there
-  with the filter starting with the heading unknown, but the app no longer places without one.) Note
-  `nav position set by the driver: lat,lon N m from the dot, heading …`.
-- **Held as the manual position** (§6.3), with or without a car connected, separately from the car's parked pose.
-  It used to be saved as the parked pose at once, which needed the VIN and the car reading 0 km/h: placed without
-  the car, it was lost, and the map and routing kept the Wi-Fi fix. With a car standing, the 30 s save still keeps
-  the navigator's pose (started from the placing) as the parked pose, as for any stop.
+  starts there (σ 10 m, 15°, init method `user`), confirmed: later fixes only pass its gate, so Wi-Fi can't move it;
+  five rejected satellite fixes still reset it. Note `nav position set by the driver: lat,lon N m from the dot,
+  heading …`.
+- **Held as the manual position** (§6.3), with or without a car connected, apart from the car's parked pose. With a
+  car standing, the 30 s save keeps the navigator's pose (started from the placing) as the parked pose.
 
 ### 6.3 The manual position
 
-- **Why:** placed with no car connected (the driver at home with only Wi-Fi, often hundreds of metres off), the navigator
-  took the placing but the map showed phone GNSS: without OBD speed the service publishes the fixes, not the
-  navigator. The dot and the route start stayed on the Wi-Fi fix.
-- **Held** (`NavigatorService`, stored under `nav.manualPosition`: for the phone, not a car): lat, lon, heading, when
-  placed, when last confirmed. It outlives the session, so an app closed right after starts from it.
+- **Why:** placed with no car connected, the navigator took the placing but the map showed phone GNSS, often
+  hundreds of metres off on Wi-Fi.
+- **Held** (`NavigatorService`, `nav.manualPosition`: for the phone, not a car): lat, lon, heading, when placed, when
+  last confirmed. It outlives the session.
 - **Shown:** with no OBD speed for 10 s, the service publishes it instead of the fixes: `source: "manual"`, ±10 m,
-  its heading, no speed, the latest fix still as `rawGnss`. Routing takes it as a reliable start, with its heading.
-  With OBD speed the navigator is published as usual (it started from the placing). While held, the snapshot carries
-  `manual: { placedAt, confirmedAt, asking }`; the status pill says "Set on the map", and its details (a tap on the
-  pill) hold a chip "Position set manually · 12 min ago" with ✕ to forget it; a tap on the chip places the car again
-  (while it stands). Folded with the other details, so it takes no room on the map until asked for.
-- **Asked:** 15 min after it was placed or last confirmed, the map asks "Are you still here?". Yes confirms it again
-  (15 min more, and a navigator started without it starts from it now); No forgets it. Until answered it is still
-  shown. Note `nav manual position 15 min old: asking …`, `… confirmed by the driver`.
-- **Released** (no longer held; a navigator started from it carries on):
-  - the car drives (OBD speed above 0): the navigator carries the placing on. Note `… released: the car drives`.
-  - a trusted satellite fix within 3σ (σ = √(fix accuracy² + 10²)): GPS takes over.
-  - 5 trusted satellite fixes in a row that disagree: the EKF's rule for a placing (§6.2). One spoofed or wrong fix
-    isn't enough.
-  - Wi-Fi/cell fixes never release it: that is the point of it.
-- **Forgotten** (✕, or No to "still here?"): no longer held, and a navigator started from it starts over without it
-  (with the parked pose saved since the placing deleted, being the placing itself), so the fixes and the car's own
-  pose decide again. Note `… discarded by the driver` / `… the driver isn't there any more`.
-- **At a start** (a navigator is created: app to the foreground, another car), the newest word on where the car is
-  wins: the manual position, confirmed within 15 min, unless the car's parked pose was saved after it and more than
-  15 m from it (closer, the pose was saved from the placing, and the placing is the stronger start: Wi-Fi can't move
-  it). Older than 15 min it isn't started from: the map asks first. Notes `nav mode dr (manual position, N min old)`,
-  `nav manual position older than the parked pose (N m apart): parked pose`. A VIN known late (§6.1) doesn't replace a
-  navigator already started from the manual position.
-- **Is it the phone or the car?** The placing means the car (§6.2), but it can be made without one, to test at home.
-  Placed at home, then walking to a car parked elsewhere within 15 min, the car starts at home: forget it with ✕.
-- **In replays:** the app replay (viewer, `replay:regress`) makes the log's placings again at their time (its
-  `nav position set by the driver` notes), and a position held from before the log comes with the log's `nav storage`
-  notes (§10; logs from 2026-10-11 on). The navigator-only `npm run replay` doesn't reproduce placings.
+  its heading, no speed, the latest fix still as `rawGnss`. Routing takes it as a reliable start with its heading.
+  The snapshot carries `manual: { placedAt, confirmedAt, asking }`; the status pill says "Set on the map" and its
+  details hold a chip "Position set manually · N min ago" with ✕ to forget it; a tap places the car again.
+- **Asked:** 15 min after it was placed or last confirmed, "Are you still here?". Yes confirms it (15 min more); No
+  forgets it. Until answered it is still shown.
+- **Released** (a navigator started from it carries on): the car drives (OBD speed above 0; phone-only: 30 m
+  measured); a trusted satellite fix within 3σ (σ = √(fix accuracy² + 10²)); 5 trusted satellite fixes in a row
+  that disagree. Wi-Fi/cell fixes never release it.
+- **Forgotten** (✕, or No): no longer held, and a navigator started from it starts over without it (with the parked
+  pose saved since the placing deleted).
+- **At a start** the newest word wins: the manual position, confirmed within 15 min, unless the car's parked pose was
+  saved after it and more than 15 m from it (closer, the pose came from the placing, and the placing is the stronger
+  start). Older than 15 min it isn't started from: the map asks first. A VIN known late doesn't replace a navigator
+  already started from it.
+- **In replays:** the app replay makes the log's placings again at their time (its `nav position set by the driver`
+  notes); a position held from before the log comes with the log's `nav storage` notes (§10). The navigator-only
+  `npm run replay` doesn't reproduce placings.
 
 ## 7. Calibration (online)
 
 ### 7.1 Gyro bias
 
-Learned at standstill from the mean yaw over 1 s (σ 0.002 rad/s, gated). The prior is tight (0.0005 rad/s) because
-CoreMotion's rate is already bias-corrected: 0.007 °/s was measured at standstill. A loose prior let GNSS course errors
-leak into the bias.
+Learned at standstill from the mean yaw over 1 s (σ 0.002 rad/s, gated), prior 0.0005 rad/s: CoreMotion's rate is
+already bias-corrected (~0.007 °/s at standstill), and a loose prior let GNSS course errors leak into the bias.
 
 ### 7.2 Gyro scale `k_ω`
 
-- Over 13 complete turns (1006°), gyro and GNSS course agreed within a median 0.4° per turn. The scale is
-  1.007 ± 0.005, so the gyro is fine.
-- The EKF still learns 1.02–1.04, because at 1 Hz GNSS a timing mismatch looks like a scale error. Fixing
-  `k_ω = 1` didn't change the outage error, so it stays a state with a 0.02 prior.
-- Revisit it with map matching or a Stage 2 yaw source.
+The gyro's true scale is ~1.007; the EKF learns 1.02–1.04 because at 1 Hz GNSS a timing mismatch looks like a scale
+error. Fixing `k_ω = 1` didn't change the outage error, so it stays a state with a 0.02 prior. Not stored.
 
 ### 7.3 GNSS lag (`calibration/gnss-lag.ts`)
 
-- **Why:** CoreLocation filtering can differ per phone model and iOS version, so the lag is measured instead of
-  hard-coded.
-- **Method:** take 30 s windows (a new one every 10 s) that contain a ≥ 30° turn, ≥ 25 satellite fixes ≤ 10 m, and
-  speed ≥ 3 m/s. For each candidate lag (−0.5…1.5 s, step 0.05), fit the relative track to the fixes with a similarity
-  transform (rotation, translation, scale) and add up the residuals. A wrong lag cuts corners, so the minimum marks
-  the true lag. Straight roads can't show a lag.
-- **When it's used:**
-  - Only after 6 windows (overlapping windows: about two turns, 1–3 min of city driving) and only if the minimum
-    isn't on the edge of the grid.
-  - Until then `gnssLagS` (default 0) applies. An explicit lag (`estimateGnssLag: false`) switches it off.
-- **Measured:** −0.1 ± 0.1 s on all drives (fit RMS 1.4 m vs 2.6 m at +0.4 s). An earlier 0.4 s guess from one turn
-  cost about a third of the outage accuracy.
+- CoreLocation's filtering differs per phone model and OS version, so the lag is measured, not hard-coded.
+- 30 s windows (a new one every 10 s) with a ≥ 30° turn, ≥ 25 satellite fixes ≤ 10 m and speed ≥ 3 m/s; for each
+  candidate lag (−0.5…1.5 s, step 0.05) the relative track is fitted to the fixes with a similarity transform; a
+  wrong lag cuts corners, so the residual minimum marks the true lag.
+- Used after 6 windows and only if the minimum isn't on the grid's edge; until then `gnssLagS` (default 0, or the
+  stored value). `estimateGnssLag: false` fixes it. Measured −0.1 ± 0.1 s on the test iPhone.
 
 ### 7.4 Persistence (`src/services/navigation/calibration-store.ts`)
 
-Learned values go to kv-store (`nav.calibration`) every 30 s and when the navigator stops, so the next session starts
-calibrated. They only replace defaults after enough data. The parked pose (§6.1) is kept separately
-(`nav.parkedPose`).
+Learned values go to kv-store (`nav.calibration`) every 30 s and when the navigator stops; they only replace defaults
+after enough data. The parked poses (`nav.parkedPoses`, by VIN) and the manual position (`nav.manualPosition`) are
+kept apart.
 
-- **GNSS lag**, per phone model (`sys_hw`) and iOS version: saved once §7.3 has an estimate (6 turn windows), used
-  as `gnssLagS` on the next start until the new session measures its own. A value from another model or iOS version
-  is dropped.
-- **Speed scale `k_s`**, per VIN: saved once its σ ≤ 0.01 (clean GNSS gets there in 1–2 km; jammed drives stay at
-  ~0.025 and don't save). It seeds the next EKF with its σ widened by 0.01, since one car's drives learn 1.00–1.03.
-  Within a session it also survives an EKF reset.
-- **Not stored:** the gyro bias (CoreMotion corrects it, and it drifts with temperature) and `k_ω` (the learned
-  value mostly absorbs GNSS timing, §7.2).
+- **GNSS lag**, per phone model (`sys_hw`) and OS version: saved once §7.3 has an estimate; a value from another
+  model or version is dropped.
+- **Speed scale `k_s`**, per VIN: saved once its σ ≤ 0.01 (clean GNSS gets there in 1–2 km; jammed drives don't
+  save). It seeds the next EKF with σ widened by 0.01 (one car's drives learn 1.00–1.03). Within a session it
+  survives an EKF reset. Under jamming `k_s` doesn't sink on real drives, and holding it or adding a speed offset
+  state was worse: the scale-only model stays.
+- **Compass calibrations** (§7.6), per VIN. **Phone mount** (phone-only mode, §9.6), per car or `phone`.
+- **Not stored:** the gyro bias (drifts with temperature) and `k_ω`.
 
 ### 7.5 Magnetometer (logged, not used; SPEC §2)
 
-Measured on the 7 drives of 2026-10-04 (`mag_raw`, 19.4 Hz):
-
-- **Field:** about 160 µT raw against Earth's ~50 µT: a large constant offset (the phone's own and the car's). The
-  heading-dependent part is 17–19 µT, Earth's horizontal field there, so the car hardly distorts it.
-- **Calibration:** horizontal components in a gravity-levelled frame fixed to the phone, fitted against GNSS course
-  as offset + rotation + scale (4 parameters, linear least squares).
-- **Error** with the calibration from the other drives:
-  - median 4–18°, p90 12–31° per drive;
-  - under 90° for every sample, except where the GNSS course itself was wrong at low speed;
-  - over the first 200 m after pulling away, median 5–24°;
-  - within one mounting of the phone, 4–6°.
-- **What moves it:** taking the phone out of the mount and back, ~6 µT (15–20°); starting the engine, 2–4 µT.
-- On the jammed drive it agreed with the DR heading within ~5° until near-repeated coarse fixes turned it (§4).
-- **So:** it picks the travel direction along a road at a jammed start with a wide margin, and could be a weak
-  absolute heading (σ ≈ 25°).
+The raw field is ~160 µT against Earth's ~50 µT (the phone's own and the car's offset); the heading-dependent part is
+Earth's horizontal field, so the car hardly distorts it. Calibrated as offset + rotation + scale in a gravity-levelled
+frame fixed to the phone, against GNSS course, it reads 4–18° off at the median on other drives and under 90° always;
+re-seating the phone moves it 15–20°. Good enough to pick the travel direction along a road, not for navigation.
 
 ### 7.6 Compass (`compass/compass.ts`; in the app in shadow only)
 
-- **Input:** `Navigator.onMag` (raw field), the IMU's gravity and yaw rate, `setCompassCalibrations` from earlier
-  drives; `compassCalibrations` is what to keep for the next drive. No field while the turning comes from the wheels
-  (§5.4): the IMU is then the car's, not the phone's.
-- **Model** (§7.5): levelled horizontal field = offset + rotation and scale of Earth's field, in a frame fixed to
-  the phone (the axis nearest the horizontal, projected). Kept as the fit's normal equations, so drives add up.
-  Holds only for the mounting it was learned in.
-- **One calibration per mounting** (the phone's tilt), at most 3 per car, most recent first. The active one is
-  the one within 10° of the phone's tilt (the current one while it still is); none matching, no heading. A drive
-  learns only into the mounting the phone sits in, or starts a new one; the least used makes room. Before this, a
-  drive in another tilt learned into the stored calibration, labelled with the stored tilt, and corrupted it for
-  the next drive in the old mount. A phone turned in its mount at the same tilt still matches: only the trust
-  check can catch that.
-- **Learning:** once a second while the EKF heading σ ≤ 3°, at ≥ 4 m/s, driving straight (< 3° over the 1 s
-  window), with the phone in its mount. A fit needs 60 samples over 5 of 8 heading sectors: alone, only the two
-  longest drives of 2026-10-04 reached that; pooled, all drives do.
-- **Trust:** a stored calibration starts `unverified` and is judged on its own (what the drive learns doesn't
-  correct it before the check). The first 10 learning moments compare it with the EKF heading: median > 45° →
-  `rejected`, the stored one is dropped and the drive's own learning takes over; else `confirmed`. Measured:
-  calibrations from the other drives were confirmed on all 6 drives that could check (median 3–20° off);
-  turned 90° or 180°, rejected within the first 10 checks on 4 of 6. On the other two the turned calibration
-  was never used before the drive learned its own.
-- **Kept for the next drive** with `confirmed`: everything in it was learned or confirmed on this drive. A drive that
-  sat in a stored mounting and never checked it (no known heading while driving straight) keeps it unconfirmed;
-  the next drive still checks it, but hands out no heading until it passes. Mountings not sat in keep their flag.
-- **Use** (`compassUse`): `shadow` (default, the app) computes, checks and learns, but the particle filter never
-  gets the heading; `on` (replay with `--compass`) weighs it at the filter's jammed start (MAPMATCH-SPEC §8.2).
-  Until 2026-10-04 replay without the option also used the compass a drive learned for itself (no change in `--jam-start`). A jammed drive can't check the compass
-  before it has a heading from elsewhere: the calibration is trusted on the last drive's word. Not covered: the
-  phone turned in its mount at the same tilt (the tilt check doesn't see it); turned 90° or 180°, it gave 3 wrong
-  map starts in 180 benchmark sessions (MAPMATCH-SPEC §8.2).
-- **Shadow mode in the app** (decided 2026-10-04): the app runs the compass but doesn't navigate with it, until
-  real drives show how often a stored calibration is wrong.
-  - `NavigatorService` feeds `mag_raw` to `Navigator.onMag` and stores `compassCalibrations` per VIN (with the
-    other calibration, every 30 s and at engine off); the next drive loads them once the VIN is known.
-  - App notes (trip log): `nav compass from storage: N mounting(s) (… samples[ unconfirmed], …)`;
-    `nav compass at start: X° off (trust)` (or `none`) when the EKF starts, the compass minus the starting heading;
-    `nav compass A → B (median X° over N checks)` at each trust change; `nav compass drive: trust, N checks, median
-    X°, p90 Y°, M mounting(s) kept` at engine off and when the navigator stops.
-  - Debug screen (Vehicle, EKF): `compass (shadow)`: trust and how far it is off the EKF heading now.
-  - `npm run replay:compass -- <logs>` lists those notes per drive and sums them up: stored calibrations confirmed
-    and rejected, the compass error at the starts (median, p90, max, > 45°).
-  - To do on the road: re-seat the phone on purpose once (same tilt, turned) to see the check reject it.
-  - Switch to `on` only if those numbers hold up; otherwise drop the compass.
-- **Not yet:** a heading prior for alignment (§6), re-fitting the offset from gyro turns after the phone is
-  re-seated.
+- **Input:** `Navigator.onMag`, the IMU's gravity and yaw rate, `setCompassCalibrations` from earlier drives;
+  `compassCalibrations` is what to keep. No field while the turning comes from the wheels (§5.4).
+- **Model** (§7.5): the fit's normal equations, so drives add up. **One calibration per mounting** (the phone's
+  tilt), at most 3 per car, most recent first; the active one is the one within 10° of the phone's tilt. A drive
+  learns only into the mounting it sits in, or starts a new one.
+- **Learning:** once a second while the EKF heading σ ≤ 3°, at ≥ 4 m/s, driving straight (< 3° over 1 s), the phone
+  in its mount. A fit needs 60 samples over 5 of 8 heading sectors.
+- **Trust:** a stored calibration starts `unverified`; the first 10 learning moments compare it with the EKF heading:
+  median > 45° → `rejected` (dropped, the drive's own learning takes over), else `confirmed`. Kept for the next drive
+  as `confirmed` only when learned or confirmed on this drive. Not covered: the phone turned in its mount at the same
+  tilt.
+- **Use** (`compassUse`): `shadow` (default, the app) computes, checks and learns, but the particle filter never gets
+  the heading; `on` (replay `--compass`) weighs it at the filter's jammed start (MAPMATCH-SPEC §8.2). The app stays in
+  shadow until real drives show how often a stored calibration is wrong (`npm run replay:compass` sums the notes:
+  `nav compass from storage …`, `nav compass at start: X° off (trust)`, `nav compass A → B …`, `nav compass drive:
+  …`).
 
 ## 8. Integrity and trust (`integrity/integrity.ts`, SPEC §3.3)
 
-`Navigator.onGnss` asks `GnssIntegrity.check` about every satellite fix first. A fix it refuses comes back as
-`status: "untrusted"` with the verdict (`integrity`: `outside`, `jump`, `shape`, `far`, `untrusted`,
-`reacquiring`) and the distance to the nearest hypothesis, and nothing uses it. The map's trust is
-`Navigator.trustAt(t)`.
+`Navigator.onGnss` asks `GnssIntegrity.check` about every satellite fix first. A refused fix comes back as
+`status: "untrusted"` with the verdict (`outside`, `jump`, `shape`, `far`, `untrusted`, `reacquiring`) and the distance
+to the nearest hypothesis, and nothing uses it. The map's trust is `Navigator.trustAt(t)`.
 
-- **What the navigator gives it:** the OBD distance and the time without OBD speed so far, the relative OBD + gyro
-  track at the fix time (its piece changes at every break: handled phone, stale OBD), and the dead-reckoning
-  hypotheses: the EKF at the lag-corrected fix time, the map-matching clusters ≥ 5 %, or the anchor (σ + distance
-  driven). Hypotheses only while OBD speed came in the last 10 s, or for 30 s after a start from a parked pose
-  before any OBD speed; otherwise the phone may be anywhere.
-- **Checks** (thresholds in `DEFAULT_INTEGRITY_CONFIG`, set from the logs):
-  - Border, then the reach from the last trusted fix. Real steps between satellite fixes exceed the OBD distance by
-    ≤ 19 m (p99 6.5 m) on 14 drives; the reach allows 3σ + 20 m on top of OBD × 1.05 and 3 m/s.
-  - Shape, within one segment (below). Static spoofs fail it once the car drives 50 m.
-  - After a gap > 10 s: max(8σ, 150 m) from every hypothesis. The first fix after 1–8 min cuts on the clean drives
-    lands up to 4.5σ and 188 m off the EKF (overconfident, §13.8).
-- **Segments:** a jump or a gap > 10 s between two satellite fixes starts a new one. A spoof is a segment; when it
-  ends, real fixes start another. Refused fixes that continue their segment come back only on a hypothesis with
-  σ ≤ 30 m; a fix after a jump or gap back on the dead reckoning counts toward the 5 that re-trust. A shape failure
-  in a trusted segment also untrusts that segment's earlier fixes: the jump test then measures from the last
-  trusted fix before it.
-- **Moved like the car:** a held or refused stream whose fixes kept the car's shape for 200 m (≥ 3 tests) is
-  trusted again when the dead reckoning may be wrong: after a gap (`far`), or when the EKF didn't agree with the
-  last trusted fix as the spoofing began. When it did agree, only after 2 km: a stream that jumped away from a
-  dead reckoning that agreed with it is a spoof, however it moves. The fix that earns the trust resets the EKF if
-  it gates it out: verified, it needs no five rejections more to say the dead reckoning is lost.
-- **Divergence without a jump** (the phone walking off with the driver, wrong dead reckoning) passes: it continues
-  a trusted stream. The EKF's rule (5 rejected satellite fixes reset it, §4) acts on such fixes only, so a spoofed
-  stream can no longer reset the navigator onto itself. On the logs, the resets of q8tfjs and 9qw8wn (walking off)
-  still happen.
-- **Shown trust** over time, as the interim tracker had it (now its home):
-  - Good fix: a satellite fix integrity passed, ≤ 50 m. Wi-Fi/cell fixes never count, however accurate they claim
-    to be (counting them used to flip trust on 8 times on a jammed drive).
-  - Lost: no good fix for 8 s → `NO_FIX`. Regained: passed fixes ≤ 30 m arriving steadily for 5 s.
-  - While integrity refuses: `UNTRUSTED`, `REACQUIRING` once fixes come back to the dead reckoning (or while held
-    after a gap), `NO_FIX` once no satellite fix came for 8 s. The 5 re-trusting fixes count as the regain.
-  - Leaked satellite fixes under jamming pass to the EKF while the shown state stays `NO_FIX`.
-- **Trip log:** trust changes (app tag: `gnss trust <state> (±N m)`), and integrity's verdict when it changes:
-  `gnss integrity <verdict>: <why> (fix ±N m, N m from the dead reckoning)`, e.g. `gnss integrity jump: 4.6 km from
-  the last trusted fix 1 s before, the car could reach 52 m`, and `gnss integrity ok: back on the dead reckoning
-  after 64 s`.
-- **Not caught:** see SPEC §3.3 (without OBD speed only the border and 200 km/h; slow drag-off; spoofs that follow
-  the car). The driver placing the car (§6.2) is the way out of a dead reckoning that went wrong.
-- **Replay:** `--spoof` and `npm run replay:spoof` (§10); the summary's `integrity` counts refusals, spoofed fixes
-  used, real fixes refused and untrusted time away from the spoofing.
+- **What the navigator gives it:** the OBD distance and the time without OBD speed, the relative OBD + gyro track at
+  the fix time (its piece changes at every break), and the dead-reckoning hypotheses: the EKF at the lag-corrected
+  fix time, the map-matching clusters ≥ 5 %, or the anchor (σ + distance driven). Hypotheses only while OBD speed
+  came in the last 10 s, or for 30 s after a start from a parked pose; otherwise the phone may be anywhere.
+- **Checks** (`DEFAULT_INTEGRITY_CONFIG`): border; the reach from the last trusted fix (OBD × 1.05 + 3σ + 20 m, 55
+  m/s while OBD speed is unknown, 3 m/s walking pace); shape within one segment (static spoofs fail it once the car
+  drives 50 m); after a gap > 10 s, max(8σ, 150 m) from every hypothesis.
+- **Segments:** a jump or a gap > 10 s between satellite fixes starts a new one. Refused fixes that continue their
+  segment come back only on a hypothesis with σ ≤ 30 m; a fix after a jump or gap back on the dead reckoning counts
+  toward the 5 that re-trust. A shape failure in a trusted segment also untrusts that segment's earlier fixes.
+- **Moved like the car:** a held or refused stream whose fixes kept the car's shape for 200 m (≥ 3 tests) is trusted
+  again when the dead reckoning may be wrong (after a gap, or when the EKF didn't agree with the last trusted fix as
+  the spoofing began); when it did agree, only after 2 km. The fix that earns the trust resets the EKF if it gates it
+  out.
+- **Divergence without a jump** (the phone walking off, wrong dead reckoning) passes: it continues a trusted stream.
+  The EKF's rule (5 rejected satellite fixes reset it) acts on such fixes only, so a spoofed stream can't reset the
+  navigator onto itself.
+- **Shown trust:** a good fix is a satellite fix integrity passed, ≤ 50 m (Wi-Fi/cell never count). No good fix for
+  8 s → `NO_FIX`; regained by passed fixes ≤ 30 m arriving steadily for 5 s. While integrity refuses: `UNTRUSTED`,
+  `REACQUIRING` once fixes come back (or while held after a gap). Leaked satellite fixes under jamming pass to the
+  EKF while the shown state stays `NO_FIX`.
+- **Trip log:** `gnss trust <state> (±N m)` on changes; `gnss integrity <verdict>: <why> (fix ±N m, N m from the dead
+  reckoning)` when the verdict changes.
+- **Replay:** `--spoof` and `npm run replay:spoof` (§10).
 
 ## 9. Wiring into the app (`src/services/navigation/navigator-service.ts`)
 
-- **NavigatorService:**
-  - Owns one `Navigator`. It takes GNSS and IMU from `SensorService` (owner `navigator`: IMU runs whenever the
-    navigator does) and speed from `VehicleLink.onSpeed`.
-  - It is the runtime's `PositionSource` (§4.3 of UI-SPEC), so the map switched source without UI changes.
-  - **Runs** while the map is on screen or a trip records, so DR isn't interrupted when the app is backgrounded
-    mid-trip. When it stops, the next start begins with a fresh navigator (the car may have moved).
-  - **Input order:** inputs are held 300 ms and fed in time order, because IMU arrives in 100 ms batches and fixes
-    ~50 ms late (p90 on the real logs; outliers take seconds). A fix more than 2 s behind is dropped.
-  - **A fix more than 10 s old on delivery** is dropped before all that, with a note: it is CoreLocation's cache, not
-    where the car is. It comes first after a start, when the navigator has no clock to be behind: started again
-    mid-drive, the app anchored on the last real fix from before the jamming, 33 km back, and the ±5 km fixes after
-    it never replaced it. Fixes in the logs arrive within 4 s.
-  - **Display:** the DR position is extrapolated along the heading to "now" (≤ 1 s), since the navigator runs
-    300 ms behind.
-  - A new VIN starts a new navigator. At start the VIN is `VehicleLinkCore.expectedVin()`: the connected car's,
-    else the last car seen (VEHICLE-LINK-SPEC §7), so the parked pose (§6.1) applies before the adapter connects.
-- **Mapping to `PositionEstimate`:**
-  - mode `dr` → `source: 'fused'` while trust is `TRUSTED` and a satellite fix was accepted in the last 3 s, else
-    `'dr'`;
-  - `anchored` → `source: 'gnss'` with the grown radius;
-  - trust from §8 (`Navigator.trustAt`, at the navigator's time: 300 ms behind);
-  - `rawGnss` = the latest fix, for the ghost marker; `distanceSinceTrustedM` from OBD.
-- **Without OBD speed** (no adapter, or none for 10 s): phone GNSS only. The navigator needs OBD speed for DR. The
-  map shows the latest fix the navigator took, once it has (300 ms after delivery, so a spoofed fix never flashes on
-  the map); while integrity refuses the fixes it holds the last one it passed, its circle growing at 15 m/s, the
-  spoofed fix as the ghost. **After the navigator's own dot** (the engine went off, the link dropped), only a
-  satellite fix replaces it: the dot is where the car stopped, and a Wi-Fi/cell fix is hundreds of metres to
-  kilometres wide under jamming — drawing it instead threw the car 1–10 km at the end of every trip of
-  2026-10-06. With phone-only mode on, §9.6 instead.
-- **Trip log:**
-  - `nav_estimate` (TRIP-LOGGER-SPEC §6.3): every position the map was given (~2–3 Hz). It holds the drawn
-    position and radius, mode, source, trust, heading and its σ, `k_s`, the GNSS lag in use, the parked-pose status,
-    and how far the navigator ran behind (`behind_us`, ~300 ms). This is what the driver saw, including the stored
-    calibration and parked pose that a replay doesn't have.
-  - Mode changes, resets, the parked pose (saved, used, confirmed, rejected), and loaded/saved calibration are app
-    notes (`nav …`).
-- **Persistence** per §7.4.
-- **Simulated GNSS outage** (test tool; Developer settings → "GPS outage button on the map"): a "Cut GPS" chip on
-  the map withholds every fix from the navigator and the trust tracker, as a real outage would, while
-  `SensorService` keeps logging them. The map shows the newest withheld satellite fix (≤ 10 m, ≤ 3 s old) as a
-  green "GPS" marker, and a card with the time, the OBD distance and the dot's distance from that fix (now and
-  max). Notes: `sim gnss outage on`, `sim gnss outage off: <s> s, <km> km, dot <m> m from GPS (max <m> m)`.
-  `npm run replay -- --app-cuts` (and `replay:mm`) cuts the same windows. Switching the button off ends an outage.
-- **Tests:** unit tests replay synthetic drives through the service. The 7 real logs replayed through it (real
-  delivery delays) match the offline replay: median 0.1–1 m apart, identical learned values.
+- Owns one `Navigator`; GNSS and IMU from `SensorService` (owner `navigator`), speed from `VehicleLink.onSpeed` or
+  the CAN speed feed. It is the runtime's `PositionSource` (UI-SPEC §4.3).
+- **Runs** while the map is on screen or a trip records. When it stops, the next start begins with a fresh navigator.
+- **Input order:** inputs are held 300 ms (`REORDER_US`; 500 ms with CAN) and fed in time order: IMU arrives in
+  100 ms batches, fixes ~50 ms late. A fix more than 2 s behind is dropped; one more than 10 s old on delivery is
+  CoreLocation's cache and is dropped with a note.
+- **Display:** the DR position is extrapolated along the heading to "now" (≤ 1 s).
+- A new VIN starts a new navigator. At start the VIN is `VehicleLinkCore.expectedVin()`: the connected car's, else
+  the last car seen, so the parked pose applies before the adapter connects.
+- **Mapping to `PositionEstimate`:** mode `dr` → `source: 'fused'` while trust is `TRUSTED` and a satellite fix was
+  accepted in the last 3 s, else `'dr'`; `anchored` → `'gnss'` with the grown radius; `rawGnss` = the latest fix;
+  `distanceSinceTrustedM` from OBD; `alternatives` the other map-matching hypotheses.
+- **Without OBD speed** (no adapter, or none for 10 s): phone GNSS only, published once the navigator has taken a
+  fix (so a spoofed fix never flashes on the map); while integrity refuses, the last passed fix with its circle
+  growing at 15 m/s. **After the navigator's own dot** (engine off, link dropped) only a satellite fix replaces it: a
+  Wi-Fi/cell fix is hundreds of metres wide under jamming. With phone-only mode on, §9.6.
+- **Trip log:** `nav_estimate` every published position (TRIP-LOGGER-SPEC §6.3); mode changes, resets, the parked
+  pose and loaded/saved calibration as `nav …` notes; at every navigator start, car change and trip start a `nav
+  storage {json}` note with what is stored, so a replay can start as the phone did (§10).
+- **Simulated GNSS outage** (Developer → "GPS outage button on the map"): a "Cut GPS" chip withholds every fix from
+  the navigator while `SensorService` keeps logging them; the map shows the newest withheld satellite fix as a green
+  marker and a card with time, distance and the dot's distance from it. Notes `sim gnss outage on|off …`; `npm run
+  replay -- --app-cuts` cuts the same windows.
 
-### 9.6 Phone-only mode (experimental; Developer settings → "Navigate without an adapter")
+### 9.6 Phone-only mode (experimental; Developer → "Navigate without an adapter")
 
-- **What:** without OBD speed (no adapter, or none for 10 s) and while GNSS isn't trusted (no satellite fix accepted
-  in the last 3 s), the map shows `PhoneNavigator` (`src/nav/phone/`): the phone's own speed (`imu-speed.ts`) on the
-  turn-anchored map matching (`turn-tracker.ts`), §9.7. `source: 'dr'`; the circle is the shown hypothesis'
-  along-road σ combined with the spread of the others (≤ 1 km); other roads it may be on are `alternatives`. The dot
-  is drawn as the navigator's is (`steadyDot`, position/puck.ts): a fix or a turn moving the hypothesis along its
-  road glides there instead of hopping (63 drawn drives: jumps 1196 → 809, incidents 760 → 501).
-- **Not good enough to go unattended:** on the 45 jammed drives (mostly a small town's, cell fixes only) it is off the
-  drawn route 44 % of the moving time from their drawn starts (`replay:regress --speed phone-app`; 26 / 43 / 59 /
-  96 % at 0–5 / 5–10 / 10–20 / 20+ min, `replay:incidents --phone-only`), and starting each drive where it ended the
-  one before it compounds to most of the time. On the 20 simulated Kyiv trips jammed from the start, with Wi-Fi
-  fixes as the real jams give them (§9.8): 44 % (11 / 18 / 35 / 58 %). The driver's placing (§6.2) is part of using it: a placing every ~4 min when the
-  dot is 100 m off brings it to ~9 % (simulated, `replay:turns --taps`). Placing is offered only while the car
-  stands.
-- **Graph:** its own reader of the active region's graph (`openActiveRoadGraph`), moved into a frame of its own at
-  each start, so the navigator's frame and tile cache are not touched; a new region or graph file reopens it.
-- **Start**, newest word first: the driver's placing (held manual position); the newest of the car's parked pose
-  and phone-only's own (key `phone`: without an adapter the phone doesn't know which car it is in); a trusted
-  satellite fix with a course (≥ 3 m/s). Without one it waits (`nav phone-only waits for a start …`) and the map
-  shows phone GNSS as without the mode.
-- **Fixes:** a trusted satellite fix (integrity passed, GNSS trusted, ≤ 20 m) re-anchors it at most every 2 s, with
-  its course when moving; untrusted satellite fixes are ignored. Wi-Fi/cell fixes weigh its hypotheses, and one
-  claiming ≤ 200 m also moves each road hypothesis along its road towards it (a Kalman update of its position and
-  speed scale, as a road jolt does). Three fixes in a row claiming ≤ 100 m (Wi-Fi, not a cell), each farther than
-  max(80 m, 3σ) from the best hypothesis, add hypotheses on the roads around the latest one, heading the way the best
-  one does (± 45°), at 0.3 of its weight; the old ones stay, and the turns and fixes after decide. Without these, a
-  tracker on another road stayed there for the rest of the drive whatever the fixes said: on the simulated jammed
-  Kyiv trips 75 % of the moving time off the route before, 44 % after (after 20 min: 95 → 58 %). The real jammed
-  drives barely change (7873 → 7864 s off the drawn route; their fixes are mostly cells); worse: i7qmk4 (121 → 202 s,
-  its fixes ~30 m ahead of the drawn timing), better: q8tfjs 20 → 1 s, wq3y8u 24 → 1 s. Taking the fixes as less
-  precise for the along-road move (σ × 2, × 3) cost the drives it helps more than it saved i7qmk4.
-- **The driver's placing** restarts it there (keeping the learned speed scale) and is shown as the manual position
-  (§6.3) while the car stands; once the phone measured 30 m of driving it is released (`nav manual position
-  released: the car drives (phone)`), as OBD speed releases it otherwise.
-- **Kept:** how the phone sits in the car (`PhoneMount`, per car or `phone`, §7.4); its pose when the car has stood
-  20 s (there is no engine-off without an adapter) and when the service stops with the car standing, under
-  `phone` and the car.
-- **On a route** (`setPhoneRoute`, the active plan's polyline; the driver said they will follow it, UI-SPEC §6.3):
-  the car is taken to be on it. `RouteFollower` (`src/nav/mapmatch/route-follower.ts`, §9.7) places it along
-  the route by the turns it makes; the dot is there, heading along the route, its circle the spread along it, no
-  alternatives. The tracker keeps running, moved to the follower's position at each stop and after each turn that
-  fits the route (0.6). Joined when the start, a placing or a trusted fix is within 30 m (+ its σ) of the route and
-  heads along it, or a new plan within 100 m of the dot. A new plan that starts within 300 m of the followed route,
-  ahead of the car or up to 300 m behind it, carries it on: the old route up to there, then the new one, from where
-  the car was with the scale it had learned (a replay's logged re-plan starts where the car really was, kilometres
-  ahead of a dot that lags on a highway; dropping to the tracker there took a wrong turn far behind on gc6xib and
-  never came back). The handover keeps the follower's gyro heading, the turn under way and its scale, and puts the
-  car where it was on the old route, else on the new route where the dot is, else at the new route's start (carrying
-  its whole belief over re-plans every few seconds piled up a lagging tail: jyxdtb 6 % → 25 %). **The nearest turn of
-  the route:** a turn the gyro sees that fits nowhere near where the follower has the car (best fit while it is in
-  the 80 m window < 0.5) puts the car at the route's nearest turn like it, up to 300 m back or max(1 km, 2 × the
-  phone's distance since the last turn that fitted) ahead, nearer ones likelier, with the scale the jump implies
-  (gc6xib's T-junction off the highway: 7.6 km ahead of the lagging dot). **Coarse fixes** up to ±5 km weigh it (the
-  tracker's limit is 400 m; on a route a ±3 km cell fix still tells far-apart places apart), and one that puts the
-  car well outside where it was taken to be (expected likelihood < 0.05, > max(500 m, 2σ) off) moves it to the
-  nearest stretch of the route that fits it, within the same reach. A placing or fix farther has left it (the tracker alone),
-  and the tracker within 30 m of it, heading along it (45°), for 5 s rejoins it. Turns alone can't tell a driver who
-  left it: on the bench a turn on the route fits 0.97 at the median and one off it still 0.81 (the follower slides
-  to another of the route's turns), so leaving it is the driver's placing, or GPS. On the 13 jammed city drives,
-  each started where its drawing starts and following the logged routes where the drawing says they were followed,
-  else the drawn route (`replay:regress --speed phone-app --phone-route`): off the drawn route 3 % of the moving
-  time, against 27 % without a route; the two long highway drives 53 % and 57 % (98 % and 57 % without), all of it
-  the dot lagging: the phone reads 40–80 km/h at 125–135 and the city prior pulls it towards 43.
-- **Notes:** `nav phone-only on|off`, `nav phone-only engine on <graph>[, phone mount from storage]`,
-  `nav phone-only start (<from>)`, `nav phone-only route: follows it | off it (the tracker alone) | none`. The trip
-  log's `nav_phone_only` info field: the setting at the trip's start.
+- **What:** without OBD speed and while GNSS isn't trusted, the map shows `PhoneNavigator` (`src/nav/phone/`): the
+  phone's own speed (`imu-speed.ts`) on the turn-anchored map matching (`turn-tracker.ts`). `source: 'dr'`; the
+  circle is the shown hypothesis' along-road σ combined with the others' spread (≤ 1 km); other roads are
+  `alternatives`. The dot is drawn as the navigator's (`steadyDot`, `position/puck.ts`): it glides instead of
+  hopping.
+- **Not good enough to go unattended:** off the drawn route about 44 % of the moving time on the real jammed drives
+  and on simulated jammed Kyiv trips; the error compounds along a drive. A placing every ~4 min when the dot is
+  100 m off brings it to ~9 %.
+- **Graph:** its own reader of the active region's graph in its own frame, so the navigator's tile cache is
+  untouched.
+- **Start**, newest word first: the driver's placing; the newest of the car's parked pose and phone-only's own (key
+  `phone`); a trusted satellite fix with a course (≥ 3 m/s). Without one it waits and the map shows phone GNSS.
+- **Fixes:** a trusted satellite fix (≤ 20 m) re-anchors it at most every 2 s; untrusted satellite fixes are
+  ignored. Wi-Fi/cell fixes weigh its hypotheses; one claiming ≤ 200 m also moves each road hypothesis along its
+  road towards it (a Kalman update of position and speed scale). Three fixes in a row claiming ≤ 100 m, each farther
+  than max(80 m, 3σ) from the best hypothesis, add hypotheses on the roads around the latest one (± 45° of the best
+  one's heading, at 0.3 of its weight); without this a tracker on another road stayed there for the rest of the drive.
+- **The driver's placing** restarts it there (keeping the speed scale) and is the manual position (§6.3) until 30 m of
+  driving.
+- **Kept:** the phone mount (`PhoneMount`, per car or `phone`); its pose when the car has stood 20 s and when the
+  service stops standing.
+- **On a route** (`setPhoneRoute`, the driver said they will follow it, UI-SPEC §6.3): `RouteFollower`
+  (`src/nav/mapmatch/route-follower.ts`) places the car along the route by the turns it makes (a grid over distance
+  and speed scale, weighed by the gyro's heading change over the last 80 m against the route's); the dot is there,
+  no alternatives. The tracker keeps running and is moved to the follower's position at each stop and after each
+  turn that fits (0.6). Joined when the start, a placing or a trusted fix is within 30 m (+σ) of the route heading
+  along it, or a new plan within 100 m of the dot; a new plan within 300 m of the followed route carries the car on
+  (the old route up to there, then the new). A turn that fits nowhere near the follower's car puts it at the route's
+  nearest turn like it (up to 300 m back or max(1 km, 2 × the distance since the last fitting turn) ahead). Coarse
+  fixes up to ±5 km weigh it, and one that puts the car well outside where it was taken to be (likelihood < 0.05,
+  > max(500 m, 2σ)) moves it to the nearest fitting stretch. A placing or fix farther has left the route (the
+  tracker alone); the tracker within 30 m of it along it for 5 s rejoins. Turns alone can't tell a driver who left
+  the route: that is the driver's placing, or GPS. On the jammed city drives following their routes: off the drawn
+  route 3 % of the moving time against 27 % without a route; on highways the dot lags (the phone under-reads speed at
+  125–135 km/h).
+- **Notes:** `nav phone-only on|off`, `nav phone-only engine on <graph>[, phone mount from storage]`, `nav phone-only
+  start (<from>)`, `nav phone-only route: follows it | off it | none`. The log's `nav_phone_only` info field is the
+  setting at the trip's start.
 
 ### 9.7 Phone-only research (replay)
 
-Goal: navigation without an adapter, usable in the city with the driver placing the car when it is off (about
-every 4 min under jamming). Measured in replay on the logged drives:
-
-- Speed: `src/nav/odometry/imu/imu-speed.ts`. The car's axes in the phone frame are learned from turns and from
-  pulling away (almost always forwards), and kept per car while the phone sits the same way. Curves measure the
-  speed (sideways acceleration = v·ω, weakly: σ 1 m/s²). Stops (phone quiet, vertical vibration < 0.25 m/s², no
-  horizontal acceleration over 0.25 s) pin it at zero. In between, the forward acceleration is integrated against
-  a gyro-tracked vertical that levels in 60 s (1 s at stops). Before the axes are known the speed is unknown, not 0.
-  `replay:imuspeed [--chain]` scores it against OBD.
-- Its limit is the vertical: carried by the gyro it is 1.4° off at the next stop (median, 3° p90); the last stop's
-  is 2° off (road slope). That is 0.2–0.5 m/s² of false acceleration, so the distance per stop-to-stop stretch reads
-  0.89× OBD at the median and 0.55× at p10. Measured on 30 drives: speed error median 2.5 km/h below 30 km/h,
-  5 km/h at 30–60, 15 km/h above 90. Carried by the gyro alone between stops (no levelling) the vertical drifts
-  0.6–1° a minute while driving (0.9° median at the next stop, 2° p90; 63 drives), ten times what CoreMotion's gyro
-  bias at the stops (~0.01 °/s) would give, and neither the turns nor the integration scheme explain it. The levelling
-  that bounds it acts as a 60 s high-pass on the speed: the distance between turns reads ~7 % short (−11 m over
-  150 m, −45 m over 600 m, −240 m beyond 800 m).
-- Map matching: `src/nav/mapmatch/turn-tracker.ts` (`replay:turns`): road hypotheses, each a position along a road
-  with its own uncertainty and speed scale; a turn the gyro sees snaps each to the junctions around where it
-  expected the turn whose exit turns that way (which teaches the scale); a free hypothesis dead-reckons off the
-  mapped roads and rejoins them. On the 13 jammed city drives from their drawn starts, seconds off the drawn route
-  (> 30 m): 8 % with OBD speed, 28 % with phone speed and its city prior (`--speed
-  '{"priorSigmaMps":5,"priorSpeedMps":12}'`; the particle filter on phone speed, `replay:regress --speed phone`:
-  30–38 %). Scaling the phone speed per stretch to OBD's distance gives 25 %: the rest of the gap is when within a
-  stretch the distance accrues, which picks the wrong junction among similar ones. It grows along a drive (22 % in
-  the first 4 minutes, 32 % after; with OBD 5 % and 12 %): once on a wrong road the tracker seldom gets back.
-- Where the dot is along the drawn route next to the car (`replay:turns --along`, the 13 jammed drives): on
-  another road 19 % of the moving time, behind by > 300 m 10 %, ahead by > 300 m 1 %. Large errors are behind
-  (the phone under-reads distance) or on another road, seldom far ahead.
-- Following a planned route (`src/nav/mapmatch/route-follower.ts`, `replay:turns --route`, bench only): with the
-  car taken to drive the route, its position is the distance along it: a grid over (distance, speed scale) moved by
-  the phone's speed and weighed by the gyro's heading change over the last 80 m against the route's over the same
-  distance (offset-free; matching absolute heading lost the car whenever the phone was handled). With the drawn
-  route as the plan (a driver who never leaves it): 3 % off the drawn route (worst drive 13 %), within ±100 m of
-  the car 78 % of the moving time, > 100 m ahead 12 %, > 100 m behind 10 %. In the app on the active route
-  (NAVIGATOR-SPEC §9.6): 3 % through the app path. Its turns don't tell that the driver left the route (best fit
-  while the turn is in the window: median 0.89 on it, 0.75 off it, `--route-source log`): that is the driver's
-  placing, or GPS. A turn's fit counts only while the turn is in the window: the update after it compares straight
-  road with straight road (0.96), which hid every missed turn until 2026-10-09.
-- Not usable unattended. Tried without gain: vertical vibration and tyre frequency as speed cues (road-dependent; no
-  speed-locked peak), roads' usual speeds learned from other drives, a per-stretch drift state, heavy-tailed junction
-  distances, more hypotheses, absolute heading kept from the start (a phone handled on its mount loses it), coarse
-  fixes weighted less (the test town's are mostly cell-level: 130–460 m off), choosing per second between the tracker
-  and the particle filter (18 % even with perfect choice), re-injecting hypotheses around the best one, a
-  road-bend correction of the along-road position. On the speed (`replay:imuspeed`, 2026-10-17): levelling over
-  20 / 120 / 300 s or not at all, levelling to the stops' vertical instead of the specific force (real slopes matter:
-  even a 5 s pull to it doubled the error), a bias random walk 10–40× larger, and each curve measuring the speed once
-  over the whole curve (∫a_lat dt / ∫ω dt: 0.81–1.06× OBD at p10–p90 on its own against 0.38–1.51 per sample, but
-  the per-sample updates already carry what it knows). A stop as a cue to the junction ahead: a third of the real
-  stops are within 20 m before one, a sixth of random places are, and the test towns' graphs have no traffic lights.
-- `replay:turns` feeds every fix to the tracker as a coarse one, satellite fixes too (±5 m at least): its results on
-  drives with GPS are not the app's, which re-anchors on trusted satellite fixes and ignores the rest.
-- Reverse (leaving a stop backwards) is not validated: most manoeuvres the main test car's OBD can't see come before the
-  axis is known, and 7 of 8 reverses it reported were forward driving.
+- **Speed** (`odometry/imu/imu-speed.ts`, `replay:imuspeed`): the car's axes in the phone frame are learned from
+  turns and pulling away, kept per car while the phone sits the same way. Curves measure the speed (sideways
+  acceleration = v·ω, σ 1 m/s²); stops (phone quiet, vertical vibration < 0.25 m/s², no horizontal acceleration over
+  0.25 s) pin it at zero; in between the forward acceleration is integrated against a gyro-tracked vertical that
+  levels in 60 s (1 s at stops). Before the axes are known the speed is unknown, not 0. Its limit is the vertical:
+  1–2° off gives 0.2–0.5 m/s² of false acceleration, so stretches read 0.89× OBD at the median, 0.55× at p10; the
+  levelling acts as a 60 s high-pass (~7 % short between turns).
+- **Map matching** (`mapmatch/turn-tracker.ts`, `replay:turns`): road hypotheses, each a position along a road with
+  its own uncertainty and speed scale; a turn the gyro sees snaps each to the junctions around where it expected a
+  turn whose exit turns that way (which teaches the scale); a free hypothesis dead-reckons off the roads and
+  rejoins. Large errors are behind (the phone under-reads distance) or on another road, seldom far ahead; once on a
+  wrong road it seldom gets back.
+- **Tried without gain:** vibration and tyre frequency as speed cues; roads' usual speeds from other drives; a
+  per-stretch drift state; heavy-tailed junction distances; more hypotheses; absolute heading kept from the start;
+  coarse fixes weighted less; choosing per second between the tracker and the particle filter; re-injecting
+  hypotheses around the best; a road-bend correction along the road; other levelling times, levelling to the stops'
+  vertical, a larger bias random walk, one speed measurement per whole curve; a stop as a cue to the junction ahead.
+- `replay:turns` feeds every fix as a coarse one, so its results on drives with GPS are not the app's.
 
 ### 9.8 The measured phone and driver in simulation (`src/nav/sim/phone-imu.ts`, `city-drive.ts`)
 
-Simulated drives (MAPMATCH-SPEC §9.4, §10.2) judge phone-only mode only if the phone and the driver behave like the
-real ones; a phone lying flat that reads the yaw rate, and a car that accelerates at 1.5 m/s² to a constant speed,
-make the phone's speed trivially good. Measured on the 63 real drives (`MEASURED_PHONE_IMU`, `MEASURED_DRIVER`,
-`MEASURED_JAM_ARRIVALS`) and reproduced by the simulator (seed 1 of the 20 Kyiv trips; real / simulated):
-
-- **Mount:** the holder tilts the screen ~20° back from vertical (σ 7°), turned up to ±25° and sitting ~0.7 m ahead of
-  the point the car turns about (the lever a whole curve's ∫a_lat / ∫ω puts it at).
-- **Car body:** pitch 0.25 / 0.33° per m/s² along the car (nose up accelerating), roll 0.30 / 0.37° per m/s²
-  sideways (outwards), on roads whose slope is ±1.2 % (σ, over ~150 m) and camber ±1.1°.
-- **Vibration** in the car frame, the median 5 s segment's spectrum per octave by speed (0 to 70+ km/h); RMS above
-  10 Hz forward / left / up: standing 0.10 / 0.09 / 0.07 (0.09 / 0.10 / 0.06) m/s², 10–30 km/h 0.64 / 0.39 / 0.51
-  (0.61 / 0.37 / 0.47), 70+ km/h 1.62 / 0.83 / 1.13 (1.60 / 0.78 / 1.08); the holder's pitch shakes the gyro 5–18 °/s
-  at 8–16 Hz. Per drive and along the road the level varies (lognormal σ 0.25, 0.3 over 150 m).
-- **Gyro and gravity:** bias ~0.01 °/s per axis drifting 0.015 °/s over 5 min: the vertical carried from one stop to
-  the next is 0.9 / 0.8° off at the median; scale 1.007. CoreMotion's gravity is a 20 s complementary filter (0.9°
-  RMS against the real one while moving), so it leans into long accelerations and curves.
-- **Driver:** accelerations 0.42 / 0.69 m/s² at the median, 1.1 / 1.2 at p90; speed wobbling 12 / 10 % while
-  cruising; crawls below 10 km/h 1.6 / 2.0 per km; stops 9 / 14 s at the median, often in a queue's steps (Kyiv's
-  2.4 stops per km against the small town's 1.0).
-- **Under jamming:** Wi-Fi-grade fixes 1.85 / 2.3 a minute in bursts (gaps 5 s at the median, 40 s at p90, minutes
-  at times), cell fixes 4.1 a minute claiming ~1.4 km and off by ~20 % of it.
-- **What the phone makes of it:** distance error at a turn since the last stop or turn, 200–400 m on: 28 / 34 m at
-  the median, short by 20 / 31 m. Phone-only off the route by time since the start, jammed: 26 / 43 / 59 / 96 %
-  (real) against 11 / 18 / 35 / 58 % (simulated, §9.6): the real drives start in yards and car parks, which the
-  simulator has none of, and their fixes are mostly cells.
-- Not reproduced: the phone handled on its mount, yards and car parks, the speed's long-stretch drift sign (the real
-  phone under-reads beyond 800 m without a stop, the simulated one over-reads).
-
-### 9.1 Field results (2026-10-04, 7 drives, `nav_estimate`)
-
-- **Clean GNSS:** the map was a median 0.9–2.3 m from the moving satellite fixes (p95 2.8–6.3 m). Its radius
-  (median 1.6–2.2 m) is slightly small for a 68 % circle. The navigator ran 305 ms behind (p99 313 ms).
-- **Jammed throughout** (3afby6: 9 min, 2.7 km, no satellite fix): the navigator kept running from the previous
-  drive, so it dead-reckoned from the first second. It ended 26 m from the next drive's first satellite fixes (the
-  car stood there), with a radius of ±64 m. 32 of 35 coarse fixes fell inside their own radius.
-  - Replay can't carry a navigator over between drives. `--chain` (starting from the parked pose) gives 48 m. With
-    the changes of §4 and §5.1 it gives 57 m (±81 m), and the worst radius is 93 m instead of 370 m.
-- **Walking off with the phone** (2 drives): the link drops when the phone leaves Bluetooth range; GNSS shows
-  2–7 km/h while OBD reads 0. One drive reset to `anchored` (5 fixes failed the gate). Handled by the frozen pose
-  (§6.1); `replay:bench` skips such windows (§10).
-- **GNSS lag** measured on the device: −0.05 to −0.2 s, saved per phone. **Speed scale:** saved only with a VIN.
+Simulated drives (MAPMATCH-SPEC §9.4) judge phone-only mode only with a phone and a driver like the real ones
+(`MEASURED_PHONE_IMU`, `MEASURED_DRIVER`, `MEASURED_JAM_ARRIVALS`, from the real drives): a holder tilting the screen
+~20° back (σ 7°), turned ±25°, ~0.7 m ahead of the point the car turns about; body pitch and roll with acceleration;
+road slope ±1.2 % and camber ±1.1°; vibration by speed with the holder's pitch shaking the gyro 5–18 °/s at 8–16 Hz;
+gyro bias ~0.01 °/s drifting 0.015 °/s over 5 min; gravity as a 20 s complementary filter that leans in curves;
+a driver accelerating 0.4–0.7 m/s² at the median, wobbling 10–12 % while cruising, crawling and queueing; under
+jamming Wi-Fi fixes ~2 a minute in bursts and cell fixes ~4 a minute claiming ~1.4 km. Not reproduced: handling, yards
+and car parks, the speed's long-stretch drift sign. `sim:drives --simple` is the older simulator (a flat phone reading
+the yaw rate, class speeds, stops at junctions), which makes the phone's speed trivially good.
 
 ## 10. Replay and benchmark (`src/nav/replay`, `tools/replay`)
 
-- **Two replays:** `replayTrip` runs the navigator alone, for the benchmarks (they measure the navigator).
-  `replayTripInApp` (`src/services/navigation/app-replay.ts`) runs the app's own `NavigatorService`, fed as on the
-  phone (IMU in 100 ms batches, OBD at its reply, fixes after CoreLocation's delivery delay) on a virtual clock: its
-  dot is what the service publishes (`nav_estimate`), and the parked pose, stored calibration and simulated outages
-  are the app's code. The viewer uses it, so a fix in the app needs no copy in the replay. Both record through one
-  `ReplayRecorder`; the dot's rule is `src/nav/position/puck.ts`.
-- **Forks:** `TripReplay` (behind `replayTrip`) feeds a drive in steps and forks: an independent copy of the
-  navigator and recorder from that moment (`Navigator.fork`, a deep copy sharing only the road graph), which can
-  then take an outage of its own. A fork's result must equal a replay with the same cuts from the start
-  (`fork.test.ts`); so navigator state keeps no closures (`deep-copy.ts` refuses them). `replay:bench` replays each
-  drive once per seed up to each window and goes on from forks, and leaves out before any replay the windows whose
-  satellite fixes couldn't reach the truth share.
-- **Starting as the phone did:** when a navigator starts, when it learns the car, and at every trip's start
-  (`logStorage`), the service notes what is stored (`nav storage {json}`: the GNSS lag and the held manual position
-  (§6.3); per car the parked pose, speed scale and compass, raw). The first two usually come before the trip's log opens and are lost with the
-  pre-roll; the trip-start ones are always in the log. A replay seeds its storage from these notes (`seedFromLog`,
-  the first per phone and per car), and `npm run replay:parity` compares its dot with the phone's. With
-  the navigation code unchanged since the log's build (`ver_sw` carries the commit) they must agree (p90 ≤ 3 m), else
-  the replay doesn't reproduce the app. A test replays a synthetic drive's notes and requires the same dots.
-
-- **Replay:** merges the three streams in time order and runs the navigator. It scores each fix before its update
-  (pre-fix error) and can withhold GNSS: `--cut start:len`, or `--open-loop` from the heading fix to the end.
-- **Held-out fixes:**
-  - They are scored at a fixed lag (`truthLagS`, default 0), so variants of the navigator's own lag share one
-    yardstick.
-  - Only satellite fixes ≤ 10 m count as truth.
-- **`npm run replay:bench`:**
-  - Outages of 60/120/240 s on a 30 s grid of log time, from 10 s after the EKF starts. A window counts when the
-    held-out satellite fixes cover ≥ 80 % of it and the car drives ≥ 200 m.
-  - A window is skipped when ≥ 5 satellite fixes in it move while OBD reads 0 or is silent: the phone left the car
-    with the driver (q8tfjs, 9qw8wn, qfger8). A reverse makes 3–5 such fixes, so far never inside a window.
-  - The grid is fixed so that a change that moves the EKF start by a few seconds still scores the same windows.
-    With the grid relative to the start, an 8 s shift moved the 120 s median by 5 m.
-  - Reports max and end error (median, p90), error per km, max error ÷ predicted σ, and the share of held-out fixes
-    inside the drawn circle (honest ≈ 68 %; the fairer check once map matching bounds the error, MAPMATCH-SPEC §9.3),
-    pooled and per drive.
-  - Windows overlap, so small differences are noise.
-- **First 7 drives** (2026-10-03, 56 windows; window grid relative to the EKF start):
-
-| Outage | Median distance | Max error median / p90 | Max error ÷ σ |
-| ------ | --------------- | ---------------------- | ------------- |
-| 60 s   | 0.65 km         | 11 / 21 m              | 1.5           |
-| 120 s  | 1.3 km          | 20 / 31 m              | 0.9           |
-| 240 s  | 2.1 km          | 37 / 88 m              | 0.6           |
-
-- **14 drives** (2026-10-04, fixed grid, the same windows before and after the changes of §4 and §5.1; map
-  matching on, so the EKF can start from the map):
-
-| Outage | Windows | Max error median / p90, before | After | End error median / p90, after | Max error ÷ σ, after |
-| ------ | ------- | ------------------------------ | ----- | ----------------------------- | -------------------- |
-| 60 s   | 59      | 12.4 / 35.8 m                  | 11.7 / 34.5 m  | 8.8 / 27.0 m         | 2.3                  |
-| 120 s  | 50      | 24.6 / 74.3 m                  | 24.7 / 64.7 m  | 20.6 / 56.0 m        | 2.3                  |
-| 240 s  | 36      | 67.3 / 128.7 m                 | 59.3 / 123.7 m | 36.0 / 107.6 m       | 2.3                  |
-
-  - The new drives are harder. j5m8tq (7 km at up to 70 km/h) loses 50–90 m in 1–2 min, nearly all cross-track:
-    its heading is 2–3° off at the outage start while σ_ψ claims 0.6–1°. In one outage the error grows from 2° to
-    9° through gentle curves and a sharp turn, while the distance stays within 1 %. Cause not found (§13.8).
-  - On the 7 older drives the changes are neutral: 60 and 120 s identical, 240 s median 27.6 → 31.8 m and p90
-    80 → 73 m. Max error ÷ σ at 240 s went from 0.5 to 0.9, because false handling no longer inflates σ.
-- **Error budget:**
-  - About 2° RMS heading error already at the start of the outage, growing only to 2.8° after 3 min.
-  - ±2–3 % along-track error.
-  - Gyro drift is not the limit.
-- **Tried with no effect:** fixed `k_ω`, course updates only on straight road, and lower gyro noise. Gyro noise
-  ≤ 0.001 makes the filter overconfident; 0.003 is kept.
-- **`npm run replay:spoof`** (integrity, §8): on each clean drive, 60 s windows every 120 s from 30 s after the
-  EKF start (satellite fixes covering ≥ 80 %), replayed once per spoof kind (`src/nav/replay/spoof.ts`: static
-  5 km and 300 m, abroad, following the car 1 km and 150 m off, static 5 km and 300 m after 60 s of jamming) and
-  once cut (the control). Per kind: first spoofed fix refused, spoofed fixes used, time until trust is back, the dot's
-  error when GPS returns (and how much more than with the cut), real fixes refused and untrusted time away from the
-  spoofing. `--any-start` also spoofs before the heading is known. Results: SPEC §7 target 7.
-- **Viewer:** `npm run replay:view` shows how a drive went: what the phone showed and a replay (any navigator
-  version, any GPS scenario) against GPS, with every stretch without GPS scored; see `tools/replay/README.md`.
+- **Two replays:** `replayTrip` runs the navigator alone (the benchmarks measure the navigator); `replayTripInApp`
+  (`src/services/navigation/app-replay.ts`) runs the app's own `NavigatorService`, fed as on the phone (IMU in 100 ms
+  batches, OBD at its reply, fixes after their delivery delay) on a virtual clock: its dot is what the service
+  publishes, and the parked pose, stored calibration, placings and simulated outages are the app's code. The viewer
+  and `replay:regress` use it, so a fix in the app needs no copy in the replay. The dot's rule is
+  `src/nav/position/puck.ts`.
+- **Forks:** `TripReplay` feeds a drive in steps and forks an independent copy of the navigator (`Navigator.fork`, a
+  deep copy sharing only the road graph), which can then take an outage of its own; a fork's result must equal a
+  replay with the same cuts from the start (`fork.test.ts`), so navigator state keeps no closures (`deep-copy.ts`
+  refuses them).
+- **Starting as the phone did:** a replay seeds its storage from the log's `nav storage` notes (`seedFromLog`), and
+  `npm run replay:parity` compares its dot with the phone's `nav_estimate`: with the navigation code unchanged since
+  the log's build they must agree (p90 ≤ 3 m), else the replay doesn't reproduce the app.
+- **Held-out fixes** are scored at a fixed lag (`truthLagS`, default 0); only satellite fixes ≤ 10 m count as truth.
+- **`npm run replay:bench`:** outages of 60/120/240 s on a fixed 30 s grid from 10 s after the EKF starts; a window
+  counts when the held-out satellite fixes cover ≥ 80 % of it and the car drives ≥ 200 m; windows where the phone
+  left the car (≥ 5 satellite fixes moving while OBD reads 0) are skipped. Reports max and end error (median, p90),
+  error per km, max error ÷ predicted σ (0.5–2 is honest), and the share of held-out fixes inside the drawn circle
+  (honest ≈ 68 %; the fairer check once map matching bounds the error). Windows overlap, so small differences are
+  noise.
+- **`npm run replay:spoof`** (§8): on each clean drive, 60 s windows every 120 s, replayed once per spoof kind
+  (`src/nav/replay/spoof.ts`: static 5 km and 300 m, abroad, following the car 1 km and 150 m off, static after 60 s
+  of jamming) and once cut (the control). Per kind: first spoofed fix refused, spoofed fixes used, time until trust
+  is back, the dot's error when GPS returns, real fixes refused. `--any-start` also spoofs before the heading is
+  known.
+- **`npm run replay:regress`** (the check for every change, MAPMATCH-SPEC §10.2) and the **viewer**
+  (`npm run replay:view`): `tools/replay/README.md`.
 
 ## 11. Tuning values and what they depend on
 
-| Value                         | Default | Depends on               | Handling                                         |
-| ----------------------------- | ------- | ------------------------ | ------------------------------------------------ |
-| GNSS position/course lag      | 0 s     | phone model, iOS         | measured online (§7.3)                           |
-| GNSS speed lag                | 1.0 s   | phone model, iOS         | fixed; results barely change between 0.4 and 1.6 s |
-| Gyro noise                    | 0.003 rad/s | mount, car (not the gyro) | from `replay:bench`; re-check with more phones/mounts |
-| Handling thresholds           | 8°, 1.5 rad/s, 1.5 s | mount, road | from logged mounted drives                    |
-| Gyro bias prior               | 0.0005 rad/s | CoreMotion          | learned at every stop                            |
-| OBD speed scale `k_s`         | 1 ± 0.03 | car, tyres              | learned online; persist per VIN (§7.4)           |
+| Value | Default | Depends on | Handling |
+| --- | --- | --- | --- |
+| GNSS position/course lag | 0 s | phone model, OS | measured online (§7.3), stored per model |
+| GNSS speed lag | 1.0 s | phone model, OS | fixed; results barely change between 0.4 and 1.6 s |
+| Gyro noise | 0.003 rad/s | mount, car | from `replay:bench`; ≤ 0.001 makes the filter overconfident |
+| Handling thresholds | 8°, 1.0 rad/s, 1.5 s | mount, road | from logged mounted drives |
+| Gyro bias prior | 0.0005 rad/s | CoreMotion | learned at every stop |
+| Speed scale `k_s` | 1 ± 0.03 | car, tyres | learned online; persisted per VIN (§7.4) |
+| OBD σ / zero σ | 0.3 / 0.8 m/s | ECU | CAN: 0.1 / 0.3 m/s |
 
-All tuning so far comes from one phone, one mount and one car. Logs from a second iPhone generation and mount are
-needed to check them (`replay:bench`).
+All tuning comes from one iPhone, one mount and one car; testers' logs (Android phones) check it with
+`replay:regress --testers`.
 
 ## 12. Verification targets
 
-1. `replay:bench` after any navigator change: no worse than §10 at 60/120 s. Max error ÷ σ stays between 0.5 and 2
-   (not met yet on the 2026-10-04 drives, §13.8; `replay:bench` prints it per drive).
-2. Jammed drives: the EKF starts by alignment once distinct coarse fixes span ≥ 150 m; ≥ 75 % of later coarse fixes
-   fall inside their own radius.
-3. Standstill: heading change < 0.5° over a 60 s stop, including handling the phone while parked.
-4. The GNSS lag estimate lies within ±0.1 s of the per-drive turn fit on every drive with ≥ 6 turn windows.
-5. Unit tests (`src/nav/__tests__`, synthetic drives) pass; lint and typecheck pass.
-6. Field (after §9): during a real jamming episode the map dot keeps moving, and its radius covers the true position.
-   **Met** on 2026-10-04 (§9.1): 26 m off after 2.7 km jammed, radius ±64 m.
-   - **Truth:** the first satellite fixes after the outage, compared with `nav_estimate` at the same time. That's
-     where the DR error is largest. It needs nothing done in the car; a second phone in the same car is jammed too.
-   - Error during an outage is measured by `replay:bench` on clean drives (§10).
+1. `replay:regress` after any navigator change: no drive worse on parked and drawn starts (several seeds); cold
+   must not fall apart.
+2. `replay:bench`: max error ÷ σ between 0.5 and 2; the truth inside the drawn circle ≈ 68 %.
+3. Jammed drives: the EKF starts from the map or alignment once distinct coarse fixes span ≥ 150 m; ≥ 75 % of later
+   coarse fixes fall inside their own radius.
+4. Standstill: heading change < 0.5° over a 60 s stop, including handling the phone while parked.
+5. `replay:spoof`: the first spoofed fix of every kind refused, no spoofed fix used, trust back within 10 s of the
+   spoof's end, no real fix refused on clean drives.
+6. `replay:parity`: the app replay reproduces the phone's dot (p90 ≤ 3 m) for logs built from the current code.
+7. Unit tests (`src/nav/__tests__`), lint and typecheck pass.
 
 ## 13. Open items
 
-1. **Heading at outage start** (about 2° RMS) limits DR. Candidates: map matching (SPEC §3.7), longer GNSS baselines.
-2. (settled) **No OBD speed truncation** at low speed on 8 clean drives. GNSS − OBD grows with speed (0.04 km/h at
-   14 km/h, 0.9 km/h at 55 km/h): a scale of 1.019 with a −0.23 km/h offset. The scale varies by drive,
-   1.005–1.022 even back to back; `k_s` learns it per drive.
-3. Longer outages (5 / 15 min, SPEC §7) need longer clean drives than the current logs.
-4. Second phone and mount, to check the tuning values (§11).
-5. (settled) **Integrity** is implemented (§8); no real spoofed drive is logged yet.
-6. (settled) **Spoofing replay:** `--spoof`, `replay:spoof` (§10).
-7. (settled) The app replay starts from what the app had stored: the chain of earlier drives, or a log's
-   `nav storage` notes (§10, `replay:parity`). It can't carry a running navigator over from the previous drive, as
-   the app did on the jammed drive of §9.1.
-8. **Overconfident on the 2026-10-04 drives** (§10). Max error ÷ σ is ~2.2 pooled (target 0.5–2, §12.1), but
-   per drive (`replay:bench`, median per outage length 60 / 120 / 240 s):
-
-   | Drive | Windows (60 s) | Err ÷ σ |
-   | --- | --- | --- |
-   | 94zf2q | 14 | 4.6 / 5.4 / 6.0 |
-   | j5m8tq | 18 | 2.5 / 3.1 / 3.5 |
-   | qfger8 | 5 | 2.7 / 2.4 / 1.6 |
-   | the 6 others | 1–9 each | 0.9–1.9 (9qw8wn: 2.8 on its one window) |
-
-   j5m8tq and 94zf2q hold 32 of the 59 60-s windows, so they set the pooled median. j5m8tq: 2–3° off at the
-   outage start against σ_ψ 0.6–1°, growing through curves at ~70 km/h. Candidates, cheapest test first:
-   1. Course updates counted as independent: about one a second at ≥ 4 m/s, each with σ = max(course accuracy,
-      2°), while at speed their errors last from fix to fix (lag, curves, multipath). Test in replay: rate-limit or
-      inflate them at speed; σ_ψ should stop shrinking to 0.6° without the errors growing on the other drives.
-   2. The phone shifting in the mount at speed (gravity moving in the phone frame; the IMU log shows it).
-   3. Gyro scale in sharp turns.
-
-   Not a blocker for MAPMATCH-SPEC M6, whose exit compares with the open loop (MAPMATCH-SPEC §12).
-9. **Alignment is overconfident** on the new drives (simulated jams, MAPMATCH-SPEC §8.1): 9 of 28 alignment
-   starts are over 10° off, the worst 43° at 4.9σ.
-10. **Reversing reads OBD 0** on the main test car (VEHICLE-LINK-SPEC §10.4), so the car turns in place in the model. It
-    could be detected from OBD 0 + the gyro turning + the phone steady in the mount; its speed is still unknown.
-11. **Compass in shadow** (§7.6): built; collect how often the stored calibration is wrong on real drives
-    (`replay:compass`) before switching it on.
-12. **Speed offset.** On the main test car, GNSS − OBD fits a scale of 1.019 with a −0.23 km/h offset (§13.2), but the EKF
-    learns only the scale `k_s`. Built: an offset state `o_s` (v = k_s·s_OBD + o_s above the zero cutoff; `ekf.
-    initSpeedOffsetSigma`, carried with `k_s`), **off by default**: the EKF can't tell it from the scale with town
-    speeds and GNSS speed (a simulated drive learned 0.5 km/h for a true 0.23); neutral on the 14 logs (`replay:bench
-    --mm`, closed loop: 240 s 16.7 vs 17.2 m), mixed on simulated highways (MAPMATCH-SPEC §9.4). Measured again
-    by incidents (MAPMATCH-SPEC §10.2, 2026-10-16), on simulated Kyiv drives that lose GPS at 200 s — where a scale
-    learned in the first slow minutes is 1–2 % off at cruising speed and the dot drifts 50–100 m along avenues — the
-    offset state, and instead not learning `k_s` from OBD readings under 5–11 m/s: both much better simulated (dot far
-    along the road 68 → 47–50, losses 7 → 4), both worse on the real drives (offset: wrong roads ×6; under 5 m/s 7
-    drives worse, under 11 m/s 13). Off. Under jamming `k_s` doesn't sink on real drives (logged over 42 jammed drives:
-    end − start −0.011 / −0.0005 / +0.008 at p10 / p50 / p90), and holding it is worse there (at its prior, or at 1.008:
-    off the drawn road 725 → 768–869 s drawn, 1242 → 1343–1479 s parked; 63 drives × 8 seeds). The offset stored with
-    `k_s` and learned only from satellite fixes (held as known while jammed, so a car never seen with GPS drives as
-    without it) was drawn better, parked worse (incidents 134 → 141–147). The scale-only model stays.
+1. **Overconfident after a course-only start** on some drives (max error ÷ σ 2.5–6 per drive): course updates at
+   ≥ 4 m/s count as independent while their errors last from fix to fix. Candidate: rate-limit or inflate them at
+   speed.
+2. Longer outages (5–15 min) need longer clean drives than the logs have; Cut GPS on a long drive keeps the real
+   fixes as truth.
+3. Compass in shadow (§7.6): collect how often a stored calibration is wrong before switching it on, or drop it.
+4. Wheel yaw (§5.4): the tyres' term needs learning that a phone in a pocket can't spoil before it leaves
+   experimental.
+5. Reverse on cars that report reverse speed as positive, and on OBD-only cars that read 0 (the car turns in place
+   in the model).

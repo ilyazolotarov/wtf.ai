@@ -1,6 +1,6 @@
 # wtf.ai — App Store and Google Play review
 
-Status: v1 (2026-10-13). What makes a build acceptable to App Review and Google Play review, what the store build
+What makes a build acceptable to App Review and Google Play review, what the store build
 changes, and the answers the two consoles ask for. Distribution today is sideloading (SPEC §2, UPDATES-SPEC); this is
 the store path next to it, not a replacement.
 

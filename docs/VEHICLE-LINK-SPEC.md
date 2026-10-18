@@ -1,775 +1,579 @@
 # wtf.ai — Vehicle Link (Bluetooth ELM327) Specification
 
-Status: v3 (2026-10-10), field-tested with the OBDLink MX+ (MFi) and the vLinker FD-IOS (BLE) on the main test car, and the MX+ on a second car over K-line. Companion to [SPEC.md](SPEC.md) §3.1. Source of truth for coding agents implementing adapter communication. The trip logger built on top of it is specified in [TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md).
+Talking to the OBD-II adapter: `modules/vehicle-link` (Swift, Kotlin) and `src/obd` (TypeScript). Companion to
+[SPEC.md](SPEC.md) §3.1; the trip logger built on it is [TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md). Source of truth
+for coding agents.
 
 ## 1. Goal
 
-Talk to as many ELM327-compatible OBD-II adapters as possible from an iPhone:
+Talk to as many ELM327-compatible OBD-II adapters as possible: every BLE adapter including no-name clones, the
+MFi-certified Classic Bluetooth adapters on iOS, and Classic SPP adapters on Android.
 
-- **Every BLE adapter** (Bluetooth 4.0+ Low Energy), including no-name clones.
-- **MFi-certified Classic Bluetooth adapters** (e.g. OBDLink MX+) via `ExternalAccessory`.
-
-First target for the module:
-
-1. Discover adapters automatically and offer the user a ranked list.
+1. Discover adapters automatically and offer a ranked list.
 2. Connect and **verify** that the device really is an ELM327-compatible adapter.
-3. Poll OBD-II vehicle speed (PID `0D`): 2 Hz, the rate navigation needs (§10.2).
-4. Poll engine RPM (PID `0C`) occasionally to know whether the engine is running.
-5. Expose all of this through a transport-agnostic TypeScript contract (§6) that the rest of the app uses. Nothing above the contract knows whether the adapter is BLE or MFi.
+3. Poll vehicle speed (PID `0D`) at 2 Hz and engine RPM (PID `0C`) occasionally; on STN adapters, listen to the CAN
+   bus between and instead of polls (§16).
+4. Expose all of this through a transport-agnostic TypeScript contract (§6). Nothing above it knows which transport
+   the adapter uses.
 
 ## 2. Decisions
 
-| Topic                   | Decision                                                                                                                                                                                  |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Transports              | **BLE** (CoreBluetooth) and **MFi Classic** (`ExternalAccessory`), both from the first milestone. Wi-Fi ELM327 is out of scope. Android Classic SPP is a future transport (§12).           |
-| Native code             | Own Expo module `modules/vehicle-link` (Swift). Thin: scan, connect, write, frame on the `>` prompt, timestamp. No ELM327 logic in Swift. No third-party BLE library.                   |
-| Protocol logic          | Pure TypeScript in `src/obd/` (no React Native imports), unit-testable in Node/Bun on Windows against an ELM327 emulator.                                                                  |
-| Adapter catalog         | BLE GATT profiles and name patterns live in a **TS table** passed to native, so adding a BLE adapter needs no native build. MFi protocol strings must be in `Info.plist` → native build. |
-| Command set             | Plain ELM327 subset (§9) for polling. STN commands: `STI` for identification, and the CAN monitor (§16, SPEC §2.1 Stage 2) on STN adapters only.                                        |
-| Speed rate              | 2 Hz (`OBD_SPEED_HZ`): in replay navigation was no worse than at 25–30 Hz back-to-back (§10.2). A per-vehicle cap can only lower it; the developer override can raise it.                 |
-| RPM rate                | Every 5 s while the engine runs, 2 s while the ECU is awake with the engine stopped, 5 s ignition probe while the ECU is silent (§10.3).                                                    |
-| Time base               | All timestamps are **monotonic uptime in µs** (`ProcessInfo.systemUptime`, same clock as CoreMotion). Wall clock only through explicit sync records.                                    |
-| Lifecycle (first target) | The user opens the app; from then on connect, trip detection, and polling are automatic and continue in the background while the app stays alive. Waking a non-running app is later (§11). |
+| Topic | Decision |
+| --- | --- |
+| Transports | iOS: **BLE** (CoreBluetooth) and **MFi Classic** (`ExternalAccessory`). Android: BLE and **Classic SPP** (RFCOMM). Wi-Fi ELM327 is out of scope. |
+| Native code | Own Expo module `modules/vehicle-link`. Thin: scan, connect, write, frame on the `>` prompt, timestamp, forward unsolicited bytes. No ELM327 logic in native code. No third-party BLE library. |
+| Protocol logic | Pure TypeScript in `src/obd/` (no React Native imports), unit-tested against an ELM327 emulator. |
+| Adapter catalog | BLE GATT profiles and name patterns in a **TS table** passed to native, so adding a BLE adapter needs no native build. MFi protocol strings are in `Info.plist` → a native build and the vendor's authorization. |
+| Command set | Plain ELM327 subset (§9) for polling. STN commands: `STI` for identification, and the CAN monitor (§16) on STN adapters only. |
+| Speed rate | **2 Hz** (`OBD_SPEED_HZ`), fixed: in replay navigation was no worse than at 25–30 Hz back-to-back (back-to-back polls repeat the same 1 km/h value, which the EKF counted as new evidence). 1 Hz while parked with the engine off. |
+| RPM rate | Every 5 s while the engine runs, 2 s while the ECU is awake with the engine stopped, 5 s as the ignition probe while the ECU is silent (§10.3). A developer knob changes the engine-on period (2 / 5 / 10 s). |
+| Time base | Monotonic uptime µs (`ProcessInfo.systemUptime`; `SystemClock.elapsedRealtimeNanos` on Android). |
+| Lifecycle | The user opens the app; from then on connect, trip detection and polling are automatic and continue in the background while the app stays alive. Waking a non-running app is later (§11). |
 
-## 3. Adapter landscape (research summary)
+## 3. Adapter landscape
 
-### 3.1 What iOS can talk to
+### 3.1 What a phone can talk to
 
-| Adapter radio                        | iOS access                                                               | Notes                                                                                                         |
-| ------------------------------------ | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
-| BLE (Bluetooth 4.0+ LE)              | CoreBluetooth, **no MFi needed**, no pairing in iOS Settings             | Most modern cheap adapters. "Dual" (BT 4.0 dual-mode) adapters expose their BLE side to iOS.                   |
-| Classic Bluetooth **with MFi**       | `ExternalAccessory` (EA) session over an MFi protocol string             | Must be paired in iOS Settings (or via the in-app MFi picker). App Store needs the vendor's MFi authorization (PPID) for our app (§3.4). |
-| Classic Bluetooth without MFi (SPP)  | **Impossible on iOS**                                                    | The typical old "ELM327 v1.5/v2.1" blue dongle. Works on Android only (§12).                                   |
-| Wi-Fi                                | TCP socket                                                               | Out of scope (SPEC §8).                                                                                        |
+| Adapter radio | iOS | Android |
+| --- | --- | --- |
+| BLE (Bluetooth 4.0+ LE) | CoreBluetooth, no MFi, no pairing in Settings | `BluetoothGatt` |
+| Classic Bluetooth **with MFi** | `ExternalAccessory` over an MFi protocol string; paired in iOS Settings or the in-app picker; the App Store needs the vendor's authorization (§3.4) | as any Classic adapter |
+| Classic Bluetooth without MFi (SPP) | **Impossible** | RFCOMM, UUID `00001101-…`; must be bonded (PIN 1234/0000) |
+| Wi-Fi | out of scope | out of scope |
 
-### 3.2 Known BLE GATT profiles
+### 3.2 BLE GATT profiles (`src/obd/catalog.ts`)
 
-ELM327 BLE adapters expose a "serial over GATT" service: one characteristic to write commands, one (sometimes the same) that notifies responses. The catalog is matched **by UUID, not brand**; brand columns are hints only.
+ELM327 BLE adapters expose a "serial over GATT" service: one characteristic to write commands, one (sometimes the
+same) that notifies responses. Matched **by UUID, not brand**.
 
-| Profile id  | Service UUID                           | Notify (adapter → phone)                | Write (phone → adapter)                 | Seen on                                                                                   | Source       |
-| ----------- | -------------------------------------- | --------------------------------------- | --------------------------------------- | ----------------------------------------------------------------------------------------- | ------------ |
-| `fff0`      | `FFF0`                                 | `FFF1`                                  | `FFF2`                                  | OBDLink CX, Veepeak OBDCheck BLE, many generic "OBDII"/"OBDBLE" clones                   | OBDLink docs, community |
-| `ffe0`      | `FFE0`                                 | `FFE1`                                  | `FFE1` (same characteristic)            | HM-10 / TI CC254x modules: LELink and many clones                                         | community    |
-| `vgate`     | `18F0`                                 | `2AF0`                                  | `2AF1`                                  | Vgate iCar Pro BLE and other Vgate models                                                 | community    |
-| `e781`      | `E7810A71-73AE-499D-8C15-FAA9AEF0C3F2` | `BEF8D6C9-9C21-4C9E-B632-BD58C1009F9F`  | same characteristic                     | Generic Chinese BLE serial module, used by some adapters (and label printers)             | LTSupportAutomotive |
-| `issc`      | `49535343-FE7D-4AE5-8FA9-9FAFD205E455` | by properties (notify)                  | by properties (write)                   | Microchip RN4870 / BM70 / ISP1807 modules. Characteristic UUIDs vary by firmware.          | community    |
-| `nus`       | `6E400001-B5A3-F393-E0A9-E50E24DCCA9E` | `6E400003-…`                            | `6E400002-…`                            | Nordic UART: ESP32/nRF DIY adapters                                                        | Nordic docs  |
-| `beef`      | `BEEF`                                 | by properties                           | by properties                           | Listed by LTSupportAutomotive; device unknown                                              | LTSupportAutomotive |
-| `heuristic` | any non-standard service               | exactly one notify/indicate char        | exactly one write/write-without-response char | Anything else                                                                        | §8.2         |
+| Profile id | Service | Notify | Write | Seen on |
+| --- | --- | --- | --- | --- |
+| `fff0` | `FFF0` | `FFF1` | `FFF2` | OBDLink CX, Veepeak OBDCheck BLE, many generic clones |
+| `ffe0` | `FFE0` | `FFE1` | `FFE1` (same) | HM-10 / CC254x modules: LELink and many clones |
+| `vgate` | `18F0` | `2AF0` | `2AF1` | Vgate iCar Pro BLE and other Vgate models |
+| `e781` | `E7810A71-…` | `BEF8D6C9-…` | same | generic Chinese BLE serial module |
+| `issc` | `49535343-…` | by properties | by properties | Microchip RN4870 / BM70 / ISP1807 |
+| `nus` | `6E400001-…` | `6E400003-…` | `6E400002-…` | Nordic UART: ESP32/nRF DIY adapters |
+| `beef` | `BEEF` | by properties | by properties | listed by LTSupportAutomotive |
+| `heuristic` | any non-SIG service | exactly one notify/indicate char | exactly one write char | anything else (§8.2) |
 
-Known OBDLink CX specifics (official adapter notes): MTU up to 247; bonding window is 5 minutes after power-up; **wait for each write response before the next write**; no queued writes. iOS reports a bogus 512 for `maximumWriteValueLength(for: .withResponse)`; writes that large become queued (long) writes, which the CX silently drops (found in CornucopiaStreams). So chunks are always sized by the `.withoutResponse` value (the real ATT MTU − 3), whatever the write type (§5.3).
+OBDLink CX: MTU up to 247; bonding window 5 minutes after power-up; wait for each write response before the next
+write; iOS reports a bogus 512 for `maximumWriteValueLength(for: .withResponse)`, and writes that large become queued
+writes the CX silently drops, so chunks are always sized by the `.withoutResponse` value (§5.3). Ignored when looking
+for a UART: `1800`, `1801`, `180A` (read for diagnostics), `180F`, `FEF5` and other SIG services.
 
-Ignored services when searching for a UART: `1800` GAP, `1801` GATT, `180A` Device Information (read it for diagnostics), `180F` Battery, `FEF5` (OBDLink internal), and other Bluetooth SIG 16-bit services.
+### 3.3 Name patterns
 
-### 3.3 Known name patterns
+Many adapters don't advertise their service UUID, so scanning doesn't filter by service and ranking uses names
+(case-insensitive): `obdlink`; `v-?link`, `vlinker`, `vgate`, `icar`; `veepeak`, `obdcheck`; `lelink`; `carista`;
+`kiwi`; `konnwei`, `kw\d{3}`; `viecar`, `fixd`, `unicarscan`, `yawoa`, `tonwon`, `cyel`, `microtech`; generic `obd`,
+`elm`, `327`, `obd2`, `obdii`, `obdble`. Known non-ELM devices (shown with a warning, ranked last): BlueDriver, xTool.
 
-Many adapters **do not advertise** their service UUID, so scanning must not filter by service and ranking uses names. Case-insensitive patterns (initial list, extend from field data):
+### 3.4 MFi adapters
 
-| Pattern                                         | Brand hint                    |
-| ----------------------------------------------- | ----------------------------- |
-| `obdlink`                                       | OBDLink (CX on BLE)           |
-| `v-?link`, `vlinker`, `vgate`, `icar`           | Vgate / vLinker               |
-| `veepeak`, `obdcheck`                           | Veepeak                       |
-| `lelink`                                        | LELink                        |
-| `carista`                                       | Carista                       |
-| `kiwi`                                          | PLX Kiwi 3/4                  |
-| `konnwei`, `kw\d{3}`                            | Konnwei                       |
-| `viecar`, `fixd`, `unicarscan`, `yawoa`, `tonwon`, `cyel`, `microtech` | other BLE brands reported working |
-| `obd`, `elm`, `327`, `obd2`, `obdii`, `obdble`  | generic clone                 |
+| Adapter | Manufacturer | Protocol string | PPID |
+| --- | --- | --- | --- |
+| OBDLink MX+ (STN2255) | OBD Solutions LLC | `com.obdlink` | `221699-0001` |
+| Vgate vLinker FS (BT) | ShenZhen CheBoTong | `com.vgatemall` | `649626-099130` |
+| Vgate vLinker MS | ShenZhen CheBoTong | `com.vgatemall` | `649626-112572` |
 
-Known **non-ELM** devices (show with a warning, rank last): BlueDriver (proprietary protocol), xTool (not ELM327-compatible).
-
-### 3.4 MFi (Classic Bluetooth) adapters
-
-| Adapter                 | Manufacturer (MFi licensee)  | EA protocol string | MFi Product Plan ID (PPID) | Notes                                                                                     |
-| ----------------------- | ---------------------------- | ------------------ | -------------------------- | ----------------------------------------------------------------------------------------- |
-| OBDLink MX+ (STN2255)   | OBD Solutions LLC            | `com.obdlink`      | `221699-0001`              | Dev adapter on hand.                                                                      |
-| Vgate vLinker FS (BT)   | ShenZhen CheBoTong           | `com.vgatemall`    | `649626-099130`            | Firmware can also switch to "BLE+BT" mode, which makes it a plain BLE adapter (§3.2).      |
-| Vgate vLinker MS        | ShenZhen CheBoTong           | `com.vgatemall`    | `649626-112572`            | Same as vLinker FS.                                                                       |
-
-- These two strings are the complete `UISupportedExternalAccessoryProtocols` list. Declare only strings backed by an MFi authorization: App Review checks every declared protocol against an approved PPID.
-- Not declared: `com.scantool.stnobd` (OBDLink EX, a USB adapter, per EVMSwiftOBD2), which isn't a Bluetooth adapter and has no authorization for this app.
-- iOS only reports accessories whose protocol string is declared, so MFi adapters cannot be discovered generically. Each new string = native rebuild + a new MFi authorization from that vendor.
-- Ad-hoc / development builds only need the strings in `Info.plist`. For App Store submission, the PPIDs above go into the App Store Connect review information (SPEC §9).
-- Both Vgate models share one protocol string; tell them apart by `EAAccessory.modelNumber` / `name`, logged in `AdapterInfo`.
+These two strings are the complete `UISupportedExternalAccessoryProtocols` list (the config plugin's `mfiProtocols`).
+Declare only strings backed by an authorization: App Review checks every one. iOS only reports accessories whose
+string is declared, so MFi adapters cannot be discovered generically. The two Vgate models share a string; tell them
+apart by `EAAccessory.modelNumber` / `name`. The vLinker FS/MS over EA is untested (none on hand); their "BLE+BT"
+firmware mode makes them plain BLE adapters.
 
 ### 3.5 Expected performance
 
-- iOS BLE connection interval is 15–30 ms (Apple's minimum is 15 ms). One request/response needs at least one connection event for the write and one for the notification, so BLE caps a single adapter at roughly **15–30 polls/s** in the best case.
-- On top of that: adapter firmware (clones are slow), ECU response time (typically 10–50 ms on CAN), and ELM timeout behavior when it doesn't know how many responses to wait for (fixed by the response-count suffix, §9.3).
-- Expected: genuine/STN adapters 15–30 Hz, decent clones 8–15 Hz, bad clones 3–8 Hz. Measure every adapter (§13).
+iOS BLE connection intervals (15–30 ms) cap a single adapter at roughly 15–30 polls/s; clones are slower. The link
+needs 2 Hz, so every adapter tested so far has headroom; what matters is that it answers every poll without gaps
+(§13).
 
 ## 4. Architecture
 
 ```
-src/app (vehicle + debug screens) ──┐
-src/services/trip-recorder ─────────┤  consumers: use only the VehicleLink contract (§6)
-                                    ▼
-src/services/vehicle-link   (RN glue: owns the session, persistence, React bindings)
+src/app (vehicle screen, ELM terminal) ──┐
+src/services/trip-recorder, navigation ──┤  consumers: the VehicleLink contract (§6) only
+                                         ▼
+src/services/vehicle-link   (RN glue: native transports, discovery, persistence, the CAN speed feed and id picker)
    │
-   ├── src/obd/catalog      pure TS: GATT profiles, name patterns, ranking (§3, §7)
-   ├── src/obd/elm327       pure TS: command queue, response parser, probe (§8), init (§9)
-   ├── src/obd/pids         pure TS: Mode 01 decoders (0C, 0D, supported-PID bitmaps)
-   ├── src/obd/poller       pure TS: speed/RPM scheduler, rate statistics (§10)
-   ├── src/obd/engine-state pure TS: ignition/engine state machine (§10.4)
-   ├── src/obd/emulator     pure TS: ELM327 + vehicle emulator (§13)
-   └── src/obd/vehicle-link-core  pure TS: VehicleLink implementation (lifecycle, discovery ranking, persistence via injected store)
-                                    │  Transport interface (§6.1)
-          ┌─────────────────────────┼─────────────────────────┐
-   NativeBleTransport        NativeMfiTransport        EmulatorTransport (tests, dev without car)
-          └──────────┬──────────────┘
-                     ▼
-   modules/vehicle-link (Swift): CoreBluetooth + ExternalAccessory, framing, timestamps (§5)
+   ├── src/obd/catalog.ts        GATT profiles, name patterns, ranking (§3, §7)
+   ├── src/obd/elm327/           session (command queue, idle monitor), parser, probe (§8), init (§9)
+   ├── src/obd/pids.ts           Mode 01 decoders (0C, 0D, supported-PID bitmaps), VIN
+   ├── src/obd/poller.ts         speed/RPM/battery scheduler, rate statistics (§10)
+   ├── src/obd/engine-state.ts   ignition/engine state machine (§10.4)
+   ├── src/obd/can-shadow.ts, can-monitor.ts   the CAN monitor between polls and the port survey (§16)
+   ├── src/obd/emulator.ts       ELM327 + vehicle emulator (§13)
+   └── src/obd/vehicle-link-core.ts   the VehicleLink implementation (lifecycle, discovery, cars, persistence via an injected store)
+                                   │  Transport interface (§6.1)
+          ┌────────────────────────┼────────────────────────┐
+   NativeTransport (BLE / MFi / SPP)                 EmulatorTransport (tests, dev without a car)
+          │
+   modules/vehicle-link: CoreBluetooth + ExternalAccessory (Swift); BluetoothGatt + RFCOMM (Kotlin); framing, timestamps (§5)
 ```
 
-- `src/obd/**` follows the `src/nav/**` rule: no React Native or Expo imports.
-- `src/nav/odometry/obd` (SPEC §3.2) consumes speed samples from the VehicleLink contract; it doesn't talk to the adapter.
+## 5. Native module (`modules/vehicle-link`)
 
-## 5. Native module — `modules/vehicle-link`
+### 5.1 Functions (`src/VehicleLinkModule.ts`)
 
-Local Expo module (see the `expo-module` skill). Swift only; iOS first.
-
-### 5.1 Functions
-
-| Function                                    | Purpose                                                                                                                         |
-| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `initialize(options)`                       | Create `CBCentralManager` (this triggers the Bluetooth permission prompt, so call it only after a user action or when permission is already granted). Options: `restoreIdentifier` (§11). |
-| `getBluetoothState()`                       | `poweredOn` / `poweredOff` / `unauthorized` / `unsupported` / `resetting` / `unknown`.                                           |
-| `startScan(serviceUuids)` / `stopScan()`    | BLE scan with **no service filter**, duplicates allowed (for RSSI). Foreground only (iOS doesn't deliver unfiltered scans in background). Also lists adapters with a catalog service that are **already connected to iOS** (`retrieveConnectedPeripherals`): connected peripherals stop advertising, so a scan alone misses them after an app relaunch or while another app holds the adapter. |
-| `getMfiAccessories()`                       | `EAAccessoryManager.connectedAccessories` filtered to declared protocol strings.                                                 |
-| `showMfiPicker(nameFilter?)`                | `showBluetoothAccessoryPicker` — lets the user pair a nearby MFi adapter without leaving the app.                                |
-| `retrieveKnownPeripheral(id)`               | `retrievePeripherals(withIdentifiers:)` — reconnect a remembered BLE adapter without scanning.                                   |
-| `connect(deviceRef, gattProfiles)`          | BLE: connect, discover services/characteristics, pick the UART per profile list (§8.2), subscribe to notify, return the chosen pair + full GATT dump. MFi: open `EASession` for the protocol string; if the accessory isn't connected to iOS yet, wait for `EAAccessoryDidConnect` until the timeout (`timeoutMs: 0` = wait indefinitely). |
-| `disconnect()`                              | Close session / cancel connection (also cancels a pending BLE or MFi connect).                                                   |
-| `transact(command, { timeoutMs })`          | Write `command + "\r"`, collect bytes until the `>` prompt or timeout. Returns `{ raw, status: 'ok' \| 'timeout', txUs, rxFirstUs, rxUs }`. One in flight; a second call while busy rejects. |
-| `writeRaw(text)`                            | Debug only (ELM terminal escape hatch): write without waiting for a prompt.                                                     |
-| `nowUs()`                                   | Current monotonic time in µs (same clock as all timestamps).                                                                    |
+| Function | Purpose |
+| --- | --- |
+| `initialize(restoreIdentifier)` | Create the central manager (triggers the Bluetooth permission prompt, so only after a user action or when already granted). |
+| `getBluetoothState()` | `poweredOn` / `poweredOff` / `unauthorized` / `unsupported` / `resetting` / `unknown`. |
+| `startScan(serviceUuids)` / `stopScan()` | BLE scan with **no service filter**, duplicates allowed (RSSI). Foreground only. Also lists adapters with a catalog service **already connected to the phone** (`retrieveConnectedPeripherals`): connected peripherals stop advertising. |
+| `getMfiAccessories()` | `EAAccessoryManager.connectedAccessories` filtered to the declared protocol strings (`[]` on Android). |
+| `showMfiPicker(nameFilter)` | `showBluetoothAccessoryPicker`: pair a nearby MFi adapter without leaving the app. |
+| `connect(options)` | BLE: connect by identifier (a remembered adapter needs no scan: `retrievePeripherals(withIdentifiers:)`), discover services, pick the UART per the profile list (§8.2), subscribe to notify, return the chosen pair and the full GATT dump. MFi: open an `EASession`; if the accessory isn't connected yet, wait for `EAAccessoryDidConnect` until the timeout (`timeoutMs: 0` = wait indefinitely). SPP: bond if needed, the secure socket, then the insecure and channel-1 fallbacks clones need. |
+| `disconnect()` | Close the session / cancel a pending connect. |
+| `transact(command, timeoutMs)` | Write `command + "\r"`, collect bytes until the `>` prompt or timeout. Returns `{ raw, status: 'ok' \| 'timeout', txUs, rxFirstUs, rxUs }`. One in flight; a second call while busy rejects. |
+| `writeRaw(text)` | Write without waiting for a prompt (starts the CAN monitor; the ELM terminal). |
+| `nowUs()` | The monotonic clock in µs. |
 
 ### 5.2 Events
 
-| Event               | Payload                                                                                                         | Rate                     |
-| ------------------- | --------------------------------------------------------------------------------------------------------------- | ------------------------ |
-| `onScanBatch`       | `[{ id, name, localName, rssi, serviceUuids, manufacturerDataHex, connectable, seenUs }]`                       | batched every 250 ms     |
-| `onMfiChange`       | accessory list changed (connect/disconnect notifications)                                                      | on change                |
-| `onLinkState`       | `{ state: 'connecting' \| 'connected' \| 'disconnected', reason?, errorCode? }`                                | on change                |
-| `onUnsolicited`     | bytes received while no transaction is in flight (`LV RESET`, `STOPPED`, stray prompts), with `rxUs`            | as received, rare        |
+| Event | Payload | Rate |
+| --- | --- | --- |
+| `onScanBatch` | `[{ id, name, localName, rssi, serviceUuids, manufacturerDataHex, connectable, seenUs }]` | every 250 ms |
+| `onMfiChange` | the accessory list changed | on change |
+| `onLinkState` | `{ state: 'connecting' \| 'connected' \| 'disconnected', reason?, errorCode? }` | on change |
+| `onUnsolicited` | bytes received while no transaction is in flight (`LV RESET`, `STOPPED`, stray prompts, the CAN monitor's output), with `rxUs` | as received |
 
 ### 5.3 Framing and writes
 
-- **Rx**: append notification/stream bytes to a buffer; drop `0x00` (some clones send NULs); a response is complete when `>` arrives. Pass the raw text (including CR/LF and echo) to TS; parsing is TS's job.
-- **Tx (BLE)**: split into chunks of `maximumWriteValueLength(for: .withoutResponse)` for both write types (never the `.withResponse` value, see §3.2; `LinkLogic.bleChunkLimit`). Use **write with response** when the characteristic supports it, waiting for `didWriteValueFor` before the next chunk (required by OBDLink CX, safe for everything). Otherwise use write without response, gated by `canSendWriteWithoutResponse` / `peripheralIsReady(toSendWriteWithoutResponse:)`. Never use queued (long) writes.
-- **Tx (MFi)**: `OutputStream` write on a dedicated thread with its own run loop; `InputStream` events feed the same Rx framer.
-- **Timestamps**: `txUs` immediately before the (first) write; `rxFirstUs` on the first byte after the write; `rxUs` on the chunk containing `>`. All from `ProcessInfo.processInfo.systemUptime`.
+- **Rx**: append bytes to a buffer; drop `0x00`; a response is complete when `>` arrives. Pass the raw text to TS;
+  parsing is TS's job.
+- **Tx (BLE)**: chunks of `maximumWriteValueLength(for: .withoutResponse)` for both write types (`LinkLogic.bleChunkLimit`).
+  Write with response when the characteristic supports it, waiting for `didWriteValueFor` before the next chunk;
+  otherwise write without response, gated by `canSendWriteWithoutResponse`. Never queued (long) writes.
+- **Tx (MFi)**: `OutputStream` on a dedicated thread with its own run loop; `InputStream` events feed the same framer.
+- **Timestamps**: `txUs` immediately before the (first) write; `rxFirstUs` on the first byte after it; `rxUs` on the
+  chunk containing `>`.
 
-### 5.4 Config plugin (`modules/vehicle-link/plugin`)
+### 5.4 Config plugin (`modules/vehicle-link/app.plugin.js`)
 
-Adds to `Info.plist` (never hand-edit `ios/`):
+iOS: `NSBluetoothAlwaysUsageDescription` (localized via `locales/`), `UIBackgroundModes` `bluetooth-central` and
+`external-accessory`, `UISupportedExternalAccessoryProtocols` from the `mfiProtocols` option. Android: the Bluetooth,
+foreground-service, notification, wake-lock and sensor permissions (ANDROID-SPEC §2). Tested in
+`modules/vehicle-link/__tests__/app-plugin.test.ts`. Never hand-edit `ios/` or `android/`.
 
-- `NSBluetoothAlwaysUsageDescription` (localized EN/UK via `locales`).
-- `UIBackgroundModes`: `bluetooth-central`, `external-accessory`.
-- `UISupportedExternalAccessoryProtocols`: `["com.obdlink", "com.vgatemall"]` from plugin options (§3.4).
+## 6. TypeScript contract (`src/obd/types.ts`)
 
-## 6. TypeScript contract
-
-### 6.1 Transport (internal, implemented by native wrappers and the emulator)
+### 6.1 Transport (internal)
 
 ```ts
-type TransportKind = "ble" | "mfi" | "spp" | "emulator"; // spp: Android Classic Bluetooth
-
-interface RawExchange {
-  raw: string; // everything received up to and including '>'
-  status: "ok" | "timeout";
-  txUs: number;
-  rxFirstUs?: number;
-  rxUs: number;
-}
-
+type TransportKind = "ble" | "mfi" | "spp" | "emulator";
+interface RawExchange { raw: string; status: "ok" | "timeout"; txUs: number; rxFirstUs?: number; rxUs: number }
 interface Transport {
   readonly kind: TransportKind;
-  connect(device: DeviceRef): Promise<ConnectedInfo>; // ConnectedInfo: chosen GATT pair or EA protocol, GATT dump, DIS fields
+  connect(device: DeviceRef): Promise<ConnectedInfo>;   // chosen GATT pair or EA protocol, GATT dump, DIS fields
   disconnect(): Promise<void>;
   exchange(command: string, timeoutMs: number): Promise<RawExchange>;
-  writeRaw?(text: string): Promise<void>; // no prompt awaited: starts the CAN monitor (§16)
+  writeRaw?(text: string): Promise<void>;               // no prompt awaited: starts the CAN monitor (§16)
   onUnsolicited(listener: (text: string, rxUs: number) => void): () => void;
   onLinkLost(listener: (reason: string) => void): () => void;
 }
 ```
 
-### 6.2 VehicleLink (public, used by the app)
+### 6.2 VehicleLink (public)
 
 ```ts
-type LinkState =
-  | "idle"          // nothing selected
-  | "discovering"
-  | "connecting"
-  | "probing"       // verifying ELM327 (§8)
-  | "standby"       // adapter verified, vehicle ECU silent (ignition off)
-  | "initializing"  // vehicle answered, configuring session (§9)
-  | "polling"       // speed/RPM loop running (§10)
-  | "reconnecting"  // link lost, waiting for the adapter to come back
-  | "error";
-
+type LinkState = "idle" | "discovering" | "connecting" | "probing" | "standby" | "initializing" | "polling"
+  | "reconnecting" | "error";
 type EngineState = "unknown" | "ignition-off" | "engine-off" | "engine-running";
 
 interface DiscoveredDevice {
-  id: string;                 // CBPeripheral.identifier, or "mfi:<serial>:<protocol>"
-  transport: "ble" | "mfi";
-  name: string | null;
-  rssi?: number;
+  id: string;            // CBPeripheral.identifier / Android MAC, "mfi:<serial>:<protocol>", "spp:<MAC>", "emulator:<id>"
+  transport: TransportKind; name: string | null; rssi?: number;
   rank: "remembered" | "known-profile" | "known-name" | "unknown" | "non-elm";
-  brandHint?: string;
-  profileId?: string;         // when the service UUID was advertised
-  lastSeenUs: number;
+  brandHint?: string; profileId?: string; lastSeenUs: number;
 }
-
 interface AdapterInfo {
-  deviceId: string;
-  transport: "ble" | "mfi";
-  name: string | null;
-  elmVersion: string | null;  // from ATI, e.g. "ELM327 v1.5"
-  description: string | null; // AT@1
-  chip: string | null;        // STI answer, e.g. "STN2255 v5.10.3", null on plain ELM/clones
-  suspectedClone: boolean;    // e.g. "v2.1" banner
-  batteryV: number | null;    // ATRV
+  deviceId: string; transport: TransportKind; name: string | null;
+  elmVersion: string | null;   // ATI
+  description: string | null;  // AT@1
+  chip: string | null;         // STI, e.g. "STN2255 v5.13.1"; null on plain ELM/clones
+  suspectedClone: boolean;     // "v2.1" banner
+  batteryV: number | null;     // ATRV
   capabilities: { responseCount: boolean; adaptiveTiming2: boolean; physicalAddressing: boolean };
+  connected: ConnectedInfo | null;
 }
-
 interface VehicleInfo {
-  protocol: string | null;    // ATDPN, e.g. "A6" → ISO 15765-4 CAN 11/500
-  supportedPids01: string[];  // hex PIDs
+  protocol: string | null;     // ATDPN, e.g. "A6"
+  supportedPids01: string[];
   vin: string | null;
-  speedEcu: string | null;    // responding ECU address used for 0D, e.g. "7E8"
+  vinSource?: "read" | "remembered" | "missing";   // §9.1
+  speedEcu: string | null;     // e.g. "7E8"
 }
-
-interface PollStats {
-  speedHz: number;            // EWMA of completed speed polls
-  latencyP50Ms: number;
-  latencyP95Ms: number;
-  errorsLastMinute: number;
-  speedCapHz: number;         // active cap (§10.2)
-}
+interface PollStats { speedHz: number; latencyP50Ms: number; latencyP95Ms: number; errorsLastMinute: number; speedCapHz: number }
 
 interface VehicleLinkSnapshot {
-  link: LinkState;
-  error: LinkError | null;
-  devices: DiscoveredDevice[];
-  adapter: AdapterInfo | null;
-  vehicle: VehicleInfo | null;
-  engine: EngineState;
-  lastSpeed: SpeedSample | null;
-  lastRpm: RpmSample | null;
-  stats: PollStats | null;
+  link: LinkState; error: LinkError | null; devices: DiscoveredDevice[]; discovering: boolean;
+  activeDeviceId: string | null; adapter: AdapterInfo | null; vehicle: VehicleInfo | null;
+  protocolSearch: boolean;     // all protocols being searched (another car on this adapter), up to ~20 s
+  engine: EngineState; lastSpeed: SpeedSample | null; lastRpm: RpmSample | null; stats: PollStats | null;
+  tryingSinceMs: number | null; // since the link has been trying to get ready (adapter, car, VIN); the UI badge times out on it
+  canShadow?: CanShadowStatus | null;   // the CAN monitor this session (§16.2)
+  canOff?: "adapter" | "car" | "firmware" | null;   // why the wheels can't be read (§16.3)
 }
 
-interface SampleTiming { txUs: number; rxUs: number; tUs: number } // tUs = (txUs + rxUs) / 2
-interface SpeedSample extends SampleTiming { speedMps: number; raw: number }      // raw = PID 0D byte, km/h
-interface RpmSample extends SampleTiming { rpm: number; raw: [number, number] }   // rev/min, named unit (SPEC §6 exception)
+interface SampleTiming { txUs: number; rxUs: number; tUs: number }          // tUs = (txUs + rxUs) / 2
+interface SpeedSample extends SampleTiming { speedMps: number; raw: number; source?: "obd" | "can" }
+interface RpmSample extends SampleTiming { rpm: number; raw: [number, number] }
 
-type ElmStatus =
-  | "ok" | "no-data" | "unable-to-connect" | "bus-error" | "unknown-command"
-  | "stopped" | "buffer-full" | "timeout" | "parse-error" | "other";
+type ElmStatus = "ok" | "no-data" | "unable-to-connect" | "bus-error" | "unknown-command" | "stopped"
+  | "buffer-full" | "timeout" | "parse-error" | "other";
+interface ElmResponse { command: string; status: ElmStatus; lines: string[]; raw: string; txUs: number; rxUs: number }
 
-interface ElmResponse {
-  command: string;
-  status: ElmStatus;
-  lines: string[];            // echo and prompt stripped
-  raw: string;
-  txUs: number;
-  rxUs: number;
-}
-
-type LinkError =
-  | { code: "bluetooth-off" | "bluetooth-unauthorized" | "device-not-found" | "no-uart-service" | "not-elm327" | "adapter-silent" | "link-lost" }
-  | { code: "other"; message: string };
+type LinkErrorCode = "bluetooth-off" | "bluetooth-unauthorized" | "device-not-found" | "no-uart-service"
+  | "not-elm327" | "adapter-silent" | "no-speed-pid" | "link-lost" | "other";
 
 interface VehicleLink {
   getSnapshot(): VehicleLinkSnapshot;
-  subscribe(listener: () => void): () => void; // for useSyncExternalStore
-
-  startDiscovery(): void;
-  stopDiscovery(): void;
-  connect(deviceId: string): Promise<void>; // runs probe → init → polling automatically
+  subscribe(listener: () => void): () => void;
+  startDiscovery(): void; stopDiscovery(): void;
+  connect(deviceId: string): Promise<void>;   // probe → init → polling automatically
   disconnect(): Promise<void>;
   forget(deviceId: string): void;
-  pairMfi(): Promise<void>;                 // opens the MFi accessory picker
-
-  /** Raw command. Queued behind the in-flight command; pauses polling for its duration. */
-  send(command: string, opts?: { timeoutMs?: number }): Promise<ElmResponse>;
-  /** Several commands with polling paused in between (ELM terminal, VIN read). */
-  exclusive<T>(fn: (send: VehicleLink["send"]) => Promise<T>): Promise<T>;
-
+  pairMfi(): Promise<void>;
+  send(command: string, opts?: { timeoutMs?: number }): Promise<ElmResponse>;   // queued; pauses polling
+  exclusive<T>(fn: (send: SendFn) => Promise<T>): Promise<T>;                   // several commands, polling paused
   onSpeed(listener: (s: SpeedSample) => void): () => void;
   onRpm(listener: (s: RpmSample) => void): () => void;
   onEngineState(listener: (e: EngineState, tUs: number) => void): () => void;
-  /** Every exchange with status and timings, including polls. For the logger. */
-  onExchange(listener: (r: ElmResponse & { pollPid?: number }) => void): () => void;
-  onLinkEvent(listener: (e: { type: string; tUs: number; detail?: string }) => void): () => void;
+  onExchange(listener: (e: ExchangeEvent) => void): () => void;   // every exchange with status and timings, for the logger
+  onLinkEvent(listener: (e: LinkEvent) => void): () => void;
 }
 ```
 
 Rules:
 
-- Only one command is in flight at a time (ELM327 is half-duplex). The queue priorities are: `exclusive`/`send` > RPM job > speed job.
-- Writing while the ELM is still answering aborts the answer (`STOPPED`), so never write before the prompt arrives. `timeout` → recover with a bare `"\r"` and wait for `>` before the next command.
-- Listeners are called synchronously in arrival order. Samples carry native timestamps, so JS jitter doesn't affect timing.
-- Units follow SPEC §6 (SI). RPM is the one exception, kept in rev/min with the unit in the field name.
+- One command in flight at a time (ELM327 is half-duplex). Queue priority: `exclusive`/`send` > RPM job > speed job.
+- Writing while the ELM is still answering aborts the answer (`STOPPED`), so never write before the prompt. A
+  `timeout` is recovered with a bare `"\r"` and waiting for `>`.
+- Listeners are called synchronously in arrival order. Samples carry native timestamps.
+- Units: SI; RPM in rev/min with the unit in the name.
 
 ## 7. Discovery and the device list
 
-- Discovery starts when the vehicle screen opens and stops when it closes (or after 60 s). It combines:
-  1. **Remembered adapters** (verified before): BLE via `retrieveKnownPeripheral`, MFi when present in `getMfiAccessories()`.
-  2. **BLE scan** results, ranked by catalog: advertised known service UUID → `known-profile`; name matches §3.3 → `known-name`; other named connectable devices → `unknown`; known non-ELM names → `non-elm`.
-  3. **MFi accessories** already paired, plus a "Pair MFi adapter" action (`showMfiPicker`).
-- List UI: sections *Remembered*, *OBD adapters* (known-profile + known-name + MFi), *Other Bluetooth devices* (collapsed; "Try anyway"). Unnamed devices hidden behind a toggle. Show RSSI bars and brand hint.
-- **Auto-connect**: on app start and when the app returns to the foreground, connect to the most recently verified adapter with a pending connect that waits for it to become reachable (BLE: connect via identifier; MFi: wait for the accessory to connect to iOS, which takes a few seconds after the car wakes the adapter). A previous attempt that ended in `error` is retried. The user doesn't pick from the list again. Never an emulated adapter (developer): its scripted drive would start whenever the app opens; it connects only when picked.
-  - Several adapters remembered: the most recently verified first, each given 8 s to become reachable, then the next,
-    round after round until one connects (link event `auto-connect: <name> not reachable in 8 s`, first round only).
-    After a round nobody answered in, a remembered MFi adapter iOS reports connected goes next: everyone before it had
-    a turn, and a car has one OBD port. One adapter remembered: its pending connect waits, as before. A user's connect
-    or disconnect ends the rounds. Seen on 2026-10-05: a vLinker FD tried once became the most recent adapter, and the
-    next drive would have waited for it forever instead of the MX+ in the car.
-- Persist per adapter (`expo-sqlite/kv-store`): id, transport, name, chosen GATT profile + characteristic UUIDs, `AdapterInfo`, capabilities, last protocol (`ATSPn`), measured poll rate, `lastVerifiedAt`.
-- Persist the cars seen by any adapter (`vehicleLink.cars`, most recent first, 8 at most): VIN (null when never read) and
-  protocol number. `expectedVin()` before connecting is the first one's VIN (§9.1).
+- Discovery starts when the vehicle screen opens and stops when it closes (or after 60 s): remembered adapters
+  (BLE by identifier, MFi when present in `getMfiAccessories()`), the BLE scan ranked by the catalog (advertised
+  known service → `known-profile`; name → `known-name`; other named connectable devices → `unknown`; known non-ELM
+  names → `non-elm`), paired MFi accessories plus "New adapter" (`showMfiPicker`); on Android bonded devices plus
+  discovery results.
+- List: sections *Remembered*, *OBD adapters*, *Other Bluetooth devices* (collapsed; "Try anyway"); RSSI bars and
+  brand hint; emulated adapters when Developer → Show emulated adapters is on.
+- **Auto-connect** on app start and on return to the foreground: the most recently verified adapter with a pending
+  connect that waits for it to become reachable (MFi: wait for the accessory to connect to the phone, a few seconds
+  after the car wakes it). A previous attempt that ended in `error` is retried. Never an emulated adapter.
+  - Several adapters remembered: the most recently verified first, each given 8 s (`AUTO_CONNECT_WINDOW_MS`), then
+    the next, round after round until one connects (link event `auto-connect: <name> not reachable in 8 s`, first
+    round only). After a round nobody answered in, a remembered MFi adapter the phone reports connected goes next.
+    A user's connect or disconnect ends the rounds.
+- Persisted per adapter (`expo-sqlite/kv-store`): id, transport, name, chosen GATT profile and characteristic UUIDs,
+  `AdapterInfo`, capabilities, last protocol, `lastVerifiedAt`.
+- Persisted cars (`vehicleLink.cars`, most recent first, 8 at most): VIN (null when never read) and protocol number.
+  `expectedVin()` before connecting is the first one's VIN (§9.1).
 
 ## 8. Verification on connect (probe)
 
 ### 8.1 Steps
 
-| # | Step                    | Command / action                    | Timeout | Pass / outcome                                                                                       |
-| - | ----------------------- | ----------------------------------- | ------- | ---------------------------------------------------------------------------------------------------- |
-| 1 | Find the UART (BLE)     | service/characteristic discovery    | 10 s    | A profile matches (§8.2) → continue; none → `no-uart-service`, GATT dump logged for the catalog.       |
-| 2 | Flush                   | write `"\r"`, wait for `>`          | 1 s     | Ignore result (clears half-typed input; some clones drop the first command after connect).             |
-| 3 | Reset                   | `ATZ`                               | 3 s     | Banner contains `ELM327`, `ELM`, or `STN`. No answer → try `ATWS` (3 s), then `ATI`. Still nothing → `not-elm327`; for an adapter this phone used before that sent not a byte back to any of them, `adapter-silent`: the Vehicle screen says it may be connected to another phone (close the app there, or its Bluetooth), else to unplug it for a few seconds. 2026-10-13: two phones with the app in one car took the MX+ from each other; the one left without it read `not-elm327`. |
-| 4 | Echo off                | `ATE0`                              | 1 s     | `OK` (the response may still echo the command once).                                                  |
-| 5 | Identify                | `ATI`                               | 1 s     | `ELM327 vX.Y` → `elmVersion`. `v2.1` → `suspectedClone` (informational only).                          |
-| 6 | Describe (optional)     | `AT@1`                              | 1 s     | Text → `description`; `?` is fine.                                                                    |
-| 7 | STN identify (optional) | `STI`                               | 1 s     | `STNxxxx …` → `chip`; `?` on plain ELM/clones is fine.                                                |
-| 8 | Voltage                 | `ATRV`                              | 1 s     | `12.6V` → `batteryV`. Missing → warning only (but a real OBD port must show 9–16 V).                   |
-| 9 | Vehicle check           | `ATSP0` (or cached `ATSPn`), `0100` | 10 s    | `41 00 …` → vehicle present → §9. `NO DATA` / `UNABLE TO CONNECT` / `CAN ERROR` / `SEARCHING…` then nothing → adapter verified, `standby`. `?` → `not-elm327`. A cached protocol that fails with a bus error or `UNABLE TO CONNECT` → one search, `ATSP0` + `0100` (20 s); found → §9 without the cached protocol, else back to `ATSPn` and `standby`. |
+| # | Step | Command | Timeout | Pass / outcome |
+| - | --- | --- | --- | --- |
+| 1 | Find the UART (BLE) | service/characteristic discovery | 10 s | a profile matches (§8.2); none → `no-uart-service`, GATT dump logged |
+| 2 | Flush | `"\r"`, wait for `>` | 1 s | ignore the result (some clones drop the first command) |
+| 3 | Reset | `ATZ` | 3 s | banner contains `ELM327`, `ELM` or `STN`. No answer → `ATWS` (3 s), then `ATI`. Still nothing → `not-elm327`; for an adapter this phone used before that sent not a byte back, `adapter-silent`: the Vehicle screen says it may be connected to another phone, else to unplug it for a few seconds |
+| 4 | Echo off | `ATE0` | 1 s | `OK` |
+| 5 | Identify | `ATI` | 1 s | `elmVersion`; `v2.1` → `suspectedClone` (informational) |
+| 6 | Describe | `AT@1` | 1 s | `description`; `?` is fine |
+| 7 | STN identify | `STI` | 1 s | `chip`; `?` on plain ELM/clones is fine |
+| 8 | Voltage | `ATRV` | 1 s | `batteryV`; missing → warning only |
+| 9 | Vehicle check | `ATSP0` (or the cached `ATSPn`), `0100` | 10 s | `41 00 …` → vehicle present → §9. `NO DATA` / `UNABLE TO CONNECT` / `CAN ERROR` / `SEARCHING…` then nothing → `standby`. `?` → `not-elm327`. A cached protocol that fails with a bus error or `UNABLE TO CONNECT` → one search, `ATSP0` + `0100` (20 s); found → §9 with the new protocol, else back to `ATSPn` and `standby` |
 
-- Pass = steps 3 and 4 succeed. The adapter is then marked verified and remembered.
+- Pass = steps 3 and 4 succeed; the adapter is then marked verified and remembered.
 - Every probe exchange goes to the logger transcript (TRIP-LOGGER-SPEC §6.4).
-- The cached protocol is the adapter's last car's. An adapter moved to another car must not stay on it: on 2026-10-05
-  the MX+ went from the main test car (CAN, 6) to the second test car (K-line, ISO 14230 KWP), and `ATSP6` + `0100` answered
-  `CAN ERROR` every 5 s until the user gave up, while the OBDLink app (auto search) read the car. `NO DATA` doesn't start
-  a search: the bus is there and the ECUs are asleep.
+- The cached protocol is the adapter's last car's. An adapter moved to another car must not stay on it (a CAN
+  protocol on a K-line car answered `CAN ERROR` every 5 s). `NO DATA` doesn't start a search: the bus is there and
+  the ECUs are asleep.
 - The protocol a search finds (`ATDPN` after its `0100`) is cached at once (link event `protocol-search: protocol 6
-  failed; 5 answered`): the init then locks it instead of trying the old one and searching again, which breaks a K-line
-  session that just came up. `protocolSearch` in the snapshot is true while a search runs; the vehicle screen and the
-  map show "Finding the car's protocol…" (UI-SPEC).
+  failed; 5 answered`): the init then locks it instead of searching again, which breaks a K-line session that just
+  came up. `protocolSearch` is true while a search runs; the vehicle screen and the map say "Finding the car's
+  protocol…".
 - An `0100` answered with text but no bitmap at init is a reply one command late: it is sent once more.
 
 ### 8.2 UART selection (BLE)
 
-1. If the device advertised or exposes a catalog service (§3.2), use that profile's characteristics in catalog order (`fff0` before `issc` when both exist).
-2. Otherwise, **heuristic**: in non-SIG services, pick a service with exactly one notify/indicate characteristic and exactly one write/write-without-response characteristic (they may be the same characteristic, as in `ffe0`).
-3. Ambiguous (several candidates): try each in order with step 2–3 of the probe and keep the first that answers.
+1. A catalog service advertised or exposed: that profile's characteristics, in catalog order (`fff0` before `issc`).
+2. Otherwise the **heuristic**: in non-SIG services, a service with exactly one notify/indicate characteristic and
+   exactly one write characteristic (they may be the same).
+3. Several candidates: try each with probe steps 2–3 and keep the first that answers.
 4. Store the chosen UUIDs per device so the next connect skips the search.
 
-### 8.3 Response parsing (pure TS)
+### 8.3 Response parsing (`elm327/parser.ts`)
 
-- Strip echo (line equal to the sent command), blank lines, `SEARCHING...`, `BUS INIT: ...OK`, and the trailing `>`.
-- Map error strings to `ElmStatus`: `NO DATA`, `UNABLE TO CONNECT`, `CAN ERROR` / `BUS ERROR` / `BUS BUSY` / `FB ERROR` / `DATA ERROR` / `<RX ERROR` → `bus-error`, `?` → `unknown-command`, `STOPPED`, `BUFFER FULL`.
-- Mode 01 data: accept with or without spaces and headers; find `41 <pid>` and read the data bytes; with headers on, also record the ECU address.
-- Tolerate `\r`, `\r\n`, `\n\r`, and lowercase hex.
+Strip the echo, blank lines, `SEARCHING...`, `BUS INIT: ...OK` and the trailing `>`. Map error strings to
+`ElmStatus` (`NO DATA`, `UNABLE TO CONNECT`, `CAN ERROR` / `BUS ERROR` / `BUS BUSY` / `FB ERROR` / `DATA ERROR` /
+`<RX ERROR` → `bus-error`, `?` → `unknown-command`, `STOPPED`, `BUFFER FULL`). Mode 01 data with or without spaces
+and headers (with headers, record the ECU address). Tolerate `\r`, `\r\n`, `\n\r` and lowercase hex. Golden strings
+from real adapters are in `src/obd/__tests__/parser.test.ts`.
 
 ## 9. Session init (vehicle present)
 
 ### 9.1 Base configuration
 
-`ATE0`, `ATL0`, `ATS0` (no spaces, ~30% fewer bytes), `ATH1` (headers on while identifying ECUs), `ATAT1`, then:
+`ATE0`, `ATL0`, `ATS0`, `ATH1` (headers on while identifying ECUs), `ATAT1`, then:
 
-1. Protocol: `ATSP0` + `0100` (auto search) → `ATDPN` → `ATSPn` (lock it, so later requests never re-search). Cache `n` per VIN/adapter for fast reconnect.
-   The init first asks `ATDPN`: a protocol the adapter has just found by its own search (`A5`: the probe's or
-   standby's `0100` answered) is locked as is, never searched again. `ATSP0` drops the K-line session that search
-   opened, and the ECU ignores a new init until its old session times out (KWP2000 P3max, ~5 s): a tester's K-line car
-   went init → fail → standby → found → init for 2 min 15 s (2026-10-10), passing only when the adapter happened to
-   be slow enough. The emulator's K-line profile models that session (`klineSessionMs`).
-2. Supported PIDs: `0100` bitmap must contain `0C` and `0D`. Missing `0D` → error "vehicle doesn't report speed over OBD".
-3. VIN: `0902` once, after §9.2 (multi-frame; clones may fail — non-fatal). Mode 09 is the engine ECU's, so with
-   another ECU pinned for speed it goes to the engine ECU (`ATSH7E0` + `ATCRA7E8`), then the speed ECU is pinned
-   again; the pinned ECU is the fallback. On the main test car the TCM (`7E9`) is pinned when the engine ECU misses the
-   speed probe, and it answers `0902` with `7F 09 12`: that is why the VIN was in only 3 of 14 logs.
-   - Still missed with that fixed: 1 of 4 main test car drives on 2026-10-05 had the VIN (and the vLinker's one drive had none).
-     The init runs before the trip log starts, so the cause isn't in the logs; likely the ECU is busy while the engine
-     cranks (init starts when `0100` first answers, at ignition on). Since then the setup goes into the log
-     (TRIP-LOGGER-SPEC §6.4) and:
-   - **Retries**: with the VIN not read, `0902` is asked again while polling, in an exclusive section (a gap of a few
-     hundred ms in speed polling) 5, 15, 30, 60, 120 and 240 s after the init, each once the engine runs. Link events
-     `vin: read on retry n` / `vin: not read after 6 retries`.
-   - **The car list** (§7): a read VIN goes first in the list (replacing a VIN-less entry on its protocol). A missed read
-     assumes the last car seen on the same protocol (`vinSource: "remembered"`, link event `vin: not read; the last car
-     on protocol 6: …`); with none, or a VIN-less one, the car is unknown (`vin: null`). One adapter mostly stays in one
-     car, and a car on another protocol is another car. Before, a missed read cleared the adapter's VIN, and with it the
-     parked pose, speed scale and compass of the next start (NAVIGATOR-SPEC §7.4): the 2026-10-05 drive home waited
-     2 min / 1.2 km in `anchored` under jamming instead of dead reckoning from where the car had parked.
-   - The trip log has `vehicle_vin_source` (`read`, `remembered`; empty: unknown) next to `vehicle_vin`, both written
-     again when a retry reads the VIN (TRIP-LOGGER-SPEC §6.3).
+1. **Protocol:** the init first asks `ATDPN`: a protocol the adapter has just found by its own search (`A…`: the
+   probe's or standby's `0100` answered) is locked as is, never searched again (`ATSP0` drops the K-line session
+   that search opened, and the ECU ignores a new init until its old session times out, ~5 s). Otherwise `ATSP0` +
+   `0100` → `ATDPN` → `ATSPn`. Cached per adapter.
+2. **Supported PIDs:** the `0100` bitmap must contain `0D`; missing → `no-speed-pid`.
+3. **VIN:** `0902` once, after §9.2. Mode 09 is the engine ECU's, so with another ECU pinned for speed it goes to the
+   engine ECU (`ATSH7E0` + `ATCRA7E8`), then the speed ECU is pinned again (a pinned TCM answers `0902` with `7F 09
+   12`).
+   - **Retries:** with the VIN not read, `0902` is asked again while polling, in an exclusive section, 5, 10, 15, 30,
+     60 and 120 s after the init, each once the engine runs (`VIN_RETRY_MS`). Link events `vin: read on retry n` /
+     `vin: not read after 6 retries`.
+   - **The car list** (§7): a read VIN goes first (replacing a VIN-less entry on its protocol). A missed read assumes
+     the last car seen on the same protocol (`vinSource: "remembered"`, link event `vin: not read; the last car on
+     protocol 6: …`); with none, the car is unknown (`vin: null`, `"missing"` after every retry). Before this, a
+     missed read cleared the adapter's VIN, and with it the parked pose, speed scale and compass of the next start.
+   - The trip log has `vehicle_vin_source` next to `vehicle_vin`, both written again when a retry reads the VIN.
 
 ### 9.2 Pin the speed ECU
 
-Several ECUs may answer `010D` (e.g. ECM `7E8` and TCM `7E9`), which makes the adapter wait for all of them.
+Several ECUs may answer `010D` (ECM `7E8` and TCM `7E9`), which makes the adapter wait for all of them.
 
 1. Send `010D` with headers on; collect the responding addresses.
-2. On 11-bit CAN (protocols 6/8): choose `7E8` if present, else the first responder; set `ATSH<id−8>` (physical request to that ECU, e.g. `ATSH7E0`) and `ATCRA<id>` (accept only its replies). Verify `010D` still answers; if not, revert with `ATSH7DF` + `ATAR` and keep functional addressing.
-3. Other protocols: keep functional addressing; rely on the response count (§9.3).
-4. `ATH0` afterwards (smaller responses), unless needed for multi-ECU diagnostics.
+2. On 11-bit CAN (protocols 6/8): choose `7E8` if present, else the first responder; `ATSH<id−8>` and `ATCRA<id>`.
+   Verify `010D` still answers; if not, revert with `ATSH7DF` + `ATAR`.
+3. Other protocols: functional addressing; rely on the response count.
+4. `ATH0` afterwards, unless the CAN monitor needs headers (§16).
 
 ### 9.3 Speed-up probes
 
-Each is measured over ~20 polls and kept only if it is accepted and actually faster/clean:
-
-| Probe            | What                                                                                      | Fallback        |
-| ---------------- | ----------------------------------------------------------------------------------------- | --------------- |
-| Response count   | `010D1`: the trailing `1` tells the ELM to return after the first response (ELM327 v1.3+). Clones may answer `?` or ignore it. | `010D`          |
-| Adaptive timing 2 | `ATAT2` (aggressive). Keep if `NO DATA` rate doesn't increase.                           | `ATAT1`         |
-| Timeout          | Only with response count off: lower `ATST` (e.g. `19` ≈ 100 ms) if no responses are lost. | default `ATST`  |
-
-Not used: bare-CR "repeat last command" (it saves nothing on BLE and breaks when RPM polls are interleaved); multi-PID requests (`010D0C`), since many clones mis-handle them; STN batch commands. The STN monitor is §16.
+Measured over ~20 polls and kept only if accepted and faster/clean: the **response count** `010D1` (ELM327 v1.3+;
+clones may answer `?`: fall back to `010D`); **adaptive timing 2** `ATAT2` if the `NO DATA` rate doesn't increase;
+a lower `ATST` only with the response count off. Not used: bare-CR repeat, multi-PID requests, STN batch commands.
 
 ## 10. Polling
 
-### 10.1 Scheduler
+### 10.1 Scheduler (`poller.ts`)
 
-- One loop in TS (`src/obd/poller`). On each completed exchange, pick the next job: pending `send`/`exclusive` → due RPM job → speed job. The speed job is due once per period of its cap.
-- Speed timestamp = midpoint of `txUs` and `rxUs` (SPEC §3.1).
-- Statistics: EWMA rate, latency p50/p95 over the last 100 exchanges, error counts per status. Exposed in `PollStats` and logged at 1 Hz.
+One loop in TS. On each completed exchange the next job is: pending `send`/`exclusive` → due RPM or battery job →
+speed job. Statistics: EWMA rate, latency p50/p95 over the last 100 exchanges, error counts per status; in
+`PollStats` and logged at 1 Hz.
 
 ### 10.2 Speed rate
 
-- **Default: 2 Hz** (`OBD_SPEED_HZ`). Measured in replay on every drive (2026-10-11), OBD speed thinned from the
-  25–30 Hz back-to-back polls:
-  - the app with map matching (`replay:regress --obd-hz`, parked and drawn starts, 8 seeds): 10, 5 and 2 Hz changed
-    nothing beyond seed noise;
-  - dead reckoning through simulated GNSS cuts (`replay:bench --obd-hz`): the error per km 21 m at 25–30 Hz, 17 at
-    5 Hz, 19–21 at 2 Hz, 15 at 1 Hz; error over the claimed σ 2.1, 1.6, 1.8, 1.5. Back-to-back polls repeat the same
-    1 km/h value, which the EKF counted as new evidence and grew overconfident on.
-  - The navigator treats OBD speed as stale after 2.5 s; a stop or start shows up at most 0.5 s later.
-- The 2 Hz count from when the request went out, not from when the poller asked for it: a CAN monitor break ahead
-  of it can take over a second (the vLinker, 2026-10-11), and counted from before it the next poll came at once,
-  giving the monitor a 1 ms window and another break. And the poll is asked for early by how long the last breaks
-  held the requests back (smoothed over ~5 polls, at most half the gap): without it every break came on top of the
-  gap, 1.75 Hz instead of 2 (2026-10-12).
-- Fewer exchanges load the phone and the link less (the car's bus hardly notices either way) and leave the adapter to
-  the CAN shadow between polls (§16.2).
-- The rate is fixed: the developer override and the per-VIN cap (never set by anything) were removed on 2026-10-17.
-  `tools/triplog refresh` still estimates an ECU's refresh period from a log, for analysis.
-- Every poll is logged, so the rate decision can always be revisited from data.
+- 2 Hz (`OBD_SPEED_HZ`, §2). The navigator treats OBD speed as stale after 2.5 s; a stop or start shows up at most
+  0.5 s later.
+- The 2 Hz count from when the request went out, not from when the poller asked for it (a CAN monitor break ahead of
+  it can take over a second), and the poll is asked for early by how long the last breaks held the requests back
+  (smoothed over ~5 polls, at most half the gap): otherwise every break came on top of the gap.
+- `tools/triplog refresh` estimates an ECU's refresh period from a log, for analysis. Every poll is logged, so the
+  rate decision can be revisited from data.
 
 ### 10.3 RPM schedule and ignition probe
 
-| Engine state      | Speed job     | RPM job (`010C`, response count when supported) |
-| ----------------- | ------------- | ----------------------------------------------- |
-| `engine-running`  | at the cap (2 Hz) | every 5 s                                   |
-| `engine-off`      | 1 Hz while speed is 0; at the cap once the car rolls (hybrid EV mode, coasting) | every 2 s (catch restarts after auto stop-start) |
-| `ignition-off`    | stopped       | every 5 s as the ignition probe                  |
-| `unknown`         | stopped       | immediately, then per the resulting state        |
+| Engine state | Speed job | RPM job (`010C`) |
+| --- | --- | --- |
+| `engine-running` | 2 Hz | every 5 s (developer knob 2 / 5 / 10 s) |
+| `engine-off` | 1 Hz while speed is 0; 2 Hz once the car rolls | every 2 s (catch restarts after auto stop-start) |
+| `ignition-off` | stopped | every 5 s as the ignition probe |
+| `unknown` | stopped | immediately, then per the resulting state |
 
-- `standby` (no answer to the vehicle check) probes `0100` every 5 s. On a cached protocol, every 4th check after bus
-  errors / `UNABLE TO CONNECT` (not `NO DATA`) is a protocol search instead (`ATSP0` + `0100`, then `ATSPn` again):
-  another car on this adapter is found within ~20 s of its ignition (link event `protocol-search`).
+`standby` (no answer to the vehicle check) probes `0100` every 5 s; on a cached protocol every 4th check after bus
+errors / `UNABLE TO CONNECT` (not `NO DATA`) is a protocol search instead, so another car on this adapter is found
+within ~20 s of its ignition.
 
-### 10.4 Engine / ignition state machine (`src/obd/engine-state`)
+### 10.4 Engine / ignition state machine (`engine-state.ts`)
 
-| From → To                       | Condition                                                                                      |
-| ------------------------------- | ---------------------------------------------------------------------------------------------- |
-| any → `engine-running`          | 2 consecutive RPM samples ≥ 400 rpm, each different from the one before                       |
-| `engine-running` → `engine-off` | 2 consecutive RPM samples < 250 rpm (auto stop-start, hybrid EV mode, key in ON position)      |
-| `engine-running` → `engine-off` | the same non-zero RPM read 3 times in a row (stale value, see below)                           |
-| any → `ignition-off`            | no valid response (`no-data`, `unable-to-connect`, `bus-error`, `timeout`) for ≥ 10 s, the last speed read 0 |
-| any → `unknown` → `ignition-off` | the same silence right after a speed > 0: `unknown` at 10 s (the adapter or its link, not the key), `ignition-off` at 2 min |
-| `unknown` / `ignition-off` → `engine-off` | first valid RPM response (a high one counts as the first of the 2 for `engine-running`) |
-| link lost                       | state becomes `unknown`                                                                        |
+| From → To | Condition |
+| --- | --- |
+| any → `engine-running` | 2 consecutive RPM samples ≥ 400 rpm, each different from the one before |
+| `engine-running` → `engine-off` | 2 consecutive RPM samples < 250 rpm (auto stop-start, hybrid EV mode, key in ON) |
+| `engine-running` → `engine-off` | the same non-zero RPM read 3 times in a row (a stale value latched at shutdown: a running engine's RPM never repeats exactly at 0.25 rpm resolution) |
+| any → `ignition-off` | no valid response (`no-data`, `unable-to-connect`, `bus-error`, `timeout`) for ≥ 10 s, the last speed read 0 |
+| any → `unknown` → `ignition-off` | the same silence right after a speed > 0: `unknown` at 10 s (the adapter or its link, not the key: an adapter froze at 39 km/h once), `ignition-off` at 2 min |
+| `unknown` / `ignition-off` → `engine-off` | first valid RPM response |
+| link lost | `unknown` |
 
-- A car stops before the key turns, and speed is polled at 2 Hz: all 19 ignition-offs in the logs read 0 last. The
-  one silence after a speed > 0 was an adapter freezing at 39 km/h (2026-10-11); as `ignition-off` it ended the trip
-  and saved a parked pose on the road.
-- Speed > 0 while `engine-off` is valid (hybrids, coasting with stop-start). Parked with the engine off, speed drops to 1 Hz: it only has to notice the car rolling, and it keeps the parked timeout fed (TRIP-LOGGER-SPEC §4).
-- A running engine's RPM never repeats exactly (0.25 rpm resolution, polled seconds apart: 0 repeats in 167 samples over three real trips). Some ECUs answer with the RPM latched at the last shutdown while awake with the engine off: a test car main test car reported 796.50 for 280 s while parked with the engine off, and 724.00 after the engine was stopped. Without the repeat rule that started a trip and blocked the parked timeout.
-- `ATRV` is read every 30 s (and logged). Voltage is a hint only (smart alternators make it unreliable for
-  engine-state decisions): the main test car read 11.9–12.1 V for 85 % of the driving on 2 of 14 drives, 14.0–14.4 V on the
-  rest.
-- The main test car reports PID `0D` = 0 while reversing (3 manoeuvres in 14 drives: 2–10 km/h by GNSS, the car turning
-  10–20 °/s, the phone still in the mount). Reversing isn't counted as driving forward; it looks like standing.
+- Speed > 0 while `engine-off` is valid (hybrids, coasting with stop-start). A CAN wheel speed counts as a valid read
+  (§16.3).
+- `ATRV` is read every 30 s and logged; voltage is a hint only (smart alternators).
 - Trip start/end on top of these states: TRIP-LOGGER-SPEC §4.
 
 ### 10.5 Errors and recovery
 
-- Isolated `no-data`/`timeout` on a speed poll: log it and continue.
-- `stopped` / `buffer-full`: send `"\r"`, wait for `>`, retry once.
-- 3 consecutive `timeout`s with no bytes at all: the adapter is hung → `ATWS`, re-run §9 from the cached configuration.
-  No answer to one `ATWS` (3 when standing) with the car moving (last speed > 0), or after the CAN monitor froze
-  (§16.2; then `ATI` after a 1 s pause before it and `ATZ` after it, each answer a `frozen` link event): the link is
-  closed and reopened as after a link
-  loss (§11), and its probe is retried with the reconnect's backoff instead of ending in an error. A frozen link
-  (the iOS stream) comes back this way; a frozen adapter only when it restarts. An MFi adapter that drops off iOS
-  then comes back only when it connects to iOS again (an app can't make it); after 25 s of waiting the vehicle
-  screen says to tap it in iOS Settings → Bluetooth.
+- Isolated `no-data`/`timeout` on a speed poll: log it and continue. `stopped` / `buffer-full`: `"\r"`, wait for `>`,
+  retry once.
+- 3 consecutive `timeout`s with no bytes: the adapter is hung → `ATWS`, re-run §9 from the cached configuration. No
+  answer to one `ATWS` (3 when standing) with the car moving, or after the CAN monitor froze (§16.2): the link is
+  closed and reopened as after a link loss (§11), its probe retried with the reconnect's backoff. An MFi adapter that
+  drops off the phone comes back only when it connects to the phone again; after 25 s of waiting the vehicle screen
+  says to tap it in iOS Settings → Bluetooth.
 - `?` on a command that worked before: the adapter reset itself (`LV RESET`, brown-out at cranking) → re-run §9.
 
 ## 11. Link loss, reconnect, background
 
-- BLE link lost → `reconnecting`; issue a pending `connect` (iOS keeps it open with no timeout) and reconnect automatically when the adapter returns (e.g. after cranking brown-out). MFi: wait for `EAAccessoryDidConnect`.
-- On reconnect: quick probe (steps 2–4), then §9 with the cached protocol and capabilities.
-- Background, first target: polling runs in TS, which keeps running while the app is alive. The trip logger keeps the app alive with background location during a trip and for a linger period after it (TRIP-LOGGER-SPEC §4.3). `bluetooth-central` and `external-accessory` background modes keep the links alive.
-- **Later: fully automatic wake** (not in the first target): `CBCentralManager` state restoration (`restoreIdentifier`) + a pending connect to the remembered adapter relaunches the app when the adapter powers up; `EAAccessoryDidConnect` for MFi; significant-location-change as a fallback for adapters that never sleep. Needs "Always" location permission to start location updates from the background. The native API already takes `restoreIdentifier` so this doesn't need a new module shape.
+- BLE link lost → `reconnecting`; a pending `connect` (iOS keeps it open with no timeout) reconnects when the
+  adapter returns. MFi: wait for `EAAccessoryDidConnect`. On reconnect: quick probe (steps 2–4), then §9 with the
+  cached protocol and capabilities.
+- Background: the TS loop runs while the app is alive; the trip logger keeps the app alive with background location
+  during a trip and for a linger period after it (TRIP-LOGGER-SPEC §4.3); `bluetooth-central` and
+  `external-accessory` keep the links alive; on Android the foreground service does.
+- **Later: fully automatic wake** of a non-running app: `CBCentralManager` state restoration (`restoreIdentifier` is
+  already in the API) + a pending connect, `EAAccessoryDidConnect` for MFi, significant-location-change as a
+  fallback. Needs "Always" location permission. Not built.
 
 ## 12. Android
 
-The same contract with two transports: BLE (same GATT catalog) and Classic SPP (UUID `00001101-0000-1000-8000-00805F9B34FB`, which covers the old non-MFi Classic dongles), in Kotlin ([ANDROID-SPEC.md](ANDROID-SPEC.md) §3). Compile-checked and run against the emulated adapter only so far.
+The same contract with two transports, BLE (same GATT catalog) and Classic SPP, in Kotlin (ANDROID-SPEC §3). Classic
+devices get the id `spp:<MAC>` so a dual-mode adapter doesn't collide with its BLE side. Road-tested with a Classic
+no-name clone on a tester's car (§13).
 
 ## 13. Testing
 
-- **ELM327 emulator** (`src/obd/emulator`, pure TS) implementing `Transport`: configurable latency per command, echo default on, CR/LF variants, NUL bytes, `SEARCHING...`, multiple responding ECUs, ignition on/off/engine states, and clone profiles (no response-count support, `v2.1` banner, `?` on `AT@1`/`STI`, drops the first command, occasional `STOPPED`). Also selectable in the dev UI as a fake adapter.
-- **Unit tests**: response parser (golden strings from real adapters, collected in `src/obd/__tests__/fixtures`), probe outcomes, init fallbacks, scheduler priorities and rate stats, engine-state transitions.
-- **Native logic** (`modules/vehicle-link/ios/Logic/LinkLogic.swift`): UART selection, UUID normalization/validation, write chunking, MFi id parsing, and `>` prompt framing are Foundation-only and covered by XCTest in `native-tests/` (run in CI on Linux). The CoreBluetooth/ExternalAccessory glue only compiles in the CI iOS build.
-- **JS bridge**: `NativeTransport` and `NativeDiscovery` are tested against a mocked native module; the config plugin is tested for the Info.plist keys.
-- **Field**: tested-adapter table below, filled from real drives.
+- **ELM327 emulator** (`src/obd/emulator.ts`, pure TS) implementing `Transport`: configurable latency, echo, CR/LF
+  variants, NUL bytes, `SEARCHING...`, multiple ECUs, ignition/engine states, K-line sessions (`klineSessionMs`),
+  clone profiles (no response count, `v2.1` banner, `?` on `AT@1`/`STI`, drops the first command, occasional
+  `STOPPED`), the STN pass filters, hardware filter and `STM` monitor with a per-profile broadcast list. Also the
+  developer's emulated adapters in the app (with a scripted drive).
+- **Unit tests:** parser (golden strings), probe outcomes, init fallbacks, scheduler priorities and rate stats,
+  engine-state transitions, the CAN shadow and monitor, the core's lifecycle and car list.
+- **Native logic** (`modules/vehicle-link/ios/Logic/LinkLogic.swift`, `android/**/logic/LinkLogic.kt`): UART
+  selection, UUID normalization, write chunking, MFi id parsing, `>` framing, with XCTest and JUnit coverage. The
+  CoreBluetooth/ExternalAccessory/BluetoothGatt glue only compiles in the CI builds.
+- **JS bridge:** `NativeTransport` and discovery tested against a mocked native module; the config plugin for its
+  Info.plist and manifest keys.
 
 ### Tested adapters
 
-| Adapter | Transport | Chip / ELM version | Profile | Car / protocol | Speed rate (Hz) | Latency p50 / p95 | Notes |
-| ------- | --------- | ------------------ | ------- | -------------- | --------------- | ----------------- | ----- |
-| OBDLink MX+ | MFi (`com.obdlink`) | STN2255 v5.10.3 / ELM327 v1.4b | — | Main test car / 6 (CAN 11-bit 500k) | 25–32 moving, 20 on one drive (`010D1`, `ATSH7E0` or `7E1`, `ATAT1`) | 16–19 / 49–65 ms; 30–49 / 70–86 ms on 4 drives (cause unknown) | 18 drives. Rare stalls: replies arrive one command late, then `STOPPED` → re-init (2–6 s gap). The VIN was missed with `7E1` pinned, and still on 3 of 4 drives with `7E0` (§9.1). |
-| OBDLink MX+ | MFi (`com.obdlink`) | STN2255 v5.10.3 / ELM327 v1.4b | — | Second test car / ISO 14230 KWP (K-line, `A5`) | 7–9 (`010D1`) | — | 3 drives. Found by the protocol search (§8.1); VIN read (5-line K-line format). First connect took 77 s: the init tried `ATSP6` again and searched again, which broke the fresh K-line session four times; the protocol found is now cached at once. |
-| No-name "OBD II" | Classic SPP (Android) | ELM327 v1.5 (no `AT@1` text beyond the default, no `STI`) | — | A tester's K-line car / `A5` (KWP fast init, `5` once found) | 5.3 uncapped (`010D1`); 1.8–1.9 at the 2 Hz cap | 169–177 ms p50 | 5 drives. Speed every poll, no dropouts, 0–3 speed errors a drive; navigated a 2 km route with no GNSS fix at all. First connect (first drive): 2 min 15 s to the first poll, the init searching again after each found session (§9.1, fixed). VIN read. |
-| vLinker FD-IOS | BLE | STN1151 v4.3.2 / ELM327 v2.2 | — | Main test car / A6 | 26–30 moving (p50 28), 21 standing | 29 / 45 ms | 2 sessions (2026-10-05), one a 1.75 km drive with a route; VIN read on the drive, not on the first short connect. |
+| Adapter | Transport | Chip / ELM | Car / protocol | Notes |
+| --- | --- | --- | --- | --- |
+| OBDLink MX+ | MFi (`com.obdlink`) | STN2255 / ELM327 v1.4b | CAN 11-bit 500k (`6`); K-line KWP (`A5`) on a second car | the main dev adapter; back-to-back it polls 25–32 Hz, latency p50 16–19 ms. Rare stalls (replies one command late, then `STOPPED` → re-init). Firmware 5.10.3 froze in the CAN monitor (§16.2); 5.13.1 doesn't. |
+| vLinker FD-IOS | BLE | STN1151 / ELM327 v2.2 | CAN (`A6`) | back-to-back 26–30 Hz, latency 29 ms. Over BLE the monitor carries ~150 frames/s of the five ids' 370; the two navigation ids arrive at full rate. Doesn't take `STM n`. |
+| No-name "OBD II" | Classic SPP (Android) | ELM327 v1.5, no `STI` | a tester's K-line car (`A5`) | 5.3 Hz uncapped, p50 170 ms; the speed every poll, no dropouts; navigated a 2 km route with no GNSS fix at all. |
 
 ## 14. Verification targets
 
-1. OBDLink MX+ (MFi) and at least one no-name BLE clone: discovered, probed, verified, polling on the main test car.
-2. Unknown BLE device that isn't an adapter (e.g. headphones, a watch): rejected with `no-uart-service` or `not-elm327` within 15 s, no crash.
-3. Speed rate measured and recorded per adapter; `010D1` and `ATSH` optimizations show a measurable gain or are auto-disabled.
-4. Engine state: start → `engine-running` within 5 s; stop-start stop → `engine-off` (not `ignition-off`); key off → `ignition-off` within 15 s of ECU silence.
-5. Link loss (unplug adapter while polling) → `reconnecting`; replug → polling again without user action.
-6. Emulator-based unit tests pass on Windows; `npx expo lint`, `npx tsc --noEmit` pass.
+1. The MFi adapter and a BLE adapter: discovered, probed, verified, polling on the main test car.
+2. An unknown BLE device that isn't an adapter: rejected with `no-uart-service` or `not-elm327` within 15 s.
+3. Engine state: start → `engine-running` within 5 s; stop-start stop → `engine-off`; key off → `ignition-off`
+   within 15 s of ECU silence.
+4. Link loss (unplug while polling) → `reconnecting`; replug → polling again without user action.
+5. Emulator-based unit tests, lint and typecheck pass.
 
 ## 15. Open items
 
-1. Test a vLinker FS/MS over `com.vgatemall` once one is available; until then their BLE+BT mode is the tested path.
-2. BLE poll rate measured on the vLinker FD-IOS (26–30 Hz, tested-adapter table): no BLE ceiling at the main test car's rate.
-   Still to measure: a cheap no-name clone, and the connection interval itself (§3.5).
-3. Verify Expo Modules event payload performance for scan batches; switch to typed arrays if needed.
-4. A native "repeat mode" (SPEC §3.1) isn't needed: speed is polled at 2 Hz (§10.2), and the JS loop reached 25–29 Hz with the MX+.
-5. The VIN (`0902`): missed on 3 of 4 main test car drives even when sent to the engine ECU. Now retried while polling, with
-   the last car on the protocol assumed meanwhile (§9.1). Next drives: the setup in the log (`… s before the log:`)
-   shows why the init read misses; `vin: read on retry n` how soon a retry gets it.
-6. Verify the auto-connect fix on device: open the app before the car wakes the MX+; it must connect once iOS reports the accessory.
-7. CAN shadow (§16.2) on the vLinker FD-IOS (BLE, STN1151): its break cost; and the listening share at 2 Hz on
-   both adapters. On 2026-10-11 it was deaf after its first break (the filter didn't open again); the next drive's
-   `reopen:` lines show which way opens it.
-8. The OBDLink MX+ froze in the CAN monitor on firmware 5.10.3 (§16.2). The vendor's 5.12.4 notes list a fix for a
-   lock-up of that firmware line ("CAN multi-frame message transmission would cause the device to lock up after 35
-   minutes of uptime"). On 5.13.1 with the filter opening (2026-10-12): no freeze in 13 min of listening over three
-   drives, the longest 7 min; the 35 min of the vendor's bug need a longer drive.
-9. The vLinker FD-IOS over BLE delivered 149 frames/s where the five ids send ~370/s (§16.2); the two ids navigation
-   uses (`215 228`, ~150/s) arrive at their full rate (2026-10-12). It doesn't take `STM n`.
+1. The vLinker FS/MS over `com.vgatemall` once one is available.
+2. A cheap no-name BLE clone (the Classic one is tested on Android only).
+3. The MX+ vendor's 35-minute lock-up bug in older firmware: a longer drive on 5.13.1 to confirm it is gone.
+4. Auto-wake (§11).
 
 ## 16. CAN monitor (STN)
 
-Passive listening to the CAN broadcast at the OBD port, for SPEC §2.1 Stage 2. STN adapters (`STI` answered) on a
-CAN car (protocol 6–9) only: plain ELM327s and clones have one receive filter and small buffers.
+Passive listening to the CAN broadcast at the OBD port (SPEC §2.1 Stage 2). STN adapters (`STI` answered) on a CAN
+car (protocol 6–9) only: plain ELM327s have one receive filter and small buffers.
 
-### 16.1 Port survey (developer)
+### 16.1 Port survey (developer; `can-monitor.ts`)
 
-`VehicleLinkCore.monitorCan({ ids, durationMs })`, from the ELM terminal (TRIP-LOGGER-SPEC §9.3): every id for 3 s,
-or the ids typed in the field (hex) for 10 s. It runs as an exclusive section, so polling pauses for its duration.
+`VehicleLinkCore.monitorCan({ ids, durationMs })` from the ELM terminal: every id for 3 s, or the ids typed (hex) for
+10 s, as an exclusive section. `ATH1`; `ATAR` (clears the speed ECU's `ATCRA`, which `STM` obeys); `STCMM0` (listen
+only); `STFPA <id>,7FF` per id (`000,000` for all; `STFAP` on older firmware); `STM` written without awaiting a
+prompt; a bare CR after `durationMs` (any character stops the monitor); then `ATAR`, `ATCRA<pinned ECU>`, `ATH0`.
+While the monitor runs the native module forwards every chunk as `onUnsolicited`. Output with headers on and spaces
+off: the id (3 hex digits on 11-bit CAN, 8 on 29-bit), then 0–8 data bytes. Result per id: frames per second, data
+lengths, the last bytes; logged as the link event `can-monitor`. Unfiltered monitoring isn't usable on either tested
+adapter (`BUFFER FULL`, and the MX+ answered `STOPPED` to polls for seconds after): it stays a 3 s survey.
 
-| Step | Command                                   | Why                                                                                                   |
-| ---- | ----------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| 1    | `ATH1`                                    | Ids in the output.                                                                                    |
-| 2    | `ATAR`                                    | Clears all custom filters, including the speed ECU's `ATCRA` (§9.2): it sets the CAN hardware filter, which `STM` obeys, so only `7E8` would pass. |
-| 3    | `STCMM0`                                  | Listen only, no ACKs (the default; older firmware may answer `?`, ignored).                            |
-| 4    | `STFPA <id>,7FF` per id; `000,000` for all | Pass filters. `STFAP` (the older name) when `STFPA` is refused; neither → the survey fails.           |
-| 5    | `STM`, written without awaiting a prompt  | Raw frames through the pass filters as set. Not `STMA`: it treats CAN as ISO 15765 and passes all.     |
-| 6    | bare CR after `durationMs`                | Any character stops the monitor; the adapter prints the rest of its output, `STOPPED` and the prompt. |
-| 7    | `ATAR`, `ATCRA<pinned ECU>`, `ATH0`       | The session as the init left it.                                                                      |
+### 16.2 The CAN monitor between polls ("the shadow"; `can-shadow.ts`)
 
-- While the monitor runs, the native module has no transaction in flight and forwards every chunk as `onUnsolicited`
-  (iOS and Android), so no native change is needed. The chunks go to the monitor, not to the link events.
-- A character written into a running monitor only stops it and is discarded: after a failure, the cleanup stops the
-  monitor before step 7.
-- Output, with headers on and spaces off: the id (3 hex digits on 11-bit CAN, 8 on 29-bit), then 0–8 data bytes. The
-  data length isn't printed (no `ATD1`).
-- Result per id: frames per monitored second, data lengths, the last bytes; totals: frames/s, chars/s, `BUFFER FULL`
-  lines. Shown in the terminal and logged as the link event `can-monitor` (TRIP-LOGGER-SPEC §6.4).
-- The emulator models `STFPA`/`STFPC`/`STCMM`, the hardware filter (`ATCRA`, with `X` digits and without an
-  argument), `STM` with a per-profile broadcast list (`broadcast`), and pass filters reaching request answers
-  (`passFiltersLeak`).
-
-Measured on the main test car, parked, engine running (2026-10-11):
-
-| Adapter                 | Filter                         | Heard                                                                 | Load                         |
-| ----------------------- | ------------------------------ | --------------------------------------------------------------------- | ---------------------------- |
-| OBDLink MX+ (MFi)       | 5 ids (215 228 82 78 202)      | all of it: 0x215 and 0x202 100 Hz, 0x082 66.7 Hz, 0x078 and 0x228 50 Hz | 367 frames/s, 7,300 chars/s |
-| vLinker FD-IOS (BLE)    | the same 5 ids                 | all of it, the same rates; one line in 3,668 arrived 2 bytes short     | 366 frames/s, 7,300 chars/s |
-| OBDLink MX+             | none (85 ids)                  | about a third (0x215 at 35 Hz), `BUFFER FULL`                          | 750 frames/s, 15,000 chars/s |
-| vLinker FD-IOS          | none                           | ~100 frames, then `BUFFER FULL` ended the monitor                      | —                            |
-
-- Unfiltered monitoring isn't usable on either adapter, and after it the MX+ timed out or answered `STOPPED` to polls
-  for up to ~7 s. It stays a 3 s survey, never a drive mode.
-- A frame shorter or longer than its id's usual length is a transport error: replay's decoding drops it.
-
-### 16.2 The CAN monitor between polls ("the shadow")
-
-The monitor runs between OBD polls while the ECU is awake; its raw frames go to the trip log (TRIP-LOGGER-SPEC §6.3
-`can_frame`, `can_window`). It is the mechanism under CAN primary (§16.3): standing, and while the car moves without
-fresh CAN speed, the polls run and the monitor listens in their breaks. A mode with the monitor on and navigation on
-OBD ("log only") existed until 2026-10-17 and is gone: the breaks cost both sides.
-
-- **Where it runs.** `CanShadow` (`src/obd/can-shadow.ts`) is the session's *idle monitor*
-  (`Elm327Session.setIdleMonitor`): it starts once the queue is empty, no exclusive section is open and a macrotask
-  has passed (so back-to-back commands don't start and stop it in between), and it is stopped before the next
-  command. The poller, RPM polls, `ATRV`, VIN retries and the terminal work unchanged.
+- **Where it runs.** `CanShadow` is the session's *idle monitor* (`Elm327Session.setIdleMonitor`): it starts once the
+  queue is empty, no exclusive section is open and a macrotask has passed, and is stopped before the next command.
+  The poller, RPM polls, `ATRV`, VIN retries and the terminal work unchanged.
 - **When.** Only while the ECU is awake (`engine-off`, `engine-running`); `standby` and `ignition-off` keep the OBD
-  probe (§10.3). Engine and ignition state come from OBD as without it (§10.4).
-- **OBD speed rate:** the usual 2 Hz (§10.2). A break on the MX+ costs ~160 ms (median; the poll itself 31 ms, the
-  stop, the two `ATCRA` and the restart the rest): at 5 Hz the monitor heard 19 % of a 13-min drive; 2 Hz leaves
-  about two thirds.
+  probe.
 - **Setup** (again after any other component's `ATCRA`/`ATCF`/`ATCM`/`ATAR`/`ATZ`/`ATWS`/`ATD`/`ATSP`/`ATH`/`ST…`
-  command, e.g. a VIN read or the survey): `ATH1`, `ATAR`, `STCMM0`, `STFPA` per id (`STFAP` fallback). Headers stay
-  on (the poll parser reads them).
-- **A break** is: stop, `ATCRA<pinned ECU>` (`7EX` / `18DAF1XX` with functional addressing), the polls, then `ATCRA`
-  (the receive filter open again) and `STM`. A window the adapter ends by itself (`BUFFER FULL`, a reset) leaves the
-  filter open: the next command still pins it first (the shadow stays "running" for the session until it has). The STN pass filters also pass broadcast frames into request answers: on
-  the MX+, `010D1` with the filters set answered with a wheel-speed frame (with the response count the adapter returns
-  the first message it passes). Pinning the receive filter keeps poll answers clean on any adapter, for two short
-  commands per break; the vLinker is an STN too.
-- **Only the ids asked for** are logged: a frame with any other id is a line that lost its start in transport (1 in
-  56,626 on the MX+), counted in the status as `garbled`.
-- **Stop:** a bare CR. One that times out is sent again: a CR reaching an adapter that has just stopped by itself
-  repeats its last command, `STM`.
+  command): `ATH1`, `ATAR`, `STCMM0`, `STFPA` per id (`STFAP` fallback). Headers stay on (the poll parser reads them).
+- **A break** is: stop, `ATCRA<pinned ECU>`, the polls, then the receive filter opened again and `STM`. The STN pass
+  filters also pass broadcast frames into request answers (with the response count the adapter returns the first
+  message it passes), so pinning keeps poll answers clean. A break costs ~160 ms on the MX+.
+- **Only the ids asked for** are logged: a frame with any other id is a line that lost its start (counted as
+  `garbled`).
+- **Stop:** a bare CR. One that times out is sent again. A stop character without an answer (the vLinker, rarely) is
+  followed by a second after 3× the slowest of the session's last 100 stops, within 200–1000 ms.
+- **The receive filter must open again before each window.** A bare `ATCRA` opened it only on MX+ firmware 5.10.3;
+  on later firmware and on the vLinker the monitor heard frames only in the first window after a full setup. So
+  **once per session a self-test** (~2 s) listens 250 ms after each of: the setup, the pin alone (must hear nothing),
+  `ATCRAXXX` after a pin, a bare `ATCRA` after a pin, a full setup after a pin; then `STM 20` to see whether the
+  adapter ends a window by itself after n frames. It picks the cheapest way that heard at least 30 % of what the
+  open filter heard and no more frames of other ids than of the ids, and writes one link event with every count
+  (`can-shadow: filter test: … → opens by ATCRAXXX from now on`). Nothing heard with the filter open (a silent bus):
+  tried again a minute later. **Backstop:** a way not answered `OK`, or 5 s of listening in a row hearing none of the
+  ids, moves to the next way for the session; deaf after the full setup too, the shadow is off. `ATCRAXXX` keeps the
+  pass filters and opens the filter on both tested adapters; the vLinker needs a full setup for every window.
 - **Failure → plain polling for the session** (link event `can-shadow: off: …`, the adapter restored with `ATAR`,
-  `ATCRA<pinned>`, `ATH0`, the speed cap back): a pass filter refused; the monitor ending by itself (`BUFFER FULL`, a
-  reset: the prompt arrives unasked) 3 times; 3 stops without a prompt.
-- **The receive filter must open again** before each window. The manual (OBDLink FRPM rev F, `ATCRA`): a bare
-  `ATCRA` or `ATAR` "reset the CAN hardware filter to its default state", the protocol's own filter (the OBD reply
-  ids), and `ATAR` also "clears all custom filters" (the pass filters); `X` digits are don't-cares. So the one-command
-  way to open it is `ATCRAXXX` (`ATCRAXXXXXXXX` on 29-bit), and `ATAR` alone is no way at all. A bare `ATCRA` opened
-  it on the MX+ with firmware 5.10.3 only (5.12.4 "corrected ATCRA to restore default filters"): with 5.13.1 and on
-  the vLinker (STN1151 v4.3.2) the monitor heard frames only in the first window after each full setup (13 of 13
-  windows that heard any, 2026-10-11), so listening was almost entirely deaf.
-  - **Measured, not assumed:** once per session after the first setup, a self-test (~2 s; up to ~5 s over BLE)
-    listens 250 ms after each of: the setup (the filter as `ATAR` left it), the pin alone (must hear nothing: `STM`
-    obeys it), `ATCRAXXX` after a pin, a bare `ATCRA` after a pin, a full setup after a pin; then sends `STM 20` to
-    see whether the adapter ends a window by itself after n frames (MX+ firmware 5.12.4+). `ATCRAXXX` goes before the
-    bare `ATCRA`, which clears the pass filters as well (both adapters, 2026-10-12: `ATCRAXXX` after it heard every id
-    on the bus, ~8 others for each one asked for). It picks the cheapest way that heard at least 30 % of what the open
-    filter heard and no more frames of other ids than of the ids (more fill the link and the stop's drain), and writes
-    one link event with every count and answer: `can-shadow: filter test: setup 35, pinned 0, ATCRAXXX "OK" 38, ATCRA
-    "OK" 0, setup again 39, STM n accepted (20 frames in 164 ms) → opens by ATCRAXXX from now on`. Nothing heard with
-    the filter open (a silent bus): no verdict, tried again a minute later.
-  - **Measured 2026-10-12** (four drives, the first build with the self-test): `ATCRAXXX` keeps the pass filters
-    and opens the filter on both adapters: the MX+ on 5.13.1 heard every id at its full rate (2 ids, then 5 at
-    7.2 KB/s), no frame of another id, listening 66–74 % of the time, stops' drain 22–51 ms (median). The vLinker
-    over BLE heard both navigation ids at their full rate (2.9 KB/s); its self-test, trying `ATCRAXXX` after a bare
-    `ATCRA` then, chose a full setup for every window: listening 48 %. It doesn't take `STM n`.
-  - **Backstop:** a way not answered `OK`, or 5 s of listening in a row hearing none of the ids, moves to the next
-    way for the session (`can-shadow: … opens by … from now on`); deaf after the full setup too, the shadow is off.
-- **A stop character without an answer** (the vLinker, 4 in 600 windows on 2026-10-12, two within one turn) is
-  followed by a second one after 3× the slowest of the session's last 100 stops, within 200–1000 ms, once 30 were
-  measured; until then 1 s. Its stops took at most 89 ms otherwise (a second after ~270 ms, not 1.1 s of nothing
-  heard); the MX+'s drain takes up to 455 ms and keeps the full second: a second character after the prompt would
-  start the monitor again (a CR repeats the last command).
-- **Into the log, per window** (`can_window`, TRIP-LOGGER-SPEC §6.3): the bytes received (the link's throughput:
-  the vLinker's BLE carried 149 frames/s of the 370/s the five ids send; the MX+ 367/s), the frames of ids not asked
-  for (a filter wide open, or lines that lost their start), the stop's latency from the stop character to the
-  prompt (the adapter draining its buffer: over BLE, over a second) and whether the first stop character got no
-  prompt, and how the filter was opened. The window ends with the first stop character. The transcript gets the
-  shadow's own exchanges for the first three of each kind (stop, pin, each way) and the setup's commands including
-  `ATCS` (the CAN error counters); answers that went wrong are link events (up to 30).
-- **The adapter froze in the monitor:** a stop gets no byte back at all (not even the frames still buffered), CR sent
-  twice; the event says what the window was (`… (window 412 ms, 150 frames, 3012 bytes, last output 18 ms before
-  the stop)`). The shadow goes off, and the link is reset with `ATI` after a 1 s pause, one `ATWS`, then `ATZ`
-  (each answer a `frozen` link event: an adapter still draining its buffer answers one of them); without an answer,
-  closed and reopened (§10.5), standing or moving. The adapter id and its chip and firmware (`STN2255 v5.10.3`) are stored, and the shadow stays
-  off on it (link event `can-shadow: off: the adapter froze in the monitor on this firmware (…)`) until the firmware
-  changes: at once when the car was moving; standing, only when the reconnect still reaches the adapter 20 s later
-  and it doesn't answer. Standing, the silence may be the car switched off: the MX+ powers down, and iOS reports it
-  gone within seconds (2026-10-11, 5.13.1: 3 s after the silent stop; a freeze kept the link up ~2 min).
-  The OBDLink MX+ on 5.10.3 froze twice in ~22 min of listening (2026-10-11), inside a window both times (once at
-  39 km/h, once standing), never without the monitor; iOS dropped it ~2 min later and it came back only when tapped in
-  iOS Settings → Bluetooth.
-- **Off:** turning the setting off restores the adapter the same way. A reinit drops the shadow; the next init sets it
-  up again.
-- **Not decoded on the phone** unless CAN primary is on (§16.3). Replay decodes the frames; counter and checksum
-  signals rebuild frame timing and catch lines garbled in transport. Frames outside the `can_window`s weren't heard.
-  Frames the stop drained are timed at the stop character (captured before it).
+  `ATCRA<pinned>`, `ATH0`): a pass filter refused; the monitor ending by itself (a reset: the prompt arrives unasked)
+  3 times; 3 stops without a prompt. `BUFFER FULL` is the link's capacity, not the adapter failing: it doesn't count,
+  and with more ids than navigation needs the shadow drops to those for the session (note `can: buffer full with 5
+  ids, listening to the 2 navigation needs`).
+- **The adapter froze in the monitor:** a stop gets no byte back at all, CR sent twice. The shadow goes off and the
+  link is reset with `ATI` after a 1 s pause, one `ATWS`, then `ATZ` (each answer a `frozen` link event); without an
+  answer, closed and reopened (§10.5). The adapter id with its chip and firmware are stored and the shadow stays off
+  on it (`can-shadow: off: the adapter froze in the monitor on this firmware (…)`) until the firmware changes: at
+  once when the car was moving; standing, only when the reconnect still reaches the adapter 20 s later and it
+  doesn't answer (standing, the silence may be the car switched off and the MX+ powering down).
+- **Into the log, per window** (`can_window`, TRIP-LOGGER-SPEC §6.3): duration, frames, bytes, frames of other ids,
+  the stop's latency, whether the first stop character got no prompt, how the filter was opened. Frames the stop
+  drained are timed at the stop character. The transcript gets the shadow's own exchanges for the first three of each
+  kind and the setup's commands including `ATCS`; answers that went wrong are link events (up to 30).
+- **Off:** turning the setting off restores the adapter the same way. A reinit drops the shadow; the next init sets
+  it up again.
 
-### 16.3 CAN primary (developer setting, on by default)
+### 16.3 Speed from the wheels (Settings → Car, on by default)
 
-With the shadow on, the navigator's speed comes from the wheels and the monitor listens without the polls' breaks:
-between them (~45 % of the time with five ids) wheel yaw lost the peaks of sharp turns (NAVIGATOR-SPEC §5.4).
+With the shadow on, the navigator's speed comes from the wheels and the monitor listens without the polls' breaks
+while the car moves.
 
 - **Decoded on the phone** (`services/vehicle-link/can-speed-feed.ts`) as replay decodes a log (`withCanSpeed`): the
   profile from the VIN's make and the ids heard, after 200 frames (none with a wheel or speed message after 3000:
-  noted, OBD stays); wheel samples averaged per 0.1 s (`CanSpeedAverager`, the same code); negative in reverse gear,
-  so the navigator and the map matching move the car backwards (NAVIGATOR-SPEC §5.3). Noted `can primary: speed from
-  the wheels, profile …`.
-- **A profile without wheel speeds** (9 of 41: VW PQ, Ford, Tesla Model 3, MG, BYD, Chrysler/Ram, Rivian) gives its
-  speed message instead (`CanSpeedFrom`: VW PQ's `Bremse_1`, Ford's `BrakeSysFeatures`, mostly the ABS module's, in
-  0.01–0.26 km/h steps against `010D`'s 1 km/h), averaged and signed by the gear the same way; the note adds `(its
-  speed message: no wheel speeds)`. Turns stay on the phone's gyro: wheel yaw needs each rear wheel. Without it such a
-  car kept the monitor on and the long window below every 10 s with nothing to decode.
-- **The link** (`VehicleLinkCore.pushCanSpeed`): CAN speed goes to the navigator and the trip detector, and to the
-  engine state as a speed read (it proves the ECU awake while no poll asks). OBD's speed is passed on only when the
-  last CAN speed is over 0.3 s old (replay's rule).
-- **No polls while the car moves:** the poller waits while the last CAN speed is under 0.5 s old and at least 1 km/h —
-  no speed, RPM or battery reads. A moving car's engine state needs none: its wheel speeds say the ECU is awake. A
-  standing car's don't: the body's bus keeps sending the wheels at 0 after the engine ECU is off (45 s of `NO DATA`
-  with them on 2026-10-15), so only the polls' silence tells `ignition-off`, and with it the monitor stops. Counted as
-  awake, the monitor kept opening until the MX+ slept in it, and it woke still streaming the bus: those starts took
-  49–219 s to connect.
-  Standing, or without fresh CAN speed (a deaf monitor, an unknown car), the polls run as always, and with them the
-  engine state and ignition-off.
+  noted, OBD stays); wheel samples averaged per 0.1 s (`CanSpeedAverager`, the same code as replay); negative in
+  reverse gear. Note `can primary: speed from the wheels, profile …`.
+- **A profile without wheel speeds** (VW PQ, Ford, Tesla Model 3, MG, BYD, Chrysler/Ram, Rivian) gives its speed
+  message instead (`CanSpeedFrom`, mostly the ABS module's), signed by the gear the same way; turns stay on the
+  phone's gyro.
+- **The link** (`VehicleLinkCore.pushCanSpeed`): CAN speed goes to the navigator, the trip detector and the engine
+  state (it proves the ECU awake while no poll asks). OBD's speed is passed on only when the last CAN speed is over
+  0.3 s old.
+- **No polls while the car moves:** the poller waits while the last CAN speed is under 0.5 s old and at least 1 km/h.
+  A standing car's wheels don't prove the ECU awake (the body's bus keeps sending the wheels at 0 after the engine
+  ECU is off), so only the polls' silence tells `ignition-off`, and with it the monitor stops; standing, or without
+  fresh CAN speed, the polls run as always.
 - **One long window for a moving car:** an OBD speed of at least 1 km/h without a fresh CAN speed pauses the polls
-  1.2 s once, so the monitor gets a window that can bring a CAN speed; one that comes keeps them paused as above. On
-  a slow link (polls answered in 60–240 ms, stops in 120–290 ms) the 2 Hz polls left it 0–70 ms, no CAN speed came
-  fresh, and the polls never paused: 50 s of driving without the wheels. No CAN speed in the window (a monitor gone
-  deaf): the polls run at 2 Hz, and the next window comes after 10 s.
-- **BUFFER FULL** (the monitor ending by itself with it) is the link's capacity, not the adapter failing: it doesn't
-  count towards the three self-endings that turn the shadow off (§16.2), and with more ids listened to than navigation
-  needs, the shadow drops to those for the session (note `can: buffer full with 5 ids, listening to the 2 navigation
-  needs`). 2026-10-13: five ids (~7.3 KB/s) without the polls' breaks outran the MX+'s link in 2–50 s, the adapter
-  delivering 361–367 of the 370 frames/s; three times a drive turned the shadow off as the car drove off. The two
-  navigation ids are ~2.9 KB/s.
-- **The log** says `can_primary: on` (TRIP-LOGGER-SPEC §6.2): OBD speed only while standing. A change of the
-  setting mid-drive is the note `can bus off|log|primary`, and the feed's `can primary: speed from the wheels` note
-  marks where the wheels took over. Replay through the app
-  (`replayTripInApp`, the viewer, `replay:regress`) then drives the navigator on the decoded wheels
-  (`canPrimaryInput`), as the phone did.
-- **Only with a live monitor:** nothing pauses the polls unless the monitor is on this session and hasn't failed
-  (`VehicleLinkCore.canPrimary`). With the setting on and an adapter or car that can't (not an STN, not CAN, the
-  firmware froze before) the link polls as without it: the long window (above) would otherwise drop 1.2 s of OBD
-  speed every 10 s with nothing listening. The snapshot says why the wheels can't be read (`canOff`: `adapter`,
-  `car`, `firmware`), and the Car page shows it (TRIP-LOGGER-SPEC §9.1).
-- **The setting** is Settings → Car → *Speed from the wheels*, **on by default**: other cars' logs show how the
-  wheels go only if it is on. Off: no CAN command at all. Settings stored before (`can` off / log / primary, typed
-  ids) are dropped on load, so every phone starts on the default.
+  1.2 s once, so the monitor gets a window that can bring a CAN speed (on a slow link the 2 Hz polls left it no
+  window at all); none in the window, the polls run and the next window comes after 10 s.
+- **Only with a live monitor:** nothing pauses the polls unless the monitor is on this session and hasn't failed.
+  With the setting on and an adapter or car that can't, the link polls as without it. The snapshot says why
+  (`canOff`: `adapter`, `car`, `firmware`) and the Car page shows it.
+- **The log** says `can_primary: on` (TRIP-LOGGER-SPEC §6.2); a change mid-drive is the note `can bus off|primary`.
+  Replay through the app drives the navigator on the decoded wheels, as the phone did.
+- **Off:** no CAN command at all. Older stored settings (typed ids, a log-only mode) are dropped on load.
 
-### 16.4 Ids picked for the car
+### 16.4 Ids picked for the car (`can-auto-ids.ts`)
 
-With the setting on (`can_shadow: auto` in the log), `services/vehicle-link/can-auto-ids.ts` picks them:
-
-- **Candidates from the VIN's make:** every platform's ids that navigation needs — the wheel speeds (and their
-  direction signals), else the speed; the gear. Up to 11 for a make (Volkswagen); Mazda's are `215 228`.
-- **Probing:** the shadow listens to up to 8 at a time; after 2 s of frames the profiles of the make are matched
-  against the ids heard (with their DBC lengths), and the first with a speed id heard wins. The shadow then listens to
-  that platform's ids only (unless it already does: no second setup), and they are kept per VIN and tried first
-  next time. Noted `can auto: mazda/…, ids 215 228`.
-- **A batch not heard:** none of its ids in 3 s of listening (`PROBE_SILENT_US`): the port doesn't carry them (a
-  gateway), and the next batch is tried. Under the monitor's own 5 s backstop (§16.2), which would blame the adapter's
-  filter and turn the monitor off before the next batch; a replaced monitor no longer runs that backstop.
-- **Nothing to pick:** no VIN yet (it waits; the VIN read late starts it), a make without a CAN profile, or none of
-  the candidates heard: noted, the monitor stays off and the navigator on OBD. Another VIN starts over.
-- **Remembered per VIN** (`vehicleLink.canAutoNone`): none heard on 2 drives (with the same candidate ids) and the
-  car is OBD only from the start, no monitor, no probing. A drive counts only if OBD showed the car moving (a fresh
-  speed of at least 1 km/h) during some of that silent listening: parked with the ECU awake (the main test car's
-  answers with the engine off), the wheels may not be on the bus yet; that drive is OBD only, noted `not counted`.
-  (Waiting for the car to move instead would leave a standing car to the monitor's backstop above, which turns it
-  off after ~15 s of silence.) New candidates (profiles from a newer app) or turning
-  *Speed from the wheels* off and on try again; ids heard later forget it. Two drives, not one: a single deaf session
+- **Candidates from the VIN's make:** every platform's ids that navigation needs (the wheel speeds and their
+  direction signals, else the speed; the gear). Up to 11 for a make.
+- **Probing:** the shadow listens to up to 8 at a time; after 2 s of frames the make's profiles are matched against
+  the ids heard, and the first with a speed id heard wins. The shadow then listens to that platform's ids only, kept
+  per VIN (`vehicleLink.canAutoIds`) and tried first next time. Note `can auto: <make>/…, ids …`. A batch not heard
+  in 3 s (`PROBE_SILENT_US`): the next batch (under the monitor's own 5 s backstop).
+- **Nothing to pick:** no VIN yet (it waits), a make without a profile, or none of the candidates heard: the monitor
+  stays off and the navigator on OBD. Another VIN starts over.
+- **Remembered per VIN** (`vehicleLink.canAutoNone`): none heard on 2 drives (with the same candidate ids) while OBD
+  showed the car moving during some of the silent listening → the car is OBD only from the start. Parked with the
+  ECU awake the wheels may not be on the bus yet: that drive is OBD only, noted `not counted`. New candidates, or
+  turning the setting off and on, try again; ids heard later forget it. Two drives, not one: a single deaf session
   must not take the wheels from a car that has them.
-- Typing ids (a developer field until 2026-10-17) is gone: the ELM terminal's survey (§16.1) is the tool for a car
-  without a profile.
+- A car without a profile: the ELM terminal's survey (§16.1) is the tool.

@@ -322,6 +322,13 @@ npm run replay:can -- trip.ulg --profile toyota/toyota/toyota_nodsu_pt_generated
 npm run replay:mm -- trip.ulg --start 300 --jam 300:inf --trace 300:420 # one jammed start, second by second
 npm run replay:places -- --mm '{"particles":1000}'                    # jammed drives scored by where they end (places.json)
 npm run replay:crossings -- tools/triplog/logs/*.ulg                   # roads the true path crossed away from junctions
+npm run replay:doubt                                                   # the dot's doubt from Wi-Fi/cell fixes over every log (NAVIGATOR-SPEC §6.1a)
+npm run replay:offroad -- trip.ulg                                     # samples with the dot off every road above 40 km/h
+npm run replay:junction -- --graph <file> --at lat,lon                 # the roads around a junction, for a test fixture
+npm run replay:imuspeed -- tools/triplog/logs/*.ulg [--chain]          # the phone's own speed estimate against OBD (NAVIGATOR-SPEC §9.7)
+npm run replay:turns -- tools/triplog/logs/*.ulg [--along] [--route]   # phone-only turn-anchored map matching on the jammed drives
+npm run can:profiles                                                   # regenerate src/nav/odometry/can/signals.json from the opendbc submodule
+npm run voice:render                                                   # record the spoken maneuvers (ROUTING-SPEC §8.5)
 npm run replay:parity -- tools/triplog/logs/*.ulg                      # does the app replay reproduce the phone's dot?
 npm run replay:graph -- --graph tools/tiles/out/release/ukraine.graph.bin trip.ulg
 npm run replay:view -- --graph tools/tiles/out/release/kyiv.graph.bin  # viewer with a given graph

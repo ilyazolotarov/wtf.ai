@@ -1,6 +1,6 @@
 # wtf.ai — Updates: app and maps
 
-Status: v1 (2026-10-10). How a phone learns of a newer app or map and gets it. The server side of JS updates is
+How a phone learns of a newer app or map and gets it. The server side of JS updates is
 [OTA.md](OTA.md); the bucket layout and the Worker's routes are there too.
 
 ## 1. What updates, and how
@@ -104,9 +104,8 @@ its own, so a failed prune never fails a publish. It never removes what `latest`
   drives. Not when the timer fires more than 5 s late: the process was frozen and wakes because the driver opens it.
 - **Native update**: prompt. On Android also a notification (local: the app posts it when its own check finds the
   build, no push server), once per build ("wtf.ai update ready"; a tap opens App
-  update), taken back once it is installed: a driver who opens the app only in the car, where the prompt waits, sees
-  it at home. Android 13+ asks once whether the app may
-  notify, in front and not while moving. Builds before 2026-10-15 lack the notification.
+  update; `modules/app-notice`), taken back once it is installed: a driver who opens the app only in the car, where
+  the prompt waits, sees it at home. Android 13+ asks once whether the app may notify, in front and not while moving.
 - **The active region's map is outdated** (tiles, graph, search index or shared files differ from the catalog):
   - on an unmetered network and the download is at most **300 MB**: download it in the background, no prompt. It is
     installed once no trip records and no route is active; until then it waits, verified, and the old map stays in use.

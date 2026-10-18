@@ -23,7 +23,8 @@ If the car stands and the dot is clearly on the wrong road: press and hold the m
 ## "Is the car where the dot is?"
 
 When you set off without GPS, the app starts from where you parked. If Wi-Fi suggests somewhere else, it asks. *Yes*
-keeps the parking spot; *No* lets you show where the car is; *Not sure* leaves it until GPS settles it.
+keeps the parking spot; *No* lets you show where the car is. Not sure? Leave it: the question goes away once GPS
+settles it.
 
 ## Without an adapter
 

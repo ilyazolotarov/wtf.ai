@@ -12,8 +12,8 @@ A development build, field-tested in one car (and a few drives in a second) with
 
 What works:
 
-- **Vehicle link:** an OBD-II adapter over Bluetooth, MFi (OBDLink MX+) or BLE ELM327 (tested: vLinker FD-IOS). Speed is polled at 25–30 Hz on the test car.
-- **Position without GPS:** dead reckoning from OBD speed and the phone gyro, fused with GNSS in an EKF that calibrates itself while driving. The pose at engine-off starts the next drive.
+- **Vehicle link:** an OBD-II adapter over Bluetooth: MFi (OBDLink MX+) or BLE ELM327 (vLinker FD-IOS) on iPhone, BLE or classic Bluetooth on Android (a no-name clone road-tested). Speed is polled twice a second; on STN adapters (OBDLink, vLinker) the app listens to the CAN bus instead and takes the wheel speeds and gear, on by default (Settings → Car).
+- **Position without GPS:** dead reckoning from the car's speed and the phone gyro, fused with GNSS in an EKF that calibrates itself while driving. The pose at engine-off starts the next drive.
 - **Spoofing:** fixes outside Ukraine, or ones that jump away from where the car could be, are refused, and the map says so.
 - **Map matching:** a particle filter holds the position on the road network while GPS is out, and shows other roads the car may be on.
 - **Putting the car on the map:** the driver can set the position and heading by hand while the car stands.
@@ -24,7 +24,7 @@ What works:
 - **Android:** an APK for volunteer testers, tested on emulators; Bluetooth on Android hasn't met a real adapter yet.
 - **Without an adapter** (experimental, a developer setting): the phone's own speed estimate and turn-based map matching, with the driver placing the car.
 
-Not yet: CAN wheel speeds and yaw rate (Stages 2–3 of [the spec](docs/SPEC.md)), waking the app when the car starts, and a logged drive with real spoofing (integrity is tuned on simulated spoofs).
+Not yet: a CAN yaw rate (Stage 3 of [the spec](docs/SPEC.md); turns from the rear wheels' speed difference exist as an experimental setting), waking the app when the car starts, and a logged drive with real spoofing (integrity is tuned on simulated spoofs).
 
 Built with Expo SDK 57, React Native, TypeScript and Expo Router. Development happens on Windows; unsigned iOS builds come from GitHub Actions macOS runners and are sideloaded with AltStore. Android APKs come from the same CI ([docs/ANDROID-TESTING.md](docs/ANDROID-TESTING.md)).
 
@@ -99,7 +99,8 @@ CI runs these plus `expo-doctor` and the iOS and Android builds, each when what 
 
 - `tools/replay`: replays trip logs through the app's navigator, benchmarks, a browser viewer of drives, route planning and route-time checks ([README](tools/replay/README.md)).
 - `tools/tiles`: builds the offline map release: vector tiles, road graph, search index ([README](tools/tiles/README.md)).
-- `tools/triplog`: Python reader of the trip logs, and the log backup ([README](tools/triplog/README.md)).
+- `tools/triplog`: Python reader of the trip logs, the log backup and tester codes ([README](tools/triplog/README.md)).
+- `tools/can`: the opendbc submodule and the CAN profile generator (`npm run can:profiles`); `tools/voice`: records the spoken maneuvers; `tools/ota`: signed JS updates and uploads of builds and maps ([docs/OTA.md](docs/OTA.md)).
 
 ## Privacy
 
@@ -115,5 +116,7 @@ Position data stays on the device; there is no position upload. Trip logs leave 
 - [Map matching (road graph, particle filter)](docs/MAPMATCH-SPEC.md)
 - [Routing](docs/ROUTING-SPEC.md)
 - [Address search](docs/SEARCH-SPEC.md)
+- [App and map updates](docs/UPDATES-SPEC.md), [OTA JS updates](docs/OTA.md)
 - [Android](docs/ANDROID-SPEC.md) and its [tester guide](docs/ANDROID-TESTING.md)
+- [Store builds and review](docs/STORE-REVIEW.md)
 - [CI](docs/CI.md)

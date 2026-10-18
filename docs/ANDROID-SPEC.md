@@ -1,161 +1,118 @@
 # wtf.ai — Android Specification
 
-Status: v2 (2026-10-10). The Android build for volunteer testers. Companion to [SPEC.md](SPEC.md); tester guide:
+The Android build for volunteer testers. Companion to [SPEC.md](SPEC.md); tester guide:
 [ANDROID-TESTING.md](ANDROID-TESTING.md).
 
 ## 1. Goal and constraints
 
-- Volunteer testers run the app on their own Android phones. We have **no Android device**, so nothing may reach them
-  that CI has not installed and exercised on an emulator.
-- Same product, same TypeScript core (`src/nav`, `src/obd`, `src/triplog` stay untouched). Android means: two Kotlin
-  Expo modules with the same JS contract as the Swift ones, a few UI fallbacks, a foreground service, and CI.
-- No EAS, no Play Store account. Distribution: a **signed release APK** from GitHub Actions (artifact, optionally sent
-  to Telegram like the IPA). Testers enable "install unknown apps".
-- Unlike iOS, **Android can be built and run on a Windows PC** (Android SDK + emulator, no Mac needed), so the native
-  iteration loop is local, and CI is the safety net.
+- Volunteer testers run the app on their own Android phones. We have **no Android device**: everything is checked
+  on emulators, and testers' trip logs and Sentry reports are the field data.
+- Same product, same TypeScript core (`src/nav`, `src/obd`, `src/triplog` untouched). Android means: Kotlin sides of
+  the Expo modules with the same JS contract as the Swift ones, a few UI fallbacks, a foreground service, and CI.
+- No Play Store account yet. Distribution: a **signed release APK** from GitHub Actions, downloaded from the website
+  and updated from the app (UPDATES-SPEC §3). The store path: STORE-REVIEW.md.
+- Android builds and runs on the Windows PC (Android SDK + emulator), so the native iteration loop is local and CI is
+  the safety net.
 
 ## 2. What Android changes (decisions)
 
 | Topic | Decision |
 | --- | --- |
-| Adapter transports | **BLE** (`BluetoothGatt`) and **Classic Bluetooth SPP** (RFCOMM, UUID `00001101-…`). No MFi: Android needs no authorization, so the OBDLink MX+ and most cheap ELM327 clones (Classic) work directly. The JS transport kind `mfi` gets a sibling `spp`; the ELM327 layer is unchanged. |
-| Position | Platform `LocationManager`, **no Google Play services dependency**: `gps` provider = satellite fixes, `network` provider = coarse Wi-Fi/cell fixes (the iOS fallback fixes the EKF already uses under jamming). Satellite fix = has speed, as on iOS. |
-| IMU | `SensorManager`: `TYPE_GYROSCOPE`, `TYPE_GRAVITY`, `TYPE_LINEAR_ACCELERATION`, `TYPE_GAME_ROTATION_VECTOR` (no magnetometer, like `xArbitraryZVertical`), raw `TYPE_MAGNETIC_FIELD` for logging. 100 Hz, batched like iOS. |
-| Clock | `SystemClock.elapsedRealtimeNanos()` in µs. Sensor events and `Location.elapsedRealtimeNanos` use it natively, so the GNSS fix time needs no wall-clock mapping (better than iOS). |
-| Conventions | Kotlin normalizes to the iOS conventions the TS code assumes: gravity is the **true gravity direction** (Android's `TYPE_GRAVITY` points up, so it is negated), and user acceleration is CoreMotion's (`total = gravity + userAcceleration`, so `TYPE_LINEAR_ACCELERATION` is negated too: a push upward is a negative z); m/s², rad/s, course in radians, invalid fields omitted. A parity test pins this (§5). |
-| Background | One **foreground service** (types `location` + `connectedDevice`) started with a trip, with a persistent notification and a partial wake lock. Without it Android stops sensors and BLE/SPP polling when the screen is off. No "Always" location permission needed. |
-| Permissions | `ACCESS_FINE_LOCATION`, `BLUETOOTH_SCAN` (`neverForLocation`) + `BLUETOOTH_CONNECT` (Android 12+; legacy `BLUETOOTH`/`BLUETOOTH_ADMIN` ≤ 11), `POST_NOTIFICATIONS` (13+), `FOREGROUND_SERVICE_LOCATION`, `FOREGROUND_SERVICE_CONNECTED_DEVICE`, `WAKE_LOCK`, `HIGH_SAMPLING_RATE_SENSORS`. All from config plugins, never by hand in `android/`. |
-| Pairing | Classic adapters must be bonded (PIN 1234/0000). The Vehicle screen lists bonded devices plus discovery results; tapping an unbonded one calls `createBond()` and the system PIN dialog does the rest. |
-| Icons | `expo-symbols` already renders Material Symbols on Android, and the `Icon` map keys are Material names: add `android: <key>` to each entry. |
-| Blur | `BlurView` on Android needs a `BlurTargetView` and `blurMethod`. Panels use `dimezisBlurViewSdk31Plus` with `blurReductionFactor` 1 (expo-blur's default 4 turns the panels' intensity 35 into a ~3 dp radius that the tint hides), and on Android 12+ the map renders into a `TextureView` (`androidView="texture"`): the default `GLSurfaceView` is not part of the view drawing the blur samples, so the blur came out empty. Android 10–11 get no blur (too slow over a moving map) and `GlassFill` swaps the 35 % tint for a dense one (`panelSolid`, 86 %) so text stays readable. |
-| Offline maps | MapLibre RN supports Android offline packs. The dev map source on the LAN is cleartext HTTP, so debug builds allow cleartext traffic (`expo-build-properties`); release does not. |
-| Vendor battery killers | Xiaomi, Samsung, Huawei kill foreground services. The tester guide (ANDROID-TESTING.md §4) names the per-vendor steps; the app doesn't open the exemption screen itself yet. |
+| Adapter transports | **BLE** (`BluetoothGatt`) and **Classic Bluetooth SPP** (RFCOMM, UUID `00001101-…`). No MFi: the OBDLink MX+ and cheap ELM327 clones work directly. The JS transport kind `spp`; the ELM327 layer is unchanged. |
+| Position | Platform `LocationManager`, **no Google Play services**: the `gps` provider = satellite fixes (with speed), `network` = coarse Wi-Fi/cell fixes. |
+| IMU | `SensorManager`: `TYPE_GYROSCOPE`, `TYPE_GRAVITY`, `TYPE_LINEAR_ACCELERATION`, `TYPE_GAME_ROTATION_VECTOR` (no magnetometer in the frame), raw `TYPE_MAGNETIC_FIELD` for logging. 100 Hz, batched like iOS. Phones without gravity / linear-acceleration sensors derive them from the accelerometer. |
+| Clock | `SystemClock.elapsedRealtimeNanos()` in µs: sensor events and `Location.elapsedRealtimeNanos` use it natively. |
+| Conventions | Kotlin normalizes to the iOS conventions the TS assumes: gravity is the **true gravity direction** (Android's `TYPE_GRAVITY` points up, so it is negated) and user acceleration is CoreMotion's (`TYPE_LINEAR_ACCELERATION` negated); m/s², rad/s, course in radians, invalid fields omitted. A parity test pins this (§5). |
+| Background | One **foreground service** (types `location` + `connectedDevice`) started with a trip, with a persistent notification ("wtf.ai is recording your trip") and a partial wake lock. Without it Android stops sensors and Bluetooth polling with the screen off. No "Always" location. |
+| Permissions | `ACCESS_FINE_LOCATION`, `BLUETOOTH_SCAN` (`neverForLocation`) + `BLUETOOTH_CONNECT` (12+; legacy `BLUETOOTH`/`BLUETOOTH_ADMIN` ≤ 11), `POST_NOTIFICATIONS` (13+), `FOREGROUND_SERVICE(_LOCATION, _CONNECTED_DEVICE)`, `WAKE_LOCK`, `HIGH_SAMPLING_RATE_SENSORS`, `REQUEST_INSTALL_PACKAGES` (sideloaded builds only). All from config plugins (`modules/vehicle-link/app.plugin.js`, `app.json`), never by hand in `android/`. The Bluetooth dialog is shown at most once per process, and never on devices without an adapter. |
+| Pairing | Classic adapters must be bonded (PIN 1234/0000). The Vehicle screen lists bonded devices plus discovery results; tapping an unbonded one calls `createBond()`. |
+| Icons | `expo-symbols` renders Material Symbols on Android; the `Icon` map keys are Material names with an `android` entry each. |
+| Blur | Panels use `dimezisBlurViewSdk31Plus` with `blurReductionFactor` 1, and on Android 12+ the map renders into a `TextureView` (the default `GLSurfaceView` isn't part of the view the blur samples). Android 10–11 get no blur and `GlassFill` uses a dense tint (`panelSolid`, 86 %). |
+| Offline maps | MapLibre RN offline packs. Debug builds allow cleartext traffic for a LAN map source; release does not. |
+| Update notification | `modules/app-notice`: a local notification when the app's own check finds a new build (UPDATES-SPEC §5.2). |
+| Vendor battery killers | Xiaomi, Samsung, Huawei kill foreground services. The tester guide names the per-vendor steps; the app doesn't open the exemption screen itself. |
+| `minSdk` | 29 (Android 10): where foreground service types start; Android 8–9 are a few percent of phones and untestable here. |
 
 ## 3. Implementation
 
-- `modules/sensor-capture` and `modules/vehicle-link` have Kotlin sides with the same JS contracts as the Swift ones
-  (`SensorCaptureModule.ts`, `VehicleLinkModule.ts`); `src/nav`, `src/obd` and `src/triplog` are unchanged.
+- `modules/sensor-capture`, `modules/vehicle-link`, `modules/audio-output` and `modules/app-notice` have Kotlin sides
+  with the same JS contracts as the Swift ones.
 - Mapping and batching live in plain Kotlin (`modules/*/android/**/logic/`, no `android.*` imports): GNSS and motion
-  payloads, `ImuBatcher`, and the link logic (UUID normalizing, UART selection, chunking, `>` framing) ported from
-  the Swift with its test vectors. JUnit tests in `native-tests-android/`.
+  payloads, the IMU batcher, and the link logic (UUID normalizing, UART selection, chunking, `>` framing) ported from
+  the Swift with its test vectors. JUnit tests in `native-tests-android/` (plain JVM).
 - **Vehicle link:** BLE (`connectGatt(TRANSPORT_LE)`, MTU request, notifications, write queue) and Classic SPP
-  (bonding, the secure socket, then the insecure and channel-1 fallbacks many clones need). Classic devices get the id
-  `spp:<MAC>` (BLE keeps the bare MAC) so a dual-mode adapter doesn't collide. `getMfiAccessories` returns `[]`.
-- **Sensors:** phones without gravity / linear-acceleration sensors (and some emulators) derive them from the
-  accelerometer.
-- **Trip service:** a foreground service (types location + connected device, notification "wtf.ai is recording your
-  trip", partial wake lock) runs while a trip records.
-- **Permissions:** the Bluetooth permission dialog is shown at most once per process, and never on devices without an
-  adapter (a restart loop on the emulator taught that).
+  (bonding, the secure socket, then the insecure and channel-1 fallbacks clones need). Classic devices get the id
+  `spp:<MAC>`. `getMfiAccessories` returns `[]`.
+- **Trip service:** the foreground service runs while a trip records.
 
 ## 4. CI/CD: nothing broken reaches a tester
 
 | Job | What it proves | When |
 | --- | --- | --- |
-| `checks` | lint, tsc, Jest (Android branches included) | per the CI plan ([CI.md](CI.md)) |
-| `native-logic-android` | the Kotlin logic tests on a plain JVM (`native-tests-android/`) | Android-native changes |
-| `build-android` | `expo prebuild --platform android`, `./gradlew assembleRelease`; uploads the signed APK | `main`, Android-native changes, `[build android]` |
+| `checks` | lint, tsc, Jest | per the CI plan ([CI.md](CI.md)) |
+| `native-logic-android` | the Kotlin logic tests on a plain JVM | Android-native changes |
+| `build-android` | `expo prebuild --platform android`, `./gradlew assembleRelease`; the signed APK | `main`, Android-native changes, `[build android]` |
 
-- **Emulator smoke test** (`scripts/android-smoke.sh`, local only; it was too slow for CI): installs the APK,
-  grants permissions, launches, and checks that the app renders its first screen, receives GNSS fixes from the
-  emulator, connects the simulated OBD adapter (`wtfai://vehicle?emulators=1`, the same switch as Developer → Show
-  emulated adapters), starts the IMU and survives; writes screenshots and logcat.
-  `bash scripts/android-smoke.sh path/to/app.apk out-dir`.
-- **Local build and emulator** (Windows, no Android Studio needed): the SDK command-line tools with
-  `platform-tools`, `emulator`, `platforms;android-36`, `build-tools;36.0.0`, `ndk;27.1.12297006`, `cmake;3.30.5` and
-  an x86_64 Google APIs system image (install with `cmdline-tools/latest/bin/android.exe sdk install "<pkg>"`: the
-  `sdkmanager.bat` wrapper splits package names at `;`), and a JDK 17 for Gradle. `npx expo prebuild --platform
-  android --no-install` (it rewrites `package.json`'s `android`/`ios` scripts: restore them), then `cd android &&
-  ./gradlew assembleDebug -PreactNativeArchitectures=x86_64` (~10 min cold, ~1 min after). The debug dev client asks
-  Metro for a manifest signed with the OTA key (`app.json` `updates.codeSigningCertificate`), which only the owner
-  holds: for a local build drop the two `expo.modules.updates.CODE_SIGNING_*` entries from the generated
-  `AndroidManifest.xml`. Test with a 3-button navigation bar (`cmd overlay enable
-  com.android.internal.systemui.navbar.threebutton`, gestural off): most phones have one, and it is what hid the
-  bottom bar. The large-text sweep (UI-SPEC §8) runs against this emulator.
+- **Emulator smoke test** (`scripts/android-smoke.sh`, local only: too slow for CI): installs the APK, grants
+  permissions, launches, and checks that the app renders its first screen, receives GNSS fixes from the emulator,
+  connects the emulated OBD adapter (`wtfai://vehicle?emulators=1`), starts the IMU and survives; writes screenshots
+  and logcat. `bash scripts/android-smoke.sh path/to/app.apk out-dir`.
+- **Local build and emulator** (Windows, no Android Studio): the SDK command-line tools with `platform-tools`,
+  `emulator`, `platforms;android-36`, `build-tools;36.0.0`, `ndk;27.1.12297006`, `cmake;3.30.5` and an x86_64 Google
+  APIs system image, and a JDK 17 for Gradle. `npx expo prebuild --platform android --no-install` (it rewrites
+  `package.json`'s `android`/`ios` scripts: restore them), then `cd android && ./gradlew assembleDebug
+  -PreactNativeArchitectures=x86_64`. The debug dev client asks Metro for a manifest signed with the OTA key, which
+  only the owner holds: for a local build drop the two `expo.modules.updates.CODE_SIGNING_*` entries from the
+  generated `AndroidManifest.xml`. Test with a 3-button navigation bar (`cmd overlay enable
+  com.android.internal.systemui.navbar.threebutton`): most phones have one. The large-text sweep (UI-SPEC §8) runs
+  against this emulator.
 - **Signing:** a stable keystore (`ANDROID_KEYSTORE_BASE64`, `_PASSWORD`, `_KEY_ALIAS`, `_KEY_PASSWORD`;
   `bash scripts/android-keystore.sh` creates the key outside the repo and prints the `gh secret set` commands), so
   APK updates install over the previous one and keep app data. The secrets belong to the GitHub environment
-  `android-release`, which only `main` may use, never to the repository: whoever holds the key can ship an APK that
-  installs over the testers' app, and a workflow edited on a branch could leak a repository secret. Branch APKs
-  (compile checks, `[build android]`) are therefore signed with a debug key: a tester must uninstall `main`'s APK
-  (losing its data) to try one.
-- **What CI cannot prove:** real BLE/SPP adapters and OEM battery killers. The first tester round is staged: one
-  tester with a common phone and a Classic adapter, using the tester guide; trip logs come back and are replayed with
-  `replay:parity`, then the wider group. Phone sensor quirks (gyro noise, GNSS lag per model) come from those logs
-  (SPEC §9 item 17).
+  `android-release`, which only `main` may use: whoever holds the key can ship an APK that installs over the testers'
+  app, and a workflow edited on a branch could leak a repository secret. Branch APKs are signed with a debug key: a
+  tester must uninstall `main`'s APK to try one.
+- **What CI cannot prove:** real adapters and OEM battery killers. Testers' trip logs are replayed with
+  `replay:parity` and `replay:regress --testers`.
 
-## 4.1 Logging and metrics (Sentry)
+### 4.1 Logging and metrics (Sentry; `src/services/telemetry.ts`, `src/config/sentry.ts`)
 
-We cannot watch testers' phones, so the app reports what it can, through the existing Sentry setup
-(`src/config/sentry.ts`: EU region, scrubbing in `sentry-scrub.ts`, logs on, breadcrumbs from the link and recorder).
-Same privacy rule as SPEC §2: no coordinates, no VINs, no adapter serials; the scrubber stays the single gate.
+We cannot watch testers' phones, so the app reports what it can through Sentry (EU region, scrubbing in
+`sentry-scrub.ts`, logs on, breadcrumbs from the link and recorder). Same privacy rule as SPEC §2: no coordinates, no
+VINs, no adapter serials; the scrubber is the single gate.
 
-- **Tags on every event** (set once at startup): `os` (`android`), `os.version`, `sdk_int`, `device.model`/`manufacturer`
-  (from `expo-device`), `build_sha`, `transport` (`ble` | `spp` | `mfi`), `adapter_model` (catalog name, not serial),
-  `battery_optimized` (true/false), `tester` (an anonymous id you hand out: "t01", "t02", so reports can be grouped; the id-to-person list is never stored in the repo).
-- **Native crashes**: Sentry's Android NDK/ANR integration (included in `@sentry/react-native`), plus Kotlin
-  `try/catch` around every bridge entry point that reports through a JS event `onNativeError {module, where, message}`
-  so a failed `connectGatt` is a Sentry issue, not a silent dead button.
-- **Metrics** (Sentry metrics, numeric, no positions), emitted from TS where the data already exists:
-  - `link.poll_rate_hz` (per adapter model, per transport), `link.transact_latency_ms`, `link.timeouts`;
-  - `link.connect_ms`, `link.connect_failed` with a reason tag (`bond`, `gatt-133`, `socket-secure-failed`, `timeout`),
-    `link.lost` with reason, and reconnect time;
-  - `gnss.fix_rate_hz`, `gnss.coarse_share`, `gnss.satellite_share` (jamming indicator), `gnss.lag_ms` (online estimate);
-  - `imu.rate_hz` and `imu.dropped_batches`: the direct check that Android keeps sensors alive with the screen off;
-  - `service.foreground_gap_s` (longest hole in samples while the screen is off) and `service.restarts`;
-  - `nav.dr_error_p50_m` per outage versus trusted fix when the fix returns, `nav.mapmatch_unimodal_share`;
-  - `trip.duration_s`, `trip.log_bytes`, `app.cold_start_ms`.
-- **Logs** (Sentry logs, levels): the vehicle-link events and recorder messages as today, plus permission results
-  (granted/denied per permission, never prompts' text), Bluetooth/location state changes, service start/stop,
-  battery-optimization state, GATT dump summary for unknown adapters (service UUIDs only).
-- **Release health**: sessions on, so crash-free rate per release and per device model is visible; the Android
-  upload of ProGuard/R8 mapping and source maps in `build-android` (same `SENTRY_AUTH_TOKEN` secret, SPEC §9 item 18).
-- **CI correlation**: `build_sha` ties an issue to the commit; the emulator smoke test sets `environment=ci` so its
-  events never mix with testers' (`environment`: `ci` | `development` | `production`, with testers on `production`).
-- **Alerts** (set up in Sentry, once): new issue on a release, crash-free sessions < 99 %, `imu.rate_hz` < 50 or
-  `service.foreground_gap_s` > 5 for a tester, `link.poll_rate_hz` < 8 (SPEC §9 item 1's minimum usable rate).
-- **Not in Sentry**: the trip logs themselves (ULog, exported by the tester) remain the source for navigation accuracy;
-  Sentry carries health and compatibility, not tracks.
+- **Tags on every event:** `os`, `os_version`, `sdk_int`, `device_manufacturer`, `device_model`, `build_sha`,
+  `js_source` (built in or an OTA update), `install_id` (the random "Support code" in Settings, so a tester's reports
+  can be found).
+- **Metrics** (numbers only): connect time and failures by reason (`bond`, `gatt-133`, `socket-secure-failed`,
+  `timeout`), poll rate and latency per transport and adapter model (the catalog name, never the serial), GNSS and
+  IMU rates, the satellite share, the longest IMU gap while recording (the direct check that Android keeps sensors
+  alive with the screen off).
+- **Logs:** the vehicle-link events and recorder messages, permission results, Bluetooth/location state changes,
+  service start/stop, a GATT dump summary for unknown adapters (service UUIDs only).
+- **Environment:** `ci` for emulator runs (the smoke test), else development / production, so testers' phones never
+  mix with CI.
+- Not in Sentry: the trip logs themselves, which remain the source for navigation accuracy.
+- Not built: native `onNativeError` events from Kotlin bridge entry points, trip size/duration metrics, alert rules
+  (set up in the Sentry UI).
 
-Built (`src/services/telemetry.ts`, pure TS, tested with Sentry mocked): the tags (device, Android version, build,
-the install id shown as "Support code" in Settings), connect time and failures by reason, poll rate and latency,
-GNSS/IMU rates, satellite share, longest IMU gap while recording, the `ci` environment for emulator runs. Not built:
-native `onNativeError` events, trip size/duration metrics, and the alert rules (set up in the Sentry UI).
+## 5. Parity checks
 
-## 5. Parity and risk checks
-
-- **Sign conventions**: a Kotlin test feeds Android-convention sensor values for a known motion (phone flat, turned
-  counter-clockwise) and asserts the same `motion` row the Swift logic yields for iOS values.
-- **Payload parity**: JSON fixtures of `onGnss` / `onImuBatch` payloads shared between Swift tests, Kotlin tests and a
-  Jest test of the TS consumers.
-- **Replay on Android logs**: logs from the first tester go through `npm run replay` unchanged; if the navigator needs a
-  per-phone tweak it lives in calibration, not in a fork.
-
-| Risk | Mitigation |
-| --- | --- |
-| Android pauses sensors/BLE with the screen off | Foreground service + wake lock, emulator sleep test, tester check |
-| Classic clones need the insecure-socket workaround | Try secure, then reflective fallback; log which worked |
-| `neverForLocation` hides some BLE adapters on some OEMs | Catalog + unfiltered fallback, as on iOS; tester log of unseen devices |
-| Differing OEM GNSS (speed/bearing accuracy missing) | Missing fields are omitted, as for iOS invalid fields |
-| Emulator GNSS is too clean to show jamming behaviour | Jam simulation stays in replay; Android only needs the event path correct |
-| Kotlin compile errors surface only in CI | Local build on Windows (Android SDK) before pushing; `build-android` is the backstop |
+- **Sign conventions:** a Kotlin test feeds Android-convention sensor values for a known motion and asserts the same
+  `motion` row the Swift logic yields for iOS values.
+- **Payload parity:** JSON fixtures of `onGnss` / `onImuBatch` payloads shared between the Swift tests, the Kotlin
+  tests and a Jest test of the TS consumers.
+- **Replay on Android logs:** testers' logs go through the replay unchanged; a per-phone tweak the navigator needs
+  lives in calibration, not in a fork.
 
 ## 6. Status
 
-- **Built and checked on the emulator:** the release APK builds and is signed; GNSS fixes from the emulator's `gps`
-  provider and IMU batches reach the TS side; the simulated ELM327 connects on the Vehicle screen; the trip
-  foreground service starts with a recording; the app survives a screen-off. 40 Kotlin logic tests mirror the Swift
-  vectors.
-- **Not yet met a real phone:** BLE and Classic SPP are compile-checked only (the emulator has no Bluetooth), and
-  OEM battery killers are untested. The first real run is a tester with an adapter.
-- Next: the first staged tester round.
+Built, checked on the emulator, and road-tested by testers: a Classic no-name adapter on a K-line car gave the speed
+every poll and navigated a route with no GNSS fix (VEHICLE-LINK-SPEC §13). The tester guide's battery-killer steps
+are the only mitigation for OEM background limits.
 
-## 7. Decisions and open items
+## 7. Open items
 
-- `minSdk` 29 (Android 10): Android 8–9 are a few percent of phones, we can't test on them, and 29 is where
-  foreground service types start.
-- First test adapters: a Vgate vLinker FD+ and a cheap ELM327 clone; which transport each uses (BLE or Classic SPP)
-  is confirmed from the first trip log.
-- No developer program: the APK is sideloaded. Google Play would need a $25 account and a 14-day closed test with 12
-  testers; not planned.
-- Open: testers' phone models, once known, refine the matrix.
+- BLE adapters on real Android phones (only Classic SPP is road-tested).
+- Testers' phone models, once known, refine the sensor matrix (gyro noise, GNSS lag per model) through the logs.
+- Google Play: STORE-REVIEW.md.

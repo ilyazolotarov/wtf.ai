@@ -30,9 +30,9 @@ adapter (ELM327 type) plugged into the car to try the full thing; without one th
    `0000` if that fails), then go back to the app. Paired adapters appear in the list.
 4. Tap the adapter. When it says connected you will see a **Disconnect** button.
 
-Adapters that should work: Vgate vLinker FD+, OBDLink MX+ and most ELM327 clones (Bluetooth Classic or BLE). The
-Android version hasn't met a real adapter yet, so tell us how yours does either way. If it doesn't connect, send the
-**Support code** (More → Settings → About) with a description (see §6).
+Adapters that should work: Vgate vLinker FD+, OBDLink MX+ and most ELM327 clones (Bluetooth Classic or BLE); a cheap
+classic clone is road-tested on Android. Tell us how yours does either way. If it doesn't connect, send the **Support
+code** (More → Settings → About) with a description (see §6).
 
 ## 4. Keep the app alive while driving (important)
 
