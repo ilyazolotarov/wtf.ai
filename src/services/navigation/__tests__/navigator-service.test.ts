@@ -113,11 +113,12 @@ function harness(
   /** Deliver a trip the way the phone does: IMU in 100 ms batches, OBD live, fixes 50 ms late. */
   /**
    * `pocketFromS`: from then the phone turns on its own, 3 °/s more than the car (its gyro about "up").
-   * `wheels`: CAN wheel samples from the true path every 0.1 s (rear track 1.6 m), as CAN primary sends them.
+   * `wheels`: CAN wheel samples from the true path every 0.1 s (rear track 1.6 m), as CAN primary sends them; `tyre`:
+   * the right rear reading that much fast (a fraction of speed: negative, slow).
    */
   function play(
     drive: SyntheticDrive,
-    opts: { untilS?: number; withoutGnssFromS?: number; withoutObd?: boolean; onStep?: (tUs: number) => void; pocketFromS?: number; wheels?: boolean } = {},
+    opts: { untilS?: number; withoutGnssFromS?: number; withoutObd?: boolean; onStep?: (tUs: number) => void; pocketFromS?: number; wheels?: boolean; tyre?: number } = {},
   ) {
     const { trip } = drive;
     const endUs = trip.startUs + (opts.untilS ?? Infinity) * 1e6;
@@ -151,7 +152,7 @@ function harness(
         const b = drive.truthAt(t + 50_000);
         const yaw = -Math.atan2(Math.sin(b.psi - a.psi), Math.cos(b.psi - a.psi)) / 0.1;
         const v = drive.truthAt(t).speedMps;
-        const diff = 1.6 * yaw;
+        const diff = 1.6 * yaw + (opts.tyre ?? 0) * v;
         wheels.emit({ tUs: t, speedMps: v, wheelsMps: [v, v, v - diff / 2, v + diff / 2], gear: "D", reverse: false });
       }
       const mag = [];
@@ -816,6 +817,37 @@ describe("compass in shadow", () => {
     expect(Math.abs(parseFloat(atStart.slice("nav compass at start: ".length)))).toBeLessThan(10);
     expect(second.service.getDebug().compassOffDeg).not.toBeNull();
     second.service.stop();
+  });
+
+  test("the rear tyres apart: learned from the gyro and applied, kept for the car, the next drive starts from it", async () => {
+    const store = memoryStore();
+    const drive = syntheticDrive({ segments: cityDrive(6), gnss: "clean", seed: 6 });
+    const first = harness({ store });
+    await first.service.start();
+    first.service.setWheelYaw(true);
+    first.play(drive, { wheels: true, tyre: -0.0008 });
+    first.service.stop();
+    const saved = new CalibrationStore(store, PHONE).wheelYaw(VIN)!;
+    expect(Math.abs(saved.tyre + 0.0008)).toBeLessThan(0.0002);
+    expect(first.notes.some((n) => n.startsWith("nav wheel yaw: tyres") && n.endsWith("saved"))).toBe(true);
+
+    const second = harness({ store });
+    await second.service.start();
+    second.service.setWheelYaw(true);
+    second.play(drive, { untilS: 2, wheels: true, tyre: -0.0008 });
+    expect(second.notes.some((n) => n.startsWith("nav wheel yaw: tyres") && n.endsWith("from storage"))).toBe(true);
+    second.service.stop();
+  });
+
+  test("stores a tyre term only once a drive learned it for a minute, and reloads it with room to move", () => {
+    const calibration = new CalibrationStore(memoryStore(), PHONE);
+    expect(calibration.saveWheelYaw(VIN, -0.0007, 0.0002, 30)).toBe(false);
+    expect(calibration.saveWheelYaw(VIN, -0.02, 0.0002, 300)).toBe(false);
+    expect(calibration.saveWheelYaw(VIN, -0.0007, 0.0002, 300)).toBe(true);
+    const prior = calibration.wheelYaw(VIN)!;
+    expect(prior.tyre).toBe(-0.0007);
+    expect(prior.tyreSigma).toBeGreaterThan(0.0005);
+    expect(calibration.wheelYaw("OTHERVIN")).toBeNull();
   });
 
   // The compass reads the phone's field against the IMU's "up"; with the turning from the wheels the IMU is the car's.

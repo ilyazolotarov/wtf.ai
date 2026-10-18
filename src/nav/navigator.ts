@@ -68,6 +68,8 @@ export interface NavConfig {
   standstillUs: number;
   /** OBD speed older than this is unknown (link lost); the parked poll runs at 1 Hz. */
   obdStaleUs: number;
+  /** The yaw rate's white noise, rad/s, while the CAN wheels turn the car (`setWheelYaw`), for the EKF's gyro one. */
+  wheelYawNoise: number;
   /** Init from a GNSS course needs at least this speed and course accuracy. */
   courseInitMinSpeedMps: number;
   courseInitMaxAccRad: number;
@@ -174,6 +176,7 @@ export const DEFAULT_NAV_CONFIG: NavConfig = {
   canZeroSigmaMps: 0.3,
   standstillUs: 2_000_000,
   obdStaleUs: 2_500_000,
+  wheelYawNoise: 0.01,
   // Pulling away, CoreLocation's course can be off by tens of degrees while claiming ±18°.
   courseInitMinSpeedMps: 5,
   courseInitMaxAccRad: (10 * Math.PI) / 180,
@@ -517,6 +520,8 @@ export class Navigator {
   private poseOffRoadAtM: number | null = null;
   /** Parked pose taken when the phone was first handled while parked: it may leave the car after that. */
   private frozenPose: ParkedPose | null = null;
+  /** The turning comes from the CAN wheels (`setWheelYaw`). */
+  private wheelYaw = false;
   /**
    * The pose at the last OBD reading of 0 km/h, until one says the car moves: with the engine off OBD falls
    * silent, and the stale reading alone no longer says parked, though nothing has moved the car since.
@@ -748,6 +753,18 @@ export class Navigator {
   /** Compass minus EKF heading at each trust check (replay statistics). */
   get compassCheckDiffs(): readonly number[] {
     return this.compass.checkDiffs;
+  }
+
+  /**
+   * The IMU's turning comes from the CAN wheels (NAVIGATOR-SPEC §5.4), not the phone's gyro: noisier than the gyro the
+   * EKF's noise is for, so the fixes and the roads correct its heading harder.
+   */
+  setWheelYaw(on: boolean): void {
+    this.wheelYaw = on;
+  }
+
+  private get gyroNoise(): number {
+    return this.wheelYaw ? this.config.wheelYawNoise : this.ekfConfig.gyroNoise;
   }
 
   onImu(s: ImuSample): void {
@@ -1102,10 +1119,10 @@ export class Navigator {
 
     if (this.ekf) {
       // Standing: hold the heading (yaw input = bias → no rotation).
-      this.ekf.predict(dt, hold ? this.ekf.params().bw : yaw);
+      this.ekf.predict(dt, hold ? this.ekf.params().bw : yaw, this.gyroNoise);
       this.ekfHistory.push(tUs, [this.ekf.east, this.ekf.north, this.ekf.psi, this.ekf.speed]);
       if (this.twin) {
-        this.twin.predict(dt, hold ? this.twin.params().bw : yaw);
+        this.twin.predict(dt, hold ? this.twin.params().bw : yaw, this.gyroNoise);
         this.twinHistory.push(tUs, [this.twin.east, this.twin.north, this.twin.psi, this.twin.speed]);
       }
       if (this.frame && Math.hypot(this.ekf.east, this.ekf.north) > this.config.reanchorM) this.reanchor();
@@ -1151,7 +1168,7 @@ export class Navigator {
         gyroScaleSigma: c.initYawScaleSigma,
       };
     }
-    const white = yawUnknown ? c.handlingYawNoise ** 2 * dt : hold ? 0 : (c.gyroNoise * kw) ** 2 * dt;
+    const white = yawUnknown ? c.handlingYawNoise ** 2 * dt : hold ? 0 : (this.gyroNoise * kw) ** 2 * dt;
     const source = this.ekf ? "ekf" : "relative";
     // A source change closes the chunk before this increment joins the next one: handed out first.
     if (this.odometry.pendingSource !== null && this.odometry.pendingSource !== source) this.flushOdometry();

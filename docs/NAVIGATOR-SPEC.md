@@ -119,9 +119,14 @@ navigate with the phone in a hand, a pocket or on a seat.
 - **The service** holds its inputs 0.5 s instead of 0.3 while CAN speed comes or wheel yaw is on: a wheel sample
   comes out of the feed 0.07–0.15 s after its time, one in ten over 0.3 s.
 - **The tyres' difference** is learned (`wheel-yaw-calibration.ts`: over 5 s stretches, ∫ difference = track · ∫ gyro
-  yaw + tyre · distance, stretches that differ from the gyro by over 3° + 10 % teaching nothing) and **noted, not
-  applied** (`nav wheel yaw: tyres …`): applied, a phone in a pocket for a whole drive taught it wrong. A rear wheel
-  reading slow by 0.1 % is 0.5 °/s of turning that isn't, at 46 km/h; this is what keeps the setting experimental.
+  yaw + tyre · distance, stretches that differ from the gyro by over 3° + 10 % teaching nothing) and **applied**. A
+  rear wheel reading slow by 0.1 % is 0.5 °/s of turning that isn't, at 46 km/h; one car's read 0.01–0.08 % apart from
+  day to day. Kept per car (`CalibrationStore.wheelYaw`, once a drive learned it from 60 s; reloaded with its σ
+  widened by 0.05 %): the next drive starts from it (`nav wheel yaw: tyres … from storage`). A phone off the mount
+  for a whole drive teaches it 0.02–0.06 % too far; the next mounted drive takes it back.
+- **The EKF's yaw noise** is `wheelYawNoise` (0.01 rad/s) instead of the gyro's 0.003 while the wheels turn the car
+  (`Navigator.setWheelYaw`): with the tyre term applied they still drift ~2.5° per 20 s from the mounted gyro, and with
+  the gyro's noise clean fixes pulled the heading back too slowly (the dot 3–9 m beside them for a minute).
 - Replay: the log says `nav_wheel_yaw: on` and each switch is the note `nav wheel yaw on|off`; `replayTripInApp`
   follows them. Experiments: `--yaw wheels --yaw-from s`, `--yaw-cal`, `--yaw-gaps gyro`.
 

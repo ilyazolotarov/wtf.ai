@@ -138,7 +138,8 @@ export class DrEkf {
    * Propagate by dt seconds. `yawRate`: measured rotation about "up" (counter-clockwise
    * positive), or null while the gyro is invalid (heading held with inflated variance).
    */
-  predict(dt: number, yawRate: number | null): void {
+  /** `gyroNoise`: the yaw rate's white noise for this step, when the source isn't the gyro the config is for. */
+  predict(dt: number, yawRate: number | null, gyroNoise = this.config.gyroNoise): void {
     if (dt <= 0) return;
     const c = this.config;
     const [, , psi, v, , bw, kw] = this.x;
@@ -161,7 +162,7 @@ export class DrEkf {
     }
 
     const next = mulInto(M.next, mulInto(M.b, F, this.P), transposeInto(M.c, F));
-    const yawNoise = yawRate === null ? c.handlingYawNoise : c.gyroNoise * kw;
+    const yawNoise = yawRate === null ? c.handlingYawNoise : gyroNoise * kw;
     next[IX.E][IX.E] += c.positionNoise ** 2 * dt;
     next[IX.N][IX.N] += c.positionNoise ** 2 * dt;
     next[IX.PSI][IX.PSI] += yawNoise ** 2 * dt;

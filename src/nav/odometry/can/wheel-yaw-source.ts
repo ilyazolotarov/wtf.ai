@@ -4,7 +4,6 @@
 // One code for the app (NavigatorService) and replay (`withWheelYaw`).
 import type { ImuSample, Vec3 } from "../../types";
 import type { CanSpeedSample } from "./can-speed";
-import { DEFAULT_TRACK_M } from "./wheel-yaw";
 import { WheelYawCalibrator, type WheelYawCalibration, type WheelYawCalibrationConfig } from "./wheel-yaw-calibration";
 
 /** Wheel yaw comes this much after the gyro's (frames at the bus's time, both adapters: −40…+100 ms by drive, 2026-10-12/13). */
@@ -24,7 +23,7 @@ const CAR_FRAME_US = 1_000_000;
 const dot = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 
 export class WheelYawSource {
-  private readonly calibrator: WheelYawCalibrator;
+  private calibrator: WheelYawCalibrator;
   /** Wheel yaw samples, time order, at the wheels' time less their lag (the gyro's time). */
   private yaw: { tUs: number; radps: number; speedMps: number }[] = [];
   /** The gyro's yaw about "up" (null: handled), time order. */
@@ -32,16 +31,21 @@ export class WheelYawSource {
   private keptFrom = -Infinity;
 
   /**
-   * `applyLearned` false: the wheels turn with the defaults (track 1.60 m, no tyre term) while the calibrator learns
-   * only to be noted. Replayed against the drawn roads (2026-10-12/13, 8 seeds) the learned tyre term helped in a
-   * pocket and hurt in the mount (one drive 1–161 s off the road against 37–78 with the defaults).
+   * The wheels turn with the calibration learned so far: the rear tyres' difference read 0.6 °/s of right turn at
+   * 70 km/h on one car, the dot 9 m right of clean fixes for a minute (ebwp4t, 2026-10-18).
    */
   constructor(
     start?: WheelYawCalibration | null,
-    config?: Partial<WheelYawCalibrationConfig>,
-    private readonly applyLearned = true,
+    private readonly config?: Partial<WheelYawCalibrationConfig>,
   ) {
     this.calibrator = new WheelYawCalibrator(start, config);
+  }
+
+  /** Start from this calibration (the car's, known late) while nothing is learned yet; returns whether it took it. */
+  seed(start: WheelYawCalibration): boolean {
+    if (this.calibrator.calibration.learnedS > 0) return false;
+    this.calibrator = new WheelYawCalibrator(start, this.config);
+    return true;
   }
 
   get calibration(): WheelYawCalibration {
@@ -54,7 +58,7 @@ export class WheelYawSource {
    */
   addWheels(s: CanSpeedSample): void {
     const [, , rl, rr] = s.wheelsMps;
-    const w = this.applyLearned ? this.calibrator.yaw(rr - rl, s.speedMps) : (rr - rl) / DEFAULT_TRACK_M;
+    const w = this.calibrator.yaw(rr - rl, s.speedMps);
     const tUs = s.tUs - WHEEL_LAG_US;
     const radps = s.reverse ? -w : w;
     let i = this.yaw.length;

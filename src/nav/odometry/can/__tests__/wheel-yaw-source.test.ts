@@ -58,6 +58,28 @@ describe("turning from the wheels (NAVIGATOR-SPEC §5.4)", () => {
   });
 });
 
+describe("the car's tyre term known late (its VIN after the wheels)", () => {
+  test("taken while nothing is learned yet, applied to the wheels; not once the drive has learned", () => {
+    const src = new WheelYawSource();
+    const car = { trackM: 1.6, tyre: -0.001, trackSigmaM: 0.003, tyreSigma: 0.0005, learnedS: 0 };
+    expect(src.seed(car)).toBe(true);
+    // Straight at 10 m/s, the right rear reading 0.1 % slow: no turning.
+    src.addWheels(wheels(WHEEL_LAG_US, 0, 10, -0.001));
+    expect(src.yawAt(0)).toBeCloseTo(0, 6);
+
+    const learned = new WheelYawSource();
+    for (let k = 0; k < 200; k++) {
+      const t = k * 100_000;
+      for (let j = 0; j < 10; j++) learned.addGyro(t - WHEEL_LAG_US + j * 10_000, 0);
+      const w = wheels(t, 0, 12);
+      learned.addWheels(w);
+      learned.learn(w);
+    }
+    expect(learned.calibration.learnedS).toBeGreaterThan(0);
+    expect(learned.seed(car)).toBe(false);
+  });
+});
+
 describe("standing, the phone's turning is never the car's", () => {
   // The car stands (wheels at 0) and the phone turns 1 rad/s in the driver's hand.
   test("in a break in listening between two standing samples: no turning, still the car's frame", () => {

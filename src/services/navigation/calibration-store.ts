@@ -59,6 +59,13 @@ export interface StoredCompass {
   savedAt: number;
 }
 
+/** The rear tyres' difference learned for the car (wheel-yaw-calibration.ts), as a fraction of speed. */
+export interface StoredWheelYaw {
+  tyre: number;
+  tyreSigma: number;
+  savedAt: number;
+}
+
 export interface StoredPhoneMount {
   mount: PhoneMount;
   savedAt: number;
@@ -68,6 +75,7 @@ interface Stored {
   gnssLag?: StoredLag;
   speedScaleByVin?: Record<string, StoredSpeedScale>;
   compassByVin?: Record<string, StoredCompass>;
+  wheelYawByVin?: Record<string, StoredWheelYaw>;
   phoneMountByCar?: Record<string, StoredPhoneMount>;
 }
 
@@ -78,7 +86,8 @@ interface Stored {
 export type StoredSnapshot =
   /** `manualPosition`: absent in notes from before 2026-10-11 (then left as it is). */
   | { gnssLag: StoredLag | null; manualPosition?: StoredManualPosition | null }
-  | { vin: string; parkedPose: StoredPose | null; speedScale: StoredSpeedScale | null; compass: StoredCompass | null };
+  /** `wheelYaw`: absent in notes from before 2026-10-18 (then left as it is). */
+  | { vin: string; parkedPose: StoredPose | null; speedScale: StoredSpeedScale | null; compass: StoredCompass | null; wheelYaw?: StoredWheelYaw | null };
 
 export const CALIBRATION_KEY = "nav.calibration";
 /** Before poses were kept per car: one pose, with its VIN. */
@@ -92,6 +101,15 @@ const SPEED_SCALE_SAVE_SIGMA = 0.01;
 const SPEED_SCALE_DRIFT_SIGMA = 0.01;
 /** A value outside this range is a bug, not a car. */
 const SPEED_SCALE_RANGE = [0.85, 1.15] as const;
+/**
+ * Added to a stored tyre term's σ: one car's rear tyres read 0.025 % apart one day and 0.056 % and 0.119 % the next
+ * morning and afternoon (wheel-yaw-calibration.ts): a start, not the answer.
+ */
+const WHEEL_TYRE_DRIFT_SIGMA = 0.0005;
+/** Store a tyre term only once a drive has learned it from this many seconds of gyro and wheels agreeing. */
+const WHEEL_TYRE_SAVE_LEARNED_S = 60;
+/** A tyre term beyond this is a bug or a flat tyre, not a car to navigate with. */
+const WHEEL_TYRE_MAX = 0.005;
 
 export class CalibrationStore {
   private readonly store: KeyValueStore;
@@ -132,6 +150,20 @@ export class CalibrationStore {
   saveSpeedScale(vin: string, ks: number, ksVar: number, now = Date.now()): boolean {
     if (!(ksVar <= SPEED_SCALE_SAVE_SIGMA ** 2) || !(ks >= SPEED_SCALE_RANGE[0] && ks <= SPEED_SCALE_RANGE[1])) return false;
     this.write((s) => (s.speedScaleByVin = { ...s.speedScaleByVin, [vin]: { ks, ksVar, savedAt: now } }));
+    return true;
+  }
+
+  /** The tyre term this car's last drives learned, its σ widened by the drift between drives. */
+  wheelYaw(vin: string): { tyre: number; tyreSigma: number } | null {
+    const v = this.read().wheelYawByVin?.[vin];
+    if (!v || !(Math.abs(v.tyre) <= WHEEL_TYRE_MAX) || !(v.tyreSigma >= 0)) return null;
+    return { tyre: v.tyre, tyreSigma: Math.hypot(v.tyreSigma, WHEEL_TYRE_DRIFT_SIGMA) };
+  }
+
+  /** Store the tyre term a drive learned (`learnedS` of it this drive); returns whether it was stored. */
+  saveWheelYaw(vin: string, tyre: number, tyreSigma: number, learnedS: number, now = Date.now()): boolean {
+    if (!(learnedS >= WHEEL_TYRE_SAVE_LEARNED_S) || !(Math.abs(tyre) <= WHEEL_TYRE_MAX) || !(tyreSigma >= 0)) return false;
+    this.write((s) => (s.wheelYawByVin = { ...s.wheelYawByVin, [vin]: { tyre, tyreSigma, savedAt: now } }));
     return true;
   }
 
@@ -187,7 +219,13 @@ export class CalibrationStore {
   snapshot(vin: string | null): StoredSnapshot {
     const s = this.read();
     if (vin === null) return { gnssLag: s.gnssLag ?? null, manualPosition: this.manualPosition() };
-    return { vin, parkedPose: this.parkedPoses()[vin] ?? null, speedScale: s.speedScaleByVin?.[vin] ?? null, compass: s.compassByVin?.[vin] ?? null };
+    return {
+      vin,
+      parkedPose: this.parkedPoses()[vin] ?? null,
+      speedScale: s.speedScaleByVin?.[vin] ?? null,
+      compass: s.compassByVin?.[vin] ?? null,
+      wheelYaw: s.wheelYawByVin?.[vin] ?? null,
+    };
   }
 
   /** Writes a snapshot back (a replay starting from what the app had); an absent item is cleared. */
@@ -203,6 +241,10 @@ export class CalibrationStore {
       const { [vin]: _compass, ...compasses } = s.compassByVin ?? {};
       s.speedScaleByVin = snap.speedScale ? { ...scales, [vin]: snap.speedScale } : scales;
       s.compassByVin = snap.compass ? { ...compasses, [vin]: snap.compass } : compasses;
+      if (snap.wheelYaw !== undefined) {
+        const { [vin]: _wheel, ...wheels } = s.wheelYawByVin ?? {};
+        s.wheelYawByVin = snap.wheelYaw ? { ...wheels, [vin]: snap.wheelYaw } : wheels;
+      }
     });
     const { [vin]: _pose, ...poses } = this.parkedPoses();
     this.store.setJson(PARKED_POSES_KEY, snap.parkedPose ? { ...poses, [vin]: snap.parkedPose } : poses);

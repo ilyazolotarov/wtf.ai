@@ -16,6 +16,7 @@ import type { PositionEstimate, PositionSourceKind, RawGnssFix } from "@/nav/pos
 import type { CompassTrust } from "@/nav/compass/compass";
 import type { GnssFix, ImuSample, MagSample, ObdSpeedSample } from "@/nav/types";
 import type { CanSpeedSample } from "@/nav/odometry/can/can-speed";
+import { DEFAULT_WHEEL_YAW_CALIBRATION_CONFIG, type WheelYawCalibration } from "@/nav/odometry/can/wheel-yaw-calibration";
 import { WheelYawSource } from "@/nav/odometry/can/wheel-yaw-source";
 import { ImuProcessor } from "@/nav/odometry/imu/imu-processor";
 import type { EngineState, SpeedSample, VehicleLinkSnapshot } from "@/obd/types";
@@ -226,6 +227,8 @@ export class NavigatorService implements PositionSource {
   private pending: Input[] = [];
   /** The navigator's turning from the wheels (§5.4): the source, while on. */
   private wheelYaw: WheelYawSource | null = null;
+  /** The tyre term was saved once this session (noted once). */
+  private wheelYawStored = false;
   /** The gyro as the navigator would read it, for the wheels to learn from. */
   private readonly gyroProc = new ImuProcessor();
   private lastCanUs = -Infinity;
@@ -303,9 +306,14 @@ export class NavigatorService implements PositionSource {
   setWheelYaw(on: boolean): void {
     if (on === (this.wheelYaw !== null)) return;
     this.note(`nav wheel yaw ${on ? "on" : "off"}`);
-    if (!on) this.noteWheelYaw();
-    // The defaults turn the wheels; what the gyro teaches is only noted for now (WheelYawSource).
-    this.wheelYaw = on ? new WheelYawSource(null, undefined, false) : null;
+    if (!on) {
+      this.noteWheelYaw();
+      this.saveWheelYaw();
+    }
+    // The tyres' difference the gyro teaches is applied, from what the car's last drives learned.
+    this.wheelYaw = on ? new WheelYawSource() : null;
+    this.seedWheelYaw();
+    this.nav?.setWheelYaw(on);
   }
 
   /** Held this long and fed in time order (`REORDER_US`; `CAN_REORDER_US` with CAN wheel samples). */
@@ -318,6 +326,24 @@ export class NavigatorService implements PositionSource {
     if (!w) return;
     w.addWheels(s);
     this.pending.push({ tUs: s.tUs, wheels: s });
+  }
+
+  /** The tyre term this drive learned, for the car's next drives (once learned well enough, CalibrationStore). */
+  private saveWheelYaw(): void {
+    const w = this.wheelYaw?.calibration;
+    if (!w || !this.vin || !this.deps.calibration.saveWheelYaw(this.vin, w.tyre, w.tyreSigma, w.learnedS, this.clock.nowMs())) return;
+    if (this.wheelYawStored) return;
+    this.wheelYawStored = true;
+    this.note(`nav wheel yaw: tyres ${(w.tyre * 100).toFixed(3)} % ±${(w.tyreSigma * 100).toFixed(3)} saved`);
+  }
+
+  /** The wheels start from the car's stored tyre term, once both the car and the wheels are known, before they learn. */
+  private seedWheelYaw(): void {
+    const v = this.vin ? this.deps.calibration.wheelYaw(this.vin) : null;
+    if (!v || !this.wheelYaw) return;
+    const p = DEFAULT_WHEEL_YAW_CALIBRATION_CONFIG.prior;
+    const start: WheelYawCalibration = { trackM: p.trackM, tyre: v.tyre, trackSigmaM: p.trackSigmaM, tyreSigma: v.tyreSigma, learnedS: 0 };
+    if (this.wheelYaw.seed(start)) this.note(`nav wheel yaw: tyres ${(v.tyre * 100).toFixed(3)} % ±${(v.tyreSigma * 100).toFixed(3)} from storage`);
   }
 
   private noteWheelYaw(): void {
@@ -494,6 +520,7 @@ export class NavigatorService implements PositionSource {
     if (lag && this.deps.calibration.saveGnssLag(lag, this.clock.nowMs())) this.note(`nav gnss lag saved ${lag.lagS} s (${lag.windows} turn windows)`);
     const compass = nav.compassCalibrations;
     if (compass.length && this.vin) this.deps.calibration.saveCompassCalibrations(this.vin, compass, this.clock.nowMs());
+    this.saveWheelYaw();
     const params = nav.params;
     if (!params || !this.vin || !this.deps.calibration.saveSpeedScale(this.vin, params.ks, params.ksVar, this.clock.nowMs())) return;
     if (this.notedSpeedScale === null || Math.abs(params.ks - this.notedSpeedScale) >= SPEED_SCALE_NOTE_STEP) {
@@ -642,6 +669,7 @@ export class NavigatorService implements PositionSource {
     // What this navigator starts from, raw, so a replay can start from the same (app-replay.ts).
     this.note(`${STORAGE_NOTE}${JSON.stringify(calibration.snapshot(null))}`);
     const nav = new Navigator({ ...this.deps.nav, ...(lag ? { gnssLagS: lag.lagS } : {}) });
+    nav.setWheelYaw(this.wheelYaw !== null);
     this.nav = nav;
     this.lastPuck = null;
     this.lastDot = null;
@@ -740,6 +768,7 @@ export class NavigatorService implements PositionSource {
       this.nav.setSpeedScalePrior(ks.ks, ks.ksVar);
       this.note(`nav speed scale ${ks.ks.toFixed(4)} from storage`);
     }
+    this.seedWheelYaw();
     const compass = this.deps.calibration.compassCalibrations(vin);
     if (compass.length && this.nav) {
       this.nav.setCompassCalibrations(compass);
