@@ -323,6 +323,7 @@ npm run replay:places -- --mm '{"particles":1000}'                    # jammed d
 npm run replay:crossings -- tools/triplog/logs/*.ulg                   # roads the true path crossed away from junctions
 npm run replay:doubt                                                   # the dot's doubt from Wi-Fi/cell fixes over every log (NAVIGATOR-SPEC §6.1a)
 npm run replay:offroad -- trip.ulg                                     # samples with the dot off every road above 40 km/h
+npm run replay:offset -- tools/triplog/logs/*.ulg [--replay gyro] [--detail <log id>]   # how far beside its road the GPS and the dot sit
 npm run replay:junction -- --graph <file> --at lat,lon                 # the roads around a junction, for a test fixture
 npm run replay:imuspeed -- tools/triplog/logs/*.ulg [--chain]          # the phone's own speed estimate against OBD (NAVIGATOR-SPEC §9.7)
 npm run replay:turns -- tools/triplog/logs/*.ulg [--along] [--route]   # phone-only turn-anchored map matching on the jammed drives
@@ -341,6 +342,12 @@ npm run replay:view -- --graph tools/tiles/out/release/kyiv.graph.bin  # viewer 
   break (off the graph, gap, no route) with time and place, how far moving fixes are from the road, the route vs
   OBD vs navigator odometry distance, and any legs that don't fit or needed a one-way/restriction/U-turn penalty.
   `--json <out>` saves the matched points, legs and breaks.
+- **`replay:offset`:** on the road `replay:truth` matches, straight and 25 m from its junctions, at ≥ 18 km/h: how
+  far right of the travel direction the clean fixes (≤ 10 m) and the dot the phone drew sit, and the dot less the
+  fix. Roads driven both ways split it into what flips with the direction (the lane: the line is the road's
+  centre) and what doesn't (where OSM draws the line); the same road on several drives gives the GPS bias.
+  `--replay log|wheels|gyro` measures the dot of the app replayed now, turning as logged, from the rear wheels or
+  from the gyro; `--detail <log id>` lists that drive's passes with the other drives on the same roads.
 - **`replay:mm`:** runs the particle filter (MAPMATCH-SPEC §7, open loop) in the replay and scores it against
   the ground truth: how the EKF started, wrong-road rate, truth survival, multimodal and off-road shares, re-lock
   time, update time, and the stretches where it was on a wrong road or lost the true one. Samples in state `init`

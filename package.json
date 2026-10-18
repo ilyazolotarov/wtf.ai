@@ -95,6 +95,7 @@
     "can:profiles": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/can/profiles.ts",
     "replay:voice": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/voice-timing.ts",
     "replay:can": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/can-report.ts",
+    "replay:offset": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/road-offset.ts",
     "voice:render": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/voice/render.ts",
     "logs:status": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/triplog/sync.ts status",
     "logs:push": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/triplog/sync.ts push",
