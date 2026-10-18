@@ -21,7 +21,9 @@
 //   npm run sim:drives                         # every trip, seed 1
 //   npm run sim:drives -- --trips north-south --seeds 2-3
 //   npm run sim:drives -- --out tools/triplog/logs/sim2 --scenarios gps,jamstart   # elsewhere, some scenarios
-//   npm run sim:drives -- --simple             # the old driver and a flat, still phone (city-drive.ts)
+//   npm run sim:drives -- --simple             # the old driver and a flat, still phone (city-drive.ts), old jam
+//   npm run sim:drives -- --driver simple --phone measured --jam regular   # each part on its own (to tell which matters)
+//   npm run sim:drives -- --phone-imu '{"gyroScale":1}'   # the measured phone with some of it changed
 //   npm run replay:incidents -- tools/triplog/logs/synthetic/*.ulg
 //   npm run replay:view -- --logs tools/triplog/logs/synthetic
 
@@ -35,6 +37,7 @@ import { jamFixes, MEASURED_JAM, MEASURED_JAM_ARRIVALS, type JamOptions } from "
 import { spoofFixes } from "../../src/nav/replay/spoof";
 import { planRoute, type RoutePlan } from "../../src/nav/routing/router";
 import { cityDrive, type CityDrive } from "../../src/nav/sim/city-drive";
+import type { PhoneImuModelConfig } from "../../src/nav/sim/phone-imu";
 import type { GnssFix } from "../../src/nav/types";
 import { TRIP_EVENTS } from "../../src/triplog/schema";
 import { TripLogWriter } from "../../src/triplog/trip-log-writer";
@@ -78,13 +81,25 @@ const TRUTH_STEP_S = 0.2;
 /** Where the planned route is logged: while the car still stands at the start. */
 const PLAN_AT_S = 10;
 
+const JAMS: Record<Job["jam"], Partial<JamOptions>> = {
+  measured: MEASURED_JAM_ARRIVALS,
+  regular: MEASURED_JAM,
+  bursts: { ...MEASURED_JAM_ARRIVALS, cellPerMin: 0 },
+  cells: { ...MEASURED_JAM, cellPerMin: MEASURED_JAM_ARRIVALS.cellPerMin, cellAccQuantilesM: MEASURED_JAM_ARRIVALS.cellAccQuantilesM, cellErrorQuantiles: MEASURED_JAM_ARRIVALS.cellErrorQuantiles, cellCorrelationS: MEASURED_JAM_ARRIVALS.cellCorrelationS },
+};
+
 interface Job {
   trip: string;
   seed: number;
   out: string;
   scenarios: readonly Scenario[];
-  /** The simulator's driver and phone (city-drive.ts); both measured unless `--simple`. */
-  simple: boolean;
+  /** The simulator's driver and phone (city-drive.ts), and the jam's fixes: measured unless `--simple` or chosen. */
+  driver: "measured" | "simple";
+  phone: "measured" | "flat";
+  /** `bursts`: the measured arrivals without the cell fixes; `cells`: the regular Wi-Fi fixes and the cells. */
+  jam: "measured" | "regular" | "bursts" | "cells";
+  /** Overrides of the measured phone (phone-imu.ts), for experiments. */
+  phoneImu?: Partial<PhoneImuModelConfig>;
 }
 
 function scenarioFixes(drive: CityDrive, scenario: Scenario, jam: Partial<JamOptions>): GnssFix[] {
@@ -204,7 +219,7 @@ function runJob(job: Job): { trip: string; lines: string[] } {
     const planned = planRoute(g.graph, frame, trip.from, trip.to);
     if (planned.status !== "done") return { trip: trip.name, lines: [`${trip.name}: no route (${planned.reason})`] };
     const plan = planned.plan;
-    const drive = cityDrive({ graph: g.graph, frame, legs: plan.legs, durationS: 4 * 3600, seed: job.seed, ...(job.simple ? { driver: "simple", phone: "flat" } : {}) });
+    const drive = cityDrive({ graph: g.graph, frame, legs: plan.legs, durationS: 4 * 3600, seed: job.seed, driver: job.driver, phone: job.phone, phoneImu: job.phoneImu });
     const OUT = job.out;
     const { path: truth, timeline } = truthPath(drive);
     mkdirSync(OUT, { recursive: true });
@@ -213,7 +228,7 @@ function runJob(job: Job): { trip: string; lines: string[] } {
     for (const scenario of job.scenarios) {
       const name = `sim-${trip.name}-s${job.seed}-${scenario}`;
       const file = `${name}.ulg`;
-      writeFileSync(path.join(OUT, file), writeLog(drive, plan, scenarioFixes(drive, scenario, job.simple ? MEASURED_JAM : MEASURED_JAM_ARRIVALS), { sim_trip: trip.name, sim_seed: job.seed, sim_scenario: scenario, vehicle_vin: "SIMULATED0000000" }));
+      writeFileSync(path.join(OUT, file), writeLog(drive, plan, scenarioFixes(drive, scenario, JAMS[job.jam]), { sim_trip: trip.name, sim_seed: job.seed, sim_scenario: scenario, vehicle_vin: "SIMULATED0000000" }));
       const drawn = {
         version: 1, file, points: [{ lat: truth[0][0], lon: truth[0][1] }, { lat: truth.at(-1)![0], lon: truth.at(-1)![1] }], path: truth,
         legs: [{ lengthM: Math.round(timeline.at(-1)![1]), start: 0, kind: "road" }], graph: path.basename(graphFile), updatedAt: new Date().toISOString(),
@@ -245,13 +260,17 @@ async function main() {
   const scenarios = (arg("--scenarios")?.split(",") ?? SCENARIOS) as Scenario[];
   for (const s of scenarios) if (!SCENARIOS.includes(s)) throw new Error(`unknown scenario ${s}: ${SCENARIOS.join(", ")}`);
   const simple = argv.includes("--simple");
+  const driver = (arg("--driver") ?? (simple ? "simple" : "measured")) as Job["driver"];
+  const phone = (arg("--phone") ?? (simple ? "flat" : "measured")) as Job["phone"];
+  const jam = (arg("--jam") ?? (simple ? "regular" : "measured")) as Job["jam"];
+  const phoneImu = arg("--phone-imu") ? (JSON.parse(arg("--phone-imu")!) as Partial<PhoneImuModelConfig>) : undefined;
   // Each seed is another drive of the same route: other stops, lanes, speeds and sensor errors.
   const [lo, hi = lo] = (arg("--seeds") ?? "1").split("-").map(Number);
   const seeds = Array.from({ length: hi - lo + 1 }, (_, i) => lo + i);
   for (const n of names) if (!TRIPS.some((t) => t.name === n)) throw new Error(`unknown trip ${n}: ${TRIPS.map((t) => t.name).join(", ")}`);
   const pool = new Pool(import.meta.url, threads);
   try {
-    const results = await pool.map<Job, { trip: string; lines: string[] }>(names.flatMap((trip) => seeds.map((seed) => ({ trip, seed, out, scenarios, simple }))));
+    const results = await pool.map<Job, { trip: string; lines: string[] }>(names.flatMap((trip) => seeds.map((seed) => ({ trip, seed, out, scenarios, driver, phone, jam, phoneImu }))));
     for (const r of results) for (const l of r.lines) console.log(l);
   } finally {
     await pool.close();
