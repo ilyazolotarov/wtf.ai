@@ -16,7 +16,6 @@ import { mergeCalibrations, type CompassCalibration } from "../../../src/nav/com
 import { LocalFrame } from "../../../src/nav/geo/local-frame";
 import type { TiledRoadGraph } from "../../../src/nav/mapmatch/graph/road-graph";
 import type { NavConfig } from "../../../src/nav/navigator";
-import { wheelYawTuning } from "../../../src/nav/odometry/can/wheel-yaw-source";
 import { puckTuning } from "../../../src/nav/position/puck";
 import { drawnTruthTrack, drawPath, type DrawnPoint, type DrawnTruth } from "../../../src/nav/replay/drawn-truth";
 import { findIncidents, INCIDENT_STEP_S } from "../../../src/nav/replay/incidents";
@@ -223,20 +222,17 @@ function logParam(url: URL): string | null {
 }
 
 /**
- * Compare with the dot as it was before 2026-10-16: no heading cue, not steady along its road (position/puck.ts), the
- * wheels' turning at a crawl too (wheel-yaw-source.ts). Run with those settings, then put back.
+ * Compare with the dot as it was before 2026-10-16: no heading cue, not steady along its road (position/puck.ts). Run
+ * with those settings, then put back.
  */
 const BEFORE_DOT = { label: "Before 2026-10-16", nav: {} as Partial<NavConfig> };
 function withDotBefore<T>(run: () => T): T {
   const puck = { ...puckTuning };
-  const wheel = { ...wheelYawTuning };
   Object.assign(puckTuning, { headingCueFactor: 1, steady: false });
-  Object.assign(wheelYawTuning, { gyroBelowMps: 0 });
   try {
     return run();
   } finally {
     Object.assign(puckTuning, puck);
-    Object.assign(wheelYawTuning, wheel);
   }
 }
 

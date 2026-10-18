@@ -33,7 +33,6 @@ import { LocalFrame } from "../../src/nav/geo/local-frame";
 import type { MapMatchConfig } from "../../src/nav/mapmatch/particle-filter";
 import type { NavConfig, ParkedPose } from "../../src/nav/navigator";
 import { puckTuning } from "../../src/nav/position/puck";
-import { wheelYawTuning } from "../../src/nav/odometry/can/wheel-yaw-source";
 import { driveOutages, estimateTrack, obdDistanceM, type ShownPoint } from "../../src/nav/replay/drive-report";
 import { drawnTruthTrack, scoreDrawn, type DrawnTruth } from "../../src/nav/replay/drawn-truth";
 import { findIncidents, INCIDENT_STEP_S, type DotSample, type Incident } from "../../src/nav/replay/incidents";
@@ -92,8 +91,6 @@ interface Job {
   yawGaps?: "interpolate" | "gyro";
   /** The dot's cues (puck.ts) for an experiment. */
   puck?: Partial<typeof puckTuning>;
-  /** The wheels' yaw (wheel-yaw-source.ts) for an experiment. */
-  wheel?: Partial<typeof wheelYawTuning>;
 }
 
 /** One drive, one start, one seed. Distances in m, times in s. */
@@ -195,11 +192,9 @@ function score(trip: TripLog, log: string, track: ShownPoint[], graph: ReturnTyp
 }
 
 const PUCK_DEFAULTS = { ...puckTuning };
-const WHEEL_DEFAULTS = { ...wheelYawTuning };
 
 function runJob(job: Job): DriveResult[] {
   Object.assign(puckTuning, PUCK_DEFAULTS, job.puck);
-  Object.assign(wheelYawTuning, WHEEL_DEFAULTS, job.wheel);
   const store = new MemoryKeyValueStore();
   const byProtocol = new Map<string, string>();
   const lastDot = new Map<string, { lat: number; lon: number }>();
@@ -395,7 +390,6 @@ async function main() {
   const yawCal = process.argv.includes("--yaw-cal");
   const yawGaps = arg("--yaw-gaps") as Job["yawGaps"];
   const puck = arg("--puck") ? (JSON.parse(arg("--puck")!) as Job["puck"]) : undefined;
-  const wheel = arg("--wheel") ? (JSON.parse(arg("--wheel")!) as Job["wheel"]) : undefined;
 
   const all = readdirSync(LOGS).filter((f) => f.endsWith(".ulg")).sort();
   const picked = only ? all.filter((f) => f.startsWith(only) || f.includes(only)) : all;
@@ -411,8 +405,8 @@ async function main() {
     : [];
   for (const logs of testerChains) picked.push(...logs.filter((l) => !only || l.includes(only)));
   const jobs: Job[] = [];
-  for (let seed = 1; seed <= seeds; seed++) for (const start of ["drawn", "parked"] as const) if (starts.includes(start)) for (const logs of [chain, ...testerChains]) jobs.push({ start, seed, logs, nav, mm, speed, scoreMapMatch, phoneRoute, obdHz, yaw, yawFromS, yawCal, yawGaps, puck, wheel });
-  for (let seed = 1; seed <= seeds; seed++) if (starts.includes("cold")) for (const log of picked) jobs.push({ start: "cold", seed, logs: [log], nav, mm, speed, scoreMapMatch, phoneRoute, obdHz, yaw, yawFromS, yawCal, yawGaps, puck, wheel });
+  for (let seed = 1; seed <= seeds; seed++) for (const start of ["drawn", "parked"] as const) if (starts.includes(start)) for (const logs of [chain, ...testerChains]) jobs.push({ start, seed, logs, nav, mm, speed, scoreMapMatch, phoneRoute, obdHz, yaw, yawFromS, yawCal, yawGaps, puck });
+  for (let seed = 1; seed <= seeds; seed++) if (starts.includes("cold")) for (const log of picked) jobs.push({ start: "cold", seed, logs: [log], nav, mm, speed, scoreMapMatch, phoneRoute, obdHz, yaw, yawFromS, yawCal, yawGaps, puck });
   const started = Date.now();
   let results: DriveResult[];
   if (fromRun) results = fromRun.results.filter((r) => picked.includes(r.log));

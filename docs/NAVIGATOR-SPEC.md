@@ -108,9 +108,12 @@ navigate with the phone in a hand, a pocket or on a seat.
   acceleration kept, its tilt and turning left out, so its movements don't read as handling. In a break in listening
   the phone's own turning is used, still in the car's frame; with no wheel sample within 1 s, the phone's sample as it
   is.
-- **At a crawl** (wheel speed below 1.5 m/s) the raw gyro's yaw replaces the wheels', if over the last 600 wheel
-  samples above 3 m/s the gyro turned with the wheels (RMS difference under 0.05 rad/s: in the mount 0.03–0.04, in a
-  pocket 0.09–0.11). Wheel speed sensors read nothing at a crawl, and the phone in a pocket must not turn the car.
+- **Standing** (every wheel sample within 1 s reads 0, including the last second after the wheels go silent at
+  ignition off): no turning, never the phone's. In the car's frame the navigator can't see the phone handled, and at a
+  stop the driver takes it out of the mount: its turning, taken for the car's, turned a parked car 60–120° and the
+  next drive set off on another road.
+- **No gyro at a crawl:** the wheels turn the car at any speed they read. Pulling out of parking spaces they matched
+  the mounted gyro within 1–2°; the gyro there only brings in the phone handled.
 - **The compass gets no field** meanwhile (§7.6): the IMU is then the car's, not the phone's.
 - **The service** holds its inputs 0.5 s instead of 0.3 while CAN speed comes or wheel yaw is on: a wheel sample
   comes out of the feed 0.07–0.15 s after its time, one in ten over 0.3 s.

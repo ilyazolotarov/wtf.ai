@@ -58,40 +58,29 @@ describe("turning from the wheels (NAVIGATOR-SPEC §5.4)", () => {
   });
 });
 
-describe("at a crawl, the phone's turning while it sits in its mount", () => {
-  // At speed for a while: wheels and gyro both 0.1 rad/s (mounted), or the gyro 0.3 rad/s off them (a pocket).
-  const drive = (src: WheelYawSource, gyroOff: number) => {
-    for (let t = 0; t < 30_000_000; t += 100_000) {
-      src.addGyro(t - WHEEL_LAG_US, 0.1 + gyroOff * Math.sin(t / 1e6));
-      const w = wheels(t, 0.1);
-      src.addWheels(w);
-      src.learn(w);
-    }
-  };
-  // Then pulling out of a space at 1 m/s: the wheels read no turning, the car (and phone) turns 0.4 rad/s.
-  const crawl = (src: WheelYawSource) => {
-    const t = 31_000_000;
-    src.addWheels({ ...wheels(t + WHEEL_LAG_US, 0, 1) });
-    src.addGyro(t, 0.4);
-    return WheelYawSource.gyroYaw(src.substitute(imu(t, 0.4))!);
-  };
-
-  test("mounted: the gyro's turning, not the wheels' nothing", () => {
-    const src = new WheelYawSource(null, undefined, false);
-    drive(src, 0);
-    expect(crawl(src)).toBeCloseTo(0.4, 6);
+describe("standing, the phone's turning is never the car's", () => {
+  // The car stands (wheels at 0) and the phone turns 1 rad/s in the driver's hand.
+  test("in a break in listening between two standing samples: no turning, still the car's frame", () => {
+    const src = new WheelYawSource();
+    src.addWheels(wheels(WHEEL_LAG_US, 0, 0));
+    src.addWheels(wheels(900_000 + WHEEL_LAG_US, 0, 0));
+    const out = src.substitute(imu(450_000, 1))!;
+    expect(out.gravity).toEqual([0, 0, -9.81]);
+    expect(WheelYawSource.gyroYaw(out)).toBe(0);
   });
 
-  test("in a pocket (the gyro didn't turn with the wheels): still the wheels", () => {
-    const src = new WheelYawSource(null, undefined, false);
-    drive(src, 0.3);
-    expect(crawl(src)).toBeCloseTo(0, 6);
+  test("as the wheels go silent (ignition off), for the second the car's frame lasts", () => {
+    const src = new WheelYawSource();
+    for (let t = 0; t <= 1_000_000; t += 100_000) src.addWheels(wheels(t + WHEEL_LAG_US, 0, 0));
+    expect(WheelYawSource.gyroYaw(src.substitute(imu(1_600_000, 1))!)).toBe(0);
+    // Then the phone's sample as it is.
+    expect(src.substitute(imu(2_200_000, 1))).toBeNull();
   });
 
-  test("what was learned at speed carries over to a new source (the wheels lost and back)", () => {
-    const before = new WheelYawSource(null, undefined, false);
-    drive(before, 0);
-    const after = new WheelYawSource(null, undefined, false, before.agreement);
-    expect(crawl(after)).toBeCloseTo(0.4, 6);
+  test("the car setting off in the break: the phone's turning", () => {
+    const src = new WheelYawSource();
+    src.addWheels(wheels(WHEEL_LAG_US, 0, 0));
+    src.addWheels(wheels(900_000 + WHEEL_LAG_US, 0, 2));
+    expect(WheelYawSource.gyroYaw(src.substitute(imu(450_000, 1))!)).toBeCloseTo(1, 6);
   });
 });

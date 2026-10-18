@@ -21,29 +21,6 @@ const KEEP_US = 3_000_000;
  */
 const CAR_FRAME_US = 1_000_000;
 
-/**
- * Below `gyroBelowMps` of wheel speed, the phone's own turning instead of the wheels', while the phone sits in its
- * mount: its gyro turned with the wheels at speed, the RMS of their difference under `mountedRmsRadps` (in the mount
- * 0.03–0.04 rad/s, in a pocket 0.09–0.11). Wheel speed sensors read nothing at a crawl, and turning out of a parking
- * space with no GPS the wheels had the car go straight: the dot set off on another road, 100–115 s off the drawn one
- * on every seed (2026-10-16). Without the mount check the phone in a pocket turned on its own at every crawl (four
- * drives 30–225 s off). Replay tools change it for an experiment (0: the wheels at any speed); the app never does.
- */
-export const wheelYawTuning = { gyroBelowMps: 1.5, mountedRmsRadps: 0.05 };
-/**
- * The gyro and the wheels compared above this speed, over the last this many wheel samples (~10 a second) however old:
- * a stop doesn't empty them, so the phone is still known to sit in its mount when the car pulls away.
- */
-const AGREE_MIN_MPS = 3;
-const AGREE_SAMPLES = 600;
-const AGREE_MIN_SAMPLES = 200;
-
-/** At one wheel sample at speed: the gyro's yaw less the wheels', rad/s. */
-export interface WheelGyroAgreement {
-  tUs: number;
-  d: number;
-}
-
 const dot = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 
 export class WheelYawSource {
@@ -53,8 +30,6 @@ export class WheelYawSource {
   /** The gyro's yaw about "up" (null: handled), time order. */
   private gyro: { tUs: number; radps: number | null }[] = [];
   private keptFrom = -Infinity;
-  /** At speed, the gyro's yaw less the wheels' (rad/s), time order: the phone in its mount turns with the car. */
-  private agree: WheelGyroAgreement[];
 
   /**
    * `applyLearned` false: the wheels turn with the defaults (track 1.60 m, no tyre term) while the calibrator learns
@@ -65,15 +40,8 @@ export class WheelYawSource {
     start?: WheelYawCalibration | null,
     config?: Partial<WheelYawCalibrationConfig>,
     private readonly applyLearned = true,
-    agreement: readonly WheelGyroAgreement[] = [],
   ) {
     this.calibrator = new WheelYawCalibrator(start, config);
-    this.agree = agreement.slice(-AGREE_SAMPLES);
-  }
-
-  /** The gyro against the wheels at speed so far, for the next source after the wheels drop out and come back. */
-  get agreement(): readonly WheelGyroAgreement[] {
-    return this.agree;
   }
 
   get calibration(): WheelYawCalibration {
@@ -102,13 +70,7 @@ export class WheelYawSource {
   /** A wheel sample, in time order with the IMU's: the calibrator learns from the gyro around it. */
   learn(s: CanSpeedSample): boolean | null {
     const [, , rl, rr] = s.wheelsMps;
-    const gyro = this.gyroAround(s.tUs - WHEEL_LAG_US);
-    if (gyro !== null && s.speedMps > AGREE_MIN_MPS) {
-      const wheels = (s.reverse ? -1 : 1) * this.calibrator.yaw(rr - rl, s.speedMps);
-      this.agree.push({ tUs: s.tUs, d: gyro - wheels });
-      if (this.agree.length > AGREE_SAMPLES) this.agree.shift();
-    }
-    return this.calibrator.push(s.tUs, rl, rr, gyro, s.reverse);
+    return this.calibrator.push(s.tUs, rl, rr, this.gyroAround(s.tUs - WHEEL_LAG_US), s.reverse);
   }
 
   /**
@@ -131,40 +93,33 @@ export class WheelYawSource {
    * The IMU sample as the car's: the wheels' yaw about a vertical "up", the phone's acceleration kept. The phone's own
    * tilt and turning are left out, so its movements in a hand or a pocket don't read as handling (which would have
    * the navigator take the turning for unknown, 1.5 s each time). In a break in listening the phone's own turning,
-   * still in the car's frame; null (the phone's sample as it is) with no wheel sample within `CAR_FRAME_US`. Also
-   * prunes what is too old to be asked for.
+   * still in the car's frame, unless the wheels around it read the car standing: then none. Null (the phone's sample
+   * as it is) with no wheel sample within `CAR_FRAME_US`. Also prunes what is too old to be asked for.
+   *
+   * Standing, the phone's turning is never the car's: in this frame the navigator can't see the phone handled, and a
+   * stop the phone doesn't keep quiet isn't held. The driver taking the phone out as the wheels went silent (ignition
+   * off) turned a parked car 61°, and with the phone's turning at every stop (the rule at a crawl, 2026-10-16) 120°;
+   * the next drive set off on another road, 83–109 s off the drawn one on every seed (nnz5ff, 2026-10-18).
    */
   substitute(s: ImuSample, bridgeUs?: number): ImuSample | null {
     this.prune(s.tUs - KEEP_US);
-    // At a crawl the wheel speed sensors read nothing: the phone's turning, while it sits in its mount (the gyro turned
-    // with the wheels at speed); not the IMU processor's, which takes tight manoeuvring for the phone being handled.
-    const slow = wheelYawTuning.gyroBelowMps > 0 && this.wheelsNear(s.tUs) && this.speedNear(s.tUs) < wheelYawTuning.gyroBelowMps && this.mounted();
-    const gyro = slow ? WheelYawSource.gyroYaw(s) : null;
-    const radps = gyro ?? this.yawAt(s.tUs, bridgeUs) ?? (this.wheelsNear(s.tUs) ? WheelYawSource.gyroYaw(s) : null);
+    const radps = this.yawAt(s.tUs, bridgeUs) ?? (this.standing(s.tUs) ? 0 : this.wheelsNear(s.tUs) ? WheelYawSource.gyroYaw(s) : null);
     if (radps === null) return null;
     const g = Math.hypot(s.gravity[0], s.gravity[1], s.gravity[2]) || 9.81;
     return { ...s, gyro: [0, 0, radps], gravity: [0, 0, -g] };
   }
 
-  /** The gyro turned with the wheels over the last minute at speed: the phone sits in its mount. */
-  private mounted(): boolean {
-    const a = this.agree;
-    if (a.length < AGREE_MIN_SAMPLES) return false;
-    let sum = 0;
-    for (const x of a) sum += x.d * x.d;
-    return Math.sqrt(sum / a.length) < wheelYawTuning.mountedRmsRadps;
-  }
-
-  /** The wheel speed of the sample nearest `tUs`, m/s. */
-  private speedNear(tUs: number): number {
-    let best = Infinity;
-    let speed = Infinity;
+  /** Every wheel sample within `CAR_FRAME_US` of `tUs` reads the car standing (there is one). */
+  private standing(tUs: number): boolean {
+    let any = false;
     for (let i = this.yaw.length - 1; i >= 0; i--) {
-      const d = Math.abs(this.yaw[i].tUs - tUs);
-      if (d < best) [best, speed] = [d, this.yaw[i].speedMps];
-      if (this.yaw[i].tUs < tUs - CAR_FRAME_US) break;
+      const d = this.yaw[i].tUs - tUs;
+      if (d < -CAR_FRAME_US) break;
+      if (d > CAR_FRAME_US) continue;
+      if (this.yaw[i].speedMps !== 0) return false;
+      any = true;
     }
-    return speed;
+    return any;
   }
 
   /** A wheel sample within `CAR_FRAME_US` of `tUs`. */

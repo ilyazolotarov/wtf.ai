@@ -206,8 +206,7 @@ line then says so.
     through the app with one storage across them, NAVIGATOR-SPEC §6.1, the car by its VIN, else the car last seen on
     the same OBD protocol: ~35 s the first time, kept until the viewer restarts); nowhere (a fresh install).
   - *Compare with*: a second version, drawn in orange. *Before 16 Oct*: the dot without the heading cue or the
-    steadying along its road, the wheels' turning at a crawl (MAPMATCH-SPEC §11, NAVIGATOR-SPEC §5.4). *Open loop*:
-    no corrections from the map into the navigator.
+    steadying along its road (MAPMATCH-SPEC §11). *Open loop*: no corrections from the map into the navigator.
   - *Adapter*: as recorded (the speed the app took, OBD or the CAN wheels), or none: phone-only mode
     (NAVIGATOR-SPEC §9.6), fed no OBD speed or engine states; the dot is the phone's own dead reckoning wherever GPS
     isn't good, the timeline draws its speed over OBD's, rings around the dot are the other roads its tracker holds.

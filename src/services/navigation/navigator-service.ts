@@ -16,7 +16,7 @@ import type { PositionEstimate, PositionSourceKind, RawGnssFix } from "@/nav/pos
 import type { CompassTrust } from "@/nav/compass/compass";
 import type { GnssFix, ImuSample, MagSample, ObdSpeedSample } from "@/nav/types";
 import type { CanSpeedSample } from "@/nav/odometry/can/can-speed";
-import { WheelYawSource, type WheelGyroAgreement } from "@/nav/odometry/can/wheel-yaw-source";
+import { WheelYawSource } from "@/nav/odometry/can/wheel-yaw-source";
 import { ImuProcessor } from "@/nav/odometry/imu/imu-processor";
 import type { EngineState, SpeedSample, VehicleLinkSnapshot } from "@/obd/types";
 import { isSatelliteRecord, mapFixToPosition } from "@/services/position/gnss-position-source";
@@ -226,8 +226,6 @@ export class NavigatorService implements PositionSource {
   private pending: Input[] = [];
   /** The navigator's turning from the wheels (§5.4): the source, while on. */
   private wheelYaw: WheelYawSource | null = null;
-  /** The gyro against the wheels from the wheel-yaw source before this one (`WheelYawSource.agreement`). */
-  private wheelAgreement: readonly WheelGyroAgreement[] = [];
   /** The gyro as the navigator would read it, for the wheels to learn from. */
   private readonly gyroProc = new ImuProcessor();
   private lastCanUs = -Infinity;
@@ -306,10 +304,8 @@ export class NavigatorService implements PositionSource {
     if (on === (this.wheelYaw !== null)) return;
     this.note(`nav wheel yaw ${on ? "on" : "off"}`);
     if (!on) this.noteWheelYaw();
-    // The defaults turn the wheels; what the gyro teaches is only noted for now (WheelYawSource). Whether the phone sits
-    // in its mount carries over a break in the wheels (the link lost while parked).
-    if (this.wheelYaw) this.wheelAgreement = this.wheelYaw.agreement;
-    this.wheelYaw = on ? new WheelYawSource(null, undefined, false, this.wheelAgreement) : null;
+    // The defaults turn the wheels; what the gyro teaches is only noted for now (WheelYawSource).
+    this.wheelYaw = on ? new WheelYawSource(null, undefined, false) : null;
   }
 
   /** Held this long and fed in time order (`REORDER_US`; `CAN_REORDER_US` with CAN wheel samples). */
