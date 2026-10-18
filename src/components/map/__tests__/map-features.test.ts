@@ -1,5 +1,5 @@
 import { haversineM } from "@/nav/geo";
-import { hypothesisFeatures, metresPerPoint, pointFeatures, routeFeatures, screenSectorFeatures, sectorFeatures } from "@/components/map/map-features";
+import { fitCircleZoom, hypothesisFeatures, metresPerPoint, pointFeatures, routeFeatures, screenSectorFeatures, sectorFeatures } from "@/components/map/map-features";
 
 const car = { lat: 50.45, lon: 30.52 };
 
@@ -13,6 +13,25 @@ describe("map features", () => {
     expect(ring[0]).toEqual([car.lon, car.lat]);
     expect(ring[ring.length - 1]).toEqual(ring[0]);
     for (const [lon, lat] of ring.slice(1, -1)) expect(haversineM(car, { lat, lon })).toBeCloseTo(45, 0);
+  });
+
+  describe("a wide circle fits the screen", () => {
+    test("a small one keeps the camera's zoom", () => {
+      expect(fitCircleZoom(car.lat, 30, 140, 17)).toBe(17);
+    });
+
+    test("a cell fix's kilometres zoom out until the radius fits, in half steps", () => {
+      const zoom = fitCircleZoom(car.lat, 2000, 140, 17);
+      expect(zoom).toBeLessThan(17);
+      expect(zoom * 2).toBe(Math.round(zoom * 2));
+      expect(2000 / metresPerPoint(car.lat, zoom)).toBeLessThanOrEqual(140);
+      // Half a step closer would not fit.
+      expect(2000 / metresPerPoint(car.lat, zoom + 0.5)).toBeGreaterThan(140);
+    });
+
+    test("never further out than the floor", () => {
+      expect(fitCircleZoom(car.lat, 500_000, 140, 17)).toBe(9);
+    });
   });
 
   describe("the heading cone looks the same on screen in every camera", () => {

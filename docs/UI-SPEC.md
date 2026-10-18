@@ -150,6 +150,10 @@ persisted in kv-store. No hardcoded user-facing strings in components.
   heading-up keeps its camera (zoom 17, tilted) and the map keeps its bearing. Moving without one (anchored under
   jamming): the `follow` camera (zoom 16, flat, north up) until there is one. The bearing goes to the map in
   [0°, 360°).
+- **A wide circle at open:** until the car first moves after the app opens, the follow camera zooms out (half steps,
+  not below 9) until the position's circle has a radius of at most 35 % of the screen's narrower side, and back in as
+  it shrinks. A circle that fills the screen reads as a tint, not as a circle. Once the car has moved, the follow
+  zooms are fixed. Logged as `camera follow: zoom <z> to fit the circle (<m> m)`.
 - **Tilt:** heading-up 50°; north-up, free, the ghost view, the routes' overview and placing are top-down. No tilt or
   rotate gesture. A gesture that leaves heading-up flattens the map once it settles.
 - **Motion** (`pose-smoother.ts`): moving (≥ 2 m/s, with a heading, not a placed position) the dot, its circle and

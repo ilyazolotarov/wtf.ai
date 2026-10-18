@@ -19,6 +19,16 @@ export function metresPerPoint(latDeg: number, zoom: number): number {
   return (40_075_016.686 * Math.cos((latDeg * Math.PI) / 180)) / 2 ** (zoom + 9);
 }
 
+/**
+ * The zoom that shows a circle of `radiusM` at most `maxRadiusPt` across its radius, never closer than `zoom`: in
+ * half steps down, so a circle that changes a little doesn't nudge the camera on every fix. Not below `minZoom`.
+ */
+export function fitCircleZoom(latDeg: number, radiusM: number, maxRadiusPt: number, zoom: number, minZoom = 9): number {
+  if (!(radiusM > 0) || !(maxRadiusPt > 0)) return zoom;
+  const fit = Math.log2((maxRadiusPt * 40_075_016.686 * Math.cos((latDeg * Math.PI) / 180)) / radiusM) - 9;
+  return fit >= zoom ? zoom : Math.max(minZoom, Math.floor(fit * 2) / 2);
+}
+
 /** The camera, as MapLibre reports it: zoom, bearing (degrees clockwise from north) and tilt (degrees). */
 export interface CameraView {
   zoom: number;

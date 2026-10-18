@@ -1,11 +1,12 @@
 import type { CameraRef } from "@maplibre/maplibre-react-native";
 import { useEffect, useRef } from "react";
-import type { NativeSyntheticEvent } from "react-native";
+import { useWindowDimensions, type NativeSyntheticEvent } from "react-native";
 
 import { haversineM, type Coordinate } from "@/nav/geo";
 import type { PositionEstimate } from "@/nav/position/types";
 import type { RouteSnapshot } from "@/services/navigation/route-service";
 
+import { fitCircleZoom } from "./map-features";
 import type { CameraMode } from "./use-camera-mode";
 import { COURSE_MIN_SPEED_MPS, mapBearingDeg } from "./use-compass-heading";
 import type { PlacingStep } from "./use-placing";
@@ -35,6 +36,13 @@ const FOLLOW_CAMERA: Record<Exclude<CameraMode, "free">, { zoom: number; pitch: 
   follow: { zoom: 16, pitch: 0 },
   "follow-heading": { zoom: 17, pitch: 50 },
 };
+/**
+ * Until the car first moves after the app opens, the follow camera zooms out until the position's circle fits: a cell
+ * fix's kilometres at zoom 17 tinted the whole screen and didn't read as a circle until zoomed out by hand. Its radius
+ * at most this share of the screen's narrower side, so its edge shows between the panels. Driving keeps the follow zoom.
+ */
+const FIT_CIRCLE_SHARE = 0.35;
+
 /** Leaving follow by the button steps back to a flat overview. */
 const FREE_ZOOM = 15.5;
 
@@ -78,6 +86,8 @@ export function useMapCamera({
   logCamera?(text: string): void;
 }) {
   const cameraRef = useRef<CameraRef | null>(null);
+  const screenPt = useWindowDimensions();
+  const fitRadiusPt = FIT_CIRCLE_SHARE * Math.min(screenPt.width, screenPt.height);
   const ghost = position?.trust === "UNTRUSTED" && position.rawGnss ? position.rawGnss : null;
   // Heading-up with no direction known. Standing (none yet: parked on phone GPS, the app just opened): still tilted and
   // close in, the map left at the bearing it has, so the view doesn't drop flat and north while the button says
@@ -166,6 +176,9 @@ export function useMapCamera({
   // The last follow stop, and whether the map has since been put back on it once (`onRegionDidChange`).
   const followStop = useRef<{ center: [number, number]; zoom: number; bearing?: number; pitch: number } | null>(null);
   const followRestored = useRef(false);
+  // The car has moved since the app opened: the follow zoom no longer makes room for the circle.
+  const movedSinceOpen = useRef(false);
+  const loggedFitZoom = useRef<number | null>(null);
   useEffect(() => {
     if (!mapReady) {
       followed.current = false;
@@ -180,9 +193,22 @@ export function useMapCamera({
     const snapped = !followed.current || (was !== null && haversineM(was, position) > FOLLOW_JUMP_M);
     followed.current = true;
     followCenter.current = { lat: position.lat, lon: position.lon };
+    if (moving) movedSinceOpen.current = true;
+    const zoom = movedSinceOpen.current
+      ? follow.zoom
+      : fitCircleZoom(position.lat, Math.max(5, position.accuracyM), fitRadiusPt, follow.zoom);
+    const fitted = zoom < follow.zoom ? zoom : null;
+    if (fitted !== loggedFitZoom.current) {
+      loggedFitZoom.current = fitted;
+      logCamera?.(
+        fitted !== null
+          ? `camera follow: zoom ${fitted.toFixed(1)} to fit the circle (${Math.round(position.accuracyM)} m)`
+          : `camera follow: zoom ${follow.zoom}${movedSinceOpen.current ? ", the car moved" : ", the circle fits"}`,
+      );
+    }
     const stop = {
       center: [position.lon, position.lat] as [number, number],
-      zoom: follow.zoom,
+      zoom,
       ...(followBearing !== undefined ? { bearing: followBearing } : {}),
       pitch: follow.pitch,
     };
@@ -191,7 +217,8 @@ export function useMapCamera({
     // Smoothed, every frame is a small step: an ease per frame would lag and restart 30 times a second.
     if (snapped || smoothing) cameraRef.current?.jumpTo(stop);
     else cameraRef.current?.easeTo({ ...stop, duration: FOLLOW_EASE_MS });
-  }, [mapReady, follow, position, ghostView, followBearing, smoothing]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapReady, follow, position, ghostView, followBearing, smoothing, fitRadiusPt]);
 
   // The route and its alternatives at once (ROUTING-SPEC §8.7), north up: framed once when asked.
   useEffect(() => {
