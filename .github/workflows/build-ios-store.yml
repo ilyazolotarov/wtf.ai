@@ -1,8 +1,8 @@
 name: Build App Store iOS App
 
-# The App Store build (docs/STORE-REVIEW.md §3.1), run by hand. DISTRIBUTION=store (app.config.js): no AltStore, no
-# tester upload, the Developer screen hidden. Signed and uploaded to App Store Connect, where it goes to TestFlight and
-# review, in one of two ways, chosen by which secrets exist:
+# The App Store build (docs/STORE-REVIEW.md §3.1), run by hand. DISTRIBUTION=store (app.config.js): no AltStore, the
+# Developer screen and the tester upload hidden until unlocked. Signed and uploaded to App Store Connect, where it goes
+# to TestFlight and review, in one of two ways, chosen by which secrets exist:
 # - key: the App Store Connect API key (Admin role). Xcode signs with cloud-managed certificates and profiles.
 #   Secrets ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8 (the .p8 file's text). Variable APPLE_TEAM_ID.
 # - manual: an Apple Distribution certificate and an App Store provisioning profile made in the developer portal, and an
@@ -18,6 +18,7 @@ on:
 env:
   DISTRIBUTION: store
   UPDATES_ORIGIN: ${{ vars.UPDATES_ORIGIN }}
+  TRIP_UPLOAD_ORIGIN: ${{ vars.TRIP_UPLOAD_ORIGIN }}
   SENTRY_DSN: ${{ vars.SENTRY_DSN }}
   SUPPORT_EMAIL: ${{ vars.SUPPORT_EMAIL }}
   SENTRY_URL: ${{ vars.SENTRY_URL }}

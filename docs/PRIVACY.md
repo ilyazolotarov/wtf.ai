@@ -1,6 +1,6 @@
 # wtf.ai privacy policy
 
-Effective 13 October 2026.
+Effective 18 October 2026.
 
 wtf.ai is a car navigator that keeps working when satellite positioning is jammed or unreliable. It is built to work
 offline, and it keeps your data on your phone. This policy describes what the app does with data. It covers the app
@@ -9,7 +9,8 @@ as distributed through the App Store and Google Play.
 ## The short version
 
 - No account and no sign-up.
-- Your position, routes, searches and trip logs stay on your phone.
+- Your position, routes, searches and trip logs stay on your phone. The one exception is for testers who choose to
+  send their trip logs to the developer (below).
 - No advertising, no tracking, no selling or sharing of data with anyone.
 - The app sends anonymous crash and error reports so that bugs can be fixed. They contain no location and no personal
   data.
@@ -48,6 +49,14 @@ logs of these requests.
 the share sheet. A trip log contains the GPS track of the drive, sensor data and your car's VIN. Whoever you send it to
 receives that data.
 
+**Trip log upload for testers.** People who test the app for the developer can turn on trip log upload with a
+personal code the developer gives them. It is off for everyone else, and the app cannot turn it on by itself.
+Before the first log is sent, the app shows what will be sent and the name the developer knows the tester by. Then
+each finished trip log (the GPS track of the drive, sensor data and the car's VIN and speeds) is sent to the
+developer's private storage (Cloudflare R2), filed under that name, and deleted from the phone. The logs are used
+only to test and improve the navigator, are never shared with anyone else and are kept until the tester asks for
+them to be deleted. Turning upload off stops it at once.
+
 ## Permissions
 
 - **Location**: to show and track your position and to guide you. In the background it is used only during a drive
@@ -60,13 +69,15 @@ You can refuse any permission. Without location the app can still show maps and 
 
 ## Age
 
-wtf.ai is meant for drivers: it is for adults, not for children. It collects no personal data from anyone.
+wtf.ai is meant for drivers: it is for adults, not for children. Apart from the trip logs testers choose to send, it collects
+no personal data from anyone.
 
 ## Your rights
 
-Since the project holds no personal data about you, there is nothing to access, correct or delete on the project's
-side. Crash reports cannot be traced back to a person; if you quote your support code, the reports carrying it can be
-deleted on request.
+Unless you send trip logs as a tester, the project holds no personal data about you, so there is nothing to access,
+correct or delete on the project's side. Crash reports cannot be traced back to a person; if you quote your support
+code, the reports carrying it can be deleted on request. A tester can ask for a copy of their uploaded logs, or for
+their deletion, at any time.
 
 ## Changes
 

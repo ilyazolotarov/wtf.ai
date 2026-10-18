@@ -1,6 +1,6 @@
 import { Host, Switch } from "@expo/ui";
 import { useState, useSyncExternalStore } from "react";
-import { StyleSheet, TextInput, View } from "react-native";
+import { Alert, StyleSheet, TextInput, View } from "react-native";
 
 import { ScreenAction, ScreenCard, ScreenNote, ScreenRow, SectionLabel } from "@/components/screens/screen-ui";
 import { INPUT_MAX_FONT_SCALE, T } from "@/components/ui/text";
@@ -9,7 +9,10 @@ import { useT } from "@/i18n/provider";
 import { useRecorderSnapshot } from "@/providers/runtime-provider";
 import type { TripUploader, UploaderSnapshot } from "@/services/trip-upload/trip-uploader";
 
-/** Opt-in trip log upload for testers (TRIP-LOGGER-SPEC §7.1): enter the developer's code, then logs go by themselves. */
+/**
+ * Opt-in trip log upload for testers (TRIP-LOGGER-SPEC §7.1): enter the developer's code, confirm what is sent and under
+ * which name, then logs go by themselves.
+ */
 export function TripUploadSection({ uploader }: { uploader: TripUploader }) {
   const { t } = useT();
   const palette = usePalette();
@@ -23,9 +26,10 @@ export function TripUploadSection({ uploader }: { uploader: TripUploader }) {
   const connect = async () => {
     setChecking(true);
     setError(null);
-    const result = await uploader.connect(typed);
+    const result = await uploader.connect(typed, (name) => confirmSending(name, t));
     setChecking(false);
     if (result === "ok") setTyped("");
+    else if (result === "cancelled") return;
     else setError(t(result === "malformed" ? "tripUploadMalformed" : result === "rejected" ? "tripUploadRejected" : result === "failed" ? "tripUploadServerError" : "tripUploadOffline"));
   };
 
@@ -88,6 +92,16 @@ export function TripUploadSection({ uploader }: { uploader: TripUploader }) {
         )}
       </ScreenCard>
     </View>
+  );
+}
+
+/** What leaves the phone, and as whom, before the first log does (STORE-REVIEW §3.3). */
+function confirmSending(name: string, t: ReturnType<typeof useT>["t"]): Promise<boolean> {
+  return new Promise((resolve) =>
+    Alert.alert(t("tripUploadConfirmTitle").replace("{name}", name), t("tripUploadConfirmBody"), [
+      { text: t("cancel"), style: "cancel", onPress: () => resolve(false) },
+      { text: t("tripUploadConfirmYes"), onPress: () => resolve(true) },
+    ], { cancelable: true, onDismiss: () => resolve(false) }),
   );
 }
 

@@ -73,7 +73,7 @@ describe("app.config.js", () => {
     expect(config.extra).toMatchObject({ distribution: "sideload", tripUploadUrl: "https://logs.example" });
   });
 
-  test("a store build cannot install packages and has no tester upload (docs/STORE-REVIEW.md §1)", () => {
+  test("a store build cannot install packages and keeps the tester upload, behind the Developer unlock (docs/STORE-REVIEW.md §1)", () => {
     process.env.DISTRIBUTION = "store";
     process.env.TRIP_UPLOAD_ORIGIN = "https://logs.example";
     const config = appConfig({ config: app.expo });
@@ -83,7 +83,7 @@ describe("app.config.js", () => {
       expect.arrayContaining([INSTALL_PACKAGES, "android.permission.SYSTEM_ALERT_WINDOW", "android.permission.ACTIVITY_RECOGNITION"]),
     );
     expect(android.permissions).toContain("android.permission.ACCESS_FINE_LOCATION");
-    expect(config.extra).toMatchObject({ distribution: "store", tripUploadUrl: null });
+    expect(config.extra).toMatchObject({ distribution: "store", tripUploadUrl: "https://logs.example" });
   });
 });
 

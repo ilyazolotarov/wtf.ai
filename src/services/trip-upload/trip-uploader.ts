@@ -90,9 +90,15 @@ export class TripUploader {
     return () => this.listeners.delete(listener);
   };
 
-  /** Checks a typed code with the Worker and keeps it; uploads start right away. */
-  /** `failed`: the server answered, but not with the name (an error there, or the URL is wrong). */
-  async connect(typed: string): Promise<"ok" | "malformed" | "rejected" | "offline" | "failed"> {
+  /**
+   * Checks a typed code with the Worker, asks `confirm` with the tester name it belongs to (what is sent and under
+   * which name: STORE-REVIEW §3.3), and keeps it; uploads start right away.
+   * `failed`: the server answered, but not with the name (an error there, or the URL is wrong).
+   */
+  async connect(
+    typed: string,
+    confirm: (name: string) => Promise<boolean> = async () => true,
+  ): Promise<"ok" | "malformed" | "rejected" | "offline" | "failed" | "cancelled"> {
     const code = normalizeCode(typed);
     if (!code) return "malformed";
     let res: HttpResult;
@@ -104,6 +110,7 @@ export class TripUploader {
     if (res.status === 401) return "rejected";
     if (res.status !== 200) return "failed";
     const name = (JSON.parse(res.body) as { name: string }).name;
+    if (!(await confirm(name))) return "cancelled";
     await this.deps.secrets.set(code);
     this.update({ name, status: "idle", lastError: null });
     void this.run();

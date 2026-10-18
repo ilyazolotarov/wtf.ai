@@ -114,7 +114,7 @@ export const en = {
   privacyMessage:
     "Position data stays on this phone. No account needed. Crash reports carry no location or personal data. Maps are downloaded and then used offline; maps and app updates come from the project's own server, which learns nothing about where you look or drive. The one exception is opt-in: trip log upload for testers (More → Trip recorder).",
   privacyMessageStore:
-    "Position data stays on this phone. No account needed. Crash reports carry no location or personal data. Maps are downloaded and then used offline; maps and app updates come from the project's own server, which learns nothing about where you look or drive. Trip logs leave the phone only when you share them yourself.",
+    "Position data stays on this phone. No account needed. Crash reports carry no location or personal data. Maps are downloaded and then used offline; maps and app updates come from the project's own server, which learns nothing about where you look or drive. Trip logs leave the phone only when you share them yourself, or when a tester turns on trip log upload with a personal code from the developer.",
   privacyPolicy: "Privacy policy",
   contactSupport: "Contact support",
   developerUnlocked: "Developer settings are now in More.",
@@ -378,6 +378,9 @@ export const en = {
   tripUploadRejected: "This code isn't valid. Check it with the developer.",
   tripUploadOffline: "Couldn't reach the server. Try again when online.",
   tripUploadServerError: "The server answered with an error. Try again later.",
+  tripUploadConfirmTitle: "Send trip logs as {name}?",
+  tripUploadConfirmBody: "Every finished trip goes to the developer's private storage under this name: the GPS track of the drive, the phone's sensor data and the car's VIN and speeds. Sent logs are deleted from this phone. Turn upload off here at any time.",
+  tripUploadConfirmYes: "Send logs",
   tripUploadAs: "Sending as",
   tripUploadSent: "Sent",
   tripUploadWaiting: "Waiting",

@@ -2,8 +2,8 @@ import { extraString } from "./extra";
 
 /**
  * How this build reaches phones, from app.config.js (DISTRIBUTION): `store` for App Store / Google Play, which allow
- * no self-installed updates, no other app store and no tester-only upload (docs/STORE-REVIEW.md); `sideload` for the
- * CI builds testers install with AltStore or as an APK.
+ * no self-installed updates and no other app store, and keep test features behind the Developer unlock
+ * (docs/STORE-REVIEW.md); `sideload` for the CI builds testers install with AltStore or as an APK.
  */
 export const STORE_BUILD: boolean = extraString("distribution") === "store";
 

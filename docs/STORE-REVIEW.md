@@ -14,15 +14,17 @@ the same app, one source tree.
 | Android installs its own APK updates (`REQUEST_INSTALL_PACKAGES`) | Permission removed and blocked; no native-build check | Play: apps update only through Play (Device and Network Abuse) |
 | Library-default permissions nothing uses: `SYSTEM_ALERT_WINDOW`, `ACTIVITY_RECOGNITION`, `USE_BIOMETRIC`, `USE_FINGERPRINT` | Blocked | Each one is a question in Play review |
 | iOS App update screen points to AltStore, shares the IPA | Neither: only JS updates and "Restart"          | App Review 3.2.2: no other app store, no app installers |
-| Opt-in trip log upload with a developer's code      | Off (`tripUploadUrl` null)                          | A tester-only feature with no way for review to test it; keeps precise location out of the privacy labels |
 | Developer row in More                               | Hidden until seven taps on Version in Settings      | App Review 2.2: no test or beta features in front of users |
-| Privacy text names the tester upload                | `privacyMessageStore`                               | Matches what the build does                           |
+| Opt-in trip log upload with a developer's code, in the Trip recorder | Shown only after the same unlock    | A tester feature, kept from drivers like the Developer screen; disclosed in full (below) |
+| Privacy text points to More → Trip recorder         | `privacyMessageStore` names the upload without the path | The path is not there until unlocked              |
 
 Both builds: the privacy manifest, the purpose strings and the Settings → Privacy policy link (§2), JS updates over the
 air (§4.3).
 
 Must not drift: a store build never downloads or installs native code, never links to AltStore or an IPA/APK, and
-never contains `REQUEST_INSTALL_PACKAGES` (`build-store.yml` fails if it does).
+never contains `REQUEST_INSTALL_PACKAGES` (`build-store.yml` fails if it does). Hidden is not undisclosed: the
+upload is in the privacy policy, both privacy labels and the review notes (App Review 2.3.1 forbids hidden or
+undocumented features). It never starts without a code and a confirmation naming the tester and what is sent.
 
 ## 2. Both builds
 
@@ -101,6 +103,14 @@ string from `mfiProtocols` before submitting:
 >
 > The app downloads JavaScript updates for its own code (bug fixes); they never change its purpose (Guideline 2.5.2,
 > 3.3.1(B)).
+>
+> Testers can send their trip logs (GPS track, sensor data, the car's VIN and speeds) to the developer. The feature
+> is off until a tester enters a personal code from the developer, and is hidden from other users: tap Version in
+> More › Settings seven times, then More › Trip recorder › Trip log upload. Review code: REVIEW_CODE. The app shows
+> what will be sent and under which name before anything is.
+
+Before submitting, make the review code with `npm run testers:add -- app-review` and put it in place of
+`REVIEW_CODE`; revoke it (`testers:remove`) once the build is approved.
 
 ### 3.3 App Privacy (nutrition label)
 
@@ -110,9 +120,13 @@ string from `mfiProtocols` before submitting:
 | Diagnostics → Performance Data              | yes       | no                 | no       | App Functionality |
 | Diagnostics → Other Diagnostic Data         | yes       | no                 | no       | App Functionality |
 | Identifiers → Device ID (the install's random support code) | yes | no      | no       | App Functionality |
-| Location, contacts, user content, usage data, everything else | no |       |          |                   |
+| Location → Precise Location (tester trip logs)               | yes | yes     | no       | App Functionality |
+| Other Data (tester trip logs: sensor data, the car's VIN and speeds) | yes | yes | no  | App Functionality |
+| Coarse location, contacts, user content, usage data, everything else | no |  |          |                   |
 
-Must match `NSPrivacyCollectedDataTypes` in app.json.
+Must match `NSPrivacyCollectedDataTypes` in app.json. The trip logs are declared rather than taken as optional
+disclosure: that exemption covers infrequent submissions the user makes one by one, and the upload sends every trip
+by itself. Linked, because the logs are stored under the tester's name.
 
 ### 3.4 Review risks
 
@@ -158,16 +172,19 @@ SDK comes from the Expo SDK (Play requires the latest year's API level for updat
   - Collected: App info and performance → Crash logs, Diagnostics; Device or other IDs → the install's random code.
     Purpose: App functionality. Not shared (Sentry processes it on our behalf). Not optional (sent by every build
     with a DSN).
+  - Collected, optional (tester trip log upload): Location → Precise location; App activity → Other actions (the
+    car's VIN, speeds and the phone's sensor data). Purpose: App functionality. Not shared.
   - Encrypted in transit: yes. Deletion: on request with the support code (PRIVACY.md).
-  - Location: not collected (it never leaves the phone; a trip log shared by the user is user-initiated sharing,
-    which Play does not count as collection).
+  - A trip log the user sends with the share sheet is user-initiated sharing, which Play does not count as
+    collection; only the upload is declared.
 
 ## 5. Before each submission
 
 1. `DISTRIBUTION=store npx expo config --type introspect`: no `REQUEST_INSTALL_PACKAGES`; every `…UsageDescription` is
    ours (none starts with "Allow $(PRODUCT_NAME) to access").
-2. On a store build: More has no Developer row; App update shows no AltStore or IPA; Settings opens the privacy
-   policy; the Trip recorder has no upload section.
+2. On a store build: More has no Developer row and the Trip recorder no upload section until seven taps on Version;
+   App update shows no AltStore or IPA; Settings opens the privacy policy; the review code turns on the upload after
+   its confirmation.
 3. A fresh install follows the §3.2 notes end to end.
 4. PRIVACY.md and PRIVACY.uk.md, §3.3 and §4.3 still describe what the build sends.
 

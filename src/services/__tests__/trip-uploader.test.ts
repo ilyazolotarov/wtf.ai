@@ -84,6 +84,18 @@ describe("TripUploader", () => {
     expect(s.sent).toEqual([A, B]);
   });
 
+  it("asks with the tester name before keeping the code; a no keeps nothing and sends nothing", async () => {
+    const s = setup();
+    const up = s.make();
+    const asked: string[] = [];
+    expect(await up.connect("bakimtuvodsegap", async (name) => (asked.push(name), false))).toBe("cancelled");
+    expect(asked).toEqual(["tester-a"]);
+    expect(s.getCode()).toBeNull();
+    await up.run();
+    expect(s.sent).toEqual([]);
+    expect(up.getSnapshot()).toMatchObject({ name: null, status: "off" });
+  });
+
   it("a Worker error at the code check is a failure, not 'offline'", async () => {
     const s = setup({ meStatus: 500 });
     const up = s.make();

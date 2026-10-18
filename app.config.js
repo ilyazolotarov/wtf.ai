@@ -9,8 +9,8 @@
 //                        CI; .github/workflows/pages.yml), which carries SUPPORT_EMAIL.
 //   SUPPORT_EMAIL        where Settings › Contact support writes. Unset: no such row.
 //   DISTRIBUTION         `store` for an App Store / Google Play build (docs/STORE-REVIEW.md): no self-installed
-//                        updates (no REQUEST_INSTALL_PACKAGES, no APK installer, no AltStore), no tester trip upload, the
-//                        Developer screen hidden until unlocked. Anything else, or unset: the sideloaded build.
+//                        updates (no REQUEST_INSTALL_PACKAGES, no APK installer, no AltStore), the Developer screen and
+//                        the tester trip upload hidden until unlocked. Anything else, or unset: the sideloaded build.
 // All are part of the OTA runtime version (fingerprint): every CI job that builds or exports sees the same values, and
 // changing one needs a native build.
 const env = (name) => process.env[name]?.trim().replace(/\/+$/, "") || null;
@@ -29,7 +29,7 @@ module.exports = ({ config }) => {
       ...config.extra,
       distribution: store ? "store" : "sideload",
       updatesOrigin,
-      tripUploadUrl: store ? null : env("TRIP_UPLOAD_ORIGIN"),
+      tripUploadUrl: env("TRIP_UPLOAD_ORIGIN"),
       sentryDsn: env("SENTRY_DSN"),
       privacyPolicyUrl: env("PRIVACY_POLICY_URL") ?? (repo ? pagesUrl(repo, "privacy.html") : null),
       supportEmail: env("SUPPORT_EMAIL"),

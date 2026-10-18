@@ -43,7 +43,7 @@ wheel speeds from the CAN bus where the adapter and car allow) and heading rate 
 | Absolute heading | From trusted GNSS course, the particle filter's road heading, the driver placing the car, and the pose saved at ignition off. **The magnetometer is not used for navigation**: in-car distortion changes when the phone moves. The compass runs in **shadow mode** (computed, checked, logged; never navigated with) and a display-only compass shows where the phone points when walking. |
 | Phone mount | A **rigid phone mount** is required (the gyro is the only yaw source without CAN). |
 | Standstill bias calibration | 2 s of standstill, refined at every stop (ZUPT). No calibration drive, screen or wizard: everything is learned online. |
-| Distribution | Sideloading (AltStore source on iOS, the app installs its own APK on Android; UPDATES-SPEC). Store builds (`DISTRIBUTION=store`) drop self-installed updates, AltStore and the tester upload, and hide the Developer screen (STORE-REVIEW.md). Privacy policy: [PRIVACY.md](PRIVACY.md). |
+| Distribution | Sideloading (AltStore source on iOS, the app installs its own APK on Android; UPDATES-SPEC). Store builds (`DISTRIBUTION=store`) drop self-installed updates and AltStore, and hide the Developer screen and the tester upload until unlocked (STORE-REVIEW.md). Privacy policy: [PRIVACY.md](PRIVACY.md). |
 | Privacy | All data stays on the device. No position upload; trip logs leave the phone only by the share sheet or the **opt-in upload** with a personal code (TRIP-LOGGER-SPEC §7.1). One other exception: Sentry crash/error reports (EU region, no PII; coordinates and VINs scrubbed in `src/config/sentry-scrub.ts`). |
 
 ### 2.1 Odometry stages

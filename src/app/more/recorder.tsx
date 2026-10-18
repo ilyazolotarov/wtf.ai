@@ -1,4 +1,5 @@
 import { router } from "expo-router";
+import { useSyncExternalStore } from "react";
 import { StyleSheet, View } from "react-native";
 
 import { TripStorageSection } from "@/components/recorder/trip-storage-section";
@@ -6,9 +7,11 @@ import { TripUploadSection } from "@/components/recorder/trip-upload-section";
 import { ScreenAction, ScreenContent, ScreenNote, ScreenRow, ScreenSection } from "@/components/screens/screen-ui";
 import { CycleRow } from "@/components/screens/setting-rows";
 import { dash, fmt, fmtBytes, fmtDuration } from "@/components/vehicle/format";
+import { STORE_BUILD } from "@/config/distribution";
 import { usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
 import { useRecorderSnapshot, useRuntime } from "@/providers/runtime-provider";
+import { isDeveloperUnlocked, subscribeDeveloperUnlocked } from "@/services/preferences";
 
 /** Everything about trip logs in one sheet: the trip now, the logs, how they are recorded, sent and kept. */
 export default function RecorderScreen() {
@@ -17,6 +20,8 @@ export default function RecorderScreen() {
   const { recorder, uploader } = useRuntime();
   const rec = useRecorderSnapshot();
   const recording = rec.state === "recording";
+  // A store build shows the tester upload with the Developer screen: reviewers get a code (STORE-REVIEW §3.2).
+  const developerUnlocked = useSyncExternalStore(subscribeDeveloperUnlocked, isDeveloperUnlocked);
 
   return (
     <ScreenContent title={t("tripRecorder")}>
@@ -60,7 +65,7 @@ export default function RecorderScreen() {
         <ScreenNote>{t("recordingTimesNote")}</ScreenNote>
       </ScreenSection>
 
-      {uploader && <TripUploadSection uploader={uploader} />}
+      {uploader && (!STORE_BUILD || developerUnlocked) && <TripUploadSection uploader={uploader} />}
       <TripStorageSection />
     </ScreenContent>
   );

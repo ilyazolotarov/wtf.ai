@@ -226,7 +226,8 @@ logs back.
   keychain (`expo-secure-store`). Uploads run after a trip ends, on foreground and on network changes, oldest first,
   one at a time; the log being written is never sent; Wi-Fi only by default. A sent log is deleted from the phone
   (if the deletion fails it is remembered as sent). A refused log is kept and marked; a revoked code stops uploads.
-  Store builds have no upload (STORE-REVIEW).
+  A code is kept only after a confirmation that names the tester and what is sent. Store builds show the upload
+  only after the Developer unlock (STORE-REVIEW §1).
 - **PC:** `npm run logs:pull` brings uploads down with everything else (`tools/triplog/README.md`).
 
 ### 7.2 Storage limit
