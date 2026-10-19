@@ -3,13 +3,13 @@
 //   npm run logs:status   what differs, changes nothing
 //   npm run logs:push     uploads new and locally changed files
 //   npm run logs:pull     downloads new and remotely changed files
-//   npm run logs:purge    only deletes from the bucket what a local-only folder (synthetic/) put there
+//   npm run logs:purge    only deletes from the bucket what a local-only folder (synthetic/, sim*/) put there
 //
 // Credentials: .env.local, read by s3.ts. Testers' uploads (logs/testers/<name>/) come down with the rest.
 //
 // Nothing is deleted on either side but what the replay viewer's Delete listed in .deleted.json (deleted.ts): a push
 // deletes those from the bucket, a pull removes a copy another PC still has, and neither brings them back. The
-// simulated drives (synthetic/, `npm run sim:drives` makes them again) stay on this PC. A file is overwritten only
+// simulated drives (synthetic/ and any sim*/ folder, `npm run sim:drives` makes them again) stay on this PC. A file is overwritten only
 // where it is unchanged since the last sync
 // (.sync.json in the logs folder remembers each file's MD5 then); edited on both sides, it is reported and left
 // alone. Before a remote file is replaced, it is copied to history/<key>.<time>, so an earlier drawing of the
@@ -27,9 +27,10 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const LOG_DIR = path.join(HERE, "logs");
 const STATE_FILE = path.join(LOG_DIR, ".sync.json");
 const PREFIX = "logs/";
-/** Folders of the logs folder that stay on this PC: regenerated, and gigabytes. */
-const LOCAL_ONLY = new Set(["synthetic"]);
-const localOnly = (key: string) => LOCAL_ONLY.has(key.split("/")[0]);
+// Folders of the logs folder that stay on this PC: simulated drives (synthetic/, sim*/), regenerated, and gigabytes.
+const LOCAL_ONLY = "synthetic/, sim*/";
+const localOnlyDir = (name: string) => name === "synthetic" || name.startsWith("sim");
+const localOnly = (key: string) => key.includes("/") && localOnlyDir(key.split("/")[0]);
 
 /** Every file under the logs folder, by its path with forward slashes; the sync's own state left out. */
 function listLocal(dir = LOG_DIR, rel = ""): Map<string, string> {
@@ -37,7 +38,7 @@ function listLocal(dir = LOG_DIR, rel = ""): Map<string, string> {
   if (!existsSync(dir)) return out;
   for (const e of readdirSync(dir, { withFileTypes: true })) {
     const r = rel + e.name;
-    if (e.isDirectory() && !(rel === "" && LOCAL_ONLY.has(e.name))) for (const [k, v] of listLocal(path.join(dir, e.name), r + "/")) out.set(k, v);
+    if (e.isDirectory() && !(rel === "" && localOnlyDir(e.name))) for (const [k, v] of listLocal(path.join(dir, e.name), r + "/")) out.set(k, v);
     else if (e.isFile() && r !== ".sync.json") out.set(r, md5(readFileSync(path.join(dir, e.name))));
   }
   return out;
@@ -99,7 +100,7 @@ async function main() {
       delete base[r.key];
     }
     saveBase();
-    console.log(`deleted from the bucket  ${strays.length} files of ${[...LOCAL_ONLY].join(", ")}/  ${mb(strays.reduce((n, r) => n + r.size, 0))}`);
+    console.log(`deleted from the bucket  ${strays.length} files of ${LOCAL_ONLY}  ${mb(strays.reduce((n, r) => n + r.size, 0))}`);
   } else if (mode === "push") {
     for (const a of deleteRemote) {
       await s3(c, "DELETE", PREFIX + a.key);
@@ -157,7 +158,7 @@ async function main() {
   );
   if (strays.length && !purge) {
     console.log(
-      `${strays.length} files (${mb(strays.reduce((n, r) => n + r.size, 0))}) of ${[...LOCAL_ONLY].join(", ")}/ are in the bucket but stay on each PC: ` +
+      `${strays.length} files (${mb(strays.reduce((n, r) => n + r.size, 0))}) of ${LOCAL_ONLY} are in the bucket but stay on each PC: ` +
         "`npm run logs:purge` deletes them from it",
     );
   }

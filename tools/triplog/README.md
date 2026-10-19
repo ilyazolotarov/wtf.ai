@@ -37,13 +37,13 @@ in `.env.example`.
 npm run logs:status   # what differs, changes nothing
 npm run logs:push     # after pulling new logs from the phone or drawing ground truth
 npm run logs:pull     # on another PC, or to get back what was lost
-npm run logs:purge    # deletes from the bucket what a local-only folder (synthetic/) put there
+npm run logs:purge    # deletes from the bucket what a local-only folder (synthetic/, sim*/) put there
 ```
 
 Nothing is deleted on either side but junk you delete on purpose: the replay viewer's *Delete* removes a log and
 its drawing here and lists them in `logs/.deleted.json`; the next `logs:push` deletes them from the bucket, and a
-`logs:pull` on another PC removes its copies and never brings them back. `logs/synthetic/` (simulated drives,
-`npm run sim:drives` makes them again, gigabytes) stays on each PC. A file is replaced only where it is unchanged since the
+`logs:pull` on another PC removes its copies and never brings them back. `logs/synthetic/` and any `logs/sim*/`
+folder (simulated drives, `npm run sim:drives` makes them again, gigabytes) stay on each PC. A file is replaced only where it is unchanged since the
 last sync; changed on both sides, it is reported as a conflict and left alone. A replaced
 remote file is kept under `logs/history/` in the bucket.
 
