@@ -24,6 +24,7 @@
 //   npm run sim:drives -- --simple             # the old driver and a flat, still phone (city-drive.ts), old jam
 //   npm run sim:drives -- --driver simple --phone measured --jam regular   # each part on its own (to tell which matters)
 //   npm run sim:drives -- --phone-imu '{"gyroScale":1}'   # the measured phone with some of it changed
+//   npm run sim:drives -- --trips demo --scenarios spoof --cut 35   # GPS goes wrong 35 s in (the store demo's spoof)
 //   npm run replay:incidents -- tools/triplog/logs/synthetic/*.ulg
 //   npm run replay:view -- --logs tools/triplog/logs/synthetic
 
@@ -74,7 +75,7 @@ export const TRIPS: { name: string; from: Coordinate; to: Coordinate }[] = [
 export const SCENARIOS = ["gps", "lost", "spoof", "jam", "jamstart", "unmapped"] as const;
 type Scenario = (typeof SCENARIOS)[number];
 
-/** GPS goes wrong this long into the log (the car has stood `START_STOP_S` = 20 s and driven the rest). */
+/** GPS goes wrong this long into the log (the car has stood `START_STOP_S` = 20 s and driven the rest); `--cut`. */
 const CUT_S = 200;
 const UTC_START_US = Date.UTC(2026, 9, 1, 9, 0, 0) * 1000;
 const TRUTH_STEP_S = 0.2;
@@ -100,13 +101,15 @@ interface Job {
   jam: "measured" | "regular" | "bursts" | "cells";
   /** Overrides of the measured phone (phone-imu.ts), for experiments. */
   phoneImu?: Partial<PhoneImuModelConfig>;
+  /** When GPS goes wrong, s into the log. */
+  cutS: number;
 }
 
-function scenarioFixes(drive: CityDrive, scenario: Scenario, jam: Partial<JamOptions>): GnssFix[] {
+function scenarioFixes(drive: CityDrive, scenario: Scenario, jam: Partial<JamOptions>, cutS: number): GnssFix[] {
   const { gnss, startUs } = drive.trip;
-  if (scenario === "lost") return gnss.filter((f) => f.tUs - startUs < CUT_S * 1e6);
-  if (scenario === "spoof") return spoofFixes(gnss, startUs, [{ fromS: CUT_S, toS: Infinity, kind: "outside" }]).fixes;
-  if (scenario === "jam") return jamFixes(gnss, startUs, [{ fromS: CUT_S, toS: Infinity }], { ...jam, seed: drive.distanceM | 0 });
+  if (scenario === "lost") return gnss.filter((f) => f.tUs - startUs < cutS * 1e6);
+  if (scenario === "spoof") return spoofFixes(gnss, startUs, [{ fromS: cutS, toS: Infinity, kind: "outside" }]).fixes;
+  if (scenario === "jam") return jamFixes(gnss, startUs, [{ fromS: cutS, toS: Infinity }], { ...jam, seed: drive.distanceM | 0 });
   if (scenario === "jamstart" || scenario === "unmapped") return jamFixes(gnss, startUs, [{ fromS: 0, toS: Infinity }], { ...jam, seed: drive.distanceM | 0 });
   return gnss;
 }
@@ -228,14 +231,14 @@ function runJob(job: Job): { trip: string; lines: string[] } {
     for (const scenario of job.scenarios) {
       const name = `sim-${trip.name}-s${job.seed}-${scenario}`;
       const file = `${name}.ulg`;
-      writeFileSync(path.join(OUT, file), writeLog(drive, plan, scenarioFixes(drive, scenario, JAMS[job.jam]), { sim_trip: trip.name, sim_seed: job.seed, sim_scenario: scenario, vehicle_vin: "SIMULATED0000000" }));
+      writeFileSync(path.join(OUT, file), writeLog(drive, plan, scenarioFixes(drive, scenario, JAMS[job.jam], job.cutS), { sim_trip: trip.name, sim_seed: job.seed, sim_scenario: scenario, vehicle_vin: "SIMULATED0000000" }));
       const drawn = {
         version: 1, file, points: [{ lat: truth[0][0], lon: truth[0][1] }, { lat: truth.at(-1)![0], lon: truth.at(-1)![1] }], path: truth,
         legs: [{ lengthM: Math.round(timeline.at(-1)![1]), start: 0, kind: "road" }], graph: path.basename(graphFile), updatedAt: new Date().toISOString(),
       };
       writeFileSync(path.join(OUT, `${name}.truth.json`), JSON.stringify(drawn));
       const hidden = scenario === "unmapped" ? hiddenRoads(plan, g.graph) : [];
-      writeFileSync(path.join(OUT, `${name}.sim.json`), JSON.stringify({ version: 1, trip: trip.name, seed: job.seed, scenario, cutS: scenario === "gps" ? null : CUT_S, hidden, timeline }));
+      writeFileSync(path.join(OUT, `${name}.sim.json`), JSON.stringify({ version: 1, trip: trip.name, seed: job.seed, scenario, cutS: scenario === "gps" ? null : job.cutS, hidden, timeline }));
     }
     lines.push(
       `${trip.name} seed ${job.seed}: ${(drive.distanceM / 1000).toFixed(1)} km in ${minutes.toFixed(0)} min, ${drive.junctions} junctions, ${drive.turns} turns, ` +
@@ -264,13 +267,14 @@ async function main() {
   const phone = (arg("--phone") ?? (simple ? "flat" : "measured")) as Job["phone"];
   const jam = (arg("--jam") ?? (simple ? "regular" : "measured")) as Job["jam"];
   const phoneImu = arg("--phone-imu") ? (JSON.parse(arg("--phone-imu")!) as Partial<PhoneImuModelConfig>) : undefined;
+  const cutS = arg("--cut") ? Number(arg("--cut")) : CUT_S;
   // Each seed is another drive of the same route: other stops, lanes, speeds and sensor errors.
   const [lo, hi = lo] = (arg("--seeds") ?? "1").split("-").map(Number);
   const seeds = Array.from({ length: hi - lo + 1 }, (_, i) => lo + i);
   for (const n of names) if (!TRIPS.some((t) => t.name === n)) throw new Error(`unknown trip ${n}: ${TRIPS.map((t) => t.name).join(", ")}`);
   const pool = new Pool(import.meta.url, threads);
   try {
-    const results = await pool.map<Job, { trip: string; lines: string[] }>(names.flatMap((trip) => seeds.map((seed) => ({ trip, seed, out, scenarios, driver, phone, jam, phoneImu }))));
+    const results = await pool.map<Job, { trip: string; lines: string[] }>(names.flatMap((trip) => seeds.map((seed) => ({ trip, seed, out, scenarios, driver, phone, jam, phoneImu, cutS }))));
     for (const r of results) for (const l of r.lines) console.log(l);
   } finally {
     await pool.close();
