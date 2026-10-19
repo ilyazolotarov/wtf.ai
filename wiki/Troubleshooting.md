@@ -23,7 +23,7 @@ Later connections are quick.
 
 **"Routes reach only places inside the downloaded region."** Download your destination's region, or all of Ukraine.
 
-**No voice.** Check the voice button under the route's ×, the volume in Settings, and where the voice plays (press and
-hold the voice button).
+**No voice.** Check the voice button beside the route's distance, the volume in Settings, and where the voice plays (press
+and hold the voice button).
 
 **Something else?** Write to SUPPORT_EMAIL and quote the *Support code* from More › Settings.

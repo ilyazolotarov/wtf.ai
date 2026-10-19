@@ -212,7 +212,7 @@ export const guideEn = {
   routeWrongTurn: "It plans again by itself. Routes stay inside the downloaded region.",
 
   // Lesson: spoken directions.
-  voiceIntro: "The button under the route’s × is the voice. Tap it to mute; press and hold it to choose where it plays: the phone or the car’s Bluetooth.",
+  voiceIntro: "The speaker button beside the route’s distance is the voice. Tap it to mute; press and hold it to choose where it plays: the phone or the car’s Bluetooth.",
   voiceSay: "“In {d}, turn right”",
   voiceSayCar: "“In {d}, turn right”, through the car’s speakers",
   voiceMuted: "Muted: directions only on screen.",

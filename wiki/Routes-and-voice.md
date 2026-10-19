@@ -12,7 +12,7 @@ itself. Routes stay inside the downloaded region; for long trips, download the w
 
 ## Spoken directions
 
-The button under the route's **×** is the voice:
+The speaker button beside the route's distance is the voice:
 
 - **Tap** to mute; directions stay on screen.
 - **Press and hold** to choose where it plays: the phone, or the car's Bluetooth speakers.
