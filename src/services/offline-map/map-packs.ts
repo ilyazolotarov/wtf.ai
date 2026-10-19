@@ -425,6 +425,27 @@ function install(j: DownloadJob) {
   if (!have && !activateNow) activateWhenAllowed(region);
 }
 
+/** Tries per small file before the download fails. */
+const SMALL_TRIES = 3;
+
+/**
+ * One small file, tried again on failure with a new `File`: on Android, expo-modules-core looks up the destination
+ * outside its registry's lock, so with parallel downloads and the garbage collector releasing other file objects it
+ * can miss one that exists ("doesn't contain valid id"). Once that failed a whole region download.
+ */
+async function downloadSmall(b: JobFile): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const dest = new File(ROOT(), b.dest);
+      dest.parentDirectory.create({ intermediates: true, idempotent: true });
+      await File.downloadFileAsync(b.url, dest, { idempotent: true });
+      return;
+    } catch (e) {
+      if (attempt >= SMALL_TRIES) throw e;
+    }
+  }
+}
+
 /**
  * Fetches the job's remaining files (resuming the current one when paused), then verifies and
  * installs them. Stops quietly when paused or when a newer run (cancel, restart) takes over.
@@ -452,9 +473,7 @@ async function run(id: number) {
       let fetched = 0;
       await Promise.all(
         batch.map(async (b) => {
-          const dest = new File(ROOT(), b.dest);
-          dest.parentDirectory.create({ intermediates: true, idempotent: true });
-          await File.downloadFileAsync(b.url, dest, { idempotent: true });
+          await downloadSmall(b);
           fetched += b.size;
           if (id === runId) setDownload("downloading", j.done + fetched);
         }),
