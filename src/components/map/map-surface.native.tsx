@@ -105,8 +105,11 @@ export function MapSurface({
   // Camera commands wait for the style (`useMapCamera`); a new map (after none) waits again.
   const [mapReady, setMapReady] = useState(false);
   if (mapStyle == null && mapReady) setMapReady(false);
+  // Heading-up places the dot by the map's own height (turned sideways, it is the screen's width).
+  const [mapHeightPt, setMapHeightPt] = useState(0);
   const { cameraRef, onRegionIsChanging, onRegionDidChange } = useMapCamera({
     mapReady,
+    mapHeightPt,
     mode,
     // Heading-up turns with the smoothed heading too, unless the walking compass leads.
     headingUpRad: smoothing && !compass && shown?.headingRad != null ? shown.headingRad : headingUpRad,
@@ -142,6 +145,7 @@ export function MapSurface({
     <Map
       mapStyle={mapStyle as ComponentProps<typeof Map>["mapStyle"]}
       style={{ flex: 1 }}
+      onLayout={(event) => setMapHeightPt(Math.round(event.nativeEvent.layout.height))}
       // The panels' blur redraws the views under it, and a GLSurfaceView (the default) isn't part of that drawing:
       // the blur came out empty. A TextureView is, so use it wherever blur runs (Android 12+).
       androidView={ANDROID_BLURS ? "texture" : "surface"}

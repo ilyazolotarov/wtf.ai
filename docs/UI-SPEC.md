@@ -157,6 +157,10 @@ persisted in kv-store. No hardcoded user-facing strings in components.
   zooms are fixed. Logged as `camera follow: zoom <z> to fit the circle (<m> m)`.
 - **Tilt:** heading-up 50°; north-up, free, the ghost view, the routes' overview and placing are top-down. No tilt or
   rotate gesture. A gesture that leaves heading-up flattens the map once it settles.
+- **Where the dot sits:** heading-up puts it 75 % down the map's own height (a top padding on the follow stop), so the
+  road ahead fills the screen between the route banner and the bottom bar. North-up, and heading-up zoomed out for a
+  wide circle at open, keep it centred. iOS reports the screen's centre as the map's, so the settle-back check below
+  allows 1 km more while the dot is lowered.
 - **Motion** (`pose-smoother.ts`): moving (≥ 2 m/s, with a heading, not a placed position) the dot, its circle and
   cone and the following camera are drawn ~30 times a second in even steps (every second 60 Hz frame): between the
   navigator's 2 Hz positions the pose goes on along the heading at the speed (≤ 1 s), the gap to each new position
@@ -192,8 +196,8 @@ One small component each; the screen only places them and wires their state. Car
 
 | Position | Component | Content |
 | --- | --- | --- |
-| Top | `StatusRow` | The status pill: the trust state in words, coloured by it ("Position trusted", "GPS looks spoofed", "GPS is back — verifying", "No GPS signal", and "Approximate location" when the only position is a Wi-Fi/cell one), the source ("GNSS", "Car sensors", "Phone sensors only", "Verifying GNSS", "Set on the map"); the speed in km/h beside it. A tap unfolds the details: the alert text, the outage card and "Cut GPS", the manual position's chip |
-| Top | `SinceTrustedStrip` (`trust-cards.tsx`) | While GNSS isn't trusted, from a minute after the last trusted fix: "Last trusted GPS: 4 min ago, 2.3 km back" |
+| Top | `StatusRow` | The status pill: the trust state in words, coloured by it ("Position trusted", "GPS looks spoofed", "GPS is back — verifying", "No GPS signal", and "Approximate location" when the only position is a Wi-Fi/cell one), the source ("GNSS", "Car sensors", "Phone sensors only", "Verifying GNSS", "Set on the map"); the speed in km/h beside it. A tap unfolds the details: the alert text and the last trusted fix's strip, the outage card and "Cut GPS", the manual position's chip |
+| Top | `SinceTrustedStrip` (`trust-cards.tsx`) | Unfolded under the trust alert, while GNSS isn't trusted, from a minute after the last trusted fix: "Last trusted GPS: 4 min ago, 2.3 km back" |
 | Top | `RouteBanner` | Only with a route (below) |
 | Top | `trust-cards.tsx`, `placing-cards.tsx` | Trust alert, simulated outage, the parked-pose question, placing (`usePlacing`), "Are you still here?", the manual chip |
 | Top | `RegionPromptCard`, `HudChip` | Outside the region (below), protocol search |
@@ -217,9 +221,11 @@ One small component each; the screen only places them and wires their state. Car
   the text (amber for a re-plan), and for a first plan a ring pulses out of the icon; both hold still with Reduce
   Motion. Its × ends the route; its speaker button mutes the voice (hidden while the volume in Settings is 0),
   holding it opens the system's audio output picker, and while the voice goes off the phone it shows the AirPlay
-  audio glyph. The two buttons are 38 pt, at least 20 pt apart. The map draws the route ahead of the car (from its
-  progress point: what is driven disappears; faded while planning again; the stretch from the progress point to the
-  next vertex dashed over its solid outline), its next maneuver and the destination. Light: indigo #3D5CBC with an
+  audio glyph. Both buttons are 38 pt, on the distance's line (the title's, without one): the speaker right after the
+  distance, the × in the corner, far apart. The lines under it take the card's whole width and the card stays low.
+  The map draws the route ahead of the car (from its progress point: what is driven disappears; faded while planning
+  again; the stretch from the progress point to the next vertex dashed over its solid outline), its next maneuver and
+  the destination. Light: indigo #3D5CBC with an
   off-white outline; dark: cyan #00D4FF with a black outline, the next maneuver's dot white ringed in black. Widths
   (`ROUTE_LINE`): a 9 pt line in a 13 pt outline, dashes 18 on 8 off. **Alternatives** (ROUTING-SPEC §8.7): quieter
   solid lines under it (light #B8C7EE in a #53618A casing; dark grey-blue #93ABC4 in the route's outline), each

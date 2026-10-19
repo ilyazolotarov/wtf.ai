@@ -188,8 +188,9 @@ export default function HomeScreen() {
   const showingGhost = ghostView && ghost != null;
   const alertText = trustAlertText(nav, t);
 
-  // The explanation under the status pill stays folded to leave room for the map; a tap on the
-  // pill opens it. The manual position's chip is part of it: the pill already says the position is set by hand.
+  // The explanation under the status pill stays folded to leave room for the map; a tap on the pill opens it. The
+  // last trusted fix's strip and the manual position's chip are part of it: the pill already says the position is
+  // set by hand.
   const showCutGps = outageButton && position != null && !outage;
   const showManual = !placing && manual != null && !manual.asking;
   // On the tour's status stop the pill unfolds even with nothing to explain: then the tour says what it means.
@@ -381,8 +382,6 @@ export default function HomeScreen() {
                 <HudChip icon="bluetooth" label={t("obdFindingProtocol")} color={palette.warn.c} />
               )}
 
-              {!placing && position && <SinceTrustedStrip position={position} />}
-
               {showCutGps && detailsOpen && (
                 <HudChip
                   icon="gps_off"
@@ -401,6 +400,9 @@ export default function HomeScreen() {
                   onToggleGhost={() => setGhostView(!showingGhost)}
                 />
               )}
+
+              {/* Unfolded only: driving, it took a line of the map under the pill. */}
+              {!placing && position && detailsOpen && <SinceTrustedStrip position={position} />}
 
               {route && (
                 <RouteBanner route={route} nowMs={position?.timestamp ?? 0} onStop={stopRoute} muted={voiceMuted} onToggleVoice={voiceOff ? undefined : toggleVoice} offPhone={audioOutput.offPhone} />

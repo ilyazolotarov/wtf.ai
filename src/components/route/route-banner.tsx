@@ -114,14 +114,66 @@ export function RouteBanner({
         <Icon name={icon} size={26} color={palette.onAccent} />
       </View>
       <View style={styles.copy}>
+        {/* The buttons on the first line, not in a column of their own: the lines under it get the whole width. The voice
+            button follows the distance, the × keeps the corner. */}
+        <View style={styles.top}>
+          <View style={styles.topText}>
+            {distance ? (
+              <T w="semibold" size={24} style={styles.distance}>
+                {distance}
+              </T>
+            ) : (
+              <T w="semibold" size={17} fit={2}>
+                {title}
+              </T>
+            )}
+          </View>
+          {route.status === "active" && onToggleVoice && (
+            <Pressable
+              onPress={onToggleVoice}
+              onLongPress={canPickAudioOutput ? openPicker : undefined}
+              accessibilityRole="button"
+              accessibilityLabel={t(muted ? "voiceOff" : "voiceOn")}
+              accessibilityHint={canPickAudioOutput ? t("voiceOutputHint") : undefined}
+              accessibilityActions={canPickAudioOutput ? [{ name: "activate" }, { name: "longpress", label: t("voiceOutput") }] : undefined}
+              onAccessibilityAction={(e) => (e.nativeEvent.actionName === "longpress" ? openPicker() : onToggleVoice())}
+              hitSlop={HIT_SLOP}
+              style={({ pressed }) => [styles.button, { backgroundColor: palette.surface }, pressed && styles.pressed]}
+            >
+              <Icon
+                name={muted ? "volume_off" : offPhone ? "airplay" : "volume_up"}
+                size={17}
+                color={muted ? palette.text2 : palette.accent}
+              />
+              {AudioOutputPicker && (
+                // Invisible: only its sheet is wanted, opened by the long press.
+                <AudioOutputPicker
+                  ref={picker}
+                  pointerEvents="none"
+                  style={styles.picker}
+                  tint={processColor(palette.text2) as number}
+                  activeTint={processColor(palette.accent) as number}
+                />
+              )}
+            </Pressable>
+          )}
+          {/* Apart: × ends the route, a slip off the voice button must not reach it. */}
+          <View style={styles.spacer} />
+          <Pressable
+            onPress={onStop}
+            accessibilityRole="button"
+            accessibilityLabel={t("stopGuidance")}
+            hitSlop={HIT_SLOP}
+            style={({ pressed }) => [styles.button, { backgroundColor: palette.surface }, pressed && styles.pressed]}
+          >
+            <Icon name="close" size={17} color={palette.text2} />
+          </Pressable>
+        </View>
         {distance && (
-          <T w="semibold" size={24} style={styles.distance}>
-            {distance}
+          <T w="semibold" size={15} fit={2}>
+            {title}
           </T>
         )}
-        <T w="semibold" size={distance ? 15 : 17} fit={2}>
-          {title}
-        </T>
         {then && (
           <View style={styles.then}>
             <T size={13} color={palette.text2}>
@@ -142,51 +194,11 @@ export function RouteBanner({
         )}
         {working && <PlanningSweep color={planning ? palette.accent : palette.warn.c} />}
       </View>
-      <View style={styles.buttons}>
-        <Pressable
-          onPress={onStop}
-          accessibilityRole="button"
-          accessibilityLabel={t("stopGuidance")}
-          hitSlop={HIT_SLOP}
-          style={({ pressed }) => [styles.button, { backgroundColor: palette.surface }, pressed && styles.pressed]}
-        >
-          <Icon name="close" size={17} color={palette.text2} />
-        </Pressable>
-        {route.status === "active" && onToggleVoice && (
-          <Pressable
-            onPress={onToggleVoice}
-            onLongPress={canPickAudioOutput ? openPicker : undefined}
-            accessibilityRole="button"
-            accessibilityLabel={t(muted ? "voiceOff" : "voiceOn")}
-            accessibilityHint={canPickAudioOutput ? t("voiceOutputHint") : undefined}
-            accessibilityActions={canPickAudioOutput ? [{ name: "activate" }, { name: "longpress", label: t("voiceOutput") }] : undefined}
-            onAccessibilityAction={(e) => (e.nativeEvent.actionName === "longpress" ? openPicker() : onToggleVoice())}
-            hitSlop={HIT_SLOP}
-            style={({ pressed }) => [styles.button, { backgroundColor: palette.surface }, pressed && styles.pressed]}
-          >
-            <Icon
-              name={muted ? "volume_off" : offPhone ? "airplay" : "volume_up"}
-              size={17}
-              color={muted ? palette.text2 : palette.accent}
-            />
-            {AudioOutputPicker && (
-              // Invisible: only its sheet is wanted, opened by the long press.
-              <AudioOutputPicker
-                ref={picker}
-                pointerEvents="none"
-                style={styles.picker}
-                tint={processColor(palette.text2) as number}
-                activeTint={processColor(palette.accent) as number}
-              />
-            )}
-          </Pressable>
-        )}
-      </View>
     </View>
   );
 }
 
-const HIT_SLOP = { top: 6, bottom: 6, left: 12, right: 12 };
+const HIT_SLOP = { top: 12, bottom: 6, left: 10, right: 10 };
 const ICON_SIZE = 52;
 
 const styles = StyleSheet.create({
@@ -208,11 +220,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   copy: { flex: 1, gap: 2 },
+  top: { flexDirection: "row", alignItems: "center", gap: 10 },
+  topText: { flexShrink: 1 },
+  spacer: { flex: 1, minWidth: 4 },
   distance: { fontVariant: ["tabular-nums"], letterSpacing: -0.4 },
   then: { flexDirection: "row", alignItems: "center", gap: 5 },
   thenText: { flexShrink: 1 },
-  // Apart, with taps that don't reach the other button: × ends the route.
-  buttons: { gap: 20, alignSelf: "stretch", justifyContent: "space-between" },
   button: {
     width: 38,
     height: 38,
