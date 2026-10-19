@@ -269,7 +269,9 @@ car left. Optimistic as the simulator is.
   maneuver's speed (20 km/h a turn, 15 a sharp turn or U-turn, 25 a roundabout, 50 a slight turn or keep), at least
   40 m. "Ahead" is skipped when "at it" would follow within 6 s. "потім …" when the next follows within 120 m; "і ви
   на місці" for the destination; roundabout exits as ordinals; "Маршрут перебудовано" for a re-plan, "Ви прибули" at
-  the end. Nothing about the plan's maneuvers while off it. `npm run replay:voice` checks "turn now" against when
+  the end. Nothing about the plan's maneuvers while off it. Taking an alternative (either way) says nothing of
+  its own and doesn't say again what was said of the same maneuver (same kind and exit, within 20 m) on the route
+  left: the turn at a junction the routes share is said once. `npm run replay:voice` checks "turn now" against when
   the car turned (the gyro).
 - **Controls:** the banner's speaker button mutes it (kept across launches). Settings has the volume, 0–100 % (a
   sample is said when the finger leaves the slider; 0 turns the voice off and hides the button). The player's gain is

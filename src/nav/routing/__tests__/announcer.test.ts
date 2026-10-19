@@ -68,6 +68,25 @@ describe("Announcer", () => {
     expect(a.update({ ...at(0, {}, 3), planReason: "off-route" })).toEqual([{ kind: "replanned" }]);
   });
 
+  test("switching to an alternative and back doesn't say again the maneuver they share; a different one is said", () => {
+    const a = new Announcer();
+    expect(a.update(at(700))).toEqual([expect.objectContaining({ stage: "prepare" })]);
+    // The alternative turns left at the same junction, then goes its own way.
+    const other = [m("depart", 0), m("left", 1000), { ...m("slight-right", 1500), lat: 51.01 }, m("arrive", 2500)];
+    const onOther = (planId: number): AnnouncerInput => ({ ...at(710, {}, planId), planReason: "alternative", maneuvers: other });
+    expect(a.update(onOther(2))).toEqual([]);
+    expect(a.update({ ...at(720, {}, 3), planReason: "alternative" })).toEqual([]);
+    // Back on the route at it: "at it" is still said once.
+    expect(a.update({ ...at(990, {}, 3), planReason: "alternative" })).toEqual([expect.objectContaining({ stage: "now" })]);
+    // An alternative whose first maneuver is another: said.
+    const right = [m("depart", 0), m("right", 1000), m("arrive", 2000)];
+    const b = new Announcer();
+    b.update(at(700));
+    expect(b.update({ ...at(710, {}, 2), planReason: "alternative", maneuvers: right })).toEqual([
+      expect.objectContaining({ stage: "prepare", maneuver: expect.objectContaining({ kind: "right" }) }),
+    ]);
+  });
+
   test("a maneuver already closer than the spoken distance (a route starting near it): the nearest", () => {
     const a = new Announcer();
     expect(a.update({ ...at(780), planId: 3 })).toEqual([expect.objectContaining({ stage: "prepare", distanceM: 200 })]);

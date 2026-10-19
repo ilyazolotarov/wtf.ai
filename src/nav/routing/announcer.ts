@@ -2,6 +2,7 @@
 // and once at it ("turn left"), the route being planned again, and arrival. Pure logic: the app turns these into
 // speech in the driver's language.
 
+import { haversineM } from "../geo";
 import type { GuidanceStep } from "./guidance";
 import type { Maneuver, ManeuverKind } from "./maneuvers";
 
@@ -81,6 +82,12 @@ export interface AnnouncerInput {
 /** The distances said ahead of a maneuver, the steps drivers know from other navigators (each is a recorded phrase). */
 export const SPOKEN_DISTANCES_M = [50, 100, 200, 300, 400, 500, 600, 800, 1000, 1500, 2000] as const;
 
+/** A maneuver of another plan this close, of the same kind: the same one (alternatives share their first junctions). */
+const SAME_MANEUVER_M = 20;
+
+const sameManeuver = (a: Maneuver, b: Maneuver) =>
+  a.kind === b.kind && (a.exit ?? 1) === (b.exit ?? 1) && haversineM(a, b) <= SAME_MANEUVER_M;
+
 /** The spoken distance nearest to `m`. */
 export function spokenDistanceM(m: number): number {
   let best: number = SPOKEN_DISTANCES_M[0];
@@ -98,6 +105,8 @@ export class Announcer {
   private planId: number | null = null;
   /** Announced, as `<maneuver index>:<stage>`, for the current plan. */
   private said = new Set<string>();
+  /** The current plan's maneuvers: what was said of them carries over to an alternative taken. */
+  private maneuvers: Maneuver[] = [];
   private arrived = false;
 
   constructor(config: Partial<AnnouncerConfig> = {}) {
@@ -112,9 +121,21 @@ export class Announcer {
       // A new plan: the first is the route starting (its first maneuver says enough), later ones are re-plans,
       // unless the driver took an alternative (by a tap, or by driving onto it).
       if (this.planId !== null && input.planReason !== "alternative") out.push({ kind: "replanned" });
+      // An alternative taken: what was said stays said where it is the same maneuver ("turn right" at the junction
+      // all the routes share isn't said again on switching between them).
+      const carried = new Set<string>();
+      if (input.planReason === "alternative") {
+        for (const k of this.said) {
+          const [i, stage] = k.split(":");
+          const was = this.maneuvers[Number(i)];
+          const j = was ? maneuvers.findIndex((x) => sameManeuver(x, was)) : -1;
+          if (j >= 0) carried.add(`${j}:${stage}`);
+        }
+      }
       this.planId = input.planId;
-      this.said.clear();
+      this.said = carried;
     }
+    this.maneuvers = maneuvers;
     if (g.state === "arrived") {
       if (!this.arrived) out.push({ kind: "arrived" });
       this.arrived = true;
