@@ -58,6 +58,9 @@ env:
   PRIVACY_POLICY_URL: ${{ vars.PRIVACY_POLICY_URL }}
   SENTRY_URL: ${{ vars.SENTRY_URL }}
 
+permissions:
+  contents: read
+
 jobs:
   build-ios:
     # Expo SDK 57 requires Xcode 26.4+

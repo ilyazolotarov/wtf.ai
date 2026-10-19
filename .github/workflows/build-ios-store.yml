@@ -24,6 +24,9 @@ env:
   SENTRY_URL: ${{ vars.SENTRY_URL }}
   PRIVACY_POLICY_URL: ${{ vars.PRIVACY_POLICY_URL }}
 
+permissions:
+  contents: read
+
 jobs:
   build-ios-store:
     runs-on: macos-26

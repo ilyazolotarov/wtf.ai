@@ -117,6 +117,11 @@
     "preset": "jest-expo"
   },
   "private": true,
+  "overrides": {
+    "xcode": {
+      "uuid": "^11.1.1"
+    }
+  },
   "allowScripts": {
     "@sentry/cli@2.58.4": true
   }

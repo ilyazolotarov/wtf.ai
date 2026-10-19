@@ -189,6 +189,9 @@ function send(res: ServerResponse, status: number, type: string, body: string | 
   res.end(body);
 }
 
+// What went wrong, for the page: the message only. The stack stays in this console (console.error).
+const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
 /**
  * Every log: the project's own in the logs folder, testers' uploads in testers/<name>/ (TRIP-LOGGER-SPEC §7.1).
  * `file` is the path inside the logs folder; `who` is the tester ("" for the project's phone). Newest first.
@@ -415,7 +418,7 @@ function startReplayWorker(): Worker {
       job.resolve({ status: 500, type: "text/plain", body: `the replay worker ${why}` });
     }
   };
-  w.on("error", (e) => lost(`failed: ${String(e)}`));
+  w.on("error", (e) => lost(`failed: ${errorText(e)}`));
   w.on("exit", (code) => code !== 0 && lost(`exited (${code})`));
   return w;
 }
@@ -450,7 +453,7 @@ if (!isMainThread && (workerData as { role?: string } | null)?.role === "replay"
       r = replayReply(new URL(href));
     } catch (error) {
       console.error(error);
-      r = { status: 500, type: "text/plain", body: String(error) };
+      r = { status: 500, type: "text/plain", body: errorText(error) };
     }
     parentPort!.postMessage({ id, ...r });
   });
@@ -465,7 +468,7 @@ const server = createServer((req, res) => {
       // The basemap in dark mode as the app draws it: OpenFreeMap Liberty re-tinted by the app's own palette.
       darkStyle()
         .then((style) => send(res, 200, "application/json", JSON.stringify(style)))
-        .catch((error: unknown) => send(res, 502, "text/plain", `the dark map style: ${String(error)}`));
+        .catch((error: unknown) => send(res, 502, "text/plain", `the dark map style: ${errorText(error)}`));
     } else if (url.pathname === "/api/logs") {
       send(res, 200, "application/json", JSON.stringify(listLogs()));
     } else if (url.pathname === "/api/replay") {
@@ -550,14 +553,14 @@ const server = createServer((req, res) => {
         })
         .catch((error: unknown) => {
           console.error(error);
-          send(res, 500, "text/plain", String(error));
+          send(res, 500, "text/plain", errorText(error));
         });
     } else {
       send(res, 404, "text/plain", "not found");
     }
   } catch (error) {
     console.error(error);
-    send(res, 500, "text/plain", String(error));
+    send(res, 500, "text/plain", errorText(error));
   }
 });
 
