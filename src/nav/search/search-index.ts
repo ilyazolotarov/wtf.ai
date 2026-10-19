@@ -88,7 +88,20 @@ interface TokenSet {
   ids: Uint32Array;
   /** Children of the settlements among `ids`: [start, end) sorted by start. */
   ranges: [number, number][];
+  /** The same for the index words the token reaches only with a typo (§4.2). */
+  nearIds: Uint32Array;
+  nearRanges: [number, number][];
+  near: NearTokens;
   cost: number;
+}
+
+interface NearTokens {
+  /** Token index ranges [lo, hi), outside the token's own. */
+  spans: [number, number][];
+  /** Whole words reached with a typo … */
+  words: Set<string>;
+  /** … and, for the word being typed, starts that every word extending them is. */
+  starts: string[];
 }
 
 interface House {
@@ -103,9 +116,11 @@ interface House {
 
 interface Match {
   id: number;
-  /** Bit i: token i matched the entity's own names / its settlement's. */
+  /** Bit i: token i matched the entity's own names / its settlement's … */
   direct: number;
   via: number;
+  /** … only with a typo. */
+  typo: number;
 }
 
 /** Postings read for one query word at most (a two-letter prefix in the whole country). */
@@ -122,6 +137,16 @@ const MAX_TOKENS = 8;
 /** Address results per street. */
 const HOUSES_PER_STREET = 5;
 const CACHE_LIMIT = 20_000;
+
+/**
+ * Typos forgiven in a query word (a letter wrong, missed, extra or two swapped; the first letter kept): none under 4
+ * letters (5 for the word being typed: its start is still short), one, two from 8 letters. Numbers none.
+ */
+export function typoBudget(t: QueryToken): number {
+  if (/[0-9]/.test(t.text)) return 0;
+  const n = t.text.length;
+  return n >= 8 ? 2 : n >= (t.prefix ? 5 : 4) ? 1 : 0;
+}
 
 const toU32 = (bytes: Uint8Array) => {
   const copy = bytes.slice();
@@ -218,7 +243,8 @@ export class SearchIndex {
     // Street kinds ("вул.", "вули…" while typing) and single letters never decide a match.
     const use = tokens.filter((t) => !t.optional);
     if (use.length === 0) return [];
-    let ranked = this.match(use).map((m) => {
+    const { matches, near: typos } = this.match(use);
+    let ranked = matches.map((m) => {
       const e = this.entity(m.id);
       return { m, e, coarse: this.coarseScore(e, m, near) };
     });
@@ -226,7 +252,7 @@ export class SearchIndex {
     ranked.sort((a, b) => b.coarse - a.coarse);
     const out: SearchResult[] = [];
     for (const { m, e } of ranked.slice(0, house ? HOUSE_OWNERS : FULL_SCORED)) {
-      const score = this.score(e, m, use, tokens, near);
+      const score = this.score(e, m, use, typos, tokens, near);
       if (house) {
         const houses = this.houses(e, house);
         for (const h of houses) out.push(this.addressResult(e, h, score + h.bonus, near));
@@ -240,55 +266,75 @@ export class SearchIndex {
   }
 
   /** Entities that every token matches, by its own names or its settlement's (at least one its own). */
-  private match(tokens: QueryToken[]): Match[] {
+  private match(tokens: QueryToken[]): { matches: Match[]; near: NearTokens[] } {
     const sets: TokenSet[] = [];
     for (const token of tokens) {
       const ids = this.postings(token);
-      const ranges: [number, number][] = [];
-      let cost = ids.length;
-      for (const id of ids) {
-        if (id >= this.header.settlements) break;
-        const e = this.entity(id);
-        if (e.nchild > 0) {
-          ranges.push([e.child, e.child + e.nchild]);
-          cost += e.nchild;
-        }
-      }
-      if (cost === 0) return [];
-      ranges.sort((a, b) => a[0] - b[0]);
-      sets.push({ token, ids, ranges, cost });
+      const near = this.nearTokens(token, typoBudget(token));
+      const nearIds = this.spanPostings(near.spans);
+      const ranges = this.childRanges(ids);
+      const nearRanges = this.childRanges(nearIds);
+      const cost = ids.length + nearIds.length + [...ranges, ...nearRanges].reduce((n, [a, b]) => n + b - a, 0);
+      if (cost === 0) return { matches: [], near: [] };
+      sets.push({ token, ids, ranges, nearIds, nearRanges, near, cost });
     }
     const driver = sets.reduce((a, b) => (b.cost < a.cost ? b : a));
     const out: Match[] = [];
+    const done = { matches: out, near: sets.map((s) => s.near) };
     const seen = new Set<number>();
     const test = (id: number) => {
       if (seen.has(id)) return;
       seen.add(id);
       let direct = 0;
       let via = 0;
+      let typo = 0;
       for (let i = 0; i < sets.length; i++) {
-        if (contains(sets[i].ids, id)) direct |= 1 << i;
-        else if (inRanges(sets[i].ranges, id)) via |= 1 << i;
-        else return;
+        const s = sets[i];
+        const bit = 1 << i;
+        // Spelled right through its settlement beats a typo in its own name.
+        if (contains(s.ids, id)) direct |= bit;
+        else if (inRanges(s.ranges, id)) via |= bit;
+        else if (contains(s.nearIds, id)) {
+          direct |= bit;
+          typo |= bit;
+        } else if (inRanges(s.nearRanges, id)) {
+          via |= bit;
+          typo |= bit;
+        } else return;
       }
-      if (direct !== 0) out.push({ id, direct, via });
+      if (direct !== 0) out.push({ id, direct, via, typo });
     };
-    for (const id of driver.ids) {
-      test(id);
-      if (out.length >= MAX_MATCHES) return out;
+    for (const ids of [driver.ids, driver.nearIds]) {
+      for (const id of ids) {
+        test(id);
+        if (out.length >= MAX_MATCHES) return done;
+      }
     }
-    for (const [start, end] of driver.ranges) {
+    for (const [start, end] of [...driver.ranges, ...driver.nearRanges]) {
       for (let id = start; id < end; id++) {
         test(id);
-        if (out.length >= MAX_MATCHES) return out;
+        if (out.length >= MAX_MATCHES) return done;
       }
     }
-    return out;
+    return done;
+  }
+
+  /** Children of the settlements among `ids`: [start, end) sorted by start. */
+  private childRanges(ids: Uint32Array): [number, number][] {
+    const ranges: [number, number][] = [];
+    for (const id of ids) {
+      if (id >= this.header.settlements) break;
+      const e = this.entity(id);
+      if (e.nchild > 0) ranges.push([e.child, e.child + e.nchild]);
+    }
+    return ranges.sort((a, b) => a[0] - b[0]);
   }
 
   /** From what the ids and the record tell, before any name is decoded. */
   private coarseScore(e: Entity, m: Match, near: Coordinate | null): number {
-    let score = 8 * bits(m.direct) + 5 * bits(m.via) + this.kindScore(e);
+    let score =
+      8 * bits(m.direct & ~m.typo) + 5 * bits(m.via & ~m.typo) + 3 * bits(m.direct & m.typo) + 2 * bits(m.via & m.typo);
+    score += this.kindScore(e);
     if (near) score -= 7 * Math.log10(1 + haversineM(near, e) / 1000);
     return score;
   }
@@ -299,13 +345,22 @@ export class SearchIndex {
     return 3;
   }
 
-  private score(e: Entity, m: Match, use: QueryToken[], all: QueryToken[], near: Coordinate | null): number {
+  private score(
+    e: Entity,
+    m: Match,
+    use: QueryToken[],
+    typos: NearTokens[],
+    all: QueryToken[],
+    near: Coordinate | null,
+  ): number {
     const name = this.string(e.nameAt);
     const nameEn = e.nameEnAt === NONE ? null : this.string(e.nameEnAt);
     const words = new Set([...fold(name), ...(nameEn ? fold(nameEn) : [])]);
     let score = 0;
     use.forEach((t, i) => {
-      if (m.direct & (1 << i)) {
+      if (m.typo & (1 << i)) {
+        score += m.direct & (1 << i) ? 3 : 2;
+      } else if (m.direct & (1 << i)) {
         if (words.has(t.text)) score += 10;
         else if (t.prefix && [...words].some((w) => w.startsWith(t.text))) score += 7;
         else score += 6; // another of its names (old, Russian, alternative)
@@ -314,7 +369,9 @@ export class SearchIndex {
       }
     });
     // Words of its name the query left out; the whole name typed scores more.
-    const typed = (w: string) => all.some((t) => t.text === w || (t.prefix && w.startsWith(t.text)));
+    const typed = (w: string) =>
+      all.some((t) => t.text === w || (t.prefix && w.startsWith(t.text))) ||
+      typos.some((n) => n.words.has(w) || n.starts.some((p) => w.startsWith(p)));
     const missing = fold(name).filter((w) => !STOPWORDS.has(w) && !typed(w)).length;
     score += missing === 0 ? 6 : -0.5 * missing;
     score += this.kindScore(e);
@@ -443,6 +500,100 @@ export class SearchIndex {
     let n = 0;
     for (let i = 0; i < ids.length; i++) if (i === 0 || ids[i] !== ids[n - 1]) ids[n++] = ids[i];
     return ids.subarray(0, n);
+  }
+
+  /**
+   * Index words within `budget` typos of the token (`typoBudget`), the first letter the same; for the word being
+   * typed, the words that start within `budget` of it. The words sorted are walked as a trie: the edit-distance rows
+   * (optimal string alignment) of a start shared with the word before are kept, and a start already too far, or
+   * close enough as a start, settles every word that extends it at once.
+   */
+  private nearTokens(token: QueryToken, budget: number): NearTokens {
+    const near: NearTokens = { spans: [], words: new Set(), starts: [] };
+    if (budget === 0) return near;
+    this.loadTokens();
+    const offsets = this.tokenOffsets!;
+    const blob = this.tokenBlob!;
+    const q = token.text;
+    const n = q.length;
+    const rows: Uint8Array[] = [Uint8Array.from({ length: n + 1 }, (_, j) => j)];
+    const text = (a: number, k: number) => String.fromCharCode(...blob.subarray(a, a + k));
+    const hi = this.lowerBound(q[0] + "");
+    let prev = -1;
+    let valid = 0; // rows[0..valid] belong to the start of word `prev`
+    for (let i = this.lowerBound(q[0]); i < hi; ) {
+      const a = offsets[i];
+      const len = offsets[i + 1] - a;
+      let k = 0;
+      if (prev >= 0) {
+        const b = offsets[prev];
+        const max = Math.min(valid, len, offsets[prev + 1] - b);
+        while (k < max && blob[a + k] === blob[b + k]) k++;
+      }
+      let next = i + 1;
+      let settled = false;
+      for (k++; k <= len; k++) {
+        const c = blob[a + k - 1];
+        const up = rows[k - 1];
+        const row = (rows[k] ??= new Uint8Array(n + 1));
+        row[0] = k;
+        let least = k;
+        for (let j = 1; j <= n; j++) {
+          const qc = q.charCodeAt(j - 1);
+          let d = Math.min(up[j] + 1, row[j - 1] + 1, up[j - 1] + (qc === c ? 0 : 1));
+          if (k > 1 && j > 1 && c === q.charCodeAt(j - 2) && blob[a + k - 2] === qc) d = Math.min(d, rows[k - 2][j - 2] + 1);
+          row[j] = d;
+          if (d < least) least = d;
+        }
+        if (token.prefix && row[n] <= budget) {
+          if (row[n] > 0) {
+            const start = text(a, k);
+            next = this.lowerBound(start + "");
+            near.starts.push(start);
+            near.spans.push([i, next]);
+          } else {
+            next = this.lowerBound(q + ""); // the token's own range
+          }
+          settled = true;
+        } else if (least > budget) {
+          next = this.lowerBound(text(a, k) + "");
+          settled = true;
+        }
+        if (settled) break;
+      }
+      valid = settled ? k : len;
+      if (!settled && !token.prefix && rows[len][n] > 0 && rows[len][n] <= budget) {
+        near.words.add(text(a, len));
+        near.spans.push([i, i + 1]);
+      }
+      prev = i;
+      i = next;
+    }
+    return near;
+  }
+
+  /** Sorted unique entity ids of the tokens in `spans` (at most `MAX_POSTINGS` read). */
+  private spanPostings(spans: [number, number][]): Uint32Array {
+    if (spans.length === 0) return new Uint32Array(0);
+    const starts = this.postingStarts!;
+    const parts: Uint32Array[] = [];
+    let total = 0;
+    for (const [lo, hi] of spans) {
+      const count = Math.min(starts[hi] - starts[lo], MAX_POSTINGS - total);
+      if (count <= 0) break;
+      parts.push(toU32(this.source.read(this.header.postingsAt + starts[lo] * 4, count * 4)));
+      total += count;
+    }
+    const ids = new Uint32Array(total);
+    let at = 0;
+    for (const p of parts) {
+      ids.set(p, at);
+      at += p.length;
+    }
+    ids.sort();
+    let m = 0;
+    for (let i = 0; i < ids.length; i++) if (i === 0 || ids[i] !== ids[m - 1]) ids[m++] = ids[i];
+    return ids.subarray(0, m);
   }
 
   private entity(id: number): Entity {

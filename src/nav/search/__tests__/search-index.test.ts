@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { bufferByteSource } from "@/nav/mapmatch/graph/byte-source";
 import { fold, foldHouse, parseQuery } from "@/nav/search/fold";
-import { SearchIndex, withoutRepeats, type SearchResult } from "@/nav/search/search-index";
+import { SearchIndex, typoBudget, withoutRepeats, type SearchResult } from "@/nav/search/search-index";
 
 import foldCases from "../__fixtures__/fold-cases.json";
 
@@ -112,6 +112,28 @@ describe("SearchIndex", () => {
     expect(silpo.tag).toBe("shop=supermarket");
     expect(silpo.nameEn).toBe("Silpo");
     expect(search("WOG")[0]).toBe("poi:WOG @Чернігів");
+  });
+
+  it("forgives typos: a letter missed, doubled, wrong or two swapped", () => {
+    expect(search("Шевчнко")[0]).toBe("street:вулиця Шевченка @Чернігів"); // missed
+    expect(search("Шевчекна 10, Чернігів")[0]).toBe("address:вулиця Шевченка 10 @Чернігів"); // swapped
+    expect(search("Шеввченка Іванівка")[0]).toBe("street:вулиця Шевченка @Іванівка"); // doubled
+    expect(search("Шевченка Іванівко")[0]).toBe("street:вулиця Шевченка @Іванівка"); // wrong, in the settlement
+    expect(search("Чернигів")[0]).toBe("place:Чернігів");
+    // While typing: a word that starts within a typo of what's typed.
+    expect(search("Шевчнк")[0]).toBe("street:вулиця Шевченка @Чернігів");
+    expect(search("Шевчнко Чернигів")[0]).toBe("street:вулиця Шевченка @Чернігів"); // a typo in each word
+  });
+
+  it("ranks an exact match above a typo, and forgives no typo in a short word or a number", () => {
+    // "Шевченка" in the village is spelled right; "Шевченко" in the city would be a typo of it.
+    expect(open().search("Шевченка", { near: CITY })[0].score).toBeGreaterThan(open().search("Шевченко", { near: CITY })[0].score);
+    expect(typoBudget(parseQuery("Мир ").tokens[0])).toBe(0);
+    expect(typoBudget(parseQuery("Миру ").tokens[0])).toBe(1);
+    expect(typoBudget(parseQuery("Миру").tokens[0])).toBe(0); // being typed
+    expect(typoBudget(parseQuery("Шевченка ").tokens[0])).toBe(2);
+    expect(typoBudget(parseQuery("12345 ").tokens[0])).toBe(0);
+    expect(search("Нва")).toEqual([]);
   });
 
   it("returns nothing for street kinds alone, single letters or unknown words", () => {

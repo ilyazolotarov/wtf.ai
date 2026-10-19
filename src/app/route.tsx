@@ -25,7 +25,7 @@ import { Font, Radius, usePalette } from "@/constants/theme";
 import type { Strings } from "@/i18n/en";
 import { useT } from "@/i18n/provider";
 import { bearingRad, haversineM, type Coordinate } from "@/nav/geo";
-import type { SearchResult } from "@/nav/search/search-index";
+import type { SearchIndex, SearchResult } from "@/nav/search/search-index";
 import { inBounds, places, usePlaces } from "@/providers/places";
 import { usePosition } from "@/providers/position-provider";
 import { destinations, useRoute } from "@/providers/route-provider";
@@ -39,12 +39,20 @@ const SEARCH_DELAY_MS = 120;
 const SAVED_ICON: Record<SavedKind, IconName> = { home: "home", work: "work", favorite: "star" };
 const SAVED_TITLE: Partial<Record<SavedKind, keyof Strings>> = { home: "placeHome", work: "placeWork" };
 
-/** Offline search of the active region as the query changes; null when the region has no index. */
-function useAddressSearch(query: string, near: Coordinate | null): SearchResult[] | null {
+const NOTHING_FOUND = { index: null, query: "", results: [] };
+
+/**
+ * Offline search of the active region as the query changes; null when the region has no index. `settled`: the
+ * results answer the query as typed (not the one before it, still shown meanwhile).
+ */
+function useAddressSearch(query: string, near: Coordinate | null): { results: SearchResult[]; settled: boolean } | null {
   useMapPacks(); // re-render when a region (and its index) is installed or switched
   const index = activeSearchIndex();
-  // Results with the query they answer: stale ones (typing went on) aren't shown.
-  const [found, setFound] = useState<{ query: string; results: SearchResult[] }>({ query: "", results: [] });
+  // The last results stay while the next query waits for its turn (no blank list on every keystroke); an emptied
+  // field or another region's index drops them, so a new search doesn't open on the old one's rows.
+  const [found, setFound] = useState<{ index: SearchIndex | null; query: string; results: SearchResult[] }>(NOTHING_FOUND);
+  const dropped = found !== NOTHING_FOUND && (!query.trim() || found.index !== index);
+  if (dropped) setFound(NOTHING_FOUND);
   const nearRef = useRef(near);
   useEffect(() => {
     nearRef.current = near;
@@ -58,12 +66,12 @@ function useAddressSearch(query: string, near: Coordinate | null): SearchResult[
       } catch (e) {
         console.warn(`search: ${e instanceof Error ? e.message : String(e)}`);
       }
-      setFound({ query, results });
+      setFound({ index, query, results });
     }, SEARCH_DELAY_MS);
     return () => clearTimeout(timer);
   }, [index, query]);
   if (!index) return null;
-  return found.query === query ? found.results : [];
+  return { results: dropped ? [] : found.results, settled: !dropped && found.query === query };
 }
 
 /** The active region's cities and towns from its search index; null without one (older releases). */
@@ -127,7 +135,7 @@ export default function RouteScreen() {
   const results: Place[] | null = !q
     ? null
     : searched
-      ? searched.map((r) => ({
+      ? searched.results.map((r) => ({
           id: `search:${r.key}`,
           title: resultTitle(r, language),
           detail: resultDetail(r, language, t),
@@ -233,15 +241,15 @@ export default function RouteScreen() {
 
       {!selected && results && (
         <ScreenSection>
-          {results.length === 0 ? (
+          {results.length > 0 ? (
+            results.map((d) => row(d, d.id))
+          ) : !searched || searched.settled ? (
             <View style={styles.empty}>
               <T size={14} color={palette.text2}>
                 {t(searched ? "noSearchResults" : "noDestinations")}
               </T>
             </View>
-          ) : (
-            results.map((d) => row(d, d.id))
-          )}
+          ) : null /* the first results still to come: nothing rather than "No results" */}
         </ScreenSection>
       )}
 

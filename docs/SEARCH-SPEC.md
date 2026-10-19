@@ -18,7 +18,7 @@ search.py`, `src/nav/search/`). Source of truth for coding agents.
 | File | `<region>.search.bin`, a release asset listed as the region's `search` entry in `index.json` (catalog format stays 2: older apps ignore it). |
 | Unit of search | *Entities*: places, streets (all ways of one name in one settlement, merged), POIs. House numbers hang off their street. |
 | Settlement | Each street, POI or area belongs to the nearest settlement (`place=city/town/village/hamlet`), its distance divided by the kind's reach (15 / 6 / 2.5 / 1.2 km). No admin boundaries yet. |
-| Matching | Folded tokens (§3.1). Every word of the query must match the entity's own names or its settlement's, at least one its own. The word being typed is a prefix. |
+| Matching | Folded tokens (§3.1). Every word of the query must match the entity's own names or its settlement's, at least one its own. The word being typed is a prefix. Typos forgiven (§4.2), ranked below the right spelling. |
 | Ranking | Name match, kind and size, distance from the car (§4.3). |
 | Reading | Random access through a `ByteSource`, as the road graph: a query reads a few posting lists and the entities it matches. |
 
@@ -81,13 +81,22 @@ For each required word: the entity ids of every token it matches (one token, or 
 60 000 ids), and the children ranges of the settlements among them. The word with the fewest candidates drives: its
 ids and children are tested against every other word's ids (binary search) or children ranges. At most 3 000 matches.
 
+Typos (`typoBudget`): a word also matches the index words within one edit (a letter wrong, missed, extra, or two
+neighbours swapped; optimal string alignment) from 4 letters, two from 8, the first letter kept; the word being typed
+from 5 letters, matching words that *start* within that many edits of it. No typos in a word with a digit. OSM names
+are often spelled unlike the usual way (a "Талліннський квартал" typed "Таллінський"), so this is not only for the
+driver's slips. The index words are walked in order as a trie from the word's first letter, keeping the rows
+of a shared start and skipping every word under a start already too far: well under a millisecond per word on an
+oblast. A word's own spelling is tested first, then its settlement's, then the typo ones.
+
 ### 4.3 Ranking
 
-1. A cheap score per match: 8 per word matched by its own names, 5 per word matched by its settlement's; kind and
-   size (places 4 + 24 · rank/65535; streets 6–10 by length and houses; POIs 3); minus 7 · log10(1 + km from the car).
+1. A cheap score per match: 8 per word matched by its own names, 5 per word matched by its settlement's (3 and 2 with
+   a typo); kind and size (places 4 + 24 · rank/65535; streets 6–10 by length and houses; POIs 3); minus 7 · log10(1 + km from the car).
 2. The best 250 (60 streets with a house number) are scored in full: per word 10 if it is a word of the shown name,
-   7 if it starts one, 6 if another name matched (old, Russian, alternative), 5 through the settlement; +6 if every
-   word of the name was typed, −0.5 per word left out; plus kind and distance.
+   7 if it starts one, 6 if another name matched (old, Russian, alternative), 5 through the settlement, 3 with a typo
+   (2 through the settlement); +6 if every word of the name was typed (a typo counts), −0.5 per word left out; plus
+   kind and distance.
 3. House numbers: exact +12, a number it starts +5 (≤ 5 per street), scored at the house; the street itself follows
    4 below its houses.
 4. A result that reads the same as a better one (kind, name, house number, settlement) within 150 m is dropped
@@ -103,7 +112,7 @@ POIs: 97 MB): queries 9–25 ms. The phone is several times slower; an oblast is
 - **Reader** (`src/services/offline-map/search-file.ts`): `activeSearchIndex()` opens the active region's file
   (`FileHandle`), again when the region or file changes.
 - **Route screen** (`src/app/route.tsx`, UI-SPEC §7.1): the field searches 120 ms after typing stops, near the car's
-  position; each result shows its name (", 10" for an address), what it is and its settlement, distance and
+  position, the last results staying until then (an emptied field drops them); each result shows its name (", 10" for an address), what it is and its settlement, distance and
   direction. Start guidance routes to it (`id` `search:<key>`, the name shown on the banner).
 - **Quick picks** (empty field): saved places, recent destinations and the region's largest cities
   (`SearchIndex.majorSettlements`: the first settlements of the file, cities then towns by population).
@@ -124,8 +133,7 @@ npm run search -- tools/tiles/out/release/kyiv.search.bin "Шевченка 10" 
 1. Settlements from admin boundaries (`boundary=administrative`, admin_level 8/9) instead of the nearest place node:
    streets on a city's edge are given to a village inside it.
 2. Multipolygon relations: buildings with addresses, place areas.
-3. Typo tolerance (one edit for words of 5+ letters).
-4. Ranking tuned from real use (`npm run search` on real queries: a village with a common name, house numbers with
+3. Ranking tuned from real use (`npm run search` on real queries: a village with a common name, house numbers with
    letters and slashes, a renamed street by its old name, Latin spellings, POIs by brand, a street crossing two
    settlements); timing on the phone with the Ukraine region.
-5. Show the result on the map before routing; search from the map screen.
+4. Show the result on the map before routing; search from the map screen.
