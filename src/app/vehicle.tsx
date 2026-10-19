@@ -1,4 +1,4 @@
-import { useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { Alert, Linking, Platform, Share, StyleSheet, View } from "react-native";
 
@@ -17,8 +17,10 @@ import { DeviceList } from "@/components/vehicle/device-list";
 import { carStateText, speedFromText } from "@/components/vehicle/car-status";
 import { usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
+import { firmwareUpdaterFor } from "@/obd/catalog";
 import type { DiscoveredDevice } from "@/obd/types";
 import { driveProfileNext, parseSpeedProfile } from "@/services/vehicle-link/driving-emulator";
+import { releaseUpdaterHold } from "@/services/vehicle-link/firmware-notice";
 import {
   useDevSettings,
   useRuntime,
@@ -69,6 +71,7 @@ function CarDetails() {
     if (device.id === snap.activeDeviceId) return;
     const go = () => {
       setSwitching(false);
+      releaseUpdaterHold();
       void link.connect(device.id);
     };
     if (device.rank === "unknown" || device.rank === "non-elm") {
@@ -111,6 +114,8 @@ function CarDetails() {
   const speedValue = speed
     ? `${Math.round(Math.abs(speed.raw))} ${t("speed")}${speed.raw < 0 ? ` · ${t("reverseGear")}` : ""}`
     : t("unavailableValue");
+  // The firmware check again, after the one-time page (VEHICLE-LINK-SPEC §8.4).
+  const updater = adapter ? firmwareUpdaterFor({ id: adapter.deviceId, name: adapter.name }) : null;
   const speedFrom = speedFromText({ wheelSpeed: devSettings.wheelSpeed, speed, canOff: snap.canOff ?? null, canShadow: snap.canShadow ?? null, canAuto }, t);
 
   return (
@@ -144,7 +149,11 @@ function CarDetails() {
                 labelKey="connect"
                 compact
                 disabled={nav.adapter === "searching"}
-                onPress={() => void link.autoConnect()}
+                onPress={() => {
+                  // The driver's own Connect ends a pause for the firmware update (VEHICLE-LINK-SPEC §8.4).
+                  releaseUpdaterHold();
+                  void link.autoConnect();
+                }}
               />
             </View>
           ) : null}
@@ -175,6 +184,13 @@ function CarDetails() {
             <ScreenAction labelKey="forget" secondary compact onPress={() => link.forget(snap.activeDeviceId!)} />
           </View>
         </View>
+      )}
+      {snap.activeDeviceId && updater && (
+        <ScreenAction
+          labelKey="fwCheck"
+          secondary
+          onPress={() => router.push({ pathname: "/adapter-firmware", params: { updater, adapter: adapter?.name ?? "", again: "1" } })}
+        />
       )}
 
       {showList && (

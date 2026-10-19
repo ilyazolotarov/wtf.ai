@@ -11,6 +11,7 @@ export const EMULATOR_DEVICES: ScannedDevice[] = [
   { id: "emulator:genuine", transport: "emulator", name: "Emulator · ELM327 v1.5", lastSeenUs: 0 },
   { id: "emulator:clone", transport: "emulator", name: "Emulator · clone v2.1", lastSeenUs: 0 },
   { id: "emulator:stn", transport: "emulator", name: "Emulator · OBDLink (STN)", lastSeenUs: 0 },
+  { id: "emulator:vlinker", transport: "emulator", name: "Emulator · vLinker FD", lastSeenUs: 0 },
 ];
 
 const SCAN_LIMIT_MS = 60_000;

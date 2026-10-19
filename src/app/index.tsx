@@ -28,6 +28,7 @@ import { useAudioOutput } from "@/components/route/use-audio-output";
 import { useVoiceGuidance, useVoiceMuted, useVoiceVolume } from "@/components/route/use-voice-guidance";
 import { UpdatePrompts } from "@/components/update/update-prompts";
 import { useNavStatus } from "@/components/status/use-nav-status";
+import { useFirmwareNotice } from "@/components/vehicle/use-firmware-notice";
 import { ANDROID_BLURS, BlurScope, BlurTarget } from "@/components/ui/glass-fill";
 import { FontScaleLimit, MAP_MAX_FONT_SCALE, T } from "@/components/ui/text";
 import { useHasUsableMap } from "@/config/map";
@@ -102,6 +103,8 @@ const ATTRIBUTION_INSET = (bottomInset: number) => bottomInset;
 
 export default function HomeScreen() {
   useKeepAwake();
+  // A new adapter's first answer: ask the driver to check its firmware (VEHICLE-LINK-SPEC §8.4).
+  useFirmwareNotice();
   const insets = useSafeAreaInsets();
   const window = useWindowDimensions();
   // iOS: the bar may reach a little into the home indicator's strip. Android's bottom inset is its navigation bar (the

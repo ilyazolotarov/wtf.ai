@@ -102,7 +102,8 @@ persisted in kv-store. No hardcoded user-facing strings in components.
   going back is the system's (the edge swipe on iOS, the back gesture or button on Android). The page header
   (`ScreenContent`) has a back button, and from the second level down a ✕ straight back to the map.
 - **Full-screen modals**, with nothing to go back to: `onboarding` (welcome → location → adapter → phone holder; shown
-  until kv-store `onboarding-done`) and `map-setup` (the first map download).
+  until kv-store `onboarding-done`), `map-setup` (the first map download) and `adapter-firmware` (a new adapter's
+  firmware check, over whatever is open: VEHICLE-LINK-SPEC §8.4).
 
 ## 6. Map screen (`src/app/index.tsx`)
 

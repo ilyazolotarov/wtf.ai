@@ -1,9 +1,11 @@
 import { router } from "expo-router";
+import { Alert } from "react-native";
 
 import { ScreenAction, ScreenContent, ScreenSection } from "@/components/screens/screen-ui";
 import { CycleRow, SwitchRow } from "@/components/screens/setting-rows";
 import { useT } from "@/i18n/provider";
 import { useDevSettings, useRuntime, useVehicleLinkSnapshot } from "@/providers/runtime-provider";
+import { resetFirmwareAsked } from "@/services/vehicle-link/firmware-notice";
 
 /** Test switches and knobs; the trip recording ones live in the Trip recorder sheet. */
 export default function DeveloperScreen() {
@@ -44,6 +46,15 @@ export default function DeveloperScreen() {
         onPress={() => router.push("/debug-terminal")}
       />
       <ScreenAction labelKey="uiGallery" secondary onPress={() => router.push("/more/ui-gallery")} />
+      {/* Every adapter new again: the firmware check opens at the next connect (VEHICLE-LINK-SPEC §8.4). */}
+      <ScreenAction
+        labelKey="fwResetAsked"
+        secondary
+        onPress={() => {
+          resetFirmwareAsked();
+          Alert.alert(t("fwResetAsked"), t("fwResetAskedDone"));
+        }}
+      />
     </ScreenContent>
   );
 }

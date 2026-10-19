@@ -32,6 +32,7 @@ import { loadDevSettings } from "./dev-settings-load";
 import { CanAutoIds, idsAfterBufferFull, type CanAutoStatus } from "./vehicle-link/can-auto-ids";
 import { CanSpeedFeed } from "./vehicle-link/can-speed-feed";
 import { DrivingEmulator } from "./vehicle-link/driving-emulator";
+import { isHeldForUpdater } from "./vehicle-link/firmware-notice";
 import { NativeTransport } from "./vehicle-link/native-transport";
 
 export interface DevSettings {
@@ -409,6 +410,8 @@ export async function autoConnect(): Promise<void> {
   const { activeDeviceId, link: state } = link.getSnapshot();
   if (activeDeviceId && state !== "error") return;
   if (Platform.OS === "web") return;
+  // The maker's app has the adapter for a firmware update (VEHICLE-LINK-SPEC §8.4).
+  if (isHeldForUpdater()) return;
   if (VehicleLinkModule.getBluetoothState() === "notDetermined") return;
   await VehicleLinkModule.initialize(null);
   // Never the emulated adapters: their scripted drive would start by itself whenever the app opens, and fake speed under

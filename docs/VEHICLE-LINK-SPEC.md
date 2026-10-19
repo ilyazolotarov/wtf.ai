@@ -317,6 +317,27 @@ Strip the echo, blank lines, `SEARCHING...`, `BUS INIT: ...OK` and the trailing 
 and headers (with headers, record the ECU address). Tolerate `\r`, `\r\n`, `\n\r` and lowercase hex. Golden strings
 from real adapters are in `src/obd/__tests__/parser.test.ts`.
 
+### 8.4 Firmware check (new adapters)
+
+An adapter may have waited on a shelf for months, and its maker fixes bugs in later firmware (MX+ 5.10.3 froze in
+the CAN monitor, §16.2). The app doesn't flash firmware and doesn't know the latest version: the first time an adapter
+passes the probe on this phone, it sends the driver to the maker's own updater app, once per adapter.
+
+- **Who**: the maker by MFi protocol or Bluetooth name (`firmwareUpdaterFor`, the §3.3 patterns), never by the
+  chip's answers: a vLinker FD answers `STI` as `STN1151 v4.3.2` and `AT@1` as a plain ELM327. OBDLink → the OBDLink
+  app (Settings → Firmware Updates); Vgate → VgateFwUpdater. No-name clones and other makers: no check.
+- **When**: the first verified probe of a device id not in kv-store `adapter-firmware-asked`, while the car stands
+  (link speed ≤ `MOVING_MPS`); a first connect on the road waits for a stop. The id is recorded when the page opens.
+- **How**: `adapter-firmware`, a full-screen modal over whatever is open (onboarding's Car page too), pushed by the
+  map screen. "Get {app}" lets go of the adapter (an adapter answers one app at a time), opens the updater's store
+  page and leaves the page open, released: auto-connect stays paused (else the app coming back to the front would
+  take the adapter back mid-update) until "Connect again" or the page closing, which reconnect that adapter (waiting
+  while it reboots), the driver's own Connect on the Car page, or 30 minutes (a page forgotten open must not leave a
+  drive without the adapter). The pause is in memory: a restarted app connects as usual. The last step tells the
+  driver to close the updater, which may hold the adapter until it quits. The Car page keeps a "Check for a
+  firmware update" button for a connected adapter with an updater. Developer → "Ask about adapter firmware again"
+  clears the list.
+
 ## 9. Session init (vehicle present)
 
 ### 9.1 Base configuration

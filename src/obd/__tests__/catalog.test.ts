@@ -1,4 +1,4 @@
-import { compareDevices, normalizeUuid, rankDevice, selectUartCandidates } from "@/obd/catalog";
+import { compareDevices, firmwareUpdaterFor, normalizeUuid, rankDevice, selectUartCandidates } from "@/obd/catalog";
 
 describe("rankDevice", () => {
   test("advertised known service wins", () => {
@@ -80,5 +80,25 @@ describe("selectUartCandidates", () => {
     expect(c).toEqual([
       { profileId: "heuristic", service: "12345678-0000-0000-0000-000000000001", notify: "A1", write: "A2" },
     ]);
+  });
+});
+
+describe("firmwareUpdaterFor", () => {
+  test("the maker's updater by Bluetooth name", () => {
+    expect(firmwareUpdaterFor({ id: "AA:BB", name: "OBDLink MX+" })).toBe("obdlink");
+    expect(firmwareUpdaterFor({ id: "AA:BB", name: "OBDLink CX" })).toBe("obdlink");
+    expect(firmwareUpdaterFor({ id: "AA:BB", name: "vLinker FD-IOS" })).toBe("vgate");
+    expect(firmwareUpdaterFor({ id: "emulator:vlinker", name: "Emulator · vLinker FD" })).toBe("vgate");
+  });
+
+  test("an MFi adapter by its protocol, whatever its name", () => {
+    expect(firmwareUpdaterFor({ id: "mfi:123:com.obdlink", name: "MX" })).toBe("obdlink");
+    expect(firmwareUpdaterFor({ id: "mfi:456:com.vgatemall", name: null })).toBe("vgate");
+  });
+
+  test("clones and other makers have none", () => {
+    expect(firmwareUpdaterFor({ id: "AA:BB", name: "OBDII" })).toBeNull();
+    expect(firmwareUpdaterFor({ id: "AA:BB", name: "Veepeak" })).toBeNull();
+    expect(firmwareUpdaterFor({ id: "AA:BB", name: null })).toBeNull();
   });
 });

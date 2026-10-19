@@ -115,6 +115,19 @@ export function rankDevice(input: RankInput): RankResult {
   return { rank: "unknown" };
 }
 
+/** The maker's own app that updates the adapter's firmware (VEHICLE-LINK-SPEC §8.4). */
+export type FirmwareUpdater = "obdlink" | "vgate";
+
+/**
+ * Which updater app serves this adapter: by its MFi protocol or Bluetooth name, never by the chip's answers (a
+ * vLinker FD answers `STI` as an "STN1151 v4.3.2" and `AT@1` as a plain ELM327). null: no-name clones, other makers.
+ */
+export function firmwareUpdaterFor(device: { id: string; name: string | null }): FirmwareUpdater | null {
+  const mfi = /^mfi:.*:([^:]+)$/.exec(device.id)?.[1];
+  const brand = (mfi && MFI_BRANDS[mfi]) || NAME_PATTERNS.find((p) => p.pattern.test(device.name ?? ""))?.brand;
+  return brand === "OBDLink" ? "obdlink" : brand === "Vgate" ? "vgate" : null;
+}
+
 const RANK_ORDER: Record<DeviceRank, number> = {
   remembered: 0,
   "known-profile": 1,

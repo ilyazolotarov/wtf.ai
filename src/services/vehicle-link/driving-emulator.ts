@@ -1,11 +1,12 @@
 import type { Clock } from "@/obd/clock";
-import { CLONE_PROFILE, Elm327Emulator, GENUINE_PROFILE, STN_PROFILE } from "@/obd/emulator";
+import { CLONE_PROFILE, Elm327Emulator, GENUINE_PROFILE, STN_PROFILE, VLINKER_PROFILE } from "@/obd/emulator";
 import type { ConnectedInfo } from "@/obd/types";
 
 const PROFILES = {
   "emulator:genuine": GENUINE_PROFILE,
   "emulator:clone": CLONE_PROFILE,
   "emulator:stn": STN_PROFILE,
+  "emulator:vlinker": VLINKER_PROFILE,
 } as const;
 
 /** A speed profile: seconds since connecting → km/h, straight between the points, the last one held. */

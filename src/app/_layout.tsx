@@ -123,6 +123,16 @@ function AppStack() {
           contentStyle: { backgroundColor: palette.bg },
         }}
       />
+      {/* The firmware check, over whatever is open when a new adapter first answers (onboarding too). */}
+      <Stack.Screen
+        name="adapter-firmware"
+        options={{
+          headerShown: false,
+          presentation: "fullScreenModal",
+          gestureEnabled: false,
+          contentStyle: { backgroundColor: palette.bg },
+        }}
+      />
       {/* Developer pages with the system's header: its back button and swipe. */}
       <Stack.Screen name="debug-terminal" options={{ title: t("elmTerminal") }} />
       <Stack.Screen name="trips" options={{ title: t("trips") }} />

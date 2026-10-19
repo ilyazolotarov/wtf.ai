@@ -109,6 +109,16 @@ export const STN_PROFILE: EmulatorProfile = {
   obdLatencyMs: 25,
 };
 
+/** A vLinker FD (BLE) as it answered on 2026-10-05: a plain ELM327 description, posing as an STN1151 to `STI`. */
+export const VLINKER_PROFILE: EmulatorProfile = {
+  ...GENUINE_PROFILE,
+  banner: "ELM327 v2.2",
+  stn: "STN1151 v4.3.2",
+  obdLatencyMs: 29,
+  bareAtcra: "default",
+  stmCountUnsupported: true,
+};
+
 /** A K-line car (a Renault Logan: KWP2000 fast init, the engine ECU at 7A) on an OBDLink. */
 export const KLINE_PROFILE: Partial<EmulatorProfile> = {
   ...STN_PROFILE,
