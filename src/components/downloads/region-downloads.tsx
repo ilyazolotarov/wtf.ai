@@ -174,15 +174,29 @@ export function RegionDownloads() {
           const have = installed.regions[row.region];
           const isActive = installed.active === row.region;
           const busy = download?.region === row.region;
+          const canDownload = !download && row.available && !have;
+          // The whole row: downloads a region (it becomes the map once installed) or switches to a downloaded one.
+          const onPress = canDownload
+            ? () => void downloadRegion(row.region)
+            : have && !isActive
+              ? () => switchRegion(row.region)
+              : undefined;
           return (
-            <View key={row.region} style={styles.row}>
+            // The row for touch; its name for a screen reader, as the row would hide its buttons in one element.
+            <Pressable
+              key={row.region}
+              style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+              disabled={!onPress}
+              onPress={onPress}
+              accessible={false}
+            >
               <View style={styles.rowHead}>
                 <Pressable
-                  style={styles.copy}
-                  disabled={!have || isActive}
-                  onPress={() => switchRegion(row.region)}
+                  style={({ pressed }) => [styles.copy, pressed && styles.pressed]}
+                  disabled={!onPress}
+                  onPress={onPress}
                   accessibilityRole="button"
-                  accessibilityLabel={`${t("useMap")}: ${row.name[language]}`}
+                  accessibilityLabel={`${t(canDownload ? "download" : "useMap")}: ${row.name[language]}`}
                 >
                   <T w={isActive ? "semibold" : "regular"} size={15}>
                     {row.name[language]}
@@ -196,7 +210,7 @@ export function RegionDownloads() {
                       .join(" · ")}
                   </T>
                 </Pressable>
-                {!download && row.available && !have && (
+                {canDownload && (
                   <IconButton icon="download" label={t("download")} onPress={() => void downloadRegion(row.region)} />
                 )}
                 {have && !busy && (
@@ -204,7 +218,7 @@ export function RegionDownloads() {
                 )}
               </View>
               {busy && !isActive && download && <DownloadProgress download={download} osmDate={catalog?.osm_date} />}
-            </View>
+            </Pressable>
           );
         })}
       </ScreenSection>
@@ -225,6 +239,7 @@ const styles = StyleSheet.create({
   head: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: 10 },
   copy: { flex: 1, minWidth: "55%", gap: 3 },
   row: { gap: 8, paddingVertical: 10 },
+  pressed: { opacity: 0.6 },
   rowHead: { flexDirection: "row", alignItems: "center", gap: 8 },
   iconButton: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
   progress: { gap: 8 },

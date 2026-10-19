@@ -31,16 +31,8 @@ interface Region extends RegionShape {
 
 /** "active→target" pairs the driver said "Not now" to, until the app restarts. */
 const dismissed = new Set<string>();
-/**
- * `activate`: a region downloaded from this prompt becomes the map once it is installed.
- * `catalogRequested`: the catalog is fetched (from GitHub) once per run, only when the car is outside the region.
- */
-const pending: { activate: string | null; catalogRequested: boolean } = { activate: null, catalogRequested: false };
-
-function downloadAndActivate(region: string) {
-  pending.activate = region;
-  void downloadRegion(region);
-}
+/** `catalogRequested`: the catalog is fetched (from GitHub) once per run, only when the car is outside the region. */
+const pending = { catalogRequested: false };
 
 /** Where the car is, rounded to ~100 m (and its accuracy to 100 m): the advice changes only as it moves on. */
 function useCheckPoint(): { at: Coordinate; marginM: number } | null {
@@ -93,13 +85,6 @@ export function RegionPrompt({ panelStyle }: { panelStyle: StyleProp<ViewStyle> 
     }
   }, [outside, catalog, catalogLoading]);
 
-  useEffect(() => {
-    if (pending.activate && installed.regions[pending.activate]) {
-      setActiveRegion(pending.activate);
-      pending.activate = null;
-    }
-  }, [installed]);
-
   if (!advice || advice.kind === "inside" || !installed.active) return null;
   const active = installed.regions[installed.active];
   const target = advice.kind === "outside" ? null : advice.region;
@@ -124,7 +109,7 @@ export function RegionPrompt({ panelStyle }: { panelStyle: StyleProp<ViewStyle> 
         ? {
             label: t("download"),
             onPress: () => {
-              downloadAndActivate(advice.region.region);
+              void downloadRegion(advice.region.region);
               router.push("/downloads");
             },
           }

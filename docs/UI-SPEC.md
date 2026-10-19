@@ -265,7 +265,10 @@ taps on the version in Settings (STORE-REVIEW).
 ### 7.4 `downloads` (Offline maps; `src/app/downloads.tsx`, also `more/downloads`)
 
 Regions of the newest map release from the update Worker: download, pause, resume, delete, switch the active one,
-update; the active region also updates by itself or asks (UPDATES-SPEC §5.2). Until a region is usable, `map-setup`
+update; the active region also updates by itself or asks (UPDATES-SPEC §5.2). Tapping anywhere on a region's row
+downloads it, or switches to it once downloaded. A region downloaded for the first time becomes the active one when
+it is installed, or during a trip or a route once it is over (switching by hand first cancels that); an update leaves
+the active region as it is. Until a region is usable, `map-setup`
 (full-screen, no close; after onboarding) shows the same list under "Download a map" and closes itself once a region
 is installed; deleting the last region brings it back.
 

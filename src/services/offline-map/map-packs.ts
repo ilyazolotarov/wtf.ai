@@ -166,7 +166,10 @@ let runId = 0;
 /** Told of every download that failed (the app sends it to Sentry); the screen shows the message itself. */
 let reportFailure: (error: unknown, where: { region: string; file: string; index: number; files: number }) => void = () => {};
 
-/** When an automatic update may replace the map in use: not during a trip or a route (set by the update center). */
+/**
+ * When an automatic update may replace the map in use, and a region just downloaded may become the map: not during a
+ * trip or a route (set by the update center).
+ */
 export interface InstallGate {
   allowed(): boolean;
   subscribe(listener: () => void): () => void;
@@ -175,6 +178,25 @@ let installGate: InstallGate = { allowed: () => true, subscribe: () => () => {} 
 
 export function setInstallGate(gate: InstallGate): void {
   installGate = gate;
+}
+
+/** A region downloaded during a trip or a route: becomes the map once the gate opens, unless the driver picks one. */
+let pendingActive: (() => void) | null = null;
+
+function activateWhenAllowed(region: string) {
+  clearPendingActive();
+  const unsubscribe = installGate.subscribe(() => {
+    if (!installGate.allowed()) return;
+    clearPendingActive();
+    const { installed } = getState();
+    if (installed.regions[region]) saveInstalled({ ...installed, active: region });
+  });
+  pendingActive = unsubscribe;
+}
+
+function clearPendingActive() {
+  pendingActive?.();
+  pendingActive = null;
 }
 
 export function onMapDownloadFailed(report: typeof reportFailure): void {
@@ -352,7 +374,11 @@ function planJob(catalog: MapCatalog, entry: CatalogRegion): DownloadJob {
 
 const letRender = () => new Promise((resolve) => setTimeout(resolve, 50));
 
-/** Moves the verified files into place and records the region, all at once. */
+/**
+ * Moves the verified files into place and records the region, all at once. A region downloaded for the first time
+ * becomes the map (the driver just asked for it), during a trip or a route only once it is over; an update leaves the
+ * active one as it is.
+ */
 function install(j: DownloadJob) {
   const region = j.region.region;
   const { installed } = getState();
@@ -377,6 +403,8 @@ function install(j: DownloadJob) {
   const { asset: _asset, md5, sha256: _sha256, graph, search, size, ...info } = j.region;
   const regionGraph = j.graph && graph ? { size: graph.size, md5: graph.md5 } : have?.graph;
   const regionSearch = j.search && search ? { size: search.size, md5: search.md5 } : have?.search;
+  const hasMap = !!installed.active && !!installed.regions[installed.active];
+  const activateNow = !hasMap || (!have && installGate.allowed());
   saveInstalled({
     ...installed,
     common: j.common ?? installed.common,
@@ -392,8 +420,9 @@ function install(j: DownloadJob) {
         ...(regionSearch ? { search: regionSearch } : {}),
       },
     },
-    active: installed.active && installed.regions[installed.active] ? installed.active : region,
+    active: activateNow ? region : installed.active,
   });
+  if (!have && !activateNow) activateWhenAllowed(region);
 }
 
 /**
@@ -574,6 +603,7 @@ export function removeRegion(region: string): void {
 }
 
 export function setActiveRegion(region: string): void {
+  clearPendingActive();
   const { installed } = getState();
   if (installed.regions[region]) saveInstalled({ ...installed, active: region });
 }
