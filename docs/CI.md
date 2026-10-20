@@ -49,7 +49,9 @@ compile check. It costs the plan two `npm ci`. If a runtime version cannot be re
 | Manual: Actions → **Build Unsigned iOS App** | the chosen configuration, no checks | optional | 14 days |
 
 Keywords, in any commit message of a push: `[build]` (both platforms), `[build ios]`, `[build android]`.
-GitHub's own `[skip ci]` skips the run entirely.
+GitHub's own `[skip ci]` skips the run entirely. The build keywords act on branches only: `main` ignores them, its
+app changes ship by themselves (a native change as a Release build, JS as an OTA update to the builds installed), so
+a commit for `main` never needs `[build]`.
 
 `main` builds Release: what phones run, and what takes the OTA updates. Per platform: a platform with a native change
 gets a build, the other gets the JS as an update (an iOS-only Swift change builds iOS and updates Android).
