@@ -109,10 +109,11 @@ navigate with the phone in a hand, a pocket or on a seat.
   acceleration kept, its tilt and turning left out, so its movements don't read as handling. In a break in listening
   the phone's own turning is used, still in the car's frame; with no wheel sample within 1 s, the phone's sample as it
   is.
-- **Standing** (every wheel sample within 1 s reads 0, including the last second after the wheels go silent at
-  ignition off): no turning, never the phone's. In the car's frame the navigator can't see the phone handled, and at a
-  stop the driver takes it out of the mount: its turning, taken for the car's, turned a parked car 60–120° and the
-  next drive set off on another road.
+- **Standing** (every wheel sample within 1 s reads 0; or the wheels went silent reading 0, at ignition off or the
+  link lost, for 3 s after the last: until the navigator takes the speed for unknown and holds the heading itself,
+  §5.2): no turning, never the phone's. In the car's frame the navigator can't see the phone handled, and at a stop
+  the driver takes it out of the mount: its turning, taken for the car's, turned a parked car 21–120° and the next
+  drive set off on another road.
 - **No gyro at a crawl:** the wheels turn the car at any speed they read. Pulling out of parking spaces they matched
   the mounted gyro within 1–2°; the gyro there only brings in the phone handled.
 - **The compass gets no field** meanwhile (§7.6): the IMU is then the car's, not the phone's.
@@ -164,7 +165,9 @@ navigate with the phone in a hand, a pocket or on a seat.
   off, and the next drive's map matching missed the street). The pose is the EKF's, not the map's dot: saving the
   dominant map-matching hypothesis carried a wrong street into the next drive.
 - **Frozen** at the first handling while parked: the driver often takes the phone out and walks off while the ECU
-  is still awake, and the fixes then follow the driver.
+  is still awake, and the fixes then follow the driver. Handled only after the speed went stale (ignition off, the
+  link lost), it is the pose where the car was last seen standing: with the wheels' turning the phone's own frame,
+  where handling shows, comes back only then (§5.4), and the pose saved later had followed the phone.
 - **Needs the VIN.** A missed VIN read assumes the last car on the protocol and retries (VEHICLE-LINK-SPEC §9.1). A
   VIN known late starts from the pose if the navigator has no position yet or the fixes agree (`startFromPose`
   accounts for the motion since the start). A car the link doesn't know (another protocol) restarts the navigator

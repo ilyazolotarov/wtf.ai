@@ -370,6 +370,28 @@ describe("Navigator from a parked pose", () => {
     expect(haversineM(end, parked.truth.at(-1)!)).toBeLessThan(10);
   });
 
+  // 2026-10-20 (nnz5ff with the wheels' turning): handled only after the speed had gone stale, the pose wasn't frozen,
+  // and the one saved later came from the dead reckoning that had followed the phone.
+  test("handled only after the speed went stale (ignition off), then carried off: the pose where the car stood", () => {
+    const parked = syntheticDrive({
+      segments: [
+        { durationS: 30, speedMps: 12, yawRateDegS: 0 },
+        { durationS: 5, speedMps: 0, yawRateDegS: 0 },
+        { durationS: 60, speedMps: 0, yawRateDegS: 0 },
+      ],
+      gnss: "clean",
+      handling: { fromS: 45, toS: 95, tiltRad: 0.8, yawRateRadS: 0.5 },
+    });
+    const at = (s: number) => parked.trip.startUs + s * 1e6;
+    // No speed from 40 s: handled at 45 s, the speed stale since 42.5 s; back (0) at 90 s, the driver walking still.
+    parked.trip.obdSpeed = parked.trip.obdSpeed.filter((o) => o.tUs < at(40) || o.tUs >= at(90));
+    parked.trip.gnss = parked.trip.gnss.map((f) =>
+      f.tUs < at(45) ? f : { ...f, lat: f.lat + (1.5 * (f.tUs - at(45))) / 1e6 / 111_320, speedMps: 1.5, courseRad: 0 },
+    );
+    const end = replayTrip(parked.trip).summary.endPose!;
+    expect(haversineM(end, parked.truth.at(-1)!)).toBeLessThan(10);
+  });
+
   test("the link lost while parked: the phone turning in the driver's hand doesn't turn the car", () => {
     const parked = syntheticDrive({
       segments: [

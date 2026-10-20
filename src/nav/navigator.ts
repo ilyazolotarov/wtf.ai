@@ -770,8 +770,9 @@ export class Navigator {
   onImu(s: ImuSample): void {
     const out = this.imu.process(s);
     // Handled while parked: the phone may now leave the car with the driver, so later fixes and
-    // positions are not the car's. Keep the pose of the car from before it.
-    if (!out.valid && this.frozenPose === null) this.frozenPose = this.currentParkedPose();
+    // positions are not the car's. Keep the pose of the car from before it; with the speed gone
+    // stale since (ignition off, the link lost), the pose where it was last seen standing.
+    if (!out.valid && this.frozenPose === null) this.frozenPose = this.currentParkedPose() ?? (this.lastObd?.rawKph === 0 ? this.stoppedPose : null);
     // With the engine off the poller reads speed once a second.
     const lastObdZero = this.lastObd !== null && this.lastObd.rawKph === 0 && s.tUs - this.lastObd.tUs < 2_500_000;
     if (out.quiet && lastObdZero) this.quietSinceUs ??= s.tUs;

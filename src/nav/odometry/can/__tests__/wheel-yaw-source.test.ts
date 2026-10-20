@@ -91,11 +91,21 @@ describe("standing, the phone's turning is never the car's", () => {
     expect(WheelYawSource.gyroYaw(out)).toBe(0);
   });
 
-  test("as the wheels go silent (ignition off), for the second the car's frame lasts", () => {
+  test("as the wheels go silent (ignition off), until the navigator holds the heading itself (speed stale)", () => {
     const src = new WheelYawSource();
     for (let t = 0; t <= 1_000_000; t += 100_000) src.addWheels(wheels(t + WHEEL_LAG_US, 0, 0));
     expect(WheelYawSource.gyroYaw(src.substitute(imu(1_600_000, 1))!)).toBe(0);
-    // Then the phone's sample as it is.
+    // Past a second without the wheels, still standing in the car's frame: the phone taken out turned the car (r4banv).
+    const silent = src.substitute(imu(3_500_000, 1))!;
+    expect(silent.gravity).toEqual([0, 0, -9.81]);
+    expect(WheelYawSource.gyroYaw(silent)).toBe(0);
+    // Past the navigator's 2.5 s (from the speed's time): the phone's sample as it is.
+    expect(src.substitute(imu(4_200_000, 1))).toBeNull();
+  });
+
+  test("the wheels gone silent with the car moving (the link lost while driving): the phone's sample as it is", () => {
+    const src = new WheelYawSource();
+    for (let t = 0; t <= 1_000_000; t += 100_000) src.addWheels(wheels(t + WHEEL_LAG_US, 0, 5));
     expect(src.substitute(imu(2_200_000, 1))).toBeNull();
   });
 

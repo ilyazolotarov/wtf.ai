@@ -19,6 +19,13 @@ const KEEP_US = 3_000_000;
  * breaks, 12–88 s off the drawn road where the gyro was 0–2 (2026-10-12).
  */
 const CAR_FRAME_US = 1_000_000;
+/**
+ * The wheels gone silent with the car standing (ignition off, the link lost): it stands, in the car's frame, until the
+ * navigator takes its speed for unknown and holds the heading itself (`obdStaleUs` 2.5 s after the speed's time, the
+ * wheels' plus their lag). After 1 s the phone's sample went in as it is, its turning not read as handling (a change of
+ * frame), and the driver taking the phone out turned a parked car 21–34° (r4banv, 2026-10-20).
+ */
+const SILENT_STANDING_US = 3_000_000;
 
 const dot = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 
@@ -113,13 +120,17 @@ export class WheelYawSource {
     return { ...s, gyro: [0, 0, radps], gravity: [0, 0, -g] };
   }
 
-  /** Every wheel sample within `CAR_FRAME_US` of `tUs` reads the car standing (there is one). */
+  /**
+   * Every wheel sample within `CAR_FRAME_US` of `tUs` reads the car standing (there is one); or none does, and the
+   * last before it, within `SILENT_STANDING_US`, read it standing.
+   */
   private standing(tUs: number): boolean {
     let any = false;
     for (let i = this.yaw.length - 1; i >= 0; i--) {
       const d = this.yaw[i].tUs - tUs;
-      if (d < -CAR_FRAME_US) break;
+      if (d < -SILENT_STANDING_US) break;
       if (d > CAR_FRAME_US) continue;
+      if (d < -CAR_FRAME_US) return any || this.yaw[i].speedMps === 0;
       if (this.yaw[i].speedMps !== 0) return false;
       any = true;
     }
