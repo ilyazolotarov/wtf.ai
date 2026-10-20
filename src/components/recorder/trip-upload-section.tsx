@@ -7,7 +7,7 @@ import { INPUT_MAX_FONT_SCALE, T } from "@/components/ui/text";
 import { usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
 import { useRecorderSnapshot } from "@/providers/runtime-provider";
-import type { TripUploader, UploaderSnapshot } from "@/services/trip-upload/trip-uploader";
+import { pendingLogs, type TripUploader, type UploaderSnapshot } from "@/services/trip-upload/trip-uploader";
 
 /**
  * Opt-in trip log upload for testers (TRIP-LOGGER-SPEC §7.1): enter the developer's code, confirm what is sent and under
@@ -17,8 +17,7 @@ export function TripUploadSection({ uploader }: { uploader: TripUploader }) {
   const { t } = useT();
   const palette = usePalette();
   const snap = useSyncExternalStore(uploader.subscribe, uploader.getSnapshot, uploader.getSnapshot);
-  // Re-render when trips end or are deleted: pending() reads them.
-  useRecorderSnapshot();
+  const recording = useRecorderSnapshot();
   const [typed, setTyped] = useState("");
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -33,7 +32,8 @@ export function TripUploadSection({ uploader }: { uploader: TripUploader }) {
     else setError(t(result === "malformed" ? "tripUploadMalformed" : result === "rejected" ? "tripUploadRejected" : result === "failed" ? "tripUploadServerError" : "tripUploadOffline"));
   };
 
-  const waiting = uploader.pending().length;
+  // From the snapshots, not `uploader.pending()`: the React Compiler kept that call's first result (`pendingLogs`).
+  const waiting = pendingLogs(recording, snap).length;
 
   return (
     <View style={styles.group}>

@@ -1,6 +1,6 @@
 // TripUploader: what gets sent when, and what each Worker answer does (TRIP-LOGGER-SPEC §7.1).
 import type { RecorderSnapshot, TripIndexEntry } from "../trip-recorder/trip-recorder";
-import { TripUploader, type HttpResult, type NetworkKind } from "../trip-upload/trip-uploader";
+import { pendingLogs, TripUploader, type HttpResult, type NetworkKind } from "../trip-upload/trip-uploader";
 
 const trip = (fileName: string, startUtcMs: number): TripIndexEntry => ({
   id: fileName.slice(16, 22),
@@ -178,5 +178,16 @@ describe("TripUploader", () => {
     expect(s.getCode()).toBeNull();
     expect(s.sent).toEqual([A, B]);
     expect(up.getSnapshot().status).toBe("off");
+  });
+});
+
+// The screen counts from the snapshots (the React Compiler kept `uploader.pending()`'s first result: "2 waiting" after
+// both were sent, until the screen was opened again).
+describe("pendingLogs", () => {
+  it("from the two snapshots: not the log being written, not sent, not refused, oldest first", () => {
+    const recorder = { trips: [trip(C, 3), trip(B, 2), trip(A, 1)], current: { id: C.slice(16, 22) } } as unknown as RecorderSnapshot;
+    expect(pendingLogs(recorder, { uploaded: {}, refused: {} })).toEqual([A, B]);
+    expect(pendingLogs(recorder, { uploaded: { [A]: 1 }, refused: {} })).toEqual([B]);
+    expect(pendingLogs(recorder, { uploaded: { [A]: 1 }, refused: { [B]: "e409" } })).toEqual([]);
   });
 });

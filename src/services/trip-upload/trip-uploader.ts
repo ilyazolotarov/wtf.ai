@@ -133,11 +133,7 @@ export class TripUploader {
 
   /** Logs waiting to go: finished, not sent, not refused, oldest first. */
   pending(): string[] {
-    const snap = this.deps.recorder.getSnapshot();
-    return snap.trips
-      .filter((t) => t.id !== snap.current?.id && !(t.fileName in this.snapshot.uploaded) && !(t.fileName in this.snapshot.refused))
-      .sort((a, b) => a.startUtcMs - b.startUtcMs)
-      .map((t) => t.fileName);
+    return pendingLogs(this.deps.recorder.getSnapshot(), this.snapshot);
   }
 
   /**
@@ -218,6 +214,17 @@ export class TripUploader {
     const kept = new Set(this.deps.recorder.getSnapshot().trips.map((t) => t.fileName));
     return Object.fromEntries(Object.entries(byFile).filter(([file]) => kept.has(file)));
   }
+}
+
+/**
+ * Logs waiting to go, from the two snapshots alone. A screen derives its count with this, not with `pending()`: the
+ * React Compiler keeps a method's result while the object is the same, and the count stood still through the uploads.
+ */
+export function pendingLogs(recorder: Pick<RecorderSnapshot, "trips" | "current">, upload: Pick<UploaderSnapshot, "uploaded" | "refused">): string[] {
+  return recorder.trips
+    .filter((t) => t.id !== recorder.current?.id && !(t.fileName in upload.uploaded) && !(t.fileName in upload.refused))
+    .sort((a, b) => a.startUtcMs - b.startUtcMs)
+    .map((t) => t.fileName);
 }
 
 function errorOf(res: HttpResult): string {
