@@ -223,6 +223,10 @@ navigate with the phone in a hand, a pocket or on a seat.
   starts there (σ 10 m, 15°, init method `user`), confirmed: later fixes only pass its gate, so Wi-Fi can't move it;
   five rejected satellite fixes still reset it. Note `nav position set by the driver: lat,lon N m from the dot,
   heading …`.
+- **Off the roads** when no road within 10 m runs within 30° of the car's heading (either way): a car park, a yard, a
+  bay at right angles to the road it leaves by. Map matching then starts as from a pose parked off the roads
+  (MAPMATCH-SPEC §7.2); started on the roads near it that fit the heading, a car placed facing a lane turned onto the
+  road beside it and the dot drove on along the lane.
 - **Held as the manual position** (§6.3), with or without a car connected, apart from the car's parked pose. With a
   car standing, the 30 s save keeps the navigator's pose (started from the placing) as the parked pose.
 

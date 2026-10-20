@@ -401,6 +401,18 @@ const fixSigma = (f: GnssFix) => (isSatelliteFix(f) ? f.hAccM / SQRT_68 : f.hAcc
 const JAMMED_POSE_SIGMA_M = 30;
 /** A start from a pose parked off the roads stays "at the spot" until the car has driven this far. */
 const PARKED_SPOT_M = 20;
+/**
+ * The driver's placing is off the roads when the nearest road within `PLACED_REACH_M` (the filter's 3σ start) runs
+ * across the car (more than `PLACED_ALONG_RAD` off its heading, either way) and none running its way is within
+ * `PLACED_ON_ROAD_M` (a car at the kerb is ~2 lanes from the centre line), or no road is within reach. Placed in a bay
+ * at right angles to the road 5 m away, a lane its way 15 m off, the filter started on the lane alone and the dot drove
+ * on along it 25-40 m off for 15 s after the car turned onto the road (r4banv, 2026-10-20; most placings at that spot
+ * look the same). Not by distance alone: placings on a road were 13-29 m from it (jd7r94, vtj42m), and at a junction's
+ * mouth the cross street is nearest with the car's road 5-7 m away (hejjjy, 4tc22d).
+ */
+const PLACED_REACH_M = 30;
+const PLACED_ON_ROAD_M = 8;
+const PLACED_ALONG_RAD = Math.PI / 4;
 const POSE_GPS_WITHIN_M = 300;
 /** A road position update's σ along the road when it knows nothing new there (no turn since the last one), m. */
 const UNKNOWN_ALONG_M = 10_000;
@@ -516,7 +528,7 @@ export class Navigator {
   private speedScale: { ks: number; ksVar: number; so?: number; soVar?: number } | null = null;
   /** The EKF started from a parked pose that no fix has confirmed yet (OBD distance at the start). */
   private poseUnverifiedFromM: number | null = null;
-  /** The EKF started from a pose parked off the roads (OBD distance at the start). */
+  /** The EKF started from a pose parked off the roads, or placed there by the driver (OBD distance at the start). */
   private poseOffRoadAtM: number | null = null;
   /** Parked pose taken when the phone was first handled while parked: it may leave the car after that. */
   private frozenPose: ParkedPose | null = null;
@@ -624,6 +636,9 @@ export class Navigator {
     if (!graph) return;
     if (this.frame) graph.setFrame(this.frame);
     this.mapMatchListening = true;
+    // The driver placed the car before the map came: off the roads or not is known only now.
+    const placedBefore = this.ekf && this.started?.method === "user" && this.driverSaidAtM !== null && this.stats.obdDistanceM - this.driverSaidAtM < PARKED_SPOT_M;
+    if (placedBefore && this.poseOffRoadAtM === null && this.placedOffRoads()) this.poseOffRoadAtM = this.driverSaidAtM;
     if (this.ekf) this.startMapMatch();
     else this.startMapMatchAtAnchor();
   }
@@ -968,9 +983,17 @@ export class Navigator {
     };
   }
 
-  /** Started from a pose parked off the roads and not yet driven away from it. */
+  /** Started from a pose parked off the roads (or placed there) and not yet driven away from it. */
   private atParkedOffRoadSpot(): boolean {
     return this.poseOffRoadAtM !== null && this.stats.obdDistanceM - this.poseOffRoadAtM < PARKED_SPOT_M;
+  }
+
+  /** The EKF's pose (the driver's placing, just started) is off the roads (`PLACED_REACH_M`). False without a map. */
+  private placedOffRoads(): boolean {
+    const ekf = this.ekf;
+    if (!ekf || !this.pf) return false;
+    const r = this.pf.roadsAround(ekf.east, ekf.north, ekf.psi, PLACED_REACH_M, PLACED_ALONG_RAD);
+    return r.nearestM === Infinity || (!r.nearestFits && r.fittingM > PLACED_ON_ROAD_M);
   }
 
   /**
@@ -1523,7 +1546,8 @@ export class Navigator {
     this.anchor = null;
     this.rejectedSat = 0;
     this.started = { method, tUs: this.lastTUs ?? 0 };
-    if (method !== "pose") this.poseOffRoadAtM = null;
+    if (method === "user") this.poseOffRoadAtM = this.placedOffRoads() ? this.stats.obdDistanceM : null;
+    else if (method !== "pose") this.poseOffRoadAtM = null;
     this.trackingFromM = null;
     // Started from the map, the filter carries on; otherwise it is kept only if it agrees.
     if (method !== "map" && !this.mapMatchAgrees()) this.startMapMatch();

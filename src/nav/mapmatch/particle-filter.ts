@@ -590,6 +590,26 @@ export class ParticleFilter {
   }
 
   /**
+   * The roads around (e, n) against a car's heading `psi`, either way along them (within `maxRad`): how far the nearest
+   * road is, and the nearest one the car could be driving along (Infinity: none within `reachM`).
+   */
+  roadsAround(e: number, n: number, psi: number, reachM: number, maxRad: number): { nearestM: number; nearestFits: boolean; fittingM: number } {
+    let nearestM = Infinity;
+    let nearestFits = false;
+    let fittingM = Infinity;
+    for (const near of this.graph.edgesNear(e, n, reachM)) {
+      const d = Math.abs(wrap(near.headingRad - psi));
+      const fits = d <= maxRad || Math.PI - d <= maxRad;
+      if (near.distanceM < nearestM) {
+        nearestM = near.distanceM;
+        nearestFits = fits;
+      }
+      if (fits) fittingM = Math.min(fittingM, near.distanceM);
+    }
+    return { nearestM, nearestFits, fittingM };
+  }
+
+  /**
    * Start with the heading unknown (§7.2, §8): particles evenly along every road within `radiusM`
    * of (e, n), in both directions (against a one-way at its soft factor); off-road ones anywhere in
    * the circle, heading anywhere. One particle per `initSpacingM` of road and direction, within

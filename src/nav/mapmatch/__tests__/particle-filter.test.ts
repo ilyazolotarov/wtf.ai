@@ -500,6 +500,38 @@ describe("a start where the car was parked off the roads (MAPMATCH-SPEC §7.2)",
   });
 });
 
+// 2026-10-20 (r4banv): placed facing a lane in a car park, at right angles to the road it left by 5 m away, the
+// filter started on the lane alone and the dot drove on along it after the car turned onto the road.
+describe("the driver's placing off the roads (NAVIGATOR-SPEC §6.2)", () => {
+  const DEG = Math.PI / 180;
+  const BESIDE = { lat: 51.53 + 5 / 111_195, lon: 30.76 };
+  const placed = (headingRad: number, withGraph: "before" | "after") => {
+    const nav = new Navigator();
+    const g = new TiledRoadGraph(bufferByteSource(new Uint8Array(FIXTURE)), new LocalFrame({ lat: 51.53, lon: 30.76 }));
+    if (withGraph === "before") nav.setRoadGraph(g);
+    nav.onImu({ tUs: 1_000_000, gyro: [0, 0, 0], gravity: [0, 0, -9.81], userAccel: [0, 0, 0] });
+    nav.setPosition({ ...BESIDE, headingRad, posSigmaM: 10, headingSigmaRad: 15 * DEG });
+    if (withGraph === "after") nav.setRoadGraph(g);
+    return nav.estimate()!;
+  };
+
+  test("5 m beside the long road, at right angles to it: off the roads, at the spot", () => {
+    for (const when of ["before", "after"] as const) {
+      const est = placed(0, when);
+      expect(est.mapMatch?.state).toBe("offroad");
+      expect(est.parkedOffRoad).toBe(true);
+    }
+  });
+
+  test("5 m beside the long road, along it either way: on the road", () => {
+    for (const heading of [92 * DEG, -88 * DEG]) {
+      const est = placed(heading, "before");
+      expect(est.mapMatch?.state).not.toBe("offroad");
+      expect(est.parkedOffRoad).toBeUndefined();
+    }
+  });
+});
+
 describe("a drive from a lot (NAVIGATOR-SPEC §6.1)", () => {
   // Parked facing east 30 m north of the long road, out of the lot onto it, then 700 m east along it; no GNSS.
   const LOT = { lat: 51.53 + 30 / 111_195, lon: 30.76 };

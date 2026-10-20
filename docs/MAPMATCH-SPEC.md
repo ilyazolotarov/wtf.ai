@@ -180,7 +180,8 @@ Structure of arrays over typed arrays, for Hermes. The values below are `DEFAULT
 
 - **Known heading** (EKF running; parked pose; placing): candidate edges within 3σ of the position, travel
   directions within 3σ_ψ + 10° of the heading, particles spread by the position likelihood; the off-road share
-  (5 %) around the position. **Parked off the roads** (the pose's `offRoad`): the off-road share is 60 %, so the
+  (5 %) around the position. **Parked off the roads** (the pose's `offRoad`, or a driver's placing off the roads,
+  NAVIGATOR-SPEC §6.2): the off-road share is 60 %, so the
   start is `offroad` at the spot until the car drives onto a road (with 5 % the roads within 3σ took the weight and
   the dot started on the heaviest one, 84 m from the lot).
 - **Unknown heading** (navigator `anchored`, §8): all roads within the anchor radius (3σ of the anchor fix plus the
