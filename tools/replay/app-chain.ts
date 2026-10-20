@@ -8,7 +8,7 @@ import { wrapAngle } from "../../src/nav/ekf/dr-ekf";
 import { bearingRad } from "../../src/nav/geo";
 import type { ParkedPose } from "../../src/nav/navigator";
 import { drawnTruthTrack, type DrawnTruth } from "../../src/nav/replay/drawn-truth";
-import { decodeTripCan } from "../../src/nav/replay/can";
+import { decodeTripCan, withWheelYaw } from "../../src/nav/replay/can";
 import { obdOdometer } from "../../src/nav/replay/truth-match";
 import { LocalFrame } from "../../src/nav/geo/local-frame";
 import { planRoute } from "../../src/nav/routing/router";
@@ -52,8 +52,23 @@ export function carOf(trip: TripLog, byProtocol: Map<string, string>): string | 
 const DRAWN_HEADING = { afterM: 120, withinM: 1500, windowM: 30, straightRad: (5 * Math.PI) / 180, maxRateRad: (2 * Math.PI) / 180, posSigmaM: 10, headingSigmaRad: (5 * Math.PI) / 180 };
 
 /**
+ * The car's turning as the app's navigator had it: the rear wheels' (the IMU samples as the car's, `withWheelYaw`) on a
+ * log that navigated on them (`nav_wheel_yaw: on`), else the phone's gyro. With the phone off its mount the gyro is
+ * the phone's: the drawn start of a drive that backed out of a bay came out 69° for ~165° (j4zi4t, 2026-10-20).
+ */
+function turningImu(trip: TripLog): TripLog["imu"] {
+  if (trip.info.nav_wheel_yaw !== "on") return trip.imu;
+  const cached = carImu.get(trip);
+  if (cached) return cached;
+  const imu = withWheelYaw(trip)?.trip.imu ?? trip.imu;
+  carImu.set(trip, imu);
+  return imu;
+}
+const carImu = new WeakMap<TripLog, TripLog["imu"]>();
+
+/**
  * Where the drawing starts, and how the car stood there: the drawing's direction once the car drives straight on it
- * (`DRAWN_HEADING`), less what the gyro turned since the log started (backing out of a bay included). The parked spot
+ * (`DRAWN_HEADING`), less what the car turned since the log started (backing out of a bay included; `turningImu`). The parked spot
  * the app should have saved. The gyro only while the car moves (the odometer) or is in reverse (the CAN gear: OBD reads
  * 0 there on some cars, and backing out of a bay is a turn): a parked car doesn't turn, and the phone handled while
  * it stood turned 180° on one drive (2026-10-15: the start 80° off, the replay hundreds of metres from the road).
@@ -76,7 +91,7 @@ export function drawnStartPose(trip: TripLog, drawn: DrawnTruth | null): ParkedP
   const turned: number[] = [];
   let sum = 0;
   let k = 0;
-  const imu = trip.imu;
+  const imu = turningImu(trip);
   const gears = (decodeTripCan(trip)?.samples ?? []).filter((x) => x.q === "gear");
   let gi = 0;
   const reverse = (tUs: number) => {
@@ -115,12 +130,12 @@ export function drawnStartPose(trip: TripLog, drawn: DrawnTruth | null): ParkedP
  * Where the car's own gyro and wheels say it went, in a frame of their own: [t s, east m, north m, heading rad] every
  * `stepS`, from (0, 0) heading north at the log's start. Only its shape is known: the viewer lays it on the drawing at
  * a moment and turns it to the drawing's direction there, so a car park or a yard the drawing guessed can be checked
- * against what the car did. The gyro as `drawnStartPose` takes it (about gravity, while the wheels turn or in reverse),
+ * against what the car did. The turning as `drawnStartPose` takes it (about gravity, while the wheels turn or in reverse),
  * backwards in reverse gear (the CAN gear; without it, a car whose OBD reads 0 in reverse doesn't move back here).
  */
 export function odometryTrack(trip: TripLog, stepS = 0.5): [number, number, number, number][] {
   const odo = obdOdometer(trip);
-  const imu = trip.imu;
+  const imu = turningImu(trip);
   const gears = (decodeTripCan(trip)?.samples ?? []).filter((x) => x.q === "gear");
   let gi = 0;
   const reverse = (tUs: number) => {

@@ -30,7 +30,8 @@ replays it, with several filter seeds, scored drive by drive, from three starts:
 - **parked:** every log in order on one storage, each drive starting from what the earlier ones left (the app's
   own chain);
 - **drawn:** that chain, but each drawn drive starts parked where its drawing starts, heading from the drawing and
-  the gyro (MAPMATCH-SPEC §10.2): the spot saved right, whatever the chain or the phone made of it;
+  the car's turning back to the start (MAPMATCH-SPEC §10.2; the rear wheels on a log that turned on them, the phone
+  may have been off its mount, else the gyro): the spot saved right, whatever the chain or the phone made of it;
 - **cold:** nothing stored, scored only from the first fix claiming ≤ 150 m (a drive without one isn't scored).
 
 Judge a change by parked and drawn; cold shows how the app copes with nothing, and must not fall apart.
@@ -179,7 +180,8 @@ line then says so.
     go before the first point, to draw a start you missed. Shift-click draws a straight stretch anyway (or toggles
     it on a point), Alt-click toggles a point on or off the roads; drag a point to move it, right-click to delete it,
     click the line to add one in between; Ctrl+Z or *Undo* undoes. Layers fold away while drawing.
-  - *Gyro path* (dashed violet; a layer, on in every mode): where the car's own gyro and wheels say it went, 90 s
+  - *Gyro path* (dashed violet; a layer, on in every mode): where the car's own turning (the gyro, or the rear
+    wheels on a log that turned on them) and wheels say it went, 90 s
     either side of the cursor, laid on the drawing at the cursor and turned to its direction there (`odometryTrack`,
     app-chain.ts). Put the cursor where the drawing is surely right and check the car park or yard next to it;
     against GPS it was within ~10 m 30 s from the cursor and ~15 m at 60 s (median).
@@ -202,9 +204,10 @@ line then says so.
   - *Where the car started*: where the phone remembered it (default: what the app had stored when the drive
     started — parked pose, speed scale, compass, GNSS lag, a manual position — from the log's `nav storage` notes;
     a log from before 2026-10-11 falls back to the next); where your drawing starts (its parked pose at the drawn
-    start, heading along it); where today's navigator would have parked it (every earlier log replayed in order
-    through the app with one storage across them, NAVIGATOR-SPEC §6.1, the car by its VIN, else the car last seen on
-    the same OBD protocol: ~35 s the first time, kept until the viewer restarts); nowhere (a fresh install).
+    start, heading along it); where today's navigator would have parked it (every earlier log of the phone replayed
+    in order through the app with one storage across them, the first from what the phone had stored then,
+    NAVIGATOR-SPEC §6.1, the car by its VIN, else the car last seen on the same OBD protocol: ~35 s the first time,
+    kept until the viewer restarts); nowhere (a fresh install).
   - *Compare with*: a second version, drawn in orange. *Before 16 Oct*: the dot without the heading cue or the
     steadying along its road (MAPMATCH-SPEC §11). *Open loop*: no corrections from the map into the navigator.
   - *Adapter*: as recorded (the speed the app took, OBD or the CAN wheels), or none: phone-only mode

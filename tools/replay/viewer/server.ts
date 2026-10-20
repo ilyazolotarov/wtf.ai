@@ -77,7 +77,9 @@ interface AppState {
 
 /**
  * The app's state before a log (NAVIGATOR-SPEC §6.1): every earlier log replayed in order through the app's own
- * NavigatorService (app-replay.ts) with one storage across them, as on the phone. Each log's state is a copy.
+ * NavigatorService (app-replay.ts) with one storage across them, as on the phone. Each log's state is a copy. The
+ * first starts from what the phone had stored then (its `nav storage` notes), not from nothing: a phone's logs start
+ * mid-life, and a driver's placing or a parked pose from before them is where its first drive started.
  */
 const states = new Map<string, AppState>();
 function appStateBefore(file: string): AppState {
@@ -85,10 +87,13 @@ function appStateBefore(file: string): AppState {
   const store = new MemoryKeyValueStore();
   const byProtocol = new Map<string, string>();
   const parkedAfter = new Map<string, string>();
+  let first = true;
   for (const { file: log } of [...listLogs()].reverse()) {
     if (!samePhone(log, file)) continue;
     if (path.basename(log) > path.basename(file)) break;
     const trip = readTripLog(new Uint8Array(readFileSync(path.join(LOG_DIR, log))));
+    if (first) seedFromLog(trip, new CalibrationStore(store, phoneOf(trip)));
+    first = false;
     const vin = carOf(trip, byProtocol);
     states.set(log, { store: store.copy(), vin, parkedAfter: vin ? (parkedAfter.get(vin) ?? null) : null });
     if (log === file) break;
