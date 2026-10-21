@@ -21,6 +21,19 @@ class SensorCaptureWebModule extends NativeModule<SensorCaptureEvents> {
     return false;
   }
   async stopImu() {}
+  launchInfo() {
+    return { wallMs: Date.now(), uptimeUs: performance.now() * 1000, inBackground: false, reasons: [] };
+  }
+  async processStats() {
+    return { footprintMb: NaN, headroomMb: NaN, cpuS: NaN, thermal: "nominal" as const, lowPower: false, memoryWarnings: 0 };
+  }
+  takeHealthReports() {
+    return [];
+  }
+  async setLocationSession() {
+    return false;
+  }
+  simulateSystemKill() {}
 }
 
 export default registerWebModule(SensorCaptureWebModule, "SensorCapture");

@@ -1,11 +1,14 @@
 package ai.wtf.vehiclelink
 
 import ai.wtf.vehiclelink.logic.ProfileSpec
+import ai.wtf.vehiclelink.logic.WakeLogic
 import android.Manifest
+import android.content.Context
 import android.os.Build
 import expo.modules.interfaces.permissions.PermissionsStatus
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.exception.Exceptions
+import expo.modules.kotlin.functions.Queues
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import expo.modules.kotlin.records.Field
@@ -42,6 +45,8 @@ class VehicleLinkModule : Module() {
     return LinkCore(context) { name, body -> sendEvent(name, body) }.also { core = it }
   }
 
+  private fun context(): Context = appContext.reactContext ?: throw Exceptions.ReactContextLost()
+
   /** The system dialog is shown at most once per process: a denial must not turn into a prompt on every foreground. */
   private var askedForPermissions = false
 
@@ -64,6 +69,12 @@ class VehicleLinkModule : Module() {
     Name("VehicleLink")
 
     Events("onScanBatch", "onMfiChange", "onLinkState", "onUnsolicited", "onBluetoothState")
+
+    // Every association observed again at each start: one Android stopped observing (an OS update, an association made
+    // elsewhere) would otherwise never wake the app.
+    OnCreate {
+      appContext.reactContext?.let { CompanionWake.observeAll(it) }
+    }
 
     OnDestroy {
       core?.shutdown()
@@ -112,5 +123,22 @@ class VehicleLinkModule : Module() {
     AsyncFunction("transact") { command: String, timeoutMs: Double, promise: Promise -> core().transact(command, timeoutMs, promise) }
 
     AsyncFunction("writeRaw") { text: String, promise: Promise -> core().writeRaw(text, promise) }
+
+    // The devices that wake the app (CompanionWake, VEHICLE-LINK-SPEC §11).
+    Function("wakeSupported") { CompanionWake.supported(context()) }
+
+    Function("wakeDevices") { CompanionWake.devices(context()) }
+
+    AsyncFunction("addWakeDevice") { bleAddress: String?, promise: Promise ->
+      val activity = appContext.currentActivity ?: return@AsyncFunction promise.resolve(null)
+      if (!CompanionWake.supported(activity)) return@AsyncFunction promise.resolve(null)
+      CompanionWake.associate(activity, WakeLogic.bleAddress(bleAddress)) { promise.resolve(it) }
+    }.runOnQueue(Queues.MAIN)
+
+    Function("forgetWakeDevice") { address: String -> CompanionWake.forget(context(), address) }
+
+    OnActivityResult { _, payload ->
+      CompanionWake.onActivityResult(context(), payload.requestCode, payload.resultCode, payload.data)
+    }
   }
 }

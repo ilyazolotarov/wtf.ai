@@ -1,8 +1,8 @@
 {
-  "NSLocationWhenInUseUsageDescription": "Дозвольте wtf.ai визначати вашу геопозицію під час навігації.",
-  "NSBluetoothAlwaysUsageDescription": "Дозвольте wtf.ai підключатися до адаптера OBD-II, щоб зчитувати швидкість авто.",
-  "NSMotionUsageDescription": "Дозвольте wtf.ai зчитувати датчики руху телефона, щоб стежити за авто, коли супутникове позиціювання заглушене.",
-  "NSLocationAlwaysAndWhenInUseUsageDescription": "wtf.ai використовує вашу геопозицію у фоні лише під час поїздки, щоб вести вас із заблокованим екраном.",
-  "NSLocationAlwaysUsageDescription": "wtf.ai використовує вашу геопозицію у фоні лише під час поїздки, щоб вести вас із заблокованим екраном.",
-  "NSMicrophoneUsageDescription": "wtf.ai не записує звук, лише озвучує підказки."
+  "NSLocationWhenInUseUsageDescription": "Дозвольте визначати вашу геопозицію під час навігації.",
+  "NSBluetoothAlwaysUsageDescription": "Дозвольте підключатися до адаптера OBD-II, щоб зчитувати швидкість авто.",
+  "NSMotionUsageDescription": "Дозвольте зчитувати датчики руху телефона, щоб стежити за авто, коли супутникове позиціювання заглушене.",
+  "NSLocationAlwaysAndWhenInUseUsageDescription": "Геопозиція використовується у фоновому режимі лише під час поїздки, щоб навігація працювала й із заблокованим екраном.",
+  "NSLocationAlwaysUsageDescription": "Геопозиція використовується у фоновому режимі лише під час поїздки, щоб навігація працювала й із заблокованим екраном.",
+  "NSMicrophoneUsageDescription": "Застосунок не записує звук, лише озвучує підказки."
 }

@@ -41,10 +41,12 @@ LINK_STATES = [
     "reconnecting",
     "error",
 ]
+THERMAL = ["nominal", "fair", "serious", "critical"]
+APP_STATES = ["active", "inactive", "background", "unknown"]
 NAV_MODES = ["none", "anchored", "dr"]
 NAV_SOURCES = ["gnss", "fused", "dr", "manual"]
 NAV_TRUST = ["TRUSTED", "UNTRUSTED", "REACQUIRING", "NO_FIX"]
-NAV_POSES = ["none", "unverified", "confirmed", "rejected"]
+NAV_POSES = ["none", "unverified", "confirmed", "rejected", "behind"]
 NAV_MAPMATCH_STATES = ["off", "init", "tracking", "multimodal", "offroad"]
 MAPMATCH_TOP = 3
 # Routing (ROUTING-SPEC §8); the maneuver kinds in src/nav/routing/maneuvers.ts order.
@@ -104,6 +106,9 @@ class Trip:
     # listening windows; a frame missing outside a window wasn't heard. Empty when it didn't run.
     can: pd.DataFrame = field(default_factory=pd.DataFrame)
     can_windows: pd.DataFrame = field(default_factory=pd.DataFrame)
+    # The app process (logs since 2026-10-21): memory footprint and headroom (MB), CPU (% of a core), thermal state,
+    # app state, low power mode. Empty in older logs.
+    app_stats: pd.DataFrame = field(default_factory=pd.DataFrame)
     dropouts_ms: list[int] = field(default_factory=list)
 
     @property
@@ -145,6 +150,7 @@ class Trip:
             "nav": self.nav,
             "can": self.can,
             "can_windows": self.can_windows,
+            "app_stats": self.app_stats,
         }
 
 
@@ -463,6 +469,23 @@ def load(path: str | Path) -> Trip:
         can_windows["reopen"] = [CAN_REOPEN[int(x)] if x == x else None for x in can_windows["reopen"]]
         can_windows = can_windows.drop(columns="flags")
 
+    app_stats = _frame(
+        ulog,
+        "app_stats",
+        start,
+        {
+            "footprint_mb": ("footprint_mb", None),
+            "headroom_mb": ("headroom_mb", None),
+            "cpu_pct": ("cpu_pct", None),
+            "thermal": ("thermal", THERMAL),
+            "app_state": ("app_state", APP_STATES),
+            "flags": ("flags", None),
+        },
+    )
+    if len(app_stats):
+        app_stats["low_power"] = (app_stats["flags"] & 1) != 0
+        app_stats = app_stats.drop(columns="flags")
+
     rows = []
     for tag, messages in getattr(ulog, "logged_messages_tagged", {}).items():
         for m in messages:
@@ -505,5 +528,6 @@ def load(path: str | Path) -> Trip:
         route_progress=route_progress,
         can=can,
         can_windows=can_windows,
+        app_stats=app_stats,
         dropouts_ms=dropouts,
     )

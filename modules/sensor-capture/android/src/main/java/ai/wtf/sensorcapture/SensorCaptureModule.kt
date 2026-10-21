@@ -57,9 +57,14 @@ class SensorCaptureModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("SensorCapture")
 
-    Events("onGnss", "onGnssError", "onImuBatch", "onAuthorization")
+    Events("onGnss", "onGnssError", "onImuBatch", "onAuthorization", "onMemoryWarning")
+
+    OnCreate {
+      AppHealth.onMemoryWarning = { level -> sendEvent("onMemoryWarning", mapOf("level" to level)) }
+    }
 
     OnDestroy {
+      AppHealth.onMemoryWarning = null
       capture?.shutdown()
       capture = null
     }
@@ -85,9 +90,9 @@ class SensorCaptureModule : Module() {
     AsyncFunction("stopImu") { capture?.stopImu() }
 
     // Foreground service for a trip in progress (TripService); Android only, absent on iOS.
-    AsyncFunction("startTripService") { title: String, text: String, channelName: String ->
+    AsyncFunction("startTripService") { title: String, text: String, channelName: String, gpsLabel: String? ->
       val context = appContext.reactContext ?: throw Exceptions.ReactContextLost()
-      TripService.canStart(context) && TripService.start(context, title, text, channelName)
+      TripService.canStart(context) && TripService.start(context, title, text, channelName, gpsLabel)
     }
 
     AsyncFunction("stopTripService") {
@@ -95,5 +100,23 @@ class SensorCaptureModule : Module() {
     }
 
     Function("isTripServiceRunning") { TripService.running }
+
+    Function("tripServiceHasLocation") { TripService.withLocation }
+
+    // The app process (TRIP-LOGGER-SPEC §4.4).
+    Function("launchInfo") { AppHealth.launchInfo() }
+
+    AsyncFunction("processStats") { appState: String, context: String ->
+      val ctx = appContext.reactContext ?: throw Exceptions.ReactContextLost()
+      AppHealth.stats(ctx, appState, context)
+    }
+
+    Function("takeHealthReports") { AppHealth.takeReports() }
+
+    // iOS's background location session; Android keeps a trip alive with TripService instead.
+    AsyncFunction("setLocationSession") { _: Boolean -> false }
+
+    // Developer: ends the process as Android would under memory pressure (not a swipe).
+    Function("simulateSystemKill") { android.os.Process.killProcess(android.os.Process.myPid()) }
   }
 }

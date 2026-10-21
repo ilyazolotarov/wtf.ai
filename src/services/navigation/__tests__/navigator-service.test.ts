@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import type { PoseAfterWake } from "@/services/on-the-way";
 import path from "node:path";
 
 import { syntheticDrive, type DriveSegment, type SyntheticDrive } from "@/nav/__fixtures__/synthetic-drive";
@@ -83,6 +84,8 @@ function harness(
     phoneGraph?: () => TiledRoadGraph;
     /** The uptime the app starts at (a later session of the same drive). */
     startUs?: number;
+    /** iOS started the app on the way (NAVIGATOR-SPEC §6.1). */
+    onTheWay?: { poseAfterWake(): PoseAfterWake; poseBehind(): void };
   } = {},
 ) {
   const gnss = new Emitter<[GnssRecord]>();
@@ -114,6 +117,7 @@ function harness(
     logMapMatch: (r) => loggedMapMatch.push(r),
     roadGraph: options.roadGraph,
     canSpeed: { onSample: (l) => wheels.on(l) },
+    onTheWay: options.onTheWay,
     ...(options.phoneGraph ? { openPhoneGraph: () => ({ key: "fixture", graph: options.phoneGraph!(), close: () => {} }) } : {}),
   });
 
@@ -460,6 +464,54 @@ describe("pose saved while driving (NAVIGATOR-SPEC §6.1)", () => {
     const seeded = new CalibrationStore(memoryStore(), PHONE);
     seedFromLog({ messages: notes.map((text) => ({ tUs: 0, tag: "app", text })) } as never, seeded);
     expect(seeded.parkedPose(VIN)).toEqual({ ...pose, vin: VIN, savedAt: 1_790_000_000_000 });
+  });
+});
+
+describe("started on the way (NAVIGATOR-SPEC §6.1)", () => {
+  const POSE = { lat: 50.45, lon: 30.52, headingRad: 2, posSigmaM: 8, headingSigmaRad: 0.05 };
+
+  function startedOnTheWay(savedAgoS: number, speedMps?: number, wake: PoseAfterWake = "behind") {
+    const store = memoryStore();
+    const startUs = 1_000_000_000;
+    const nowMs = (startUs + UTC_OFFSET_US) / 1000;
+    new CalibrationStore(store, PHONE).saveParkedPose(VIN, { ...POSE, ...(speedMps ? { speedMps } : {}) }, nowMs - savedAgoS * 1000);
+    const behind = jest.fn();
+    return { ...harness({ store, startUs, onTheWay: { poseAfterWake: () => wake, poseBehind: behind } }), behind };
+  }
+
+  test("the pose where the car was parked is behind it: not used, and the map is told", async () => {
+    const { service, notes, behind } = startedOnTheWay(3600);
+    await service.start();
+    expect(notes).toContain("nav parked pose not used: the app was started on the way (60 min after it was saved)");
+    expect(notes.some((n) => n.startsWith("nav mode dr"))).toBe(false);
+    expect(behind).toHaveBeenCalledTimes(1);
+    expect(service.getDebug().parkedPose).toBe("behind");
+    service.stop();
+  });
+
+  test("the relaunch's location is still at the pose: the car stands, the pose is used", async () => {
+    const { service, notes, behind } = startedOnTheWay(3600, undefined, "standing");
+    await service.start();
+    expect(notes).toContain("nav parked pose kept: the app was started on the way, but the phone is still at it");
+    expect(notes.some((n) => n.startsWith("nav mode dr (parked pose"))).toBe(true);
+    expect(behind).not.toHaveBeenCalled();
+    service.stop();
+  });
+
+  test("a pose saved within 2 min is the stop the app ended at: used", async () => {
+    const { service, notes, behind } = startedOnTheWay(60);
+    await service.start();
+    expect(notes.some((n) => n.startsWith("nav mode dr (parked pose"))).toBe(true);
+    expect(behind).not.toHaveBeenCalled();
+    service.stop();
+  });
+
+  test("a pose saved while driving is carried on as before", async () => {
+    const { service, notes, behind } = startedOnTheWay(30, 15);
+    await service.start();
+    expect(notes.some((n) => n.startsWith("nav mode dr (pose saved while driving"))).toBe(true);
+    expect(behind).not.toHaveBeenCalled();
+    service.stop();
   });
 });
 

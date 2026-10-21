@@ -1,8 +1,8 @@
 {
-  "NSLocationWhenInUseUsageDescription": "Allow wtf.ai to use your location while navigating.",
-  "NSBluetoothAlwaysUsageDescription": "Allow wtf.ai to connect to your OBD-II adapter to read vehicle speed.",
-  "NSMotionUsageDescription": "Allow wtf.ai to read the phone's motion sensors, to follow the car when satellite positioning is jammed.",
-  "NSLocationAlwaysAndWhenInUseUsageDescription": "wtf.ai uses your location in the background only during a drive, to keep guiding you with the screen locked.",
-  "NSLocationAlwaysUsageDescription": "wtf.ai uses your location in the background only during a drive, to keep guiding you with the screen locked.",
-  "NSMicrophoneUsageDescription": "wtf.ai doesn't record audio; it only speaks directions."
+  "NSLocationWhenInUseUsageDescription": "Allow location access while navigating.",
+  "NSBluetoothAlwaysUsageDescription": "Allow connections to your OBD-II adapter to read vehicle speed.",
+  "NSMotionUsageDescription": "Allow access to the phone's motion sensors to track the car when satellite positioning is jammed.",
+  "NSLocationAlwaysAndWhenInUseUsageDescription": "Your location is used in the background only during a drive, to keep guiding you with the screen locked.",
+  "NSLocationAlwaysUsageDescription": "Your location is used in the background only during a drive, to keep guiding you with the screen locked.",
+  "NSMicrophoneUsageDescription": "The app doesn't record audio; it only speaks directions."
 }

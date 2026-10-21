@@ -1,2 +1,13 @@
-<manifest>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <application>
+    <!-- Bound by Android when an associated device appears (docs/VEHICLE-LINK-SPEC.md §11). -->
+    <service
+      android:name="ai.wtf.vehiclelink.WakeService"
+      android:exported="true"
+      android:permission="android.permission.BIND_COMPANION_DEVICE_SERVICE">
+      <intent-filter>
+        <action android:name="android.companion.CompanionDeviceService" />
+      </intent-filter>
+    </service>
+  </application>
 </manifest>

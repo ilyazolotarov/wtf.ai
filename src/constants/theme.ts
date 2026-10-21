@@ -64,6 +64,8 @@ export const Colors = {
     puckRing: "#FFFFFF",
     // Dark enough for 3:1 even on the route's indigo, where the doubt dot's amber ring alone differs only in hue.
     puckEdge: "rgba(0,0,0,0.9)",
+    /** Pins and marks the driver puts on the map (a dropped pin, the placing pin, the placed position): the accent. */
+    mapPin: "#4371B7",
     // Legacy names used by dev-only screens (trips, ELM terminal, device list).
     background: "#F5F4F1",
     backgroundElement: "#FFFFFF",
@@ -107,6 +109,8 @@ export const Colors = {
     puckDoubt: "#E4B572",
     puckRing: "#FFFFFF",
     puckEdge: "#000000",
+    // The trusted dot's deep blue: the light accent read pale and washed out on the dark map.
+    mapPin: "#3D6BFF",
     background: "#121211",
     backgroundElement: "#232220",
     backgroundSelected: "#2C2B29",

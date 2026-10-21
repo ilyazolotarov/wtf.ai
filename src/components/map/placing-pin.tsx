@@ -23,10 +23,10 @@ export function PlacingPinShape() {
   return (
     <G strokeLinejoin="round">
       <Path d={PATH} fill="none" stroke={palette.puckEdge} strokeWidth={RING + 2 * PUCK.edge} />
-      <Path d={PATH} fill={palette.accent} stroke={palette.puckRing} strokeWidth={RING} />
+      <Path d={PATH} fill={palette.mapPin} stroke={palette.puckRing} strokeWidth={RING} />
       <Circle cx={0} cy={-32} r={6} fill={palette.puckRing} />
       <Circle cx={0} cy={0} r={POINT_R + RING / 2 + PUCK.edge} fill={palette.puckEdge} />
-      <Circle cx={0} cy={0} r={POINT_R} fill={palette.accent} stroke={palette.puckRing} strokeWidth={RING} />
+      <Circle cx={0} cy={0} r={POINT_R} fill={palette.mapPin} stroke={palette.puckRing} strokeWidth={RING} />
     </G>
   );
 }

@@ -1,6 +1,6 @@
 {
   "name": "wtf.ai",
-  "main": "expo-router/entry",
+  "main": "index.ts",
   "version": "1.0.0",
   "dependencies": {
     "@expo-google-fonts/onest": "^0.4.2",

@@ -7,10 +7,11 @@ import type { LocationPermissionResponse } from "expo-location";
 
 import type { MapMatchConfig } from "@/nav/mapmatch/particle-filter";
 import type { UpdateTimingSummary } from "@/nav/mapmatch/update-timing";
+import type { PoseAfterWake } from "@/services/on-the-way";
 import type { FixOutcome, MapMatchEstimate, NavConfig, NavMode, ParkedPose } from "@/nav/navigator";
 import { Navigator } from "@/nav/navigator";
 import { PhoneNavigator, type PhoneGraph, type PhonePose, type PhoneRouteState } from "@/nav/phone/phone-navigator";
-import { carryDrivePose } from "@/nav/drive-pose";
+import { carryDrivePose, DRIVE_POSE_MAX_AGE_S } from "@/nav/drive-pose";
 import { haversineM } from "@/nav/geo";
 import { FUSED_WINDOW_US, puckAccuracyM, puckHypothesis, steadyDot, type DrawnDot, type LastPuck } from "@/nav/position/puck";
 import type { PositionEstimate, PositionSourceKind, RawGnssFix } from "@/nav/position/types";
@@ -121,7 +122,7 @@ export interface NavigatorDebug {
   /** Turn windows behind the online lag estimate (0: still the stored or default lag). */
   gnssLagWindows: number;
   /** The pose this session started from. */
-  parkedPose: "none" | "unverified" | "confirmed" | "rejected";
+  parkedPose: "none" | "unverified" | "confirmed" | "rejected" | "behind";
   /** Compass in shadow (NAVIGATOR-SPEC §7.6): its trust, and how far it is off the EKF heading now. */
   compassTrust: CompassTrust | "off";
   compassOffDeg: number | null;
@@ -171,6 +172,12 @@ export interface NavigatorServiceDeps {
   openPhoneGraph?(): { key: string; graph: PhoneGraph; close(): void } | null;
   /** The CAN wheel samples (CAN primary), for the navigator's turning with `setWheelYaw` (NAVIGATOR-SPEC §5.4). */
   canSpeed?: { onSample(listener: (s: CanSpeedSample) => void): () => void };
+  /**
+   * The app was started after the car drove off (iOS's wake for location "Always", VEHICLE-LINK-SPEC §11): a pose
+   * saved standing is behind the car, unless the wake's location is still at it (§6.1). `poseBehind` is told when one
+   * was left aside.
+   */
+  onTheWay?: { poseAfterWake(pose: { lat: number; lon: number; savedAt: number }): PoseAfterWake; poseBehind(): void };
 }
 
 export interface ServiceClock {
@@ -747,6 +754,17 @@ export class NavigatorService implements PositionSource {
       }
       return;
     }
+    // Started on the way: the car left this pose before the app was running. Saved within a drive pose's age, it is
+    // the stop the car is still at (the app ended there and iOS brought it back).
+    const ageS = pose ? (this.clock.nowMs() - pose.savedAt) / 1000 : 0;
+    const wake = pose && ageS > DRIVE_POSE_MAX_AGE_S ? (this.deps.onTheWay?.poseAfterWake(pose) ?? "not woken") : "not woken";
+    if (wake === "behind") {
+      this.poseStatus = "behind";
+      this.note(`nav parked pose not used: the app was started on the way (${Math.round(ageS / 60)} min after it was saved)`);
+      this.deps.onTheWay?.poseBehind();
+      return;
+    }
+    if (wake === "standing") this.note("nav parked pose kept: the app was started on the way, but the phone is still at it");
     if (pose && this.nav?.startFromPose(widen(pose))) {
       this.poseStatus = "unverified";
       this.note(`nav mode dr (parked pose, ${Math.round((this.clock.nowMs() - pose.savedAt) / 60_000)} min old${late ? ", VIN known late" : ""})`);

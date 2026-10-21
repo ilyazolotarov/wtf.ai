@@ -19,7 +19,7 @@ public class SensorCaptureModule: Module {
   public func definition() -> ModuleDefinition {
     Name("SensorCapture")
 
-    Events("onGnss", "onGnssError", "onImuBatch", "onAuthorization")
+    Events("onGnss", "onGnssError", "onImuBatch", "onAuthorization", "onMemoryWarning")
 
     OnCreate {
       let emit: SensorCapture.Emit = { [weak self] name, body in
@@ -28,11 +28,14 @@ public class SensorCaptureModule: Module {
       DispatchQueue.main.async {
         self.capture = SensorCapture(emit: emit)
       }
+      AppHealth.shared.onMemoryWarning = { emit("onMemoryWarning", [:]) }
     }
 
     OnDestroy {
+      AppHealth.shared.onMemoryWarning = nil
       let capture = self.capture
       DispatchQueue.main.async {
+        // The location session stays: the next JS (a reload) holds it again.
         capture?.stopGnss()
         capture?.stopImu()
       }
@@ -69,6 +72,45 @@ public class SensorCaptureModule: Module {
     AsyncFunction("stopImu") { () -> Void in
       self.capture?.stopImu()
     }.runOnQueue(.main)
+
+    // The app process (TRIP-LOGGER-SPEC §4.4).
+    Function("launchInfo") { () -> [String: Any] in
+      return AppHealth.shared.launchInfo()
+    }
+
+    AsyncFunction("processStats") { (appState: String, context: String) -> [String: Any] in
+      return AppHealth.shared.stats(appState: appState, context: context)
+    }
+
+    Function("takeHealthReports") { () -> [[String: Any]] in
+      return AppHealth.shared.takeReports()
+    }
+
+    // The background location session (TRIP-LOGGER-SPEC §4.3); true while held.
+    AsyncFunction("setLocationSession") { (on: Bool) -> Bool in
+      if on { return LocationKeepAlive.begin() }
+      LocationKeepAlive.end()
+      return false
+    }.runOnQueue(.main)
+
+    // Developer: ends the process as iOS would (not a swipe), to try the relaunch paths on a drive.
+    Function("simulateSystemKill") { () -> Void in
+      _ = kill(getpid(), SIGKILL)
+    }
+
+    // Relaunched a few hundred metres into a drive with location "Always" (DriveWake); true while monitoring.
+    AsyncFunction("setDriveWake") { (on: Bool) -> Bool in
+      return DriveWake.shared.set(on)
+    }.runOnQueue(.main)
+
+    Function("driveWakeOn") { () -> Bool in
+      return DriveWake.shared.enabled
+    }
+
+    // The location the drive wake got (on-the-way.ts: is the car still where it was parked?).
+    Function("driveWakeFix") { () -> [String: Any]? in
+      return DriveWake.shared.fix()
+    }
   }
 }
 

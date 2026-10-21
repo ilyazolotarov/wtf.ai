@@ -13,3 +13,8 @@ android {
     versionName "1.0.0"
   }
 }
+
+dependencies {
+  // The wake runs a headless JS task (WakeService.kt).
+  implementation 'com.facebook.react:react-android'
+}

@@ -7,11 +7,16 @@ import * as Device from "expo-device";
 import { AppState, Platform } from "react-native";
 
 import VehicleLinkModule from "../../modules/vehicle-link/src/VehicleLinkModule";
+import { RESTORE_IDENTIFIER } from "../../modules/vehicle-link/src/restore";
+import SensorCaptureModule from "../../modules/sensor-capture/src/SensorCaptureModule";
 import { Sentry, sentryMetricSink } from "@/config/sentry";
 import { TRIP_UPLOAD_URL } from "@/config/trip-upload";
 import { createClock } from "@/obd/clock";
 import { VehicleLinkCore } from "@/obd/vehicle-link-core";
 
+import { AppHealth } from "./app-health";
+import { OnTheWay, poseAfterWake } from "./on-the-way";
+import { LocationSession } from "./location-session";
 import { kvStore } from "./kv-store";
 import { CalibrationStore } from "./navigation/calibration-store";
 import { NavigatorService } from "./navigation/navigator-service";
@@ -28,7 +33,7 @@ import { NativeDiscovery } from "./vehicle-link/discovery";
 import { TelemetryReporter } from "./telemetry";
 import { jsSourceInfo } from "./js-source";
 import { setTripService } from "./trip-service";
-import { loadDevSettings } from "./dev-settings-load";
+import { DEV_SETTINGS_VERSION, loadDevSettings } from "./dev-settings-load";
 import { CanAutoIds, idsAfterBufferFull, type CanAutoStatus } from "./vehicle-link/can-auto-ids";
 import { CanSpeedFeed } from "./vehicle-link/can-speed-feed";
 import { DrivingEmulator } from "./vehicle-link/driving-emulator";
@@ -60,6 +65,8 @@ export interface DevSettings {
 const DEV_SETTINGS_KEY = "dev.settings";
 /** Tiles the phone-only navigator's own graph reader keeps decoded (a few km around the car). */
 const PHONE_GRAPH_CACHE_TILES = 64;
+/** How long after a start the trip service has taken its types. */
+const TRIP_SERVICE_TYPES_CHECK_MS = 2000;
 
 export interface Runtime {
   link: VehicleLinkCore;
@@ -71,6 +78,10 @@ export interface Runtime {
   position: NavigatorService;
   /** Route planning and guidance (ROUTING-SPEC §8). */
   routes: RouteService;
+  /** The app process in the trip log (TRIP-LOGGER-SPEC §4.4). */
+  health: AppHealth;
+  /** The app started after the car drove off: the map says why the parked pose isn't used (NAVIGATOR-SPEC §6.1). */
+  onTheWay: OnTheWay;
   getDevSettings(): DevSettings;
   /** How the CAN ids are being picked for the car (VEHICLE-LINK-SPEC §16.4). */
   canAuto: { status(): CanAutoStatus; subscribe(listener: () => void): () => void };
@@ -90,7 +101,7 @@ export function getRuntime(): Runtime {
     phoneOnly: false,
     // On by default, so other cars' logs show how the wheels go (VEHICLE-LINK-SPEC §16.3).
     wheelSpeed: true,
-    wheelYaw: false,
+    wheelYaw: true,
     rpmPeriodS: 5,
   };
   let dev: DevSettings = loadDevSettings(kvStore.getJson(DEV_SETTINGS_KEY), defaults);
@@ -244,6 +255,7 @@ export function getRuntime(): Runtime {
   });
   schedulePrune();
 
+  const onTheWay = new OnTheWay();
   const position = new NavigatorService({
     sensors,
     link,
@@ -260,6 +272,14 @@ export function getRuntime(): Runtime {
     // Phone-only mode reads the graph in a frame of its own (NAVIGATOR-SPEC §9.6).
     openPhoneGraph: () => openActiveRoadGraph(PHONE_GRAPH_CACHE_TILES),
     permission: { get: Location.getForegroundPermissionsAsync, request: Location.requestForegroundPermissionsAsync },
+    // iOS relaunches the app for location "Always" a few hundred metres into a drive (VEHICLE-LINK-SPEC §11).
+    onTheWay: {
+      poseAfterWake: (pose) =>
+        Platform.OS === "ios"
+          ? poseAfterWake(SensorCaptureModule.launchInfo(), nowUs(), SensorCaptureModule.driveWakeFix?.() ?? null, pose)
+          : "not woken",
+      poseBehind: () => onTheWay.behind(),
+    },
   });
   position.setPhoneOnly(dev.phoneOnly);
   const syncWheelYaw = () => position.setWheelYaw(dev.wheelSpeed && dev.wheelYaw);
@@ -273,6 +293,8 @@ export function getRuntime(): Runtime {
   let lastTrust: string | null = null;
   position.subscribe(() => {
     const p = position.getSnapshot();
+    // Found: by a trusted fix, or the driver put the car on the map.
+    if (p && (p.trust === "TRUSTED" || p.source === "manual")) onTheWay.clear();
     if (!p || p.trust === lastTrust) return;
     lastTrust = p.trust;
     recorder.note(`gnss trust ${p.trust} (±${Math.round(p.accuracyM)} m)`);
@@ -302,21 +324,88 @@ export function getRuntime(): Runtime {
   routes.resume();
   // A route planned before the trip started (engine off) goes into the trip's log once it is open.
   // Likewise what the navigator has stored (parked pose, speed scale, compass, GNSS lag): a replay starts from it.
+  // The app process (TRIP-LOGGER-SPEC §4.4): its memory and CPU while a trip records, and at a trip's start how it was
+  // launched and how the run before it ended.
+  const health = new AppHealth({
+    launchInfo: () => SensorCaptureModule.launchInfo(),
+    processStats: (appState, context) => SensorCaptureModule.processStats(appState, context),
+    takeReports: () => SensorCaptureModule.takeHealthReports(),
+    onMemoryWarning: (listener) => {
+      const sub = SensorCaptureModule.addListener("onMemoryWarning", (e) => listener(e.level));
+      return () => sub.remove();
+    },
+    appState: () => AppState.currentState ?? "unknown",
+    context: () => {
+      const snap = recorder.getSnapshot();
+      return snap.current ? `${snap.state} ${snap.current.id}` : snap.state;
+    },
+    nowUs,
+    record: (r) => recorder.appStats(r),
+    note: (text) => recorder.note(text),
+    report: (message, extra) => Sentry.captureMessage(message, { level: "warning", extra }),
+    setInterval: (fn, ms) => setInterval(fn, ms),
+    clearInterval: (handle) => clearInterval(handle as ReturnType<typeof setInterval>),
+  });
+  health.start();
+
+  // iOS's background location session (TRIP-LOGGER-SPEC §4.3): held whenever the app is in front, so a trip that starts
+  // after the driver switched away gets GNSS and iOS can relaunch the app it ended; let go 30 min after leaving it idle.
+  const busyStates = new Set(["recording", "lingering"]);
+  const locationSession = new LocationSession({
+    set: (on) => SensorCaptureModule.setLocationSession(on),
+    appState: () => AppState.currentState ?? "unknown",
+    onAppState: (listener) => {
+      const sub = AppState.addEventListener("change", listener);
+      return () => sub.remove();
+    },
+    busy: () => {
+      const state = recorder.getSnapshot().state;
+      const engine = link.getSnapshot().engine;
+      return busyStates.has(state) || (state === "armed" && (engine === "engine-off" || engine === "engine-running"));
+    },
+    onBusy: (listener) => {
+      const off = [recorder.subscribe(listener), link.subscribe(listener)];
+      return () => off.forEach((o) => o());
+    },
+    note: (text) => recorder.note(text),
+    setTimeout: (fn, ms) => setTimeout(fn, ms),
+    clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+  });
+  if (Platform.OS === "ios") locationSession.start();
+
   recorder.tripStarted.on(() => {
     routes.logActiveRoute();
     position.logStorage();
+    health.tripStarted();
   });
   let wasRecording = recorder.getSnapshot().state === "recording";
   recorder.subscribe(() => {
+    onTheWay.setRecording(recorder.getSnapshot().state === "recording");
     const recording = recorder.getSnapshot().state === "recording";
     // Android keeps sensors and the adapter alive with the screen off only while a foreground service runs.
     if (recording !== wasRecording) {
       void setTripService(recording).then((running) => {
         if (recording) recorder.note(`android trip service ${running ? "running" : "not started"}`);
+        // The service takes its types a moment later: without location, GNSS waits for the app or the notification's
+        // button (VEHICLE-LINK-SPEC §11).
+        if (recording && running) {
+          setTimeout(() => {
+            if (recorder.getSnapshot().state === "recording" && SensorCaptureModule.tripServiceHasLocation?.() === false) {
+              recorder.note("android trip service without location: started in the background");
+            }
+          }, TRIP_SERVICE_TYPES_CHECK_MS);
+        }
       });
     }
     wasRecording = recording;
   });
+  // A trip the companion wake started records without the service's location type (Android allows it only with the app
+  // on screen, VEHICLE-LINK-SPEC §11): opening the app starts the service again, with it.
+  if (Platform.OS === "android") {
+    AppState.addEventListener("change", (state) => {
+      if (state === "active" && recorder.getSnapshot().state === "recording") void setTripService(true);
+    });
+  }
 
   // Health metrics for field testers (docs/ANDROID-SPEC.md §4.1).
   const telemetry = new TelemetryReporter(sentryMetricSink, () => Date.now());
@@ -370,6 +459,8 @@ export function getRuntime(): Runtime {
     uploader,
     position,
     routes,
+    health,
+    onTheWay,
     getDevSettings: () => dev,
     canAuto: {
       status: () => canAuto.status,
@@ -380,7 +471,7 @@ export function getRuntime(): Runtime {
     },
     setDevSettings: (patch) => {
       dev = { ...dev, ...patch };
-      kvStore.setJson(DEV_SETTINGS_KEY, dev);
+      kvStore.setJson(DEV_SETTINGS_KEY, { ...dev, version: DEV_SETTINGS_VERSION });
       devListeners.forEach((listener) => listener());
       // Hiding the button ends a simulated outage, so it can't be left on unseen.
       if (patch.outageButton === false) position.setSimulatedOutage(false);
@@ -404,8 +495,20 @@ export function getRuntime(): Runtime {
   return runtime;
 }
 
-/** Auto-connect to the remembered adapter without triggering a permission prompt (§7). */
-export async function autoConnect(): Promise<void> {
+let autoConnecting: Promise<void> | null = null;
+
+/**
+ * Auto-connect to the remembered adapter without triggering a permission prompt (§7). One at a time: the screen and a
+ * wake (VEHICLE-LINK-SPEC §11) can both ask at launch, and two connects at once would each open the adapter.
+ */
+export function autoConnect(): Promise<void> {
+  autoConnecting ??= autoConnectOnce().finally(() => {
+    autoConnecting = null;
+  });
+  return autoConnecting;
+}
+
+async function autoConnectOnce(): Promise<void> {
   const { link } = getRuntime();
   const { activeDeviceId, link: state } = link.getSnapshot();
   if (activeDeviceId && state !== "error") return;
@@ -413,7 +516,7 @@ export async function autoConnect(): Promise<void> {
   // The maker's app has the adapter for a firmware update (VEHICLE-LINK-SPEC §8.4).
   if (isHeldForUpdater()) return;
   if (VehicleLinkModule.getBluetoothState() === "notDetermined") return;
-  await VehicleLinkModule.initialize(null);
+  await VehicleLinkModule.initialize(RESTORE_IDENTIFIER);
   // Never the emulated adapters: their scripted drive would start by itself whenever the app opens, and fake speed under
   // a real drive if a driver ever tapped one (2026-10-14: the emulator drove off before any destination was set).
   await link.autoConnect(["emulator"]);

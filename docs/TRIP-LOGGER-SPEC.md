@@ -78,8 +78,51 @@ modules/sensor-capture ─▶ src/services/sensor-capture ──(SensorStream)�
 The user opens the app; it auto-connects to the remembered adapter and goes `armed`. During `recording` and
 `lingering`, background location (`allowsBackgroundLocationUpdates`, the indicator; Android the foreground service)
 keeps the app running, so the poll loop, sensor batches and the writer work with the screen locked. In `armed` with
-the ignition off and no linger, the app may be suspended; the next session begins when the user opens the app again
-(auto-wake: VEHICLE-LINK-SPEC §11).
+the ignition off and no linger, the app may be suspended.
+
+- **Ended by the OS** (not by the user), the app comes back by itself on iOS:
+  - **Location** (iOS 17+): a `CLBackgroundActivitySession` (`LocationKeepAlive`, `src/services/location-session.ts`)
+    is held from every time the app is in front, whatever is connected: only one started in front counts, and "When
+    In Use" can't start GNSS from the background without it (2026-10-21: the app placed the car, went behind the
+    music, the engine started, and the whole 37 min drive had no fix, satellite or Wi-Fi). Held, a trip that starts
+    with the app in the background gets GNSS, and iOS relaunches an app it ended; the app joins the session at launch
+    (`AppHealthAppDelegate`), before JS, then auto-connects and records as usual. Let go 30 min after the app left
+    the screen with no trip recording or lingering and the ECU asleep (the indicator shows while it is held), never
+    with the app: one invalidated can't be started again from the background. Joined at a relaunch and not held again
+    by JS within 2 min, it ends. Notes `location session held`, `… let go …`.
+  - **The adapter** (VEHICLE-LINK-SPEC §11): Bluetooth state restoration relaunches the app for the adapter's link,
+    mid-drive or when the car is switched on later; without a location session such a trip has no GNSS (it dead-
+    reckons on the wheels).
+  - **Never opened for the drive** (opt-in, location "Always", VEHICLE-LINK-SPEC §11): significant location changes
+    relaunch the app a few hundred metres into a drive, whatever the adapter; "Always" starts GNSS from the
+    background, and the pose where the car was parked is left aside (NAVIGATOR-SPEC §6.1).
+  - **Swiped away** by the user, nothing brings it back reliably: iOS doesn't relaunch an app the user closed (the
+    significant-change relaunch after a swipe varies by iOS version; reported gone on iOS 26).
+- Without any of these, the next session begins when the user opens the app again.
+
+### 4.4 The app process (`src/services/app-health.ts`, `AppHealth.swift`, `AppHealth.kt`)
+
+Why: the app died mid-drive with no crash, memory or CPU report on the phone (2026-10-21), and a process that is
+ended can't log why. What it can, it logs; the next process logs the rest.
+
+- **`app_stats`** (§6.3) every 5 s: the memory the process holds and how much more the OS leaves it (iOS
+  `os_proc_available_memory`, what jetsam ends it at), CPU, thermal state, low power mode, app state. In the log
+  while a trip records (or its pre-roll).
+- **A heartbeat** with each sample (iOS `UserDefaults`, Android `SharedPreferences`): time, app state, what the
+  recorder did (`recording <trip id>`), memory, memory warnings. iOS also notes `applicationWillTerminate` (the OS
+  saying it will end the app), synchronously.
+- **At launch** (native, before JS): whether in the background and why (iOS launch options: `location`,
+  `bluetooth`), the previous heartbeat, and what the OS reported: iOS MetricKit (exits by reason a day at a time,
+  crash, hang and CPU reports; kept until a trip takes them, 20 at most), Android `ApplicationExitInfo` (reason,
+  importance, memory; those newer than the last read).
+- **Into the trip log** as notes at each trip's start: `app launched N s before this, in front | in the background
+  (reasons)` (iOS `location`, `bluetooth`; Android the companion wake within a minute of the start, `ble in range`,
+  `bluetooth connected` or `restarted with the device present`, VEHICLE-LINK-SPEC §11); the first trip of a process also `previous run: last seen … before this launch, <app state>, <what it
+  did>, <memory>; ended without notice | the OS said it would end it …` and one note per OS report (`iOS exits …`,
+  `iOS crash report …`, `Android exit …`). Memory warnings (iOS) and trim levels (Android) are notes when they
+  come.
+- **Sentry**: a previous run that was recording and ended without notice is a warning event (`app ended mid-trip
+  without notice`) with the heartbeat's numbers: known without the trip log.
 
 ## 5. Sensor capture (`modules/sensor-capture`)
 
@@ -161,7 +204,8 @@ with columnar plain number arrays. Native configuration through config plugins o
 | `trip_event` | `uint8_t event` (0 start, 1 end, 2 link_lost, 3 link_restored, 4 marker, 5 preroll_end), `uint8_t reason` (end: 0 ignition_off, 1 parked_timeout, 2 link_timeout, 3 manual) | on event |
 | `link_stats` | `float speed_hz`, `latency_p50_ms`, `latency_p95_ms`, `uint16_t errors`, `uint8_t link_state`, `float battery_v` (NaN if not read) | 1 Hz |
 | `time_sync` | `int64_t utc_us` | at start, every 60 s, on a wall-clock jump |
-| `nav_estimate` | what the map showed (NAVIGATOR-SPEC §9): `double lat_deg`, `lon_deg`, `float accuracy_m`, `heading_rad`, `heading_sigma_rad`, `speed_mps`, `speed_scale`, `gnss_lag_s` (NaN unknown), `uint32_t behind_us`, `uint8_t mode` (0 none, 1 anchored, 2 dr), `source` (0 gnss, 1 fused, 2 dr, 3 manual), `trust` (0 TRUSTED, 1 UNTRUSTED, 2 REACQUIRING, 3 NO_FIX), `parked_pose` (0 none, 1 unverified, 2 confirmed, 3 rejected) | each map update, ~2–3 Hz |
+| `app_stats` | the app process (§4.4): `float footprint_mb` (iOS the footprint jetsam weighs, Android PSS), `headroom_mb` (iOS left before jetsam ends the process, Android the system's available memory; NaN unknown), `cpu_pct` (since the previous record, % of one core; NaN first), `uint8_t thermal` (0 nominal, 1 fair, 2 serious, 3 critical), `app_state` (0 active, 1 inactive, 2 background, 3 unknown), `flags` (bit0 low power mode) | every 5 s |
+| `nav_estimate` | what the map showed (NAVIGATOR-SPEC §9): `double lat_deg`, `lon_deg`, `float accuracy_m`, `heading_rad`, `heading_sigma_rad`, `speed_mps`, `speed_scale`, `gnss_lag_s` (NaN unknown), `uint32_t behind_us`, `uint8_t mode` (0 none, 1 anchored, 2 dr), `source` (0 gnss, 1 fused, 2 dr, 3 manual), `trust` (0 TRUSTED, 1 UNTRUSTED, 2 REACQUIRING, 3 NO_FIX), `parked_pose` (0 none, 1 unverified, 2 confirmed, 3 rejected, 4 behind: the app started on the way, VEHICLE-LINK-SPEC §11) | each map update, ~2–3 Hz |
 | `nav_mapmatch` | map matching at that `nav_estimate` (MAPMATCH-SPEC §11): `uint8_t state` (0 off, 1 init, 2 tracking, 3 multimodal, 4 offroad), `clusters` (≤ 5), `uint16_t particles`, `uint32_t update_us`, `uint16_t update_count`, `uint32_t update_total_us`, `update_max_us` (every filter update since the previous record), `uint32_t graph_built` (the graph's build time), then the 3 heaviest hypotheses: `float[3] weight`, `double[3] lat_deg`, `lon_deg`, `float[3] heading_rad`, `spread_m` | with `nav_estimate` |
 | `nav_route` | each route plan (ROUTING-SPEC §8): `uint16_t plan_id`, `uint8_t reason` (0 new, 1 off-route, 2 resume, 3 alternative, 4 placed), `status` (0 done, 1 no-road-at-start, 2 no-road-at-destination, 3 no-route, 4 too-far, 5 cancelled), `double from_lat_deg`, `from_lon_deg`, `float from_heading_rad`, `double to_lat_deg`, `to_lon_deg`, `float length_m`, `duration_s`, `off_start_m`, `off_end_m`, `uint32_t states`, `tiles`, `float plan_ms`, `wall_ms`, `uint16_t slices`, `points`, `maneuvers`, `uint32_t graph_built` | per plan |
 | `nav_route_point` | the plan's polyline: `uint16_t plan_id`, `index`, `double lat_deg`, `lon_deg` | after `nav_route` |
@@ -240,7 +284,7 @@ written, and logs waiting for upload while upload is on, are never deleted.
 
 `pip install -e "tools/triplog[dev]"`. `from triplog import load` gives `trip.info`, `trip.obd`, `trip.obd_speed`,
 `trip.obd_rpm`, `trip.gnss`, `trip.imu` (with `yaw_rate_up`), `trip.mag`, `trip.engine`, `trip.trip_events`,
-`trip.link_stats`, `trip.time_sync`, `trip.transcript`, `trip.map_match`. CLI: `triplog info`, `export`, `plot`,
+`trip.link_stats`, `trip.app_stats`, `trip.time_sync`, `trip.transcript`, `trip.map_match`. CLI: `triplog info`, `export`, `plot`,
 `check`, `refresh` (`tools/triplog/README.md`). Cross-language golden test: `src/triplog/__fixtures__/trip-fixture.ts`
 builds `tools/triplog/tests/data/fixture.ulg` (regenerate with `UPDATE_TRIPLOG_FIXTURE=1 npx jest src/triplog`); the
 TS test checks the bytes, the Python tests load it. The TS reader (`src/triplog/trip-log-reader.ts`) feeds the replay.

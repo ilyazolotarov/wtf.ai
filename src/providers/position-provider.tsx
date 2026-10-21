@@ -1,7 +1,7 @@
 import type { LocationPermissionResponse } from "expo-location";
 import * as React from "react";
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { AppState, type AppStateStatus } from "react-native";
+import { AppState, Platform, type AppStateStatus } from "react-native";
 
 import type { PositionEstimate } from "@/nav/position/types";
 import { getRuntime } from "@/services/runtime";
@@ -31,7 +31,9 @@ export function PositionProvider({ children }: React.PropsWithChildren) {
         if (result.granted) void source.start();
       });
     };
-    refresh();
+    // Not when iOS launched the app in the background (a location relaunch): the wake decides how long GNSS runs there
+    // (vehicle-wake-task.ts), and opening the app starts it here.
+    if (Platform.OS !== "ios" || AppState.currentState !== "background") refresh();
     const subscription = AppState.addEventListener(
       "change",
       (state: AppStateStatus) => {

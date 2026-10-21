@@ -13,6 +13,7 @@ import {
   TRIP_EVENTS,
   type EndReason,
   type GnssRecord,
+  type AppStatsRecord,
   type NavEstimateRecord,
   type NavMapMatchRecord,
   type NavRouteManeuverRecord,
@@ -289,6 +290,11 @@ export class TripRecorder {
 
   navRouteProgress(r: NavRouteProgressRecord): void {
     this.record(r.timestampUs, (w) => w.navRouteProgress(r));
+  }
+
+  /** The app process (TRIP-LOGGER-SPEC §4.4); dropped when not recording. */
+  appStats(r: AppStatsRecord): void {
+    this.record(r.timestampUs, (w) => w.appStats(r));
   }
 
   /** App-side event worth seeing in the log (no marker); dropped when not recording. */

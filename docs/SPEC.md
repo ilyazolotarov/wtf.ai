@@ -245,7 +245,7 @@ site/, wiki/             the website (https://wtf-ai.uk) and the GitHub wiki sou
 Built and field-tested: the vehicle link (MFi and BLE on iOS, a Classic adapter on Android), trip logging, the
 navigator with integrity and online calibration, map matching with the closed loop, routing with voice guidance and
 alternatives, address search, offline maps and updates, the guide, the Android build, CAN wheel speeds (Stage 2)
-with the wheel yaw as an experiment. Field data: two test cars and a few testers' cars, one iPhone and testers'
+and turns from the wheels (on by default). Field data: two test cars and a few testers' cars, one iPhone and testers'
 Android phones.
 
 Not built: CAN yaw rate (Stage 3: a parking-lot drive with unfiltered CAN logging, regression of every candidate field
@@ -289,7 +289,11 @@ other apps; cross-region routing.
 3. **Heading at outage start** (~2° RMS) limits dead reckoning more than gyro drift does; the road heading from map
    matching is the correction.
 4. **MFi for the App Store**: each declared protocol string needs the vendor's authorization (STORE-REVIEW §3.2).
-5. **Auto-wake** of a non-running app when the adapter powers up: deferred (VEHICLE-LINK-SPEC §11).
+5. **Auto-wake** of a non-running app: on iOS by the location session and Bluetooth state restoration after the OS
+   ended the app, and with the opt-in for location "Always" by significant location changes for a drive the app wasn't
+   opened for (TRIP-LOGGER-SPEC §4.3, VEHICLE-LINK-SPEC §11), untested on a drive; not after a swipe. Android
+   12+: by a companion device the driver picked once (the car's Bluetooth, a BLE adapter), untested on a phone; a
+   woken trip has GNSS with location "all the time", else after a tap on the notification or opening the app.
 6. **Particle filter CPU on the phone**: ~8 ms per update at 500 particles on the test iPhone against a 5 ms budget;
    smooth at 2–3 updates a second, spikes can drop frames (MAPMATCH-SPEC §14).
 7. **Routing time on the phone**: A\* in slices on the JS thread; long routes fall back to a stronger heuristic.

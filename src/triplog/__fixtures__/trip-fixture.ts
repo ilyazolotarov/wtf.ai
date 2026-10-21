@@ -138,6 +138,7 @@ export function buildFixture(): Uint8Array {
   w.canFrame({ timestampUs: t0 + 1_850_000, id: 0x228, data: [0x01, 0x20, 0x07, 0xff, 0x00, 0xf0, 0x00, 0x00] });
   w.canFrame({ timestampUs: t0 + 1_900_000, id: 0x202, data: [0x0d, 0x43, 0x00, 0x00, 0x19, 0xd5] });
   w.linkStats({ timestampUs: t0 + 1_000_000, speedHz: 19.5, latencyP50Ms: 40, latencyP95Ms: 55, errors: 1, linkState: 6, batteryV: 14.2 });
+  w.appStats({ timestampUs: t0 + 1_000_000, footprintMb: 412.5, headroomMb: NaN, cpuPct: 37.5, thermal: "serious", appState: "background", lowPower: true });
   w.log("info", LOG_TAGS.elm, t0 + 1, "tx=10000000 ATI | ELM327 v1.5\\r\\r>");
   w.tripEvent(t0 + 3_000_000, TRIP_EVENTS.end, 0);
   w.close();

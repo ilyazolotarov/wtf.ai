@@ -444,9 +444,52 @@ within ~20 s of its ignition.
 - Background: the TS loop runs while the app is alive; the trip logger keeps the app alive with background location
   during a trip and for a linger period after it (TRIP-LOGGER-SPEC §4.3); `bluetooth-central` and
   `external-accessory` keep the links alive; on Android the foreground service does.
-- **Later: fully automatic wake** of a non-running app: `CBCentralManager` state restoration (`restoreIdentifier` is
-  already in the API) + a pending connect, `EAAccessoryDidConnect` for MFi, significant-location-change as a
-  fallback. Needs "Always" location permission. Not built.
+- **Woken by the adapter (iOS):** the central has a restoration id (`RESTORE_IDENTIFIER`, the same in Swift). With
+  a connection up or a connect pending when iOS ends the app (memory, a crash; not a swipe), iOS keeps it and
+  relaunches the app in the background when the adapter's link has news: mid-drive within moments, parked when the
+  car is next switched on. At such a launch the central is created at once (`VehicleLinkAppDelegate`), before JS;
+  JS auto-connects as at any launch, and a peripheral restored still connected is set up without a new connect.
+  GNSS then needs the location session (TRIP-LOGGER-SPEC §4.3); without it the trip dead-reckons. MFi
+  (`EAAccessoryDidConnect`) wakes nothing: not built.
+- **Started with a drive (iOS, opt-in):** the same opt-in on iOS (onboarding and the Vehicle screen) asks for
+  location "Always" (`requestBackgroundPermissionsAsync`, after saying to pick *Change to Always Allow*) and turns on
+  `DriveWake` (`AppHealth.swift`): significant location changes, which relaunch the app a few hundred metres into a
+  drive whatever the adapter (cell and Wi-Fi, so under jamming too). iOS shows *Change to Always Allow* once per
+  install and ignores a second request, and expo-location can't tell (a new process reports "While Using" as not asked
+  yet): the app keeps that it asked (`location-always-asked`), and from then on, as for any refusal, says where to go in
+  Settings and opens them. Monitoring starts again at every launch, and when "Always" is granted later. A relaunch on
+  the way (in the background for `location`, `on-the-way.ts`) runs the same wait as Android's task (`iosDriveWake`):
+  GNSS, which "Always" may start from the background, keeps the app running while it auto-connects; a trip then keeps
+  it, and if none records in 9 min GNSS stops unless the app is open (the map starts GNSS only in front). The parked
+  pose is left aside unless the relaunch's location, accuracy included, is within 150 m of it (the car still stands
+  there); the map says why once a trip records (NAVIGATOR-SPEC §6.1). A swipe or Background App Refresh off stops
+  it.
+- **Started by a companion device (Android 12+):** the opt-in that keeps the driver's position when they forget to
+  open the app: an onboarding step after the adapter's, and the Vehicle screen's *Automatic startup* switch
+  (`use-wake-setup.ts`). It shows the system's one-time companion dialog (`CompanionWake.kt`), offering the
+  remembered adapter when it is a BLE one and Classic devices, and then asks for location "all the time"
+  (`ACCESS_BACKGROUND_LOCATION`, after saying what to pick on Android's settings page). That permission is asked
+  for here only. The driver picks the car's own Bluetooth (the phone connects to it at ignition) or a BLE adapter (it
+  advertises while powered). A Classic adapter can't be one: it never connects by itself, so Android never sees it
+  appear. The dialog can't leave it out (its Classic filter lists every Classic device): one picked that is a
+  remembered `spp:` adapter is forgotten again and the driver told to pick the car's Bluetooth. The association is observed for presence; Android then binds `WakeService` when the device comes into BLE
+  range or connects, starting the process if needed, and keeps it bound while the device stays. The service runs the
+  headless JS task `VehicleWake` (registered in `index.ts`, React Native started without a screen): it notes `app
+  woken: <how>`, auto-connects, and holds the CPU until a trip records, nothing is left to wait for (noted with why:
+  no adapter remembered, no Bluetooth permission, the link's error), or 9 min pass, counted from the wake (a connect
+  that waits for an adapter out of range never returns). When the process dies with the device still present
+  (mid-drive), Android binds the service again some seconds later, starting the process, but reports no arrival: no
+  callback within 3 s of a bind that started the process runs the task too (`restarted with the device present`), so
+  the trip goes on.
+  A trip that starts records under the trip service, which a companion app may start from the background
+  (`REQUEST_COMPANION_START_FOREGROUND_SERVICES_FROM_BACKGROUND`). With location "all the time" GNSS runs from the
+  start. Without it Android 14+ refuses the service's location type with the app off screen: the service starts
+  without it (`android trip service without location` in the log), the trip dead-reckons on the car's speed and
+  the IMU, and the notification gets a *Turn on GPS* button; a service started from a notification may use
+  location, and so does opening the app, which starts the service again. `REQUEST_COMPANION_RUN_IN_BACKGROUND` also puts the app on
+  the power allowlist. One arrival through two callbacks (the old and new APIs) acts once (`WakeLogic`); on Android
+  16 the old one waits 1 s, so the new one, which says how the device appeared, is the one acted on. A device
+  associated twice is listed once.
 
 ## 12. Android
 

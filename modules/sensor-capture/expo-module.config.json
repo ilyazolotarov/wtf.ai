@@ -1,7 +1,8 @@
 {
   "platforms": ["apple", "android"],
   "apple": {
-    "modules": ["SensorCaptureModule"]
+    "modules": ["SensorCaptureModule"],
+    "appDelegateSubscribers": ["AppHealthAppDelegate"]
   },
   "android": {
     "modules": ["ai.wtf.sensorcapture.SensorCaptureModule"]

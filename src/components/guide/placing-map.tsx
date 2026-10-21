@@ -201,7 +201,7 @@ export function PlacingMap({
                 cx={car.x}
                 cy={car.y}
                 r={HIT_UNITS}
-                fill={onCar ? palette.ok.c : palette.accent}
+                fill={onCar ? palette.ok.c : palette.mapPin}
                 fillOpacity={0.16}
                 stroke={onCar ? palette.ok.c : palette.accent}
                 strokeWidth={2}
@@ -233,12 +233,12 @@ export function PlacingMap({
           <Svg pointerEvents="none" style={StyleSheet.absoluteFill} viewBox={`0 0 ${frameW} ${frameH}`}>
             {step === "heading" && !headingRight && (
               // Where to tap: ahead of the car, up its road.
-              <Circle cx={pinX} cy={pinY - AHEAD_UNITS} r={AHEAD_R} fill={palette.accent} fillOpacity={0.16} stroke={palette.accent} strokeWidth={2} strokeDasharray="6 4" />
+              <Circle cx={pinX} cy={pinY - AHEAD_UNITS} r={AHEAD_R} fill={palette.mapPin} fillOpacity={0.16} stroke={palette.mapPin} strokeWidth={2} strokeDasharray="6 4" />
             )}
             {step === "heading" && headingDeg != null && (
               <G transform={`rotate(${headingDeg} ${pinX} ${pinY})`}>
-                <Path d={`M${pinX} ${pinY} V${pinY - 70}`} stroke={palette.accent} strokeWidth={4} strokeLinecap="round" />
-                <Path d={`M${pinX - 11} ${pinY - 62} L${pinX} ${pinY - 84} L${pinX + 11} ${pinY - 62} Z`} fill={palette.accent} />
+                <Path d={`M${pinX} ${pinY} V${pinY - 70}`} stroke={palette.mapPin} strokeWidth={4} strokeLinecap="round" />
+                <Path d={`M${pinX - 11} ${pinY - 62} L${pinX} ${pinY - 84} L${pinX + 11} ${pinY - 62} Z`} fill={palette.mapPin} />
               </G>
             )}
             {/* The pin: its point is exactly the spot that is placed, the frame's centre. */}

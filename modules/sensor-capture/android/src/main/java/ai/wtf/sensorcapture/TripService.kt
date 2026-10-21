@@ -28,9 +28,15 @@ class TripService : Service() {
     private const val EXTRA_TITLE = "title"
     private const val EXTRA_TEXT = "text"
     private const val EXTRA_CHANNEL = "channel"
+    private const val EXTRA_GPS = "gps"
 
     @Volatile
     var running = false
+      private set
+
+    /** Whether the service holds the location type (false: started from the background, VEHICLE-LINK-SPEC §11). */
+    @Volatile
+    var withLocation = false
       private set
 
     /** The foreground service types this phone and the current permissions allow; 0 = cannot start. */
@@ -49,13 +55,17 @@ class TripService : Service() {
     /** At least one service type must be allowed, or the start throws. */
     fun canStart(context: Context): Boolean = allowedTypes(context) != 0
 
-    /** Starts the service; false (with a log line) when Android refuses, e.g. from the background or without permission. */
-    fun start(context: Context, title: String, text: String, channelName: String): Boolean {
+    /**
+     * Starts the service; false (with a log line) when Android refuses, e.g. from the background or without permission.
+     * `gpsLabel`: the notification's button when the service starts without the location type.
+     */
+    fun start(context: Context, title: String, text: String, channelName: String, gpsLabel: String?): Boolean {
       return try {
         val intent = Intent(context, TripService::class.java)
           .putExtra(EXTRA_TITLE, title)
           .putExtra(EXTRA_TEXT, text)
           .putExtra(EXTRA_CHANNEL, channelName)
+          .putExtra(EXTRA_GPS, gpsLabel)
         ContextCompat.startForegroundService(context, intent)
         true
       } catch (e: Exception) {
@@ -77,11 +87,26 @@ class TripService : Service() {
     val title = intent?.getStringExtra(EXTRA_TITLE) ?: "wtf.ai"
     val text = intent?.getStringExtra(EXTRA_TEXT) ?: ""
     val channelName = intent?.getStringExtra(EXTRA_CHANNEL) ?: "Trip"
+    val gpsLabel = intent?.getStringExtra(EXTRA_GPS)
     val types = allowedTypes(this)
     try {
-      val notification = buildNotification(title, text, channelName)
+      val notification = buildNotification(title, text, channelName, null)
       if (types != 0) {
-        startForeground(NOTIFICATION_ID, notification, types)
+        try {
+          startForeground(NOTIFICATION_ID, notification, types)
+          withLocation = types and ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION != 0
+        } catch (e: Exception) {
+          // Started from the background (the companion wake, VEHICLE-LINK-SPEC §11) without location "all the time":
+          // Android 14+ refuses the location type without the app on screen. The trip records without GNSS until the
+          // driver opens the app or taps the notification's button, which starts the service again with it.
+          val withoutLocation = types and ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION.inv()
+          if (withoutLocation == 0 || withoutLocation == types) throw e
+          Log.w(TAG, "no location type from the background: ${e.javaClass.simpleName}")
+          val again = intent?.let { Intent(it).setClass(this, TripService::class.java) }
+          val button = if (gpsLabel != null && again != null) gpsLabel to again else null
+          startForeground(NOTIFICATION_ID, buildNotification(title, text, channelName, button), withoutLocation)
+          withLocation = false
+        }
       } else {
         startForeground(NOTIFICATION_ID, notification)
       }
@@ -103,20 +128,22 @@ class TripService : Service() {
 
   override fun onDestroy() {
     running = false
+    withLocation = false
     wakeLock?.let { if (it.isHeld) it.release() }
     wakeLock = null
     Log.i(TAG, "stopped")
     super.onDestroy()
   }
 
-  private fun buildNotification(title: String, text: String, channelName: String): Notification {
+  /** `gps`: a button that starts the service again (label, intent); a start from a notification may use location. */
+  private fun buildNotification(title: String, text: String, channelName: String, gps: Pair<String, Intent>?): Notification {
     val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     if (manager.getNotificationChannel(CHANNEL_ID) == null) {
       manager.createNotificationChannel(NotificationChannel(CHANNEL_ID, channelName, NotificationManager.IMPORTANCE_LOW))
     }
     val launch = packageManager.getLaunchIntentForPackage(packageName)
     val open = launch?.let { PendingIntent.getActivity(this, 0, it, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT) }
-    return NotificationCompat.Builder(this, CHANNEL_ID)
+    val builder = NotificationCompat.Builder(this, CHANNEL_ID)
       .setContentTitle(title)
       .setContentText(text)
       .setSmallIcon(applicationInfo.icon)
@@ -124,6 +151,10 @@ class TripService : Service() {
       .setOnlyAlertOnce(true)
       .setCategory(NotificationCompat.CATEGORY_NAVIGATION)
       .setContentIntent(open)
-      .build()
+    gps?.let { (label, intent) ->
+      val again = PendingIntent.getForegroundService(this, 1, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+      builder.addAction(0, label, again)
+    }
+    return builder.build()
   }
 }

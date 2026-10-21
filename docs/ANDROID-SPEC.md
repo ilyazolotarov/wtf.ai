@@ -23,8 +23,8 @@ The Android build for volunteer testers. Companion to [SPEC.md](SPEC.md); tester
 | IMU | `SensorManager`: `TYPE_GYROSCOPE`, `TYPE_GRAVITY`, `TYPE_LINEAR_ACCELERATION`, `TYPE_GAME_ROTATION_VECTOR` (no magnetometer in the frame), raw `TYPE_MAGNETIC_FIELD` for logging. 100 Hz, batched like iOS. Phones without gravity / linear-acceleration sensors derive them from the accelerometer. |
 | Clock | `SystemClock.elapsedRealtimeNanos()` in µs: sensor events and `Location.elapsedRealtimeNanos` use it natively. |
 | Conventions | Kotlin normalizes to the iOS conventions the TS assumes: gravity is the **true gravity direction** (Android's `TYPE_GRAVITY` points up, so it is negated) and user acceleration is CoreMotion's (`TYPE_LINEAR_ACCELERATION` negated); m/s², rad/s, course in radians, invalid fields omitted. A parity test pins this (§5). |
-| Background | One **foreground service** (types `location` + `connectedDevice`) started with a trip, with a persistent notification ("wtf.ai is recording your trip") and a partial wake lock. Without it Android stops sensors and Bluetooth polling with the screen off. No "Always" location. |
-| Permissions | `ACCESS_FINE_LOCATION`, `BLUETOOTH_SCAN` (`neverForLocation`) + `BLUETOOTH_CONNECT` (12+; legacy `BLUETOOTH`/`BLUETOOTH_ADMIN` ≤ 11), `POST_NOTIFICATIONS` (13+), `FOREGROUND_SERVICE(_LOCATION, _CONNECTED_DEVICE)`, `WAKE_LOCK`, `HIGH_SAMPLING_RATE_SENSORS`, `REQUEST_INSTALL_PACKAGES` (sideloaded builds only). All from config plugins (`modules/vehicle-link/app.plugin.js`, `app.json`), never by hand in `android/`. The Bluetooth dialog is shown at most once per process, and never on devices without an adapter. |
+| Background | One **foreground service** (types `location` + `connectedDevice`) started with a trip, with a persistent notification ("wtf.ai is recording your trip") and a partial wake lock. Without it Android stops sensors and Bluetooth polling with the screen off. Location "all the time" only for the opt-in that keeps the position without opening the app (VEHICLE-LINK-SPEC §11), asked for there and nowhere else. |
+| Permissions | `ACCESS_FINE_LOCATION`, `BLUETOOTH_SCAN` (`neverForLocation`) + `BLUETOOTH_CONNECT` (12+; legacy `BLUETOOTH`/`BLUETOOTH_ADMIN` ≤ 11), `POST_NOTIFICATIONS` (13+), `FOREGROUND_SERVICE(_LOCATION, _CONNECTED_DEVICE)`, `WAKE_LOCK`, `HIGH_SAMPLING_RATE_SENSORS`, `ACCESS_BACKGROUND_LOCATION` (asked for only by the wake's opt-in), the three companion permissions for the wake (`REQUEST_OBSERVE_COMPANION_DEVICE_PRESENCE`, `REQUEST_COMPANION_START_FOREGROUND_SERVICES_FROM_BACKGROUND`, `REQUEST_COMPANION_RUN_IN_BACKGROUND`), `REQUEST_INSTALL_PACKAGES` (sideloaded builds only). All from config plugins (`modules/vehicle-link/app.plugin.js`, `app.json`), never by hand in `android/`. The Bluetooth dialog is shown at most once per process, and never on devices without an adapter. |
 | Pairing | Classic adapters must be bonded (PIN 1234/0000). The Vehicle screen lists bonded devices plus discovery results; tapping an unbonded one calls `createBond()`. |
 | Icons | `expo-symbols` renders Material Symbols on Android; the `Icon` map keys are Material names with an `android` entry each. |
 | Blur | Panels use `dimezisBlurViewSdk31Plus` with `blurReductionFactor` 1, and on Android 12+ the map renders into a `TextureView` (the default `GLSurfaceView` isn't part of the view the blur samples). Android 10–11 get no blur and `GlassFill` uses a dense tint (`panelSolid`, 86 %). |
@@ -44,6 +44,9 @@ The Android build for volunteer testers. Companion to [SPEC.md](SPEC.md); tester
   (bonding, the secure socket, then the insecure and channel-1 fallbacks clones need). Classic devices get the id
   `spp:<MAC>`. `getMfiAccessories` returns `[]`.
 - **Trip service:** the foreground service runs while a trip records.
+- **Wake:** a companion device the driver picked once (the car's Bluetooth, a BLE adapter) starts the app and its
+  JS without a screen, and a trip records in the background; a process that dies mid-drive with the device present
+  is started again (VEHICLE-LINK-SPEC §11). Android 12+.
 
 ## 4. CI/CD: nothing broken reaches a tester
 
@@ -114,5 +117,7 @@ are the only mitigation for OEM background limits.
 ## 7. Open items
 
 - BLE adapters on real Android phones (only Classic SPP is road-tested).
+- The companion wake on a real phone: the dialog listing the car's Bluetooth, the process start, a trip recorded
+  without opening the app, and whether vendor battery killers let it run.
 - Testers' phone models, once known, refine the sensor matrix (gyro noise, GNSS lag per model) through the logs.
 - Google Play: STORE-REVIEW.md.

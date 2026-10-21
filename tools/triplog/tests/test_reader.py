@@ -102,6 +102,16 @@ def test_events_and_time(trip):
     assert trip.link_stats["link_state"].tolist() == ["polling"]
 
 
+def test_app_stats(trip):
+    a = trip.app_stats
+    assert a["footprint_mb"].tolist() == [412.5]
+    assert np.isnan(a["headroom_mb"].iloc[0])
+    assert a["cpu_pct"].tolist() == [37.5]
+    assert a["thermal"].tolist() == ["serious"]
+    assert a["app_state"].tolist() == ["background"]
+    assert a["low_power"].tolist() == [True]
+
+
 def test_nav(trip):
     nav = trip.nav
     assert len(nav) == 1

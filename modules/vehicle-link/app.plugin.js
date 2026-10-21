@@ -23,11 +23,17 @@ const ANDROID_PERMISSIONS = [
   { name: "android.permission.POST_NOTIFICATIONS" },
   { name: "android.permission.WAKE_LOCK" },
   { name: "android.permission.HIGH_SAMPLING_RATE_SENSORS" },
+  // The wake by a companion device (VEHICLE-LINK-SPEC §11): presence events, the trip service started from the
+  // background, and the power allowlist an associated companion app gets.
+  { name: "android.permission.REQUEST_OBSERVE_COMPANION_DEVICE_PRESENCE" },
+  { name: "android.permission.REQUEST_COMPANION_START_FOREGROUND_SERVICES_FROM_BACKGROUND" },
+  { name: "android.permission.REQUEST_COMPANION_RUN_IN_BACKGROUND" },
 ];
 
 const ANDROID_FEATURES = [
   { name: "android.hardware.bluetooth", required: "false" },
   { name: "android.hardware.bluetooth_le", required: "false" },
+  { name: "android.software.companion_device_setup", required: "false" },
 ];
 
 function addAndroidEntries(manifest) {

@@ -115,6 +115,21 @@ export function ManualQuestionCard({ manual, onAnswer }: { manual: Manual; onAns
   );
 }
 
+/** The app started on the way: why there's no dot from where the car was parked (NAVIGATOR-SPEC §6.1). */
+export function OnTheWayCard({ onClose }: { onClose(): void }) {
+  const { t } = useT();
+  const palette = usePalette();
+  return (
+    <HudCard
+      icon="my_location"
+      tone={palette.warn}
+      title={t("onTheWayTitle")}
+      lines={<CardLine>{t("onTheWayBody")}</CardLine>}
+      onClose={onClose}
+    />
+  );
+}
+
 /** "Is the car where the dot is?" when a Wi-Fi fix puts it elsewhere than where it was parked (UI-SPEC §6.2). */
 export function PoseQuestionCard({ distanceM, onAnswer }: { distanceM: number; onAnswer(here: boolean): void }) {
   const { t, language } = useT();

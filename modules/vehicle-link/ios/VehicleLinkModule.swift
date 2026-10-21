@@ -1,6 +1,7 @@
 import CoreBluetooth
 import ExpoModulesCore
 import ExternalAccessory
+import UIKit
 
 // Thin transport for ELM327 adapters (docs/VEHICLE-LINK-SPEC.md §5):
 // BLE (CoreBluetooth) + MFi (ExternalAccessory). Scan, connect, write, frame on the
@@ -21,6 +22,18 @@ struct ConnectOptions: Record {
   @Field var preferred: [String]?
   /** 0 = no timeout (pending connect, used for reconnects). */
   @Field var timeoutMs: Double = 15000
+}
+
+/** Bluetooth state restoration (VEHICLE-LINK-SPEC §11): iOS relaunched the app for the adapter. */
+public class VehicleLinkAppDelegate: ExpoAppDelegateSubscriber {
+  public func application(
+    _ application: UIApplication,
+    didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+  ) -> Bool {
+    let ids = launchOptions?[.bluetoothCentrals] as? [String] ?? []
+    LinkCore.restoring = ids.contains(LinkCore.restoreIdentifier)
+    return true
+  }
 }
 
 public class VehicleLinkModule: Module {
@@ -111,6 +124,11 @@ final class LinkCore: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
     return ProcessInfo.processInfo.systemUptime * 1_000_000
   }
 
+  /** The central's restoration id: iOS relaunches the app for the adapter's events after ending it (§11). */
+  static let restoreIdentifier = "ai.wtf.vehiclelink.central"
+  /** Launched by iOS to restore the central: it is created at once, not when JS gets to it. */
+  nonisolated(unsafe) static var restoring = false
+
   private let queue = DispatchQueue(label: "ai.wtf.vehiclelink")
   private let emit: Emit
 
@@ -167,6 +185,9 @@ final class LinkCore: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
       self, selector: #selector(accessoryDidConnect(_:)), name: .EAAccessoryDidConnect, object: nil)
     NotificationCenter.default.addObserver(
       self, selector: #selector(accessoryDidDisconnect(_:)), name: .EAAccessoryDidDisconnect, object: nil)
+    if LinkCore.restoring {
+      queue.async { self.createCentral(restoreIdentifier: LinkCore.restoreIdentifier) }
+    }
   }
 
   func shutdown() {
@@ -201,15 +222,19 @@ final class LinkCore: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
 
   func initialize(restoreIdentifier: String?, promise: Promise) {
     queue.async {
-      if self.central == nil {
-        var options: [String: Any] = [CBCentralManagerOptionShowPowerAlertKey: true]
-        if let id = restoreIdentifier, !id.isEmpty {
-          options[CBCentralManagerOptionRestoreIdentifierKey] = id
-        }
-        self.central = CBCentralManager(delegate: self, queue: self.queue, options: options)
-      }
+      self.createCentral(restoreIdentifier: restoreIdentifier)
       self.whenStateKnown { state in promise.resolve(state) }
     }
+  }
+
+  /** On `queue`; once per process. */
+  private func createCentral(restoreIdentifier: String?) {
+    guard central == nil else { return }
+    var options: [String: Any] = [CBCentralManagerOptionShowPowerAlertKey: true]
+    if let id = restoreIdentifier, !id.isEmpty {
+      options[CBCentralManagerOptionRestoreIdentifierKey] = id
+    }
+    central = CBCentralManager(delegate: self, queue: queue, options: options)
   }
 
   /** Calls back once the central leaves the unknown/resetting state (max 5 s). */
@@ -505,7 +530,12 @@ final class LinkCore: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
       self.kind = .ble
       self.peripheral = p
       p.delegate = self
-      central.connect(p, options: nil)
+      // Restored still connected (iOS kept the link while the app was gone): set up as if it had just connected.
+      if p.state == .connected {
+        self.centralManager(central, didConnect: p)
+      } else {
+        central.connect(p, options: nil)
+      }
     }
   }
 

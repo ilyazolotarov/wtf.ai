@@ -7,9 +7,14 @@ import { stringsNow } from "@/i18n/strings-now";
 // delivery and Bluetooth I/O soon after the screen turns off. No-op on iOS (background modes) and web.
 
 /** The notification's words in the app language (same rule as I18nProvider; this runs outside React). */
-export function tripNotificationCopy(): { title: string; text: string; channel: string } {
+export function tripNotificationCopy(): { title: string; text: string; channel: string; gps: string } {
   const strings = stringsNow();
-  return { title: strings.tripNotificationTitle, text: strings.tripNotificationText, channel: strings.tripNotificationChannel };
+  return {
+    title: strings.tripNotificationTitle,
+    text: strings.tripNotificationText,
+    channel: strings.tripNotificationChannel,
+    gps: strings.tripNotificationGps,
+  };
 }
 
 /** Starts or stops the service; resolves true when it is running afterwards. Never throws. */
@@ -18,7 +23,7 @@ export async function setTripService(running: boolean): Promise<boolean> {
   try {
     if (running) {
       const copy = tripNotificationCopy();
-      return (await SensorCaptureModule.startTripService?.(copy.title, copy.text, copy.channel)) ?? false;
+      return (await SensorCaptureModule.startTripService?.(copy.title, copy.text, copy.channel, copy.gps)) ?? false;
     }
     await SensorCaptureModule.stopTripService?.();
     return false;

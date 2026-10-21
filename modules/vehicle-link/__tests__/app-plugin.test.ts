@@ -48,6 +48,8 @@ describe("vehicle-link config plugin", () => {
     expect(perm("android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE")).toBeDefined();
     expect(perm("android.permission.FOREGROUND_SERVICE_LOCATION")).toBeDefined();
     expect(perm("android.permission.POST_NOTIFICATIONS")).toBeDefined();
+    expect(perm("android.permission.REQUEST_OBSERVE_COMPANION_DEVICE_PRESENCE")).toBeDefined();
+    expect(perm("android.permission.REQUEST_COMPANION_START_FOREGROUND_SERVICES_FROM_BACKGROUND")).toBeDefined();
     expect(manifest["uses-feature"].every((f: any) => f.$["android:required"] === "false")).toBe(true);
   });
 

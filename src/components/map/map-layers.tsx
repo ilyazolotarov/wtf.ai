@@ -212,20 +212,20 @@ export function MarkLayers({
         <Layer
           id="dropped-pin-halo"
           type="circle"
-          paint={{ "circle-radius": PIN_DOT.halo, "circle-color": palette.accent, "circle-opacity": 0.18 }}
+          paint={{ "circle-radius": PIN_DOT.halo, "circle-color": palette.mapPin, "circle-opacity": 0.18 }}
         />
         <Layer id="dropped-pin-edge" type="circle" paint={{ "circle-radius": PIN_DOT.r + PIN_DOT.ring + PUCK.edge, "circle-color": palette.puckEdge }} />
         <Layer
           id="dropped-pin-dot"
           type="circle"
-          paint={{ "circle-radius": PIN_DOT.r, "circle-color": palette.accent, "circle-stroke-color": palette.puckRing, "circle-stroke-width": PIN_DOT.ring }}
+          paint={{ "circle-radius": PIN_DOT.r, "circle-color": palette.mapPin, "circle-stroke-color": palette.puckRing, "circle-stroke-width": PIN_DOT.ring }}
         />
       </GeoJSONSource>
       <GeoJSONSource id="placed-arrow" data={placedArrow}>
         <Layer
           id="placed-arrow-fill"
           type="fill"
-          paint={{ "fill-color": palette.accent, "fill-opacity": 0.55 * placedOpacity }}
+          paint={{ "fill-color": palette.mapPin, "fill-opacity": 0.55 * placedOpacity }}
         />
         {/* Outlined as the heading cone. */}
         <Layer
@@ -252,7 +252,7 @@ export function MarkLayers({
           type="circle"
           paint={{
             "circle-radius": 7,
-            "circle-color": palette.accent,
+            "circle-color": palette.mapPin,
             "circle-opacity": placedOpacity,
             "circle-stroke-color": palette.puckRing,
             "circle-stroke-width": 3,

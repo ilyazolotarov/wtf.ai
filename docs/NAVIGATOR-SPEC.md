@@ -98,7 +98,7 @@ Built, wired into the app and field-tested on two cars and testers' phones; the 
 - Replay: `withCanSpeed` (`nav/replay/can.ts`); `replay:bench --speed can`, `replay:regress --speed can`, the
   viewer's *Adapter: CAN wheel speeds*.
 
-### 5.4 Wheel yaw (Stage 2; Settings → Car → *Turns from the wheels*, experimental, off by default)
+### 5.4 Wheel yaw (Stage 2; Settings → Car → *Turns from the wheels*, on by default)
 
 The rear wheels aren't steered: (right − left) / track is the car's yaw rate whatever the phone does: the way to
 navigate with the phone in a hand, a pocket or on a seat.
@@ -192,6 +192,14 @@ navigate with the phone in a hand, a pocket or on a seat.
   (`PositionEstimate.poseQuestion`, with the distance). Yes confirms it (`Navigator.answerPose`); No drops it and
   anchors at that fix; unanswered, the 3-in-a-row rule applies. Notes `nav parked pose doubted …`, `… confirmed /
   rejected by the driver`.
+- **Behind the car** when the app was started on the way (iOS relaunched it in the background for location within
+  the last 10 min: the wake for location "Always", VEHICLE-LINK-SPEC §11, comes a few hundred metres into a drive): a
+  pose older than a drive pose's 2 min isn't used (`parkedPose: "behind"`, note `nav parked pose not used: the app was
+  started on the way`), the navigator starts as with no pose, and once a trip records the map says why until a
+  trusted fix or a placing (`on-the-way.ts`; without a trip the driver walked or rode off with the phone, which
+  relaunches the app too). Kept when the location iOS relaunched the app for, accuracy included, is within 150 m of
+  it and no older than the pose or 2 min before the launch (`nav parked pose kept: … the phone is still at it`): the
+  car still stands there. A pose saved within 2 min is the stop the app ended at and is used as above.
 - **One per car** (by VIN): with one slot, a second car's pose replaced the main car's.
 - **Not checked:** with no fix at all, nothing can tell that the car was moved while the app was off.
 

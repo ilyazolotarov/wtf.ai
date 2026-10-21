@@ -166,17 +166,18 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Allow wtf.ai to use your location while navigating.",
+          "locationWhenInUsePermission": "Allow location access while navigating.",
           "isIosBackgroundLocationEnabled": true,
-          "locationAlwaysAndWhenInUsePermission": "wtf.ai uses your location in the background only during a drive, to keep guiding you with the screen locked.",
-          "locationAlwaysPermission": "wtf.ai uses your location in the background only during a drive, to keep guiding you with the screen locked.",
-          "motionUsagePermission": "Allow wtf.ai to read the phone's motion sensors, to follow the car when satellite positioning is jammed."
+          "isAndroidBackgroundLocationEnabled": true,
+          "locationAlwaysAndWhenInUsePermission": "Your location is used in the background only during a drive, to keep guiding you with the screen locked.",
+          "locationAlwaysPermission": "Your location is used in the background only during a drive, to keep guiding you with the screen locked.",
+          "motionUsagePermission": "Allow access to the phone's motion sensors to track the car when satellite positioning is jammed."
         }
       ],
       [
         "expo-sensors",
         {
-          "motionPermission": "Allow wtf.ai to read the phone's motion sensors, to follow the car when satellite positioning is jammed."
+          "motionPermission": "Allow access to the phone's motion sensors to track the car when satellite positioning is jammed."
         }
       ],
       "expo-localization",
@@ -216,7 +217,7 @@
           "enableBackgroundPlayback": true,
           "enableBackgroundRecording": false,
           "recordAudioAndroid": false,
-          "microphonePermission": "wtf.ai doesn't record audio; it only speaks directions."
+          "microphonePermission": "The app doesn't record audio; it only speaks directions."
         }
       ],
       "expo-asset"

@@ -1,6 +1,6 @@
 import { useKeepAwake } from "expo-keep-awake";
 import { router, useIsFocused } from "expo-router";
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState, useSyncExternalStore } from "react";
 import { Platform, StyleSheet, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -12,7 +12,7 @@ import { HudCard, HudChip, usePanelStyle } from "@/components/map/hud-card";
 import { MapSurface } from "@/components/map/map-surface";
 import { useMapTurn, type MapTurn } from "@/components/map/map-turn";
 import { PlacingPin } from "@/components/map/placing-pin";
-import { ManualChip, ManualQuestionCard, PlacingCard, PoseQuestionCard } from "@/components/map/placing-cards";
+import { ManualChip, ManualQuestionCard, OnTheWayCard, PlacingCard, PoseQuestionCard } from "@/components/map/placing-cards";
 import { RegionPrompt } from "@/components/map/region-prompt";
 import { SheetBlur } from "@/components/map/sheet-blur";
 import { StatusRow } from "@/components/map/status-row";
@@ -39,7 +39,8 @@ import { MOVING_MPS } from "@/services/app-update/decide";
 import { usePositionPermission } from "@/providers/position-provider";
 import { useHeldRoute, useRoute } from "@/providers/route-provider";
 import { useDevSettings, useRecorderSnapshot, useRuntime } from "@/providers/runtime-provider";
-import { isOnboardingDone } from "@/services/preferences";
+import { isOnboardingDone, markWakeOffered } from "@/services/preferences";
+import { wakeToOffer } from "@/components/vehicle/use-wake-setup";
 import {
   dismissLessonsInvite,
   isLessonsInviteDue,
@@ -182,6 +183,8 @@ export default function HomeScreen() {
   const placing = place.step;
   // Lost while standing: offer putting the car on the map, and say so when the ignition comes on.
   const placeOffered = !placing && !position?.poseQuestion && !manual && place.standing && isLost(position);
+  // Started on the way (iOS's wake): the parked pose was left aside until the car is found.
+  const onTheWay = useSyncExternalStore(runtime.onTheWay.subscribe, runtime.onTheWay.get);
   usePlaceReminder({ offered: placeOffered, muted: voiceMuted || voiceOff });
 
   const ghost = trust === "UNTRUSTED" ? position?.rawGnss : undefined;
@@ -262,7 +265,13 @@ export default function HomeScreen() {
     if (!screenFocused) return;
     if (!isOnboardingDone()) router.push("/onboarding");
     else if (!mapReady) router.push("/map-setup");
-  }, [screenFocused, mapReady]);
+    // Installed before the step that keeps the position without opening the app: shown once by itself, never on a drive.
+    else if (recorderState !== "recording" && wakeToOffer()) {
+      // Once, even if left with the back button.
+      markWakeOffered();
+      router.push({ pathname: "/onboarding", params: { only: "wake" } });
+    }
+  }, [screenFocused, mapReady, recorderState]);
 
   return (
     <BlurScope>
@@ -366,6 +375,8 @@ export default function HomeScreen() {
                   onAnswer={(here) => (here ? navigator.answerManual(true) : place.forgetManual(true))}
                 />
               )}
+
+              {!placing && onTheWay && <OnTheWayCard onClose={() => runtime.onTheWay.clear()} />}
 
               {!placing && position?.poseQuestion && (
                 <PoseQuestionCard

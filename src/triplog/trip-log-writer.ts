@@ -3,6 +3,9 @@
 
 import {
   ACCEL_RAW,
+  APP_STATE_CODES,
+  APP_STATS,
+  APP_STATS_FLAGS,
   CAN_FRAME,
   CAN_WINDOW,
   CAN_REOPEN_CODES,
@@ -32,6 +35,7 @@ import {
   ROUTE_REASON_CODES,
   ROUTE_STATE_CODES,
   ROUTE_STATUS_CODES,
+  THERMAL_CODES,
   TIME_SYNC,
   TRIP_EVENT,
   WTF_LOG_VERSION,
@@ -40,6 +44,7 @@ import {
   type GnssRecord,
   type ImuMotionRecord,
   type LinkStatsRecord,
+  type AppStatsRecord,
   type NavEstimateRecord,
   type NavMapMatchRecord,
   type NavRouteManeuverRecord,
@@ -207,6 +212,18 @@ export class TripLogWriter {
       Math.min(0xffff, r.errors),
       r.linkState,
       r.batteryV,
+    ]);
+  }
+
+  appStats(r: AppStatsRecord): void {
+    this.enc.data(APP_STATS.name, [
+      r.timestampUs,
+      r.footprintMb,
+      r.headroomMb,
+      r.cpuPct,
+      THERMAL_CODES.indexOf(r.thermal),
+      APP_STATE_CODES.indexOf(r.appState),
+      r.lowPower ? APP_STATS_FLAGS.lowPower : 0,
     ]);
   }
 

@@ -1,7 +1,8 @@
 {
   "platforms": ["apple", "android"],
   "apple": {
-    "modules": ["VehicleLinkModule"]
+    "modules": ["VehicleLinkModule"],
+    "appDelegateSubscribers": ["VehicleLinkAppDelegate"]
   },
   "android": {
     "modules": ["ai.wtf.vehiclelink.VehicleLinkModule"]

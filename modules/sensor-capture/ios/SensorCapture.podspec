@@ -12,7 +12,7 @@ Pod::Spec.new do |s|
   s.static_framework = true
 
   s.dependency 'ExpoModulesCore'
-  s.frameworks = 'CoreLocation', 'CoreMotion'
+  s.frameworks = 'CoreLocation', 'CoreMotion', 'MetricKit'
 
   # Swift/Objective-C compatibility
   s.pod_target_xcconfig = {

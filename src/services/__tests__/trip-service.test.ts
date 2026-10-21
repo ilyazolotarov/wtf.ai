@@ -41,12 +41,12 @@ describe("trip service", () => {
   test("starts with the English copy by default and reports it running", async () => {
     setOs("android");
     expect(await setTripService(true)).toBe(true);
-    expect(native.startTripService).toHaveBeenCalledWith("wtf.ai is recording your trip", "Tap to open the map.", "Trip in progress");
+    expect(native.startTripService).toHaveBeenCalledWith("Tracking your trip", "Tap to open the map.", "Trip in progress", "Turn on GPS");
   });
 
   test("uses the stored language preference over the system locale", () => {
     storage.getItemSync.mockReturnValue("uk");
-    expect(tripNotificationCopy().title).toMatch(/записує/);
+    expect(tripNotificationCopy().title).toBe("Відстежуємо вашу поїздку");
   });
 
   test("stops the service and reports not running", async () => {

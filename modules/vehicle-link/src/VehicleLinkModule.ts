@@ -78,9 +78,16 @@ export type VehicleLinkEvents = {
   onBluetoothState: (e: { state: BluetoothState }) => void;
 };
 
+/** A device that wakes the app when it appears (Android, VEHICLE-LINK-SPEC §11). */
+export interface NativeWakeDevice {
+  address: string;
+  name: string | null;
+}
+
 declare class VehicleLinkNativeModule extends NativeModule<VehicleLinkEvents> {
   nowUs(): number;
   getBluetoothState(): BluetoothState;
+  /** `restoreIdentifier`: iOS state restoration (relaunched for the adapter after ending the app); Android ignores it. */
   initialize(restoreIdentifier: string | null): Promise<BluetoothState>;
   /** `serviceUuids`: catalog services, used to also list adapters already connected to iOS. */
   startScan(serviceUuids: string[]): void;
@@ -91,6 +98,12 @@ declare class VehicleLinkNativeModule extends NativeModule<VehicleLinkEvents> {
   disconnect(): Promise<void>;
   transact(command: string, timeoutMs: number): Promise<NativeExchange>;
   writeRaw(text: string): Promise<void>;
+  /** Android 12+ only (undefined on iOS and web): the companion devices that wake the app. */
+  wakeSupported?(): boolean;
+  wakeDevices?(): NativeWakeDevice[];
+  /** The system's dialog, offering `bleAddress` (a BLE adapter) and Classic devices; null when cancelled. */
+  addWakeDevice?(bleAddress: string | null): Promise<NativeWakeDevice | null>;
+  forgetWakeDevice?(address: string): void;
 }
 
 export default requireNativeModule<VehicleLinkNativeModule>("VehicleLink");

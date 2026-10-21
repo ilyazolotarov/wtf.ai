@@ -91,7 +91,7 @@ export const guideEn = {
   beforeAdapterOn: "Connected · the car answers",
   beforeHolder: "Phone in a firm holder",
   beforeHolderSub: "It feels the car’s turns when GPS is gone.",
-  beforeOpen: "Open wtf.ai before you set off",
+  beforeOpen: "Open the app before you set off",
   beforeOpenSub: "It follows the car from the first metre and remembers where you park.",
   beforeDot: "The dot is on your car",
   beforeDotOk: "GPS checks out",

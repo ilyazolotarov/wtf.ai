@@ -181,9 +181,9 @@ export function PinDot({ x, y, destination = false }: { x: number; y: number; de
   }
   return (
     <G>
-      <Circle cx={x} cy={y} r={PIN_DOT.halo} fill={palette.accent} fillOpacity={0.18} />
+      <Circle cx={x} cy={y} r={PIN_DOT.halo} fill={palette.mapPin} fillOpacity={0.18} />
       <Circle cx={x} cy={y} r={PIN_DOT.r + PIN_DOT.ring + PUCK.edge} fill={palette.puckEdge} />
-      <Circle cx={x} cy={y} r={PIN_DOT.r + PIN_DOT.ring / 2} fill={palette.accent} stroke={palette.puckRing} strokeWidth={PIN_DOT.ring} />
+      <Circle cx={x} cy={y} r={PIN_DOT.r + PIN_DOT.ring / 2} fill={palette.mapPin} stroke={palette.puckRing} strokeWidth={PIN_DOT.ring} />
     </G>
   );
 }

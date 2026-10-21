@@ -152,7 +152,7 @@ describe("NativeDiscovery", () => {
     d.start((devices) => updates.push(devices));
     await Promise.resolve();
     await Promise.resolve();
-    expect(mockNative.initialize).toHaveBeenCalledWith(null);
+    expect(mockNative.initialize).toHaveBeenCalledWith("ai.wtf.vehiclelink.central");
     expect(mockNative.startScan).toHaveBeenCalledWith(GATT_PROFILES.map((p) => p.service));
 
     mockEmit("onScanBatch", {

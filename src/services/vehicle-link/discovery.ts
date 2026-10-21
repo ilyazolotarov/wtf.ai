@@ -4,6 +4,7 @@ import VehicleLinkModule, {
   type NativeMfiAccessory,
   type NativeScanResult,
 } from "../../../modules/vehicle-link/src/VehicleLinkModule";
+import { RESTORE_IDENTIFIER } from "../../../modules/vehicle-link/src/restore";
 import { GATT_PROFILES } from "@/obd/catalog";
 import type { DiscoveryBackend, ScannedDevice } from "@/obd/vehicle-link-core";
 
@@ -30,7 +31,7 @@ export class NativeDiscovery implements DiscoveryBackend {
       VehicleLinkModule.addListener("onScanBatch", (e) => onUpdate(e.devices.map(scannedDevice))),
       VehicleLinkModule.addListener("onMfiChange", (e) => onUpdate(mfiDevices(e.accessories))),
     );
-    void VehicleLinkModule.initialize(null).then(() => VehicleLinkModule.startScan(GATT_PROFILES.map((p) => p.service)));
+    void VehicleLinkModule.initialize(RESTORE_IDENTIFIER).then(() => VehicleLinkModule.startScan(GATT_PROFILES.map((p) => p.service)));
     // Scanning ends by itself after a while: the owner's "discovering" ends with it.
     this.stopTimer = setTimeout(() => {
       this.stop();

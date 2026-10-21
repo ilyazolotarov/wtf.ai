@@ -92,6 +92,20 @@ export const LINK_STATS: ULogFormat = {
   ],
 };
 
+/** The app process itself (TRIP-LOGGER-SPEC §6.3): what it needs, and what the phone leaves it before ending it. */
+export const APP_STATS: ULogFormat = {
+  name: "app_stats",
+  fields: [
+    ts,
+    { type: "float", name: "footprint_mb" },
+    { type: "float", name: "headroom_mb" },
+    { type: "float", name: "cpu_pct" },
+    { type: "uint8_t", name: "thermal" },
+    { type: "uint8_t", name: "app_state" },
+    { type: "uint8_t", name: "flags" },
+  ],
+};
+
 export const TIME_SYNC: ULogFormat = {
   name: "time_sync",
   fields: [ts, { type: "int64_t", name: "utc_us" }],
@@ -259,6 +273,7 @@ export const ALL_FORMATS: readonly ULogFormat[] = [
   NAV_ROUTE_PROGRESS,
   CAN_FRAME,
   CAN_WINDOW,
+  APP_STATS,
 ];
 
 export const ENGINE_STATE_CODES = ["unknown", "ignition-off", "engine-off", "engine-running"] as const;
@@ -288,6 +303,12 @@ export const END_REASON_CODES: Record<EndReason, number> = {
   manual: END_REASONS.manual,
 };
 
+export const THERMAL_CODES = ["nominal", "fair", "serious", "critical"] as const;
+export const APP_STATE_CODES = ["active", "inactive", "background", "unknown"] as const;
+export const APP_STATS_FLAGS = {
+  lowPower: 1,
+} as const;
+
 export const LINK_STATE_CODES = [
   "idle",
   "discovering",
@@ -311,7 +332,7 @@ export const LOG_TAGS = {
 export const NAV_MODE_CODES = ["none", "anchored", "dr"] as const;
 export const NAV_SOURCE_CODES = ["gnss", "fused", "dr", "manual"] as const;
 export const NAV_TRUST_CODES = ["TRUSTED", "UNTRUSTED", "REACQUIRING", "NO_FIX"] as const;
-export const NAV_POSE_CODES = ["none", "unverified", "confirmed", "rejected"] as const;
+export const NAV_POSE_CODES = ["none", "unverified", "confirmed", "rejected", "behind"] as const;
 export const NAV_MAPMATCH_STATE_CODES = ["off", "init", "tracking", "multimodal", "offroad"] as const;
 /** Why a route was planned: a new destination, the car left the route, logged again at a trip's start, or an alternative taken. */
 export const ROUTE_REASON_CODES = ["new", "off-route", "resume", "alternative", "placed"] as const;
@@ -457,6 +478,19 @@ export interface LinkStatsRecord {
   errors: number;
   linkState: number;
   batteryV: number;
+}
+
+export interface AppStatsRecord {
+  timestampUs: number;
+  /** Memory the process holds: iOS its footprint (what jetsam weighs), Android its PSS. */
+  footprintMb: number;
+  /** iOS: how much more before jetsam ends the process; Android: the system's available memory. NaN unknown. */
+  headroomMb: number;
+  /** CPU the process used since the previous record, % of one core. NaN for the first. */
+  cpuPct: number;
+  thermal: (typeof THERMAL_CODES)[number];
+  appState: (typeof APP_STATE_CODES)[number];
+  lowPower: boolean;
 }
 
 export interface NavRouteRecord {

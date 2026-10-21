@@ -8,7 +8,12 @@ import { scrubBreadcrumb, scrubEvent, scrubLog } from "./sentry-scrub";
 // environment, SENTRY_DSN (app.config.js), so the source names no Sentry account. Without it nothing is sent.
 export const SENTRY_DSN: string | null = extraString("sentryDsn");
 
+let started = false;
+
+/** Once per JS runtime: the root layout calls it, and so does Android's wake task, which runs without a screen. */
 export function initSentry(): void {
+  if (started) return;
+  started = true;
   Sentry.init({
     dsn: SENTRY_DSN ?? undefined,
     enabled: SENTRY_DSN != null,

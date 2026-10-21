@@ -1,10 +1,11 @@
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { useState } from "react";
-import { Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { Platform, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ScreenCard } from "@/components/screens/screen-ui";
 import { useNavStatus } from "@/components/status/use-nav-status";
+import { useWakeSetup, wakeSupported } from "@/components/vehicle/use-wake-setup";
 import { Icon, type IconName } from "@/components/ui/icon";
 import { T } from "@/components/ui/text";
 import { TAGLINE } from "@/constants/brand";
@@ -12,41 +13,61 @@ import { Radius, usePalette } from "@/constants/theme";
 import type { Strings } from "@/i18n/en";
 import { useT } from "@/i18n/provider";
 import { usePositionPermission } from "@/providers/position-provider";
-import { markOnboardingDone } from "@/services/preferences";
+import { useRuntime } from "@/providers/runtime-provider";
+import { markOnboardingDone, markWakeOffered } from "@/services/preferences";
 
-type Step = 0 | 1 | 2 | 3;
+type StepId = "welcome" | "location" | "car" | "wake" | "holder";
 
 /** `title: null` is the welcome page: its title is the tagline, the same in every language. */
-const STEPS: { icon?: IconName; title: keyof Strings | null; body: keyof Strings }[] = [
-  { title: null, body: "obWelcomeBody" },
-  { icon: "location_on", title: "obLocationTitle", body: "obLocationBody" },
-  { icon: "directions_car", title: "obCarTitle", body: "obCarBody" },
-  { icon: "phone_iphone", title: "obHolderTitle", body: "obHolderBody" },
+const STEPS: { id: StepId; icon?: IconName; title: keyof Strings | null; body: keyof Strings }[] = [
+  { id: "welcome", title: null, body: "obWelcomeBody" },
+  { id: "location", icon: "location_on", title: "obLocationTitle", body: "obLocationBody" },
+  { id: "car", icon: "directions_car", title: "obCarTitle", body: "obCarBody" },
+  // The position kept when the driver forgets to open the app (VEHICLE-LINK-SPEC §11): Android 12+ and iOS.
+  { id: "wake", icon: "my_location", title: "obWakeTitle", body: Platform.OS === "ios" ? "obWakeBodyIos" : "obWakeBody" },
+  { id: "holder", icon: "phone_iphone", title: "obHolderTitle", body: "obHolderBody" },
 ];
 
 /** Without GPS the gyro is the only yaw source: a phone loose in the car loses the heading (SPEC §2, phone mount). */
 const HOLDER_TIPS = ["obHolderFirm", "obHolderAngle", "obHolderMoved"] as const;
 
-/** First-run flow: welcome → location → adapter → phone holder. The app calibrates itself while driving (NAVIGATOR-SPEC §7). */
+/**
+ * First-run flow: welcome → location → adapter → keep the position without the app → phone holder. The app
+ * calibrates itself while driving (NAVIGATOR-SPEC §7).
+ */
 export default function OnboardingScreen() {
   const { t } = useT();
   const palette = usePalette();
   const insets = useSafeAreaInsets();
   const nav = useNavStatus();
   const { requestPermission } = usePositionPermission();
-  const [step, setStep] = useState<Step>(0);
+  const { link } = useRuntime();
+  const wake = useWakeSetup();
+  // `only=wake`: the wake step by itself, once, for an install from before it (index.tsx).
+  const { only } = useLocalSearchParams<{ only?: string }>();
+  const [steps] = useState(() =>
+    only === "wake" ? STEPS.filter((s) => s.id === "wake") : STEPS.filter((s) => s.id !== "wake" || wakeSupported()),
+  );
+  const [step, setStep] = useState(0);
   const [busy, setBusy] = useState(false);
-  const meta = STEPS[step];
+  const meta = steps[step];
+  // The adapter just connected (or remembered): offered in the companion dialog when it is a BLE one.
+  const adapterId = () => {
+    const snap = link.getSnapshot();
+    return snap.activeDeviceId ?? snap.devices.find((d) => d.rank === "remembered")?.id ?? null;
+  };
 
   const finish = () => {
     markOnboardingDone();
+    markWakeOffered();
     router.back();
   };
+  const next = () => (step >= steps.length - 1 ? finish() : setStep(step + 1));
 
   const primary: { label: string; disabled?: boolean; onPress(): void } =
-    step === 0
-      ? { label: t("obWelcomeCta"), onPress: () => setStep(1) }
-      : step === 1
+    meta.id === "welcome"
+      ? { label: t("obWelcomeCta"), onPress: next }
+      : meta.id === "location"
         ? {
             label: t("obLocationCta"),
             disabled: busy,
@@ -56,23 +77,32 @@ export default function OnboardingScreen() {
                 await requestPermission();
               } finally {
                 setBusy(false);
-                setStep(2);
+                next();
               }
             },
           }
-        : step === 3
-          ? { label: t("obDone"), onPress: finish }
-          : nav.adapter === "on"
-            ? { label: t("continue"), onPress: () => setStep(3) }
-            : nav.adapter === "searching"
-              ? { label: t("obdSearching"), disabled: true, onPress: () => undefined }
-              : { label: t("connect"), onPress: () => router.push("/vehicle") };
+        : meta.id === "wake"
+          ? {
+              label: t("obWakeCta"),
+              disabled: wake.busy,
+              onPress: async () => {
+                await wake.turnOn(adapterId()).catch(() => false);
+                next();
+              },
+            }
+          : meta.id === "holder"
+            ? { label: t("obDone"), onPress: finish }
+            : nav.adapter === "on"
+              ? { label: t("continue"), onPress: next }
+              : nav.adapter === "searching"
+                ? { label: t("obdSearching"), disabled: true, onPress: () => undefined }
+                : { label: t("connect"), onPress: () => router.push("/vehicle") };
 
   const secondary: { label: string; onPress(): void } | null =
-    step === 1
-      ? { label: t("notNow"), onPress: () => setStep(2) }
-      : step === 2 && nav.adapter !== "on"
-        ? { label: t("skipForNow"), onPress: () => setStep(3) }
+    meta.id === "location" || meta.id === "wake"
+      ? { label: t("notNow"), onPress: next }
+      : meta.id === "car" && nav.adapter !== "on"
+        ? { label: t("skipForNow"), onPress: next }
         : null;
 
   return (
@@ -87,7 +117,7 @@ export default function OnboardingScreen() {
       ]}
     >
       <View style={styles.dots}>
-        {STEPS.map((_, i) => (
+        {steps.length > 1 && steps.map((_, i) => (
           <View
             key={i}
             style={[styles.dot, { backgroundColor: i <= step ? palette.accent : palette.line }]}
@@ -97,7 +127,7 @@ export default function OnboardingScreen() {
 
       {/* Anchored at the bottom, by the buttons; scrolls when large text makes a step taller than the screen. */}
       <ScrollView style={styles.scroll} contentContainerStyle={styles.body}>
-        {step === 0 ? (
+        {meta.id === "welcome" ? (
           <>
             <T w="bold" size={22} color={palette.accent}>
               wtf.ai
@@ -123,7 +153,7 @@ export default function OnboardingScreen() {
           </>
         )}
 
-        {step === 3 && (
+        {meta.id === "holder" && (
           <>
             <ScreenCard style={styles.tips}>
               {HOLDER_TIPS.map((key, i) => (
@@ -146,7 +176,7 @@ export default function OnboardingScreen() {
       </ScrollView>
 
       {/* By the buttons, never scrolled away: whether the adapter answers is what this step is for. */}
-      {step === 2 && (
+      {meta.id === "car" && (
         <ScreenCard style={styles.adapterCard}>
           <Icon name="bluetooth" size={24} color={nav.adapterColor} />
           <View style={styles.flex}>
