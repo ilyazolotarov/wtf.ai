@@ -308,7 +308,7 @@ const DR_FOLLOWS_POSE_US = 30_000_000;
 /** Map-matching clusters lighter than this aren't dead-reckoning hypotheses for integrity. */
 const INTEGRITY_CLUSTER_MIN_WEIGHT = 0.05;
 
-/** Vehicle pose while parked: the next session starts from it (SPEC §3.3 startup). */
+/** Vehicle pose while parked, or while driving (with `speedMps`): the next session starts from it (SPEC §3.3 startup). */
 export interface ParkedPose {
   lat: number;
   lon: number;
@@ -319,6 +319,8 @@ export interface ParkedPose {
   headingSigmaRad: number;
   /** Map matching had the car off every road (a lot, a yard): the next start keeps it there (MAPMATCH-SPEC §7.2). */
   offRoad?: boolean;
+  /** Saved while driving: the speed, m/s, to carry it on with for the time the app was off (NAVIGATOR-SPEC §6.1). */
+  speedMps?: number;
 }
 
 /** `untrusted`: a satellite fix integrity refused (`integrity` says why); nothing used it. */
@@ -965,22 +967,33 @@ export class Navigator {
     return this.frozenPose ?? this.currentParkedPose() ?? this.stoppedPose;
   }
 
+  /**
+   * The pose while the car moves, with its speed (null: standing, the speed stale, or no heading): the service keeps
+   * the newest so a start soon after the app died mid-drive carries on from it (`drive-pose.ts`).
+   */
+  get drivePose(): (ParkedPose & { speedMps: number }) | null {
+    const o = this.lastObd;
+    if (o === null || o.rawKph === 0 || this.lastTUs === null || this.lastTUs - o.tUs >= this.config.obdStaleUs) return null;
+    const pose = this.poseNow();
+    return pose && { ...pose, speedMps: Math.abs(this.ekf!.speed) };
+  }
+
   private currentParkedPose(): ParkedPose | null {
     const o = this.lastObd;
     const parked = this.standstill || (o !== null && o.rawKph === 0 && this.lastTUs !== null && this.lastTUs - o.tUs < this.config.obdStaleUs);
-    if (!parked || !this.ekf || !this.frame) return null;
+    if (!parked) return null;
+    const pose = this.poseNow();
+    const offRoad = pose !== null && this.pf?.isActive === true && this.pf.output().state === "offroad";
+    return pose && { ...pose, ...(offRoad ? { offRoad } : {}) };
+  }
+
+  private poseNow(): ParkedPose | null {
+    if (!this.ekf || !this.frame) return null;
     const psi = this.ekf.psi < 0 ? this.ekf.psi + 2 * Math.PI : this.ekf.psi;
     // Dead-reckoned to the spot without GPS, the EKF's own σ is what the road updates made of it, not how far off it is.
     const sinceGps = this.distanceSinceTrustedM;
     const posSigmaM = sinceGps === undefined || sinceGps > POSE_GPS_WITHIN_M ? Math.max(this.ekf.positionSigma, JAMMED_POSE_SIGMA_M) : this.ekf.positionSigma;
-    const offRoad = this.pf?.isActive === true && this.pf.output().state === "offroad";
-    return {
-      ...this.frame.toCoordinate(this.ekf.east, this.ekf.north),
-      headingRad: psi,
-      posSigmaM,
-      headingSigmaRad: this.ekf.psiSigma,
-      ...(offRoad ? { offRoad } : {}),
-    };
+    return { ...this.frame.toCoordinate(this.ekf.east, this.ekf.north), headingRad: psi, posSigmaM, headingSigmaRad: this.ekf.psiSigma };
   }
 
   /** Started from a pose parked off the roads (or placed there) and not yet driven away from it. */

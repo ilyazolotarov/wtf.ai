@@ -164,6 +164,16 @@ navigate with the phone in a hand, a pocket or on a seat.
   trusted satellite fix in the last 300 m, its σ is at least 30 m (the EKF claimed 5–7 m where the car was 12–80 m
   off, and the next drive's map matching missed the street). The pose is the EKF's, not the map's dot: saving the
   dominant map-matching hypothesis carried a wrong street into the next drive.
+- **While driving** (`Navigator.drivePose`, `drive-pose.ts`): every 5 s while the car moves (fresh speed above 0) and
+  the EKF runs, the same pose with the speed, in the same slot. Why: an app that dies mid-drive (iOS in the
+  background, a crash, the driver swiping it away) otherwise starts again with no position: under jamming a
+  Wi-Fi/cell fix kilometres wide, and a placing made from that circle was off by a street and a direction
+  (2026-10-21). The pose where the car stops replaces it, without a speed; driving doesn't clear it.
+- **Used while driving**, at most 2 min old (`DRIVE_POSE_MAX_AGE_S`; 2 min at 100 km/h is ±1 km, no better than the
+  Wi-Fi fix): carried on along its heading at its speed for the time the app was off, σ widened by 30 % of the
+  distance carried and the heading's by 1°/s (up to 45°), then started from as below. Older, only noted (`nav pose
+  saved while driving N s ago: not used`). Note `nav mode dr (pose saved while driving, N s old, carried M m on at
+  K km/h, ±S m, heading ±H°)`. Phone-only mode (§9.6) starts only from poses saved standing.
 - **Frozen** at the first handling while parked: the driver often takes the phone out and walks off while the ECU
   is still awake, and the fixes then follow the driver. Handled only after the speed went stale (ignition off, the
   link lost), it is the pose where the car was last seen standing: with the wheels' turning the phone's own frame,

@@ -6,6 +6,7 @@
 // - the pose while parked, per VIN: the next session starts dead reckoning from it at once
 //   instead of waiting for a GNSS course, or for ~500 m of alignment under jamming. One per car: with a
 //   single slot, a second car's pose replaced the first's (2026-10-05).
+//   Saved every few seconds while driving too, with the speed: a start soon after the app died mid-drive carries on.
 // - the compass calibrations, per VIN (§7.6): the car's own magnetic field and the phone's angle in
 //   the mount, learned against known headings over earlier drives, one per mounting (the phone's
 //   tilt), most recent first. This phone only (the store is local).
@@ -188,10 +189,10 @@ export class CalibrationStore {
     this.write((s) => (s.phoneMountByCar = { ...s.phoneMountByCar, [car]: { mount, savedAt: now } }));
   }
 
-  /** Pose saved when this car was last parked. */
+  /** Pose saved when this car was last parked, or while it drove (with its speed). */
   parkedPose(vin: string): StoredPose | null {
     const pose = this.parkedPoses()[vin];
-    return pose && Number.isFinite(pose.lat) && Number.isFinite(pose.headingRad) ? pose : null;
+    return pose && Number.isFinite(pose.lat) && Number.isFinite(pose.headingRad) && (pose.speedMps === undefined || Number.isFinite(pose.speedMps)) ? pose : null;
   }
 
   saveParkedPose(vin: string, pose: ParkedPose, now = Date.now()): void {

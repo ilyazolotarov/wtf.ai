@@ -76,7 +76,14 @@ function record(f: Partial<GnssFix> & Pick<GnssFix, "tUs" | "lat" | "lon">, over
 
 /** The app around the service: fake sensors, vehicle link and clocks, driven by a synthetic trip. */
 function harness(
-  options: { vin?: string | null; store?: ReturnType<typeof memoryStore>; roadGraph?: RoadGraphSource; phoneGraph?: () => TiledRoadGraph } = {},
+  options: {
+    vin?: string | null;
+    store?: ReturnType<typeof memoryStore>;
+    roadGraph?: RoadGraphSource;
+    phoneGraph?: () => TiledRoadGraph;
+    /** The uptime the app starts at (a later session of the same drive). */
+    startUs?: number;
+  } = {},
 ) {
   const gnss = new Emitter<[GnssRecord]>();
   const imu = new Emitter<[ReturnType<typeof decodeImuBatch>]>();
@@ -90,7 +97,7 @@ function harness(
   const store = options.store ?? memoryStore();
   // The link's car: null before an adapter initialises (then the expected VIN is `options.vin`); a VIN of null is a car it doesn't know.
   let vehicle: { vin: string | null } | null = options.vin === null ? null : { vin: options.vin ?? VIN };
-  let nowUs = 1_000_000_000;
+  let nowUs = options.startUs ?? 1_000_000_000;
   jest.setSystemTime((nowUs + UTC_OFFSET_US) / 1000);
   const service = new NavigatorService({
     sensors: { gnss, imu, want } as never,
@@ -380,6 +387,82 @@ describe("NavigatorService", () => {
 const storedPose = (store: KeyValueStore, vin = VIN) => store.getJson<Record<string, StoredPose>>(PARKED_POSES_KEY)?.[vin] ?? null;
 const storedManual = (store: KeyValueStore) => new CalibrationStore(store, PHONE).manualPosition();
 
+describe("pose saved while driving (NAVIGATOR-SPEC §6.1)", () => {
+  // Clean GNSS through town, then 2 min on a straight road at 20 m/s.
+  const DRIVE: DriveSegment[] = [...cityDrive(2), { durationS: 5, speedMps: 20, yawRateDegS: 0 }, { durationS: 120, speedMps: 20, yawRateDegS: 0 }];
+  const KILLED_AT_S = 110;
+  const storedDrive = (store: KeyValueStore) => store.getJson<Record<string, StoredPose>>(PARKED_POSES_KEY)?.[VIN] ?? null;
+
+  /** Driven until the app dies (no stop: nothing is saved at the end). */
+  async function killedMidDrive() {
+    const store = memoryStore();
+    const drive = syntheticDrive({ segments: DRIVE, gnss: "clean", startHeadingRad: 1, seed: 5 });
+    const first = harness({ store });
+    await first.service.start();
+    first.play(drive, { untilS: KILLED_AT_S });
+    return { store, drive };
+  }
+
+  test("saved every few seconds while the car drives, with its speed", async () => {
+    const { store, drive } = await killedMidDrive();
+    const pose = storedDrive(store)!;
+    const truth = drive.truthAt(drive.trip.startUs + KILLED_AT_S * 1e6);
+    expect(haversineM(pose, truth)).toBeLessThan(110);
+    expect(pose.speedMps!).toBeCloseTo(20, 0);
+    expect(Math.abs(Math.atan2(Math.sin(pose.headingRad - truth.psi), Math.cos(pose.headingRad - truth.psi)))).toBeLessThan(0.05);
+  });
+
+  test("the app opened again 30 s later, jammed: the dot carries on from it, carried on for the time off", async () => {
+    const { store, drive } = await killedMidDrive();
+    const next = harness({ store, startUs: drive.trip.startUs + (KILLED_AT_S + 30) * 1e6 });
+    await next.service.start();
+    const started = next.notes.find((n) => n.startsWith("nav mode dr (pose saved while driving"));
+    expect(started).toMatch(/^nav mode dr \(pose saved while driving, 3\d s old, carried \d+ m on at 72 km\/h, ±\d+ m, heading ±\d+°\)$/);
+    next.play(drive, { untilS: KILLED_AT_S + 60, withoutGnssFromS: 0 });
+    const p = next.service.getSnapshot()!;
+    expect(p.source).toBe("dr");
+    expect(haversineM(p, drive.truthAt(next.now()))).toBeLessThan(60);
+    next.service.stop();
+  });
+
+  test("older than 2 min it isn't used", async () => {
+    const { store, drive } = await killedMidDrive();
+    const next = harness({ store, startUs: drive.trip.startUs + (KILLED_AT_S + 150) * 1e6 });
+    await next.service.start();
+    expect(next.notes.some((n) => n.startsWith("nav mode dr"))).toBe(false);
+    expect(next.notes.some((n) => /^nav pose saved while driving 1[45]\d s ago: not used$/.test(n))).toBe(true);
+    next.service.stop();
+  });
+
+  test("the car stops and the engine goes off: the pose where it stands replaces it, without a speed", async () => {
+    const store = memoryStore();
+    const segments: DriveSegment[] = [...DRIVE.slice(0, -1), { durationS: 30, speedMps: 20, yawRateDegS: 0 }, { durationS: 5, speedMps: 0, yawRateDegS: 0 }, { durationS: 10, speedMps: 0, yawRateDegS: 0 }];
+    const drive = syntheticDrive({ segments, gnss: "clean", startHeadingRad: 1, seed: 5 });
+    const first = harness({ store });
+    await first.service.start();
+    first.play(drive, { untilS: (segments.reduce((a, s) => a + s.durationS, 0)) - 12 });
+    expect(storedDrive(store)?.speedMps).toBeGreaterThan(0);
+    first.play(drive);
+    first.engine.emit("engine-off", first.now());
+    const pose = storedDrive(store)!;
+    expect(pose.speedMps).toBeUndefined();
+    expect(haversineM(pose, drive.truthAt(drive.trip.imu.at(-1)!.tUs))).toBeLessThan(5);
+    first.service.stop();
+  });
+
+  test("written to the trip log's storage note, so a replay starts from it", () => {
+    const store = memoryStore();
+    const pose = { lat: 50.45, lon: 30.52, headingRad: 2, posSigmaM: 30, headingSigmaRad: 0.05, speedMps: 25 };
+    new CalibrationStore(store, PHONE).saveParkedPose(VIN, pose, 1_790_000_000_000);
+    const { service, notes } = harness({ store });
+    notes.length = 0;
+    service.logStorage();
+    const seeded = new CalibrationStore(memoryStore(), PHONE);
+    seedFromLog({ messages: notes.map((text) => ({ tUs: 0, tag: "app", text })) } as never, seeded);
+    expect(seeded.parkedPose(VIN)).toEqual({ ...pose, vin: VIN, savedAt: 1_790_000_000_000 });
+  });
+});
+
 describe("parked pose", () => {
   // Drive with clean GNSS, then stop and stand.
   const PARK: DriveSegment[] = [...cityDrive(2), { durationS: 8, speedMps: 0, yawRateDegS: 0 }, { durationS: 10, speedMps: 0, yawRateDegS: 0 }];
@@ -410,7 +493,7 @@ describe("parked pose", () => {
     expect(Math.abs(Math.atan2(Math.sin(pose.headingRad - truth.psi), Math.cos(pose.headingRad - truth.psi)))).toBeLessThan(0.05);
   });
 
-  test("under jamming the next session dead-reckons from it right away, and driving clears it", async () => {
+  test("under jamming the next session dead-reckons from it right away; driving replaces it with the pose as it drives", async () => {
     const { store, pose } = await parkFirst();
     const drive = syntheticDrive({ segments: DRIVE_OFF, gnss: "coarse", origin: pose, startHeadingRad: pose.headingRad, seed: 7 });
     const next = harness({ store });
@@ -419,7 +502,7 @@ describe("parked pose", () => {
     next.play(drive, { untilS: 5 });
     expect(next.service.getSnapshot()).toMatchObject({ source: "dr" });
     next.play(drive);
-    expect(storedPose(store)).toBeNull();
+    expect(storedPose(store)?.speedMps).toBeGreaterThan(0);
     expect(next.notes).toContain("nav parked pose confirmed");
     // ~600 m on coarse fixes only: without the pose, alignment would still be waiting for spread.
     const p = next.service.getSnapshot()!;

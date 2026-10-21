@@ -10,6 +10,7 @@ import type { UpdateTimingSummary } from "@/nav/mapmatch/update-timing";
 import type { FixOutcome, MapMatchEstimate, NavConfig, NavMode, ParkedPose } from "@/nav/navigator";
 import { Navigator } from "@/nav/navigator";
 import { PhoneNavigator, type PhoneGraph, type PhonePose, type PhoneRouteState } from "@/nav/phone/phone-navigator";
+import { carryDrivePose } from "@/nav/drive-pose";
 import { haversineM } from "@/nav/geo";
 import { FUSED_WINDOW_US, puckAccuracyM, puckHypothesis, steadyDot, type DrawnDot, type LastPuck } from "@/nav/position/puck";
 import type { PositionEstimate, PositionSourceKind, RawGnssFix } from "@/nav/position/types";
@@ -60,6 +61,8 @@ const OBD_TIMEOUT_US = 10_000_000;
 /** Draw the position up to this far ahead of the navigator, which runs `REORDER_US` behind. */
 const MAX_EXTRAPOLATE_S = 1;
 const SAVE_EVERY_MS = 30_000;
+/** The pose is saved this often while the car moves (§6.1): 5 s at 100 km/h is 140 m of a 2-minute reach. */
+const DRIVE_SAVE_EVERY_MS = 5_000;
 /** Note a saved speed scale in the trip log when it moved this much. */
 const SPEED_SCALE_NOTE_STEP = 0.002;
 const EARTH_RADIUS_M = 6_371_000;
@@ -248,8 +251,9 @@ export class NavigatorService implements PositionSource {
   private mode: NavMode = "none";
   private vin: string | null = null;
   private lastSaveAt = 0;
+  private lastDriveSaveAt = 0;
   private notedSpeedScale: number | null = null;
-  /** A parked pose is in storage: cleared once the car moves. */
+  /** A pose saved standing is in storage: cleared once the car moves (one saved moving is replaced as it goes). */
   private poseStored = false;
   private poseStatus: NavigatorDebug["parkedPose"] = "none";
   /** A Wi-Fi fix doubts the parked pose the navigator started from: the driver is asked. */
@@ -625,7 +629,8 @@ export class NavigatorService implements PositionSource {
     this.phone = { engine: new PhoneNavigator(g.graph, {}, mount), graph: g, car, started: false, parkedSaved: false };
     this.note(`nav phone-only engine on ${g.key}${mount ? ", phone mount from storage" : ""}`);
     const m = this.manual;
-    const poses = [this.deps.calibration.parkedPose(car), this.deps.calibration.parkedPose(PHONE_CAR)].filter((x) => x !== null);
+    // Standing ones: a pose saved while driving is for the car's navigator to carry on.
+    const poses = [this.deps.calibration.parkedPose(car), this.deps.calibration.parkedPose(PHONE_CAR)].filter((x) => x !== null).filter((x) => !x.speedMps);
     const pose = poses.sort((a, b) => b.savedAt - a.savedAt)[0] ?? null;
     const start: (PhonePose & { from: string }) | null = m
       ? { lat: m.lat, lon: m.lon, headingRad: m.headingRad, posSigmaM: USER_POSITION_SIGMA_M, headingSigmaRad: USER_HEADING_SIGMA_RAD, from: "manual position" }
@@ -691,7 +696,7 @@ export class NavigatorService implements PositionSource {
     const vin = link.expectedVin();
     if (vin) this.setVehicle(vin);
     if (this.startFromManual(vin)) return;
-    if (vin) this.startFromParkedPose(vin, false);
+    if (vin) this.startFromStoredPose(vin, false);
   }
 
   /**
@@ -721,10 +726,27 @@ export class NavigatorService implements PositionSource {
     this.poseStatus = "none";
   }
 
-  /** The pose saved when this car was parked, if the navigator has no better start; `late`: the VIN came after the start. */
-  private startFromParkedPose(vin: string, late: boolean): void {
+  /**
+   * The pose saved for this car, if the navigator has no better start: saved standing, as it is; saved while it drove,
+   * carried on for the time the app was off (§6.1). `late`: the VIN came after the start.
+   */
+  private startFromStoredPose(vin: string, late: boolean): void {
     const pose = this.deps.calibration.parkedPose(vin);
-    this.poseStored = pose !== null;
+    const speedMps = pose?.speedMps ?? 0;
+    this.poseStored = pose !== null && speedMps === 0;
+    if (pose && speedMps > 0) {
+      const gapS = (this.clock.nowMs() - pose.savedAt) / 1000;
+      const carried = carryDrivePose({ ...pose, speedMps }, gapS);
+      if (!carried) this.note(`nav pose saved while driving ${Math.round(gapS)} s ago: not used`);
+      else if (this.nav?.startFromPose(carried)) {
+        this.poseStatus = "unverified";
+        this.note(
+          `nav mode dr (pose saved while driving, ${Math.round(gapS)} s old, carried ${Math.round(carried.carriedM)} m on at ${Math.round(speedMps * 3.6)} km/h, ` +
+            `±${Math.round(carried.posSigmaM)} m, heading ±${Math.round((carried.headingSigmaRad * 180) / Math.PI)}°${late ? ", VIN known late" : ""})`,
+        );
+      }
+      return;
+    }
     if (pose && this.nav?.startFromPose(widen(pose))) {
       this.poseStatus = "unverified";
       this.note(`nav mode dr (parked pose, ${Math.round((this.clock.nowMs() - pose.savedAt) / 60_000)} min old${late ? ", VIN known late" : ""})`);
@@ -756,7 +778,7 @@ export class NavigatorService implements PositionSource {
       this.createNavigator();
     } else if (vehicle.vin) {
       this.setVehicle(vehicle.vin);
-      this.startFromParkedPose(vehicle.vin, true);
+      this.startFromStoredPose(vehicle.vin, true);
     }
   }
 
@@ -926,6 +948,17 @@ export class NavigatorService implements PositionSource {
     this.publish();
     if (this.nav) this.notes.compassTrustChange(this.nav);
     if (this.clock.nowMs() - this.lastSaveAt >= SAVE_EVERY_MS) this.saveCalibration();
+    if (this.clock.nowMs() - this.lastDriveSaveAt >= DRIVE_SAVE_EVERY_MS) this.saveDrivePose();
+  }
+
+  /** While the car moves: where it is, so a start soon after the app dies mid-drive carries on from there (§6.1). */
+  private saveDrivePose(): void {
+    const pose = this.nav?.drivePose;
+    if (!pose || !this.vin) return;
+    this.lastDriveSaveAt = this.clock.nowMs();
+    this.deps.calibration.saveParkedPose(this.vin, pose, this.lastDriveSaveAt);
+    // Replaced as the car goes and by the pose where it stops: not one for driving to clear.
+    this.poseStored = false;
   }
 
   /**
