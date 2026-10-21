@@ -29,7 +29,9 @@ export function listenedIds(trip: TripLog): Set<number> | null {
  * The frames at when the bus carried them, as near as the log tells: one that arrived after its window ended (the
  * stop's drain, sent before the stop character reached the adapter) at the window's end. On the vLinker a stop
  * without an answer was retried after 1 s, and the frames it drained, arriving then, put a turn's start a second late
- * (2026-10-12).
+ * (2026-10-12). A frame later than any drain is from a window the log has no record of (the app died in it) and keeps
+ * its arrival: moved to the last recorded window's end, 6 min of highway (u37h65) stood at one instant and the replay
+ * had no speed after it.
  */
 export function busTimedFrames(trip: TripLog): NonNullable<TripLog["can"]> {
   const frames = trip.can ?? [];
@@ -39,9 +41,12 @@ export function busTimedFrames(trip: TripLog): NonNullable<TripLog["can"]> {
   return frames.map((f) => {
     while (w + 1 < windows.length && windows[w + 1].startUs <= f.tUs) w++;
     const win = windows[w];
-    return win.startUs <= f.tUs && f.tUs > win.endUs ? { ...f, tUs: win.endUs } : f;
+    return win.startUs <= f.tUs && f.tUs > win.endUs && f.tUs - win.endUs <= DRAIN_MAX_US ? { ...f, tUs: win.endUs } : f;
   });
 }
+
+/** The latest a stop's drain arrives after the window's end: a stop waits up to 1 s for its prompt, then one more 1 s. */
+const DRAIN_MAX_US = 3_000_000;
 
 /** Null when the log has no CAN frames. `profileKey` overrides the choice ("make/mapping/dbc"). */
 export function decodeTripCan(trip: TripLog, profileKey?: string): TripCan | null {
