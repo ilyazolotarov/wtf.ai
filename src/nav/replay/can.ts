@@ -189,3 +189,40 @@ export function canPrimaryInput(trip: TripLog): TripLog {
 
 /** Decoding a log's frames takes a second: once per log (the truth's odometer and the replay both ask). */
 const primaryInputs = new WeakMap<TripLog, TripLog>();
+
+/** The app's OBD poller read the speed about this often while the car moved (2026-10 logs, both adapters). */
+export const OBD_POLL_HZ = 2;
+/** Half a poll's round trip: when the answer reached the phone after the sample time (latency p50 20-90 ms). */
+const OBD_HALF_LATENCY_US = 15_000;
+/** No speed this long before a poll (the link lost, the ECU asleep): no answer, as the poller would have had none. */
+const OBD_SOURCE_STALE_US = 1_000_000;
+
+/**
+ * The speed as OBD polls would have read it instead of the wheels (research, the viewer's Experiment): `hz` polls a
+ * second, each the speed then (the wheels where the shadow heard them, the log's OBD where not) in whole km/h, 0 in
+ * reverse as the test car's ECU reads it (another car's may not), none where the log has no speed (the link lost),
+ * fed as OBD (`source` absent). What CAN primary buys over OBD on the same drive. The frames stay, so the wheels' yaw
+ * is a separate choice.
+ */
+export function obdFromCan(trip: TripLog, hz = OBD_POLL_HZ): TripLog {
+  const speeds = canPrimaryInput(trip).obdSpeed;
+  const obdSpeed: TripLog["obdSpeed"] = [];
+  if (speeds.length) {
+    const stepUs = 1e6 / hz;
+    let i = 0;
+    for (let tUs = speeds[0].tUs; tUs <= speeds[speeds.length - 1].tUs; tUs += stepUs) {
+      while (i + 1 < speeds.length && speeds[i + 1].tUs <= tUs) i++;
+      if (tUs - speeds[i].tUs > OBD_SOURCE_STALE_US) continue;
+      // Reversing, this car's PID 0D reads 0 (CAN gives the wheels negative there).
+      const rawKph = speeds[i].speedMps < 0 ? 0 : Math.round(speeds[i].speedMps * 3.6);
+      obdSpeed.push({ tUs, speedMps: rawKph / 3.6, rawKph, rxUs: tUs + OBD_HALF_LATENCY_US });
+    }
+  }
+  return {
+    ...trip,
+    info: { ...trip.info, can_primary: "off" },
+    // Not CAN primary any more: the app replay must not decode the wheels into the speed again.
+    messages: trip.messages.filter((m) => !m.text.startsWith("can primary: speed from the wheels")),
+    obdSpeed,
+  };
+}

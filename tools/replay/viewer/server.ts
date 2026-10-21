@@ -17,6 +17,7 @@ import { LocalFrame } from "../../../src/nav/geo/local-frame";
 import type { TiledRoadGraph } from "../../../src/nav/mapmatch/graph/road-graph";
 import type { NavConfig } from "../../../src/nav/navigator";
 import { puckTuning } from "../../../src/nav/position/puck";
+import { obdFromCan } from "../../../src/nav/replay/can";
 import { drawnTruthTrack, drawPath, type DrawnPoint, type DrawnTruth } from "../../../src/nav/replay/drawn-truth";
 import { findIncidents, INCIDENT_STEP_S } from "../../../src/nav/replay/incidents";
 import { appOutageCuts, replayTrip, type ReplayOptions } from "../../../src/nav/replay/replay";
@@ -280,6 +281,10 @@ function replayReply(url: URL): Reply {
   // Adapter: as recorded (OBD or CAN, whichever the app took its speed from), or none (phone-only mode,
   // NAVIGATOR-SPEC §9.6: no OBD speed or engine).
   const phoneOnly = q("adapter") === "none";
+  // With the adapter (app replay only): the speed as OBD polls would have read it instead of the CAN wheels, and the
+  // turns from the phone's gyro instead of the rear wheels (can.ts `obdFromCan`; the service's wheel yaw off).
+  const obdSpeed = !phoneOnly && q("speed") === "obd";
+  const gyroTurns = !phoneOnly && q("turns") === "gyro";
   const compareLoop = q("compare") === "before" ? BEFORE_DOT : null;
   // Compass: off, or calibrated on the other logs, optionally turned (a wrong calibration).
   const compassArg = url.searchParams.get("compass") ?? "";
@@ -326,7 +331,7 @@ function replayReply(url: URL): Reply {
     let mainFixes: { t: number; lat: number; lon: number; hAccM: number }[] = [];
     // Through the app: the service publishes the dot, starts from the stored parked pose, and runs the outages.
     const replay = (o: ReplayOptions) => {
-      const run = () => replayTripInApp(trip, {
+      const run = () => replayTripInApp(obdSpeed ? obdFromCan(trip) : trip, {
         calibration: new CalibrationStore(state!.store.copy(), phoneOf(trip)),
         roadGraph: opened ? { key: graphFile!, region: path.basename(graphFile!, ".graph.bin"), graph: opened.graph } : null,
         vin: state!.vin,
@@ -336,6 +341,7 @@ function replayReply(url: URL): Reply {
         trackStepS: o.trackStepS,
         mapMatch: { particlesEveryS: o.mapMatch?.particlesEveryS },
         placings: q("placings") !== "off",
+        ...(gyroTurns ? { wheelYaw: false } : {}),
         // The routes the driver had, as the app gives them to the service (the dot leans on them, puck.ts).
         ...(phoneOnly ? {} : { phoneRoutes: phoneRouteFor(trip, null).routes }),
         ...(phoneOnly

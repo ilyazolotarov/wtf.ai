@@ -338,6 +338,10 @@
       <legend>Adapter</legend>
       <label><input type="radio" name="adapter" value="" checked /><span>as recorded<small>the speed the app took: OBD or the CAN wheels</small></span></label>
       <label><input type="radio" name="adapter" value="none" /><span>none — the phone on its own<small>phone-only mode: its own speed and gyro; GPS still takes over when good</small></span></label>
+      <label title="On a drive the app drove on the CAN wheels: the speed as the app's OBD polls would have read it instead">Speed
+        <select id="speed"><option value="">as recorded</option><option value="obd">OBD polls (2 Hz, whole km/h)</option></select></label>
+      <label title="On a drive the app turned with the rear wheels: the phone's gyro for the turns instead">Turns
+        <select id="turns"><option value="">as recorded</option><option value="gyro">the phone's gyro</option></select></label>
     </fieldset>
     <details class="box exp-only">
       <summary>Research options</summary>
@@ -1714,11 +1718,11 @@ document.addEventListener("keydown", (e) => {
 window.addEventListener("resize", drawTimeline);
 
 // ---------- loading ----------
-const PARAMS = ["file", "adapter", "gps", "cut", "from", "compare", "lag", "start", "compass", "placings"];
+const PARAMS = ["file", "adapter", "speed", "turns", "gps", "cut", "from", "compare", "lag", "start", "compass", "placings"];
 /** The replay settings: three are radio groups (by name), the rest inputs and selects (by id). */
 const RADIOS = ["adapter", "gps", "from"];
 /** What each setting is when the replay runs as it happened. */
-const AS_IT_HAPPENED = { adapter: "", gps: "app", cut: "", from: "phone", compare: "", lag: "", start: "", compass: "", placings: "" };
+const AS_IT_HAPPENED = { adapter: "", speed: "", turns: "", gps: "app", cut: "", from: "phone", compare: "", lag: "", start: "", compass: "", placings: "" };
 function param(k) {
   if (RADIOS.includes(k)) return document.querySelector(`input[name="${k}"]:checked`)?.value ?? "";
   return $(k).value;
@@ -1745,6 +1749,8 @@ function changedFromApp() {
   if (param("from") === "parked") out.push("started where today’s navigator parked it");
   if (param("from") === "cold") out.push("cold start");
   if (param("adapter") === "none") out.push("no adapter");
+  if ($("speed").value === "obd" && param("adapter") !== "none") out.push("speed from OBD polls");
+  if ($("turns").value === "gyro" && param("adapter") !== "none") out.push("turns from the phone's gyro");
   if ($("compare").value) out.push(`compared with ${$("compare").selectedOptions[0].textContent.replace(/ \(orange\)$/, "")}`);
   if ($("placings").value) out.push("placings ignored");
   if ($("lag").value) out.push(`GPS lag ${$("lag").value} s`);
@@ -2005,7 +2011,7 @@ async function run() {
   }
   seek(0);
 }
-for (const id of ["compare", "compass", "placings"]) $(id).onchange = run;
+for (const id of ["compare", "compass", "placings", "speed", "turns"]) $(id).onchange = run;
 for (const r of document.querySelectorAll('input[name="adapter"], input[name="from"]')) r.onchange = run;
 for (const r of document.querySelectorAll('input[name="gps"]')) {
   r.onchange = () => { syncCutInput(); if (param("gps") !== "cut") run(); else { renderChanged(); $("cut").focus(); } };
