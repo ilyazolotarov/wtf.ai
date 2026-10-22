@@ -100,10 +100,8 @@ class SensorCaptureModule : Module() {
     }
 
     AsyncFunction("stopTripService") {
-      appContext.reactContext?.let {
-        TripService.stop(it)
-        (it as? ReactContext)?.let { react -> JsKeepAlive.stop(react) }
-      }
+      appContext.reactContext?.let { TripService.stop(it) }
+      JsKeepAlive.stop()
     }
 
     // The running service's notification, with new words; false when it isn't running (yet).

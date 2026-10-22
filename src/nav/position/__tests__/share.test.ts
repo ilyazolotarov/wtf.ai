@@ -6,6 +6,9 @@ import {
   SHARE_RESUME_ACCURACY_M,
   shareDecision,
   TAKEOVER_NO_FIX_AFTER_START_MS,
+  TAKEOVER_NO_FIX_FIRST_PROBE_MS,
+  TAKEOVER_NO_FIX_SILENT_MS,
+  TAKEOVER_PROBE_BACK_FIXES,
   TAKEOVER_PROBE_EVERY_MAX_MS,
   TAKEOVER_PROBE_EVERY_MS,
   TAKEOVER_PROBE_FAR_M,
@@ -79,6 +82,9 @@ describe("shareDecision", () => {
 });
 
 describe("GpsTakeoverPolicy", () => {
+  /** A satellite fix near the dot, `at` telling it from the others. */
+  const near = (at: number): ProbeFix => ({ at, offM: 40, radiusM: 20 });
+
   test("trusted GPS stays the phone's; spoofing takes it at once", () => {
     const p = new GpsTakeoverPolicy();
     expect(p.update(0, "TRUSTED", true)).toBe(false);
@@ -91,14 +97,68 @@ describe("GpsTakeoverPolicy", () => {
     expect(p.update(0, "UNTRUSTED", false)).toBe(false);
   });
 
-  test("no fix at the start is a cold GPS until a minute; after trusted GPS it is jamming at once", () => {
+  test("no fix at the start is a cold GPS until a minute; after trusted GPS it is jamming once the fixes stop", () => {
     const cold = new GpsTakeoverPolicy();
     expect(cold.update(0, "NO_FIX", true)).toBe(false);
     expect(cold.update(TAKEOVER_NO_FIX_AFTER_START_MS - 1, "NO_FIX", true)).toBe(false);
     expect(cold.update(TAKEOVER_NO_FIX_AFTER_START_MS, "NO_FIX", true)).toBe(true);
     const jammed = new GpsTakeoverPolicy();
-    jammed.update(0, "TRUSTED", true);
-    expect(jammed.update(5_000, "NO_FIX", true)).toBe(true);
+    jammed.update(0, "TRUSTED", true, near(1));
+    expect(jammed.update(TAKEOVER_NO_FIX_SILENT_MS - 1, "NO_FIX", true, near(1))).toBe(false);
+    expect(jammed.update(TAKEOVER_NO_FIX_SILENT_MS, "NO_FIX", true, near(1))).toBe(true);
+  });
+
+  test("poor satellite fixes still coming keep the phone's GPS: Waze shows them, the navigator uses them", () => {
+    const p = new GpsTakeoverPolicy();
+    p.update(0, "TRUSTED", true, near(0));
+    // Two minutes among tall buildings: a fix a second, none good enough to trust.
+    for (let t = 1_000; t <= 120_000; t += 1_000) expect(p.update(t, "NO_FIX", true, near(t))).toBe(false);
+    // A bridge: a few seconds without any.
+    expect(p.update(135_000, "NO_FIX", true, near(120_000))).toBe(false);
+    // They stop.
+    expect(p.update(120_000 + TAKEOVER_NO_FIX_SILENT_MS, "NO_FIX", true, near(120_000))).toBe(true);
+  });
+
+  test("the first no-fix takeover since trusted GPS probes soon; one a probe found still on waits the full time", () => {
+    const p = new GpsTakeoverPolicy();
+    p.update(0, "TRUSTED", true, near(0));
+    let t = TAKEOVER_NO_FIX_SILENT_MS;
+    expect(p.update(t, "NO_FIX", true, near(0))).toBe(true);
+    expect(p.update(t + TAKEOVER_NO_FIX_FIRST_PROBE_MS - 1, "NO_FIX", true, near(0))).toBe(true);
+    t += TAKEOVER_NO_FIX_FIRST_PROBE_MS;
+    expect(p.update(t, "NO_FIX", true, near(0))).toBe(false);
+    // Nothing during the probe: still jammed.
+    t += TAKEOVER_PROBE_MS;
+    expect(p.update(t, "NO_FIX", true, near(0))).toBe(true);
+    expect(p.update(t + TAKEOVER_PROBE_EVERY_MS - 1, "NO_FIX", true, near(0))).toBe(true);
+    expect(p.update(t + TAKEOVER_PROBE_EVERY_MS, "NO_FIX", true, near(0))).toBe(false);
+    // Spoofing waits the full time from the start.
+    const spoof = new GpsTakeoverPolicy();
+    spoof.update(0, "UNTRUSTED", true);
+    expect(spoof.update(TAKEOVER_NO_FIX_FIRST_PROBE_MS, "UNTRUSTED", true)).toBe(true);
+  });
+
+  test("a probe meeting fixes integrity lets through, only too poor to trust, gives the gps provider back", () => {
+    const p = new GpsTakeoverPolicy();
+    p.update(0, "TRUSTED", true, near(0));
+    let t = TAKEOVER_NO_FIX_SILENT_MS;
+    p.update(t, "NO_FIX", true, near(0));
+    t += TAKEOVER_NO_FIX_FIRST_PROBE_MS;
+    expect(p.update(t, "NO_FIX", true, near(0))).toBe(false);
+    for (let i = 1; i <= TAKEOVER_PROBE_BACK_FIXES; i++) p.update(t + i * 1_000, "NO_FIX", true, near(t + i * 1_000));
+    expect(p.update(t + TAKEOVER_PROBE_MS, "NO_FIX", true, near(t + TAKEOVER_PROBE_BACK_FIXES * 1_000))).toBe(false);
+    expect(p.state).toBe("real");
+  });
+
+  test("a fix leaking through jamming during a probe doesn't give it back", () => {
+    const p = new GpsTakeoverPolicy();
+    p.update(0, "TRUSTED", true, near(0));
+    let t = TAKEOVER_NO_FIX_SILENT_MS;
+    p.update(t, "NO_FIX", true, near(0));
+    t += TAKEOVER_NO_FIX_FIRST_PROBE_MS;
+    p.update(t, "NO_FIX", true, near(0));
+    p.update(t + 3_000, "NO_FIX", true, near(t + 3_000));
+    expect(p.update(t + TAKEOVER_PROBE_MS, "NO_FIX", true, near(t + 3_000))).toBe(true);
   });
 
   test("taken, it lets go every two minutes to look, and takes it again when GPS is still bad", () => {

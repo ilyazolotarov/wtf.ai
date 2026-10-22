@@ -24,7 +24,7 @@ The Android build for volunteer testers. Companion to [SPEC.md](SPEC.md); tester
 | IMU | `SensorManager`: `TYPE_GYROSCOPE`, `TYPE_GRAVITY`, `TYPE_LINEAR_ACCELERATION`, `TYPE_GAME_ROTATION_VECTOR` (no magnetometer in the frame), raw `TYPE_MAGNETIC_FIELD` for logging. 100 Hz, batched like iOS. Phones without gravity / linear-acceleration sensors derive them from the accelerometer. |
 | Clock | `SystemClock.elapsedRealtimeNanos()` in µs: sensor events and `Location.elapsedRealtimeNanos` use it natively. |
 | Conventions | Kotlin normalizes to the iOS conventions the TS assumes: gravity is the **true gravity direction** (Android's `TYPE_GRAVITY` points up, so it is negated) and user acceleration is CoreMotion's (`TYPE_LINEAR_ACCELERATION` negated); m/s², rad/s, course in radians, invalid fields omitted. A parity test pins this (§5). |
-| Background | One **foreground service** (types `location` + `connectedDevice`) started with a trip, with a persistent notification ("wtf.ai is recording your trip") and a partial wake lock. Without it Android stops sensors and Bluetooth polling with the screen off. Location "all the time" only for the opt-in that keeps the position without opening the app (VEHICLE-LINK-SPEC §11), asked for there and nowhere else. While it runs, a **headless JS task** (`JsKeepAlive`, registered in JS as `WtfTripKeepAlive`) keeps React Native's timers firing with another app in front: without one they stop with the activity, and with them the OBD poller and the navigator's tick. |
+| Background | One **foreground service** (types `location` + `connectedDevice`) started with a trip, with a persistent notification ("wtf.ai is recording your trip") and a partial wake lock. Without it Android stops sensors and Bluetooth polling with the screen off. Location "all the time" only for the opt-in that keeps the position without opening the app (VEHICLE-LINK-SPEC §11), asked for there and nowhere else. While it runs, a **headless JS task** (`JsKeepAlive`, registered in JS as `WtfTripKeepAlive`) keeps React Native's timers firing with another app in front: without one they stop with the activity, and with them the OBD poller and the navigator's tick. A task belongs to one React context: after a JS reload mid-trip (More → Update's restart) the new one starts its own. |
 | Permissions | `ACCESS_FINE_LOCATION`, `BLUETOOTH_SCAN` (`neverForLocation`) + `BLUETOOTH_CONNECT` (12+; legacy `BLUETOOTH`/`BLUETOOTH_ADMIN` ≤ 11), `POST_NOTIFICATIONS` (13+), `FOREGROUND_SERVICE(_LOCATION, _CONNECTED_DEVICE)`, `WAKE_LOCK`, `HIGH_SAMPLING_RATE_SENSORS`, `ACCESS_BACKGROUND_LOCATION` (asked for only by the wake's opt-in), the three companion permissions for the wake (`REQUEST_OBSERVE_COMPANION_DEVICE_PRESENCE`, `REQUEST_COMPANION_START_FOREGROUND_SERVICES_FROM_BACKGROUND`, `REQUEST_COMPANION_RUN_IN_BACKGROUND`), `REQUEST_INSTALL_PACKAGES` (sideloaded builds only), `ACCESS_MOCK_LOCATION` (§8). From config plugins (`modules/vehicle-link/app.plugin.js`, `app.json`) or a module's own manifest (`modules/position-share`: the mock location permission, with lint's `MockLocation` check ignored, and `<queries>` for Waze and Google Maps), never by hand in `android/`. The Bluetooth dialog is shown at most once per process, and never on devices without an adapter. |
 | Pairing | Classic adapters must be bonded (PIN 1234/0000). The Vehicle screen lists bonded devices plus discovery results; tapping an unbonded one calls `createBond()`. |
 | Icons | `expo-symbols` renders Material Symbols on Android; the `Icon` map keys are Material names with an `android` entry each. |
@@ -140,16 +140,20 @@ puts the phone. Opt-in, Android only (iOS has no way to give other apps a positi
 - **The platform `gps` provider replaced by a test provider** (`addTestProvider`, `GpsTakeover`): **Waze reads
   `LocationManager`'s `gps` (and `network`) directly**, never the fused provider. Installing a test `gps` provider
   stops the real one for every app, wtf.ai included (its own fixes are then the mock ones, flagged and dropped), so it
-  is taken only while GPS isn't trusted (`GpsTakeoverPolicy`): at once when spoofed or being re-checked, when no fix
-  comes once GPS was trusted this trip or after a minute of trip. Taken, it is given back every 2 min for a probe of
-  10 s, up to 60 s while integrity checks returning fixes (`REACQUIRING`); trusted GPS ends the takeover. During a
-  probe Waze sees the phone's real GPS, spoofed or not, so a spoofed one is cut short: the probe's first satellite fix
-  over 500 m (and 3 radii) from the dot, unless integrity is checking it, takes `gps` again at once, and Waze saw one
-  fix instead of ten seconds of them (`PositionEstimate.satelliteFix`: never wtf.ai's own fixes, which come back on
-  `gps` flagged as mock). Each probe cut short doubles the wait for the next (2, 4, then 8 min); one that met no such
-  fix (jamming: Waze saw nothing) starts the waits over. Android has no way for an app to read the real GNSS while
-  `gps` is mocked: the hardware-only provider that can't be mocked (`gps_hardware`) is for system apps. `network` is
-  never replaced: Wi-Fi/cell fixes stay honest under jamming.
+  is taken only while GPS isn't trusted (`GpsTakeoverPolicy`): at once when spoofed or being re-checked. Without a
+  trusted fix (`NO_FIX`), only once the phone's satellite fixes have stopped for 20 s, and at a trip's start only after
+  a minute unless GPS was trusted already: poor fixes still coming (tall buildings) are Waze's to show and the
+  navigator's to use, and a bridge or an underpass passes first. Taken, it is given back every 2 min for a probe of
+  10 s, up to 60 s while integrity checks returning fixes (`REACQUIRING`); the first no-fix takeover since GPS was
+  trusted probes after 30 s, since most losses are short (a tunnel). Trusted GPS ends the takeover, and so do 3
+  satellite fixes during a probe that integrity let through, only too poor to trust (one is a leak through jamming).
+  During a probe Waze sees the phone's real GPS, spoofed or not, so a spoofed one is cut short: the probe's first
+  satellite fix over 500 m (and 3 radii) from the dot, unless integrity is checking it, takes `gps` again at once, and
+  Waze saw one fix instead of ten seconds of them (`PositionEstimate.satelliteFix`: never wtf.ai's own fixes, which
+  come back on `gps` flagged as mock). Each probe cut short doubles the wait for the next (2, 4, then 8 min); one that
+  met no such fix (jamming: Waze saw nothing) starts the waits over. Android has no way for an app to read the real
+  GNSS while `gps` is mocked: the hardware-only provider that can't be mocked (`gps_hardware`) is for system apps.
+  `network` is never replaced: Wi-Fi/cell fixes stay honest under jamming.
 
 Phones without Google Play services get only the `gps` takeover (not built: sharing needs Play services).
 

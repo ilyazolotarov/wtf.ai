@@ -93,6 +93,22 @@ export const TAKEOVER_PROBE_FAR_RADII = 3;
  * trusted earlier in the trip (then losing it is jamming).
  */
 export const TAKEOVER_NO_FIX_AFTER_START_MS = 60_000;
+/**
+ * `NO_FIX` takes the gps provider only once the phone's satellite fixes have stopped this long. Poor ones still coming
+ * (tall buildings) are Waze's to show and the navigator's to use, and a bridge or an underpass passes before it:
+ * taken, the navigator would get no satellite fix until the next probe.
+ */
+export const TAKEOVER_NO_FIX_SILENT_MS = 20_000;
+/**
+ * The first `NO_FIX` takeover since GPS was trusted (or since the trip's start) probes this soon: most losses are short
+ * (a tunnel). Spoofing, and losses a probe found still on, wait the full time.
+ */
+export const TAKEOVER_NO_FIX_FIRST_PROBE_MS = 30_000;
+/**
+ * A probe that met this many satellite fixes integrity let through, only too poor to trust, gives the gps provider back:
+ * the phone's GPS works. Fewer is a fix leaking through jamming.
+ */
+export const TAKEOVER_PROBE_BACK_FIXES = 3;
 
 /** `real`: Waze reads the phone's own GPS; `taken`: wtf.ai's fixes; `probing`: let go to look at the real GPS. */
 export type GpsTakeoverState = "real" | "taken" | "probing";
@@ -111,54 +127,99 @@ export interface ProbeFix {
  */
 export class GpsTakeoverPolicy {
   state: GpsTakeoverState = "real";
-  /** Taken, the wait before the next probe. */
+  /** The wait between probes, doubled by each one a spoofed fix ended. */
   probeEveryMs = TAKEOVER_PROBE_EVERY_MS;
   /** The last probe ended at a spoofed fix this far from the dot, m; null: it didn't. */
   spoofedOffM: number | null = null;
   private sinceMs = 0;
+  /** Taken, the wait before the next probe: the first after a `NO_FIX` takeover may be shorter. */
+  private waitMs = TAKEOVER_PROBE_EVERY_MS;
+  /** The next `NO_FIX` takeover probes after `TAKEOVER_NO_FIX_FIRST_PROBE_MS`: none since GPS was last trusted. */
+  private quickProbe = true;
   private startMs: number | null = null;
   private trustedOnce = false;
   /** The satellite fix seen last before the probe: any other one came during it. */
   private probeFixAt: number | null = null;
+  /** New satellite fixes seen during the probe. */
+  private probeFixes = 0;
+  /** The phone's last satellite fix (its `at`), and when this policy saw it first; before any, the policy's start. */
+  private fixAt: number | null = null;
+  private fixSeenMs = 0;
 
   /**
    * Whether the gps provider should be wtf.ai's now; `sharing`: a fix of the dot is going out (not held); `fix`: the
    * phone's last satellite fix, refused or not (what Waze reads during a probe).
    */
   update(nowMs: number, trust: TrustState, sharing: boolean, fix?: ProbeFix | null): boolean {
-    this.startMs ??= nowMs;
+    if (this.startMs === null) {
+      this.startMs = nowMs;
+      this.fixSeenMs = nowMs;
+    }
+    if (fix && fix.at !== this.fixAt) {
+      this.fixAt = fix.at;
+      this.fixSeenMs = nowMs;
+      if (this.state === "probing") this.probeFixes++;
+    }
     if (trust === "TRUSTED") {
       this.trustedOnce = true;
+      this.quickProbe = true;
       this.state = "real";
       this.probeEveryMs = TAKEOVER_PROBE_EVERY_MS;
       return false;
     }
     const age = nowMs - this.sinceMs;
     if (this.state === "real") {
-      const lost = trust !== "NO_FIX" || this.trustedOnce || nowMs - this.startMs >= TAKEOVER_NO_FIX_AFTER_START_MS;
-      if (lost && sharing) this.enter("taken", nowMs);
+      if (sharing && this.lost(nowMs, trust)) {
+        const quick = trust === "NO_FIX" && this.quickProbe;
+        if (trust === "NO_FIX") this.quickProbe = false;
+        this.take(nowMs, quick ? Math.min(TAKEOVER_NO_FIX_FIRST_PROBE_MS, this.probeEveryMs) : this.probeEveryMs);
+      }
     } else if (this.state === "taken") {
-      if (age >= this.probeEveryMs) {
+      if (age >= this.waitMs) {
         this.enter("probing", nowMs);
         this.probeFixAt = fix?.at ?? null;
+        this.probeFixes = 0;
       }
     } else if (this.spoofed(trust, fix)) {
       // Waze has just been given it: taken again at once, before the next.
       this.spoofedOffM = fix!.offM;
       this.probeEveryMs = Math.min(this.probeEveryMs * 2, TAKEOVER_PROBE_EVERY_MAX_MS);
-      this.enter("taken", nowMs);
+      this.take(nowMs, this.probeEveryMs);
     } else if (age >= TAKEOVER_PROBE_MS && (trust !== "REACQUIRING" || age >= TAKEOVER_PROBE_MAX_MS)) {
       this.spoofedOffM = null;
       this.probeEveryMs = TAKEOVER_PROBE_EVERY_MS;
-      this.enter("taken", nowMs);
+      // Fixes integrity let through came during the probe, only too poor to trust: the phone's GPS works again.
+      const back = trust === "NO_FIX" && this.probeFixes >= TAKEOVER_PROBE_BACK_FIXES && !this.silent(nowMs);
+      if (back) this.enter("real", nowMs);
+      else this.take(nowMs, this.probeEveryMs);
     }
     return this.state === "taken";
+  }
+
+  /**
+   * GPS is lost for Waze: refused fixes (spoofing) at once; no trusted fix only once the satellite fixes have stopped,
+   * and at a trip's start only after a minute unless GPS was trusted already.
+   */
+  private lost(nowMs: number, trust: TrustState): boolean {
+    if (trust !== "NO_FIX") return true;
+    if (!this.silent(nowMs)) return false;
+    return this.trustedOnce || nowMs - (this.startMs ?? nowMs) >= TAKEOVER_NO_FIX_AFTER_START_MS;
+  }
+
+  /** No satellite fix for `TAKEOVER_NO_FIX_SILENT_MS`. */
+  private silent(nowMs: number): boolean {
+    return nowMs - this.fixSeenMs >= TAKEOVER_NO_FIX_SILENT_MS;
   }
 
   /** A satellite fix came during the probe, far from the dot, and integrity isn't checking it as GPS coming back. */
   private spoofed(trust: TrustState, fix: ProbeFix | null | undefined): boolean {
     if (!fix || fix.at === this.probeFixAt || trust === "REACQUIRING") return false;
     return fix.offM > Math.max(TAKEOVER_PROBE_FAR_M, TAKEOVER_PROBE_FAR_RADII * fix.radiusM);
+  }
+
+  private take(nowMs: number, waitMs: number): void {
+    this.waitMs = waitMs;
+    this.enter("taken", nowMs);
   }
 
   private enter(state: GpsTakeoverState, nowMs: number): void {
