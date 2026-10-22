@@ -549,7 +549,8 @@ export function cityDrive(o: CityDriveOptions): CityDrive {
         tUs,
         gyro: [0, 0, -yawCw * s.gyroScale + bias + s.gyroNoiseRadS * r.gauss()],
         gravity: [0, 0, -9.80665],
-        userAccel: [0.02 * r.gauss(), 0.02 * r.gauss(), 0.02 * r.gauss()],
+        // The turn's push sideways (v·ω), as a car's: without it the IMU processor takes the turn for the phone's.
+        userAccel: [aLong + 0.02 * r.gauss(), -v * yawCw + 0.02 * r.gauss(), 0.02 * r.gauss()],
       });
     }
     if (step % 5 === 0) {

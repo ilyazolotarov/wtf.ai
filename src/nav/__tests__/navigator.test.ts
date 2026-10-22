@@ -1,6 +1,6 @@
 import { syntheticDrive, type DriveSegment } from "@/nav/__fixtures__/synthetic-drive";
 import { haversineM } from "@/nav/geo";
-import { Navigator } from "@/nav/navigator";
+import { Navigator, type NavConfig } from "@/nav/navigator";
 import { replayTrip } from "@/nav/replay/replay";
 
 const deg = (r: number) => (r * 180) / Math.PI;
@@ -213,6 +213,36 @@ describe("Navigator on a synthetic drive", () => {
     expect(result.summary.imuInvalidS).toBe(0);
     expect(err.headingDeg).toBeLessThan(2);
     expect(err.posM).toBeLessThan(15);
+  });
+
+  // u37h65 (2026-10-21): 4 min in a hand at OBD 0 before the drive turned the parked car 60°, the gyro read valid
+  // whenever the hand rested; 4tc22d: a phone grabbed swings ~100° in the second before any check sees the hand.
+  test("a phone in a hand while parked doesn't turn the car: not its first swing, not its fidgeting", () => {
+    const run = (nav: Partial<NavConfig>) => {
+      const drive = syntheticDrive({
+        segments: [
+          { durationS: 30, speedMps: 14, yawRateDegS: 0 },
+          { durationS: 5, speedMps: 0, yawRateDegS: 0 },
+          { durationS: 40, speedMps: 0, yawRateDegS: 0 },
+          { durationS: 20, speedMps: 12, yawRateDegS: 0 },
+        ],
+        gnss: "clean",
+      });
+      const t0 = drive.trip.imu[0].tUs;
+      for (const s of drive.trip.imu) {
+        const t = (s.tUs - t0) / 1e6;
+        // Grabbed: 0.4 s at 1.5 rad/s about the vertical alone (no tilt for the old checks to see), 34°.
+        if (t >= 45 && t < 45.4) s.gyro = [s.gyro[0], s.gyro[1], s.gyro[2] + 1.5];
+        // Then held: swaying a little off the vertical, turning 0.05 rad/s, resting 2 s in every 6 (40° in all).
+        else if (t >= 45.4 && t < 65 && (t - 45.4) % 6 < 4) s.gyro = [0.35 * Math.sin(2 * Math.PI * t), s.gyro[1], s.gyro[2] + 0.05];
+      }
+      const result = replayTrip(drive.trip, { cuts: [{ fromS: 38, toS: 200 }], nav });
+      return endError(drive, result).headingDeg;
+    };
+    expect(run({})).toBeLessThan(3);
+    // The checks before: the swing and the rests let in.
+    const before = { imu: { handRmsRadS: 1e9, lateralMissMS2: 1e9, mountedRmsRadS: 1e9, remountUs: 0 }, standingYawDelayUs: 0 };
+    expect(run(before)).toBeGreaterThan(20);
   });
 
   test("handling while driving inflates the heading uncertainty instead of turning", () => {

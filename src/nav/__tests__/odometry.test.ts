@@ -106,10 +106,11 @@ describe("Navigator odometry on a synthetic drive", () => {
   });
 
   test("stops are stopped chunks with no turn and no real distance", () => {
-    // Speed reaches 0 at 79 s; standstill is detected 2 s later; it pulls away at 87 s.
-    const stopUs = drive.trip.startUs + 81.5e6;
-    const atStop = steps.filter((s) => s.t0Us >= stopUs && s.t1Us <= stopUs + 5e6);
-    expect(atStop.length).toBeGreaterThan(20);
+    // Speed reaches 0 at 79 s; standstill is detected 2 s after the braking's push has left the 1 s quiet window;
+    // it pulls away at 87 s.
+    const stopUs = drive.trip.startUs + 82.5e6;
+    const atStop = steps.filter((s) => s.t0Us >= stopUs && s.t1Us <= stopUs + 4e6);
+    expect(atStop.length).toBeGreaterThan(15);
     // The EKF speed after zero-velocity updates is ~1e-5 m/s, not exactly 0.
     expect(atStop.every((s) => s.stopped && s.dsM < 1e-3 && s.dpsiRad === 0)).toBe(true);
   });

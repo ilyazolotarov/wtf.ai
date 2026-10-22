@@ -23,6 +23,29 @@ export interface ImuConfig {
   handlingRateRadS: number;
   /** Gyro stays invalid this long after the last handling trigger. */
   handlingHoldUs: number;
+  /**
+   * With the car's speed 0 (standing, or crawling below the ECU's cutoff): the rotation off the vertical, averaged as a
+   * vector over 0.1 s, as an RMS over 1 s, above this = the phone in a hand. A hand never holds it as still as a mount
+   * on a car that barely moves: mounted, 90 % of such seconds stay under 0.06 rad/s; in a hand half are above 0.5
+   * (36 drives with the wheels as truth, 2026-10-22). Not lower: reversing out of a parking space (OBD 0) shook a mount
+   * to 0.18 (qkxjpt). Driving, a mount on a rough road shakes as much as a hand: not then.
+   */
+  handRmsRadS: number;
+  /** With the speed 0, the gyro is the car's again only after that RMS stayed under this for `remountUs`. */
+  mountedRmsRadS: number;
+  /**
+   * A hand holds the phone still for a second or two between moves, and the gyro read valid then let the phone's turning
+   * in as the car's: 60° while parked before a drive, which the navigator took for a manoeuvre (u37h65).
+   */
+  remountUs: number;
+  /**
+   * Moving: the yaw rate ω at speed v pushes the car sideways with v·ω. A yaw rate whose push the accelerometer
+   * doesn't feel, by more than this plus `lateralMissShare` of it (over `lateralWindow` samples), is the phone
+   * turning on its own: in a hand, the phone's turn has no push behind it.
+   */
+  lateralMissMS2: number;
+  lateralMissShare: number;
+  lateralWindow: number;
   gravityTauS: number;
   /** Stillness window and thresholds on the 0.1 s low-passed yaw rate / acceleration. */
   stillWindow: number;
@@ -37,6 +60,12 @@ export const DEFAULT_IMU_CONFIG: ImuConfig = {
   frameJumpRad: (10 * Math.PI) / 180,
   handlingRateRadS: 1.0,
   handlingHoldUs: 1_500_000,
+  handRmsRadS: 0.2,
+  mountedRmsRadS: 0.08,
+  remountUs: 3_000_000,
+  lateralMissMS2: 1.0,
+  lateralMissShare: 0.3,
+  lateralWindow: 50,
   gravityTauS: 3,
   stillWindow: 100,
   stillYawStdRadS: 0.01,
@@ -105,6 +134,15 @@ export class ImuProcessor {
   private lastUp: Vec3 | null = null;
   private lastTUs: number | null = null;
   private handlingUntilUs = -Infinity;
+  /** Squared off-vertical rotation (its 0.1 s vector mean) over the last second. */
+  private offSq = new RollingStats(100);
+  /** Since when the phone has been held as still as a mount (null: it isn't). */
+  private steadySinceUs: number | null = null;
+  /** Handled and not yet back in a mount: from a trigger until held still (standing) or the hold's end (moving). */
+  private inHand = false;
+  /** The acceleration across the vertical (phone frame) and the yaw rate, over `lateralWindow`. */
+  private sideLp: RollingStats[];
+  private yawSideLp: RollingStats;
   private yawLp = new RollingStats(10);
   private accelLp = new RollingStats(10);
   private offLp = [new RollingStats(10), new RollingStats(10), new RollingStats(10)];
@@ -117,9 +155,15 @@ export class ImuProcessor {
     this.yawWindow = new RollingStats(this.config.stillWindow);
     this.yawLpWindow = new RollingStats(this.config.stillWindow);
     this.accelLpWindow = new RollingStats(this.config.stillWindow);
+    this.sideLp = [0, 1, 2].map(() => new RollingStats(this.config.lateralWindow));
+    this.yawSideLp = new RollingStats(this.config.lateralWindow);
   }
 
-  process(s: ImuSample): ImuOutput {
+  /**
+   * `speedMps`: the car's speed when known (null or absent: unknown). 0 holds the phone to a mount's stillness; moving,
+   * its turning to the car's sideways push. Without it only the tilt and rate triggers judge.
+   */
+  process(s: ImuSample, speedMps?: number | null): ImuOutput {
     const c = this.config;
     const gNorm = norm(s.gravity);
     const up: Vec3 = gNorm > 0 ? [-s.gravity[0] / gNorm, -s.gravity[1] / gNorm, -s.gravity[2] / gNorm] : [0, 0, 1];
@@ -153,8 +197,33 @@ export class ImuProcessor {
     const off: Vec3 = [s.gyro[0] - yawRate * up[0], s.gyro[1] - yawRate * up[1], s.gyro[2] - yawRate * up[2]];
     for (let i = 0; i < 3; i++) this.offLp[i].push(off[i]);
     const offMean = norm([this.offLp[0].mean, this.offLp[1].mean, this.offLp[2].mean]);
-    if (tilt > c.handlingTiltRad || offMean > c.handlingRateRadS) this.handlingUntilUs = s.tUs + c.handlingHoldUs;
-    const valid = s.tUs >= this.handlingUntilUs;
+    this.offSq.push(offMean * offMean);
+    const offRms = Math.sqrt(this.offSq.mean);
+    // The specific force across the gyro's vertical (not gravity's: Android's leans with that very force).
+    const u = this.upGyro;
+    const f: Vec3 = [s.gravity[0] + s.userAccel[0], s.gravity[1] + s.userAccel[1], s.gravity[2] + s.userAccel[2]];
+    const fu = dot(f, u);
+    for (let i = 0; i < 3; i++) this.sideLp[i].push(f[i] - fu * u[i]);
+    this.yawSideLp.push(yawRate);
+    const standing = speedMps === 0;
+    let sideMiss = false;
+    if (speedMps != null && speedMps > 0 && this.yawSideLp.full) {
+      const push = Math.abs(speedMps * this.yawSideLp.mean);
+      const felt = norm([this.sideLp[0].mean, this.sideLp[1].mean, this.sideLp[2].mean]);
+      sideMiss = push - felt > c.lateralMissMS2 + c.lateralMissShare * push;
+    }
+    if (tilt > c.handlingTiltRad || offMean > c.handlingRateRadS || sideMiss || (standing && this.offSq.full && offRms > c.handRmsRadS)) {
+      this.handlingUntilUs = s.tUs + c.handlingHoldUs;
+      this.inHand = true;
+    }
+    if (offRms >= c.mountedRmsRadS || !this.offSq.full) this.steadySinceUs = null;
+    else this.steadySinceUs ??= s.tUs;
+    // Standing, back in the mount only once held as still as one; moving, the vibration hides that and the push judges.
+    // Back in it, a car reversing out of its space shakes it up to ~0.2 rad/s: only a trigger takes it out again.
+    if (this.inHand && s.tUs >= this.handlingUntilUs && (!standing || (this.steadySinceUs !== null && s.tUs - this.steadySinceUs >= c.remountUs))) {
+      this.inHand = false;
+    }
+    const valid = !this.inHand;
 
     this.yawLp.push(yawRate);
     this.accelLp.push(norm(s.userAccel));

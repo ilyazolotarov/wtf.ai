@@ -68,6 +68,11 @@ export interface NavConfig {
   standstillUs: number;
   /** OBD speed older than this is unknown (link lost); the parked poll runs at 1 Hz. */
   obdStaleUs: number;
+  /**
+   * The gyro's turning with OBD 0 reaches the heading this late, and not at all if the phone is found handled meanwhile
+   * (§5.1): a grabbed phone swings ~100° in the second before any check sees the hand (4tc22d). Moving, it all goes in.
+   */
+  standingYawDelayUs: number;
   /** The yaw rate's white noise, rad/s, while the CAN wheels turn the car (`setWheelYaw`), for the EKF's gyro one. */
   wheelYawNoise: number;
   /** Init from a GNSS course needs at least this speed and course accuracy. */
@@ -176,6 +181,7 @@ export const DEFAULT_NAV_CONFIG: NavConfig = {
   canZeroSigmaMps: 0.3,
   standstillUs: 2_000_000,
   obdStaleUs: 2_500_000,
+  standingYawDelayUs: 1_500_000,
   wheelYawNoise: 0.01,
   // Pulling away, CoreLocation's course can be off by tens of degrees while claiming ±18°.
   courseInitMinSpeedMps: 5,
@@ -501,6 +507,8 @@ export class Navigator {
   private quietSinceUs: number | null = null;
   /** Net gyro turn while OBD read 0 and the phone wasn't still, since the car last drove (a manoeuvre: reversing). */
   private manoeuvreRad = 0;
+  /** The gyro's turning with OBD 0 not yet let in (`standingYawDelayUs`): each step's rad less the bias, its time. */
+  private standingTurns: { tUs: number; rad: number }[] = [];
   private lastBiasUpdateUs = -Infinity;
   private standstill = false;
 
@@ -785,7 +793,12 @@ export class Navigator {
   }
 
   onImu(s: ImuSample): void {
-    const out = this.imu.process(s);
+    // The car's speed for the handling checks (§5.1): standing until a speed says otherwise, last seen standing it
+    // stands; moving with the speed gone stale, unknown. Not with the wheels' turning: their sample is the car's (its
+    // acceleration still the phone's, in another frame than its vertical).
+    const o = this.lastObd;
+    const speed = o === null ? 0 : s.tUs - o.tUs < this.config.obdStaleUs ? Math.abs(o.speedMps) : o.rawKph === 0 ? 0 : null;
+    const out = this.imu.process(s, this.wheelYaw ? undefined : speed);
     // Handled while parked: the phone may now leave the car with the driver, so later fixes and
     // positions are not the car's. Keep the pose of the car from before it; with the speed gone
     // stale since (ignition off, the link lost), the pose where it was last seen standing.
@@ -1123,8 +1136,8 @@ export class Navigator {
     // as the position does: the phone turned in a hand, not read as handled, turned parked cars
     // 17–88° (qfger8, nnz5ff).
     const parked = this.lastObd !== null && this.lastObd.rawKph === 0;
-    const yaw = dt > 0.2 ? null : yawRate;
-    const hold = this.standstill || (parked && (yaw === null || !obdFresh));
+    const hold = this.standstill || (parked && ((dt > 0.2 ? null : yawRate) === null || !obdFresh));
+    const yaw = dt > 0.2 ? null : this.delayedStandingYaw(tUs, dt, yawRate, parked && obdFresh && !hold);
     if (yaw === null && !parked) this.stats.imuInvalidS += dt;
     if (this.standstill) this.stats.standstillS += dt;
     this.stats.obdDistanceM += Math.abs(speed) * dt;
@@ -1135,8 +1148,6 @@ export class Navigator {
     }
 
     const relRate = hold || yaw === null ? 0 : yaw - this.rel.bias;
-    // Signed: idling, the gyro's noise averages out; a manoeuvre turns the car one way.
-    if (parked && obdFresh && !hold) this.manoeuvreRad -= relRate * dt;
     this.rel.psi = wrapAngle(this.rel.psi - relRate * dt);
     this.rel.e += speed * Math.sin(this.rel.psi) * dt;
     this.rel.n += speed * Math.cos(this.rel.psi) * dt;
@@ -1169,6 +1180,38 @@ export class Navigator {
       this.mapStartDue = false;
       if (!this.ekf) this.startFromMap();
     }
+  }
+
+  /**
+   * The yaw rate to turn by over this step: with the car standing (`standing`, OBD 0) and the phone's own gyro, the
+   * turning of `standingYawDelayUs` ago, the newer kept back; a handled phone drops what is kept back (its first swing,
+   * before the checks saw the hand). Otherwise this step's and whatever was kept back.
+   */
+  private delayedStandingYaw(tUs: number, dt: number, yawRate: number | null, standing: boolean): number | null {
+    const q = this.standingTurns;
+    // Kept back less the bias, let in on top of it: the EKF takes the bias off each step, kept back or not.
+    const bias = this.ekf ? this.ekf.params().bw : this.rel.bias;
+    const kept = () => q.reduce((sum, x) => sum + x.rad, 0);
+    if (yawRate === null) {
+      // Never the car's: neither is it a manoeuvre.
+      this.manoeuvreRad += kept();
+      q.length = 0;
+      return null;
+    }
+    if (!standing || this.wheelYaw) {
+      if (!q.length) return yawRate;
+      const k = kept();
+      q.length = 0;
+      return yawRate + k / dt;
+    }
+    const rad = (yawRate - bias) * dt;
+    // Signed: idling, the gyro's noise averages out; a manoeuvre turns the car one way. Counted as it comes, for a
+    // manoeuvre is judged as the car pulls away, before the last of it is let in.
+    this.manoeuvreRad -= rad;
+    q.push({ tUs, rad });
+    let released = 0;
+    while (q.length && q[0].tUs <= tUs - this.config.standingYawDelayUs) released += q.shift()!.rad;
+    return bias + released / dt;
   }
 
   /**

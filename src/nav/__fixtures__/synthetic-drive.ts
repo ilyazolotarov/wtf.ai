@@ -120,7 +120,8 @@ export function syntheticDrive(o: SyntheticOptions): SyntheticDrive {
               v * yawCcw + 0.02 * r.gauss(),
               (v > 0.5 ? (o.phoneAccel.roadShakeMS2 ?? 0.8) : 0.02) * r.gauss(),
             ]
-          : [0.02 * r.gauss(), 0.02 * r.gauss(), 0.02 * r.gauss()],
+          : // A car's turn pushes it sideways (v·ω): the IMU processor takes a turn without it for the phone's own.
+            [(v > 0 ? along : 0) + 0.02 * r.gauss(), v * yawCcw + 0.02 * r.gauss(), 0.02 * r.gauss()],
       });
       if (o.magnetometer && step % 5 === 0) {
         // The phone lies flat with x forward: in (forward, left) Earth's horizontal field is

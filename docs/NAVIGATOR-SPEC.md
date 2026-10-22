@@ -61,8 +61,25 @@ Built, wired into the app and field-tested on two cars and testers' phones; the 
   - the rotation off the vertical, averaged as a vector over 0.1 s, exceeds 1.0 rad/s (the vector mean: bumps shake
     the phone back and forth and stay under 0.7 rad/s; a magnitude mean triggered on bumps).
 
+  - the car's speed 0 (standing, or crawling under the ECU's cutoff; also before any speed and with the link lost
+    standing): the rotation off the vertical, averaged as a vector over 0.1 s, as an RMS over 1 s above 0.2 rad/s.
+    A hand never holds the phone as still as a mount on a car that barely moves (mounted, 90 % of such seconds
+    < 0.06 rad/s; in a hand half > 0.5). Driving, a mount on a rough road shakes as much as a hand: not then;
+  - moving: the yaw rate ω at speed v without the push v·ω across the vertical (the gyro's, not gravity's), more than
+    1.0 m/s² + 30 % of it short over 0.5 s. A phone turned in a hand or slipping in its holder has no push behind its
+    turn; the car's turn has.
+
   Each trigger holds for 1.5 s. Mounted driving stays under 4° and 0.7 rad/s; real handling reaches ≥ 1.4 rad/s and
-  ≥ 7.6°.
+  ≥ 7.6°. **With the speed 0 the phone stays in the hand after the hold until it has been as still as a mount (that RMS
+  < 0.08 rad/s) for 3 s**: a hand rests between moves, and read as the car's in those rests, 4 min in a hand before a
+  drive turned the parked car 60° and the jammed drive after it went 24 km off. Back in the mount, only a trigger takes
+  it out again: reversing out of a parking space (OBD 0) shakes the mount to ~0.2 rad/s and its turn must count.
+  The speed 0 rule and the push check don't run on the wheels' turning (§5.4): that sample is the car's.
+- **Standing turns come in 1.5 s late.** With OBD 0 the gyro's turning reaches the heading (and the odometry) 1.5 s
+  after it happened, and is dropped if the phone reads handled before then: a grabbed phone swings ~100° in the second
+  before any check sees the hand. A manoeuvre is counted as it comes; once the car moves, whatever is kept back goes in.
+  No cap on the turning rate itself: OBD polled twice a second still reads 0 for the first half-second of pulling
+  away, while the car turns at a junction faster than a reverse would.
 - While the gyro is invalid: if the car stands (speed 0) the heading is held; otherwise the EKF propagates without
   yaw input and with heading noise 0.3 rad/√s.
 - **Quiet:** over 1 s, yaw-rate std < 0.01 rad/s, mean yaw < 0.005 rad/s, acceleration std < 0.2 m/s².
@@ -503,7 +520,7 @@ the yaw rate, class speeds, stops at junctions), which makes the phone's speed t
 | GNSS position/course lag | 0 s | phone model, OS | measured online (§7.3), stored per model |
 | GNSS speed lag | 1.0 s | phone model, OS | fixed; results barely change between 0.4 and 1.6 s |
 | Gyro noise | 0.003 rad/s | mount, car | from `replay:bench`; ≤ 0.001 makes the filter overconfident |
-| Handling thresholds | 8°, 1.0 rad/s, 1.5 s | mount, road | from logged mounted drives |
+| Handling thresholds | 8°, 1.0 rad/s, 1.5 s; standing 0.2 / 0.08 rad/s, 3 s, turns 1.5 s late; push 1.0 m/s² + 30 % | mount, road | from logged mounted drives; standing and push from the wheels as truth |
 | Gyro bias prior | 0.0005 rad/s | CoreMotion | learned at every stop |
 | Speed scale `k_s` | 1 ± 0.03 | car, tyres | learned online; persisted per VIN (§7.4) |
 | OBD σ / zero σ | 0.3 / 0.8 m/s | ECU | CAN: 0.1 / 0.3 m/s |

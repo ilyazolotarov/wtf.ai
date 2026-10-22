@@ -393,9 +393,8 @@ async function main() {
 
   const all = readdirSync(LOGS).filter((f) => f.endsWith(".ulg")).sort();
   const picked = only ? all.filter((f) => f.startsWith(only) || f.includes(only)) : all;
-  if (!picked.length) throw new Error(`no logs match ${only}`);
   // The parked chain replays every log up to the last one picked: those before it set its storage.
-  const chain = all.filter((f) => f <= picked.at(-1)!);
+  const chain = picked.length ? all.filter((f) => f <= picked.at(-1)!) : [];
   // `--testers`: each tester's drawn drives too, on their phone's own chain (testers/<name>/, its storage apart).
   const testerChains = argv.includes("--testers") && existsSync(path.join(LOGS, "testers"))
     ? readdirSync(path.join(LOGS, "testers"), { withFileTypes: true })
@@ -404,8 +403,9 @@ async function main() {
         .filter((logs) => logs.some((l) => existsSync(path.join(LOGS, l.replace(/\.ulg$/, ".truth.json")))))
     : [];
   for (const logs of testerChains) picked.push(...logs.filter((l) => !only || l.includes(only)));
+  if (!picked.length) throw new Error(`no logs match ${only}`);
   const jobs: Job[] = [];
-  for (let seed = 1; seed <= seeds; seed++) for (const start of ["drawn", "parked"] as const) if (starts.includes(start)) for (const logs of [chain, ...testerChains]) jobs.push({ start, seed, logs, nav, mm, speed, scoreMapMatch, phoneRoute, obdHz, yaw, yawFromS, yawCal, yawGaps, puck });
+  for (let seed = 1; seed <= seeds; seed++) for (const start of ["drawn", "parked"] as const) if (starts.includes(start)) for (const logs of [chain, ...testerChains]) if (logs.length) jobs.push({ start, seed, logs, nav, mm, speed, scoreMapMatch, phoneRoute, obdHz, yaw, yawFromS, yawCal, yawGaps, puck });
   for (let seed = 1; seed <= seeds; seed++) if (starts.includes("cold")) for (const log of picked) jobs.push({ start: "cold", seed, logs: [log], nav, mm, speed, scoreMapMatch, phoneRoute, obdHz, yaw, yawFromS, yawCal, yawGaps, puck });
   const started = Date.now();
   let results: DriveResult[];
