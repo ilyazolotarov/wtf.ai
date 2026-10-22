@@ -530,6 +530,9 @@ export function getRuntime(): Runtime {
       return () => devListeners.delete(listener);
     },
   };
+  // Last, once everything that listens to the recorder does: the resumed log gets the launch notes, and Android's trip
+  // service starts for it.
+  recorder.resumeManual();
   return runtime;
 }
 

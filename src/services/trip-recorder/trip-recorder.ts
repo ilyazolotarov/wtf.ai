@@ -103,12 +103,23 @@ export interface TripRecorderDeps {
   files: TripFiles;
   store: KeyValueStore;
   nowUs(): number;
+  /** Wall clock, ms (tests); Date.now by default. */
+  wallMs?(): number;
   /** sys_name, ver_sw, sys_hw, sys_os_ver … (TRIP-LOGGER-SPEC §6.2). */
   appInfo(): Record<string, string>;
 }
 
 const INDEX_KEY = "trips.index";
 const SETTINGS_KEY = "trips.settings";
+/**
+ * A manual recording in progress, and when it was last seen recording: the process that ended without stopping it
+ * (the system closed the app) starts it again at the next start within `MANUAL_RESUME_WITHIN_MS` (TRIP-LOGGER-SPEC
+ * §4.3). Null when none.
+ */
+const MANUAL_KEY = "trips.manual";
+export const MANUAL_RESUME_WITHIN_MS = 10 * 60_000;
+/** How often a manual recording says it is still on. */
+const MANUAL_ALIVE_EVERY_MS = 30_000;
 const PREROLL_US = 30_000_000;
 /**
  * Link traffic kept outside the pre-roll (which waits for the engine state): the adapter setup and VIN read of the
@@ -158,6 +169,8 @@ export class TripRecorder {
   private detector: TripDetector;
   private writer: TripLogWriter | null = null;
   private current: CurrentTrip | null = null;
+  /** When a manual recording last said it is still on (`MANUAL_KEY`). */
+  private manualAliveMs = 0;
   private preroll: Pending[] = [];
   private linkHistory: LinkLine[] = [];
   private lastFix: GnssRecord | null = null;
@@ -251,6 +264,32 @@ export class TripRecorder {
 
   manualStart(): void {
     this.detector.manualStart(this.deps.nowUs());
+  }
+
+  /**
+   * Once, at the app's start, after what a trip's start writes into its log is listening: a manual recording the last
+   * process didn't stop starts again, in a log of its own.
+   */
+  resumeManual(): void {
+    const stored = this.deps.store.getJson<{ aliveMs: number }>(MANUAL_KEY);
+    if (!stored) return;
+    const agoMs = this.wallMs() - stored.aliveMs;
+    if (agoMs < 0 || agoMs > MANUAL_RESUME_WITHIN_MS) {
+      this.deps.store.setJson(MANUAL_KEY, null);
+      return;
+    }
+    this.manualStart();
+    this.note(`manual recording resumed: the app ended without stopping it, last seen recording ${Math.round(agoMs / 1000)} s ago`);
+  }
+
+  private manualAlive(): void {
+    const now = this.wallMs();
+    this.manualAliveMs = now;
+    this.deps.store.setJson(MANUAL_KEY, { aliveMs: now });
+  }
+
+  private wallMs(): number {
+    return (this.deps.wallMs ?? Date.now)();
   }
 
   manualStop(): void {
@@ -491,6 +530,7 @@ export class TripRecorder {
       complete: false,
     };
     this.saveIndex([entry, ...this.snapshot.trips]);
+    if (reason === "manual") this.manualAlive();
     this.events.emit(`trip started (${reason})`);
     this.update({ current: { ...this.current }, lastError: null });
     this.syncSensors();
@@ -503,6 +543,7 @@ export class TripRecorder {
     this.writer = null;
     this.current = null;
     if (!writer || !current) return;
+    if (current.startReason === "manual") this.deps.store.setJson(MANUAL_KEY, null);
     try {
       writer.tripEvent(Math.round(tUs), TRIP_EVENTS.end, END_REASON_CODES[reason]);
       writer.close();
@@ -556,6 +597,7 @@ export class TripRecorder {
     }
     this.current.bytes = this.writer.bytesWritten;
     this.current.durationS = (now - this.current.startedUs) / 1e6;
+    if (this.current.startReason === "manual" && this.wallMs() - this.manualAliveMs >= MANUAL_ALIVE_EVERY_MS) this.manualAlive();
     this.update({ state: this.detector.state, current: { ...this.current } });
   }
 

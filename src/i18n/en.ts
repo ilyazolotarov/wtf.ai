@@ -363,7 +363,7 @@ export const en = {
   notNow: "Not now",
   obCarTitle: "Connect your car",
   obCarBody: "An OBD-II Bluetooth adapter streams wheel speed, so tracking continues when GPS can’t be trusted.",
-  obWakeTitle: "No need to open the app before every drive",
+  obWakeTitle: "Automatic launch",
   obWakeBody: "The app can start automatically when you start the car and track your position in the background, even if you forget to open it. Android will ask you to choose a Bluetooth device — your car’s audio system or a Bluetooth LE adapter — and allow location access all the time.",
   obWakeBodyIos: "Even if you forget to open the app before driving off, iOS can launch it a few hundred metres into your drive. It will then start tracking your position in the background. This requires location access set to Always.",
   obWakeCta: "Turn on",

@@ -99,6 +99,14 @@ the ignition off and no linger, the app may be suspended.
   - **Swiped away** by the user, nothing brings it back reliably: iOS doesn't relaunch an app the user closed (the
     significant-change relaunch after a swipe varies by iOS version; reported gone on iOS 26).
 - Without any of these, the next session begins when the user opens the app again.
+- **A manual recording** (the Trip recorder's start button) the process ended without stopping starts again, in a new
+  log, at the next start within 10 min of when it was last seen recording (`trips.manual`, refreshed every 30 s;
+  note `manual recording resumed …`), after the trip-start listeners, so that log gets the launch notes. Opened later,
+  it doesn't: a recording the driver has forgotten about.
+- **Developer → *Simulate the system closing the app*** ends the process with `SIGKILL`, as the OS would, after a
+  marker. On iOS it first posts `UIApplication.willTerminateNotification`: Sentry would otherwise report an app gone
+  while in front as a watchdog (memory) termination. The delegate's `applicationWillTerminate` isn't called, so the
+  next launch's previous-run note still reads as an end without notice.
 
 ### 4.4 The app process (`src/services/app-health.ts`, `AppHealth.swift`, `AppHealth.kt`)
 

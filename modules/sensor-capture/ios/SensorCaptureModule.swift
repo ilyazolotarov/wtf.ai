@@ -1,6 +1,7 @@
 import CoreLocation
 import CoreMotion
 import ExpoModulesCore
+import UIKit
 
 // GNSS + IMU capture for the trip logger (docs/TRIP-LOGGER-SPEC.md §5).
 // Timestamps: monotonic uptime µs, the same clock as CoreMotion and modules/vehicle-link.
@@ -95,7 +96,16 @@ public class SensorCaptureModule: Module {
 
     // Developer: ends the process as iOS would (not a swipe), to try the relaunch paths on a drive.
     Function("simulateSystemKill") { () -> Void in
-      _ = kill(getpid(), SIGKILL)
+      // Sentry reports an app gone while in front, without a crash or a normal exit, as a watchdog termination (a
+      // memory kill): it was neither. The notification is how Sentry learns of a normal exit (its app state, written
+      // at once, and the session ended); this app's own record of one (`applicationWillTerminate`, the next launch's
+      // "previous run" note) is the delegate call, which this doesn't make, so the log still reads as the system's end.
+      DispatchQueue.main.async {
+        NotificationCenter.default.post(name: UIApplication.willTerminateNotification, object: UIApplication.shared)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+          _ = kill(getpid(), SIGKILL)
+        }
+      }
     }
 
     // Relaunched a few hundred metres into a drive with location "Always" (DriveWake); true while monitoring.
