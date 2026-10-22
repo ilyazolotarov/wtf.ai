@@ -592,6 +592,11 @@ describe("VehicleLinkCore", () => {
       // Every id: a pass-all filter.
       const all = await core.monitorCan({ ids: null, durationMs: 3000 });
       expect(all.ids.map((i) => i.id)).toEqual([0x215, 0x228, 0x4f0]);
+
+      // A slice of the id space (discovery's survey, §16.6): 0x200–0x2FF.
+      const slice = await core.monitorCan({ ids: null, durationMs: 1000, slice: { prefix: 2, bits: 3 } });
+      expect(emu.log).toContain("STFPA200,700");
+      expect(slice.ids.map((i) => i.id)).toEqual([0x215, 0x228]);
       await core.disconnect();
     });
 
@@ -820,6 +825,37 @@ describe("VehicleLinkCore", () => {
         const k = toNav.length;
         can(40);
         expect(toNav.slice(k).some((s) => s.source === "can")).toBe(false);
+      } finally {
+        await core.disconnect();
+      }
+    });
+
+    // §16.5: a profile on probation is compared with the polls, so they keep their rate and the navigator keeps OBD.
+    test("CAN on probation: the polls run at 2 Hz while moving, the navigator on OBD; trusted again, CAN carries it", async () => {
+      const { core, emu, clock, speeds } = await shadowOn({});
+      const toNav: SpeedSample[] = [];
+      core.onSpeed((s) => toNav.push(s));
+      const pushFor = async (ms: number, kph: number) => {
+        for (let t = 0; t < ms; t += 100) {
+          const tUs = clock.nowUs();
+          core.pushCanSpeed({ txUs: tUs, rxUs: tUs, tUs, speedMps: kph / 3.6, raw: kph, source: "can" });
+          await clock.sleep(100);
+        }
+      };
+      try {
+        core.setCanTrusted(false);
+        emu.setVehicle({ speedKph: 40 });
+        await until(() => speeds.length >= 3);
+        const n = speeds.length;
+        const k = toNav.length;
+        await pushFor(10_000, 40);
+        expect(speeds.length - n).toBeGreaterThanOrEqual(15);
+        expect(toNav.slice(k).some((s) => s.source === "can")).toBe(false);
+        core.setCanTrusted(true);
+        await pushFor(500, 40);
+        const m = toNav.length;
+        await pushFor(3000, 40);
+        expect(toNav.slice(m).every((s) => s.source === "can")).toBe(true);
       } finally {
         await core.disconnect();
       }

@@ -2,7 +2,7 @@
 // Pure TS: transports, discovery, and storage are injected, so the whole lifecycle
 // runs in Node tests against the emulator.
 
-import { CanMonitorCollector, formatSurvey, type CanFrame, type CanSurvey } from "./can-monitor";
+import { CanMonitorCollector, formatSurvey, sliceFilter, type CanFrame, type CanSurvey, type IdSlice } from "./can-monitor";
 import { CanShadow, type CanShadowStatus, type CanWindow } from "./can-shadow";
 import { compareDevices, rankDevice } from "./catalog";
 import type { Clock } from "./clock";
@@ -192,6 +192,8 @@ export class VehicleLinkCore implements VehicleLink {
   private monitorSink: ((text: string, rxUs: number) => void) | null = null;
   /** Ids the CAN monitor listens to (picked for the car, §16.4); null: off. */
   private canShadowIds: number[] | null = null;
+  /** False while the car's profile is on probation (§16.5): CAN speed doesn't carry the navigation. */
+  private canTrusted = true;
   private shadow: CanShadow | null = null;
   /** A replaced shadow still listening: its output is its own until the next command stops it. */
   private retiredShadow: CanShadow | null = null;
@@ -454,7 +456,19 @@ export class VehicleLinkCore implements VehicleLink {
    * or car that can't, a failed monitor) the polls are all there is, and nothing pauses them.
    */
   private get canPrimary(): boolean {
-    return this.shadow !== null && this.shadow.status.state !== "failed";
+    return this.canTrusted && this.shadow !== null && this.shadow.status.state !== "failed";
+  }
+
+  /**
+   * A profile on probation (§16.5): the monitor listens and its speed is decoded, but the navigator keeps OBD's speed
+   * and the polls run at their rate while the car moves, so the two can be compared. True again once it passed.
+   */
+  setCanTrusted(on: boolean): void {
+    this.canTrusted = on;
+    if (!on) {
+      this.listenUntilUs = null;
+      this.lastCanSpeed = null;
+    }
   }
 
   /** A CAN speed sample (`source: "can"`, negative in reverse), from the frames this link's shadow heard. */
@@ -506,8 +520,9 @@ export class VehicleLinkCore implements VehicleLink {
   /**
    * Listen to the CAN bus for `durationMs` with polling paused, then poll again (§16, developer survey). STN
    * adapters on a CAN car only. `ids` null: every id, which a busy 500 kbit/s bus can overrun (`BUFFER FULL`).
+   * `slice`: instead, the ids whose top `bits` bits (of 11 or 29) are `prefix` (discovery's survey, §16.6).
    */
-  async monitorCan(opts: { ids: number[] | null; durationMs: number }): Promise<CanSurvey> {
+  async monitorCan(opts: { ids: number[] | null; durationMs: number; slice?: IdSlice }): Promise<CanSurvey> {
     const transport = this.transport;
     if (!transport?.writeRaw || !/^STN/i.test(this.snapshot.adapter?.chip ?? "")) throw new Error("needs an STN adapter");
     const protocol = this.remembered().find((a) => a.id === this.snapshot.activeDeviceId)?.protocolNumber ?? null;
@@ -525,7 +540,11 @@ export class VehicleLinkCore implements VehicleLink {
         await send("STCMM0", { timeoutMs: 1000 }); // listen only, no ACKs (the default; older firmware may answer ?)
         const zero = "0".repeat(idDigits);
         const mask = idDigits === 3 ? "7FF" : "1FFFFFFF";
-        const filters = opts.ids === null ? [`${zero},${zero}`] : opts.ids.map((id) => `${hex(id, idDigits)},${mask}`);
+        const filters = opts.slice
+          ? [sliceFilter(opts.slice, idDigits === 3 ? 11 : 29)].map((f) => `${hex(f.id, idDigits)},${hex(f.mask, idDigits)}`)
+          : opts.ids === null
+            ? [`${zero},${zero}`]
+            : opts.ids.map((id) => `${hex(id, idDigits)},${mask}`);
         for (const f of filters) {
           // STFAP: the name before STFPA, on older firmware.
           const added = (await send(`STFPA${f}`, { timeoutMs: 1000 })).status === "ok" || (await send(`STFAP${f}`, { timeoutMs: 1000 })).status === "ok";

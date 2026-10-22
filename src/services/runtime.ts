@@ -12,6 +12,7 @@ import { RESTORE_IDENTIFIER } from "../../modules/vehicle-link/src/restore";
 import SensorCaptureModule from "../../modules/sensor-capture/src/SensorCaptureModule";
 import { Sentry, sentryMetricSink } from "@/config/sentry";
 import { TRIP_UPLOAD_URL } from "@/config/trip-upload";
+import type { Profile } from "@/nav/odometry/can/profile";
 import { createClock } from "@/obd/clock";
 import { VehicleLinkCore } from "@/obd/vehicle-link-core";
 
@@ -31,12 +32,14 @@ import { TripRecorder, tripsOverLimit } from "./trip-recorder/trip-recorder";
 import { get, networkKind, onNetworkChange, putFile, uploadSecrets } from "./trip-upload/native";
 import { TripUploader } from "./trip-upload/trip-uploader";
 import { NativeDiscovery } from "./vehicle-link/discovery";
-import { TelemetryReporter } from "./telemetry";
+import { adapterModel, TelemetryReporter } from "./telemetry";
 import { jsSourceInfo } from "./js-source";
 import { PositionShareService } from "./position-share/position-share-service";
 import { setTripService, updateTripNotification } from "./trip-service";
 import { DEV_SETTINGS_VERSION, loadDevSettings } from "./dev-settings-load";
-import { CanAutoIds, idsAfterBufferFull, type CanAutoStatus } from "./vehicle-link/can-auto-ids";
+import { CanAutoIds, idsAfterBufferFull, navigationIds, type CanAutoStatus } from "./vehicle-link/can-auto-ids";
+import { CanDiscovery, discoveryReportAttributes, linkCapacity, type CanDiscoveryReport, type CanDiscoveryStatus } from "./vehicle-link/can-discovery";
+import { CanProbation, probationReportAttributes, type CanProbationReport, type CanProbationStatus } from "./vehicle-link/can-probation";
 import { CanSpeedFeed } from "./vehicle-link/can-speed-feed";
 import { DrivingEmulator } from "./vehicle-link/driving-emulator";
 import { isHeldForUpdater } from "./vehicle-link/firmware-notice";
@@ -60,6 +63,11 @@ export interface DevSettings {
    * (NAVIGATOR-SPEC §5.4), so the phone may be in a hand, a pocket or on a seat.
    */
   wheelYaw: boolean;
+  /**
+   * Settings → Car: send the anonymous report of each car profile's probation (VEHICLE-LINK-SPEC §16.5; PRIVACY.md):
+   * the make, the profile, its ids and how it compared with OBD speed. No VIN, no position.
+   */
+  carReports: boolean;
   /** RPM poll period while the engine runs, s. */
   rpmPeriodS: number;
   /** More → Waze and Google Maps: share the car's position with other navigators during a trip (ANDROID-SPEC §8). */
@@ -91,6 +99,10 @@ export interface Runtime {
   getDevSettings(): DevSettings;
   /** How the CAN ids are being picked for the car (VEHICLE-LINK-SPEC §16.4). */
   canAuto: { status(): CanAutoStatus; subscribe(listener: () => void): () => void };
+  /** The car's profile on probation, passed or failed (VEHICLE-LINK-SPEC §16.5). */
+  canProbation: { status(): CanProbationStatus; subscribe(listener: () => void): () => void };
+  /** The search for a speed on the bus of a car without a profile (VEHICLE-LINK-SPEC §16.6). */
+  canDiscovery: { status(): CanDiscoveryStatus; subscribe(listener: () => void): () => void };
   setDevSettings(patch: Partial<DevSettings>): void;
   subscribeDevSettings(listener: () => void): () => void;
 }
@@ -108,6 +120,7 @@ export function getRuntime(): Runtime {
     // On by default, so other cars' logs show how the wheels go (VEHICLE-LINK-SPEC §16.3).
     wheelSpeed: true,
     wheelYaw: true,
+    carReports: true,
     rpmPeriodS: 5,
     positionShare: false,
   };
@@ -169,6 +182,31 @@ export function getRuntime(): Runtime {
     listened: () => canIds,
     push: (s) => link.pushCanSpeed(s),
     note: (text) => recorder.note(text),
+    admit: (profile): boolean => canProbation.admit(profile),
+    extraProfiles: (): Profile[] => (canDiscovery.profile ? [canDiscovery.profile] : []),
+    active: (): boolean => !canDiscovery.searching,
+  });
+  const canProbationListeners = new Set<() => void>();
+  const canProbation = new CanProbation({
+    vin: () => link.getSnapshot().vehicle?.vin ?? null,
+    nowUs,
+    onSpeed: (listener) => link.onSpeed(listener),
+    onCanSpeed: (listener): (() => void) => canSpeed.onSpeed(listener),
+    onFrames: (listener) => link.onCanFrames(listener),
+    onWindow: (listener) => link.onCanWindow(listener),
+    setTrusted: (on) => link.setCanTrusted(on),
+    promote: () => canSpeed.promote(),
+    stopListening: () => listenCan(null),
+    reportScope: () => `${adapterModel(link.getSnapshot())}|${Constants.expoConfig?.version ?? ""}`,
+    reportsOn: () => dev.carReports,
+    report: (r) => reportCanProbation(r, link.getSnapshot().vehicle?.protocol ?? "", adapterModel(link.getSnapshot())),
+    store: kvStore,
+    note: (text) => recorder.note(text),
+    onStatus: (status) => {
+      // A layout the search found that the car's OBD speed refutes: the search goes on (§16.6).
+      if (status.state === "failed" && status.profile.startsWith("found/")) canDiscovery.rejectFound();
+      canProbationListeners.forEach((l) => l());
+    },
   });
   const canAutoListeners = new Set<() => void>();
   const canAuto = new CanAutoIds({
@@ -182,10 +220,49 @@ export function getRuntime(): Runtime {
     },
     store: kvStore,
     note: (text) => recorder.note(text),
-    onStatus: () => canAutoListeners.forEach((l) => l()),
+    onStatus: () => {
+      canAutoListeners.forEach((l) => l());
+      canDiscovery.refresh();
+    },
   });
-  // A new car (another VIN, or the VIN read late) gets its own ids.
+  // A car whose make has no profile, or none heard (§16.6): its own speed searched for on its bus.
+  const canDiscoveryListeners = new Set<() => void>();
+  const canDiscovery: CanDiscovery = new CanDiscovery({
+    vin: () => link.getSnapshot().vehicle?.vin ?? null,
+    nowUs,
+    canAuto: () => canAuto.status,
+    canMonitor: () => {
+      const s = link.getSnapshot();
+      return s.link === "polling" && s.canOff === null;
+    },
+    // Not only the ECU awake: with the engine off some cars' ABS is quiet, and a survey then would miss the wheels for
+    // good. Standing or moving it tells by its own last poll.
+    engineRunning: () => link.getSnapshot().engine === "engine-running",
+    survey: (slice, durationMs) => link.monitorCan({ ids: null, durationMs, slice }),
+    capacity: () => linkCapacity(link.getSnapshot().adapter?.transport),
+    listen: listenCan,
+    onFrames: (listener) => link.onCanFrames(listener),
+    onWindow: (listener) => link.onCanWindow(listener),
+    onSpeed: (listener) => link.onSpeed(listener),
+    setTrusted: (on) => link.setCanTrusted(on),
+    found: (profile) => {
+      if (!profile) return;
+      // The feed matches the car's own profile from scratch, on its id alone.
+      canSpeed.stop();
+      canSpeed.start();
+      listenCan(navigationIds(profile));
+    },
+    reportScope: () => `${adapterModel(link.getSnapshot())}|${Constants.expoConfig?.version ?? ""}`,
+    reportsOn: () => dev.carReports,
+    report: (r) => reportCanDiscovery(r, link.getSnapshot().vehicle?.protocol ?? "", adapterModel(link.getSnapshot())),
+    store: kvStore,
+    note: (text) => recorder.note(text),
+    onStatus: () => canDiscoveryListeners.forEach((l) => l()),
+  });
+  // A new car (another VIN, or the VIN read late) gets its own ids. Before discovery's: whether a search is due is the
+  // picking's answer for the new car, not the old one's.
   link.subscribe(() => canAuto.refresh());
+  link.subscribe(() => canDiscovery.refresh());
   // More ids than the link carries without the polls' breaks (CAN primary, VEHICLE-LINK-SPEC §16.3): the ones
   // navigation needs only, for the rest of the session.
   link.onCanBufferFull(() => {
@@ -198,14 +275,36 @@ export function getRuntime(): Runtime {
   const syncWheelSpeed = () => {
     if (dev.wheelSpeed) {
       canAuto.start();
+      canProbation.start();
       canSpeed.start();
+      canDiscovery.start();
     } else {
       canAuto.stop();
+      canDiscovery.stop();
       listenCan(null);
       canSpeed.stop();
+      canProbation.stop();
+      link.setCanTrusted(true);
     }
   };
   syncWheelSpeed();
+  // A probation the link couldn't carry turned the monitor off for the drive (§16.5): the car switched off, the next
+  // drive picks the ids again and tries once more.
+  link.onEngineState((state) => {
+    if (state !== "ignition-off" || !dev.wheelSpeed) return;
+    if (canDiscovery.status.state === "aborted") {
+      canDiscovery.stop();
+      canDiscovery.start();
+    }
+    if (canProbation.status.state !== "aborted") return;
+    canProbation.stop();
+    canProbation.start();
+    // The feed chooses the profile again, so the next drive's probation starts with it.
+    canSpeed.stop();
+    canSpeed.start();
+    canAuto.stop();
+    canAuto.start();
+  });
   const syncPolling = () => {
     link.setRpmPeriods({ rpmPeriodRunningMs: dev.rpmPeriodS * 1000 });
   };
@@ -507,6 +606,20 @@ export function getRuntime(): Runtime {
         return () => canAutoListeners.delete(listener);
       },
     },
+    canDiscovery: {
+      status: () => canDiscovery.status,
+      subscribe: (listener) => {
+        canDiscoveryListeners.add(listener);
+        return () => canDiscoveryListeners.delete(listener);
+      },
+    },
+    canProbation: {
+      status: () => canProbation.status,
+      subscribe: (listener) => {
+        canProbationListeners.add(listener);
+        return () => canProbationListeners.delete(listener);
+      },
+    },
     setDevSettings: (patch) => {
       dev = { ...dev, ...patch };
       kvStore.setJson(DEV_SETTINGS_KEY, { ...dev, version: DEV_SETTINGS_VERSION });
@@ -517,8 +630,12 @@ export function getRuntime(): Runtime {
       // The log's info has the setting the drive started with; a change mid-drive is a note.
       if (patch.wheelSpeed !== undefined) {
         recorder.note(`can bus ${dev.wheelSpeed ? "primary" : "off"}`);
-        // Turned on again: cars taken for OBD only get another try.
-        if (dev.wheelSpeed) canAuto.forgetNone();
+        // Turned on again: cars taken for OBD only, and profiles that failed probation, get another try.
+        if (dev.wheelSpeed) {
+          canAuto.forgetNone();
+          canProbation.forgetFailed();
+          canDiscovery.forgetNone();
+        }
         syncWheelSpeed();
       }
       // The service notes the change (`nav wheel yaw on|off`): only with the wheels' speed does the setting turn it on.
@@ -561,4 +678,25 @@ async function autoConnectOnce(): Promise<void> {
   // Never the emulated adapters: their scripted drive would start by itself whenever the app opens, and fake speed under
   // a real drive if a driver ever tapped one (2026-10-14: the emulator drove off before any destination was set).
   await link.autoConnect(["emulator"]);
+}
+
+/**
+ * A car profile's probation as an anonymous Sentry log (VEHICLE-LINK-SPEC §16.5, PRIVACY.md): what the car's make and
+ * the adapter make of CAN at the OBD port, never the VIN or a position. Sentry's own device tags come with it.
+ */
+function reportCanProbation(r: CanProbationReport, protocol: string, adapter: string): void {
+  try {
+    Sentry.logger.info(`can probation: ${r.outcome} ${r.profile}`, probationReportAttributes(r, protocol, adapter));
+  } catch {
+    // reporting is best effort
+  }
+}
+
+/** A search for a car's speed on its bus as an anonymous Sentry log (VEHICLE-LINK-SPEC §16.6, PRIVACY.md). */
+function reportCanDiscovery(r: CanDiscoveryReport, protocol: string, adapter: string): void {
+  try {
+    Sentry.logger.info(`can discovery: ${r.outcome} ${r.make}`, discoveryReportAttributes(r, protocol, adapter));
+  } catch {
+    // reporting is best effort
+  }
 }

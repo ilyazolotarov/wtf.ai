@@ -1,4 +1,4 @@
-import { CanMonitorCollector, formatSurvey, parseCanIds, parseMonitorLine } from "@/obd/can-monitor";
+import { CanMonitorCollector, formatSurvey, inSlice, parseCanIds, parseMonitorLine, sliceFilter } from "@/obd/can-monitor";
 
 describe("parseMonitorLine", () => {
   test("11-bit id with and without spaces", () => {
@@ -49,5 +49,22 @@ describe("parseCanIds", () => {
     expect(parseCanIds("215, 228 82;0x78 215")).toEqual([0x215, 0x228, 0x82, 0x78]);
     expect(parseCanIds("  ")).toBeNull();
     expect(parseCanIds("215 ATZ")).toBeNull();
+  });
+});
+
+describe("id slices (VEHICLE-LINK-SPEC §16.6)", () => {
+  test("a slice's pass filter is its prefix under a mask of its top bits", () => {
+    expect(sliceFilter({ prefix: 1, bits: 3 }, 11)).toEqual({ id: 0x100, mask: 0x700 });
+    expect(sliceFilter({ prefix: 5, bits: 5 }, 11)).toEqual({ id: 0x140, mask: 0x7c0 });
+    expect(sliceFilter({ prefix: 0x7e8, bits: 11 }, 11)).toEqual({ id: 0x7e8, mask: 0x7ff });
+    expect(sliceFilter({ prefix: 6, bits: 3 }, 29)).toEqual({ id: 0x18000000, mask: 0x1c000000 });
+    expect(sliceFilter({ prefix: 0, bits: 0 }, 11)).toEqual({ id: 0, mask: 0 });
+  });
+
+  test("an id is in the slice its filter passes", () => {
+    expect(inSlice(0x13f, { prefix: 4, bits: 5 }, 11)).toBe(true);
+    expect(inSlice(0x140, { prefix: 4, bits: 5 }, 11)).toBe(false);
+    expect(inSlice(0x18daf110, { prefix: 6, bits: 3 }, 29)).toBe(true);
+    expect(inSlice(0x7ff, { prefix: 0, bits: 0 }, 11)).toBe(true);
   });
 });

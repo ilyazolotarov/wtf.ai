@@ -57,6 +57,8 @@ function CarDetails() {
   const snap = useVehicleLinkSnapshot();
   const { adapter } = snap;
   const canAuto = useSyncExternalStore(runtime.canAuto.subscribe, runtime.canAuto.status);
+  const canProbation = useSyncExternalStore(runtime.canProbation.subscribe, runtime.canProbation.status);
+  const canDiscovery = useSyncExternalStore(runtime.canDiscovery.subscribe, runtime.canDiscovery.status);
 
   // With an adapter connected the list stays hidden until the driver asks to switch.
   const [switching, setSwitching] = useState(false);
@@ -118,7 +120,7 @@ function CarDetails() {
     : t("unavailableValue");
   // The firmware check again, after the one-time page (VEHICLE-LINK-SPEC §8.4).
   const updater = adapter ? firmwareUpdaterFor({ id: adapter.deviceId, name: adapter.name }) : null;
-  const speedFrom = speedFromText({ wheelSpeed: devSettings.wheelSpeed, speed, canOff: snap.canOff ?? null, canShadow: snap.canShadow ?? null, canAuto }, t);
+  const speedFrom = speedFromText({ wheelSpeed: devSettings.wheelSpeed, speed, canOff: snap.canOff ?? null, canShadow: snap.canShadow ?? null, canAuto, canProbation, canDiscovery }, t);
 
   return (
     <>

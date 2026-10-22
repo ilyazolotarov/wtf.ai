@@ -5,7 +5,8 @@ import { retimeFrames } from "../odometry/can/frame-timing";
 import type { WheelYawCalibration, WheelYawCalibrationConfig } from "../odometry/can/wheel-yaw-calibration";
 import { WheelYawSource } from "../odometry/can/wheel-yaw-source";
 import { ImuProcessor } from "../odometry/imu/imu-processor";
-import { matchProfiles, profileByKey, seenIds, type Profile, type ProfileMatch, type SeenId } from "../odometry/can/profile";
+import { foundProfile } from "../odometry/can/discovery";
+import { makeForVin, matchProfiles, profileByKey, seenIds, type Profile, type ProfileMatch, type SeenId } from "../odometry/can/profile";
 import type { TripLog } from "../../triplog/trip-log-reader";
 
 export interface TripCan {
@@ -57,14 +58,30 @@ export function decodeTripCan(trip: TripLog, profileKey?: string): TripCan | nul
   const seen = seenIds(frames);
   const listened = listenedIds(trip);
   const vin = typeof trip.info.vehicle_vin === "string" ? trip.info.vehicle_vin : null;
-  const matches = matchProfiles(seen, vin, listened ?? undefined);
-  const profile = profileKey ? profileByKey(profileKey) : (matches[0]?.profile ?? null);
+  // A car without a profile drove on what the search found on its bus (VEHICLE-LINK-SPEC §16.6): its key in the notes.
+  // Of the VIN's make, as the app made it (`CanDiscovery.useFound`): matching keeps only the make's profiles.
+  const make = makeForVin(vin) ?? "unknown";
+  const found = foundInLog(trip, make);
+  const matches = matchProfiles(seen, vin, listened ?? undefined, found ? [found] : []);
+  // A find the app had is the car's profile: it was searched for because no other fits.
+  const profile = profileKey ? (profileByKey(profileKey) ?? foundProfile(profileKey, make)) : (found ?? matches[0]?.profile ?? null);
   const samples: CarStateSample[] = [];
   if (profile) {
     const decoder = new CarStateDecoder(profile);
     for (const f of frames) for (const s of decoder.push(f.tUs, f.id, f.data)) samples.push(s);
   }
   return { matches, profile, samples, listened, seen };
+}
+
+/**
+ * The profile a log's notes name from a discovery, if any: the one CAN primary's note names (the speed came from it),
+ * else the last one probation checked (an earlier find it refuted, the search went on).
+ */
+function foundInLog(trip: TripLog, make: string): Profile | null {
+  const primary = trip.messages.map((m) => /^can primary: .*profile (found\/\S+)/.exec(m.text)?.[1]).find((k) => k);
+  if (primary) return foundProfile(primary, make);
+  const checked = trip.messages.map((m) => /^can probation: checking (found\/\S+)/.exec(m.text)?.[1]).filter((k) => k);
+  return checked.length ? foundProfile(checked.at(-1)!, make) : null;
 }
 
 function canSample(s: CanSpeed): TripLog["obdSpeed"][number] {
@@ -80,12 +97,12 @@ const CAN_FRESH_US = 300_000;
  * log's OBD speed where it didn't. In reverse gear the speed is negative (`rawKph` stays the unsigned reading): the
  * navigator and the map matching move the car backwards. Null when the log has neither.
  */
-export function withCanSpeed(trip: TripLog, profileKey?: string): TripLog | null {
+export function withCanSpeed(trip: TripLog, profileKey?: string, fromUs = -Infinity): TripLog | null {
   // Already on CAN speed (`canPrimaryInput`, or twice asked): as it is.
   if (trip.obdSpeed.some((s) => s.source === "can")) return trip;
   const can = decodeTripCan(trip, profileKey);
   // The wheels, else the speed message: what the app's feed decodes (can-speed-feed.ts).
-  const speeds = can?.profile ? navigatorSpeeds(can.samples, can.profile) : [];
+  const speeds = can?.profile ? navigatorSpeeds(can.samples, can.profile).filter((s) => s.tUs >= fromUs) : [];
   if (!speeds.length) return null;
   const merged: TripLog["obdSpeed"] = [];
   let ci = 0;
@@ -173,16 +190,32 @@ export function withWheelYaw(
   return { trip: { ...trip, imu }, gyroShare: after ? kept / after : 0, calibration: options.calibrate ? src.calibration : null };
 }
 
+const PRIMARY_NOTE = "can primary: speed from the wheels";
+/** Notes of a drive whose CAN speed carried nothing until a pass: probation's (§16.5) and discovery's (§16.6). */
+const ON_OBD_NOTES = ["can probation: ", "can discovery: "];
+
 /**
- * The input the app's navigator had: a log recorded with CAN primary (`can_primary: on`, VEHICLE-LINK-SPEC §16.3) has
- * OBD speed only while standing, the navigator drove on the wheels. Turned on mid-drive, the log has the feed's note
- * instead (`can primary: speed from the wheels`); before it no CAN was heard, so the whole log is as the phone had it.
+ * From when the app's navigator drove on the wheels (µs; -Infinity: the whole log), null: never. A log recorded with
+ * CAN primary (`can_primary: on`, VEHICLE-LINK-SPEC §16.3) did all along (before the feed's note no CAN was heard);
+ * turned on mid-drive, from the feed's note (`can primary: speed from the wheels`). A drive with probation (§16.5:
+ * checking, or a fail remembered from an earlier drive) or discovery (§16.6) in its notes carried the speed only from
+ * that note, a pass; without one, never: the frames heard were the check's or the search's.
+ */
+export function canPrimaryFromUs(trip: TripLog): number | null {
+  const note = trip.messages.find((m) => m.text.startsWith(PRIMARY_NOTE));
+  if (trip.messages.some((m) => ON_OBD_NOTES.some((n) => m.text.startsWith(n)))) return note?.tUs ?? null;
+  return trip.info.can_primary === "on" || note ? -Infinity : null;
+}
+
+/**
+ * The input the app's navigator had: a log recorded with CAN primary has OBD speed only while standing, the navigator
+ * drove on the wheels from `canPrimaryFromUs`; before it, the log as the phone had it.
  */
 export function canPrimaryInput(trip: TripLog): TripLog {
   const cached = primaryInputs.get(trip);
   if (cached) return cached;
-  const primary = trip.info.can_primary === "on" || trip.messages.some((m) => m.text.startsWith("can primary: speed from the wheels"));
-  const input = primary ? (withCanSpeed(trip) ?? trip) : trip;
+  const fromUs = canPrimaryFromUs(trip);
+  const input = fromUs !== null ? (withCanSpeed(trip, undefined, fromUs) ?? trip) : trip;
   primaryInputs.set(trip, input);
   return input;
 }
@@ -222,7 +255,7 @@ export function obdFromCan(trip: TripLog, hz = OBD_POLL_HZ): TripLog {
     ...trip,
     info: { ...trip.info, can_primary: "off" },
     // Not CAN primary any more: the app replay must not decode the wheels into the speed again.
-    messages: trip.messages.filter((m) => !m.text.startsWith("can primary: speed from the wheels")),
+    messages: trip.messages.filter((m) => !m.text.startsWith(PRIMARY_NOTE)),
     obdSpeed,
   };
 }

@@ -24,7 +24,7 @@ function drive(fromUs: number, seconds: number, kph: number, gear: number): CanF
   return out;
 }
 
-function feed(vin: string | null, listened = [0x215, 0x228]) {
+function feed(vin: string | null, listened = [0x215, 0x228], admit?: () => boolean) {
   let listener: ((frames: CanFrame[]) => void) | null = null;
   let windowEnd: (() => void) | null = null;
   const pushed: SpeedSample[] = [];
@@ -36,14 +36,17 @@ function feed(vin: string | null, listened = [0x215, 0x228]) {
     listened: () => listened,
     push: (s) => pushed.push(s),
     note: (t) => notes.push(t),
+    ...(admit ? { admit } : {}),
   });
   const wheelSamples: unknown[] = [];
   f.onSample((s) => wheelSamples.push(s));
+  const decoded: unknown[] = [];
+  f.onSpeed((s) => decoded.push(s));
   f.start();
   const send = (frames: CanFrame[]) => {
     for (let i = 0; i < frames.length; i += 25) listener?.(frames.slice(i, i + 25));
   };
-  return { f, pushed, notes, wheelSamples, send, endWindow: () => windowEnd?.(), listening: () => listener !== null || windowEnd !== null };
+  return { f, pushed, notes, wheelSamples, decoded, send, endWindow: () => windowEnd?.(), listening: () => listener !== null || windowEnd !== null };
 }
 
 // A VIN with a Mazda WMI, made up.
@@ -108,5 +111,21 @@ describe("CAN speed feed (VEHICLE-LINK-SPEC §16.3)", () => {
     const n = pushed.length;
     send(drive(3_000_000, 1, 36, 4));
     expect(pushed).toHaveLength(n);
+  });
+
+  // VEHICLE-LINK-SPEC §16.5: decoded for the check, but nothing to the navigator until it passed.
+  test("a profile on probation: decoded for the check only, then from its pass the navigator's", () => {
+    const { f, pushed, notes, wheelSamples, decoded, send } = feed(VIN, undefined, () => false);
+    send(drive(0, 3, 36, 4));
+    expect(f.profile?.key).toMatch(/^mazda\//);
+    expect(decoded.length).toBeGreaterThanOrEqual(28);
+    expect(pushed).toHaveLength(0);
+    expect(wheelSamples).toHaveLength(0);
+    expect(notes).toEqual([]);
+    f.promote();
+    expect(notes).toEqual([expect.stringMatching(/^can primary: speed from the wheels, profile mazda\//)]);
+    send(drive(3_000_000, 1, 36, 4));
+    expect(pushed.length).toBeGreaterThanOrEqual(8);
+    expect(wheelSamples.length).toBeGreaterThanOrEqual(8);
   });
 });

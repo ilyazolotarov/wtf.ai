@@ -68,6 +68,8 @@ describe("profiles", () => {
     expect(profiles.length).toBe(MAKES.flatMap((m) => m.mappings.flatMap((x) => x.dbcs)).length);
     for (const p of profiles) {
       expect([p.key, p.speedIds.length > 0]).toEqual([p.key, true]);
+      // A DBC no carstate reads may give no gear or steering: its speed is what probation checks.
+      if (p.dbcOnly) continue;
       expect([p.key, p.gear.length > 0]).toEqual([p.key, true]);
       expect([p.key, p.steer.length > 0]).toEqual([p.key, true]);
     }

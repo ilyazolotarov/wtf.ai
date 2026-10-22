@@ -112,9 +112,9 @@ export const en = {
   appearance: "Appearance",
   privacy: "Privacy",
   privacyMessage:
-    "Your position stays on this phone unless you choose to share it with other navigators on Android. No account needed. Crash reports contain no location or personal data. Downloaded maps work offline; maps and app updates come from the project's own server, which doesn't receive your position or routes. Trip logs leave the phone only when you share them or enable tester uploads (More → Trip recorder).",
+    "Your position stays on this phone unless you choose to share it with other navigators on Android. No account needed. Crash reports and anonymous car reports (Settings → Vehicle) contain no location or personal data. Downloaded maps work offline; maps and app updates come from the project's own server, which doesn't receive your position or routes. Trip logs leave the phone only when you share them or enable tester uploads (More → Trip recorder).",
   privacyMessageStore:
-    "Your position stays on this phone unless you choose to share it with other navigators on Android. No account needed. Crash reports contain no location or personal data. Downloaded maps work offline; maps and app updates come from the project's own server, which doesn't receive your position or routes. Trip logs leave the phone only when you share them or enable tester uploads with a personal code from the developer.",
+    "Your position stays on this phone unless you choose to share it with other navigators on Android. No account needed. Crash reports and anonymous car reports (Settings → Vehicle) contain no location or personal data. Downloaded maps work offline; maps and app updates come from the project's own server, which doesn't receive your position or routes. Trip logs leave the phone only when you share them or enable tester uploads with a personal code from the developer.",
   privacyPolicy: "Privacy policy",
   contactSupport: "Contact support",
   developerUnlocked: "Developer settings are now in More.",
@@ -249,6 +249,9 @@ export const en = {
     "With an OBDLink or vLinker adapter on a car with a CAN bus: the speed from the wheel sensors, ten times a second, and reversing moves the dot back. Other adapters and cars give the speed over OBD.",
   wheelYawSetting: "Turns from the wheels",
   wheelYawNote: "Where the car sends each wheel's speed, the rear wheels tell the turns instead of the phone, so the phone may lie anywhere in the car.",
+  carReportsSetting: "Send anonymous car reports",
+  carReportsNote:
+    "Whether reading the wheels worked on your car: its make, the adapter model and how the wheels compared with the OBD speed. Never the VIN or where you drive.",
   carState: "Car",
   carRunning: "Engine running",
   carEngineOff: "Ignition on, engine off",
@@ -268,6 +271,11 @@ export const en = {
   wheelsLooking: "looking for the wheels",
   wheelsNotHeard: "the wheels weren't heard",
   wheelsWaiting: "waiting for the wheels",
+  wheelsChecking: "checking the wheels against the OBD speed",
+  wheelsMismatch: "the wheels didn't match the OBD speed",
+  wheelsCheckSlow: "the adapter was too slow to check the wheels on this drive",
+  wheelsSearching: "searching the car's bus for its speed",
+  wheelsNoneOnBus: "no speed found on the car's bus",
   cutGps: "Cut GPS",
   restoreGps: "Restore GPS",
   simOutage: "Simulated GPS outage",

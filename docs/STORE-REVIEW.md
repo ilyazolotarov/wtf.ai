@@ -124,6 +124,9 @@ Before submitting, make the review code with `npm run testers:add -- app-review`
 | Other Data (tester trip logs: sensor data, the car's VIN and speeds) | yes | yes | no  | App Functionality |
 | Coarse location, contacts, user content, usage data, everything else | no |  |          |                   |
 
+The car compatibility report (VEHICLE-LINK-SPEC §16.5–16.6: make, profile, CAN ids, how the wheels compared with
+OBD speed, the speed layout found on a car without a profile, the adapter model; no VIN) goes with the Sentry reports and is Other Diagnostic Data, not linked.
+
 Must match `NSPrivacyCollectedDataTypes` in app.json. The trip logs are declared rather than taken as optional
 disclosure: that exemption covers infrequent submissions the user makes one by one, and the upload sends every trip
 by itself. Linked, because the logs are stored under the tester's name.
@@ -175,7 +178,7 @@ SDK comes from the Expo SDK (Play requires the latest year's API level for updat
 - **Data safety**:
   - Collected: App info and performance → Crash logs, Diagnostics; Device or other IDs → the install's random code.
     Purpose: App functionality. Not shared (Sentry processes it on our behalf). Not optional (sent by every build
-    with a DSN).
+    with a DSN). The car compatibility report (§3.3) is part of Diagnostics.
   - Collected, optional (tester trip log upload): Location → Precise location; App activity → Other actions (the
     car's VIN, speeds and the phone's sensor data). Purpose: App functionality. Not shared.
   - Encrypted in transit: yes. Deletion: on request with the support code (PRIVACY.md).

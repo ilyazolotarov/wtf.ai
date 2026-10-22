@@ -8,6 +8,7 @@ const defaults: DevSettings = {
   phoneOnly: false,
   wheelSpeed: true,
   wheelYaw: true,
+  carReports: true,
   rpmPeriodS: 5,
   positionShare: false,
 };

@@ -7,7 +7,7 @@
 // result has the same track, fixes, particles and summary as `replayTrip`.
 // Drives replayed in order with one CalibrationStore carry what the app keeps from drive to drive.
 
-import { canPrimaryInput, decodeTripCan } from "@/nav/replay/can";
+import { canPrimaryFromUs, canPrimaryInput, decodeTripCan } from "@/nav/replay/can";
 import { canSpeedSamples, type CanSpeedSample } from "@/nav/odometry/can/can-speed";
 import type { MapMatchConfig } from "@/nav/mapmatch/particle-filter";
 import type { NavConfig } from "@/nav/navigator";
@@ -239,7 +239,11 @@ export function replayTripInApp(logged: TripLog, o: AppReplayOptions): AppReplay
   const wheelYaw = o.wheelYaw ?? trip.info.nav_wheel_yaw === "on";
   const yawSwitches =
     o.wheelYaw !== undefined ? [] : trip.messages.flatMap((m) => (m.text === "nav wheel yaw on" || m.text === "nav wheel yaw off" ? [{ tUs: m.tUs, on: m.text.endsWith(" on") }] : []));
-  const wheels = wheelYaw || yawSwitches.some((s) => s.on) ? canSpeedSamples(decodeTripCan(trip)?.samples ?? []) : [];
+  // As the log says: the feed gave the navigator wheel samples only while their profile carried the speed (from a pass,
+  // VEHICLE-LINK-SPEC §16.5; never, none). Asked for (research), the whole drive's.
+  const wheelsFromUs = o.wheelYaw !== undefined ? -Infinity : (canPrimaryFromUs(trip) ?? Infinity);
+  const wheels =
+    wheelYaw || yawSwitches.some((s) => s.on) ? canSpeedSamples(decodeTripCan(trip)?.samples ?? []).filter((s) => s.tUs >= wheelsFromUs) : [];
   if (wheelYaw) service.setWheelYaw(true);
 
   // The inputs, each at the time the app would get it.

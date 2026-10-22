@@ -33,6 +33,24 @@ export interface CanSurvey {
   other: number;
 }
 
+/** A slice of the id space: the ids whose top `bits` bits (of the 11 or 29) are `prefix`; bits 0: every id. */
+export interface IdSlice {
+  prefix: number;
+  bits: number;
+}
+
+/** The pass filter (`STFPA id,mask`) of a slice on `width`-bit ids. */
+export function sliceFilter(slice: IdSlice, width: 11 | 29): { id: number; mask: number } {
+  const low = width - slice.bits;
+  const mask = slice.bits === 0 ? 0 : ((2 ** slice.bits - 1) * 2 ** low) >>> 0;
+  return { id: (slice.prefix * 2 ** low) >>> 0, mask };
+}
+
+/** Whether `id` is in the slice. */
+export function inSlice(id: number, slice: IdSlice, width: 11 | 29): boolean {
+  return Math.floor(id / 2 ** (width - slice.bits)) === slice.prefix;
+}
+
 const HEX = /^[0-9A-F]+$/;
 
 /**

@@ -604,7 +604,8 @@ while the car moves.
 - **Decoded on the phone** (`services/vehicle-link/can-speed-feed.ts`) as replay decodes a log (`withCanSpeed`): the
   profile from the VIN's make and the ids heard, after 200 frames (none with a wheel or speed message after 3000:
   noted, OBD stays); wheel samples averaged per 0.1 s (`CanSpeedAverager`, the same code as replay); negative in
-  reverse gear. Note `can primary: speed from the wheels, profile …`.
+  reverse gear. A profile not yet passed on the VIN goes on probation first (§16.5). Note `can primary: speed from the
+  wheels, profile …` when its speed starts carrying the navigation.
 - **A profile without wheel speeds** (VW PQ, Ford, Tesla Model 3, MG, BYD, Chrysler/Ram, Rivian) gives its speed
   message instead (`CanSpeedFrom`, mostly the ABS module's), signed by the gear the same way; turns stay on the
   phone's gyro.
@@ -641,3 +642,127 @@ while the car moves.
   turning the setting off and on, try again; ids heard later forget it. Two drives, not one: a single deaf session
   must not take the wheels from a car that has them.
 - A car without a profile: the ELM terminal's survey (§16.1) is the tool.
+
+### 16.5 Probation (`can-probation.ts`, `nav/odometry/can/probation.ts`)
+
+A profile's mapping comes from opendbc and is right for the cars openpilot drives; on another car of the make, a year
+or a market it may read the wrong signal, unit or factor. So no profile carries the navigation on a car until it has
+been checked against that car's own OBD speed.
+
+- **When.** The first time a profile is chosen for a VIN (§16.3), or after the profile changed. A pass is kept per VIN
+  (`vehicleLink.canProbation`): the next drives start on the wheels at once. Every car goes through it once, the ones
+  with tested profiles too. It is what makes the `dbcOnly` profiles (SPEC §3.2: layouts from DBCs no openpilot car
+  drives on) safe to offer: a wrong one costs that car nothing but the wheels.
+- **During it** (`VehicleLinkCore.setCanTrusted(false)`): the monitor listens and the frames are decoded and logged,
+  but nothing of them reaches the navigator, neither the speed nor the wheels' turning; the polls keep their 2 Hz while
+  the car moves (no pause, no long window), the monitor listening in their breaks. The navigator is on OBD as with the
+  setting off.
+- **The check** (`SpeedProbation`, pure): each OBD speed against the CAN speed at the poll's midpoint, interpolated
+  between the samples either side of the poll's break (at most 0.8 s apart), where the CAN speed changed under
+  1.5 km/h across them (no lag between the two). OBD only, never GNSS: it works under jamming and needs no position.
+  - Data first: 60 pairs at 20 km/h or more, the moving pairs spanning 20 km/h, 6 polls standing (OBD 0, not in
+    reverse: an ECU may read 0 reversing).
+  - **Pass:** scale (median CAN / OBD) within 0.92–1.08 (tyres, carstate's own factors up to 3.5 %); its median
+    absolute deviation under 3 % of it; correlation of the moving pairs at least 0.985; at least 80 % of the standing
+    polls with the CAN speed at most 3 km/h (some ECUs read 0 below 2–3 km/h); every wheel within 3 % of the wheels'
+    mean.
+  - **Fail at once:** scale outside 0.8–1.25 (a wrong unit), correlation under 0.9, under half of 20 or more standing
+    polls at rest, a wheel 10 % off the others. **Fail anyway:** 600 pairs without a pass, on a rule the drive gave
+    data for. One it gave none for waits, however long: no stop yet for the standstill, too narrow a range for the
+    correlation. A lack of data never fails a profile, since a fail is kept for the car.
+  - On the 10 drives of 2026-10-11/13 recorded this way (CAN shadow, polls at 2 Hz) every one with enough data passed,
+    in 1.5–12 min (median ~3), scale 0.995–1.017, deviation ≤ 1.2 %, correlation ≥ 0.9988, wheels within 0.3 %
+    (`npm run replay:probation`).
+- **A pass:** CAN carries the speed from then on (`setCanTrusted(true)`, the feed's `promote`): the note `can primary:
+  …` at that moment, and the wheels' turning with it. Note `can probation: <profile> passed (…)`.
+- **A fail:** OBD stays and the monitor goes off for the session; kept per VIN, so later drives don't listen beyond
+  picking the profile. Note `can probation: <profile> failed: <reason> (…)`. Turning the setting off and on forgets
+  the fails, as it forgets cars taken for OBD only (§16.4).
+- **The link can't carry it:** two polls over 2 s late (under 10 s: longer is the link lost) while the car moves end
+  probation for the drive, the monitor off; nothing kept. The next ignition-off picks the ids again for the next
+  drive. The navigator must never lose its speed for a check.
+- **No verdict by the drive's end:** nothing kept; the next drive starts over.
+- **The Car page** says `OBD · checking the wheels against the OBD speed`, `… didn't match …`, `… too slow …`.
+- **Replay** (`canPrimaryFromUs`): a log with a `can probation:` note (checking, or a fail remembered from an earlier
+  drive) drove on the wheels only from the
+  `can primary` note, if any; the wheels' turning too.
+
+**The anonymous report** (Settings → Car → Send anonymous car reports, on by default; PRIVACY.md). Each verdict, and a
+probation the link couldn't carry, goes to Sentry as one log (`can probation: <outcome> <profile>`), once per profile,
+outcome, adapter model and app version (`vehicleLink.canProbationReported`). Attributes: outcome and reason, make,
+profile, opendbc commit, whether the profile is `dbcOnly`, wheels or speed message, the OBD protocol, the adapter
+model, the profile's ids with frames per second of listening, the check's numbers (scale, deviation, correlation,
+range, pairs, standing share, worst wheel), seconds to the verdict, the breaks between listening windows (p50, p90),
+the listening share, late polls. Shares go in per cent with at most 2 decimals (`probationReportAttributes`): the
+scrubber drops finer decimals as possible coordinates. Never the VIN or any part of it, no position, no time of day.
+It answers which makes and adapters work, from every phone, not only the testers'. With the switch off nothing is
+sent, nor taken for sent: the same outcome later, the switch on, goes out.
+
+### 16.6 Discovery (`can-discovery.ts`, `nav/odometry/can/discovery.ts`)
+
+A car whose make has no profile, or none of whose make's ids is heard (§16.4), may still send its wheels or its
+speed at the OBD port (no gateway). Discovery finds them on the car itself, so it needs no DBC and nobody driving
+that car first.
+
+- **When.** The ids' picking says `unknown-make` or `none`, the VIN is read, and the adapter can monitor on this car
+  (an STN on CAN, not off for its firmware). Kept per VIN (`vehicleLink.canDiscovery`): the survey's slices left and
+  the rates it measured, the candidates, the ids tried, the find, or done with none; a survey and a search go on over
+  several stops and drives, and a find is used from the next drive's start. Turning the setting off and on forgets
+  the searches that found nothing.
+- **Survey, once, a slice at a time.** Every id at once overruns the link on both tested adapters (§16.1), and its
+  rates would be the link's, not the bus's. So the survey listens to a slice of the id space for 1 s
+  (`monitorCan({ slice })`: the ids under one prefix of their top bits, one `STFPA` with its mask), first the eighths
+  (11-bit: 0x000–0x0FF, …). A slice that sent 80 % of what the link carries, or `BUFFER FULL`, with more than one id
+  in it is split in two and each half surveyed; one id alone keeps its rate, a lower bound. One slice per poll: only
+  while the car stands with the engine running (not just the ECU awake: with the engine off some cars' ABS is quiet,
+  and the wheels would be missed for good), a poll between two slices (the polls keep their turn and show the car
+  still standing). Standing is the discovery's own last poll, not the link's snapshot (its listeners run before the
+  snapshot has the poll); between a slice and the next poll the status stays. Some 10–25 slices: a stop or two. Candidates: ids sent at least 10 times a second (wheel and speed
+  messages come at 20–100 Hz), not diagnostic answers (11-bit 0x700 and up; 29-bit 0x18DA/0x18DB), most frequent
+  first, at most 45.
+- **What the link carries** (`linkCapacity`), frames per second out of the monitor: 150 over BLE (the vLinker carried
+  ~150 of five ids' 370), 400 otherwise (the MX+ carried those five in the polls' breaks).
+- **The search** (as probation, §16.5: `setCanTrusted(false)`, the polls at their 2 Hz, the navigator on OBD): the
+  monitor listens to a batch of candidates, busiest first, as many as the link carries by the survey's rates (at
+  most 8, at least one): two busy ids on the vLinker, more on the MX+. Each frame retimed as the feed does; at each poll every field of each id
+  is interpolated between the frames either side (at most 0.8 s apart) and paired with the OBD speed. Fields tried:
+  11–16 bits, shifted 0–4 bits, of the 16-bit word at every byte, big- and little-endian (`layouts`). Moving pairs
+  only where OBD changed at most 2 km/h from the poll before (accelerating, the polls' lag spreads them); standing
+  polls give each field's zero. A field is a speed when its line on OBD speed has a correlation of at least 0.995,
+  a step between 0.002 and 1 km/h per count, and its standing reading within 1.5 km/h of the line's zero. Of a
+  field's variants that fit as well (within 0.001), the plainest (no shift, the widest): a shifted one is coarser, a
+  narrower one wraps at higher speeds. Fields of one message whose steps agree within 3 % are its wheels.
+- **A batch is judged** once each id heard has 120 moving pairs over 30 km/h and the car stood 3 polls: four fields
+  in a message decide at once; no field of any id correlating 0.9 rejects the batch; otherwise up to 360 pairs, then
+  the best. A poll waits at most 2 s for a frame of every id after it, then pairs with the ids that have one. An id
+  short of 120 pairs (heard standing, silent driving; its frames changed length) holds the batch up only until the
+  busiest has 360: then the batch is judged without it, a speed being sent all the time. A batch none of whose ids
+  is heard in 3 s of listening in a row, from its start or since one was last heard, is passed over: under the
+  monitor's own 5 s backstop (§16.2), as the ids' picking (§16.4), which would otherwise turn the monitor off. That
+  listening counts only with the engine running or the car moving: with the engine off at a stop some cars' ABS is
+  quiet, and the wheels would be passed over for good. The step is snapped to one cars use (decimal and binary km/h,
+  mph and m/s steps) within 2 %, the zero to a whole km/h within 1 km/h, shared by the message's fields (`tidy`).
+- **On the drives of 2026-10-11/13** recorded with the polls at 2 Hz: all 11 with enough data found 0x215, its four
+  wheels as opendbc has them (big-endian 16-bit at bytes 0, 2, 4, 6, 0.01 km/h, zero at 10 000), in 2–12 min; the
+  gear's and other ids alone: nothing; the engine's 0x202 alone: its speed field as opendbc has it
+  (`npm run replay:discover`, `--ids` for a batch).
+- **A find** becomes the car's own profile (`discoveredProfile`: the mean of its fields, unsigned, no gear, no
+  turning: the sides aren't known), keyed by its whole layout (`found/<id>/<length>/<fields>`): the feed matches it
+  beside opendbc's, and it goes through probation like any profile. A find probation refutes is dropped and the
+  search goes on with the ids left: probation turns the monitor off before it tells of the fail, so the ids the
+  search then listens to stay. While surveying or searching, the feed ignores the frames (they are no profile's). The
+  feed matches a find before opendbc's profiles: one of another make on the same id ties with it and comes after.
+- **None found:** OBD stays and the monitor goes off for the car. **The link can't carry it** (two late polls, as
+  §16.5): off for the drive, again the next. **Not due any more** mid-search (another VIN, the ids' picking found the
+  make's profile): the navigator's trust back, the monitor's ids left to the picking, which set them before it told.
+- **Car page:** `OBD · searching the car's bus for its speed`, `… no speed found on the car's bus`.
+- **Replay:** a log's note naming a `found/…` profile rebuilds it (`foundProfile`), of the VIN's make as the app made
+  it: a car of a make with profiles, none of them heard, keeps its find. The one `can primary`'s note names, else the
+  last probation checked (an earlier one it refuted). A log with a `can discovery:` note drove on OBD until a `can
+  primary` note, as with probation's (§16.5): each batch notes its ids as it starts (`listening to … for a speed`),
+  so a drive that ends mid-batch has its marker too.
+- **Reported** (the same switch, once per make, outcome, layout, adapter model and app version): `can discovery:
+  <outcome> <make>` with the make (`unknown` without a profile), the OBD protocol, the adapter model, how many
+  candidates and how many tried, and a find's id, length, fields (byte, order, bits, shift, step, zero), worst
+  correlation, pairs and range. A find is a car's speed layout nobody had: the report is how it reaches the app's
+  profiles for everyone.

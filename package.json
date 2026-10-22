@@ -111,7 +111,9 @@
     "ota:upload": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/ota/upload.ts",
     "updates-worker:deploy": "npx wrangler deploy --config workers/app-updates/wrangler.toml",
     "updates-worker:dev": "npx wrangler dev --config workers/app-updates/wrangler.toml",
-    "route:eta": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/eta.ts"
+    "route:eta": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/eta.ts",
+    "replay:probation": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/probation.ts",
+    "replay:discover": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/discover.ts"
   },
   "jest": {
     "preset": "jest-expo"

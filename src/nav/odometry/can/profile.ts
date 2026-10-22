@@ -50,6 +50,8 @@ export interface Profile {
   make: string;
   mapping: string;
   dbc: string;
+  /** From a DBC no carstate reads (mappings.ts): a layout nobody has driven on. */
+  dbcOnly: boolean;
   /** All wheels in m/s, as [fl, fr, rl, rr]. */
   wheels?: [WheelField, WheelField, WheelField, WheelField];
   /** Alternatives in order of preference; values in m/s, degrees, rad/s. */
@@ -177,6 +179,7 @@ export function resolveProfile(make: MakeMappings, mapping: Mapping, dbcName: st
     make: make.make,
     mapping: mapping.name,
     dbc: dbcName,
+    dbcOnly: mapping.dbcOnly ?? false,
     wheels,
     speed,
     gear: (mapping.gear ?? []).filter((g) => r.has(g)).map((g) => r.gear(g)),
@@ -254,12 +257,13 @@ export function seenIds(frames: { id: number; data: number[] }[]): Map<number, S
 
 /**
  * Profiles that fit the ids seen on the OBD port, best first. `listened` limits the comparison to the ids the monitor
- * passed (the CAN shadow's filters); without it every id counts. With a VIN, only its make's profiles.
+ * passed (the CAN shadow's filters); without it every id counts. With a VIN, only its make's profiles. `extra`: the
+ * car's own beside opendbc's (one discovery found, VEHICLE-LINK-SPEC §16.6).
  */
-export function matchProfiles(seen: Map<number, SeenId>, vin?: string | null, listened?: Set<number>): ProfileMatch[] {
+export function matchProfiles(seen: Map<number, SeenId>, vin?: string | null, listened?: Set<number>, extra: Profile[] = []): ProfileMatch[] {
   const make = makeForVin(vin);
   const out: ProfileMatch[] = [];
-  for (const profile of allProfiles()) {
+  for (const profile of [...extra, ...allProfiles()]) {
     if (make && profile.make !== make) continue;
     const ids = [...profile.ids.entries()].filter(([id]) => !listened || listened.has(id));
     if (!ids.length) continue;

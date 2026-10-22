@@ -285,8 +285,9 @@ is installed; deleting the last region brings it back.
 
 Language (System / English / Українська); Appearance (System / Light / Dark); Voice volume (ROUTING-SPEC §8.5); Car:
 **Speed from the wheels** (on by default; VEHICLE-LINK-SPEC §16.3) and, with it, **Turns from the wheels
-(experimental)** (NAVIGATOR-SPEC §5.4), each with a line on what it does; Privacy: the statement (position data on
-device; maps and app updates from the project's own server; crash reports without location or personal data; the
+(experimental)** (NAVIGATOR-SPEC §5.4) and **Send anonymous car reports** (on by default; VEHICLE-LINK-SPEC §16.5),
+each with a line on what it does; Privacy: the statement (position data on device; maps and app updates from the
+project's own server; crash reports and car reports without location or personal data; the
 opt-in trip log upload in the Trip recorder; a store build's variant) and the **Privacy policy** link
 (`privacyPolicyUrl(language)`); About: version with its build number ("1.0.0 (3563887)"), the app code (the JS
 commit, built in or an update), the support code (the install id testers send), the map data credit; **Contact

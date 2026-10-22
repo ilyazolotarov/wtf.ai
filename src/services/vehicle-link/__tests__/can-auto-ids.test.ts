@@ -39,17 +39,28 @@ function harness(vin: string | null, stored: Record<string, unknown> = {}) {
 const status = (a: CanAutoIds): CanAutoStatus => a.status;
 
 describe("CAN ids picked for the car (VEHICLE-LINK-SPEC §16.4)", () => {
-  test("a make with two candidates: listened to at once, kept, remembered for the VIN", () => {
-    const mazda = allProfiles().find((p) => p.make === "mazda" && p.wheels)!;
+  test("a make with two platforms: listened to at once, then the car's only, remembered for the VIN", () => {
+    const mazda = allProfiles().find((p) => p.key === "mazda/mazda/mazda_2017")!;
     const h = harness(MAZDA);
     h.auto.start();
     expect(h.listens).toEqual([candidateIds(MAZDA)]);
     h.car(mazda, 0, 3);
-    expect(status(h.auto)).toMatchObject({ state: "chosen", profile: expect.stringMatching(/^mazda\//) });
-    // The shadow carries on with what it listens to: no second setup.
-    expect(h.listens).toHaveLength(1);
-    expect((h.store.get(CAN_AUTO_IDS_KEY) as Record<string, number[]>)[MAZDA].sort()).toEqual(candidateIds(MAZDA).sort());
+    expect(status(h.auto)).toMatchObject({ state: "chosen", profile: "mazda/mazda/mazda_2017" });
+    expect(h.listens).toHaveLength(2);
+    expect([...h.listens[1]!].sort()).toEqual([0x215, 0x228]);
+    expect((h.store.get(CAN_AUTO_IDS_KEY) as Record<string, number[]>)[MAZDA].sort()).toEqual([0x215, 0x228]);
     expect(h.notes).toEqual([expect.stringMatching(/^can auto: mazda\/.*, ids 215 228$/i)]);
+  });
+
+  test("a make whose one platform's ids are all its candidates: the shadow carries on, no second setup", () => {
+    const BYD = "LGXAAAAAA00000000";
+    const byd = allProfiles().find((p) => p.make === "byd")!;
+    const h = harness(BYD);
+    h.auto.start();
+    expect(h.listens).toEqual([candidateIds(BYD)]);
+    h.car(byd, 0, 3);
+    expect(status(h.auto)).toMatchObject({ state: "chosen", profile: byd.key });
+    expect(h.listens).toHaveLength(1);
   });
 
   test("many candidates: in batches until the car's are heard, then only the platform's", () => {

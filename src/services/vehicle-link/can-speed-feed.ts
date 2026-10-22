@@ -1,6 +1,7 @@
 // CAN primary (VEHICLE-LINK-SPEC §16.3): the CAN shadow's frames decoded into speed for the navigator, as replay
 // decodes a log's (`withCanSpeed`): the profile from the VIN and the ids heard, its wheel samples (a profile without
-// wheel speeds: its speed message) averaged per 0.1 s, negative in reverse gear.
+// wheel speeds: its speed message) averaged per 0.1 s, negative in reverse gear. A profile on probation (§16.5) is
+// decoded the same, but its speed reaches only the check until it passes (`promote`).
 import { CAN_SPEED_PERIOD_US, CanSpeedAverager, canSpeedFrom, canSpeedReading, type CanSpeed, type CanSpeedSample } from "@/nav/odometry/can/can-speed";
 import { CarStateDecoder } from "@/nav/odometry/can/car-state";
 import { FrameRetimer } from "@/nav/odometry/can/frame-timing";
@@ -25,7 +26,20 @@ export interface CanSpeedFeedDeps {
   /** A CAN speed sample for the link (`VehicleLinkCore.pushCanSpeed`). */
   push(s: SpeedSample): void;
   note(text: string): void;
+  /**
+   * The profile chosen for the car: true, its speed goes to the navigator now; false, it is on probation and goes
+   * there only after `promote`. Absent: always now.
+   */
+  admit?(profile: Profile): boolean;
+  /** The car's own profiles beside opendbc's (a discovery's, §16.6). */
+  extraProfiles?(): Profile[];
+  /** False while something else owns the monitor's ids (discovery searching, §16.6): its frames are no car's profile. */
+  active?(): boolean;
 }
+
+/** The note that the navigator's speed now comes from the profile; replay starts the wheels' speed at it. */
+export const canPrimaryNote = (profile: Profile) =>
+  `can primary: speed from the wheels, profile ${profile.key}${profile.wheels ? "" : " (its speed message: no wheel speeds)"}`;
 
 export class CanSpeedFeed {
   private decoder: CarStateDecoder | null = null;
@@ -35,9 +49,12 @@ export class CanSpeedFeed {
   /** Frames (at the bus's time) kept until the profile is chosen, then decoded. */
   private early: TimedFrame[] = [];
   private gaveUp = false;
+  /** The chosen profile's speed goes to the navigator (not on probation, or passed it). */
+  private admitted = false;
   private vin: string | null = null;
   private off: (() => void) | null = null;
   private readonly samples = new Set<(s: CanSpeedSample) => void>();
+  private readonly speeds = new Set<(s: CanSpeed) => void>();
 
   constructor(private readonly deps: CanSpeedFeedDeps) {}
 
@@ -50,9 +67,22 @@ export class CanSpeedFeed {
     return () => this.samples.delete(listener);
   }
 
+  /** Every speed sample decoded (unsigned, with the gear), admitted or not: what probation checks (§16.5). */
+  onSpeed(listener: (s: CanSpeed) => void): () => void {
+    this.speeds.add(listener);
+    return () => this.speeds.delete(listener);
+  }
+
   /** The car's profile the speed comes from, once chosen. */
   get profile(): Profile | null {
     return this.decoder?.profile ?? null;
+  }
+
+  /** The profile on probation passed: its speed goes to the navigator from now on. */
+  promote(): void {
+    if (!this.decoder || this.admitted) return;
+    this.admitted = true;
+    this.deps.note(canPrimaryNote(this.decoder.profile));
   }
 
   start(): void {
@@ -77,9 +107,11 @@ export class CanSpeedFeed {
     this.retimer = new FrameRetimer();
     this.early = [];
     this.gaveUp = false;
+    this.admitted = false;
   }
 
   private onFrames(frames: CanFrame[]): void {
+    if (this.deps.active && !this.deps.active()) return;
     const vin = this.deps.vin();
     if (vin !== this.vin) {
       this.vin = vin;
@@ -92,7 +124,8 @@ export class CanSpeedFeed {
       this.early.push(...timed);
       if (this.early.length < PROFILE_AFTER_FRAMES) return;
       const listened = this.deps.listened();
-      const match = matchProfiles(seenIds(this.early), vin, listened ? new Set(listened) : undefined).find((m) => m.speed);
+      const extra = this.deps.extraProfiles?.() ?? [];
+      const match = matchProfiles(seenIds(this.early), vin, listened ? new Set(listened) : undefined, extra).find((m) => m.speed);
       if (!match) {
         if (this.early.length >= GIVE_UP_AFTER_FRAMES) {
           this.gaveUp = true;
@@ -102,16 +135,18 @@ export class CanSpeedFeed {
         return;
       }
       this.decoder = new CarStateDecoder(match.profile);
-      const from = canSpeedFrom(match.profile);
-      this.averager = new CanSpeedAverager(CAN_SPEED_PERIOD_US, from);
+      this.averager = new CanSpeedAverager(CAN_SPEED_PERIOD_US, canSpeedFrom(match.profile));
+      this.admitted = this.deps.admit?.(match.profile) ?? true;
       // Replay looks for this note's start (`canPrimaryInput`): the same for the speed message.
-      this.deps.note(`can primary: speed from the wheels, profile ${match.profile.key}${from === "speed" ? " (its speed message: no wheel speeds)" : ""}`);
+      if (this.admitted) this.deps.note(canPrimaryNote(match.profile));
       timed = this.early;
       this.early = [];
     }
     for (const f of timed) {
       for (const s of this.decoder.push(f.tUs, f.id, f.data)) {
         for (const c of this.averager.push(s)) {
+          this.speeds.forEach((l) => l(c));
+          if (!this.admitted) continue;
           this.deps.push(toSpeedSample(c));
           if (c.wheelsMps) this.samples.forEach((l) => l(c as CanSpeedSample));
         }

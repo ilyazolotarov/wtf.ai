@@ -1,8 +1,13 @@
 // Per-make CAN mappings, written by hand from opendbc's `opendbc/car/<make>/carstate.py` (the pinned submodule in
 // tools/can/opendbc): which message and signal give each quantity, its unit, sign and gear values. The signal layouts
 // themselves come from the DBCs (`npm run can:profiles` → signals.json). Only what navigation can use is ported:
-// wheel speeds, speed, gear, steering angle, brake, yaw rate. A mapping is trusted on a car only after the CAN shadow
-// comparison (SPEC §2.1), so a wrong unit or factor here shows as a constant ratio to OBD speed, not as a wrong position.
+// wheel speeds, speed, gear, steering angle, brake, yaw rate. A mapping is trusted on a car only after probation, the
+// check against its OBD speed (VEHICLE-LINK-SPEC §16.5), so a wrong unit or factor here keeps that car on OBD speed
+// instead of moving the dot wrong.
+//
+// Mappings marked `dbcOnly` come from opendbc DBCs that no carstate reads: crowd-sourced layouts of older cars and
+// makes openpilot doesn't drive, with names and units as the DBC gives them. Nobody here has driven one; probation is
+// what decides whether they fit a car.
 //
 // Alternatives are listed in carstate's order of preference; the decoder uses the first one whose message is on the
 // bus, which stands in for carstate's per-platform flags. An alternative whose message a DBC lacks is dropped for that
@@ -69,6 +74,8 @@ export interface Mapping {
   brake?: FlagSource[];
   /** Yaw rate, positive left; only where carstate reads one. */
   yaw?: YawSource[];
+  /** Written from a DBC alone: no carstate reads it, no openpilot car drives on it. */
+  dbcOnly?: boolean;
   note?: string;
 }
 
@@ -93,6 +100,36 @@ const nonzero = (msg: string, sig: string): FlagSource => ({ msg, sig, on: "nonz
 const eq = (msg: string, sig: string, ...values: number[]): FlagSource => ({ msg, sig, on: { eq: values } });
 
 export const MAKES: MakeMappings[] = [
+  {
+    make: "alfa",
+    wmi: ["ZAR", "ZAS"],
+    mappings: [
+      {
+        name: "giorgio",
+        dbcs: ["fca_giorgio"],
+        dbcOnly: true,
+        wheels: wheels4("ABS_1", "WHEEL_SPEED_FL", "WHEEL_SPEED_FR", "WHEEL_SPEED_RL", "WHEEL_SPEED_RR", "mps"),
+        gear: [reverseLight("ENGINE_1", "REVERSE")],
+        note: "Giulia and Stelvio.",
+      },
+    ],
+  },
+  {
+    make: "bmw",
+    wmi: ["WBA", "WBS", "WBX", "WBY", "4US", "5UX", "5YM", "X4X"],
+    mappings: [
+      {
+        name: "e9x",
+        dbcs: ["bmw_e9x_e8x"],
+        dbcOnly: true,
+        wheels: wheels4("WheelSpeeds", "Wheel_FL", "Wheel_FR", "Wheel_RL", "Wheel_RR"),
+        speed: [{ msg: "Speed", sig: "VehicleSpeed", unit: "kph" }],
+        // Automatics' lever; a manual's only sign is the car moving backwards.
+        gear: [selector("TransmissionDataDisplay", "ShiftLeverPosition"), reverseLight("Speed", "MovingReverse")],
+        note: "1 and 3 Series 2004–2013 (E8x, E9x), as tapped behind the gateway; the OBD port may not carry it.",
+      },
+    ],
+  },
   {
     make: "byd",
     wmi: ["LGX", "LC0"],
@@ -219,6 +256,21 @@ export const MAKES: MakeMappings[] = [
     wmi: ["KMH", "KMF", "KM8", "5NP", "5NM", "TMA", "NLH", "MAL", "KNA", "KNC", "KND", "KNE", "5XX", "5XY", "3KP", "U5Y", "U6Y", "KMT"],
     mappings: [
       {
+        name: "i30-2014",
+        dbcs: ["hyundai_i30_2014"],
+        dbcOnly: true,
+        wheels: wheels4("WHL_SPD", "WHL_SPD_FL", "WHL_SPD_FR", "WHL_SPD_RL", "WHL_SPD_RR"),
+        note: "A European i30 (GD) of 2012–2016; the wheels on another id than the newer cars'.",
+      },
+      {
+        name: "santafe-2007",
+        dbcs: ["hyundai_santafe_2007"],
+        dbcOnly: true,
+        wheels: wheels4("ESP_WheelSpeed", "FrontLeftWheelSpeed", "FrontRightWheelSpeed", "RearLeftWheelSpeed", "RearRightWheelSpeed"),
+        gear: [selector("TCU_Data", "CurrentGear", { 7: "R", 0: "N", 1: "D", 2: "D", 3: "D", 4: "D" })],
+        note: "Santa Fe (CM) and its 2006–2012 siblings.",
+      },
+      {
         name: "can",
         dbcs: ["hyundai_can_generated"],
         wheels: wheels4("WHL_SPD11", "WHL_SPD_FL", "WHL_SPD_FR", "WHL_SPD_RL", "WHL_SPD_RR"),
@@ -248,6 +300,28 @@ export const MAKES: MakeMappings[] = [
         gear: [selector("GEAR", "GEAR")],
         steer: [{ msg: "STEER", sig: "STEER_ANGLE" }],
         brake: [eq("PEDALS", "BRAKE_ON", 1)],
+      },
+      {
+        name: "rx8",
+        dbcs: ["mazda_rx8"],
+        dbcOnly: true,
+        wheels: wheels4("wheel_speed", "WheelSpeedFL", "WheelSpeedFR", "WheelSpeedRL", "WheelSpeedRR"),
+        speed: [{ msg: "speed", sig: "VehicleSpeed", unit: "kph" }],
+        note: "The RX-8's layout, shared by the Mazda 3, 6 and CX-7 of 2003–2012.",
+      },
+    ],
+  },
+  {
+    make: "mercedes",
+    wmi: ["WDB", "WDC", "WDD", "WDF", "W1K", "W1N", "W1V", "4JG", "55S"],
+    mappings: [
+      {
+        name: "w212",
+        dbcs: ["mercedes_benz_e350_2010"],
+        dbcOnly: true,
+        wheels: wheels4("WHEEL_SPEEDS", "WHEEL_SPEED_FL", "WHEEL_SPEED_FR", "WHEEL_SPEED_RL", "WHEEL_SPEED_RR", "mph"),
+        gear: [reverseLight("GEAR_LEVER", "REVERSE")],
+        note: "E-Class 2010 (W212); the OBD port may sit behind the gateway.",
       },
     ],
   },
@@ -286,6 +360,27 @@ export const MAKES: MakeMappings[] = [
         gear: [selector("GEARBOX", "GEAR_SHIFTER")],
         steer: [{ msg: "STEER_TORQUE_SENSOR", sig: "STEER_ANGLE" }],
         brake: [nonzero("DOORS_LIGHTS", "USER_BRAKE_PRESSED"), nonzero("CRUISE_THROTTLE", "USER_BRAKE_PRESSED")],
+      },
+      {
+        name: "xterra-2011",
+        dbcs: ["nissan_xterra_2011"],
+        dbcOnly: true,
+        // Its four wheel signals overlap by a bit and say no side: the speed only.
+        speed: [{ msg: "SPEED", sig: "SPEED", unit: "kph" }],
+        note: "Xterra, Frontier and Pathfinder of the 2005–2015 body-on-frame family.",
+      },
+    ],
+  },
+  {
+    make: "opel",
+    wmi: ["W0L", "W0V", "VXK"],
+    mappings: [
+      {
+        name: "omega-b",
+        dbcs: ["opel_omega_2001"],
+        dbcOnly: true,
+        wheels: wheels4("ABS_WheelSpeed", "FrontLeftWheelSpeed", "FrontRightWheelSpeed", "RearLeftWheelSpeed", "RearRightWheelSpeed"),
+        note: "Omega B (1999–2003); later GM-era Opels may share its ABS message.",
       },
     ],
   },
@@ -360,6 +455,14 @@ export const MAKES: MakeMappings[] = [
         steer: [{ msg: "EPAS3S_sysStatus", sig: "EPAS3S_internalSAS", scale: -1 }],
         brake: [eq("ESP_status", "ESP_driverBrakeApply", 2)],
       },
+      {
+        name: "model-s",
+        dbcs: ["tesla_can"],
+        dbcOnly: true,
+        speed: [{ msg: "ESP_B", sig: "ESP_vehicleSpeed", unit: "kph" }],
+        gear: [selector("DI_torque2", "DI_gear", { 1: "P", 2: "R", 3: "N", 4: "D" })],
+        note: "Model S and X before the 2021 refresh.",
+      },
     ],
   },
   {
@@ -419,6 +522,36 @@ export const MAKES: MakeMappings[] = [
         gear: [selector("Getriebe_03", "GE_Waehlhebel")],
         steer: [{ msg: "LWI_01", sig: "LWI_Lenkradwinkel", signSig: "LWI_VZ_Lenkradwinkel" }],
         brake: [nonzero("Motor_03", "MO_Fahrer_bremst"), nonzero("ESP_05", "ESP_Fahrer_bremst")],
+      },
+    ],
+  },
+  {
+    make: "volvo",
+    wmi: ["YV1", "YV4", "LYV", "LVY", "7JR"],
+    mappings: [
+      {
+        name: "v60-2015",
+        dbcs: ["volvo_v60_2015_pt"],
+        dbcOnly: true,
+        // The DBC gives no unit: km/h by the 0.01 step and the signed range (probation tells).
+        wheels: {
+          fl: { msg: "wheelspeed0", sig: "WhlSpdLF" },
+          fr: { msg: "wheelspeed0", sig: "WhlSpdRF" },
+          rl: { msg: "wheelspeed1", sig: "WhlSpdLR" },
+          rr: { msg: "wheelspeed1", sig: "WhlSpdRR" },
+          unit: "kph",
+        },
+        speed: [{ msg: "VehicleSpeed1", sig: "VehicleSpeed", unit: "kph" }],
+        note: "The P3 platform (S60, V60, XC60, V70, S80 of 2008–2018).",
+      },
+      {
+        name: "v40-2017",
+        dbcs: ["volvo_v40_2017_pt"],
+        dbcOnly: true,
+        // Its wheel signals carry no scale: the speed only.
+        speed: [{ msg: "VehicleSpeed0", sig: "VehicleSpeed", unit: "kph" }],
+        gear: [selector("TCM0", "GearShifter")],
+        note: "V40 of 2012–2019.",
       },
     ],
   },

@@ -1,6 +1,6 @@
 # wtf.ai privacy policy
 
-Effective 18 October 2026.
+Effective 22 October 2026.
 
 wtf.ai is a car navigator that keeps working when satellite positioning is jammed or unreliable. It is built to work
 offline, and it keeps your data on your phone. This policy describes what the app does with data. It covers the app
@@ -12,13 +12,13 @@ as distributed through the App Store and Google Play.
 - Your position, routes, searches and trip logs stay on your phone unless you choose to share them or enable
   position sharing with other navigators or trip log upload for testers (below).
 - No advertising, no tracking and no sale of your data. Data is shared only as described below.
-- The app sends anonymous crash and error reports so that bugs can be fixed. They contain no location and no personal
-  data.
+- The app sends anonymous crash and error reports so that bugs can be fixed, and anonymous reports on whether it
+  could read your car's wheel sensors (you can turn these off). They contain no location and no personal data.
 
 ## What stays on your phone
 
-The app uses the following to work out where the car is. None of it leaves your phone unless you share it yourself
-(see below).
+The app uses the following to work out where the car is. None of it leaves your phone unless you share it yourself,
+except the short car compatibility report described below.
 
 - **Location** (satellite positioning), while you use the app and during a drive with the screen locked.
 - **Motion sensors**: accelerometer, gyroscope and magnetometer.
@@ -39,6 +39,17 @@ Settings as "Support code", so that you can quote it if you report a problem). T
 reports before sending them. Reports carry no name, email, phone number, contacts, photos or advertising identifier.
 They are not used to identify you, and they are not combined with other data. Sentry deletes them after at most 90
 days.
+
+**Car compatibility reports.** The app can read the speed of each wheel from many cars' data bus, but how to read it
+differs between car makes and models. The first time it reads a car's wheels, the app checks them against the car's
+own speed for a few minutes before it relies on them. It then sends one report of the result with the crash and error
+reports, to the same place: the car's make (such as "toyota"), which wheel-reading layout it tried, the message numbers
+of the car's data bus it used and how often they came, the OBD protocol, the adapter's model, numbers comparing the
+wheels with the car's speed, how long the check took and how fast the adapter answered. For a car the app has no
+wheel-reading layout for, it can look for the car's speed on its data bus itself, and then reports what it found: the
+message number and where the speed sits in it, or that it found none. It never contains the VIN or
+any part of it, your location or the time of the drive. A report is sent once per result, not after every drive. You
+can turn these reports off in Settings → Vehicle → Send anonymous car reports.
 
 **Map and app update downloads.** The app downloads offline maps and app updates from the project's server. These
 requests say which map region or app version is wanted, and nothing about where you are or where you drive. As with

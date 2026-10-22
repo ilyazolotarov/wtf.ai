@@ -96,6 +96,12 @@ export default function SettingsScreen() {
                 label={t("wheelYawSetting")}
               />
               <ScreenNote>{t("wheelYawNote")}</ScreenNote>
+              <SwitchRow
+                value={settings.carReports}
+                onValueChange={(v) => setDevSettings({ carReports: v })}
+                label={t("carReportsSetting")}
+              />
+              <ScreenNote>{t("carReportsNote")}</ScreenNote>
             </>
           )}
         </ScreenCard>
