@@ -6,6 +6,7 @@ import Constants from "expo-constants";
 import * as Device from "expo-device";
 import { AppState, Platform } from "react-native";
 
+import PositionShareModule from "../../modules/position-share/src/PositionShareModule";
 import VehicleLinkModule from "../../modules/vehicle-link/src/VehicleLinkModule";
 import { RESTORE_IDENTIFIER } from "../../modules/vehicle-link/src/restore";
 import SensorCaptureModule from "../../modules/sensor-capture/src/SensorCaptureModule";
@@ -32,7 +33,8 @@ import { TripUploader } from "./trip-upload/trip-uploader";
 import { NativeDiscovery } from "./vehicle-link/discovery";
 import { TelemetryReporter } from "./telemetry";
 import { jsSourceInfo } from "./js-source";
-import { setTripService } from "./trip-service";
+import { PositionShareService } from "./position-share/position-share-service";
+import { setTripService, updateTripNotification } from "./trip-service";
 import { DEV_SETTINGS_VERSION, loadDevSettings } from "./dev-settings-load";
 import { CanAutoIds, idsAfterBufferFull, type CanAutoStatus } from "./vehicle-link/can-auto-ids";
 import { CanSpeedFeed } from "./vehicle-link/can-speed-feed";
@@ -60,6 +62,8 @@ export interface DevSettings {
   wheelYaw: boolean;
   /** RPM poll period while the engine runs, s. */
   rpmPeriodS: number;
+  /** More → Waze and Google Maps: share the car's position with other navigators during a trip (ANDROID-SPEC §8). */
+  positionShare: boolean;
 }
 
 const DEV_SETTINGS_KEY = "dev.settings";
@@ -82,6 +86,8 @@ export interface Runtime {
   health: AppHealth;
   /** The app started after the car drove off: the map says why the parked pose isn't used (NAVIGATOR-SPEC §6.1). */
   onTheWay: OnTheWay;
+  /** The car's position for Waze and Google Maps (Android; ANDROID-SPEC §8). */
+  share: PositionShareService;
   getDevSettings(): DevSettings;
   /** How the CAN ids are being picked for the car (VEHICLE-LINK-SPEC §16.4). */
   canAuto: { status(): CanAutoStatus; subscribe(listener: () => void): () => void };
@@ -103,6 +109,7 @@ export function getRuntime(): Runtime {
     wheelSpeed: true,
     wheelYaw: true,
     rpmPeriodS: 5,
+    positionShare: false,
   };
   let dev: DevSettings = loadDevSettings(kvStore.getJson(DEV_SETTINGS_KEY), defaults);
   const devListeners = new Set<() => void>();
@@ -144,6 +151,8 @@ export function getRuntime(): Runtime {
       can_shadow: dev.wheelSpeed ? "auto" : "off",
       can_primary: dev.wheelSpeed ? "on" : "off",
       nav_wheel_yaw: dev.wheelSpeed && dev.wheelYaw ? "on" : "off",
+      // Waze and Google Maps got the map's dot (ANDROID-SPEC §8); notes say when it started, held and failed.
+      ...(Platform.OS === "android" ? { position_share: dev.positionShare ? "on" : "off" } : {}),
     }),
   });
   recorder.start();
@@ -407,6 +416,34 @@ export function getRuntime(): Runtime {
     });
   }
 
+  // The car's position for Waze and Google Maps (ANDROID-SPEC §8): during a trip with the car, while the setting is on.
+  const share = new PositionShareService({
+    native: Platform.OS === "android" ? PositionShareModule : null,
+    position,
+    trip: {
+      active: () => {
+        const { state, current } = recorder.getSnapshot();
+        return state === "recording" && (current?.startReason !== "manual" || link.getSnapshot().adapter !== null);
+      },
+      subscribe: (listener) => {
+        const off = [recorder.subscribe(listener), link.subscribe(listener)];
+        return () => off.forEach((o) => o());
+      },
+    },
+    enabled: {
+      get: () => dev.positionShare,
+      subscribe: (listener) => {
+        devListeners.add(listener);
+        return () => devListeners.delete(listener);
+      },
+    },
+    notify: updateTripNotification,
+    note: (text) => recorder.note(text),
+    nowMs: () => Date.now(),
+  });
+  // Back from Android's settings: Developer options or the mock location app may have changed.
+  AppState.addEventListener("change", (s) => s === "active" && share.recheck());
+
   // Health metrics for field testers (docs/ANDROID-SPEC.md §4.1).
   const telemetry = new TelemetryReporter(sentryMetricSink, () => Date.now());
   const isRecording = () => recorder.getSnapshot().state === "recording";
@@ -461,6 +498,7 @@ export function getRuntime(): Runtime {
     routes,
     health,
     onTheWay,
+    share,
     getDevSettings: () => dev,
     canAuto: {
       status: () => canAuto.status,

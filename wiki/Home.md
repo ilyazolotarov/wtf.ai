@@ -2,21 +2,22 @@
 
 [[Українська версія|Home-uk]]
 
-**wtf.ai** is a car navigator for roads where satellite positioning can't be trusted. During air raids GPS is jammed
-or spoofed: the dot on an ordinary map freezes, or jumps hundreds of kilometres away. wtf.ai keeps following the car
-anyway, from its wheel speed and the phone's own sense of turning, and keeps it on the roads.
+**wtf.ai** is a car navigator to help you stay on track when GPS lets you down. With an OBD-II adapter connected, it
+estimates the position from the car's speed and turns measured by the phone, then matches the movement to the road
+network.
 
 It works **offline**: you download your region once, and the map, address search, routes and spoken directions need
-no internet after that. No account, and your position never leaves the phone.
+no internet after that. No account is needed. Your position and trip logs stay on your phone by default. You decide
+when to share them.
 
 **Get the app:** iPhone, the [public beta on TestFlight](https://testflight.apple.com/join/nCHCN441); Android, the newest APK from the [website](https://wtf-ai.uk/en.html).
 
 ## Start here
 
-1. [[Getting started]]: install, first run, download a map.
-2. [[Car adapter|Car-adapter]]: the small OBD-II plug that tells the app how fast the car goes. Strongly recommended.
+1. [[Getting started]]: installation, first launch and downloading a map.
+2. [[Car adapter|Car-adapter]]: choosing and connecting an adapter. Required for navigation without GPS.
 3. [[Reading the map]]: what the dot, the circle and the status pill mean.
-4. [[When GPS fails]]: what the app does on its own, and the one thing you may need to do.
+4. [[When GPS fails]]: what the app does automatically and when it needs your help.
 
 ## Everyday use
 

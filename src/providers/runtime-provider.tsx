@@ -2,6 +2,7 @@ import { useEffect, useSyncExternalStore } from "react";
 import { AppState } from "react-native";
 
 import type { VehicleLinkSnapshot } from "@/obd/types";
+import type { ShareSnapshot } from "@/services/position-share/position-share-service";
 import type { SensorSnapshot } from "@/services/sensor-capture/sensor-service";
 import { autoConnect, getRuntime, type DevSettings, type Runtime } from "@/services/runtime";
 import type { RecorderSnapshot } from "@/services/trip-recorder/trip-recorder";
@@ -54,6 +55,12 @@ export function useSensorValue<T>(select: (s: SensorSnapshot) => T): T {
   const { sensors } = getRuntime();
   const get = () => select(sensors.getSnapshot());
   return useSyncExternalStore(sensors.subscribe, get, get);
+}
+
+/** Sharing the car's position with Waze and Google Maps (ANDROID-SPEC §8). */
+export function useShareSnapshot(): ShareSnapshot {
+  const { share } = getRuntime();
+  return useSyncExternalStore(share.subscribe, share.getSnapshot, share.getSnapshot);
 }
 
 export function useDevSettings(): DevSettings {

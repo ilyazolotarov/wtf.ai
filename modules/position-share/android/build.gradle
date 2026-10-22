@@ -1,0 +1,20 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'ai.wtf'
+version = '1.0.0'
+
+android {
+  namespace = "ai.wtf.positionshare"
+  defaultConfig {
+    versionCode = 1
+    versionName = "1.0.0"
+  }
+}
+
+dependencies {
+  // The fused location provider's mock mode. The same version expo-location already puts in the app.
+  implementation 'com.google.android.gms:play-services-location:21.0.1'
+}

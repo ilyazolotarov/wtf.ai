@@ -38,10 +38,17 @@ export interface PositionEstimate {
   lastTrustedFixAt?: number;
   distanceSinceTrustedM?: number;
   rawGnss?: RawGnssFix;
+  /**
+   * The phone's last satellite fix, refused or not; never a simulated one (wtf.ai's own, shared with Waze) or a
+   * Wi-Fi/cell one. What Waze reads while wtf.ai lets go of the gps provider (position/share.ts).
+   */
+  satelliteFix?: RawGnssFix;
   /** Map matching (MAPMATCH-SPEC §6.2); absent without a road graph. */
   mapMatch?: MapMatchState;
   /** Standing where it was parked off the roads, started from there: `offroad` is where the car is, not lost. */
   parkedOffRoad?: boolean;
+  /** Phone-only mode's dead reckoning (NAVIGATOR-SPEC §9.6), not the navigator's: never shared with other apps. */
+  phoneOnly?: boolean;
   /** Driven since the driver put the car on the map (or confirmed the parked pose), m (NAVIGATOR-SPEC §6.2). */
   sinceDriverM?: number;
   /** Other roads the car may be on while map matching is ambiguous, heaviest first. */

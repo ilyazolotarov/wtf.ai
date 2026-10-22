@@ -2,18 +2,19 @@
 
 [[Українська|Car-adapter-uk]]
 
-An OBD-II Bluetooth adapter plugs into the diagnostic port under the dashboard, which nearly every car from the
-2000s on has. The app reads the car's **speed** from it, twice a second. When GPS is jammed, that speed is what
-keeps the dot moving the right distance; the phone supplies the turns.
+An OBD-II Bluetooth adapter plugs into the diagnostic port under the dashboard, found in nearly every car made
+since the early 2000s. It reports the car's **speed** so the app can calculate the distance travelled, while the
+phone's sensors measure turns.
 
-**Without an adapter** the app still works while GPS is good. When GPS goes away it can't tell how far the car moves:
-the dot stays at the last good position and the circle around it grows quickly. You can still navigate by following
-a route exactly (see [[When GPS fails]]), but an adapter is what makes the app useful under jamming.
+**Without an adapter**, navigation works while GPS is reliable. If the signal is lost, the app can't measure the
+distance travelled: the dot stays at the last trusted position and its uncertainty circle grows quickly. You can
+still follow a route exactly (see [[When GPS fails]]), but navigation during GPS outages requires an adapter.
 
 ## Which adapter
 
-The app reads the speed twice a second. What matters is that the adapter answers **every time, without gaps**, and
-keeps the connection for the whole drive: all the adapters we tested do, a cheap clone included.
+When polling for speed, the app sends two requests per second. The adapter needs to respond **every time, without
+gaps**, and stay connected throughout the drive. All the adapters we tested meet this requirement, including a cheap
+clone.
 
 | Phone   | What connects                                                                                               |
 | ------- | ----------------------------------------------------------------------------------------------------------- |
@@ -45,8 +46,8 @@ keeps the connection for the whole drive: all the adapters we tested do, a cheap
 
 ### Won't work
 
-- **On iPhone, classic Bluetooth only**: OBDLink LX and MX (without "+"), vLinker BM, MC and FD without "+", BAFX,
-  most blue "ELM327" clones. iOS doesn't let apps use classic Bluetooth. (On Android they work.)
+- **On iPhone, classic-only models without Apple MFi**: OBDLink LX and MX (without "+"), vLinker BM, MC and FD
+  without "+", BAFX, most blue "ELM327" clones. iOS doesn't let apps access these adapters. They work on Android.
 - **Dongles made for their own app**: OBDeleven, Thinkdiag, Topdon TopScan, Autel AP200, BlueDriver, XTOOL iOBD2,
   Innova, Carly. They don't speak ELM327: the app may list them but gets no data.
 - **USB or Wi-Fi only**: OBDLink EX (USB), Wi-Fi ELM327 adapters.
@@ -55,10 +56,10 @@ keeps the connection for the whole drive: all the adapters we tested do, a cheap
 
 - iPhone: the box says **"Bluetooth LE"** or **"BLE"**, or it is one of the MFi models above. Plain "Bluetooth" means
   classic: Android only.
-- From Vgate vLinker, take a **"+"** model (MC+, FD+, BM+), or FS / MS.
+- From Vgate vLinker, choose **FD-IOS**, a **"+"** model (MC+, FD+, BM+), or FS / MS.
 - A "v1.5" or "v2.1" clone for the price of a coffee can work on Android; a branded adapter is the safer buy.
 
-Tried an adapter that isn't listed? Write to SUPPORT_EMAIL how it went.
+Tried an adapter that isn't listed? Let us know how it went at SUPPORT_EMAIL.
 
 ## Connecting
 
@@ -72,7 +73,7 @@ connects by itself whenever you open the app in the car.
 
 ## The car button
 
-| Dot     | Means                                          | You                             |
+| Status  | What it means                                  | What to do                      |
 | ------- | ---------------------------------------------- | ------------------------------- |
 | Green   | Connected, the car answers                     | Drive normally                  |
 | Yellow  | Connecting, or the engine is off               | Switch the ignition on and wait |

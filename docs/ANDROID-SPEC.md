@@ -20,11 +20,12 @@ The Android build for volunteer testers. Companion to [SPEC.md](SPEC.md); tester
 | --- | --- |
 | Adapter transports | **BLE** (`BluetoothGatt`) and **Classic Bluetooth SPP** (RFCOMM, UUID `00001101-…`). No MFi: the OBDLink MX+ and cheap ELM327 clones work directly. The JS transport kind `spp`; the ELM327 layer is unchanged. |
 | Position | Platform `LocationManager`, **no Google Play services**: the `gps` provider = satellite fixes (with speed), `network` = coarse Wi-Fi/cell fixes. |
+| Position for other navigators | Opt-in: during a trip with the car, the map's dot is Google Play services' **fused location provider in mock mode** (Google Maps), and, only while GPS isn't trusted, the platform **`gps` provider** too (Waze reads it directly), so both follow the car under jamming and spoofing (§8). Holding `gps` stops the phone's real GNSS for wtf.ai as well: it is given back for probes and once GPS is trusted. |
 | IMU | `SensorManager`: `TYPE_GYROSCOPE`, `TYPE_GRAVITY`, `TYPE_LINEAR_ACCELERATION`, `TYPE_GAME_ROTATION_VECTOR` (no magnetometer in the frame), raw `TYPE_MAGNETIC_FIELD` for logging. 100 Hz, batched like iOS. Phones without gravity / linear-acceleration sensors derive them from the accelerometer. |
 | Clock | `SystemClock.elapsedRealtimeNanos()` in µs: sensor events and `Location.elapsedRealtimeNanos` use it natively. |
 | Conventions | Kotlin normalizes to the iOS conventions the TS assumes: gravity is the **true gravity direction** (Android's `TYPE_GRAVITY` points up, so it is negated) and user acceleration is CoreMotion's (`TYPE_LINEAR_ACCELERATION` negated); m/s², rad/s, course in radians, invalid fields omitted. A parity test pins this (§5). |
-| Background | One **foreground service** (types `location` + `connectedDevice`) started with a trip, with a persistent notification ("wtf.ai is recording your trip") and a partial wake lock. Without it Android stops sensors and Bluetooth polling with the screen off. Location "all the time" only for the opt-in that keeps the position without opening the app (VEHICLE-LINK-SPEC §11), asked for there and nowhere else. |
-| Permissions | `ACCESS_FINE_LOCATION`, `BLUETOOTH_SCAN` (`neverForLocation`) + `BLUETOOTH_CONNECT` (12+; legacy `BLUETOOTH`/`BLUETOOTH_ADMIN` ≤ 11), `POST_NOTIFICATIONS` (13+), `FOREGROUND_SERVICE(_LOCATION, _CONNECTED_DEVICE)`, `WAKE_LOCK`, `HIGH_SAMPLING_RATE_SENSORS`, `ACCESS_BACKGROUND_LOCATION` (asked for only by the wake's opt-in), the three companion permissions for the wake (`REQUEST_OBSERVE_COMPANION_DEVICE_PRESENCE`, `REQUEST_COMPANION_START_FOREGROUND_SERVICES_FROM_BACKGROUND`, `REQUEST_COMPANION_RUN_IN_BACKGROUND`), `REQUEST_INSTALL_PACKAGES` (sideloaded builds only). All from config plugins (`modules/vehicle-link/app.plugin.js`, `app.json`), never by hand in `android/`. The Bluetooth dialog is shown at most once per process, and never on devices without an adapter. |
+| Background | One **foreground service** (types `location` + `connectedDevice`) started with a trip, with a persistent notification ("wtf.ai is recording your trip") and a partial wake lock. Without it Android stops sensors and Bluetooth polling with the screen off. Location "all the time" only for the opt-in that keeps the position without opening the app (VEHICLE-LINK-SPEC §11), asked for there and nowhere else. While it runs, a **headless JS task** (`JsKeepAlive`, registered in JS as `WtfTripKeepAlive`) keeps React Native's timers firing with another app in front: without one they stop with the activity, and with them the OBD poller and the navigator's tick. |
+| Permissions | `ACCESS_FINE_LOCATION`, `BLUETOOTH_SCAN` (`neverForLocation`) + `BLUETOOTH_CONNECT` (12+; legacy `BLUETOOTH`/`BLUETOOTH_ADMIN` ≤ 11), `POST_NOTIFICATIONS` (13+), `FOREGROUND_SERVICE(_LOCATION, _CONNECTED_DEVICE)`, `WAKE_LOCK`, `HIGH_SAMPLING_RATE_SENSORS`, `ACCESS_BACKGROUND_LOCATION` (asked for only by the wake's opt-in), the three companion permissions for the wake (`REQUEST_OBSERVE_COMPANION_DEVICE_PRESENCE`, `REQUEST_COMPANION_START_FOREGROUND_SERVICES_FROM_BACKGROUND`, `REQUEST_COMPANION_RUN_IN_BACKGROUND`), `REQUEST_INSTALL_PACKAGES` (sideloaded builds only), `ACCESS_MOCK_LOCATION` (§8). From config plugins (`modules/vehicle-link/app.plugin.js`, `app.json`) or a module's own manifest (`modules/position-share`: the mock location permission, with lint's `MockLocation` check ignored, and `<queries>` for Waze and Google Maps), never by hand in `android/`. The Bluetooth dialog is shown at most once per process, and never on devices without an adapter. |
 | Pairing | Classic adapters must be bonded (PIN 1234/0000). The Vehicle screen lists bonded devices plus discovery results; tapping an unbonded one calls `createBond()`. |
 | Icons | `expo-symbols` renders Material Symbols on Android; the `Icon` map keys are Material names with an `android` entry each. |
 | Blur | Panels use `dimezisBlurViewSdk31Plus` with `blurReductionFactor` 1, and on Android 12+ the map renders into a `TextureView` (the default `GLSurfaceView` isn't part of the view the blur samples). Android 10–11 get no blur and `GlassFill` uses a dense tint (`panelSolid`, 86 %). |
@@ -43,10 +44,13 @@ The Android build for volunteer testers. Companion to [SPEC.md](SPEC.md); tester
 - **Vehicle link:** BLE (`connectGatt(TRANSPORT_LE)`, MTU request, notifications, write queue) and Classic SPP
   (bonding, the secure socket, then the insecure and channel-1 fallbacks clones need). Classic devices get the id
   `spp:<MAC>`. `getMfiAccessories` returns `[]`.
-- **Trip service:** the foreground service runs while a trip records.
+- **Trip service:** the foreground service runs while a trip records; its notification's words change while the
+  position is shared (§8), and a start again (the app back in front) keeps them.
 - **Wake:** a companion device the driver picked once (the car's Bluetooth, a BLE adapter) starts the app and its
   JS without a screen, and a trip records in the background; a process that dies mid-drive with the device present
   is started again (VEHICLE-LINK-SPEC §11). Android 12+.
+- **Position share:** `modules/position-share` (Kotlin only, like `app-notice`): the fused provider's mock mode, the
+  phone's setup checks, the fix mapping in `logic/` (JUnit).
 
 ## 4. CI/CD: nothing broken reaches a tester
 
@@ -121,3 +125,70 @@ are the only mitigation for OEM background limits.
   without opening the app, and whether vendor battery killers let it run.
 - Testers' phone models, once known, refine the sensor matrix (gyro noise, GNSS lag per model) through the logs.
 - Google Play: STORE-REVIEW.md.
+- Position sharing (§8) on real phones: Waze and Google Maps under jamming, Android Auto, vendor ROMs.
+
+## 8. The car's position for other navigators
+
+Waze (most drivers' navigator) and Google Maps show the car where wtf.ai has it, not where a jammed or spoofed GPS
+puts the phone. Opt-in, Android only (iOS has no way to give other apps a position).
+
+**How.** Two sinks, because the two navigators read different providers:
+
+- **Google Play services' fused provider in mock mode** (`setMockMode` / `setMockLocation`, `FusedSharer`), for the
+  whole trip: Google Maps and every other app that asks it get only wtf.ai's fixes. The platform providers aren't
+  touched, so wtf.ai keeps reading the real GNSS.
+- **The platform `gps` provider replaced by a test provider** (`addTestProvider`, `GpsTakeover`): **Waze reads
+  `LocationManager`'s `gps` (and `network`) directly**, never the fused provider. Installing a test `gps` provider
+  stops the real one for every app, wtf.ai included (its own fixes are then the mock ones, flagged and dropped), so it
+  is taken only while GPS isn't trusted (`GpsTakeoverPolicy`): at once when spoofed or being re-checked, when no fix
+  comes once GPS was trusted this trip or after a minute of trip. Taken, it is given back every 2 min for a probe of
+  10 s, up to 60 s while integrity checks returning fixes (`REACQUIRING`); trusted GPS ends the takeover. During a
+  probe Waze sees the phone's real GPS, spoofed or not, so a spoofed one is cut short: the probe's first satellite fix
+  over 500 m (and 3 radii) from the dot, unless integrity is checking it, takes `gps` again at once, and Waze saw one
+  fix instead of ten seconds of them (`PositionEstimate.satelliteFix`: never wtf.ai's own fixes, which come back on
+  `gps` flagged as mock). Each probe cut short doubles the wait for the next (2, 4, then 8 min); one that met no such
+  fix (jamming: Waze saw nothing) starts the waits over. Android has no way for an app to read the real GNSS while
+  `gps` is mocked: the hardware-only provider that can't be mocked (`gps_hardware`) is for system apps. `network` is
+  never replaced: Wi-Fi/cell fixes stay honest under jamming.
+
+Phones without Google Play services get only the `gps` takeover (not built: sharing needs Play services).
+
+**The phone's setup**, once, on More → Waze and Google Maps (`src/app/more/navigators.tsx`): Developer options on,
+then wtf.ai chosen as the "mock location app" (the app op `android:mock_location`; the manifest declares
+`ACCESS_MOCK_LOCATION`). The page reads the setup again whenever the app comes back to the front, opens About phone and
+Developer options (`expo-intent-launcher`), names the installed navigators and opens them, and checks what they get
+(the fused provider's last location read back). It also says: some banking and government apps refuse to run with
+Developer options on, and taxi and delivery driver apps refuse mock locations.
+
+**When** (`src/services/position-share/`): the setting is on, a trip records, and it is a trip with the car (started
+by the engine or by speed, or with the adapter connected). Mock mode goes off when the trip ends (the phone may leave
+the car with the driver), when the setting is turned off, and at every app start: Google Play services keeps mock
+mode after the process dies, the other apps frozen at its last fix until wtf.ai is opened again (the page says so). A refusal (no Play services, not the mock location app, mock mode
+refused, a fix refused) stops sharing until the next trip or the driver opens the app.
+
+**What** (`src/nav/position/share.ts`, pure: a replay of `nav_estimate` gives what Waze got):
+
+| `Location` field | From |
+| --- | --- |
+| latitude, longitude | the map's dot (`position/puck.ts`) |
+| `accuracy` | the dot's radius: both are 68 % radii |
+| `speed` | the navigator's speed, unsigned |
+| `bearing`, `bearingAccuracyDegrees` | the way the car travels: its heading, turned round in reverse (signed CAN wheel speeds); the navigator's heading doubt. Left out while unknown |
+| `time`, `elapsedRealtimeNanos` | stamped on arrival in Kotlin (the dot is drawn where the car is now); the wall clock never runs back |
+
+- About once a second (`SHARE_MIN_INTERVAL_MS` 900 ms over the navigator's 0.5 s publishes), and only a position the
+  navigator published: **nothing is invented**. No new position, no fix; the other apps then show no location.
+- **Never shared:** the driver's held placing (`manual`), phone-only mode (`phoneOnly`), and a dot whose radius is over
+  **200 m**, until it is under 150 m again (`SHARE_HOLD_ACCURACY_M`, `SHARE_RESUME_ACCURACY_M`). The other apps
+  can't show how sure the position is or the other roads the car may be on; "no GPS" there beats a confident arrow on
+  the wrong street.
+- wtf.ai never takes a mock fix as its own: sensor-capture flags them (`Location.isMock`) and the navigator drops
+  flagged fixes (`toNavFix`).
+
+**The driver sees** localized trip notification text (`trip-service.ts`): whether GPS is reliable and whether the
+position shared with Waze and Google Maps is estimated. If the position is too uncertain, the notification says
+sharing is paused. Missing setup or a sharing failure is reported under the trip's own title.
+
+**Trip log:** the info `position_share`, the notes `position share on|off|hold: <reason>|resumed|failed: …` and
+`position share gps taken|probing|real|failed: …` (TRIP-LOGGER-SPEC §6.2). Mock fixes wtf.ai hears while it holds `gps`
+are logged as `gnss` records with the simulated flag.

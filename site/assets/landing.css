@@ -45,8 +45,20 @@ section p.sub { color: var(--text2); margin: 0 0 32px; max-width: 40em; }
 .shots img { height: 480px; border-radius: 24px; scroll-snap-align: start; flex: none; background: var(--card); }
 footer { padding: 32px 0 48px; color: var(--text2); font-size: 15px; border-top: 1px solid var(--line); }
 footer a { color: var(--text2); margin-right: 16px; }
+/* A section's heading with a picture beside it (above it on a phone): "wtf.ai ❤ Waze". */
+.duo { display: grid; grid-template-columns: 1fr auto; gap: 24px 48px; align-items: center; margin-bottom: 32px; }
+.duo p.sub { margin-bottom: 0; }
+/* The app icon's wordmark with a heart in its position dot's ring, then Waze in the same type. */
+.love { display: flex; align-items: baseline; font-weight: 700; font-size: 64px; line-height: 1; letter-spacing: -0.03em;
+  white-space: nowrap; }
+.love svg { width: 0.56em; height: 0.56em; margin: 0 0.3em 0 0.06em; flex: none; }
+.love circle { fill: var(--line); }
+.love path { fill: var(--bad); }
 @media (max-width: 820px) {
   .hero { grid-template-columns: 1fr; padding-top: 16px; }
+  .duo { grid-template-columns: 1fr; }
+  .duo .love { order: -1; }
+  .love { font-size: 48px; }
   .grid, .steps { grid-template-columns: 1fr; }
   nav a:not(:last-of-type) { display: none; }
   .shots img { height: 380px; }

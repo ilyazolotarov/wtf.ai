@@ -44,7 +44,8 @@ wheel speeds from the CAN bus where the adapter and car allow) and heading rate 
 | Phone mount | A **rigid phone mount** is required (the gyro is the only yaw source without CAN). |
 | Standstill bias calibration | 2 s of standstill, refined at every stop (ZUPT). No calibration drive, screen or wizard: everything is learned online. |
 | Distribution | Sideloading (AltStore source on iOS, the app installs its own APK on Android; UPDATES-SPEC). Store builds (`DISTRIBUTION=store`) drop self-installed updates and AltStore, and hide the Developer screen and the tester upload until unlocked (STORE-REVIEW.md). Privacy policy: [PRIVACY.md](PRIVACY.md). |
-| Privacy | All data stays on the device. No position upload; trip logs leave the phone only by the share sheet or the **opt-in upload** with a personal code (TRIP-LOGGER-SPEC §7.1). One other exception: Sentry crash/error reports (EU region, no PII; coordinates and VINs scrubbed in `src/config/sentry-scrub.ts`). |
+| Other navigators | Android, opt-in: during a trip with the car, Waze and Google Maps get the map's dot as the phone's location, and nothing when its radius is over 200 m ([ANDROID-SPEC.md](ANDROID-SPEC.md) §8). Google Maps through the fused provider in mock mode; Waze through the platform `gps` provider, replaced only while GPS isn't trusted, since holding it blinds wtf.ai's own GNSS too (probes every 2 min). |
+| Privacy | All data stays on the device. No position upload by wtf.ai (with sharing on, the other navigators get the dot instead of the phone's GPS and handle it as they handle any location); trip logs leave the phone only by the share sheet or the **opt-in upload** with a personal code (TRIP-LOGGER-SPEC §7.1). One other exception: Sentry crash/error reports (EU region, no PII; coordinates and VINs scrubbed in `src/config/sentry-scrub.ts`). |
 
 ### 2.1 Odometry stages
 
@@ -192,7 +193,7 @@ device and in replay.
 
 - `index`: the map. `onboarding`, `map-setup` (the first download): full-screen modals. Pages pushed on the root
   stack: `route`, `vehicle`, `downloads` (also `more/downloads`), `guide/` (+ `guide/lesson`), `more/` with
-  `settings`, `update`, `recorder` (trip logs), `developer` (test switches, ELM terminal, UI gallery), `trips`,
+  `settings`, `update`, `navigators` (Android: Waze and Google Maps), `recorder` (trip logs), `developer` (test switches, ELM terminal, UI gallery), `trips`,
   `debug-terminal`.
 - Background: iOS `UIBackgroundModes` `location`, `external-accessory`, `bluetooth-central`, `audio`; Android a
   foreground service while a trip records. Location stays **When In Use**.
@@ -278,7 +279,8 @@ real spoofing (integrity is tuned on simulated spoofs), App Store and Google Pla
 Google Maps; live traffic (none is open for Ukraine); raw GNSS analysis; slow drag-off spoofing detection; Wi-Fi
 ELM327 adapters; magnetometer heading for navigation; Classic Bluetooth without MFi on iOS (impossible); lane-level
 accuracy; cloud services beyond Sentry, the update Worker and the opt-in trip log upload; feeding corrected location to
-other apps; cross-region routing.
+other apps on iOS (impossible) or on Android phones without Google Play services (ANDROID-SPEC §8); cross-region
+routing.
 
 ## 8. Risks and open items
 

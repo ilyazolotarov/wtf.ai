@@ -11,26 +11,26 @@
 
 ## 2. First run
 
-The app asks a few things, once:
+On first launch, the app guides you through a few steps:
 
-- **Location, while using the app.** It shows your position and checks GPS against the car. It never leaves the phone,
-  and the app never asks for "Always" access.
+- **Allow location access while using the app.** This lets it show your position and check GPS against the car's
+  movement. This step does not require "Always" access.
 - **Connect your car.** If you have an [[OBD-II adapter|Car-adapter]], plug it in and connect now; otherwise tap
   *Skip for now*.
-- **Put the phone in a holder.** Without GPS the phone itself feels every turn the car makes; in a firm holder it keeps
-  the direction right for a long time. Any angle works, upright or flat. Picked up for a moment? It catches up.
+- **Secure the phone in a mount.** Its sensors measure the car's turns, so it needs to stay still relative to the
+  car. Any mounting angle works. If you briefly pick it up, the app will readjust the heading afterwards.
 
 ## 3. Download a map
 
-There is no online map. Pick your oblast, or all of Ukraine, and download it on Wi-Fi. One download holds the map, the
-roads the app uses to find the car, and address search. See [[Offline maps]].
+There is no online map. Choose your region or all of Ukraine and download it over Wi-Fi. Each download includes the
+map, the road network used to estimate the car's position, and address search. See [[Offline maps]].
 
 ## 4. Before each drive
 
-- A map of the region you drive in.
-- Adapter in, ignition on: the car button turns green.
-- Phone in the holder.
-- **Open wtf.ai before you set off.** It follows the car from the first metre and remembers where you park.
+- Download a map of the region you'll be driving in.
+- Plug in the adapter and switch on the ignition: the car button turns green.
+- Secure the phone in its mount.
+- **Open the app before you set off.** It tracks the car from the first metre and remembers where you park.
 - On long drives, keep the phone charging: the map keeps the screen on.
 
-There is nothing to calibrate. The app learns your car and phone on the way.
+No manual calibration is needed: the app adapts to your car and phone as you drive.

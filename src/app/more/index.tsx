@@ -1,6 +1,6 @@
 import { router, type Href } from "expo-router";
 import { useSyncExternalStore } from "react";
-import { Pressable, StyleSheet, useColorScheme, View } from "react-native";
+import { Platform, Pressable, StyleSheet, useColorScheme, View } from "react-native";
 
 import { AVAILABLE_LESSONS } from "@/components/guide/lesson-bodies";
 import { ScreenContent, ScreenSection } from "@/components/screens/screen-ui";
@@ -10,7 +10,7 @@ import { fmtBytes } from "@/components/vehicle/format";
 import { STORE_BUILD } from "@/config/distribution";
 import { usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
-import { useRecorderSnapshot } from "@/providers/runtime-provider";
+import { useRecorderSnapshot, useShareSnapshot } from "@/providers/runtime-provider";
 import { useUpdateCenter, useUpdateBadges } from "@/services/app-update/update-center";
 import { useLessonsDone } from "@/services/guide/guide-progress";
 import { isDeveloperUnlocked, subscribeDeveloperUnlocked } from "@/services/preferences";
@@ -33,6 +33,25 @@ export default function MoreScreen() {
   // A region holds everything offline: the map, the road graph and the search index.
   const ready = installed.active != null;
   const logBytes = rec.trips.reduce((sum, trip) => sum + (trip.id === rec.current?.id ? (rec.current?.bytes ?? 0) : trip.bytes), 0);
+  const share = useShareSnapshot();
+  // The car's position for Waze and Google Maps (Android; ANDROID-SPEC §8).
+  const shareStarted = share.state === "sharing" || share.state === "holding" || share.state === "starting";
+  const shareBroken = share.state === "setup" || share.state === "failed";
+  const navigatorsItem: Item = {
+    icon: "navigation",
+    label: t("navShareTitle"),
+    sub: t(
+      share.state === "sharing"
+        ? "navShareMoreSharing"
+        : shareBroken
+          ? "navShareMoreSetup"
+          : share.enabled && share.state !== "unavailable"
+            ? "navShareMoreReady"
+            : "navShareMoreOff",
+    ),
+    subColor: shareStarted ? palette.ok.c : shareBroken ? palette.warn.c : undefined,
+    href: "/more/navigators",
+  };
 
   const items: Item[] = [
     {
@@ -63,6 +82,7 @@ export default function MoreScreen() {
       href: "/more/update",
       badge: updates.app,
     },
+    ...(Platform.OS === "android" ? [navigatorsItem] : []),
     {
       icon: "settings",
       label: t("settings"),

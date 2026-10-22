@@ -5,15 +5,15 @@
 ## Plan a route
 
 - **Press and hold** anywhere on the map, then **Route here**; or
-- **Search** for an address or place. Below the results: recent destinations and the region's biggest towns.
+- **Search** for an address or place. Recent destinations and the region's largest cities appear below the results.
 
-Guidance keeps going without GPS: it follows the dot, not the satellites. After a wrong turn it plans again by
-itself. Routes stay inside the downloaded region; for long trips, download the whole of Ukraine.
+Guidance uses the car's estimated position, so it can continue without GPS. If you miss a turn, the route is
+recalculated automatically. Routes stay within the downloaded region; for longer trips, download all of Ukraine.
 
 ## Spoken directions
 
-The speaker button beside the route's distance is the voice:
+The speaker button beside the distance on the route card controls spoken directions:
 
 - **Tap** to mute; directions stay on screen.
-- **Press and hold** to choose where it plays: the phone, or the car's Bluetooth speakers.
-- Volume: **More › Settings**. At zero there is no voice and no sound button.
+- **Press and hold** to choose the audio output: the phone or the car's Bluetooth speakers.
+- Adjust the volume in **More › Settings**. Setting it to zero turns off spoken directions and hides the speaker button.

@@ -163,6 +163,10 @@ SDK comes from the Expo SDK (Play requires the latest year's API level for updat
 - **Location**: foreground only (fine and coarse). No background location permission, so no background location
   declaration.
 - **Bluetooth**: `BLUETOOTH_SCAN` is `neverForLocation`.
+- **Mock location** (`ACCESS_MOCK_LOCATION`, ANDROID-SPEC §8): the opt-in "Waze and Google Maps" feature, which
+  gives other navigators the car's position during a drive. It takes effect only after the user picks the app in
+  Developer options. Say so in the reviewer notes, and check Data safety: other apps receive the position on the
+  phone. Nothing is sent to us.
 - **App access**: no login; all functionality available. Paste the §3.2 notes for the reviewer.
 - **Ads**: none. **Content rating** (IARC): no violence, no user interaction, no data sharing; mention the masked
   word in the Android tagline "Where the f* am I?" under language if the questionnaire asks.

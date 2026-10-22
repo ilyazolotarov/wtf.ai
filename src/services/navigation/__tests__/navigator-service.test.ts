@@ -17,7 +17,7 @@ import { seedFromLog } from "@/services/navigation/app-replay";
 import { NavigatorService } from "@/services/navigation/navigator-service";
 import type { ActiveRoadGraph, RoadGraphSource } from "@/services/offline-map/road-graph-file";
 import type { decodeImuBatch } from "@/services/sensor-capture/sensor-service";
-import type { GnssRecord, NavEstimateRecord, NavMapMatchRecord } from "@/triplog/schema";
+import { GNSS_FLAGS, type GnssRecord, type NavEstimateRecord, type NavMapMatchRecord } from "@/triplog/schema";
 
 jest.mock("expo-location", () => ({
   getForegroundPermissionsAsync: jest.fn(async () => ({ granted: true, status: "granted" })),
@@ -301,7 +301,7 @@ describe("NavigatorService", () => {
 
   test("fuses GNSS with OBD and IMU, then dead-reckons through a GNSS outage", async () => {
     const drive = syntheticDrive({ segments: cityDrive(4), gnss: "clean", obdScale: 0.985, startHeadingRad: 1 });
-    const { service, play, notes, logged } = harness();
+    const { service, play, notes, logged, gnss } = harness();
     await service.start();
     const durationS = (drive.trip.imu.at(-1)!.tUs - drive.trip.startUs) / 1e6;
     const outageS = durationS - 40;
@@ -324,8 +324,15 @@ describe("NavigatorService", () => {
     expect(haversineM(p, truth)).toBeLessThan(10);
     expect(p.accuracyM).toBeGreaterThan(2);
     expect(p.distanceSinceTrustedM).toBeGreaterThan(400);
-    // The trip log gets what the map showed, including how far the navigator ran behind.
+    // What Waze would read in a probe: the phone's last satellite fix. wtf.ai's own (shared, it comes back on the gps
+    // provider as a simulated fix) is never it.
+    expect(p.satelliteFix).toEqual(p.rawGnss);
     const last = logged.at(-1)!;
+    const tUs = drive.trip.imu.at(-1)!.tUs;
+    gnss.emit(record({ tUs, lat: p.lat, lon: p.lon, hAccM: 5, speedMps: 10 }, { flags: GNSS_FLAGS.simulated }));
+    expect(service.getSnapshot()!.rawGnss?.timestamp).not.toBe(p.rawGnss!.timestamp);
+    expect(service.getSnapshot()!.satelliteFix).toEqual(p.satelliteFix);
+    // The trip log gets what the map showed, including how far the navigator ran behind.
     expect(last).toMatchObject({ latDeg: p.lat, lonDeg: p.lon, accuracyM: p.accuracyM, mode: "dr", source: "dr", trust: "NO_FIX" });
     expect(last.behindUs).toBeGreaterThanOrEqual(200_000);
     expect(last.behindUs).toBeLessThanOrEqual(500_000);

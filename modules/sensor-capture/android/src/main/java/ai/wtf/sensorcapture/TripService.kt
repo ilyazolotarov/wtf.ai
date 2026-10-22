@@ -39,6 +39,10 @@ class TripService : Service() {
     var withLocation = false
       private set
 
+    /** The notification's "Turn on GPS" button while started without location: label, the intent starting it again. */
+    @Volatile
+    private var gpsButton: Pair<String, Intent>? = null
+
     /** The foreground service types this phone and the current permissions allow; 0 = cannot start. */
     fun allowedTypes(context: Context): Int {
       fun granted(p: String) = ContextCompat.checkSelfPermission(context, p) == PackageManager.PERMISSION_GRANTED
@@ -77,6 +81,43 @@ class TripService : Service() {
     fun stop(context: Context) {
       context.stopService(Intent(context, TripService::class.java))
     }
+
+    /** New words on the running service's notification (what sharing the position does); false when not running. */
+    fun update(context: Context, title: String, text: String, channelName: String): Boolean {
+      if (!running) return false
+      return try {
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.notify(NOTIFICATION_ID, buildNotification(context, title, text, channelName))
+        true
+      } catch (e: Exception) {
+        Log.w(TAG, "update failed: ${e.javaClass.simpleName}: ${e.message}")
+        false
+      }
+    }
+
+    /** With `gpsButton`'s button (a start from a notification may use location), kept when the words change. */
+    private fun buildNotification(context: Context, title: String, text: String, channelName: String): Notification {
+      val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+      if (manager.getNotificationChannel(CHANNEL_ID) == null) {
+        manager.createNotificationChannel(NotificationChannel(CHANNEL_ID, channelName, NotificationManager.IMPORTANCE_LOW))
+      }
+      val launch = context.packageManager.getLaunchIntentForPackage(context.packageName)
+      val open = launch?.let { PendingIntent.getActivity(context, 0, it, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT) }
+      val builder = NotificationCompat.Builder(context, CHANNEL_ID)
+        .setContentTitle(title)
+        .setContentText(text)
+        .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+        .setSmallIcon(context.applicationInfo.icon)
+        .setOngoing(true)
+        .setOnlyAlertOnce(true)
+        .setCategory(NotificationCompat.CATEGORY_NAVIGATION)
+        .setContentIntent(open)
+      gpsButton?.let { (label, intent) ->
+        val again = PendingIntent.getForegroundService(context, 1, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        builder.addAction(0, label, again)
+      }
+      return builder.build()
+    }
   }
 
   private var wakeLock: PowerManager.WakeLock? = null
@@ -90,7 +131,8 @@ class TripService : Service() {
     val gpsLabel = intent?.getStringExtra(EXTRA_GPS)
     val types = allowedTypes(this)
     try {
-      val notification = buildNotification(title, text, channelName, null)
+      gpsButton = null
+      val notification = buildNotification(this, title, text, channelName)
       if (types != 0) {
         try {
           startForeground(NOTIFICATION_ID, notification, types)
@@ -103,8 +145,8 @@ class TripService : Service() {
           if (withoutLocation == 0 || withoutLocation == types) throw e
           Log.w(TAG, "no location type from the background: ${e.javaClass.simpleName}")
           val again = intent?.let { Intent(it).setClass(this, TripService::class.java) }
-          val button = if (gpsLabel != null && again != null) gpsLabel to again else null
-          startForeground(NOTIFICATION_ID, buildNotification(title, text, channelName, button), withoutLocation)
+          gpsButton = if (gpsLabel != null && again != null) gpsLabel to again else null
+          startForeground(NOTIFICATION_ID, buildNotification(this, title, text, channelName), withoutLocation)
           withLocation = false
         }
       } else {
@@ -129,32 +171,10 @@ class TripService : Service() {
   override fun onDestroy() {
     running = false
     withLocation = false
+    gpsButton = null
     wakeLock?.let { if (it.isHeld) it.release() }
     wakeLock = null
     Log.i(TAG, "stopped")
     super.onDestroy()
-  }
-
-  /** `gps`: a button that starts the service again (label, intent); a start from a notification may use location. */
-  private fun buildNotification(title: String, text: String, channelName: String, gps: Pair<String, Intent>?): Notification {
-    val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-    if (manager.getNotificationChannel(CHANNEL_ID) == null) {
-      manager.createNotificationChannel(NotificationChannel(CHANNEL_ID, channelName, NotificationManager.IMPORTANCE_LOW))
-    }
-    val launch = packageManager.getLaunchIntentForPackage(packageName)
-    val open = launch?.let { PendingIntent.getActivity(this, 0, it, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT) }
-    val builder = NotificationCompat.Builder(this, CHANNEL_ID)
-      .setContentTitle(title)
-      .setContentText(text)
-      .setSmallIcon(applicationInfo.icon)
-      .setOngoing(true)
-      .setOnlyAlertOnce(true)
-      .setCategory(NotificationCompat.CATEGORY_NAVIGATION)
-      .setContentIntent(open)
-    gps?.let { (label, intent) ->
-      val again = PendingIntent.getForegroundService(this, 1, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-      builder.addAction(0, label, again)
-    }
-    return builder.build()
   }
 }

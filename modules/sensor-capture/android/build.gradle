@@ -13,3 +13,8 @@ android {
     versionName "1.0.0"
   }
 }
+
+dependencies {
+  // JsKeepAlive: React Native's headless JS tasks (the version is the app's, as for expo-asset).
+  implementation 'com.facebook.react:react-android'
+}

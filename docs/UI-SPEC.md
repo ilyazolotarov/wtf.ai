@@ -262,7 +262,10 @@ The car only: TRIP-LOGGER-SPEC §9.1.
 ### 7.3 `more`
 
 How to use? (the Guide, §7.7), Offline maps (`more/downloads`), App update (`more/update`, UPDATES-SPEC §5.5; its row
-and Offline maps' carry the update dot), Settings (§7.6); then the diagnostic pages Trip recorder (`more/recorder`,
+and Offline maps' carry the update dot), on Android **Waze and Google Maps** (`more/navigators`, ANDROID-SPEC §8: the
+switch, what sharing does now, the one-time setup as a checklist with buttons into Android's settings, "Open Waze",
+"Check what they get", and what to know; its row says Off, On, Sharing (green) or Setup not finished (amber)),
+Settings (§7.6); then the diagnostic pages Trip recorder (`more/recorder`,
 TRIP-LOGGER-SPEC §9.2) and Developer (`more/developer`: the switches of TRIP-LOGGER-SPEC §9.2, the ELM terminal, the
 **UI gallery** (`more/ui-gallery`): every panel the map shows only in some state, drawn at once with made-up data, to
 see them all at a large text size and in both languages). In a store build the Developer row is hidden until seven

@@ -9,6 +9,7 @@ const defaults: DevSettings = {
   wheelSpeed: true,
   wheelYaw: true,
   rpmPeriodS: 5,
+  positionShare: false,
 };
 
 describe("loadDevSettings", () => {

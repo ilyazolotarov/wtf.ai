@@ -4,28 +4,28 @@
 
 ## The status pill: can GPS be trusted?
 
-At the top of the map. The app checks every GPS position against the car's wheel speed and turns before using it.
+The indicator at the top of the map shows whether GPS agrees with the car's speed and turns.
 
-| Status      | What is happening                                                                       | You                                                   |
+| Status      | What is happening                                                                       | What to do                                            |
 | ----------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------- |
 | Trusted     | GPS agrees with the car                                                                 | Keep driving normally                                 |
 | Approximate | No satellites, only a Wi-Fi or cell position: a rough idea, not for driving by          | Standing and the dot is wrong? Put the car on the map |
-| No signal   | GPS is jammed. The dot keeps moving on wheel speed and the phone's turns, kept on roads | Keep driving normally                                 |
-| Spoofed     | GPS jumped somewhere the car can't have driven. The app ignores it                      | Trust the blue dot, not the grey one                  |
+| No signal   | No reliable GPS position; with an adapter connected, the dot follows the estimated position | Keep driving normally                              |
+| Spoofed     | GPS jumped somewhere the car can't have driven. The app ignores it                      | Follow the car's dot, not the grey GPS dot             |
 | Checking    | Satellites are back and are checked against the car for a few seconds                   | Keep driving normally                                 |
 
 Tap the pill for details. Putting the car on the map: see [[When GPS fails]].
 
 ## The dot and the circle
 
-The car is somewhere in the circle; a bigger circle means less sure. Blue: the position is trusted. Yellow with a
-dashed circle: estimated. When the app is unsure between two roads side by side, it shows the other one as a hollow
-ring, and the next turn settles it.
+The circle shows the approximate uncertainty of the position: the larger it is, the less precise the estimate.
+Blue means a trusted position; yellow with a dashed circle means an estimated one. If two nearby roads are plausible,
+the app marks the alternative with a hollow ring. The next turn helps tell them apart.
 
 ## Buttons
 
-- **Press and hold the map**: drops a pin. *Route here*, or, while the car stands, *I'm here*.
-- **Follow button**: switches between following the car and heading-up. Moving the map lets go of the car; tap to come
-  back, or just drive on.
+- **Press and hold the map** to drop a pin. Choose *Route here* or, while the car is stopped, *I'm here*.
+- **Follow button**: switches between following the car and orienting the map in the direction of travel. Dragging
+  the map stops following; tap the button or continue driving to resume.
 - **Car button**: the adapter connection ([[Car adapter|Car-adapter]]).
 - **More**: lessons, offline maps, settings.

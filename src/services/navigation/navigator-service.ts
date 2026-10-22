@@ -247,6 +247,8 @@ export class NavigatorService implements PositionSource {
   /** The latest fix (the ghost marker), and the latest the navigator took (phone GNSS shows it: not a refused one). */
   private lastFix: GnssRecord | null = null;
   private lastShownFix: GnssRecord | null = null;
+  /** The latest real satellite fix, refused or not: what Waze reads when wtf.ai lets go of the gps provider. */
+  private lastSatelliteFix: GnssRecord | null = null;
   /** `lastShownFix` changed since the last publish: phone GNSS shows it at the next IMU batch, not the next tick. */
   private shownChanged = false;
   private lastObdUs = -Infinity;
@@ -833,6 +835,7 @@ export class NavigatorService implements PositionSource {
     }
     this.lastFix = r;
     const fix = toNavFix(r);
+    if (fix && isSatelliteRecord(r)) this.lastSatelliteFix = r;
     if (fix) this.pending.push({ tUs: fix.tUs, fix, record: r });
     // One the navigator never gets (a simulated location, no accuracy) is shown as it was before integrity.
     else this.lastShownFix = r;
@@ -1069,6 +1072,7 @@ export class NavigatorService implements PositionSource {
         ...(phone.speedMps !== undefined ? { speedMps: phone.speedMps } : {}),
         accuracyM: phone.accuracyM,
         ...(phone.alternatives.length ? { alternatives: phone.alternatives } : {}),
+        phoneOnly: true,
         source: "dr",
         trust,
         timestamp: now,
@@ -1154,6 +1158,7 @@ export class NavigatorService implements PositionSource {
       lastTrustedFixAt,
       distanceSinceTrustedM: nav.distanceSinceTrustedM,
       rawGnss: fix ? rawOf(fix) : undefined,
+      ...(this.lastSatelliteFix ? { satelliteFix: rawOf(this.lastSatelliteFix) } : {}),
       },
       nowUs - estimate.tUs,
     );

@@ -140,6 +140,8 @@ declare class SensorCaptureNativeModule extends NativeModule<SensorCaptureEvents
    */
   startTripService?(title: string, text: string, channelName: string, gpsLabel: string | null): Promise<boolean>;
   stopTripService?(): Promise<void>;
+  /** New words on the running service's notification; false while it isn't running. Absent in builds before it. */
+  updateTripService?(title: string, text: string, channelName: string): boolean;
   isTripServiceRunning?(): boolean;
   tripServiceHasLocation?(): boolean;
 }

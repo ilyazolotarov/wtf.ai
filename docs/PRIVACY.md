@@ -9,9 +9,9 @@ as distributed through the App Store and Google Play.
 ## The short version
 
 - No account and no sign-up.
-- Your position, routes, searches and trip logs stay on your phone. The one exception is for testers who choose to
-  send their trip logs to the developer (below).
-- No advertising, no tracking, no selling or sharing of data with anyone.
+- Your position, routes, searches and trip logs stay on your phone unless you choose to share them or enable
+  position sharing with other navigators or trip log upload for testers (below).
+- No advertising, no tracking and no sale of your data. Data is shared only as described below.
 - The app sends anonymous crash and error reports so that bugs can be fixed. They contain no location and no personal
   data.
 
@@ -57,19 +57,29 @@ developer's private storage (Cloudflare R2), filed under that name, and deleted 
 only to test and improve the navigator, are never shared with anyone else and are kept until the tester asks for
 them to be deleted. Turning upload off stops it at once.
 
+**Position sharing with other navigators (Android).** If you enable Share the car's position in More → Waze and
+Google Maps, the app supplies its position estimate to Android's location services during drives with the car
+adapter connected. This includes the Google Play services location provider and, when GPS is unreliable, Android's
+GPS provider. Waze, Google Maps and other apps that request location from these providers can receive this estimate
+instead of the phone's GPS position. They handle it under their own privacy policies, just as they would the phone's
+location. Sharing is off by default and stops when the drive ends.
+
 ## Permissions
 
-- **Location**: to show and track your position and to guide you. In the background it is used only during a drive
-  and for up to 15 minutes after it, so that guidance continues with the screen locked; iPhone shows the location
-  indicator and Android a notification meanwhile. The app never asks for "Always" access.
+- **Location**: to show and track your position and to guide you. Navigation can continue with the screen locked
+  during a drive and for up to 15 minutes afterwards; iPhone shows the location indicator and Android a notification
+  meanwhile. "Always" access is requested only if you choose automatic startup. On iPhone, that feature also detects
+  significant movement using cellular networks and Wi-Fi so iOS can launch the app when you set off.
 - **Bluetooth**: to connect to an OBD-II adapter in your car. It is never used to find your location.
 - **Notifications** (Android): the notification that keeps navigation running with the screen off.
+- **Mock location** (Android): lets you select wtf.ai in Developer options to supply the car's position to other
+  navigators. Sharing starts only after you select it there and enable the feature in the app.
 
 You can refuse any permission. Without location the app can still show maps and search addresses.
 
 ## Age
 
-wtf.ai is meant for drivers: it is for adults, not for children. Apart from the trip logs testers choose to send, it collects
+The app is meant for drivers: it is for adults, not for children. Apart from the trip logs testers choose to send, it collects
 no personal data from anyone.
 
 ## Your rights

@@ -1,0 +1,13 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
+  <!--
+    Sharing the car's position with other navigators (docs/ANDROID-SPEC.md §8). Declaring the permission puts wtf.ai in
+    Developer options → "Select mock location app"; the driver's choice there is what allows it. Lint's MockLocation
+    check wants it in debug manifests only: here it is the feature, in release builds too.
+  -->
+  <uses-permission android:name="android.permission.ACCESS_MOCK_LOCATION" tools:ignore="MockLocation,ProtectedPermissions" />
+  <!-- The navigators the setup page names and opens (package visibility, Android 11+). -->
+  <queries>
+    <package android:name="com.waze" />
+    <package android:name="com.google.android.apps.maps" />
+  </queries>
+</manifest>

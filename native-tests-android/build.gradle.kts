@@ -17,6 +17,7 @@ sourceSets {
   main {
     kotlin.srcDir("../modules/sensor-capture/android/src/main/java/ai/wtf/sensorcapture/logic")
     kotlin.srcDir("../modules/vehicle-link/android/src/main/java/ai/wtf/vehiclelink/logic")
+    kotlin.srcDir("../modules/position-share/android/src/main/java/ai/wtf/positionshare/logic")
   }
 }
 

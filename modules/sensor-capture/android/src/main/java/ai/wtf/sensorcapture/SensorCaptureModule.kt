@@ -2,6 +2,7 @@ package ai.wtf.sensorcapture
 
 import ai.wtf.sensorcapture.logic.SensorLogic
 import android.Manifest
+import com.facebook.react.bridge.ReactContext
 import expo.modules.interfaces.permissions.PermissionsResponse
 import expo.modules.interfaces.permissions.PermissionsResponseListener
 import expo.modules.interfaces.permissions.PermissionsStatus
@@ -89,14 +90,26 @@ class SensorCaptureModule : Module() {
 
     AsyncFunction("stopImu") { capture?.stopImu() }
 
-    // Foreground service for a trip in progress (TripService); Android only, absent on iOS.
+    // Foreground service for a trip in progress (TripService); Android only, absent on iOS. With it, the JS timers keep
+    // running while another app is in front (JsKeepAlive).
     AsyncFunction("startTripService") { title: String, text: String, channelName: String, gpsLabel: String? ->
       val context = appContext.reactContext ?: throw Exceptions.ReactContextLost()
-      TripService.canStart(context) && TripService.start(context, title, text, channelName, gpsLabel)
+      val started = TripService.canStart(context) && TripService.start(context, title, text, channelName, gpsLabel)
+      if (started) (context as? ReactContext)?.let { JsKeepAlive.start(it) }
+      started
     }
 
     AsyncFunction("stopTripService") {
-      appContext.reactContext?.let { TripService.stop(it) }
+      appContext.reactContext?.let {
+        TripService.stop(it)
+        (it as? ReactContext)?.let { react -> JsKeepAlive.stop(react) }
+      }
+    }
+
+    // The running service's notification, with new words; false when it isn't running (yet).
+    Function("updateTripService") { title: String, text: String, channelName: String ->
+      val context = appContext.reactContext ?: return@Function false
+      TripService.update(context, title, text, channelName)
     }
 
     Function("isTripServiceRunning") { TripService.running }

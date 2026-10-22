@@ -1,6 +1,6 @@
 # The project's website (GitHub Pages, .github/workflows/pages.yml). privacy.md is copied from docs/PRIVACY.md at build.
 title: wtf.ai
-description: Offline car navigation that keeps your position when GPS is jammed or spoofed.
+description: Offline car navigation to help you stay on track when GPS lets you down.
 markdown: kramdown
 # The public TestFlight beta (iOS). The APK link (Android) is the update Worker's, added at build from UPDATES_ORIGIN.
 testflight_url: https://testflight.apple.com/join/nCHCN441
