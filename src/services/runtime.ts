@@ -461,6 +461,7 @@ export function getRuntime(): Runtime {
   const busyStates = new Set(["recording", "lingering"]);
   const locationSession = new LocationSession({
     set: (on) => SensorCaptureModule.setLocationSession(on),
+    always: async () => (await Location.getBackgroundPermissionsAsync()).granted,
     appState: () => AppState.currentState ?? "unknown",
     onAppState: (listener) => {
       const sub = AppState.addEventListener("change", listener);

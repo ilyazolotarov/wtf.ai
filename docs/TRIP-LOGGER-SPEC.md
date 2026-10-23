@@ -87,17 +87,23 @@ the ignition off and no linger, the app may be suspended.
     music, the engine started, and the whole 37 min drive had no fix, satellite or Wi-Fi). Held, a trip that starts
     with the app in the background gets GNSS, and iOS relaunches an app it ended; the app joins the session at launch
     (`AppHealthAppDelegate`), before JS, then auto-connects and records as usual. Let go 30 min after the app left
-    the screen with no trip recording or lingering and the ECU asleep (the indicator shows while it is held), never
-    with the app: one invalidated can't be started again from the background. Joined at a relaunch and not held again
-    by JS within 2 min, it ends. Notes `location session held`, `… let go …`.
+    the screen with no trip recording or lingering and the ECU asleep (the indicator shows while it is held), not
+    when iOS ends the app: one invalidated can't be started again from the background. Joined at a relaunch and not
+    held again by JS within 2 min, it ends. With location "Always", GNSS starts from the background without it: let
+    go as soon as the app leaves the screen with nothing going on, and at a start in the background with nothing going
+    on as soon as JS runs (the indicator showed for nothing after the adapter relaunched the app as the driver walked
+    past the car). Notes `location session held`, `… let go …`.
   - **The adapter** (VEHICLE-LINK-SPEC §11): Bluetooth state restoration relaunches the app for the adapter's link,
     mid-drive or when the car is switched on later; without a location session such a trip has no GNSS (it dead-
     reckons on the wheels).
   - **Never opened for the drive** (opt-in, location "Always", VEHICLE-LINK-SPEC §11): significant location changes
     relaunch the app a few hundred metres into a drive, whatever the adapter; "Always" starts GNSS from the
     background, and the pose where the car was parked is left aside (NAVIGATOR-SPEC §6.1).
-  - **Swiped away** by the user, nothing brings it back reliably: iOS doesn't relaunch an app the user closed (the
-    significant-change relaunch after a swipe varies by iOS version; reported gone on iOS 26).
+  - **Swiped away** by the user, nothing brings it back until it is opened. iOS doesn't relaunch an app the user
+    closed, mostly (the significant-change relaunch after a swipe varies by iOS version), so the app makes sure: a
+    running app swiped away gets `applicationWillTerminate`, where its location session ends, its adapter's pending
+    connect is cancelled and significant-change monitoring stops until the next launch. A suspended app swiped away
+    gets no call: iOS's own rules alone.
 - Without any of these, the next session begins when the user opens the app again.
 - **A manual recording** (the Trip recorder's start button) the process ended without stopping starts again, in a new
   log, at the next start within 10 min of when it was last seen recording (`trips.manual`, refreshed every 30 s;

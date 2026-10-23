@@ -449,13 +449,13 @@ within ~20 s of its ignition.
 - Background: the TS loop runs while the app is alive; the trip logger keeps the app alive with background location
   during a trip and for a linger period after it (TRIP-LOGGER-SPEC §4.3); `bluetooth-central` and
   `external-accessory` keep the links alive; on Android the foreground service does.
-- **Woken by the adapter (iOS):** the central has a restoration id (`RESTORE_IDENTIFIER`, the same in Swift). With
-  a connection up or a connect pending when iOS ends the app (memory, a crash; not a swipe), iOS keeps it and
-  relaunches the app in the background when the adapter's link has news: mid-drive within moments, parked when the
-  car is next switched on. At such a launch the central is created at once (`VehicleLinkAppDelegate`), before JS;
-  JS auto-connects as at any launch, and a peripheral restored still connected is set up without a new connect.
-  GNSS then needs the location session (TRIP-LOGGER-SPEC §4.3); without it the trip dead-reckons. MFi
-  (`EAAccessoryDidConnect`) wakes nothing: not built.
+- **Woken by the adapter (iOS):** the central has a restoration id (`RESTORE_IDENTIFIER`, the same in Swift). With a
+  connection up or a connect pending when iOS ends the app (memory, a crash; not a swipe: the app cancels it in
+  `applicationWillTerminate`, TRIP-LOGGER-SPEC §4.3), iOS keeps it and relaunches the app in the background when the
+  adapter's link has news: mid-drive within moments, parked when the car is next switched on. At such a launch the
+  central is created at once (`VehicleLinkAppDelegate`), before JS; JS auto-connects as at any launch, and a
+  peripheral restored still connected is set up without a new connect. GNSS then needs the location session
+  (TRIP-LOGGER-SPEC §4.3); without it the trip dead-reckons. MFi (`EAAccessoryDidConnect`) wakes nothing: not built.
 - **Started with a drive (iOS, opt-in):** the same opt-in on iOS (onboarding and the Vehicle screen) asks for
   location "Always" (`requestBackgroundPermissionsAsync`, after saying to pick *Change to Always Allow*) and turns on
   `DriveWake` (`AppHealth.swift`): significant location changes, which relaunch the app a few hundred metres into a
@@ -467,8 +467,8 @@ within ~20 s of its ignition.
   GNSS, which "Always" may start from the background, keeps the app running while it auto-connects; a trip then keeps
   it, and if none records in 9 min GNSS stops unless the app is open (the map starts GNSS only in front). The parked
   pose is left aside unless the relaunch's location, accuracy included, is within 150 m of it (the car still stands
-  there); the map says why once a trip records (NAVIGATOR-SPEC §6.1). A swipe or Background App Refresh off stops
-  it.
+  there); the map says why once a trip records (NAVIGATOR-SPEC §6.1). Background App Refresh off stops it, and so
+  does a swipe: the app stops monitoring as it ends (`DriveWake.pause`), until its next launch.
 - **Started by a companion device (Android 12+):** the opt-in that keeps the driver's position when they forget to
   open the app: an onboarding step after the adapter's, and the Vehicle screen's *Automatic startup* switch
   (`use-wake-setup.ts`). It shows the system's one-time companion dialog (`CompanionWake.kt`), offering the

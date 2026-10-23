@@ -22,8 +22,15 @@ public class AppHealthAppDelegate: ExpoAppDelegateSubscriber {
     return true
   }
 
+  /**
+   iOS ends a running app with this call when the driver swipes it away (an app it ends itself, or one suspended, gets
+   none): nothing brings it back until it is opened (TRIP-LOGGER-SPEC §4.3). Its location session ends, so iOS doesn't
+   relaunch it for location and the next launch shows no indicator; significant changes stop until the next launch.
+   */
   public func applicationWillTerminate(_ application: UIApplication) {
     AppHealth.shared.willTerminate()
+    LocationKeepAlive.end()
+    DriveWake.shared.pause()
   }
 
   public func applicationDidReceiveMemoryWarning(_ application: UIApplication) {
@@ -241,8 +248,8 @@ final class AppHealth: NSObject, MXMetricManagerSubscriber, @unchecked Sendable 
  TRIP-LOGGER-SPEC §4.3). Only one started in the foreground counts, and while it is held a trip starting in the
  background can start GNSS ("When In Use" can't from the background otherwise: 2026-10-21, a whole drive without a
  fix), and iOS relaunches the app after ending it, the app joining the session at launch (Apple: "recreate the session
- immediately upon launch in the background"). Never invalidated by the app ending: an invalidated session can't be
- started again from the background.
+ immediately upon launch in the background"). Not invalidated when iOS ends the app (an invalidated session can't be
+ started again from the background), only when the driver swipes it away (`applicationWillTerminate`).
  */
 enum LocationKeepAlive {
   private static let activeKey = "ai.wtf.location.sessionActive"
@@ -307,6 +314,11 @@ final class DriveWake: NSObject, CLLocationManagerDelegate, @unchecked Sendable 
     manager?.delegate = nil
     manager = nil
     return false
+  }
+
+  /** On the main thread: no relaunches until the next launch monitors again (`resume`); the opt-in stays. */
+  func pause() {
+    manager?.stopMonitoringSignificantLocationChanges()
   }
 
   /** On the main thread, at every launch: monitoring again keeps the relaunches coming. */

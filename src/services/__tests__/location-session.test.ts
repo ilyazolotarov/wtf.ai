@@ -1,7 +1,7 @@
 import { LocationSession, RELEASE_AFTER_LEAVING_MS, type LocationSessionDeps } from "@/services/location-session";
 
-function harness(granted = true) {
-  let appState = "active";
+function harness(granted = true, always = false, startIn = "active") {
+  let appState = startIn;
   let busy = false;
   const appListeners = new Set<(s: string) => void>();
   const busyListeners = new Set<() => void>();
@@ -10,6 +10,7 @@ function harness(granted = true) {
   let timer: { fn: () => void; ms: number } | null = null;
   const deps: LocationSessionDeps = {
     set: async (on) => (calls.push(on), on && granted),
+    always: async () => always,
     appState: () => appState,
     onAppState: (l) => (appListeners.add(l), () => appListeners.delete(l)),
     busy: () => busy,
@@ -72,4 +73,40 @@ test("without location permission nothing is held, so nothing is let go", async 
   await h.to("background");
   expect(h.timer()).toBeNull();
   expect(h.notes).toEqual([]);
+});
+
+describe("with location Always (GNSS starts from the background without it)", () => {
+  test("let go as soon as the app leaves the screen with no trip; a trip keeps it", async () => {
+    const h = harness(true, true);
+    h.setBusy(true);
+    h.session.start();
+    await h.flush();
+    await h.to("background");
+    expect(h.timer()).toBeNull();
+    h.setBusy(false);
+    expect(h.timer()?.ms).toBe(0);
+    await h.fire();
+    expect(h.calls).toEqual([true, false]);
+    expect(h.notes.at(-1)).toBe("location session let go: away from the app with no trip (location Always)");
+  });
+
+  test("started in the background with nothing going on: the session joined at launch let go at once", async () => {
+    const h = harness(true, true, "background");
+    h.session.start();
+    await h.flush();
+    expect(h.calls).toEqual([false]);
+    expect(h.notes).toEqual(["location session let go: started in the background with nothing going on (location Always)"]);
+  });
+
+  test("started in the background with a trip going on, or with While Using: kept", async () => {
+    const busy = harness(true, true, "background");
+    busy.setBusy(true);
+    busy.session.start();
+    await busy.flush();
+    expect(busy.calls).toEqual([]);
+    const whileUsing = harness(true, false, "background");
+    whileUsing.session.start();
+    await whileUsing.flush();
+    expect(whileUsing.calls).toEqual([]);
+  });
 });

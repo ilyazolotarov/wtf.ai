@@ -34,6 +34,11 @@ public class VehicleLinkAppDelegate: ExpoAppDelegateSubscriber {
     LinkCore.restoring = ids.contains(LinkCore.restoreIdentifier)
     return true
   }
+
+  /** The driver swiped the app away (AppHealth.swift): no connect left pending for iOS to relaunch it with. */
+  public func applicationWillTerminate(_ application: UIApplication) {
+    LinkCore.current?.closeForTermination()
+  }
 }
 
 public class VehicleLinkModule: Module {
@@ -128,6 +133,8 @@ final class LinkCore: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
   static let restoreIdentifier = "ai.wtf.vehiclelink.central"
   /** Launched by iOS to restore the central: it is created at once, not when JS gets to it. */
   nonisolated(unsafe) static var restoring = false
+  /** The module's core, for the app delegate. */
+  nonisolated(unsafe) static weak var current: LinkCore?
 
   private let queue = DispatchQueue(label: "ai.wtf.vehiclelink")
   private let emit: Emit
@@ -180,6 +187,7 @@ final class LinkCore: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
   init(emit: @escaping Emit) {
     self.emit = emit
     super.init()
+    LinkCore.current = self
     DispatchQueue.main.async { EAAccessoryManager.shared().registerForLocalNotifications() }
     NotificationCenter.default.addObserver(
       self, selector: #selector(accessoryDidConnect(_:)), name: .EAAccessoryDidConnect, object: nil)
@@ -187,6 +195,14 @@ final class LinkCore: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
       self, selector: #selector(accessoryDidDisconnect(_:)), name: .EAAccessoryDidDisconnect, object: nil)
     if LinkCore.restoring {
       queue.async { self.createCentral(restoreIdentifier: LinkCore.restoreIdentifier) }
+    }
+  }
+
+  /** The app is ending (applicationWillTerminate): the link closed and no connect pending, before the process goes. */
+  func closeForTermination() {
+    queue.sync {
+      self.failConnect(code: "cancelled", message: "app closed")
+      self.closeLink(reason: "app closed", notify: false)
     }
   }
 
