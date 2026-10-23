@@ -6,7 +6,7 @@ name: Website
 on:
   push:
     branches: [main]
-    paths: ["site/**", "store-assets/play/**", "scripts/site-media.sh", "docs/PRIVACY.md", "docs/PRIVACY.uk.md", ".github/workflows/pages.yml"]
+    paths: ["site/**", "store-assets/play/**", "scripts/site-media.sh", "scripts/site-share-card.py", "docs/PRIVACY.md", "docs/PRIVACY.uk.md", ".github/workflows/pages.yml"]
   workflow_dispatch:
 
 # The support address (a repository variable, so the repo names none): the policy's contact and the site's footer.
@@ -37,8 +37,10 @@ jobs:
         run: command -v ffmpeg || { sudo apt-get update -q && sudo apt-get install -y -q ffmpeg; }
 
       # The site's screenshots and demo videos are made from the store set (scripts/site-media.sh): one copy in the repo.
+      # The screenshots and the link preview cards made from them (scripts/site-share-card.py, Pillow).
       - name: Screenshots
         run: |
+          pip install --quiet pillow
           git lfs pull --include "store-assets/play/*/*.png"
           bash scripts/site-media.sh screens
 

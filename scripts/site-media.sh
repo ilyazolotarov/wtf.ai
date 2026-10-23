@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# The website's screenshots and demo videos, made from the store set in store-assets/play/ (scripts/store-screenshots.py)
-# so there is one copy of each in the repo. The site's are smaller: screenshots 720x1440, videos 540x1080 at 30 fps. Run by
+# The website's screenshots (and the link preview cards made from them, scripts/site-share-card.py) and demo videos,
+# made from the store set in store-assets/play/ (scripts/store-screenshots.py) so there is one copy of each in the repo. The site's are smaller: screenshots 720x1440, videos 540x1080 at 30 fps. Run by
 # .github/workflows/pages.yml; locally before a preview.
 #
 #   bash scripts/site-media.sh            # screenshots and videos
@@ -26,6 +26,8 @@ if [ "$what" = all ] || [ "$what" = screens ]; then
     done
   done
   echo "screens: $out/screens"
+  # The link previews (og:image) show a screenshot.
+  python3 "$root/scripts/site-share-card.py" 2>/dev/null || python "$root/scripts/site-share-card.py"
 fi
 
 if [ "$what" = all ] || [ "$what" = videos ]; then

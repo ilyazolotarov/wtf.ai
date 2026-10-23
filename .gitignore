@@ -76,3 +76,4 @@ native-tests-android/.kotlin/
 # The website's screenshots and demo videos: made from store-assets/play/ by scripts/site-media.sh.
 /site/assets/screens/
 /site/assets/demo*.mp4
+/site/assets/share*.png

@@ -4,6 +4,17 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ page.title }} · wtf.ai</title>
+  <meta name="description" content="{{ page.title }} · wtf.ai — {{ site.description }}">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="wtf.ai">
+  <meta property="og:title" content="{{ page.title }} · wtf.ai">
+  <meta property="og:url" content="https://wtf-ai.uk{{ page.url }}">
+  <meta property="og:locale" content="{% if page.lang == 'uk' %}uk_UA{% else %}en_US{% endif %}">
+  <meta property="og:image" content="https://wtf-ai.uk/assets/{% if page.lang == 'uk' %}share-uk.png{% else %}share.png{% endif %}">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="canonical" href="https://wtf-ai.uk{{ page.url }}">
   <link rel="icon" href="assets/icon.png">
   <link rel="alternate" hreflang="en" href="privacy.html">
   <link rel="alternate" hreflang="uk" href="privacy.uk.html">
