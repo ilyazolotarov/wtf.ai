@@ -14,7 +14,6 @@ import { useLinkBadge, useNavStatus } from "@/components/status/use-nav-status";
 import { Icon } from "@/components/ui/icon";
 import { T } from "@/components/ui/text";
 import { DeviceList } from "@/components/vehicle/device-list";
-import { WakeWithCar } from "@/components/vehicle/wake-with-car";
 import { carStateText, speedFromText } from "@/components/vehicle/car-status";
 import { usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
@@ -22,7 +21,6 @@ import { firmwareUpdaterFor } from "@/obd/catalog";
 import type { DiscoveredDevice } from "@/obd/types";
 import { driveProfileNext, parseSpeedProfile } from "@/services/vehicle-link/driving-emulator";
 import { releaseUpdaterHold } from "@/services/vehicle-link/firmware-notice";
-import { isOnboardingDone } from "@/services/preferences";
 import {
   useDevSettings,
   useRuntime,
@@ -221,11 +219,6 @@ function CarDetails() {
           </View>
           <ScreenNote>{t(Platform.OS === "android" ? "pairHintAndroid" : "pairHint")}</ScreenNote>
         </>
-      )}
-
-      {/* Not while onboarding brought the driver here: its next step is the same offer. */}
-      {(snap.activeDeviceId || remembered) && isOnboardingDone() && (
-        <WakeWithCar adapterId={snap.activeDeviceId ?? remembered?.id ?? null} />
       )}
     </>
   );

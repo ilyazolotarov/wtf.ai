@@ -14,6 +14,7 @@ import {
 } from "@/components/screens/screen-ui";
 import { VoiceVolumeSection } from "@/components/route/voice-volume-section";
 import { SwitchRow } from "@/components/screens/setting-rows";
+import { WakeWithCar } from "@/components/vehicle/wake-with-car";
 import { privacyPolicyUrl, STORE_BUILD, SUPPORT_EMAIL } from "@/config/distribution";
 import { appCode } from "@/components/update/app-code";
 import { Icon } from "@/components/ui/icon";
@@ -106,6 +107,7 @@ export default function SettingsScreen() {
           )}
         </ScreenCard>
       </View>
+      <WakeWithCar />
       <View style={styles.group}>
         <SectionLabel>{t("privacy")}</SectionLabel>
         <ScreenCard style={styles.privacy}>

@@ -134,9 +134,11 @@ function AppStack() {
           contentStyle: { backgroundColor: palette.bg },
         }}
       />
-      {/* Developer pages with the system's header: its back button and swipe. */}
-      <Stack.Screen name="debug-terminal" options={{ title: t("elmTerminal") }} />
-      <Stack.Screen name="trips" options={{ title: t("trips") }} />
+      {/* Developer pages with the system's header: its back button and swipe. The back button a bare chevron, as on
+          Android: iOS labels it with the page below's title, and the app's own pages have none (their route name
+          showed, "more/recorder"). */}
+      <Stack.Screen name="debug-terminal" options={{ title: t("elmTerminal"), headerBackButtonDisplayMode: "minimal" }} />
+      <Stack.Screen name="trips" options={{ title: t("trips"), headerBackButtonDisplayMode: "minimal" }} />
     </Stack>
   );
 }

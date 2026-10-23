@@ -470,7 +470,7 @@ within ~20 s of its ignition.
   there); the map says why once a trip records (NAVIGATOR-SPEC §6.1). Background App Refresh off stops it, and so
   does a swipe: the app stops monitoring as it ends (`DriveWake.pause`), until its next launch.
 - **Started by a companion device (Android 12+):** the opt-in that keeps the driver's position when they forget to
-  open the app: an onboarding step after the adapter's, and the Vehicle screen's *Automatic startup* switch
+  open the app: an onboarding step after the adapter's, and the *Automatic startup* switch in Settings
   (`use-wake-setup.ts`). It shows the system's one-time companion dialog (`CompanionWake.kt`), offering the
   remembered adapter when it is a BLE one and Classic devices, and then asks for location "all the time"
   (`ACCESS_BACKGROUND_LOCATION`, after saying what to pick on Android's settings page). That permission is asked
