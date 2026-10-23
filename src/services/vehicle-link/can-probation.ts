@@ -3,6 +3,7 @@
 // (`SpeedProbation`) compares the decoded speed with the polls. A pass moves the car to the wheels mid-drive and is
 // kept per VIN; a fail keeps the car on OBD (the monitor off) until the profile changes or the driver turns the
 // wheels' speed off and on. Each verdict, and a probation the link couldn't carry, is reported once (anonymous).
+import { speedKey } from "@/nav/odometry/can/discovery";
 import { OPENDBC_COMMIT, type Profile } from "@/nav/odometry/can/profile";
 import { SpeedProbation, type ProbationStats, type ProbationVerdict } from "@/nav/odometry/can/probation";
 import type { CanSpeed } from "@/nav/odometry/can/can-speed";
@@ -13,7 +14,7 @@ import type { KeyValueStore } from "@/obd/vehicle-link-core";
 
 /** VIN → the profile's verdict. */
 export const CAN_PROBATION_KEY = "vehicleLink.canProbation";
-/** Reports already sent: `report key` → true, so a car's verdict goes out once per app version and adapter. */
+/** Reports already sent: `report key` → true, so a car's verdict goes out once per build of the app and adapter. */
 export const CAN_PROBATION_REPORTED_KEY = "vehicleLink.canProbationReported";
 
 type VerdictRecord = Record<string, { profile: string; pass: boolean; reason: string | null }>;
@@ -97,7 +98,7 @@ export interface CanProbationDeps {
   promote(): void;
   /** The monitor off for this session: the car stays on OBD. */
   stopListening(): void;
-  /** Adapter model and app version, for the report's once-only key. */
+  /** Adapter model and the app's build (its JS's commit), for the report's once-only key. */
   reportScope(): string;
   /** The driver's setting: false, nothing is reported, nor taken for reported. Absent: on. */
   reportsOn?(): boolean;
@@ -158,13 +159,15 @@ export class CanProbation {
     this.vin = vin;
     this.profile = profile;
     const record = vin ? this.records()[vin] : undefined;
-    if (record?.profile === profile.key && record.pass) {
+    // A find's wheels' order, learned since, changes no speed: its pass holds.
+    const same = record !== undefined && speedKey(record.profile) === speedKey(profile.key);
+    if (same && record.pass) {
       this.deps.setTrusted(true);
       this.set({ state: "passed", profile: profile.key });
       return true;
     }
     this.deps.setTrusted(false);
-    if (record?.profile === profile.key && !record.pass) {
+    if (same && !record.pass) {
       this.deps.note(`can probation: ${profile.key} failed on an earlier drive (${record.reason}), OBD speed stays`);
       // The monitor off before the status: what the status starts (the search going on, §16.6) sets its own ids.
       this.deps.stopListening();
@@ -260,7 +263,7 @@ export class CanProbation {
     };
   }
 
-  /** Once per car profile, outcome, adapter model and app version: a fail tried again on every drive isn't news. */
+  /** Once per car profile, outcome, adapter model and app build: a fail tried again on every drive isn't news. */
   private send(r: CanProbationReport): void {
     if (this.deps.reportsOn && !this.deps.reportsOn()) return;
     const key = [r.profile, r.outcome, r.reason ?? "", this.deps.reportScope()].join("|");

@@ -1,4 +1,4 @@
-import { busTimedFrames, canPrimaryFromUs, canPrimaryInput, decodeTripCan, obdFromCan } from "@/nav/replay/can";
+import { busTimedFrames, canPrimaryFromUs, canPrimaryInput, decodeTripCan, obdFromCan, tripWheelSamples } from "@/nav/replay/can";
 import type { TripLog } from "@/triplog/trip-log-reader";
 
 const frame = (tS: number) => ({ tUs: tS * 1e6, id: 0x215, data: [0] });
@@ -89,6 +89,18 @@ describe("a speed the app found on the car's bus (VEHICLE-LINK-SPEC §16.6)", ()
     // Without the wheels' note, the last one checked.
     trip.messages.pop();
     expect(decodeTripCan(trip)?.profile?.key).toBe(KEY);
+  });
+
+  test("a find with its wheels' order: the wheels turn the car, below 11 km/h flagged as without a gear", () => {
+    const trip = log("XXXAAAAAA00000000");
+    trip.messages = [{ tUs: 0, tag: "app", text: `can primary: speed from the wheels, profile ${KEY}/w1032` } as never];
+    const can = decodeTripCan(trip);
+    expect(can?.profile?.key).toBe(`${KEY}/w1032`);
+    const wheels = tripWheelSamples(can);
+    expect(wheels.length).toBeGreaterThan(90);
+    expect(wheels.every((w) => w.noGear && Math.abs(w.speedMps * 3.6 - 36) < 1e-6)).toBe(true);
+    // Without the order: no wheels, the phone's gyro turns it.
+    expect(tripWheelSamples(decodeTripCan(log("XXXAAAAAA00000000")))).toEqual([]);
   });
 
   test("rebuilt from the log's note, for a car of a make with profiles too (none of its ids heard) as for one without", () => {

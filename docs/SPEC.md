@@ -128,7 +128,8 @@ Full specification: [VEHICLE-LINK-SPEC.md](VEHICLE-LINK-SPEC.md). Summary:
   carstate reads (crowd-sourced, older cars: Mazda 2003–2012, Hyundai 2007 and 2014, BMW E8x/E9x, Mercedes W212, Opel
   Omega B, Volvo P3 and V40, Nissan Xterra, Tesla Model S/X, Alfa Giorgio), the speed and what gear there is. Every
   profile, either kind, carries a car's navigation only after probation (VEHICLE-LINK-SPEC §16.5). A car with neither
-  gets its speed searched for on its own bus (discovery, §16.6). No DBC parsing on the device. CAN FD platforms are left
+  gets its speed searched for on its own bus (discovery, §16.6); four wheels found there get their order from the
+  phone's gyro as the car turns, for turning from them. No DBC parsing on the device. CAN FD platforms are left
   out (STN adapters receive classic CAN only). Profile selection: the VIN's make gives the candidates, the ids heard
   at the OBD port pick one; a profile needs a wheel or speed message among them. The track width for wheel yaw is a
   constant (1.60 m), not in the profile.

@@ -134,6 +134,10 @@ navigate with the phone in a hand, a pocket or on a seat.
   drive set off on another road.
 - **No gyro at a crawl:** the wheels turn the car at any speed they read. Pulling out of parking spaces they matched
   the mounted gyro within 1–2°; the gyro there only brings in the phone handled.
+- **Without a gear** (a profile that reads none, `noGear` on its samples: a find, VEHICLE-LINK-SPEC §16.6) reversing
+  can't be told, and the unsigned wheels turn it the other way. So below 11 km/h (`NO_GEAR_MIN_MPS`; reversing is
+  slower) the phone's own turning while its gyro reads it mounted, the wheels' only while it is handled (forwards
+  being likelier); the tyres' term isn't learned there.
 - **The compass gets no field** meanwhile (§7.6): the IMU is then the car's, not the phone's.
 - **The service** holds its inputs 0.5 s instead of 0.3 while CAN speed comes or wheel yaw is on: a wheel sample
   comes out of the feed 0.07–0.15 s after its time, one in ten over 0.3 s.

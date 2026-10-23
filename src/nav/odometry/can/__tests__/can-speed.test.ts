@@ -29,6 +29,12 @@ describe("CAN speed samples", () => {
     expect(s[0].speedMps * 3.6).toBeCloseTo(10.1, 6);
   });
 
+  test("a profile that reads no gear says so on every sample: reversing is never known", () => {
+    const withGear = allProfiles().find((p) => p.wheels && p.gear.length)!;
+    expect(navigatorSpeeds([wheels(0, 20)], withGear)[0].noGear).toBeUndefined();
+    expect(navigatorSpeeds([wheels(0, 20)], { ...withGear, gear: [] })[0].noGear).toBe(true);
+  });
+
   test("a standing car is exactly 0 (0.01·raw − 100 in floating point isn't)", () => {
     const raw = 10_000 * 0.01 - 100;
     const s = canSpeedSamples([{ q: "wheels", tUs: 0, v: [raw, raw, raw, raw] }]);

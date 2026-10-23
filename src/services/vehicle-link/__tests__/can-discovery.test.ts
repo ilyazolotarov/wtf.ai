@@ -159,6 +159,10 @@ describe("CAN discovery (VEHICLE-LINK-SPEC §16.6)", () => {
     // No poll yet: whether the car stands isn't known.
     expect(h.d.status).toEqual({ state: "waiting" });
     expect(h.surveys()).toBe(0);
+    // Standing before the car moved: the engine may not run (a frozen RPM), the bus may be quiet.
+    await h.stand(2);
+    expect(h.surveys()).toBe(0);
+    h.cruise(1);
     // One slice, then a poll before the next: the polls keep their turn.
     await h.stand(0.5);
     expect(h.surveys()).toBe(1);
@@ -197,6 +201,7 @@ describe("CAN discovery (VEHICLE-LINK-SPEC §16.6)", () => {
   test("the survey goes on at the next stop where it left off", async () => {
     const h = harness({ busIds: [0x100, WHEELS] });
     h.d.start();
+    h.cruise(1);
     await h.stand(1.5);
     expect(h.surveys()).toBe(3);
     // The link's own refresh after a slice, its poll before the slice too old to tell: the survey goes on.
@@ -215,15 +220,18 @@ describe("CAN discovery (VEHICLE-LINK-SPEC §16.6)", () => {
     const bus = { busIds: [0x100, 0x120, 0x200, WHEELS], hz: { [WHEELS]: 100, 0x200: 100 } };
     const ble = harness({ ...bus, capacity: linkCapacity("ble") });
     ble.d.start();
+    ble.cruise(1);
     await ble.stand(5);
     expect(ble.listens[0]).toEqual([0x200, 0x100]);
     const mfi = harness({ ...bus, capacity: linkCapacity("mfi") });
     mfi.d.start();
+    mfi.cruise(1);
     await mfi.stand(5);
     expect(mfi.listens[0]).toEqual([0x200, WHEELS, 0x100, 0x120]);
     // An id busier than the link alone still gets its batch.
     const one = harness({ busIds: [0x100, WHEELS], hz: { [WHEELS]: 200 }, capacity: linkCapacity("ble") });
     one.d.start();
+    one.cruise(1);
     await one.stand(8);
     expect(one.listens[0]).toEqual([WHEELS]);
   });
@@ -231,6 +239,7 @@ describe("CAN discovery (VEHICLE-LINK-SPEC §16.6)", () => {
   test("a batch none of whose ids is heard: passed over after 3 s of listening, under the monitor's own 5 s", async () => {
     const h = harness({ busIds: [0x100, 0x120, 0x140, WHEELS], silent: [0x100, 0x120, 0x140] });
     h.d.start();
+    h.cruise(1);
     await h.stand(10);
     expect(h.listens.at(-1)).toEqual([0x100, 0x120, 0x140]);
     // 0.28 s of listening each half second: 3 s of it in 5.5 s.
@@ -242,8 +251,9 @@ describe("CAN discovery (VEHICLE-LINK-SPEC §16.6)", () => {
   });
 
   test("a batch heard, then silent while driving: passed over after 3 s of listening without it", async () => {
-    const h = harness({ busIds: [0x100, 0x120, 0x140, WHEELS], silentFrom: { 0x100: 30, 0x120: 30, 0x140: 30 } });
+    const h = harness({ busIds: [0x100, 0x120, 0x140, WHEELS], silentFrom: { 0x100: 31, 0x120: 31, 0x140: 31 } });
     h.d.start();
+    h.cruise(1);
     await h.stand(10);
     expect(h.listens.at(-1)).toEqual([0x100, 0x120, 0x140]);
     h.drive(25);
@@ -256,6 +266,7 @@ describe("CAN discovery (VEHICLE-LINK-SPEC §16.6)", () => {
   test("a silent batch at a stop with the engine off isn't passed over: some cars' ABS is quiet then", async () => {
     const h = harness({ busIds: [0x100, 0x120, 0x140, WHEELS], silent: [0x100, 0x120, 0x140] });
     h.d.start();
+    h.cruise(1);
     await h.stand(10);
     h.engine(false);
     h.drive(20, [], () => 0);
@@ -269,6 +280,7 @@ describe("CAN discovery (VEHICLE-LINK-SPEC §16.6)", () => {
   test("a bus without a speed among its ids: none after every batch, the monitor off, reported once", async () => {
     const h = harness({ busIds: [0x100, 0x120, 0x140, 0x160] });
     h.d.start();
+    h.cruise(1);
     await h.stand(10);
     h.drive(1500);
     expect(h.d.status).toEqual({ state: "none" });
@@ -281,10 +293,43 @@ describe("CAN discovery (VEHICLE-LINK-SPEC §16.6)", () => {
     expect(again.surveys()).toBe(0);
   });
 
+  test("a survey that heard no id is a quiet bus: surveyed again once the car has driven; two such, a gateway", async () => {
+    // Only the diagnostic answers at the port.
+    const h = harness({ busIds: [] });
+    h.d.start();
+    h.cruise(1);
+    await h.stand(10);
+    expect(h.notes).toContain("can discovery: the survey heard no id at the port (a quiet bus), surveyed again once the car has driven");
+    expect(h.d.status).toEqual({ state: "waiting" });
+    expect(h.reports).toHaveLength(0);
+    // Standing on: not again until the car has driven.
+    const surveys = h.surveys();
+    await h.stand(10);
+    expect(h.surveys()).toBe(surveys);
+    h.cruise(1);
+    await h.stand(10);
+    expect(h.notes).toContain("can discovery: no id heard at the port in 2 surveys (a gateway)");
+    expect(h.d.status).toEqual({ state: "none" });
+    expect(h.reports.map((r) => r.outcome)).toEqual(["none"]);
+  });
+
+  test("none concluded from a survey before ids heard were counted: surveyed again", async () => {
+    const store = memoryStore();
+    store.setJson(CAN_DISCOVERY_KEY, { [VIN]: { slices: [], hz: {}, candidates: [], tried: [], found: null, done: true } });
+    const h = harness({ busIds: [WHEELS], store });
+    h.d.start();
+    h.cruise(1);
+    await h.stand(10);
+    expect(h.surveys()).toBeGreaterThan(0);
+    h.drive(600);
+    expect(h.d.status.state).toBe("found");
+  });
+
   test("a find the car's OBD speed refutes in probation: the search goes on with the ids left", async () => {
     // Ranked by id at equal rates: the wheels in the first batch, two ids left after it.
     const h = harness({ busIds: [0x100, 0x120, WHEELS, 0x500, 0x520] });
     h.d.start();
+    h.cruise(1);
     await h.stand(10);
     h.drive(600);
     expect(h.d.status.state).toBe("found");
@@ -294,9 +339,53 @@ describe("CAN discovery (VEHICLE-LINK-SPEC §16.6)", () => {
     expect((h.store.getJson(CAN_DISCOVERY_KEY) as Record<string, { found: unknown }>)[VIN].found).toBeNull();
   });
 
+  test("the gyro's order of the find's wheels: kept with it, reported once, its wheels from the next drive", async () => {
+    const h = harness({ busIds: [WHEELS] });
+    h.d.start();
+    h.cruise(1);
+    await h.stand(5);
+    h.drive(600);
+    expect(h.d.status.state).toBe("found");
+    const find = h.d.find!;
+    const key = h.found.at(-1)!.key;
+    expect(find.order).toBeUndefined();
+    h.d.setOrder(find, { order: [1, 0, 3, 2], trackM: 1.6, frontTrackM: 1.58, wheelbaseM: 2.7 }, 300);
+    // Not mid-drive: a drive replays on the one profile its notes name.
+    expect(h.found.at(-1)!.key).toBe(key);
+    expect(h.d.find!.order).toEqual([1, 0, 3, 2]);
+    expect(h.reports.map((r) => r.outcome)).toEqual(["found", "wheels"]);
+    const attrs = discoveryReportAttributes(h.reports[1], "6", "stn2255");
+    expect(attrs).toMatchObject({ outcome: "wheels", wheels: "fl:1 fr:0 rl:3 rr:2", wheels_reason: "", track_cm: 160, wheelbase_cm: 270, duration_s: 300 });
+    expect(scrubLog({ message: "m", attributes: attrs }).attributes).toEqual(attrs);
+    // Ignition off: the next drive turns from them.
+    h.d.nextDrive();
+    expect(h.found.at(-1)!.key).toBe(`${key}/w1032`);
+    expect(h.found.at(-1)!.wheels).toHaveLength(4);
+    // As after the app starts again.
+    const next = harness({ busIds: [WHEELS], store: h.store });
+    next.d.start();
+    await flush();
+    expect(next.found.at(-1)!.key).toBe(`${key}/w1032`);
+    expect(next.reports).toHaveLength(0);
+  });
+
+  test("fields the gyro says aren't four wheels: reported, the find kept as it is", async () => {
+    const h = harness({ busIds: [WHEELS] });
+    h.d.start();
+    h.cruise(1);
+    await h.stand(5);
+    h.drive(600);
+    const key = h.found.at(-1)!.key;
+    h.d.setOrder(h.d.find!, { order: null, reason: "not two wheels a side" }, 600);
+    h.d.nextDrive();
+    expect(h.found.at(-1)!.key).toBe(key);
+    expect(discoveryReportAttributes(h.reports.at(-1)!, "6", "stn2255")).toMatchObject({ outcome: "wheels", wheels: "", wheels_reason: "not two wheels a side" });
+  });
+
   test("polls held up while moving: stopped for the drive", async () => {
     const h = harness({ busIds: [0x100, 0x120, WHEELS] });
     h.d.start();
+    h.cruise(1);
     await h.stand(5);
     h.drive(60, [25, 35]);
     expect(h.d.status).toEqual({ state: "aborted" });
@@ -307,6 +396,7 @@ describe("CAN discovery (VEHICLE-LINK-SPEC §16.6)", () => {
     let on = false;
     const h = harness({ busIds: [WHEELS], reportsOn: () => on });
     h.d.start();
+    h.cruise(1);
     await h.stand(5);
     h.drive(600);
     expect(h.d.status.state).toBe("found");
@@ -316,6 +406,7 @@ describe("CAN discovery (VEHICLE-LINK-SPEC §16.6)", () => {
     h.store.setJson(CAN_DISCOVERY_KEY, {});
     const again = harness({ busIds: [WHEELS], store: h.store, reportsOn: () => on });
     again.d.start();
+    again.cruise(1);
     await again.stand(5);
     again.drive(600);
     expect(again.reports.map((r) => r.outcome)).toEqual(["found"]);

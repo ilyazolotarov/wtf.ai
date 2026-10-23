@@ -1,4 +1,4 @@
-import { discoveredProfile, fieldKey, foundProfile, readField, SpeedFieldFinder, tidy, type FieldLayout } from "../discovery";
+import { discoveredProfile, fieldKey, foundProfile, readField, speedKey, SpeedFieldFinder, tidy, type FieldLayout } from "../discovery";
 
 /** True speed, km/h: 20 s standing, then 60 s cycles of 0 → 70 → 0 with cruising and a 10 s stop. */
 function kphAt(tS: number): number {
@@ -147,5 +147,25 @@ describe("SpeedFieldFinder (VEHICLE-LINK-SPEC §16.6)", () => {
     expect(back.speed[0].read(data, 8)).toBeCloseTo(p.speed[0].read(data, 8), 9);
     expect(foundProfile("mazda/mazda/mazda_2017")).toBeNull();
     expect(foundProfile("found/4b0/8/nonsense")).toBeNull();
+  });
+
+  it("four wheels get wheels, and with them turning, only with their order: in the key, the same speed", () => {
+    const fields = tidy([0, 2, 4, 6].map((byte) => ({ byte, endian: "be" as const, shift: 0, bits: 16, kphPerCount: 0.01, offset: 10000, r: 0.999 })));
+    const find = { id: 0x4b0, len: 8, fields, pairs: 200, rangeKph: 60 };
+    const data = new Array<number>(8).fill(0);
+    // The fields read 40, 41, 42, 43 km/h: the order puts fl in the last, fr in the third, rl in the first, rr in the second.
+    [0, 2, 4, 6].forEach((byte, i) => writeField({ byte, endian: "be", shift: 0, bits: 16 }, data, 10000 + 4000 + 100 * i));
+    expect(discoveredProfile("unknown", find).wheels).toBeUndefined();
+    const p = discoveredProfile("unknown", { ...find, order: [3, 2, 0, 1] });
+    expect(p.key).toBe(`${discoveredProfile("unknown", find).key}/w3201`);
+    expect(p.wheels!.map((w) => Math.round(w.read(data, 8) * 3.6 * 100) / 100)).toEqual([43, 42, 40, 41]);
+    expect(p.speed[0].read(data, 8) * 3.6).toBeCloseTo(41.5, 6);
+    expect(speedKey(p.key)).toBe(discoveredProfile("unknown", find).key);
+    expect(speedKey("mazda/mazda/mazda_2017")).toBe("mazda/mazda/mazda_2017");
+    // Replay rebuilds it, wheels and all.
+    expect(foundProfile(p.key)!.wheels!.map((w) => w.read(data, 8))).toEqual(p.wheels!.map((w) => w.read(data, 8)));
+    // Not each field once: no order.
+    expect(discoveredProfile("unknown", { ...find, order: [0, 0, 1, 2] }).wheels).toBeUndefined();
+    expect(foundProfile(`${discoveredProfile("unknown", find).key}/w0012`)).toBeNull();
   });
 });

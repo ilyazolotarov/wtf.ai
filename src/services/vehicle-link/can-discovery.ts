@@ -4,10 +4,12 @@
 // while the car drives, the monitor listens to as many of them as the link carries while the polls keep their rate,
 // and `SpeedFieldFinder` fits their fields against OBD speed. A find becomes the car's own profile
 // (`discoveredProfile`), which goes through probation (§16.5) like any other before it carries the navigation. Kept per
-// VIN, so a search goes on over several drives and a find is used at once on the next. Reported once, anonymously.
-import { discoveredProfile, fieldKey, SpeedFieldFinder, tidy, type DiscoveredSpeed } from "@/nav/odometry/can/discovery";
+// VIN, so a search goes on over several drives and a find is used at once on the next. A find of four wheels gets its
+// order from the phone's gyro (`CanWheelOrder`), used from the drive after. Reported once, anonymously.
+import { discoveredProfile, fieldKey, foundKey, SpeedFieldFinder, tidy, type DiscoveredSpeed } from "@/nav/odometry/can/discovery";
 import { FrameRetimer } from "@/nav/odometry/can/frame-timing";
 import { makeForVin, type Profile } from "@/nav/odometry/can/profile";
+import type { WheelOrderVerdict } from "@/nav/odometry/can/wheel-order";
 import { inSlice, type CanFrame, type CanSurvey, type IdSlice } from "@/obd/can-monitor";
 import type { SpeedSample } from "@/obd/types";
 import type { KeyValueStore } from "@/obd/vehicle-link-core";
@@ -24,6 +26,10 @@ interface SearchRecord {
   slices: IdSlice[];
   /** Frames per second of each id the slices heard that may be a speed (hex id → Hz). */
   hz: Record<string, number>;
+  /** Ids the survey's slices heard at all, at any rate, but diagnostic answers. Absent: before it was counted. */
+  heard?: number;
+  /** Surveys that heard no id at all. */
+  emptySurveys?: number;
   candidates: number[];
   tried: number[];
   found: DiscoveredSpeed | null;
@@ -59,6 +65,11 @@ const SILENT_LISTEN_US = 3_000_000;
 const FRESH_US = 2_000_000;
 /** A survey that failed is tried again no sooner than this. */
 const SURVEY_RETRY_US = 60_000_000;
+/**
+ * Surveys that heard no id at all before the port is taken for silent (a gateway): one alone is a quiet bus (the engine
+ * off with the ECU awake, a frozen RPM reading it running), which nothing can be told from.
+ */
+const EMPTY_SURVEYS = 2;
 
 export type CanDiscoveryStatus =
   | { state: "idle" }
@@ -72,14 +83,16 @@ export type CanDiscoveryStatus =
   | { state: "aborted" };
 
 export interface CanDiscoveryReport {
-  outcome: "found" | "none" | "aborted";
+  /** `wheels`: the gyro's verdict on a find of four wheels, its order or not four wheels. */
+  outcome: "found" | "none" | "aborted" | "wheels";
   make: string;
   candidates: number;
   tried: number;
   found: DiscoveredSpeed | null;
-  /** Seconds of the drive this batch's search took (the last batch's). */
+  /** Seconds of the drive this batch's search took (the last batch's); for `wheels`, of driving the gyro learned from. */
   durationS: number;
   latePolls: number;
+  wheels?: WheelOrderVerdict;
 }
 
 export interface CanDiscoveryDeps {
@@ -134,6 +147,8 @@ export class CanDiscovery {
   private retimer = new FrameRetimer();
   private profile_: Profile | null = null;
   private surveyFailedUs = -Infinity;
+  /** The car moved this drive (a poll over 0): its engine runs and its bus is awake, whatever the RPM read. */
+  private moved = false;
 
   constructor(private readonly deps: CanDiscoveryDeps) {}
 
@@ -144,6 +159,34 @@ export class CanDiscovery {
   /** The car's profile from a find, for the feed's matching. */
   get profile(): Profile | null {
     return this.profile_;
+  }
+
+  /** The car's find as kept (with its wheels' order once learned), while one is in use. */
+  get find(): DiscoveredSpeed | null {
+    if (this.status_.state !== "found" || !this.vin) return null;
+    return this.records()[this.vin]?.found ?? null;
+  }
+
+  /**
+   * The gyro's verdict on the find's four wheels (`CanWheelOrder`). An order is kept with the find and used from the
+   * next drive (`nextDrive`): a drive replays on the one profile its notes name.
+   */
+  setOrder(find: DiscoveredSpeed, verdict: WheelOrderVerdict, learnedS: number): void {
+    const record = this.vin ? this.records()[this.vin] : undefined;
+    if (!record?.found || foundKey(record.found) !== foundKey(find)) return;
+    const next = verdict.order ? { ...record, found: { ...record.found, order: verdict.order } } : record;
+    this.save(next);
+    this.send({ outcome: "wheels", record: next, durationS: Math.round(learnedS), wheels: verdict });
+  }
+
+  /**
+   * Between drives (ignition off): the next survey waits for the car to move again; a find whose order was learned
+   * meanwhile takes the place of the one in use.
+   */
+  nextDrive(): void {
+    this.moved = false;
+    const found = this.find;
+    if (found && this.profile_?.key !== foundKey(found)) this.useFound(found);
   }
 
   /** The monitor's ids are the search's: the feed must not take its frames for a profile. */
@@ -195,6 +238,7 @@ export class CanDiscovery {
     if (vin !== this.vin) {
       this.endBatch();
       this.vin = vin;
+      this.moved = false;
       this.setProfile(null);
       this.set({ state: "idle" });
     }
@@ -212,7 +256,12 @@ export class CanDiscovery {
     }
     const s = this.status_.state;
     if (s === "found" || s === "none" || s === "aborted" || s === "searching" || this.sliceRunning) return;
-    const record = this.records()[vin!];
+    let record = this.records()[vin!];
+    // Concluded from a survey that may have heard nothing (before `heard` was counted, 2026-10-23): surveyed again.
+    if (record?.done && !record.found && !record.candidates.length && record.heard === undefined) {
+      record = { slices: FIRST_SLICES, hz: {}, heard: 0, candidates: [], tried: [], found: null, done: false };
+      this.save(record);
+    }
     if (record?.found) {
       this.useFound(record.found);
       return;
@@ -228,11 +277,11 @@ export class CanDiscovery {
     // A poll between two slices: the polls get their turn, and tell whether the car still stands. Until it comes, the
     // poll before the slice is too old to tell: the status stays.
     if (!this.polledSinceSlice) return;
-    if (!this.standing() || this.deps.nowUs() - this.surveyFailedUs < SURVEY_RETRY_US) {
+    if (!this.moved || !this.standing() || this.deps.nowUs() - this.surveyFailedUs < SURVEY_RETRY_US) {
       if (s !== "waiting") this.set({ state: "waiting" });
       return;
     }
-    void this.surveySlice(record ?? { slices: FIRST_SLICES, hz: {}, candidates: [], tried: [], found: null, done: false });
+    void this.surveySlice(record ?? { slices: FIRST_SLICES, hz: {}, heard: 0, candidates: [], tried: [], found: null, done: false });
   }
 
   /** One slice of the survey: its ids' rates kept, or split in two when it sent more than the link carries. */
@@ -272,11 +321,25 @@ export class CanDiscovery {
         if (x.hz < MIN_HZ || Math.max(...x.lengths) < 2 || isDiagnostic(x.id, survey.idDigits)) continue;
         hz[x.id.toString(16)] = Math.round(x.hz * 10) / 10;
       }
-      next = { ...record, hz, slices: record.slices.slice(1) };
+      const broadcast = heard.filter((x) => !isDiagnostic(x.id, survey.idDigits)).length;
+      next = { ...record, hz, heard: (record.heard ?? 0) + broadcast, slices: record.slices.slice(1) };
     }
     if (next.slices.length) {
       this.save(next);
       return;
+    }
+    if (!next.heard) {
+      const empty = (record.emptySurveys ?? 0) + 1;
+      if (empty < EMPTY_SURVEYS) {
+        // Nothing heard is a quiet bus, not a car without a speed: again once the car has driven.
+        this.save({ ...next, slices: FIRST_SLICES, hz: {}, heard: 0, emptySurveys: empty });
+        this.moved = false;
+        this.set({ state: "waiting" });
+        this.deps.note("can discovery: the survey heard no id at the port (a quiet bus), surveyed again once the car has driven");
+        return;
+      }
+      this.deps.note(`can discovery: no id heard at the port in ${empty} surveys (a gateway)`);
+      next = { ...next, emptySurveys: empty };
     }
     const candidates = Object.entries(next.hz)
       .sort(([a, x], [b, y]) => y - x || parseInt(a, 16) - parseInt(b, 16))
@@ -349,6 +412,7 @@ export class CanDiscovery {
   private onObd(s: SpeedSample): void {
     if (s.source === "can") return;
     this.lastObd = { us: this.deps.nowUs(), kph: s.raw };
+    if (s.raw > 0) this.moved = true;
     this.polledSinceSlice = true;
     if (!this.finder) {
       // The survey's next slice, once this poll is in.
@@ -433,7 +497,13 @@ export class CanDiscovery {
     if (changed) this.deps.found(p);
   }
 
-  private send(o: { outcome: CanDiscoveryReport["outcome"]; record: SearchRecord; durationS: number; latePolls?: number }): void {
+  private send(o: {
+    outcome: CanDiscoveryReport["outcome"];
+    record: SearchRecord;
+    durationS: number;
+    latePolls?: number;
+    wheels?: WheelOrderVerdict;
+  }): void {
     const make = makeForVin(this.vin) ?? "unknown";
     const r: CanDiscoveryReport = {
       outcome: o.outcome,
@@ -443,8 +513,11 @@ export class CanDiscovery {
       found: o.record.found,
       durationS: o.durationS,
       latePolls: o.latePolls ?? 0,
+      ...(o.wheels ? { wheels: o.wheels } : {}),
     };
-    const what = r.found ? `${r.found.id}:${tidy(r.found.fields).map(fieldKey).join("+")}` : "";
+    const w = o.wheels;
+    const wheels = w ? `/${w.order ? w.order.join("") : w.reason}` : "";
+    const what = r.found ? `${r.found.id}:${tidy(r.found.fields).map(fieldKey).join("+")}${wheels}` : "";
     if (this.deps.reportsOn && !this.deps.reportsOn()) return;
     const key = [make, r.outcome, what, this.deps.reportScope()].join("|");
     const reported = this.deps.store.getJson<Record<string, true>>(CAN_DISCOVERY_REPORTED_KEY) ?? {};
@@ -482,6 +555,7 @@ const hexIds = (ids: number[]) => ids.map((id) => id.toString(16).toUpperCase())
  */
 export function discoveryReportAttributes(r: CanDiscoveryReport, protocol: string, adapter: string): Record<string, string | number> {
   const f = r.found;
+  const w = r.wheels;
   const fields = f ? tidy(f.fields) : [];
   return {
     feature: "can-discovery",
@@ -499,5 +573,10 @@ export function discoveryReportAttributes(r: CanDiscoveryReport, protocol: strin
     range_kph: f ? Math.round(f.rangeKph) : -1,
     duration_s: r.durationS,
     late_polls: r.latePolls,
+    // The gyro's verdict: each wheel's field (its index in `fields`), or why they aren't four wheels.
+    wheels: w?.order ? ["fl", "fr", "rl", "rr"].map((name, i) => `${name}:${w.order![i]}`).join(" ") : "",
+    wheels_reason: w && !w.order ? w.reason : "",
+    track_cm: w?.order ? Math.round(w.trackM * 100) : -1,
+    wheelbase_cm: w?.order ? Math.round(w.wheelbaseM * 100) : -1,
   };
 }

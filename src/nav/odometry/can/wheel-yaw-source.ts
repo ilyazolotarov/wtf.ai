@@ -4,6 +4,7 @@
 // One code for the app (NavigatorService) and replay (`withWheelYaw`).
 import type { ImuSample, Vec3 } from "../../types";
 import type { CanSpeedSample } from "./can-speed";
+import { NO_GEAR_MIN_MPS } from "./wheel-yaw";
 import { WheelYawCalibrator, type WheelYawCalibration, type WheelYawCalibrationConfig } from "./wheel-yaw-calibration";
 
 /** Wheel yaw comes this much after the gyro's (frames at the bus's time, both adapters: −40…+100 ms by drive, 2026-10-12/13). */
@@ -32,7 +33,7 @@ const dot = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 export class WheelYawSource {
   private calibrator: WheelYawCalibrator;
   /** Wheel yaw samples, time order, at the wheels' time less their lag (the gyro's time). */
-  private yaw: { tUs: number; radps: number; speedMps: number }[] = [];
+  private yaw: { tUs: number; radps: number; speedMps: number; noGear: boolean }[] = [];
   /** The gyro's yaw about "up" (null: handled), time order. */
   private gyro: { tUs: number; radps: number | null }[] = [];
   private keptFrom = -Infinity;
@@ -70,7 +71,7 @@ export class WheelYawSource {
     const radps = s.reverse ? -w : w;
     let i = this.yaw.length;
     while (i > 0 && this.yaw[i - 1].tUs > tUs) i--;
-    this.yaw.splice(i, 0, { tUs, radps, speedMps: s.speedMps });
+    this.yaw.splice(i, 0, { tUs, radps, speedMps: s.speedMps, noGear: !!s.noGear });
   }
 
   /** The gyro's yaw about "up" for an IMU sample (null: the phone is being handled). */
@@ -78,10 +79,14 @@ export class WheelYawSource {
     this.gyro.push({ tUs, radps });
   }
 
-  /** A wheel sample, in time order with the IMU's: the calibrator learns from the gyro around it. */
+  /**
+   * A wheel sample, in time order with the IMU's: the calibrator learns from the gyro around it. Without a gear, not
+   * below `NO_GEAR_MIN_MPS`: it may be reversing.
+   */
   learn(s: CanSpeedSample): boolean | null {
     const [, , rl, rr] = s.wheelsMps;
-    return this.calibrator.push(s.tUs, rl, rr, this.gyroAround(s.tUs - WHEEL_LAG_US), s.reverse);
+    const reverse = s.reverse || (!!s.noGear && s.speedMps < NO_GEAR_MIN_MPS);
+    return this.calibrator.push(s.tUs, rl, rr, this.gyroAround(s.tUs - WHEEL_LAG_US), reverse);
   }
 
   /**
@@ -111,10 +116,15 @@ export class WheelYawSource {
    * stop the phone doesn't keep quiet isn't held. The driver taking the phone out as the wheels went silent (ignition
    * off) turned a parked car 61°, and with the phone's turning at every stop (the rule at a crawl, 2026-10-16) 120°;
    * the next drive set off on another road, 83–109 s off the drawn one on every seed (nnz5ff, 2026-10-18).
+   *
+   * Without a gear, at a crawl the car may be reversing, which the unsigned wheels turn the other way: there the
+   * phone's turning while its gyro reads it mounted, the wheels' only while it is handled (forwards being likelier).
    */
   substitute(s: ImuSample, bridgeUs?: number): ImuSample | null {
     this.prune(s.tUs - KEEP_US);
-    const radps = this.yawAt(s.tUs, bridgeUs) ?? (this.standing(s.tUs) ? 0 : this.wheelsNear(s.tUs) ? WheelYawSource.gyroYaw(s) : null);
+    let radps = this.yawAt(s.tUs, bridgeUs);
+    if (radps !== null && this.crawlingNoGear(s.tUs) && !this.handledAt(s.tUs)) radps = WheelYawSource.gyroYaw(s);
+    radps ??= this.standing(s.tUs) ? 0 : this.wheelsNear(s.tUs) ? WheelYawSource.gyroYaw(s) : null;
     if (radps === null) return null;
     const g = Math.hypot(s.gravity[0], s.gravity[1], s.gravity[2]) || 9.81;
     return { ...s, gyro: [0, 0, radps], gravity: [0, 0, -g], ...(this.handledAt(s.tUs) ? { handled: true as const } : {}) };
@@ -141,6 +151,17 @@ export class WheelYawSource {
       any = true;
     }
     return any;
+  }
+
+  /** The wheel sample nearest `tUs` (within `FRESH_US`) has no gear and moves slower than `NO_GEAR_MIN_MPS`. */
+  private crawlingNoGear(tUs: number): boolean {
+    let near: { tUs: number; speedMps: number; noGear: boolean } | null = null;
+    for (let i = this.yaw.length - 1; i >= 0; i--) {
+      const y = this.yaw[i];
+      if (y.tUs < tUs - FRESH_US) break;
+      if (y.tUs <= tUs + FRESH_US && (!near || Math.abs(y.tUs - tUs) < Math.abs(near.tUs - tUs))) near = y;
+    }
+    return !!near && near.noGear && near.speedMps > 0 && near.speedMps < NO_GEAR_MIN_MPS;
   }
 
   /** A wheel sample within `CAR_FRAME_US` of `tUs`. */

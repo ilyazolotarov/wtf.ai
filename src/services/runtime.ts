@@ -33,7 +33,7 @@ import { get, networkKind, onNetworkChange, putFile, uploadSecrets } from "./tri
 import { TripUploader } from "./trip-upload/trip-uploader";
 import { NativeDiscovery } from "./vehicle-link/discovery";
 import { adapterModel, TelemetryReporter } from "./telemetry";
-import { jsSourceInfo } from "./js-source";
+import { jsCommit, jsSourceInfo } from "./js-source";
 import { PositionShareService } from "./position-share/position-share-service";
 import { setTripService, updateTripNotification } from "./trip-service";
 import { DEV_SETTINGS_VERSION, loadDevSettings } from "./dev-settings-load";
@@ -41,6 +41,7 @@ import { CanAutoIds, idsAfterBufferFull, navigationIds, type CanAutoStatus } fro
 import { CanDiscovery, discoveryReportAttributes, linkCapacity, type CanDiscoveryReport, type CanDiscoveryStatus } from "./vehicle-link/can-discovery";
 import { CanProbation, probationReportAttributes, type CanProbationReport, type CanProbationStatus } from "./vehicle-link/can-probation";
 import { CanSpeedFeed } from "./vehicle-link/can-speed-feed";
+import { CanWheelOrder } from "./vehicle-link/can-wheel-order";
 import { DrivingEmulator } from "./vehicle-link/driving-emulator";
 import { isHeldForUpdater } from "./vehicle-link/firmware-notice";
 import { NativeTransport } from "./vehicle-link/native-transport";
@@ -186,6 +187,9 @@ export function getRuntime(): Runtime {
     extraProfiles: (): Profile[] => (canDiscovery.profile ? [canDiscovery.profile] : []),
     active: (): boolean => !canDiscovery.searching,
   });
+  // The car reports go once per outcome and adapter for each build of the app's JS (the commit CI built it from, a new
+  // IPA or OTA update): the app.json version is the same for every build.
+  const carReportScope = () => `${adapterModel(link.getSnapshot())}|${jsCommit() ?? "dev"}`;
   const canProbationListeners = new Set<() => void>();
   const canProbation = new CanProbation({
     vin: () => link.getSnapshot().vehicle?.vin ?? null,
@@ -197,7 +201,7 @@ export function getRuntime(): Runtime {
     setTrusted: (on) => link.setCanTrusted(on),
     promote: () => canSpeed.promote(),
     stopListening: () => listenCan(null),
-    reportScope: () => `${adapterModel(link.getSnapshot())}|${Constants.expoConfig?.version ?? ""}`,
+    reportScope: carReportScope,
     reportsOn: () => dev.carReports,
     report: (r) => reportCanProbation(r, link.getSnapshot().vehicle?.protocol ?? "", adapterModel(link.getSnapshot())),
     store: kvStore,
@@ -252,12 +256,28 @@ export function getRuntime(): Runtime {
       canSpeed.start();
       listenCan(navigationIds(profile));
     },
-    reportScope: () => `${adapterModel(link.getSnapshot())}|${Constants.expoConfig?.version ?? ""}`,
+    reportScope: carReportScope,
     reportsOn: () => dev.carReports,
     report: (r) => reportCanDiscovery(r, link.getSnapshot().vehicle?.protocol ?? "", adapterModel(link.getSnapshot())),
     store: kvStore,
     note: (text) => recorder.note(text),
-    onStatus: () => canDiscoveryListeners.forEach((l) => l()),
+    onStatus: () => {
+      canWheelOrder.refresh();
+      canDiscoveryListeners.forEach((l) => l());
+    },
+  });
+  // A find of four wheels: which is which, from the phone's gyro (§16.6), for turning from them from the next drive.
+  // Another car or another find changes the discovery's status: that refreshes it.
+  const canWheelOrder: CanWheelOrder = new CanWheelOrder({
+    vin: () => link.getSnapshot().vehicle?.vin ?? null,
+    find: () => canDiscovery.find,
+    onFrames: (listener) => link.onCanFrames(listener),
+    onWindow: (listener) => link.onCanWindow(() => listener()),
+    onImu: (listener) =>
+      sensors.imu.on((batch) => listener(batch.motion.map((m) => ({ tUs: m.timestampUs, gyro: m.gyro, gravity: m.gravity, userAccel: m.userAccel })))),
+    decided: (find, verdict, learnedS) => canDiscovery.setOrder(find, verdict, learnedS),
+    store: kvStore,
+    note: (text) => recorder.note(text),
   });
   // A new car (another VIN, or the VIN read late) gets its own ids. Before discovery's: whether a search is due is the
   // picking's answer for the new car, not the old one's.
@@ -278,8 +298,10 @@ export function getRuntime(): Runtime {
       canProbation.start();
       canSpeed.start();
       canDiscovery.start();
+      canWheelOrder.start();
     } else {
       canAuto.stop();
+      canWheelOrder.stop();
       canDiscovery.stop();
       listenCan(null);
       canSpeed.stop();
@@ -292,6 +314,8 @@ export function getRuntime(): Runtime {
   // drive picks the ids again and tries once more.
   link.onEngineState((state) => {
     if (state !== "ignition-off" || !dev.wheelSpeed) return;
+    // A find's wheels' order learned on the drive that ended: its wheels from the next.
+    canDiscovery.nextDrive();
     if (canDiscovery.status.state === "aborted") {
       canDiscovery.stop();
       canDiscovery.start();
@@ -636,6 +660,7 @@ export function getRuntime(): Runtime {
           canAuto.forgetNone();
           canProbation.forgetFailed();
           canDiscovery.forgetNone();
+          canWheelOrder.forgetNotWheels();
         }
         syncWheelSpeed();
       }

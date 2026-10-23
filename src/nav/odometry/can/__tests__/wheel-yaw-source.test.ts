@@ -43,6 +43,28 @@ describe("turning from the wheels (NAVIGATOR-SPEC §5.4)", () => {
     expect(src.substitute(imu(1_010_000, 1))!.handled).toBe(true);
   });
 
+  test("without a gear, at a crawl (reversing, maybe): the phone's turning while it reads mounted, the wheels' while handled", () => {
+    const noGear = (tUs: number, yaw: number, speed: number): CanSpeedSample => ({ ...wheels(tUs, yaw, speed), gear: null, reverse: false, noGear: true });
+    const crawl = new WheelYawSource();
+    for (let t = 0; t <= 2_000_000; t += 100_000) crawl.addWheels(noGear(t + WHEEL_LAG_US, 0.2, 2));
+    crawl.addGyro(1_000_000, -0.2);
+    crawl.addGyro(1_010_000, null);
+    // Reversing, the phone turned the other way than the unsigned wheels.
+    expect(WheelYawSource.gyroYaw(crawl.substitute(imu(1_000_000, -0.2))!)).toBeCloseTo(-0.2, 6);
+    // In a hand its turning is its own: the wheels', forwards being likelier.
+    expect(WheelYawSource.gyroYaw(crawl.substitute(imu(1_010_000, 1))!)).toBeCloseTo(0.2, 6);
+    // From 11 km/h it goes forwards: the wheels'.
+    const forwards = new WheelYawSource();
+    for (let t = 0; t <= 2_000_000; t += 100_000) forwards.addWheels(noGear(t + WHEEL_LAG_US, 0.2, 3));
+    forwards.addGyro(1_000_000, -0.2);
+    expect(WheelYawSource.gyroYaw(forwards.substitute(imu(1_000_000, -0.2))!)).toBeCloseTo(0.2, 6);
+    // With a gear, the wheels at a crawl too.
+    const geared = new WheelYawSource();
+    for (let t = 0; t <= 2_000_000; t += 100_000) geared.addWheels(wheels(t + WHEEL_LAG_US, 0.2, 2));
+    geared.addGyro(1_000_000, -0.2);
+    expect(WheelYawSource.gyroYaw(geared.substitute(imu(1_000_000, -0.2))!)).toBeCloseTo(0.2, 6);
+  });
+
   test("in reverse the wheels' difference turns the car the other way", () => {
     const src = new WheelYawSource();
     for (let t = 0; t <= 1_000_000; t += 100_000) src.addWheels(wheels(t, 0.2, 2, 0, true));

@@ -3,8 +3,10 @@
 // every plausible field of their frames is fitted against OBD speed. Wheel speeds are unsigned counts, linear in the
 // speed, 11–16 bits wide, at a byte boundary or a few bits from one, in either byte order: a field that follows the
 // polls that closely across a range of speeds is a speed. Several such fields with one scale in a message are its
-// wheels. Pure: the app and replay (`npm run replay:discover`) run the same code.
-import type { Profile, ValueField } from "./profile";
+// wheels; which is which the phone's gyro tells later (wheel-order.ts). Pure: the app and replay
+// (`npm run replay:discover`) run the same code.
+import type { Profile, ValueField, WheelField } from "./profile";
+import type { WheelOrder } from "./wheel-order";
 
 /** A field of a frame: `bits` wide, `shift` bits up from the low end of the 16-bit word at `byte` (big- or little-endian). */
 export interface FieldLayout {
@@ -30,6 +32,8 @@ export interface DiscoveredSpeed {
   fields: FoundField[];
   pairs: number;
   rangeKph: number;
+  /** Four wheels' order by the gyro (`WheelOrderFinder`), once learned: the field of each of [fl, fr, rl, rr]. */
+  order?: WheelOrder;
 }
 
 export interface DiscoveryConfig {
@@ -351,11 +355,17 @@ export function tidy(fields: FoundField[]): FoundField[] {
 /** A field's own zero this far from its message's (km/h): not the same zero. */
 const ZERO_KPH = 3;
 
+/** Each field's speed in a frame of the find's id (m/s, unsigned, as `tidy` reads them), null for another length. */
+export function fieldSpeeds(d: DiscoveredSpeed): (data: ArrayLike<number>, len: number) => number[] | null {
+  const fields = tidy(d.fields);
+  return (data, len) => (len === d.len ? fields.map((f) => Math.max(0, (readField(f, data) - f.offset) * f.kphPerCount) / 3.6) : null);
+}
+
 /**
- * A profile from a discovery: its speed the mean of the fields found (sides unknown, so no wheels and no turning from
- * them), unsigned (no gear known). Its key, "found/<id>/<length>/<field>+…", is the whole layout: the same for the
- * same find, so probation's verdict holds across drives, and replay rebuilds the profile from a log's note
- * (`foundProfile`).
+ * A profile from a discovery: its speed the mean of the fields found, unsigned (no gear known). Its wheels, and with
+ * them turning, only once the gyro told which is which (`order`). Its key, "found/<id>/<length>/<field>+…[/w<order>]",
+ * is the whole layout: the same for the same find, so probation's verdict holds across drives (the order changes no
+ * speed: `speedKey`), and replay rebuilds the profile from a log's note (`foundProfile`).
  */
 export function discoveredProfile(make: string, d: DiscoveredSpeed): Profile {
   const fields = tidy(d.fields);
@@ -365,13 +375,17 @@ export function discoveredProfile(make: string, d: DiscoveredSpeed): Profile {
     for (const f of fields) sum += (readField(f, data) - f.offset) * f.kphPerCount;
     return Math.max(0, sum / fields.length) / 3.6;
   };
-  const key = `found/${d.id.toString(16)}/${d.len}/${fields.map(fieldKey).join("+")}`;
+  const speeds = fieldSpeeds(d);
+  const order = wheelOrder(d);
+  const wheel = (i: number): WheelField => ({ id: d.id, read: (data, len) => speeds(data, len)?.[i] ?? NaN });
+  const key = foundKey(d);
   return {
     key,
     make,
     mapping: "found",
     dbc: key,
     dbcOnly: true,
+    ...(order ? { wheels: order.map(wheel) as Profile["wheels"] } : {}),
     speed: [{ id: d.id, read }],
     gear: [],
     steer: [],
@@ -382,16 +396,30 @@ export function discoveredProfile(make: string, d: DiscoveredSpeed): Profile {
   };
 }
 
+/** A find's wheels' order, when it has four fields and one (each field once). */
+const wheelOrder = (d: DiscoveredSpeed): WheelOrder | null =>
+  d.order && d.fields.length === 4 && new Set(d.order).size === 4 ? d.order : null;
+
+/** The key of a find's profile (`discoveredProfile`). */
+export function foundKey(d: DiscoveredSpeed): string {
+  const order = wheelOrder(d);
+  return `found/${d.id.toString(16)}/${d.len}/${tidy(d.fields).map(fieldKey).join("+")}${order ? `/w${order.join("")}` : ""}`;
+}
+
 /** "b2be14s0x0.03125o0": byte, order, bits, shift, scale, offset. */
 export function fieldKey(f: FoundField): string {
   return `b${f.byte}${f.endian}${f.bits}s${f.shift}x${f.kphPerCount}o${f.offset}`;
 }
 
 const FIELD_KEY = /^b(\d+)(be|le)(\d+)s(\d+)x([0-9.e-]+)o(-?\d+)$/;
-const FOUND_KEY = /^found\/([0-9a-f]+)\/(\d+)\/(.+)$/;
+const FOUND_KEY = /^found\/([0-9a-f]+)\/(\d+)\/([^/]+)(?:\/w([0-3]{4}))?$/;
+const ORDER_SUFFIX = /\/w[0-3]{4}$/;
 
-/** The profile a `discoveredProfile` key names (a log's note), null when it isn't one. */
-export function foundProfile(key: string, make = "unknown"): Profile | null {
+/** The key a profile's speed is checked under (probation, §16.5): a find's without its wheels' order. */
+export const speedKey = (key: string): string => (key.startsWith("found/") ? key.replace(ORDER_SUFFIX, "") : key);
+
+/** The find a `discoveredProfile` key names (a log's note), null when it isn't one. */
+export function foundSpeed(key: string): DiscoveredSpeed | null {
   const m = FOUND_KEY.exec(key);
   if (!m) return null;
   const fields: FoundField[] = [];
@@ -400,6 +428,13 @@ export function foundProfile(key: string, make = "unknown"): Profile | null {
     if (!f) return null;
     fields.push({ byte: +f[1], endian: f[2] as "be" | "le", bits: +f[3], shift: +f[4], kphPerCount: +f[5], offset: +f[6], r: 1 });
   }
-  const p = discoveredProfile(make, { id: parseInt(m[1], 16), len: +m[2], fields, pairs: 0, rangeKph: 0 });
-  return p.key === key ? p : null;
+  const order = m[4] ? ([...m[4]].map(Number) as WheelOrder) : undefined;
+  const d: DiscoveredSpeed = { id: parseInt(m[1], 16), len: +m[2], fields, pairs: 0, rangeKph: 0, ...(order ? { order } : {}) };
+  return foundKey(d) === key ? d : null;
+}
+
+/** The profile a `discoveredProfile` key names (a log's note), null when it isn't one. */
+export function foundProfile(key: string, make = "unknown"): Profile | null {
+  const d = foundSpeed(key);
+  return d ? discoveredProfile(make, d) : null;
 }

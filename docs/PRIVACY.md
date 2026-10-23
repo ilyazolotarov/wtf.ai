@@ -47,7 +47,9 @@ reports, to the same place: the car's make (such as "toyota"), which wheel-readi
 of the car's data bus it used and how often they came, the OBD protocol, the adapter's model, numbers comparing the
 wheels with the car's speed, how long the check took and how fast the adapter answered. For a car the app has no
 wheel-reading layout for, it can look for the car's speed on its data bus itself, and then reports what it found: the
-message number and where the speed sits in it, or that it found none. It never contains the VIN or
+message number and where the speed sits in it, or that it found none. When it found four wheels, it later works out
+which is which from the phone's motion sensors as the car turns, and reports that too: which wheel each one is, and
+the car's track and wheelbase as measured, in centimetres. It never contains the VIN or
 any part of it, your location or the time of the drive. A report is sent once per result, not after every drive. You
 can turn these reports off in Settings → Vehicle → Send anonymous car reports.
 

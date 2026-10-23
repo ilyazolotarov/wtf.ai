@@ -1,6 +1,6 @@
 // A trip log's CAN shadow frames decoded through the car's profile (SPEC §2.1: decoded in replay).
 import { CarStateDecoder, type CarStateSample } from "../odometry/can/car-state";
-import { CAN_SPEED_PERIOD_US, canSpeedReading, canSpeedSamples, navigatorSpeeds, type CanSpeed } from "../odometry/can/can-speed";
+import { CAN_SPEED_PERIOD_US, canSpeedReading, canSpeedSamples, navigatorSpeeds, readsNoGear, type CanSpeed, type CanSpeedSample } from "../odometry/can/can-speed";
 import { retimeFrames } from "../odometry/can/frame-timing";
 import type { WheelYawCalibration, WheelYawCalibrationConfig } from "../odometry/can/wheel-yaw-calibration";
 import { WheelYawSource } from "../odometry/can/wheel-yaw-source";
@@ -71,6 +71,11 @@ export function decodeTripCan(trip: TripLog, profileKey?: string): TripCan | nul
     for (const f of frames) for (const s of decoder.push(f.tUs, f.id, f.data)) samples.push(s);
   }
   return { matches, profile, samples, listened, seen };
+}
+
+/** The wheel samples of a log's decoded frames (none from a profile without wheels), as the app's feed gives them. */
+export function tripWheelSamples(can: TripCan | null): CanSpeedSample[] {
+  return can?.profile ? canSpeedSamples(can.samples, CAN_SPEED_PERIOD_US, readsNoGear(can.profile)) : [];
 }
 
 /**
@@ -150,8 +155,7 @@ export function withWheelYaw(
   trip: TripLog,
   options: WheelYawOptions = {},
 ): { trip: TripLog; gyroShare: number; calibration: WheelYawCalibration | null } | null {
-  const can = decodeTripCan(trip, options.profileKey);
-  const speeds = can ? canSpeedSamples(can.samples) : [];
+  const speeds = tripWheelSamples(decodeTripCan(trip, options.profileKey));
   if (!speeds.length) return null;
   const fromUs = trip.startUs + (options.fromS ?? 0) * 1e6;
   const learnAll = !options.fromS;

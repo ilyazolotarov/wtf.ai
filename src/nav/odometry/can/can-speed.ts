@@ -19,6 +19,8 @@ export interface CanSpeed {
   /** The gear last read (within `GEAR_FRESH_US`), null when unknown. */
   gear: Gear | null;
   reverse: boolean;
+  /** The profile reads no gear: `reverse` is never known (wheel-yaw.ts `NO_GEAR_MIN_MPS`). */
+  noGear?: true;
 }
 
 /** From the four wheels: what the turning from the wheels needs (wheel-yaw.ts). */
@@ -29,6 +31,8 @@ export interface CanSpeedSample extends CanSpeed {
 /** What a profile's navigation speed comes from: its wheel speeds, else its speed message. */
 export type CanSpeedFrom = "wheels" | "speed";
 export const canSpeedFrom = (profile: Profile): CanSpeedFrom => (profile.wheels ? "wheels" : "speed");
+/** The profile reads no gear: its samples never know reversing. */
+export const readsNoGear = (profile: Profile): boolean => profile.gear.length === 0;
 
 /** One sample per this much time with wheel speeds (100 Hz frames averaged: ~10 per sample). */
 export const CAN_SPEED_PERIOD_US = 100_000;
@@ -85,6 +89,7 @@ export class CanSpeedAverager {
   constructor(
     private readonly periodUs = CAN_SPEED_PERIOD_US,
     private readonly from: CanSpeedFrom = "wheels",
+    private readonly noGear = false,
   ) {}
 
   push(s: CarStateSample): CanSpeed[] {
@@ -113,19 +118,19 @@ export class CanSpeedAverager {
     const g = this.gear && tUs - this.gear.tUs <= GEAR_FRESH_US ? this.gear.gear : null;
     const wheelsMps = this.from === "wheels" ? (mean as [number, number, number, number]) : null;
     const speedMps = round(mean.reduce((a, b) => a + b, 0) / mean.length);
-    return [{ tUs, speedMps, wheelsMps, gear: g, reverse: g === "R" }];
+    return [{ tUs, speedMps, wheelsMps, gear: g, reverse: g === "R", ...(this.noGear ? { noGear: true as const } : {}) }];
   }
 }
 
-/** Wheel samples (time-ordered) averaged per `periodUs`, each with the gear then. */
-export function canSpeedSamples(samples: CarStateSample[], periodUs = CAN_SPEED_PERIOD_US): CanSpeedSample[] {
-  const avg = new CanSpeedAverager(periodUs);
+/** Wheel samples (time-ordered) averaged per `periodUs`, each with the gear then; `noGear`: a profile that reads none. */
+export function canSpeedSamples(samples: CarStateSample[], periodUs = CAN_SPEED_PERIOD_US, noGear = false): CanSpeedSample[] {
+  const avg = new CanSpeedAverager(periodUs, "wheels", noGear);
   return [...samples.flatMap((s) => avg.push(s)), ...avg.flush()] as CanSpeedSample[];
 }
 
 /** The navigator's speed from a profile's samples (time-ordered): its wheels, else its speed message. */
 export function navigatorSpeeds(samples: CarStateSample[], profile: Profile, periodUs = CAN_SPEED_PERIOD_US): CanSpeed[] {
-  const avg = new CanSpeedAverager(periodUs, canSpeedFrom(profile));
+  const avg = new CanSpeedAverager(periodUs, canSpeedFrom(profile), readsNoGear(profile));
   return [...samples.flatMap((s) => avg.push(s)), ...avg.flush()];
 }
 

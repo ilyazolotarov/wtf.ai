@@ -7,8 +7,8 @@
 // result has the same track, fixes, particles and summary as `replayTrip`.
 // Drives replayed in order with one CalibrationStore carry what the app keeps from drive to drive.
 
-import { canPrimaryFromUs, canPrimaryInput, decodeTripCan } from "@/nav/replay/can";
-import { canSpeedSamples, type CanSpeedSample } from "@/nav/odometry/can/can-speed";
+import { canPrimaryFromUs, canPrimaryInput, decodeTripCan, tripWheelSamples } from "@/nav/replay/can";
+import type { CanSpeedSample } from "@/nav/odometry/can/can-speed";
 import type { MapMatchConfig } from "@/nav/mapmatch/particle-filter";
 import type { NavConfig } from "@/nav/navigator";
 import type { PhoneGraph } from "@/nav/phone/phone-navigator";
@@ -243,7 +243,7 @@ export function replayTripInApp(logged: TripLog, o: AppReplayOptions): AppReplay
   // VEHICLE-LINK-SPEC §16.5; never, none). Asked for (research), the whole drive's.
   const wheelsFromUs = o.wheelYaw !== undefined ? -Infinity : (canPrimaryFromUs(trip) ?? Infinity);
   const wheels =
-    wheelYaw || yawSwitches.some((s) => s.on) ? canSpeedSamples(decodeTripCan(trip)?.samples ?? []).filter((s) => s.tUs >= wheelsFromUs) : [];
+    wheelYaw || yawSwitches.some((s) => s.on) ? tripWheelSamples(decodeTripCan(trip)).filter((s) => s.tUs >= wheelsFromUs) : [];
   if (wheelYaw) service.setWheelYaw(true);
 
   // The inputs, each at the time the app would get it.

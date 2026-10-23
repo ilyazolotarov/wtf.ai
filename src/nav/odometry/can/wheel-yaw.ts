@@ -8,6 +8,13 @@ import type { CanSpeedSample } from "./can-speed";
  */
 export const DEFAULT_TRACK_M = 1.6;
 
+/**
+ * Without a gear (a profile that reads none: a find, VEHICLE-LINK-SPEC §16.6) reversing can't be told, and the
+ * unsigned wheels read its turns the other way. Reversing is slower than this (11 km/h): at or above it the car goes
+ * forwards.
+ */
+export const NO_GEAR_MIN_MPS = 3;
+
 export interface WheelYawSample {
   tUs: number;
   /** rad/s, counter-clockwise seen from above (left turn) positive, as the phone's `yawRate`. */

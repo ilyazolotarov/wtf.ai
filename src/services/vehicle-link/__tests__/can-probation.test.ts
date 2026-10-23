@@ -1,4 +1,5 @@
 import type { CanSpeed } from "@/nav/odometry/can/can-speed";
+import { discoveredProfile, tidy } from "@/nav/odometry/can/discovery";
 import { profileByKey } from "@/nav/odometry/can/profile";
 import type { SpeedSample } from "@/obd/types";
 import { scrubLog } from "@/config/sentry-scrub";
@@ -74,6 +75,19 @@ describe("CAN probation (VEHICLE-LINK-SPEC §16.5)", () => {
     expect(next.p.admit(PROFILE)).toBe(true);
     expect(next.calls.trusted).toEqual([true]);
     expect(next.reports).toHaveLength(0);
+  });
+
+  test("a find's wheels' order, learned after its pass, changes no speed: the pass holds", () => {
+    const fields = tidy([0, 2, 4, 6].map((byte) => ({ byte, endian: "be" as const, shift: 0, bits: 16, kphPerCount: 0.01, offset: 10000, r: 0.999 })));
+    const find = { id: 0x4b0, len: 8, fields, pairs: 200, rangeKph: 60 };
+    const h = harness();
+    expect(h.p.admit(discoveredProfile("unknown", find))).toBe(false);
+    h.drive(600);
+    expect(h.p.status.state).toBe("passed");
+    const next = harness(h.store);
+    const ordered = discoveredProfile("unknown", { ...find, order: [1, 0, 3, 2] });
+    expect(next.p.admit(ordered)).toBe(true);
+    expect(next.p.status).toEqual({ state: "passed", profile: ordered.key });
   });
 
   test("a profile that misreads the speed: OBD stays, the monitor off, and on the next drive too", () => {

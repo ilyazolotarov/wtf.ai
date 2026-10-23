@@ -2,7 +2,7 @@
 // decodes a log's (`withCanSpeed`): the profile from the VIN and the ids heard, its wheel samples (a profile without
 // wheel speeds: its speed message) averaged per 0.1 s, negative in reverse gear. A profile on probation (§16.5) is
 // decoded the same, but its speed reaches only the check until it passes (`promote`).
-import { CAN_SPEED_PERIOD_US, CanSpeedAverager, canSpeedFrom, canSpeedReading, type CanSpeed, type CanSpeedSample } from "@/nav/odometry/can/can-speed";
+import { CAN_SPEED_PERIOD_US, CanSpeedAverager, canSpeedFrom, canSpeedReading, readsNoGear, type CanSpeed, type CanSpeedSample } from "@/nav/odometry/can/can-speed";
 import { CarStateDecoder } from "@/nav/odometry/can/car-state";
 import { FrameRetimer } from "@/nav/odometry/can/frame-timing";
 import { matchProfiles, seenIds, type Profile } from "@/nav/odometry/can/profile";
@@ -135,7 +135,7 @@ export class CanSpeedFeed {
         return;
       }
       this.decoder = new CarStateDecoder(match.profile);
-      this.averager = new CanSpeedAverager(CAN_SPEED_PERIOD_US, canSpeedFrom(match.profile));
+      this.averager = new CanSpeedAverager(CAN_SPEED_PERIOD_US, canSpeedFrom(match.profile), readsNoGear(match.profile));
       this.admitted = this.deps.admit?.(match.profile) ?? true;
       // Replay looks for this note's start (`canPrimaryInput`): the same for the speed message.
       if (this.admitted) this.deps.note(canPrimaryNote(match.profile));

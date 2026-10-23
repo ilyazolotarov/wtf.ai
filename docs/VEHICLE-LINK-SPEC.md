@@ -695,14 +695,15 @@ been checked against that car's own OBD speed.
 
 **The anonymous report** (Settings → Car → Send anonymous car reports, on by default; PRIVACY.md). Each verdict, and a
 probation the link couldn't carry, goes to Sentry as one log (`can probation: <outcome> <profile>`), once per profile,
-outcome, adapter model and app version (`vehicleLink.canProbationReported`). Attributes: outcome and reason, make,
-profile, opendbc commit, whether the profile is `dbcOnly`, wheels or speed message, the OBD protocol, the adapter
-model, the profile's ids with frames per second of listening, the check's numbers (scale, deviation, correlation,
-range, pairs, standing share, worst wheel), seconds to the verdict, the breaks between listening windows (p50, p90),
-the listening share, late polls. Shares go in per cent with at most 2 decimals (`probationReportAttributes`): the
-scrubber drops finer decimals as possible coordinates. Never the VIN or any part of it, no position, no time of day.
-It answers which makes and adapters work, from every phone, not only the testers'. With the switch off nothing is
-sent, nor taken for sent: the same outcome later, the switch on, goes out.
+outcome, adapter model and build of the app (`vehicleLink.canProbationReported`): the commit its JS was built from
+(`jsCommit`), so a new IPA or OTA update reports again; never the app.json version, the same for every build.
+Attributes: outcome and reason, make, profile, opendbc commit, whether the profile is `dbcOnly`, wheels or speed
+message, the OBD protocol, the adapter model, the profile's ids with frames per second of listening, the check's
+numbers (scale, deviation, correlation, range, pairs, standing share, worst wheel), seconds to the verdict, the breaks
+between listening windows (p50, p90), the listening share, late polls. Shares go in per cent with at most 2 decimals
+(`probationReportAttributes`): the scrubber drops finer decimals as possible coordinates. Never the VIN or any part of
+it, no position, no time of day. It answers which makes and adapters work, from every phone, not only the testers'.
+With the switch off nothing is sent, nor taken for sent: the same outcome later, the switch on, goes out.
 
 ### 16.6 Discovery (`can-discovery.ts`, `nav/odometry/can/discovery.ts`)
 
@@ -721,11 +722,16 @@ that car first.
   (11-bit: 0x000–0x0FF, …). A slice that sent 80 % of what the link carries, or `BUFFER FULL`, with more than one id
   in it is split in two and each half surveyed; one id alone keeps its rate, a lower bound. One slice per poll: only
   while the car stands with the engine running (not just the ECU awake: with the engine off some cars' ABS is quiet,
-  and the wheels would be missed for good), a poll between two slices (the polls keep their turn and show the car
-  still standing). Standing is the discovery's own last poll, not the link's snapshot (its listeners run before the
-  snapshot has the poll); between a slice and the next poll the status stays. Some 10–25 slices: a stop or two. Candidates: ids sent at least 10 times a second (wheel and speed
-  messages come at 20–100 Hz), not diagnostic answers (11-bit 0x700 and up; 29-bit 0x18DA/0x18DB), most frequent
-  first, at most 45.
+  and the wheels would be missed for good) after it has moved this drive (the main test car's ECU can hold its last
+  RPM with the engine off: the bus quiet, the engine read running), a poll between two slices (the polls keep their
+  turn and show the car still standing). Standing is the discovery's own last poll, not the link's snapshot (its
+  listeners run before the snapshot has the poll); between a slice and the next poll the status stays. Some 10–25
+  slices: a stop or two. Candidates: ids sent at least 10 times a second (wheel and speed messages come at 20–100
+  Hz), not diagnostic answers (11-bit 0x700 and up; 29-bit 0x18DA/0x18DB), most frequent first, at most 45.
+- **A survey that heard no id** but diagnostic answers is a quiet bus, not a car without a speed: surveyed again
+  once the car has driven (note `the survey heard no id at the port (a quiet bus)…`). Two such surveys: the port is
+  silent (a gateway), none. A none kept from before the ids heard were counted, with no candidates, is surveyed
+  again.
 - **What the link carries** (`linkCapacity`), frames per second out of the monitor: 150 over BLE (the vLinker carried
   ~150 of five ids' 370), 400 otherwise (the MX+ carried those five in the polls' breaks).
 - **The search** (as probation, §16.5: `setCanTrusted(false)`, the polls at their 2 Hz, the navigator on OBD): the
@@ -752,12 +758,38 @@ that car first.
   wheels as opendbc has them (big-endian 16-bit at bytes 0, 2, 4, 6, 0.01 km/h, zero at 10 000), in 2–12 min; the
   gear's and other ids alone: nothing; the engine's 0x202 alone: its speed field as opendbc has it
   (`npm run replay:discover`, `--ids` for a batch).
-- **A find** becomes the car's own profile (`discoveredProfile`: the mean of its fields, unsigned, no gear, no
-  turning: the sides aren't known), keyed by its whole layout (`found/<id>/<length>/<fields>`): the feed matches it
-  beside opendbc's, and it goes through probation like any profile. A find probation refutes is dropped and the
+- **A find** becomes the car's own profile (`discoveredProfile`: the mean of its fields, unsigned, no gear; no wheels,
+  and no turning from them, until their order is known), keyed by its whole layout
+  (`found/<id>/<length>/<fields>[/w<order>]`): the feed matches it beside opendbc's, and it goes through probation like
+  any profile. A find probation refutes is dropped and the
   search goes on with the ids left: probation turns the monitor off before it tells of the fail, so the ids the
   search then listens to stay. While surveying or searching, the feed ignores the frames (they are no profile's). The
   feed matches a find before opendbc's profiles: one of another make on the same id ties with it and comes after.
+- **Which wheel is which** (`can-wheel-order.ts`, `nav/odometry/can/wheel-order.ts`), for a find of four fields
+  while the car drives on it (probation too): each frame's fields averaged per 0.1 s as the feed averages wheels, each
+  sample paired with the phone's gyro 0.1 s earlier (the wheels' lag), handled phone samples left out. In a turn the
+  outer wheels run faster, and the front ones on their wider arc faster than the rear ones whichever way it turns: over
+  stretches of 5 s, ∫(field − the four's mean) = side · ∫yaw + axle · ∫yaw²/speed + tyre · distance, by least squares
+  per field (side ± half the track, right +; axle ± a quarter of the wheelbase squared, front +). Only at 11 km/h or
+  more: a find has no gear, and reversing, slower, reads every turn the other way.
+  - **A verdict** after 2 min of stretches and 90° of turning each way, once every field's side is at 10 standard
+    errors and its axle at 5: one field a corner, both tracks 1.2–2.1 m and the wheelbase 1.8–4 m, is the order. Clear
+    sides or axles that don't make one wheel a corner, or a car's shape, are not four wheels: kept, nothing more
+    learned until the setting is turned off and on. A fit that stays unclear never decides: a lack of turns says
+    nothing of the fields.
+  - **Kept per VIN** (`vehicleLink.canWheelOrder`): short drives add up. The order goes into the find's record and its
+    key; the feed takes it from the next drive (`CanDiscovery.nextDrive` at ignition off, or the app's next start), so
+    a drive replays on the one profile its notes name. Probation's pass holds: the order changes no speed (`speedKey`).
+  - Its wheels then turn the car as any profile's (NAVIGATOR-SPEC §5.4), without a gear: below 11 km/h the mounted
+    phone's gyro instead.
+  - On the 42 CAN drives of one car (2026-10-11/23, two phones; 0x215 as its find, opendbc's wheels as truth): every
+    verdict right, 19 of the drives alone (3–15 min into the drive, median 5), 20 with the drives carried over; none
+    wrong. By a drive's end the sides stood at 38–199 standard errors, the axles, the slower part, at 5–37 (a highway
+    drive of 15 min stayed at 4–5). The undecided drives were mostly under 2 min at 11 km/h or more.
+    `npm run replay:discover -- … --order` (`--find <key>` without the search, `--carry`).
+  - Notes: `can discovery: learning which wheel is which in <id> from the gyro`, `… wheels of <id> by the gyro: fl …
+    (track, wheelbase, from … min); turns from them from the next drive`, `… <id>'s fields aren't four wheels by the
+    gyro (…)`.
 - **None found:** OBD stays and the monitor goes off for the car. **The link can't carry it** (two late polls, as
   §16.5): off for the drive, again the next. **Not due any more** mid-search (another VIN, the ids' picking found the
   make's profile): the navigator's trust back, the monitor's ids left to the picking, which set them before it told.
@@ -767,8 +799,10 @@ that car first.
   last probation checked (an earlier one it refuted). A log with a `can discovery:` note drove on OBD until a `can
   primary` note, as with probation's (§16.5): each batch notes its ids as it starts (`listening to … for a speed`),
   so a drive that ends mid-batch has its marker too.
-- **Reported** (the same switch, once per make, outcome, layout, adapter model and app version): `can discovery:
+- **Reported** (the same switch, once per make, outcome, layout, adapter model and build of the app): `can discovery:
   <outcome> <make>` with the make (`unknown` without a profile), the OBD protocol, the adapter model, how many
   candidates and how many tried, and a find's id, length, fields (byte, order, bits, shift, step, zero), worst
   correlation, pairs and range. A find is a car's speed layout nobody had: the report is how it reaches the app's
-  profiles for everyone.
+  profiles for everyone. The gyro's verdict on its wheels goes as `can discovery: wheels <make>`, the find's layout
+  with each wheel's field (`fl:2 fr:3 …`) or why they aren't four wheels, the track and wheelbase in cm, the seconds
+  of driving it took.
