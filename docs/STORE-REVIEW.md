@@ -77,7 +77,8 @@ undocumented features). It never starts without a code and a confirmation naming
 string from `mfiProtocols` before submitting:
 
 - `com.obdlink`: OBDLink MX+, OBD Solutions LLC, PPID 221699-0001
-- `com.vgatemall`: Vgate vLinker FS / MS, ShenZhen CheBoTong, PPIDs 649626-099130, 649626-112572
+- `com.vgatemall`: Vgate vLinker FS / MS, ShenZhen CheBoTong: the app is on Vgate's MFi product plan; Vgate has not
+  sent PPIDs. Ask Vgate for them; until then write "PPID available from the manufacturer".
 
 **Notes:**
 
