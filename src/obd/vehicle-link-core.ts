@@ -124,6 +124,11 @@ const CAN_STATUS_INTERVAL_US = 1_000_000;
 const CAN_FRESH_US = 300_000;
 /** The polls wait while the last CAN speed is this fresh and at least `CAN_MOVING_KPH`: the car moves. */
 const CAN_PAUSE_FRESH_US = 500_000;
+/**
+ * The snapshot says the wheels carry the speed (`speedFromCan`) while the last CAN speed is this fresh: standing, the
+ * polls' OBD 0 comes between the monitor's windows, and the Car page flipped between the two with every sample.
+ */
+const CAN_CARRIES_US = 3_000_000;
 const CAN_MOVING_KPH = 1;
 /**
  * An OBD speed of a moving car without a fresh CAN speed: the polls wait this long once, so the monitor gets a window
@@ -332,6 +337,7 @@ export class VehicleLinkCore implements VehicleLink {
       adapter: null,
       vehicle: null,
       lastSpeed: null,
+      speedFromCan: false,
       lastRpm: null,
       stats: null,
       canOff: null,
@@ -468,6 +474,7 @@ export class VehicleLinkCore implements VehicleLink {
     if (!on) {
       this.listenUntilUs = null;
       this.lastCanSpeed = null;
+      if (this.snapshot.speedFromCan) this.update({ speedFromCan: false });
     }
   }
 
@@ -750,7 +757,8 @@ export class VehicleLinkCore implements VehicleLink {
     );
     this.poller = poller;
     poller.start();
-    this.update({ link: this.engine.state === "ignition-off" ? "standby" : "polling" });
+    // The car answers again: an earlier session's error is over.
+    this.update({ link: this.engine.state === "ignition-off" ? "standby" : "polling", error: null });
     this.attachShadow();
     if (vehicle.vinSource !== "read") void this.retryVin(gen, seq, init.pinnedEcu, init.protocolNumber);
     return "polling";
@@ -852,14 +860,14 @@ export class VehicleLinkCore implements VehicleLink {
       // Lost again while the reconnect loop's session was probing or initializing: that session is over (its
       // pending command rejects, and the loop connects again); a second loop would run two sessions on one adapter.
       void this.teardownSession();
-      this.update({ link: "reconnecting", stats: null });
+      this.update({ link: "reconnecting", stats: null, speedFromCan: false });
       return;
     }
     this.reconnecting = gen;
     void (async () => {
       await this.teardownSession();
       this.engine.reset(this.deps.clock.nowUs());
-      this.update({ link: "reconnecting", stats: null });
+      this.update({ link: "reconnecting", stats: null, speedFromCan: false });
       try {
         await this.reconnectLoop(gen);
       } finally {
@@ -911,6 +919,12 @@ export class VehicleLinkCore implements VehicleLink {
   private handleFailure(gen: number, error: unknown): void {
     if (error instanceof Cancelled || error instanceof SessionClosedError || gen !== this.gen) return;
     const message = error instanceof Error ? error.message : String(error);
+    // The link was lost under it (a reinit waiting for an answer as the adapter powers down): the reconnect is on it,
+    // and this failure is only that loss again, not an error to show.
+    if (this.reconnecting === gen) {
+      this.event("failed-while-reconnecting", message);
+      return;
+    }
     const code = (error as { code?: string })?.code;
     const linkError: LinkError =
       code === "bluetooth-off" || code === "bluetooth-unauthorized" || code === "no-uart-service" || code === "device-not-found"
@@ -1044,11 +1058,11 @@ export class VehicleLinkCore implements VehicleLink {
     if (s.source !== "can") this.lastObdSpeed = { rxUs: s.rxUs, raw: s.raw };
     // CAN primary: OBD's speed only fills in where CAN's is stale (the poll of a standing car, a monitor gone deaf).
     if (s.source !== "can" && this.canSpeedFresh(s.tUs, CAN_FRESH_US)) {
-      this.update(this.maybeStats(s.rxUs));
+      this.update({ speedFromCan: true, ...this.maybeStats(s.rxUs) });
       return;
     }
     this.speed.emit(s);
-    this.update({ lastSpeed: s, ...this.maybeStats(s.rxUs) });
+    this.update({ lastSpeed: s, speedFromCan: this.canSpeedFresh(s.tUs, CAN_CARRIES_US), ...this.maybeStats(s.rxUs) });
   }
 
   private onRpmSample(s: RpmSample): void {

@@ -2,7 +2,7 @@
 import type { usePalette } from "@/constants/theme";
 import type { Strings } from "@/i18n/en";
 import type { CanShadowStatus } from "@/obd/can-shadow";
-import type { CanOff, EngineState, SpeedSample } from "@/obd/types";
+import type { CanOff, EngineState } from "@/obd/types";
 import type { CanAutoStatus } from "@/services/vehicle-link/can-auto-ids";
 import type { CanDiscoveryStatus } from "@/services/vehicle-link/can-discovery";
 import type { CanProbationStatus } from "@/services/vehicle-link/can-probation";
@@ -31,7 +31,8 @@ export function carStateText(engine: EngineState, palette: ReturnType<typeof use
 export function speedFromText(
   s: {
     wheelSpeed: boolean;
-    speed: SpeedSample | null;
+    /** The snapshot's `speedFromCan`. */
+    speedFromCan: boolean;
     canOff: CanOff | null;
     canShadow: CanShadowStatus | null;
     canAuto: CanAutoStatus;
@@ -40,7 +41,7 @@ export function speedFromText(
   },
   t: Translate,
 ): string {
-  if (s.wheelSpeed && s.speed?.source === "can") return t("speedFromWheels");
+  if (s.wheelSpeed && s.speedFromCan) return t("speedFromWheels");
   const why: keyof Strings = !s.wheelSpeed
     ? "wheelsOffSetting"
     : s.canOff === "adapter"

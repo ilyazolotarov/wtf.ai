@@ -123,7 +123,8 @@ navigate with the phone in a hand, a pocket or on a seat.
 - **The source** (`wheel-yaw-source.ts`, one code for `NavigatorService.setWheelYaw` and replay's `withWheelYaw`):
   the CAN wheel samples give the yaw, track 1.60 m, opposite in reverse, placed 0.1 s earlier (the wheels lag the
   gyro by −40…+100 ms). Each IMU sample becomes the car's: the wheels' yaw about a vertical "up", the phone's
-  acceleration kept, its tilt and turning left out, so its movements don't read as handling. In a break in listening
+  acceleration kept, its tilt and turning left out, so its movements don't read as handling; whether the phone's own
+  gyro read handled comes with it (`handled`), for the parked pose (§6.1). In a break in listening
   the phone's own turning is used, still in the car's frame; with no wheel sample within 1 s, the phone's sample as it
   is.
 - **Standing** (every wheel sample within 1 s reads 0; or the wheels went silent reading 0, at ignition off or the
@@ -193,8 +194,22 @@ navigate with the phone in a hand, a pocket or on a seat.
   K km/h, ±S m, heading ±H°)`. Phone-only mode (§9.6) starts only from poses saved standing.
 - **Frozen** at the first handling while parked: the driver often takes the phone out and walks off while the ECU
   is still awake, and the fixes then follow the driver. Handled only after the speed went stale (ignition off, the
-  link lost), it is the pose where the car was last seen standing: with the wheels' turning the phone's own frame,
-  where handling shows, comes back only then (§5.4), and the pose saved later had followed the phone.
+  link lost), it is the pose where the car was last seen standing. With the wheels' turning the navigator gets the
+  car's samples, where handling doesn't show: the phone's own reading comes with them (`ImuSample.handled`, §5.4);
+  without it the pose saved at a coffee stop had followed the driver 30–40 m and turned 50°, and the next drive
+  started from there (2026-10-23). **Released** when the car drives off: a speed of at least 1 km/h, forward or
+  reverse. Not the wheels' 0.01 km/h of a car rocking as someone gets in: that released the pose where the dead
+  reckoning had since followed the driver.
+- **The car held there** (`Navigator.heldParked`) once it is parked for real: the pose frozen and the engine off (the
+  link's state, `setEngine`; the service and replay pass it on) or the speed gone stale, the pose the car's (not one
+  started from that no fix has confirmed: the fixes check that one). Until it drives off or the engine starts: fixes
+  move nothing (status `parked`, integrity still sees them) and the speed is held at 0, so the car is where it was
+  left when the driver comes back. Without it the dead reckoning followed the walk: OBD answering 0 with the ECU
+  awake, each fix pulled it a little; with the speed stale, a walking fix's speed carried it off at walking pace.
+  The map still shows the phone while the car doesn't answer (§9). Not at a light where the driver picks the phone up
+  (the engine runs): fixes there are the car's, and holding at every such stop put drawn drives more often off the
+  road. The cost: a stop where the dead reckoning arrived off keeps that pose for the next start, whose checks then
+  have to drop it.
 - **Needs the VIN.** A missed VIN read assumes the last car on the protocol and retries (VEHICLE-LINK-SPEC §9.1). A
   VIN known late starts from the pose if the navigator has no position yet or the fixes agree (`startFromPose`
   accounts for the motion since the start). A car the link doesn't know (another protocol) restarts the navigator

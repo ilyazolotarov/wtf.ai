@@ -305,9 +305,11 @@ Real logs go in `tools/triplog/logs/` (git-ignored).
 
 The device list per VEHICLE-LINK-SPEC §7 (sections, RSSI bars, brand hint, scanning indicator, "New adapter", "Try
 anyway", "Forget"); the connected adapter's name and state; whether the car answers (engine running, ignition on with
-the engine off, ignition off, waiting), its speed now, and where the speed comes from: the wheels, or OBD and why not
-the wheels (`components/vehicle/car-status.ts`). The last error; "Share GATT dump" for an unknown device that
-failed, so it can be added to the catalog. The adapter's chip, firmware, protocol, poll timing and the learned
+the engine off, ignition off, waiting), its speed now, and where the speed comes from: the wheels while their speed
+is under 3 s old (the snapshot's `speedFromCan`; not the last sample's source, which at a stop goes back and forth
+with the polls between the monitor's windows), or OBD and why not the wheels (`components/vehicle/car-status.ts`).
+The last error, until the car answers again; "Share GATT dump" for an unknown device that failed, so it can be added
+to the catalog. The adapter's chip, firmware, protocol, poll timing and the learned
 calibration are in the trip log, not on the page.
 
 ### 9.2 `recorder` and `developer` (from More)

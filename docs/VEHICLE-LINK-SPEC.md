@@ -441,6 +441,10 @@ within ~20 s of its ignition.
 - BLE link lost → `reconnecting`; a pending `connect` (iOS keeps it open with no timeout) reconnects when the
   adapter returns. MFi: wait for `EAAccessoryDidConnect`. On reconnect: quick probe (steps 2–4), then §9 with the
   cached protocol and capabilities.
+- **A failure under a reconnect is no error:** a reinit waiting for an answer as the adapter powers down (the car
+  switched off with the monitor running) fails once the link is lost; that is the loss again, the link stays
+  `reconnecting` (link event `failed-while-reconnecting`). Its message sat on the Car page as the last error after
+  every such stop (2026-10-23). A session that polls clears the error.
 - Background: the TS loop runs while the app is alive; the trip logger keeps the app alive with background location
   during a trip and for a linger period after it (TRIP-LOGGER-SPEC §4.3); `bluetooth-central` and
   `external-accessory` keep the links alive; on Android the foreground service does.
@@ -611,7 +615,8 @@ while the car moves.
   phone's gyro.
 - **The link** (`VehicleLinkCore.pushCanSpeed`): CAN speed goes to the navigator, the trip detector and the engine
   state (it proves the ECU awake while no poll asks). OBD's speed is passed on only when the last CAN speed is over
-  0.3 s old.
+  0.3 s old. The snapshot's `speedFromCan` says the wheels carry the speed while their last speed is under 3 s old:
+  standing, OBD's 0 fills the gaps between the monitor's windows, and the Car page showed the source flipping.
 - **No polls while the car moves:** the poller waits while the last CAN speed is under 0.5 s old and at least 1 km/h.
   A standing car's wheels don't prove the ECU awake (the body's bus keeps sending the wheels at 0 after the engine
   ECU is off), so only the polls' silence tells `ignition-off`, and with it the monitor stops; standing, or without

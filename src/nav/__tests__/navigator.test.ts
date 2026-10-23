@@ -400,6 +400,82 @@ describe("Navigator from a parked pose", () => {
     expect(haversineM(end, parked.truth.at(-1)!)).toBeLessThan(10);
   });
 
+  // 2026-10-23 (gnv7ti, the wheels' turning): the car's samples showed nothing of the phone taken out at a coffee stop,
+  // the pose saved later had followed the driver 40 m and turned 50°, and the next drive set off from it.
+  test("the wheels' turning: the phone's own reading handled freezes the pose, then carried off: it stays where the car is", () => {
+    const parked = syntheticDrive({
+      segments: [
+        { durationS: 30, speedMps: 12, yawRateDegS: 0 },
+        { durationS: 5, speedMps: 0, yawRateDegS: 0 },
+        { durationS: 60, speedMps: 0, yawRateDegS: 0 },
+      ],
+      gnss: "clean",
+    });
+    const at = (s: number) => parked.trip.startUs + s * 1e6;
+    // The car's samples (`WheelYawSource.substitute`): the wheels' yaw about a vertical up, the phone's tilt left out.
+    parked.trip.imu = parked.trip.imu.map((s) => ({
+      ...s,
+      gyro: [0, 0, 0],
+      gravity: [0, 0, -9.81],
+      ...(s.tUs >= at(45) ? { handled: true as const } : {}),
+    }));
+    // Ignition off at 50 s, the speed back (0) at 80 s while the driver walks on: as on the vLinker at the coffee stop.
+    // At 85 s the wheels read 0.01 km/h: the car rocking as someone gets in, not driving off.
+    parked.trip.obdSpeed = parked.trip.obdSpeed
+      .filter((o) => o.tUs < at(50) || o.tUs >= at(80))
+      .map((o) => (o.tUs >= at(85) && o.tUs < at(86) ? { ...o, speedMps: 0.01 / 3.6, rawKph: 0.01, source: "can" as const } : o));
+    parked.trip.gnss = parked.trip.gnss.map((f) =>
+      f.tUs < at(45) ? f : { ...f, lat: f.lat + (1.5 * (f.tUs - at(45))) / 1e6 / 111_320, speedMps: 1.5, courseRad: 0 },
+    );
+    const r = replayTrip(parked.trip);
+    expect(haversineM(r.summary.endPose!, parked.truth.at(-1)!)).toBeLessThan(10);
+    // Back at the car, the navigator's car is there too: the walk's fixes moved nothing.
+    expect(haversineM(r.track.at(-1)!, parked.truth.at(-1)!)).toBeLessThan(10);
+  });
+
+  test("the engine off, the ECU still answering 0 while the driver walks off with the phone: the car stays put", () => {
+    const parked = syntheticDrive({
+      segments: [
+        { durationS: 30, speedMps: 12, yawRateDegS: 0 },
+        { durationS: 5, speedMps: 0, yawRateDegS: 0 },
+        { durationS: 60, speedMps: 0, yawRateDegS: 0 },
+      ],
+      gnss: "clean",
+      handling: { fromS: 45, toS: 95, tiltRad: 0.8, yawRateRadS: 0.5 },
+    });
+    const at = (s: number) => parked.trip.startUs + s * 1e6;
+    parked.trip.engine = [{ tUs: at(40), state: "engine-off" }];
+    parked.trip.gnss = parked.trip.gnss.map((f) =>
+      f.tUs < at(45) ? f : { ...f, lat: f.lat + (1.5 * (f.tUs - at(45))) / 1e6 / 111_320, speedMps: 1.5, courseRad: 0 },
+    );
+    const r = replayTrip(parked.trip);
+    expect(haversineM(r.track.at(-1)!, parked.truth.at(-1)!)).toBeLessThan(10);
+    expect(r.summary.fixes.parked).toBeGreaterThan(0);
+  });
+
+  test("walked off and back while parked, then driven off: the fixes count again once the car drives", () => {
+    const trip = syntheticDrive({
+      segments: [
+        { durationS: 30, speedMps: 12, yawRateDegS: 0 },
+        { durationS: 60, speedMps: 0, yawRateDegS: 0 },
+        { durationS: 20, speedMps: 3, yawRateDegS: 4.5 },
+        { durationS: 30, speedMps: 12, yawRateDegS: 0 },
+      ],
+      gnss: "clean",
+      handling: { fromS: 40, toS: 80, tiltRad: 0.8, yawRateRadS: 0.5 },
+    });
+    const at = (s: number) => trip.trip.startUs + s * 1e6;
+    // Out 1.5 m/s east from 45 s, back at the car by 75 s.
+    trip.trip.gnss = trip.trip.gnss.map((f) => {
+      const m = 1.5 * Math.max(0, Math.min(f.tUs - at(45), at(75) - f.tUs)) / 1e6;
+      return m > 0 ? { ...f, lon: f.lon + m / (111_320 * Math.cos((f.lat * Math.PI) / 180)), speedMps: 1.5 } : f;
+    });
+    const r = replayTrip(trip.trip);
+    const parkedAt = r.track.filter((p) => p.tS <= 88).at(-1)!;
+    expect(haversineM(parkedAt, trip.truthAt(at(88)))).toBeLessThan(10);
+    expect(endError(trip, r).posM).toBeLessThan(15);
+  });
+
   // 2026-10-20 (nnz5ff with the wheels' turning): handled only after the speed had gone stale, the pose wasn't frozen,
   // and the one saved later came from the dead reckoning that had followed the phone.
   test("handled only after the speed went stale (ignition off), then carried off: the pose where the car stood", () => {
@@ -418,8 +494,10 @@ describe("Navigator from a parked pose", () => {
     parked.trip.gnss = parked.trip.gnss.map((f) =>
       f.tUs < at(45) ? f : { ...f, lat: f.lat + (1.5 * (f.tUs - at(45))) / 1e6 / 111_320, speedMps: 1.5, courseRad: 0 },
     );
-    const end = replayTrip(parked.trip).summary.endPose!;
-    expect(haversineM(end, parked.truth.at(-1)!)).toBeLessThan(10);
+    const r = replayTrip(parked.trip);
+    expect(haversineM(r.summary.endPose!, parked.truth.at(-1)!)).toBeLessThan(10);
+    // Back at the car, the navigator's car is there too: the walk's fixes moved nothing.
+    expect(haversineM(r.track.at(-1)!, parked.truth.at(-1)!)).toBeLessThan(10);
   });
 
   test("the link lost while parked: the phone turning in the driver's hand doesn't turn the car", () => {

@@ -380,7 +380,7 @@ export class ReplayRecorder {
     const end = nav.estimate();
     if (end && end.tUs > (track.at(-1)?.tUs ?? -Infinity)) track.push({ ...end, tS: this.tS(end.tUs), standstill: nav.isStandstill, trust: nav.trustAt(end.tUs) });
 
-    const counts = { init: 0, accepted: 0, rejected: 0, anchored: 0, skipped: 0, untrusted: 0, cut: 0 };
+    const counts = { init: 0, accepted: 0, rejected: 0, anchored: 0, skipped: 0, untrusted: 0, parked: 0, cut: 0 };
     for (const f of fixes) counts[f.status]++;
     const compared = fixes.filter((f) => (f.status === "accepted" || f.status === "rejected") && f.errorM !== undefined);
     const coarse = compared.filter((f) => !f.satellite);
@@ -479,6 +479,8 @@ interface ReplayInputs {
   obdSpeed: TripLog["obdSpeed"];
   gnss: GnssFix[];
   mag: MagSample[];
+  /** The link's engine states, as the app's service passes them on (`Navigator.setEngine`). */
+  engine: TripLog["engine"];
   /** The navigator that last used the road graph (forks share it, each in its own frame). */
   graphUser: Navigator | null;
 }
@@ -495,7 +497,7 @@ export class TripReplay {
     private readonly nav: Navigator,
     private readonly rec: ReplayRecorder,
     /** Next input of each stream; log time (s) of the last input fed. */
-    private readonly at: { i: number; o: number; g: number; k: number; fedS: number },
+    private readonly at: { i: number; o: number; g: number; k: number; e: number; fedS: number },
   ) {}
 
   static start(trip: TripLog, options: ReplayOptions = {}): TripReplay {
@@ -524,9 +526,10 @@ export class TripReplay {
       obdSpeed: from(trip.obdSpeed),
       gnss: from(spoofed),
       mag: from(trip.mag ?? []),
+      engine: from(trip.engine ?? []),
       graphUser: nav,
     };
-    return new TripReplay(inputs, nav, rec, { i: 0, o: 0, g: 0, k: 0, fedS: -Infinity });
+    return new TripReplay(inputs, nav, rec, { i: 0, o: 0, g: 0, k: 0, e: 0, fedS: -Infinity });
   }
 
   /** Feed the inputs up to log time `untilS` (s), inclusive (as `ReplayOptions.untilS`). */
@@ -581,7 +584,7 @@ export class TripReplay {
   /** Merge the streams in time order until `stop` (at the next input's log time, s). */
   private feed(stop: (tS: number) => boolean): void {
     this.useGraph();
-    const { imu, obdSpeed, gnss, mag } = this.inputs;
+    const { imu, obdSpeed, gnss, mag, engine } = this.inputs;
     const { nav, rec, at } = this;
     while (at.i < imu.length || at.o < obdSpeed.length || at.g < gnss.length || at.k < mag.length) {
       const ti = at.i < imu.length ? imu[at.i].tUs : Infinity;
@@ -591,6 +594,7 @@ export class TripReplay {
       const tNext = this.tS(Math.min(ti, to, tg, tm));
       if (stop(tNext)) break;
       at.fedS = tNext;
+      for (const tUs = Math.min(ti, to, tg, tm); at.e < engine.length && engine[at.e].tUs <= tUs; at.e++) nav.setEngine(engine[at.e].state as Parameters<Navigator["setEngine"]>[0]);
       if (tm < ti && tm < to && tm < tg) {
         nav.onMag(mag[at.k++]);
       } else if (ti <= to && ti <= tg) {

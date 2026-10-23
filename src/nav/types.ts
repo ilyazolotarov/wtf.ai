@@ -12,6 +12,11 @@ export interface ImuSample {
   gravity: Vec3;
   /** Acceleration without gravity, m/s², device frame. */
   userAccel: Vec3;
+  /**
+   * The car's sample in place of the phone's (wheel yaw, NAVIGATOR-SPEC §5.4) while the phone's own read handled: in
+   * the car's frame the navigator can't see that itself, and a parked car's pose freezes on it (§6.1).
+   */
+  handled?: true;
 }
 
 /** Raw magnetometer (`CMMagnetometerData`, uncalibrated), ~20 Hz. */

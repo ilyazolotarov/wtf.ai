@@ -34,6 +34,15 @@ describe("turning from the wheels (NAVIGATOR-SPEC §5.4)", () => {
     expect(src.substitute(imu(5_000_000, 1))).toBeNull();
   });
 
+  test("the phone's own gyro read handled: the car's sample says so, for the navigator's parked pose", () => {
+    const src = new WheelYawSource();
+    for (let t = 0; t <= 2_000_000; t += 100_000) src.addWheels(wheels(t + WHEEL_LAG_US, 0, 0));
+    src.addGyro(1_000_000, 0);
+    src.addGyro(1_010_000, null);
+    expect(src.substitute(imu(1_000_000, 0))!.handled).toBeUndefined();
+    expect(src.substitute(imu(1_010_000, 1))!.handled).toBe(true);
+  });
+
   test("in reverse the wheels' difference turns the car the other way", () => {
     const src = new WheelYawSource();
     for (let t = 0; t <= 1_000_000; t += 100_000) src.addWheels(wheels(t, 0.2, 2, 0, true));

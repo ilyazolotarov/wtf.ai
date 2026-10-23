@@ -120,7 +120,7 @@ function CarDetails() {
     : t("unavailableValue");
   // The firmware check again, after the one-time page (VEHICLE-LINK-SPEC §8.4).
   const updater = adapter ? firmwareUpdaterFor({ id: adapter.deviceId, name: adapter.name }) : null;
-  const speedFrom = speedFromText({ wheelSpeed: devSettings.wheelSpeed, speed, canOff: snap.canOff ?? null, canShadow: snap.canShadow ?? null, canAuto, canProbation, canDiscovery }, t);
+  const speedFrom = speedFromText({ wheelSpeed: devSettings.wheelSpeed, speedFromCan: snap.speedFromCan ?? false, canOff: snap.canOff ?? null, canShadow: snap.canShadow ?? null, canAuto, canProbation, canDiscovery }, t);
 
   return (
     <>

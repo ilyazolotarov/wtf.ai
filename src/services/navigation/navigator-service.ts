@@ -237,6 +237,8 @@ export class NavigatorService implements PositionSource {
   private pending: Input[] = [];
   /** The navigator's turning from the wheels (§5.4): the source, while on. */
   private wheelYaw: WheelYawSource | null = null;
+  /** The link's last engine state, for a navigator started meanwhile. */
+  private engineState: EngineState = "unknown";
   /** The tyre term was saved once this session (noted once). */
   private wheelYawStored = false;
   /** The gyro as the navigator would read it, for the wheels to learn from. */
@@ -592,6 +594,8 @@ export class NavigatorService implements PositionSource {
       link.onSpeed((s) => this.onSpeed(s)),
       this.deps.canSpeed?.onSample((s) => this.onWheels(s)) ?? (() => {}),
       link.onEngineState((state) => {
+        this.engineState = state;
+        this.nav?.setEngine(state);
         // Parked: keep the pose for the next start, even if the app is killed later.
         if (state !== "engine-off" && state !== "ignition-off") return;
         this.flush(this.deps.nowUs() - this.reorderUs);
@@ -684,6 +688,7 @@ export class NavigatorService implements PositionSource {
     this.note(`${STORAGE_NOTE}${JSON.stringify(calibration.snapshot(null))}`);
     const nav = new Navigator({ ...this.deps.nav, ...(lag ? { gnssLagS: lag.lagS } : {}) });
     nav.setWheelYaw(this.wheelYaw !== null);
+    nav.setEngine(this.engineState);
     this.nav = nav;
     this.lastPuck = null;
     this.lastDot = null;

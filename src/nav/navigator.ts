@@ -329,8 +329,11 @@ export interface ParkedPose {
   speedMps?: number;
 }
 
-/** `untrusted`: a satellite fix integrity refused (`integrity` says why); nothing used it. */
-export type FixStatus = "init" | "accepted" | "rejected" | "anchored" | "skipped" | "untrusted";
+/**
+ * `untrusted`: a satellite fix integrity refused (`integrity` says why); nothing used it. `parked`: a fix while the car
+ * is held where it was parked (§6.1), the phone's and maybe not the car's: it moves nothing.
+ */
+export type FixStatus = "init" | "accepted" | "rejected" | "anchored" | "skipped" | "untrusted" | "parked";
 
 export interface FixOutcome {
   status: FixStatus;
@@ -456,6 +459,12 @@ const ANCHOR_GROW_WITHOUT_SPEED_US = 60_000_000;
  * heading it now has (vwaz7t: out of a space ~90° to the road, reversing through 78°).
  */
 const MANOEUVRE_TURN_RAD = (30 * Math.PI) / 180;
+/**
+ * The car drives off from a pose frozen while parked (§6.1) at this speed, either way. Not a car rocking as someone gets
+ * in: the wheels read in 0.01 km/h steps, and their 0.01 released the pose frozen at a coffee stop where the dead
+ * reckoning had since followed the driver 30 m; the next drive started from there (gnv7ti, 2026-10-23).
+ */
+const DRIVE_OFF_KPH = 1;
 const MANOEUVRE_M_PER_RAD = 6;
 /** A Wi-Fi/cell fix claiming up to this is narrow: it can doubt the track inside its reach, and move a lost one. */
 const NARROW_FIX_M = 450;
@@ -540,6 +549,10 @@ export class Navigator {
   private poseUnverifiedFromM: number | null = null;
   /** The EKF started from a pose parked off the roads, or placed there by the driver (OBD distance at the start). */
   private poseOffRoadAtM: number | null = null;
+  /** The engine off (or the ignition), by the link: the car parked, not at a light. `setEngine`. */
+  private engineOff = false;
+  /** The car held where it was parked (`heldParked`): latched once parked for real, until it drives off. */
+  private parkedHold = false;
   /** Parked pose taken when the phone was first handled while parked: it may leave the car after that. */
   private frozenPose: ParkedPose | null = null;
   /** The turning comes from the CAN wheels (`setWheelYaw`). */
@@ -801,8 +814,13 @@ export class Navigator {
     const out = this.imu.process(s, this.wheelYaw ? undefined : speed);
     // Handled while parked: the phone may now leave the car with the driver, so later fixes and
     // positions are not the car's. Keep the pose of the car from before it; with the speed gone
-    // stale since (ignition off, the link lost), the pose where it was last seen standing.
-    if (!out.valid && this.frozenPose === null) this.frozenPose = this.currentParkedPose() ?? (this.lastObd?.rawKph === 0 ? this.stoppedPose : null);
+    // stale since (ignition off, the link lost), the pose where it was last seen standing. With the
+    // wheels' turning the sample is the car's: the phone's own reading comes with it (`handled`).
+    if ((!out.valid || s.handled) && this.frozenPose === null) this.frozenPose = this.currentParkedPose() ?? (this.lastObd?.rawKph === 0 ? this.stoppedPose : null);
+    // Held there once parked for real (the engine off, or the speed gone stale: ignition off, the link lost), not at a
+    // light where the driver picked the phone up: its fixes are the car's then.
+    if (this.frozenPose === null) this.parkedHold = false;
+    else if (!this.parkedHold && this.poseUnverifiedFromM === null && (this.engineOff || (o !== null && s.tUs - o.tUs >= this.config.obdStaleUs))) this.parkedHold = true;
     // With the engine off the poller reads speed once a second.
     const lastObdZero = this.lastObd !== null && this.lastObd.rawKph === 0 && s.tUs - this.lastObd.tUs < 2_500_000;
     if (out.quiet && lastObdZero) this.quietSinceUs ??= s.tUs;
@@ -810,6 +828,9 @@ export class Navigator {
     this.standstill = this.quietSinceUs !== null && s.tUs - this.quietSinceUs >= this.config.standstillUs;
 
     this.advance(s.tUs, out.valid ? out.yawRate : null);
+    // Frozen while parked: the car stands until it drives off. With the speed stale (ignition off) the speed a walking
+    // fix gave just before would carry the dead reckoning off at the driver's pace, fixes or not.
+    if (this.heldParked && this.ekf) for (const ekf of this.twin ? [this.ekf, this.twin] : [this.ekf]) ekf.updateZeroSpeed(0.02);
     this.lastYaw = { tUs: s.tUs, rate: out.yawRate, valid: out.valid };
     this.feedCompass(s, out.yawRate, out.valid);
 
@@ -825,8 +846,8 @@ export class Navigator {
   onObdSpeed(s: ObdSpeedSample): void {
     this.advance(s.tUs, this.heldYaw(s.tUs));
     this.lastObd = s;
+    if (Math.abs(s.rawKph) >= DRIVE_OFF_KPH) this.frozenPose = null;
     if (s.rawKph > 0) {
-      this.frozenPose = null;
       this.stoppedPose = null;
       const turned = Math.abs(this.manoeuvreRad);
       if (turned >= MANOEUVRE_TURN_RAD && this.ekf) {
@@ -877,6 +898,13 @@ export class Navigator {
       }
     } else {
       this.integrity.onCoarse(fix);
+    }
+    // Frozen while parked (§6.1): the phone may be in the driver's pocket, away from the car. Until the car drives off
+    // its fixes move nothing, so the car is where it was left when the driver comes back: at a coffee stop the dead
+    // reckoning followed the driver 30 m and turned with the walk, and showed the car there on return (gnv7ti).
+    if (this.heldParked) {
+      if (verdict.integrity) this.integrity.onUsed(false);
+      return { status: "parked", ...verdict };
     }
     this.lagEstimator.onFix(fix.tUs, fix, fix.hAccM, isSatelliteFix(fix));
     const sigma = fixSigma(fix);
@@ -969,6 +997,26 @@ export class Navigator {
       };
     }
     return null;
+  }
+
+  /**
+   * The car held where it was parked (§6.1): its pose frozen (the phone handled) and the car parked for real, the pose
+   * the car's, not one started from that the fixes haven't confirmed yet. Fixes then move nothing and the speed is 0,
+   * until it drives off or the engine starts.
+   */
+  private get heldParked(): boolean {
+    return this.parkedHold && this.frozenPose !== null;
+  }
+
+  /**
+   * The engine's state by the link: off (or the ignition) the car is parked, and a phone handled then may leave it
+   * (`heldParked`); running again, the driver is back in it.
+   */
+  setEngine(state: "engine-running" | "engine-off" | "ignition-off" | "unknown"): void {
+    if (state === "engine-running") {
+      this.engineOff = false;
+      this.parkedHold = false;
+    } else if (state !== "unknown") this.engineOff = true;
   }
 
   /**

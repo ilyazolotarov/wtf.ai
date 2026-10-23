@@ -240,6 +240,11 @@ export interface VehicleLinkSnapshot {
   protocolSearch: boolean;
   engine: EngineState;
   lastSpeed: SpeedSample | null;
+  /**
+   * The wheels carry the speed (VEHICLE-LINK-SPEC §16.3): their last speed is under 3 s old. Not `lastSpeed`'s source,
+   * which standing goes back and forth with the polls between the monitor's windows.
+   */
+  speedFromCan?: boolean;
   lastRpm: RpmSample | null;
   stats: PollStats | null;
   /**

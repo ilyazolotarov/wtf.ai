@@ -739,6 +739,24 @@ describe("VehicleLinkCore", () => {
       }
     });
 
+    // 2026-10-23, vLinker: the car switched off, the monitor silent; iOS dropped the link while the reset after it waited
+    // for an answer. That reset's failure put the link in error, and its message stayed on the Car page after the
+    // reconnect polled again.
+    test("the link lost during the reset after a silent monitor: reconnecting, not an error, none left once it polls", async () => {
+      const { core, windows, emu, events, states } = await shadowOn({});
+      try {
+        await until(() => windows.length >= 3);
+        emu.freezeInMonitor();
+        await until(() => events.some((e) => e.type === "frozen"));
+        emu.dropLink("link-lost");
+        await until(() => events.some((e) => e.type === "link-restored") && core.getSnapshot().link === "polling");
+        expect(states.slice(states.indexOf("reconnecting"))).not.toContain("error");
+        expect(core.getSnapshot().error).toBeNull();
+      } finally {
+        await core.disconnect();
+      }
+    });
+
     // 2026-10-11: a bare ATCRA didn't open the filter on the vLinker (STN1151 v4.3.2) nor the MX+ on 5.13.1; it restores
     // the OBD answers' filter and clears the pass filters (`default`), which on 2026-10-12 had the self-test, trying
     // ATCRAXXX after it, hear every id and choose a full setup for the vLinker.
@@ -815,11 +833,25 @@ describe("VehicleLinkCore", () => {
         emu.setVehicle({ speedKph: 0 });
         await pushFor(3000, 0);
         expect(polls()).toBeGreaterThan(before + 3);
-        // CAN goes quiet while moving: OBD's speed is the navigator's again.
+        // Standing on a slow link, a CAN speed only in each window between the polls: OBD's 0 fills in the gaps, and the
+        // snapshot still says the wheels carry the speed (the Car page flipped with every sample, 2026-10-23).
+        const carried: boolean[] = [];
+        const unsubscribe = core.subscribe(() => carried.push(core.getSnapshot().speedFromCan ?? false));
+        const s = toNav.length;
+        for (let t = 0; t < 4000; t += 100) {
+          if (t % 600 === 0) can(0);
+          await clock.sleep(100);
+        }
+        unsubscribe();
+        expect(toNav.slice(s).some((x) => x.source !== "can")).toBe(true);
+        expect(carried.length).toBeGreaterThan(0);
+        expect(carried.every(Boolean)).toBe(true);
+        // CAN goes quiet while moving: OBD's speed is the navigator's again, and in 3 s the snapshot says so.
         emu.setVehicle({ speedKph: 40 });
         await pushFor(500, 40);
         const m = toNav.length;
         await until(() => toNav.slice(m).some((s) => s.source !== "can"));
+        await until(() => core.getSnapshot().speedFromCan === false);
         // Off: nothing from CAN is taken.
         core.setCanShadow(null);
         const k = toNav.length;

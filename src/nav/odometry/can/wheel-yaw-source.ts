@@ -117,7 +117,13 @@ export class WheelYawSource {
     const radps = this.yawAt(s.tUs, bridgeUs) ?? (this.standing(s.tUs) ? 0 : this.wheelsNear(s.tUs) ? WheelYawSource.gyroYaw(s) : null);
     if (radps === null) return null;
     const g = Math.hypot(s.gravity[0], s.gravity[1], s.gravity[2]) || 9.81;
-    return { ...s, gyro: [0, 0, radps], gravity: [0, 0, -g] };
+    return { ...s, gyro: [0, 0, radps], gravity: [0, 0, -g], ...(this.handledAt(s.tUs) ? { handled: true as const } : {}) };
+  }
+
+  /** The phone's own gyro read handled at `tUs` (`addGyro` with null for that sample). */
+  private handledAt(tUs: number): boolean {
+    for (let i = this.gyro.length - 1; i >= 0 && this.gyro[i].tUs >= tUs; i--) if (this.gyro[i].tUs === tUs) return this.gyro[i].radps === null;
+    return false;
   }
 
   /**
