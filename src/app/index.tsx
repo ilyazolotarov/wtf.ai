@@ -11,6 +11,7 @@ import { HeldRouteCard, PinCard } from "@/components/map/destination-cards";
 import { HudCard, HudChip, usePanelStyle } from "@/components/map/hud-card";
 import { MapSurface } from "@/components/map/map-surface";
 import { useMapTurn, type MapTurn } from "@/components/map/map-turn";
+import type { Pin } from "@/components/map/pin-pick";
 import { PlacingPin } from "@/components/map/placing-pin";
 import { ManualChip, ManualQuestionCard, OnTheWayCard, PlacingCard, PoseQuestionCard } from "@/components/map/placing-cards";
 import { RegionPrompt } from "@/components/map/region-prompt";
@@ -34,7 +35,6 @@ import { FontScaleLimit, MAP_MAX_FONT_SCALE, T } from "@/components/ui/text";
 import { useHasUsableMap } from "@/config/map";
 import { usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
-import type { Coordinate } from "@/nav/geo";
 import { MOVING_MPS } from "@/services/app-update/decide";
 import { usePositionPermission } from "@/providers/position-provider";
 import { useHeldRoute, useRoute } from "@/providers/route-provider";
@@ -125,7 +125,7 @@ export default function HomeScreen() {
   // A route asked for without an adapter waits here for the driver's word (UI-SPEC §6.3).
   const held = useHeldRoute();
   // A long press on the map drops a pin to route to (ROUTING-SPEC §8), or to say the car is there.
-  const [pin, setPin] = useState<Coordinate | null>(null);
+  const [pin, setPin] = useState<Pin | null>(null);
   const [voiceMuted, toggleVoice] = useVoiceMuted();
   // Volume 0 in Settings: no voice, and no button for it.
   const voiceOff = useVoiceVolume() === 0;
@@ -284,8 +284,8 @@ export default function HomeScreen() {
               compass={compass}
               headingUpRad={headingUp}
               onUserInteraction={onGesture}
-              onLongPress={(at) => {
-                setPin(at);
+              onLongPress={(at, pick) => {
+                setPin({ ...at, pick });
                 if (touring) tryTour("hold");
               }}
               pin={placing ? null : pin}
@@ -441,8 +441,8 @@ export default function HomeScreen() {
                   onClose={() => setPin(null)}
                   // The car is here, not a destination: the same placing as from the chip, starting at the pin.
                   onPlace={place.mayPlace ? () => place.start(pin) : undefined}
-                  onRoute={() => {
-                    startRoute({ lat: pin.lat, lon: pin.lon });
+                  onRoute={(name) => {
+                    startRoute({ lat: pin.lat, lon: pin.lon, name });
                     setPin(null);
                   }}
                 />

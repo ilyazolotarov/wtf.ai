@@ -1,9 +1,10 @@
-import { Camera, LogManager, Map, type PressEvent, type ViewStateChangeEvent } from "@maplibre/maplibre-react-native";
-import { useState, type ComponentProps } from "react";
+import { Camera, LogManager, Map, type MapRef, type PressEvent, type ViewStateChangeEvent } from "@maplibre/maplibre-react-native";
+import { useRef, useState, type ComponentProps } from "react";
 import { useColorScheme, View, type NativeSyntheticEvent } from "react-native";
 
 import { ANDROID_BLURS } from "@/components/ui/glass-fill";
 import { useMapStyle } from "@/config/map";
+import { STREET_PICK_LAYER } from "@/config/map-labels";
 import { Sentry } from "@/config/sentry";
 import { Colors } from "@/constants/theme";
 import type { Coordinate } from "@/nav/geo";
@@ -15,6 +16,7 @@ import { useEntrancesUrl } from "@/services/offline-map/entrance-file";
 import { useMapPacks } from "@/services/offline-map/map-packs";
 
 import type { CameraView } from "./map-features";
+import { BUILDING_ZOOM, FINGER_PT, nearestStreet, type PinPick } from "./pin-pick";
 
 import { DebugLayers, EntranceLayers, MarkLayers, PositionLayers, PuckLayers, RouteLayers } from "./map-layers";
 import type { CameraMode } from "./use-camera-mode";
@@ -50,7 +52,8 @@ interface MapSurfaceProps {
   headingUpRad: number | null;
   onUserInteraction(): void;
   /** Long press: where on the map. */
-  onLongPress(at: Coordinate): void;
+  /** `pick`: the zoom it was pressed at and the street under the finger, for the pin's name (`pin-pick.ts`). */
+  onLongPress(at: Coordinate, pick: PinPick): void;
   /** A dropped pin, before routing to it. */
   pin: Coordinate | null;
   /** Camera lines for the trip log: the mode shown, and in heading-up the bearing asked vs the map's. */
@@ -131,6 +134,26 @@ export function MapSurface({
   // The camera now, rounded (zoom to 0.1, bearing and tilt to a degree): the heading cone looks the same on screen in
   // every camera (puck-style.ts), and a camera that holds draws nothing again.
   const [view, setView] = useState<CameraView>({ zoom: INITIAL_ZOOM, bearingDeg: 0, pitchDeg: 0 });
+  const mapRef = useRef<MapRef>(null);
+  // A long press where buildings are drawn: the street under the finger and whether it is on a building; then the pin
+  // with what the map knew there.
+  const longPress = (at: Coordinate, [x, y]: [number, number]) => {
+    const zoom = view.zoom;
+    const map = mapRef.current;
+    if (zoom < BUILDING_ZOOM || !map) return onLongPress(at, { zoom, street: null });
+    const box: [[number, number], [number, number]] = [
+      [x - FINGER_PT, y - FINGER_PT],
+      [x + FINGER_PT, y + FINGER_PT],
+    ];
+    Promise.all([
+      map.queryRenderedFeatures(box, { layers: [STREET_PICK_LAYER] }),
+      map.queryRenderedFeatures([x, y], { layers: ["building", "building-3d"] }),
+    ])
+      .then(([streets, buildings]) =>
+        onLongPress(at, { zoom, street: nearestStreet(streets, at), onBuilding: buildings.length > 0 }),
+      )
+      .catch(() => onLongPress(at, { zoom, street: null }));
+  };
   const trackView = (event: NativeSyntheticEvent<ViewStateChangeEvent>) => {
     const { zoom, bearing, pitch } = event.nativeEvent;
     if (![zoom, bearing, pitch].every(Number.isFinite)) return;
@@ -146,6 +169,7 @@ export function MapSurface({
 
   return (
     <Map
+      ref={mapRef}
       mapStyle={mapStyle as ComponentProps<typeof Map>["mapStyle"]}
       style={{ flex: 1 }}
       onLayout={(event) => setMapHeightPt(Math.round(event.nativeEvent.layout.height))}
@@ -166,7 +190,7 @@ export function MapSurface({
       onLongPress={(event: NativeSyntheticEvent<PressEvent>) => {
         if (placing) return;
         const [lon, lat] = event.nativeEvent.lngLat;
-        onLongPress({ lat, lon });
+        longPress({ lat, lon }, event.nativeEvent.point);
       }}
       onPress={(event: NativeSyntheticEvent<PressEvent>) => {
         if (placing !== "heading") return;

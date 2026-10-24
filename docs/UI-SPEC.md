@@ -216,8 +216,12 @@ One small component each; the screen only places them and wires their state. Car
   "Outside <region>" offers **Switch map** to a downloaded region that has the car, else **Download** the smallest
   catalog region that has it, else Offline maps. "Not now" hides it for that pair of regions until restart. Hidden
   while that region downloads.
-- **Long-press on the map** drops a pin; a card shows its distance and direction, ✕, **Route here** (ROUTING-SPEC
-  §8), and **I'm here** (at any speed): placing starting at the pin.
+- **Long-press on the map** drops a pin; a card names what is there at that zoom (`pin-pick.ts`). Where the map draws
+  buildings (from z13): on a building its house (the nearest within 75 m, SEARCH-SPEC §5); off one (a road, a yard)
+  the street drawn under the finger (an all but invisible layer of the tiles' named street lines: MapLibre doesn't
+  query a layer it doesn't draw), else the nearest house. From z9 the settlement, below that "Dropped pin". The pin
+  keeps its exact point for Route here and I'm here. Then its distance and direction, ✕, **Route here** (ROUTING-SPEC §8), and **I'm here** (at any speed): placing
+  starting at the pin.
 - **With a route** (`src/components/route/route-banner.tsx`): the next maneuver's icon, the distance to it (10 m
   steps under 300 m, 50 m under 1 km), its instruction, "then …" when the next follows within 120 m, and the
   distance, time and arrival clock left; or "Planning route…", "Off route, planning again…", "Position uncertain:

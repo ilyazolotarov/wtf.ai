@@ -124,6 +124,22 @@ describe("SearchIndex", () => {
     expect(door.lon).toBeCloseTo(31.2947 + 0.0012, 5);
   });
 
+  it("names the address nearest a dropped pin, and nothing away from houses", () => {
+    const index = open();
+    // On the building of Шевченка 1 (its centre is 0.0011° E, 0.0013° N of the city's point).
+    const house = index.nearestAddress({ lat: 51.4939 + 0.00125, lon: 31.2947 + 0.00105 });
+    expect(house && label(house)).toBe("address:вулиця Шевченка 1 @Чернігів");
+    expect(house?.entrances.map((e) => e.ref)).toEqual(["1", "2"]);
+    // A village house addressed by its place.
+    const village = index.nearestAddress({ lat: 51.41 - 0.0005, lon: 31.15 + 0.0005 });
+    expect(village && label(village)).toBe("address:Іванівка 5");
+    expect(index.nearestAddress({ lat: 51.4939 + 0.02, lon: 31.2947 + 0.02 })).toBeNull();
+    // …but the settlement it is in: the city's reach is 15 km, the village's 2.5 km.
+    expect(index.settlementAt({ lat: 51.4939 + 0.02, lon: 31.2947 + 0.02 })?.name).toBe("Чернігів");
+    expect(index.settlementAt({ lat: 51.41 + 0.005, lon: 31.15 })?.name).toBe("Іванівка");
+    expect(index.settlementAt({ lat: 52.5, lon: 33.5 })).toBeNull();
+  });
+
   it("reads the region's entrances for the map, numbered or not", () => {
     const all = open().allEntrances();
     expect(all.map((e) => e.ref)).toEqual(["1", "2", null]);

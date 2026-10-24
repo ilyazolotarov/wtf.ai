@@ -134,6 +134,11 @@ POIs: 97 MB): queries 9–25 ms. The phone is several times slower; an oblast is
   on a round blue badge (a circle and text, no icon images: those load late on iOS and never showed), one without
   as a small dot, right above the house numbers. A house's card (route screen) offers its numbered entrances:
   Building (default) or a number; the route then ends at that door ("вулиця Шевченка, 10, під'їзд 3"). Picking a result closes the keyboard.
+- **The address at a point** (`SearchIndex.nearestAddress`, the dropped pin's card): the nearest house within 75 m
+  (a house is its building's centre: a long block's ends are that far), among the addresses of the settlements whose
+  reach the point is in, the nearest three; a settlement's streets keep their houses in one run of the address table,
+  so this reads under a megabyte for a big city. `settlementAt`: the settlement a point is in. The pin's card names
+  the building where the map draws buildings, from z13 (UI-SPEC §6); "Route here" takes the name as the destination's, the point stays the pin's.
 - **Quick picks** (empty field): saved places, recent destinations and the region's largest cities
   (`SearchIndex.majorSettlements`: the first settlements of the file, cities then towns by population).
 

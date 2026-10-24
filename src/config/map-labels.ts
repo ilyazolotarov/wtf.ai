@@ -85,7 +85,29 @@ export function withPoisFromStreetLevel(style: MapStyleJson): MapStyleJson {
   };
 }
 
-/** Both: house numbers from z15, POI names from z16, no bins, playgrounds and the like. */
+/**
+ * The streets a long press can name (`pin-pick.ts`): the tiles' named street lines (`transportation_name`), drawn
+ * all but invisibly on top, so the map can say which runs under a finger anywhere along it, not only at its label.
+ */
+export const STREET_PICK_LAYER = "street-pick";
+
+export function withStreetPick(style: MapStyleJson): MapStyleJson {
+  const source = style.layers.find((l) => l["source-layer"] === "transportation_name")?.source;
+  if (typeof source !== "string" || style.layers.some((l) => l.id === STREET_PICK_LAYER)) return style;
+  const pick: MapStyleLayer = {
+    id: STREET_PICK_LAYER,
+    type: "line",
+    source,
+    "source-layer": "transportation_name",
+    minzoom: 12,
+    filter: ["has", "name"],
+    // Not 0: MapLibre skips a layer it doesn't draw, from queries too. 1 % of a 1 px line shows nowhere.
+    paint: { "line-opacity": 0.01, "line-width": 1 },
+  };
+  return { ...style, layers: [...style.layers, pick] };
+}
+
+/** All: house numbers from z15, POI names from z16, no bins, playgrounds and the like, the streets a press names. */
 export function withStreetLabels(style: MapStyleJson): MapStyleJson {
-  return withPoisFromStreetLevel(withHouseNumbers(style));
+  return withStreetPick(withPoisFromStreetLevel(withHouseNumbers(style)));
 }

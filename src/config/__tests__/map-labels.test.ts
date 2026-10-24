@@ -1,5 +1,5 @@
 import { DARK_PALETTE, tintDarkStyle, type MapStyleJson } from "@/config/map-dark";
-import { HOUSE_NUMBER_LAYER, POI_MINZOOM, withHouseNumbers, withStreetLabels } from "@/config/map-labels";
+import { HOUSE_NUMBER_LAYER, POI_MINZOOM, STREET_PICK_LAYER, withHouseNumbers, withStreetLabels } from "@/config/map-labels";
 
 /** Evaluates the few expressions the POI filter uses (all, !, in, get, literal) against a feature's properties. */
 function evaluate(e: unknown, props: Record<string, string>): unknown {
@@ -23,13 +23,14 @@ const style = (): MapStyleJson => ({
     { id: "poi_r1", type: "symbol", source: "openmaptiles", "source-layer": "poi", minzoom: 15 },
     { id: "poi_r20", type: "symbol", source: "openmaptiles", "source-layer": "poi", minzoom: 17 },
     { id: "poi_transit", type: "symbol", source: "openmaptiles", "source-layer": "poi" },
+    { id: "highway-name-path", type: "symbol", source: "openmaptiles", "source-layer": "transportation_name" },
   ],
 });
 
 describe("house numbers", () => {
   test("go right above the last building layer, below every other label, from the tiles' housenumber layer", () => {
     const out = withHouseNumbers(style());
-    expect(out.layers.map((l) => l.id)).toEqual(["background", "building", "building-3d", HOUSE_NUMBER_LAYER, "highway-name-minor", "poi_r1", "poi_r20", "poi_transit"]);
+    expect(out.layers.map((l) => l.id)).toEqual(["background", "building", "building-3d", HOUSE_NUMBER_LAYER, "highway-name-minor", "poi_r1", "poi_r20", "poi_transit", "highway-name-path"]);
     const layer = out.layers[3];
     expect(layer).toMatchObject({ type: "symbol", source: "openmaptiles", "source-layer": "housenumber" });
     expect(layer.layout?.["text-field"]).toEqual(["get", "housenumber"]);
@@ -66,5 +67,11 @@ describe("house numbers", () => {
     expect(shown({ class: "fuel", subclass: "fuel" })).toBe(true);
     const filtered = withStreetLabels({ version: 8, layers: [{ id: "poi_r7", type: "symbol", "source-layer": "poi", filter: ["==", 1, 1] }] });
     expect(filtered.layers[0].filter).toEqual(["all", ["==", 1, 1], poi.filter]);
+  });
+
+  test("an invisible layer of the named street lines, on top, for a long press to ask which street is under it", () => {
+    const layers = withStreetLabels(style()).layers;
+    expect(layers.at(-1)).toMatchObject({ id: STREET_PICK_LAYER, type: "line", "source-layer": "transportation_name", paint: { "line-opacity": 0.01 } });
+    expect(withStreetLabels(withStreetLabels(style())).layers.filter((l) => l.id === STREET_PICK_LAYER)).toHaveLength(1);
   });
 });

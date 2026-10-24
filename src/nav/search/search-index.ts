@@ -146,6 +146,13 @@ const MAX_TOKENS = 8;
 /** Address results per street. */
 const HOUSES_PER_STREET = 5;
 const CACHE_LIMIT = 20_000;
+/** How far a settlement's own reach goes (m), as the index builder gives streets to settlements. */
+const SETTLEMENT_REACH_M: Record<string, number> = {
+  "place=city": 15_000,
+  "place=town": 6_000,
+  "place=village": 2_500,
+  "place=hamlet": 1_200,
+};
 
 /** A building's entrance (SEARCH-SPEC §3.2): its number if mapped, and where it is. */
 export interface Entrance {
@@ -286,6 +293,80 @@ export class SearchIndex {
    * The region's largest settlements: cities, then towns, by population (the file keeps its
    * settlements first, by rank). For the route screen's quick picks.
    */
+  /**
+   * The address nearest a point (a dropped pin), within `maxM` of its house: the house's street (or settlement for an
+   * `addr:place` house) and number; null where none is that close. A house is where its building's centre is, so a
+   * long block's ends are up to ~75 m from it. Reads the addresses of the few settlements whose reach the point is in
+   * (a settlement's streets keep theirs in one block: all of a big city's in well under a megabyte).
+   */
+  nearestAddress(at: Coordinate, maxM = 75): SearchResult | null {
+    let best: { owner: Entity; house: House; d: number } | null = null;
+    for (const s of this.settlementsNear(at)) {
+      // The settlement's own houses (`addr:place`), then its children's: one contiguous run of the address table.
+      const ranges: [number, number][] = [[s.addr, s.addr + s.naddr]];
+      if (s.nchild > 0) {
+        const first = this.entity(s.child);
+        const last = this.entity(s.child + s.nchild - 1);
+        ranges.push([first.addr, last.addr + last.naddr]);
+      }
+      for (const [from, to] of ranges) {
+        if (to <= from) continue;
+        const bytes = this.source.read(this.header.addressesAt + from * ADDRESS_BYTES, (to - from) * ADDRESS_BYTES);
+        const v = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+        const kx = Math.cos((at.lat * Math.PI) / 180);
+        for (let i = 0; i < to - from; i++) {
+          const lat = v.getInt32(i * ADDRESS_BYTES + 4, true) * COORD_SCALE;
+          const lon = v.getInt32(i * ADDRESS_BYTES + 8, true) * COORD_SCALE;
+          // Equirectangular metres: exact enough within a town, and cheap for 50 000 houses.
+          const d = Math.hypot((lon - at.lon) * kx, lat - at.lat) * 111_195;
+          if (d > maxM || (best && d >= best.d)) continue;
+          const index = from + i;
+          const owner = index < s.addr + s.naddr && index >= s.addr ? s : this.ownerOf(index, s);
+          if (!owner) continue;
+          const house = this.string(v.getUint32(i * ADDRESS_BYTES, true));
+          best = { owner, house: { index, house, lat, lon, bonus: 0 }, d };
+        }
+      }
+    }
+    return best ? this.addressResult(best.owner, best.house, 0, null) : null;
+  }
+
+  /** The settlement a point is in (the nearest whose reach it is in, as the index gives streets theirs); null if none. */
+  settlementAt(at: Coordinate): SearchResult | null {
+    const [s] = this.settlementsNear(at, 1);
+    return s ? this.result(s, 0) : null;
+  }
+
+  /** Settlements whose reach (§2: city 15 km, town 6, village 2.5, hamlet 1.2) the point is in, nearest first. */
+  private settlementsNear(at: Coordinate, limit = 3): Entity[] {
+    const near: { e: Entity; score: number }[] = [];
+    for (let id = 0; id < this.header.settlements; id++) {
+      const e = this.entity(id);
+      const reach = SETTLEMENT_REACH_M[this.string(e.tagAt)] ?? 1_200;
+      const score = haversineM(at, e) / reach;
+      if (score <= 1) near.push({ e, score });
+    }
+    return near.sort((a, b) => a.score - b.score).slice(0, limit).map((n) => n.e);
+  }
+
+  /** The child of `settlement` whose houses include address `index` (children's address runs ascend with their ids). */
+  private ownerOf(index: number, settlement: Entity): Entity | null {
+    let lo = settlement.child;
+    let hi = settlement.child + settlement.nchild - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (this.entity(mid).addr <= index) lo = mid;
+      else hi = mid - 1;
+    }
+    // Entities without houses share the next one's start: step to the one that has it.
+    for (let id = lo; id >= settlement.child; id--) {
+      const e = this.entity(id);
+      if (e.naddr > 0 && e.addr <= index && index < e.addr + e.naddr) return e;
+      if (e.addr + e.naddr <= index) break;
+    }
+    return null;
+  }
+
   majorSettlements(limit = 8): SearchResult[] {
     const out: SearchResult[] = [];
     for (let id = 0; id < this.header.settlements && out.length < limit; id++) {
