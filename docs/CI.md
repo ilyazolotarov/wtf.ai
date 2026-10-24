@@ -96,7 +96,7 @@ runs `.github/workflows/build-android.yml` with it.
     `ccache statistics` in the log shows invocations and hit rate.
 - Google Play: Actions → **Build Google Play bundle** (`build-store.yml`, by hand only) builds the store AAB
   (`DISTRIBUTION=store`, all four ABIs, `wtfai-play.aab`) and fails if its manifest asks for
-  `REQUEST_INSTALL_PACKAGES` or background location ([STORE-REVIEW.md](STORE-REVIEW.md) §4.2). Never published or
+  `REQUEST_INSTALL_PACKAGES` or an unused permission ([STORE-REVIEW.md](STORE-REVIEW.md) §4.2). Never published or
   announced.
 - App Store: Actions → **Build App Store iOS App** (`build-ios-store.yml`, by hand only): the store build, signed and
   uploaded to App Store Connect when the `ASC_KEY_*` secrets or the certificate, profile and app-specific password

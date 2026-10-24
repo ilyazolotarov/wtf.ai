@@ -106,9 +106,6 @@ jobs:
               echo "::error::$P is in the store build: nothing uses it (app.config.js UNUSED)"; exit 1
             fi
           done
-          if grep -q ACCESS_BACKGROUND_LOCATION "$MANIFEST"; then
-            echo "::error::ACCESS_BACKGROUND_LOCATION needs a Play declaration this app does not make (docs/STORE-REVIEW.md §5)"; exit 1
-          fi
 
       - name: Name the bundle
         run: cp android/app/build/outputs/bundle/release/app-release.aab wtfai-play.aab

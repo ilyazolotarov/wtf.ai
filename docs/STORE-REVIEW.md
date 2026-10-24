@@ -40,8 +40,9 @@ undocumented features). It never starts without a code and a confirmation naming
   library default (`Allow $(PRODUCT_NAME) to access…`) may reach the build: App Review rejects vague ones (5.1.1).
   Face ID is removed (unused). The microphone string stays though nothing records: expo-audio links recording APIs, and
   App Store Connect refuses an upload that references them without a string (ITMS-90683).
-- **Location**: When In Use only; background updates only during a drive (TRIP-LOGGER-SPEC §4.3) with the indicator.
-  The "Always" strings exist because expo-location links the API; the app never requests it.
+- **Location**: When In Use; background updates only during a drive (TRIP-LOGGER-SPEC §4.3) with the indicator.
+  "Always" / "Allow all the time" is requested only by the Automatic startup opt-in (VEHICLE-LINK-SPEC §11), after the
+  app's own disclosure; Play's declaration for it is in §4.3.
 - **Encryption**: `ITSAppUsesNonExemptEncryption: false`: HTTPS only, MD5/SHA-256 for checksums. No export filing.
 - **No account**, so no account deletion requirement (5.1.1(v)). No ads, no tracking, no IDFA, no in-app purchases.
 
@@ -154,9 +155,9 @@ by itself. Linked, because the logs are stored under the tester's name.
 ### 4.2 The bundle
 
 `.github/workflows/build-store.yml`, run by hand on `main`: `DISTRIBUTION=store`, prebuild, `bundleRelease` for all
-four ABIs, signed with the `android-release` key, the merged manifest checked (no `REQUEST_INSTALL_PACKAGES`, no
-`ACCESS_BACKGROUND_LOCATION`), `wtfai-play.aab` as the artifact. Not published to our server, not announced. Target
-SDK comes from the Expo SDK (Play requires the latest year's API level for updates; a new SDK keeps it current).
+four ABIs, signed with the `android-release` key, the merged manifest checked (no `REQUEST_INSTALL_PACKAGES`, none of
+the unused permissions; background location stays, declared in §4.3), `wtfai-play.aab` as the artifact. Not published
+to our server, not announced. Target SDK comes from the Expo SDK (Play requires the latest year's API level for updates; a new SDK keeps it current).
 
 ### 4.3 Console declarations
 
@@ -164,8 +165,24 @@ SDK comes from the Expo SDK (Play requires the latest year's API level for updat
   - `location`: navigation and trip recording continue with the screen off during a drive.
   - `connectedDevice`: the OBD-II adapter stays connected during a drive.
   - `mediaPlayback` (expo-audio): spoken turn directions with the screen off.
-- **Location**: foreground only (fine and coarse). No background location permission, so no background location
-  declaration.
+- **Location** (App content → Sensitive app permissions → Location permissions): fine and coarse, and
+  `ACCESS_BACKGROUND_LOCATION` for **Automatic startup** only (VEHICLE-LINK-SPEC §11), which is opt-in and asks for
+  "Allow all the time" after its own disclosure.
+  - *Feature*: Automatic startup. A Bluetooth device the driver picks once (the car's audio system, a BLE OBD adapter)
+    starts the app when the car is switched on; it connects the adapter and records the drive, keeping the car's
+    position on the road when satellite positioning is jammed or spoofed. The driver never opens the app, so the
+    location used is background location.
+  - *Why foreground is not enough*: the app is started by the companion device with no screen and no user action; on
+    Android 14+ a location foreground service cannot start from the background without "all the time". Without it
+    the drive records without GPS, and the position starts from a guess instead of a satellite fix.
+  - *Prominent disclosure*: the alert before Android's request (`wakeLocationBody`, `wakeLocationSettingsBody`):
+    collects location data, to track the car and record the drive, even when the app is closed or not in use,
+    stays on the phone; Not now / Continue.
+  - *Video* (YouTube, unlisted, ≤ 30 s): Vehicle → Automatic startup on → the companion dialog → the disclosure →
+    "Allow all the time" → the app closed, the car's Bluetooth connects → the trip notification appears and the trip
+    records with GPS.
+  - The privacy policy and Data safety say so (PRIVACY.md: Location; Data safety: location collected only by the
+    optional trip upload, so background use adds no collection).
 - **Bluetooth**: `BLUETOOTH_SCAN` is `neverForLocation`.
 - **Mock location** (`ACCESS_MOCK_LOCATION`, ANDROID-SPEC §8): the opt-in "Waze and Google Maps" feature, which
   gives other navigators the car's position during a drive. It takes effect only after the user picks the app in

@@ -20,7 +20,8 @@ as distributed through the App Store and Google Play.
 The app uses the following to work out where the car is. None of it leaves your phone unless you share it yourself,
 except the short car compatibility report described below.
 
-- **Location** (satellite positioning), while you use the app and during a drive with the screen locked.
+- **Location** (satellite positioning), while you use the app and during a drive with the screen locked; with
+  automatic startup, also during a drive the app was started for by itself, even when it is closed or not in use.
 - **Motion sensors**: accelerometer, gyroscope and magnetometer.
 - **Your car's data over Bluetooth**, if you connect an OBD-II adapter: vehicle speed and, on some cars, wheel speeds,
   gear and steering. The app also reads the car's VIN to tell your cars apart.
@@ -81,7 +82,8 @@ location. Sharing is off by default and stops when the drive ends.
 
 - **Location**: to show and track your position and to guide you. Navigation can continue with the screen locked
   during a drive and for up to 15 minutes afterwards; iPhone shows the location indicator and Android a notification
-  meanwhile. "Always" access is requested only if you choose automatic startup. On iPhone, that feature also detects
+  meanwhile. "Always" ("Allow all the time" on Android) is requested only if you choose automatic startup: it lets the
+  app track the drive it starts for, even when it is closed or not in use. On iPhone, that feature also detects
   significant movement using cellular networks and Wi-Fi so iOS can launch the app when you set off.
 - **Bluetooth**: to connect to an OBD-II adapter in your car. It is never used to find your location.
 - **Notifications** (Android): the notification that keeps navigation running with the screen off.
