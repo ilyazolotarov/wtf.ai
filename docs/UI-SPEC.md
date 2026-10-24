@@ -67,8 +67,12 @@ persisted in kv-store. No hardcoded user-facing strings in components.
 - `src/constants/theme.ts`: light and dark palettes (`bg`, `text`, `accent`, `route`, `routeAlt`, `routeCasing`,
   `maneuver`, `puck*`, status colours `ok` / `warn` / `bad` / `idle`, …), `usePalette()`.
 - `src/config/map.ts`: the active region's offline style (`useMapStyle(scheme)`, `hasUsableMap`, `withAttribution`),
-  with the world drawn around it (`map-world.ts`); `map-dark.ts` re-tints Liberty for the dark scheme (Night Drive:
-  near-black ground, amber primary roads, orange motorways and trunk roads, dark road names on a white halo);
+  with the world drawn around it (`map-world.ts`) and street-level labels (`map-labels.ts`): house numbers from z15
+  (the tiles' `housenumber` layer, which Liberty doesn't draw, above the buildings and below every other label) and
+  shop and other POI names from z16, not Liberty's z15, without the POIs of no use to a driver (bins, recycling,
+  playgrounds, pitches, bicycle parking, shelters, bollards, information boards, drinking water, artworks);
+  `map-dark.ts` re-tints Liberty for the dark scheme (Night Drive: near-black ground, amber primary roads, orange
+  motorways and trunk roads, dark road names on a white halo, quiet grey house numbers);
   `map-palette.ts` reads the style's colours for the guide's drawn maps.
 
 ### 4.7 Text size, system bars and orientation

@@ -56,6 +56,8 @@ export interface DarkPalette {
   label: string;
   labelHalo: string;
   poiLabel: string;
+  /** House numbers: quieter than names, readable on a building. */
+  houseNumber: string;
   waterLabel: string;
   roadLabel: { color: string; halo: string; haloWidth: number };
 }
@@ -80,6 +82,7 @@ export const DARK_PALETTE: DarkPalette = {
   label: "#ffffff",
   labelHalo: "#000000",
   poiLabel: "#e8ecf2",
+  houseNumber: "#9aa3b4",
   waterLabel: "#5aaeff",
   roadLabel: { color: "#111111", halo: "rgba(255,255,255,0.95)", haloWidth: 2 },
 };
@@ -196,6 +199,7 @@ interface Tints {
   label: Tint;
   labelHalo: Tint;
   poiLabel: Tint;
+  houseNumber: Tint;
   waterLabel: Tint;
   roadLabel: Tint;
   roadLabelHalo: Tint;
@@ -229,6 +233,7 @@ function makeTints(p: DarkPalette): Tints {
     label: solid(p.label),
     labelHalo: solid(p.labelHalo),
     poiLabel: solid(p.poiLabel),
+    houseNumber: solid(p.houseNumber),
     waterLabel: solid(p.waterLabel),
     roadLabel: solid(p.roadLabel.color),
     roadLabelHalo: solid(p.roadLabel.halo),
@@ -310,7 +315,10 @@ function tintLayer(
       break;
     case "symbol":
       if (isShield) break;
-      if (isWater) {
+      if (/housenumber/i.test(id)) {
+        set("text-color", t.houseNumber);
+        set("text-halo-color", t.building);
+      } else if (isWater) {
         set("text-color", t.waterLabel);
         ensureHalo(paint, 1.2, t.labelHalo);
       } else if (isRoadLabel) {
