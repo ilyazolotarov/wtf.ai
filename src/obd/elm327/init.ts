@@ -20,6 +20,8 @@ export interface InitResult {
   poll: PollConfig;
   /** The ECU pinned for speed (11-bit CAN id), null with functional addressing: `readVin` needs it to ask again. */
   pinnedEcu: number | null;
+  /** What `0902` answered when it gave no VIN (`replyShape`); null: not asked. */
+  vinReply: string | null;
 }
 
 export interface InitOptions {
@@ -33,24 +35,52 @@ const hex = (n: number) => n.toString(16).toUpperCase();
 /** 11-bit CAN response id of the engine ECU, which holds the VIN (mode 09). */
 const ENGINE_ECU = 0x7e8;
 
+/** A `0902` read: the VIN, else what came back (`replyShape`), for the link event. */
+export interface VinRead {
+  vin: string | null;
+  reply: string;
+}
+
+/**
+ * A reply's shape for the logs, without the VIN it may hold: its status, and each line's first 8 characters with its
+ * length. Tells a timeout, `NO DATA`, a refusal (`7F0912`) and a multi-frame answer the parser missed apart.
+ */
+export function replyShape(r: ElmResponse): string {
+  if (r.status === "timeout") return "timeout";
+  const word = r.status.replace(/-/g, "").toUpperCase(); // NO DATA as a line says no more than the status
+  const lines = r.lines
+    .map((l) => l.replace(/\s/g, ""))
+    .filter((t) => t.toUpperCase() !== word)
+    .map((t) => (t.length <= 8 ? t : `${t.slice(0, 8)}…(${t.length})`));
+  return [r.status, ...lines].join(" ");
+}
+
 /**
  * VIN (non-fatal). Mode 09 is the engine ECU's; the ECU pinned for speed may be another one (on a
  * CX-5 the TCM at 7E9 answers 0902 with 7F 09 12). With another ECU pinned, ask the engine ECU,
  * then pin the speed ECU again; the pinned one is the fallback. Asked again while polling when the
  * read at init missed (§9.1).
  */
-export async function readVin(send: Send, pinned: number | null): Promise<string | null> {
+export async function readVin(send: Send, pinned: number | null): Promise<VinRead> {
+  const replies: string[] = [];
   const ask = async () => {
     const r = await send("0902", { timeoutMs: 5000 });
-    return r.status === "ok" ? parseVin(r.lines) : null;
+    const vin = r.status === "ok" ? parseVin(r.lines) : null;
+    if (!vin) replies.push(replyShape(r));
+    return vin;
   };
-  if (pinned === null || pinned === ENGINE_ECU) return ask();
-  let vin: string | null = null;
-  const sh = await send(`ATSH${hex(ENGINE_ECU - 8)}`, { timeoutMs: 1000 });
-  if (sh.status === "ok" && (await send(`ATCRA${hex(ENGINE_ECU)}`, { timeoutMs: 1000 })).status === "ok") vin = await ask();
-  await send(`ATSH${hex(pinned - 8)}`, { timeoutMs: 1000 });
-  await send(`ATCRA${hex(pinned)}`, { timeoutMs: 1000 });
-  return vin ?? ask();
+  const read = async (): Promise<string | null> => {
+    if (pinned === null || pinned === ENGINE_ECU) return ask();
+    let vin: string | null = null;
+    const sh = await send(`ATSH${hex(ENGINE_ECU - 8)}`, { timeoutMs: 1000 });
+    if (sh.status === "ok" && (await send(`ATCRA${hex(ENGINE_ECU)}`, { timeoutMs: 1000 })).status === "ok") vin = await ask();
+    else replies.push(`${hex(ENGINE_ECU)} not addressed`);
+    await send(`ATSH${hex(pinned - 8)}`, { timeoutMs: 1000 });
+    await send(`ATCRA${hex(pinned)}`, { timeoutMs: 1000 });
+    return vin ?? ask();
+  };
+  const vin = await read();
+  return { vin, reply: vin ? "ok" : replies.join(" / ") };
 }
 
 interface Measurement {
@@ -95,6 +125,7 @@ export async function initVehicle(send: Send, opts: InitOptions = {}): Promise<I
     capabilities,
     poll: { speedCommand: "010D", rpmCommand: "010C" },
     pinnedEcu: null,
+    vinReply: null,
   });
 
   // Retry once without an OK: a late reply (e.g. a reset banner) means the command was lost.
@@ -152,7 +183,8 @@ export async function initVehicle(send: Send, opts: InitOptions = {}): Promise<I
   }
   await send("ATH0", { timeoutMs: 1000 });
 
-  vehicle.vin = await readVin(send, pinned);
+  const vinRead = await readVin(send, pinned);
+  vehicle.vin = vinRead.vin;
 
   // 4. Speed-up probes (§9.3).
   const plain = await measure(send, "010D", polls);
@@ -174,5 +206,5 @@ export async function initVehicle(send: Send, opts: InitOptions = {}): Promise<I
     if (r.status === "ok" && parseMode01(r.lines, PID_RPM, 2).length > 0) rpmCommand = "010C1";
   }
 
-  return { ok: true, vehicle, protocolNumber, capabilities, poll: { speedCommand, rpmCommand }, pinnedEcu: pinned };
+  return { ok: true, vehicle, protocolNumber, capabilities, poll: { speedCommand, rpmCommand }, pinnedEcu: pinned, vinReply: vinRead.vin ? null : vinRead.reply };
 }

@@ -15,7 +15,7 @@ import type { PhoneGraph } from "@/nav/phone/phone-navigator";
 import { jamFixes, type JamOptions, type JamWindow } from "@/nav/replay/jam";
 import { appOutageCuts, ReplayRecorder, type RecorderOptions, type ReplayCut, type ReplayResult } from "@/nav/replay/replay";
 import { isSatelliteFix, type GnssFix } from "@/nav/types";
-import type { EngineState, SpeedSample } from "@/obd/types";
+import { UNKNOWN_CAR, type EngineState, type SpeedSample } from "@/obd/types";
 import type { ActiveRoadGraph } from "@/services/offline-map/road-graph-file";
 import type { TripLog } from "@/triplog/trip-log-reader";
 import { ENGINE_STATE_CODES, type GnssRecord, type ImuMotionRecord, type NavEstimateRecord, type NavMapMatchRecord, type Vec3Record } from "@/triplog/schema";
@@ -192,6 +192,8 @@ export function replayTripInApp(logged: TripLog, o: AppReplayOptions): AppReplay
   const engine = new Channel<[EngineState, number]>();
   const logVin = typeof trip.info.vehicle_vin === "string" && trip.info.vehicle_vin ? trip.info.vehicle_vin : null;
   const vin = o.vin === undefined ? logVin : o.vin;
+  // A car that answered without a VIN is kept under UNKNOWN_CAR, as in the app; without the adapter there is no car.
+  const car = vin ?? (!o.phoneOnly && trip.obdSpeed.length > 0 ? UNKNOWN_CAR : null);
   const published: NavEstimateRecord[] = [];
   const publishedMapMatch: NavMapMatchRecord[] = [];
   const publishedAlternatives: AppReplayResult["publishedAlternatives"] = [];
@@ -214,8 +216,8 @@ export function replayTripInApp(logged: TripLog, o: AppReplayOptions): AppReplay
     link: {
       onSpeed: speed.on,
       onEngineState: engine.on,
-      getSnapshot: () => ({ vehicle: { vin } as never }),
-      expectedVin: () => vin,
+      getSnapshot: () => ({ vehicle: car === null ? null : ({ vin } as never) }),
+      expectedCar: () => car,
     },
     calibration: o.calibration,
     nowUs: () => nowUs,

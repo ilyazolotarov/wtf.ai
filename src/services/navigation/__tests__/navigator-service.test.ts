@@ -10,7 +10,7 @@ import { TiledRoadGraph } from "@/nav/mapmatch/graph/road-graph";
 import type { GnssFix } from "@/nav/types";
 import type { CanSpeedSample } from "@/nav/odometry/can/can-speed";
 import { Emitter } from "@/obd/emitter";
-import type { EngineState, SpeedSample } from "@/obd/types";
+import { UNKNOWN_CAR, type EngineState, type SpeedSample } from "@/obd/types";
 import type { KeyValueStore } from "@/obd/vehicle-link-core";
 import { CALIBRATION_KEY, CalibrationStore, PARKED_POSES_KEY, type StoredPose } from "@/services/navigation/calibration-store";
 import { seedFromLog } from "@/services/navigation/app-replay";
@@ -108,7 +108,7 @@ function harness(
       onSpeed: (l) => speed.on(l),
       onEngineState: (l) => engine.on(l),
       getSnapshot: () => ({ vehicle: vehicle as never }),
-      expectedVin: () => (vehicle ? vehicle.vin : null),
+      expectedCar: () => (vehicle ? (vehicle.vin ?? UNKNOWN_CAR) : null),
     },
     calibration: new CalibrationStore(store, PHONE),
     nowUs: () => nowUs,
@@ -744,6 +744,31 @@ describe("parked pose", () => {
     expect(next.service.getDebug().parkedPose).toBe("none");
     // The stored pose stays for the car it belongs to.
     expect(storedPose(store)).not.toBeNull();
+    next.service.stop();
+  });
+
+  test("a car whose VIN never came keeps its pose as the unknown car's, and its VIN takes it over mid-drive", async () => {
+    const store = memoryStore();
+    const drive = syntheticDrive({ segments: PARK, gnss: "clean", startHeadingRad: 0.5 });
+    const first = harness({ store, vin: null });
+    first.setVehicle({ vin: null });
+    await first.service.start();
+    first.play(drive);
+    first.engine.emit("engine-off", first.now());
+    first.service.stop();
+    const pose = storedPose(store, UNKNOWN_CAR)!;
+    expect(pose).not.toBeNull();
+
+    const next = harness({ store, vin: null });
+    next.setVehicle({ vin: null });
+    await next.service.start();
+    expect(next.notes.some((n) => n.startsWith("nav mode dr (parked pose"))).toBe(true);
+    // A retry reads the VIN: no restart, and the pose is the VIN's now.
+    next.setVehicle({ vin: VIN });
+    jest.advanceTimersByTime(2000);
+    expect(next.notes.filter((n) => n.startsWith("nav vehicle"))).toEqual(["nav vehicle's VIN came: what was kept for the unknown car is its now"]);
+    expect(storedPose(store, UNKNOWN_CAR)).toBeNull();
+    expect(storedPose(store)).toMatchObject({ vin: VIN, lat: pose.lat, lon: pose.lon });
     next.service.stop();
   });
 });
@@ -1437,6 +1462,19 @@ describe("CalibrationStore", () => {
     expect(prior.ks).toBe(1.02);
     expect(Math.sqrt(prior.ksVar)).toBeGreaterThan(0.01);
     expect(calibration.speedScale("OTHERVIN")).toBeNull();
+  });
+
+  test("the unknown car's items go to its VIN, unless the VIN has newer ones of its own", () => {
+    const store = memoryStore();
+    const calibration = new CalibrationStore(store, PHONE);
+    const pose = { lat: 51.5, lon: 30.7, headingRad: 1, posSigmaM: 5, headingSigmaRad: 0.05 };
+    calibration.saveParkedPose(UNKNOWN_CAR, pose, 20);
+    calibration.saveSpeedScale(UNKNOWN_CAR, 1.02, 0.002 ** 2, 20);
+    calibration.saveSpeedScale(VIN, 1.01, 0.002 ** 2, 30);
+    calibration.moveCar(UNKNOWN_CAR, VIN);
+    expect(calibration.parkedPose(VIN)).toMatchObject({ lat: 51.5, vin: VIN, savedAt: 20 });
+    expect(calibration.speedScale(VIN)?.ks).toBe(1.01);
+    expect(calibration.snapshot(UNKNOWN_CAR)).toEqual({ vin: UNKNOWN_CAR, parkedPose: null, speedScale: null, compass: null, wheelYaw: null });
   });
 });
 

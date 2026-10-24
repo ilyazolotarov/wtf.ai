@@ -1,4 +1,5 @@
 import * as Sentry from "@sentry/react-native";
+import * as Device from "expo-device";
 
 import { deviceTags, sentryEnvironment, type MetricSink } from "@/services/telemetry";
 import { extraString } from "./extra";
@@ -16,9 +17,9 @@ export function initSentry(): void {
   started = true;
   Sentry.init({
     dsn: SENTRY_DSN ?? undefined,
-    enabled: SENTRY_DSN != null,
-    // On in every build (Debug IPAs run without a Mac console); filter by environment in Sentry.
-    // Emulator runs in CI report as "ci" so they never mix with testers' phones.
+    // Testers' phones only: an emulator or a debug build (Metro) is the developer's, and its errors mixed in with theirs
+    // (2026-10-24: 185 events from a local emulator among a day's dozen).
+    enabled: SENTRY_DSN != null && Device.isDevice && !__DEV__,
     environment: sentryEnvironment(),
     sendDefaultPii: false,
     tracesSampleRate: __DEV__ ? 1 : 0.1,

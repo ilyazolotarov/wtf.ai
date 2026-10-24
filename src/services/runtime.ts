@@ -14,7 +14,7 @@ import { Sentry, sentryMetricSink } from "@/config/sentry";
 import { TRIP_UPLOAD_URL } from "@/config/trip-upload";
 import type { Profile } from "@/nav/odometry/can/profile";
 import { createClock } from "@/obd/clock";
-import { VehicleLinkCore } from "@/obd/vehicle-link-core";
+import { RECONNECTING, VehicleLinkCore } from "@/obd/vehicle-link-core";
 
 import { AppHealth } from "./app-health";
 import { OnTheWay, poseAfterWake } from "./on-the-way";
@@ -579,7 +579,28 @@ export function getRuntime(): Runtime {
   // Breadcrumbs give crash reports context; scrubbing removes VINs/coordinates (src/config/sentry-scrub.ts).
   link.onLinkEvent((e) => {
     Sentry.addBreadcrumb({ category: "vehicle-link", message: e.detail ? `${e.type}: ${e.detail}` : e.type, level: e.type === "error" ? "error" : "info" });
-    if (e.type === "error" || e.type === "probe-failed") Sentry.captureMessage(`vehicle-link ${e.type}: ${e.detail ?? ""}`, "warning");
+    // A car that never gave its VIN, as an anonymous log: a breadcrumb only arrives with a later error, and the drive
+    // may have none. The detail holds what 0902 answered, never a VIN (replyShape).
+    if (e.type === "vin" && e.detail?.startsWith("not read after")) {
+      const snap = link.getSnapshot();
+      try {
+        Sentry.logger.warn(`vin ${e.detail}`, { adapter: snap.adapter?.name ?? "", model: adapterModel(snap), elm: snap.adapter?.elmVersion ?? "", protocol: snap.vehicle?.protocol ?? "" });
+      } catch {
+        // reporting is best effort
+      }
+    }
+    // Bluetooth switched off is mostly the driver's choice: once per launch (one iPhone sent 20 in a night). A probe
+    // under a reconnect is retried: only one that ends the connect is a fault.
+    const bluetoothOff = e.type === "error" && link.getSnapshot().error?.code === "bluetooth-off";
+    if (bluetoothOff && bluetoothOffReported) return;
+    if (bluetoothOff) bluetoothOffReported = true;
+    const reconnectProbe = e.type === "probe-failed" && !!e.detail?.endsWith(RECONNECTING);
+    if (e.type === "error" || (e.type === "probe-failed" && !reconnectProbe)) Sentry.captureMessage(`vehicle-link ${e.type}: ${e.detail ?? ""}`, "warning");
+  });
+  // Bluetooth back on: a link that failed for it connects again by itself (autoConnect leaves a working link alone).
+  VehicleLinkModule.addListener("onBluetoothState", ({ state }) => {
+    Sentry.addBreadcrumb({ category: "bluetooth", message: state });
+    if (state === "poweredOn") void autoConnect().catch((error) => console.warn("auto-connect failed", error));
   });
   recorder.events.on((message) => {
     Sentry.addBreadcrumb({ category: "trip-recorder", message });
@@ -680,6 +701,8 @@ export function getRuntime(): Runtime {
 }
 
 let autoConnecting: Promise<void> | null = null;
+/** A Bluetooth-off error went to Sentry in this launch. */
+let bluetoothOffReported = false;
 
 /**
  * Auto-connect to the remembered adapter without triggering a permission prompt (§7). One at a time: the screen and a

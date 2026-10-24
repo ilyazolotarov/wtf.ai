@@ -209,6 +209,8 @@ export const en = {
   updateNoticeText: "A new version of the app is ready. Tap to install it, best before your next drive.",
   updateNoticeChannel: "App updates",
   adapterSilent: "The adapter doesn't answer. It may be connected to another phone: close the app there, or turn off its Bluetooth. Otherwise unplug the adapter for a few seconds.",
+  bluetoothOff: "Bluetooth is off. Turn it on: the adapter connects again by itself.",
+  bluetoothDenied: "The app isn’t allowed to use Bluetooth. Allow it in the phone’s settings.",
   mfiNotFound: "No adapter found. Put the adapter in pairing mode (OBDLink MX+: press the button; vLinker: plug it into the car) and try again.",
   remembered: "Remembered",
   obdAdapters: "OBD adapters",

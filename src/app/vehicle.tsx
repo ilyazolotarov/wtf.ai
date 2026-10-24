@@ -108,7 +108,11 @@ function CarDetails() {
     ? null
     : snap.error.code === "adapter-silent"
       ? t("adapterSilent")
-      : `${snap.error.code}${snap.error.message && !gattDump ? `: ${snap.error.message}` : ""}`;
+      : snap.error.code === "bluetooth-off"
+        ? t("bluetoothOff")
+        : snap.error.code === "bluetooth-unauthorized"
+          ? t("bluetoothDenied")
+          : `${snap.error.code}${snap.error.message && !gattDump ? `: ${snap.error.message}` : ""}`;
   // Does the car answer, and what it reads (UI-SPEC §7.2): the rest (chip, protocol, timing) is in the trip log.
   const answering = snap.link === "polling" || snap.link === "standby";
   const car = answering ? carStateText(snap.engine, palette, t) : null;

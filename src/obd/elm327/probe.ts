@@ -95,8 +95,11 @@ export async function probeAdapter(send: Send, opts: ProbeOptions = {}): Promise
   }
   result.elmVersion = parseElmVersion(reset.lines);
 
-  // 4. Echo off.
-  const echo = await send("ATE0", { timeoutMs: 1000 });
+  // 4. Echo off; once more without an OK, as in the init (§9.1): after a reconnect the reset's banner can come one
+  // command late, as the answer to this one (a Viecar and a vLinker FD failed here on the first probe after the link
+  // came back, 2026-10-15 to 10-24).
+  let echo = await send("ATE0", { timeoutMs: 1000 });
+  if (echo.status !== "ok" || !/OK/i.test(text(echo))) echo = await send("ATE0", { timeoutMs: 1000 });
   if (echo.status !== "ok" || !/OK/i.test(text(echo))) {
     result.failedStep = "echo-off";
     return result;

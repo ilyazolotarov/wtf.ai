@@ -32,6 +32,7 @@ import type {
   VehicleLink,
   VehicleLinkSnapshot,
 } from "./types";
+import { UNKNOWN_CAR } from "./types";
 
 export interface ScannedDevice {
   id: string;
@@ -102,6 +103,9 @@ export interface KnownCar {
   protocolNumber: number | null;
   seenAt: number;
 }
+
+/** Ends a `probe-failed` event's detail when the probe was a reconnect's, which is retried. */
+export const RECONNECTING = ", reconnecting";
 
 const MAX_CARS = 8;
 /** While the VIN isn't read: ask again after each of these waits (and once the engine runs) (§9.1). */
@@ -302,6 +306,14 @@ export class VehicleLinkCore implements VehicleLink {
   expectedVin(): string | null {
     const vehicle = this.snapshot.vehicle;
     return vehicle ? vehicle.vin : (this.cars()[0]?.vin ?? null);
+  }
+
+  /** The key what is kept per car is stored under: `expectedVin`, `UNKNOWN_CAR` for a car without one; null: no car. */
+  expectedCar(): string | null {
+    const vehicle = this.snapshot.vehicle;
+    const last = this.cars()[0];
+    if (!vehicle && !last) return null;
+    return this.expectedVin() ?? UNKNOWN_CAR;
   }
 
   // ---- VehicleLink: connection ----
@@ -621,7 +633,8 @@ export class VehicleLinkCore implements VehicleLink {
     if (!probe.ok && suspect && this.deps.clock.nowUs() - suspect.sinceUs >= FROZE_CONFIRM_US) this.markShadowFroze(suspect);
     if (probe.ok) this.shadowFrozeSuspect = null;
     if (!probe.ok) {
-      this.event("probe-failed", probe.failedStep);
+      // Under a reconnect it is retried, no fault yet: the detail says so (Sentry leaves those out).
+      this.event("probe-failed", reconnect ? `${probe.failedStep}${RECONNECTING}` : probe.failedStep);
       if (reconnect) throw new Error(`probe failed at ${probe.failedStep}`);
       await this.transport?.disconnect().catch(() => undefined);
       // An adapter this phone used before that answers nothing at all: most likely another phone with the app holds
@@ -740,7 +753,8 @@ export class VehicleLinkCore implements VehicleLink {
     this.patchRemembered({ protocolNumber: init.protocolNumber, adapter: adapter ?? undefined });
     this.event("initialized", `${init.vehicle.protocol ?? "?"} ${init.poll.speedCommand}`);
     if (vehicle.vinSource !== "read") {
-      this.event("vin", vehicle.vin ? `not read; the last car on protocol ${init.protocolNumber}: ${vehicle.vin}` : "not read; a car not seen on this protocol");
+      const reply = `0902: ${init.vinReply ?? "not asked"}`;
+      this.event("vin", vehicle.vin ? `not read (${reply}); the last car on protocol ${init.protocolNumber}: ${vehicle.vin}` : `not read (${reply}); a car not seen on this protocol`);
     }
 
     const poller = new ObdPoller(
@@ -793,15 +807,18 @@ export class VehicleLinkCore implements VehicleLink {
   /** Ask for the VIN again while polling: the read at init can miss (the engine cranking, a late reply). */
   private async retryVin(gen: number, seq: number, pinned: number | null, protocolNumber: number | null): Promise<void> {
     const stale = () => gen !== this.gen || seq !== this.initSeq || !this.poller;
+    let reply = "not asked";
     for (let i = 0; i < VIN_RETRY_MS.length; i++) {
       await this.deps.clock.sleep(VIN_RETRY_MS[i]);
       // Not while cranking or with the engine off: the read that missed may have been the ECU busy starting.
       while (!stale() && this.engine.state !== "engine-running") await this.deps.clock.sleep(1000);
       if (stale()) return;
-      const vin = await this.requireSession()
+      const read = await this.requireSession()
         .exclusive((send) => readVin(send, pinned))
-        .catch(() => null);
+        .catch((e: unknown) => ({ vin: null, reply: `failed: ${e instanceof Error ? e.message : String(e)}` }));
       if (stale()) return;
+      const vin = read.vin;
+      reply = read.reply;
       if (!vin) continue;
       const assumed = this.snapshot.vehicle?.vin;
       const vehicle = this.identify({ ...this.snapshot.vehicle!, vin, vinSource: undefined }, protocolNumber);
@@ -810,7 +827,7 @@ export class VehicleLinkCore implements VehicleLink {
       return;
     }
     if (stale()) return;
-    this.event("vin", `not read after ${VIN_RETRY_MS.length} retries`);
+    this.event("vin", `not read after ${VIN_RETRY_MS.length} retries (last 0902: ${reply})`);
     const vehicle = this.snapshot.vehicle;
     if (vehicle && !vehicle.vin) this.update({ vehicle: { ...vehicle, vinSource: "missing" } });
   }
@@ -939,8 +956,9 @@ export class VehicleLinkCore implements VehicleLink {
       code === "bluetooth-off" || code === "bluetooth-unauthorized" || code === "no-uart-service" || code === "device-not-found"
         ? { code, message }
         : { code: "other", message, ...(code ? { nativeCode: code } : {}) };
-    this.event("error", message);
+    // The snapshot first: the event's listeners read the error's code from it.
     this.update({ link: "error", error: linkError });
+    this.event("error", message);
   }
 
   private check(gen: number): void {

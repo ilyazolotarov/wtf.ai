@@ -284,7 +284,7 @@ Rules:
 | 1 | Find the UART (BLE) | service/characteristic discovery | 10 s | a profile matches (§8.2); none → `no-uart-service`, GATT dump logged |
 | 2 | Flush | `"\r"`, wait for `>` | 1 s | ignore the result (some clones drop the first command) |
 | 3 | Reset | `ATZ` | 3 s | banner contains `ELM327`, `ELM` or `STN`. No answer → `ATWS` (3 s), then `ATI`. Still nothing → `not-elm327`; for an adapter this phone used before that sent not a byte back, `adapter-silent`: the Vehicle screen says it may be connected to another phone, else to unplug it for a few seconds |
-| 4 | Echo off | `ATE0` | 1 s | `OK` |
+| 4 | Echo off | `ATE0`, once more without an `OK` (the reset banner a command late, after a reconnect) | 1 s | `OK` |
 | 5 | Identify | `ATI` | 1 s | `elmVersion`; `v2.1` → `suspectedClone` (informational) |
 | 6 | Describe | `AT@1` | 1 s | `description`; `?` is fine |
 | 7 | STN identify | `STI` | 1 s | `chip`; `?` on plain ELM/clones is fine |
@@ -355,10 +355,15 @@ passes the probe on this phone, it sends the driver to the maker's own updater a
    12`).
    - **Retries:** with the VIN not read, `0902` is asked again while polling, in an exclusive section, 5, 10, 15, 30,
      60 and 120 s after the init, each once the engine runs (`VIN_RETRY_MS`). Link events `vin: read on retry n` /
-     `vin: not read after 6 retries`.
+     `vin: not read after 6 retries (last 0902: …)`, with what `0902` answered (`replyShape`: the status, each line's
+     first 8 characters and length, never the whole VIN).
+   - **Headers on:** the CAN monitor (§16.2) leaves `ATH1` set while polling, so a retry's answer comes as CAN frames
+     (`7E8 10 14 49 02 01 …`, `7E8 21 …`); `parseVin` joins their ISO-TP payloads. Read as plain lines, only the first
+     frame's 3 characters counted, and every retry on an STN adapter missed the VIN the engine ECU had sent.
    - **The car list** (§7): a read VIN goes first (replacing a VIN-less entry on its protocol). A missed read assumes
      the last car seen on the same protocol (`vinSource: "remembered"`, link event `vin: not read; the last car on
-     protocol 6: …`); with none, the car is unknown (`vin: null`, `"missing"` after every retry). Before this, a
+     protocol 6: …`); with none, the car is unknown (`vin: null`, `"missing"` after every retry), and what is kept per
+     car is kept under `UNKNOWN_CAR` until a VIN comes (`expectedCar()`, NAVIGATOR-SPEC §7.4). Before this, a
      missed read cleared the adapter's VIN, and with it the parked pose, speed scale and compass of the next start.
    - The trip log has `vehicle_vin_source` next to `vehicle_vin`, both written again when a retry reads the VIN.
 
@@ -446,6 +451,10 @@ within ~20 s of its ignition.
   switched off with the monitor running) fails once the link is lost; that is the loss again, the link stays
   `reconnecting` (link event `failed-while-reconnecting`). Its message sat on the Car page as the last error after
   every such stop (2026-10-23). A session that polls clears the error.
+- **Bluetooth off:** the link's error is `bluetooth-off`; the Car page says to turn Bluetooth on (`bluetooth-unauthorized`:
+  to allow it in Settings), never the native message, and it goes to Sentry once per launch (mostly the driver's choice:
+  one iPhone sent 20 in a night). A probe failing under a reconnect is retried and not sent either (link event detail
+  `…, reconnecting`). Bluetooth back on (`onBluetoothState` `poweredOn`) auto-connects again, as a foreground does.
 - Background: the TS loop runs while the app is alive; the trip logger keeps the app alive with background location
   during a trip and for a linger period after it (TRIP-LOGGER-SPEC §4.3); `bluetooth-central` and
   `external-accessory` keep the links alive; on Android the foreground service does.

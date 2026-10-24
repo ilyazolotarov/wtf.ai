@@ -286,3 +286,9 @@ export interface VehicleLink {
   onExchange(listener: (e: ExchangeEvent) => void): () => void;
   onLinkEvent(listener: (e: LinkEvent) => void): () => void;
 }
+
+/**
+ * The key a car whose VIN never came is kept under (its parked pose, calibrations): the first VIN heard takes over what
+ * was kept (CalibrationStore.moveCar). Most drivers have one car, so this beats starting cold on every drive.
+ */
+export const UNKNOWN_CAR = "unknown-car";

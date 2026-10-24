@@ -309,4 +309,5 @@ routing.
 9. **Tuning from one phone**: all navigator tuning comes from one iPhone, one mount and one car; testers' logs
    check it (NAVIGATOR-SPEC §11).
 10. **Sentry** needs the `SENTRY_DSN` variable and, for readable stack traces, the source map upload secrets
-    (README → Configuration).
+    (README → Configuration). It sends from release builds on real phones only: an emulator's or a debug build's
+    errors are the developer's own and buried the testers' among them.

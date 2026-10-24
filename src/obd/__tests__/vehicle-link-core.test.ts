@@ -417,7 +417,7 @@ describe("VehicleLinkCore", () => {
     expect(core.getSnapshot().vehicle?.vin).toBe(CX5_VIN);
     expect(clock.nowUs() - runningAt).toBeLessThan(6e6);
     expect(events.filter((e) => e.type === "vin").map((e) => e.detail)).toEqual([
-      `not read; the last car on protocol 6: ${CX5_VIN}`,
+      `not read (0902: no-data); the last car on protocol 6: ${CX5_VIN}`,
       "read on retry 1",
     ]);
     // The car list never loses the VIN to a missed read.
@@ -435,8 +435,8 @@ describe("VehicleLinkCore", () => {
     const t0 = clock.nowUs();
     await until(() => clock.nowUs() - t0 > 300e6);
     expect(events.filter((e) => e.type === "vin").map((e) => e.detail)).toEqual([
-      "not read; a car not seen on this protocol",
-      "not read after 6 retries",
+      "not read (0902: no-data); a car not seen on this protocol",
+      "not read after 6 retries (last 0902: no-data)",
     ]);
     expect(core.getSnapshot().vehicle?.vinSource).toBe("missing");
     await core.disconnect();

@@ -360,6 +360,9 @@ kept apart.
   survives an EKF reset. Under jamming `k_s` doesn't sink on real drives, and holding it or adding a speed offset
   state was worse: the scale-only model stays.
 - **Compass calibrations** (§7.6), per VIN. **Phone mount** (phone-only mode, §9.6), per car or `phone`.
+- **A car whose VIN never came** (VEHICLE-LINK-SPEC §9.1) is kept under `unknown-car` (`UNKNOWN_CAR`), not dropped:
+  starting cold on every drive cost more than the rare second car without a VIN. The first VIN heard takes it over
+  (`CalibrationStore.moveCar`: each item unless the VIN has a newer one), mid-drive without a restart.
 - **Not stored:** the gyro bias (drifts with temperature) and `k_ω`.
 
 ### 7.5 Magnetometer (logged, not used; SPEC §2)

@@ -90,11 +90,34 @@ export function parseMode01(lines: string[], pid: number, count: number): Mode01
   return answers;
 }
 
-/** VIN from a `0902` answer: CAN multi-frame ("0: 4902…") or ISO/J1850 line-per-frame. */
+/**
+ * CAN frames as they come with headers on (`ATH1`, which the CAN monitor leaves set while polling): `7E8 10 14 49 02
+ * 01 …`, `7E8 21 …` (11-bit) or `18DAF110 10 14 …` (29-bit). Each sender's ISO-TP payloads joined, in order; null
+ * when the lines aren't such frames.
+ */
+function headerFramePayloads(lines: string[]): string[] | null {
+  const bySender = new Map<string, string>();
+  for (const line of lines) {
+    const m = /^(7E[89A-F]|18DAF1[0-9A-F]{2})((?:[0-9A-F]{2})+)$/i.exec(compact(line));
+    if (!m) return null;
+    const pci = parseInt(m[2][0], 16);
+    // Single (0) and consecutive (2) frames: one PCI byte; a first frame (1): two, the length after the type.
+    const payload = pci === 1 ? m[2].slice(4) : m[2].slice(2);
+    bySender.set(m[1], (bySender.get(m[1]) ?? "") + payload);
+  }
+  return bySender.size > 0 ? [...bySender.values()] : null;
+}
+
+/** VIN from a `0902` answer: CAN multi-frame ("0: 4902…"), CAN frames with headers, or ISO/J1850 line-per-frame. */
 export function parseVin(lines: string[]): string | null {
   let hex = "";
   const framed = lines.filter((l) => /^[0-9A-F]:/i.test(l.trim()));
-  if (framed.length > 0) {
+  const withHeaders = framed.length > 0 ? null : headerFramePayloads(lines);
+  if (withHeaders) {
+    const payload = withHeaders.find((p) => p.toUpperCase().includes("4902"));
+    if (!payload) return null;
+    hex = payload.slice(payload.toUpperCase().indexOf("4902") + 6); // skip 49 02 + message count
+  } else if (framed.length > 0) {
     const joined = framed.map((l) => compact(l.slice(l.indexOf(":") + 1))).join("");
     const at = joined.indexOf("4902");
     if (at < 0) return null;

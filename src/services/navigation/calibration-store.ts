@@ -14,6 +14,7 @@
 //   placing made without a car connected) until it is released or discarded.
 // - how the phone sits in the car for navigation without an adapter (§9.6): the car's axes in the phone frame,
 //   per car (the VIN, or "phone" for a car never connected), kept while the phone sits the same way.
+// "Per VIN" is per car key: a car whose VIN never came is kept under UNKNOWN_CAR until its VIN is heard (`moveCar`).
 // The gyro bias and scale are not stored: CoreMotion corrects the bias itself and it drifts
 // with temperature, and the learned k_ω mostly absorbs GNSS timing (§7.2), not the gyro.
 
@@ -216,6 +217,23 @@ export class CalibrationStore {
     this.store.setJson(MANUAL_POSITION_KEY, m);
   }
 
+  /**
+   * What was kept under `from` (a car whose VIN hadn't come, UNKNOWN_CAR) is now `to`'s: each item moves over unless
+   * `to` has a newer one of its own, and `from` keeps nothing.
+   */
+  moveCar(from: string, to: string): void {
+    this.write((s) => {
+      s.speedScaleByVin = moveEntry(s.speedScaleByVin, from, to);
+      s.compassByVin = moveEntry(s.compassByVin, from, to);
+      s.wheelYawByVin = moveEntry(s.wheelYawByVin, from, to);
+      s.phoneMountByCar = moveEntry(s.phoneMountByCar, from, to);
+    });
+    const poses = this.parkedPoses();
+    if (!poses[from] || from === to) return;
+    const moved = moveEntry(poses, from, to)!;
+    this.store.setJson(PARKED_POSES_KEY, moved[to] ? { ...moved, [to]: { ...moved[to], vin: to } } : moved);
+  }
+
   /** What is stored for the phone (`vin` null) or this car, as it is. */
   snapshot(vin: string | null): StoredSnapshot {
     const s = this.read();
@@ -267,6 +285,14 @@ export class CalibrationStore {
     change(s);
     this.store.setJson(CALIBRATION_KEY, s);
   }
+}
+
+function moveEntry<T extends { savedAt: number }>(map: Record<string, T> | undefined, from: string, to: string): Record<string, T> | undefined {
+  const moved = map?.[from];
+  if (!map || !moved || from === to) return map;
+  const { [from]: _from, ...rest } = map;
+  const kept = rest[to];
+  return kept && kept.savedAt >= moved.savedAt ? rest : { ...rest, [to]: moved };
 }
 
 function isCalibration(c: CompassCalibration): boolean {
