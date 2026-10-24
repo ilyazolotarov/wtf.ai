@@ -23,6 +23,9 @@ env:
   SUPPORT_EMAIL: ${{ vars.SUPPORT_EMAIL }}
   SENTRY_URL: ${{ vars.SENTRY_URL }}
   PRIVACY_POLICY_URL: ${{ vars.PRIVACY_POLICY_URL }}
+  # 1 once Apple has added CarPlay navigation to the App ID and the profile has it (docs/CARPLAY-SPEC.md §2): the build
+  # then claims the entitlement. Before that, claiming it fails the signing.
+  CARPLAY_ENTITLEMENT: ${{ vars.CARPLAY_ENTITLEMENT }}
 
 permissions:
   contents: read

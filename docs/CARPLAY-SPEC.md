@@ -13,9 +13,25 @@ phone's GPS: under jamming the car's screen is no help otherwise.
 
 | Need | Fact | Consequence |
 | --- | --- | --- |
-| Entitlement `com.apple.developer.carplay-maps` | Granted by Apple on request (the CarPlay entitlement form), per App ID, to a **paid Developer Program** account, for an app whose main purpose is turn-by-turn navigation. Without it CarPlay doesn't list the app. | The owner's decision (STORE-REVIEW §3.1): paid account, then the request. |
-| A signed build carrying it | The CI IPA is unsigned and has no entitlements (`build-ios.yml`); AltStore re-signs it with a free Apple ID, whose profiles can't hold CarPlay. | **No CarPlay in the sideloaded build.** Phones get it only from the store path (`build-ios-store.yml`, TestFlight) once the entitlement is granted. |
-| Testing without it | Community reports (and react-native-carplay's docs): the iOS Simulator reads the entitlement from the entitlements file, no profile (I/O → External Displays → CarPlay). Apple's navigation guide says it needs a CarPlay profile. | A simulator job on the macOS runner settles it (§6.2). Until then nothing has run. |
+| Entitlement `com.apple.developer.carplay-maps` | Requested at [CarPlay Contact Us](https://developer.apple.com/contact/carplay) by a **paid Developer Program** account, which agrees to the CarPlay Entitlement Addendum, for an app whose main purpose is turn-by-turn navigation. Reviewed by Apple (days to months); granted as a managed capability of the account. Without it CarPlay doesn't list the app. | Available: an organization account with the owner's go-ahead (§2.1). |
+| A signed build carrying it | The CI IPA is unsigned and has no entitlements (`build-ios.yml`); AltStore re-signs it with a free Apple ID, whose profiles can't hold CarPlay. | **No CarPlay in the sideloaded build.** Phones get it from the store path (`build-ios-store.yml`, TestFlight) once the entitlement is granted. |
+| Testing without it | Apple's "Requesting CarPlay Entitlements" tests in the Simulator (I/O → External Displays → CarPlay), with the entitlements file; its older navigation guide says the Simulator needs a CarPlay profile. | A simulator job on the macOS runner settles it (§6.2). Until then nothing has run. |
+
+### 2.1 With the organization account
+
+1. The account holder requests the **Navigation** entitlement (link above) and agrees to the addendum.
+2. Once granted: Certificates, Identifiers & Profiles → the app's App ID → **Additional Capabilities** → CarPlay
+   Navigation on; then a new **App Store** provisioning profile for it (Apple's steps sign it manually).
+3. That profile and an Apple Distribution certificate go into the store workflow's manual signing secrets
+   (STORE-REVIEW §3.1: `IOS_DIST_P12_BASE64`, `IOS_DIST_P12_PASSWORD`, `IOS_PROFILE_BASE64`, `ASC_APPLE_ID`,
+   `ASC_APP_PASSWORD`, variables `APPLE_TEAM_ID`, `ASC_APP_ID`), and the repository variable
+   **`CARPLAY_ENTITLEMENT=1`**, which makes the plugin claim the entitlement. Claimed before step 2, it fails the
+   signing. Whether cloud-managed signing (the API key) picks up a managed capability is unverified.
+4. Actions → Build App Store iOS App on the branch → TestFlight (internal testers: the team's own members).
+
+Open with the account: whether the app lives there under `ai.wtf.navigator` (a bundle id is the team's, and moves to
+another account only with an App Store app transfer) or under a bundle id of its own; and whether it is the Developer
+Program (TestFlight) or the Enterprise Program (in-house distribution, no TestFlight, another export method).
 
 ## 3. Scenes
 
@@ -26,9 +42,9 @@ CarPlay draws in a `CPTemplateApplicationScene`, so the app adopts the UIKit sce
   React Native into it. **SDK 58** makes this the template's default (the iOS 27 SDK requires it): the costs below
   come with the next SDK upgrade whether or not CarPlay ships.
 - `modules/car-play/app.plugin.js` adds the CarPlay scene beside the phone's (`WTFCarPlaySceneDelegate`),
-  `UIApplicationSupportsMultipleScenes` (phone and car at once) and the entitlement. It runs after expo-build-properties
-  whatever the order in app.json (that plugin refuses a manifest it didn't write). Checked with
-  `npx expo config --type introspect`; prebuild of iOS doesn't run on Windows.
+  `UIApplicationSupportsMultipleScenes` (phone and car at once) and, with `CARPLAY_ENTITLEMENT=1` (§2.1), the
+  entitlement. It runs after expo-build-properties whatever the order in app.json (that plugin refuses a manifest it
+  didn't write). Checked with `npx expo config --type introspect`; prebuild of iOS doesn't run on Windows.
 
 What the scene life cycle breaks, to fix before `main`:
 
@@ -95,9 +111,9 @@ Must not drift:
 ## 6. Open items
 
 1. **Compile**: the Swift and the plugin have not been through Xcode; the branch needs a CI iOS build.
-2. **Simulator job**: a simulator build signed to run locally (so the entitlement is embedded), CarPlay's display
-   turned on (no `simctl` command for it: the Simulator's menu or a preference to find), screenshots of both displays
-   (`simctl io booted screenshot --display external`).
+2. **Simulator job**: a simulator build with `CARPLAY_ENTITLEMENT=1`, signed to run locally (so the entitlement is
+   embedded), CarPlay's display turned on (no `simctl` command for it: the Simulator's menu or a preference to find),
+   screenshots of both displays (`simctl io booted screenshot --display external`).
 3. Whether the CarPlay scene connects with `UIApplicationSupportsMultipleScenes` false (set true after Apple's sample).
 4. **AppState with only the car's screen in front** (phone locked): React Native's AppState follows the application
    state; GNSS on the phone's screen and the trip recorder key off `active` and `background`.
