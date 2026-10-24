@@ -454,7 +454,10 @@ within ~20 s of its ignition.
 - **Bluetooth off:** the link's error is `bluetooth-off`; the Car page says to turn Bluetooth on (`bluetooth-unauthorized`:
   to allow it in Settings), never the native message, and it goes to Sentry once per launch (mostly the driver's choice:
   one iPhone sent 20 in a night). A probe failing under a reconnect is retried and not sent either (link event detail
-  `…, reconnecting`). Bluetooth back on (`onBluetoothState` `poweredOn`) auto-connects again, as a foreground does.
+  `…, reconnecting`). Bluetooth back on (`onBluetoothState` `poweredOn`) auto-connects again, as a foreground does. iOS 27
+  reports Bluetooth switched off as `unsupported`, not `poweredOff`, and the central kept that state through every
+  connect until the app restarted (2026-10-24): a connect replaces a central that says `unsupported` (no iPhone lacks
+  BLE) with a new one, without iOS's power alert.
 - Background: the TS loop runs while the app is alive; the trip logger keeps the app alive with background location
   during a trip and for a linger period after it (TRIP-LOGGER-SPEC §4.3); `bluetooth-central` and
   `external-accessory` keep the links alive; on Android the foreground service does.

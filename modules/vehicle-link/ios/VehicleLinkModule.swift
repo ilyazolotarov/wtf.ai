@@ -141,6 +141,7 @@ final class LinkCore: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
 
   // BLE
   private var central: CBCentralManager?
+  private var centralRestoreIdentifier: String?
   private var stateWaiters: [(String) -> Void] = []
   private var scanning = false
   private var catalogServices: [CBUUID] = []
@@ -243,14 +244,29 @@ final class LinkCore: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
     }
   }
 
-  /** On `queue`; once per process. */
-  private func createCentral(restoreIdentifier: String?) {
+  /** On `queue`; once per process, but for a replaced one (`replaceCentralIfUnsupported`). */
+  private func createCentral(restoreIdentifier: String?, showPowerAlert: Bool = true) {
     guard central == nil else { return }
-    var options: [String: Any] = [CBCentralManagerOptionShowPowerAlertKey: true]
+    centralRestoreIdentifier = restoreIdentifier
+    var options: [String: Any] = [CBCentralManagerOptionShowPowerAlertKey: showPowerAlert]
     if let id = restoreIdentifier, !id.isEmpty {
       options[CBCentralManagerOptionRestoreIdentifierKey] = id
     }
     central = CBCentralManager(delegate: self, queue: queue, options: options)
+  }
+
+  /**
+   * On `queue`. iOS 27 reports Bluetooth switched off as `.unsupported` (Apple documents `.poweredOff`), and the central
+   * kept saying so to every connect after it until the app restarted (2026-10-24, two iPhones). No iPhone lacks BLE: a
+   * central that claims it is replaced by a new one, which reads the state afresh. Without the power alert: the link
+   * retries while Bluetooth stays off, and the app's own message says to turn it on.
+   */
+  private func replaceCentralIfUnsupported() {
+    guard let old = central, old.state == .unsupported else { return }
+    old.delegate = nil
+    central = nil
+    known = [:] // peripherals belong to the central that found them
+    createCentral(restoreIdentifier: centralRestoreIdentifier, showPowerAlert: false)
   }
 
   /** Calls back once the central leaves the unknown/resetting state (max 5 s). */
@@ -520,6 +536,7 @@ final class LinkCore: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
   // MARK: BLE connect
 
   private func connectBle(options: ConnectOptions) {
+    replaceCentralIfUnsupported()
     whenStateKnown { state in
       guard let central = self.central else {
         self.failConnect(code: "bluetooth-off", message: "Bluetooth not initialized")
