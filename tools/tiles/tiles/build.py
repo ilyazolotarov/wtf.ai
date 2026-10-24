@@ -1,6 +1,7 @@
 """Build the offline map release.
 
-Planetiler builds Ukraine's tiles once; every other region's are cut from them (`pmtiles extract`
+Planetiler builds Ukraine's tiles once, from the extract with a street written onto every house
+that has none, from its `addr:place` or associatedStreet relation (streets.py); every other region's are cut from them (`pmtiles extract`
 on the region's polygon, seconds instead of a Planetiler run each). Whole tiles are kept, so a
 region's border tiles hold some of its neighbours; the app covers everything outside the region
 with the world drawn around it (world.py), so none of it shows. One `osmium extract` pass clips the
@@ -48,6 +49,7 @@ from shapely.geometry import mapping
 from .graph import build_region_graph
 from .region import load_registry, read_poly, region_outline
 from .search import build_region_search
+from .streets import house_street_changes
 from .style import SPRITE_NAME, collect_fonts, font_slug, offline_style
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -247,11 +249,28 @@ def build_common(release: Path = RELEASE) -> list[dict[str, str]]:
     return files
 
 
+def with_relation_streets(pbf: Path) -> Path:
+    """The extract with a street on every house that has none: its `addr:place`, else its
+    associatedStreet relation's (streets.py): Planetiler drops all but one label per (street,
+    number) in a tile."""
+    # Not in cache/tmp: Planetiler empties its temp directory when it starts.
+    changes = CACHE / "streets" / f"{WHOLE}.streets.osc"
+    output = CACHE / "streets" / f"{WHOLE}.streets.osm.pbf"
+    count = house_street_changes(pbf, changes)
+    log(f"Streets for houses without one: {count}")
+    prefix, to_cmd = osmium_command()
+    subprocess.run([*prefix, "apply-changes", to_cmd(pbf), to_cmd(changes), "-o", to_cmd(output), "--overwrite"], check=True)
+    changes.unlink()
+    return output
+
+
 def build_whole(clipped: Path, heap: str = "4g", release: Path = RELEASE) -> Path:
     """Planetiler on Ukraine's clipped extract → out/release/ukraine.pmtiles."""
     release.mkdir(parents=True, exist_ok=True)
     output = release / f"{WHOLE}.pmtiles"
-    run_planetiler(ensure_planetiler(), clipped, REGIONS / f"{WHOLE}.poly", output, heap)
+    source = with_relation_streets(clipped)
+    run_planetiler(ensure_planetiler(), source, REGIONS / f"{WHOLE}.poly", output, heap)
+    source.unlink()
     log(f"{WHOLE}: {output.stat().st_size / 1e6:.1f} MB")
     return output
 

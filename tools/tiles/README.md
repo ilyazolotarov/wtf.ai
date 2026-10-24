@@ -36,6 +36,11 @@ Planetiler builds Ukraine's tiles once; every other region's are cut from them b
 of its neighbours: the app covers everything outside the region with the world drawn around
 it (below), so none of it shows. Building `kyiv` alone therefore needs `out/release/ukraine.pmtiles`.
 
+Planetiler reads the extract with a street written onto every house that has none (`tiles/streets.py`:
+its `addr:place`, else its associatedStreet relation's name; an `.osc` merged by `osmium apply-changes`
+into `cache/streets/`): its house-number layer keeps one label per street and number in a tile, and
+houses without a street all counted as one, so most of their numbers were missing from the map.
+
 One `osmium extract --strategy smart` pass clips the Ukraine extract to every region
 (`cache/extracts/`) for the road graphs and search indexes: only data inside the polygon, with
 ways and multipolygons that cross the border kept whole. They build in parallel processes
