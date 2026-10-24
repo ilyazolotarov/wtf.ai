@@ -1,6 +1,6 @@
 import { router } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, StyleSheet, TextInput, View } from "react-native";
+import { Keyboard, Pressable, StyleSheet, TextInput, View } from "react-native";
 
 import {
     ScreenAction,
@@ -29,7 +29,7 @@ import type { SearchIndex, SearchResult } from "@/nav/search/search-index";
 import { inBounds, places, usePlaces } from "@/providers/places";
 import { usePosition } from "@/providers/position-provider";
 import { destinations, useRoute } from "@/providers/route-provider";
-import { requestPlacing, STANDING_MPS } from "@/services/navigation/place-request";
+import { requestPlacing } from "@/services/navigation/place-request";
 import type { Place, SavedKind, SavedPlace } from "@/services/navigation/places-store";
 import { useMapPacks } from "@/services/offline-map/map-packs";
 import { activeSearchIndex } from "@/services/offline-map/search-file";
@@ -83,7 +83,7 @@ function useMajorSettlements(region: string | null): Place[] | null {
     try {
       return index.majorSettlements(8).map((r) => ({
         id: `search:${r.key}`,
-        title: resultTitle(r, language),
+        title: resultTitle(r, language, t),
         detail: resultDetail(r, language, t),
         lat: r.lat,
         lon: r.lon,
@@ -112,9 +112,7 @@ export default function RouteScreen() {
     return d?.id ? { id: d.id, title: d.name ?? "", detail: null, lat: d.lat, lon: d.lon } : null;
   });
   const [query, setQuery] = useState("");
-  // "I'm here": the car is at the place, not going there (NAVIGATOR-SPEC §6.2); the map puts it there while it
-  // isn't moving.
-  const mayPlace = (position?.speedMps ?? 0) < STANDING_MPS;
+  // "I'm here": the car is at the place, not going there (NAVIGATOR-SPEC §6.2); the map puts it there, at any speed.
   // Distances from the car; without a fix, from the region's middle.
   const origin: Coordinate =
     position ?? (bounds ? { lat: (bounds[1] + bounds[3]) / 2, lon: (bounds[0] + bounds[2]) / 2 } : { lat: 50.45, lon: 30.52 });
@@ -137,10 +135,11 @@ export default function RouteScreen() {
     : searched
       ? searched.results.map((r) => ({
           id: `search:${r.key}`,
-          title: resultTitle(r, language),
+          title: resultTitle(r, language, t),
           detail: resultDetail(r, language, t),
           lat: r.lat,
           lon: r.lon,
+          ...(r.entrances.length > 0 ? { entrances: r.entrances.map((e) => ({ ref: e.ref!, lat: e.lat, lon: e.lon })) } : {}),
         }))
       : cities.filter((c) => c.title.toLocaleLowerCase().includes(q));
   const savedHere = reachable(saved);
@@ -150,10 +149,27 @@ export default function RouteScreen() {
   const [feedback, setFeedback] = useState<{ placeId: string; kind: SavedKind | null; replaced: string | null; undo: SavedPlace[] } | null>(null);
   // The saved row that glows once when the list comes back.
   const [flashId, setFlashId] = useState<string | null>(null);
+  // The entrance picked on the card (its number); null: the building itself.
+  const [door, setDoor] = useState<string | null>(null);
   const select = (d: Place | null) => {
     setSelected(d);
+    setDoor(null);
     setFeedback(null);
+    // A place picked: its card in full, not under the keyboard.
+    if (d) Keyboard.dismiss();
   };
+  // Where the card routes: the building, or the entrance picked ("…, 16-Б, під'їзд 2" at its door).
+  const doorAt = door ? selected?.entrances?.find((e) => e.ref === door) : undefined;
+  const target: Place | null =
+    selected && doorAt
+      ? {
+          id: `${selected.id}:e${doorAt.ref}`,
+          title: `${selected.title}, ${t("searchEntrance").replace("{n}", doorAt.ref)}`,
+          detail: selected.detail,
+          lat: doorAt.lat,
+          lon: doorAt.lon,
+        }
+      : selected;
   const save = (place: Place, kind: SavedKind) => {
     const before = places.getSnapshot().saved;
     const was = places.savedAt(place);
@@ -287,11 +303,11 @@ export default function RouteScreen() {
         </>
       )}
 
-      {selected && (
+      {selected && target && (
         <ScreenCard style={styles.selected}>
           <View style={styles.selectedHead}>
             <T w="semibold" size={28} style={styles.selectedName}>
-              {selected.title}
+              {target.title}
             </T>
             {selected.detail && (
               <T size={14} color={palette.text2}>
@@ -299,8 +315,39 @@ export default function RouteScreen() {
               </T>
             )}
           </View>
+          {selected.entrances && selected.entrances.length > 0 && (
+            // The house's numbered entrances: the route ends at the one picked.
+            <View style={styles.doors}>
+              <T size={13} color={palette.text2}>
+                {t("entrances")}
+              </T>
+              <View style={styles.doorRow}>
+                {[null, ...selected.entrances.map((e) => e.ref)].map((ref) => {
+                  const on = door === ref;
+                  return (
+                    <Pressable
+                      key={ref ?? "building"}
+                      onPress={() => setDoor(ref)}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: on }}
+                      accessibilityLabel={ref ? t("searchEntrance").replace("{n}", ref) : t("entranceBuilding")}
+                      style={({ pressed }) => [
+                        styles.door,
+                        { backgroundColor: on ? palette.accent : palette.surface },
+                        pressed && styles.pressed,
+                      ]}
+                    >
+                      <T w="semibold" size={15} color={on ? palette.onAccent : palette.text} style={styles.tabular}>
+                        {ref ?? t("entranceBuilding")}
+                      </T>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+          )}
           {!position && <ScreenNote>{t("currentPositionUnknown")}</ScreenNote>}
-          {routeId === selected.id && route?.plan ? (
+          {routeId === target.id && route?.plan ? (
             // The planned route: its road distance and time.
             <View style={styles.metrics}>
               <Metric label={t("distance")} value={formatDistance(route.plan.lengthM, language)} />
@@ -308,42 +355,40 @@ export default function RouteScreen() {
             </View>
           ) : (
             <View style={styles.metrics}>
-              <Metric label={t("distance")} value={formatDistance(summary(selected).distanceM, language)} />
+              <Metric label={t("distance")} value={formatDistance(summary(target).distanceM, language)} />
               <Metric
                 label={t("bearing")}
-                value={`${Math.round(summary(selected).bearing)}° ${cardinal(summary(selected).bearing, language)}`}
+                value={`${Math.round(summary(target).bearing)}° ${cardinal(summary(target).bearing, language)}`}
               />
-              <Metric label={t("etaStraight")} value={formatEta(summary(selected).distanceM, language)} />
+              <Metric label={t("etaStraight")} value={formatEta(summary(target).distanceM, language)} />
             </View>
           )}
-          {routeId === selected.id && route?.status === "planning" && <ScreenNote>{t("planningRoute")}</ScreenNote>}
-          {routeId === selected.id && route?.status === "failed" && (
+          {routeId === target.id && route?.status === "planning" && <ScreenNote>{t("planningRoute")}</ScreenNote>}
+          {routeId === target.id && route?.status === "failed" && (
             <ScreenNote>{t(route.failure ? PROBLEM_TEXT[route.failure] : "routeCancelled")}</ScreenNote>
           )}
-          {routeId === selected.id && route?.status !== "failed" ? (
+          {routeId === target.id && route?.status !== "failed" ? (
             <ScreenAction labelKey="stopGuidance" secondary onPress={stopRoute} />
           ) : (
             <ScreenAction
               labelKey="startGuidance"
               icon="navigation"
               onPress={() => {
-                places.addRecent(selected);
-                startRoute({ lat: selected.lat, lon: selected.lon, name: selected.title, id: selected.id });
+                places.addRecent(target);
+                startRoute({ lat: target.lat, lon: target.lon, name: target.title, id: target.id });
                 router.back();
               }}
             />
           )}
-          {mayPlace && (
-            <ScreenAction
-              labelKey="placeMeHere"
-              icon="location_on"
-              secondary
-              onPress={() => {
-                requestPlacing(selected);
-                router.back();
-              }}
-            />
-          )}
+          <ScreenAction
+            labelKey="placeMeHere"
+            icon="location_on"
+            secondary
+            onPress={() => {
+              requestPlacing(target);
+              router.back();
+            }}
+          />
           {feedback?.placeId === selected.id && (
             <SaveConfirmation
               key={`${feedback.kind}:${feedback.undo.length}`}
@@ -408,6 +453,9 @@ const styles = StyleSheet.create({
   badge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: Radius.pill },
   selected: { gap: 18, paddingTop: 18 },
   selectedHead: { gap: 4 },
+  doors: { gap: 8 },
+  doorRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  door: { minWidth: 48, minHeight: 44, paddingHorizontal: 14, borderRadius: Radius.pill, alignItems: "center", justifyContent: "center" },
   saveRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 },
   flex: { flex: 1 },
   rowIcon: { width: 30, height: 30, borderRadius: 15, alignItems: "center", justifyContent: "center" },

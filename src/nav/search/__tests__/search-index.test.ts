@@ -2,21 +2,23 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 
 import { bufferByteSource } from "@/nav/mapmatch/graph/byte-source";
-import { fold, foldHouse, parseQuery } from "@/nav/search/fold";
+import { fold, foldHouse, parseQuery, splitEntrance } from "@/nav/search/fold";
 import { SearchIndex, typoBudget, withoutRepeats, type SearchResult } from "@/nav/search/search-index";
 
 import foldCases from "../__fixtures__/fold-cases.json";
 
 // town.search.bin is written by tools/tiles (tests/test_search.py): Chernihiv (city), Ivanivka
 // (village ~12 km south-west), "вулиця Шевченка" in both, "проспект Миру" (old name проспект
-// Леніна), the address-only "вулиця Нова", an `addr:place` house in the village, WOG and Сільпо.
+// Леніна), the address-only "вулиця Нова", an `addr:place` house in the village, WOG and Сільпо;
+// Шевченка 1 has entrances 1 and 2 (and a garage door, left out), and one entrance of no address stands apart;
+// Шевченка 10 is mapped four times side by side.
 const FIXTURE = readFileSync(path.join(__dirname, "../__fixtures__/town.search.bin"));
 const CITY = { lat: 51.4939, lon: 31.2947 };
 const VILLAGE = { lat: 51.41, lon: 31.15 };
 
 const open = () => new SearchIndex(bufferByteSource(new Uint8Array(FIXTURE)));
 const label = (r: SearchResult) =>
-  `${r.kind}:${r.name}${r.house ? ` ${r.house}` : ""}${r.settlement ? ` @${r.settlement.name}` : ""}`;
+  `${r.kind}:${r.name}${r.house ? ` ${r.house}` : ""}${r.entrance ? ` entrance ${r.entrance}` : ""}${r.settlement ? ` @${r.settlement.name}` : ""}`;
 const search = (q: string, near: { lat: number; lon: number } | null = CITY) =>
   open().search(q, { near }).map(label);
 
@@ -24,6 +26,23 @@ describe("fold", () => {
   it("matches the index builder (shared cases)", () => {
     for (const [text, tokens] of foldCases.tokens as [string, string[]][]) expect([text, fold(text)]).toEqual([text, tokens]);
     for (const [text, house] of foldCases.houses as [string, string][]) expect([text, foldHouse(text)]).toEqual([text, house]);
+  });
+
+  it("reads an entrance at the end of a query only after a house number", () => {
+    expect(splitEntrance("Оболонський 16 під'їзд 3")).toEqual({ rest: "Оболонський 16", entrance: "3" });
+    expect(splitEntrance("Оболонський 16-А, п. 12")).toEqual({ rest: "Оболонський 16-А,", entrance: "12" });
+    expect(splitEntrance("8 Березня п 3")).toEqual({ rest: "8 Березня", entrance: "3" });
+    expect(splitEntrance("Пирогова п 3")).toEqual({ rest: "Пирогова п 3", entrance: null });
+    expect(splitEntrance("Оболонський 16 під")).toEqual({ rest: "Оболонський 16 ", entrance: null });
+    expect(splitEntrance("Підвальна")).toEqual({ rest: "Підвальна", entrance: null });
+    expect(splitEntrance("Оболонський проспект 16 3 під'їзд")).toEqual({ rest: "Оболонський проспект 16", entrance: "3" });
+    expect(splitEntrance("Оболонський 16 3-й під'їзд")).toEqual({ rest: "Оболонський 16", entrance: "3" });
+    expect(splitEntrance("Оболонський проспект 16 3")).toEqual({ rest: "Оболонський проспект 16", entrance: "3" });
+    expect(splitEntrance("Оболонський 16-А, 3")).toEqual({ rest: "Оболонський 16-А", entrance: "3" });
+    expect(splitEntrance("8 Березня 3")).toEqual({ rest: "8 Березня 3", entrance: null });
+    expect(splitEntrance("Оболонский 16 подъезд 3").entrance).toBe("3");
+    expect(splitEntrance("Оболонский 16 подезд 3").entrance).toBe("3");
+    expect(splitEntrance("Оболонский 16 подьезд 3").entrance).toBe("3");
   });
 
   it("parses a house number and the word being typed", () => {
@@ -86,6 +105,38 @@ describe("SearchIndex", () => {
     expect(search("Шевченка 10а")[0]).toBe("address:вулиця Шевченка 10А @Чернігів");
     expect(search("Шевченка 10", VILLAGE)[0]).toBe("address:вулиця Шевченка 10 @Іванівка");
     expect(search("shevchenka 12/2")[0]).toBe("address:вулиця Шевченка 12/2 @Чернігів");
+  });
+
+  it("gives a house its numbered entrances for its card, and finds the one typed", () => {
+    // Not listed as results of their own: the card offers them.
+    expect(search("Шевченка 1").filter((r) => r.includes("entrance"))).toEqual([]);
+    const [house] = open().search("Шевченка 1", { near: CITY });
+    expect(house).toMatchObject({ house: "1", entrance: null });
+    expect(house.entrances.map((e) => e.ref)).toEqual(["1", "2"]);
+    for (const q of ["Шевченка 1 під'їзд 2", "Шевченка 1, п. 2", "shevchenka 1 entrance 2", "Шевченка 1 п2", "Шевченка 1 2 під'їзд", "Шевченка 1 2"]) {
+      expect([q, search(q)[0]]).toEqual([q, "address:вулиця Шевченка 1 entrance 2 @Чернігів"]);
+    }
+    // The entrance word being typed: the house and its entrances meanwhile.
+    expect(search("Шевченка 1 під")[0]).toBe("address:вулиця Шевченка 1 @Чернігів");
+    const [door] = open().search("Шевченка 1 під'їзд 1", { near: CITY });
+    expect(door).toMatchObject({ house: "1", entrance: "1" });
+    expect(door.lat).toBeCloseTo(51.4939 + 0.0012, 5); // at the door, not the building's centre
+    expect(door.lon).toBeCloseTo(31.2947 + 0.0012, 5);
+  });
+
+  it("reads the region's entrances for the map, numbered or not", () => {
+    const all = open().allEntrances();
+    expect(all.map((e) => e.ref)).toEqual(["1", "2", null]);
+  });
+
+  it("counts a number mapped several times nearby once, so other numbers still fit", () => {
+    // "10" four times: before, its copies took four of a street's five places and 10А, 12/2 were left out.
+    expect(search("Шевченка 1").slice(0, 4)).toEqual([
+      "address:вулиця Шевченка 1 @Чернігів",
+      "address:вулиця Шевченка 10 @Чернігів",
+      "address:вулиця Шевченка 10А @Чернігів",
+      "address:вулиця Шевченка 12/2 @Чернігів",
+    ]);
   });
 
   it("puts an address at its house, not at its street's middle", () => {
@@ -157,6 +208,8 @@ describe("withoutRepeats", () => {
     name: "вулиця Хрещатик",
     nameEn: "Khreshchatyk Street",
     house: "22",
+    entrance: null,
+    entrances: [],
     tag: "addr:street",
     settlement: { name: "Київ", nameEn: "Kyiv" },
     lat,

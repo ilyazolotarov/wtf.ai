@@ -11,10 +11,12 @@ import { usePosition } from "@/providers/position-provider";
 
 import { useSmoothedPosition } from "./use-smoothed-position";
 import { useRoute } from "@/providers/route-provider";
+import { useEntrancesUrl } from "@/services/offline-map/entrance-file";
 import { useMapPacks } from "@/services/offline-map/map-packs";
 
 import type { CameraView } from "./map-features";
-import { DebugLayers, MarkLayers, PositionLayers, PuckLayers, RouteLayers } from "./map-layers";
+
+import { DebugLayers, EntranceLayers, MarkLayers, PositionLayers, PuckLayers, RouteLayers } from "./map-layers";
 import type { CameraMode } from "./use-camera-mode";
 import type { CompassHeading } from "./use-compass-heading";
 import { useMapCamera } from "./use-map-camera";
@@ -95,6 +97,7 @@ export function MapSurface({
   const scheme = useColorScheme() === "dark" ? "dark" : "light";
   const palette = Colors[scheme];
   const mapStyle = useMapStyle(scheme);
+  const entrancesUrl = useEntrancesUrl();
   const { installed } = useMapPacks();
   const region = installed.active ? installed.regions[installed.active] : null;
   const position = usePosition();
@@ -189,6 +192,8 @@ export function MapSurface({
             : { zoom: INITIAL_ZOOM, pitch: 0, bearing: 0 }
         }
       />
+      {/* Placed in the style, above its house numbers: not part of the stack below. */}
+      <EntranceLayers url={entrancesUrl} />
       {/* Bottom to top: MapLibre stacks layers in the order they are declared. */}
       <RouteLayers route={route} palette={palette} onChoose={chooseAlternative} />
       <MarkLayers pin={pin} placedMark={placedMark} palette={palette} scheme={scheme} />

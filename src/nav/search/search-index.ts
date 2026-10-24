@@ -4,15 +4,19 @@
 
 import { haversineM, type Coordinate } from "@/nav/geo";
 import type { ByteSource } from "@/nav/mapmatch/graph/byte-source";
-import { fold, foldHouse, parseQuery, STOPWORDS, type QueryToken } from "@/nav/search/fold";
+import { fold, foldHouse, parseQuery, splitEntrance, STOPWORDS, type QueryToken } from "@/nav/search/fold";
 import {
   ADDRESS_BYTES,
   COORD_SCALE,
   decodeUtf8,
   ENTITY_BYTES,
+  ENTRANCE_BYTES,
+  ENTRANCE_MAGIC,
   EntityKind,
+  FLAG_ENTRANCES,
   HEADER_BYTES,
   NONE,
+  TRAILER_BYTES,
   parseHeader,
   type SearchHeader,
 } from "@/nav/search/format";
@@ -28,6 +32,10 @@ export interface SearchResult {
   nameEn: string | null;
   /** Address only, as mapped ("10А"). */
   house: string | null;
+  /** An entrance of the address, by its number ("3"): the result is that entrance's door. */
+  entrance: string | null;
+  /** An address's numbered entrances, to pick one on its card (none for other results and entrance results). */
+  entrances: Entrance[];
   /** OSM tag that made it: "place=village", "highway=residential", "amenity=fuel", "addr:street" (a street known only from its houses). */
   tag: string;
   /** The settlement it belongs to (none for a settlement itself, or far from any). */
@@ -52,6 +60,7 @@ export function withoutRepeats(ranked: SearchResult[]): SearchResult[] {
       k.kind === r.kind &&
       k.name === r.name &&
       k.house === r.house &&
+      k.entrance === r.entrance &&
       k.settlement?.name === r.settlement?.name &&
       haversineM(k, r) < REPEAT_M;
     if (!kept.some(same)) kept.push(r);
@@ -138,6 +147,21 @@ const MAX_TOKENS = 8;
 const HOUSES_PER_STREET = 5;
 const CACHE_LIMIT = 20_000;
 
+/** A building's entrance (SEARCH-SPEC §3.2): its number if mapped, and where it is. */
+export interface Entrance {
+  ref: string | null;
+  lat: number;
+  lon: number;
+}
+
+interface EntranceTable {
+  /** Address index of each entrance (NONE: none), ascending. */
+  address: Uint32Array;
+  ref: Uint32Array;
+  lat: Int32Array;
+  lon: Int32Array;
+}
+
 /**
  * Typos forgiven in a query word (a letter wrong, missed, extra or two swapped; the first letter kept): none under 4
  * letters (5 for the word being typed: its start is still short), one, two from 8 letters. Numbers none.
@@ -189,12 +213,73 @@ export class SearchIndex {
   private readonly entities = new Map<number, Entity>();
   private readonly entityBlocks = new Map<number, DataView>();
   private readonly strings = new Map<number, string>();
+  /** Where the entrance section is ([offset, count]); null in a file without one. */
+  private readonly entranceSection: [number, number] | null = null;
+  private entranceTable: EntranceTable | null = null;
 
   constructor(private readonly source: ByteSource) {
     this.header = parseHeader(source.read(0, HEADER_BYTES));
     if (this.header.size !== source.size) {
       throw new Error(`search file is ${source.size} bytes, header says ${this.header.size}`);
     }
+    if (this.header.flags & FLAG_ENTRANCES) {
+      const t = source.read(source.size - TRAILER_BYTES, TRAILER_BYTES);
+      const v = new DataView(t.buffer, t.byteOffset, TRAILER_BYTES);
+      if (String.fromCharCode(...t.subarray(8, 12)) !== ENTRANCE_MAGIC) throw new Error("search file: no entrance trailer");
+      this.entranceSection = [v.getUint32(0, true), v.getUint32(4, true)];
+    }
+  }
+
+  /** Every entrance of the region, numbered or not (the map draws them). */
+  allEntrances(): Entrance[] {
+    const t = this.entrances();
+    if (!t) return [];
+    const out: Entrance[] = [];
+    for (let i = 0; i < t.address.length; i++) out.push(this.entranceAt(t, i));
+    return out;
+  }
+
+  /** The entrances of an address (an index in the file's address table), in their numbers' order. */
+  entrancesOf(address: number): Entrance[] {
+    const t = this.entrances();
+    if (!t) return [];
+    let lo = 0;
+    let hi = t.address.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (t.address[mid] < address) lo = mid + 1;
+      else hi = mid;
+    }
+    const out: Entrance[] = [];
+    for (let i = lo; i < t.address.length && t.address[i] === address; i++) out.push(this.entranceAt(t, i));
+    return out;
+  }
+
+  private entranceAt(t: EntranceTable, i: number): Entrance {
+    return {
+      ref: t.ref[i] === NONE ? null : this.string(t.ref[i]),
+      lat: t.lat[i] * COORD_SCALE,
+      lon: t.lon[i] * COORD_SCALE,
+    };
+  }
+
+  /** The entrance section, read once (16 bytes an entrance: a few MB for the whole country). */
+  private entrances(): EntranceTable | null {
+    if (!this.entranceSection) return null;
+    if (this.entranceTable) return this.entranceTable;
+    const [at, n] = this.entranceSection;
+    const b = this.source.read(at, n * ENTRANCE_BYTES);
+    const v = new DataView(b.buffer, b.byteOffset, b.byteLength);
+    const t: EntranceTable = { address: new Uint32Array(n), ref: new Uint32Array(n), lat: new Int32Array(n), lon: new Int32Array(n) };
+    for (let i = 0; i < n; i++) {
+      const o = i * ENTRANCE_BYTES;
+      t.address[i] = v.getUint32(o, true);
+      t.ref[i] = v.getUint32(o + 4, true);
+      t.lat[i] = v.getInt32(o + 8, true);
+      t.lon[i] = v.getInt32(o + 12, true);
+    }
+    this.entranceTable = t;
+    return t;
   }
 
   /**
@@ -214,7 +299,8 @@ export class SearchIndex {
 
   search(query: string, options: SearchOptions = {}): SearchResult[] {
     const limit = options.limit ?? 20;
-    const parsed = parseQuery(query);
+    const { rest, entrance } = splitEntrance(query);
+    const parsed = parseQuery(rest);
     const tokens = parsed.tokens.slice(0, MAX_TOKENS);
     const best = new Map<string, SearchResult>();
     const keep = (results: SearchResult[]) => {
@@ -236,7 +322,22 @@ export class SearchIndex {
     const sorted = [...best.values()].sort(
       (a, b) => b.score - a.score || a.name.localeCompare(b.name) || a.key.localeCompare(b.key),
     );
-    return withoutRepeats(sorted).slice(0, limit);
+    return this.withEntrances(withoutRepeats(sorted), parsed.house, entrance).slice(0, limit);
+  }
+
+  /**
+   * An entrance typed ("…16 під'їзд 3"): that door first, above its house (the best address whose number is the one
+   * typed in full). Without one, the house's card offers its entrances (`SearchResult.entrances`).
+   */
+  private withEntrances(results: SearchResult[], house: string | null, entrance: string | null): SearchResult[] {
+    if (!house || entrance === null || !this.entranceSection) return results;
+    const at = results.findIndex((r) => r.kind === "address" && r.house !== null && foldHouse(r.house) === house);
+    if (at < 0) return results;
+    const addr = results[at];
+    const doors = addr.entrances
+      .filter((e) => foldHouse(e.ref!) === entrance)
+      .map((e, i) => ({ ...addr, key: `${addr.key}e${i}`, entrance: e.ref, entrances: [], lat: e.lat, lon: e.lon }));
+    return [...results.slice(0, at), ...doors, ...results.slice(at)];
   }
 
   private run(tokens: QueryToken[], house: string | null, near: Coordinate | null): SearchResult[] {
@@ -386,6 +487,9 @@ export class SearchIndex {
     const v = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     const exact: House[] = [];
     const starts: House[] = [];
+    // One number mapped several times nearby (the building, its shops, an address point) is one house: the building
+    // with entrances if one has them, so its card offers them. The copies took the five places of other numbers.
+    const seen: { folded: string; rec: House; doors: boolean }[] = [];
     for (let i = 0; i < e.naddr; i++) {
       const raw = this.string(v.getUint32(i * ADDRESS_BYTES, true));
       const folded = foldHouse(raw);
@@ -397,6 +501,16 @@ export class SearchIndex {
         lon: v.getInt32(i * ADDRESS_BYTES + 8, true) * COORD_SCALE,
         bonus: folded === house ? 12 : 5,
       };
+      const doors = this.entrancesOf(rec.index).length > 0;
+      const same = seen.find((s) => s.folded === folded && haversineM(s.rec, rec) < REPEAT_M);
+      if (same) {
+        if (doors && !same.doors) {
+          Object.assign(same.rec, { index: rec.index, house: rec.house, lat: rec.lat, lon: rec.lon });
+          same.doors = true;
+        }
+        continue;
+      }
+      seen.push({ folded, rec, doors });
       (folded === house ? exact : starts).push(rec);
     }
     return [...exact, ...starts].slice(0, HOUSES_PER_STREET);
@@ -416,6 +530,8 @@ export class SearchIndex {
       name: this.string(e.nameAt),
       nameEn: e.nameEnAt === NONE ? null : this.string(e.nameEnAt),
       house: null,
+      entrance: null,
+      entrances: [],
       tag: this.string(e.tagAt),
       settlement: this.settlementOf(e),
       lat: e.lat,
@@ -438,6 +554,8 @@ export class SearchIndex {
       name: this.string(owner.nameAt),
       nameEn: owner.nameEnAt === NONE ? null : this.string(owner.nameEnAt),
       house: h.house,
+      entrance: null,
+      entrances: this.entrancesOf(h.index).filter((e) => e.ref !== null),
       tag: this.string(owner.tagAt),
       settlement: owner.kind === EntityKind.place ? null : this.settlementOf(owner),
       lat: h.lat,

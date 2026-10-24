@@ -12,6 +12,8 @@ export interface Place extends Coordinate {
   title: string;
   /** What and where it is ("Street · Chernihiv"), as shown when it was picked. */
   detail: string | null;
+  /** A house's numbered entrances (SEARCH-SPEC §5): its card offers to route to one of them. */
+  entrances?: { ref: string; lat: number; lon: number }[];
 }
 
 export interface SavedPlace extends Place {

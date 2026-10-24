@@ -41,7 +41,13 @@ Both sides are tested against `src/nav/search/__fixtures__/fold-cases.json`. Str
   house count.
 - **Addresses**: `addr:housenumber` with `addr:street` (on the street of that name in its settlement; else a
   same-named street within 500 m; else an address-only street shown at its middle house) or `addr:place` (on that
-  settlement, a place of that name within 3 km, else an `addr:place` group). Ways at their nodes' centroid.
+  settlement, a place of that name within 3 km, else an `addr:place` group). Ways at their nodes' centroid. A house
+  number with neither takes the `name` of a `type=associatedStreet` (or `street`) relation that lists it, whatever
+  its role: whole districts are mapped that way (about 6 % of an oblast's addresses, a quarter of a city's blocks).
+- **Entrances**: nodes with `entrance` = staircase, main, yes, home or secondary (not garages, shop doors or exits);
+  the number is `ref`, else `addr:unit`, else a `name` of up to three letters or digits. One on the outline of an
+  addressed building belongs to that address (the first, if two share it); the rest are kept for the map only.
+  Coverage varies widely: a quarter of Kyiv's apartment blocks have numbered entrances, 1 in 30 in an oblast.
 - **POIs**: named objects with amenity, shop, tourism, leisure, office, healthcare, craft, historic,
   `railway=station/halt` or `aeroway=aerodrome/terminal`.
 - Names searched: `name`, `name:uk`, `name:en`, `name:ru`, `alt_name`, `old_name`, `official_name`. Shown: `name`
@@ -52,7 +58,7 @@ Both sides are tested against `src/nav/search/__fixtures__/fold-cases.json`. Str
 
 | Section | Content |
 | --- | --- |
-| header, 76 B | `"WTFS"`, u16 format, u16 0, u32 entities, settlements, addresses, tokens, offsets of the 7 sections, 16 B OSM date, u32 build time, u32 file size |
+| header, 76 B | `"WTFS"`, u16 format, u16 flags (1: entrances), u32 entities, settlements, addresses, tokens, offsets of the 7 sections, 16 B OSM date, u32 build time, u32 file size |
 | strings | u16 byte length + UTF-8, deduplicated |
 | entities, 44 B | u8 kind (1 place, 2 street, 3 POI), u8 0, u16 rank, i32 lat, lon (1e-6°), u32 name, name_en (or NONE), tag, u32 parent (settlement or NONE), u32 first address, count, u32 first child, count |
 | addresses, 12 B | u32 house number (string), i32 lat, lon |
@@ -60,15 +66,21 @@ Both sides are tested against `src/nav/search/__fixtures__/fold-cases.json`. Str
 | token blob | the sorted tokens, ASCII |
 | posting starts | u32 × (tokens + 1) into the postings |
 | postings | u32 entity ids, ascending per token |
+| entrances, 16 B | u32 address (NONE: of no address), u32 number string (NONE: none), i32 lat, lon; by address |
+| trailer, 12 B | u32 offset of the entrances, u32 count, `"WTFE"` |
 
 Order: settlements first (by rank), then every settlement's children (one contiguous range per settlement), then
 entities without a settlement. A street's houses are contiguous, in natural order (2, 10, 10А, 12/2).
+The entrances and trailer come after the 7 sections, so a reader of the file before them reads it as before.
 `tiles search-check` validates a file.
 
 ## 4. Search (`src/nav/search/search-index.ts`)
 
 ### 4.1 Query
 
+An entrance at the end, after a house number, is taken off first (`splitEntrance`): "під'їзд 3", "п. 3", "п3",
+"подъезд 3" (also "подьезд", "подезд"), "entrance 3", "3 під'їзд", "3-й під'їзд", or a second number ("Оболонський 16 3";
+not after a number alone: "8 Березня 3" is a house). The entrance word being typed is dropped meanwhile.
 Split on spaces, commas and semicolons. The last piece that starts with a digit is the house number, when other
 words come with it. Each piece is folded into words; the last word is a prefix unless the query ends with a
 separator. A word is *optional* when it's a street kind, one letter, or a prefix of a street kind being typed; a
@@ -99,7 +111,10 @@ oblast. A word's own spelling is tested first, then its settlement's, then the t
    kind and distance.
 3. House numbers: exact +12, a number it starts +5 (≤ 5 per street), scored at the house; the street itself follows
    4 below its houses.
-4. A result that reads the same as a better one (kind, name, house number, settlement) within 150 m is dropped
+4. An address result carries its numbered entrances (its card offers them); a typed entrance is a result of its own,
+   at its door, above the best address whose number is the one typed in full. One number mapped several times within
+   150 m (the building, its shops) counts once, as the copy with entrances: the copies took a street's 5 places.
+5. A result that reads the same as a better one (kind, name, house number, entrance, settlement) within 150 m is dropped
    (`withoutRepeats`): OSM maps one address on the building, its entrances and its shops.
 
 Measured in Node on a synthetic Ukraine-sized index (28 000 settlements, 496 000 streets, 4.7 M addresses, 53 000
@@ -114,6 +129,11 @@ POIs: 97 MB): queries 9–25 ms. The phone is several times slower; an oblast is
 - **Route screen** (`src/app/route.tsx`, UI-SPEC §7.1): the field searches 120 ms after typing stops, near the car's
   position, the last results staying until then (an emptied field drops them); each result shows its name (", 10" for an address), what it is and its settlement, distance and
   direction. Start guidance routes to it (`id` `search:<key>`, the name shown on the banner).
+- **Entrances on the map** (`src/services/offline-map/entrance-file.ts`, `EntranceLayers`): the active search
+  file's entrances written once to a GeoJSON file in the cache (per file MD5); from z16 a numbered one as its number
+  on a plate (three widths, `assets/images/map/entrance-plate-*`), one without as a small dot, right above the house
+  numbers. A house's card (route screen) offers its numbered entrances: Building (default) or a number; the route
+  then ends at that door ("вулиця Шевченка, 10, під'їзд 3"). Picking a result closes the keyboard.
 - **Quick picks** (empty field): saved places, recent destinations and the region's largest cities
   (`SearchIndex.majorSettlements`: the first settlements of the file, cities then towns by population).
 

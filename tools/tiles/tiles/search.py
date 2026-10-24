@@ -1,8 +1,9 @@
 """Address search index (SEARCH-SPEC): <region>.search.bin.
 
-Three passes over the region's extract with pyosmium: tagged ways (streets, buildings with an
-address, named POI and place areas), tagged nodes (places, POIs, address points), then the
-locations of only the nodes those ways use. Everything named becomes an *entity*:
+Four passes over the region's extract with pyosmium: associatedStreet relations (the street of
+houses tagged with a number only), tagged ways (streets, buildings with an address, named POI and
+place areas), tagged nodes (places, POIs, address points), then the locations of only the nodes
+those ways use. Everything named becomes an *entity*:
 
     place     place=city/town/village/hamlet (settlements) and suburb/quarter/… (named areas)
     street    the named highways of one settlement with one name, merged; or the addresses
@@ -39,10 +40,16 @@ import osmium
 import shapely
 
 from .graph import read_locations
+from .streets import read_relation_streets
 
 FORMAT = 1
 MAGIC = b"WTFS"
 HEADER = struct.Struct("<4sHHIIIIIIIIIII16sII")  # 76 bytes
+# Flags (the u16 after the format): the file ends with an entrance section and this trailer
+# (section offset, count, "WTFE"). Readers of format 1 without it read the rest as before.
+FLAG_ENTRANCES = 1
+TRAILER = struct.Struct("<II4s")
+ENTRANCE_MAGIC = b"WTFE"
 NONE = 0xFFFFFFFF
 EARTH_R = 6_371_008.8
 M_PER_DEG = EARTH_R * math.pi / 180
@@ -55,7 +62,9 @@ ENTITY_DT = np.dtype([
     ("addr", "<u4"), ("naddr", "<u4"), ("child", "<u4"), ("nchild", "<u4"),
 ])
 ADDR_DT = np.dtype([("house", "<u4"), ("lat", "<i4"), ("lon", "<i4")])
-assert (HEADER.size, ENTITY_DT.itemsize, ADDR_DT.itemsize) == (76, 44, 12)
+# address: index in the address table, NONE for an entrance of no address; ref: its number, NONE without.
+ENTRANCE_DT = np.dtype([("address", "<u4"), ("ref", "<u4"), ("lat", "<i4"), ("lon", "<i4")])
+assert (HEADER.size, ENTITY_DT.itemsize, ADDR_DT.itemsize, ENTRANCE_DT.itemsize) == (76, 44, 12, 16)
 
 # Settlements own the streets, POIs and areas near them: how far (m) each kind reaches.
 SETTLEMENT_RADIUS_M = {"city": 15_000, "town": 6_000, "village": 2_500, "hamlet": 1_200}
@@ -73,7 +82,11 @@ POI_VALUES = {"railway": {"station", "halt"}, "aeroway": {"aerodrome", "terminal
 # Every name a query may use; the first present of DISPLAY_KEYS is shown, name:en in English.
 NAME_KEYS = ("name", "name:uk", "name:en", "name:ru", "alt_name", "old_name", "official_name")
 DISPLAY_KEYS = ("name", "name:uk")
-FILTER_KEYS = ("highway", "addr:housenumber", "place", *POI_KEYS, *POI_VALUES)
+FILTER_KEYS = ("highway", "addr:housenumber", "place", "entrance", *POI_KEYS, *POI_VALUES)
+# Entrances people use (garages, shop doors and emergency exits are left out); the number is the
+# `ref`, else `addr:unit`, else a `name` of up to three letters or digits ("1", "Б").
+ENTRANCE_KINDS = {"staircase", "main", "yes", "home", "secondary"}
+SHORT_NAME_RE = re.compile(r"[0-9A-Za-zА-Яа-яІіЇїЄєҐґ]{1,3}")
 # An address whose street no highway of its settlement carries joins a same-named street
 # whose extent is this close (m), in any settlement; else it makes an address-only street.
 STREET_JOIN_M = 500
@@ -155,6 +168,9 @@ class Item:
     located: bool = False
     length_m: float = 0.0  # streets
     bbox: list[int] | None = None  # streets: extent of the way (1e-7°)
+    osm_id: int = 0  # nodes
+    entrances: list["Item"] = field(default_factory=list)  # addresses: the entrances on its outline
+    owned: bool = False  # entrances: on an address's outline
 
 
 @dataclass
@@ -163,6 +179,7 @@ class Raw:
     streets: list[Item] = field(default_factory=list)
     addresses: list[Item] = field(default_factory=list)
     pois: list[Item] = field(default_factory=list)
+    entrances: list[Item] = field(default_factory=list)
 
 
 def names_of(tags: Mapping[str, str]) -> dict[str, str]:
@@ -180,8 +197,9 @@ def poi_tag(tags: Mapping[str, str]) -> str | None:
     return None
 
 
-def classify(tags: Mapping[str, str], refs: list[int] | None, raw: Raw) -> list[Item]:
-    """Adds the object to every list it belongs in; returns the items made."""
+def classify(tags: Mapping[str, str], refs: list[int] | None, raw: Raw, relation_street: str = "") -> list[Item]:
+    """Adds the object to every list it belongs in; returns the items made. `relation_street`:
+    the street an associatedStreet relation gives the object, for a house without `addr:street`."""
     names = names_of(tags)
     shown = any(k in names for k in DISPLAY_KEYS)
     made: list[tuple[list[Item], Item]] = []
@@ -192,8 +210,12 @@ def classify(tags: Mapping[str, str], refs: list[int] | None, raw: Raw) -> list[
         made.append((raw.streets, Item(names, {"highway": tags.get("highway")}, refs)))
     house = (tags.get("addr:housenumber") or "").strip()
     street, addr_place = (tags.get("addr:street") or "").strip(), (tags.get("addr:place") or "").strip()
+    if not (street or addr_place):
+        street = relation_street
     if house and (street or addr_place):
         made.append((raw.addresses, Item({}, {"house": house, "street": street, "place": addr_place}, refs)))
+    if refs is None and tags.get("entrance") in ENTRANCE_KINDS:
+        made.append((raw.entrances, Item({}, {"ref": entrance_number(tags)})))
     if shown and place is None and (tag := poi_tag(tags)):
         made.append((raw.pois, Item(names, {"tag": tag}, refs)))
     for lst, item in made:
@@ -204,19 +226,44 @@ def classify(tags: Mapping[str, str], refs: list[int] | None, raw: Raw) -> list[
 def read_objects(pbf: Path) -> Raw:
     raw = Raw()
     ways: list[Item] = []
+    rel_street = read_relation_streets(pbf)
     for obj in osmium.FileProcessor(str(pbf), osmium.osm.WAY).with_filter(osmium.filter.KeyFilter(*FILTER_KEYS)):
         refs = [n.ref for n in obj.nodes]
         if refs:
-            ways.extend(classify(obj.tags, refs, raw))
+            ways.extend(classify(obj.tags, refs, raw, rel_street.get(("w", obj.id), "")))
     for obj in osmium.FileProcessor(str(pbf), osmium.osm.NODE).with_filter(osmium.filter.KeyFilter(*FILTER_KEYS)):
         if not obj.location.valid():
             continue
-        for item in classify(obj.tags, None, raw):
+        for item in classify(obj.tags, None, raw, rel_street.get(("n", obj.id), "")):
             item.lon, item.lat, item.located = obj.location.x, obj.location.y, True
+            item.osm_id = obj.id
     locate_ways(pbf, ways)
-    for name in ("places", "streets", "addresses", "pois"):
+    for name in ("places", "streets", "addresses", "pois", "entrances"):
         setattr(raw, name, [i for i in getattr(raw, name) if i.located])
+    link_entrances(raw)
     return raw
+
+
+def entrance_number(tags: Mapping[str, str]) -> str:
+    for key in ("ref", "addr:unit"):
+        if v := (tags.get(key) or "").strip():
+            return v
+    name = (tags.get("name") or "").strip()
+    return name if SHORT_NAME_RE.fullmatch(name) else ""
+
+
+def link_entrances(raw: Raw) -> None:
+    """Each entrance on an addressed building's outline joins that address (the first, if two
+    buildings share it). Entrances drawn next to a building, off its outline, stay loose."""
+    by_node = {e.osm_id: e for e in raw.entrances}
+    if not by_node:
+        return
+    for a in raw.addresses:
+        for ref in dict.fromkeys(a.refs or ()):
+            e = by_node.get(ref)
+            if e is not None and not e.owned:
+                e.owned = True
+                a.entrances.append(e)
 
 
 def locate_ways(pbf: Path, ways: list[Item]) -> None:
@@ -400,7 +447,7 @@ def build_index(raw: Raw) -> list[Entity]:
                         entities.append(Entity(KIND_STREET, {}, "addr:place", a.lon, a.lat, 0, p, None))
                     orphan_spelling[owner][aplace] += 1
             e = entities[owner]
-            e.houses.append((house, a.lon, a.lat))
+            e.houses.append((house, a.lon, a.lat, a.entrances))
             if e.kind == KIND_STREET:
                 e.bbox = extend_bbox(e.bbox, a.lon, a.lat)
         for idx, spellings in orphan_spelling.items():
@@ -487,13 +534,16 @@ def order_entities(entities: list[Entity]) -> tuple[list[int], int]:
     return settlements + rest, len(settlements)
 
 
-def write_index(entities: list[Entity], path: Path, osm_date: str, built_at: int | None = None) -> dict[str, int]:
+def write_index(entities: list[Entity], path: Path, osm_date: str, built_at: int | None = None,
+                loose_entrances: list[Item] = ()) -> dict[str, int]:
+    """`loose_entrances`: entrances on no address's outline, kept for the map (address NONE)."""
     order, n_settlements = order_entities(entities)
     new_id = np.empty(len(entities), dtype=np.int64)
     new_id[order] = np.arange(len(order))
     strings = Strings()
     ent = np.zeros(len(order), dtype=ENTITY_DT)
     addrs: list[tuple[int, int, int]] = []
+    entrances: list[tuple[int, int, int, int]] = []
     postings: dict[str, set[int]] = defaultdict(set)
     children: dict[int, list[int]] = defaultdict(list)
 
@@ -512,7 +562,11 @@ def write_index(entities: list[Entity], path: Path, osm_date: str, built_at: int
             children[int(new_id[e.parent])].append(nid)
         houses = sorted(e.houses, key=lambda h: house_sort_key(h[0]))
         r["addr"], r["naddr"] = len(addrs), len(houses)
-        addrs.extend((strings.add(h), q6(lon), q6(lat)) for h, lon, lat in houses)
+        for h, lon, lat, ents in houses:
+            for en in sorted(ents, key=lambda en: house_sort_key(en.tags["ref"] or "~")):
+                ref = en.tags["ref"]
+                entrances.append((len(addrs), strings.add(ref) if ref else NONE, q6(en.lat), q6(en.lon)))
+            addrs.append((strings.add(h), q6(lon), q6(lat)))
         for v in set(e.names.values()):
             for tok in fold(v):
                 postings[tok].add(nid)
@@ -529,6 +583,13 @@ def write_index(entities: list[Entity], path: Path, osm_date: str, built_at: int
     if addrs:
         addr_rec["house"], addr_rec["lat"], addr_rec["lon"] = zip(*((h, la, lo) for h, lo, la in addrs))
 
+    for en in loose_entrances:
+        ref = en.tags["ref"]
+        entrances.append((NONE, strings.add(ref) if ref else NONE, q6(en.lat), q6(en.lon)))
+    entr_rec = np.zeros(len(entrances), dtype=ENTRANCE_DT)
+    if entrances:
+        entr_rec["address"], entr_rec["ref"], entr_rec["lat"], entr_rec["lon"] = zip(*entrances)
+
     tokens = sorted(postings)
     encoded = [t.encode("ascii") for t in tokens]
     tok_blob = b"".join(encoded)
@@ -539,25 +600,28 @@ def write_index(entities: list[Entity], path: Path, osm_date: str, built_at: int
 
     sections = [
         pad4(bytes(strings.data)), ent.tobytes(), addr_rec.tobytes(), tok_off.tobytes(),
-        pad4(tok_blob), post_start.tobytes(), post_arr.tobytes(),
+        pad4(tok_blob), post_start.tobytes(), post_arr.tobytes(), entr_rec.tobytes(),
     ]
     offsets, pos = [], HEADER.size
     for s in sections:
         offsets.append(pos)
         pos += len(s)
+    trailer = TRAILER.pack(offsets[-1], len(entr_rec), ENTRANCE_MAGIC)
+    pos += len(trailer)
     header = HEADER.pack(
-        MAGIC, FORMAT, 0, len(ent), n_settlements, len(addr_rec), len(tokens), *offsets,
+        MAGIC, FORMAT, FLAG_ENTRANCES, len(ent), n_settlements, len(addr_rec), len(tokens), *offsets[:7],
         osm_date.encode("ascii").ljust(16, b"\0"), int(built_at if built_at is not None else time.time()), pos,
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_bytes(header + b"".join(sections))
+    tmp.write_bytes(header + b"".join(sections) + trailer)
     tmp.replace(path)
     kinds = Counter(ent["kind"].tolist())
     return {
         "bytes": pos, "entities": len(ent), "places": kinds[KIND_PLACE], "streets": kinds[KIND_STREET],
         "pois": kinds[KIND_POI], "addresses": len(addr_rec), "tokens": len(tokens), "postings": len(post_arr),
-        "string_bytes": len(strings.data),
+        "string_bytes": len(strings.data), "entrances": len(entr_rec),
+        "numbered_entrances": int((entr_rec["ref"] != NONE).sum()),
     }
 
 
@@ -585,6 +649,7 @@ class SearchFile:
     post_start: np.ndarray
     postings: np.ndarray
     strings_offset: int
+    entrances: np.ndarray  # ENTRANCE_DT, sorted by address (NONE last); empty in a file without them
 
     def string(self, offset: int) -> str | None:
         if offset == NONE:
@@ -608,7 +673,7 @@ class SearchFile:
 
 def read_search(path: Path) -> SearchFile:
     data = path.read_bytes()
-    (magic, fmt, _flags, n_ent, n_settlements, n_addr, n_tok, o_str, o_ent, o_addr, o_toff, o_tblob, o_pstart, o_post,
+    (magic, fmt, flags, n_ent, n_settlements, n_addr, n_tok, o_str, o_ent, o_addr, o_toff, o_tblob, o_pstart, o_post,
      date, built, size) = HEADER.unpack_from(data)
     if magic != MAGIC or fmt != FORMAT or size != len(data):
         raise ValueError(f"not a format-{FORMAT} search file: {path}")
@@ -616,13 +681,19 @@ def read_search(path: Path) -> SearchFile:
     blob = data[o_tblob : o_tblob + int(tok_off[-1])]
     tokens = [blob[tok_off[i] : tok_off[i + 1]].decode("ascii") for i in range(n_tok)]
     post_start = np.frombuffer(data, dtype="<u4", count=n_tok + 1, offset=o_pstart)
+    entrances = np.zeros(0, dtype=ENTRANCE_DT)
+    if flags & FLAG_ENTRANCES:
+        o_entr, n_entr, entr_magic = TRAILER.unpack_from(data, len(data) - TRAILER.size)
+        if entr_magic != ENTRANCE_MAGIC:
+            raise ValueError(f"entrance trailer missing: {path}")
+        entrances = np.frombuffer(data, dtype=ENTRANCE_DT, count=n_entr, offset=o_entr)
     return SearchFile(
         date.rstrip(b"\0").decode(), built, n_settlements, data,
         np.frombuffer(data, dtype=ENTITY_DT, count=n_ent, offset=o_ent),
         np.frombuffer(data, dtype=ADDR_DT, count=n_addr, offset=o_addr),
         tokens, post_start,
         np.frombuffer(data, dtype="<u4", count=int(post_start[-1]), offset=o_post),
-        o_str,
+        o_str, entrances,
     )
 
 
@@ -651,6 +722,11 @@ def validate(sf: SearchFile) -> list[str]:
             if not (p["child"] <= i < p["child"] + p["nchild"]):
                 problems.append(f"entity {i} outside its parent's children")
                 break
+    addr = sf.entrances["address"].astype(np.int64)
+    if (np.diff(addr) < 0).any():
+        problems.append("entrances not sorted by address")
+    if ((addr >= len(sf.addresses)) & (addr != NONE)).any():
+        problems.append("entrance address out of range")
     return problems
 
 
@@ -663,9 +739,10 @@ def build_region_search(pbf: Path, output: Path, osm_date: str) -> dict[str, int
     t1 = time.monotonic()
     entities = build_index(raw)
     t2 = time.monotonic()
-    stats = write_index(entities, output, osm_date)
+    stats = write_index(entities, output, osm_date, loose_entrances=[e for e in raw.entrances if not e.owned])
     t3 = time.monotonic()
     log(f"{output.name}: {stats['bytes'] / 1e6:.1f} MB, {stats['places']} places, {stats['streets']} streets, "
-        f"{stats['addresses']} addresses, {stats['pois']} POIs, {stats['tokens']} tokens; "
+        f"{stats['addresses']} addresses, {stats['pois']} POIs, {stats['tokens']} tokens, "
+        f"{stats['entrances']} entrances ({stats['numbered_entrances']} numbered); "
         f"read {t1 - t0:.0f} s, build {t2 - t1:.0f} s, write {t3 - t2:.0f} s")
     return stats

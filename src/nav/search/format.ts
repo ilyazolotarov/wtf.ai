@@ -6,6 +6,12 @@ export const SEARCH_FORMAT = 1;
 export const HEADER_BYTES = 76;
 export const ENTITY_BYTES = 44;
 export const ADDRESS_BYTES = 12;
+/** Flags (u16 after the format): the file ends with an entrance section and a trailer (offset, count, "WTFE"). */
+export const FLAG_ENTRANCES = 1;
+export const TRAILER_BYTES = 12;
+export const ENTRANCE_MAGIC = "WTFE";
+/** u32 address (NONE: an entrance of no address), u32 number string (NONE: none), i32 lat, lon. */
+export const ENTRANCE_BYTES = 16;
 /** No string, parent or children. */
 export const NONE = 0xffffffff;
 /** Coordinates are integers in 1e-6°. */
@@ -14,6 +20,7 @@ export const COORD_SCALE = 1e-6;
 export const EntityKind = { place: 1, street: 2, poi: 3 } as const;
 
 export interface SearchHeader {
+  flags: number;
   entities: number;
   /** Entities 0 … settlements − 1 are the settlements: only they have children. */
   settlements: number;
@@ -42,6 +49,7 @@ export function parseHeader(bytes: Uint8Array): SearchHeader {
   let osmDate = "";
   for (let i = 52; i < 68 && bytes[i] !== 0; i++) osmDate += String.fromCharCode(bytes[i]);
   return {
+    flags: v.getUint16(6, true),
     entities: u32(8),
     settlements: u32(12),
     addresses: u32(16),

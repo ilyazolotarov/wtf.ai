@@ -41,10 +41,11 @@ const POI_KEYS: Record<string, keyof Strings> = {
 const localName = (r: { name: string; nameEn: string | null }, language: "en" | "uk") =>
   language === "en" && r.nameEn ? r.nameEn : r.name;
 
-/** "вулиця Шевченка, 10", "Сільпо", "Чернігів". */
-export function resultTitle(r: SearchResult, language: "en" | "uk"): string {
+/** "вулиця Шевченка, 10", "вулиця Шевченка, 10, під'їзд 3", "Сільпо", "Чернігів". */
+export function resultTitle(r: SearchResult, language: "en" | "uk", t: T): string {
   const name = localName(r, language);
-  return r.house ? `${name}, ${r.house}` : name;
+  const house = r.house ? `${name}, ${r.house}` : name;
+  return r.entrance ? `${house}, ${t("searchEntrance").replace("{n}", r.entrance)}` : house;
 }
 
 /** What it is and where: "Village", "Chernihiv", "Fuel · Chernihiv". */

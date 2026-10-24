@@ -46,7 +46,7 @@ function main(argv: string[]) {
     console.log(`\n"${query}": ${results.length} results in ${ms.toFixed(1)} ms`);
     for (const r of results) {
       const where = r.settlement ? ` · ${r.settlement.name}` : "";
-      const house = r.house ? `, ${r.house}` : "";
+      const house = (r.house ? `, ${r.house}` : "") + (r.entrance ? `, entrance ${r.entrance}` : "");
       console.log(
         `  ${r.score.toFixed(1).padStart(6)}  ${r.kind.padEnd(7)} ${r.name}${house}${where}  ` +
           `[${r.tag}] ${r.lat.toFixed(5)},${r.lon.toFixed(5)}`,

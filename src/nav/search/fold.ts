@@ -88,3 +88,37 @@ export function parseQuery(query: string): ParsedQuery {
   const house = houseIndex >= 0 && named ? foldHouse(pieces[houseIndex]) : null;
   return { tokens, house: house || null };
 }
+
+// "під'їзд", "підʼїзд", "пiдїзд", "подъезд" (or "подьезд", "подезд"), "п." or "п", "entrance", "ent", "pidizd": the word for an entrance.
+const ENTRANCE_WORD = String.raw`(?:п[іi]д['’ʼ\u0060]?[їi]зд|под[ъь]?езд|п\.?|entrance|entr?\.?|pid['’ʼ\u0060]?izd)`;
+const ENTRANCE_AT_END = new RegExp(String.raw`(?:^|[\s,;])${ENTRANCE_WORD}\s*(\d{1,3}[a-zа-яієїґ]?)\s*$`, "iu");
+/** "3 під'їзд", "3-й під'їзд": the number before the word. */
+const ENTRANCE_BEFORE_WORD = new RegExp(String.raw`(?:^|[\s,;])(\d{1,3}[a-zа-яієїґ]?)(?:\s*-?\s*[йиі])?\s*${ENTRANCE_WORD}\s*$`, "iu");
+/** Two numbers at the end ("Оболонський 16 3"): a house, then its entrance. */
+const TWO_NUMBERS_AT_END = /(?:^|[\s,;])(\d[^\s,;]*)[\s,;]+(\d{1,3})\s*$/u;
+/** The word alone (being typed, or the number not yet): dropped, so the house is still found meanwhile. */
+const ENTRANCE_WORD_AT_END = new RegExp(String.raw`(?:^|[\s,;])(?:п[іi]д['’ʼ\u0060]?[їi]?з?д?|под[ъь]?е?з?д?|entr?a?n?c?e?)\s*$`, "iu");
+
+/**
+ * A query ending in an entrance ("Оболонський 16 під'їзд 3", "…16, п. 3", "…16 entrance 3", "…16 3 під'їзд",
+ * "…16 3"): the rest, and the entrance's number folded like a house number. Only after a house number.
+ */
+export function splitEntrance(query: string): { rest: string; entrance: string | null } {
+  const hasHouse = (rest: string) => /(?:^|[\s,;])\d/.test(rest);
+  for (const re of [ENTRANCE_AT_END, ENTRANCE_BEFORE_WORD]) {
+    const m = re.exec(query);
+    if (m && hasHouse(query.slice(0, m.index))) return { rest: query.slice(0, m.index), entrance: foldHouse(m[1]) };
+  }
+  // "16 3": the street's name before them, so "8 Березня 3" (a house 3 on 8 Березня) stays a house.
+  const two = TWO_NUMBERS_AT_END.exec(query);
+  if (two) {
+    const rest = query.slice(0, two.index + two[0].indexOf(two[1]) + two[1].length);
+    if (/[^\d\s,;]/.test(query.slice(0, two.index))) return { rest, entrance: foldHouse(two[2]) };
+  }
+  const w = ENTRANCE_WORD_AT_END.exec(query);
+  if (w && w[0].trim().length > 1) {
+    const rest = query.slice(0, w.index);
+    if (/(?:^|[\s,;])\d[^\s,;]*[\s,;]*$/.test(rest)) return { rest: rest + " ", entrance: null };
+  }
+  return { rest: query, entrance: null };
+}

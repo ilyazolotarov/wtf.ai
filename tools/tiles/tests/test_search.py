@@ -50,13 +50,20 @@ NODES = {
     20: (at(C, 0, -2), {}), 21: (at(C, 5, -2), {}),
     # Шевченка (village)
     30: (at(V, -1, 0), {}), 31: (at(V, 1, 0), {}),
-    # building (way 110) on Шевченка, city
-    40: (at(C, 1, 1.2), {}), 41: (at(C, 1.2, 1.2), {}), 42: (at(C, 1.2, 1.4), {}), 43: (at(C, 1, 1.4), {}),
+    # building (way 110) on Шевченка, city; entrances 1 and 2 on its outline, a garage door (left out)
+    40: (at(C, 1, 1.2), {"entrance": "staircase", "ref": "2"}), 41: (at(C, 1.2, 1.2), {"entrance": "staircase", "ref": "1"}),
+    42: (at(C, 1.2, 1.4), {"entrance": "garage", "ref": "9"}), 43: (at(C, 1, 1.4), {}),
+    # an entrance of no addressed building, without a number
+    72: (at(C, 6, 6), {"entrance": "yes"}),
     # shop area (way 120)
     50: (at(C, 4, -1.8), {}), 51: (at(C, 4.2, -1.8), {}), 52: (at(C, 4.2, -1.6), {}),
     # address nodes
     60: (at(C, 2, 1.2), {"addr:street": "вулиця Шевченка", "addr:housenumber": "10"}),
     61: (at(C, 3, 1.2), {"addr:street": "вулиця Шевченка", "addr:housenumber": "10А"}),
+    # "10" mapped three more times beside it (its shops, an address point): one house in search
+    73: (at(C, 2.02, 1.2), {"addr:street": "вулиця Шевченка", "addr:housenumber": "10", "shop": "bakery"}),
+    74: (at(C, 2.04, 1.2), {"addr:street": "вулиця Шевченка", "addr:housenumber": "10"}),
+    75: (at(C, 2.06, 1.2), {"addr:street": "вулиця Шевченка", "addr:housenumber": "10"}),
     62: (at(C, 0.5, 1.2), {"addr:street": "вулиця Шевченка", "addr:housenumber": "2"}),
     63: (at(C, 4, 1.2), {"addr:street": "вулиця Шевченка", "addr:housenumber": "12/2"}),
     64: (at(V, 0, 0.2), {"addr:street": "вулиця Шевченка", "addr:housenumber": "10"}),
@@ -103,7 +110,8 @@ def built(tmp_path_factory):
     raw = read_objects(osm)
     entities = build_index(raw)
     path = tmp / "town.search.bin"
-    stats = write_index(entities, path, "2026-10-01", built_at=1_790_000_000)
+    stats = write_index(entities, path, "2026-10-01", built_at=1_790_000_000,
+                        loose_entrances=[e for e in raw.entrances if not e.owned])
     return raw, stats, path, read_search(path)
 
 
@@ -111,7 +119,7 @@ def test_reading(built):
     raw, _, _, _ = built
     assert sorted(display for p in raw.places for display in [p.names["name"]]) == ["Іванівка", "Подусівка", "Чернігів"]
     assert len(raw.streets) == 4
-    assert len(raw.addresses) == 10  # 9 nodes + the building
+    assert len(raw.addresses) == 13  # 12 nodes + the building
     assert [p.names["name"] for p in raw.pois] == ["Сільпо", "WOG"]
     shop = next(p for p in raw.pois if p.names["name"] == "Сільпо")
     assert shop.lon == pytest.approx(int((C[0] + (4 + 0.4 / 3) * D) * 1e7), abs=20)  # centroid, closing node once
@@ -146,7 +154,7 @@ def test_streets_merged_per_settlement(built):
     e = sf.entities[city_shev]
     assert sf.string(int(e["name_en"])) == "Shevchenka Street"
     assert sf.string(int(e["tag"])) == "highway=tertiary"  # the longer way's class
-    assert sf.houses(city_shev) == ["1", "2", "10", "10А", "12/2"]  # natural order
+    assert sf.houses(city_shev) == ["1", "2", "10", "10", "10", "10", "10А", "12/2"]  # natural order
 
 
 def test_address_only_street_and_addr_place(built):
@@ -166,6 +174,58 @@ def test_tokens_cover_every_name(built):
     (wog,) = sf.find("WOG")
     assert sf.entities[wog]["kind"] == KIND_POI and sf.string(int(sf.entities[wog]["tag"])) == "amenity=fuel"
     assert sf.find("Сільпо")[0] in sf.posting("silpo")
+
+
+def test_entrances_hang_off_their_address(built):
+    _, stats, _, sf = built
+    assert validate(sf) == [] and stats["entrances"] == 3 and stats["numbered_entrances"] == 2
+    shev = sf.find("вулиця Шевченка", KIND_STREET)
+    city_shev = next(i for i in shev if sf.houses(i)[0] == "1")
+    first = int(sf.entities[city_shev]["addr"])  # house "1": the building with the entrances
+    mine = sf.entrances[sf.entrances["address"] == first]
+    assert [sf.string(int(r)) for r in mine["ref"]] == ["1", "2"]  # in order, the garage left out
+    loose = sf.entrances[sf.entrances["address"] == NONE]
+    assert len(loose) == 1 and loose[0]["ref"] == NONE
+    assert sf.entrances["address"][-1] == NONE  # sorted: the loose ones last
+
+
+def test_associated_street_gives_houses_their_street(tmp_path):
+    # Houses tagged with a number only, listed in an associatedStreet relation: as "house", with
+    # no role, and one with its own addr:street (which wins). A relation's street way is no house.
+    nodes = {
+        1: (C, {"place": "city", "name": "Чернігів"}),
+        10: (at(C, 0, 1), {}), 11: (at(C, 5, 1), {}),
+        20: (at(C, 1, 1.2), {}), 21: (at(C, 1.2, 1.2), {}), 22: (at(C, 1.2, 1.4), {}),
+        30: (at(C, 2, 1.2), {"addr:housenumber": "30"}),
+        31: (at(C, 3, 1.2), {"addr:housenumber": "5", "addr:street": "вулиця Нова"}),
+        32: (at(C, 4, 1.2), {"addr:housenumber": "99"}),  # in no relation: no street, dropped
+    }
+    ways = [
+        (101, [10, 11], {"highway": "secondary", "name": "проспект Миру"}),
+        (110, [20, 21, 22, 20], {"building": "apartments", "addr:housenumber": "28"}),
+    ]
+    out = ['<?xml version="1.0" encoding="UTF-8"?>', '<osm version="0.6" generator="test">']
+    for nid, ((lon, lat), t) in nodes.items():
+        out.append(f'<node id="{nid}" version="1" lat="{lat:.7f}" lon="{lon:.7f}">'
+                   + "".join(f'<tag k="{k}" v="{v}"/>' for k, v in t.items()) + "</node>")
+    for wid, refs, t in ways:
+        out.append(f'<way id="{wid}" version="1">' + "".join(f'<nd ref="{r}"/>' for r in refs)
+                   + "".join(f'<tag k="{k}" v="{v}"/>' for k, v in t.items()) + "</way>")
+    out.append('<relation id="1" version="1"><member type="way" ref="101" role="street"/>'
+               '<member type="way" ref="110" role="house"/><member type="node" ref="30" role=""/>'
+               '<member type="node" ref="31" role="house"/>'
+               '<tag k="type" v="associatedStreet"/><tag k="name" v="проспект Миру"/></relation>')
+    out.append("</osm>")
+    osm = tmp_path / "assoc.osm"
+    osm.write_text("\n".join(out), encoding="utf-8")
+    raw = read_objects(osm)
+    assert sorted((a.tags["street"], a.tags["house"]) for a in raw.addresses) == [
+        ("вулиця Нова", "5"), ("проспект Миру", "28"), ("проспект Миру", "30")]
+    path = tmp_path / "assoc.search.bin"
+    write_index(build_index(raw), path, "2026-10-01")
+    sf = read_search(path)
+    (myru,) = sf.find("проспект Миру", KIND_STREET)
+    assert sf.houses(myru) == ["28", "30"]
 
 
 def test_ts_fixture_is_current(built):
