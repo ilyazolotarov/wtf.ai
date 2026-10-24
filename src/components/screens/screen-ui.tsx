@@ -6,6 +6,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  useWindowDimensions,
   View,
   type StyleProp,
   type ViewStyle,
@@ -13,7 +14,7 @@ import {
 
 import { Icon, type IconName } from "@/components/ui/icon";
 import { T } from "@/components/ui/text";
-import { Radius, usePalette } from "@/constants/theme";
+import { PageMaxWidth, Radius, usePalette } from "@/constants/theme";
 import type { Strings } from "@/i18n/en";
 import { useT } from "@/i18n/provider";
 
@@ -41,14 +42,14 @@ export function ScreenContent({
           { backgroundColor: palette.sheetBg, paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right },
         ]}
       >
-        <View style={styles.pageHeader}>
+        <View style={[styles.pageHeader, styles.column]}>
           <PageHeader title={title} />
         </View>
         <ScrollView
           ref={scrollRef}
           keyboardShouldPersistTaps="handled"
           scrollEnabled={scrollEnabled}
-          contentContainerStyle={[styles.content, { paddingBottom: styles.content.paddingBottom + insets.bottom }]}
+          contentContainerStyle={[styles.content, styles.column, { paddingBottom: styles.content.paddingBottom + insets.bottom }]}
         >
           {children}
         </ScrollView>
@@ -67,6 +68,7 @@ export function ScreenContent({
       scrollEnabled={scrollEnabled}
       contentContainerStyle={[
         styles.content,
+        styles.column,
         styles.contentNoHeader,
         android && { paddingBottom: styles.content.paddingBottom + insets.bottom },
       ]}
@@ -85,6 +87,15 @@ export function ScreenContent({
       {body}
     </View>
   );
+}
+
+/**
+ * Side padding for a full-screen modal (onboarding, the firmware check): `base`, or more on a tablet's wide window,
+ * so its content keeps a page's width (PageMaxWidth), centred.
+ */
+export function useSidePadding(base: number): number {
+  const { width } = useWindowDimensions();
+  return Math.max(base, (width - PageMaxWidth) / 2);
 }
 
 function PageHeader({ title }: { title: string }) {
@@ -354,6 +365,8 @@ const styles = StyleSheet.create({
   },
   contentNoHeader: { paddingTop: 16 },
   page: { flex: 1 },
+  // A tablet's wide window: the page keeps a phone's width, centred (PageMaxWidth).
+  column: { width: "100%", maxWidth: PageMaxWidth, alignSelf: "center" },
   pageHeader: { paddingHorizontal: 16, paddingTop: 8 },
   headerWrap: { marginHorizontal: -16, paddingHorizontal: 16, paddingBottom: 6, marginBottom: -6 },
   header: {

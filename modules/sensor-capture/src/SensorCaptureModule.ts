@@ -105,10 +105,17 @@ export type SensorCaptureEvents = {
   onImuBatch: (batch: NativeImuBatch) => void;
   onAuthorization: (p: SensorPermissions) => void;
   onMemoryWarning: (e: { level?: string }) => void;
+  /** Android: the screen turned (`displayRotation`), also by 180°, which keeps the window's size. */
+  onDisplayRotation: (e: { degrees: number }) => void;
 };
 
 declare class SensorCaptureNativeModule extends NativeModule<SensorCaptureEvents> {
   nowUs(): number;
+  /**
+   * Android only (undefined on iOS, web and older builds): the screen's turn from the device's natural orientation,
+   * degrees counter-clockwise (0, 90, 180, 270). Not 0 on a tablet, which turns the window though the app is portrait.
+   */
+  displayRotation?(): number;
   getPermissions(): Promise<SensorPermissions>;
   requestLocationPermission(): Promise<LocationPermission>;
   startGnss(): Promise<boolean>;

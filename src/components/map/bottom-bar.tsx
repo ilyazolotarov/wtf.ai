@@ -135,7 +135,9 @@ const styles = StyleSheet.create({
   dot: {
     position: "absolute",
     top: 8,
-    right: 22,
+    // From the button's centre (where the icon is), not its edge: a wider bar kept the dot far from its icon.
+    left: "50%",
+    marginLeft: 23,
     width: 12,
     height: 12,
     borderRadius: 6,

@@ -2,6 +2,12 @@ package ai.wtf.sensorcapture
 
 import ai.wtf.sensorcapture.logic.SensorLogic
 import android.Manifest
+import android.content.Context
+import android.hardware.display.DisplayManager
+import android.os.Handler
+import android.os.Looper
+import android.view.Display
+import android.view.Surface
 import com.facebook.react.bridge.ReactContext
 import expo.modules.interfaces.permissions.PermissionsResponse
 import expo.modules.interfaces.permissions.PermissionsResponseListener
@@ -26,6 +32,14 @@ class ImuOptions : Record {
 
 class SensorCaptureModule : Module() {
   private var capture: SensorCapture? = null
+  private var displayListener: DisplayManager.DisplayListener? = null
+
+  private fun displays(): DisplayManager? =
+    appContext.reactContext?.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
+
+  /** The screen's turn from the device's natural orientation, degrees counter-clockwise (Display.getRotation). */
+  private fun displayRotation(): Int =
+    SensorLogic.rotationDegrees(displays()?.getDisplay(Display.DEFAULT_DISPLAY)?.rotation ?: Surface.ROTATION_0)
 
   private val fine = Manifest.permission.ACCESS_FINE_LOCATION
   private val coarse = Manifest.permission.ACCESS_COARSE_LOCATION
@@ -58,19 +72,37 @@ class SensorCaptureModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("SensorCapture")
 
-    Events("onGnss", "onGnssError", "onImuBatch", "onAuthorization", "onMemoryWarning")
+    Events("onGnss", "onGnssError", "onImuBatch", "onAuthorization", "onMemoryWarning", "onDisplayRotation")
 
     OnCreate {
       AppHealth.onMemoryWarning = { level -> sendEvent("onMemoryWarning", mapOf("level" to level)) }
+      // A turn by 180° keeps the window's size, so JS hears of it only from here.
+      var last = displayRotation()
+      displayListener = object : DisplayManager.DisplayListener {
+        override fun onDisplayAdded(displayId: Int) {}
+        override fun onDisplayRemoved(displayId: Int) {}
+        override fun onDisplayChanged(displayId: Int) {
+          if (displayId != Display.DEFAULT_DISPLAY) return
+          val degrees = displayRotation()
+          if (degrees == last) return
+          last = degrees
+          sendEvent("onDisplayRotation", mapOf("degrees" to degrees))
+        }
+      }.also { displays()?.registerDisplayListener(it, Handler(Looper.getMainLooper())) }
     }
 
     OnDestroy {
+      displayListener?.let { displays()?.unregisterDisplayListener(it) }
+      displayListener = null
       AppHealth.onMemoryWarning = null
       capture?.shutdown()
       capture = null
     }
 
     Function("nowUs") { SensorCapture.nowUs() }
+
+    // A tablet turns the window though the app asks for portrait (Android 16 ignores it on large screens).
+    Function("displayRotation") { displayRotation() }
 
     AsyncFunction("getPermissions") { promise: Promise ->
       permissions(false, { promise.resolve(it) }, promise)

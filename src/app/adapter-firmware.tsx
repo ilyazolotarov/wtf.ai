@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { ScreenCard } from "@/components/screens/screen-ui";
+import { ScreenCard, useSidePadding } from "@/components/screens/screen-ui";
 import { Icon } from "@/components/ui/icon";
 import { T } from "@/components/ui/text";
 import { Radius, usePalette } from "@/constants/theme";
@@ -29,6 +29,8 @@ export default function AdapterFirmwareScreen() {
   const { t } = useT();
   const palette = usePalette();
   const insets = useSafeAreaInsets();
+  // A tablet's wide window: the content keeps a page's width, centred.
+  const sidePadding = useSidePadding(styles.root.paddingHorizontal);
   const { link } = useRuntime();
   const params = useLocalSearchParams<{ updater?: string; adapter?: string; again?: string }>();
   const updater: FirmwareUpdater = params.updater === "vgate" ? "vgate" : "obdlink";
@@ -71,7 +73,7 @@ export default function AdapterFirmwareScreen() {
     <View
       style={[
         styles.root,
-        { backgroundColor: palette.bg, paddingTop: insets.top + 12, paddingBottom: insets.bottom + 10 },
+        { backgroundColor: palette.bg, paddingHorizontal: sidePadding, paddingTop: insets.top + 12, paddingBottom: insets.bottom + 10 },
       ]}
     >
       <ScrollView style={styles.scroll} contentContainerStyle={styles.body}>

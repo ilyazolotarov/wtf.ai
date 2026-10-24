@@ -249,3 +249,12 @@ class ImuBatcherTest {
     assertEquals(listOf(4.0), p["mag"])
   }
 }
+
+class DisplayRotationTest {
+  @Test
+  fun surfaceRotationAsDegrees() {
+    // Surface.ROTATION_0/90/180/270 are 0…3.
+    assertEquals(listOf(0, 90, 180, 270), (0..3).map { SensorLogic.rotationDegrees(it) })
+    assertEquals(0, SensorLogic.rotationDegrees(7))
+  }
+}

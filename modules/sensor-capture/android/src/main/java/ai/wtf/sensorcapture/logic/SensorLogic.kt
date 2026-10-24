@@ -116,6 +116,9 @@ object SensorLogic {
     }
     return location to accuracy
   }
+
+  /** `Display.getRotation()` (Surface.ROTATION_0…270 = 0…3) as degrees counter-clockwise; anything else is 0. */
+  fun rotationDegrees(rotation: Int): Int = if (rotation in 0..3) rotation * 90 else 0
 }
 
 /**

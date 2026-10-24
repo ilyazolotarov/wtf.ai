@@ -3,7 +3,7 @@ import { useState } from "react";
 import { Platform, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { ScreenCard } from "@/components/screens/screen-ui";
+import { ScreenCard, useSidePadding } from "@/components/screens/screen-ui";
 import { useNavStatus } from "@/components/status/use-nav-status";
 import { useWakeSetup, wakeSupported } from "@/components/vehicle/use-wake-setup";
 import { Icon, type IconName } from "@/components/ui/icon";
@@ -39,6 +39,8 @@ export default function OnboardingScreen() {
   const { t } = useT();
   const palette = usePalette();
   const insets = useSafeAreaInsets();
+  // A tablet's wide window: the content keeps a page's width, centred.
+  const sidePadding = useSidePadding(styles.root.paddingHorizontal);
   const nav = useNavStatus();
   const { requestPermission } = usePositionPermission();
   const { link } = useRuntime();
@@ -111,6 +113,7 @@ export default function OnboardingScreen() {
         styles.root,
         {
           backgroundColor: palette.bg,
+          paddingHorizontal: sidePadding,
           paddingTop: insets.top + 12,
           paddingBottom: insets.bottom + 10,
         },

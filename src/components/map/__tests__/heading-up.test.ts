@@ -2,6 +2,7 @@ import { headingUpRad, holdHeading, mapBearingDeg, travelHeadingRad } from "@/co
 import type { PositionEstimate } from "@/nav/position/types";
 
 jest.mock("expo-location", () => ({}));
+jest.mock("../../../../modules/sensor-capture/src/SensorCaptureModule", () => ({}));
 
 const at = (p: Partial<PositionEstimate>): PositionEstimate => ({
   lat: 50.45,

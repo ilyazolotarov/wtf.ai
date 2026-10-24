@@ -1,6 +1,7 @@
-import { turnFor, type MapTurn } from "@/components/map/map-turn";
+import { screenGravity, turnFor, type MapTurn } from "@/components/map/map-turn";
 
 jest.mock("@/services/runtime", () => ({}));
+jest.mock("../../../../modules/sensor-capture/src/SensorCaptureModule", () => ({}));
 
 /** Gravity in the phone's frame (x to the screen's right, y to its top, z out of it) with the phone turned `deg` clockwise from upright, leaning back `leanDeg`. */
 function gravity(deg: number, leanDeg = 20): [number, number, number] {
@@ -40,5 +41,27 @@ describe("the map's turn for how the phone is held", () => {
   test("units don't matter: m/s² as g", () => {
     const [x, y, z] = gravity(-90);
     expect(turnFor([x * 9.81, y * 9.81, z * 9.81], 0)).toBe(90);
+  });
+});
+
+describe("a tablet that turns its window itself", () => {
+  // Display.getRotation: the window turned counter-clockwise, as the device was (turned left = -90 clockwise here).
+  test.each<[string, number, number]>([
+    ["portrait, the device turned left", -90, 90],
+    ["portrait, the device turned right", 90, 270],
+    ["landscape the other way up", 180, 180],
+  ])("%s: the map needs no turn of its own", (_, deg, rotation) => {
+    expect(turnFor(screenGravity(gravity(deg), rotation), 0)).toBe(0);
+  });
+
+  test("with auto-rotate off (the window kept), the map still turns", () => {
+    expect(turnFor(screenGravity(gravity(-90), 0), 0)).toBe(90);
+    // Window at 90, the device turned back upright: the map turns the other way.
+    expect(turnFor(screenGravity(gravity(0), 90), 0)).toBe(-90);
+  });
+
+  test("no rotation leaves gravity as it is", () => {
+    const g = gravity(30);
+    expect(screenGravity(g, 0)).toBe(g);
   });
 });

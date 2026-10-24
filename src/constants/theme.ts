@@ -175,4 +175,9 @@ export const Spacing = {
 } as const;
 
 export const BottomTabInset = Platform.select({ ios: 50, android: 80 }) ?? 0;
-export const MaxContentWidth = 800;
+/**
+ * Wide screens (a tablet, which turns the window itself: UI-SPEC §4.7) keep a phone's proportions: the map's panels
+ * and a page's body stop at these widths, centred, and the map shows around them. Any phone is narrower than both.
+ */
+export const PanelMaxWidth = 520;
+export const PageMaxWidth = 640;

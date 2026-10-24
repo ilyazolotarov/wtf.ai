@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 
 import type { PositionEstimate } from "@/nav/position/types";
 
+import { useDisplayRotation } from "./display-rotation";
+
 /**
  * Phone compass heading, for the walking beam on the map only. Never feed it into
  * navigation: in a car the magnetometer is off by 10–30° and shows where the phone
@@ -25,6 +27,8 @@ const UNCERTAINTY_DEG = [60, 50, 35, 20];
 
 export function useCompassHeading(enabled: boolean): CompassHeading | null {
   const [heading, setHeading] = useState<CompassHeading | null>(null);
+  // The compass gives where the device's natural top points; a tablet's turned screen has its top elsewhere.
+  const rotation = useDisplayRotation();
 
   useEffect(() => {
     if (!enabled) return;
@@ -67,7 +71,8 @@ export function useCompassHeading(enabled: boolean): CompassHeading | null {
     };
   }, [enabled]);
 
-  return enabled ? heading : null;
+  if (!enabled || !heading) return null;
+  return rotation === 0 ? heading : { ...heading, headingRad: heading.headingRad + (rotation * Math.PI) / 180 };
 }
 
 /** The compass heading to show, or null when moving faster than walking. */

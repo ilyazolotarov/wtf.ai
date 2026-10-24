@@ -96,6 +96,13 @@ persisted in kv-store. No hardcoded user-facing strings in components.
   has north at the physical top; the panels stay. A new turn holds 0.7 s, ±15° of hysteresis past the diagonal, kept
   while the phone lies flat; `map turned <deg>°` goes into the trip log. Not on Android 10–11 (a GLSurfaceView can't
   be rotated).
+- **Tablets** (Android 16 ignores the portrait lock at 600 dp and wider; a tablet's natural orientation is landscape):
+  the system turns the window itself. Gravity for the map turn is taken in the screen's frame (`screenGravity`, by
+  `Display.getRotation`: `useDisplayRotation`, also told of a 180° flip, which keeps the window's size), so the map
+  turns only where the window didn't; the walking compass adds the same rotation. The map's panels stop at
+  `PanelMaxWidth` (520), a page's body and the full-screen modals at `PageMaxWidth` (640), centred: a wide window keeps
+  a phone's proportions, the map showing around the panels. Must not drift: a phone never reaches either width, and
+  a badge or anything placed on a stretched element anchors to its content, not to the element's edge.
 
 ## 5. App shell
 

@@ -33,7 +33,7 @@ import { useFirmwareNotice } from "@/components/vehicle/use-firmware-notice";
 import { ANDROID_BLURS, BlurScope, BlurTarget } from "@/components/ui/glass-fill";
 import { FontScaleLimit, MAP_MAX_FONT_SCALE, T } from "@/components/ui/text";
 import { useHasUsableMap } from "@/config/map";
-import { usePalette } from "@/constants/theme";
+import { PanelMaxWidth, usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
 import { MOVING_MPS } from "@/services/app-update/decide";
 import { usePositionPermission } from "@/providers/position-provider";
@@ -503,7 +503,8 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFill,
     justifyContent: "space-between",
   },
-  topStack: { gap: 10 },
+  // A tablet's wide window: the panels keep a phone's width, centred, and the map shows around them (PanelMaxWidth).
+  topStack: { gap: 10, width: "100%", maxWidth: PanelMaxWidth, alignSelf: "center" },
   tourExplain: { lineHeight: 20 },
-  bottomStack: { gap: 12 },
+  bottomStack: { gap: 12, width: "100%", maxWidth: PanelMaxWidth, alignSelf: "center" },
 });
