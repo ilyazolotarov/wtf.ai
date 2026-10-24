@@ -66,8 +66,9 @@ registered. The Google Play bundle is never published, so it registers nothing.
   phone files its copy under it, and a `require()` finds the file through `Updates.localAssets` by it. Under any other
   key (the SHA-256, once) every image, font or clip added since the native build downloads and is never found:
   blank images, no error. `tools/ota/manifest.ts` refuses an export whose assets are named otherwise.
-- **Pruned.** The Worker removes what no phone needs, daily and after each publish (UPDATES-SPEC §2.1): JS of all but
-  the newest 3 runtimes per platform and distribution, sideloaded and store (each keeps only its latest update), all
+- **Pruned.** The Worker removes what no phone needs, daily and after each publish (UPDATES-SPEC §2.1): JS of runtimes
+  untouched for 30 days beyond the newest 3 per platform and distribution, sideloaded and store (each keeps only its
+  latest update), all
   but the newest 3 builds, map releases but the newest (and the one before it for 2 days). `POST /publish/prune?dry=1` lists what it would remove.
 
 ## Recovery
@@ -84,6 +85,23 @@ registered. The Google Play bundle is never published, so it registers nothing.
   ```
 
   The next publish for that runtime replaces the rollback.
+
+## Backporting a fix
+
+Phones on an older build get no JS updates: each update goes to one runtime only. A fix they need (one that brings
+them to the newest build, say) goes to each old runtime by **Backport OTA Fix** (`backport-ota.yml`, by hand on
+`main`): a script in `tools/ota/backports/` patches the JS those phones run now, and the result is exported,
+signed and published for that runtime only. The phones get it like any update, and nothing else changes under them.
+
+- **Targets**: `runtime@commit`, both full SHAs. The runtimes: `ANDROID_RUNTIME`/`IOS_RUNTIME` in the
+  `publish-builds` logs of `main`'s builds. The commit: the last one published to that runtime ("update … for runtime
+  … (commit …)" in the `publish-ota` logs), else the build's own commit.
+- **Safe by construction**: the commit must resolve to the runtime (`--expect-runtime-<platform>`) and typecheck after
+  the patch, or that target publishes nothing. Signing uses `main`'s tools with the target's config and certificate
+  (`ota:prepare --project`).
+- **Kept 30 days** by the Worker (UPDATES-SPEC §2.1): time for the phones to start the app twice.
+- A patch rewrites what all its targets share and fails where it doesn't apply; it copies new files from `main` as
+  they are, so those must import nothing the old JS lacks.
 
 ## One-time setup (owner)
 

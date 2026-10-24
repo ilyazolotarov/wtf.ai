@@ -18,6 +18,9 @@ import { deleteKeys, listAll, readJson, type Env, type R2Object } from "./bucket
 
 export const KEEP_BUILDS = 3;
 export const KEEP_RUNTIMES = 3;
+/** Besides those, every runtime registered or published to this recently: a fix backported to old runtimes
+ * (docs/OTA.md) must not push the current ones out, and the phones on them need time to start the app. */
+export const KEEP_RUNTIME_MS = 30 * 24 * 3600 * 1000;
 /** Files no kept record names are removed only after this: an upload whose record isn't written yet is younger. */
 export const STRAY_AGE_MS = 24 * 3600 * 1000;
 /** A map release newer than the current one is an upload on its way, unless nothing in it is this recent. */
@@ -68,7 +71,7 @@ async function pruneUpdates(env: Env, now: Date): Promise<string[]> {
       [...touched]
         .filter(([target]) => target.endsWith(`/${platform}`) && (distribution.get(target) ?? "sideload") === d)
         .sort((a, b) => b[1] - a[1])
-        .slice(0, KEEP_RUNTIMES)
+        .filter(([, touchedAt], i) => i < KEEP_RUNTIMES || now.getTime() - touchedAt < KEEP_RUNTIME_MS)
         .forEach(([target]) => kept.add(target));
     }
   }

@@ -3,6 +3,9 @@
 //   npx expo export --platform ios --platform android
 //   OTA_SIGNING_KEY="$(cat private-key.pem)" npm run ota:prepare -- [--dist dist] [--out ota-out] [--commit <sha>]
 //                                                                    [--runtime-ios <v>] [--runtime-android <v>]
+//                                                                    [--project <checkout>] [--expect-runtime-<platform> <v>]
+//   --project: the export is of another checkout (a backport, docs/OTA.md): its config, certificate, commit and runtime.
+//   --expect-runtime-<platform>: stop unless the checkout resolves to this runtime, so its JS never lands on other native code.
 //   OTA_SIGNING_KEY=... npm run ota:prepare -- --rollback --platform ios --runtime-ios <v>
 //                       a signed rollBackToEmbedded instead: phones of that runtime go back to their build's own JS
 //
@@ -41,13 +44,17 @@ function writeRecord(out: string, runtimeVersion: string, platform: Platform, re
 function main() {
   const dist = path.resolve(flag("dist") ?? "dist");
   const out = path.resolve(flag("out") ?? "ota-out");
-  const commit = flag("commit") ?? process.env.GITHUB_SHA ?? execFileSync("git", ["rev-parse", "HEAD"], { cwd: ROOT, encoding: "utf8" }).trim();
+  const project = flag("project") ? path.resolve(flag("project")!) : ROOT;
+  const commit =
+    flag("commit") ??
+    (project === ROOT ? process.env.GITHUB_SHA : undefined) ??
+    execFileSync("git", ["rev-parse", "HEAD"], { cwd: project, encoding: "utf8" }).trim();
   const privateKey = process.env.OTA_SIGNING_KEY;
   if (!privateKey) throw new Error("OTA_SIGNING_KEY (the PEM of the update signing key) is not set");
 
-  const updates = updatesConfig();
+  const updates = updatesConfig(project);
   const baseUrl = new URL(updates.url).origin;
-  const certificate = readFileSync(path.resolve(ROOT, updates.codeSigningCertificate), "utf8");
+  const certificate = readFileSync(path.resolve(project, updates.codeSigningCertificate), "utf8");
   const only = flag("platform");
   if (only !== undefined && !isPlatform(only)) throw new Error("--platform is ios or android");
 
@@ -63,12 +70,12 @@ function main() {
   }
 
   // What the app reads as Constants.expoConfig while it runs the update.
-  const expoClient = JSON.parse(runCli("expo/bin/cli", ["config", "--json", "--type", "public"])) as Record<string, unknown>;
+  const expoClient = JSON.parse(runCli("expo/bin/cli", ["config", "--json", "--type", "public"], project)) as Record<string, unknown>;
   const metadata = JSON.parse(readFileSync(path.join(dist, "metadata.json"), "utf8")) as ExportMetadata;
   const createdAt = new Date();
   let message: string | undefined;
   try {
-    message = execFileSync("git", ["log", "-1", "--format=%s", commit], { cwd: ROOT, encoding: "utf8" }).trim() || undefined;
+    message = execFileSync("git", ["log", "-1", "--format=%s", commit], { cwd: project, encoding: "utf8" }).trim() || undefined;
   } catch {
     // Not in this clone: the update has no title.
   }
@@ -76,7 +83,11 @@ function main() {
   if (!platforms.length) throw new Error(`${dist} has no ${only ?? "ios or android"} bundle: run npx expo export first`);
 
   for (const platform of platforms) {
-    const runtimeVersion = flag(`runtime-${platform}`) ?? resolveRuntimeVersion(platform);
+    const runtimeVersion = flag(`runtime-${platform}`) ?? resolveRuntimeVersion(platform, project);
+    const expected = flag(`expect-runtime-${platform}`);
+    if (expected && runtimeVersion !== expected) {
+      throw new Error(`${platform}: ${project} has runtime ${runtimeVersion}, not ${expected}: its JS would not fit those builds`);
+    }
     const { manifest, files } = buildManifest({
       metadata,
       platform,

@@ -34,6 +34,7 @@ import { TripUploader } from "./trip-upload/trip-uploader";
 import { NativeDiscovery } from "./vehicle-link/discovery";
 import { adapterModel, TelemetryReporter } from "./telemetry";
 import { jsCommit, jsSourceInfo } from "./js-source";
+import { nativeBuild } from "./native-build-number";
 import { PositionShareService } from "./position-share/position-share-service";
 import { setTripService, updateTripNotification } from "./trip-service";
 import { DEV_SETTINGS_VERSION, loadDevSettings } from "./dev-settings-load";
@@ -152,7 +153,7 @@ export function getRuntime(): Runtime {
     appInfo: () => ({
       sys_name: "wtf.ai",
       // The commit CI built (EXPO_PUBLIC_BUILD_SHA, inlined by Metro): which build a log came from.
-      ver_sw: `${Constants.expoConfig?.version ?? "?"} (${Constants.nativeBuildVersion ?? "dev"}${process.env.EXPO_PUBLIC_BUILD_SHA ? ` ${process.env.EXPO_PUBLIC_BUILD_SHA.slice(0, 7)}` : ""})`,
+      ver_sw: `${Constants.expoConfig?.version ?? "?"} (${nativeBuild() ?? "dev"}${process.env.EXPO_PUBLIC_BUILD_SHA ? ` ${process.env.EXPO_PUBLIC_BUILD_SHA.slice(0, 7)}` : ""})`,
       // The OTA update the drive ran, when the JS is newer than the build.
       ...jsSourceInfo(),
       // An app build or JS update waiting to be installed: a drive on old code says so.

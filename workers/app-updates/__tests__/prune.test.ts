@@ -5,6 +5,8 @@ import { prune } from "../prune";
 import { testBucket, type TestBucket } from "../test-bucket";
 
 const HOUR = 3600 * 1000;
+/** Past the 30 days a runtime is kept for however many there are. */
+const MONTH_H = 31 * 24;
 const T0 = new Date("2026-10-01T00:00:00Z").getTime();
 
 let bucket: TestBucket;
@@ -54,7 +56,7 @@ describe("prune", () => {
     ]);
   });
 
-  it("drops the JS of all but the newest 3 runtimes, all but each one's latest record, and files no kept record uses", async () => {
+  it("drops the JS of all but the newest 3 runtimes after 30 days, all but each one's latest record, and files no kept record uses", async () => {
     // Runtimes r1…r4 for iOS, registered an hour apart; r1 is the oldest.
     for (const [i, r] of ["r1", "r2", "r3", "r4"].entries()) {
       await put(`builds/${r}/ios.json`, { commit: r }, i);
@@ -72,9 +74,9 @@ describe("prune", () => {
       await put(`assets/${id}-bundle`, "js", 10 + i);
     }
     // Uploaded for a publish still running: no record names it yet.
-    await put("assets/in-flight", "js", 40);
+    await put("assets/in-flight", "js", MONTH_H - 8);
 
-    const removed = await run(48);
+    const removed = await run(MONTH_H);
     expect(removed.sort()).toEqual([
       "assets/r1-bundle",
       "assets/r4-b-bundle",
@@ -96,10 +98,30 @@ describe("prune", () => {
     // One store runtime, registered first: four sideloaded runtimes after it still leave it alone.
     await put("builds/store1/ios.json", { commit: "s", distribution: "store" }, 0);
     for (const [i, r] of ["r1", "r2", "r3", "r4"].entries()) await put(`builds/${r}/ios.json`, { commit: r, distribution: "sideload" }, 1 + i);
-    expect((await run(10)).sort()).toEqual(["builds/r1/ios.json"]);
+    expect((await run(MONTH_H)).sort()).toEqual(["builds/r1/ios.json"]);
     // Four store runtimes: the oldest goes, the sideloaded ones stay.
-    for (const [i, r] of ["store2", "store3", "store4"].entries()) await put(`builds/${r}/ios.json`, { commit: r, distribution: "store" }, 20 + i);
-    expect((await run(30)).sort()).toEqual(["builds/store1/ios.json"]);
+    for (const [i, r] of ["store2", "store3", "store4"].entries()) await put(`builds/${r}/ios.json`, { commit: r, distribution: "store" }, MONTH_H + i);
+    expect((await run(2 * MONTH_H)).sort()).toEqual(["builds/store1/ios.json"]);
+  });
+
+  it("keeps every runtime registered or published to in the last 30 days, however many", async () => {
+    // Six runtimes built over a month; a fix published to the four oldest a month later (a backport).
+    for (const [i, r] of ["r1", "r2", "r3", "r4", "r5", "r6"].entries()) await put(`builds/${r}/android.json`, { commit: r }, i * 24);
+    expect(await run(6 * 24)).toEqual([]);
+    for (const [i, r] of ["r1", "r2", "r3", "r4"].entries()) {
+      await put(`updates/${r}/android/${r}-fix.json`, update(r, "android", `${r}-fix`, ["fix-bundle"]), MONTH_H + i);
+      await put(`latest/${r}/android.json`, update(r, "android", `${r}-fix`, ["fix-bundle"]), MONTH_H + i);
+    }
+    await put("assets/fix-bundle", "js", MONTH_H);
+    expect(await run(MONTH_H + 4)).toEqual([]);
+    // 30 days on, only the 3 touched last are left: r2…r4, published to after r5 and r6 were built.
+    expect((await run(2 * MONTH_H + 4)).sort()).toEqual([
+      "builds/r1/android.json",
+      "builds/r5/android.json",
+      "builds/r6/android.json",
+      "latest/r1/android.json",
+      "updates/r1/android/r1-fix.json",
+    ]);
   });
 
   it("keeps a runtime whose latest publish is recent even without a registered build", async () => {

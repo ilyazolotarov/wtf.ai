@@ -19,6 +19,7 @@ import { privacyPolicyUrl, STORE_BUILD, SUPPORT_EMAIL } from "@/config/distribut
 import { appCode } from "@/components/update/app-code";
 import { Icon } from "@/components/ui/icon";
 import { installId } from "@/services/telemetry";
+import { nativeBuild } from "@/services/native-build-number";
 import { T } from "@/components/ui/text";
 import { usePalette } from "@/constants/theme";
 import { useT, type LanguagePreference } from "@/i18n/provider";
@@ -133,7 +134,7 @@ export default function SettingsScreen() {
             labelKey="appVersion"
             value={
               (Constants.expoConfig?.version ?? t("unavailableValue")) +
-              (Constants.nativeBuildVersion ? ` (${Constants.nativeBuildVersion})` : "")
+              (nativeBuild() ? ` (${nativeBuild()})` : "")
             }
           />
         </Pressable>
@@ -152,7 +153,7 @@ export default function SettingsScreen() {
           onPress={() =>
             void Linking.openURL(
               `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(
-                `wtf.ai ${Constants.expoConfig?.version ?? ""} (${Constants.nativeBuildVersion ?? "dev"}) · ${installId()}`,
+                `wtf.ai ${Constants.expoConfig?.version ?? ""} (${nativeBuild() ?? "dev"}) · ${installId()}`,
               )}`,
             )
           }

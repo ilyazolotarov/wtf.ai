@@ -1,6 +1,5 @@
 // Native builds (docs/UPDATES-SPEC.md §3): this app's build, the newest published one, and getting it installed:
 // Android opens the downloaded APK in the system installer, iOS hands over to AltStore (or the share sheet).
-import Constants from "expo-constants";
 import { Directory, DownloadTask, File, Paths } from "expo-file-system";
 import * as IntentLauncher from "expo-intent-launcher";
 import * as Sharing from "expo-sharing";
@@ -9,6 +8,7 @@ import { Linking, Platform } from "react-native";
 
 import { ALTSTORE_SOURCE_URL, UPDATES_ORIGIN } from "@/config/app-updates";
 import { STORE_BUILD } from "@/config/distribution";
+import { nativeBuild } from "@/services/native-build-number";
 
 import type { AppBuildInfo, OwnBuild } from "./decide";
 
@@ -19,7 +19,7 @@ const APK_TYPE = "application/vnd.android.package-archive";
 export const platform: "ios" | "android" = Platform.OS === "ios" ? "ios" : "android";
 
 export function ownBuild(): OwnBuild {
-  const build = Number(Constants.nativeBuildVersion);
+  const build = Number(nativeBuild());
   return {
     build: Number.isSafeInteger(build) && build > 0 ? build : null,
     runtime: Updates.runtimeVersion ?? null,

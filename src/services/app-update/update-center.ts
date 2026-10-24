@@ -8,6 +8,7 @@ import AppNotice from "../../../modules/app-notice/src/AppNoticeModule";
 import { Sentry } from "@/config/sentry";
 import { stringsNow } from "@/i18n/strings-now";
 import { kvStore } from "@/services/kv-store";
+import { nativeBuildReady } from "@/services/native-build-number";
 import {
   downloadRegion,
   getMapPacks,
@@ -258,6 +259,8 @@ export async function checkForUpdates(reason: "launch" | "resume" | "manual"): P
   let error: string | null = null;
   try {
     const latest = await withTimeout(fetchLatestBuild);
+    // Read from native at launch, in a few ms: unknown, no native update is offered.
+    await nativeBuildReady;
     const native = nativeUpdate(latest, ownBuild());
     setState({ latest, found: { ...state.found, native } });
     save({ waitingBuild: native ? `${native.build} ${native.date.slice(0, 10)}` : null });

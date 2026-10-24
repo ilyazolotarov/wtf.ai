@@ -20,8 +20,8 @@ updates and checks nothing. Phones contact nothing else for updates.
 
 - **One bucket, free tier.** R2's free tier is 10 GB of storage; downloads cost nothing. A map release is ~3.6 GB, a
   build ~0.1 GB, a JS update a few MB of new files. The Worker prunes what no phone needs (§2.1), which keeps the
-  bucket at ~5 GB: one map release (two for two days after a new one), three builds per platform, the JS of three
-  runtimes per platform.
+  bucket at ~5 GB: one map release (two for two days after a new one), three builds per platform, the JS of the
+  runtimes of the last 30 days (a few MB each: files are shared between updates).
 - **Uploads go through the Worker**, with the publish token (`OTA_PUBLISH_TOKEN`); no R2 credentials outside it. A
   file over 64 MiB is uploaded in 32 MiB parts (R2 multipart): the Worker takes at most 100 MB per request.
 - **Downloads** of builds and maps answer `Range` (and `If-Range`), so iOS background downloads resume.
@@ -33,9 +33,10 @@ its own, so a failed prune never fails a publish. It never removes what `latest`
 
 - **Builds**: per platform, the newest 3 (by build number); their files go with them. Files in `apps/` that no kept
   build names are removed a day after upload (a publish that failed halfway).
-- **JS updates**: the runtimes kept are the newest 3 per platform and distribution (a store build's runtime never
-  takes a sideloaded one's place; one with no build record counts as sideloaded), by their build's registration or
-  their latest publish, whichever is newer. For each, only the latest record. A runtime not kept loses its records: its phones get "no update" and keep the
+- **JS updates**: the runtimes kept are those registered or published to in the last 30 days, and at least the
+  newest 3 per platform and distribution (a store build's runtime never takes a sideloaded one's place; one with no
+  build record counts as sideloaded), by their build's registration or their latest publish, whichever is newer. A
+  backport to old runtimes ([OTA.md](OTA.md)) never pushes the current ones out. For each, only the latest record. A runtime not kept loses its records: its phones get "no update" and keep the
   JS they have. A file (`assets/`) that no kept record uses is removed a day after upload, so a publish in progress
   never loses its files.
 - **Maps**: the release `maps/latest.json` names, and the one before it for 2 days after the switch (downloads in
@@ -45,7 +46,8 @@ its own, so a failed prune never fails a publish. It never removes what `latest`
 
 - **Build number** (`CFBundleVersion`, `versionCode`): the commit's time in minutes since 2020-01-01 UTC, set by the
   build workflows after prebuild. It grows along `main`, and stays out of `app.json` so it never changes the runtime
-  version (fingerprint). `version` (`1.0.0`) changes by hand.
+  version (fingerprint). `version` (`1.0.0`) changes by hand. The app reads its own from Sentry's native module
+  (`src/services/native-build-number.ts`; expo-constants has none): unknown, no native update is ever offered.
 - **Published** by `ci.yml`'s `publish-builds` job for `main`'s Release builds: the IPA/APK under `apps/<platform>/`,
   then its record (`AppBuild`: version, build, runtime, commit, date, file, size, MD5, SHA-256, notes = the commit
   titles since the previous build, at most 20; iOS: the app's permissions). The job also registers the runtime for

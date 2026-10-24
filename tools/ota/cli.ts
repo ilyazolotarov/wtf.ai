@@ -14,16 +14,16 @@ export function flag(name: string): string | undefined {
   return i >= 0 ? process.argv[i + 1] : undefined;
 }
 
-/** Runs a package's CLI with this Node (no npx: works the same on Windows). */
-export const runCli = (bin: string, args: string[]): string =>
-  execFileSync(process.execPath, [require.resolve(bin, { paths: [ROOT] }), ...args], { cwd: ROOT, encoding: "utf8", maxBuffer: 64 << 20 });
+/** Runs a package's CLI of the app in `root` with this Node (no npx: works the same on Windows). */
+export const runCli = (bin: string, args: string[], root = ROOT): string =>
+  execFileSync(process.execPath, [require.resolve(bin, { paths: [root] }), ...args], { cwd: root, encoding: "utf8", maxBuffer: 64 << 20 });
 
 /**
  * The app's update config: the URL from UPDATES_ORIGIN, as app.config.js makes it for the app (the repo names no
  * server), the certificate from app.json (the public config, `expo config`, leaves it out).
  */
-export function updatesConfig(): { url: string; codeSigningCertificate: string } {
-  const updates = (JSON.parse(readFileSync(path.join(ROOT, "app.json"), "utf8")) as { expo: { updates?: { codeSigningCertificate?: string } } }).expo
+export function updatesConfig(root = ROOT): { url: string; codeSigningCertificate: string } {
+  const updates = (JSON.parse(readFileSync(path.join(root, "app.json"), "utf8")) as { expo: { updates?: { codeSigningCertificate?: string } } }).expo
     .updates;
   if (!updates?.codeSigningCertificate) throw new Error("app.json has no updates.codeSigningCertificate");
   const origin = process.env.UPDATES_ORIGIN?.trim().replace(/\/+$/, "");
@@ -31,9 +31,9 @@ export function updatesConfig(): { url: string; codeSigningCertificate: string }
   return { url: `${origin}/manifest`, codeSigningCertificate: updates.codeSigningCertificate };
 }
 
-/** The runtime version a build of this checkout has (fingerprint policy, fingerprint.config.js). */
-export function resolveRuntimeVersion(platform: Platform): string {
-  const out = runCli("expo-updates/bin/cli.js", ["runtimeversion:resolve", "--platform", platform]);
+/** The runtime version a build of the checkout in `root` has (fingerprint policy, fingerprint.config.js). */
+export function resolveRuntimeVersion(platform: Platform, root = ROOT): string {
+  const out = runCli("expo-updates/bin/cli.js", ["runtimeversion:resolve", "--platform", platform], root);
   const line = out.split("\n").find((l) => l.startsWith('{"runtimeVersion"'));
   const runtimeVersion = line ? (JSON.parse(line) as { runtimeVersion: unknown }).runtimeVersion : undefined;
   if (typeof runtimeVersion !== "string") throw new Error(`could not resolve the ${platform} runtime version`);
