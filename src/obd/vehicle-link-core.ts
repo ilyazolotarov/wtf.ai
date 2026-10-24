@@ -315,8 +315,17 @@ export class VehicleLinkCore implements VehicleLink {
 
   async disconnect(): Promise<void> {
     this.autoRun++;
+    const emulated = this.transport?.kind === "emulator";
     await this.close();
     this.update({ tryingSinceMs: null });
+    // A simulated car is gone with its adapter: it stands. A real adapter's silence keeps the last speed (the
+    // navigator's link-loss rules), but an emulator switched off mid-drive would otherwise drive on at its last speed.
+    if (emulated) {
+      const t = this.deps.clock.nowUs();
+      const stop: SpeedSample = { txUs: t, rxUs: t, tUs: t, speedMps: 0, raw: 0 };
+      this.speed.emit(stop);
+      this.update({ lastSpeed: stop, speedFromCan: false });
+    }
   }
 
   /** `windowMs`: give up (and return "unreachable") if the transport doesn't connect within it. */

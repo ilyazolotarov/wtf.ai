@@ -151,6 +151,20 @@ describe("VehicleLinkCore", () => {
     await second.core.disconnect();
   });
 
+  test("disconnecting an emulated adapter mid-drive stops the car: a last speed of 0, not the last one held", async () => {
+    const { core, emulators } = setup();
+    core.startDiscovery();
+    const speeds: number[] = [];
+    core.onSpeed((s) => speeds.push(s.speedMps));
+    void core.connect("emu-1");
+    await until(() => core.getSnapshot().link === "polling");
+    emulators.get("emu-1")!.setVehicle({ speedKph: 60 });
+    await until(() => (core.getSnapshot().lastSpeed?.raw ?? 0) === 60);
+    await core.disconnect();
+    expect(speeds.at(-1)).toBe(0);
+    expect(core.getSnapshot().lastSpeed).toMatchObject({ speedMps: 0, raw: 0 });
+  });
+
   test("auto-connect leaves adapters on a skipped transport to the driver", async () => {
     const { core, store } = setup();
     core.startDiscovery();
