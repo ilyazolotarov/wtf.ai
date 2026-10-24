@@ -484,9 +484,11 @@ within ~20 s of its ignition.
 - **Started by a companion device (Android 12+):** the opt-in that keeps the driver's position when they forget to
   open the app: an onboarding step after the adapter's, and the *Automatic startup* switch in Settings
   (`use-wake-setup.ts`). It shows the system's one-time companion dialog (`CompanionWake.kt`), offering the
-  remembered adapter when it is a BLE one and Classic devices, and then asks for location "all the time"
-  (`ACCESS_BACKGROUND_LOCATION`, after saying what to pick on Android's settings page). That permission is asked
-  for here only. The driver picks the car's own Bluetooth (the phone connects to it at ignition) or a BLE adapter (it
+  remembered adapter when it is a BLE one (a connected BLE adapter doesn't advertise, so the app lets go of it while
+  the dialog is open, never during a trip, and connects again after) and Classic devices, then asks for notifications (Android 13+: the trip's
+  notification is how the driver sees that the app started by itself; asked nowhere else but the updater) and for
+  location "all the time" (`ACCESS_BACKGROUND_LOCATION`, after saying what to pick on Android's settings page). That
+  permission is asked for here only. The driver picks the car's own Bluetooth (the phone connects to it at ignition) or a BLE adapter (it
   advertises while powered). A Classic adapter can't be one: it never connects by itself, so Android never sees it
   appear. The dialog can't leave it out (its Classic filter lists every Classic device): one picked that is a
   remembered `spp:` adapter is forgotten again and the driver told to pick the car's Bluetooth. The association is observed for presence; Android then binds `WakeService` when the device comes into BLE

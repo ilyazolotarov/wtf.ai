@@ -421,9 +421,13 @@ def first_run(say, dev_url=None):
         shell("am", "start", "-a", "android.intent.action.VIEW", "-d", f"'{url}'", PKG)
     else:
         shell("monkey", "-p", PKG, "-c", "android.intent.category.LAUNCHER", "1")
-    tap_text(say["get_started"], 90)
+    # A debug build's first start after the wipe loads its JS from Metro: well over a minute.
+    tap_text(say["get_started"], 180)
     tap_if(say["allow"])
     tap_text(say["skip"])
+    # Automatic launch (Android 12+), before the last step: not for the demo, which starts the drive itself.
+    time.sleep(2)
+    tap_if(say["not_now"])
     tap_text(say["done"])
 
 

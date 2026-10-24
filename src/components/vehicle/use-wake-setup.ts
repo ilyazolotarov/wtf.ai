@@ -1,13 +1,13 @@
 import * as Location from "expo-location";
 import { useCallback, useEffect, useState } from "react";
-import { Alert, AppState, Linking, Platform } from "react-native";
+import { Alert, AppState, Linking, PermissionsAndroid, Platform } from "react-native";
 
 import SensorCaptureModule from "../../../modules/sensor-capture/src/SensorCaptureModule";
 import VehicleLinkModule, { type NativeWakeDevice } from "../../../modules/vehicle-link/src/VehicleLinkModule";
 import type { Strings } from "@/i18n/en";
 import { useT } from "@/i18n/provider";
 import { isLocationAlwaysAsked, isWakeOffered, markLocationAlwaysAsked, markWakeOffered } from "@/services/preferences";
-import { getRuntime } from "@/services/runtime";
+import { autoConnect, getRuntime } from "@/services/runtime";
 import { isClassicAdapter } from "@/services/vehicle-wake";
 
 // The opt-in that keeps the driver's position when they forget to open the app (VEHICLE-LINK-SPEC §11), shared by the
@@ -79,6 +79,15 @@ async function askLocationAlways(t: (key: keyof Strings) => string): Promise<boo
   return (await Location.requestBackgroundPermissionsAsync()).granted;
 }
 
+/**
+ * Android 13+: notifications, so the driver sees when the app has started by itself and is tracking the drive (the
+ * trip's notification, with its Turn on GPS). Asked here, the opt-in that starts the app without the driver.
+ */
+async function askNotifications(): Promise<void> {
+  if (Platform.OS !== "android" || Number(Platform.Version) < 33) return;
+  await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS).catch(() => undefined);
+}
+
 export function useWakeSetup() {
   const { t } = useT();
   const supported = wakeSupported();
@@ -128,16 +137,31 @@ export function useWakeSetup() {
         await SensorCaptureModule.setDriveWake?.(true);
         return true;
       }
-      const device = await (VehicleLinkModule.addWakeDevice?.(adapterId) ?? Promise.resolve(null)).catch(() => null);
+      // A connected BLE adapter doesn't advertise, and Android's dialog finds one only by its advertising: let go of it
+      // while the dialog is open (never during a trip, whose speed it is), and connect again after.
+      const { link, recorder } = getRuntime();
+      const held = link.getSnapshot();
+      const release =
+        held.activeDeviceId !== null &&
+        held.devices.find((d) => d.id === held.activeDeviceId)?.transport === "ble" &&
+        recorder.getSnapshot().state !== "recording";
+      if (release) await link.disconnect();
+      let device: NativeWakeDevice | null;
+      try {
+        device = await (VehicleLinkModule.addWakeDevice?.(adapterId) ?? Promise.resolve(null)).catch(() => null);
+      } finally {
+        if (release) void autoConnect().catch(() => undefined);
+      }
       if (!device) return false;
       // The OBD adapter itself, over Bluetooth Classic: it would never start the app.
-      const snap = getRuntime().link.getSnapshot();
+      const snap = link.getSnapshot();
       const ids = [...snap.devices.map((d) => d.id), ...(snap.activeDeviceId ? [snap.activeDeviceId] : [])];
       if (isClassicAdapter(device.address, ids)) {
         VehicleLinkModule.forgetWakeDevice?.(device.address);
         Alert.alert(t("wakeAdapterPickedTitle"), t("wakeAdapterPickedBody"));
         return false;
       }
+      await askNotifications();
       await askLocationAlways(t).catch(() => false);
       return true;
     } finally {
