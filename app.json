@@ -135,7 +135,9 @@
         "expo-build-properties",
         {
           "android": {
-            "minSdkVersion": 29
+            "minSdkVersion": 29,
+            "enableMinifyInReleaseBuilds": true,
+            "extraProguardRules": "-dontobfuscate"
           }
         }
       ],

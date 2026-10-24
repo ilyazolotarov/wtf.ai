@@ -33,6 +33,7 @@ The Android build for volunteer testers. Companion to [SPEC.md](SPEC.md); tester
 | Update notification | `modules/app-notice`: a local notification when the app's own check finds a new build (UPDATES-SPEC §5.2). |
 | Vendor battery killers | Xiaomi, Samsung, Huawei kill foreground services. The tester guide names the per-vendor steps; the app doesn't open the exemption screen itself. |
 | `minSdk` | 29 (Android 10): where foreground service types start; Android 8–9 are a few percent of phones and untestable here. |
+| R8 | On for Release (`expo-build-properties` `enableMinifyInReleaseBuilds`): the code shrunk and optimised, as Google Play asks. Not obfuscated (`-dontobfuscate`), so Sentry's Java/Kotlin stack traces read without a mapping upload. Resources aren't shrunk: React Native loads images by name. A Release build in the emulator, connected to the simulated adapter, is the check after a native dependency changes. |
 
 ## 3. Implementation
 
