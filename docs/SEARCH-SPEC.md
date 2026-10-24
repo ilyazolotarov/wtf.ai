@@ -131,9 +131,9 @@ POIs: 97 MB): queries 9–25 ms. The phone is several times slower; an oblast is
   direction. Start guidance routes to it (`id` `search:<key>`, the name shown on the banner).
 - **Entrances on the map** (`src/services/offline-map/entrance-file.ts`, `EntranceLayers`): the active search
   file's entrances written once to a GeoJSON file in the cache (per file MD5); from z16 a numbered one as its number
-  on a plate (three widths, `assets/images/map/entrance-plate-*`), one without as a small dot, right above the house
-  numbers. A house's card (route screen) offers its numbered entrances: Building (default) or a number; the route
-  then ends at that door ("вулиця Шевченка, 10, під'їзд 3"). Picking a result closes the keyboard.
+  on a round blue badge (a circle and text, no icon images: those load late on iOS and never showed), one without
+  as a small dot, right above the house numbers. A house's card (route screen) offers its numbered entrances:
+  Building (default) or a number; the route then ends at that door ("вулиця Шевченка, 10, під'їзд 3"). Picking a result closes the keyboard.
 - **Quick picks** (empty field): saved places, recent destinations and the region's largest cities
   (`SearchIndex.majorSettlements`: the first settlements of the file, cities then towns by population).
 

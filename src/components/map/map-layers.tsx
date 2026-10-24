@@ -1,4 +1,4 @@
-import { GeoJSONSource, Images, Layer } from "@maplibre/maplibre-react-native";
+import { GeoJSONSource, Layer } from "@maplibre/maplibre-react-native";
 import { useMemo } from "react";
 import type { NativeSyntheticEvent } from "react-native";
 
@@ -537,55 +537,68 @@ export function PuckLayers({
   );
 }
 
-/** Number plates in three widths: 1, 2 and 3+ characters (assets/images/map, enamel blue with a white rim). */
-const ENTRANCE_PLATES = {
-  "entrance-plate-1": require("@/assets/images/map/entrance-plate-1.png"),
-  "entrance-plate-2": require("@/assets/images/map/entrance-plate-2.png"),
-  "entrance-plate-3": require("@/assets/images/map/entrance-plate-3.png"),
-};
 const ENTRANCE_MINZOOM = 16;
 
 /**
- * Building entrances (SEARCH-SPEC §5): a numbered one as its number on a plate, one without a number as a small dot,
- * from street level. Right above the house numbers (`map-labels.ts`): a plate wins over a number where they meet,
- * every other label over both. The same in both themes.
+ * Building entrances (SEARCH-SPEC §5): a numbered one as its number on a round enamel-blue badge, one without a
+ * number as a small dot, from street level. Right above the house numbers (`map-labels.ts`): a badge wins over a
+ * number where they meet, every other label over both. Drawn with a circle and text, no images: icons added from
+ * JS load late on iOS, and the map had already laid the entrances out without them (only the numbers showed).
  */
 export function EntranceLayers({ url }: { url: string | null }) {
   if (!url) return null;
   return (
-    <>
-      <Images images={ENTRANCE_PLATES} />
-      <GeoJSONSource id="entrances" data={url}>
-        <Layer
-          id="entrance-dots"
-          type="circle"
-          afterId="housenumber"
-          minzoom={ENTRANCE_MINZOOM}
-          filter={["==", ["get", "r"], ""]}
-          paint={{
-            "circle-radius": ["interpolate", ["linear"], ["zoom"], 16, 2, 19, 3],
-            "circle-color": "#ffffff",
-            "circle-stroke-color": "#3b4652",
-            "circle-stroke-width": 1.2,
-          }}
-        />
-        <Layer
-          id="entrance-plates"
-          type="symbol"
-          afterId="housenumber"
-          minzoom={ENTRANCE_MINZOOM}
-          filter={["!=", ["get", "r"], ""]}
-          layout={{
-            "icon-image": ["concat", "entrance-plate-", ["to-string", ["min", 3, ["length", ["get", "r"]]]]],
-            "text-field": ["get", "r"],
-            "text-font": ["noto-sans-bold"],
-            "text-size": ["interpolate", ["linear"], ["zoom"], 16, 9, 19, 11],
-            "icon-allow-overlap": true,
-            "text-allow-overlap": true,
-          }}
-          paint={{ "text-color": "#ffffff" }}
-        />
-      </GeoJSONSource>
-    </>
+    <GeoJSONSource id="entrances" data={url}>
+      <Layer
+        id="entrance-dots"
+        type="circle"
+        afterId="housenumber"
+        minzoom={ENTRANCE_MINZOOM}
+        filter={["==", ["get", "r"], ""]}
+        paint={{
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], 16, 2, 19, 3],
+          "circle-color": "#ffffff",
+          "circle-stroke-color": "#3b4652",
+          "circle-stroke-width": 1.2,
+        }}
+      />
+      <Layer
+        id="entrance-badges"
+        type="circle"
+        afterId="housenumber"
+        minzoom={ENTRANCE_MINZOOM}
+        filter={["!=", ["get", "r"], ""]}
+        paint={{
+          // Grows with the number: "1", "12", "12А".
+          "circle-radius": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            16,
+            ["match", ["length", ["get", "r"]], 1, 6.5, 2, 8, 9.5],
+            19,
+            ["match", ["length", ["get", "r"]], 1, 8.5, 2, 10, 11.5],
+          ],
+          "circle-color": "#1d4f91",
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 1.5,
+        }}
+      />
+      <Layer
+        id="entrance-numbers"
+        type="symbol"
+        afterId="entrance-badges"
+        minzoom={ENTRANCE_MINZOOM}
+        filter={["!=", ["get", "r"], ""]}
+        layout={{
+          "text-field": ["get", "r"],
+          "text-font": ["noto-sans-bold"],
+          "text-size": ["interpolate", ["linear"], ["zoom"], 16, 8, 19, 10.5],
+          "text-allow-overlap": true,
+          "text-ignore-placement": true,
+        }}
+        paint={{ "text-color": "#ffffff" }}
+      />
+    </GeoJSONSource>
   );
 }
