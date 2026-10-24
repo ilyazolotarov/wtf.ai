@@ -14,7 +14,7 @@ import path from "node:path";
 
 import { expectOk, flag, inParallel, publishCall as call, requestPrune, resolveRuntimeVersion, runMain } from "./cli";
 import type { UpdateManifest } from "./manifest";
-import { isDistribution, isPlatform, isRollback, parseRecord, type Platform, type PublishedRecord } from "./protocol";
+import { isDistribution, isPlatform, isRollback, parseRecord, storeKeyOf, type Platform, type PublishedRecord } from "./protocol";
 
 interface Found {
   runtime: string;
@@ -91,7 +91,11 @@ async function main() {
   for (const { record } of records) {
     if (isRollback(record)) continue;
     const m = JSON.parse(record.manifest) as UpdateManifest;
-    for (const a of [m.launchAsset, ...m.assets]) types.set(a.key, a.contentType);
+    for (const a of [m.launchAsset, ...m.assets]) {
+      const key = storeKeyOf(a);
+      if (!key) throw new Error(`${record.id}: ${a.key} has no store url`);
+      types.set(key, a.contentType);
+    }
   }
   const res = await call("POST", "missing", token, JSON.stringify({ keys: [...types.keys()] }));
   if (!res.ok) throw new Error(`listing missing files: HTTP ${res.status}`);

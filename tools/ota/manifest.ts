@@ -15,9 +15,15 @@ export interface ExportMetadata {
 export interface UpdateAsset {
   /** Base64URL SHA-256 of the file: the client checks every download against it. */
   hash: string;
+  /**
+   * What the phone names its copy of the file by and, for an asset, what `require()` finds it by: expo-asset looks a
+   * bundled file up in `Updates.localAssets` under Metro's hash of it, the exported file's name. Under any other key
+   * every file added since the native build downloads but is never found: a blank image, a silent clip, no error.
+   */
   key: string;
   contentType: string;
   fileExtension?: string;
+  /** `<base>/assets/<SHA-256 of the file>`: the store's key is the content's, shared by every update with the file. */
   url: string;
 }
 
@@ -59,6 +65,9 @@ export const contentTypeOf = (ext: string): string => CONTENT_TYPES[ext.toLowerC
 
 export const sha256Base64Url = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("base64url");
 
+/** Metro names an exported asset file by its MD5: the hash the phone resolves a `require()` to. */
+const METRO_HASH_RE = /^[0-9a-f]{32}$/;
+
 /** Hex, so keys stay distinct on a case-insensitive file system (the client names its cached files after them). */
 const sha256Hex = (bytes: Uint8Array | string): string => createHash("sha256").update(bytes).digest("hex");
 
@@ -94,23 +103,23 @@ export function buildManifest(args: BuildManifestArgs): { manifest: UpdateManife
   if (!platformFiles) throw new Error(`the export has no ${args.platform} bundle`);
 
   const files: UpdateFile[] = [];
-  const asset = (rawPath: string, contentType: string, ext?: string): UpdateAsset => {
+  const stored = (rawPath: string, contentType: string) => {
     const path = rawPath.replaceAll("\\", "/");
     const bytes = args.read(path);
-    const key = sha256Hex(bytes);
-    if (!files.some((f) => f.key === key)) files.push({ path, key, contentType });
-    return {
-      hash: sha256Base64Url(bytes),
-      key,
-      contentType,
-      ...(ext ? { fileExtension: `.${ext}` } : {}),
-      url: `${args.baseUrl}/assets/${key}`,
-    };
+    const storeKey = sha256Hex(bytes);
+    if (!files.some((f) => f.key === storeKey)) files.push({ path, key: storeKey, contentType });
+    return { path, hash: sha256Base64Url(bytes), contentType, url: `${args.baseUrl}/assets/${storeKey}`, storeKey };
   };
 
-  // The protocol ignores the launch asset's file extension, so it has none.
-  const launchAsset = asset(platformFiles.bundle, "application/javascript");
-  const assets = platformFiles.assets.map((a) => asset(a.path, contentTypeOf(a.ext), a.ext));
+  // The protocol ignores the launch asset's file extension, so it has none; its key only names the phone's copy.
+  const bundle = stored(platformFiles.bundle, "application/javascript");
+  const launchAsset: UpdateAsset = { hash: bundle.hash, key: bundle.storeKey, contentType: bundle.contentType, url: bundle.url };
+  const assets = platformFiles.assets.map((a): UpdateAsset => {
+    const file = stored(a.path, contentTypeOf(a.ext));
+    const key = file.path.slice(file.path.lastIndexOf("/") + 1);
+    if (!METRO_HASH_RE.test(key)) throw new Error(`${file.path} is not named by Metro's hash: phones would never find it (the export's layout changed)`);
+    return { hash: file.hash, key, contentType: file.contentType, fileExtension: `.${a.ext}`, url: file.url };
+  });
 
   return {
     manifest: {

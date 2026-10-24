@@ -6,6 +6,7 @@ import {
   isPlatform,
   MAPS_LATEST_KEY,
   PLATFORMS,
+  storeKeyOf,
   type BuildRecord,
   type Distribution,
   type MapsLatest,
@@ -93,7 +94,8 @@ async function pruneUpdates(env: Env, now: Date): Promise<string[]> {
     latestIds.set(target, record.id);
     if (!record.manifest) continue;
     const m = JSON.parse(record.manifest) as UpdateManifestRef;
-    for (const a of [m.launchAsset, ...m.assets]) used.add(a.key);
+    // By the url's store key; by the asset's own key for a record from before urls named it: never drop a file in doubt.
+    for (const a of [m.launchAsset, ...m.assets]) used.add(storeKeyOf(a) ?? a.key);
   }
   for (const o of await listAll(env.BUCKET, "updates/")) {
     const [, runtime, platform] = o.key.split("/");

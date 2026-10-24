@@ -187,7 +187,7 @@ export function RouteLayers({
 /**
  * The car on the map (UI-SPEC §6.1): where it was left while the dot is the phone's, or where the driver put it, once
  * confirmed. `MAP_CAR`'s image, nose the way it faces, growing as the map is zoomed in, and facing the screen when the
- * map tilts. The images are the style's car sprite (car-sprite.ts), not added from JS: iOS never showed those.
+ * map tilts. The images are the style's car sprite (car-sprite.ts), loaded with the style, not added from JS after it.
  */
 export function ParkedCarLayers({
   car,
@@ -582,8 +582,7 @@ const ENTRANCE_MINZOOM = 16;
 /**
  * Building entrances (SEARCH-SPEC §5): a numbered one as its number on a round enamel-blue badge, one without a
  * number as a small dot, from street level. Right above the house numbers (`map-labels.ts`): a badge wins over a
- * number where they meet, every other label over both. Drawn with a circle and text, no images: icons added from
- * JS load late on iOS, and the map had already laid the entrances out without them (only the numbers showed).
+ * number where they meet, every other label over both. Drawn with a circle and text, no images.
  */
 export function EntranceLayers({ url }: { url: string | null }) {
   if (!url) return null;

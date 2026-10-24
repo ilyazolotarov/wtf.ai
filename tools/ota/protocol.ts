@@ -48,8 +48,18 @@ export interface BuildRecord {
 export interface UpdateManifestRef {
   id: string;
   runtimeVersion: string;
-  launchAsset: { key: string };
-  assets: { key: string }[];
+  launchAsset: { key: string; url?: string };
+  assets: { key: string; url?: string }[];
+}
+
+/**
+ * The store's key of a manifest asset, `assets/<SHA-256>`, named by its `url`. Not its `key`: that is what the phone
+ * names its copy and, for a `require()`d file, what expo-asset finds it by (`Updates.localAssets`), Metro's hash of it.
+ * `null` when the url names no stored file.
+ */
+export function storeKeyOf(asset: { url?: string }): string | null {
+  const last = asset.url?.split("/").pop() ?? "";
+  return ASSET_KEY_RE.test(last) ? last : null;
 }
 
 export const isRollback =(r: PublishedRecord): r is RollbackRecord => "directive" in r;

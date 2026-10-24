@@ -38,6 +38,7 @@ import {
   recordKey,
   RECORD_ID_RE,
   RUNTIME_RE,
+  storeKeyOf,
   type BuildRecord,
   type UpdateManifestRef,
 } from "../../tools/ota/protocol";
@@ -154,7 +155,9 @@ async function publish(request: Request, env: Env, parts: string[]): Promise<Res
       const m = JSON.parse(record.manifest) as UpdateManifestRef;
       if (m.id !== c || m.runtimeVersion !== a) return json(400, { error: "the manifest is for another id or runtime" });
       const stored = await storedAssetKeys(env);
-      const missing = [m.launchAsset, ...m.assets].map((x) => x.key).filter((k) => !stored.has(k));
+      const keys = [m.launchAsset, ...m.assets].map(storeKeyOf);
+      if (keys.some((k) => k === null)) return json(400, { error: "an asset's url names no stored file" });
+      const missing = keys.filter((k): k is string => k !== null && !stored.has(k));
       if (missing.length) return json(409, { error: "assets not uploaded", missing });
     }
     await env.BUCKET.put(recordKey(a, b, c), text);

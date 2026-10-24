@@ -23,7 +23,13 @@ const keys = () => [...bucket.objects.keys()].sort();
 const update = (runtime: string, platform: string, id: string, assets: string[]) => ({
   id,
   signature: "s",
-  manifest: JSON.stringify({ id, runtimeVersion: runtime, launchAsset: { key: assets[0] }, assets: assets.slice(1).map((key) => ({ key })) }),
+  manifest: JSON.stringify({
+    id,
+    runtimeVersion: runtime,
+    launchAsset: { key: assets[0], url: `u/assets/${assets[0]}` },
+    // Keyed as the phone names them (Metro's hash), stored under the url's.
+    assets: assets.slice(1).map((key) => ({ key: key.slice(0, 32), url: `u/assets/${key}` })),
+  }),
 });
 
 describe("prune", () => {

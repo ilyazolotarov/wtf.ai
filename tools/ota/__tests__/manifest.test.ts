@@ -6,12 +6,17 @@ import { createHash, createVerify, generateKeyPairSync } from "node:crypto";
 import { buildManifest, contentTypeOf, signatureHeader, updateId, type BuildManifestArgs, type ExportMetadata } from "../manifest";
 
 const bytes = (s: string) => new TextEncoder().encode(s);
+const sha256 = (b: Uint8Array, enc: "hex" | "base64url") => createHash("sha256").update(b).digest(enc);
+/** Metro names an exported asset file by its MD5. */
+const md5 = (b: Uint8Array) => createHash("md5").update(b).digest("hex");
 
+const FONT = bytes("font");
+const VOICE = bytes("voice");
 const FILES: Record<string, Uint8Array> = {
   "_expo/static/js/ios/entry-1.hbc": bytes("ios bundle"),
   "_expo/static/js/android/entry-2.hbc": bytes("android bundle"),
-  "assets/aaa": bytes("font"),
-  "assets/bbb": bytes("voice"),
+  [`assets/${md5(FONT)}`]: FONT,
+  [`assets/${md5(VOICE)}`]: VOICE,
 };
 
 // As written on Windows: backslashes in asset paths.
@@ -19,8 +24,8 @@ const METADATA: ExportMetadata = {
   version: 0,
   bundler: "metro",
   fileMetadata: {
-    ios: { bundle: "_expo/static/js/ios/entry-1.hbc", assets: [{ path: "assets\\aaa", ext: "ttf" }, { path: "assets\\bbb", ext: "mp3" }] },
-    android: { bundle: "_expo/static/js/android/entry-2.hbc", assets: [{ path: "assets/aaa", ext: "ttf" }] },
+    ios: { bundle: "_expo/static/js/ios/entry-1.hbc", assets: [{ path: `assets\\${md5(FONT)}`, ext: "ttf" }, { path: `assets\\${md5(VOICE)}`, ext: "mp3" }] },
+    android: { bundle: "_expo/static/js/android/entry-2.hbc", assets: [{ path: `assets/${md5(FONT)}`, ext: "ttf" }] },
   },
 };
 
@@ -40,10 +45,8 @@ const args = (over: Partial<BuildManifestArgs> = {}): BuildManifestArgs => ({
   ...over,
 });
 
-const sha256 = (b: Uint8Array, enc: "hex" | "base64url") => createHash("sha256").update(b).digest(enc);
-
 describe("buildManifest", () => {
-  it("describes the bundle and every asset by content hash", () => {
+  it("stores the bundle and every asset by content hash, in their urls", () => {
     const { manifest } = buildManifest(args());
     const bundle = FILES["_expo/static/js/ios/entry-1.hbc"];
     expect(manifest.launchAsset).toEqual({
@@ -52,17 +55,30 @@ describe("buildManifest", () => {
       contentType: "application/javascript",
       url: `https://updates.example/assets/${sha256(bundle, "hex")}`,
     });
-    expect(manifest.assets.map((a) => [a.contentType, a.fileExtension])).toEqual([
-      ["font/ttf", ".ttf"],
-      ["audio/mpeg", ".mp3"],
+    expect(manifest.assets.map((a) => [a.contentType, a.fileExtension, a.url])).toEqual([
+      ["font/ttf", ".ttf", `https://updates.example/assets/${sha256(FONT, "hex")}`],
+      ["audio/mpeg", ".mp3", `https://updates.example/assets/${sha256(VOICE, "hex")}`],
     ]);
-    expect(manifest.assets[1].hash).toBe(sha256(FILES["assets/bbb"], "base64url"));
+    expect(manifest.assets[1].hash).toBe(sha256(VOICE, "base64url"));
     expect(manifest).toMatchObject({
       createdAt: "2026-10-10T12:00:00.000Z",
       runtimeVersion: "fp1",
       metadata: { commit: "abc1234" },
       extra: { expoClient: { name: "wtf.ai", version: "1.0.0" } },
     });
+  });
+
+  it("keys each asset by Metro's hash, the name the phone finds a require() by", () => {
+    // expo-asset resolves a bundled file through Updates.localAssets[<Metro's MD5>]; the phone files a downloaded asset
+    // under its manifest key. Keyed by anything else, a file added since the native build never shows.
+    const { manifest } = buildManifest(args());
+    expect(manifest.assets.map((a) => a.key)).toEqual([md5(FONT), md5(VOICE)]);
+    expect(manifest.assets[0].key).not.toBe(sha256(FONT, "hex"));
+  });
+
+  it("refuses an asset the export did not name by Metro's hash", () => {
+    const metadata: ExportMetadata = { ...METADATA, fileMetadata: { ios: { bundle: "_expo/static/js/ios/entry-1.hbc", assets: [{ path: "assets/font.ttf", ext: "ttf" }] } } };
+    expect(() => buildManifest(args({ metadata, read: (p) => (p === "assets/font.ttf" ? FONT : FILES[p]) }))).toThrow("not named by Metro's hash");
   });
 
   it("carries the commit's title when it has one", () => {
@@ -74,11 +90,14 @@ describe("buildManifest", () => {
       args({
         metadata: {
           ...METADATA,
-          fileMetadata: { ios: { bundle: "_expo/static/js/ios/entry-1.hbc", assets: [{ path: "assets\\aaa", ext: "ttf" }, { path: "assets/aaa", ext: "ttf" }] } },
+          fileMetadata: { ios: { bundle: "_expo/static/js/ios/entry-1.hbc", assets: [{ path: `assets\\${md5(FONT)}`, ext: "ttf" }, { path: `assets/${md5(FONT)}`, ext: "ttf" }] } },
         },
       }),
     );
-    expect(files.map((f) => f.path)).toEqual(["_expo/static/js/ios/entry-1.hbc", "assets/aaa"]);
+    expect(files.map((f) => [f.path, f.key])).toEqual([
+      ["_expo/static/js/ios/entry-1.hbc", sha256(FILES["_expo/static/js/ios/entry-1.hbc"], "hex")],
+      [`assets/${md5(FONT)}`, sha256(FONT, "hex")],
+    ]);
   });
 
   it("gives the same JS the same id, and new JS or another platform a new one", () => {

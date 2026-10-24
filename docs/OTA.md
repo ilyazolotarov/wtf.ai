@@ -59,8 +59,13 @@ registered. The Google Play bundle is never published, so it registers nothing.
   with nothing going on (UPDATES-SPEC §5.2).
 - **Which JS ran is known.** About shows the JS commit and whether it is built in or an update; trip logs carry
   `ver_update` and `ver_runtime` (TRIP-LOGGER-SPEC §6.2); Sentry events the `js_source` tag next to `build_sha`.
-- **Files are immutable.** `assets/<key>` is the file's SHA-256; a file is uploaded once and never changed or
-  removed while a kept update uses it (the client checks each download against the hash in the signed manifest).
+- **Files are immutable.** `assets/<key>` is the file's SHA-256, named in each manifest asset's `url`; a file is
+  uploaded once and never changed or removed while a kept update uses it (the client checks each download against
+  the hash in the signed manifest).
+- **Assets keep Metro's name.** A manifest asset's `key` is Metro's MD5 of the file, the exported file's name: the
+  phone files its copy under it, and a `require()` finds the file through `Updates.localAssets` by it. Under any other
+  key (the SHA-256, once) every image, font or clip added since the native build downloads and is never found:
+  blank images, no error. `tools/ota/manifest.ts` refuses an export whose assets are named otherwise.
 - **Pruned.** The Worker removes what no phone needs, daily and after each publish (UPDATES-SPEC §2.1): JS of all but
   the newest 3 runtimes per platform and distribution, sideloaded and store (each keeps only its latest update), all
   but the newest 3 builds, map releases but the newest (and the one before it for 2 days). `POST /publish/prune?dry=1` lists what it would remove.
@@ -128,7 +133,8 @@ The CLI for builds and maps is `npm run ota:upload` (`tools/ota/upload.ts`): `--
 
 ## Store layout (R2 `wtf-ai-updates`)
 
-- `assets/<key>`: every file of every update (bundle, fonts, images, voice), shared between updates and platforms.
+- `assets/<key>`: every file of every update (bundle, fonts, images, voice), by SHA-256, shared between updates and
+  platforms.
 - `updates/<runtime>/<platform>/<id>.json`: `{id, manifest | directive, signature}`. The Worker serves `manifest`
   byte for byte with `signature` as its `expo-signature` header: re-serializing the JSON breaks the signature.
 - `latest/<runtime>/<platform>.json`: a copy of the record phones get now.

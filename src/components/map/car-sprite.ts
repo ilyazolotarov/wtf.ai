@@ -9,8 +9,8 @@ import { MAP_CAR } from "./puck-style";
 
 /*
  * The parked car's images (`MAP_CAR`) as a sprite of the map's style, referenced as `car:<name>`: the map loads them
- * with the style, before it lays the car out. Images added from JS (`Images`) load on iOS only once the map has asked
- * for a missing one, after it drew the car without it, and the car never showed (nor did the entrance plates).
+ * with the style, before it lays the car out, on both platforms (images added from JS, `Images`, reach iOS only
+ * through the map's missing-image request, after a first draw without them).
  *
  * The sheet (`scripts/map-car.py`: the 3x car and the near images, each with its pixel ratio) is a bundled asset; the map
  * reads a sprite as `<url>.json` and `<url>.png` (`@2x` on a dense screen) side by side, so it is copied once per

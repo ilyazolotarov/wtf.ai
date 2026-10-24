@@ -11,7 +11,8 @@ const RUNTIME = "fp1";
 const BUNDLE = new TextEncoder().encode("bundle bytes");
 const KEY = createHash("sha256").update(BUNDLE).digest("hex");
 const ID = "11111111-2222-3333-4444-555555555555";
-const MANIFEST = JSON.stringify({ id: ID, runtimeVersion: RUNTIME, launchAsset: { key: KEY }, assets: [] });
+const url = (key: string) => `https://updates.example/assets/${key}`;
+const MANIFEST = JSON.stringify({ id: ID, runtimeVersion: RUNTIME, launchAsset: { key: KEY, url: url(KEY) }, assets: [] });
 const RECORD = JSON.stringify({ id: ID, manifest: MANIFEST, signature: 'sig="abc", keyid="main"' });
 
 let env: Env & { BUCKET: TestBucket };
@@ -113,6 +114,21 @@ describe("/publish", () => {
     expect((await publish(`updates/fp2/ios/${ID}`, "PUT", RECORD)).status).toBe(400);
     expect((await publish(`updates/${RUNTIME}/ios/22222222-2222-3333-4444-555555555555`, "PUT", RECORD)).status).toBe(400);
     expect((await phone()).status).toBe(204);
+  });
+
+  it("finds an asset's file by its url, not its key (the phone's name for it)", async () => {
+    const image = new TextEncoder().encode("png bytes");
+    const stored = createHash("sha256").update(image).digest("hex");
+    const manifest = (asset: object) => JSON.stringify({ id: ID, runtimeVersion: RUNTIME, launchAsset: { key: KEY, url: url(KEY) }, assets: [asset] });
+    const record = (m: string) => JSON.stringify({ id: ID, manifest: m, signature: 's' });
+    expect((await publish(`assets/${KEY}`, "PUT", BUNDLE)).status).toBe(201);
+    const metro = createHash("md5").update(image).digest("hex");
+    expect((await publish(`updates/${RUNTIME}/ios/${ID}`, "PUT", record(manifest({ key: metro })))).status).toBe(400);
+    const res = await publish(`updates/${RUNTIME}/ios/${ID}`, "PUT", record(manifest({ key: metro, url: url(stored) })));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ missing: [stored] });
+    expect((await publish(`assets/${stored}`, "PUT", image, { "content-type": "image/png" })).status).toBe(201);
+    expect((await publish(`updates/${RUNTIME}/ios/${ID}`, "PUT", record(manifest({ key: metro, url: url(stored) })))).status).toBe(201);
   });
 
   it("records native builds per runtime", async () => {
