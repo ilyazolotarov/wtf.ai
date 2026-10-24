@@ -3,7 +3,7 @@ import type { PoseAfterWake } from "@/services/on-the-way";
 import path from "node:path";
 
 import { syntheticDrive, type DriveSegment, type SyntheticDrive } from "@/nav/__fixtures__/synthetic-drive";
-import { haversineM } from "@/nav/geo";
+import { destinationAtBearing, haversineM } from "@/nav/geo";
 import { LocalFrame } from "@/nav/geo/local-frame";
 import { bufferByteSource } from "@/nav/mapmatch/graph/byte-source";
 import { TiledRoadGraph } from "@/nav/mapmatch/graph/road-graph";
@@ -600,6 +600,8 @@ describe("parked pose", () => {
     const drive = syntheticDrive({ segments: DRIVE_OFF, gnss: "coarse", origin: moved, startHeadingRad: 2, seed: 7 });
     const next = harness({ store });
     await next.service.start();
+    // In the car, the engine running: its fixes are the car's.
+    next.engine.emit("engine-running", next.now());
     next.play(drive, { untilS: 5 });
     expect(next.notes.some((n) => n.startsWith("nav parked pose rejected"))).toBe(true);
     expect(storedPose(store)).toBeNull();
@@ -613,6 +615,7 @@ describe("parked pose", () => {
     const drive = syntheticDrive({ segments: [{ durationS: 40, speedMps: 0, yawRateDegS: 0 }], gnss: "none", origin: pose, startHeadingRad: pose.headingRad, seed: 7 });
     const next = harness({ store });
     await next.service.start();
+    next.engine.emit("engine-running", next.now());
     // Each a little apart: iOS repeats a Wi-Fi fix with tiny jitter, and a repeat counts once.
     let k = 0;
     const far = (tUs: number) => record({ tUs, lat: pose.lat + 0.0027 + 0.0004 * k, lon: pose.lon + 0.011 - 0.0006 * k++, hAccM: 55 });
@@ -822,6 +825,49 @@ describe("the car left parked, the phone elsewhere (NAVIGATOR-SPEC §6.1, UI-SPE
     expect(storedPose(store)).toEqual(pose);
   });
 
+  test("engine off, the ECU still answering 0 km/h, the driver walks off without the phone's handling showing: the car stays", async () => {
+    // The phone off its mount all drive (in a pocket): no handling when the walk starts. The adapter keeps answering
+    // within its radio's reach while the phone's satellite fixes walk away east, slowly enough to pass integrity.
+    const store = memoryStore();
+    const parkS = PARK.reduce((t, s) => t + s.durationS, 0);
+    const drive = syntheticDrive({ segments: [...PARK, { durationS: 60, speedMps: 0, yawRateDegS: 0 }], gnss: "clean", startHeadingRad: 0.5 });
+    const h = harness({ store });
+    await h.service.start();
+    h.play(drive, { untilS: parkS });
+    const car = drive.truthAt(drive.trip.startUs + parkS * 1e6);
+    h.engine.emit("engine-off", h.now());
+    let lastFixUs = 0;
+    h.play(drive, {
+      withoutGnssFromS: parkS,
+      onStep: (tUs) => {
+        if (tUs - lastFixUs < 1_000_000) return;
+        lastFixUs = tUs;
+        const walked = destinationAtBearing(car, Math.PI / 2, 0.5 * ((tUs - drive.trip.startUs) / 1e6 - parkS));
+        h.gnss.emit(record({ tUs: tUs - LATE_US, ...walked, hAccM: 5, speedMps: 0.5, courseRad: Math.PI / 2 }));
+      },
+    });
+    h.service.saveCalibration();
+    expect(haversineM(storedPose(store)!, car)).toBeLessThan(3);
+    h.service.stop();
+  });
+
+  test("started from the stored pose, engine off, the ECU answering: the phone's walking fixes don't drop it, nor are saved as the car", async () => {
+    const { store, pose, truth } = await atHome().then(async (a) => (a.h.service.stop(), a));
+    const h = harness({ store });
+    await h.service.start();
+    h.engine.emit("engine-off", h.now());
+    // The phone 40 m off (walked away within the adapter's reach), its GPS good; the ECU answers 0 km/h.
+    h.play(standing(destinationAtBearing(truth, Math.PI / 2, 40), "clean", 40));
+    expect(h.notes.some((n) => n.startsWith("nav parked pose rejected"))).toBe(true);
+    expect(h.notes.some((n) => n.startsWith("nav parked pose kept in storage"))).toBe(true);
+    h.service.saveCalibration();
+    expect(storedPose(store)).toMatchObject({ lat: pose.lat, lon: pose.lon });
+    // Back at the car, the engine starts: the navigator starts again from where the car was left.
+    h.engine.emit("engine-running", h.now());
+    expect(h.notes).toContain("nav restart: the engine starts, from the parked pose kept for it");
+    h.service.stop();
+  });
+
   test("back at the car with the map open: it answers, and the navigator starts again from where it was left", async () => {
     const { h, store, pose, home, truth } = await atHome();
     h.play(standing(home, "coarse", 60), { withoutObd: true });
@@ -1019,6 +1065,7 @@ describe("the manual position (NAVIGATOR-SPEC §6.3)", () => {
     // Answered with the car answering (the phone in it): it is the car that moved.
     const inCar = harness({});
     await inCar.service.start();
+    inCar.engine.emit("engine-running", inCar.now());
     const standing = syntheticDrive({ segments: [{ durationS: 40, speedMps: 0, yawRateDegS: 0 }], gnss: "none", origin, startHeadingRad: 0.8, seed: 3 });
     inCar.play(standing, { untilS: 2 });
     inCar.service.setUserPosition(origin, 0.8);

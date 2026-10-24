@@ -817,6 +817,10 @@ export class Navigator {
     // stale since (ignition off, the link lost), the pose where it was last seen standing. With the
     // wheels' turning the sample is the car's: the phone's own reading comes with it (`handled`).
     if ((!out.valid || s.handled) && this.frozenPose === null) this.frozenPose = this.currentParkedPose() ?? (this.lastObd?.rawKph === 0 ? this.stoppedPose : null);
+    // The engine off and the car standing, the pose is frozen too, handling or not: a phone off its mount (a pocket)
+    // shows none when the driver walks off with it, and the ECU, still awake, answers 0 km/h while the walk's fixes,
+    // slow enough to pass integrity, pulled the dead reckoning 16 m after it within the adapter's reach.
+    if (this.engineOff && this.frozenPose === null && this.lastObd?.rawKph === 0) this.frozenPose = this.currentParkedPose() ?? this.stoppedPose;
     // Held there once parked for real (the engine off, or the speed gone stale: ignition off, the link lost), not at a
     // light where the driver picked the phone up: its fixes are the car's then.
     if (this.frozenPose === null) this.parkedHold = false;

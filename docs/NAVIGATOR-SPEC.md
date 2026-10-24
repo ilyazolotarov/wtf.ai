@@ -199,8 +199,9 @@ navigate with the phone in a hand, a pocket or on a seat.
   distance carried and the heading's by 1°/s (up to 45°), then started from as below. Older, only noted (`nav pose
   saved while driving N s ago: not used`). Note `nav mode dr (pose saved while driving, N s old, carried M m on at
   K km/h, ±S m, heading ±H°)`. Phone-only mode (§9.6) starts only from poses saved standing.
-- **Frozen** at the first handling while parked: the driver often takes the phone out and walks off while the ECU
-  is still awake, and the fixes then follow the driver. Handled only after the speed went stale (ignition off, the
+- **Frozen** at the first handling while parked, and at engine off with the car standing, handling or not: the driver
+  often takes the phone out and walks off while the ECU is still awake, and the fixes then follow the driver (a phone
+  in a pocket shows no handling, and a slow walk's fixes pass integrity: the pose followed one 16 m). Handled only after the speed went stale (ignition off, the
   link lost), it is the pose where the car was last seen standing. With the wheels' turning the navigator gets the
   car's samples, where handling doesn't show: the phone's own reading comes with them (`ImuSample.handled`, §5.4);
   without it the pose saved at a coffee stop had followed the driver 30–40 m and turned 50°, and the next drive
@@ -225,12 +226,14 @@ navigate with the phone in a hand, a pocket or on a seat.
   before it connects). The EKF starts at once with σ widened by 5 m and 2°. Refused if the fixes so far disagree.
 - **Checked:** until confirmed, a satellite fix that fails the EKF gate drops it, and so do 3 Wi-Fi/cell fixes in a
   row that fail it (`poseRejectCoarse`; one Wi-Fi fix isn't enough: a single ±55 m fix 850 m off threw away a correct
-  pose): reset to `anchored` at that fix, the stored pose deleted. **Only while the car answers** (OBD speed within
-  10 s), when the phone is in it. With the car silent (the app opened at home, the walk back to it) the fixes are the
-  phone's and say nothing about the car: whenever they take the navigator off the car's stored standing pose (the
+  pose): reset to `anchored` at that fix, the stored pose deleted. **Only while the phone is in the car**: the car
+  answers (OBD speed within 10 s) and its engine runs, or it moved in the last minute; answering alone isn't enough,
+  the ECU stays awake with the engine off while the driver walks off. Otherwise (the app opened at home, the walk back
+  to the car, a walk away within the adapter's reach) the fixes are the phone's and say nothing about the car: whenever they take the navigator off the car's stored standing pose (the
   pose rejected, a placing released, the track reset), the pose stays stored (status `kept`, note `nav parked pose
-  kept in storage: …`), the map draws the car there (UI-SPEC §6.1), and the car answering again starts a navigator
-  from it (`nav restart: the car answers again …`), whose fixes in the car check it. A Wi-Fi anchor doesn't refuse a
+  kept in storage: …`), the navigator's pose isn't saved over it until the car drives, the map draws the car there
+  (UI-SPEC §6.1), and the car answering again or its engine starting starts a navigator from it (`nav restart: …`),
+  whose fixes in the car check it. A Wi-Fi anchor doesn't refuse a
   pose at `startFromPose`; a satellite one does. Confirmed by an agreeing fix ≤ 100 m after 150 m of driving.
 - **Asked:** the first Wi-Fi fix that disagrees (`pose: "doubted"`) makes the map ask "Is the car where the dot is?"
   (`PositionEstimate.poseQuestion`, with the distance). Yes confirms it (`Navigator.answerPose`); No drops it and
@@ -313,8 +316,8 @@ navigate with the phone in a hand, a pocket or on a seat.
   that disagree. Wi-Fi/cell fixes never release it.
 - **Forgotten** (✕, or No): no longer held, and a navigator started from it starts over without it. ✕ (the placing
   was wrong) also undoes the parked pose saved from it: the pose stored before the placing (before the first of
-  several, known within the session) comes back, else none. No with the car silent (the driver left) keeps it: the
-  car is still where it was put; No with the car answering (the phone is in it) drops it: the car moved.
+  several, known within the session) comes back, else none. No with the phone out of the car (the driver left) keeps
+  it: the car is still where it was put; No with the phone in it (the engine running) drops it: the car moved.
 - **At a start** the newest word wins: the manual position, confirmed within 15 min, unless the car's parked pose was
   saved after it and more than 15 m from it (closer, the pose came from the placing, and the placing is the stronger
   start). Older than 15 min it isn't started from: the map asks first. A VIN known late doesn't replace a navigator
