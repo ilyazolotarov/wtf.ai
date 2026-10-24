@@ -24,7 +24,7 @@ the app marks the alternative with a hollow ring. The next turn helps tell them 
 
 ## Buttons
 
-- **Press and hold the map** to drop a pin. Choose *Route here* or, while the car is stopped, *I'm here*.
+- **Press and hold the map** to drop a pin. Choose *Route here* or *I'm here*.
 - **Follow button**: switches between following the car and orienting the map in the direction of travel. Dragging
   the map stops following; tap the button or continue driving to resume.
 - **Car button**: the adapter connection ([[Car adapter|Car-adapter]]).

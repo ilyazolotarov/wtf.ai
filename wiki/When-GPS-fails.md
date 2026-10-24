@@ -19,8 +19,9 @@ Usually, no action is needed: **keep driving normally.**
 
 ## Put the car on the map
 
-If the car is stopped and the dot is clearly on the wrong road, press and hold the map where the car really is, tap
-**I'm here**, then tap the road ahead to show which way the car faces. The dot carries on from there.
+If the dot is clearly on the wrong road, press and hold the map where the car really is, tap **I'm here**, then tap
+the road ahead to show which way the car faces. The dot carries on from there. It works while driving too: leave it to
+a passenger, or stop first.
 
 ## "Is the car where the dot is?"
 

@@ -217,7 +217,7 @@ One small component each; the screen only places them and wires their state. Car
   catalog region that has it, else Offline maps. "Not now" hides it for that pair of regions until restart. Hidden
   while that region downloads.
 - **Long-press on the map** drops a pin; a card shows its distance and direction, ✕, **Route here** (ROUTING-SPEC
-  §8), and while the car stands **I'm here**: placing starting at the pin.
+  §8), and **I'm here** (at any speed): placing starting at the pin.
 - **With a route** (`src/components/route/route-banner.tsx`): the next maneuver's icon, the distance to it (10 m
   steps under 300 m, 50 m under 1 km), its instruction, "then …" when the next follows within 120 m, and the
   distance, time and arrival clock left; or "Planning route…", "Off route, planning again…", "Position uncertain:
@@ -255,7 +255,7 @@ One small component each; the screen only places them and wires their state. Car
   the road distance and time. Under it **Home**, **Work**, **Save** (a place is saved under one kind), or "Saved as
   Home · Remove"; a confirmation strip with **Undo**.
 - "Start guidance" plans from the position (`runtime.routes`, `useRoute()`) and returns to the map; "Stop guidance"
-  ends it. **I'm here** on the summary card, while the car stands: placing starting at the place
+  ends it. **I'm here** on the summary card, at any speed: placing starting at the place
   (`place-request.ts`).
 - Footnote: long-press the map to route anywhere or to say the car is there; routes stay inside the region.
 

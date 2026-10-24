@@ -38,8 +38,9 @@ export function isLost(position: PositionEstimate | null): boolean {
 }
 
 /**
- * Putting the car on the map (NAVIGATOR-SPEC §6.2): where it stands, then which way it faces. Only while it stands;
- * moving off cancels. The confirmed placing stays on the map until the car has driven away from it.
+ * Putting the car on the map (NAVIGATOR-SPEC §6.2): where it is, then which way it faces. The driver may ask for it at
+ * any speed; only the offer (`isLost`'s chip) waits for the car to stand. The confirmed placing stays on the map until
+ * the car has driven away from it.
  */
 export function usePlacing({
   position,
@@ -62,9 +63,9 @@ export function usePlacing({
   const center = useRef<Coordinate | null>(null);
   const [placeFrom, setPlaceFrom] = useState<Coordinate | null>(null);
   const standing = position != null && (position.speedMps ?? 0) < STANDING_MPS;
-  // The driver may say where the car is from a pin or a search result whenever it isn't moving, also before any
-  // fix at all (indoors, jammed): the manual position is shown without one (NAVIGATOR-SPEC §6.3).
-  const mayPlace = position == null || standing;
+  // The driver may say where the car is from a pin or a search result at any time, also moving and before any fix at
+  // all (indoors, jammed): the manual position is shown without one (NAVIGATOR-SPEC §6.3).
+  const mayPlace = true;
 
   // From the dot, or from where the driver says the car is (a dropped pin, a search result).
   const start = (at?: Coordinate) => {
@@ -114,14 +115,6 @@ export function usePlacing({
   });
   // The map stays mounted under the route sheet, so the request always comes while subscribed.
   useEffect(() => onPlacingRequest(() => takeRequest()), []);
-  // Moving off cancels (state adjusted during render, not in an effect).
-  if (step && !mayPlace) {
-    setStep(null);
-    setPlaceAt(null);
-    setHeading(null);
-    setCameraMode("follow");
-  }
-
   const mark =
     step === "heading" && placeAt
       ? { at: placeAt, headingRad: heading, draft: true }

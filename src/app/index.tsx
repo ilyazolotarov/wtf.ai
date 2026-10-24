@@ -364,7 +364,7 @@ export default function HomeScreen() {
               {showManual && detailsOpen && (
                 <ManualChip
                   manual={manual}
-                  onPlace={place.standing ? () => place.start() : undefined}
+                  onPlace={() => place.start()}
                   onForget={() => place.forgetManual()}
                 />
               )}
@@ -383,8 +383,8 @@ export default function HomeScreen() {
                   distanceM={position.poseQuestion.distanceM}
                   onAnswer={(here) => {
                     navigator.answerPose(here);
-                    // Not there: show where it is instead, if it stands.
-                    if (!here && place.standing) place.start();
+                    // Not there: show where it is instead.
+                    if (!here) place.start();
                   }}
                 />
               )}
