@@ -17,7 +17,8 @@ const PositionContext = React.createContext<PositionContextValue | null>(null);
 
 /**
  * `gnss` false: only the position; GNSS and the navigator are started and stopped by whoever runs them (the car's map,
- * shown while the phone's app is in the background: its session runs the navigator, src/components/car-screen).
+ * shown while the phone's app is in the background: its session runs the navigator, src/components/car-screen and
+ * src/components/car-play).
  */
 export function PositionProvider({ children, gnss = true }: React.PropsWithChildren<{ gnss?: boolean }>) {
   const [source] = useState(() => getRuntime().position);

@@ -144,6 +144,9 @@
           "android": {
             "minSdkVersion": 29,
             "enableMinifyInReleaseBuilds": true
+          },
+          "ios": {
+            "enableSceneSupport": true
           }
         }
       ],
@@ -207,6 +210,7 @@
           ]
         }
       ],
+      "./modules/car-play/app.plugin.js",
       [
         "@sentry/react-native/expo",
         {
