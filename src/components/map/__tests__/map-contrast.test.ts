@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
-import { CONE_OUTLINE } from "@/components/map/puck-style";
+import { CONE_OUTLINE, MAP_CAR } from "@/components/map/puck-style";
 import { DARK_PALETTE, tintDarkStyle, type MapStyleJson } from "@/config/map-dark";
 import { cssToHex, stylePalette } from "@/config/map-palette";
 import { Colors } from "@/constants/theme";
@@ -10,7 +10,7 @@ jest.mock("@/global.css", () => ({}));
 
 /**
  * What the app draws over the map stands out on everything under it, in both themes (UI-SPEC §6.1): the car's dot, its
- * heading cone, the placing pin, the routes and their markers, the pins and marks, the GPS ghost. Every surface meets
+ * heading cone, the placing pin, the routes and their markers, the pins and marks, the GPS ghost, the parked car. Every surface meets
  * a band of theirs at WCAG's 3:1 for graphics (SC 1.4.11); labels read at 4.5:1 on their halo. The surfaces come from
  * the map's own styles (Liberty, and the same re-tinted for Night Drive) and the route colours.
  */
@@ -127,6 +127,11 @@ describe.each(SCHEMES)("%s theme", (scheme) => {
     expect(contrast(solid(p.puck, [0, 0, 0]), solid(p.puckRing, [0, 0, 0]))).toBeGreaterThanOrEqual(MIN);
   });
 
+  test("the parked car's glass is the trusted dot's blue, reading on its body", () => {
+    expect(MAP_CAR.glass[scheme]).toBe(p.puck);
+    expect(contrast(solid(MAP_CAR.glass[scheme], [0, 0, 0]), solid(MAP_CAR.body[scheme], [0, 0, 0]))).toBeGreaterThanOrEqual(MIN);
+  });
+
   test("the trusted dot's blue is not the route's: the line doesn't run into it", () => {
     expect(deltaE(solid(p.puck, [0, 0, 0]), solid(p.route, [0, 0, 0]))).toBeGreaterThanOrEqual(20);
   });
@@ -170,6 +175,7 @@ describe.each(SCHEMES)("%s theme: the rest of what the app draws on the map", (s
     ["the placed car's arrow", arrow, all],
     ["the GPS ghost", [p.puckEdge, p.puckRing, p.bad.c], all],
     ["another road the car may be on", [p.puckEdge, p.puckDoubt, p.bg], all],
+    ["the parked car", [MAP_CAR.edge[scheme], MAP_CAR.ring, MAP_CAR.body[scheme]], all],
   ];
 
   describe.each(marks)("%s", (_, bands, on) => {

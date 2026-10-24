@@ -4,6 +4,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { AppState, Platform, type AppStateStatus } from "react-native";
 
 import type { PositionEstimate } from "@/nav/position/types";
+import type { ParkedCar } from "@/services/navigation/navigator-service";
 import { getRuntime } from "@/services/runtime";
 
 interface PositionContextValue {
@@ -81,4 +82,10 @@ export function usePositionPermission() {
     permission: context.permission,
     requestPermission: context.requestPermission,
   };
+}
+
+/** Where the car was left, while the dot is the phone's (UI-SPEC §6.1; `NavigatorService.getParkedCar`). */
+export function useParkedCar(): ParkedCar | null {
+  const [source] = useState(() => getRuntime().position);
+  return useSyncExternalStore(source.subscribe, source.getParkedCar, source.getParkedCar);
 }

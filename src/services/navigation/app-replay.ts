@@ -23,7 +23,7 @@ import { ENGINE_STATE_CODES, type GnssRecord, type ImuMotionRecord, type NavEsti
 import type { KeyValueStore } from "@/obd/vehicle-link-core";
 
 import type { CalibrationStore, PhoneKey, StoredSnapshot } from "./calibration-store";
-import { NavigatorService, STORAGE_NOTE, toNavFix, type ServiceClock } from "./navigator-service";
+import { NavigatorService, STORAGE_NOTE, toNavFix, type ParkedCar, type ServiceClock } from "./navigator-service";
 
 /** The app's key-value storage in memory: one carried through drives replayed in order, copied to try variants. */
 export class MemoryKeyValueStore implements KeyValueStore {
@@ -115,6 +115,11 @@ export interface AppReplayResult extends ReplayResult {
   publishedAlternatives: { lat: number; lon: number; weight: number }[][];
   /** The service's notes (what the app would write to the trip log). */
   notes: { tUs: number; text: string }[];
+  /**
+   * The car the map drew where it was left (`getParkedCar`), each time it changed; the last entry, at the log's end, is
+   * where the app keeps the car once it closes (what its map draws when opened away from the car).
+   */
+  parkedCar: { tUs: number; car: ParkedCar | null }[];
 }
 
 /** Listeners that let a failure through (the app's Emitter logs and swallows it, which would hide a replay bug). */
@@ -191,6 +196,7 @@ export function replayTripInApp(logged: TripLog, o: AppReplayOptions): AppReplay
   const publishedMapMatch: NavMapMatchRecord[] = [];
   const publishedAlternatives: AppReplayResult["publishedAlternatives"] = [];
   const notes: AppReplayResult["notes"] = [];
+  const parkedCar: AppReplayResult["parkedCar"] = [];
   const graph = o.roadGraph ?? null;
   const rec = new ReplayRecorder(trip, {
     cuts: o.cuts ?? appOutageCuts(trip),
@@ -316,11 +322,16 @@ export function replayTripInApp(logged: TripLog, o: AppReplayOptions): AppReplay
         t.fn();
       }
     }
+    const car = service.getParkedCar();
+    if (car !== (parkedCar.at(-1)?.car ?? null)) parkedCar.push({ tUs: nowUs, car });
   }
   // The app closes: what's pending is fed, and the calibration saved.
   service.setKeepAlive(false);
+  const stored = vin ? o.calibration.parkedPose(vin) : null;
+  const left = stored && !stored.speedMps ? stored : null;
+  if (left || parkedCar.length) parkedCar.push({ tUs: endUs, car: left });
   const result = rec.finish(tS(endUs));
-  return { ...result, published, publishedMapMatch, publishedAlternatives, notes };
+  return { ...result, published, publishedMapMatch, publishedAlternatives, notes, parkedCar };
 }
 
 /** The driver's placings in a log: its notes `nav position set by the driver: <lat>,<lon>…, heading <deg>°`. */

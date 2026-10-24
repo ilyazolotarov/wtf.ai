@@ -127,6 +127,19 @@ persisted in kv-store. No hardcoded user-facing strings in components.
   < 3 m/s, the cone comes from `watchHeadingAsync` and shows where the phone points, as wide as the compass is unsure
   (20°/35°/50°/60° for accuracy 3–0). It never reaches `PositionEstimate`.
 - Raw GNSS **ghost marker** from `rawGnss`, hidden while `source === 'gnss'`.
+- **The parked car** (`useParkedCar`, `ParkedCarLayers`): while the car isn't the dot (no speed from it for 10 s: the
+  driver walked off, the app opened elsewhere), its stored parked pose (NAVIGATOR-SPEC §6.1) is drawn as a car seen
+  from straight above (`MAP_CAR`, `puck-style.ts`; the images `assets/images/map-car-{light,dark}` drawn by
+  `scripts/map-car.py`): shaded to read as 3D, its body dark on the light map and white on the dark one, the windscreen
+  and windows in the trusted dot's blue, banded as the dot (a white ring, a dark edge, black round the white car), a
+  soft shadow; nose the way it was parked, facing the screen when the map tilts, under the pins
+  and the dot. It grows as the map is zoomed in, at half the map's rate (56 pt long at zoom 17, twice that at 19),
+  never below 28 pt nor shorter on the ground than a real car (5 m). Zoomed in past the screen's own image (1x–3x), a
+  denser one is drawn (6 and 12 px a point), so the car stays sharp at real size. Not while the car answers (the dot is the car),
+  once it drives (the pose is cleared), nor in phone-only mode. The phone's fixes away from the car never move or drop
+  it. A confirmed placing (§6.2) is drawn instead while it stays: one car on the map. **Standing on it**, when the
+  dot's disc touches the car on screen, the dot and its cone give way to the car (its circle stays) until the dot is
+  8 pt clear of it.
 - **Map-match alternatives** (`alternatives`): hollow markers under the puck, more opaque the heavier they are.
 - **Test tools** (Developer, off by default): the particle overlay (MAPMATCH-SPEC §11) and the "Cut GPS" chip; while
   it is on, a card replaces the trust alert with the time, distance, the dot's distance from the withheld fix and
@@ -182,7 +195,8 @@ persisted in kv-store. No hardcoded user-facing strings in components.
   dot, a chip "Set your position on the map"; "No" to the pose question opens it too. The map zooms in (18, flat,
   north up) with a centre pin and a card ("Where is the car?" · Cancel / Here), then "Which way does it face?": a tap
   draws an arrow from the pin, another tap turns it (Cancel / Confirm; Confirm needs a tap). Moving off cancels. The
-  confirmed spot and arrow stay, fainter, until the dot is 50 m away or the car is placed again. When the ignition
+  confirmed placing is drawn as the car (the parked car's icon, §6.1, nose the way it was aimed, in place of the
+  parked car) until the dot is 50 m away or the car is placed again. When the ignition
   comes on while the chip is offered, the voice says once, within 2 min, "Show on the map where the car is"
   (`place-car`; not when muted or at volume 0), on the phone's own speaker on Android (`playOnSpeaker`); on iOS where
   the voice goes, and once more 2 s after the audio moves off the phone within 20 s, while the chip is still offered.

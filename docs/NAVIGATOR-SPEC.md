@@ -182,7 +182,10 @@ navigate with the phone in a hand, a pocket or on a seat.
 - **Saved** (`Navigator.parkedPose`): position, heading and their σ while the car stands in mode `dr`, and `offRoad`
   when map matching had it off every road (a lot, a yard: the next start keeps it there, MAPMATCH-SPEC §7.2, and the
   map doesn't take `offroad` for lost there). The service stores it per VIN (`nav.parkedPoses`) at engine/ignition
-  off, every 30 s while parked, and when it stops. The first speed > 0 clears it. Dead-reckoned there without a
+  off, every 30 s while parked, and when it stops, while the car answered in the last 150 s (ignition off comes 120 s
+  after the last answer when the key turns right after stopping): later the navigator may follow the phone (a fix the
+  pose lost to, below; a walk), and its pose is where the phone is (noted once, `nav parked pose not saved: …`). The
+  first speed > 0 clears it. Dead-reckoned there without a
   trusted satellite fix in the last 300 m, its σ is at least 30 m (the EKF claimed 5–7 m where the car was 12–80 m
   off, and the next drive's map matching missed the street). The pose is the EKF's, not the map's dot: saving the
   dominant map-matching hypothesis carried a wrong street into the next drive.
@@ -222,8 +225,13 @@ navigate with the phone in a hand, a pocket or on a seat.
   before it connects). The EKF starts at once with σ widened by 5 m and 2°. Refused if the fixes so far disagree.
 - **Checked:** until confirmed, a satellite fix that fails the EKF gate drops it, and so do 3 Wi-Fi/cell fixes in a
   row that fail it (`poseRejectCoarse`; one Wi-Fi fix isn't enough: a single ±55 m fix 850 m off threw away a correct
-  pose): reset to `anchored` at that fix, the stored pose deleted. A Wi-Fi anchor doesn't refuse a pose at
-  `startFromPose`; a satellite one does. Confirmed by an agreeing fix ≤ 100 m after 150 m of driving.
+  pose): reset to `anchored` at that fix, the stored pose deleted. **Only while the car answers** (OBD speed within
+  10 s), when the phone is in it. With the car silent (the app opened at home, the walk back to it) the fixes are the
+  phone's and say nothing about the car: whenever they take the navigator off the car's stored standing pose (the
+  pose rejected, a placing released, the track reset), the pose stays stored (status `kept`, note `nav parked pose
+  kept in storage: …`), the map draws the car there (UI-SPEC §6.1), and the car answering again starts a navigator
+  from it (`nav restart: the car answers again …`), whose fixes in the car check it. A Wi-Fi anchor doesn't refuse a
+  pose at `startFromPose`; a satellite one does. Confirmed by an agreeing fix ≤ 100 m after 150 m of driving.
 - **Asked:** the first Wi-Fi fix that disagrees (`pose: "doubted"`) makes the map ask "Is the car where the dot is?"
   (`PositionEstimate.poseQuestion`, with the distance). Yes confirms it (`Navigator.answerPose`); No drops it and
   anchors at that fix; unanswered, the 3-in-a-row rule applies. Notes `nav parked pose doubted …`, `… confirmed /
@@ -282,8 +290,11 @@ navigate with the phone in a hand, a pocket or on a seat.
   bay at right angles to the road it leaves by. Map matching then starts as from a pose parked off the roads
   (MAPMATCH-SPEC §7.2); started on the roads near it that fit the heading, a car placed facing a lane turned onto the
   road beside it and the dot drove on along the lane.
-- **Held as the manual position** (§6.3), with or without a car connected, apart from the car's parked pose. With a
-  car standing, the 30 s save keeps the navigator's pose (started from the placing) as the parked pose.
+- **Held as the manual position** (§6.3), with or without a car connected. With the car answering, standing, the 30 s
+  save keeps the navigator's pose (started from the placing) as the parked pose. With the phone's car known but not
+  answering (the adapter not connected yet, the driver away from it), the placing is stored as its parked pose at once
+  (`nav parked pose set from the placing: …`): it answered "where is the car?", and the phone's GPS that later takes
+  the dot back (§6.3) says where the phone is, not the car. The map then draws the car there (UI-SPEC §6.1).
 
 ### 6.3 The manual position
 
@@ -300,8 +311,10 @@ navigate with the phone in a hand, a pocket or on a seat.
 - **Released** (a navigator started from it carries on): the car drives (OBD speed above 0; phone-only: 30 m
   measured); a trusted satellite fix within 3σ (σ = √(fix accuracy² + 10²)); 5 trusted satellite fixes in a row
   that disagree. Wi-Fi/cell fixes never release it.
-- **Forgotten** (✕, or No): no longer held, and a navigator started from it starts over without it (with the parked
-  pose saved since the placing deleted).
+- **Forgotten** (✕, or No): no longer held, and a navigator started from it starts over without it. ✕ (the placing
+  was wrong) also undoes the parked pose saved from it: the pose stored before the placing (before the first of
+  several, known within the session) comes back, else none. No with the car silent (the driver left) keeps it: the
+  car is still where it was put; No with the car answering (the phone is in it) drops it: the car moved.
 - **At a start** the newest word wins: the manual position, confirmed within 15 min, unless the car's parked pose was
   saved after it and more than 15 m from it (closer, the pose came from the placing, and the placing is the stronger
   start). Older than 15 min it isn't started from: the map asks first. A VIN known late doesn't replace a navigator

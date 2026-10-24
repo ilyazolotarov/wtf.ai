@@ -41,6 +41,52 @@ export const PUCK_HALO = {
   dark: { r: PUCK_OUTER + 10, opacity: 0.45 },
 } as const;
 
+/**
+ * The lessons' car (`CarGlyph`): the map's car image (`MAP_CAR`) drawn `length` units long on a lesson's drawn map
+ * (inside the placing lesson's target circle, 28 units in radius), and the colour of its trail, dark on light ground
+ * and light on dark.
+ */
+export const CAR_GLYPH = {
+  length: 52,
+  color: { light: "#1D1C1A", dark: "#F2F0EC" },
+} as const;
+
+/**
+ * The car on the map (UI-SPEC §6.1): a car seen from straight above, shaded to read as 3D, drawn by
+ * `scripts/map-car.py` into `assets/images/map-car-{light,dark}` (1x/2x/3x, and the `near` images). Its body dark on light ground and white on
+ * dark, the windscreen and windows in the trusted dot's blue (theme.ts `puck`, held equal by a
+ * test), banded as the dot, a soft shadow. The colours here are the image's, for the
+ * contrast test: change both together. Facing the screen when the map tilts (seen from above whatever the camera).
+ */
+export const MAP_CAR = {
+  image: { light: "map-car-light", dark: "map-car-dark" },
+  body: { light: "#24272C", dark: "#F3F5F8" },
+  glass: { light: "#0A84FF", dark: "#3D6BFF" },
+  /** Banded as the dot: a white ring round the body, a dark edge outside it (0.7 and 0.6 pt in the image). */
+  ring: "#FFFFFF",
+  edge: { light: "#1C1F24", dark: "#000000" },
+  /** The car's footprint in the image at 1x, points (26 × 56), drawn at `size`. */
+  footprint: { w: 13, h: 28 },
+  /** The whole image at 1x, points: the car centred on it, room round it for the mirrors and the shadow. */
+  canvas: { w: 40, h: 68 },
+  /**
+   * The near images' densities, pixels per point (`map-car-{light,dark}-x6`, `-x12`): drawn instead of the car's own
+   * once the map is zoomed in so far that a 3x screen would stretch it (the car is drawn as long as it is on the ground,
+   * over seven times its own size at zoom 22). Densest last.
+   */
+  near: [6, 12],
+  /**
+   * How many times the footprint's points it is drawn: `size` at `atZoom` (the image's own 56 pt), growing as the map is
+   * zoomed in, at `growth` of the map's rate (half: twice as large every two zoom levels); zoomed out, never below
+   * `minSize`. Never shorter on the ground than `minLengthM` either.
+   */
+  size: 2,
+  atZoom: 17,
+  growth: 0.5,
+  minSize: 1,
+  minLengthM: 5,
+} as const;
+
 /** The route's destination: the route's colour in its casing; points. */
 export const DESTINATION_DOT = { r: 8, ring: 3 } as const;
 

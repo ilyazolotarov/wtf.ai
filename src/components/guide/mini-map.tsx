@@ -1,11 +1,13 @@
 import * as Location from "expo-location";
 import { useEffect, useState, type PropsWithChildren } from "react";
 import { StyleSheet, useColorScheme, View, type LayoutChangeEvent } from "react-native";
-import Svg, { Circle, G, Path, Rect } from "react-native-svg";
+import Svg, { Circle, G, Image as SvgImage, Path, Rect } from "react-native-svg";
 
 import { CAR_COLOR, FALLBACK_PALETTE, type MapColors } from "@/components/guide/map-colors";
 import {
+  CAR_GLYPH,
   CONE,
+  MAP_CAR,
   CONE_FILL_OPACITY,
   CONE_OUTLINE,
   DESTINATION_DOT,
@@ -228,13 +230,19 @@ export function useNudgedHeading(baseDeg: number): number {
   return baseDeg + nudge;
 }
 
-/** A car seen from above, `x`,`y` its centre; faces up unless turned. */
+const CAR_IMAGE = {
+  light: require("@/assets/images/map-car-light.png"),
+  dark: require("@/assets/images/map-car-dark.png"),
+};
+
+/** A car seen from above, `x`,`y` its centre; faces up unless turned. The map's car (`MAP_CAR`), `CAR_GLYPH.length` long. */
 export function CarGlyph({ x, y, rotate = 0, opacity = 1 }: { x: number; y: number; rotate?: number; opacity?: number }) {
-  const c = useMapColors();
+  const scheme = useColorScheme() === "dark" ? "dark" : "light";
+  const k = CAR_GLYPH.length / (MAP_CAR.footprint.h * MAP_CAR.size);
+  const [w, h] = [MAP_CAR.canvas.w * k, MAP_CAR.canvas.h * k];
   return (
     <G opacity={opacity} transform={`translate(${x} ${y}) rotate(${rotate})`}>
-      <Rect x={-8} y={-14} width={16} height={28} rx={5} fill={c.car} />
-      <Rect x={-5} y={-9} width={10} height={7} rx={2} fill="#9DB4F2" />
+      <SvgImage href={CAR_IMAGE[scheme]} x={-w / 2} y={-h / 2} width={w} height={h} />
     </G>
   );
 }

@@ -1,6 +1,6 @@
-import { GeoJSONSource, Layer } from "@maplibre/maplibre-react-native";
+import { GeoJSONSource, Images, Layer } from "@maplibre/maplibre-react-native";
 import { useMemo } from "react";
-import type { NativeSyntheticEvent } from "react-native";
+import { type NativeSyntheticEvent, PixelRatio } from "react-native";
 
 import type { Palette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
@@ -14,6 +14,7 @@ import {
   alternativeFeatures,
   alternativeLabelFeatures,
   alternativeLineFeatures,
+  carFeatures,
   emptyLines,
   emptyPoints,
   emptyPolygons,
@@ -30,6 +31,7 @@ import {
   CONE_FILL_OPACITY,
   CONE_OUTLINE,
   DESTINATION_DOT,
+  MAP_CAR,
   PIN_DOT,
   PUCK,
   PUCK_HALO,
@@ -40,7 +42,7 @@ import type { CompassHeading } from "./use-compass-heading";
 
 /**
  * The map's own layers, in groups. MapLibre stacks layers in the order they are declared, so `MapSurface` renders
- * the groups bottom to top: route, marks, position, debug, puck.
+ * the groups bottom to top: route, parked car, marks, position, debug, puck.
  */
 
 /** The placed car's arrow: narrow and long enough to read at zoom 18. */
@@ -182,9 +184,56 @@ export function RouteLayers({
   );
 }
 
+/** The car's images (`MAP_CAR`, drawn by scripts/map-car.py), registered with the map by name. */
+const CAR_IMAGES = {
+  [MAP_CAR.image.light]: require("@/assets/images/map-car-light.png"),
+  [MAP_CAR.image.dark]: require("@/assets/images/map-car-dark.png"),
+  [`${MAP_CAR.image.light}-x6`]: require("@/assets/images/map-car-light-x6.png"),
+  [`${MAP_CAR.image.dark}-x6`]: require("@/assets/images/map-car-dark-x6.png"),
+  [`${MAP_CAR.image.light}-x12`]: require("@/assets/images/map-car-light-x12.png"),
+  [`${MAP_CAR.image.dark}-x12`]: require("@/assets/images/map-car-dark-x12.png"),
+};
+
 /**
- * A dropped pin, and where the driver put the car with an arrow the way it faces (null: skipped): full strength
- * while choosing (`draft`), fainter once confirmed.
+ * The car on the map (UI-SPEC §6.1): where it was left while the dot is the phone's, or where the driver put it, once
+ * confirmed. `MAP_CAR`'s image, nose the way it faces, growing as the map is zoomed in, and facing the screen when the
+ * map tilts.
+ */
+export function ParkedCarLayers({
+  car,
+  scheme,
+  zoom,
+}: {
+  car: { lat: number; lon: number; headingRad: number } | null;
+  scheme: "light" | "dark";
+  zoom: number;
+}) {
+  const shape = useMemo(() => (car ? carFeatures(car, car.headingRad, zoom, PixelRatio.get()) : emptyPoints()), [car, zoom]);
+  return (
+    <>
+      <Images images={CAR_IMAGES} />
+      <GeoJSONSource id="parked-car" data={shape}>
+        <Layer
+          id="parked-car-icon"
+          type="symbol"
+          layout={{
+            "icon-image": ["concat", MAP_CAR.image[scheme], ["get", "image"]],
+            "icon-size": ["get", "size"],
+            "icon-rotate": ["get", "deg"],
+            "icon-rotation-alignment": "map",
+            "icon-pitch-alignment": "viewport",
+            "icon-allow-overlap": true,
+            "icon-ignore-placement": true,
+          }}
+        />
+      </GeoJSONSource>
+    </>
+  );
+}
+
+/**
+ * A dropped pin, and the car being put on the map: the spot, and an arrow the way it faces once aimed (confirmed, it
+ * is drawn as the car, `ParkedCarLayers`).
  */
 export function MarkLayers({
   pin,
@@ -193,7 +242,7 @@ export function MarkLayers({
   scheme,
 }: {
   pin: Coordinate | null;
-  placedMark: { at: Coordinate; headingRad: number | null; draft: boolean } | null;
+  placedMark: { at: Coordinate; headingRad: number | null } | null;
   palette: Palette;
   scheme: "light" | "dark";
 }) {
@@ -203,7 +252,6 @@ export function MarkLayers({
     placedMark && placedMark.headingRad !== null
       ? sectorFeatures(placedMark.at, placedMark.headingRad, PLACED_ARROW_HALF_ANGLE_RAD, PLACED_ARROW_M)
       : emptyPolygons();
-  const placedOpacity = placedMark?.draft ? 1 : 0.45;
   const arrowOutline = CONE_OUTLINE[scheme];
   return (
     <>
@@ -225,27 +273,27 @@ export function MarkLayers({
         <Layer
           id="placed-arrow-fill"
           type="fill"
-          paint={{ "fill-color": palette.mapPin, "fill-opacity": 0.55 * placedOpacity }}
+          paint={{ "fill-color": palette.mapPin, "fill-opacity": 0.55 }}
         />
         {/* Outlined as the heading cone. */}
         <Layer
           id="placed-arrow-edge"
           type="line"
           layout={{ "line-join": "round" }}
-          paint={{ "line-color": palette.puckEdge, "line-width": arrowOutline.edge, "line-opacity": placedOpacity }}
+          paint={{ "line-color": palette.puckEdge, "line-width": arrowOutline.edge }}
         />
         <Layer
           id="placed-arrow-ring"
           type="line"
           layout={{ "line-join": "round" }}
-          paint={{ "line-color": palette.puckRing, "line-width": arrowOutline.ring, "line-opacity": placedOpacity }}
+          paint={{ "line-color": palette.puckRing, "line-width": arrowOutline.ring }}
         />
       </GeoJSONSource>
       <GeoJSONSource id="placed-point" data={placedPoint}>
         <Layer
           id="placed-point-edge"
           type="circle"
-          paint={{ "circle-radius": 7 + 3 + PUCK.edge, "circle-color": palette.puckEdge, "circle-opacity": placedOpacity }}
+          paint={{ "circle-radius": 7 + 3 + PUCK.edge, "circle-color": palette.puckEdge }}
         />
         <Layer
           id="placed-point-dot"
@@ -253,10 +301,8 @@ export function MarkLayers({
           paint={{
             "circle-radius": 7,
             "circle-color": palette.mapPin,
-            "circle-opacity": placedOpacity,
             "circle-stroke-color": palette.puckRing,
             "circle-stroke-width": 3,
-            "circle-stroke-opacity": placedOpacity,
           }}
         />
       </GeoJSONSource>
@@ -274,6 +320,7 @@ export function PositionLayers({
   palette,
   scheme,
   view,
+  hideCone = false,
 }: {
   position: PositionEstimate | null;
   compass: CompassHeading | null;
@@ -281,6 +328,8 @@ export function PositionLayers({
   scheme: "light" | "dark";
   /** The camera now: the heading cone looks the same on screen in every one (puck-style.ts). */
   view: CameraView;
+  /** The dot gives way to the car it stands on: no cone either (the car's nose shows the way). */
+  hideCone?: boolean;
 }) {
   const dr = deadReckoning(position);
   const tint = dr ? palette.puckDoubt : palette.puck;
@@ -288,8 +337,9 @@ export function PositionLayers({
   const accuracy = position ? accuracyFeatures(position) : emptyPolygons();
   // The heading cone, the same on screen at every zoom and as in the lessons; walking (`compass`), the phone's compass
   // draws it, as wide each side as the compass is unsure.
-  const cone =
-    position && compass
+  const cone = hideCone
+    ? emptyPolygons()
+    : position && compass
       ? screenSectorFeatures(position, compass.headingRad, compass.uncertaintyRad, CONE.r, view)
       : position && position.headingRad != null
         ? screenSectorFeatures(position, position.headingRad, CONE.halfAngleRad, CONE.r, view)
@@ -462,15 +512,18 @@ export function PuckLayers({
   position,
   palette,
   scheme,
+  hideDot = false,
 }: {
   position: PositionEstimate | null;
   palette: Palette;
   scheme: "light" | "dark";
+  /** Standing on the car: the car shows instead (UI-SPEC §6.1). */
+  hideDot?: boolean;
 }) {
   const dr = deadReckoning(position);
   const halo = PUCK_HALO[scheme];
   const alternatives = alternativeFeatures(position?.alternatives ?? []);
-  const puck = position ? pointFeatures(position) : emptyPoints();
+  const puck = position && !hideDot ? pointFeatures(position) : emptyPoints();
   return (
     <>
       <GeoJSONSource id="map-match-alternatives" data={alternatives}>

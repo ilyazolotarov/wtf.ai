@@ -10,6 +10,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isMainThread, parentPort, Worker, workerData } from "node:worker_threads";
 
+import { MAP_CAR } from "../../../src/components/map/puck-style";
+import { carScale } from "../../../src/components/map/map-features";
 import { tintDarkStyle, type MapStyleJson } from "../../../src/config/map-dark";
 
 import { mergeCalibrations, type CompassCalibration } from "../../../src/nav/compass/compass";
@@ -261,6 +263,28 @@ interface Reply {
   body: string;
 }
 
+/** The app's car images at 2x, as data URLs (assets/images, drawn by scripts/map-car.py). */
+const CAR_IMAGES = Object.fromEntries(
+  (["light", "dark"] as const).map((theme) => [
+    theme,
+    `data:image/png;base64,${readFileSync(path.join(HERE, `../../../assets/images/map-car-${theme}@2x.png`)).toString("base64")}`,
+  ]),
+);
+
+/**
+ * How the app's map draws the parked car (puck-style.ts MAP_CAR, map-features.ts carScale and carFeatures): its images,
+ * and its image size by zoom at this drive's latitude.
+ */
+function carStyleFor(trip: TripLog) {
+  const lat = regionPoint(trip)?.lat ?? 50;
+  const zooms = Array.from({ length: 29 }, (_, k) => 8 + k / 2);
+  // Its own image at any zoom: the viewer registers the @2x one only, not the app's near images.
+  return {
+    images: CAR_IMAGES,
+    sizeByZoom: zooms.map((z) => [z, carScale(lat, z) / MAP_CAR.size]),
+  };
+}
+
 /**
  * One drive replayed for the page (/api/replay): the app replay, its incidents against the drawing, the placings, the
  * gyro path. Runs in the replay worker (below), so the server answers everything else meanwhile and a replay nobody
@@ -329,6 +353,8 @@ function replayReply(url: URL): Reply {
     // The main replay's dots, for the incidents against the drawing.
     let mainPublished: { timestampUs: number; latDeg: number; lonDeg: number; headingRad: number }[] | null = null;
     let mainFixes: { t: number; lat: number; lon: number; hAccM: number }[] = [];
+    // Where the app's map drew the car it was left, from when (null: none drawn from then).
+    let mainParkedCar: { t: number; car: { lat: number; lon: number; headingRad: number } | null }[] = [];
     // Through the app: the service publishes the dot, starts from the stored parked pose, and runs the outages.
     const replay = (o: ReplayOptions) => {
       const run = () => replayTripInApp(obdSpeed ? obdFromCan(trip) : trip, {
@@ -360,6 +386,10 @@ function replayReply(url: URL): Reply {
       if (o.nav === mainNav) {
         mainPublished = r.published;
         mainFixes = r.fixes.filter((f) => f.satellite && f.status === "accepted").map((f) => ({ t: f.tS, lat: f.fix.lat, lon: f.fix.lon, hAccM: f.fix.hAccM }));
+        mainParkedCar = r.parkedCar.map(({ tUs, car }) => ({
+          t: Math.round((tUs - trip.startUs) / 1e5) / 10,
+          car: car && { lat: car.lat, lon: car.lon, headingRad: car.headingRad },
+        }));
       }
       return r;
     };
@@ -395,7 +425,7 @@ function replayReply(url: URL): Reply {
         maneuvers: [],
       });
     }
-    reply = { status: 200, type: "application/json", body: JSON.stringify({ ...data, incidents, compassInfo, placings: driverPlacings(trip).map((p) => ({ t: Math.round((p.tUs - trip.startUs) / 1e5) / 10, lat: p.lat, lon: p.lon, headingRad: p.headingRad })), odo: odometryTrack(trip), startNote, phoneRouteSource: phoneRoute?.source ?? null, appCuts: appCuts.length, parkedFrom: state && chained ? { file: state.parkedAfter, status: data.summary.startPose?.status ?? null } : null, inApp }) };
+    reply = { status: 200, type: "application/json", body: JSON.stringify({ ...data, incidents, compassInfo, placings: driverPlacings(trip).map((p) => ({ t: Math.round((p.tUs - trip.startUs) / 1e5) / 10, lat: p.lat, lon: p.lon, headingRad: p.headingRad })), odo: odometryTrack(trip), startNote, parkedCar: mainParkedCar, carStyle: carStyleFor(trip), phoneRouteSource: phoneRoute?.source ?? null, appCuts: appCuts.length, parkedFrom: state && chained ? { file: state.parkedAfter, status: data.summary.startPose?.status ?? null } : null, inApp }) };
   } finally {
     opened?.close();
   }

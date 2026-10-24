@@ -1,3 +1,4 @@
+import { CAR_GLYPH } from "@/components/map/puck-style";
 import { DARK_PALETTE } from "@/config/map-dark";
 import { blend, type MapPalette } from "@/config/map-palette";
 
@@ -7,7 +8,7 @@ const PARK_OPACITY = 0.7;
 /** A lesson map's colours: the real map's palette, and the car drawn on it. */
 export type MapColors = MapPalette & { car: string };
 
-export const CAR_COLOR = { light: "#1D1C1A", dark: "#F2F0EC" } as const;
+export const CAR_COLOR = CAR_GLYPH.color;
 
 /**
  * The map's palette when no offline region is usable to read it from (`useMapPalette`): Liberty's colours as the map

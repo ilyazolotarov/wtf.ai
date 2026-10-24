@@ -1,5 +1,5 @@
 import { Camera, LogManager, Map, type MapRef, type PressEvent, type ViewStateChangeEvent } from "@maplibre/maplibre-react-native";
-import { useRef, useState, type ComponentProps } from "react";
+import { useMemo, useRef, useState, type ComponentProps } from "react";
 import { useColorScheme, View, type NativeSyntheticEvent } from "react-native";
 
 import { ANDROID_BLURS } from "@/components/ui/glass-fill";
@@ -8,17 +8,18 @@ import { STREET_PICK_LAYER } from "@/config/map-labels";
 import { Sentry } from "@/config/sentry";
 import { Colors } from "@/constants/theme";
 import type { Coordinate } from "@/nav/geo";
-import { usePosition } from "@/providers/position-provider";
+import { useParkedCar, usePosition } from "@/providers/position-provider";
 
 import { useSmoothedPosition } from "./use-smoothed-position";
 import { useRoute } from "@/providers/route-provider";
+import { STANDING_MPS } from "@/services/navigation/place-request";
 import { useEntrancesUrl } from "@/services/offline-map/entrance-file";
 import { useMapPacks } from "@/services/offline-map/map-packs";
 
-import type { CameraView } from "./map-features";
+import { dotOnCar, type CameraView } from "./map-features";
 import { BUILDING_ZOOM, FINGER_PT, nearestStreet, type PinPick } from "./pin-pick";
 
-import { DebugLayers, EntranceLayers, MarkLayers, PositionLayers, PuckLayers, RouteLayers } from "./map-layers";
+import { DebugLayers, EntranceLayers, MarkLayers, ParkedCarLayers, PositionLayers, PuckLayers, RouteLayers } from "./map-layers";
 import type { CameraMode } from "./use-camera-mode";
 import type { CompassHeading } from "./use-compass-heading";
 import { useMapCamera } from "./use-map-camera";
@@ -67,8 +68,8 @@ interface MapSurfaceProps {
   onCenter?(at: Coordinate): void;
   onTap?(at: Coordinate): void;
   /**
-   * Where the driver put the car, with an arrow the way it faces (null: skipped): `draft` while choosing, else the
-   * confirmed one, fainter, kept until the car has driven away from it.
+   * Where the driver put the car (heading null: not aimed yet): `draft` while choosing, a pin and an arrow; the confirmed
+   * one is drawn as the car, kept until the car has driven away from it.
    */
   placedMark?: { at: Coordinate; headingRad: number | null; draft: boolean } | null;
   /** Changes when the route and its alternatives should be framed (they came while the car stood). */
@@ -104,6 +105,17 @@ export function MapSurface({
   const { installed } = useMapPacks();
   const region = installed.active ? installed.regions[installed.active] : null;
   const position = usePosition();
+  const parkedCar = useParkedCar();
+  // One car on the map: the driver's confirmed placing while it stays, the newest word on where it is; else where it
+  // was left (UI-SPEC §6.1).
+  // By its numbers: the mark is a new object every render, and the map would be sent a new car with each.
+  const confirmed = placedMark && !placedMark.draft ? placedMark : null;
+  const [placedLat, placedLon, placedHeading] = [confirmed?.at.lat ?? null, confirmed?.at.lon ?? null, confirmed?.headingRad ?? null];
+  const placedCar = useMemo(
+    () => (placedLat !== null && placedLon !== null && placedHeading !== null ? { lat: placedLat, lon: placedLon, headingRad: placedHeading } : null),
+    [placedLat, placedLon, placedHeading],
+  );
+  const car = placedCar ?? parkedCar;
   // Drawn and followed smoothly between the navigator's 2 Hz positions (pose-smoother.ts).
   const shown = useSmoothedPosition(position);
   const smoothing = shown !== position;
@@ -134,6 +146,10 @@ export function MapSurface({
   // The camera now, rounded (zoom to 0.1, bearing and tilt to a degree): the heading cone looks the same on screen in
   // every camera (puck-style.ts), and a camera that holds draws nothing again.
   const [view, setView] = useState<CameraView>({ zoom: INITIAL_ZOOM, bearingDeg: 0, pitchDeg: 0 });
+  // Standing on the car, the dot gives way to it (UI-SPEC §6.1), its circle kept.
+  const [dotHidden, setDotHidden] = useState(false);
+  const onCar = car != null && shown != null && dotOnCar(shown, car, view.zoom, STANDING_MPS, dotHidden);
+  if (onCar !== dotHidden) setDotHidden(onCar);
   const mapRef = useRef<MapRef>(null);
   // A long press where buildings are drawn: the street under the finger and whether it is on a building; then the pin
   // with what the map knew there.
@@ -220,10 +236,11 @@ export function MapSurface({
       <EntranceLayers url={entrancesUrl} />
       {/* Bottom to top: MapLibre stacks layers in the order they are declared. */}
       <RouteLayers route={route} palette={palette} onChoose={chooseAlternative} />
-      <MarkLayers pin={pin} placedMark={placedMark} palette={palette} scheme={scheme} />
-      <PositionLayers position={shown} compass={compass} palette={palette} scheme={scheme} view={view} />
+      <ParkedCarLayers car={car} scheme={scheme} zoom={view.zoom} />
+      <MarkLayers pin={pin} placedMark={placedMark?.draft ? placedMark : null} palette={palette} scheme={scheme} />
+      <PositionLayers position={shown} compass={compass} palette={palette} scheme={scheme} view={view} hideCone={onCar} />
       <DebugLayers position={position} palette={palette} />
-      <PuckLayers position={shown} palette={palette} scheme={scheme} />
+      <PuckLayers position={shown} palette={palette} scheme={scheme} hideDot={onCar} />
     </Map>
   );
 }

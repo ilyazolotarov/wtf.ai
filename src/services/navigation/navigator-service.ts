@@ -36,7 +36,7 @@ import {
   type Vec3Record,
 } from "@/triplog/schema";
 
-import type { CalibrationStore } from "./calibration-store";
+import type { CalibrationStore, StoredPose } from "./calibration-store";
 import { ManualHold, USER_HEADING_SIGMA_RAD, USER_POSITION_SIGMA_M } from "./manual-hold";
 import { MapMatchTiming } from "./map-match-timing";
 import { compassOff, NavigatorNotes } from "./navigator-notes";
@@ -62,6 +62,13 @@ const OBD_TIMEOUT_US = 10_000_000;
 /** Draw the position up to this far ahead of the navigator, which runs `REORDER_US` behind. */
 const MAX_EXTRAPOLATE_S = 1;
 const SAVE_EVERY_MS = 30_000;
+/**
+ * The car answered this recently: the navigator's parked pose is still where the car stands (frozen at the first
+ * handling, §6.1), not where the phone was carried since, and is saved. Covers the save at ignition off, which comes
+ * 120 s after the last answer when the car went silent right after moving (engine-state.ts
+ * `silenceWhileMovingToIgnitionOffUs`), and the 30 s saves before it.
+ */
+const CAR_ANSWERED_WITHIN_US = 150_000_000;
 /** The pose is saved this often while the car moves (§6.1): 5 s at 100 km/h is 140 m of a 2-minute reach. */
 const DRIVE_SAVE_EVERY_MS = 5_000;
 /** Note a saved speed scale in the trip log when it moved this much. */
@@ -122,7 +129,7 @@ export interface NavigatorDebug {
   /** Turn windows behind the online lag estimate (0: still the stored or default lag). */
   gnssLagWindows: number;
   /** The pose this session started from. */
-  parkedPose: "none" | "unverified" | "confirmed" | "rejected" | "behind";
+  parkedPose: "none" | "unverified" | "confirmed" | "rejected" | "kept" | "behind";
   /** Compass in shadow (NAVIGATOR-SPEC §7.6): its trust, and how far it is off the EKF heading now. */
   compassTrust: CompassTrust | "off";
   compassOffDeg: number | null;
@@ -139,6 +146,9 @@ export interface NavigatorDebug {
 }
 
 /** The particle filter's state for the map's debug overlay (MAPMATCH-SPEC §11). */
+/** Where the car was left (UI-SPEC §6.1): its stored parked pose; `savedAt` wall clock, ms. */
+export type ParkedCar = Pick<StoredPose, "lat" | "lon" | "headingRad" | "savedAt">;
+
 export interface MapMatchOverlay {
   /** [lat, lon, weight ÷ the heaviest particle's, off-road 1/0], heaviest first. */
   particles: [number, number, number, number][];
@@ -269,6 +279,20 @@ export class NavigatorService implements PositionSource {
   private poseStatus: NavigatorDebug["parkedPose"] = "none";
   /** A Wi-Fi fix doubts the parked pose the navigator started from: the driver is asked. */
   private poseQuestion: { distanceM: number } | null = null;
+  /**
+   * The phone's fixes moved this navigator off the car's stored pose while the car wasn't answering (the pose rejected,
+   * a placing released, the track reset): they say where the phone is, so the pose stays stored, and the car answering
+   * again starts a navigator from it (§6.1).
+   */
+  private poseKeptForCar = false;
+  /** What the car's stored pose was before a placing made with the car silent replaced it: ✕ puts it back. */
+  private poseBeforePlacing: { car: string; placedAt: number; pose: StoredPose | null } | null = null;
+  /** Noted that the navigator's pose isn't saved while the car is silent (once per navigator). */
+  private notedPoseUnsaved = false;
+  /** The stored parked pose, as last read (null: not read since it was last written). */
+  private storedPose: { vin: string; pose: StoredPose | null } | null = null;
+  /** The car drawn on the map where it was left (`getParkedCar`). */
+  private shownCar: ParkedCar | null = null;
   /** Where the driver set the car on the map (§6.3). */
   private readonly held: ManualHold;
   /** The road graph set on the navigator: its key, region and build time. */
@@ -376,7 +400,8 @@ export class NavigatorService implements PositionSource {
 
   /**
    * The driver put the car on the map while it stood (NAVIGATOR-SPEC §6.2), always with a heading. It is held as the
-   * manual position (§6.3) whether or not a car is connected. False when there is no navigator.
+   * manual position (§6.3) whether or not a car is connected; with the car silent, it is also where the car is now (its
+   * parked pose). False when there is no navigator.
    */
   setUserPosition(at: { lat: number; lon: number }, headingRad: number): boolean {
     const nav = this.nav;
@@ -387,6 +412,20 @@ export class NavigatorService implements PositionSource {
     this.note(`nav position set by the driver: ${at.lat.toFixed(6)},${at.lon.toFixed(6)}${moved}, heading ${Math.round(degrees360(headingRad))}°`);
     this.held.hold({ lat: at.lat, lon: at.lon, headingRad, placedAt: now, confirmedAt: now });
     this.applyManual();
+    // The answer to "where is the car?" while it isn't answering (the adapter not connected yet, the driver away from
+    // it): stored as the car's, since the phone's GPS that later takes the dot back says where the phone is, not the car.
+    // Answering, the navigator started here, and the 30 s save stores it.
+    const car = this.vin ?? this.deps.link.expectedVin();
+    if (car && this.deps.nowUs() - this.lastObdUs >= OBD_TIMEOUT_US) {
+      // Placed again over an earlier placing's pose: what was stored before that one is what ✕ goes back to.
+      const stored = this.deps.calibration.parkedPose(car);
+      const earlier = this.poseBeforePlacing;
+      const before = earlier && earlier.car === car && stored?.savedAt === earlier.placedAt ? earlier.pose : stored;
+      this.poseBeforePlacing = { car, placedAt: now, pose: before };
+      this.savePose(car, { lat: at.lat, lon: at.lon, headingRad, posSigmaM: USER_POSITION_SIGMA_M, headingSigmaRad: USER_HEADING_SIGMA_RAD }, now);
+      if (car === this.vin) this.poseStored = true;
+      this.note("nav parked pose set from the placing: the car isn't answering");
+    }
     this.phone?.engine.place({ lat: at.lat, lon: at.lon, headingRad, posSigmaM: USER_POSITION_SIGMA_M, headingSigmaRad: USER_HEADING_SIGMA_RAD });
     if (this.phone && !this.phone.started) {
       this.phone.started = true;
@@ -402,7 +441,9 @@ export class NavigatorService implements PositionSource {
     const m = this.manual;
     if (!m) return;
     if (!here) {
-      this.discardManualPosition("the driver isn't there any more");
+      // With the car silent the driver left and the car didn't: the pose stored from the placing stays. Answering, the
+      // phone is in the car, so it is the car that moved (reverse reads 0 km/h on some cars): the pose goes.
+      this.discardManualPosition("the driver isn't there any more", this.deps.nowUs() - this.lastObdUs >= OBD_TIMEOUT_US);
       return;
     }
     const minutes = Math.round((this.clock.nowMs() - m.confirmedAt) / 60_000);
@@ -415,19 +456,25 @@ export class NavigatorService implements PositionSource {
 
   /**
    * Forget the manual position (the chip's ✕, or "no" to "still here?"). A navigator that started from it starts
-   * over, with the parked pose it saved from it gone too, so fixes and the car's own pose decide again.
+   * over, with the parked pose saved from it gone too (unless `keepPose`: the driver left, the car is still there), so
+   * fixes and the car's own pose decide again.
    */
-  discardManualPosition(why = "discarded by the driver"): void {
+  discardManualPosition(why = "discarded by the driver", keepPose = false): void {
     const m = this.manual;
     if (!m) return;
     this.note(`nav manual position ${why}`);
     const applied = this.held.applied;
     this.held.drop();
-    if (applied && this.nav) {
-      const pose = this.vin ? this.deps.calibration.parkedPose(this.vin) : null;
-      if (pose && pose.savedAt >= m.placedAt && this.vin) this.deps.calibration.clearParkedPose(this.vin);
-      this.createNavigator();
+    const car = this.vin ?? this.deps.link.expectedVin();
+    const pose = car ? this.deps.calibration.parkedPose(car) : null;
+    if (!keepPose && car && pose && pose.savedAt >= m.placedAt) {
+      // A wrong placing: the car is back where it was stored before it (known this session), else nowhere known.
+      const before = this.poseBeforePlacing;
+      if (before?.pose && before.car === car && before.placedAt === m.placedAt) this.savePose(car, before.pose, before.pose.savedAt);
+      else this.clearPose(car);
     }
+    this.poseBeforePlacing = null;
+    if (applied && this.nav) this.createNavigator();
     this.publish();
   }
 
@@ -439,7 +486,7 @@ export class NavigatorService implements PositionSource {
     this.poseQuestion = null;
     if (answered) {
       this.poseStatus = here ? "confirmed" : "rejected";
-      if (!here && this.vin) this.deps.calibration.clearParkedPose(this.vin);
+      if (!here && this.vin) this.clearPose(this.vin);
       if (!here) this.poseStored = false;
     }
     this.publish();
@@ -461,6 +508,12 @@ export class NavigatorService implements PositionSource {
     } else this.note(this.outage.stop(this.clock.nowMs(), this.position?.simulatedOutage));
     if (this.position) this.set(this.position);
   }
+
+  /**
+   * Where the car was left (UI-SPEC §6.1), while it isn't the dot: no speed from it for 10 s, so the map shows the
+   * phone (or a placing). Its stored parked pose, saved standing; null once it drives, or none stored.
+   */
+  getParkedCar = (): ParkedCar | null => this.shownCar;
 
   /** Particles and hypotheses now (null: map matching off); recomputed once per published position. */
   getMapMatchOverlay(): MapMatchOverlay | null {
@@ -526,10 +579,18 @@ export class NavigatorService implements PositionSource {
     if (!nav) return;
     this.lastSaveAt = this.clock.nowMs();
     const pose = nav.parkedPose;
-    if (pose && this.vin) {
-      this.deps.calibration.saveParkedPose(this.vin, pose, this.clock.nowMs());
+    // Only while the car answered lately: long after, the navigator follows the phone (a fix the car's pose lost to,
+    // a walk), and its pose is where the phone is.
+    const answered = this.deps.nowUs() - this.lastObdUs < CAR_ANSWERED_WITHIN_US;
+    if (pose && this.vin && answered) {
+      this.savePose(this.vin, pose, this.clock.nowMs());
       if (!this.poseStored) this.note(`nav parked pose saved (heading ±${((pose.headingSigmaRad * 180) / Math.PI).toFixed(1)}°${pose.offRoad ? ", off the roads" : ""})`);
       this.poseStored = true;
+    } else if (pose && this.vin && !this.notedPoseUnsaved) {
+      this.notedPoseUnsaved = true;
+      const stored = this.deps.calibration.parkedPose(this.vin);
+      const apart = stored ? `${Math.round(haversineM(stored, pose))} m from the one stored` : "none stored";
+      this.note(`nav parked pose not saved: the car hasn't answered for a minute, so the pose may be the phone's (${apart})`);
     }
     const lag = nav.gnssLagEstimate;
     if (lag && this.deps.calibration.saveGnssLag(lag, this.clock.nowMs())) this.note(`nav gnss lag saved ${lag.lagS} s (${lag.windows} turn windows)`);
@@ -675,8 +736,8 @@ export class NavigatorService implements PositionSource {
     const e = p.engine.estimate();
     if (!withObd && e && p.engine.stillForS >= parkedAfterS) {
       const pose = { lat: e.lat, lon: e.lon, headingRad: e.headingRad, posSigmaM: e.accuracyM, headingSigmaRad: PHONE_PARK_HEADING_SIGMA_RAD };
-      this.deps.calibration.saveParkedPose(PHONE_CAR, pose, this.clock.nowMs());
-      if (p.car !== PHONE_CAR) this.deps.calibration.saveParkedPose(p.car, pose, this.clock.nowMs());
+      this.savePose(PHONE_CAR, pose, this.clock.nowMs());
+      if (p.car !== PHONE_CAR) this.savePose(p.car, pose, this.clock.nowMs());
     }
   }
 
@@ -701,6 +762,8 @@ export class NavigatorService implements PositionSource {
     this.vin = null;
     this.poseStatus = "none";
     this.poseQuestion = null;
+    this.poseKeptForCar = false;
+    this.notedPoseUnsaved = false;
     // Before the parked pose: the filter then starts around it.
     this.graph = null;
     this.timing.resetInterval();
@@ -874,7 +937,13 @@ export class NavigatorService implements PositionSource {
   }
 
   private onSpeed(s: SpeedSample): void {
+    const answersAgain = this.deps.nowUs() - this.lastObdUs >= OBD_TIMEOUT_US;
     this.lastObdUs = s.tUs;
+    if (answersAgain && this.poseKeptForCar && this.nav) {
+      // Back at the car: start from where it was left rather than from the phone's way to it; fixes in the car check it.
+      this.note("nav restart: the car answers again, from the parked pose kept for it");
+      this.createNavigator();
+    }
     if (s.source === "can") this.lastCanUs = this.deps.nowUs();
     if (s.raw > 0 && this.manual) {
       // Driving: the navigator carries the placing on (it started from it, or from something newer).
@@ -883,7 +952,7 @@ export class NavigatorService implements PositionSource {
     }
     if (s.raw > 0 && this.poseStored) {
       // Driving: the stored pose is stale until the next stop.
-      if (this.vin) this.deps.calibration.clearParkedPose(this.vin);
+      if (this.vin) this.clearPose(this.vin);
       this.poseStored = false;
     }
     this.pending.push({ tUs: s.tUs, obd: { tUs: s.tUs, speedMps: s.speedMps, rawKph: s.raw, ...(s.source ? { source: s.source } : {}) } });
@@ -938,8 +1007,14 @@ export class NavigatorService implements PositionSource {
         if (out.pose === "confirmed") this.note("nav parked pose confirmed");
         if (out.pose === "rejected") {
           this.note(`nav parked pose rejected: fix ${Math.round(out.errorM ?? 0)} m away (±${Math.round(input.fix.hAccM)} m)`);
-          if (this.vin) this.deps.calibration.clearParkedPose(this.vin);
-          this.poseStored = false;
+          if (this.deps.nowUs() - this.lastObdUs < OBD_TIMEOUT_US) {
+            if (this.vin) this.clearPose(this.vin);
+            this.poseStored = false;
+          } else {
+            // The car isn't answering: the phone may be anywhere (at home, on the way back to the car). The dot follows
+            // the phone; the car is still where it was left.
+            this.keepPoseForCar("the fix is the phone's");
+          }
         }
       } else if (late) {
         continue;
@@ -982,7 +1057,7 @@ export class NavigatorService implements PositionSource {
     const pose = this.nav?.drivePose;
     if (!pose || !this.vin) return;
     this.lastDriveSaveAt = this.clock.nowMs();
-    this.deps.calibration.saveParkedPose(this.vin, pose, this.lastDriveSaveAt);
+    this.savePose(this.vin, pose, this.lastDriveSaveAt);
     // Replaced as the car goes and by the pose where it stops: not one for driving to clear.
     this.poseStored = false;
   }
@@ -1004,10 +1079,48 @@ export class NavigatorService implements PositionSource {
 
   private publish(): void {
     this.publishPosition();
+    this.publishParkedCar();
     // The pose question is drawn with the position (`set`), but parked on the phone's GPS an unchanged position isn't
     // published again (no new fix): an answered question stayed on the map, "Yes" doing nothing (2026-10-15).
     const p = this.position;
     if (p && (p.poseQuestion?.distanceM ?? null) !== (this.shownPoseQuestion(p)?.distanceM ?? null)) this.set(p);
+  }
+
+  /**
+   * The navigator left the car's stored pose for the phone's fixes while the car was silent: the pose stays stored (a
+   * standing one, not a moving car's) and the car answering again starts from it (`onSpeed`).
+   */
+  private keepPoseForCar(why: string): void {
+    if (this.poseKeptForCar) return;
+    const vin = this.vin ?? this.deps.link.expectedVin();
+    const stored = vin ? this.deps.calibration.parkedPose(vin) : null;
+    if (!stored || stored.speedMps) return;
+    this.poseKeptForCar = true;
+    this.poseStatus = "kept";
+    this.note(`nav parked pose kept in storage: the car isn't answering, so ${why}`);
+  }
+
+  private savePose(car: string, pose: ParkedPose, at: number): void {
+    this.deps.calibration.saveParkedPose(car, pose, at);
+    this.storedPose = null;
+  }
+
+  private clearPose(vin: string): void {
+    this.deps.calibration.clearParkedPose(vin);
+    this.storedPose = null;
+  }
+
+  /** The car on the map while the dot is the phone's (`getParkedCar`). Phone-only mode: the car is the dot. */
+  private publishParkedCar(): void {
+    const vin = this.vin ?? this.deps.link.expectedVin();
+    const away = this.deps.nowUs() - this.lastObdUs >= OBD_TIMEOUT_US && !this.phoneOnly;
+    if (vin && away && this.storedPose?.vin !== vin) this.storedPose = { vin, pose: this.deps.calibration.parkedPose(vin) };
+    const pose = vin && away ? (this.storedPose?.pose ?? null) : null;
+    // Saved standing: one saved while driving is a moving car's.
+    const car = pose && !pose.speedMps ? pose : null;
+    if (car === this.shownCar) return;
+    this.shownCar = car;
+    this.listeners.forEach((listener) => listener());
   }
 
   /**
@@ -1173,6 +1286,8 @@ export class NavigatorService implements PositionSource {
     if (mode === this.mode) return;
     // Entering dr is noted with its init method when the fix is processed.
     if (mode === "anchored") this.note(this.mode === "dr" ? "nav reset: fixes disagree with dead reckoning" : "nav mode anchored");
+    // Reset to the phone's fixes while the car is silent: the car is still at its stored pose.
+    if (mode === "anchored" && this.mode === "dr" && this.deps.nowUs() - this.lastObdUs >= OBD_TIMEOUT_US) this.keepPoseForCar("the fixes are the phone's");
     this.mode = mode;
     if (mode !== "dr") return;
     // Fix-based starts are noted with the fix; a map start happens between fixes.

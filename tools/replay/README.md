@@ -64,6 +64,8 @@ npm run replay:regress -- --from after --against before   # two saved runs, noth
 - **Memory:** each worker holds a road graph and a drive (~0.5–1 GB). Pass `--threads 8` and run one benchmark at a
   time: four side by side ran a 32 GB laptop out of memory.
 - `--puck '{"headingCueFactor":1}'` switches the dot's heading cue off (`position/puck.ts`) for a before.
+- `npm run replay:chain-notes -- "<regex>" [--testers]` runs the same parked chain once and prints the service notes
+  that match: how often a path of the service fires on real drives (none: the drives replay as before).
 
 ## Incidents and simulated Kyiv drives
 
@@ -217,7 +219,9 @@ line then says so.
     ignored, GPS lag (empty = learned), a later start, the compass at a jammed start (MAPMATCH-SPEC §8.2), and clock
     times local or UTC.
 - **Layers** (on the map): *Where the dot was* — the replay in blue, what the phone showed in cyan (from the log's
-  `nav_estimate`; older logs don't have it), the compare replay in orange, and distance lines to where the car was;
+  `nav_estimate`; older logs don't have it), the compare replay in orange, distance lines to where the car was, and
+  the parked car where the replayed app's map drew it (the app's own car icon, while the car didn't answer; at the
+  end, where the app keeps it for the next time the map opens);
   *Where the car really was* — your drawing, the gyro path, your placings, GPS fixes (green satellite, amber
   Wi-Fi/cell; hover for details, click to jump), the path matched from GPS; *Background* — streets or satellite
   photos (Esri World Imagery: where the map lacks a yard, a car park or a new road); *For debugging the navigator* —

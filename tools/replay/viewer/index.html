@@ -236,6 +236,7 @@
           <legend>Where the dot was</legend>
           <div id="trackLayers"></div>
           <label title="From each dot to where the car was (clean GPS, else your drawing)"><input id="showErr" type="checkbox" checked /> distance lines</label>
+          <label title="Where the replayed app's map drew the car it was left, while the dot was the phone's (no speed from the car for 10 s); after the drive's end, where the app keeps it for the next time the map opens"><input id="showCar" type="checkbox" checked /> parked car</label>
         </fieldset>
         <fieldset>
           <legend>Where the car really was</legend>
@@ -519,7 +520,7 @@ map.on("error", (e) => showError(`map: ${e.error?.message ?? e.error}`));
 function addLayers() {
   const empty = fc([]);
   const sources = ["roads", "roadNodes", "truth", "truthBreaks", "particles", "clusters", "fixes", "gpsTrack", "gpsNow", "gpsAcc", "routeOld", "routeLine", "routeManeuvers",
-    "drawnPath", "drawnStraight", "drawnPoints", "drawnNow", "odoPath", "odoNow", "placings", "placingHeads", "placingGaps"];
+    "drawnPath", "drawnStraight", "drawnPoints", "drawnNow", "odoPath", "odoNow", "placings", "placingHeads", "placingGaps", "parkedCar"];
   for (const tr of TRACKS) sources.push(`${tr.key}Line`, `${tr.key}Jumps`, `${tr.key}Now`, `${tr.key}Acc`, `${tr.key}Err`);
   for (const id of sources) map.addSource(id, { type: "geojson", data: empty });
   // Satellite photos over the street map, under everything drawn here: yards, car parks and new roads the map lacks.
@@ -569,6 +570,11 @@ function addLayers() {
     map.addLayer({ id: `${tr.key}AccLine`, type: "line", source: `${tr.key}Acc`, paint: { "line-color": c, "line-width": 1.3, "line-opacity": 0.8 } });
     map.addLayer({ id: `${tr.key}Err`, type: "line", source: `${tr.key}Err`, paint: { "line-color": c, "line-width": 2, "line-dasharray": [1.5, 1.5] } });
   }
+  // Where the app's map drew the parked car: its own image (scripts/map-car.py, added with a replay) facing the screen,
+  // under the dots.
+  map.addLayer({ id: "parkedCar", type: "symbol", source: "parkedCar",
+    layout: { "icon-image": "wtf-parked-car", "icon-rotate": ["get", "deg"], "icon-rotation-alignment": "map", "icon-pitch-alignment": "viewport",
+      "icon-allow-overlap": true, "icon-ignore-placement": true } });
   map.addLayer({ id: "gpsNow", type: "circle", source: "gpsNow",
     paint: { "circle-radius": 6, "circle-color": css("--gps"), "circle-opacity": ["get", "opacity"],
       "circle-stroke-width": 2, "circle-stroke-color": "#fff", "circle-stroke-opacity": ["get", "opacity"] } });
@@ -740,6 +746,28 @@ async function setStatic() {
 }
 
 /** Dots, circles and distance lines at the cursor. */
+/** The app's car image for the theme being loaded into the map (its name, the basemap sprite has a "car" of its own). */
+let carImageLoading = null;
+function ensureCarImage() {
+  const theme = isDark() ? "dark" : "light";
+  if (map.hasImage("wtf-parked-car") || carImageLoading === theme) return;
+  carImageLoading = theme;
+  map.loadImage(data.carStyle.images[theme]).then(({ data: img }) => {
+    carImageLoading = null;
+    if (!map.hasImage("wtf-parked-car")) map.addImage("wtf-parked-car", img, { pixelRatio: 2 });
+    updateDynamic();
+  }).catch(() => { carImageLoading = null; });
+}
+
+/** The parked car the app's map drew at `time` (null: none then). */
+function parkedCarAt(time) {
+  // At the end: where the app keeps it (the last entry, stamped at the log's last sample).
+  const end = time >= data.durationS - 0.1;
+  let car = null;
+  for (const e of data.parkedCar ?? []) if (e.t <= time || end) car = e.car;
+  return car;
+}
+
 function updateMap() {
   const { fix, truthFix } = fixesAt(t);
   const drawnNow = $("showDrawn").checked ? drawnAt(t) : null;
@@ -752,6 +780,13 @@ function updateMap() {
     map.getSource(`${tr.key}Err`).setData(fc(p && to && $("showErr").checked ? [line([[p.lon, p.lat], [to.lon, to.lat]])] : []));
   }
   map.getSource("drawnNow").setData(fc(drawnNow ? [pt(drawnNow)] : []));
+  const style = data.carStyle;
+  const car = $("showCar").checked && style ? parkedCarAt(t) : null;
+  // A style load (a theme switch) drops the image.
+  if (car) ensureCarImage();
+  // Its size by zoom, as the app's map draws it (map-features.ts, sampled by the server).
+  if (car) map.setLayoutProperty("parkedCar", "icon-size", ["interpolate", ["linear"], ["zoom"], ...style.sizeByZoom.flat()]);
+  map.getSource("parkedCar").setData(fc(car ? [pt(car, { deg: (car.headingRad * 180) / Math.PI })] : []));
   updateOdo(drawnAt(t));
   map.getSource("gpsNow").setData(fc(fix ? [pt(fix, { opacity: age < 3 ? 1 : age < 15 ? 0.5 : 0.2 })] : []));
   map.getSource("gpsAcc").setData(fc(fix && age < 3 ? [circle(fix, Math.max(1, fix.acc))] : []));
@@ -1689,6 +1724,7 @@ $("fwd").onclick = () => seek(t + 5);
 $("follow").onclick = () => { setFollow(!follow); updateDynamic(); };
 $("showFixes").onchange = () => data && setStatic();
 $("showErr").onchange = () => updateDynamic();
+$("showCar").onchange = () => updateDynamic();
 $("showRoads").onchange = () => setRoads();
 $("showTruth").onchange = () => setTruth();
 $("showDrawn").onchange = () => { setDrawn(); updateDynamic(); };
