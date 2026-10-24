@@ -1,0 +1,47 @@
+{
+  "version": "5f8384e3",
+  "images": {
+    "map-car-light-x12": {
+      "x": 0,
+      "y": 0,
+      "width": 480,
+      "height": 816,
+      "pixelRatio": 1
+    },
+    "map-car-dark-x12": {
+      "x": 480,
+      "y": 0,
+      "width": 480,
+      "height": 816,
+      "pixelRatio": 1
+    },
+    "map-car-light-x6": {
+      "x": 0,
+      "y": 816,
+      "width": 240,
+      "height": 408,
+      "pixelRatio": 1
+    },
+    "map-car-dark-x6": {
+      "x": 240,
+      "y": 816,
+      "width": 240,
+      "height": 408,
+      "pixelRatio": 1
+    },
+    "map-car-light": {
+      "x": 480,
+      "y": 816,
+      "width": 120,
+      "height": 204,
+      "pixelRatio": 3
+    },
+    "map-car-dark": {
+      "x": 600,
+      "y": 816,
+      "width": 120,
+      "height": 204,
+      "pixelRatio": 3
+    }
+  }
+}

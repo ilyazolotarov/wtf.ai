@@ -129,8 +129,9 @@ persisted in kv-store. No hardcoded user-facing strings in components.
 - Raw GNSS **ghost marker** from `rawGnss`, hidden while `source === 'gnss'`.
 - **The parked car** (`useParkedCar`, `ParkedCarLayers`): while the car isn't the dot (no speed from it for 10 s: the
   driver walked off, the app opened elsewhere), its stored parked pose (NAVIGATOR-SPEC §6.1) is drawn as a car seen
-  from straight above (`MAP_CAR`, `puck-style.ts`; the images `assets/images/map-car-{light,dark}` drawn by
-  `scripts/map-car.py`): shaded to read as 3D, its body dark on the light map and white on the dark one, the windscreen
+  from straight above (`MAP_CAR`, `puck-style.ts`; drawn by `scripts/map-car.py` into one sheet,
+  `assets/images/map-car-sprite.png`, a second sprite of the map's style, `car-sprite.ts`: images added from JS load
+  on iOS only after the map laid the car out, and it never showed): shaded to read as 3D, its body dark on the light map and white on the dark one, the windscreen
   and windows in the trusted dot's blue, banded as the dot (a white ring, a dark edge, black round the white car), a
   soft shadow; nose the way it was parked, facing the screen when the map tilts, under the pins
   and the dot. It grows as the map is zoomed in, at half the map's rate (56 pt long at zoom 17, twice that at 19),

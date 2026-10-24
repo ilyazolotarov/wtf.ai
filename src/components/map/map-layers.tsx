@@ -1,4 +1,4 @@
-import { GeoJSONSource, Images, Layer } from "@maplibre/maplibre-react-native";
+import { GeoJSONSource, Layer } from "@maplibre/maplibre-react-native";
 import { useMemo } from "react";
 import { type NativeSyntheticEvent, PixelRatio } from "react-native";
 
@@ -184,20 +184,10 @@ export function RouteLayers({
   );
 }
 
-/** The car's images (`MAP_CAR`, drawn by scripts/map-car.py), registered with the map by name. */
-const CAR_IMAGES = {
-  [MAP_CAR.image.light]: require("@/assets/images/map-car-light.png"),
-  [MAP_CAR.image.dark]: require("@/assets/images/map-car-dark.png"),
-  [`${MAP_CAR.image.light}-x6`]: require("@/assets/images/map-car-light-x6.png"),
-  [`${MAP_CAR.image.dark}-x6`]: require("@/assets/images/map-car-dark-x6.png"),
-  [`${MAP_CAR.image.light}-x12`]: require("@/assets/images/map-car-light-x12.png"),
-  [`${MAP_CAR.image.dark}-x12`]: require("@/assets/images/map-car-dark-x12.png"),
-};
-
 /**
  * The car on the map (UI-SPEC §6.1): where it was left while the dot is the phone's, or where the driver put it, once
  * confirmed. `MAP_CAR`'s image, nose the way it faces, growing as the map is zoomed in, and facing the screen when the
- * map tilts.
+ * map tilts. The images are the style's car sprite (car-sprite.ts), not added from JS: iOS never showed those.
  */
 export function ParkedCarLayers({
   car,
@@ -210,24 +200,21 @@ export function ParkedCarLayers({
 }) {
   const shape = useMemo(() => (car ? carFeatures(car, car.headingRad, zoom, PixelRatio.get()) : emptyPoints()), [car, zoom]);
   return (
-    <>
-      <Images images={CAR_IMAGES} />
-      <GeoJSONSource id="parked-car" data={shape}>
-        <Layer
-          id="parked-car-icon"
-          type="symbol"
-          layout={{
-            "icon-image": ["concat", MAP_CAR.image[scheme], ["get", "image"]],
-            "icon-size": ["get", "size"],
-            "icon-rotate": ["get", "deg"],
-            "icon-rotation-alignment": "map",
-            "icon-pitch-alignment": "viewport",
-            "icon-allow-overlap": true,
-            "icon-ignore-placement": true,
-          }}
-        />
-      </GeoJSONSource>
-    </>
+    <GeoJSONSource id="parked-car" data={shape}>
+      <Layer
+        id="parked-car-icon"
+        type="symbol"
+        layout={{
+          "icon-image": ["concat", `${MAP_CAR.sprite}:${MAP_CAR.image[scheme]}`, ["get", "image"]],
+          "icon-size": ["get", "size"],
+          "icon-rotate": ["get", "deg"],
+          "icon-rotation-alignment": "map",
+          "icon-pitch-alignment": "viewport",
+          "icon-allow-overlap": true,
+          "icon-ignore-placement": true,
+        }}
+      />
+    </GeoJSONSource>
   );
 }
 

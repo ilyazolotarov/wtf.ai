@@ -10,6 +10,7 @@ import { Colors } from "@/constants/theme";
 import type { Coordinate } from "@/nav/geo";
 import { useParkedCar, usePosition } from "@/providers/position-provider";
 
+import { useCarSprite, withCarSprite } from "./car-sprite";
 import { useSmoothedPosition } from "./use-smoothed-position";
 import { useRoute } from "@/providers/route-provider";
 import { STANDING_MPS } from "@/services/navigation/place-request";
@@ -100,7 +101,10 @@ export function MapSurface({
 }: MapSurfaceProps) {
   const scheme = useColorScheme() === "dark" ? "dark" : "light";
   const palette = Colors[scheme];
-  const mapStyle = useMapStyle(scheme);
+  const packStyle = useMapStyle(scheme);
+  // The parked car's images come with the style (car-sprite.ts); the first time, the style is reloaded with them.
+  const carSprite = useCarSprite();
+  const mapStyle = useMemo(() => packStyle && withCarSprite(packStyle, carSprite), [packStyle, carSprite]);
   const entrancesUrl = useEntrancesUrl();
   const { installed } = useMapPacks();
   const region = installed.active ? installed.regions[installed.active] : null;

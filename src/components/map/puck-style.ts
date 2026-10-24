@@ -60,6 +60,8 @@ export const CAR_GLYPH = {
  */
 export const MAP_CAR = {
   image: { light: "map-car-light", dark: "map-car-dark" },
+  /** The style's sprite its images are in (car-sprite.ts): `car:map-car-dark`. */
+  sprite: "car",
   body: { light: "#24272C", dark: "#F3F5F8" },
   glass: { light: "#0A84FF", dark: "#3D6BFF" },
   /** Banded as the dot: a white ring round the body, a dark edge outside it (0.7 and 0.6 pt in the image). */

@@ -1,6 +1,6 @@
 """The parked car drawn on the map (UI-SPEC §6.1): a car seen from straight above, shaded to read as 3D.
 
-    python scripts/map-car.py                     # assets/images/map-car-{light,dark}@{1,2,3}x.png, -x6.png, -x12.png
+    python scripts/map-car.py                     # assets/images/map-car-{light,dark}@{1,2,3}x.png, map-car-sprite.png
     python scripts/map-car.py --preview out.png   # and a sheet of it on light and dark map ground
 
 The windscreen and windows in the trusted dot's blue per theme (theme.ts `puck`); the body dark on light ground and
@@ -8,6 +8,8 @@ white on dark (as the lessons' car), banded as the dot (a white ring, a dark edg
 """
 
 import argparse
+import hashlib
+import json
 import math
 from pathlib import Path
 
@@ -28,8 +30,12 @@ CANVAS_PT = (40, 68)
 SUPERSAMPLE = 8
 SUPERSAMPLE_PX = 24
 # The near images' densities, pixels per point (puck-style.ts MAP_CAR.near): drawn by the map once it is zoomed in so
-# far that the screen's own image would be stretched. Written without an @ suffix, so the map takes a pixel a point.
+# far that the screen's own image would be stretched. A pixel a point in the sprite, so the map draws them that large.
 NEAR = (6, 12)
+# The map's car sprite (car-sprite.ts): one sheet of the 3x car and the near images, each with its pixel ratio, and its
+# index beside the code. A sprite, not images added from JS: those load late on iOS and the car never showed.
+SPRITE_PNG = OUT / "map-car-sprite.png"
+SPRITE_JSON = ROOT / "src" / "components" / "map" / "map-car-sprite.json"
 
 GLASS = {"light": (0x0A, 0x84, 0xFF), "dark": (0x3D, 0x6B, 0xFF)}
 # The paint per theme: the body's colour, how much it darkens to its sides, the sheen down its middle, and the colours
@@ -248,6 +254,27 @@ def preview(path: Path) -> None:
     print(f"preview: {path}")
 
 
+def sprite() -> None:
+    """The sheet, the near images in rows above the 3x car, and its index (name: x, y, width, height, pixelRatio)."""
+    rows = [[(f"map-car-{t}-x{k}", car(t, k), 1) for t in ("light", "dark")] for k in reversed(NEAR)]
+    rows[-1] += [(f"map-car-{t}", car(t, 3), 3) for t in ("light", "dark")]
+    width = max(sum(im.width for _, im, _ in row) for row in rows)
+    height = sum(max(im.height for _, im, _ in row) for row in rows)
+    sheet = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    index, y = {}, 0
+    for row in rows:
+        x = 0
+        for name, im, ratio in row:
+            sheet.paste(im, (x, y))
+            index[name] = {"x": x, "y": y, "width": im.width, "height": im.height, "pixelRatio": ratio}
+            x += im.width
+        y += max(im.height for _, im, _ in row)
+    sheet.save(SPRITE_PNG, optimize=True)
+    version = hashlib.md5(SPRITE_PNG.read_bytes()).hexdigest()[:8]
+    SPRITE_JSON.write_text(json.dumps({"version": version, "images": index}, indent=2) + "\n", encoding="utf-8", newline="\n")
+    print(f"wrote {SPRITE_PNG} and {SPRITE_JSON} ({version})")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--preview", type=Path, help="also write a sheet of the car on map ground here")
@@ -259,10 +286,7 @@ def main() -> None:
                 name = f"map-car-{theme}@{k}x.png" if k > 1 else f"map-car-{theme}.png"
                 car(theme, k).save(OUT / name, optimize=True)
                 print(f"wrote {OUT / name}")
-            for k in NEAR:
-                name = f"map-car-{theme}-x{k}.png"
-                car(theme, k).save(OUT / name, optimize=True)
-                print(f"wrote {OUT / name}")
+        sprite()
     if a.preview:
         preview(a.preview)
 
