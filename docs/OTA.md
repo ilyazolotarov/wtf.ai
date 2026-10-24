@@ -99,6 +99,11 @@ signed and published for that runtime only. The phones get it like any update, a
 - **Safe by construction**: the commit must resolve to the runtime (`--expect-runtime-<platform>`) and typecheck after
   the patch, or that target publishes nothing. Signing uses `main`'s tools with the target's config and certificate
   (`ota:prepare --project`).
+- **The variables of the time**: before 2026-10-15 a build's runtime included app.config's `extra`, so the repository
+  variables then are part of it. A target refused with another runtime may need them (`env` input: `NAME=value`,
+  empty to unset); the update then carries them too, as its build did. Until 2026-10-14 02:30 UTC the builds had
+  `UPDATES_ORIGIN` and `TRIP_UPLOAD_ORIGIN` on the old domain, and no `SUPPORT_EMAIL` or `PRIVACY_POLICY_URL`; the Worker
+  answers on both domains.
 - **Kept 30 days** by the Worker (UPDATES-SPEC §2.1): time for the phones to start the app twice.
 - A patch rewrites what all its targets share and fails where it doesn't apply; it copies new files from `main` as
   they are, so those must import nothing the old JS lacks.

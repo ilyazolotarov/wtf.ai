@@ -19,6 +19,10 @@ on:
         description: "runtime@commit, space-separated: the runtime and the full SHA of the JS its phones run (OTA.md)"
         type: string
         required: true
+      env:
+        description: "NAME=value, space-separated: a repository variable as the targets' builds had it (empty: unset)"
+        type: string
+        default: ""
 
 # Same values as publish-ota.yml: they are part of the runtime version and of the config an update carries.
 env:
@@ -71,6 +75,19 @@ jobs:
       OTA_SIGNING_KEY: ${{ secrets.OTA_SIGNING_KEY }}
       OTA_PUBLISH_TOKEN: ${{ secrets.OTA_PUBLISH_TOKEN }}
     steps:
+      - name: The variables as the targets' builds had them
+        # Part of the runtime of builds before 2026-10-15 (app.config's extra), and the config the update carries.
+        if: ${{ inputs.env != '' }}
+        env:
+          OVERRIDES: ${{ inputs.env }}
+        run: |
+          for kv in $OVERRIDES; do
+            case "${kv%%=*}" in
+              UPDATES_ORIGIN | TRIP_UPLOAD_ORIGIN | SENTRY_DSN | SUPPORT_EMAIL | PRIVACY_POLICY_URL) echo "$kv" >> "$GITHUB_ENV" ;;
+              *) echo "::error::${kv%%=*} is not one of the variables a build reads"; exit 1 ;;
+            esac
+          done
+
       - name: Checkout main (the tools and the patch)
         uses: actions/checkout@v7
         with:
