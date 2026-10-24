@@ -444,6 +444,7 @@ export const uk = {
   noAdapterRouteSetButton: "Вказати позицію",
   noAdapterRouteAgree: "Їхатиму за маршрутом",
   droppedPin: "Обрана точка",
+  selectedLocation: "Обране місце",
   planningRoute: "Прокладаємо маршрут…",
   alternativeSlower: "+{n} хв",
   alternativeFaster: "−{n} хв",

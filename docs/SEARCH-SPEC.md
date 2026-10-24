@@ -117,6 +117,17 @@ oblast. A word's own spelling is tested first, then its settlement's, then the t
 5. A result that reads the same as a better one (kind, name, house number, entrance, settlement) within 150 m is dropped
    (`withoutRepeats`): OSM maps one address on the building, its entrances and its shops.
 
+### 4.5 Coordinates (`src/nav/search/coordinates.ts`)
+
+A query that is only a point is not searched as words: decimal degrees ("50.45012, 30.52341", as Google Maps copies
+them; a space or a semicolon between; decimal commas "50,45 30,52"), degrees with minutes and seconds
+(`50°27'00.4"N 30°31'24.2"E`, `50°27.006'N`), hemisphere letters before or after (N/S the latitude, E/W the longitude,
+either order), "lat: …, lon: …", a `geo:` URI, and a Google Maps, OpenStreetMap or Apple Maps link (its place:
+`!3d…!4d…`, `q=`/`query=`/`ll=`, `mlat`/`mlon`; else the map's centre, `@lat,lon` or `#map=z/lat/lon`). Short links
+(maps.app.goo.gl) would need the network and are not opened. Bare numbers need a fraction or a degree sign ("16 3" is a
+house and its entrance) and are read as latitude, longitude; the other way round when the first is past ±90, or when
+only that puts the point in the region.
+
 Measured in Node on a synthetic Ukraine-sized index (28 000 settlements, 496 000 streets, 4.7 M addresses, 53 000
 POIs: 97 MB): queries 9–25 ms. The phone is several times slower; an oblast is about a 25th of this.
 
@@ -128,7 +139,10 @@ POIs: 97 MB): queries 9–25 ms. The phone is several times slower; an oblast is
   (`FileHandle`), again when the region or file changes.
 - **Route screen** (`src/app/route.tsx`, UI-SPEC §7.1): the field searches 120 ms after typing stops, near the car's
   position, the last results staying until then (an emptied field drops them); each result shows its name (", 10" for an address), what it is and its settlement, distance and
-  direction. Start guidance routes to it (`id` `search:<key>`, the name shown on the banner).
+  direction. Start guidance routes to it (`id` `search:<key>`, the name shown on the banner). Coordinates (§4.5) are one
+  result, opened at once when pasted (or on the keyboard's Search): named by the house within 75 m (as a dropped pin),
+  else "Selected location", then its settlement and the coordinates; the route goes to the exact point
+  (`id` `point:<lat>,<lon>`).
 - **Entrances on the map** (`src/services/offline-map/entrance-file.ts`, `EntranceLayers`): the active search
   file's entrances written once to a GeoJSON file in the cache (per file MD5); from z16 a numbered one as its number
   on a round blue badge (a circle and text, no icon images), one without

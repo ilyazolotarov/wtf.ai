@@ -3,15 +3,18 @@
 
 import { SearchIndex } from "@/nav/search/search-index";
 import { fileHandleByteSource } from "@/services/offline-map/road-graph-file";
-import { activeSearchFile, getMapPacks } from "@/services/offline-map/map-packs";
+import { activeSearchFile, getMapPacks, type InstalledState } from "@/services/offline-map/map-packs";
 
 let open: { key: string; region: string; index: SearchIndex; close(): void } | null = null;
 /** A file that failed to open isn't retried until the installed index changes. */
 let failedKey: string | null = null;
 
-/** The active region's search index; null when it has none (not downloaded, or an older release). */
-export function activeSearchIndex(): SearchIndex | null {
-  const active = activeSearchFile(getMapPacks().installed);
+/**
+ * The active region's search index; null when it has none (not downloaded, or an older release). In a component, pass
+ * `useMapPacks().installed`: the React Compiler keeps a call without arguments for the component's life.
+ */
+export function activeSearchIndex(installed: InstalledState = getMapPacks().installed): SearchIndex | null {
+  const active = activeSearchFile(installed);
   const key = active ? `${active.region}:${active.md5}` : null;
   if (open?.key === key) return open.index;
   open?.close();

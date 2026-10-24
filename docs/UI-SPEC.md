@@ -275,7 +275,7 @@ One small component each; the screen only places them and wires their state. Car
   largest cities from its search index, else the built-in list inside the region's bounds).
 - Typing: with the region's search index (SEARCH-SPEC §6), places, streets, house numbers and POIs, each with what it
   is, its settlement, distance and direction; without one, the cities filtered by name and a note to download the
-  region again.
+  region again. Coordinates or a map link (SEARCH-SPEC §4.5): one result, its card straight away when pasted.
 - A selected result → summary card: straight-line distance, bearing and time at 60 km/h; once its route is planned,
   the road distance and time. Under it **Home**, **Work**, **Save** (a place is saved under one kind), or "Saved as
   Home · Remove"; a confirmation strip with **Undo**.

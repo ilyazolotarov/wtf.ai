@@ -25,6 +25,7 @@ import { Font, Radius, usePalette } from "@/constants/theme";
 import type { Strings } from "@/i18n/en";
 import { useT } from "@/i18n/provider";
 import { bearingRad, haversineM, type Coordinate } from "@/nav/geo";
+import { orientPoint, parseCoordinates } from "@/nav/search/coordinates";
 import type { SearchIndex, SearchResult } from "@/nav/search/search-index";
 import { inBounds, places, usePlaces } from "@/providers/places";
 import { usePosition } from "@/providers/position-provider";
@@ -46,8 +47,7 @@ const NOTHING_FOUND = { index: null, query: "", results: [] };
  * results answer the query as typed (not the one before it, still shown meanwhile).
  */
 function useAddressSearch(query: string, near: Coordinate | null): { results: SearchResult[]; settled: boolean } | null {
-  useMapPacks(); // re-render when a region (and its index) is installed or switched
-  const index = activeSearchIndex();
+  const index = activeSearchIndex(useMapPacks().installed); // again when a region (and its index) is installed or switched
   // The last results stay while the next query waits for its turn (no blank list on every keystroke); an emptied
   // field or another region's index drops them, so a new search doesn't open on the old one's rows.
   const [found, setFound] = useState<{ index: SearchIndex | null; query: string; results: SearchResult[] }>(NOTHING_FOUND);
@@ -72,6 +72,42 @@ function useAddressSearch(query: string, near: Coordinate | null): { results: Se
   }, [index, query]);
   if (!index) return null;
   return { results: dropped ? [] : found.results, settled: !dropped && found.query === query };
+}
+
+/**
+ * Coordinates typed or pasted (SEARCH-SPEC §5): the place at that point, named by the house there (within 75 m, as a
+ * dropped pin), else "Selected location" in its settlement; the coordinates follow. The route goes to the exact point.
+ */
+function pointPlace(
+  text: string,
+  index: SearchIndex | null,
+  bounds: [number, number, number, number] | null,
+  language: "en" | "uk",
+  t: (key: keyof Strings) => string,
+): Place | null {
+  const typed = parseCoordinates(text);
+  if (!typed) return null;
+  const at = orientPoint(typed, (c) => inBounds(bounds, c));
+  let named: { title: string; detail: string | null } | null = null;
+  try {
+    const town = index?.settlementAt(at) ?? null;
+    const house = index?.nearestAddress(at) ?? null;
+    // A house's detail is its settlement; one addressed by its quarter or village names none of its own.
+    const detail = house && (house.settlement || !town ? resultDetail(house, language, t) : resultTitle(town, language, t));
+    named = house
+      ? { title: resultTitle(house, language, t), detail }
+      : { title: t("selectedLocation"), detail: town ? resultTitle(town, language, t) : null };
+  } catch (e) {
+    console.warn(`point name: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  const coordinates = `${at.lat.toFixed(5)}, ${at.lon.toFixed(5)}`;
+  return {
+    id: `point:${at.lat.toFixed(6)},${at.lon.toFixed(6)}`,
+    title: named?.title ?? t("selectedLocation"),
+    detail: named?.detail ? `${named.detail} · ${coordinates}` : coordinates,
+    lat: at.lat,
+    lon: at.lon,
+  };
 }
 
 /** The active region's cities and towns from its search index; null without one (older releases). */
@@ -116,7 +152,10 @@ export default function RouteScreen() {
   // Distances from the car; without a fix, from the region's middle.
   const origin: Coordinate =
     position ?? (bounds ? { lat: (bounds[1] + bounds[3]) / 2, lon: (bounds[0] + bounds[2]) / 2 } : { lat: 50.45, lon: 30.52 });
-  const searched = useAddressSearch(query, position);
+  // Coordinates are a place of their own, not words to search.
+  const index = activeSearchIndex(installed);
+  const point = useMemo(() => pointPlace(query, index, bounds, language, t), [query, index, bounds, language, t]);
+  const searched = useAddressSearch(point ? "" : query, position);
   const majors = useMajorSettlements(installed.active);
   const summary = (d: Coordinate) => {
     const distanceM = haversineM(origin, d);
@@ -132,16 +171,18 @@ export default function RouteScreen() {
     reachable(destinations).map((d) => ({ id: d.id, title: d.name[language], detail: null, lat: d.lat, lon: d.lon }));
   const results: Place[] | null = !q
     ? null
-    : searched
-      ? searched.results.map((r) => ({
-          id: `search:${r.key}`,
-          title: resultTitle(r, language, t),
-          detail: resultDetail(r, language, t),
-          lat: r.lat,
-          lon: r.lon,
-          ...(r.entrances.length > 0 ? { entrances: r.entrances.map((e) => ({ ref: e.ref!, lat: e.lat, lon: e.lon })) } : {}),
-        }))
-      : cities.filter((c) => c.title.toLocaleLowerCase().includes(q));
+    : point
+      ? [point]
+      : searched
+        ? searched.results.map((r) => ({
+            id: `search:${r.key}`,
+            title: resultTitle(r, language, t),
+            detail: resultDetail(r, language, t),
+            lat: r.lat,
+            lon: r.lon,
+            ...(r.entrances.length > 0 ? { entrances: r.entrances.map((e) => ({ ref: e.ref!, lat: e.lat, lon: e.lon })) } : {}),
+          }))
+        : cities.filter((c) => c.title.toLocaleLowerCase().includes(q));
   const savedHere = reachable(saved);
   const recentHere = reachable(recent);
   const selectedSaved = selected ? places.savedAt(selected) : null;
@@ -244,8 +285,10 @@ export default function RouteScreen() {
           value={query}
           onChangeText={(text) => {
             setQuery(text);
-            select(null);
+            // Coordinates pasted (not typed a digit at a time): straight to their card.
+            select(text.length - query.length > 1 ? pointPlace(text, index, bounds, language, t) : null);
           }}
+          onSubmitEditing={() => point && select(point)}
           placeholder={t(searched ? "searchPlaces" : "routeSearch")}
           placeholderTextColor={palette.text2}
           autoCorrect={false}
@@ -416,7 +459,7 @@ export default function RouteScreen() {
         </ScreenCard>
       )}
 
-      {!searched && q !== "" && <ScreenNote>{t("searchNeedsData")}</ScreenNote>}
+      {!searched && q !== "" && !point && <ScreenNote>{t("searchNeedsData")}</ScreenNote>}
       <ScreenNote>{`${t("routeTip")} ${t("routeOutsideRegion")}`}</ScreenNote>
     </ScreenContent>
   );

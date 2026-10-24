@@ -419,6 +419,7 @@ export const en = {
   noAdapterRouteSetButton: "Set position",
   noAdapterRouteAgree: "I'll follow the route",
   droppedPin: "Dropped pin",
+  selectedLocation: "Selected location",
   planningRoute: "Planning route…",
   alternativeSlower: "+{n} min",
   alternativeFaster: "−{n} min",
