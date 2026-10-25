@@ -93,6 +93,7 @@ export const en = {
   savedPlace: "Saved",
   removeSaved: "Remove",
   paused: "Paused",
+  mapDownloadInterrupted: "Connection lost. Keep the app open — the download will resume automatically.",
   verifying: "Verifying…",
   pause: "Pause",
   resume: "Resume",

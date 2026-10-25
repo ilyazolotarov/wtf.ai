@@ -68,7 +68,7 @@ function DownloadProgress({ download, osmDate }: { download: MapDownload; osmDat
       <T size={13} color={palette.text2}>
         {(download.auto && download.phase !== "waiting" ? `${t("mapUpdateAuto")} · ` : "") +
           (download.phase === "paused"
-            ? t("paused") + (download.bytes ? ` · ${formatMb(download.bytes)} / ${formatMb(download.total)}` : "")
+            ? (download.interrupted ? t("mapDownloadInterrupted") : t("paused")) + (download.bytes ? ` · ${formatMb(download.bytes)} / ${formatMb(download.total)}` : "")
             : download.phase === "verifying"
               ? t("verifying")
               : download.phase === "waiting"

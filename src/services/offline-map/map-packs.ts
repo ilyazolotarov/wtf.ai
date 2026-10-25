@@ -1,5 +1,6 @@
 import { Directory, DownloadTask, File, Paths, type DownloadPauseState } from "expo-file-system";
 import { useSyncExternalStore } from "react";
+import { AppState, Platform } from "react-native";
 
 import type { MapStyleJson } from "@/config/map-dark";
 import { kvStore } from "@/services/kv-store";
@@ -57,6 +58,8 @@ export interface MapDownload {
   total: number;
   /** Started by the app (an update on Wi-Fi), not by the driver. */
   auto: boolean;
+  /** Paused by a dropped connection, not by the driver: it goes on by itself while the app is in front. */
+  interrupted?: boolean;
 }
 
 export interface MapPacksState {
@@ -102,6 +105,8 @@ interface DownloadJob {
   total: number;
   /** Resume data of `files[index]` when paused mid-file. */
   resume?: DownloadPauseState;
+  /** Paused with Pause: waits for Resume. Otherwise a job stopped (a dropped connection, the app ended) goes on. */
+  pausedByDriver?: boolean;
 }
 
 const ROOT = () => new Directory(Paths.document, "maps");
@@ -128,6 +133,13 @@ const SMALL_FILE = 4e6;
 const PARALLEL = 6;
 /** Keep this much free space beyond the download itself. */
 const DISK_MARGIN = 300e6;
+/**
+ * An interrupted download tries again after these waits while the app is in front, and at once whenever it comes to
+ * the front. Android cuts a background app's network (a Redmi: "Software caused connection abort", 2026-10-23/24), and
+ * each failure used to drop every file fetched so far: the whole country again, several times, until the app stayed
+ * open.
+ */
+const RETRY_MS = [5_000, 30_000, 120_000];
 
 const EMPTY: InstalledState = { common: null, regions: {}, active: null };
 
@@ -149,8 +161,11 @@ function initialState(): MapPacksState {
     catalogLoading: false,
     catalogError: null,
     catalogTooNew: false,
-    // A job found at start is paused: the app was closed (or killed) during the download.
-    download: job ? { region: job.region.region, phase: "paused", bytes: job.done, total: job.total, auto: !!job.auto } : null,
+    // A job found at start is paused: the app was closed (or killed) during the download. Unless the driver paused
+    // it (or it is an update, which waits for Wi-Fi), it goes on by itself.
+    download: job
+      ? { region: job.region.region, phase: "paused", bytes: job.done, total: job.total, auto: !!job.auto, ...(resumesItself(job) ? { interrupted: true } : {}) }
+      : null,
     downloadError: null,
   };
 }
@@ -163,6 +178,8 @@ let task: DownloadTask | null = null;
 let pauseRequested = false;
 /** Incremented by every start, resume and cancel; a stale run ignores its own result. */
 let runId = 0;
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+let retries = 0;
 /** Told of every download that failed (the app sends it to Sentry); the screen shows the message itself. */
 let reportFailure: (error: unknown, where: { region: string; file: string; index: number; files: number }) => void = () => {};
 
@@ -204,7 +221,11 @@ export function onMapDownloadFailed(report: typeof reportFailure): void {
 }
 
 function getState(): MapPacksState {
-  state ??= initialState();
+  if (!state) {
+    state = initialState();
+    // Already in front at launch, so no change of app state will come: an interrupted job goes on from here.
+    if (state.download?.interrupted) scheduleRetry();
+  }
   return state;
 }
 
@@ -213,8 +234,8 @@ function setState(patch: Partial<MapPacksState>) {
   listeners.forEach((listener) => listener());
 }
 
-function setDownload(phase: MapDownload["phase"], bytes: number) {
-  if (job) setState({ download: { region: job.region.region, phase, bytes, total: job.total, auto: !!job.auto } });
+function setDownload(phase: MapDownload["phase"], bytes: number, interrupted = false) {
+  if (job) setState({ download: { region: job.region.region, phase, bytes, total: job.total, auto: !!job.auto, ...(interrupted ? { interrupted } : {}) } });
 }
 
 function saveJob() {
@@ -501,6 +522,9 @@ async function run(id: number) {
     } else if (j.resume) {
       task = DownloadTask.fromSavable(j.resume, { onProgress });
       operation = task.resumeAsync();
+    } else if (resumeFromDisk(f)) {
+      task = DownloadTask.fromSavable(resumeFromDisk(f)!, { onProgress });
+      operation = task.resumeAsync();
     } else {
       const dest = new File(ROOT(), f.dest);
       dest.parentDirectory.create({ intermediates: true, idempotent: true });
@@ -558,8 +582,20 @@ function cleanUp(error?: unknown) {
 async function runGuarded(id: number) {
   try {
     await run(id);
+    retries = 0;
   } catch (e) {
     if (id !== runId) return;
+    if (job && job.index < job.files.length && dropped(e)) {
+      // A dropped connection mid-file: what is fetched stays, and the download goes on (`scheduleRetry`).
+      const f = job.files[job.index];
+      if (retries === 0) reportFailure(e, { region: job.region.region, file: f.label, index: job.index, files: job.files.length });
+      task = null;
+      job.resume = undefined;
+      saveJob();
+      setDownload("paused", job.done + partBytes(f), true);
+      scheduleRetry();
+      return;
+    }
     if (job) {
       // Past the last file, it failed verifying or installing.
       const file = job.files[job.index]?.label ?? "verify";
@@ -592,16 +628,21 @@ export async function downloadRegion(region: string, { auto = false }: { auto?: 
 
 export function pauseDownload(): void {
   if (getState().download?.phase !== "downloading") return;
+  if (job) job.pausedByDriver = true;
   pauseRequested = true;
   if (task?.state === "active") task.pause();
 }
 
 export async function resumeDownload(): Promise<void> {
   if (!job || getState().download?.phase !== "paused") return;
+  clearRetry();
+  job.pausedByDriver = false;
+  setDownload("downloading", getState().download?.bytes ?? job.done);
   await runGuarded(++runId);
 }
 
 export function cancelDownload(): void {
+  clearRetry();
   runId++;
   task?.cancel();
   cleanUp();
@@ -626,6 +667,60 @@ export function setActiveRegion(region: string): void {
   const { installed } = getState();
   if (installed.regions[region]) saveInstalled({ ...installed, active: region });
 }
+
+/** A job stopped without the driver's Pause, and not an update (which waits for Wi-Fi): it goes on by itself. */
+function resumesItself(j: DownloadJob): boolean {
+  return !j.pausedByDriver && !j.auto;
+}
+
+/**
+ * A failure of the connection (a timeout, a dropped or aborted stream), not of the file or the server (an HTTP error,
+ * a size or checksum that doesn't match), which would only fail again.
+ */
+function dropped(e: unknown): boolean {
+  const message = e instanceof Error ? e.message : String(e);
+  return !/HTTP [45]\d\d|checksum|expected|space|resume data/i.test(message);
+}
+
+/** Bytes of `f` already on disk (Android writes into the part file as it goes). */
+function partBytes(f: JobFile): number {
+  const part = new File(ROOT(), f.dest);
+  return part.exists ? Math.min(part.size, f.size) : 0;
+}
+
+/**
+ * Android resumes a file from the bytes on disk (a Range request from the part's length), so a file cut off by an error
+ * or by the app ending goes on from there. iOS's resume data is opaque and only Pause makes it: there the file starts
+ * again, the files before it kept.
+ */
+function resumeFromDisk(f: JobFile): DownloadPauseState | undefined {
+  if (Platform.OS !== "android") return undefined;
+  const part = new File(ROOT(), f.dest);
+  if (!part.exists || part.size <= 0 || part.size >= f.size) return undefined;
+  return { url: f.url, fileUri: part.uri, isDirectory: false, resumeData: String(part.size) };
+}
+
+function clearRetry() {
+  if (retryTimer) clearTimeout(retryTimer);
+  retryTimer = null;
+}
+
+/** The interrupted download again after the next wait, if the app is in front; else when it comes to the front. */
+function scheduleRetry() {
+  clearRetry();
+  if (AppState.currentState !== "active" || retries >= RETRY_MS.length) return;
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    retries++;
+    if (getState().download?.interrupted) void resumeDownload();
+  }, RETRY_MS[retries]);
+}
+
+AppState.addEventListener("change", (appState) => {
+  if (appState !== "active" || !getState().download?.interrupted) return;
+  retries = 0;
+  void resumeDownload();
+});
 
 /** Style for the active region, or `null` when no pack is usable. */
 export function readActiveStyle(installed: InstalledState): MapStyleJson | null {

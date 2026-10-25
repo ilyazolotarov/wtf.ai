@@ -310,6 +310,13 @@ the active region as it is. Until a region is usable, `map-setup`
 (full-screen, no close; after onboarding) shows the same list under "Download a map" and closes itself once a region
 is installed; deleting the last region brings it back.
 
+A dropped connection (a timeout, a stream cut off; not an HTTP error or a bad checksum) never throws the download away:
+it shows "Connection lost. Keep the app open — the download will resume automatically." and goes on after 5 s, 30 s and
+2 min while the app is in front, and at once whenever it comes back to the front or starts again, unless the driver had
+paused it (an automatic update waits for its own network rules). Android goes on from the bytes on disk (a `Range`
+request from the part file's length), iOS starts the cut file again; the files fetched before it stay. Android cuts a
+background app's network, so a whole country used to fail and start from zero until the app stayed open (2026-10-23/24).
+
 ### 7.6 `settings`
 
 Language (System / English / Українська); Appearance (System / Light / Dark); Voice volume (ROUTING-SPEC §8.5); Car:

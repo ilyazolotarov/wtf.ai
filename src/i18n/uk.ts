@@ -99,6 +99,7 @@ export const uk = {
   savedPlace: "Збережено",
   removeSaved: "Видалити",
   paused: "Призупинено",
+  mapDownloadInterrupted: "З’єднання втрачено. Залиште застосунок відкритим — завантаження продовжиться автоматично.",
   verifying: "Перевірка…",
   pause: "Пауза",
   resume: "Продовжити",
