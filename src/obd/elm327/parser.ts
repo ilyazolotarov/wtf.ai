@@ -108,10 +108,16 @@ function headerFramePayloads(lines: string[]): string[] | null {
   return bySender.size > 0 ? [...bySender.values()] : null;
 }
 
+/**
+ * A CAN multi-frame line: the frame index, a colon, its bytes. Some clones put the byte count on the first frame's
+ * line instead of its own (`0140: 49 02 01 …`, seen on an ELM327 v1.5 clone over 29-bit CAN).
+ */
+const FRAME_LINE = /^(?:[0-9A-F]{3}\s*)?[0-9A-F]\s*:/i;
+
 /** VIN from a `0902` answer: CAN multi-frame ("0: 4902…"), CAN frames with headers, or ISO/J1850 line-per-frame. */
 export function parseVin(lines: string[]): string | null {
   let hex = "";
-  const framed = lines.filter((l) => /^[0-9A-F]:/i.test(l.trim()));
+  const framed = lines.filter((l) => FRAME_LINE.test(l.trim()));
   const withHeaders = framed.length > 0 ? null : headerFramePayloads(lines);
   if (withHeaders) {
     const payload = withHeaders.find((p) => p.toUpperCase().includes("4902"));

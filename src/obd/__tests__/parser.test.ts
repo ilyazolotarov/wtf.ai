@@ -68,6 +68,11 @@ describe("other parsers", () => {
     expect(parseVin(lines)).toBe("JM3KFBDM1J0123456");
   });
 
+  test("VIN from CAN multi-frame with the byte count on the first frame's line (an ELM327 v1.5 clone)", () => {
+    expect(parseVin(["0140:4902014A4D33", "1:4B4642444D314A", "2:30313233343536"])).toBe("JM3KFBDM1J0123456");
+    expect(parseVin(["014 0: 49 02 01 4A 4D 33", "1: 4B 46 42 44 4D 31 4A", "2: 30 31 32 33 34 35 36"])).toBe("JM3KFBDM1J0123456");
+  });
+
   test("VIN from CAN frames with headers on (the CAN monitor leaves ATH1), another ECU refusing", () => {
     expect(parseVin(["7E810144902014A4D33", "7E8214B4642444D314A", "7E82230313233343536"])).toBe("JM3KFBDM1J0123456");
     expect(parseVin(["7E8 10 14 49 02 01 4A 4D 33", "7E9 03 7F 09 12", "7E8 21 4B 46 42 44 4D 31 4A", "7E8 22 30 31 32 33 34 35 36"])).toBe("JM3KFBDM1J0123456");

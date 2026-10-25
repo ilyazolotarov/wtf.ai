@@ -315,8 +315,9 @@ Rules:
 Strip the echo, blank lines, `SEARCHING...`, `BUS INIT: ...OK` and the trailing `>`. Map error strings to
 `ElmStatus` (`NO DATA`, `UNABLE TO CONNECT`, `CAN ERROR` / `BUS ERROR` / `BUS BUSY` / `FB ERROR` / `DATA ERROR` /
 `<RX ERROR` → `bus-error`, `?` → `unknown-command`, `STOPPED`, `BUFFER FULL`). Mode 01 data with or without spaces
-and headers (with headers, record the ECU address). Tolerate `\r`, `\r\n`, `\n\r` and lowercase hex. Golden strings
-from real adapters are in `src/obd/__tests__/parser.test.ts`.
+and headers (with headers, record the ECU address). CAN multi-frame answers (`0902`): the byte count on its own line
+(`014`, `0: 49 02 01 …`) or on the first frame's (`0140: 49 02 01 …`, a clone). Tolerate `\r`, `\r\n`, `\n\r` and
+lowercase hex. Golden strings from real adapters are in `src/obd/__tests__/parser.test.ts`.
 
 ### 8.4 Firmware check (new adapters)
 
