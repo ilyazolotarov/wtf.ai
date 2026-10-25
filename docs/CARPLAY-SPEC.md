@@ -120,7 +120,10 @@ Must not drift:
    scene active after the click, the map drawn by the React root, and the car's screen off its home screen.
    Settled by the first run: the simulator lists the app with the entitlement from the file alone, and CarPlay
    connects the scene in the background as soon as its display comes on (the map's React root is created then), so
-   "connected" doesn't mean shown. Not covered yet: CarPlay opened before the phone's app, a map pack, a route.
+   "connected" doesn't mean shown. On the iOS 26.5 simulator, opening the app there crashes CarPlay's own process
+   (`CarPlayTemplateUIHost`: `-[CPSTemplateInstance vehicleSupportsDestinationSharing]: unrecognized selector`,
+   from the map template's destination-sharing button, iOS 26.4's) and CarPlay goes back home: the job runs on the
+   newest runtime below 26.4. Not covered yet: CarPlay opened before the phone's app, a map pack, a route.
 3. Whether the CarPlay scene connects with `UIApplicationSupportsMultipleScenes` false (set true after Apple's sample).
 4. **AppState with only the car's screen in front** (phone locked): React Native's AppState follows the application
    state; GNSS on the phone's screen and the trip recorder key off `active` and `background`.

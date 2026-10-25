@@ -63,7 +63,8 @@ jobs:
       - name: Boot a simulator
         run: |
           mkdir -p "$OUT"
-          UDID=$(xcrun simctl list devices available -j | node .github/scripts/carplay/pick-iphone.js)
+          # Below iOS 26.4: the 26.5 simulator's CarPlay host crashes on any map template (CARPLAY-SPEC §6.2).
+          UDID=$(xcrun simctl list devices available -j | node .github/scripts/carplay/pick-iphone.js 26.4)
           [ -n "$UDID" ] || { xcrun simctl list devices available; echo "::error::No iPhone simulator"; exit 1; }
           xcrun simctl list devices | grep "$UDID"
           xcrun simctl boot "$UDID"
