@@ -8,7 +8,7 @@ Companion specs: [UI-SPEC.md](UI-SPEC.md) (screens and the map), [VEHICLE-LINK-S
 [NAVIGATOR-SPEC.md](NAVIGATOR-SPEC.md) (EKF, calibration, integrity, replay), [MAPMATCH-SPEC.md](MAPMATCH-SPEC.md)
 (road graph, particle filter), [ROUTING-SPEC.md](ROUTING-SPEC.md) (routing and guidance),
 [SEARCH-SPEC.md](SEARCH-SPEC.md) (offline address search), [UPDATES-SPEC.md](UPDATES-SPEC.md) (app and map updates),
-[ANDROID-SPEC.md](ANDROID-SPEC.md) (the Android build), [STORE-REVIEW.md](STORE-REVIEW.md) (store builds).
+[ANDROID-SPEC.md](ANDROID-SPEC.md) (the Android build).
 
 ## 1. Problem and goal
 
@@ -26,7 +26,7 @@ wheel speeds from the CAN bus where the adapter and car allow) and heading rate 
 
 | Topic | Decision |
 | --- | --- |
-| Platform | **iOS first**; **Android** for volunteer testers, sideloaded as an APK from CI and tested on emulators ([ANDROID-SPEC.md](ANDROID-SPEC.md), [ANDROID-TESTING.md](ANDROID-TESTING.md)). |
+| Platform | **iOS first**; **Android** for testers' own phones, sideloaded as an APK from CI ([ANDROID-SPEC.md](ANDROID-SPEC.md), [ANDROID-TESTING.md](ANDROID-TESTING.md)). |
 | Dev environment | Windows only, no Mac, **no paid Apple Developer account**. iOS builds: GitHub Actions macOS runner, `expo prebuild` + `xcodebuild` with signing disabled → unsigned IPA, sideloaded with **AltStore**. **No EAS.** JS-only changes reach Release builds over the air from our own update server ([OTA.md](OTA.md)). CI: [CI.md](CI.md). |
 | Framework | Expo SDK 57, Expo Router, TypeScript. Dev builds only (no Expo Go). |
 | Odometry roadmap | **Staged** (§2.1). Each stage is a drop-in odometry source; the EKF, integrity and map matching don't change between stages. |
@@ -39,13 +39,13 @@ wheel speeds from the CAN bus where the adapter and car allow) and heading rate 
 | Map matching | **Custom road-constrained particle filter** in TS over our own road graph. No HMM for live matching: an HMM assumes independent, bounded errors; dead-reckoning error is correlated and grows. |
 | Estimator location | **TypeScript** (`src/nav/`), not native: logic must hot-reload and replay on Windows. Native code stays thin. |
 | GNSS integrity | Two checks only: **outside the Ukraine polygon** and **teleport vs odometry**. No raw GNSS (C/N0, AGC), no slow drag-off detection. |
-| Yaw source | Phone gyro projected onto gravity (any mount angle). Optional, experimental: the rear wheels' speed difference from CAN (NAVIGATOR-SPEC §5.4). CAN yaw rate: later (Stage 3). |
+| Yaw source | Phone gyro projected onto gravity (any mount angle). On Stage 2 cars the rear wheels' speed difference from CAN, on by default (NAVIGATOR-SPEC §5.4). CAN yaw rate: later (Stage 3). |
 | Absolute heading | From trusted GNSS course, the particle filter's road heading, the driver placing the car, and the pose saved at ignition off. **The magnetometer is not used for navigation**: in-car distortion changes when the phone moves. The compass runs in **shadow mode** (computed, checked, logged; never navigated with) and a display-only compass shows where the phone points when walking. |
 | Phone mount | A **rigid phone mount** is required (the gyro is the only yaw source without CAN). |
 | Standstill bias calibration | 2 s of standstill, refined at every stop (ZUPT). No calibration drive, screen or wizard: everything is learned online. |
-| Distribution | Sideloading (AltStore source on iOS, the app installs its own APK on Android; UPDATES-SPEC). Store builds (`DISTRIBUTION=store`) drop self-installed updates and AltStore, and hide the Developer screen and the tester upload until unlocked (STORE-REVIEW.md). Privacy policy: [PRIVACY.md](PRIVACY.md). |
+| Distribution | Sideloading (AltStore source on iOS, the app installs its own APK on Android; UPDATES-SPEC). Store builds (`DISTRIBUTION=store`) drop self-installed updates and AltStore, and hide the Developer screen and the tester upload until unlocked (§2.2). Privacy policy: [PRIVACY.md](PRIVACY.md). |
 | Other navigators | Android, opt-in: during a trip with the car, Waze and Google Maps get the map's dot as the phone's location, and nothing when its radius is over 200 m ([ANDROID-SPEC.md](ANDROID-SPEC.md) §8). Google Maps through the fused provider in mock mode; Waze through the platform `gps` provider, replaced only while GPS isn't trusted, since holding it blinds wtf.ai's own GNSS too (probes every 2 min). |
-| Privacy | All data stays on the device. No position upload by wtf.ai (with sharing on, the other navigators get the dot instead of the phone's GPS and handle it as they handle any location); trip logs leave the phone only by the share sheet or the **opt-in upload** with a personal code (TRIP-LOGGER-SPEC §7.1). One other exception: Sentry crash/error reports (EU region, no PII; coordinates and VINs scrubbed in `src/config/sentry-scrub.ts`), which also carry the anonymous car report of each CAN profile's probation (VEHICLE-LINK-SPEC §16.5; off in Settings → Car). |
+| Privacy | All data stays on the device. No position upload by wtf.ai (with sharing on, the other navigators get the dot instead of the phone's GPS and handle it as they handle any location); trip logs leave the phone only by the share sheet or the **opt-in upload** with a personal code (TRIP-LOGGER-SPEC §7.1). One other exception: Sentry crash/error reports (EU region, no PII; coordinates and VINs scrubbed in `src/config/sentry-scrub.ts`), which also carry the anonymous car report of each CAN profile's probation (VEHICLE-LINK-SPEC §16.5; off in Settings → Vehicle). |
 
 ### 2.1 Odometry stages
 
@@ -61,7 +61,8 @@ wheel speeds from the CAN bus where the adapter and car allow) and heading rate 
 - The adapter can't poll and monitor CAN at the same moment; it switches within tens of milliseconds. Stage 2 shares
   it by time-slicing (VEHICLE-LINK-SPEC §16): the monitor listens while the car moves, the polls run while it stands
   or while no fresh CAN speed comes.
-- One setting for every car, Settings → Car → **Speed from the wheels**, on by default (VEHICLE-LINK-SPEC §16.3):
+- One setting for every car, Settings → Vehicle → **Precise speed from the car's data bus**, on by default
+  (VEHICLE-LINK-SPEC §16.3):
 
   | Setting | Navigation speed | CAN frames | OBD `010D` |
   | --- | --- | --- | --- |
@@ -73,6 +74,52 @@ wheel speeds from the CAN bus where the adapter and car allow) and heading rate 
   OBD speed before they carry the navigation (probation, VEHICLE-LINK-SPEC §16.5); the speed scale is learned against
   GNSS as with OBD (`k_s`). There is no "log the frames but navigate on OBD" mode: the polls'
   breaks cost both sides.
+
+### 2.2 Store builds
+
+`DISTRIBUTION=store` at build time (`app.config.js`, `STORE_BUILD` in `src/config/distribution.ts`): the App Store /
+TestFlight build (`build-ios-store.yml`) and the Google Play bundle (`build-store.yml`), both by hand ([CI.md](CI.md)).
+One source tree; only this differs:
+
+| Sideloaded build | Store build |
+| --- | --- |
+| Android installs its own APK updates (`REQUEST_INSTALL_PACKAGES`) | Permission removed and blocked; no native-build check (UPDATES-SPEC §3) |
+| Library-default permissions nothing uses (`SYSTEM_ALERT_WINDOW`, `ACTIVITY_RECOGNITION`, `USE_BIOMETRIC`, `USE_FINGERPRINT`) | Blocked |
+| iOS App update points to AltStore and shares the IPA | Neither: only JS updates and Restart |
+| Developer row in More | Hidden until seven taps on Version in Settings (UI-SPEC §7.3) |
+| Trip log upload in the Trip recorder | Shown only after the same unlock (TRIP-LOGGER-SPEC §7.1) |
+| Privacy text points to More → Trip recorder | `privacyMessageStore` names the upload without the path |
+
+Must not drift:
+
+- A store build never downloads or installs native code, never links to AltStore or an IPA/APK, and never contains
+  `REQUEST_INSTALL_PACKAGES` (`build-store.yml` fails if it does).
+- Hidden is not undisclosed: the tester upload is in the privacy policy and both stores' privacy declarations. It
+  never starts without a code and a confirmation naming the tester and what is sent.
+- A JS update fixes or extends within the app's purpose; it never switches on what a reviewed build didn't have.
+
+Every build:
+
+- **Privacy policy**: [PRIVACY.md](PRIVACY.md) and [PRIVACY.uk.md](PRIVACY.uk.md), published by `pages.yml` as
+  `privacy.html` / `privacy.uk.html` with `SUPPORT_EMAIL` filled in. Settings → Privacy opens the one in the app's
+  language (`PRIVACY_POLICY_URL`, `privacyPolicyUrl()`). Change both, and the stores' privacy declarations, whenever
+  data handling changes (Sentry fields, a new upload, a new permission).
+- **iOS privacy manifest** (`ios.privacyManifests` in app.json): the required-reason APIs are the union of every
+  dependency's `PrivacyInfo.xcprivacy` (Apple misses those of static pods) plus our modules' `systemUptime`
+  (SystemBootTime 35F9.1); the collected data types match what PRIVACY.md says leaves the phone. After adding or
+  updating a native dependency, list what its pods declare and add new reasons:
+
+  ```bash
+  find node_modules -name PrivacyInfo.xcprivacy | while read -r f; do
+    python -c "import plistlib,sys; [print(a['NSPrivacyAccessedAPIType'], *a['NSPrivacyAccessedAPITypeReasons']) for a in plistlib.load(open(sys.argv[1],'rb')).get('NSPrivacyAccessedAPITypes',[])]" "$f"
+  done | sort -u
+  ```
+
+- **Purpose strings** (app.json plugins, localized in `locales/*.json`) say what the app does with each permission.
+  No library default (`Allow $(PRODUCT_NAME) to access…`) reaches a build; `build-ios-store.yml` fails on one. The
+  microphone string stays though nothing records: expo-audio links the recording APIs, and App Store Connect refuses
+  an upload that references them without a string (ITMS-90683).
+- **Encryption**: `ITSAppUsesNonExemptEncryption: false` (HTTPS only, hashes for checksums).
 
 ## 3. Architecture
 
@@ -249,15 +296,16 @@ site/, wiki/             the website (https://wtf-ai.uk) and the GitHub wiki sou
 
 ## 5. Status and roadmap
 
-Built and field-tested: the vehicle link (MFi and BLE on iOS, a Classic adapter on Android), trip logging, the
-navigator with integrity and online calibration, map matching with the closed loop, routing with voice guidance and
-alternatives, address search, offline maps and updates, the guide, the Android build, CAN wheel speeds (Stage 2)
-and turns from the wheels (on by default). Field data: two test cars and a few testers' cars, one iPhone and testers'
-Android phones.
+Built and driven by testers in their own cars, with different adapters, iPhones and Android phones: the vehicle link
+(MFi and BLE on iOS, BLE and Classic on Android), trip logging, the navigator with integrity and online calibration,
+map matching with the closed loop, routing with voice guidance and alternatives, address search, offline maps and
+updates, the guide, CAN wheel speeds (Stage 2) and turns from the wheels (on by default), automatic startup on
+Android, and the car's position for Waze and Google Maps (Android, opt-in).
+
+Built, not yet seen on a drive: automatic startup on iOS (VEHICLE-LINK-SPEC §11).
 
 Not built: CAN yaw rate (Stage 3: a parking-lot drive with unfiltered CAN logging, regression of every candidate field
-against the gyro's vertical yaw rate), waking the app when the car starts (VEHICLE-LINK-SPEC §11), a logged drive with
-real spoofing (integrity is tuned on simulated spoofs), App Store and Google Play submission (STORE-REVIEW.md).
+against the gyro's vertical yaw rate).
 
 ## 6. Conventions for agents
 
@@ -296,18 +344,18 @@ routing.
    positive on others: NAVIGATOR-SPEC §5.2). CAN wheel speeds and gear remove this where available.
 3. **Heading at outage start** (~2° RMS) limits dead reckoning more than gyro drift does; the road heading from map
    matching is the correction.
-4. **MFi for the App Store**: each declared protocol string needs the vendor's authorization (STORE-REVIEW §3.2).
+4. **MFi for the App Store**: each declared protocol string needs the vendor's authorization; Vgate's PPIDs haven't
+   come yet (VEHICLE-LINK-SPEC §3.4).
 5. **Auto-wake** of a non-running app: on iOS by the location session and Bluetooth state restoration after the OS
    ended the app, and with the opt-in for location "Always" by significant location changes for a drive the app wasn't
    opened for (TRIP-LOGGER-SPEC §4.3, VEHICLE-LINK-SPEC §11), untested on a drive; not after a swipe. Android
-   12+: by a companion device the driver picked once (the car's Bluetooth, a BLE adapter), untested on a phone; a
-   woken trip has GNSS with location "all the time", else after a tap on the notification or opening the app.
+   12+: by a companion device the driver picked once (the car's Bluetooth, a BLE adapter), seen on a tester's phone
+   (woken by the car's Bluetooth), not yet against other vendors' battery killers; a woken trip has GNSS with
+   location "all the time", else after a tap on the notification or opening the app.
 6. **Particle filter CPU on the phone**: ~8 ms per update at 500 particles on the test iPhone against a 5 ms budget;
    smooth at 2–3 updates a second, spikes can drop frames (MAPMATCH-SPEC §14).
 7. **Routing time on the phone**: A\* in slices on the JS thread; long routes fall back to a stronger heuristic.
 8. **OSM completeness**: missing roads and wrong tags. Mitigated by off-road particles and soft restriction factors.
-9. **Tuning from one phone**: all navigator tuning comes from one iPhone, one mount and one car; testers' logs
-   check it (NAVIGATOR-SPEC §11).
-10. **Sentry** needs the `SENTRY_DSN` variable and, for readable stack traces, the source map upload secrets
-    (README → Configuration). It sends from release builds on real phones only: an emulator's or a debug build's
-    errors are the developer's own and buried the testers' among them.
+9. **Sentry** needs the `SENTRY_DSN` variable and, for readable stack traces, the source map upload secrets
+   (README → Configuration). It sends from release builds on real phones only: an emulator's or a debug build's
+   errors are the developer's own and buried the testers' among them.

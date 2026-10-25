@@ -96,14 +96,14 @@ runs `.github/workflows/build-android.yml` with it.
     `ccache statistics` in the log shows invocations and hit rate.
 - Google Play: Actions → **Build Google Play bundle** (`build-store.yml`, by hand only) builds the store AAB
   (`DISTRIBUTION=store`, all four ABIs, `wtfai-play.aab`) and fails if its manifest asks for
-  `REQUEST_INSTALL_PACKAGES` or an unused permission ([STORE-REVIEW.md](STORE-REVIEW.md) §4.2). Never published or
+  `REQUEST_INSTALL_PACKAGES` or an unused permission ([SPEC.md](SPEC.md) §2.2). Never published or
   announced.
 - App Store: Actions → **Build App Store iOS App** (`build-ios-store.yml`, by hand only): the store build, signed and
   uploaded to App Store Connect when the `ASC_KEY_*` secrets or the certificate, profile and app-specific password
   secrets exist, else unsigned as a compile check. Run from `main`, a signed build registers its runtime, and the
   JS updates of `main` reach it ([OTA.md](OTA.md) → Store builds);
   fails on a library's generic purpose string or a missing privacy manifest
-  ([STORE-REVIEW.md](STORE-REVIEW.md) §3.1).
+  ([SPEC.md](SPEC.md) §2.2). Its secrets are listed at the top of the workflow.
 
 ## Changing the rules
 

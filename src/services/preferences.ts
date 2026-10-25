@@ -76,7 +76,7 @@ export function markLocationAlwaysAsked(): void {
   Storage.setItemSync(ALWAYS_ASKED_KEY, "1");
 }
 
-// Store builds hide the Developer screen until seven taps on the version in Settings (docs/STORE-REVIEW.md §3):
+// Store builds hide the Developer screen until seven taps on the version in Settings (docs/SPEC.md §2.2):
 // reviewers and drivers never meet test switches, a tester still can.
 const DEVELOPER_KEY = "developer-unlocked";
 const developerListeners = new Set<() => void>();

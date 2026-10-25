@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Google Play screenshots and a short video from the Android emulator (docs/STORE-REVIEW.md §7).
+"""Google Play screenshots and a short video from the Android emulator.
 
 Against a running emulator with a Release build installed (a store build: DISTRIBUTION=store, UPDATES_ORIGIN set, so
 maps download). It wipes the app's data, goes through first run like a new user, downloads the Kyiv region, puts the
@@ -22,7 +22,9 @@ cropped to the screen and encoded to MP4 on the GPU. Leaves the emulator's size,
     python scripts/store-screenshots.py out-dir
     python scripts/store-screenshots.py out-dir --lang uk --dark --video
 
-The App Store needs screenshots of the iOS app: take those on an iPhone (docs/STORE-REVIEW.md §7).
+The current sets are in store-assets/play/ (Git LFS): light/, dark/, uk-light/, uk-dark/ and promo[-uk][-dark].mp4. The
+website's screenshots and videos are made from them (scripts/site-media.sh), so re-run after UI changes.
+The App Store needs screenshots of the iOS app: take those on an iPhone.
 """
 import argparse
 import json

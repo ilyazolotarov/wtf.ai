@@ -1,6 +1,6 @@
 name: Build App Store iOS App
 
-# The App Store build (docs/STORE-REVIEW.md §3.1), run by hand. DISTRIBUTION=store (app.config.js): no AltStore, the
+# The App Store build (docs/SPEC.md §2.2), run by hand. DISTRIBUTION=store (app.config.js): no AltStore, the
 # Developer screen and the tester upload hidden until unlocked. Signed and uploaded to App Store Connect, where it goes
 # to TestFlight and review, in one of two ways, chosen by which secrets exist:
 # - key: the App Store Connect API key (Admin role). Xcode signs with cloud-managed certificates and profiles.

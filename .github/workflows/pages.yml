@@ -2,7 +2,7 @@ name: Website
 
 # The project's website on GitHub Pages: site/ (the landing page; its screenshots and videos made from store-assets/play/ by scripts/site-media.sh) and
 # the privacy policy, copied from docs/PRIVACY.md so the stores' privacy URL always shows the current one
-# (docs/STORE-REVIEW.md §2). Needs Settings → Pages → Source: GitHub Actions.
+# (docs/SPEC.md §2.2). Needs Settings → Pages → Source: GitHub Actions.
 on:
   push:
     branches: [main]

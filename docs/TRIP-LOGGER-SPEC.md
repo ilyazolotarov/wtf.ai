@@ -202,7 +202,7 @@ with columnar plain number arrays. Native configuration through config plugins o
 | `nav_mapmatch_loop` | `closed` (older logs: `open` or `heading`) |
 | `nav_phone_only` | `on` / `off`: navigation without an adapter (NAVIGATOR-SPEC §9.6); a change is the note `nav phone-only …` |
 | `can_shadow` | `auto` (ids picked for the car, VEHICLE-LINK-SPEC §16.4) or `off` |
-| `can_primary` | `on` / `off`: Settings → Car → Speed from the wheels (VEHICLE-LINK-SPEC §16.3) |
+| `can_primary` | `on` / `off`: Settings → Vehicle → Precise speed from the car's data bus (VEHICLE-LINK-SPEC §16.3) |
 | `nav_wheel_yaw` | `on` / `off`: turns from the wheels (NAVIGATOR-SPEC §5.4); a switch is the note `nav wheel yaw on|off` |
 | `position_share` | Android only, `on` / `off`: the car's position shared with Waze and Google Maps (ANDROID-SPEC §8). What they got is `share.ts` over `nav_estimate`; the notes `position share on|off`, `position share hold: <reason>`, `position share resumed`, `position share failed: <code> <message>` say when; `position share gps taken|probing|real|failed: <reason>` when Waze's `gps` provider was wtf.ai's (`taken: a fix <km> km off, next probe in <n> min`: a probe cut short by a spoofed fix) |
 
@@ -286,7 +286,7 @@ logs back.
   one at a time; the log being written is never sent; Wi-Fi only by default. A sent log is deleted from the phone
   (if the deletion fails it is remembered as sent). A refused log is kept and marked; a revoked code stops uploads.
   A code is kept only after a confirmation that names the tester and what is sent. Store builds show the upload
-  only after the Developer unlock (STORE-REVIEW §1).
+  only after the Developer unlock (SPEC §2.2).
 - **PC:** `npm run logs:pull` brings uploads down with everything else (`tools/triplog/README.md`).
 
 ### 7.2 Storage limit

@@ -92,7 +92,7 @@ export class TripUploader {
 
   /**
    * Checks a typed code with the Worker, asks `confirm` with the tester name it belongs to (what is sent and under
-   * which name: STORE-REVIEW §3.3), and keeps it; uploads start right away.
+   * which name: SPEC §2.2), and keeps it; uploads start right away.
    * `failed`: the server answered, but not with the name (an error there, or the URL is wrong).
    */
   async connect(

@@ -4,10 +4,10 @@
 
 ## 1. Install
 
-- **iPhone**: the public beta on [TestFlight](https://testflight.apple.com/join/nCHCN441) (App Store coming). Open the
-  link on the iPhone: it asks you to install Apple's TestFlight app first, then wtf.ai from it.
-- **Android**: the APK linked on the [website](https://wtf-ai.uk/en.html), always the newest build
-  (Google Play coming). The first time, Android asks to allow installing apps from your browser.
+- **iPhone**: the public beta on [TestFlight](https://testflight.apple.com/join/nCHCN441). Open the link on the
+  iPhone: it asks you to install Apple's TestFlight app first, then wtf.ai from it.
+- **Android**: the APK linked on the [website](https://wtf-ai.uk/en.html), always the newest build. The first time,
+  Android asks to allow installing apps from your browser.
 
 ## 2. First run
 
@@ -30,7 +30,8 @@ map, the road network used to estimate the car's position, and address search. S
 - Download a map of the region you'll be driving in.
 - Plug in the adapter and switch on the ignition: the car button turns green.
 - Secure the phone in its mount.
-- **Open the app before you set off.** It tracks the car from the first metre and remembers where you park.
+- **Open the app before you set off.** It tracks the car from the first metre and remembers where you park. If you
+  often forget, turn on **Automatic startup** in More → Settings: the app then starts by itself for a drive.
 - On long drives, keep the phone charging: the map keeps the screen on.
 
 No manual calibration is needed: the app adapts to your car and phone as you drive.

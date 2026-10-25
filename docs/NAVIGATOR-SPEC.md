@@ -17,8 +17,8 @@ including while GNSS is jammed:
 
 ## 2. Status
 
-Built, wired into the app and field-tested on two cars and testers' phones; the replay reproduces the phone's dot
-(§10). Open items: §13.
+Built, wired into the app and driven by testers in their own cars, on iPhones and Android phones; the replay
+reproduces the phone's dot (§10). Open items: §13.
 
 ## 3. Inputs (`src/nav/types.ts`)
 
@@ -115,7 +115,7 @@ Built, wired into the app and field-tested on two cars and testers' phones; the 
 - Replay: `withCanSpeed` (`nav/replay/can.ts`); `replay:bench --speed can`, `replay:regress --speed can`, the
   viewer's *Adapter: CAN wheel speeds*.
 
-### 5.4 Wheel yaw (Stage 2; Settings → Car → *Detect turns using the car's data bus*, on by default)
+### 5.4 Wheel yaw (Stage 2; Settings → Vehicle → *Detect turns using the car's data bus*, on by default)
 
 The rear wheels aren't steered: (right − left) / track is the car's yaw rate whatever the phone does: the way to
 navigate with the phone in a hand, a pocket or on a seat.
@@ -564,8 +564,7 @@ the yaw rate, class speeds, stops at junctions), which makes the phone's speed t
 | Speed scale `k_s` | 1 ± 0.03 | car, tyres | learned online; persisted per VIN (§7.4) |
 | OBD σ / zero σ | 0.3 / 0.8 m/s | ECU | CAN: 0.1 / 0.3 m/s |
 
-All tuning comes from one iPhone, one mount and one car; testers' logs (Android phones) check it with
-`replay:regress --testers`.
+Testers' drawn drives (their cars, adapters and phones) check every tuning change with `replay:regress --testers`.
 
 ## 12. Verification targets
 

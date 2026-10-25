@@ -8,23 +8,25 @@ wtf.ai is a navigation app for drivers in Ukraine that keeps a trustworthy car p
 
 ## Project status
 
-A development build, field-tested in one car (and a few drives in a second) with one phone. It is not a production navigation system: do not rely on it for emergency navigation.
+Driven by testers in their own cars, with different OBD adapters, iPhones and Android phones.
 
 What works:
 
-- **Vehicle link:** an OBD-II adapter over Bluetooth: MFi (OBDLink MX+) or BLE ELM327 (vLinker FD-IOS) on iPhone, BLE or classic Bluetooth on Android (a no-name clone road-tested). Speed is polled twice a second; on STN adapters (OBDLink, vLinker) the app listens to the CAN bus instead and takes the wheel speeds and gear, on by default (Settings → Car).
-- **Position without GPS:** dead reckoning from the car's speed and the phone gyro, fused with GNSS in an EKF that calibrates itself while driving. The pose at engine-off starts the next drive.
+- **Vehicle link:** an OBD-II adapter over Bluetooth: MFi (OBDLink MX+) or BLE ELM327 (vLinker FD-IOS) on iPhone, BLE or classic Bluetooth on Android (cheap clones included). Speed is polled twice a second; on STN adapters (OBDLink, vLinker) the app listens to the CAN bus instead and takes the wheel speeds and gear, on by default (Settings → Vehicle). A car without a known profile has its speed found on its own bus.
+- **Position without GPS:** dead reckoning from the car's speed and turns (the phone gyro, or the rear wheels' speed difference on CAN cars), fused with GNSS in an EKF that calibrates itself while driving. The pose at engine-off starts the next drive, and an app that dies mid-drive starts again where the dot was.
 - **Spoofing:** fixes outside Ukraine, or ones that jump away from where the car could be, are refused, and the map says so.
 - **Map matching:** a particle filter holds the position on the road network while GPS is out, and shows other roads the car may be on.
-- **Putting the car on the map:** the driver can set the position and heading by hand while the car stands.
-- **Offline maps** per region, downloaded from the project's update server, with **address search**.
+- **Putting the car on the map:** the driver can place the car by hand ("I'm here"), standing or driving.
+- **Parked car:** the map shows where the car was left.
+- **Automatic startup** (opt-in): the app starts by itself for a drive it wasn't opened for. On Android, when the car's Bluetooth or a BLE adapter appears; the iPhone's (a relaunch a few hundred metres into the drive, with location "Always") is built but not yet seen on a drive.
+- **Offline maps** per region, downloaded from the project's update server, with **address search**: typos forgiven, house entrances, pasted coordinates and map links.
 - **Routing:** turn-by-turn with spoken directions (Ukrainian, English), re-planning when the car leaves the route, alternative routes, and travel times from speed limits, settlements, traffic lights and rush hours in big cities. No live traffic: none is available for Ukraine.
 - **Trip logs:** every drive is recorded automatically and can be replayed on a PC, the same code the app runs; opt-in upload for testers.
 - **In-app guide:** onboarding, a map tour and interactive lessons.
-- **Android:** an APK for volunteer testers, tested on emulators; Bluetooth on Android hasn't met a real adapter yet.
+- **Android:** an APK from the website that updates itself. Opt-in and experimental: Waze and Google Maps follow the car's position from wtf.ai when GPS is jammed or spoofed.
 - **Without an adapter** (experimental, a developer setting): the phone's own speed estimate and turn-based map matching, with the driver placing the car.
 
-Not yet: a CAN yaw rate (Stage 3 of [the spec](docs/SPEC.md); turns from the rear wheels' speed difference exist as an experimental setting), waking the app when the car starts, and a logged drive with real spoofing (integrity is tuned on simulated spoofs).
+Not yet: a CAN yaw rate (Stage 3 of [the spec](docs/SPEC.md)).
 
 Built with Expo SDK 57, React Native, TypeScript and Expo Router. Development happens on Windows; unsigned iOS builds come from GitHub Actions macOS runners and are sideloaded with AltStore. Android APKs come from the same CI ([docs/ANDROID-TESTING.md](docs/ANDROID-TESTING.md)).
 
@@ -118,5 +120,4 @@ Position data stays on the device; there is no position upload. Trip logs leave 
 - [Address search](docs/SEARCH-SPEC.md)
 - [App and map updates](docs/UPDATES-SPEC.md), [OTA JS updates](docs/OTA.md)
 - [Android](docs/ANDROID-SPEC.md) and its [tester guide](docs/ANDROID-TESTING.md)
-- [Store builds and review](docs/STORE-REVIEW.md)
 - [CI](docs/CI.md)

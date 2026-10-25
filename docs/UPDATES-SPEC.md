@@ -66,7 +66,7 @@ its own, so a failed prune never fails a publish. It never removes what `latest`
   anywhere. Without AltStore, "Share IPA" downloads the IPA and opens the share sheet.
   - AltStore refuses an IPA whose entitlements and `…UsageDescription` texts differ from the source's
     `appPermissions`, so CI reads them from the IPA it built (`codesign`, `Info.plist`).
-- **Store builds** (`DISTRIBUTION=store`, [STORE-REVIEW.md](STORE-REVIEW.md)) never look for a native build: their store
+- **Store builds** (`DISTRIBUTION=store`, [SPEC.md](SPEC.md) §2.2) never look for a native build: their store
   updates them. No APK installer, no AltStore. JS updates as above, each exported and signed a second time with
   `DISTRIBUTION=store`: that is in the store build's config, so its runtime is another one, and the update carries the
   config it reads ([OTA.md](OTA.md) → Store builds).

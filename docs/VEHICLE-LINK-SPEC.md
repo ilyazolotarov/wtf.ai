@@ -81,7 +81,7 @@ These two strings are the complete `UISupportedExternalAccessoryProtocols` list 
 Declare only strings backed by an authorization: App Review checks every one. iOS only reports accessories whose
 string is declared, so MFi adapters cannot be discovered generically. The two Vgate models share a string; tell them
 apart by `EAAccessory.modelNumber` / `name`. Vgate has added the app to its MFi product plan but
-has not sent PPIDs: the review notes say so until it does (STORE-REVIEW.md §3.2). The vLinker FS/MS over EA is untested (none on hand); their "BLE+BT"
+has not sent PPIDs: until it does, the App Store review notes give "PPID available from the manufacturer". The vLinker FS/MS over EA is untested (none on hand); their "BLE+BT"
 firmware mode makes them plain BLE adapters.
 
 ### 3.5 Expected performance
@@ -514,8 +514,8 @@ within ~20 s of its ignition.
 ## 12. Android
 
 The same contract with two transports, BLE (same GATT catalog) and Classic SPP, in Kotlin (ANDROID-SPEC §3). Classic
-devices get the id `spp:<MAC>` so a dual-mode adapter doesn't collide with its BLE side. Road-tested with a Classic
-no-name clone on a tester's car (§13).
+devices get the id `spp:<MAC>` so a dual-mode adapter doesn't collide with its BLE side. Road-tested by testers with
+BLE and Classic adapters (§13).
 
 ## 13. Testing
 
@@ -554,7 +554,7 @@ no-name clone on a tester's car (§13).
 1. The vLinker FS/MS over `com.vgatemall` once one is available.
 2. A cheap no-name BLE clone (the Classic one is tested on Android only).
 3. The MX+ vendor's 35-minute lock-up bug in older firmware: a longer drive on 5.13.1 to confirm it is gone.
-4. Auto-wake (§11).
+4. Auto-wake on iOS (§11): not yet seen on a drive.
 
 ## 16. CAN monitor (STN)
 
@@ -616,7 +616,7 @@ adapter (`BUFFER FULL`, and the MX+ answered `STOPPED` to polls for seconds afte
 - **Off:** turning the setting off restores the adapter the same way. A reinit drops the shadow; the next init sets
   it up again.
 
-### 16.3 Speed from the wheels (Settings → Car → Precise speed from the car's data bus, on by default)
+### 16.3 Speed from the wheels (Settings → Vehicle → Precise speed from the car's data bus, on by default)
 
 With the shadow on, the navigator's speed comes from the wheels and the monitor listens without the polls' breaks
 while the car moves.
@@ -708,7 +708,7 @@ been checked against that car's own OBD speed.
   drive) drove on the wheels only from the
   `can primary` note, if any; the wheels' turning too.
 
-**The anonymous report** (Settings → Car → Send anonymous car reports, on by default; PRIVACY.md). Each verdict, and a
+**The anonymous report** (Settings → Vehicle → Send anonymous car reports, on by default; PRIVACY.md). Each verdict, and a
 probation the link couldn't carry, goes to Sentry as one log (`can probation: <outcome> <profile>`), once per profile,
 outcome, adapter model and build of the app (`vehicleLink.canProbationReported`): the commit its JS was built from
 (`jsCommit`), so a new IPA or OTA update reports again; never the app.json version, the same for every build.

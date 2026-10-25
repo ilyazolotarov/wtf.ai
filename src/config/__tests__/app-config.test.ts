@@ -73,7 +73,7 @@ describe("app.config.js", () => {
     expect(config.extra).toMatchObject({ distribution: "sideload", tripUploadUrl: "https://logs.example" });
   });
 
-  test("a store build cannot install packages and keeps the tester upload, behind the Developer unlock (docs/STORE-REVIEW.md §1)", () => {
+  test("a store build cannot install packages and keeps the tester upload, behind the Developer unlock (docs/SPEC.md §2.2)", () => {
     process.env.DISTRIBUTION = "store";
     process.env.TRIP_UPLOAD_ORIGIN = "https://logs.example";
     const config = appConfig({ config: app.expo });

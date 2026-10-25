@@ -5,12 +5,12 @@ The Android build for volunteer testers. Companion to [SPEC.md](SPEC.md); tester
 
 ## 1. Goal and constraints
 
-- Volunteer testers run the app on their own Android phones. We have **no Android device**: everything is checked
-  on emulators, and testers' trip logs and Sentry reports are the field data.
+- Testers run the app on their own Android phones; their trip logs and Sentry reports are the field data. We have
+  **no Android device**: development is checked on emulators.
 - Same product, same TypeScript core (`src/nav`, `src/obd`, `src/triplog` untouched). Android means: Kotlin sides of
   the Expo modules with the same JS contract as the Swift ones, a few UI fallbacks, a foreground service, and CI.
-- No Play Store account yet. Distribution: a **signed release APK** from GitHub Actions, downloaded from the website
-  and updated from the app (UPDATES-SPEC §3). The store path: STORE-REVIEW.md.
+- Distribution: a **signed release APK** from GitHub Actions, downloaded from the website and updated from the app
+  (UPDATES-SPEC §3); the Google Play bundle is the store build of the same tree (SPEC §2.2).
 - Android builds and runs on the Windows PC (Android SDK + emulator), so the native iteration loop is local and CI is
   the safety net.
 
@@ -115,18 +115,16 @@ VINs, no adapter serials; the scrubber is the single gate.
 
 ## 6. Status
 
-Built, checked on the emulator, and road-tested by testers: a Classic no-name adapter on a K-line car gave the speed
-every poll and navigated a route with no GNSS fix (VEHICLE-LINK-SPEC §13). The tester guide's battery-killer steps
-are the only mitigation for OEM background limits.
+Built, checked on the emulator, and driven by testers on their own phones with BLE and Classic adapters
+(VEHICLE-LINK-SPEC §13). The companion wake has started a trip from the car's Bluetooth, and Waze and Google Maps have
+followed the shared position under jamming (§8). The tester guide's battery-killer steps are the only mitigation for
+OEM background limits.
 
 ## 7. Open items
 
-- BLE adapters on real Android phones (only Classic SPP is road-tested).
-- The companion wake on a real phone: the dialog listing the car's Bluetooth, the process start, a trip recorded
-  without opening the app, and whether vendor battery killers let it run.
+- The companion wake on more phones: whether vendor battery killers let it run.
 - Testers' phone models, once known, refine the sensor matrix (gyro noise, GNSS lag per model) through the logs.
-- Google Play: STORE-REVIEW.md.
-- Position sharing (§8) on real phones: Waze and Google Maps under jamming, Android Auto, vendor ROMs.
+- Position sharing (§8) with Android Auto and on vendor ROMs.
 
 ## 8. The car's position for other navigators
 

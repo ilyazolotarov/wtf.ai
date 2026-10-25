@@ -1,8 +1,8 @@
 # wtf.ai on Android: guide for testers
 
-Thank you for testing. wtf.ai is an early test build of a navigator that keeps a position when GPS is jammed or
-spoofed. **Do not rely on it for real navigation.** It runs on Android 10 or newer. You need an OBD-II Bluetooth
-adapter (ELM327 type) plugged into the car to try the full thing; without one the map still works from the phone's GPS.
+Thank you for testing. wtf.ai is a navigator that keeps a position when GPS is jammed or spoofed. It runs on
+Android 10 or newer. You need an OBD-II Bluetooth adapter (ELM327 type) plugged into the car to try the full thing;
+without one the map still works from the phone's GPS.
 
 ## 1. Install
 
@@ -30,8 +30,8 @@ adapter (ELM327 type) plugged into the car to try the full thing; without one th
    `0000` if that fails), then go back to the app. Paired adapters appear in the list.
 4. Tap the adapter. When it says connected you will see a **Disconnect** button.
 
-Adapters that should work: Vgate vLinker FD+, OBDLink MX+ and most ELM327 clones (Bluetooth Classic or BLE); a cheap
-classic clone is road-tested on Android. Tell us how yours does either way. If it doesn't connect, send the **Support
+Adapters that should work: Vgate vLinker FD+, OBDLink MX+ and most ELM327 clones (Bluetooth Classic or BLE); BLE
+adapters and a cheap classic clone are road-tested on Android. Tell us how yours does either way. If it doesn't connect, send the **Support
 code** (More → Settings → About) with a description (see §6).
 
 ## 4. Keep the app alive while driving (important)

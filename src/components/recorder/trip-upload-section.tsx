@@ -95,7 +95,7 @@ export function TripUploadSection({ uploader }: { uploader: TripUploader }) {
   );
 }
 
-/** What leaves the phone, and as whom, before the first log does (STORE-REVIEW §3.3). */
+/** What leaves the phone, and as whom, before the first log does (SPEC §2.2). */
 function confirmSending(name: string, t: ReturnType<typeof useT>["t"]): Promise<boolean> {
   return new Promise((resolve) =>
     Alert.alert(t("tripUploadConfirmTitle").replace("{name}", name), t("tripUploadConfirmBody"), [

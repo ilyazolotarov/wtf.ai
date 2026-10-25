@@ -20,7 +20,7 @@ export default function RecorderScreen() {
   const { recorder, uploader } = useRuntime();
   const rec = useRecorderSnapshot();
   const recording = rec.state === "recording";
-  // A store build shows the tester upload with the Developer screen: reviewers get a code (STORE-REVIEW §3.2).
+  // A store build shows the tester upload with the Developer screen: reviewers get a code (SPEC §2.2).
   const developerUnlocked = useSyncExternalStore(subscribeDeveloperUnlocked, isDeveloperUnlocked);
 
   return (

@@ -298,7 +298,7 @@ Settings (§7.6); then the diagnostic pages Trip recorder (`more/recorder`,
 TRIP-LOGGER-SPEC §9.2) and Developer (`more/developer`: the switches of TRIP-LOGGER-SPEC §9.2, the ELM terminal, the
 **UI gallery** (`more/ui-gallery`): every panel the map shows only in some state, drawn at once with made-up data, to
 see them all at a large text size and in both languages). In a store build the Developer row is hidden until seven
-taps on the version in Settings (STORE-REVIEW).
+taps on the version in Settings (SPEC §2.2).
 
 ### 7.4 `downloads` (Offline maps; `src/app/downloads.tsx`, also `more/downloads`)
 

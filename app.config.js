@@ -8,7 +8,7 @@
 //   PRIVACY_POLICY_URL   the privacy policy Settings links to. Unset: the website's (GitHub Pages of GITHUB_REPOSITORY, set in
 //                        CI; .github/workflows/pages.yml), which carries SUPPORT_EMAIL.
 //   SUPPORT_EMAIL        where Settings › Contact support writes. Unset: no such row.
-//   DISTRIBUTION         `store` for an App Store / Google Play build (docs/STORE-REVIEW.md): no self-installed
+//   DISTRIBUTION         `store` for an App Store / Google Play build (docs/SPEC.md §2.2): no self-installed
 //                        updates (no REQUEST_INSTALL_PACKAGES, no APK installer, no AltStore), the Developer screen and
 //                        the tester trip upload hidden until unlocked. Anything else, or unset: the sideloaded build.
 // All are part of the OTA runtime version (fingerprint): every CI job that builds or exports sees the same values, and
