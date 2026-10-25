@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { LocalFrame } from "@/nav/geo/local-frame";
 import { bufferByteSource } from "@/nav/mapmatch/graph/byte-source";
+import { EdgeFlag } from "@/nav/mapmatch/graph/format";
 import type { Exit, RoadEdge, RoadGraph, RoadNode } from "@/nav/mapmatch/graph/road-graph";
 import { TiledRoadGraph } from "@/nav/mapmatch/graph/road-graph";
 import { routeManeuvers } from "@/nav/routing/maneuvers";
@@ -89,5 +90,34 @@ describe("routeManeuvers", () => {
     });
     expect(routeManeuvers(graph, plan(2)).map((m) => m.kind)).toEqual(["depart", "keep-left", "arrive"]);
     expect(routeManeuvers(graph, plan(3)).map((m) => m.kind)).toEqual(["depart", "slight-right", "arrive"]);
+  });
+
+  test("roundabout exits: a way off at the node of the way in, or of the exit, counts when it branches off first", () => {
+    // In along 1 onto the ring (2, then 3); off at the end of 2 along 6. At the entry node the split road 5 goes out
+    // just right of the ring, as the car comes in (the way back out of the car's own split road, 4, is on the left).
+    const edge = (id: number): RoadEdge => ({
+      id, wayId: id, from: 10 * id, to: 10 * id + 1, lengthM: 100, cls: 2, oneway: 0, flags: id === 2 || id === 3 ? EdgeFlag.roundabout : 0,
+      maxspeedKph: 0, lonLat: new Float64Array([0, 0, 0, 0]), xy: new Float64Array([0, 0, 0, 100]), cum: new Float64Array([0, 100]),
+    });
+    const node = (id: number): RoadNode => ({ id, lat: 50, lon: 30, e: 0, n: 0, flags: 0, edges: [] });
+    const exit = (id: number, deg: number): Exit => ({ edge: id, dir: 1, turnRad: deg * DEG, againstOneway: false, restricted: false, uTurn: false });
+    const roundaboutExit = (atEntry: Exit[], atExit: Exit[]) => {
+      const exits = (via: number) => (via === 1 ? [exit(2, -10), ...atEntry] : [exit(3, -20), exit(6, 40), ...atExit]);
+      const graph = { edge, node, exits } as unknown as RoadGraph;
+      const plan: RoutePlan = {
+        legs: [1, 2, 6].map((id) => ({ edge: id, dir: 1 as const, fromM: 0, toM: 100 })),
+        lengthM: 300,
+        durationS: 18,
+        coordinates: [{ lat: 50, lon: 30 }, { lat: 50.001, lon: 30 }],
+        offRoadM: { start: 0, end: 0 },
+      };
+      return routeManeuvers(graph, plan).find((m) => m.kind === "roundabout")?.exit;
+    };
+    expect(roundaboutExit([], [])).toBe(1);
+    expect(roundaboutExit([exit(5, 12)], [])).toBe(2);
+    expect(roundaboutExit([exit(4, -160)], [])).toBe(1);
+    // At the exit node: another way off further right is passed first, one further left after.
+    expect(roundaboutExit([], [exit(7, 80)])).toBe(2);
+    expect(roundaboutExit([], [exit(7, 10)])).toBe(1);
   });
 });

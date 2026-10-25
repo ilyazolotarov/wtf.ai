@@ -94,13 +94,21 @@ export function routeManeuvers(graph: RoadGraph, plan: RoutePlan): Maneuver[] {
     if (inRoundabout || outRoundabout) {
       roundabout ??= { ...here, turnRad: 0, exits: 0 };
       roundabout.turnRad += chosen.turnRad;
-      if (!inRoundabout) continue; // entering
       // Legal ways off the roundabout at this node.
-      const off = exits.filter((x) => legal(x) && !isRoundabout(graph.edge(x.edge).flags)).length;
+      const off = exits.filter((x) => legal(x) && !isRoundabout(graph.edge(x.edge).flags));
+      // Where the route comes on or goes off, the ways off further right than the route's branch off first (a ring runs
+      // counter-clockwise): a split road's way out at the node of the way in, or another exit at the node of the exit.
+      // The way back out of a split road the car came in on is on the left: the last exit, not the first.
+      const before = off.filter((x) => x !== chosen && x.turnRad > chosen.turnRad).length;
+      if (!inRoundabout) {
+        roundabout.exits += before;
+        continue; // entering
+      }
       if (outRoundabout) {
-        roundabout.exits += off;
+        roundabout.exits += off.length;
         continue;
       }
+      roundabout.exits += before;
       out.push({ kind: "roundabout", atM: roundabout.atM, lat: roundabout.lat, lon: roundabout.lon, turnRad: roundabout.turnRad, exit: roundabout.exits + 1 });
       roundabout = null;
       continue;
