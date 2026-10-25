@@ -111,9 +111,14 @@ Must not drift:
 ## 6. Open items
 
 1. **Compile**: the Swift and the plugin have not been through Xcode; the branch needs a CI iOS build.
-2. **Simulator job**: a simulator build with `CARPLAY_ENTITLEMENT=1`, signed to run locally (so the entitlement is
-   embedded), CarPlay's display turned on (no `simctl` command for it: the Simulator's menu or a preference to find),
-   screenshots of both displays (`simctl io booted screenshot --display external`).
+2. **Simulator job** (`carplay-simulator.yml`, written, not yet run): a Release build for the simulator with
+   `CARPLAY_ENTITLEMENT=1`, signed to run locally so the entitlement is embedded (checked in the executable), started
+   on the phone; CarPlay's display turned on through the Simulator's menu (no `simctl` command does it; GitHub's macOS
+   images let `osascript` drive menus and post clicks); the app opened on the CarPlay home screen by a click on its
+   label, found by Vision's OCR. Passes on the app's own log lines (`ai.wtf.navigator`, category `carplay`): the scene
+   connected, the map drawn by the React root. Artifact: both displays before and after, the desktop, the logs.
+   Not covered yet: CarPlay opened before the phone's app (React Native started by the car's screen), a map pack, a
+   route.
 3. Whether the CarPlay scene connects with `UIApplicationSupportsMultipleScenes` false (set true after Apple's sample).
 4. **AppState with only the car's screen in front** (phone locked): React Native's AppState follows the application
    state; GNSS on the phone's screen and the trip recorder key off `active` and `background`.

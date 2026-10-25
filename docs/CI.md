@@ -104,6 +104,10 @@ runs `.github/workflows/build-android.yml` with it.
   JS updates of `main` reach it ([OTA.md](OTA.md) → Store builds);
   fails on a library's generic purpose string or a missing privacy manifest
   ([SPEC.md](SPEC.md) §2.2). Its secrets are listed at the top of the workflow.
+- CarPlay: **CarPlay Simulator** (`carplay-simulator.yml`), on pushes that change `modules/car-play/`,
+  `src/components/car-play/` or its scripts (`.github/scripts/carplay/`), and by hand: a simulator build that claims
+  the CarPlay entitlement, opened on the Simulator's CarPlay display; passes when the app's CarPlay scene connects.
+  Screenshots and logs are its artifact ([CARPLAY-SPEC.md](CARPLAY-SPEC.md) §6.2). Outside `ci.yml` and its plan.
 
 ## Changing the rules
 

@@ -1,6 +1,10 @@
 import CarPlay
 import ExpoModulesCore
 import MapKit
+import os
+
+/** The car's screen coming and going, and what drew its map: in the device log, which the simulator job reads. */
+let carPlayLog = Logger(subsystem: "ai.wtf.navigator", category: "carplay")
 
 /**
  * The connected car's screen: the map template, the React Native view under it, and the navigation session of a
@@ -19,6 +23,7 @@ final class CarPlaySession {
   private var navigation: CPNavigationSession?
 
   func connect(_ controller: CPInterfaceController, window: CPWindow) {
+    carPlayLog.notice("CarPlay scene connected")
     interfaceController = controller
     self.window = window
     let template = CPMapTemplate()
@@ -28,6 +33,7 @@ final class CarPlaySession {
   }
 
   func disconnect() {
+    carPlayLog.notice("CarPlay scene disconnected")
     navigation?.cancelTrip()
     navigation = nil
     trip = nil
@@ -105,7 +111,10 @@ final class CarPlaySession {
 /** The car's map: the React root `CarPlayMap`. */
 final class CarPlayMapController: UIViewController {
   override func loadView() {
-    view = CarPlaySession.reactView() ?? UIView()
+    let react = CarPlaySession.reactView()
+    let drawnBy = react == nil ? "no React Native factory, a blank view" : "the React root"
+    carPlayLog.notice("CarPlay map: \(drawnBy, privacy: .public)")
+    view = react ?? UIView()
     view.backgroundColor = .systemBackground
   }
 }
