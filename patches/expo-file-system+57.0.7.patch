@@ -1,0 +1,23 @@
+diff --git a/node_modules/expo-file-system/ios/FileSystemFile.swift b/node_modules/expo-file-system/ios/FileSystemFile.swift
+index bd07716..e0970bd 100644
+--- a/node_modules/expo-file-system/ios/FileSystemFile.swift
++++ b/node_modules/expo-file-system/ios/FileSystemFile.swift
+@@ -59,8 +59,16 @@ internal final class FileSystemFile: FileSystemPath {
+         defer { try? handle.close() }
+ 
+         var hasher = Insecure.MD5()
+-        while let chunk = try handle.read(upToCount: bufferSize), !chunk.isEmpty {
+-          hasher.update(data: chunk)
++        // Each chunk is autoreleased: without a pool per chunk, a 1 GB file stays in memory until the call returns.
++        var done = false
++        while !done {
++          try autoreleasepool {
++            if let chunk = try handle.read(upToCount: bufferSize), !chunk.isEmpty {
++              hasher.update(data: chunk)
++            } else {
++              done = true
++            }
++          }
+         }
+ 
+         let hash = hasher.finalize()
