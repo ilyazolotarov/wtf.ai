@@ -130,7 +130,16 @@ jobs:
             --predicate 'subsystem == "ai.wtf.navigator"' > "$OUT/carplay.log" || true
           xcrun simctl spawn "$UDID" log show --last 60m --style compact \
             --predicate "process == \"${EXECUTABLE:-wtfai}\"" > "$OUT/app.log" || true
-          cp ~/Library/Logs/DiagnosticReports/*"${EXECUTABLE:-wtfai}"* "$OUT/" 2>/dev/null || true
+          # CarPlay's own UI process, which draws the templates: it went away each time the app opened on the car's
+          # screen (CARPLAY-SPEC §6.2).
+          xcrun simctl spawn "$UDID" log show --last 60m --style compact \
+            --predicate 'process BEGINSWITH "CarPlay"' > "$OUT/carplay-host.log" || true
+          mkdir -p "$OUT/crashes"
+          cp ~/Library/Logs/DiagnosticReports/*"${EXECUTABLE:-wtfai}"* ~/Library/Logs/DiagnosticReports/*CarPlay* \
+            "$OUT/crashes/" 2>/dev/null || true
+          cp ~/Library/Developer/CoreSimulator/Devices/"$UDID"/data/Library/Logs/CrashReporter/* "$OUT/crashes/" \
+            2>/dev/null || true
+          ls -la "$OUT/crashes" ~/Library/Logs/DiagnosticReports 2>/dev/null | tail -30
           grep "CarPlay" "$OUT/carplay.log" || echo "No CarPlay lines in the app's log"
 
       - name: Upload screenshots and logs
