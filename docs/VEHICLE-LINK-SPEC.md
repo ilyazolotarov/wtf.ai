@@ -615,7 +615,7 @@ adapter (`BUFFER FULL`, and the MX+ answered `STOPPED` to polls for seconds afte
 - **Off:** turning the setting off restores the adapter the same way. A reinit drops the shadow; the next init sets
   it up again.
 
-### 16.3 Speed from the wheels (Settings → Car, on by default)
+### 16.3 Speed from the wheels (Settings → Car → Precise speed from the car's data bus, on by default)
 
 With the shadow on, the navigator's speed comes from the wheels and the monitor listens without the polls' breaks
 while the car moves.

@@ -361,6 +361,20 @@ describe("NavigatorService", () => {
     expect(on.notes).toContain("nav wheel yaw on");
   });
 
+  test("the Car page's Turns from says the wheels only while they turn the dot, not for the setting alone", async () => {
+    const drive = syntheticDrive({ segments: cityDrive(1), gnss: "clean" });
+    const { service, play } = harness();
+    await service.start();
+    service.setWheelYaw(true);
+    play(drive, { untilS: 20 });
+    expect(service.turnsFromWheels()).toBe(false);
+    play(drive, { untilS: 40, wheels: true });
+    expect(service.turnsFromWheels()).toBe(true);
+    service.setWheelYaw(false);
+    expect(service.turnsFromWheels()).toBe(false);
+    service.stop();
+  });
+
   test("falls back to phone GNSS when OBD speed stops", async () => {
     const drive = syntheticDrive({ segments: cityDrive(1), gnss: "clean" });
     const { service, play } = harness();

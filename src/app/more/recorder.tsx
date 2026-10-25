@@ -46,6 +46,7 @@ export default function RecorderScreen() {
         <ScreenAction labelKey="trips" secondary onPress={() => router.push("/trips")} />
       </View>
       <ScreenNote>{t("tripsHint")}</ScreenNote>
+      <TripStorageSection />
 
       <ScreenSection title={t("recordingSettings")} plain>
         <CycleRow
@@ -66,7 +67,6 @@ export default function RecorderScreen() {
       </ScreenSection>
 
       {uploader && (!STORE_BUILD || developerUnlocked) && <TripUploadSection uploader={uploader} />}
-      <TripStorageSection />
     </ScreenContent>
   );
 }

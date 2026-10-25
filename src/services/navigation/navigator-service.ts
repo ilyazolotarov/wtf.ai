@@ -106,6 +106,8 @@ const STALE_FIX_US = 10_000_000;
  * navigation left off.
  */
 export const PHONE_CAR = "phone";
+/** The wheels turned an IMU sample this recently: the Car page says the turns come from them. */
+const WHEEL_TURNS_RECENT_US = 2_000_000;
 /** Standing this long, the phone-only estimate is saved as the parked pose (no engine-off without an adapter). */
 const PHONE_PARK_AFTER_S = 20;
 /** The service stops (the map closed, the app going away): a car standing this long is parked there. */
@@ -260,6 +262,8 @@ export class NavigatorService implements PositionSource {
   private engineState: EngineState = "unknown";
   /** The tyre term was saved once this session (noted once). */
   private wheelYawStored = false;
+  /** The last IMU sample the rear wheels turned (`turnsFromWheels`). */
+  private wheelTurnsUs = -Infinity;
   /** The gyro as the navigator would read it, for the wheels to learn from. */
   private readonly gyroProc = new ImuProcessor();
   private lastCanUs = -Infinity;
@@ -542,6 +546,12 @@ export class NavigatorService implements PositionSource {
     };
     return this.overlay;
   }
+
+  /**
+   * The rear wheels turn the dot now, not the phone (NAVIGATOR-SPEC §5.4): what the app read from this car's port, not
+   * what the car has. A car that gives one speed message, not each wheel's, never does. Read on the Car page.
+   */
+  turnsFromWheels = (): boolean => this.wheelYaw !== null && this.deps.nowUs() - this.wheelTurnsUs < WHEEL_TURNS_RECENT_US;
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
@@ -1057,7 +1067,9 @@ export class NavigatorService implements PositionSource {
         if (w) {
           const o = this.gyroProc.process(input.imu);
           w.addGyro(input.tUs, o.valid ? o.yawRate : null);
-          nav.onImu(w.substitute(input.imu) ?? input.imu);
+          const car = w.substitute(input.imu);
+          if (car) this.wheelTurnsUs = input.tUs;
+          nav.onImu(car ?? input.imu);
         } else nav.onImu(input.imu);
       } else if ("mag" in input) {
         // The compass reads the phone's field against the IMU's "up": with the car's IMU in its place (wheel yaw) it

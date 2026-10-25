@@ -54,9 +54,7 @@ function CarDetails() {
   const nav = useNavStatus();
   const snap = useVehicleLinkSnapshot();
   const { adapter } = snap;
-  const canAuto = useSyncExternalStore(runtime.canAuto.subscribe, runtime.canAuto.status);
-  const canProbation = useSyncExternalStore(runtime.canProbation.subscribe, runtime.canProbation.status);
-  const canDiscovery = useSyncExternalStore(runtime.canDiscovery.subscribe, runtime.canDiscovery.status);
+  const turnsFromWheels = useSyncExternalStore(runtime.position.subscribe, runtime.position.turnsFromWheels);
 
   // With an adapter connected the list stays hidden until the driver asks to switch.
   const [switching, setSwitching] = useState(false);
@@ -122,7 +120,7 @@ function CarDetails() {
     : t("unavailableValue");
   // The firmware check again, after the one-time page (VEHICLE-LINK-SPEC §8.4).
   const updater = adapter ? firmwareUpdaterFor({ id: adapter.deviceId, name: adapter.name }) : null;
-  const speedFrom = speedFromText({ wheelSpeed: devSettings.wheelSpeed, speedFromCan: snap.speedFromCan ?? false, canOff: snap.canOff ?? null, canShadow: snap.canShadow ?? null, canAuto, canProbation, canDiscovery }, t);
+  const speedFrom = speedFromText({ wheelSpeed: devSettings.wheelSpeed, speedFromCan: snap.speedFromCan ?? false, canOff: snap.canOff ?? null }, t);
 
   return (
     <>
@@ -171,6 +169,10 @@ function CarDetails() {
               <>
                 <ScreenRow labelKey="carSpeed" value={speedValue} />
                 <ScreenRow labelKey="speedFrom" value={speedFrom} />
+                {/* The turn detection source Settings tells the driver to check before leaving the holder. */}
+                {devSettings.wheelSpeed && devSettings.wheelYaw && (
+                  <ScreenRow labelKey="turnsFrom" value={t(turnsFromWheels ? "turnsFromWheels" : "turnsFromPhone")} />
+                )}
               </>
             )}
           </>

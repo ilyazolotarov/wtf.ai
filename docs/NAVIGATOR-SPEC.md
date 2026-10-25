@@ -115,7 +115,7 @@ Built, wired into the app and field-tested on two cars and testers' phones; the 
 - Replay: `withCanSpeed` (`nav/replay/can.ts`); `replay:bench --speed can`, `replay:regress --speed can`, the
   viewer's *Adapter: CAN wheel speeds*.
 
-### 5.4 Wheel yaw (Stage 2; Settings → Car → *Turns from the wheels*, on by default)
+### 5.4 Wheel yaw (Stage 2; Settings → Car → *Detect turns using the car's data bus*, on by default)
 
 The rear wheels aren't steered: (right − left) / track is the car's yaw rate whatever the phone does: the way to
 navigate with the phone in a hand, a pocket or on a seat.

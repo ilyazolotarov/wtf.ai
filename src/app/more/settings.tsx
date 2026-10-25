@@ -32,6 +32,16 @@ import {
     type AppearancePreference,
 } from "@/services/preferences";
 
+/**
+ * A new email to support. The support code and version in the subject: they find the reports and the build behind the
+ * question. `body`: what to fill in (the car to support).
+ */
+function mailSupport(body?: string) {
+  const subject = `wtf.ai ${Constants.expoConfig?.version ?? ""} (${nativeBuild() ?? "dev"}) · ${installId()}`;
+  const fill = body ? `&body=${encodeURIComponent(body)}` : "";
+  void Linking.openURL(`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(subject)}${fill}`);
+}
+
 /** Taps on the version that show the Developer screen in a store build. */
 const DEVELOPER_TAPS = 7;
 
@@ -90,6 +100,14 @@ export default function SettingsScreen() {
             label={t("wheelSpeedSetting")}
           />
           <ScreenNote>{t("wheelSpeedNote")}</ScreenNote>
+          {SUPPORT_EMAIL && (
+            <ScreenNote>
+              {`${t("wheelSpeedAsk")} `}
+              <T size={13} color={palette.accent} style={styles.link} accessibilityRole="link" onPress={() => mailSupport(t("wheelSpeedAskBody"))}>
+                {t("wheelSpeedAskLink")}
+              </T>
+            </ScreenNote>
+          )}
           {settings.wheelSpeed && (
             <>
               <SwitchRow
@@ -149,14 +167,7 @@ export default function SettingsScreen() {
           icon="open_in_new"
           secondary
           compact
-          // The support code and version in the subject: they find the reports and the build behind the question.
-          onPress={() =>
-            void Linking.openURL(
-              `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(
-                `wtf.ai ${Constants.expoConfig?.version ?? ""} (${nativeBuild() ?? "dev"}) · ${installId()}`,
-              )}`,
-            )
-          }
+          onPress={() => mailSupport()}
         />
       )}
     </ScreenContent>
@@ -168,4 +179,5 @@ const styles = StyleSheet.create({
   car: { gap: 8 },
   privacy: { flexDirection: "row", gap: 12 },
   privacyText: { flex: 1, lineHeight: 20 },
+  link: { textDecorationLine: "underline" },
 });

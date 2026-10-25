@@ -311,9 +311,14 @@ Real logs go in `tools/triplog/logs/` (git-ignored).
 
 The device list per VEHICLE-LINK-SPEC §7 (sections, RSSI bars, brand hint, scanning indicator, "New adapter", "Try
 anyway", "Forget"); the connected adapter's name and state; whether the car answers (engine running, ignition on with
-the engine off, ignition off, waiting), its speed now, and where the speed comes from: the wheels while their speed
-is under 3 s old (the snapshot's `speedFromCan`; not the last sample's source, which at a stop goes back and forth
-with the polls between the monitor's windows), or OBD and why not the wheels (`components/vehicle/car-status.ts`).
+the engine off, ignition off, waiting), its speed now, and where the speed comes from: the wheels while their speed is
+under 3 s old (the snapshot's `speedFromCan`; not the last sample's source, which at a stop goes back and forth with the
+polls between the monitor's windows), or "OBD" (`components/vehicle/car-status.ts`), with a reason only when the driver
+can act on it: the adapter froze reading the bus, its firmware. The app's own steps (the setting, a plain ELM327, a car
+without CAN at the port, the probation, the search) read as faults to drivers ("my adapter does support the wheels"):
+they are in the trip log. With turns from the wheels on, **Turns from**: the wheels while they turned the dot within 2 s
+(`NavigatorService.turnsFromWheels`: what the app read at this car's port, not what the car has; one speed message is
+not each wheel's), else the phone, to keep in a holder.
 The last error, until the car answers again; "Share GATT dump" for an unknown device that failed, so it can be added
 to the catalog. The adapter's chip, firmware, protocol, poll timing and the learned
 calibration are in the trip log, not on the page.
@@ -321,8 +326,8 @@ calibration are in the trip log, not on the page.
 ### 9.2 `recorder` and `developer` (from More)
 
 - `recorder` holds all of trip logging: state, current trip id, duration, file size, start reason; Start (manual) /
-  Stop / Marker; the `trips` list; the parked and linger times (§4.2); the upload code (§7.1); the storage limit
-  (§7.2).
+  Stop / Marker; the `trips` list; the storage limit (§7.2), up with the logs it limits; the parked and linger times
+  (§4.2); the upload code (§7.1).
 - `developer`: Show emulated adapters, Map matching on the map (particles), the GPS outage button, Navigate without
   an adapter, RPM period; the ELM terminal and the UI gallery (UI-SPEC §7.3).
 
