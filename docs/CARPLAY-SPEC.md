@@ -75,7 +75,10 @@ src/components/car-play/car-play-root.tsx ◀───────────�
   style, dot, route and camera are the phone's, and over-the-air JS updates reach the car's screen. The view comes
   from `ExpoReactNativeFactory.recreateRootView` (ExpoModulesCore's protocol; the factory is the template AppDelegate's
   `reactNativeFactory`, reached by reflection since a module can't depend on the Expo pod). It starts the host when
-  the phone's scene hasn't: the app opened from the car with the phone locked.
+  the phone's scene hasn't: the app opened from the car with the phone locked. It is made without the app delegate
+  subscribers' root view customizations: expo-splash-screen keeps one splash and moves it to the newest root view,
+  which covered the car's map with the launch screen for good and would leave the phone's on screen if CarPlay
+  connected while it showed.
 - The root is mounted while a car is connected and unmounted when it goes, so the JS side needs no connection events.
   Mounted, it starts GNSS (with permission) and the adapter's auto-connect as the phone's screen does; unmounted, it
   stops GNSS unless the phone's app is in front (a trip keeps it). Trip log: `carplay connected`, `carplay disconnected`.

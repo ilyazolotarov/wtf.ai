@@ -156,3 +156,7 @@ jobs:
         run: |
           grep -q "CarPlay map: the React root" "$OUT/carplay.log" ||
             { echo "::error::The CarPlay map isn't the React root (carplay.log)"; exit 1; }
+          # The launch screen's "wtf.ai" mid-screen (the side dock's icon is at the left edge): expo-splash-screen's.
+          if "$RUNNER_TEMP/find-text" "$OUT/carplay-app.png" wtf 2>/dev/null | awk '$1 > 120 { f = 1 } END { exit !f }'; then
+            echo "::error::The launch screen covers the CarPlay map (carplay-app.png)"; exit 1
+          fi

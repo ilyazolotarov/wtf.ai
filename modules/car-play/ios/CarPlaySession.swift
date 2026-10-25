@@ -104,6 +104,15 @@ final class CarPlaySession {
     guard let delegate = UIApplication.shared.delegate else { return nil }
     let factory = Mirror(reflecting: delegate).children.first { $0.label == "reactNativeFactory" }?.value
     guard let factory = factory as? ExpoReactNativeFactoryProtocol else { return nil }
+    // Made without the app delegate subscribers' root view customizations (RCTRootViewFactoryConfiguration's
+    // customizeRootView, read the way ExpoReactNativeFactory reads it): expo-splash-screen's would put the launch
+    // screen over the car's map for good, and move its one splash to this view, so the phone's would never go if
+    // CarPlay connected while it showed.
+    let rootViewFactory = (factory as? NSObject)?.value(forKey: "rootViewFactory") as? NSObject
+    let configuration = rootViewFactory?.value(forKey: "_configuration") as? NSObject
+    let customize = configuration?.value(forKey: "customizeRootView")
+    configuration?.setValue(nil, forKey: "customizeRootView")
+    defer { configuration?.setValue(customize, forKey: "customizeRootView") }
     return factory.recreateRootView(withBundleURL: nil, moduleName: moduleName, initialProps: nil, launchOptions: nil)
   }
 }
