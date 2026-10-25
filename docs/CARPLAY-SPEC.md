@@ -15,7 +15,7 @@ phone's GPS: under jamming the car's screen is no help otherwise.
 | --- | --- | --- |
 | Entitlement `com.apple.developer.carplay-maps` | Requested at [CarPlay Contact Us](https://developer.apple.com/contact/carplay) by a **paid Developer Program** account, which agrees to the CarPlay Entitlement Addendum, for an app whose main purpose is turn-by-turn navigation. Reviewed by Apple (days to months); granted as a managed capability of the account. Without it CarPlay doesn't list the app. | Available: an organization account with the owner's go-ahead (§2.1). |
 | A signed build carrying it | The CI IPA is unsigned and has no entitlements (`build-ios.yml`); AltStore re-signs it with a free Apple ID, whose profiles can't hold CarPlay. | **No CarPlay in the sideloaded build.** Phones get it from the store path (`build-ios-store.yml`, TestFlight) once the entitlement is granted. |
-| Testing without it | Apple's "Requesting CarPlay Entitlements" tests in the Simulator (I/O → External Displays → CarPlay), with the entitlements file; its older navigation guide says the Simulator needs a CarPlay profile. | A simulator job on the macOS runner settles it (§6.2). Until then nothing has run. |
+| Testing without it | The iOS Simulator (I/O → External Displays → CarPlay) takes the entitlement from the entitlements file, no profile: it lists the app on the CarPlay home screen (§6.2). | The simulator job on the macOS runner (§6.2). |
 
 ### 2.1 With the organization account
 
@@ -110,15 +110,17 @@ Must not drift:
 
 ## 6. Open items
 
-1. **Compile**: the Swift and the plugin have not been through Xcode; the branch needs a CI iOS build.
-2. **Simulator job** (`carplay-simulator.yml`, written, not yet run): a Release build for the simulator with
-   `CARPLAY_ENTITLEMENT=1`, signed to run locally so the entitlement is embedded (checked in the executable), started
-   on the phone; CarPlay's display turned on through the Simulator's menu (no `simctl` command does it; GitHub's macOS
-   images let `osascript` drive menus and post clicks); the app opened on the CarPlay home screen by a click on its
-   label, found by Vision's OCR. Passes on the app's own log lines (`ai.wtf.navigator`, category `carplay`): the scene
-   connected, the map drawn by the React root. Artifact: both displays before and after, the desktop, the logs.
-   Not covered yet: CarPlay opened before the phone's app (React Native started by the car's screen), a map pack, a
-   route.
+1. ~~Compile~~: the branch's CI iOS build passed (2026-10-25).
+2. **Simulator job** (`carplay-simulator.yml`): a Release build for the simulator with `CARPLAY_ENTITLEMENT=1`, signed
+   to run locally so the entitlement is embedded (checked in the executable), started on the phone; CarPlay's display
+   turned on through the Simulator's menu (no `simctl` command does it; GitHub's macOS images let `osascript` drive
+   menus and post clicks); the app opened on the CarPlay home screen by a click on its icon, whose label Vision's OCR
+   reads in a desktop screenshot inside the CarPlay window (the window frames the car's screen, so the screen's own
+   screenshot doesn't map onto it). Passes on the app's own log lines (`ai.wtf.navigator`, category `carplay`): the
+   scene active after the click, the map drawn by the React root, and the car's screen off its home screen.
+   Settled by the first run: the simulator lists the app with the entitlement from the file alone, and CarPlay
+   connects the scene in the background as soon as its display comes on (the map's React root is created then), so
+   "connected" doesn't mean shown. Not covered yet: CarPlay opened before the phone's app, a map pack, a route.
 3. Whether the CarPlay scene connects with `UIApplicationSupportsMultipleScenes` false (set true after Apple's sample).
 4. **AppState with only the car's screen in front** (phone locked): React Native's AppState follows the application
    state; GNSS on the phone's screen and the trip recorder key off `active` and `background`.

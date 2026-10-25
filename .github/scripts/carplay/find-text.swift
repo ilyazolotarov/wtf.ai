@@ -1,6 +1,6 @@
-// Finds a text in a screenshot with Vision's OCR (an app's label on the CarPlay home screen). Prints the centre of the
-// first text containing it, in the image's pixels from the top left, and every text read to stderr. Exit 1: not
-// found. Usage: find-text <image.png> <text>
+// Finds a text in a screenshot with Vision's OCR (an app's label on the CarPlay screen). Prints one line per text
+// read that contains it, case-insensitively: "x y text", its centre in the image's pixels from the top left. Every text
+// read goes to stderr. Exit 1: not found. Usage: find-text <image.png> <text>
 import Foundation
 import ImageIO
 import Vision
@@ -25,12 +25,14 @@ do {
   exit(2)
 }
 
-var found: CGRect?
+var found = false
 for observation in request.results ?? [] {
   guard let text = observation.topCandidates(1).first?.string else { continue }
-  FileHandle.standardError.write(Data("read \"\(text)\" at \(observation.boundingBox)\n".utf8))
-  if found == nil, text.lowercased().contains(wanted) { found = observation.boundingBox }
+  let box = observation.boundingBox
+  FileHandle.standardError.write(Data("read \"\(text)\" at \(box)\n".utf8))
+  guard text.lowercased().contains(wanted) else { continue }
+  // Vision's boxes are normalized, from the bottom left.
+  print(Int(box.midX * Double(image.width)), Int((1 - box.midY) * Double(image.height)), text)
+  found = true
 }
-guard let box = found else { exit(1) }
-// Vision's boxes are normalized, from the bottom left.
-print(Int(box.midX * Double(image.width)), Int((1 - box.midY) * Double(image.height)))
+exit(found ? 0 : 1)

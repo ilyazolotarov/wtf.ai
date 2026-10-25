@@ -3,8 +3,9 @@ name: CarPlay Simulator
 # The car's screen in the iOS Simulator (docs/CARPLAY-SPEC.md §6.2): a Release build for the simulator that claims the
 # CarPlay entitlement (CARPLAY_ENTITLEMENT=1; the simulator wants no profile for it), started on the phone, then the
 # Simulator's CarPlay display turned on and the app opened there with a click on its icon
-# (.github/scripts/carplay/). Passes when the app's CarPlay scene connects with its map drawn by the React root. The
-# artifact: screenshots of both displays and the desktop, the app's log, any crash report. No signing, no account.
+# (.github/scripts/carplay/). Passes when the app's CarPlay scene becomes active after the click with its map drawn by
+# the React root (it connects in the background before, as soon as the display comes on). The artifact: screenshots
+# of both displays and the desktop, the app's log, any crash report. No signing, no account.
 on:
   workflow_dispatch:
   push:

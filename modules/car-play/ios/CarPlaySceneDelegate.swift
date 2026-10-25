@@ -20,4 +20,14 @@ public final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationScene
   ) {
     CarPlaySession.shared.disconnect()
   }
+
+  // CarPlay connects the scene in the background as soon as the car's screen comes on; it becomes active when the
+  // driver opens the app there.
+  public func sceneDidBecomeActive(_ scene: UIScene) {
+    carPlayLog.notice("CarPlay scene active")
+  }
+
+  public func sceneDidEnterBackground(_ scene: UIScene) {
+    carPlayLog.notice("CarPlay scene in the background")
+  }
 }
