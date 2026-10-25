@@ -58,6 +58,15 @@ const HEADING_UP_CENTRE_OFF_M = 1000;
 /** Leaving follow by the button steps back to a flat overview. */
 const FREE_ZOOM = 15.5;
 
+interface Insets {
+  top: number;
+  bottom: number;
+  left: number;
+  right: number;
+}
+
+const NO_INSETS: Insets = { top: 0, bottom: 0, left: 0, right: 0 };
+
 /** Room for the panels when framing several things at once (the routes, the ghost). */
 const FRAME_PADDING = { top: 300, bottom: 260, left: 60, right: 60 };
 
@@ -69,6 +78,7 @@ const FRAME_PADDING = { top: 300, bottom: 260, left: 60, right: 60 };
 export function useMapCamera({
   mapReady,
   mapHeightPt,
+  insets = NO_INSETS,
   mode,
   headingUpRad,
   position,
@@ -86,6 +96,8 @@ export function useMapCamera({
   mapReady: boolean;
   /** The map's own height (turned sideways, the screen's width); 0 before its layout: the screen's height. */
   mapHeightPt: number;
+  /** Edges of the map covered by others' panels (the car's screen): following keeps the position in the rest. */
+  insets?: Insets;
   mode: CameraMode;
   headingUpRad: number | null;
   position: PositionEstimate | null;
@@ -104,6 +116,8 @@ export function useMapCamera({
   const screenPt = useWindowDimensions();
   const fitRadiusPt = FIT_CIRCLE_SHARE * Math.min(screenPt.width, screenPt.height);
   const mapHeight = mapHeightPt > 0 ? mapHeightPt : screenPt.height;
+  // By their numbers: the insets are a new object with every render.
+  const { top: insetTop, bottom: insetBottom, left: insetLeft, right: insetRight } = insets;
   const ghost = position?.trust === "UNTRUSTED" && position.rawGnss ? position.rawGnss : null;
   // Heading-up with no direction known. Standing (none yet: parked on phone GPS, the app just opened): still tilted and
   // close in, the map left at the bearing it has, so the view doesn't drop flat and north while the button says
@@ -229,13 +243,20 @@ export function useMapCamera({
       );
     }
     // Heading-up lowers the dot, unless zoomed out for a wide circle: that stays centred so it fits between the panels.
+    // Both in the part of the map no one else's panels cover.
     const lowered = camera === "follow-heading" && fitted === null;
+    const visibleHeight = Math.max(0, mapHeight - insetTop - insetBottom);
     const stop = {
       center: [position.lon, position.lat] as [number, number],
       zoom,
       ...(followBearing !== undefined ? { bearing: followBearing } : {}),
       pitch: follow.pitch,
-      padding: { top: lowered ? Math.round((2 * HEADING_UP_DOT_AT - 1) * mapHeight) : 0, bottom: 0, left: 0, right: 0 },
+      padding: {
+        top: insetTop + (lowered ? Math.round((2 * HEADING_UP_DOT_AT - 1) * visibleHeight) : 0),
+        bottom: insetBottom,
+        left: insetLeft,
+        right: insetRight,
+      },
     };
     followStop.current = stop;
     followRestored.current = false;
@@ -243,7 +264,7 @@ export function useMapCamera({
     if (snapped || smoothing) cameraRef.current?.jumpTo(stop);
     else cameraRef.current?.easeTo({ ...stop, duration: FOLLOW_EASE_MS });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapReady, follow, position, ghostView, followBearing, smoothing, fitRadiusPt, mapHeight]);
+  }, [mapReady, follow, position, ghostView, followBearing, smoothing, fitRadiusPt, mapHeight, insetTop, insetBottom, insetLeft, insetRight]);
 
   // The route and its alternatives at once (ROUTING-SPEC §8.7), north up: framed once when asked.
   useEffect(() => {

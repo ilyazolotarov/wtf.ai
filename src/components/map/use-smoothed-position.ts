@@ -25,11 +25,13 @@ const appActive = () => AppState.currentState === "active";
  * Only while the app is on screen: React Native's requestAnimationFrame is a setTimeout(0), paced by the display only in
  * the foreground; in the background the loop spun the JS thread flat out and iOS killed the app for its CPU use
  * (80 % over 60 s), mid-drive, whenever the driver switched to another app (2026-10-16).
+ * `onScreen`: the map's own screen says (the car's, which shows while the phone's app is in the background).
  */
-export function useSmoothedPosition(position: PositionEstimate | null): PositionEstimate | null {
+export function useSmoothedPosition(position: PositionEstimate | null, onScreen?: boolean): PositionEstimate | null {
   const smoother = useRef<PoseSmoother | null>(null);
   const [frame, setFrame] = useState<{ of: PositionEstimate; pose: Pose } | null>(null);
-  const active = useSyncExternalStore(subscribeAppState, appActive, appActive);
+  const appInFront = useSyncExternalStore(subscribeAppState, appActive, appActive);
+  const active = onScreen ?? appInFront;
 
   useEffect(() => {
     smoother.current ??= new PoseSmoother();

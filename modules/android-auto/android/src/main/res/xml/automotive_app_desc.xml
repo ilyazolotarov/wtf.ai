@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- An Android Auto app built with the Car App Library's templates (docs/ANDROID-AUTO-SPEC.md §2). -->
+<automotiveApp>
+  <uses name="template" />
+</automotiveApp>

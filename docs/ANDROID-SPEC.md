@@ -52,6 +52,9 @@ The Android build for volunteer testers. Companion to [SPEC.md](SPEC.md); tester
   is started again (VEHICLE-LINK-SPEC §11). Android 12+.
 - **Position share:** `modules/position-share` (Kotlin only, like `app-notice`): the fused provider's mock mode, the
   phone's setup checks, the fix mapping in `logic/` (JUnit).
+- **Android Auto:** `modules/android-auto` (Kotlin only): the car's screen with the phone's map and the route's
+  guidance ([ANDROID-AUTO-SPEC.md](ANDROID-AUTO-SPEC.md)). In a car only from a Play install; the sideloaded APK shows
+  in the Desktop Head Unit.
 
 ## 4. CI/CD: nothing broken reaches a tester
 

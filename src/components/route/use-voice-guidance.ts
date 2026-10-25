@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 
+import type { Strings } from "@/i18n/en";
 import { useT } from "@/i18n/provider";
 import { Announcer } from "@/nav/routing/announcer";
 import type { RouteSnapshot } from "@/services/navigation/route-service";
@@ -40,63 +41,104 @@ export function saveVoiceVolume(v: number): void {
   volumeListeners.forEach((l) => l());
 }
 
-const subscribeVolume = (l: () => void) => {
+export const subscribeVoiceVolume = (l: () => void) => {
   volumeListeners.add(l);
   return () => void volumeListeners.delete(l);
 };
 
 /** The voice's volume, following Settings. */
 export function useVoiceVolume(): number {
-  return useSyncExternalStore(subscribeVolume, loadVoiceVolume);
+  return useSyncExternalStore(subscribeVoiceVolume, loadVoiceVolume);
 }
 
-/** Whether spoken guidance is off (kept across launches). */
+let mutedSetting: boolean | null = null;
+const mutedListeners = new Set<() => void>();
+
+/** Whether spoken guidance is off (kept across launches): the map's button, and the car screen's. */
+export function loadVoiceMuted(): boolean {
+  mutedSetting ??= kvStore.getJson<boolean>(MUTED_KEY) ?? false;
+  return mutedSetting;
+}
+
+export function saveVoiceMuted(next: boolean): void {
+  mutedSetting = next;
+  kvStore.setJson(MUTED_KEY, next);
+  if (next) hushVoice();
+  mutedListeners.forEach((l) => l());
+}
+
+export const subscribeVoiceMuted = (l: () => void) => {
+  mutedListeners.add(l);
+  return () => void mutedListeners.delete(l);
+};
+
+/** Whether spoken guidance is off, and the toggle. */
 export function useVoiceMuted(): [boolean, () => void] {
-  const [muted, setMuted] = useState(() => kvStore.getJson<boolean>(MUTED_KEY) ?? false);
-  const toggle = () => {
-    const next = !muted;
-    kvStore.setJson(MUTED_KEY, next);
-    setMuted(next);
-    if (next) hushVoice();
-  };
-  return [muted, toggle];
+  const value = useSyncExternalStore(subscribeVoiceMuted, loadVoiceMuted);
+  return [value, () => saveVoiceMuted(!value)];
 }
 
 /**
- * Speaks the route's maneuvers (ROUTING-SPEC §8.5): ahead of each ("in 300 metres, turn left"), at it, a re-plan
- * and arrival, in recorded phrases where there are some (voice-player.ts).
+ * Who speaks the route: one voice however many screens show it (the phone's map, the car's screen). The first to claim
+ * it speaks; the others follow the route in silence, ready to take over when it lets go.
  */
+const voiceClaims: VoiceGuide[] = [];
+
+/**
+ * One screen's guidance voice (ROUTING-SPEC §8.5): ahead of each maneuver ("in 300 metres, turn left"), at it, a
+ * re-plan and arrival, in recorded phrases where there are some (voice-player.ts). Said only while it holds the voice.
+ */
+export class VoiceGuide {
+  private current: { destination: RouteSnapshot["destination"]; announcer: Announcer } | null = null;
+
+  /** Speak when first among the claims; returns the release. */
+  claim(): () => void {
+    voiceClaims.push(this);
+    return () => {
+      const i = voiceClaims.indexOf(this);
+      if (i >= 0) voiceClaims.splice(i, 1);
+    };
+  }
+
+  update(route: RouteSnapshot | null, speedMps: number, muted: boolean, t: (key: keyof Strings) => string, language: "en" | "uk"): void {
+    if (!route) {
+      this.current = null;
+      return;
+    }
+    // A new route starts afresh (its plan isn't a re-plan of the last one).
+    if (this.current?.destination !== route.destination) this.current = { destination: route.destination, announcer: new Announcer() };
+    if (route.status !== "active" || !route.guidance || !route.maneuvers) return;
+    const said = this.current.announcer.update({
+      planId: route.planId,
+      planReason: route.planReason,
+      maneuvers: route.maneuvers,
+      guidance: route.guidance,
+      speedMps,
+    });
+    if (!said.length || voiceClaims[0] !== this) return;
+    if (muted) {
+      getRuntime().recorder.note(`voice muted: ${said.map((a) => (a.kind === "maneuver" ? `${a.stage} ${a.maneuver.kind}` : a.kind)).join(", ")}`);
+      return;
+    }
+    for (const a of said) sayPhrases(announcementPhrases(a, t, language), language);
+  }
+}
+
+/** Speaks the route's maneuvers on this screen (`VoiceGuide`). */
 export function useVoiceGuidance(route: RouteSnapshot | null, speedMps: number | undefined, muted: boolean): void {
   const { t, language } = useT();
-  const announcer = useRef<{ destination: RouteSnapshot["destination"]; announcer: Announcer } | null>(null);
+  const [guide] = useState(() => new VoiceGuide());
 
   // What the voice says and what goes wrong with it, into the trip log.
   useEffect(() => {
     setVoiceNote((text) => getRuntime().recorder.note(text));
     setVoiceVolume(gainOf(loadVoiceVolume()));
-  }, []);
+    return guide.claim();
+  }, [guide]);
 
   useEffect(() => {
-    if (!route) {
-      announcer.current = null;
-      return;
-    }
-    // A new route starts afresh (its plan isn't a re-plan of the last one).
-    if (announcer.current?.destination !== route.destination) announcer.current = { destination: route.destination, announcer: new Announcer() };
-    if (route.status !== "active" || !route.guidance || !route.maneuvers) return;
-    const said = announcer.current.announcer.update({
-      planId: route.planId,
-      planReason: route.planReason,
-      maneuvers: route.maneuvers,
-      guidance: route.guidance,
-      speedMps: speedMps ?? 0,
-    });
-    if (muted) {
-      if (said.length) getRuntime().recorder.note(`voice muted: ${said.map((a) => (a.kind === "maneuver" ? `${a.stage} ${a.maneuver.kind}` : a.kind)).join(", ")}`);
-      return;
-    }
-    for (const a of said) sayPhrases(announcementPhrases(a, t, language), language);
-  }, [route, speedMps, muted, t, language]);
+    guide.update(route, speedMps ?? 0, muted, t, language);
+  }, [guide, route, speedMps, muted, t, language]);
 
   // Ending the route ends what it was saying.
   const active = route != null;

@@ -15,7 +15,11 @@ interface PositionContextValue {
 
 const PositionContext = React.createContext<PositionContextValue | null>(null);
 
-export function PositionProvider({ children }: React.PropsWithChildren) {
+/**
+ * `gnss` false: only the position; GNSS and the navigator are started and stopped by whoever runs them (the car's map,
+ * shown while the phone's app is in the background: its session runs the navigator, src/components/car-screen).
+ */
+export function PositionProvider({ children, gnss = true }: React.PropsWithChildren<{ gnss?: boolean }>) {
   const [source] = useState(() => getRuntime().position);
   const [permission, setPermission] =
     useState<LocationPermissionResponse | null>(null);
@@ -26,6 +30,7 @@ export function PositionProvider({ children }: React.PropsWithChildren) {
   );
 
   useEffect(() => {
+    if (!gnss) return;
     const refresh = () => {
       void source.getPermission().then((result) => {
         setPermission(result);
@@ -47,7 +52,7 @@ export function PositionProvider({ children }: React.PropsWithChildren) {
       subscription.remove();
       source.stop();
     };
-  }, [source]);
+  }, [source, gnss]);
 
   const requestPermission = async () => {
     const result = await source.requestPermission();

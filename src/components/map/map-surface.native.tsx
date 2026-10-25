@@ -80,6 +80,15 @@ interface MapSurfaceProps {
    * would cover it.
    */
   attributionPosition?: { top?: number; bottom?: number; left?: number; right?: number };
+  /** Light or dark: the phone's scheme by default; the car's screen has its own (ANDROID-AUTO-SPEC §4). */
+  scheme?: "light" | "dark";
+  /**
+   * The edges covered by something else's panels, in points (the car's screen: Android Auto's cards): the camera keeps
+   * the car in the rest of the map.
+   */
+  insets?: { top: number; bottom: number; left: number; right: number };
+  /** Shown on a screen of its own, whatever the phone's app does (the car's): drawn smoothly while it is. */
+  onOwnScreen?: boolean;
 }
 
 export function MapSurface({
@@ -98,8 +107,12 @@ export function MapSurface({
   placedMark = null,
   overview = null,
   attributionPosition = { bottom: 8, left: 18 },
+  scheme: schemeOverride,
+  insets,
+  onOwnScreen,
 }: MapSurfaceProps) {
-  const scheme = useColorScheme() === "dark" ? "dark" : "light";
+  const phoneScheme = useColorScheme() === "dark" ? "dark" : "light";
+  const scheme = schemeOverride ?? phoneScheme;
   const palette = Colors[scheme];
   const packStyle = useMapStyle(scheme);
   // The parked car's images come with the style (car-sprite.ts); the first time, the style is reloaded with them.
@@ -121,7 +134,7 @@ export function MapSurface({
   );
   const car = placedCar ?? parkedCar;
   // Drawn and followed smoothly between the navigator's 2 Hz positions (pose-smoother.ts).
-  const shown = useSmoothedPosition(position);
+  const shown = useSmoothedPosition(position, onOwnScreen);
   const smoothing = shown !== position;
   const { route, chooseAlternative } = useRoute();
   // Camera commands wait for the style (`useMapCamera`); a new map (after none) waits again.
@@ -132,6 +145,7 @@ export function MapSurface({
   const { cameraRef, onRegionIsChanging, onRegionDidChange } = useMapCamera({
     mapReady,
     mapHeightPt,
+    insets,
     mode,
     // Heading-up turns with the smoothed heading too, unless the walking compass leads.
     headingUpRad: smoothing && !compass && shown?.headingRad != null ? shown.headingRad : headingUpRad,

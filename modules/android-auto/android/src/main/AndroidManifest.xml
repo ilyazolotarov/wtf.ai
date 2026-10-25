@@ -1,0 +1,32 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <!-- A navigation app on Android Auto (docs/ANDROID-AUTO-SPEC.md §2): its templates, and a surface to draw the map on. -->
+  <uses-permission android:name="androidx.car.app.NAVIGATION_TEMPLATES" />
+  <uses-permission android:name="androidx.car.app.ACCESS_SURFACE" />
+  <!-- Location for the whole session, also while the car's screen shows another app (CarLocationService). -->
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+
+  <application>
+    <!-- Lists the app on Android Auto. -->
+    <meta-data
+      android:name="com.google.android.gms.car.application"
+      android:resource="@xml/automotive_app_desc" />
+    <!-- Every host that runs the Car App Library: the templates used are all from its first API level. -->
+    <meta-data
+      android:name="androidx.car.app.minCarApiLevel"
+      android:value="1" />
+
+    <service
+      android:name="ai.wtf.androidauto.CarScreenService"
+      android:exported="true">
+      <intent-filter>
+        <action android:name="androidx.car.app.CarAppService" />
+        <category android:name="androidx.car.app.category.NAVIGATION" />
+      </intent-filter>
+    </service>
+    <service
+      android:name="ai.wtf.androidauto.CarLocationService"
+      android:exported="false"
+      android:foregroundServiceType="location" />
+  </application>
+</manifest>

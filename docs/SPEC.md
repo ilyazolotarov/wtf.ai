@@ -8,7 +8,8 @@ Companion specs: [UI-SPEC.md](UI-SPEC.md) (screens and the map), [VEHICLE-LINK-S
 [NAVIGATOR-SPEC.md](NAVIGATOR-SPEC.md) (EKF, calibration, integrity, replay), [MAPMATCH-SPEC.md](MAPMATCH-SPEC.md)
 (road graph, particle filter), [ROUTING-SPEC.md](ROUTING-SPEC.md) (routing and guidance),
 [SEARCH-SPEC.md](SEARCH-SPEC.md) (offline address search), [UPDATES-SPEC.md](UPDATES-SPEC.md) (app and map updates),
-[ANDROID-SPEC.md](ANDROID-SPEC.md) (the Android build).
+[ANDROID-SPEC.md](ANDROID-SPEC.md) (the Android build), [ANDROID-AUTO-SPEC.md](ANDROID-AUTO-SPEC.md) (the car's
+Android Auto screen).
 
 ## 1. Problem and goal
 
@@ -280,6 +281,7 @@ modules/vehicle-link/    Expo module (Swift, Kotlin): BLE + EA (MFi) on iOS, BLE
 modules/sensor-capture/  Expo module (Swift, Kotlin): GNSS and IMU capture, batched; the Android trip foreground service
 modules/audio-output/    Expo module (Swift, Kotlin): where the phone plays audio, the system output picker, play on the speaker
 modules/app-notice/      Expo module (Kotlin): Android's local "update ready" notification (UPDATES-SPEC §5.2)
+modules/android-auto/    Expo module (Kotlin): the Android Auto car app: templates, the map's surface, the session (ANDROID-AUTO-SPEC)
 native-tests/            XCTest for the modules' Foundation-only Swift logic (Package.swift at the root)
 native-tests-android/    JUnit for the modules' plain-Kotlin logic
 tools/replay/            replay CLI, viewer, benchmarks, route tools over src/nav/replay (Node)

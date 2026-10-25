@@ -1,4 +1,4 @@
-import { useLocales } from "expo-localization";
+import { getLocales, useLocales } from "expo-localization";
 import Storage from "expo-sqlite/kv-store";
 import * as React from "react";
 import { useEffect, useState } from "react";
@@ -59,6 +59,17 @@ export function I18nProvider({ children }: React.PropsWithChildren) {
   );
 
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
+}
+
+/**
+ * The app's language and words outside React (the car screen's headless task): the stored preference, else the
+ * system's, as `I18nProvider` picks them.
+ */
+export function appStrings(): { language: "en" | "uk"; t(key: keyof Strings): string } {
+  const stored = Storage.getItemSync(LANGUAGE_STORAGE_KEY);
+  const language = stored === "en" || stored === "uk" ? stored : systemLanguage(getLocales());
+  const strings: Strings = language === "uk" ? uk : en;
+  return { language, t: (key) => strings[key] };
 }
 
 export function useT(): I18nContextValue {

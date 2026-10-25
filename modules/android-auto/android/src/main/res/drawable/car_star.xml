@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Material Symbols "star" (Apache License 2.0), drawn by scripts/car-icons.py: don't edit by hand. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="960"
+    android:viewportHeight="960">
+  <path
+      android:fillColor="@android:color/white"
+      android:pathData="M354 673 480 597 606 674 573 530 684 434 538 421 480 285 422 420 276 433 387 530ZM233 840 298 559 80 370 368 345 480 80 592 345 880 370 662 559 727 840 480 691ZM480 490Z" />
+</vector>

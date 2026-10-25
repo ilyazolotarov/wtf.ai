@@ -1,0 +1,45 @@
+diff --git a/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/mapview/MLRNMapView.kt b/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/mapview/MLRNMapView.kt
+index b088909..9d87cdf 100644
+--- a/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/mapview/MLRNMapView.kt
++++ b/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/mapview/MLRNMapView.kt
+@@ -327,7 +327,8 @@ open class MLRNMapView(
+         }
+ 
+         val reactContext = context as ReactContext
+-        reactContext.removeLifecycleEventListener(lifeCycleListener)
++        // wtf.ai: none on another display (setLifecycleListeners).
++        lifeCycleListener?.let { reactContext.removeLifecycleEventListener(it) }
+ 
+         if (!paused) {
+             onPause()
+@@ -1414,6 +1415,9 @@ open class MLRNMapView(
+     }
+ 
+     private fun setLifecycleListeners() {
++        // wtf.ai: a map on another display (Android Auto's car screen, a virtual display) shows while the phone's
++        // activity is paused or gone: it isn't paused with it, and is disposed with its React view.
++        if (onAnotherDisplay()) return
+         val reactContext = context as ReactContext
+ 
+         lifeCycleListener =
+@@ -1434,6 +1438,20 @@ open class MLRNMapView(
+         reactContext.addLifecycleEventListener(lifeCycleListener)
+     }
+ 
++    private fun onAnotherDisplay(): Boolean =
++        try {
++            val display =
++                if (android.os.Build.VERSION.SDK_INT >= 30) {
++                    context.display
++                } else {
++                    @Suppress("DEPRECATION")
++                    (context.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager).defaultDisplay
++                }
++            display != null && display.displayId != android.view.Display.DEFAULT_DISPLAY
++        } catch (e: UnsupportedOperationException) {
++            false
++        }
++
+     private fun makeViewState(isAnimated: Boolean?): WritableMap {
+         val position = mapLibreMap!!.cameraPosition
+         val viewState: WritableMap = Arguments.createMap()

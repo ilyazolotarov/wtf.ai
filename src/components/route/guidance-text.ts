@@ -1,6 +1,6 @@
 import type { IconName } from "@/components/ui/icon";
 import type { Strings } from "@/i18n/en";
-import type { ManeuverKind } from "@/nav/routing/maneuvers";
+import type { Maneuver, ManeuverKind } from "@/nav/routing/maneuvers";
 import type { RouteProblem } from "@/services/navigation/route-service";
 
 type Lang = "en" | "uk";
@@ -34,6 +34,11 @@ export const MANEUVER_TEXT: Record<ManeuverKind, keyof Strings> = {
   roundabout: "mRoundabout",
   arrive: "mArrive",
 };
+
+/** "Turn left", "At the roundabout, exit 2": the route banner's, and the car screen's. */
+export function maneuverInstruction(m: Maneuver, t: (key: keyof Strings) => string): string {
+  return t(MANEUVER_TEXT[m.kind]).replace("{n}", String(m.exit ?? 1));
+}
 
 export const PROBLEM_TEXT: Record<RouteProblem, keyof Strings> = {
   "no-road-graph": "routeNoRoadGraph",

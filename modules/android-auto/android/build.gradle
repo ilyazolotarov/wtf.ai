@@ -1,0 +1,23 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'ai.wtf'
+version = '1.0.0'
+
+android {
+  namespace = "ai.wtf.androidauto"
+  defaultConfig {
+    versionCode = 1
+    versionName = "1.0.0"
+  }
+}
+
+dependencies {
+  // The Car App Library (Android Auto's templates and map surface), its latest stable release.
+  implementation 'androidx.car.app:app:1.7.0'
+  implementation 'androidx.car.app:app-projected:1.7.0'
+  // The React host the car's map and session task run on (the version is the app's, as in sensor-capture).
+  implementation 'com.facebook.react:react-android'
+}

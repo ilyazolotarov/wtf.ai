@@ -22,7 +22,7 @@ import {
   formatDurationS,
   formatManeuverDistance,
   MANEUVER_ICON,
-  MANEUVER_TEXT,
+  maneuverInstruction,
   PROBLEM_TEXT,
 } from "./guidance-text";
 import { PlanningPulse, PlanningSweep } from "./planning-motion";
@@ -56,7 +56,7 @@ export function RouteBanner({
     if (AudioOutputPicker) void picker.current?.open().catch(() => false);
     else openAudioOutputPanel();
   };
-  const instruction = (m: Maneuver) => t(MANEUVER_TEXT[m.kind]).replace("{n}", String(m.exit ?? 1));
+  const instruction = (m: Maneuver) => maneuverInstruction(m, t);
 
   let icon: IconName = "alt_route";
   let iconBg: string = palette.accent;

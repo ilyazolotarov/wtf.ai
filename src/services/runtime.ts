@@ -107,6 +107,8 @@ export interface Runtime {
   canDiscovery: { status(): CanDiscoveryStatus; subscribe(listener: () => void): () => void };
   setDevSettings(patch: Partial<DevSettings>): void;
   subscribeDevSettings(listener: () => void): () => void;
+  /** A car's screen shows the map (Android Auto, ANDROID-AUTO-SPEC §3): the navigator runs as it does on a trip. */
+  setCarScreen(on: boolean): void;
 }
 
 let runtime: Runtime | null = null;
@@ -418,8 +420,9 @@ export function getRuntime(): Runtime {
   const syncWheelYaw = () => position.setWheelYaw(dev.wheelSpeed && dev.wheelYaw);
   syncWheelYaw();
   // During a trip the navigator keeps running with the map off screen, so dead reckoning
-  // doesn't start over each time the app comes back.
-  const syncKeepAlive = () => position.setKeepAlive(recorder.getSnapshot().state === "recording");
+  // doesn't start over each time the app comes back. So it does while a car's screen shows it, the phone's app closed.
+  let carScreen = false;
+  const syncKeepAlive = () => position.setKeepAlive(recorder.getSnapshot().state === "recording" || carScreen);
   recorder.subscribe(syncKeepAlive);
   syncKeepAlive();
   // Trust changes go into the trip log, so a stuck or flickering status shows up in replay.
@@ -693,6 +696,12 @@ export function getRuntime(): Runtime {
     subscribeDevSettings: (listener) => {
       devListeners.add(listener);
       return () => devListeners.delete(listener);
+    },
+    setCarScreen: (on) => {
+      if (on === carScreen) return;
+      carScreen = on;
+      recorder.note(`car screen ${on ? "on" : "off"}`);
+      syncKeepAlive();
     },
   };
   // Last, once everything that listens to the recorder does: the resumed log gets the launch notes, and Android's trip

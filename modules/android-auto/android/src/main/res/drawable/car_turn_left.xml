@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Material Symbols "turn_left" (Apache License 2.0), drawn by scripts/car-icons.py: don't edit by hand. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="960"
+    android:viewportHeight="960">
+  <path
+      android:fillColor="@android:color/white"
+      android:pathData="M600 800V440Q600 440 600.0 440.0Q600 440 600 440H272L336 504L280 560L120 400L280 240L336 296L272 360H600Q633 360 656.5 383.5Q680 407 680 440V800Z" />
+</vector>
