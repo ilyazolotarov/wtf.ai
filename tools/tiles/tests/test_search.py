@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from tiles.graph import date_stamp
 from tiles.search import (
     KIND_PLACE, KIND_POI, KIND_STREET, NONE, build_index, fold, fold_house, read_objects,
     read_search, validate, write_index,
@@ -114,6 +115,16 @@ def built(tmp_path_factory):
     stats = write_index(entities, path, "2026-10-01", built_at=1_790_000_000,
                         loose_entrances=[e for e in raw.entrances if not e.owned])
     return raw, stats, path, read_search(path)
+
+
+def test_a_rebuild_writes_the_same_bytes(built, tmp_path):
+    # Stamped with the OSM date's midnight, not the clock (as the road graph).
+    raw, _, _, _ = built
+    a, b = tmp_path / "a.search.bin", tmp_path / "b.search.bin"
+    for path in (a, b):
+        write_index(build_index(raw), path, "2026-10-01", loose_entrances=[e for e in raw.entrances if not e.owned])
+    assert a.read_bytes() == b.read_bytes()
+    assert read_search(a).built_at == date_stamp("2026-10-01")
 
 
 def test_reading(built):

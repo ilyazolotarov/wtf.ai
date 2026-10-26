@@ -86,7 +86,7 @@ export function UpdatePrompts({ busy }: { busy: boolean }) {
       title = t("promptMapTitle").replace("{region}", map.name[language]);
       body = t("promptMapBody").replace("{date}", map.osmDate).replace("{size}", formatMb(map.bytes));
       buttons = [
-        { text: t("promptSkip"), style: "destructive", onPress: close(() => skipMap(map.osmDate)) },
+        { text: t("promptSkip"), style: "destructive", onPress: close(() => skipMap(map.release)) },
         later,
         // Started by the app's question: installed like an automatic update, never mid-drive.
         { text: t("promptDownload"), onPress: close(() => void downloadMapUpdate(map.region)) },

@@ -451,7 +451,7 @@ export interface NavMapMatchRecord {
   updateUs: number;
   /** Every filter update since the previous record: how many, their total and the slowest (µs). */
   updates: { count: number; totalUs: number; maxUs: number };
-  /** The graph file's build time (unix s): identifies the graph version. */
+  /** The graph file's build stamp (unix s): its OSM date's midnight UTC (MAPMATCH-SPEC §4). */
   graphBuilt: number;
   top: NavMapMatchHypothesis[];
 }

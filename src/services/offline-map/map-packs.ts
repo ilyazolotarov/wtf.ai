@@ -65,6 +65,8 @@ export interface MapDownload {
 export interface MapPacksState {
   installed: InstalledState;
   catalog: MapCatalog | null;
+  /** When `catalog` was fetched (ms). */
+  catalogAt: number | null;
   catalogLoading: boolean;
   catalogError: string | null;
   /** The published maps are for a newer app (another catalog format). */
@@ -158,6 +160,7 @@ function initialState(): MapPacksState {
   return {
     installed: readInstalled(),
     catalog: null,
+    catalogAt: null,
     catalogLoading: false,
     catalogError: null,
     catalogTooNew: false,
@@ -266,7 +269,7 @@ export async function loadCatalog(): Promise<MapCatalog | null> {
   setState({ catalogLoading: true, catalogError: null });
   try {
     const catalog = await fetchCatalog();
-    setState({ catalog, catalogLoading: false, catalogTooNew: false });
+    setState({ catalog, catalogAt: Date.now(), catalogLoading: false, catalogTooNew: false });
     return catalog;
   } catch (e) {
     setState({ catalogLoading: false, catalogError: e instanceof Error ? e.message : String(e), catalogTooNew: e instanceof CatalogFormatError });
@@ -281,16 +284,39 @@ function verify(file: File, expected: { size: number; md5: string }, label: stri
   if (info.md5 !== expected.md5) throw new Error(`${label}: checksum mismatch`);
 }
 
+/** FNV-1a, 8 hex digits. */
+function fnv1a(text: string): string {
+  let hash = 0x811c9dc5;
+  for (const ch of text) hash = Math.imul(hash ^ ch.charCodeAt(0), 0x01000193);
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
 /**
  * Identifies the shared files by content, not `osm_date`: a forced rebuild of the same OSM
  * extract (new glyphs, style fixes) keeps the date but changes the files. FNV-1a over the MD5s.
  */
-function commonFingerprint(catalog: MapCatalog): string {
-  let hash = 0x811c9dc5;
-  for (const entry of [...catalog.common].sort((a, b) => a.path.localeCompare(b.path))) {
-    for (const ch of `${entry.path}:${entry.md5};`) hash = Math.imul(hash ^ ch.charCodeAt(0), 0x01000193);
-  }
-  return (hash >>> 0).toString(16).padStart(8, "0");
+export function commonFingerprint(catalog: MapCatalog): string {
+  return fnv1a([...catalog.common].sort((a, b) => a.path.localeCompare(b.path)).map((e) => `${e.path}:${e.md5};`).join(""));
+}
+
+const releaseOf = (region: string, tiles?: string, graph?: string, search?: string, common?: string) =>
+  fnv1a(`${region}:${tiles ?? ""}:${graph ?? ""}:${search ?? ""}:${common ?? ""}`);
+
+/**
+ * A region's map release by content: its tiles', road graph's and search index's MD5s and the shared files'. What a
+ * skipped update is remembered by, not `osm_date`: a forced rebuild of the same extract that changes a file is offered
+ * again (docs/UPDATES-SPEC.md §5.3). Null when the catalog has no such region.
+ */
+export function releaseFingerprint(catalog: MapCatalog, region: string): string | null {
+  const entry = catalog.regions.find((r) => r.region === region);
+  return entry ? releaseOf(region, entry.md5, entry.graph?.md5, entry.search?.md5, commonFingerprint(catalog)) : null;
+}
+
+/** The same for what is installed; a file recorded without its MD5 (older installs) never matches a release. */
+export function installedRelease(installed: InstalledState, region: string): string | null {
+  const have = installed.regions[region];
+  if (!have) return null;
+  return releaseOf(region, have.md5 ?? "?", have.graph?.md5, have.search?.md5, installed.common?.fingerprint ?? "?");
 }
 
 const commonCurrent = (installed: InstalledState, catalog: MapCatalog) =>

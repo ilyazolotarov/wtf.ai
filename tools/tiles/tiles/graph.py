@@ -6,7 +6,7 @@ every node, so Ukraine fits in memory). Ways are split at graph nodes (way ends,
 nodes a way visits twice) into undirected edges, simplified to 1 m, and written as a tiled
 binary file that the app reads by random access:
 
-    header      64 B: magic "WTFG", format, zoom, tile range, counts, OSM date, build time, features
+    header      64 B: magic "WTFG", format, zoom, tile range, counts, OSM date, build stamp, features
     directory   u32[nx·ny + 1] tile blob offsets (relative to the data start)
     tiles       per non-empty tile: nodes, incidence, edges, geometry, restrictions, spatial
 
@@ -30,6 +30,7 @@ from array import array
 from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -708,6 +709,12 @@ def edge_tiles(g: Graph) -> tuple[np.ndarray, np.ndarray]:
 # --- Writing ------------------------------------------------------------------------------
 
 
+def date_stamp(osm_date: str) -> int:
+    """A file's build stamp (unix s): its OSM date's midnight UTC, not the clock, so a rebuild of
+    the same extract writes the same bytes and the app downloads only what changed (by MD5)."""
+    return int(datetime.strptime(osm_date, "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp())
+
+
 def write_graph(g: Graph, path: Path, osm_date: str, built_at: int | None = None) -> dict[str, int]:
     """Write the tiled file; returns size stats."""
     nx, ny = g.nx, g.ny
@@ -821,7 +828,7 @@ def write_graph(g: Graph, path: Path, osm_date: str, built_at: int | None = None
         f.write(HEADER.pack(
             MAGIC, FORMAT, g.zoom, g.x0, g.y0, nx, ny, len(g.node_ids), len(g.edge_from),
             HEADER.size, data_offset, osm_date.encode("ascii").ljust(16, b"\0"),
-            int(built_at if built_at is not None else time.time()), FEATURE_ATTRIBUTES,
+            int(built_at if built_at is not None else date_stamp(osm_date)), FEATURE_ATTRIBUTES,
         ))
         f.write(offsets.astype("<u4").tobytes())
     tmp.replace(path)

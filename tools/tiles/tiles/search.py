@@ -18,7 +18,7 @@ with no area, else among all. So "Шевченка Чернігів" finds the s
 number belongs to its street's entity, or to the settlement for `addr:place` addresses. The file
 is read by random access on the phone:
 
-    header      76 B: magic "WTFS", format, counts, section offsets, OSM date, build time
+    header      76 B: magic "WTFS", format, counts, section offsets, OSM date, build stamp
     strings     u16 length + UTF-8, deduplicated: names, tags, house numbers
     entities    44 B each: settlements first (with how far their children reach), then each
                 settlement's children, then the rest
@@ -43,7 +43,7 @@ import numpy as np
 import osmium
 import shapely
 
-from .graph import read_locations
+from .graph import date_stamp, read_locations
 from .streets import read_relation_streets
 
 FORMAT = 1
@@ -735,7 +735,7 @@ def write_index(entities: list[Entity], path: Path, osm_date: str, built_at: int
     pos += len(trailer)
     header = HEADER.pack(
         MAGIC, FORMAT, FLAG_ENTRANCES, len(ent), n_settlements, len(addr_rec), len(tokens), *offsets[:7],
-        osm_date.encode("ascii").ljust(16, b"\0"), int(built_at if built_at is not None else time.time()), pos,
+        osm_date.encode("ascii").ljust(16, b"\0"), int(built_at if built_at is not None else date_stamp(osm_date)), pos,
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")

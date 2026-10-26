@@ -12,10 +12,12 @@ import { nativeBuildReady } from "@/services/native-build-number";
 import {
   downloadRegion,
   getMapPacks,
+  installedRelease,
   loadCatalog,
   pauseDownload,
   plannedBytes,
   regionNeedsUpdate,
+  releaseFingerprint,
   resumeDownload,
   setInstallGate,
   subscribeMapPacks,
@@ -62,7 +64,7 @@ const UPDATE_PAGE_URL = "wtfai://more/update";
 interface Saved {
   /** promptKey → until when "Later" holds it back. */
   snoozed: Record<string, number>;
-  /** The OSM date the driver skipped for the active region. */
+  /** The map release (`releaseFingerprint`) the driver skipped; an OSM date in older saves, which matches none. */
   skippedMap: string | null;
   lastCatalogCheck: number;
   /** The active region's update at the last catalog check: the dots stay across restarts without a new fetch. */
@@ -188,9 +190,9 @@ export function snooze(key: string): void {
   save({ snoozed: { ...snoozed, [key]: now + SNOOZE_MS } });
 }
 
-/** "Skip" on a map prompt: no prompt and no dot for this OSM date. */
-export function skipMap(osmDate: string): void {
-  save({ skippedMap: osmDate });
+/** "Skip" on a map prompt: no prompt and no dot for this release (its files, not its OSM date). */
+export function skipMap(release: string): void {
+  save({ skippedMap: release });
   refreshMap();
 }
 
@@ -211,11 +213,12 @@ function refreshMap({ start = false }: { start?: boolean } = {}) {
   if (catalog) {
     if (region && regionNeedsUpdate(installed, catalog, region)) {
       const entry = catalog.regions.find((r) => r.region === region)!;
-      map = { region, name: entry.name, osmDate: catalog.osm_date, bytes: plannedBytes(catalog, region) };
+      const release = releaseFingerprint(catalog, region)!;
+      map = { region, name: entry.name, osmDate: catalog.osm_date, release, bytes: plannedBytes(catalog, region) };
     }
     if (JSON.stringify(map) !== JSON.stringify(saved.map)) save({ map });
-  } else if (saved.map && saved.map.region === region && installed.regions[region]?.osm_date !== saved.map.osmDate) {
-    // No catalog fetched since the app started: the last check's answer, while that region is still the older one.
+  } else if (saved.map?.release && saved.map.region === region && installedRelease(installed, region) !== saved.map.release) {
+    // No catalog fetched since the app started: the last check's answer, while that region's files are other ones.
     map = saved.map;
   }
   // While that region downloads, there is nothing to ask.
