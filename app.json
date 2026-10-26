@@ -136,8 +136,7 @@
         {
           "android": {
             "minSdkVersion": 29,
-            "enableMinifyInReleaseBuilds": true,
-            "extraProguardRules": "-dontobfuscate"
+            "enableMinifyInReleaseBuilds": true
           }
         }
       ],
@@ -204,7 +203,13 @@
       [
         "@sentry/react-native/expo",
         {
-          "note": "Set SENTRY_URL, SENTRY_AUTH_TOKEN, SENTRY_ORG and SENTRY_PROJECT to upload source maps; otherwise set SENTRY_DISABLE_AUTO_UPLOAD=true."
+          "note": "Set SENTRY_URL, SENTRY_AUTH_TOKEN, SENTRY_ORG and SENTRY_PROJECT to upload source maps and the Android R8 mapping; otherwise set SENTRY_DISABLE_AUTO_UPLOAD=true.",
+          "experimental_android": {
+            "enableAndroidGradlePlugin": true,
+            "uploadNativeSymbols": false,
+            "autoUploadNativeSymbols": false,
+            "includeNativeSources": false
+          }
         }
       ],
       [
