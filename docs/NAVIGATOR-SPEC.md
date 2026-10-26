@@ -224,6 +224,19 @@ navigate with the phone in a hand, a pocket or on a seat.
   without the expected car's pose and calibration.
 - **Used** (`Navigator.startFromPose`) when the app starts and the VIN matches (the car auto-connect will use, known
   before it connects). The EKF starts at once with σ widened by 5 m and 2°. Refused if the fixes so far disagree.
+- **Rested on** (`Navigator.restsOnStoredPose`) until the car has driven 1 m from it: the service doesn't save the
+  navigator's pose over the stored one (the stored one is as good, and not widened), and a Wi-Fi/cell fix inside the
+  EKF gate moves nothing (position, speed, heading; the twin too), whatever the engine does: it is ±10–30 m around
+  the phone, which hears the same networks from the bay and from the house, while the stored pose is the car's own
+  track, a metre or two. A satellite fix moves it unless the phone may be out of the car (the engine off, or nothing
+  from the car yet: the adapter not connected); not once the car answers with the engine still unconfirmed (the
+  seconds every drive starts with) nor with it running: the driver and the phone are in the car and its fixes are the
+  car's, as for the hold above (held there too, jammed starts lost the fix that placed them: 2nzmpn 8 of 8 seeds).
+  Fixes confirm or drop a stored pose, they never nudge it: the map
+  opened at the parked car with the phone in the house 20 m off, its Wi-Fi fixes ±11 m inside the gate pulled the
+  dead reckoning to the phone before the first 0 km/h froze the pose, the 30 s save stored that as the car's, and
+  every opening started 5 m wider from there and pulled further, a placing the same way (2026-10-26: the car drawn in
+  the backyard, both testers' phones).
 - **Checked:** until confirmed, a satellite fix that fails the EKF gate drops it, and so do 3 Wi-Fi/cell fixes in a
   row that fail it (`poseRejectCoarse`; one Wi-Fi fix isn't enough: a single ±55 m fix 850 m off threw away a correct
   pose): reset to `anchored` at that fix, the stored pose deleted. **Only while the phone is in the car**: the car

@@ -213,8 +213,11 @@ export class DrEkf {
     return this.update(H, [meanYawRate - this.x[IX.BW]], [[sigma * sigma]], gate);
   }
 
-  /** Position residual already computed against the state at the fix time (lag-corrected). */
-  updatePosition(residualE: number, residualN: number, sigma: number, gate: number): UpdateResult {
+  /**
+   * Position residual already computed against the state at the fix time (lag-corrected). `apply` false: only the
+   * gate is checked, the state stays (a parked pose the fixes may confirm or drop but never move).
+   */
+  updatePosition(residualE: number, residualN: number, sigma: number, gate: number, apply = true): UpdateResult {
     const H = zeros(2, DIM);
     H[0][IX.E] = 1;
     H[1][IX.N] = 1;
@@ -222,7 +225,7 @@ export class DrEkf {
     return this.update(H, [residualE, residualN], [
       [r, 0],
       [0, r],
-    ], gate);
+    ], gate, apply);
   }
 
   /** Position with a full covariance [EE, EN, NN] (m²): the road position, tight across the road (MAPMATCH-SPEC §9). */
@@ -289,7 +292,7 @@ export class DrEkf {
     };
   }
 
-  private update(H: Mat, y: number[], R: Mat, gate = Infinity): UpdateResult {
+  private update(H: Mat, y: number[], R: Mat, gate = Infinity, apply = true): UpdateResult {
     const m = measurementScratch(H.length);
     const PHt = mulInto(m.PHt, this.P, transposeInto(m.Ht, H));
     const S = mul(H, PHt);
@@ -297,7 +300,8 @@ export class DrEkf {
     const Si = inverse(S);
     const ySi = mul([y], Si)[0];
     const nis = ySi.reduce((acc, v, i) => acc + v * y[i], 0);
-    if (!(nis <= gate)) return { accepted: false, nis };
+    const accepted = nis <= gate;
+    if (!accepted || !apply) return { accepted, nis };
 
     const K = mulInto(m.K, PHt, Si);
     for (let i = 0; i < DIM; i++) this.x[i] += K[i].reduce((acc, k, j) => acc + k * y[j], 0);

@@ -930,6 +930,80 @@ describe("the car left parked, the phone elsewhere (NAVIGATOR-SPEC §6.1, UI-SPE
     expect(h.service.getParkedCar()).toBeNull();
     h.service.stop();
   });
+
+  /**
+   * The app opened at home with the car in its bay and the phone in the house: Wi-Fi fixes ±11 m from 20 m off, the
+   * link connecting 15 s in, then the ECU answering 0 km/h with the engine off. `fixes` emits the house's fixes.
+   */
+  function openedInTheHouse(store: ReturnType<typeof memoryStore>, truth: { lat: number; lon: number; psi: number }, minutesLater: number, engine: EngineState = "engine-off") {
+    const house = destinationAtBearing(truth, Math.PI / 2, 20);
+    const h = harness({ store });
+    jest.setSystemTime(Date.now() + minutesLater * 60_000);
+    let lastFixUs = 0;
+    const fixes = (tUs: number) => {
+      if (tUs - lastFixUs < 3_000_000) return;
+      lastFixUs = tUs;
+      const jitter = destinationAtBearing(house, (tUs / 1e6) % (2 * Math.PI), 3);
+      h.gnss.emit(record({ tUs: tUs - LATE_US, ...jitter, hAccM: 11 }));
+    };
+    const drive = syntheticDrive({ segments: [{ durationS: 200, speedMps: 0, yawRateDegS: 0 }], gnss: "none", origin: truth, startHeadingRad: truth.psi, seed: 7 });
+    /** The app open `untilS` seconds: before the link connects, then the ECU answering. */
+    const open = async (untilS = 75) => {
+      await h.service.start();
+      h.play(drive, { untilS: 15, withoutObd: true, onStep: fixes });
+      h.engine.emit(engine, h.now());
+      h.play(drive, { untilS, onStep: fixes });
+    };
+    return { h, open, fixes, drive };
+  }
+
+  test("in the car with the engine running, jammed: the Wi-Fi fixes, the same from the car as from the house, don't move the stored pose either", async () => {
+    // Wi-Fi places the phone ±10–30 m from the networks it hears, which are the same from the bay and from the house;
+    // the stored pose is the car's own track, a metre or two. Blending them in only pulls the car to where Wi-Fi lands.
+    const { store, pose, truth } = await atHome().then(async (a) => (a.h.service.stop(), a));
+    const { h, open } = openedInTheHouse(store, truth, 10, "engine-running");
+    await open();
+    expect(haversineM(h.service.getSnapshot()!, pose)).toBeLessThan(3);
+    h.service.stop();
+    expect(haversineM(storedPose(store)!, pose)).toBeLessThan(3);
+  });
+
+  test("opened at the parked car with the phone in the house, the ECU answering 0 km/h: the house's Wi-Fi fixes move neither the car nor the dot, however often", async () => {
+    // Within the gate of a pose the fixes haven't confirmed, they pulled the dead reckoning towards the phone before
+    // the first 0 km/h froze it, and the 30 s save stored the phone's spot as the car's; every opening started from
+    // that, 5 m wider, and pulled further (2026-10-26: the car "parked in the backyard").
+    const { store, pose, truth } = await atHome().then(async (a) => (a.h.service.stop(), a));
+    for (let i = 1; i <= 4; i++) {
+      const { h, open } = openedInTheHouse(store, truth, 10 * i);
+      await open();
+      expect(haversineM(h.service.getSnapshot()!, pose)).toBeLessThan(3);
+      h.service.stop();
+      const stored = storedPose(store)!;
+      expect(haversineM(stored, pose)).toBeLessThan(3);
+      expect(stored.posSigmaM).toBeLessThan(pose.posSigmaM + 1);
+    }
+  });
+
+  test("placed by the driver while the ECU answers, then opened again in the house: the placing stays the car's pose", async () => {
+    const { store, pose, truth } = await atHome().then(async (a) => (a.h.service.stop(), a));
+    const placed = destinationAtBearing(truth, -Math.PI / 2, 12);
+    {
+      const { h, open, drive, fixes } = openedInTheHouse(store, truth, 10);
+      await open(40);
+      expect(h.service.setUserPosition(placed, truth.psi)).toBe(true);
+      h.play(drive, { untilS: 100, onStep: fixes });
+      expect(haversineM(h.service.getSnapshot()!, placed)).toBeLessThan(3);
+      h.service.stop();
+      expect(haversineM(storedPose(store)!, placed)).toBeLessThan(3);
+    }
+    // 20 min later: the placing is being asked about, so the navigator starts from the stored pose (the placing).
+    const { h, open } = openedInTheHouse(store, truth, 30);
+    await open();
+    expect(haversineM(h.service.getSnapshot()!, placed)).toBeLessThan(3);
+    h.service.stop();
+    expect(haversineM(storedPose(store)!, placed)).toBeLessThan(3);
+    expect(haversineM(storedPose(store)!, pose)).toBeGreaterThan(9);
+  });
 });
 
 describe("the driver puts the car on the map", () => {

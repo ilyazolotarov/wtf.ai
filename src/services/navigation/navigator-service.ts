@@ -600,7 +600,9 @@ export class NavigatorService implements PositionSource {
     const nav = this.nav;
     if (!nav) return;
     this.lastSaveAt = this.clock.nowMs();
-    const pose = nav.parkedPose;
+    // Resting on the stored pose (the car hasn't driven from it): the stored one is as good, and tighter than the
+    // navigator's widened copy of it, which was saved 5 m wider at every opening at the parked car (2026-10-26).
+    const pose = nav.restsOnStoredPose ? null : nav.parkedPose;
     // Only while the car answered lately: long after, the navigator follows the phone (a fix the car's pose lost to,
     // a walk), and its pose is where the phone is.
     const answered = this.deps.nowUs() - this.lastObdUs < CAR_ANSWERED_WITHIN_US;

@@ -476,6 +476,8 @@ const RELOCATE_GPS_WITHIN_M = 1000;
 const RELOCATE_AGREE_SHARE = 0.5;
 /** Fixes don't move a track the driver confirmed or placed until the car has driven this far from there. */
 export const DRIVER_WORD_M = 500;
+/** Driven less than this from a stored parked pose, the car rests on it (`restsOnStoredPose`). */
+const POSE_REST_M = 1;
 
 export interface NavStats {
   imuInvalidS: number;
@@ -549,8 +551,11 @@ export class Navigator {
   private poseUnverifiedFromM: number | null = null;
   /** The EKF started from a pose parked off the roads, or placed there by the driver (OBD distance at the start). */
   private poseOffRoadAtM: number | null = null;
-  /** The engine off (or the ignition), by the link: the car parked, not at a light. `setEngine`. */
-  private engineOff = false;
+  /**
+   * The engine by the link (`setEngine`): off (or the ignition), the car is parked, not at a light; running, the
+   * driver is in the car and so is the phone; unknown before the adapter connects or after the link drops.
+   */
+  private engine: "running" | "off" | "unknown" = "unknown";
   /** The car held where it was parked (`heldParked`): latched once parked for real, until it drives off. */
   private parkedHold = false;
   /** Parked pose taken when the phone was first handled while parked: it may leave the car after that. */
@@ -820,11 +825,11 @@ export class Navigator {
     // The engine off and the car standing, the pose is frozen too, handling or not: a phone off its mount (a pocket)
     // shows none when the driver walks off with it, and the ECU, still awake, answers 0 km/h while the walk's fixes,
     // slow enough to pass integrity, pulled the dead reckoning 16 m after it within the adapter's reach.
-    if (this.engineOff && this.frozenPose === null && this.lastObd?.rawKph === 0) this.frozenPose = this.currentParkedPose() ?? this.stoppedPose;
+    if (this.engine === "off" && this.frozenPose === null && this.lastObd?.rawKph === 0) this.frozenPose = this.currentParkedPose() ?? this.stoppedPose;
     // Held there once parked for real (the engine off, or the speed gone stale: ignition off, the link lost), not at a
     // light where the driver picked the phone up: its fixes are the car's then.
     if (this.frozenPose === null) this.parkedHold = false;
-    else if (!this.parkedHold && this.poseUnverifiedFromM === null && (this.engineOff || (o !== null && s.tUs - o.tUs >= this.config.obdStaleUs))) this.parkedHold = true;
+    else if (!this.parkedHold && this.poseUnverifiedFromM === null && (this.engine === "off" || (o !== null && s.tUs - o.tUs >= this.config.obdStaleUs))) this.parkedHold = true;
     // With the engine off the poller reads speed once a second.
     const lastObdZero = this.lastObd !== null && this.lastObd.rawKph === 0 && s.tUs - this.lastObd.tUs < 2_500_000;
     if (out.quiet && lastObdZero) this.quietSinceUs ??= s.tUs;
@@ -1017,10 +1022,12 @@ export class Navigator {
    * (`heldParked`); running again, the driver is back in it.
    */
   setEngine(state: "engine-running" | "engine-off" | "ignition-off" | "unknown"): void {
+    // Unknown after off is the link dropping at the parked car, not the engine: it stays off until it runs.
     if (state === "engine-running") {
-      this.engineOff = false;
+      this.engine = "running";
       this.parkedHold = false;
-    } else if (state !== "unknown") this.engineOff = true;
+    } else if (state === "unknown") this.engine = this.engine === "off" ? "off" : "unknown";
+    else this.engine = "off";
   }
 
   /**
@@ -1030,6 +1037,32 @@ export class Navigator {
    */
   get parkedPose(): ParkedPose | null {
     return this.frozenPose ?? this.currentParkedPose() ?? this.stoppedPose;
+  }
+
+  /**
+   * Started from a stored parked pose the car hasn't driven from (§6.1). Fixes confirm or drop it, never nudge it: the
+   * map opened at home with the phone in the house 20 m off, its Wi-Fi fixes ±11 m passed the gate and pulled the
+   * dead reckoning to the phone before the first 0 km/h froze it, and the 30 s save stored that as the car's; every
+   * opening started 5 m wider from there and pulled further (2026-10-26: the car "parked in the backyard", the
+   * driver's placing walked off the same way). The service doesn't save it again either: the stored one is as good.
+   */
+  get restsOnStoredPose(): boolean {
+    return this.poseUnverifiedFromM !== null && this.stats.obdDistanceM - this.poseUnverifiedFromM < POSE_REST_M;
+  }
+
+  /**
+   * Resting on the stored pose, this fix moves nothing even inside the gate (one outside it still doubts and drops the
+   * pose). A Wi-Fi/cell fix never does: it is ±10-30 m around the phone, which hears the same networks from the
+   * car and from the house, and the stored pose, from the car's own track, is a metre or two; blending it in only
+   * pulls the car to where Wi-Fi lands (2026-10-26, the backyard). A satellite fix can be better than the stored
+   * pose, and moves it unless the phone may be out of the car: the engine off, or nothing from the car yet (the
+   * adapter not connected). Not once the car answers with the engine still unconfirmed (the few seconds every drive
+   * starts with) nor with it running: the driver is in the car with the phone, and its fixes are the car's (as for
+   * `heldParked`); held there too, jammed starts lost the fix that placed them (2nzmpn 8 of 8 seeds, pxpcgw).
+   */
+  private fixHeldOnPose(sat: boolean): boolean {
+    if (!this.restsOnStoredPose) return false;
+    return !sat || this.engine === "off" || (this.engine === "unknown" && this.lastObd === null);
   }
 
   /**
@@ -1663,7 +1696,11 @@ export class Navigator {
 
   /** `verified`: integrity has just trusted these fixes for moving like the car away from the dead reckoning. */
   private updateEkf(fix: GnssFix, fE: number, fN: number, tRef: number, sigma: number, verified = false): FixOutcome {
-    if (this.twin) this.updateTwin(fix, fE, fN, tRef, sigma);
+    const sat = isSatelliteFix(fix);
+    // Resting on a stored pose, a fix inside the gate may move nothing (`fixHeldOnPose`); one outside it still
+    // doubts and drops the pose below.
+    const resting = this.fixHeldOnPose(sat);
+    if (this.twin && !resting) this.updateTwin(fix, fE, fN, tRef, sigma);
     const c = this.config;
     const ekf = this.ekf!;
     const h = this.ekfHistory.at(tRef, 2) ?? [ekf.east, ekf.north, ekf.psi, ekf.speed];
@@ -1671,9 +1708,8 @@ export class Navigator {
     const rE = fE - h[0];
     const rN = fN - h[1];
     const predictedSigmaM = ekf.positionSigma;
-    const pos = ekf.updatePosition(rE, rN, sigma, c.gate);
+    const pos = ekf.updatePosition(rE, rN, sigma, c.gate, !resting);
     const outcome: FixOutcome = { status: pos.accepted ? "accepted" : "rejected", errorM: Math.hypot(rE, rN), predictedSigmaM, nis: pos.nis };
-    const sat = isSatelliteFix(fix);
     const lost = this.noteCoarseDoubt(sat, pos.accepted, outcome.errorM!, fix.hAccM, rE, rN);
     // A parked pose not yet confirmed has its own answer: fixes that disagree drop it (below). The driver's word
     // (a confirmed pose, a placing) stands over Wi-Fi until the car has driven `DRIVER_WORD_M` from it.
@@ -1717,7 +1753,7 @@ export class Navigator {
       this.rejectedSat = 0;
       this.lastSatAcceptedUs = fix.tUs;
     }
-    if (sat && fix.speedMps !== undefined) {
+    if (sat && fix.speedMps !== undefined && !resting) {
       ekf.updateSpeed(fix.speedMps - hv[3], Math.max(fix.speedAccMps ?? 0.5, 0.2), c.gate);
       if (fix.courseRad !== undefined && fix.speedMps >= c.courseUpdateMinSpeedMps && fix.courseAccRad !== undefined) {
         ekf.updateHeading(fix.courseRad - h[2], Math.max(fix.courseAccRad, (2 * Math.PI) / 180), c.gate);
