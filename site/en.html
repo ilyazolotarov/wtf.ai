@@ -37,11 +37,18 @@ layout: null
   <div class="wrap">
     <header class="top">
       <a class="brand" href="en.html">wtf.ai</a>
-      <nav>
+      <button class="menu-toggle" type="button" aria-label="Menu" aria-expanded="false" aria-controls="site-nav" hidden>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+          <path d="M4 6h16M4 12h16M4 18h16"/>
+        </svg>
+      </button>
+      <nav id="site-nav" aria-label="Main navigation">
+        <a href="#features">Features</a>
+        <a href="#how">How it works</a>
         <a href="#adapter">Adapter</a>
         <a href="#install">Install</a>
         <a href="#contact">Contact</a>
-        <a href="https://github.com/{{ site.github.repository_nwo }}/wiki">Guide</a>
+        <a href="#faq">FAQ</a>
         <a href="./" lang="uk" hreflang="uk">Українська</a>
         <button class="theme-toggle" type="button" data-to-light="Light" data-to-dark="Dark">Light</button>
       </nav>
@@ -124,6 +131,8 @@ layout: null
           <li>On the phone, download <a href="{{ site.apk_url }}">the app (APK file)</a>.</li>
           <li>Open the downloaded file.</li>
           <li>If Android asks, allow installing apps from your browser, then tap <b>Install</b>.</li>
+          <li>If Play Protect warns about an unknown app, expand <b>More details</b>, then tap
+            <b>Install anyway</b>.</li>
         </ol></div>
         <div class="card"><h3>First drive</h3><p>Download your region's map in the app, plug in the adapter and
           connect it once. <a href="https://github.com/{{ site.github.repository_nwo }}/wiki/Getting-started">Getting
@@ -132,23 +141,22 @@ layout: null
     </div>
   </section>
 
-  <section>
+  <section id="features">
     <div class="wrap">
-      <h2>Navigation during air raids</h2>
-      <p class="sub">During air raids, GPS may be jammed or spoofed: the dot freezes or jumps hundreds of kilometres
-        away. This navigator uses the car's actual movement instead.</p>
+      <h2>For everyday drives</h2>
+      <p class="sub">Find an address, plan a route and follow spoken directions — through an air raid, a blackout or even a zombie apocalypse.</p>
       <div class="grid">
-        <div class="card"><h3>Tracks the car's movement</h3><p>Speed from the adapter and turns measured by the phone
-          help locate the car on the downloaded road network.</p></div>
-        <div class="card"><h3>Spots fake positions</h3><p>The app ignores satellite positions that conflict with the
-          car's movement. A grey dot shows where GPS claims you are.</p></div>
+        <div class="card"><h3>Finds the address you need</h3><p>Search for streets, house numbers and even building
+          entrances, even with typos. Or paste coordinates.</p></div>
+        <div class="card"><h3>Remembers where you parked</h3><p>The app saves where you left the car and shows
+          the parking spot on the map.</p></div>
         <div class="card"><h3>Fully offline</h3><p>Download your region once. The map, address search, routes and voice
           guidance then need no internet.</p></div>
         <div class="card"><h3>Turn-by-turn voice</h3><p>Spoken directions in English or Ukrainian, through the phone or
           the car's speakers. It re-plans by itself after a wrong turn.</p></div>
-        <div class="card"><h3>Learns your car</h3><p>Nothing to calibrate: the app learns your car and phone on the
-          way, and remembers where you park.</p></div>
-        <div class="card"><h3>Private</h3><p>No account or ads. Your position and trip logs stay on your phone by
+        <div class="card"><h3>No manual calibration</h3><p>Connect the adapter and secure the phone in its mount.
+          The app adapts to your car and phone as you drive.</p></div>
+        <div class="card"><h3>Private</h3><p>Your position and trip logs stay on your phone by
           default. You decide when to share them.</p></div>
       </div>
     </div>
@@ -157,16 +165,19 @@ layout: null
   <section id="how">
     <div class="wrap">
       <h2>How it works</h2>
-      <p class="sub">The app checks each GPS position against the car's movement before using it.</p>
+      <p class="sub">When GPS lets you down, the app works out your position from where the car started and how it moves.</p>
       <div class="steps">
-        <div class="card"><h3><span class="dot" style="background:var(--ok)"></span>Reliable GPS</h3><p>GPS agrees with the
-          car's speed and turns: the status is green.</p></div>
-        <div class="card"><h3><span class="dot" style="background:var(--bad)"></span>Signal lost</h3><p>Starting from
-          the last trusted position, the dot keeps moving using the adapter and the phone's sensors.</p></div>
-        <div class="card"><h3>Turns refine the position</h3><p>When two nearby roads look equally likely, a turn helps
-          tell them apart and shrink the uncertainty circle.</p></div>
-        <div class="card"><h3>GPS returns</h3><p>The app checks new positions against the car's movement for a few
-          seconds before trusting them again.</p></div>
+        <div class="card"><h3>Starts from a known place</h3><p>It uses the last trusted GPS position or the saved
+          parking spot. If GPS is unavailable from the start, you can set the car's position and direction
+          manually.</p></div>
+        <div class="card"><h3>Measures the car's movement</h3><p>The adapter supplies speed, and the phone's sensors
+          measure turns. Together, they tell the app how far you've driven and in which direction, even without
+          GPS.</p></div>
+        <div class="card"><h3>Matches your path to roads</h3><p>The app compares the car's movement with roads on
+          the downloaded map to work out which road you're on. No internet is needed.</p></div>
+        <div class="card"><h3>Doesn't trust GPS blindly</h3><p>If GPS puts you somewhere the car couldn't have
+          reached, the app ignores it and keeps tracking your movement. When the signal is reliable again,
+          it uses it to refine your position.</p></div>
       </div>
     </div>
   </section>
@@ -181,6 +192,25 @@ layout: null
         <img src="assets/screens/dark/02-route.png" data-dark="assets/screens/dark/02-route.png" data-light="assets/screens/02-route.png" alt="A destination" loading="lazy">
         <img src="assets/screens/dark/05-lesson.png" data-dark="assets/screens/dark/05-lesson.png" data-light="assets/screens/05-lesson.png" alt="Lesson: driving through jamming" loading="lazy">
         <img src="assets/screens/dark/06-maps.png" data-dark="assets/screens/dark/06-maps.png" data-light="assets/screens/06-maps.png" alt="Offline maps" loading="lazy">
+      </div>
+    </div>
+  </section>
+
+  <section id="faq">
+    <div class="wrap">
+      <h2>Frequently asked questions</h2>
+      <div class="grid">
+        <div class="card"><h3>How accurate is it without GPS?</h3><p>Surprisingly accurate: in most cases,
+          you can drive for hours without GPS and barely notice it's missing, both in the city and on the
+          highway. Mistakes can still happen, especially if you start a drive without GPS and set the initial
+          position or the car's heading incorrectly. If the dot is in the wrong place, stop somewhere safe
+          and correct the position and heading manually.</p></div>
+        <div class="card"><h3>Is it really free?</h3><p>Yes! Not just during the beta —
+          the app is free and will stay free forever.</p></div>
+        <div class="card"><h3>Can I leave the adapter plugged into the OBD port?</h3><p>Usually, yes,
+          and many drivers do. But some cheap adapters don't go to sleep and slowly drain the car's battery.
+          If you won't be driving for several weeks, it's best to unplug the adapter. This is especially
+          relevant to cheap blue ELM327 clones; check your adapter manufacturer's recommendations too.</p></div>
       </div>
     </div>
   </section>
@@ -223,5 +253,6 @@ layout: null
     </div>
   </footer>
   <script src="assets/theme.js?v={{ site.github.build_revision }}"></script>
+  <script src="assets/navigation.js?v={{ site.github.build_revision }}"></script>
 </body>
 </html>
