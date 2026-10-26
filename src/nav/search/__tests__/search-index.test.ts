@@ -16,6 +16,10 @@ const FIXTURE = readFileSync(path.join(__dirname, "../__fixtures__/town.search.b
 const CITY = { lat: 51.4939, lon: 31.2947 };
 const VILLAGE = { lat: 51.41, lon: 31.15 };
 
+const AREAS = readFileSync(path.join(__dirname, "../__fixtures__/areas.search.bin"));
+/** A point dx km east and dy km north of the city's point (as the fixture is drawn). */
+const km = (dx: number, dy: number) => ({ lat: CITY.lat + dy / 111.32, lon: CITY.lon + dx / (111.32 * 0.6225) });
+
 const open = () => new SearchIndex(bufferByteSource(new Uint8Array(FIXTURE)));
 const label = (r: SearchResult) =>
   `${r.kind}:${r.name}${r.house ? ` ${r.house}` : ""}${r.entrance ? ` entrance ${r.entrance}` : ""}${r.settlement ? ` @${r.settlement.name}` : ""}`;
@@ -138,6 +142,23 @@ describe("SearchIndex", () => {
     expect(index.settlementAt({ lat: 51.4939 + 0.02, lon: 31.2947 + 0.02 })?.name).toBe("Чернігів");
     expect(index.settlementAt({ lat: 51.41 + 0.005, lon: 31.15 })?.name).toBe("Іванівка");
     expect(index.settlementAt({ lat: 52.5, lon: 33.5 })).toBeNull();
+  });
+
+  it("labels a street by the settlement whose area holds it, and finds a pin's house there past the kind's reach", () => {
+    // areas.search.bin (tests/test_search.py, test_settlement_from_the_area_around_it): two "вулиця Садова",
+    // each in a village's boundary but nearer another settlement's point. House 7-А is 3.7 km from its village's
+    // point (a village reaches 2.5 km by its kind) and 3 km from a town's.
+    const index = new SearchIndex(bufferByteSource(new Uint8Array(AREAS)));
+    expect(index.search("Садова", { near: null }).map(label).sort()).toEqual([
+      "street:вулиця Садова @Петрівка",
+      "street:вулиця Садова @Степове",
+    ]);
+    const house = index.nearestAddress(km(0.1, 3.05));
+    expect(house && label(house)).toBe("address:вулиця Садова 7-А @Петрівка");
+    // 150 m from it no address, but the settlement is the house's, not the town 3 km away; far from houses, by kind.
+    expect(index.nearestAddress(km(0.1, 3.2))).toBeNull();
+    expect(index.settlementAt(km(0.1, 3.2))?.name).toBe("Петрівка");
+    expect(index.settlementAt(km(2, -1))?.name).toBe("Залісся");
   });
 
   it("reads the region's entrances for the map, numbered or not", () => {

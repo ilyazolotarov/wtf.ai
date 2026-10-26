@@ -14,6 +14,7 @@ FOLD_CASES = REPO / "src" / "nav" / "search" / "__fixtures__" / "fold-cases.json
 # The app's search tests read this file (src/nav/search/__tests__). Regenerate after a
 # format or fixture change: UPDATE_FIXTURES=1 python -m pytest.
 TS_FIXTURE = REPO / "src" / "nav" / "search" / "__fixtures__" / "town.search.bin"
+AREAS_FIXTURE = REPO / "src" / "nav" / "search" / "__fixtures__" / "areas.search.bin"
 
 
 def test_fold_cases_shared_with_the_app():
@@ -226,6 +227,78 @@ def test_associated_street_gives_houses_their_street(tmp_path):
     sf = read_search(path)
     (myru,) = sf.find("проспект Миру", KIND_STREET)
     assert sf.houses(myru) == ["28", "30"]
+
+
+def km(dx: float, dy: float) -> tuple[float, float]:
+    """A point dx km east and dy km north of C."""
+    return (C[0] + dx / (111.32 * 0.6225), C[1] + dy / 111.32)
+
+
+def test_settlement_from_the_area_around_it(tmp_path):
+    # A town with no area; village A's boundary (a relation) reaches a street nearer the town's
+    # point; village B's (a closed way) holds a street nearer A's point. A hromada around them all
+    # bears neither name. Outside every area: the nearest settlement with no area, else any.
+    nodes = {
+        1: (km(0, 0), {"place": "town", "name": "Залісся"}),
+        2: (km(-3, 1), {"place": "village", "name": "Петрівка"}),
+        3: (km(-6, 2.5), {"place": "village", "name": "Степове"}),
+        10: (km(-0.2, 3), {}), 11: (km(0.2, 3), {}),  # S1: in A's area, 3 km from the town, 3.6 from A
+        12: (km(-5, 1), {}), 13: (km(-4.6, 1), {}),  # S2: in B's area, 1.8 km from A, 1.9 from B
+        14: (km(2, -1), {}), 15: (km(2.4, -1), {}),  # S3: in no area, by the town
+        16: (km(-6.2, 4.5), {}), 17: (km(-5.8, 4.5), {}),  # S4: in no area, 2 km from B, 7.5 from the town
+        30: (km(0.1, 3.05), {"addr:street": "вулиця Садова", "addr:housenumber": "7-А"}),
+        # A's boundary 20–23, B's 24–27, the hromada's 40–43
+        20: (km(-4.5, 0), {}), 21: (km(0.5, 0), {}), 22: (km(0.5, 4), {}), 23: (km(-4.5, 4), {}),
+        24: (km(-8, 0), {}), 25: (km(-4.5, 0), {}), 26: (km(-4.5, 4), {}), 27: (km(-8, 4), {}),
+        40: (km(-10, -5), {}), 41: (km(5, -5), {}), 42: (km(5, 8), {}), 43: (km(-10, 8), {}),
+    }
+    ways = [
+        (101, [10, 11], {"highway": "residential", "name": "вулиця Садова"}),
+        (102, [12, 13], {"highway": "residential", "name": "вулиця Садова"}),
+        (103, [14, 15], {"highway": "residential", "name": "вулиця Лугова"}),
+        (104, [16, 17], {"highway": "residential", "name": "вулиця Лісова"}),
+        (120, [20, 21, 22, 23, 20], {}),
+        (121, [24, 25, 26, 27, 24], {"boundary": "administrative", "admin_level": "9", "name": "Степове"}),
+        (122, [40, 41, 42, 43, 40], {}),
+    ]
+    out = ['<?xml version="1.0" encoding="UTF-8"?>', '<osm version="0.6" generator="test">']
+    for nid, ((lon, lat), t) in nodes.items():
+        out.append(f'<node id="{nid}" version="1" lat="{lat:.7f}" lon="{lon:.7f}">'
+                   + "".join(f'<tag k="{k}" v="{v}"/>' for k, v in t.items()) + "</node>")
+    for wid, refs, t in ways:
+        out.append(f'<way id="{wid}" version="1">' + "".join(f'<nd ref="{r}"/>' for r in refs)
+                   + "".join(f'<tag k="{k}" v="{v}"/>' for k, v in t.items()) + "</way>")
+    for rid, way, tags in ((1, 120, {"admin_level": "9", "name": "Петрівка", "place": "village"}),
+                           (2, 122, {"admin_level": "7", "name": "Петрівська сільська громада"})):
+        out.append(f'<relation id="{rid}" version="1"><member type="way" ref="{way}" role="outer"/>'
+                   + "".join(f'<tag k="{k}" v="{v}"/>' for k, v in {"type": "boundary", "boundary": "administrative", **tags}.items())
+                   + "</relation>")
+    out.append("</osm>")
+    osm = tmp_path / "areas.osm"
+    osm.write_text("\n".join(out), encoding="utf-8")
+    raw = read_objects(osm)
+    assert sorted(min(a.keys) for a in raw.areas) == ["petrivka", "petrivska silska hromada", "stepove"]
+    path = tmp_path / "areas.search.bin"
+    write_index(build_index(raw), path, "2026-10-01", built_at=1_790_000_000)
+    sf = read_search(path)
+    assert validate(sf) == []
+    if os.environ.get("UPDATE_FIXTURES") == "1":
+        AREAS_FIXTURE.write_bytes(path.read_bytes())
+    assert AREAS_FIXTURE.exists() and AREAS_FIXTURE.read_bytes() == path.read_bytes(), "TS fixture is stale: UPDATE_FIXTURES=1 python -m pytest"
+
+    def settlement(entity: int) -> str:
+        return sf.string(int(sf.entities[int(sf.entities[entity]["parent"])]["name"]))
+
+    by_settlement = {settlement(i): i for i in sf.find("вулиця Садова", KIND_STREET)}
+    assert set(by_settlement) == {"Петрівка", "Степове"}  # by nearest points: Залісся and Петрівка
+    assert sf.houses(by_settlement["Петрівка"]) == ["7-А"]
+    assert [settlement(i) for i in sf.find("вулиця Лугова")] == ["Залісся"]
+    assert [settlement(i) for i in sf.find("вулиця Лісова")] == ["Степове"]
+    # The reach carries A past a village's 2.5 km to its street's shown point 3.8 km away (+ 100 m for a pin).
+    (village,) = sf.find("Петрівка", KIND_PLACE)
+    assert 3_870 <= int(sf.entities[village]["reach"]) * 250 <= 4_000
+    (town,) = sf.find("Залісся", KIND_PLACE)
+    assert int(sf.entities[town]["reach"]) * 250 == 6_000  # its kind's: nothing farther
 
 
 def test_ts_fixture_is_current(built):

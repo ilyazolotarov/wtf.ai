@@ -1,23 +1,27 @@
 """Address search index (SEARCH-SPEC): <region>.search.bin.
 
-Four passes over the region's extract with pyosmium: associatedStreet relations (the street of
-houses tagged with a number only), tagged ways (streets, buildings with an address, named POI and
-place areas), tagged nodes (places, POIs, address points), then the locations of only the nodes
-those ways use. Everything named becomes an *entity*:
+Five passes over the region's extract with pyosmium: the settlements' areas (admin boundaries and
+place polygons), associatedStreet relations (the street of houses tagged with a number only),
+tagged ways (streets, buildings with an address, named POI and place areas), tagged nodes (places,
+POIs, address points), then the locations of only the nodes those ways use. Everything named
+becomes an *entity*:
 
     place     place=city/town/village/hamlet (settlements) and suburb/quarter/… (named areas)
     street    the named highways of one settlement with one name, merged; or the addresses
               of an `addr:street` no highway carries (address-only street)
     poi       a named amenity, shop, office, …
 
-Each entity outside a settlement belongs to the settlement nearest to it (scaled by its kind:
-a city reaches 15 km, a hamlet 1.2 km), so "Шевченка Чернігів" finds the street through its
-settlement's name. A house number belongs to its street's entity, or to the settlement for
-`addr:place` addresses. The file is read by random access on the phone:
+Each entity outside a settlement belongs to the settlement whose area holds it: a boundary or
+place polygon with the settlement's name around its point. Outside every such area, to the
+settlement nearest to it (scaled by its kind: a city reaches 15 km, a hamlet 1.2 km) among those
+with no area, else among all. So "Шевченка Чернігів" finds the street through its settlement's name. A house
+number belongs to its street's entity, or to the settlement for `addr:place` addresses. The file
+is read by random access on the phone:
 
     header      76 B: magic "WTFS", format, counts, section offsets, OSM date, build time
     strings     u16 length + UTF-8, deduplicated: names, tags, house numbers
-    entities    44 B each: settlements first, then each settlement's children, then the rest
+    entities    44 B each: settlements first (with how far their children reach), then each
+                settlement's children, then the rest
     addresses   12 B each, grouped by owner entity, house numbers in natural order
     tokens      sorted folded tokens (fold() below, src/nav/search/fold.ts): offsets + blob
     postings    per token, ascending entity ids
@@ -56,8 +60,9 @@ M_PER_DEG = EARTH_R * math.pi / 180
 
 KIND_PLACE, KIND_STREET, KIND_POI = 1, 2, 3
 
+# reach: a settlement's, in REACH_UNIT_M; 0 for other entities, and in files before it (read: the kind's).
 ENTITY_DT = np.dtype([
-    ("kind", "u1"), ("pad", "u1"), ("rank", "<u2"), ("lat", "<i4"), ("lon", "<i4"),
+    ("kind", "u1"), ("reach", "u1"), ("rank", "<u2"), ("lat", "<i4"), ("lon", "<i4"),
     ("name", "<u4"), ("name_en", "<u4"), ("tag", "<u4"), ("parent", "<u4"),
     ("addr", "<u4"), ("naddr", "<u4"), ("child", "<u4"), ("nchild", "<u4"),
 ])
@@ -66,8 +71,14 @@ ADDR_DT = np.dtype([("house", "<u4"), ("lat", "<i4"), ("lon", "<i4")])
 ENTRANCE_DT = np.dtype([("address", "<u4"), ("ref", "<u4"), ("lat", "<i4"), ("lon", "<i4")])
 assert (HEADER.size, ENTITY_DT.itemsize, ADDR_DT.itemsize, ENTRANCE_DT.itemsize) == (76, 44, 12, 16)
 
-# Settlements own the streets, POIs and areas near them: how far (m) each kind reaches.
+# Settlements with no area own the streets, POIs and areas near them: how far (m) each kind reaches.
 SETTLEMENT_RADIUS_M = {"city": 15_000, "town": 6_000, "village": 2_500, "hamlet": 1_200}
+# A settlement's reach in the file: the farthest of its children and houses, at least its kind's
+# radius, in these units (u8: up to 63.75 km), so the app looks for a point's address among the
+# settlements that may own it.
+REACH_UNIT_M = 250
+# Settlement areas: admin boundaries and place polygons (a settlement's when they bear its name).
+AREA_TAGS = (("boundary", "administrative"), *(("place", k) for k in SETTLEMENT_RADIUS_M))
 PLACE_RANK = {
     "city": 50_000, "town": 40_000, "village": 20_000, "hamlet": 10_000, "suburb": 15_000,
     "quarter": 9_000, "neighbourhood": 8_000, "isolated_dwelling": 3_000, "locality": 2_000,
@@ -174,12 +185,20 @@ class Item:
 
 
 @dataclass
+class Area:
+    """A boundary or place polygon (lon/lat °) and its names, folded without kind words."""
+    keys: frozenset[str]
+    geom: object
+
+
+@dataclass
 class Raw:
     places: list[Item] = field(default_factory=list)
     streets: list[Item] = field(default_factory=list)
     addresses: list[Item] = field(default_factory=list)
     pois: list[Item] = field(default_factory=list)
     entrances: list[Item] = field(default_factory=list)
+    areas: list[Area] = field(default_factory=list)
 
 
 def names_of(tags: Mapping[str, str]) -> dict[str, str]:
@@ -224,7 +243,8 @@ def classify(tags: Mapping[str, str], refs: list[int] | None, raw: Raw, relation
 
 
 def read_objects(pbf: Path) -> Raw:
-    raw = Raw()
+    # Areas first: their node location index is gone before the other passes fill the memory.
+    raw = Raw(areas=read_areas(pbf))
     ways: list[Item] = []
     rel_street = read_relation_streets(pbf)
     for obj in osmium.FileProcessor(str(pbf), osmium.osm.WAY).with_filter(osmium.filter.KeyFilter(*FILTER_KEYS)):
@@ -242,6 +262,34 @@ def read_objects(pbf: Path) -> Raw:
         setattr(raw, name, [i for i in getattr(raw, name) if i.located])
     link_entrances(raw)
     return raw
+
+
+def area_key(text: str) -> str:
+    """A name compared between a settlement and its area: folded, kind words left out ("смт")."""
+    return " ".join(t for t in fold(text) if t not in STOPWORDS)
+
+
+def read_areas(pbf: Path) -> list[Area]:
+    """Named admin boundaries and place polygons. One cut by the region's edge can't be
+    assembled and is left out: its settlement keeps the nearest-point rule."""
+    wkb = osmium.geom.WKBFactory()
+    areas: list[Area] = []
+    fp = osmium.FileProcessor(str(pbf)).with_areas(osmium.filter.TagFilter(*AREA_TAGS))
+    for obj in fp.with_filter(osmium.filter.KeyFilter("boundary", "place")):
+        if not obj.is_area():
+            continue
+        keys = frozenset(k for v in names_of(obj.tags).values() if (k := area_key(v)))
+        if not keys:
+            continue
+        try:
+            geom = shapely.from_wkb(wkb.create_multipolygon(obj))
+        except RuntimeError:
+            continue  # broken multipolygon
+        if not geom.is_valid:
+            geom = geom.buffer(0)  # a ring that touches itself
+        if not geom.is_empty:
+            areas.append(Area(keys, geom))
+    return areas
 
 
 def entrance_number(tags: Mapping[str, str]) -> str:
@@ -310,6 +358,7 @@ class Entity:
     # street groups: extent (1e-7°) and name spellings seen
     bbox: list[int] | None = None
     houses: list[tuple[str, int, int]] = field(default_factory=list)
+    reach_m: float = 0.0  # settlements: how far their children and houses are (set_reach)
 
 
 def display_name(names: Mapping[str, str]) -> str:
@@ -347,6 +396,56 @@ def nearest_settlement(points: np.ndarray, settlements: list[tuple[int, str, np.
     return best
 
 
+def settlement_areas(entities: list[Entity], settlements: list[tuple[int, str, np.ndarray]], areas: list[Area]) -> list[tuple[object, int]]:
+    """Each settlement's area, with the settlement's index: the smallest of the areas that hold
+    its point and bear one of its names. An area is one settlement's (the higher rank's)."""
+    if not areas or not settlements:
+        return []
+    tree = shapely.STRtree([a.geom for a in areas])
+    points = shapely.points([(entities[i].lon * 1e-7, entities[i].lat * 1e-7) for i, _, _ in settlements])
+    holder: dict[int, int] = {}
+    for s, a in zip(*tree.query(points, predicate="within").tolist()):
+        i = settlements[s][0]
+        if not areas[a].keys & {k for v in entities[i].names.values() if (k := area_key(v))}:
+            continue  # a district, a hromada or another settlement around it
+        j = holder.get(a)
+        if j is None or entities[i].rank > entities[j].rank:
+            holder[a] = i
+    smallest: dict[int, int] = {}
+    for a, i in holder.items():
+        if i not in smallest or areas[a].geom.area < areas[smallest[i]].geom.area:
+            smallest[i] = a
+    return [(areas[a].geom, i) for i, a in smallest.items()]
+
+
+def settlement_finder(entities: list[Entity], settlements: list[tuple[int, str, np.ndarray]], areas: list[Area], project):
+    """(lon, lat 1e-7°) → settlement index, −1 for none. A point in a settlement's area is that
+    settlement's (the innermost area's). Elsewhere the nearest one's that has no area (one with an
+    area owns nothing outside it), else the nearest one's: near a town past its edge, by a road."""
+    owned = settlement_areas(entities, settlements, areas)
+    bounded = {i for _, i in owned}
+    unbounded = [s for s in settlements if s[0] not in bounded]
+    tree = shapely.STRtree([g for g, _ in owned]) if owned else None
+    size = np.array([g.area for g, _ in owned])
+    owner = np.array([i for _, i in owned], dtype=np.int64)
+
+    def parents(items_lon, items_lat) -> np.ndarray:
+        lon, lat = np.asarray(items_lon, np.float64), np.asarray(items_lat, np.float64)
+        xy = project(lon, lat)
+        best = nearest_settlement(xy, unbounded)
+        if bounded and (none := best < 0).any():
+            best[none] = nearest_settlement(xy[none], settlements)
+        if tree is not None and len(lon):
+            point, area = tree.query(shapely.points(lon * 1e-7, lat * 1e-7), predicate="within")
+            order = np.lexsort((size[area], point))  # by point, the smallest area first
+            point, area = point[order], area[order]
+            first = np.r_[True, point[1:] != point[:-1]] if len(point) else np.zeros(0, bool)
+            best[point[first]] = owner[area[first]]
+        return best
+
+    return parents
+
+
 def build_index(raw: Raw) -> list[Entity]:
     """Entities (settlements, other places, streets, POIs) with parents and house numbers."""
     entities: list[Entity] = []
@@ -364,9 +463,7 @@ def build_index(raw: Raw) -> list[Entity]:
         if kind in SETTLEMENT_RADIUS_M:
             settlements.append((idx, kind, project([p.lon], [p.lat])[0]))
     settlement_set = {i for i, _, _ in settlements}
-
-    def parents(items_lon, items_lat) -> np.ndarray:
-        return nearest_settlement(project(items_lon, items_lat), settlements)
+    parents = settlement_finder(entities, settlements, raw.areas, project)
 
     others = [i for i in range(len(entities)) if i not in settlement_set]
     if others:
@@ -468,7 +565,34 @@ def build_index(raw: Raw) -> list[Entity]:
         par = parents([q.lon for q in raw.pois], [q.lat for q in raw.pois])
         for q, p in zip(raw.pois, par.tolist()):
             entities.append(Entity(KIND_POI, q.names, q.tags["tag"], q.lon, q.lat, POI_RANK, p))
+    set_reach(entities, settlements)
     return entities
+
+
+def set_reach(entities: list[Entity], settlements: list[tuple[int, str, np.ndarray]]) -> None:
+    """Each settlement's reach: the farthest of its children and houses (and its own), plus
+    100 m (a dropped pin finds a house 75 m away), at least its kind's radius."""
+    owner, lon, lat = [], [], []
+    for i, e in enumerate(entities):
+        s = i if e.parent < 0 else e.parent
+        owner.append(s)
+        lon.append(e.lon)
+        lat.append(e.lat)
+        for h in e.houses:
+            owner.append(s)
+            lon.append(h[1])
+            lat.append(h[2])
+    if not owner:
+        return
+    s_idx = np.array(owner, dtype=np.int64)
+    s_lon = np.array([entities[s].lon for s in range(len(entities))], np.float64)[s_idx]
+    s_lat = np.array([entities[s].lat for s in range(len(entities))], np.float64)[s_idx]
+    dx = (np.array(lon, np.float64) - s_lon) * 1e-7 * M_PER_DEG * np.cos(np.radians(s_lat * 1e-7))
+    dy = (np.array(lat, np.float64) - s_lat) * 1e-7 * M_PER_DEG
+    far = np.zeros(len(entities))
+    np.maximum.at(far, s_idx, np.hypot(dx, dy))
+    for i, kind, _ in settlements:
+        entities[i].reach_m = max(float(SETTLEMENT_RADIUS_M[kind]), far[i] + 100)
 
 
 def extend_bbox(bbox: list[int] | None, lon: int, lat: int) -> list[int]:
@@ -551,6 +675,7 @@ def write_index(entities: list[Entity], path: Path, osm_date: str, built_at: int
         e = entities[old]
         r = ent[nid]
         r["kind"], r["rank"] = e.kind, min(0xFFFF, max(0, int(e.rank)))
+        r["reach"] = min(0xFF, math.ceil(e.reach_m / REACH_UNIT_M))
         r["lon"], r["lat"] = q6(e.lon), q6(e.lat)
         shown = display_name(e.names)
         r["name"] = strings.add(shown)

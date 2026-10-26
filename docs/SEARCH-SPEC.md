@@ -17,7 +17,7 @@ search.py`, `src/nav/search/`). Source of truth for coding agents.
 | Source | The region's clipped OSM extract (the one the tiles and graph come from), not the vector tiles: their house numbers have no street. |
 | File | `<region>.search.bin`, a release asset listed as the region's `search` entry in `index.json` (catalog format stays 2: older apps ignore it). |
 | Unit of search | *Entities*: places, streets (all ways of one name in one settlement, merged), POIs. House numbers hang off their street. |
-| Settlement | Each street, POI or area belongs to the nearest settlement (`place=city/town/village/hamlet`), its distance divided by the kind's reach (15 / 6 / 2.5 / 1.2 km). No admin boundaries yet. |
+| Settlement | Each street, POI or area belongs to the settlement (`place=city/town/village/hamlet`) whose area holds it: an admin boundary or place polygon around the settlement's point that bears one of its names (the innermost, if several). Outside every such area, to the nearest settlement with no area, its distance divided by the kind's reach (15 / 6 / 2.5 / 1.2 km); if none is that close, the nearest of all (a road just past a town's edge). The nearest point alone named a village's far streets after a neighbour: the label is how a driver tells same-named streets apart. |
 | Matching | Folded tokens (§3.1). Every word of the query must match the entity's own names or its settlement's, at least one its own. The word being typed is a prefix. Typos forgiven (§4.2), ranked below the right spelling. |
 | Ranking | Name match, kind and size, distance from the car (§4.3). |
 | Reading | Random access through a `ByteSource`, as the road graph: a query reads a few posting lists and the entities it matches. |
@@ -50,9 +50,16 @@ Both sides are tested against `src/nav/search/__fixtures__/fold-cases.json`. Str
   Coverage varies widely: a quarter of Kyiv's apartment blocks have numbered entrances, 1 in 30 in an oblast.
 - **POIs**: named objects with amenity, shop, tourism, leisure, office, healthcare, craft, historic,
   `railway=station/halt` or `aeroway=aerodrome/terminal`.
+- **Settlement areas**: `boundary=administrative` and `place=city/town/village/hamlet` polygons (ways and
+  relations) with a name. One is a settlement's when it holds the settlement's point and one of its names equals one
+  of the settlement's, folded without kind words ("смт Залісся" = "Залісся"): a district, a hromada ("Петрівканська
+  сільська громада") or an oblast named after its centre is not. An area goes to one settlement (the higher rank);
+  a settlement keeps its smallest. One cut by the region's edge can't be assembled (the clip completes multipolygons,
+  not boundaries) and is left out: its settlement keeps the nearest-point rule.
 - Names searched: `name`, `name:uk`, `name:en`, `name:ru`, `alt_name`, `old_name`, `official_name`. Shown: `name`
   (or `name:uk`), and `name:en` in English.
-- Not yet: multipolygon relations (buildings and places mapped as relations), admin boundaries.
+- Not yet: buildings with addresses mapped as multipolygon relations; a place mapped only as a relation is no
+  settlement.
 
 ### 3.3 File (format 1, little-endian, sections 4-byte aligned)
 
@@ -60,7 +67,7 @@ Both sides are tested against `src/nav/search/__fixtures__/fold-cases.json`. Str
 | --- | --- |
 | header, 76 B | `"WTFS"`, u16 format, u16 flags (1: entrances), u32 entities, settlements, addresses, tokens, offsets of the 7 sections, 16 B OSM date, u32 build time, u32 file size |
 | strings | u16 byte length + UTF-8, deduplicated |
-| entities, 44 B | u8 kind (1 place, 2 street, 3 POI), u8 0, u16 rank, i32 lat, lon (1e-6°), u32 name, name_en (or NONE), tag, u32 parent (settlement or NONE), u32 first address, count, u32 first child, count |
+| entities, 44 B | u8 kind (1 place, 2 street, 3 POI), u8 reach, u16 rank, i32 lat, lon (1e-6°), u32 name, name_en (or NONE), tag, u32 parent (settlement or NONE), u32 first address, count, u32 first child, count |
 | addresses, 12 B | u32 house number (string), i32 lat, lon |
 | token offsets | u32 × (tokens + 1) into the token blob |
 | token blob | the sorted tokens, ASCII |
@@ -71,6 +78,9 @@ Both sides are tested against `src/nav/search/__fixtures__/fold-cases.json`. Str
 
 Order: settlements first (by rank), then every settlement's children (one contiguous range per settlement), then
 entities without a settlement. A street's houses are contiguous, in natural order (2, 10, 10А, 12/2).
+A settlement's *reach* is how far from its point its children and houses go, plus 100 m (a dropped pin up to 75 m
+from a house), at least its kind's reach (§2), in 250 m (u8: 63.75 km); Kyiv's is ~27 km. 0 for other entities and
+in files before it: a reader takes the kind's reach then. Older apps ignore the byte (it was 0).
 The entrances and trailer come after the 7 sections, so a reader of the file before them reads it as before.
 `tiles search-check` validates a file.
 
@@ -150,8 +160,11 @@ POIs: 97 MB): queries 9–25 ms. The phone is several times slower; an oblast is
   Building (default) or a number; the route then ends at that door ("вулиця Шевченка, 10, під'їзд 3"). Picking a result closes the keyboard.
 - **The address at a point** (`SearchIndex.nearestAddress`, the dropped pin's card): the nearest house within 75 m
   (a house is its building's centre: a long block's ends are that far), among the addresses of the settlements whose
-  reach the point is in, the nearest three; a settlement's streets keep their houses in one run of the address table,
-  so this reads under a megabyte for a big city. `settlementAt`: the settlement a point is in. The pin's card names
+  reach (§3.3) the point is in, the nearest eight for their reach; a settlement's streets keep their houses in one run
+  of the address table, so this reads under a megabyte for a big city. The house's settlement is the one its street
+  belongs to (§2). `settlementAt`: the settlement of the nearest house within 300 m (one scan serves both calls);
+  else the nearest settlement for its kind's reach (§2), which near an edge may name the neighbour (the file has no
+  boundaries). The pin's card names
   the building where the map draws buildings, from z13 (UI-SPEC §6); "Route here" takes the name as the destination's, the point stays the pin's.
 - **Quick picks** (empty field): saved places, recent destinations and the region's largest cities
   (`SearchIndex.majorSettlements`: the first settlements of the file, cities then towns by population).
@@ -169,10 +182,8 @@ npm run search -- tools/tiles/out/release/kyiv.search.bin "Шевченка 10" 
 
 ## 7. Open items
 
-1. Settlements from admin boundaries (`boundary=administrative`, admin_level 8/9) instead of the nearest place node:
-   streets on a city's edge are given to a village inside it.
-2. Multipolygon relations: buildings with addresses, place areas.
-3. Ranking tuned from real use (`npm run search` on real queries: a village with a common name, house numbers with
+1. Multipolygon relations: buildings with addresses; places mapped only as a relation.
+2. Ranking tuned from real use (`npm run search` on real queries: a village with a common name, house numbers with
    letters and slashes, a renamed street by its old name, Latin spellings, POIs by brand, a street crossing two
    settlements); timing on the phone with the Ukraine region.
-4. Show the result on the map before routing; search from the map screen.
+3. Show the result on the map before routing; search from the map screen.

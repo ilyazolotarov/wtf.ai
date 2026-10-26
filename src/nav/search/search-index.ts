@@ -77,6 +77,8 @@ export interface SearchOptions {
 interface Entity {
   id: number;
   kind: number;
+  /** A settlement's reach (m): its farthest child or house; 0 in files before it (its kind's then). */
+  reach: number;
   rank: number;
   lat: number;
   lon: number;
@@ -146,13 +148,19 @@ const MAX_TOKENS = 8;
 /** Address results per street. */
 const HOUSES_PER_STREET = 5;
 const CACHE_LIMIT = 20_000;
-/** How far a settlement's own reach goes (m), as the index builder gives streets to settlements. */
+/** A settlement's reach by kind (m), in files that don't carry their own (SEARCH-SPEC §3.3). */
 const SETTLEMENT_REACH_M: Record<string, number> = {
   "place=city": 15_000,
   "place=town": 6_000,
   "place=village": 2_500,
   "place=hamlet": 1_200,
 };
+/** The unit of the reach byte in an entity record. */
+const REACH_UNIT_M = 250;
+/** Settlements whose houses a dropped pin looks among: all whose reach it is in, but a few. */
+const PIN_SETTLEMENTS = 8;
+/** A point is named by the settlement of its nearest house this close (m). */
+const SETTLEMENT_HOUSE_M = 300;
 
 /** A building's entrance (SEARCH-SPEC §3.2): its number if mapped, and where it is. */
 export interface Entrance {
@@ -223,6 +231,8 @@ export class SearchIndex {
   /** Where the entrance section is ([offset, count]); null in a file without one. */
   private readonly entranceSection: [number, number] | null = null;
   private entranceTable: EntranceTable | null = null;
+  /** The last house scan (a dropped pin asks for its settlement, then its address). */
+  private lastHouse: { at: Coordinate; maxM: number; best: { owner: Entity; house: House; d: number } | null } | null = null;
 
   constructor(private readonly source: ByteSource) {
     this.header = parseHeader(source.read(0, HEADER_BYTES));
@@ -296,12 +306,38 @@ export class SearchIndex {
   /**
    * The address nearest a point (a dropped pin), within `maxM` of its house: the house's street (or settlement for an
    * `addr:place` house) and number; null where none is that close. A house is where its building's centre is, so a
-   * long block's ends are up to ~75 m from it. Reads the addresses of the few settlements whose reach the point is in
+   * long block's ends are up to ~75 m from it. Reads the addresses of the settlements whose reach the point is in
    * (a settlement's streets keep theirs in one block: all of a big city's in well under a megabyte).
    */
   nearestAddress(at: Coordinate, maxM = 75): SearchResult | null {
+    const best = this.nearestHouse(at, maxM);
+    return best ? this.addressResult(best.owner, best.house, 0, null) : null;
+  }
+
+  /**
+   * The settlement a point is in: its nearest house's within 300 m (the index gives a house the settlement whose area
+   * holds its street); else the nearest settlement for its kind's reach, which near another one's edge may name the
+   * neighbour (the file has no boundaries). Null if none.
+   */
+  settlementAt(at: Coordinate): SearchResult | null {
+    const house = this.nearestHouse(at, SETTLEMENT_HOUSE_M);
+    if (house) {
+      const { owner } = house;
+      const s = owner.id < this.header.settlements ? owner : owner.parent !== NONE ? this.entity(owner.parent) : null;
+      if (s) return this.result(s, 0);
+    }
+    const [s] = this.settlementsNear(at, 1, (e) => this.kindReach(e));
+    return s ? this.result(s, 0) : null;
+  }
+
+  /** The house nearest a point within `maxM`, and its owner; the last scan's answer serves a nearer limit. */
+  private nearestHouse(at: Coordinate, maxM: number): { owner: Entity; house: House; d: number } | null {
+    const last = this.lastHouse;
+    if (last && last.at.lat === at.lat && last.at.lon === at.lon && maxM <= last.maxM) {
+      return last.best && last.best.d <= maxM ? last.best : null;
+    }
     let best: { owner: Entity; house: House; d: number } | null = null;
-    for (const s of this.settlementsNear(at)) {
+    for (const s of this.settlementsNear(at, PIN_SETTLEMENTS, (e) => e.reach || this.kindReach(e))) {
       // The settlement's own houses (`addr:place`), then its children's: one contiguous run of the address table.
       const ranges: [number, number][] = [[s.addr, s.addr + s.naddr]];
       if (s.nchild > 0) {
@@ -328,22 +364,21 @@ export class SearchIndex {
         }
       }
     }
-    return best ? this.addressResult(best.owner, best.house, 0, null) : null;
+    this.lastHouse = { at: { lat: at.lat, lon: at.lon }, maxM, best };
+    return best;
   }
 
-  /** The settlement a point is in (the nearest whose reach it is in, as the index gives streets theirs); null if none. */
-  settlementAt(at: Coordinate): SearchResult | null {
-    const [s] = this.settlementsNear(at, 1);
-    return s ? this.result(s, 0) : null;
+  /** A settlement's reach by its kind (§2). */
+  private kindReach(e: Entity): number {
+    return SETTLEMENT_REACH_M[this.string(e.tagAt)] ?? 1_200;
   }
 
-  /** Settlements whose reach (§2: city 15 km, town 6, village 2.5, hamlet 1.2) the point is in, nearest first. */
-  private settlementsNear(at: Coordinate, limit = 3): Entity[] {
+  /** Settlements whose `reach` the point is in, nearest for it first. */
+  private settlementsNear(at: Coordinate, limit: number, reach: (e: Entity) => number): Entity[] {
     const near: { e: Entity; score: number }[] = [];
     for (let id = 0; id < this.header.settlements; id++) {
       const e = this.entity(id);
-      const reach = SETTLEMENT_REACH_M[this.string(e.tagAt)] ?? 1_200;
-      const score = haversineM(at, e) / reach;
+      const score = haversineM(at, e) / reach(e);
       if (score <= 1) near.push({ e, score });
     }
     return near.sort((a, b) => a.score - b.score).slice(0, limit).map((n) => n.e);
@@ -812,6 +847,7 @@ export class SearchIndex {
     const e: Entity = {
       id,
       kind: v.getUint8(at),
+      reach: v.getUint8(at + 1) * REACH_UNIT_M,
       rank: v.getUint16(at + 2, true),
       lat: v.getInt32(at + 4, true) * COORD_SCALE,
       lon: v.getInt32(at + 8, true) * COORD_SCALE,
