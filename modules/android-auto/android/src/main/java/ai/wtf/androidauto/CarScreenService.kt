@@ -3,6 +3,7 @@ package ai.wtf.androidauto
 import ai.wtf.androidauto.logic.CarGuidanceLogic
 import ai.wtf.androidauto.logic.CarRoute
 import ai.wtf.androidauto.logic.SessionStep
+import android.Manifest
 import android.app.Application
 import android.content.Intent
 import android.content.pm.ApplicationInfo
@@ -10,6 +11,7 @@ import android.content.res.Configuration
 import android.util.Log
 import androidx.car.app.AppManager
 import androidx.car.app.CarAppService
+import androidx.car.app.CarToast
 import androidx.car.app.Screen
 import androidx.car.app.ScreenManager
 import androidx.car.app.Session
@@ -18,6 +20,7 @@ import androidx.car.app.navigation.NavigationManager
 import androidx.car.app.navigation.NavigationManagerCallback
 import androidx.car.app.validation.HostValidator
 import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 
 /**
@@ -65,8 +68,11 @@ class CarScreenSession : Session() {
           manager?.clearNavigationManagerCallback()
           map?.release()
           map = null
+          // What the car's connection holds, let go only by its current session: a session made again before this one
+          // was destroyed has them now.
+          if (CarLink.session !== this@CarScreenSession) return
+          CarLink.session = null
           CarLocationService.stop(carContext)
-          if (CarLink.session === this@CarScreenSession) CarLink.session = null
           CarSessionTask.stop()
         }
       },
@@ -85,6 +91,7 @@ class CarScreenSession : Session() {
           // The host ends this app's navigation (another navigator started one, or the driver ended it there).
           override fun onStopNavigation() {
             navigating = false
+            CarLink.note("navigation stopped by the car")
             CarLink.send("end-route")
           }
         },
@@ -100,12 +107,39 @@ class CarScreenSession : Session() {
     refresh()
   }
 
-  /** Labels, places or the voice changed: the templates are built again. */
+  /** Labels, places, the voice or the notice changed: the templates are built again. */
   fun refresh() {
     CarLocationService.update(carContext)
-    val top = carContext.getCarService(ScreenManager::class.java).top
-    top.invalidate()
+    val screens = carContext.getCarService(ScreenManager::class.java)
+    // Empty before the first screen is pushed and after the session ends.
+    val top = if (screens.stackSize > 0) screens.top else null
+    top?.invalidate()
     if (top !== navigation) navigation?.invalidate()
+  }
+
+  /** Location allowed since the session started: held from now, if the car shows the app (else at its next start). */
+  fun locationAllowed() {
+    if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) && !CarLocationService.running) {
+      CarLocationService.start(carContext)
+    }
+  }
+
+  /**
+   * The location notice's button (parked only): Android's permission dialog, on the phone's screen, and the car says to
+   * look at the phone only when it's safe (quality guideline VI-1).
+   */
+  fun requestLocation() {
+    CarLink.note("location permission asked on the car's screen")
+    try {
+      CarToast.makeText(carContext, CarLink.labels.checkPhone, CarToast.LENGTH_LONG).show()
+      carContext.requestPermissions(listOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)) { granted, _ ->
+        CarLink.note(if (granted.isEmpty()) "location permission refused" else "location permission granted: ${granted.joinToString { it.substringAfterLast('.') }}")
+        if (granted.isNotEmpty()) locationAllowed()
+        CarLink.send("permission")
+      }
+    } catch (e: Exception) {
+      CarLink.note("location permission request failed: ${e.javaClass.simpleName}: ${e.message}", problem = true)
+    }
   }
 
   fun routeChanged() {
@@ -131,7 +165,7 @@ class CarScreenSession : Session() {
         SessionStep.NONE -> Unit
       }
     } catch (e: Exception) {
-      Log.w(CarLink.TAG, "navigation session: ${e.javaClass.simpleName}: ${e.message}")
+      CarLink.note("navigation session failed: ${e.javaClass.simpleName}: ${e.message}", problem = true)
     }
   }
 }

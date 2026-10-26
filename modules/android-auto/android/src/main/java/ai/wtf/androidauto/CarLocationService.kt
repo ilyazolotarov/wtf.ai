@@ -11,7 +11,6 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.IBinder
-import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 
@@ -30,15 +29,27 @@ class CarLocationService : Service() {
     var running = false
       private set
 
-    /** False (with a log line) when Android refuses, e.g. without location permission. */
-    fun start(context: Context): Boolean =
-      try {
+    /**
+     * False (with a note) without location permission, or when Android refuses (the car shows another app). Checked
+     * first: a service started in the foreground must go there, which a location service can't without the permission.
+     */
+    fun start(context: Context): Boolean {
+      if (!located(context)) {
+        CarLink.note("location service not started: no location permission")
+        return false
+      }
+      return try {
         ContextCompat.startForegroundService(context, Intent(context, CarLocationService::class.java))
         true
       } catch (e: Exception) {
-        Log.w(CarLink.TAG, "location service not started: ${e.javaClass.simpleName}: ${e.message}")
+        CarLink.note("location service not started: ${e.javaClass.simpleName}: ${e.message}", problem = true)
         false
       }
+    }
+
+    private fun located(context: Context): Boolean =
+      listOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+        .any { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }
 
     fun stop(context: Context) {
       context.stopService(Intent(context, CarLocationService::class.java))
@@ -50,7 +61,7 @@ class CarLocationService : Service() {
       try {
         (context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(NOTIFICATION_ID, notification(context))
       } catch (e: Exception) {
-        Log.w(CarLink.TAG, "location service notification: ${e.javaClass.simpleName}: ${e.message}")
+        CarLink.note("location service notification failed: ${e.javaClass.simpleName}: ${e.message}", problem = true)
       }
     }
 
@@ -76,19 +87,13 @@ class CarLocationService : Service() {
   override fun onBind(intent: Intent?): IBinder? = null
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-    val located = listOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
-      .any { ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED }
-    if (!located) {
-      Log.i(CarLink.TAG, "location service: no location permission")
-      stopSelf()
-      return START_NOT_STICKY
-    }
+    // In the foreground first, as Android asks of a service started there; with the permission gone since, it refuses.
     try {
       startForeground(NOTIFICATION_ID, notification(this), ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
       running = true
-      Log.i(CarLink.TAG, "location service running")
+      CarLink.note("location service running")
     } catch (e: Exception) {
-      Log.w(CarLink.TAG, "location service refused: ${e.javaClass.simpleName}: ${e.message}")
+      CarLink.note("location service refused: ${e.javaClass.simpleName}: ${e.message}", problem = true)
       stopSelf()
     }
     return START_NOT_STICKY

@@ -31,8 +31,9 @@ Android Auto ─▶ CarScreenService ─▶ CarScreenSession (Kotlin, main threa
                                       ├─ CarMapSurface: Surface ─▶ VirtualDisplay ─▶ Presentation ─▶ React root "CarMap"
                                       └─ CarSessionTask: headless JS task "WtfCarSession"
                                                  │
-src/components/car-screen/car-session.ts ◀───────┘  route, places, words, voice ─▶ AndroidAutoModule ─▶ CarLink ─▶ templates
-                                                     ◀─ onCarAction (end-route, go, toggle-voice, session-ended)
+src/components/car-screen/car-session.ts ◀───────┘  route, places, words, voice, notice ─▶ AndroidAutoModule ─▶ CarLink ─▶ templates
+                                                     ◀─ onCarAction (end-route, go, toggle-voice, confirm-held, cancel-held,
+                                                                     permission, notes, session-ended)
 ```
 
 - A **session** is one connection of the car's screen with the app opened there. Its JS side is a headless task, run
@@ -43,19 +44,49 @@ src/components/car-screen/car-session.ts ◀───────┘  route, pla
 - Running, the task keeps React Native's timers firing with no activity in front (as `JsKeepAlive` does for trips),
   keeps the navigator and the phone's sensors running as on a trip (`Runtime.setCarScreen`), and connects the
   remembered adapter as the phone's app does when it opens. Trip log: `android auto connected`, `car screen on|off`,
-  `android auto disconnected`, the driver's actions there.
+  `android auto disconnected`, the driver's actions there, and the native side's notes as `android auto: …` (the map's
+  surface, the location service, the permission asked, what failed). CarLink keeps those notes until the task takes
+  them (`takeNotes`, at its start and on each `notes` action), since some come before a task runs or listens. A failure
+  among them is also reported to Sentry (warning, tag `feature: android-auto`), since the trip log keeps notes only
+  while a trip records.
 - **The route** goes to the car at every change of the route service's snapshot (`carRoute`, pure, Jest-tested);
-  the native side keeps the last state for whichever comes next (the session or the JS runtime).
+  the native side keeps the last state for whichever comes next (the session or the JS runtime). Each session's task
+  sends all of it at its start, the notice too when there is none: a JS reload loses what JS held (a held route),
+  while the car still shows what the runtime before sent.
 - **One voice** however many screens show the route (`VoiceGuide` in use-voice-guidance.ts): the first screen to claim
   it speaks, the others follow the route in silence and take over when it lets go. The phone's map claims it while
   mounted (also in the background); with no phone screen (the app opened from the car) the car session speaks. Muted
-  and the volume are the phone's settings; the car's button toggles mute, and is gone at volume 0. The voice plays
-  through Android Auto like any phone audio.
+  and the volume are the phone's settings, which the session applies as the phone's map does; the car's button toggles
+  mute, and is gone at volume 0. The route's end stops what is being said.
+- **The voice is navigation guidance** while the session runs: its clips play on Android's own player with
+  `USAGE_ASSISTANCE_NAVIGATION_GUIDANCE` (`modules/audio-output` `playGuidance`, ROUTING-SPEC §8.5), which Android Auto
+  mixes over whatever the car plays, its own radio too. As media they would be heard only with the phone as the car's
+  source. A clip that won't play that way goes through expo-audio as media; the system voice (an announcement without
+  clips) is media always. Without a car the voice plays as before.
+- **Location permission:** without it (fine or approximate) the navigator has no GNSS and the car shows a notice
+  instead of the route (§4): its button, parked only (`ParkedOnlyOnClickListener`), opens Android's permission dialog
+  on the phone (`CarContext.requestPermissions`), and a toast on the car says to look at the phone only when it's safe
+  (quality guideline VI-1). The task checks again on the dialog's answer, when the phone's app
+  comes to the front, and every 5 s while the notice shows. Allowed: the notice goes, GNSS starts
+  (`NavigatorService.retryCapture`), and `CarLocationService` starts if the car shows the app (else at the session's
+  next start).
+- **Without an adapter** (phone-only mode, no adapter connected; UI-SPEC §6.3): a destination picked on the car is held
+  for the driver's word as on the phone (`route-without-adapter.ts`), and a route held on the phone shows on the car
+  too. The car shows it as a notice: stop and set the position on the phone, or once it is set or GPS is trusted,
+  keep to the route (checked every 5 s while it shows). The card has a short title and two short lines, cut beyond
+  them in split screen: the car's words are its own (`car*` strings), one instruction at a time. Its button gives the word and starts the route; its
+  close button drops it.
+- **Words:** the app's language, sent again when the driver changes it and when the phone's app comes to the front
+  (the system's language changed meanwhile).
 - **Location**: Android Auto binds the app's service as a top app's binding, with the location capability while the
   car's screen shows the app (no activity, no permission beyond When In Use) and without it while it shows another
   app: GNSS stopped then. `CarLocationService`, a foreground service of the location type started when the car shows
   the app (the session's start; a session made while the car shows another app has nothing to keep yet), keeps it for
-  the session, with a quiet notification in the app's language. A trip's own service (ANDROID-SPEC §3) is apart.
+  the session, with a quiet notification in the app's language. It starts only with location permission (a service
+  started for the foreground must go there, which a location service can't without it). A trip's own service
+  (ANDROID-SPEC §3) is apart.
+- **Teardown** is the current session's: a session ended after a new one began (the car reconnected) leaves the task,
+  the location service and CarLink's session to the new one.
 
 ## 4. The car's screen
 
@@ -73,23 +104,31 @@ src/components/car-screen/car-session.ts ◀───────┘  route, pla
     them after each pause; after, they follow the activity again.
   - MapLibre's React Native map pauses and is destroyed with the activity. A map on another display ignores the
     activity (`patches/@maplibre+maplibre-react-native+11.4.0.patch`) and is disposed with its React view.
+  - The same patch drops a camera command that arrives after a JS reload or an applied update has torn the React
+    context down (`ReactTagResolver`; unpatched, a NullPointerException). The car's map sends one every frame, so it
+    meets that window.
 - The car's map follows heading-up, smoothed every frame as the phone's is in front (`useSmoothedPosition`'s
   `onScreen`).
 - **Templates** (`CarScreens.kt`), built from the last state the session sent:
 
-  | Route | NavigationTemplate shows |
+  | State | NavigationTemplate shows |
   | --- | --- |
-  | None | The map; buttons: Destinations, voice |
+  | A notice: no location permission | Its message card, before any route; button: Allow (parked only) |
+  | A notice: a route held without an adapter | Its message card; buttons: I'll follow the route, close |
+  | No route | The map; buttons: Destinations, voice |
   | Planning, or planning again after leaving the route | A loading turn card; buttons: Stop guidance, voice |
   | Followed | The next maneuver (the phone banner's words and icon, the distance rounded as the banner rounds it), the one after when it follows closely; the trip card (time and distance left, arrival time at the plan's pace); buttons: Stop guidance, voice |
   | Arrived, failed | A message card with the phone's words |
 
+  Which card shows is `CarGuidanceLogic.card` (JUnit).
+
   Destinations: saved places (Home, Work, favourites) then recent ones, as many as the car allows; one picked routes
   to it as the phone's route screen does (and becomes recent). The car's words are the app's (en/uk), sent by the
   session; English until it has.
-- **The navigation session** (`NavigationManager`): started when a route is planned or followed, the trip (steps with
-  their estimates, the destination) sent with each change, loading while it is planned; ended at arrival, a failure
-  or no route. The host's "stop navigation" (another navigator started) ends the route.
+- **The navigation session** (`NavigationManager`): started when a route is planned or followed, the trip (the steps
+  ahead, each with its distance and time from the car; the destination) sent with each change, loading while it is
+  planned; ended at arrival, a failure or no route. The host's "stop navigation" (another navigator started) ends the
+  route.
 - **Icons**: Material Symbols drawn as vector drawables by `scripts/car-icons.py` from the font the phone draws its
   icons with: the same arrows as the banner.
 
@@ -123,6 +162,10 @@ bundle), the route resumed; the turn and trip cards following a drive; Stop guid
 started from the car; GNSS with another app on the car's screen; the car session's voice with no phone screen; the map
 after another app was shown on the car's screen; Android Auto's split screen (a narrower surface, insets on both
 sides); the car's night mode; the spoofed GPS shown as on the phone (the dot kept, its circle, the "GPS?" ghost).
+Also (debug build): the location notice with the permission revoked, its Allow button opening the phone's dialog,
+and after the grant the notice gone, the location service running and the dot on the car's map; a clip played with
+the navigation guidance usage after a route started from the car (`dumpsys audio`); a destination picked on the car
+in phone-only mode held as a notice, its button starting the route; a JS reload clearing a stale notice.
 
 ## 6. Not chosen
 
@@ -135,13 +178,12 @@ sides); the car's night mode; the spoofed GPS shown as on the phone (the dot kep
 
 1. A real car, from the Play internal test track (§2).
 2. Moving the map from the car: Android Auto's map buttons (pan, zoom, recentre) and gestures (`SurfaceCallback`).
-3. Search in the car (the search template, limited while driving) and navigation intents from the car's assistant
-   (`geo:`, `google.navigation:`; quality guideline NF-6).
+3. Search in the car (the search template, limited while driving) and navigation intents from other apps and the
+   car's assistant (`geo:`, `google.navigation:`): required for production (quality guidelines NF-6, VC-1).
 4. A route's alternatives before following one (the route preview, ROUTING-SPEC §8.7).
-5. The voice: its clips play as media (expo-audio, ducking others); as navigation guidance
-   (`USAGE_ASSISTANCE_NAVIGATION_GUIDANCE`) the car would mix them over its music as it does other navigators'.
-6. The instrument cluster (`FEATURE_CLUSTER`) and turn-by-turn notifications while another app fills the car's
+5. The instrument cluster (`FEATURE_CLUSTER`) and turn-by-turn notifications while another app fills the car's
    screen.
-7. The quality review's other navigation guidelines, before production.
-8. Debug builds need Metro as for the phone. A car's map started before the development launcher loaded the JS stayed
+6. The quality review's other navigation guidelines, before production: turn-by-turn notifications (NF-3, item 5),
+   the cluster (NF-4), a test-drive mode that simulates driving (NF-7).
+7. Debug builds need Metro as for the phone. A car's map started before the development launcher loaded the JS stayed
    blank; `CarMapSurface.restartIfStopped` starts it again in the new React context, not yet seen doing so.

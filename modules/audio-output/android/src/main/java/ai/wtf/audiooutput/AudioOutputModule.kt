@@ -21,12 +21,13 @@ import expo.modules.kotlin.modules.ModuleDefinition
 
 // Where the phone plays audio, and the system's output switcher (ROUTING-SPEC §8.5); the same JS contract as the iOS
 // module, without its picker view: `openPicker` opens the system's media output panel instead. `playOnSpeaker` plays
-// a clip on the phone's own speaker whatever else is connected (UI-SPEC §6.2's reminder to put the car on the map).
+// a clip on the phone's own speaker whatever else is connected (UI-SPEC §6.2's reminder to put the car on the map);
+// `playGuidance` plays one as navigation guidance wherever that goes (Android Auto mixes it over the car's sources).
 
 class AudioOutputModule : Module() {
   private var callback: AudioDeviceCallback? = null
-  /** Ends the clip playing on the speaker (resolving its promise false); null when none plays. */
-  private var stopSpeaker: (() -> Unit)? = null
+  /** Ends the clip playing (resolving its promise false); null when none plays. */
+  private var stopClip: (() -> Unit)? = null
 
   private val audio: AudioManager?
     get() = appContext.reactContext?.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
@@ -41,15 +42,20 @@ class AudioOutputModule : Module() {
     Function("openPicker") { openPicker() }
 
     AsyncFunction("playOnSpeaker") { uri: String, volume: Double, promise: Promise ->
-      playOnSpeaker(uri, volume.toFloat(), promise)
+      play(uri, volume.toFloat(), onSpeaker = true, promise)
     }.runOnQueue(Queues.MAIN)
 
+    AsyncFunction("playGuidance") { uri: String, volume: Double, promise: Promise ->
+      play(uri, volume.toFloat(), onSpeaker = false, promise)
+    }.runOnQueue(Queues.MAIN)
+
+    /** Stops the clip `playOnSpeaker` or `playGuidance` plays. */
     AsyncFunction("stopOnSpeaker") {
-      stopSpeaker?.invoke()
+      stopClip?.invoke()
     }.runOnQueue(Queues.MAIN)
 
     OnDestroy {
-      stopSpeaker?.invoke()
+      stopClip?.invoke()
     }
 
     OnStartObserving {
@@ -105,17 +111,21 @@ class AudioOutputModule : Module() {
   }
 
   /**
-   * Plays a local clip (`file://`) on the built-in speaker, lowering other audio meanwhile; true once it played to its
-   * end, false when it couldn't (no speaker, a player error, stopped). A car's Bluetooth keeps playing what it plays.
+   * Plays a local clip (`file://`) as navigation guidance, lowering other audio meanwhile; true once it played to its
+   * end, false when it couldn't (no speaker, a player error, stopped). `onSpeaker`: on the built-in speaker, while a
+   * car's Bluetooth keeps playing what it plays; else wherever guidance goes (Android Auto: the car's guidance channel,
+   * mixed over its radio or music).
    */
-  private fun playOnSpeaker(uri: String, volume: Float, promise: Promise) {
-    stopSpeaker?.invoke()
+  private fun play(uri: String, volume: Float, onSpeaker: Boolean, promise: Promise) {
+    stopClip?.invoke()
     val context = appContext.reactContext
     val am = audio
-    val speaker = am?.getDevices(AudioManager.GET_DEVICES_OUTPUTS)?.firstOrNull {
-      it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+    val speaker = if (onSpeaker) {
+      am?.getDevices(AudioManager.GET_DEVICES_OUTPUTS)?.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+    } else {
+      null
     }
-    if (context == null || am == null || speaker == null) {
+    if (context == null || am == null || (onSpeaker && speaker == null)) {
       promise.resolve(false)
       return
     }
@@ -133,19 +143,19 @@ class AudioOutputModule : Module() {
     val finish = { played: Boolean ->
       if (!settled) {
         settled = true
-        if (stopSpeaker === stop) stopSpeaker = null
+        if (stopClip === stop) stopClip = null
         am.abandonAudioFocusRequest(focus)
         player.release()
         promise.resolve(played)
       }
     }
     stop = { finish(false) }
-    stopSpeaker = stop
+    stopClip = stop
     try {
       player.setAudioAttributes(attributes)
       player.setDataSource(context, Uri.parse(uri))
       player.setVolume(volume, volume)
-      player.setPreferredDevice(speaker)
+      speaker?.let { player.setPreferredDevice(it) }
       player.setOnCompletionListener { finish(true) }
       player.setOnErrorListener { _, _, _ ->
         finish(false)

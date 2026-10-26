@@ -20,7 +20,8 @@ export function carDistance(meters: number): { shown: number; unit: CarDistanceU
 /**
  * What the car's screen shows of the route service's snapshot (docs/ANDROID-AUTO-SPEC.md §4): the next maneuver with
  * the distance to it, the one after when it follows closely, the distance and time left; or why there is no maneuver
- * to show (planning, a failure, arrival). Null: no route.
+ * to show (planning, a failure, arrival). Each maneuver's distance and time are from the car, as the trip in the car's
+ * other displays wants them. Null: no route.
  */
 export function carRoute(route: RouteSnapshot | null, t: (key: keyof Strings) => string): CarRoutePayload | null {
   if (!route) return null;
@@ -61,6 +62,6 @@ export function carRoute(route: RouteSnapshot | null, t: (key: keyof Strings) =>
   };
   const then = guidance.thenIndex != null ? maneuvers[guidance.thenIndex] : undefined;
   const steps = [step(next, guidance.toNextM)];
-  if (then) steps.push(step(then, Math.max(0, then.atM - next.atM)));
+  if (then) steps.push(step(then, guidance.toNextM + Math.max(0, then.atM - next.atM)));
   return { ...base, ...left, status: "active", message: null, steps };
 }

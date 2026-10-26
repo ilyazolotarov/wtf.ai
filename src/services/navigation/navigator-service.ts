@@ -575,6 +575,14 @@ export class NavigatorService implements PositionSource {
     this.sync();
   }
 
+  /**
+   * Location allowed since the navigator was wanted without it (the car's screen, which runs it with no map on the
+   * phone): GNSS capture tried again.
+   */
+  retryCapture(): void {
+    this.sync();
+  }
+
   /** Keep running with the map off screen (during a trip), so dead reckoning isn't interrupted. */
   setKeepAlive(keepAlive: boolean): void {
     if (keepAlive === this.keepAlive) return;

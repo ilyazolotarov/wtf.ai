@@ -1,6 +1,5 @@
 package ai.wtf.androidauto
 
-import android.util.Log
 import com.facebook.react.ReactHost
 import com.facebook.react.ReactInstanceEventListener
 import com.facebook.react.bridge.LifecycleEventListener
@@ -77,7 +76,7 @@ internal class CarFabricFrames(private val host: ReactHost, private val onContex
     return try {
       UIManagerHelper.getUIManager(context, UIManagerType.FABRIC) as? FabricUIManager
     } catch (e: Exception) {
-      Log.w(CarLink.TAG, "no Fabric UI manager: ${e.javaClass.simpleName}: ${e.message}")
+      CarLink.note("map frames: no Fabric UI manager: ${e.javaClass.simpleName}: ${e.message}", problem = true)
       null
     }
   }

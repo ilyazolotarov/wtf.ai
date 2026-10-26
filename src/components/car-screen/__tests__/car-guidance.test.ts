@@ -88,11 +88,11 @@ describe("car route", () => {
     ]);
   });
 
-  test("the maneuver after it when it follows closely, measured from the first", () => {
+  test("the maneuver after it when it follows closely, measured from the car as the trip's estimates are", () => {
     const r = carRoute(route(step({ thenIndex: 2 })), t)!;
-    expect(r.steps.map((s) => [s.instruction, s.distanceM, s.exit])).toEqual([
-      ["Turn left", 400, null],
-      ["At the roundabout, exit 2", 100, 2],
+    expect(r.steps.map((s) => [s.instruction, s.distanceM, s.timeS, s.shownDistance, s.exit])).toEqual([
+      ["Turn left", 400, 36, 400, null],
+      ["At the roundabout, exit 2", 500, 45, 500, 2],
     ]);
   });
 

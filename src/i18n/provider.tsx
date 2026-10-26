@@ -19,6 +19,14 @@ interface I18nContextValue {
 const I18nContext = React.createContext<I18nContextValue | null>(null);
 const LANGUAGE_STORAGE_KEY = "language-preference";
 
+/** Told when the driver changes the app's language (the car's screen follows, outside React). */
+const languageListeners = new Set<() => void>();
+
+export function subscribeAppLanguage(listener: () => void): () => void {
+  languageListeners.add(listener);
+  return () => void languageListeners.delete(listener);
+}
+
 export function I18nProvider({ children }: React.PropsWithChildren) {
   const locales = useLocales();
   const [preference, setPreferenceState] =
@@ -46,6 +54,7 @@ export function I18nProvider({ children }: React.PropsWithChildren) {
   const setPreference = async (nextPreference: LanguagePreference) => {
     setPreferenceState(nextPreference);
     await Storage.setItem(LANGUAGE_STORAGE_KEY, nextPreference);
+    languageListeners.forEach((l) => l());
   };
 
   const value = React.useMemo(

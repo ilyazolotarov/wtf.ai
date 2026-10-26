@@ -1,5 +1,6 @@
 package ai.wtf.androidauto
 
+import ai.wtf.androidauto.logic.CarCard
 import ai.wtf.androidauto.logic.CarDistanceUnit
 import ai.wtf.androidauto.logic.CarGuidanceLogic
 import ai.wtf.androidauto.logic.CarManeuverType
@@ -16,6 +17,7 @@ import androidx.car.app.model.DateTimeWithZone
 import androidx.car.app.model.Distance
 import androidx.car.app.model.ItemList
 import androidx.car.app.model.ListTemplate
+import androidx.car.app.model.ParkedOnlyOnClickListener
 import androidx.car.app.model.Row
 import androidx.car.app.model.SectionedItemList
 import androidx.car.app.model.Template
@@ -33,14 +35,18 @@ import java.util.TimeZone
 /**
  * The car's main screen (docs/ANDROID-AUTO-SPEC.md §4): the map under Android Auto's navigation template, with the next
  * maneuver and the one after, the time and distance left, and the buttons: a destination to pick, or the route to end,
- * and the voice.
+ * and the voice. What the driver must do first (allow location, agree to a route without an adapter) comes before.
  */
 internal class NavigationScreen(carContext: CarContext) : Screen(carContext) {
   override fun onGetTemplate(): Template {
     val labels = CarLink.labels
     val route = CarLink.route
+    val notice = CarLink.notice
+    val card = CarGuidanceLogic.card(route, notice)
     val actions = ActionStrip.Builder()
-    if (route != null) {
+    if (card == CarCard.NOTICE && notice != null) {
+      noticeActions(notice.kind, notice.action).forEach { actions.addAction(it) }
+    } else if (route != null) {
       actions.addAction(
         Action.Builder()
           .setTitle(labels.endRoute)
@@ -57,7 +63,8 @@ internal class NavigationScreen(carContext: CarContext) : Screen(carContext) {
           .build(),
       )
     }
-    CarLink.voiceMuted?.let { muted ->
+    // No route to speak while a notice shows; its buttons need the room.
+    CarLink.voiceMuted?.takeIf { card != CarCard.NOTICE }?.let { muted ->
       actions.addAction(
         Action.Builder()
           .setIcon(CarTemplates.icon(carContext, if (muted) R.drawable.car_volume_off else R.drawable.car_volume_up))
@@ -66,25 +73,61 @@ internal class NavigationScreen(carContext: CarContext) : Screen(carContext) {
       )
     }
     val template = NavigationTemplate.Builder().setActionStrip(actions.build())
-    when {
-      route == null -> Unit
-      CarGuidanceLogic.showsSteps(route) -> {
-        val next = route.steps[0]
+    when (card) {
+      CarCard.NONE -> Unit
+      CarCard.NOTICE -> {
+        val n = notice!!
+        val icon = if (n.kind == CarLink.NOTICE_LOCATION) R.drawable.car_location_off else R.drawable.car_alt_route
+        val message = MessageInfo.Builder(n.title.ifEmpty { " " }).setImage(CarTemplates.icon(carContext, icon))
+        if (n.text.isNotEmpty()) message.setText(n.text)
+        template.setNavigationInfo(message.build())
+      }
+      CarCard.STEPS -> {
+        val r = route!!
+        val next = r.steps[0]
         val info = RoutingInfo.Builder()
           .setCurrentStep(CarTemplates.step(carContext, next), CarTemplates.distance(next.shownDistance, next.shownUnit))
-        route.steps.getOrNull(1)?.let { info.setNextStep(CarTemplates.step(carContext, it)) }
+        r.steps.getOrNull(1)?.let { info.setNextStep(CarTemplates.step(carContext, it)) }
         template.setNavigationInfo(info.build())
-        template.setDestinationTravelEstimate(CarTemplates.estimate(route.remainingShown, route.remainingUnit, route.remainingS))
+        template.setDestinationTravelEstimate(CarTemplates.estimate(r.remainingShown, r.remainingUnit, r.remainingS))
       }
-      route.status == "planning" || route.replanning -> template.setNavigationInfo(RoutingInfo.Builder().setLoading(true).build())
-      else -> {
-        val message = MessageInfo.Builder(route.message ?: route.destinationName.ifEmpty { " " })
-        if (route.status == "arrived") message.setImage(CarTemplates.icon(carContext, R.drawable.car_flag))
+      CarCard.LOADING -> template.setNavigationInfo(RoutingInfo.Builder().setLoading(true).build())
+      CarCard.MESSAGE -> {
+        val r = route!!
+        val message = MessageInfo.Builder(r.message ?: r.destinationName.ifEmpty { " " })
+        if (r.status == "arrived") message.setImage(CarTemplates.icon(carContext, R.drawable.car_flag))
         template.setNavigationInfo(message.build())
       }
     }
     return template.build()
   }
+
+  /**
+   * The notice's buttons. Location: Android's permission dialog on the phone, parked only (the host says so while the
+   * car moves). A route without an adapter: the driver's word, or the route dropped.
+   */
+  private fun noticeActions(kind: String, title: String): List<Action> =
+    when (kind) {
+      CarLink.NOTICE_LOCATION -> listOf(
+        Action.Builder()
+          .setTitle(title)
+          .setIcon(CarTemplates.icon(carContext, R.drawable.car_location_on))
+          .setOnClickListener(ParkedOnlyOnClickListener.create { CarLink.session?.requestLocation() })
+          .build(),
+      )
+      CarLink.NOTICE_HELD_ROUTE -> listOf(
+        Action.Builder()
+          .setTitle(title)
+          .setIcon(CarTemplates.icon(carContext, R.drawable.car_navigation))
+          .setOnClickListener { CarLink.send("confirm-held") }
+          .build(),
+        Action.Builder()
+          .setIcon(CarTemplates.icon(carContext, R.drawable.car_close))
+          .setOnClickListener { CarLink.send("cancel-held") }
+          .build(),
+      )
+      else -> emptyList()
+    }
 }
 
 /** Saved places and recent destinations; picking one routes to it, as on the phone's route screen. */
@@ -161,15 +204,14 @@ internal object CarTemplates {
 
   /**
    * The route for the host's own displays (cluster, heads-up display, the rail when another app is in front): the
-   * steps ahead with their times, and the destination. Loading while it is planned or planned again.
+   * steps ahead, each with its distance and time from the car, and the destination. Loading while it is planned or
+   * planned again.
    */
   fun trip(context: CarContext, route: CarRoute): Trip {
     val trip = Trip.Builder()
     if (!CarGuidanceLogic.showsSteps(route)) return trip.setLoading(true).build()
-    var atS = 0.0
     for (step in route.steps) {
-      atS += step.timeS
-      trip.addStep(step(context, step), estimate(step.shownDistance, step.shownUnit, atS))
+      trip.addStep(step(context, step), estimate(step.shownDistance, step.shownUnit, step.timeS))
     }
     val name = route.destinationName.ifEmpty { route.message ?: " " }
     trip.addDestination(Destination.Builder().setName(name).build(), estimate(route.remainingShown, route.remainingUnit, route.remainingS))

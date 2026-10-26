@@ -54,19 +54,22 @@ const TRUST: Record<
 
 const APPROX = { color: "warn", label: "approxFix", sentence: "sApprox", icon: "location_searching" } as const;
 
-export function useAdapterStatus(): AdapterStatus {
-  return useVehicleLinkValue((s) =>
-    s.protocolSearch
+/** The adapter's state for the driver, from the link's snapshot (outside React too: the car's screen). */
+export function adapterStatusOf(s: VehicleLinkSnapshot): AdapterStatus {
+  return s.protocolSearch
+    ? "searching"
+    : s.link === "polling" || s.link === "standby"
+    ? "on"
+    : s.link === "connecting" ||
+        s.link === "probing" ||
+        s.link === "initializing" ||
+        s.link === "reconnecting"
       ? "searching"
-      : s.link === "polling" || s.link === "standby"
-      ? "on"
-      : s.link === "connecting" ||
-          s.link === "probing" ||
-          s.link === "initializing" ||
-          s.link === "reconnecting"
-        ? "searching"
-        : "off",
-  );
+      : "off";
+}
+
+export function useAdapterStatus(): AdapterStatus {
+  return useVehicleLinkValue(adapterStatusOf);
 }
 
 /** Trust state, its colors and copy, and where the position comes from. */

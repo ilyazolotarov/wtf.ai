@@ -39,6 +39,9 @@ declare class AudioOutputNativeModule extends NativeModule<AudioOutputEvents> {
   openPicker?(): boolean;
   /** Android: plays a local clip on the phone's speaker; true once it played to its end. */
   playOnSpeaker?(uri: string, volume: number): Promise<boolean>;
+  /** Android: plays a local clip as navigation guidance; true once it played to its end. */
+  playGuidance?(uri: string, volume: number): Promise<boolean>;
+  /** Stops the clip `playOnSpeaker` or `playGuidance` plays. */
   stopOnSpeaker?(): Promise<void>;
 }
 
@@ -80,7 +83,18 @@ export function playOnSpeaker(uri: string, volume: number): Promise<boolean> {
   return native?.playOnSpeaker?.(uri, volume) ?? Promise.resolve(false);
 }
 
-/** Stops the clip `playOnSpeaker` plays (its promise then resolves false). */
+/**
+ * Whether a clip can be played as navigation guidance (Android): Android Auto mixes guidance over whatever the car
+ * plays, its radio too, where media from the phone would have to be the car's source.
+ */
+export const canPlayGuidance = native?.playGuidance != null;
+
+/** Android: plays a local clip (`file://`) as navigation guidance at `volume` (0–1); true once it played to its end. */
+export function playGuidance(uri: string, volume: number): Promise<boolean> {
+  return native?.playGuidance?.(uri, volume) ?? Promise.resolve(false);
+}
+
+/** Stops the clip `playOnSpeaker` or `playGuidance` plays (its promise then resolves false). */
 export function stopOnSpeaker(): void {
   void native?.stopOnSpeaker?.();
 }

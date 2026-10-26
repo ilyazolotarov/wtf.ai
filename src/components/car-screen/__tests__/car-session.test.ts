@@ -1,24 +1,39 @@
 // One Android Auto connection on the JS side (car-session.ts, docs/ANDROID-AUTO-SPEC.md §3), on fakes of the native
-// module, the route service, the places and the voice.
+// module, the route service, the places, the held route and the voice.
 
 import { en } from "@/i18n/en";
+import { uk } from "@/i18n/uk";
 import type { RouteDestination, RouteSnapshot } from "@/services/navigation/route-service";
 import type { PlacesSnapshot } from "@/services/navigation/places-store";
 
-import type { CarAction } from "../../../../modules/android-auto/src/AndroidAutoModule";
-import { carPlaces, runCarSession, type CarSessionDeps } from "../car-session";
+import type { CarAction, CarNote } from "../../../../modules/android-auto/src/AndroidAutoModule";
+import { carNotice, carPlaces, NOTICE_CHECK_MS, runCarSession, type CarSessionDeps } from "../car-session";
 
-const t = (key: keyof typeof en) => en[key];
+const tEn = (key: keyof typeof en) => en[key];
 
-function setup({ connected = true }: { connected?: boolean } = {}) {
+/** The promises the session waits on (the permission, the native notes) settled. */
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+function setup({ connected = true, located = true }: { connected?: boolean; located?: boolean } = {}) {
   const calls: { method: string; arg: unknown }[] = [];
   let actionListener: ((e: CarAction) => void) | null = null;
   const routeListeners = new Set<() => void>();
   const placeListeners = new Set<() => void>();
   const voiceListeners = new Set<() => void>();
+  const heldListeners = new Set<() => void>();
+  const languageListeners = new Set<() => void>();
+  const frontListeners = new Set<() => void>();
   let route: RouteSnapshot | null = null;
   let muted = false;
   let volume = 0.8;
+  let granted = located;
+  let held: RouteDestination | null = null;
+  let withoutAdapter = false;
+  let positionSet = false;
+  let language: "en" | "uk" = "en";
+  let nativeNotes: CarNote[] = [];
+  const timers = new Map<number, () => void>();
+  let nextTimer = 0;
   const placesSnapshot: PlacesSnapshot = {
     saved: [{ id: "home", title: "Home", detail: "Khreshchatyk 1", lat: 50.45, lon: 30.52, kind: "home", savedAt: 1 }],
     recent: [{ id: "search:1", title: "Lviv", detail: null, lat: 49.84, lon: 24.03, usedAt: 2 }],
@@ -27,12 +42,16 @@ function setup({ connected = true }: { connected?: boolean } = {}) {
   const recents: string[] = [];
   const spoken: { route: RouteSnapshot | null; muted: boolean }[] = [];
   const notes: string[] = [];
+  const reports: string[] = [];
   const carScreen: boolean[] = [];
   let claims = 0;
+  let hushes = 0;
+  let retries = 0;
   const call = (method: string) => (arg: unknown) => {
     calls.push({ method, arg });
     return Promise.resolve();
   };
+  const emitHeld = () => heldListeners.forEach((l) => l());
   const deps: CarSessionDeps = {
     native: {
       isConnected: () => connected,
@@ -40,6 +59,12 @@ function setup({ connected = true }: { connected?: boolean } = {}) {
       setRoute: call("setRoute"),
       setPlaces: call("setPlaces"),
       setVoiceMuted: call("setVoiceMuted"),
+      setNotice: call("setNotice"),
+      takeNotes: () => {
+        const taken = nativeNotes;
+        nativeNotes = [];
+        return Promise.resolve(taken);
+      },
       addListener: (_event, listener) => {
         actionListener = listener;
         return { remove: () => (actionListener = null) };
@@ -65,7 +90,34 @@ function setup({ connected = true }: { connected?: boolean } = {}) {
       },
       addRecent: (p) => recents.push(p.id),
     },
-    strings: () => ({ language: "en", t }),
+    held: {
+      get: () => held,
+      hold: (d) => {
+        held = d;
+        emitHeld();
+      },
+      take: () => {
+        const d = held;
+        held = null;
+        if (d) emitHeld();
+        return d;
+      },
+      subscribe: (l) => {
+        heldListeners.add(l);
+        return () => heldListeners.delete(l);
+      },
+    },
+    withoutAdapter: () => withoutAdapter,
+    positionSet: () => positionSet,
+    strings: () => ({ language, t: (key) => (language === "uk" ? uk : en)[key] }),
+    subscribeLanguage: (l) => {
+      languageListeners.add(l);
+      return () => languageListeners.delete(l);
+    },
+    subscribePhoneInFront: (l) => {
+      frontListeners.add(l);
+      return () => frontListeners.delete(l);
+    },
     voice: {
       muted: () => muted,
       setMuted: (m) => {
@@ -82,11 +134,21 @@ function setup({ connected = true }: { connected?: boolean } = {}) {
         return () => claims--;
       },
       update: (r, _speed, m) => spoken.push({ route: r, muted: m }),
+      hush: () => hushes++,
     },
     speedMps: () => 10,
+    located: () => Promise.resolve(granted),
+    retryLocation: () => retries++,
     setCarScreen: (on) => carScreen.push(on),
     connect: () => notes.push("connect"),
     note: (text) => notes.push(text),
+    report: (text) => reports.push(text),
+    every: (ms, fn) => {
+      expect(ms).toBe(NOTICE_CHECK_MS);
+      const id = nextTimer++;
+      timers.set(id, fn);
+      return () => timers.delete(id);
+    },
   };
   return {
     deps,
@@ -101,17 +163,39 @@ function setup({ connected = true }: { connected?: boolean } = {}) {
       volume = v;
       voiceListeners.forEach((l) => l());
     },
+    grant: () => (granted = true),
+    holdOnPhone: (d: RouteDestination) => {
+      held = d;
+      emitHeld();
+    },
+    setWithoutAdapter: (v: boolean) => (withoutAdapter = v),
+    setPositionSet: (v: boolean) => (positionSet = v),
+    setLanguage: (l: "en" | "uk") => {
+      language = l;
+      languageListeners.forEach((f) => f());
+    },
+    phoneInFront: () => frontListeners.forEach((f) => f()),
+    addNativeNotes: (n: CarNote[]) => (nativeNotes = [...nativeNotes, ...n]),
+    tick: () => [...timers.values()].forEach((f) => f()),
+    timers: () => timers.size,
+    held: () => held,
+    notices: () => calls.filter((c) => c.method === "setNotice").map((c) => c.arg),
     started,
     recents,
     spoken,
     notes,
+    reports,
     carScreen,
     claims: () => claims,
-    listeners: () => routeListeners.size + placeListeners.size + voiceListeners.size,
+    hushes: () => hushes,
+    retries: () => retries,
+    listeners: () =>
+      routeListeners.size + placeListeners.size + voiceListeners.size + heldListeners.size + languageListeners.size + frontListeners.size,
   };
 }
 
 const planning: RouteSnapshot = { destination: { lat: 49.84, lon: 24.03, name: "Lviv" }, status: "planning", planId: 1, replanning: false };
+const lviv = { lat: 49.84, lon: 24.03, name: "Lviv", id: "search:1" };
 
 describe("car session", () => {
   test("at the start: the navigator on, the adapter connecting, and the car told its words, places, voice and route", () => {
@@ -121,13 +205,25 @@ describe("car session", () => {
     expect(s.notes).toEqual(["android auto connected", "connect"]);
     expect(s.claims()).toBe(1);
     const sent = Object.fromEntries(s.calls.map((c) => [c.method, c.arg]));
-    expect(sent.setLabels).toMatchObject({ endRoute: en.stopGuidance, destinations: en.carDestinations, saved: en.savedPlaces });
+    expect(sent.setLabels).toEqual({
+      endRoute: en.stopGuidance,
+      destinations: en.carDestinations,
+      saved: en.savedPlaces,
+      recent: en.recentPlaces,
+      noDestinations: en.carNoDestinations,
+      checkPhone: en.carCheckPhone,
+      notification: en.carNotification,
+    });
     expect(sent.setPlaces).toEqual([
       { id: "home", title: "Home", detail: "Khreshchatyk 1", kind: "home" },
       { id: "search:1", title: "Lviv", detail: null, kind: "recent" },
     ]);
     expect(sent.setVoiceMuted).toBe(false);
     expect(sent.setRoute).toBeNull();
+    // Nothing to do first, said even so: the native side may keep a notice from a JS runtime before a reload. And no
+    // checks running for it.
+    expect(sent.setNotice).toBeNull();
+    expect(s.timers()).toBe(0);
   });
 
   test("the route goes to the car and to the car's voice as it changes; the words only once", () => {
@@ -141,12 +237,22 @@ describe("car session", () => {
     expect(s.calls.filter((c) => c.method === "setLabels")).toHaveLength(1);
   });
 
+  test("the route's end stops what the voice was saying", () => {
+    const s = setup();
+    void runCarSession(s.deps);
+    expect(s.hushes()).toBe(0);
+    s.setRoute(planning);
+    expect(s.hushes()).toBe(0);
+    s.setRoute(null);
+    expect(s.hushes()).toBe(1);
+  });
+
   test("the driver's actions on the car's screen", () => {
     const s = setup();
     void runCarSession(s.deps);
     s.act({ action: "go", id: "search:1" });
     expect(s.recents).toEqual(["search:1"]);
-    expect(s.started).toEqual([{ lat: 49.84, lon: 24.03, name: "Lviv", id: "search:1" }]);
+    expect(s.started).toEqual([lviv]);
     s.act({ action: "go", id: "gone" });
     expect(s.started).toHaveLength(1);
 
@@ -167,14 +273,150 @@ describe("car session", () => {
     expect(s.spoken.at(-1)?.muted).toBe(true);
   });
 
-  test("ends with the car's screen: the navigator let go, the voice and the listeners released", async () => {
+  test("the app's language changed on the phone: the car's words, route and notice follow", async () => {
+    const s = setup({ located: false });
+    void runCarSession(s.deps);
+    await settle();
+    s.setRoute(planning);
+    s.setLanguage("uk");
+    const labels = s.calls.filter((c) => c.method === "setLabels").map((c) => c.arg);
+    expect(labels).toEqual([expect.objectContaining({ endRoute: en.stopGuidance }), expect.objectContaining({ endRoute: uk.stopGuidance })]);
+    expect(s.calls.filter((c) => c.method === "setRoute").at(-1)?.arg).toMatchObject({ message: uk.planningRoute });
+    expect(s.notices().at(-1)).toMatchObject({ kind: "location", title: uk.locationOff });
+  });
+
+  describe("location permission", () => {
+    test("missing: the car says so, with the button to ask, and checks again now and then", async () => {
+      const s = setup({ located: false });
+      void runCarSession(s.deps);
+      await settle();
+      expect(s.notices()).toEqual([null, { kind: "location", title: en.locationOff, text: en.carLocationNeeded, action: en.carAllowLocation }]);
+      expect(s.notes).toContain("android auto: no location permission");
+      expect(s.timers()).toBe(1);
+      // Still missing: nothing new for the car.
+      s.tick();
+      await settle();
+      expect(s.notices()).toHaveLength(2);
+
+      // Allowed on the phone, seen by the next check: the notice gone, GNSS tried again, the checks stopped.
+      s.grant();
+      s.tick();
+      await settle();
+      expect(s.notices().at(-1)).toBeNull();
+      expect(s.retries()).toBe(1);
+      expect(s.notes).toContain("android auto: location allowed");
+      expect(s.timers()).toBe(0);
+    });
+
+    test("the car's request answered, or the phone's app in front: checked at once", async () => {
+      const s = setup({ located: false });
+      void runCarSession(s.deps);
+      await settle();
+      s.act({ action: "permission" });
+      await settle();
+      expect(s.retries()).toBe(0);
+      s.grant();
+      s.act({ action: "permission" });
+      await settle();
+      expect(s.notices().at(-1)).toBeNull();
+      expect(s.retries()).toBe(1);
+
+      const t = setup({ located: false });
+      void runCarSession(t.deps);
+      await settle();
+      t.grant();
+      t.phoneInFront();
+      await settle();
+      expect(t.notices().at(-1)).toBeNull();
+      expect(t.retries()).toBe(1);
+    });
+
+    test("granted from the start: no notice, no retry", async () => {
+      const s = setup();
+      void runCarSession(s.deps);
+      await settle();
+      expect(s.notices()).toEqual([null]);
+      expect(s.retries()).toBe(0);
+    });
+  });
+
+  describe("a route without an adapter", () => {
+    test("picked on the car: held for the driver's word, which the car's button gives", async () => {
+      const s = setup();
+      void runCarSession(s.deps);
+      await settle();
+      s.setWithoutAdapter(true);
+      s.setRoute(planning);
+      s.act({ action: "go", id: "search:1" });
+      expect(s.started).toEqual([]);
+      expect(s.calls.filter((c) => c.method === "setRoute").at(-1)?.arg).toBeNull();
+      expect(s.held()).toEqual(lviv);
+      expect(s.notices().at(-1)).toEqual({
+        kind: "held-route",
+        title: en.carHeldTitle,
+        text: en.carHeldSetPosition,
+        action: en.noAdapterRouteAgree,
+      });
+      // The position set on the phone meanwhile: seen by the next check.
+      s.setPositionSet(true);
+      s.tick();
+      expect(s.notices().at(-1)).toMatchObject({ text: en.carHeldFollow });
+
+      s.act({ action: "confirm-held" });
+      expect(s.started).toEqual([lviv]);
+      expect(s.held()).toBeNull();
+      expect(s.notices().at(-1)).toBeNull();
+      expect(s.timers()).toBe(0);
+    });
+
+    test("held on the phone: shown on the car too; the car's close button drops it", async () => {
+      const s = setup();
+      void runCarSession(s.deps);
+      await settle();
+      s.holdOnPhone(lviv);
+      expect(s.notices().at(-1)).toMatchObject({ kind: "held-route" });
+      s.act({ action: "cancel-held" });
+      expect(s.held()).toBeNull();
+      expect(s.started).toEqual([]);
+      expect(s.notices().at(-1)).toBeNull();
+      // Nothing held: the button does nothing.
+      s.act({ action: "confirm-held" });
+      expect(s.started).toEqual([]);
+    });
+
+    test("with the adapter connected, a route picked on the car starts at once", () => {
+      const s = setup();
+      void runCarSession(s.deps);
+      s.act({ action: "go", id: "search:1" });
+      expect(s.started).toEqual([lviv]);
+      expect(s.held()).toBeNull();
+    });
+  });
+
+  test("the native side's notes go into the trip log, its problems reported too", async () => {
     const s = setup();
+    s.addNativeNotes([{ text: "map surface 1280x720 at 160 dpi", problem: false }]);
+    void runCarSession(s.deps);
+    await settle();
+    expect(s.notes).toContain("android auto: map surface 1280x720 at 160 dpi");
+    s.addNativeNotes([{ text: "map surface failed: IllegalStateException: no React host", problem: true }]);
+    s.act({ action: "notes" });
+    await settle();
+    expect(s.notes).toContain("android auto: map surface failed: IllegalStateException: no React host");
+    expect(s.reports).toEqual(["android auto: map surface failed: IllegalStateException: no React host"]);
+  });
+
+  test("ends with the car's screen: the navigator let go, the voice, the checks and the listeners released", async () => {
+    const s = setup({ located: false });
     const session = runCarSession(s.deps);
+    await settle();
+    expect(s.timers()).toBe(1);
     s.act({ action: "session-ended" });
     await session;
     expect(s.carScreen).toEqual([true, false]);
     expect(s.claims()).toBe(0);
     expect(s.listeners()).toBe(0);
+    expect(s.timers()).toBe(0);
     expect(s.hasListener()).toBe(false);
     expect(s.notes.at(-1)).toBe("android auto disconnected");
   });
@@ -187,5 +429,12 @@ describe("car session", () => {
 
   test("the car's list: saved places, then recent ones", () => {
     expect(carPlaces({ saved: [], recent: [] })).toEqual([]);
+  });
+
+  test("the notice: location first, then a held route; nothing while the permission is unknown", () => {
+    expect(carNotice(null, null, false, tEn)).toBeNull();
+    expect(carNotice(true, null, false, tEn)).toBeNull();
+    expect(carNotice(false, lviv, true, tEn)).toMatchObject({ kind: "location" });
+    expect(carNotice(null, lviv, true, tEn)).toMatchObject({ kind: "held-route", text: en.carHeldFollow });
   });
 });

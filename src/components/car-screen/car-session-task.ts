@@ -1,4 +1,9 @@
+import * as Sentry from "@sentry/react-native";
+import { AppState } from "react-native";
+
+import { adapterStatusOf } from "@/components/status/use-nav-status";
 import {
+  gainOf,
   loadVoiceMuted,
   loadVoiceVolume,
   saveVoiceMuted,
@@ -6,10 +11,11 @@ import {
   subscribeVoiceVolume,
   VoiceGuide,
 } from "@/components/route/use-voice-guidance";
-import { setVoiceNote } from "@/components/route/voice-player";
+import { hushVoice, setVoiceAsGuidance, setVoiceNote, setVoiceVolume } from "@/components/route/voice-player";
 import { initSentry } from "@/config/sentry";
-import { appStrings } from "@/i18n/provider";
+import { appStrings, subscribeAppLanguage } from "@/i18n/provider";
 import { places } from "@/providers/places";
+import { heldRoute, holdRouteForGuide, onHeldRoute, takeHeldRoute } from "@/services/navigation/route-without-adapter";
 import { autoConnect, getRuntime } from "@/services/runtime";
 
 import AndroidAuto from "../../../modules/android-auto/src/AndroidAutoModule";
@@ -24,28 +30,57 @@ export async function carSessionTask(): Promise<void> {
   // The process may have started for the car, the phone's screens (and the root layout's setup) never loaded.
   initSentry();
   const runtime = getRuntime();
-  const { recorder, routes, position } = runtime;
+  const { recorder, routes, position, link } = runtime;
+  // The voice as the phone's map sets it up: its notes, the driver's volume (Settings), and as navigation guidance,
+  // which the car mixes over whatever it plays (ROUTING-SPEC §8.5).
   setVoiceNote((text) => recorder.note(text));
+  setVoiceVolume(gainOf(loadVoiceVolume()));
+  setVoiceAsGuidance(true);
   const guide = new VoiceGuide();
-  await runCarSession({
-    native: AndroidAuto,
-    routes,
-    places,
-    strings: appStrings,
-    voice: {
-      muted: loadVoiceMuted,
-      setMuted: saveVoiceMuted,
-      volume: loadVoiceVolume,
-      subscribe: (listener) => {
-        const off = [subscribeVoiceMuted(listener), subscribeVoiceVolume(listener)];
-        return () => off.forEach((o) => o());
+  try {
+    await runCarSession({
+      native: AndroidAuto,
+      routes,
+      places,
+      held: { get: heldRoute, hold: holdRouteForGuide, take: takeHeldRoute, subscribe: onHeldRoute },
+      withoutAdapter: () => runtime.getDevSettings().phoneOnly && adapterStatusOf(link.getSnapshot()) !== "on",
+      positionSet: () => {
+        const p = position.getSnapshot();
+        return p?.manual != null || p?.trust === "TRUSTED";
       },
-      claim: () => guide.claim(),
-      update: (route, speedMps, muted, t, language) => guide.update(route, speedMps, muted, t, language),
-    },
-    speedMps: () => position.getSnapshot()?.speedMps ?? 0,
-    setCarScreen: (on) => runtime.setCarScreen(on),
-    connect: () => void autoConnect().catch((error) => console.warn("auto-connect failed", error)),
-    note: (text) => recorder.note(text),
-  });
+      strings: appStrings,
+      subscribeLanguage: subscribeAppLanguage,
+      subscribePhoneInFront: (listener) => {
+        const sub = AppState.addEventListener("change", (state) => {
+          if (state === "active") listener();
+        });
+        return () => sub.remove();
+      },
+      voice: {
+        muted: loadVoiceMuted,
+        setMuted: saveVoiceMuted,
+        volume: loadVoiceVolume,
+        subscribe: (listener) => {
+          const off = [subscribeVoiceMuted(listener), subscribeVoiceVolume(listener)];
+          return () => off.forEach((o) => o());
+        },
+        claim: () => guide.claim(),
+        update: (route, speedMps, muted, t, language) => guide.update(route, speedMps, muted, t, language),
+        hush: hushVoice,
+      },
+      speedMps: () => position.getSnapshot()?.speedMps ?? 0,
+      located: () => position.getPermission().then((p) => p.granted),
+      retryLocation: () => position.retryCapture(),
+      setCarScreen: (on) => runtime.setCarScreen(on),
+      connect: () => void autoConnect().catch((error) => console.warn("auto-connect failed", error)),
+      note: (text) => recorder.note(text),
+      report: (text) => Sentry.captureMessage(text, { level: "warning", tags: { feature: "android-auto" } }),
+      every: (ms, fn) => {
+        const id = setInterval(fn, ms);
+        return () => clearInterval(id);
+      },
+    });
+  } finally {
+    setVoiceAsGuidance(false);
+  }
 }

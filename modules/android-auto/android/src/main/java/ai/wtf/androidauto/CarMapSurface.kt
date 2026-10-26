@@ -8,7 +8,6 @@ import android.graphics.drawable.ColorDrawable
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.os.Bundle
-import android.util.Log
 import androidx.car.app.CarContext
 import androidx.car.app.SurfaceCallback
 import androidx.car.app.SurfaceContainer
@@ -40,7 +39,7 @@ internal class CarMapSurface(private val carContext: CarContext) : SurfaceCallba
     // A new surface (the car's screen resized, or back from another app): drawn again from scratch.
     release()
     container = surfaceContainer
-    Log.i(CarLink.TAG, "map surface ${surfaceContainer.width}x${surfaceContainer.height} at ${surfaceContainer.dpi} dpi")
+    CarLink.note("map surface ${surfaceContainer.width}x${surfaceContainer.height} at ${surfaceContainer.dpi} dpi")
     try {
       val displays = carContext.getSystemService(DisplayManager::class.java)
       val display = displays.createVirtualDisplay(
@@ -64,7 +63,7 @@ internal class CarMapSurface(private val carContext: CarContext) : SurfaceCallba
       surface.start()
       frames = CarFabricFrames(host) { restartIfStopped() }.also { it.start() }
     } catch (e: Exception) {
-      Log.w(CarLink.TAG, "map surface failed: ${e.javaClass.simpleName}: ${e.message}")
+      CarLink.note("map surface failed: ${e.javaClass.simpleName}: ${e.message}", problem = true)
       release()
     }
   }
@@ -75,7 +74,7 @@ internal class CarMapSurface(private val carContext: CarContext) : SurfaceCallba
   }
 
   override fun onSurfaceDestroyed(surfaceContainer: SurfaceContainer) {
-    Log.i(CarLink.TAG, "map surface destroyed")
+    CarLink.note("map surface destroyed")
     release()
   }
 
@@ -92,14 +91,14 @@ internal class CarMapSurface(private val carContext: CarContext) : SurfaceCallba
       try {
         s.stop()
       } catch (e: Exception) {
-        Log.w(CarLink.TAG, "map surface stop: ${e.javaClass.simpleName}: ${e.message}")
+        CarLink.note("map surface stop failed: ${e.javaClass.simpleName}: ${e.message}", problem = true)
       }
     }
     surface = null
     try {
       presentation?.dismiss()
     } catch (e: Exception) {
-      Log.w(CarLink.TAG, "presentation dismiss: ${e.javaClass.simpleName}: ${e.message}")
+      CarLink.note("map presentation dismiss failed: ${e.javaClass.simpleName}: ${e.message}", problem = true)
     }
     presentation = null
     display?.release()
@@ -137,7 +136,7 @@ internal class CarMapSurface(private val carContext: CarContext) : SurfaceCallba
     UiThreadUtil.getUiThreadHandler().postDelayed({
       val s = surface ?: return@postDelayed
       if (s.isRunning) return@postDelayed
-      Log.i(CarLink.TAG, "map surface started again in a new React context")
+      CarLink.note("map surface started again in a new React context")
       s.start()
     }, RESTART_CHECK_MS)
   }

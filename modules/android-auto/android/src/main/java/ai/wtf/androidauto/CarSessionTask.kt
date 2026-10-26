@@ -32,7 +32,7 @@ internal object CarSessionTask {
 
   fun start(app: Application) {
     UiThreadUtil.assertOnUiThread()
-    val host = (app as? ReactApplication)?.reactHost ?: return Unit.also { Log.w(CarLink.TAG, "no React host") }
+    val host = (app as? ReactApplication)?.reactHost ?: return Unit.also { CarLink.note("session task: no React host", problem = true) }
     if (this.host != null) return
     this.host = host
     host.addReactInstanceEventListener(listener)
@@ -56,7 +56,7 @@ internal object CarSessionTask {
         val id = HeadlessJsTaskContext.getInstance(context).startTask(HeadlessJsTaskConfig(TASK, Arguments.createMap(), 0, true))
         Log.i(CarLink.TAG, "session task $id started")
       } catch (e: Exception) {
-        Log.w(CarLink.TAG, "session task failed to start: ${e.javaClass.simpleName}: ${e.message}")
+        CarLink.note("session task failed to start: ${e.javaClass.simpleName}: ${e.message}", problem = true)
       }
     }
   }

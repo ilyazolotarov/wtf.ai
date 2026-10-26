@@ -1,6 +1,7 @@
 package ai.wtf.androidauto
 
 import ai.wtf.androidauto.logic.CarLabels
+import ai.wtf.androidauto.logic.CarNotice
 import ai.wtf.androidauto.logic.CarPlace
 import ai.wtf.androidauto.logic.CarRoute
 import ai.wtf.androidauto.logic.CarStep
@@ -11,7 +12,8 @@ import expo.modules.kotlin.records.Field
 import expo.modules.kotlin.records.Record
 
 // The car's screen for the JS side (docs/ANDROID-AUTO-SPEC.md §4): what it shows, sent by the car session's task
-// (src/services/car-screen), and what the driver did there, as `onCarAction`. Android only; what to show is TypeScript.
+// (src/components/car-screen), and what the driver did there, as `onCarAction`. Android only; what to show is
+// TypeScript.
 
 class CarStepRecord : Record {
   @Field var kind: String = ""
@@ -48,9 +50,15 @@ class CarLabelsRecord : Record {
   @Field var saved: String = ""
   @Field var recent: String = ""
   @Field var noDestinations: String = ""
-  @Field var voiceOn: String = ""
-  @Field var voiceOff: String = ""
+  @Field var checkPhone: String = ""
   @Field var notification: String = ""
+}
+
+class CarNoticeRecord : Record {
+  @Field var kind: String = ""
+  @Field var title: String = ""
+  @Field var text: String = ""
+  @Field var action: String = ""
 }
 
 class AndroidAutoModule : Module() {
@@ -79,8 +87,7 @@ class AndroidAutoModule : Module() {
           saved = labels.saved.ifEmpty { d.saved },
           recent = labels.recent.ifEmpty { d.recent },
           noDestinations = labels.noDestinations.ifEmpty { d.noDestinations },
-          voiceOn = labels.voiceOn.ifEmpty { d.voiceOn },
-          voiceOff = labels.voiceOff.ifEmpty { d.voiceOff },
+          checkPhone = labels.checkPhone.ifEmpty { d.checkPhone },
           notification = labels.notification.ifEmpty { d.notification },
         ),
       )
@@ -112,6 +119,16 @@ class AndroidAutoModule : Module() {
     /** Muted or not; null: no voice, no button. */
     AsyncFunction("setVoiceMuted") { muted: Boolean? ->
       CarLink.setVoiceMuted(muted)
+    }.runOnQueue(Queues.MAIN)
+
+    /** What the driver must do first (`location`, `held-route`), shown instead of the route; null: nothing. */
+    AsyncFunction("setNotice") { notice: CarNoticeRecord? ->
+      CarLink.setNotice(notice?.let { CarNotice(it.kind, it.title, it.text, it.action) })
+    }.runOnQueue(Queues.MAIN)
+
+    /** The native side's notes since the last call, for the trip log (`problem`: reported too). */
+    AsyncFunction("takeNotes") {
+      CarLink.takeNotes().map { mapOf("text" to it.text, "problem" to it.problem) }
     }.runOnQueue(Queues.MAIN)
   }
 }

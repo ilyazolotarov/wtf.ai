@@ -3,7 +3,13 @@ import { createAudioPlayer, setAudioModeAsync } from "expo-audio";
 import * as Speech from "expo-speech";
 import { Platform } from "react-native";
 
-import { canPlayOnSpeaker, playOnSpeaker, stopOnSpeaker } from "../../../modules/audio-output/src/AudioOutputModule";
+import {
+  canPlayGuidance,
+  canPlayOnSpeaker,
+  playGuidance,
+  playOnSpeaker,
+  stopOnSpeaker,
+} from "../../../modules/audio-output/src/AudioOutputModule";
 import { VOICE_CLIPS } from "./voice-clips";
 import type { Phrase, VoiceLang } from "./voice-phrases";
 
@@ -33,6 +39,8 @@ let audioMode: Promise<void> | null = null;
 let note: (text: string) => void = () => {};
 /** The player's gain for the driver's voice volume (Settings), 0–1 of the recorded level: a clip already playing keeps its own. */
 let volume = 1;
+/** Clips as navigation guidance (Android's own player) while Android Auto is connected; else through expo-audio. */
+let asGuidance = false;
 
 export function setVoiceNote(fn: (text: string) => void): void {
   note = fn;
@@ -40,6 +48,14 @@ export function setVoiceNote(fn: (text: string) => void): void {
 
 export function setVoiceVolume(v: number): void {
   volume = Math.min(1, Math.max(0, v));
+}
+
+/**
+ * Android Auto connected (docs/ANDROID-AUTO-SPEC.md §3): clips play as navigation guidance, which the car mixes over
+ * whatever it plays, its own radio too. As media they would be heard only with the phone as the car's source.
+ */
+export function setVoiceAsGuidance(on: boolean): void {
+  asGuidance = on && canPlayGuidance;
 }
 
 const languageOf = (lang: VoiceLang) => (lang === "uk" ? "uk-UA" : "en-US");
@@ -96,7 +112,11 @@ function next(): void {
     finished = true;
     if (gen === generation) next();
   };
-  if ("clip" in item) void (item.speaker ? playOnPhoneSpeaker(item, gen, done) : playClip(item, gen, done));
+  if ("clip" in item) {
+    if (item.speaker) void playNative(item, gen, done, "speaker");
+    else if (asGuidance) void playNative(item, gen, done, "guidance");
+    else void playClip(item, gen, done);
+  }
   else speak(item.text, item.language, done, item.gain);
 }
 
@@ -127,8 +147,12 @@ function speak(text: string, language: string, done: () => void, gain = volume):
   }
 }
 
-/** A clip on the phone's speaker (Android's own player); one that won't play there goes where the audio goes. */
-async function playOnPhoneSpeaker(item: Extract<Item, { clip: number }>, gen: number, done: () => void): Promise<void> {
+/**
+ * A clip on Android's own player: on the phone's speaker, or as navigation guidance (Android Auto). One that won't
+ * play that way goes through expo-audio, where the phone's audio goes.
+ */
+async function playNative(item: Extract<Item, { clip: number }>, gen: number, done: () => void, how: "speaker" | "guidance"): Promise<void> {
+  const where = how === "speaker" ? "on the phone's speaker" : "as guidance";
   let played = false;
   let gaveUp = false;
   const timer = setTimeout(() => {
@@ -139,20 +163,21 @@ async function playOnPhoneSpeaker(item: Extract<Item, { clip: number }>, gen: nu
     const { localUri } = await Asset.fromModule(item.clip).downloadAsync();
     if (localUri && gen === generation && !gaveUp) {
       stopCurrent = stopOnSpeaker;
-      played = await playOnSpeaker(localUri, item.gain ?? volume);
+      const gain = item.gain ?? volume;
+      played = await (how === "speaker" ? playOnSpeaker(localUri, gain) : playGuidance(localUri, gain));
     }
   } catch (e) {
-    note(`voice clip ${item.id} on the phone's speaker failed: ${String(e)}`);
+    note(`voice clip ${item.id} ${where} failed: ${String(e)}`);
   }
   clearTimeout(timer);
   if (stopCurrent === stopOnSpeaker) stopCurrent = null;
   if (gen !== generation) return;
   if (gaveUp) {
-    note(`voice clip ${item.id} on the phone's speaker never reported its end`);
+    note(`voice clip ${item.id} ${where} never reported its end`);
     done();
   } else if (played) done();
   else {
-    note(`voice clip ${item.id} not played on the phone's speaker: where the audio goes instead`);
+    note(`voice clip ${item.id} not played ${where}: where the audio goes instead`);
     void playClip(item, gen, done);
   }
 }

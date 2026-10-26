@@ -33,10 +33,10 @@ data class CarStep(
   val exit: Int?,
   /** "Turn left", in the app's language. */
   val instruction: String,
-  /** From the car (the first) or the step before (the second), m and s. */
+  /** From the car, m, and the time to it at the plan's pace, s (the trip's estimates for the car's other displays). */
   val distanceM: Double,
   val timeS: Double,
-  /** The distance as the phone's banner rounds it: a value and "m", "km" or "km1" (one decimal). */
+  /** The distance from the car as the phone's banner rounds it: a value and "m", "km" or "km1" (one decimal). */
   val shownDistance: Double,
   val shownUnit: String,
 )
@@ -68,11 +68,32 @@ data class CarLabels(
   val saved: String = "Saved",
   val recent: String = "Recent",
   val noDestinations: String = "Saved places and recent destinations show here.",
-  val voiceOn: String = "Voice on",
-  val voiceOff: String = "Voice off",
+  /** Shown when the car sends the driver to the phone (the permission dialog): quality guideline VI-1. */
+  val checkPhone: String = "Look at the phone only when it's safe.",
   /** The phone's notification while the car session holds location (CarLocationService). */
   val notification: String = "Keeps the car's position while Android Auto shows another app.",
 )
+
+/**
+ * What the driver must do before the car can guide, shown instead of the route (the JS side decides when):
+ * `location`: the app has no location permission (its button asks for it, parked only); `held-route`: a route picked
+ * without an adapter waits for the driver's word (its button gives it, the close button drops the route).
+ */
+data class CarNotice(val kind: String, val title: String, val text: String, val action: String)
+
+/** The navigation template's card. */
+enum class CarCard {
+  /** The map alone. */
+  NONE,
+  /** CarNotice's message, its button instead of Destinations. */
+  NOTICE,
+  /** The next maneuver and the trip's estimate. */
+  STEPS,
+  /** A route planned, or planned again: the loading card. */
+  LOADING,
+  /** Arrival or a failed plan: a message. */
+  MESSAGE,
+}
 
 /** What the car's navigation session (NavigationManager) is told for a route state. */
 enum class SessionStep { NONE, START, UPDATE, END }
@@ -111,6 +132,16 @@ object CarGuidanceLogic {
   /** Turn-by-turn shows only on a followed route with a maneuver ahead, not while it is planned again. */
   fun showsSteps(route: CarRoute?): Boolean =
     route != null && route.status == "active" && !route.replanning && route.steps.isNotEmpty()
+
+  /** A notice comes first: the route can't be followed until the driver has done what it asks. */
+  fun card(route: CarRoute?, notice: CarNotice?): CarCard =
+    when {
+      notice != null -> CarCard.NOTICE
+      route == null -> CarCard.NONE
+      showsSteps(route) -> CarCard.STEPS
+      route.status == "planning" || route.replanning -> CarCard.LOADING
+      else -> CarCard.MESSAGE
+    }
 
   /**
    * The session's step for a new route state: started when a route begins (the host then shows it in the cluster

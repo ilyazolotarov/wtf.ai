@@ -1,6 +1,8 @@
+import ai.wtf.androidauto.logic.CarCard
 import ai.wtf.androidauto.logic.CarDistanceUnit
 import ai.wtf.androidauto.logic.CarGuidanceLogic
 import ai.wtf.androidauto.logic.CarManeuverType
+import ai.wtf.androidauto.logic.CarNotice
 import ai.wtf.androidauto.logic.CarRoute
 import ai.wtf.androidauto.logic.CarStep
 import ai.wtf.androidauto.logic.SessionStep
@@ -63,6 +65,19 @@ class CarGuidanceLogicTest {
     assertFalse(CarGuidanceLogic.showsSteps(route("active", steps = emptyList())))
     assertFalse(CarGuidanceLogic.showsSteps(route("planning")))
     assertFalse(CarGuidanceLogic.showsSteps(null))
+  }
+
+  @Test
+  fun aNoticeComesBeforeTheRoute() {
+    val notice = CarNotice("location", "Location is off", "Allow it on the phone.", "Allow")
+    assertEquals(CarCard.NOTICE, CarGuidanceLogic.card(route("active"), notice))
+    assertEquals(CarCard.NOTICE, CarGuidanceLogic.card(null, notice))
+    assertEquals(CarCard.NONE, CarGuidanceLogic.card(null, null))
+    assertEquals(CarCard.STEPS, CarGuidanceLogic.card(route("active"), null))
+    assertEquals(CarCard.LOADING, CarGuidanceLogic.card(route("planning", steps = emptyList()), null))
+    assertEquals(CarCard.LOADING, CarGuidanceLogic.card(route("active", replanning = true), null))
+    assertEquals(CarCard.MESSAGE, CarGuidanceLogic.card(route("arrived", steps = emptyList()), null))
+    assertEquals(CarCard.MESSAGE, CarGuidanceLogic.card(route("failed", steps = emptyList()), null))
   }
 
   @Test

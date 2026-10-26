@@ -1,7 +1,7 @@
 // The route voice's queue (voice-player.ts) on a fake audio player: whatever the player does or fails to report, the
 // next announcement is still said.
 
-import { hushVoice, sayOnSpeaker, sayPhrases, setVoiceNote, setVoiceVolume } from "../voice-player";
+import { hushVoice, sayOnSpeaker, sayPhrases, setVoiceAsGuidance, setVoiceNote, setVoiceVolume } from "../voice-player";
 
 // jest.mock calls are hoisted above the import.
 type Listener = (status: { didJustFinish: boolean; playing?: boolean }) => void;
@@ -46,12 +46,23 @@ jest.mock("expo-speech", () => ({
   stop: jest.fn(() => Promise.resolve()),
 }));
 
-// Android's player on the phone's speaker: each call waits for `mockSpeaker.end` to say how it went.
-const mockSpeaker: { plays: { uri: string; volume: number }[]; end: ((played: boolean) => void) | null; stops: number } = { plays: [], end: null, stops: 0 };
+// Android's player, on the phone's speaker or as navigation guidance: each call waits for `mockSpeaker.end` to say how
+// it went.
+const mockSpeaker: {
+  plays: { uri: string; volume: number }[];
+  guidance: { uri: string; volume: number }[];
+  end: ((played: boolean) => void) | null;
+  stops: number;
+} = { plays: [], guidance: [], end: null, stops: 0 };
 jest.mock("../../../../modules/audio-output/src/AudioOutputModule", () => ({
   canPlayOnSpeaker: true,
+  canPlayGuidance: true,
   playOnSpeaker: jest.fn((uri: string, volume: number) => {
     mockSpeaker.plays.push({ uri, volume });
+    return new Promise<boolean>((resolve) => (mockSpeaker.end = resolve));
+  }),
+  playGuidance: jest.fn((uri: string, volume: number) => {
+    mockSpeaker.guidance.push({ uri, volume });
     return new Promise<boolean>((resolve) => (mockSpeaker.end = resolve));
   }),
   stopOnSpeaker: jest.fn(() => {
@@ -79,12 +90,16 @@ beforeEach(() => {
   notes.length = 0;
   mockFailPlay = mockFailRemove = false;
   mockSpeaker.plays.length = 0;
+  mockSpeaker.guidance.length = 0;
   mockSpeaker.end = null;
   mockSpeaker.stops = 0;
   setVoiceNote((t) => notes.push(t));
   setVoiceVolume(1);
 });
-afterEach(() => jest.useRealTimers());
+afterEach(() => {
+  setVoiceAsGuidance(false);
+  jest.useRealTimers();
+});
 
 describe("voice player", () => {
   test("clips and the system voice play at the driver's volume", async () => {
@@ -219,5 +234,40 @@ describe("voice player", () => {
     expect(mockSpeaker.stops).toBe(1);
     expect(mockPlayers.map((p) => p.clip)).toEqual([2]);
     expect(notes).toContain("voice clip now-left on the phone's speaker never reported its end");
+  });
+
+  test("with Android Auto connected, clips play as navigation guidance at the driver's volume, one after another", async () => {
+    setVoiceAsGuidance(true);
+    setVoiceVolume(0.6);
+    sayPhrases([{ id: "now-left", text: "Turn left" }], "en");
+    sayPhrases([{ id: "now-right", text: "Turn right" }], "en");
+    await flush();
+    expect(mockSpeaker.guidance).toEqual([{ uri: "file:///clip-1.mp3", volume: 0.6 }]);
+    expect(mockPlayers).toHaveLength(0);
+    mockSpeaker.end?.(true);
+    await flush();
+    expect(mockSpeaker.guidance.map((g) => g.uri)).toEqual(["file:///clip-1.mp3", "file:///clip-2.mp3"]);
+    // A phrase meant for the phone's speaker still goes there.
+    mockSpeaker.end?.(true);
+    sayOnSpeaker([{ id: "then-left", text: "Then left" }], "en");
+    await flush();
+    expect(mockSpeaker.plays).toEqual([{ uri: "file:///clip-3.mp3", volume: 0.6 }]);
+  });
+
+  test("a clip that won't play as guidance goes where the audio goes; without Android Auto, clips play as before", async () => {
+    setVoiceAsGuidance(true);
+    sayPhrases([{ id: "now-left", text: "Turn left" }], "en");
+    await flush();
+    mockSpeaker.end?.(false);
+    await flush();
+    expect(mockPlayers.map((p) => p.clip)).toEqual([1]);
+    expect(notes.some((n) => n.startsWith("voice clip now-left not played as guidance"))).toBe(true);
+    finish(0);
+
+    setVoiceAsGuidance(false);
+    sayPhrases([{ id: "now-right", text: "Turn right" }], "en");
+    await flush();
+    expect(mockSpeaker.guidance).toHaveLength(1);
+    expect(mockPlayers.map((p) => p.clip)).toEqual([1, 2]);
   });
 });

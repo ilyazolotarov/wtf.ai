@@ -43,3 +43,56 @@ index b088909..9d87cdf 100644
      private fun makeViewState(isAnimated: Boolean?): WritableMap {
          val position = mapLibreMap!!.cameraPosition
          val viewState: WritableMap = Arguments.createMap()
+diff --git a/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/utils/ReactTagResolver.kt b/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/utils/ReactTagResolver.kt
+index b257692..225886d 100644
+--- a/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/utils/ReactTagResolver.kt
++++ b/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/utils/ReactTagResolver.kt
+@@ -16,6 +16,9 @@ data class Await<V>(
+ 
+ const val LOG_TAG = "ReactTagResolver"
+ 
++// wtf.ai: see `manager`.
++private const val NO_UI_MANAGER = "no UI manager: the React context is gone"
++
+ typealias ReactTag = Double
+ 
+ // https://github.com/rnmapbox/maps/pull/3074
+@@ -32,6 +35,12 @@ open class ReactTagResolver(
+         val list = awaitedViews[reactTag]
+         if (list != null) {
+             context.runOnUiQueueThread {
++                val manager = manager
++                if (manager == null) {
++                    list.forEach { it.reject?.reject(Throwable(NO_UI_MANAGER)) }
++                    awaitedViews.remove(reactTag)
++                    return@runOnUiQueueThread
++                }
+                 try {
+                     val view = manager.resolveView(reactTag)
+ 
+@@ -49,8 +58,10 @@ open class ReactTagResolver(
+         createdViews.remove(reactTag)
+     }
+ 
+-    private val manager: UIManager
+-        get() = UIManagerHelper.getUIManager(context, UIManagerType.FABRIC)!!
++    // wtf.ai: null once the React context is torn down (a JS reload, an update applied): a command queued before
++    // then is dropped, not a crash. The car's map (Android Auto) sends one every frame.
++    private val manager: UIManager?
++        get() = UIManagerHelper.getUIManager(context, UIManagerType.FABRIC)
+ 
+     fun <V> withViewResolved(
+         reactTag: Int,
+@@ -58,6 +69,12 @@ open class ReactTagResolver(
+         fn: (V) -> Unit,
+     ) {
+         context.runOnUiQueueThread {
++            val manager = manager
++            if (manager == null) {
++                Logger.w(LOG_TAG, NO_UI_MANAGER)
++                promise?.reject(Throwable(NO_UI_MANAGER))
++                return@runOnUiQueueThread
++            }
+             try {
+                 val resolvedView: View? = manager.resolveView(reactTag)
+                 val view = resolvedView as? V
