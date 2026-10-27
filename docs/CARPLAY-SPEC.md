@@ -215,10 +215,12 @@ GNSS and the adapter as they were. What the JS side sent is kept on the native s
   drawing is scaled to the X's, 14 of its 24 pt (`CarPlayImages.mapIcon`, the ink measured once): the symbols leave
   different room around their drawing, and the voice and my location filled the round button. The map's buttons are
   not CarPlay's to tint: on iOS 26 its tint of map buttons is wrong (Apple's known issue; developer forums 798735,
-  799192, 842273), white on its white focus fill, and reported white on near-white buttons by day. They are drawn white
-  by night and black by day (the scene's `contentStyle`, as the map; drawn again when it changes), with an edge of the
-  other colour for whatever the glass shows behind them; focused (a knob, a touchpad, where the focus comes back after
-  a list) black with a white edge, which CarPlay shows on a white fill or on the glass.
+  799192, 842273), white on its white focus fill, and reported white on near-white buttons by day. They are drawn by the
+  scene's `contentStyle`, as the map, and again when it changes: by night white with a faint dark edge (a quarter
+  opaque, 1 pt) for where the glass shows something light; by day the app's text colour (#1D1C1A, about CarPlay's own
+  glyphs) with no edge. Focused (a knob, a touchpad, where the focus comes back after a list) by night black with a
+  full white edge, which CarPlay shows on a white fill or on the glass; by day as unfocused. Pure black in a white
+  edge looked heavy by day; grey looked disabled, and the app's blue reads as a mode turned on.
 - Device log (`ai.wtf.navigator`, category `carplay`): the scene connected, in the foreground, active, in the
   background, disconnected; React Native started without the phone's scene or on a new host; what drew the map;
   actions sent (info level); the notes also go to the trip log.

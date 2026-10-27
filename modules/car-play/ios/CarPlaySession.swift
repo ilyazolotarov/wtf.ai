@@ -501,8 +501,8 @@ final class CarPlaySession: NSObject {
       made = CPMapButton { [weak self] _ in self?.send("toggle-voice") }
       icon = muted ? "car_volume_off" : "car_volume_up"
     }
-    made.image = CarPlayImages.mapIcon(icon, color: dark ? .white : .black, edge: dark ? .black : .white)
-    made.focusedImage = CarPlayImages.mapIcon(icon, color: .black, edge: .white)
+    made.image = CarPlayImages.mapIcon(icon, dark ? .night : .day)
+    made.focusedImage = CarPlayImages.mapIcon(icon, dark ? .focusedAtNight : .day)
     return made
   }
 
@@ -1113,33 +1113,63 @@ enum CarPlayImages {
    */
   static let mapDrawingShare = 14.0 / 24
 
-  /** How far the edge around a map button's drawing reaches, points. */
-  private static let edgeWidth = 1.5
+  /** How a map button's icon is drawn: its colour, and an edge around it (`edgeAlpha` of `edge`, `edgeWidth` pt). */
+  struct MapIconStyle {
+    var color: UIColor
+    var edge: UIColor
+    var edgeAlpha: Double
+    var edgeWidth: Double
+
+    /** White on the night's dark glass, a faint dark edge for where it shows something light. */
+    static let night = MapIconStyle(color: .white, edge: .black, edgeAlpha: 0.25, edgeWidth: 1)
+    /**
+     * By day the app's text colour (src/constants/theme.ts, light `text` #1D1C1A), about CarPlay's own glyphs by day,
+     * with no edge: the light glass needs none, and pure black in a white edge looked heavy.
+     */
+    static let day = MapIconStyle(
+      color: UIColor(red: 0x1D / 255.0, green: 0x1C / 255.0, blue: 0x1A / 255.0, alpha: 1), edge: .white, edgeAlpha: 0,
+      edgeWidth: 0)
+    /**
+     * Focused by night: on CarPlay's white focus fill or on the dark glass, black with a full white edge. By day the
+     * fill and the glass are light alike: the day's own.
+     */
+    static let focusedAtNight = MapIconStyle(color: .black, edge: .white, edgeAlpha: 1, edgeWidth: 1.5)
+  }
 
   /** The share of its box each icon's drawing spans, measured once. Main thread. */
   private static var drawingShares: [String: Double] = [:]
 
   /**
-   * A map button's icon, its drawing as big as the X's, in `color` with an `edge` around it, never tinted by CarPlay:
-   * on iOS 26 its tint of map buttons is wrong (Apple's known issue; developer forums 798735, 799192, 842273): white
-   * on its white focus fill, and by day white glyphs on near-white buttons. The session draws them white by night,
-   * black by day, and focused (a knob's, a touchpad's, or where the focus came back after a list) black, which CarPlay
-   * shows on a white fill or on the glass: the edge keeps each readable on whatever the glass shows behind it.
+   * A map button's icon, its drawing as big as the X's, never tinted by CarPlay: on iOS 26 its tint of map buttons is
+   * wrong (Apple's known issue; developer forums 798735, 799192, 842273), white on its white focus fill, and reported
+   * white on near-white buttons by day. The session draws them by the car's night or day, and focused (a knob's, a
+   * touchpad's, or where the focus came back after a list) by night for a white fill or the glass. The edge's copies
+   * make one layer, faded as a whole: overlapping, they would add up to solid.
    */
-  static func mapIcon(_ name: String, color: UIColor, edge: UIColor) -> UIImage {
+  static func mapIcon(_ name: String, _ style: MapIconStyle) -> UIImage {
     guard let image = vector(name) else { return UIImage() }
     let share = drawingShares[name] ?? drawingShare(image)
     drawingShares[name] = share
     let size = buttonSize * min(1, mapDrawingShare / share)
     let inset = (buttonSize - size) / 2
-    let around = image.withTintColor(edge, renderingMode: .alwaysOriginal)
-    let drawing = image.withTintColor(color, renderingMode: .alwaysOriginal)
-    return UIGraphicsImageRenderer(size: CGSize(width: buttonSize, height: buttonSize)).image { _ in
+    let around = image.withTintColor(style.edge, renderingMode: .alwaysOriginal)
+    let drawing = image.withTintColor(style.color, renderingMode: .alwaysOriginal)
+    return UIGraphicsImageRenderer(size: CGSize(width: buttonSize, height: buttonSize)).image { context in
+      let cg = context.cgContext
+      guard style.edgeAlpha > 0 else {
+        drawing.draw(in: CGRect(x: inset, y: inset, width: size, height: size))
+        return
+      }
+      cg.saveGState()
+      cg.setAlpha(style.edgeAlpha)
+      cg.beginTransparencyLayer(auxiliaryInfo: nil)
       for i in 0..<8 {
         let angle = Double(i) * .pi / 4
-        let at = CGRect(x: inset + cos(angle) * edgeWidth, y: inset + sin(angle) * edgeWidth, width: size, height: size)
-        around.draw(in: at)
+        let offset = (x: cos(angle) * style.edgeWidth, y: sin(angle) * style.edgeWidth)
+        around.draw(in: CGRect(x: inset + offset.x, y: inset + offset.y, width: size, height: size))
       }
+      cg.endTransparencyLayer()
+      cg.restoreGState()
       drawing.draw(in: CGRect(x: inset, y: inset, width: size, height: size))
     }.withRenderingMode(.alwaysOriginal)
   }
