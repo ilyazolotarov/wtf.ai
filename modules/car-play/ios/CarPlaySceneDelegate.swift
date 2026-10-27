@@ -5,6 +5,11 @@ import CarPlay
 
 @objc(WTFCarPlaySceneDelegate)
 public final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
+  // From here on the app has a scene that isn't a window scene, which React Native's own code doesn't expect.
+  public func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options: UIScene.ConnectionOptions) {
+    _ = ReactSceneGuards.install
+  }
+
   public func templateApplicationScene(
     _ templateApplicationScene: CPTemplateApplicationScene,
     didConnect interfaceController: CPInterfaceController,
