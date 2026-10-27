@@ -42,7 +42,7 @@ import {
   PUCK_OUTER,
   ROUTE_LINE,
 } from "./puck-style";
-import { NEAR_NUMBERS_M, NEAR_POIS_M, NONE_FILTER, nearFilter, type NearHouses } from "./map-near";
+import { NEAR_NUMBERS_M, NEAR_POIS_M, nearFilter, type NearHouses } from "./map-near";
 import type { CompassHeading } from "./use-compass-heading";
 
 /**
@@ -594,10 +594,18 @@ const ENTRANCE_MINZOOM = 16;
 /**
  * One of the style's own symbol layers taken over by id to change its filter, once the style has loaded. Always
  * rendered while the map is: taking it off the map removes the style's layer. Given its whole definition, so that one
- * already gone (a JS reload remounted it) is made again, on top, instead of failing without a source.
+ * already gone (a JS reload remounted it) is made again, on top, instead of failing without a source. `hidden`: by
+ * visibility, set either way (a filter that keeps nothing, `["==", 0, 1]`, reads as a legacy one and is refused).
  */
-function StyleSymbolLayer({ layer, filter }: { layer: MapStyleJson["layers"][number]; filter: unknown[] }) {
-  return <Layer {...(layer as unknown as SymbolLayerSpecification)} filter={filter as FilterSpecification} />;
+function StyleSymbolLayer({ layer, filter, hidden = false }: { layer: MapStyleJson["layers"][number]; filter: unknown[]; hidden?: boolean }) {
+  const spec = layer as unknown as SymbolLayerSpecification;
+  return (
+    <Layer
+      {...spec}
+      layout={{ ...spec.layout, visibility: hidden ? "none" : (spec.layout?.visibility ?? "visible") }}
+      filter={filter as FilterSpecification}
+    />
+  );
 }
 
 const NO_HOUSES: NearHouses = { type: "FeatureCollection", features: [] };
@@ -645,7 +653,7 @@ export function NearLayers({
         const base = l.filter as unknown[] | undefined;
         if (l.id === HOUSE_NUMBER_LAYER && l.type === "symbol")
           return [
-            <StyleSymbolLayer key={l.id} layer={l} filter={houses ? NONE_FILTER : (base ?? ["all"])} />,
+            <StyleSymbolLayer key={l.id} layer={l} filter={base ?? ["all"]} hidden={houses != null} />,
             <NearHouseNumbers key="near-housenumbers" layer={l} houses={houses} />,
           ];
         if (pois && l["source-layer"] === "poi" && l.type === "symbol")

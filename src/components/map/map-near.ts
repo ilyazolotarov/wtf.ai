@@ -34,9 +34,6 @@ export function nearFilter(at: Coordinate | null, m: number, base?: unknown[], a
   return base ? ["all", base, near] : near;
 }
 
-/** A filter that keeps nothing: the tiles' house numbers while the search file's are drawn. */
-export const NONE_FILTER = ["==", 0, 1];
-
 export type NearHouses = { type: "FeatureCollection"; features: unknown[] };
 
 /**
