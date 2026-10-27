@@ -86,9 +86,10 @@ struct CarLabels: Equatable {
 }
 
 /**
- * What the driver must do before the car can guide (the JS side decides when): `location`, the app has no location
- * permission (its button asks for it); `held-route`, a route picked without an adapter waits for the driver's word (its
- * button gives it, the cancel button drops the route).
+ * What the driver must do before the car can guide (the JS side decides when): `no-map`, no offline map is installed
+ * (the condition only: nothing on the car's screen downloads one); `location`, the app has no location permission (its
+ * button asks for it); `held-route`, a route picked without an adapter waits for the driver's word (its button gives
+ * it, the cancel button drops the route).
  */
 struct CarNotice: Equatable {
   var kind: String
@@ -96,8 +97,19 @@ struct CarNotice: Equatable {
   var text: String
   var action: String
 
+  static let noMap = "no-map"
   static let location = "location"
   static let heldRoute = "held-route"
+}
+
+/** A notice's alert buttons. */
+enum CarNoticeButtons: Equatable {
+  /** Its action asks iOS for location. */
+  case allow
+  /** The driver's word for a held route, or Cancel. */
+  case confirmOrCancel
+  /** Only Close: the condition said, nothing on the car's screen changes it. */
+  case close
 }
 
 /** A maneuver as CarPlay's `CPManeuverType` knows it, and the app's icon for it. */
@@ -306,6 +318,26 @@ enum CarPlayLogic {
   static func estimatesKey(_ shown: Double, _ unit: String, _ seconds: Double) -> String {
     let d = distance(shown, unit: unit)
     return "\(d.value)\(d.kilometers ? "km" : "m") \(Int((max(0, seconds) / 60).rounded()))"
+  }
+
+  /**
+   * A notice's buttons: location asks while iOS can (`canAsk`: it never has), else only closes, as no map does; a held
+   * route takes the driver's word or is dropped.
+   */
+  static func noticeButtons(_ notice: CarNotice, canAsk: Bool) -> CarNoticeButtons {
+    switch notice.kind {
+    case CarNotice.location: return canAsk ? .allow : .close
+    case CarNotice.heldRoute: return .confirmOrCancel
+    default: return .close
+    }
+  }
+
+  /**
+   * Closed by CarPlay's own x, the notice stays closed (as by its Close) unless it asks something of the driver: the
+   * location alert comes back until location is allowed, a held route until the driver decides.
+   */
+  static func closedByCarPlaysX(_ notice: CarNotice, canAsk: Bool) -> Bool {
+    noticeButtons(notice, canAsk: canAsk) == .close
   }
 
   /** The results shown answer the text typed (an older text's would mislead); none yet while it is searched. */

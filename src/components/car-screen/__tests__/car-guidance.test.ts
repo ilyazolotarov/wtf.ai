@@ -79,6 +79,13 @@ describe("car route", () => {
     expect(carRoute(route(undefined, { status: "failed" }), t, "en")).toMatchObject({ status: "failed", message: en.routeCancelled });
   });
 
+  test("CarPlay's failures name no phone screen (Apple's guidelines); Android Auto's keep the phone's words", () => {
+    const noMap = route(undefined, { status: "failed", failure: "no-road-graph" });
+    expect(carRoute(noMap, t, "en")).toMatchObject({ message: en.routeNoRoadGraph });
+    expect(carRoute(noMap, t, "en", [], true)).toMatchObject({ message: en.carPlayNoRoadGraph });
+    expect(carRoute(route(undefined, { status: "failed", failure: "no-route" }), t, "en", [], true)).toMatchObject({ message: en.routeNoRoute });
+  });
+
   test("the next maneuver with the distance to it, its time at the plan's pace, and what is left", () => {
     const r = carRoute(route(step({})), t, "en")!;
     expect(r).toMatchObject({

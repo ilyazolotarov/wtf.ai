@@ -35,6 +35,12 @@ export interface CarSessionDeps {
    * use their iPhone); Android Auto's say where to look, when it's safe.
    */
   phoneFree?: boolean;
+  /**
+   * The car's screen says so while no offline map is installed (CarPlay): its map is a plain canvas then, and search
+   * finds cities only. Not Android Auto's: its installed builds draw a notice's buttons by its kind, have none for
+   * this one, and an action strip without a button throws.
+   */
+  mapNotice?: boolean;
   native: {
     isConnected(): boolean;
     /** Android Auto asked for its test drive (CarPlay has none). */
@@ -72,6 +78,8 @@ export interface CarSessionDeps {
     take(): RouteDestination | null;
     subscribe(listener: () => void): () => void;
   };
+  /** The offline map: a region installed and active, and its changes (a download finished, a region removed). */
+  map: { installed(): boolean; subscribe(listener: () => void): () => void };
   /** Phone-only mode with no adapter connected: a new route waits for the driver's word (UI-SPEC §6.3). */
   withoutAdapter(): boolean;
   /** The driver set the position, or GPS is trusted: a route without an adapter can start from it. */
@@ -146,10 +154,10 @@ export function carLabels(t: T): CarLabelsPayload {
 }
 
 /**
- * What the driver must do before the car can guide: allow location (unknown until checked: nothing yet), then agree
- * to a route held without an adapter, once the position is set (the card says to set it first, else to follow the
- * route exactly). The car's card has two short lines: one instruction at a time. `phoneFree`: the condition only, no
- * word of the phone (CarPlay).
+ * What the driver must do before the car can guide: a map (`noMap`: none installed, and the car's screen says so),
+ * then allow location (unknown until checked: nothing yet), then agree to a route held without an adapter, once the
+ * position is set (the card says to set it first, else to follow the route exactly). The car's card has two short
+ * lines: one instruction at a time. `phoneFree`: the condition only, no word of the phone (CarPlay).
  */
 export function carNotice(
   located: boolean | null,
@@ -157,7 +165,9 @@ export function carNotice(
   positionSet: boolean,
   t: T,
   phoneFree = false,
+  noMap = false,
 ): CarNoticePayload | null {
+  if (noMap) return { kind: "no-map", title: t("carNoMapTitle"), text: t("carNoMap"), action: t("close") };
   if (located === false) {
     return { kind: "location", title: t("locationOff"), text: t(phoneFree ? "carPlayLocationNeeded" : "carLocationNeeded"), action: t("carAllowLocation") };
   }
@@ -234,7 +244,7 @@ export function runCarSession(deps: CarSessionDeps): Promise<void> {
       const { t, language } = deps.strings();
       sendLabels(t, language);
       const route = routes.getSnapshot();
-      send(native.setRoute(carRoute(route, t, language, viaOf(route, language))));
+      send(native.setRoute(carRoute(route, t, language, viaOf(route, language), deps.phoneFree)));
       voice.update(route, deps.speedMps(), voice.muted() || voice.volume() === 0, t, language);
       // Ending the route ends what it was saying (the phone's map does the same while it is mounted).
       if (hadRoute && !route) voice.hush();
@@ -247,7 +257,8 @@ export function runCarSession(deps: CarSessionDeps): Promise<void> {
     let notice: CarNoticePayload | null | undefined;
     let stopChecks: (() => void) | null = null;
     const sendNotice = () => {
-      const next = carNotice(located, held.get(), deps.positionSet(), deps.strings().t, deps.phoneFree);
+      const noMap = deps.mapNotice === true && !deps.map.installed();
+      const next = carNotice(located, held.get(), deps.positionSet(), deps.strings().t, deps.phoneFree, noMap);
       if (notice === undefined || !sameNotice(next, notice)) {
         notice = next;
         send(native.setNotice(next));
@@ -402,6 +413,7 @@ export function runCarSession(deps: CarSessionDeps): Promise<void> {
       places.subscribe(sendPlaces),
       voice.subscribe(sendVoice),
       held.subscribe(sendNotice),
+      deps.map.subscribe(sendNotice),
       deps.subscribeLanguage(refreshWords),
       deps.subscribePhoneInFront(() => {
         refreshWords();

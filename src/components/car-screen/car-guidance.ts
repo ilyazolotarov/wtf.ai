@@ -4,9 +4,12 @@ import type { Strings } from "@/i18n/en";
 import { isStartTurnaround } from "@/nav/routing/announcer";
 import type { Maneuver } from "@/nav/routing/maneuvers";
 import type { RoutePlan } from "@/nav/routing/router";
-import type { RouteSnapshot } from "@/services/navigation/route-service";
+import type { RouteProblem, RouteSnapshot } from "@/services/navigation/route-service";
 
 import type { CarDistanceUnit, CarRoutePayload, CarStepPayload } from "./car-types";
+
+/** The failures whose phone words name a phone screen ("… in Offline maps"): the condition only, for CarPlay. */
+const PHONE_FREE_PROBLEM: Partial<Record<RouteProblem, keyof Strings>> = { "no-road-graph": "carPlayNoRoadGraph" };
 
 /**
  * A distance as the car shows it, rounded as the phone's banner rounds it (`formatManeuverDistance`): 10 m under 300 m,
@@ -32,6 +35,8 @@ export function carRoute(
   language: "en" | "uk",
   /** The street each route goes by (`viaNames`): the route's, then its alternatives'. */
   via: (string | null)[] = [],
+  /** The failures' words without the phone's screens (CarPlay: Apple's guidelines). */
+  phoneFree = false,
 ): CarRoutePayload | null {
   if (!route) return null;
   const { destination, guidance, maneuvers, plan } = route;
@@ -51,7 +56,8 @@ export function carRoute(
     alternatives: [],
   };
   if (route.status === "failed") {
-    return { ...base, status: "failed", message: t(route.failure ? PROBLEM_TEXT[route.failure] : "routeCancelled") };
+    const problem = route.failure ? ((phoneFree && PHONE_FREE_PROBLEM[route.failure]) || PROBLEM_TEXT[route.failure]) : "routeCancelled";
+    return { ...base, status: "failed", message: t(problem) };
   }
   if (route.status === "planning" || !plan || !maneuvers?.length) {
     return { ...base, status: "planning", message: t("planningRoute") };

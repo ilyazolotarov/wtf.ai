@@ -45,7 +45,8 @@ function setup({
   located = true,
   testDrive = false,
   carPlay = false,
-}: { connected?: boolean; located?: boolean; testDrive?: boolean; carPlay?: boolean } = {}) {
+  mapInstalled = true,
+}: { connected?: boolean; located?: boolean; testDrive?: boolean; carPlay?: boolean; mapInstalled?: boolean } = {}) {
   const calls: { method: string; arg: unknown }[] = [];
   let actionListener: ((e: CarAction) => void) | null = null;
   const routeListeners = new Set<() => void>();
@@ -54,6 +55,8 @@ function setup({
   const heldListeners = new Set<() => void>();
   const languageListeners = new Set<() => void>();
   const frontListeners = new Set<() => void>();
+  const mapListeners = new Set<() => void>();
+  let installed = mapInstalled;
   let route: RouteSnapshot | null = null;
   let muted = false;
   let volume = 0.8;
@@ -88,6 +91,8 @@ function setup({
   const emitHeld = () => heldListeners.forEach((l) => l());
   const deps: CarSessionDeps = {
     name: carPlay ? "carplay" : "android auto",
+    phoneFree: carPlay,
+    mapNotice: carPlay,
     native: {
       isConnected: () => connected,
       // CarPlay has no test drive.
@@ -151,6 +156,13 @@ function setup({
       subscribe: (l) => {
         heldListeners.add(l);
         return () => heldListeners.delete(l);
+      },
+    },
+    map: {
+      installed: () => installed,
+      subscribe: (l) => {
+        mapListeners.add(l);
+        return () => mapListeners.delete(l);
       },
     },
     withoutAdapter: () => withoutAdapter,
@@ -220,6 +232,11 @@ function setup({
     },
     setWithoutAdapter: (v: boolean) => (withoutAdapter = v),
     setPositionSet: (v: boolean) => (positionSet = v),
+    /** A region downloaded or removed on the phone. */
+    setMapInstalled: (v: boolean) => {
+      installed = v;
+      mapListeners.forEach((f) => f());
+    },
     setLanguage: (l: "en" | "uk") => {
       language = l;
       languageListeners.forEach((f) => f());
@@ -250,7 +267,13 @@ function setup({
     hushes: () => hushes,
     retries: () => retries,
     listeners: () =>
-      routeListeners.size + placeListeners.size + voiceListeners.size + heldListeners.size + languageListeners.size + frontListeners.size,
+      routeListeners.size +
+      placeListeners.size +
+      voiceListeners.size +
+      heldListeners.size +
+      languageListeners.size +
+      frontListeners.size +
+      mapListeners.size,
   };
 }
 
@@ -417,7 +440,24 @@ describe("car session", () => {
       expect(t.retries()).toBe(1);
     });
 
-    test("granted from the start: no notice, no retry", async () => {
+    test("no map installed: CarPlay says so before anything else, until a region is downloaded", async () => {
+    const s = setup({ carPlay: true, mapInstalled: false, located: false });
+    void runCarSession(s.deps);
+    await settle();
+    expect(s.notices().at(-1)).toEqual({ kind: "no-map", title: en.carNoMapTitle, text: en.carNoMap, action: en.close });
+    expect(s.timers()).toBe(1);
+    s.setMapInstalled(true);
+    expect(s.notices().at(-1)).toMatchObject({ kind: "location" });
+  });
+
+  test("no map installed on Android Auto: no notice (its installed builds have no button for one)", async () => {
+    const s = setup({ mapInstalled: false });
+    void runCarSession(s.deps);
+    await settle();
+    expect(s.notices()).toEqual([null]);
+  });
+
+  test("granted from the start: no notice, no retry", async () => {
       const s = setup();
       void runCarSession(s.deps);
       await settle();

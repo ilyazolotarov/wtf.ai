@@ -57,8 +57,8 @@ ICONS = [
     "remove",
     "my_location",
 ]
-# CarPlay's own: its map's pan button (Android Auto's is the host's).
-IOS_ICONS = ICONS + ["drag_pan"]
+# CarPlay's own: its map's pan button (Android Auto's is the host's), the no-map notice's.
+IOS_ICONS = ICONS + ["drag_pan", "map"]
 
 TEMPLATE = """<?xml version="1.0" encoding="utf-8"?>
 <!-- Material Symbols "{name}" (Apache License 2.0), drawn by scripts/car-icons.py: don't edit by hand. -->

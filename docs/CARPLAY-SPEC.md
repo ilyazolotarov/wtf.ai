@@ -129,6 +129,7 @@ GNSS and the adapter as they were. What the JS side sent is kept on the native s
 
   | State | The map template shows |
   | --- | --- |
+  | A notice: no offline map installed | An alert over the map: No offline map, routes and search need a downloaded region; button: Close (CarPlay draws it as its x) |
   | A notice: no location permission | An alert over the map with its words; button: Allow |
   | A notice: a route held without an adapter | An alert; buttons: I'll follow the route, Cancel |
   | No route | The map; bar: Destinations, Search; voice. Buttons: pan, recentre, +, − |
@@ -175,13 +176,19 @@ GNSS and the adapter as they were. What the JS side sent is kept on the native s
 - **Notices** as alerts over the map (`CPNavigationAlert`, until dismissed), one at a time, a notice before a failed
   plan. Their words state the condition and never send the driver to the phone (`carNotice`'s `phoneFree`, Jest:
   "Without location access the car's position can't be shown.", "The car's position isn't set yet."), as Apple's
-  guidelines require; Android Auto's say where to look. Location: while iOS has never asked, Allow asks
+  guidelines require; Android Auto's say where to look. No offline map first (`mapNotice`): without one the map is a
+  plain canvas and search finds cities only, and a driver who opened the car's screen first saw nothing say why. It
+  only closes (`CarPlayLogic.noticeButtons`), by its button or CarPlay's x, and goes when a region is installed (the
+  session follows the map packs). CarPlay's only: Android Auto's installed builds draw a notice's buttons by its kind,
+  have none for this one, and its action strip throws without a button. Location: while iOS has never asked, Allow asks
   (`requestWhenInUseAuthorization`; the dialog is the system's), and the alert comes back until the answer; refused
   before, nothing on the car's screen can allow it: the alert has Close, and stays closed until the notice changes. A
   change of the permission redraws it; the session checks it every 5 s and takes the answer (`permission`). A route
   held without an adapter: its button gives the driver's word (`confirm-held`), Cancel drops it (`cancel-held`). A
-  failed plan's alert names the destination and says why in its subtitle. An alert CarPlay takes down comes back; one
-  the driver closed (its button or CarPlay's own x, `userDismissed`) doesn't. Every template operation has a completion:
+  failed plan's alert names the destination and says why in its subtitle, naming no phone screen (`carRoute`'s
+  `phoneFree`: no map is "This region's map isn't downloaded.", not the phone's "… in Offline maps"). An alert CarPlay
+  takes down comes back; a failure the driver closed (its button or CarPlay's own x, `userDismissed`) doesn't, nor a
+  notice that only says something (`closedByCarPlaysX`); one that asks (Allow, a held route) does. Every template operation has a completion:
   CarPlay raises an exception for a failed one without (a pop with nothing to pop ended the app), and the failure goes
   to the trip log instead.
 - **Moving the map**: a finger on a touch screen (`didUpdatePanGestureWithTranslation`, `didEndPanGestureWithVelocity`)

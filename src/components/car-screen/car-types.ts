@@ -111,7 +111,8 @@ export interface CarLabelsPayload {
  * word (the button gives it, a close button drops the route).
  */
 export interface CarNoticePayload {
-  kind: "location" | "held-route";
+  /** `no-map`: CarPlay's only (`CarSessionDeps.mapNotice`). */
+  kind: "location" | "held-route" | "no-map";
   title: string;
   text: string;
   /** The button's words. */

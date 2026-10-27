@@ -21,7 +21,7 @@ import { inBounds, places } from "@/providers/places";
 import { destinations } from "@/providers/route-provider";
 import { heldRoute, holdRouteForGuide, onHeldRoute, takeHeldRoute } from "@/services/navigation/route-without-adapter";
 import { TestDrive } from "@/services/navigation/test-drive";
-import { getMapPacks } from "@/services/offline-map/map-packs";
+import { getMapPacks, subscribeMapPacks } from "@/services/offline-map/map-packs";
 import { activeSearchIndex } from "@/services/offline-map/search-file";
 import { autoConnect, getRuntime } from "@/services/runtime";
 
@@ -38,7 +38,7 @@ export const CAR_SESSION_TASK = "WtfCarSession";
 /** Android Auto's car screen connected (docs/ANDROID-AUTO-SPEC.md §3): runs until it is gone. */
 export async function carSessionTask(): Promise<void> {
   if (!AndroidAuto) return;
-  await runCarScreen(AndroidAuto, "android auto", "android-auto", false);
+  await runCarScreen(AndroidAuto, "android auto", "android-auto", { phoneFree: false, mapNotice: false });
 }
 
 let carPlayRunning = false;
@@ -54,7 +54,7 @@ export function listenForCarPlay(): void {
   const start = () => {
     if (carPlayRunning || !native.isConnected()) return;
     carPlayRunning = true;
-    void runCarScreen(native, "carplay", "carplay", true).finally(() => {
+    void runCarScreen(native, "carplay", "carplay", { phoneFree: true, mapNotice: true }).finally(() => {
       carPlayRunning = false;
     });
   };
@@ -63,10 +63,16 @@ export function listenForCarPlay(): void {
 }
 
 /**
- * One connection of a car's screen, the same on both platforms but for its native side, its name in the log, and
- * whether its words may send the driver to the phone (`phoneFree`: CarPlay's may not).
+ * One connection of a car's screen, the same on both platforms but for its native side, its name in the log, whether
+ * its words may send the driver to the phone (`phoneFree`: CarPlay's may not), and whether it says when no map is
+ * installed (`mapNotice`: CarPlay's; CarSessionDeps).
  */
-async function runCarScreen(native: CarSessionDeps["native"], name: string, feature: string, phoneFree: boolean): Promise<void> {
+async function runCarScreen(
+  native: CarSessionDeps["native"],
+  name: string,
+  feature: string,
+  { phoneFree, mapNotice }: Pick<CarSessionDeps, "phoneFree" | "mapNotice">,
+): Promise<void> {
   // The process may have started for the car, the phone's screens (and the root layout's setup) never loaded.
   initSentry();
   const runtime = getRuntime();
@@ -91,10 +97,12 @@ async function runCarScreen(native: CarSessionDeps["native"], name: string, feat
     await runCarSession({
       name,
       phoneFree,
+      mapNotice,
       native,
       routes,
       places,
       held: { get: heldRoute, hold: holdRouteForGuide, take: takeHeldRoute, subscribe: onHeldRoute },
+      map: { installed: () => getMapPacks().installed.active != null, subscribe: subscribeMapPacks },
       withoutAdapter: () => runtime.getDevSettings().phoneOnly && adapterStatusOf(link.getSnapshot()) !== "on",
       positionSet: () => {
         const p = position.getSnapshot();

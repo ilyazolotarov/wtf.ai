@@ -675,22 +675,24 @@ final class CarPlaySession: NSObject {
   private func alert(_ content: AlertContent) -> CPNavigationAlert {
     switch content {
     case .notice(let notice, let canAsk):
-      let location = notice.kind == CarNotice.location
-      // Location refused before: nothing on the car's screen can allow it, and its words may not send the driver to the
-      // phone (Apple's guidelines): the alert says so and closes.
-      let primary =
-        canAsk
-        ? CPAlertAction(title: notice.action, style: .default) { [weak self] _ in
-          location ? self?.requestLocation() : self?.send("confirm-held")
-        }
-        : CPAlertAction(title: labels.close, style: .cancel) { [weak self] _ in self?.noticeClosed = notice }
-      let secondary = location ? nil : CPAlertAction(title: labels.cancel, style: .cancel) { [weak self] _ in
-        self?.send("cancel-held")
+      // Location refused before, or no map: nothing on the car's screen changes it, and its words may not send the
+      // driver to the phone (Apple's guidelines): the alert says so and closes.
+      let close = CPAlertAction(title: labels.close, style: .cancel) { [weak self] _ in self?.noticeClosed = notice }
+      let primary: CPAlertAction
+      var secondary: CPAlertAction?
+      switch CarPlayLogic.noticeButtons(notice, canAsk: canAsk) {
+      case .allow:
+        primary = CPAlertAction(title: notice.action, style: .default) { [weak self] _ in self?.requestLocation() }
+      case .confirmOrCancel:
+        primary = CPAlertAction(title: notice.action, style: .default) { [weak self] _ in self?.send("confirm-held") }
+        secondary = CPAlertAction(title: labels.cancel, style: .cancel) { [weak self] _ in self?.send("cancel-held") }
+      case .close:
+        primary = close
       }
+      let icon = [CarNotice.location: "car_location_off", CarNotice.noMap: "car_map"][notice.kind] ?? "car_alt_route"
       let text = notice.text
       return CPNavigationAlert(
-        titleVariants: [notice.title], subtitleVariants: text.isEmpty ? [] : [text],
-        image: CarPlayImages.icon(location ? "car_location_off" : "car_alt_route"),
+        titleVariants: [notice.title], subtitleVariants: text.isEmpty ? [] : [text], image: CarPlayImages.icon(icon),
         primaryAction: primary, secondaryAction: secondary, duration: 0)
     case .failure(let message, let destination):
       let close = CPAlertAction(title: labels.close, style: .cancel) { [weak self] _ in
@@ -906,8 +908,14 @@ extension CarPlaySession: CPMapTemplateDelegate {
     alertPresentedContent = nil
     alertShown = nil
     carPlayLog.notice("alert dismissed (\(dismissalContext.rawValue))")
-    // Closed by the driver (its button, or CarPlay's own x): a failure stays closed.
-    if dismissalContext == .userDismissed, case .failure = content { failureClosed = content }
+    // Closed by the driver (its button, or CarPlay's own x): a failure stays closed, and a notice that only says
+    // something (no map, location iOS can't ask for any more).
+    if dismissalContext == .userDismissed {
+      if case .failure = content { failureClosed = content }
+      if case .notice(let notice, let canAsk) = content, CarPlayLogic.closedByCarPlaysX(notice, canAsk: canAsk) {
+        noticeClosed = notice
+      }
+    }
     // Taken down by CarPlay (another alert, the app sent away): shown again; the driver's own buttons decide theirs.
     if dismissalContext == .systemDismissed {
       DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.syncAlert() }

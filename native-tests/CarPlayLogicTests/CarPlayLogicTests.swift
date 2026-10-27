@@ -139,6 +139,24 @@ final class ButtonsTests: XCTestCase {
   }
 }
 
+final class NoticeTests: XCTestCase {
+  private func notice(_ kind: String) -> CarNotice { CarNotice(kind: kind, title: "t", text: "x", action: "a") }
+
+  func testLocationAsksWhileIOSCanThenOnlyClosesAsNoMapDoesAHeldRouteTakesTheDriversWord() {
+    XCTAssertEqual(CarPlayLogic.noticeButtons(notice(CarNotice.location), canAsk: true), .allow)
+    XCTAssertEqual(CarPlayLogic.noticeButtons(notice(CarNotice.location), canAsk: false), .close)
+    XCTAssertEqual(CarPlayLogic.noticeButtons(notice(CarNotice.noMap), canAsk: true), .close)
+    XCTAssertEqual(CarPlayLogic.noticeButtons(notice(CarNotice.heldRoute), canAsk: true), .confirmOrCancel)
+  }
+
+  func testCarPlaysXClosesForGoodOnlyANoticeThatAsksNothing() {
+    XCTAssertTrue(CarPlayLogic.closedByCarPlaysX(notice(CarNotice.noMap), canAsk: true))
+    XCTAssertTrue(CarPlayLogic.closedByCarPlaysX(notice(CarNotice.location), canAsk: false))
+    XCTAssertFalse(CarPlayLogic.closedByCarPlaysX(notice(CarNotice.location), canAsk: true))
+    XCTAssertFalse(CarPlayLogic.closedByCarPlaysX(notice(CarNotice.heldRoute), canAsk: true))
+  }
+}
+
 final class SearchAndDistanceTests: XCTestCase {
   func testTheResultsShownAnswerTheTextTyped() {
     let found = CarSearch(query: "khre", results: [CarPlace(id: "search:a1", title: "Khreshchatyk, 22", detail: nil, kind: "result")])
