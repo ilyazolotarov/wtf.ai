@@ -1,9 +1,9 @@
 # wtf.ai — Android Auto: Specification
 
 The map with the navigator's position, the route's guidance and a destination to pick, on the car's Android Auto
-screen. Companion to [ANDROID-SPEC.md](ANDROID-SPEC.md); the iOS counterpart is the CarPlay spike (branch
-`spike/carplay`, its CARPLAY-SPEC.md), whose split this follows: the map is the phone's React map, the car's own UI is
-the platform's templates, and what they show is decided in TypeScript.
+screen. Companion to [ANDROID-SPEC.md](ANDROID-SPEC.md); the iOS counterpart is [CARPLAY-SPEC.md](CARPLAY-SPEC.md),
+with the same split: the map is the phone's React map, the car's own UI is the platform's templates, and what they
+show is decided in TypeScript, by one session for both (`car-session.ts`).
 
 ## 1. Goal
 

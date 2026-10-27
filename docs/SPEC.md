@@ -8,7 +8,7 @@ Companion specs: [UI-SPEC.md](UI-SPEC.md) (screens and the map), [VEHICLE-LINK-S
 [NAVIGATOR-SPEC.md](NAVIGATOR-SPEC.md) (EKF, calibration, integrity, replay), [MAPMATCH-SPEC.md](MAPMATCH-SPEC.md)
 (road graph, particle filter), [ROUTING-SPEC.md](ROUTING-SPEC.md) (routing and guidance),
 [SEARCH-SPEC.md](SEARCH-SPEC.md) (offline address search), [UPDATES-SPEC.md](UPDATES-SPEC.md) (app and map updates),
-[ANDROID-SPEC.md](ANDROID-SPEC.md) (the Android build), [STORE-REVIEW.md](STORE-REVIEW.md) (store builds),
+[ANDROID-SPEC.md](ANDROID-SPEC.md) (the Android build),
 [ANDROID-AUTO-SPEC.md](ANDROID-AUTO-SPEC.md) and [CARPLAY-SPEC.md](CARPLAY-SPEC.md) (the car's screen).
 
 ## 1. Problem and goal

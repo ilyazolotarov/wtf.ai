@@ -3,7 +3,7 @@ import ExpoModulesCore
 import MapKit
 import os
 
-/** The car's screen coming and going, and what drew its map: in the device log, which the simulator job reads. */
+/** The car's screen coming and going, and what drew its map: in the device log (CARPLAY-SPEC §5). */
 let carPlayLog = Logger(subsystem: "ai.wtf.navigator", category: "carplay")
 
 /**
