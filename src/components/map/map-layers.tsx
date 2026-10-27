@@ -42,7 +42,7 @@ import {
   PUCK_OUTER,
   ROUTE_LINE,
 } from "./puck-style";
-import { NEAR_NUMBERS_M, NEAR_POIS_M, nearFilter } from "./map-near";
+import { NEAR_NUMBERS_M, NEAR_POIS_M, NONE_FILTER, nearFilter, type NearHouses } from "./map-near";
 import type { CompassHeading } from "./use-compass-heading";
 
 /**
@@ -600,17 +600,54 @@ function StyleSymbolLayer({ layer, filter }: { layer: MapStyleJson["layers"][num
   return <Layer {...(layer as unknown as SymbolLayerSpecification)} filter={filter as FilterSpecification} />;
 }
 
+const NO_HOUSES: NearHouses = { type: "FeatureCollection", features: [] };
+
 /**
- * Heading-up's near area (`map-near.ts`): house numbers only near the car; of the POIs, a driver's (the car's map's,
- * `DRIVER_POI_FILTER`) wherever they are, the rest only near the car (null: all, as the style has them). `pois: false`:
- * the car's style, which has only a driver's.
+ * The search file's house numbers near the car (`houses`, null: none) drawn as the style's: its layer's look, right
+ * above it, so they give way to every other label as the tiles' numbers do.
  */
-export function NearLayers({ style, near, pois }: { style: MapStyleJson; near: Coordinate | null; pois: boolean }) {
+function NearHouseNumbers({ layer, houses }: { layer: MapStyleJson["layers"][number]; houses: NearHouses | null }) {
+  const spec = layer as unknown as SymbolLayerSpecification;
+  return (
+    <GeoJSONSource id="near-housenumbers" data={(houses ?? NO_HOUSES) as GeoJSON.FeatureCollection}>
+      <Layer
+        id="near-housenumber"
+        type="symbol"
+        afterId={HOUSE_NUMBER_LAYER}
+        minzoom={spec.minzoom}
+        layout={{ ...spec.layout, "text-field": ["get", "n"] }}
+        paint={spec.paint}
+      />
+    </GeoJSONSource>
+  );
+}
+
+/**
+ * Heading-up's near area (`map-near.ts`): house numbers only near the car, the search file's (`houses`) instead of the
+ * tiles' (null: the tiles', all); of the POIs, a driver's (the car's map's, `DRIVER_POI_FILTER`) wherever they are, the
+ * rest only near the car (null `near`: all, as the style has them). `pois: false`: the car's style, which has only a
+ * driver's.
+ */
+export function NearLayers({
+  style,
+  near,
+  houses,
+  pois,
+}: {
+  style: MapStyleJson;
+  near: Coordinate | null;
+  houses: NearHouses | null;
+  pois: boolean;
+}) {
   return (
     <>
       {style.layers.map((l) => {
         const base = l.filter as unknown[] | undefined;
-        if (l.id === HOUSE_NUMBER_LAYER && l.type === "symbol") return <StyleSymbolLayer key={l.id} layer={l} filter={nearFilter(near, NEAR_NUMBERS_M, base)} />;
+        if (l.id === HOUSE_NUMBER_LAYER && l.type === "symbol")
+          return [
+            <StyleSymbolLayer key={l.id} layer={l} filter={houses ? NONE_FILTER : (base ?? ["all"])} />,
+            <NearHouseNumbers key="near-housenumbers" layer={l} houses={houses} />,
+          ];
         if (pois && l["source-layer"] === "poi" && l.type === "symbol")
           return <StyleSymbolLayer key={l.id} layer={l} filter={nearFilter(near, NEAR_POIS_M, base, DRIVER_POI_FILTER)} />;
         return null;

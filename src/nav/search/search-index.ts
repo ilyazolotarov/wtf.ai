@@ -337,7 +337,39 @@ export class SearchIndex {
       return last.best && last.best.d <= maxM ? last.best : null;
     }
     let best: { owner: Entity; house: House; d: number } | null = null;
-    for (const s of this.settlementsNear(at, PIN_SETTLEMENTS, (e) => e.reach || this.kindReach(e))) {
+    this.scanHouses(at, maxM, 0, (s, index, d, lat, lon, numberAt) => {
+      if (best && d >= best.d) return;
+      const owner = index < s.addr + s.naddr && index >= s.addr ? s : this.ownerOf(index, s);
+      if (!owner) return;
+      best = { owner, house: { index, house: this.string(numberAt), lat, lon, bonus: 0 }, d };
+    });
+    this.lastHouse = { at: { lat: at.lat, lon: at.lon }, maxM, best };
+    return best;
+  }
+
+  /**
+   * Every house within `maxM` of a point: its number and its building's centre. For the map's house numbers near the
+   * car (`map-near.ts`): the tiles merge a tile's houses of one number into one feature, which a distance filter keeps
+   * or drops whole.
+   */
+  housesNear(at: Coordinate, maxM: number): { house: string; lat: number; lon: number }[] {
+    const out: { house: string; lat: number; lon: number }[] = [];
+    this.scanHouses(at, maxM, maxM, (_s, _index, _d, lat, lon, numberAt) => out.push({ house: this.string(numberAt), lat, lon }));
+    return out;
+  }
+
+  /**
+   * Each house within `maxM` of a point, of the settlements whose reach (and `pastReach` beyond it) the point is in,
+   * with its settlement, address index, distance and number's string offset.
+   */
+  private scanHouses(
+    at: Coordinate,
+    maxM: number,
+    pastReach: number,
+    visit: (s: Entity, index: number, d: number, lat: number, lon: number, numberAt: number) => void,
+  ): void {
+    const kx = Math.cos((at.lat * Math.PI) / 180);
+    for (const s of this.settlementsNear(at, PIN_SETTLEMENTS, (e) => (e.reach || this.kindReach(e)) + pastReach)) {
       // The settlement's own houses (`addr:place`), then its children's: one contiguous run of the address table.
       const ranges: [number, number][] = [[s.addr, s.addr + s.naddr]];
       if (s.nchild > 0) {
@@ -349,23 +381,15 @@ export class SearchIndex {
         if (to <= from) continue;
         const bytes = this.source.read(this.header.addressesAt + from * ADDRESS_BYTES, (to - from) * ADDRESS_BYTES);
         const v = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-        const kx = Math.cos((at.lat * Math.PI) / 180);
         for (let i = 0; i < to - from; i++) {
           const lat = v.getInt32(i * ADDRESS_BYTES + 4, true) * COORD_SCALE;
           const lon = v.getInt32(i * ADDRESS_BYTES + 8, true) * COORD_SCALE;
           // Equirectangular metres: exact enough within a town, and cheap for 50 000 houses.
           const d = Math.hypot((lon - at.lon) * kx, lat - at.lat) * 111_195;
-          if (d > maxM || (best && d >= best.d)) continue;
-          const index = from + i;
-          const owner = index < s.addr + s.naddr && index >= s.addr ? s : this.ownerOf(index, s);
-          if (!owner) continue;
-          const house = this.string(v.getUint32(i * ADDRESS_BYTES, true));
-          best = { owner, house: { index, house, lat, lon, bonus: 0 }, d };
+          if (d <= maxM) visit(s, from + i, d, lat, lon, v.getUint32(i * ADDRESS_BYTES, true));
         }
       }
     }
-    this.lastHouse = { at: { lat: at.lat, lon: at.lon }, maxM, best };
-    return best;
   }
 
   /** A settlement's reach by its kind (§2). */

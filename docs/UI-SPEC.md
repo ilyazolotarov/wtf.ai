@@ -77,6 +77,9 @@ persisted in kv-store. No hardcoded user-facing strings in components.
   numbers, `RouteLayers`), so a street's name reads on the route along it, its dots and the alternatives' times on
   top; in heading-up, house numbers and entrances only within 250 m of the car (`map-near.ts`, MapLibre's `distance`
   from a point that moves on every 40 m), far ahead they were clutter (buildings not: `distance` is wrong for polygons);
+  the house numbers there are the search file's (`SearchIndex.housesNear`, a point a house, in the style's look), not
+  the tiles': a tile merges its houses of one number into one feature, which a distance filter keeps or drops whole
+  (without a search file the tiles' show, all of them);
   so are the POIs other than a driver's: within 250 m only, while the car's map's (fuel and charging, railway and
   metro stations: `DRIVER_POI_FILTER`) show at any distance (`NearLayers`); north-up and free show them all;
   `map-dark.ts` re-tints Liberty for the dark scheme (Night Drive: near-black ground, amber primary roads, orange

@@ -179,6 +179,9 @@ POIs: 97 MB): queries 9–25 ms. The phone is several times slower; an oblast is
   else the nearest settlement for its kind's reach (§2), which near an edge may name the neighbour (the file has no
   boundaries). The pin's card names
   the building where the map draws buildings, from z13 (UI-SPEC §6); "Route here" takes the name as the destination's, the point stays the pin's.
+- **Houses near a point** (`SearchIndex.housesNear`, the map's house numbers near the car in heading-up, UI-SPEC
+  §6.1): every house within the distance, its number and building centre, by the same scan, the settlements' reach
+  widened by the distance so a neighbour's edge houses are in.
 - **Quick picks** (empty field): saved places, recent destinations and the region's largest cities
   (`SearchIndex.majorSettlements`: the first settlements of the file, cities then towns by population).
 
