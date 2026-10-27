@@ -4,6 +4,7 @@ import ai.wtf.androidauto.logic.CarLabels
 import ai.wtf.androidauto.logic.CarNotice
 import ai.wtf.androidauto.logic.CarPlace
 import ai.wtf.androidauto.logic.CarRoute
+import ai.wtf.androidauto.logic.CarSearch
 import ai.wtf.androidauto.logic.CarStep
 import expo.modules.kotlin.functions.Queues
 import expo.modules.kotlin.modules.Module
@@ -50,8 +51,16 @@ class CarLabelsRecord : Record {
   @Field var saved: String = ""
   @Field var recent: String = ""
   @Field var noDestinations: String = ""
+  @Field var search: String = ""
+  @Field var searchHint: String = ""
+  @Field var noResults: String = ""
   @Field var checkPhone: String = ""
   @Field var notification: String = ""
+}
+
+class CarSearchRecord : Record {
+  @Field var query: String = ""
+  @Field var results: List<CarPlaceRecord> = emptyList()
 }
 
 class CarNoticeRecord : Record {
@@ -87,6 +96,9 @@ class AndroidAutoModule : Module() {
           saved = labels.saved.ifEmpty { d.saved },
           recent = labels.recent.ifEmpty { d.recent },
           noDestinations = labels.noDestinations.ifEmpty { d.noDestinations },
+          search = labels.search.ifEmpty { d.search },
+          searchHint = labels.searchHint.ifEmpty { d.searchHint },
+          noResults = labels.noResults.ifEmpty { d.noResults },
           checkPhone = labels.checkPhone.ifEmpty { d.checkPhone },
           notification = labels.notification.ifEmpty { d.notification },
         ),
@@ -124,6 +136,21 @@ class AndroidAutoModule : Module() {
     /** What the driver must do first (`location`, `held-route`), shown instead of the route; null: nothing. */
     AsyncFunction("setNotice") { notice: CarNoticeRecord? ->
       CarLink.setNotice(notice?.let { CarNotice(it.kind, it.title, it.text, it.action) })
+    }.runOnQueue(Queues.MAIN)
+
+    /** What the search screen's text found; null: nothing searched. */
+    AsyncFunction("setSearch") { search: CarSearchRecord? ->
+      CarLink.setSearch(search?.let { r -> CarSearch(r.query, r.results.map { CarPlace(it.id, it.title, it.detail, it.kind) }) })
+    }.runOnQueue(Queues.MAIN)
+
+    /** The search screen with `query` typed, over the map (after `setSearch` with its answers). */
+    AsyncFunction("openSearch") { query: String ->
+      CarLink.openSearch(query)
+    }.runOnQueue(Queues.MAIN)
+
+    /** A place the car's assistant or another app asked for, once: `{ navigate, uri }`, or null. */
+    AsyncFunction("takeRequest") {
+      CarLink.takeRequest()?.let { mapOf("navigate" to it.navigate, "uri" to it.uri) }
     }.runOnQueue(Queues.MAIN)
 
     /** The native side's notes since the last call, for the trip log (`problem`: reported too). */

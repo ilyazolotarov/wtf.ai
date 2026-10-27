@@ -11,6 +11,7 @@ import android.content.res.Configuration
 import android.util.Log
 import androidx.car.app.AppManager
 import androidx.car.app.CarAppService
+import androidx.car.app.CarContext
 import androidx.car.app.CarToast
 import androidx.car.app.Screen
 import androidx.car.app.ScreenManager
@@ -99,7 +100,33 @@ class CarScreenSession : Session() {
     }
     CarSessionTask.start(carContext.applicationContext as Application)
     syncNavigation()
+    request(intent)
     return NavigationScreen(carContext).also { navigation = it }
+  }
+
+  /** The car's assistant or another app asks for a place while the app is open. */
+  override fun onNewIntent(intent: Intent) {
+    request(intent)
+  }
+
+  /**
+   * A navigation intent (quality guideline NF-6): `androidx.car.app.action.NAVIGATE` to go to a `geo:` place, or
+   * `ACTION_VIEW` to look for one. The JS side searches and routes (car-session.ts).
+   */
+  private fun request(intent: Intent) {
+    val uri = intent.data?.toString() ?: return
+    when (intent.action) {
+      CarContext.ACTION_NAVIGATE -> CarLink.request(CarLink.Request(navigate = true, uri = uri))
+      Intent.ACTION_VIEW -> CarLink.request(CarLink.Request(navigate = false, uri = uri))
+    }
+  }
+
+  /** The search screen with `query` typed, right over the map (a list open before goes). */
+  fun openSearch(query: String) {
+    val screens = carContext.getCarService(ScreenManager::class.java)
+    if (screens.stackSize == 0) return
+    screens.popToRoot()
+    screens.push(SearchScreen(carContext, query, keyboard = false))
   }
 
   override fun onCarConfigurationChanged(newConfiguration: Configuration) {

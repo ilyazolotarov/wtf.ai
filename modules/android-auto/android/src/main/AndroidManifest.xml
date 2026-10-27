@@ -16,6 +16,17 @@
       android:name="androidx.car.app.minCarApiLevel"
       android:value="1" />
 
+    <!-- Navigation intents (quality guideline NF-6): Android Auto sends the car's assistant's "navigate to" to the
+         navigator whose phone activity takes them; the car session gets it (CarScreenSession.onNewIntent). Merged into
+         the app's activity. -->
+    <activity android:name="ai.wtf.navigator.MainActivity" android:exported="true">
+      <intent-filter>
+        <action android:name="androidx.car.app.action.NAVIGATE" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <data android:scheme="geo" />
+      </intent-filter>
+    </activity>
+
     <service
       android:name="ai.wtf.androidauto.CarScreenService"
       android:exported="true">

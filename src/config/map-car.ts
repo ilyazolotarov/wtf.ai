@@ -1,0 +1,52 @@
+import type { MapStyleJson } from "@/config/map-dark";
+
+/** Android for Cars' map guidelines: text not paired with a road or route at least 24 dp; icons and markers 36 dp. */
+export const CAR_MIN_TEXT_DP = 24;
+export const CAR_MIN_ICON_DP = 36;
+/** The POI icons' size in the style's sprite (OpenFreeMap's), dp. */
+const POI_ICON_DP = 19;
+/** What a driver stops for (OpenMapTiles `poi.class`). */
+export const CAR_POI_CLASSES = ["fuel", "charging_station"];
+/** Landmarks to check the dot by: stations, the metro's too, and airports; not bus stops. */
+export const CAR_TRANSIT_CLASSES = ["rail", "airport"];
+/**
+ * Ways a car can't take (OpenMapTiles `transportation.class`: footways, cycleways, steps, paths; pedestrian streets):
+ * in parks and yards their dashes were the busiest thing on the car's screen. Service roads and tracks stay.
+ */
+export const CAR_HIDDEN_WAY_CLASSES = ["path", "pedestrian"];
+
+/** The car's map style (ANDROID-AUTO-SPEC §4): no footways, and only a driver's POIs, at the guidelines' sizes. */
+export function carMapStyle(style: MapStyleJson, scale: number): MapStyleJson {
+  return withCarPois(withoutFootways(style), scale);
+}
+
+/** No ways a car can't take, nor their names. */
+export function withoutFootways(style: MapStyleJson): MapStyleJson {
+  const drivable = ["!", ["in", ["get", "class"], ["literal", CAR_HIDDEN_WAY_CLASSES]]];
+  return {
+    ...style,
+    layers: style.layers.map((l) => {
+      const source = l["source-layer"];
+      if (source !== "transportation" && source !== "transportation_name") return l;
+      return { ...l, filter: l.filter ? ["all", l.filter, drivable] : drivable };
+    }),
+  };
+}
+
+/**
+ * The car's map style (ANDROID-AUTO-SPEC §4), for a map drawn `scale` times the car's density (CarMapSurface): of the
+ * POIs only what a driver stops for and the landmarks, their names and icons as big as the guidelines ask.
+ */
+export function withCarPois(style: MapStyleJson, scale: number): MapStyleJson {
+  const keep = ["in", ["get", "class"], ["literal", [...CAR_POI_CLASSES, ...CAR_TRANSIT_CLASSES]]];
+  const textSize = Math.ceil(CAR_MIN_TEXT_DP / scale);
+  const iconSize = Math.ceil((CAR_MIN_ICON_DP / (POI_ICON_DP * scale)) * 100) / 100;
+  return {
+    ...style,
+    layers: style.layers.map((l) => {
+      if (l["source-layer"] !== "poi") return l;
+      const layout = { ...l.layout, "text-size": textSize, "icon-size": iconSize };
+      return { ...l, layout, filter: l.filter ? ["all", l.filter, keep] : keep };
+    }),
+  };
+}

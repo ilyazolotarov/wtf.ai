@@ -1,5 +1,5 @@
 import type { CameraRef } from "@maplibre/maplibre-react-native";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useWindowDimensions, type NativeSyntheticEvent } from "react-native";
 
 import { haversineM, type Coordinate } from "@/nav/geo";
@@ -45,10 +45,10 @@ const FIT_CIRCLE_SHARE = 0.35;
 
 /**
  * Heading-up puts the dot this far down the map (top 0, bottom 1), not in the middle: the road ahead fills the screen,
- * not the road behind (a tester's first ask, 2026-10-19). Below the route banner, above the bottom bar.
- * North-up stays centred: the road ahead may lie any way.
+ * not the road behind (a tester's first ask, 2026-10-19). Below the route banner, above the bottom bar: about 0.88 of
+ * the map between them, where Google Maps keeps its arrow. North-up stays centred: the road ahead may lie any way.
  */
-const HEADING_UP_DOT_AT = 0.75;
+const HEADING_UP_DOT_AT = 0.8;
 /**
  * iOS reports the screen's centre as the map's centre, not the dot's padded one: in heading-up (zoom 17, tilted) the
  * dot is a few hundred metres from it. The settle-back check allows that much more.
@@ -75,10 +75,21 @@ const FRAME_PADDING = { top: 300, bottom: 260, left: 60, right: 60 };
  * ghost, zooms in for placing the car, flattens after a gesture leaves a tilted mode, and logs what it shows.
  * Hand `cameraRef` to `<Camera>` and the two region handlers to `<Map>`.
  */
+/** A camera command sent and let go: MapLibre rejects one whose map view is gone, and none is awaited. */
+function send(command: () => unknown): void {
+  try {
+    void Promise.resolve(command()).catch(() => {});
+  } catch {
+    // No map view yet.
+  }
+}
+
 export function useMapCamera({
   mapReady,
   mapHeightPt,
   insets = NO_INSETS,
+  zoomOffset = 0,
+  headingUpDotAt = HEADING_UP_DOT_AT,
   mode,
   headingUpRad,
   position,
@@ -98,6 +109,10 @@ export function useMapCamera({
   mapHeightPt: number;
   /** Edges of the map covered by others' panels (the car's screen): following keeps the position in the rest. */
   insets?: Insets;
+  /** Added to the follow zooms: the car's map, drawn bigger, zooms out to show the same ground. */
+  zoomOffset?: number;
+  /** Heading-up's dot this far down the visible map (top 0, bottom 1); the phone's `HEADING_UP_DOT_AT` by default. */
+  headingUpDotAt?: number;
   mode: CameraMode;
   headingUpRad: number | null;
   position: PositionEstimate | null;
@@ -113,6 +128,13 @@ export function useMapCamera({
   logCamera?(text: string): void;
 }) {
   const cameraRef = useRef<CameraRef | null>(null);
+  // The car's map is taken down while Android Auto shows a list or the search over it: commands meanwhile fail.
+  const commands = {
+    jumpTo: (...a: Parameters<CameraRef["jumpTo"]>) => send(() => cameraRef.current?.jumpTo(...a)),
+    easeTo: (...a: Parameters<CameraRef["easeTo"]>) => send(() => cameraRef.current?.easeTo(...a)),
+    fitBounds: (...a: Parameters<CameraRef["fitBounds"]>) => send(() => cameraRef.current?.fitBounds(...a)),
+    setStop: (...a: Parameters<CameraRef["setStop"]>) => send(() => cameraRef.current?.setStop(...a)),
+  };
   const screenPt = useWindowDimensions();
   const fitRadiusPt = FIT_CIRCLE_SHARE * Math.min(screenPt.width, screenPt.height);
   const mapHeight = mapHeightPt > 0 ? mapHeightPt : screenPt.height;
@@ -126,7 +148,11 @@ export function useMapCamera({
   const noDirection = mode === "follow-heading" && headingUpRad === null;
   const moving = (position?.speedMps ?? 0) > COURSE_MIN_SPEED_MPS;
   const camera = noDirection && moving ? "follow" : mode;
-  const follow = camera === "free" ? null : FOLLOW_CAMERA[camera];
+  // One object per mode and offset: the follow effect runs when it changes.
+  const follow = useMemo(
+    () => (camera === "free" ? null : { ...FOLLOW_CAMERA[camera], zoom: FOLLOW_CAMERA[camera].zoom + zoomOffset }),
+    [camera, zoomOffset],
+  );
   const followBearing =
     camera === "follow-heading" ? (headingUpRad !== null ? mapBearingDeg(headingUpRad) : undefined) : 0;
 
@@ -157,7 +183,7 @@ export function useMapCamera({
       const v = lastView.current;
       logCamera?.(`camera placing from ${v ? `tilt ${Math.round(v.pitch)}°, bearing ${Math.round(v.bearing)}°, zoom ${v.zoom.toFixed(1)}` : "an unknown view"}`);
     }
-    void cameraRef.current?.setStop({
+    commands.setStop({
       ...(placing === "position" && placeFrom ? { center: [placeFrom.lon, placeFrom.lat] as [number, number] } : {}),
       ...(placing === "position" ? { zoom: PLACE_ZOOM } : {}),
       pitch: 0,
@@ -187,7 +213,7 @@ export function useMapCamera({
     // Placing and the ghost view set their own camera: a second command now would cancel theirs and start from the
     // map as it is, keeping heading-up's bearing (placing came out rotated at zoom 16, not north up at 18).
     if (byGesture || ghostView || placing) return;
-    void cameraRef.current?.setStop({
+    commands.setStop({
       zoom: FREE_ZOOM,
       pitch: 0,
       duration: 600,
@@ -252,7 +278,7 @@ export function useMapCamera({
       ...(followBearing !== undefined ? { bearing: followBearing } : {}),
       pitch: follow.pitch,
       padding: {
-        top: insetTop + (lowered ? Math.round((2 * HEADING_UP_DOT_AT - 1) * visibleHeight) : 0),
+        top: insetTop + (lowered ? Math.round((2 * headingUpDotAt - 1) * visibleHeight) : 0),
         bottom: insetBottom,
         left: insetLeft,
         right: insetRight,
@@ -261,10 +287,10 @@ export function useMapCamera({
     followStop.current = stop;
     followRestored.current = false;
     // Smoothed, every frame is a small step: an ease per frame would lag and restart 30 times a second.
-    if (snapped || smoothing) cameraRef.current?.jumpTo(stop);
-    else cameraRef.current?.easeTo({ ...stop, duration: FOLLOW_EASE_MS });
+    if (snapped || smoothing) commands.jumpTo(stop);
+    else commands.easeTo({ ...stop, duration: FOLLOW_EASE_MS });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapReady, follow, position, ghostView, followBearing, smoothing, fitRadiusPt, mapHeight, insetTop, insetBottom, insetLeft, insetRight]);
+  }, [mapReady, follow, position, ghostView, followBearing, smoothing, fitRadiusPt, mapHeight, insetTop, insetBottom, insetLeft, insetRight, headingUpDotAt]);
 
   // The route and its alternatives at once (ROUTING-SPEC §8.7), north up: framed once when asked.
   useEffect(() => {
@@ -273,7 +299,7 @@ export function useMapCamera({
     if (all.length < 2) return;
     const lons = all.map((c) => c.lon);
     const lats = all.map((c) => c.lat);
-    cameraRef.current?.fitBounds([Math.min(...lons), Math.min(...lats), Math.max(...lons), Math.max(...lats)], {
+    commands.fitBounds([Math.min(...lons), Math.min(...lats), Math.max(...lons), Math.max(...lats)], {
       padding: FRAME_PADDING,
       bearing: 0,
       pitch: 0,
@@ -285,7 +311,7 @@ export function useMapCamera({
   const hasGhost = ghost != null;
   useEffect(() => {
     if (!ghostView || !position || !ghost) return;
-    cameraRef.current?.fitBounds(
+    commands.fitBounds(
       [
         Math.min(position.lon, ghost.lon),
         Math.min(position.lat, ghost.lat),
@@ -335,7 +361,7 @@ export function useMapCamera({
       if (offM > FOLLOW_JUMP_M + (stop.padding.top > 0 ? HEADING_UP_CENTRE_OFF_M : 0)) {
         followRestored.current = true;
         logCamera?.(`camera follow: the map settled ${Math.round(offM)} m from the dot by itself, back to it`);
-        cameraRef.current?.jumpTo(stop);
+        commands.jumpTo(stop);
       }
     }
     if (logCamera && camera === "follow-heading" && bearing !== undefined && followBearing !== undefined) {
@@ -356,7 +382,7 @@ export function useMapCamera({
     clearTimeout(flattenTimer.current);
     flattenTimer.current = setTimeout(() => {
       flattenPending.current = false;
-      void cameraRef.current?.setStop({ pitch: 0, duration: 300, easing: "ease" });
+      commands.setStop({ pitch: 0, duration: 300, easing: "ease" });
     }, 80);
   };
 

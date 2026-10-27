@@ -4,6 +4,7 @@ import { useColorScheme, View, type NativeSyntheticEvent } from "react-native";
 
 import { ANDROID_BLURS } from "@/components/ui/glass-fill";
 import { useMapStyle } from "@/config/map";
+import { carMapStyle } from "@/config/map-car";
 import { STREET_PICK_LAYER } from "@/config/map-labels";
 import { Sentry } from "@/config/sentry";
 import { Colors } from "@/constants/theme";
@@ -32,7 +33,10 @@ const INITIAL_ZOOM = 15.4;
 // MapLibre's own errors (a tile it can't read, a style it can't load) reach JS only as console lines, which Sentry
 // keeps as logs, not issues. Each kind becomes an issue once per run: a broken pack fails every tile on screen.
 const reportedMapErrors = new Set<string>();
+// A camera command for a map view already gone: the car's map, taken down while Android Auto shows a list over it.
+const VIEW_GONE = /resolved to `view` null/;
 LogManager.onLog(({ level, tag, message }) => {
+  if (VIEW_GONE.test(message)) return true; // expected: not reported, not logged
   const kind = `${tag}: ${message.replace(/\d+/g, "#")}`;
   if (level === "error" && !reportedMapErrors.has(kind)) {
     reportedMapErrors.add(kind);
@@ -89,6 +93,13 @@ interface MapSurfaceProps {
   insets?: { top: number; bottom: number; left: number; right: number };
   /** Shown on a screen of its own, whatever the phone's app does (the car's): drawn smoothly while it is. */
   onOwnScreen?: boolean;
+  /**
+   * The car's screen draws the map this many times its density (CarMapSurface, ANDROID-AUTO-SPEC §4): the camera zooms
+   * out by as much, showing the same ground bigger, and of the POIs only a driver's, as big as the guidelines ask.
+   */
+  carScale?: number;
+  /** Heading-up's dot this far down the map (top 0, bottom 1), if not the phone's. */
+  headingUpDotAt?: number;
 }
 
 export function MapSurface({
@@ -110,6 +121,8 @@ export function MapSurface({
   scheme: schemeOverride,
   insets,
   onOwnScreen,
+  carScale,
+  headingUpDotAt,
 }: MapSurfaceProps) {
   const phoneScheme = useColorScheme() === "dark" ? "dark" : "light";
   const scheme = schemeOverride ?? phoneScheme;
@@ -117,7 +130,10 @@ export function MapSurface({
   const packStyle = useMapStyle(scheme);
   // The parked car's images come with the style (car-sprite.ts); the first time, the style is reloaded with them.
   const carSprite = useCarSprite();
-  const mapStyle = useMemo(() => packStyle && withCarSprite(packStyle, carSprite), [packStyle, carSprite]);
+  const mapStyle = useMemo(
+    () => packStyle && withCarSprite(carScale ? carMapStyle(packStyle, carScale) : packStyle, carSprite),
+    [packStyle, carSprite, carScale],
+  );
   const entrancesUrl = useEntrancesUrl();
   const { installed } = useMapPacks();
   const region = installed.active ? installed.regions[installed.active] : null;
@@ -146,6 +162,8 @@ export function MapSurface({
     mapReady,
     mapHeightPt,
     insets,
+    zoomOffset: carScale ? -Math.log2(carScale) : 0,
+    headingUpDotAt,
     mode,
     // Heading-up turns with the smoothed heading too, unless the walking compass leads.
     headingUpRad: smoothing && !compass && shown?.headingRad != null ? shown.headingRad : headingUpRad,

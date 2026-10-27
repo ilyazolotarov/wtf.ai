@@ -1,6 +1,8 @@
 import * as Sentry from "@sentry/react-native";
 import { AppState } from "react-native";
 
+import { findPlaces } from "@/components/route/place-search";
+import { formatDistance } from "@/components/status/format-geo";
 import { adapterStatusOf } from "@/components/status/use-nav-status";
 import {
   gainOf,
@@ -14,8 +16,12 @@ import {
 import { hushVoice, setVoiceAsGuidance, setVoiceNote, setVoiceVolume } from "@/components/route/voice-player";
 import { initSentry } from "@/config/sentry";
 import { appStrings, subscribeAppLanguage } from "@/i18n/provider";
-import { places } from "@/providers/places";
+import { haversineM } from "@/nav/geo";
+import { inBounds, places } from "@/providers/places";
+import { destinations } from "@/providers/route-provider";
 import { heldRoute, holdRouteForGuide, onHeldRoute, takeHeldRoute } from "@/services/navigation/route-without-adapter";
+import { getMapPacks } from "@/services/offline-map/map-packs";
+import { activeSearchIndex } from "@/services/offline-map/search-file";
 import { autoConnect, getRuntime } from "@/services/runtime";
 
 import AndroidAuto from "../../../modules/android-auto/src/AndroidAutoModule";
@@ -69,6 +75,20 @@ export async function carSessionTask(): Promise<void> {
         hush: hushVoice,
       },
       speedMps: () => position.getSnapshot()?.speedMps ?? 0,
+      // As the phone's route screen searches: the active region, near the car; its cities without an index.
+      find: (text) => {
+        const { language, t } = appStrings();
+        const { installed } = getMapPacks();
+        const bounds = (installed.active ? installed.regions[installed.active]?.bounds : null) ?? null;
+        const cities = destinations
+          .filter((d) => inBounds(bounds, d))
+          .map((d) => ({ id: d.id, title: d.name[language], detail: null, lat: d.lat, lon: d.lon }));
+        return findPlaces(text, { index: activeSearchIndex(installed), bounds, near: position.getSnapshot(), cities, language, t });
+      },
+      away: (at) => {
+        const from = position.getSnapshot();
+        return from ? formatDistance(haversineM(from, at), appStrings().language) : null;
+      },
       located: () => position.getPermission().then((p) => p.granted),
       retryLocation: () => position.retryCapture(),
       setCarScreen: (on) => runtime.setCarScreen(on),

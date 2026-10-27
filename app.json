@@ -122,6 +122,13 @@
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.REQUEST_INSTALL_PACKAGES"
       ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "category": ["DEFAULT", "BROWSABLE"],
+          "data": [{ "scheme": "geo" }, { "scheme": "google.navigation" }]
+        }
+      ],
       "package": "ai.wtf.navigator"
     },
     "web": {

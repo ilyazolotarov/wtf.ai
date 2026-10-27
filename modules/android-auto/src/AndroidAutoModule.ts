@@ -36,11 +36,27 @@ export interface CarRoutePayload {
   remainingUnit: CarDistanceUnit;
 }
 
+/** A destination to pick: a saved place, a recent one, or a search result. */
 export interface CarPlacePayload {
   id: string;
   title: string;
   detail?: string | null;
-  kind: "home" | "work" | "favorite" | "recent";
+  kind: "home" | "work" | "favorite" | "recent" | "result";
+}
+
+/** What the car's search found, and the text it answers (the screen shows it only for that text). */
+export interface CarSearchPayload {
+  query: string;
+  results: CarPlacePayload[];
+}
+
+/**
+ * A place the car's assistant or another app asked for: a `geo:` URI; `navigate`, to go there
+ * (`androidx.car.app.action.NAVIGATE`), else to look for it.
+ */
+export interface CarRequest {
+  navigate: boolean;
+  uri: string;
 }
 
 /** The car screen's own words, in the app's language. */
@@ -50,6 +66,10 @@ export interface CarLabelsPayload {
   saved: string;
   recent: string;
   noDestinations: string;
+  /** The search button's name; the search field's hint; its list with nothing found. */
+  search: string;
+  searchHint: string;
+  noResults: string;
   /** Shown when the car sends the driver to the phone (the permission dialog): look at it only when it's safe. */
   checkPhone: string;
   /** The phone's notification while the car session keeps the position. */
@@ -77,13 +97,15 @@ export interface CarNote {
 
 /**
  * `end-route`: the driver ended the route on the car's screen, or the host did (another navigator started one);
- * `go`: a destination picked in the list (`id`); `toggle-voice`; `confirm-held`, `cancel-held`: the held route's
- * buttons; `permission`: the location request answered; `notes`: native notes to take; `session-ended`: the car's
- * screen is gone.
+ * `go`: a destination or search result picked (`id`); `search`: the search screen's text changed; `request`: a place
+ * asked for, to take; `toggle-voice`; `confirm-held`, `cancel-held`: the held route's buttons; `permission`: the
+ * location request answered; `notes`: native notes to take; `session-ended`: the car's screen is gone.
  */
 export type CarAction =
   | { action: "end-route" }
   | { action: "go"; id: string }
+  | { action: "search"; text: string }
+  | { action: "request" }
   | { action: "toggle-voice" }
   | { action: "confirm-held" }
   | { action: "cancel-held" }
@@ -104,6 +126,11 @@ declare class AndroidAutoNativeModule extends NativeModule<AndroidAutoEvents> {
   /** Null: no voice (volume 0), no button. */
   setVoiceMuted(muted: boolean | null): Promise<void>;
   setNotice(notice: CarNoticePayload | null): Promise<void>;
+  setSearch(search: CarSearchPayload | null): Promise<void>;
+  /** The search screen with `query` typed, over the map (after `setSearch` with its answers). */
+  openSearch(query: string): Promise<void>;
+  /** A place asked for, once: taking it clears it. */
+  takeRequest(): Promise<CarRequest | null>;
   /** The native side's notes since the last call. */
   takeNotes(): Promise<CarNote[]>;
 }

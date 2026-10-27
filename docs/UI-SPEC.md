@@ -180,9 +180,11 @@ persisted in kv-store. No hardcoded user-facing strings in components.
   it shrinks. A circle that fills the screen reads as a tint, not as a circle. Once the car has moved, the follow
   zooms are fixed. Logged as `camera follow: zoom <z> to fit the circle (<m> m)`.
 - **Tilt:** heading-up 50°; north-up, free, the ghost view, the routes' overview and placing are top-down. No tilt or
-  rotate gesture. A gesture that leaves heading-up flattens the map once it settles.
-- **Where the dot sits:** heading-up puts it 75 % down the map's own height (a top padding on the follow stop), so the
-  road ahead fills the screen between the route banner and the bottom bar. North-up, and heading-up zoomed out for a
+  rotate gesture. A gesture that leaves heading-up flattens the map once it settles. Names along streets and rivers
+  stand up facing the driver (`text-pitch-alignment: viewport`): lying on the tilted road they blurred.
+- **Where the dot sits:** heading-up puts it 80 % down the map's own height (a top padding on the follow stop), so the
+  road ahead fills the screen between the route banner and the bottom bar: about 88 % of the map between them, where
+  Google Maps keeps its arrow. The car's screen: 85 % of its visible map (ANDROID-AUTO-SPEC §4). North-up, and heading-up zoomed out for a
   wide circle at open, keep it centred. iOS reports the screen's centre as the map's, so the settle-back check below
   allows 1 km more while the dot is lowered.
 - **Motion** (`pose-smoother.ts`): moving (≥ 2 m/s, with a heading, not a placed position) the dot, its circle and
@@ -276,6 +278,7 @@ One small component each; the screen only places them and wires their state. Car
 - Typing: with the region's search index (SEARCH-SPEC §6), places, streets, house numbers and POIs, each with what it
   is, its settlement, distance and direction; without one, the cities filtered by name and a note to download the
   region again. Coordinates or a map link (SEARCH-SPEC §4.5): one result, its card straight away when pasted.
+- Opened by another app's `geo:` link (Android, SEARCH-SPEC §4.6): over the map, its place or words in the field.
 - A selected result → summary card: straight-line distance, bearing and time at 60 km/h; once its route is planned,
   the road distance and time. Under it **Home**, **Work**, **Save** (a place is saved under one kind), or "Saved as
   Home · Remove"; a confirmation strip with **Undo**.

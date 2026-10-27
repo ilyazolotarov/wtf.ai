@@ -58,20 +58,38 @@ data class CarRoute(
   val remainingUnit: String,
 )
 
-/** A destination to pick on the car's screen: a saved place or a recent one. */
+/** A destination to pick on the car's screen: a saved place, a recent one, or a search result (`result`). */
 data class CarPlace(val id: String, val title: String, val detail: String?, val kind: String)
+
+/** What the car's search found (the JS side's offline search), and the text it answers. */
+data class CarSearch(val query: String, val results: List<CarPlace>)
+
+/** The search screen's list for the text typed now. */
+sealed interface CarSearchList {
+  /** Nothing typed: no list. */
+  object Empty : CarSearchList
+
+  /** Typed, not answered yet: the loading list. */
+  object Loading : CarSearchList
+
+  /** The answer (empty: the "nothing found" message). */
+  data class Results(val places: List<CarPlace>) : CarSearchList
+}
 
 /** The car's own words, in the app's language (the JS side's strings; English until it sends them). */
 data class CarLabels(
-  val endRoute: String = "End route",
+  val endRoute: String = "Stop guidance",
   val destinations: String = "Destinations",
   val saved: String = "Saved",
   val recent: String = "Recent",
-  val noDestinations: String = "Saved places and recent destinations show here.",
+  val noDestinations: String = "Saved places and recent destinations from your phone will appear here.",
+  val search: String = "Search",
+  val searchHint: String = "Search addresses and places",
+  val noResults: String = "Nothing found in the downloaded region",
   /** Shown when the car sends the driver to the phone (the permission dialog): quality guideline VI-1. */
-  val checkPhone: String = "Look at the phone only when it's safe.",
+  val checkPhone: String = "Check your phone only when it's safe.",
   /** The phone's notification while the car session holds location (CarLocationService). */
-  val notification: String = "Keeps the car's position while Android Auto shows another app.",
+  val notification: String = "Tracks your car's position even when another app is open in Android Auto.",
 )
 
 /**
@@ -133,6 +151,16 @@ object CarGuidanceLogic {
   fun showsSteps(route: CarRoute?): Boolean =
     route != null && route.status == "active" && !route.replanning && route.steps.isNotEmpty()
 
+  /** The results shown answer the text typed (an older text's would mislead); none yet while it is searched. */
+  fun searchList(search: CarSearch?, typed: String): CarSearchList {
+    val text = typed.trim()
+    return when {
+      text.isEmpty() -> CarSearchList.Empty
+      search == null || search.query.trim() != text -> CarSearchList.Loading
+      else -> CarSearchList.Results(search.results)
+    }
+  }
+
   /** A notice comes first: the route can't be followed until the driver has done what it asks. */
   fun card(route: CarRoute?, notice: CarNotice?): CarCard =
     when {
@@ -157,7 +185,16 @@ object CarGuidanceLogic {
     }
   }
 
-  /** The visible area as insets from the surface's edges, in the car's density-independent pixels. */
+  /**
+   * The car's map is drawn this many times the car's density: Android for Cars asks 36 dp for markers (the dot is
+   * 26 dp on the phone) and 24 dp for text off the roads; the map zooms out by as much to show the same ground.
+   */
+  const val MAP_SCALE = 1.4
+
+  /** The map's display density for the car's: 160 when the host gives none. */
+  fun mapDpi(dpi: Int): Int = Math.round((if (dpi > 0) dpi else 160) * MAP_SCALE).toInt()
+
+  /** The visible area as insets from the surface's edges, in the map display's density-independent pixels. */
   fun insetsDp(
     width: Int,
     height: Int,

@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 
 import { tintDarkStyle, type MapStyleJson } from "@/config/map-dark";
-import { withStreetLabels } from "@/config/map-labels";
+import { withBlackLabels, withStreetLabels } from "@/config/map-labels";
 import { stylePalette, type MapPalette } from "@/config/map-palette";
 import { withWorld } from "@/config/map-world";
 import { readActiveStyle, readActiveWorld, useMapPacks, type InstalledState } from "@/services/offline-map/map-packs";
@@ -37,7 +37,7 @@ function packStyle(installed: InstalledState, scheme: "light" | "dark"): MapStyl
     const read = readActiveStyle(installed);
     if (!read) return null;
     const style = withWorld(withStreetLabels(withAttribution(read)), readActiveWorld(installed));
-    return scheme === "dark" ? tintDarkStyle(style) : style;
+    return scheme === "dark" ? tintDarkStyle(style) : withBlackLabels(style);
   } catch (error) {
     console.warn("Offline map style unreadable", error);
     return null;

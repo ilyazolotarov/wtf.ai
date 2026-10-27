@@ -15,6 +15,8 @@ export interface CarMapProps {
   /** The car's night mode (its own, not the phone's). */
   dark?: boolean;
   insets?: CarInsets;
+  /** The map drawn this many times the car's density (CarMapSurface): bigger, as Android for Cars asks. */
+  scale?: number;
 }
 
 /**
@@ -23,12 +25,12 @@ export interface CarMapProps {
  * heading-up and following the car in the part of the screen the template leaves free. What it shows of the route
  * besides the map, and the navigator kept running, are the car session's (car-session-task.ts).
  */
-export function CarMapRoot({ dark = false, insets = {} }: CarMapProps) {
+export function CarMapRoot({ dark = false, insets = {}, scale = 1 }: CarMapProps) {
   return (
     <I18nProvider>
       {/* The session runs the navigator: this map only draws it. */}
       <PositionProvider gnss={false}>
-        <CarMap dark={dark} insets={insets} />
+        <CarMap dark={dark} insets={insets} scale={scale} />
       </PositionProvider>
     </I18nProvider>
   );
@@ -36,7 +38,14 @@ export function CarMapRoot({ dark = false, insets = {} }: CarMapProps) {
 
 const noop = () => {};
 
-function CarMap({ dark, insets }: Required<CarMapProps>) {
+/**
+ * Heading-up puts the dot this far down the car's visible map (the phone: 0.8 of its whole map): a car's screen is
+ * wide and short, and the road ahead needs its height. Google Maps keeps its arrow lower still (about 0.92 on the head
+ * unit), flat; tilted, the top already reaches far ahead.
+ */
+const CAR_HEADING_UP_DOT_AT = 0.85;
+
+function CarMap({ dark, insets, scale }: Required<CarMapProps>) {
   const position = usePosition();
   const headingUp = useHeadingUp(position, null);
   const padding = {
@@ -57,6 +66,8 @@ function CarMap({ dark, insets }: Required<CarMapProps>) {
       scheme={dark ? "dark" : "light"}
       insets={padding}
       onOwnScreen
+      carScale={scale}
+      headingUpDotAt={CAR_HEADING_UP_DOT_AT}
       attributionPosition={{ bottom: padding.bottom + 8, left: padding.left + 8 }}
     />
   );

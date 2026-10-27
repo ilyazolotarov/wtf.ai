@@ -29,6 +29,9 @@ void SplashScreen.preventAutoHideAsync();
 
 export default Sentry.wrap(RootLayout);
 
+// A page opened by a link (`geo:` from another app, `wtfai://…`) has the map under it, as when opened from the map.
+export const unstable_settings = { anchor: "index" };
+
 function RootLayout() {
   const colorScheme = useColorScheme();
   const [fontsLoaded, fontError] = useFonts({

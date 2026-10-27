@@ -4,6 +4,7 @@ import ai.wtf.androidauto.logic.CarLabels
 import ai.wtf.androidauto.logic.CarNotice
 import ai.wtf.androidauto.logic.CarPlace
 import ai.wtf.androidauto.logic.CarRoute
+import ai.wtf.androidauto.logic.CarSearch
 import android.util.Log
 
 /**
@@ -33,6 +34,10 @@ internal object CarLink {
   var notice: CarNotice? = null
     private set
 
+  /** What the search screen's text found (the JS side searches as the driver types). */
+  var search: CarSearch? = null
+    private set
+
   /** The connected car's session, while there is one. */
   @Volatile
   var session: CarScreenSession? = null
@@ -44,6 +49,14 @@ internal object CarLink {
   data class Note(val text: String, val problem: Boolean)
 
   private val notes = ArrayDeque<Note>()
+
+  /**
+   * A place asked for by the car's assistant or another app (a `geo:` URI): `navigate`, to go there
+   * (`androidx.car.app.action.NAVIGATE`), else to look for it (`ACTION_VIEW`).
+   */
+  data class Request(val navigate: Boolean, val uri: String)
+
+  private var request: Request? = null
 
   fun setLabels(value: CarLabels) {
     if (value == labels) return
@@ -78,6 +91,29 @@ internal object CarLink {
     if (wasLocation && value?.kind != NOTICE_LOCATION) session.locationAllowed()
     session.refresh()
   }
+
+  fun setSearch(value: CarSearch?) {
+    if (value == search) return
+    search = value
+    session?.refresh()
+  }
+
+  /**
+   * The search screen with `query` typed, over the map: a request with several answers (the JS side sent them with
+   * `setSearch`).
+   */
+  fun openSearch(query: String) {
+    session?.openSearch(query)
+  }
+
+  /** Kept until the JS side takes it (`takeRequest`): the session's task may not run yet. A newer one replaces it. */
+  fun request(value: Request) {
+    note("${if (value.navigate) "navigation" else "search"} asked for: ${value.uri}")
+    request = value
+    emit?.invoke("onCarAction", mapOf("action" to "request"))
+  }
+
+  fun takeRequest(): Request? = request.also { request = null }
 
   /** The driver's action on the car's screen, or the host's, for the JS side. */
   fun send(action: String, body: Map<String, Any?> = emptyMap()) {

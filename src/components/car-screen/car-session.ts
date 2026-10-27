@@ -1,4 +1,6 @@
 import type { Strings } from "@/i18n/en";
+import type { Coordinate } from "@/nav/geo";
+import { addressQueries, geoSearchText, parseGeoUri } from "@/nav/search/geo-uri";
 import type { RouteDestination, RouteSnapshot } from "@/services/navigation/route-service";
 import type { Place, PlacesSnapshot } from "@/services/navigation/places-store";
 
@@ -8,7 +10,9 @@ import type {
   CarNote,
   CarNoticePayload,
   CarPlacePayload,
+  CarRequest,
   CarRoutePayload,
+  CarSearchPayload,
 } from "../../../modules/android-auto/src/AndroidAutoModule";
 import { carRoute } from "./car-guidance";
 
@@ -29,6 +33,9 @@ export interface CarSessionDeps {
     setPlaces(places: CarPlacePayload[]): Promise<void>;
     setVoiceMuted(muted: boolean | null): Promise<void>;
     setNotice(notice: CarNoticePayload | null): Promise<void>;
+    setSearch(search: CarSearchPayload | null): Promise<void>;
+    openSearch(query: string): Promise<void>;
+    takeRequest(): Promise<CarRequest | null>;
     takeNotes(): Promise<CarNote[]>;
     addListener(event: "onCarAction", listener: (e: CarAction) => void): { remove(): void };
   };
@@ -73,6 +80,10 @@ export interface CarSessionDeps {
     hush(): void;
   };
   speedMps(): number;
+  /** What a search finds at once (place-search.ts `findPlaces`): a point, the region's index, or its cities. */
+  find(text: string): Place[];
+  /** How far a place is from the car ("1.2 km"); null without a position. */
+  away(at: Coordinate): string | null;
   /** Location permission granted (fine or approximate). */
   located(): Promise<boolean>;
   /** Location allowed since: GNSS started again for the navigator. */
@@ -103,6 +114,9 @@ export function carLabels(t: T): CarLabelsPayload {
     saved: t("savedPlaces"),
     recent: t("recentPlaces"),
     noDestinations: t("carNoDestinations"),
+    search: t("carSearch"),
+    searchHint: t("searchPlaces"),
+    noResults: t("noSearchResults"),
     checkPhone: t("carCheckPhone"),
     notification: t("carNotification"),
   };
@@ -121,6 +135,9 @@ export function carNotice(located: boolean | null, held: RouteDestination | null
   }
   return null;
 }
+
+/** A house the search found (its id `search:a<address>`, place-search.ts `resultPlace`; SEARCH-SPEC §4). */
+const isHouse = (p: Place) => p.id.startsWith("search:a");
 
 const sameNotice = (a: CarNoticePayload | null, b: CarNoticePayload | null) =>
   a === b || (a != null && b != null && a.kind === b.kind && a.title === b.title && a.text === b.text && a.action === b.action);
@@ -216,6 +233,70 @@ export function runCarSession(deps: CarSessionDeps): Promise<void> {
       sendNotice();
     };
 
+    // A place to go to, as the phone's route screen goes: a recent destination from now; without an adapter, the route
+    // waits for the driver's word.
+    const goTo = (place: Place, how: string) => {
+      places.addRecent(place);
+      const destination = { lat: place.lat, lon: place.lon, name: place.title, id: place.id };
+      if (deps.withoutAdapter()) {
+        deps.note(`android auto: ${how}, held: no adapter`);
+        routes.stop();
+        held.hold(destination);
+        return;
+      }
+      deps.note(`android auto: ${how}`);
+      routes.start(destination);
+    };
+
+    // The search screen's answers, as the driver types (the phone's offline search; nearest first).
+    let found: Place[] = [];
+    const show = (text: string, answers: Place[]) => {
+      found = answers;
+      const results = answers.map((p) => {
+        const detail = [p.detail, deps.away(p)].filter(Boolean).join(" · ");
+        return { id: p.id, title: p.title, detail: detail || null, kind: "result" as const };
+      });
+      send(native.setSearch({ query: text, results }));
+    };
+    const search = (text: string) => show(text, text.trim() ? deps.find(text) : []);
+
+    // A place the car's assistant or another app asked for (SEARCH-SPEC §4.6): to go to, a point is gone to and words
+    // with one answer too; else the answers show to pick from, as when asked only to look for it. The assistant's
+    // address is searched as the index holds it, less of it while nothing is found (`addressQueries`).
+    const request = ({ navigate, uri }: CarRequest) => {
+      const geo = parseGeoUri(uri);
+      if (!geo) {
+        deps.note("android auto: a place asked for, not understood");
+        return;
+      }
+      const wordings = geo.point ? [geoSearchText(uri)!] : addressQueries(geo.query!);
+      let text = wordings[0];
+      let answers = deps.find(text);
+      for (const wording of wordings.slice(1)) {
+        if (answers.length > 0) break;
+        const more = deps.find(wording);
+        if (more.length > 0) [text, answers] = [wording, more];
+      }
+      show(text, answers);
+      // One answer, or one house among them (its street comes too): no doubt where to go.
+      const houses = answers.filter(isHouse);
+      const sure = geo.point != null || answers.length === 1 || (houses.length === 1 && answers[0] === houses[0]);
+      if (navigate && sure && answers.length > 0) {
+        const place = answers[0];
+        goTo(geo.point && geo.query ? { ...place, title: geo.query } : place, "place asked for on the car");
+        return;
+      }
+      deps.note(`android auto: place asked for on the car: ${answers.length} found`);
+      send(native.openSearch(text));
+    };
+    const takeRequest = () =>
+      void native
+        .takeRequest()
+        .then((r) => {
+          if (r && !ended) request(r);
+        })
+        .catch((e: unknown) => deps.note(`android auto: request not taken: ${e instanceof Error ? e.message : String(e)}`));
+
     const listener = native.addListener("onCarAction", (e) => {
       switch (e.action) {
         case "end-route":
@@ -224,21 +305,18 @@ export function runCarSession(deps: CarSessionDeps): Promise<void> {
           return;
         case "go": {
           const { saved, recent } = places.getSnapshot();
-          const place = [...saved, ...recent].find((p) => p.id === e.id);
-          if (!place) return;
-          places.addRecent(place);
-          const destination = { lat: place.lat, lon: place.lon, name: place.title, id: place.id };
-          // Without an adapter, as on the phone: the route waits for the driver's word.
-          if (deps.withoutAdapter()) {
-            deps.note("android auto: destination picked on the car's screen, held: no adapter");
-            routes.stop();
-            held.hold(destination);
-            return;
-          }
-          deps.note("android auto: destination picked on the car's screen");
-          routes.start(destination);
+          const listed = [...saved, ...recent].find((p) => p.id === e.id);
+          const result = listed ? undefined : found.find((p) => p.id === e.id);
+          if (listed) goTo(listed, "destination picked on the car's screen");
+          else if (result) goTo(result, "search result picked on the car's screen");
           return;
         }
+        case "search":
+          search(e.text);
+          return;
+        case "request":
+          takeRequest();
+          return;
         case "confirm-held": {
           const destination = held.take();
           if (!destination) return;
@@ -282,6 +360,7 @@ export function runCarSession(deps: CarSessionDeps): Promise<void> {
     onRoute();
     sendNotice();
     checkLocation();
+    takeRequest();
     // Gone before the listener was there.
     if (!native.isConnected()) end();
   });

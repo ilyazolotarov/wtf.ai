@@ -138,6 +138,13 @@ either order), "lat: …, lon: …", a `geo:` URI, and a Google Maps, OpenStreet
 house and its entrance) and are read as latitude, longitude; the other way round when the first is past ±90, or when
 only that puts the point in the region.
 
+### 4.6 Links from other apps (`src/nav/search/geo-uri.ts`)
+
+A place another app or the car's assistant asks for: a `geo:` URI (RFC 5870's point; Android's `q=`, words to search
+for or `lat,lon(name)`; `0,0` is no point) or Google Maps' `google.navigation:q=…` (`ll=` too). A point keeps the
+link's name and is its one result; words are searched as typed. `mode`, `avoid` and `intent` are ignored: the app
+routes by car, and a link's place replaces the destination.
+
 Measured in Node on a synthetic Ukraine-sized index (28 000 settlements, 496 000 streets, 4.7 M addresses, 53 000
 POIs: 97 MB): queries 9–25 ms. The phone is several times slower; an oblast is about a 25th of this.
 
@@ -152,7 +159,13 @@ POIs: 97 MB): queries 9–25 ms. The phone is several times slower; an oblast is
   direction. Start guidance routes to it (`id` `search:<key>`, the name shown on the banner). Coordinates (§4.5) are one
   result, opened at once when pasted (or on the keyboard's Search): named by the house within 75 m (as a dropped pin),
   else "Selected location", then its settlement and the coordinates; the route goes to the exact point
-  (`id` `point:<lat>,<lon>`).
+  (`id` `point:<lat>,<lon>`). A `geo:` link pasted reads as its place or its words (§4.6).
+- **Links** (`src/app/+native-intent.tsx`): Android offers the app for `geo:` and `google.navigation:` links
+  (`app.json` intent filter: view, browsable); the route screen opens over the map (the router's anchor) with the
+  link's point (its coordinates) or words in the field, searched. iOS gives these links to Apple Maps only.
+- **The car's search** (ANDROID-AUTO-SPEC §3, §4; `findPlaces` in `src/components/route/place-search.ts`): the same
+  index on each change of the car's field, with no delay (the car's keyboard is slow), a point as one result, the
+  built-in cities without an index. Each result shows what and where it is, then its distance.
 - **Entrances on the map** (`src/services/offline-map/entrance-file.ts`, `EntranceLayers`): the active search
   file's entrances written once to a GeoJSON file in the cache (per file MD5); from z16 a numbered one as its number
   on a round blue badge (a circle and text, no icon images), one without

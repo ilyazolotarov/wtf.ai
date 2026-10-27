@@ -3,7 +3,10 @@ import ai.wtf.androidauto.logic.CarDistanceUnit
 import ai.wtf.androidauto.logic.CarGuidanceLogic
 import ai.wtf.androidauto.logic.CarManeuverType
 import ai.wtf.androidauto.logic.CarNotice
+import ai.wtf.androidauto.logic.CarPlace
 import ai.wtf.androidauto.logic.CarRoute
+import ai.wtf.androidauto.logic.CarSearch
+import ai.wtf.androidauto.logic.CarSearchList
 import ai.wtf.androidauto.logic.CarStep
 import ai.wtf.androidauto.logic.SessionStep
 import kotlin.test.Test
@@ -78,6 +81,25 @@ class CarGuidanceLogicTest {
     assertEquals(CarCard.LOADING, CarGuidanceLogic.card(route("active", replanning = true), null))
     assertEquals(CarCard.MESSAGE, CarGuidanceLogic.card(route("arrived", steps = emptyList()), null))
     assertEquals(CarCard.MESSAGE, CarGuidanceLogic.card(route("failed", steps = emptyList()), null))
+  }
+
+  @Test
+  fun theSearchScreenShowsOnlyResultsForTheTextTyped() {
+    val found = listOf(CarPlace("search:a1", "Khreshchatyk, 22", "Kyiv · 1.2 km", "result"))
+    assertEquals(CarSearchList.Empty, CarGuidanceLogic.searchList(CarSearch("khresh", found), "  "))
+    // Typed on: the last answer was for less, the next one is on its way.
+    assertEquals(CarSearchList.Loading, CarGuidanceLogic.searchList(CarSearch("khresh", found), "khreshch"))
+    assertEquals(CarSearchList.Loading, CarGuidanceLogic.searchList(null, "khresh"))
+    assertEquals(CarSearchList.Results(found), CarGuidanceLogic.searchList(CarSearch("khresh ", found), "khresh"))
+    assertEquals(CarSearchList.Results(emptyList()), CarGuidanceLogic.searchList(CarSearch("zzz", emptyList()), "zzz"))
+  }
+
+  @Test
+  fun theCarsMapIsDrawnBiggerThanTheCarsDensity() {
+    assertEquals(224, CarGuidanceLogic.mapDpi(160))
+    assertEquals(336, CarGuidanceLogic.mapDpi(240))
+    // A dpi the host didn't give: as 160.
+    assertEquals(224, CarGuidanceLogic.mapDpi(0))
   }
 
   @Test

@@ -49,6 +49,7 @@ ICONS = [
     "history",
     "volume_up",
     "volume_off",
+    "search",
 ]
 
 TEMPLATE = """<?xml version="1.0" encoding="utf-8"?>

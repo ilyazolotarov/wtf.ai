@@ -20,7 +20,8 @@ import com.facebook.react.runtime.ReactSurfaceImpl
  * The car's map (docs/ANDROID-AUTO-SPEC.md §4): Android Auto hands over a Surface; a virtual display on it shows a
  * Presentation whose view is the React root `MODULE` (src/components/car-screen/car-map-root.tsx) on the app's one
  * React host. The map is the phone's MapSurface: its style, dot, route and camera, and over-the-air JS updates reach the
- * car's screen too. The display has the car's size and density, so React Native and MapLibre lay out in the car's dp.
+ * car's screen too. The display has the car's size and its density times `MAP_SCALE`: React Native and MapLibre draw the
+ * map bigger than the car's dp, as Android for Cars asks.
  *
  * The root gets the car's day or night and the part of the screen the template's cards leave visible as props, and is
  * stopped when the surface goes (the driver opened another app on the car's screen, or the car disconnected).
@@ -46,7 +47,7 @@ internal class CarMapSurface(private val carContext: CarContext) : SurfaceCallba
         DISPLAY_NAME,
         surfaceContainer.width,
         surfaceContainer.height,
-        surfaceContainer.dpi,
+        CarGuidanceLogic.mapDpi(surfaceContainer.dpi),
         target,
         DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY,
       )
@@ -106,13 +107,17 @@ internal class CarMapSurface(private val carContext: CarContext) : SurfaceCallba
     container = null
   }
 
-  /** `dark`, and `insets`: the template's cards, in dp from each edge (the camera keeps the car in the rest). */
+  /**
+   * `dark`; `insets`: the template's cards, in the map's dp from each edge (the camera keeps the car in the rest);
+   * `scale`: the map's density over the car's.
+   */
   private fun props(): Bundle {
     val c = container
     val area = visibleArea
     val insets = Bundle()
     if (c != null && area != null) {
-      val (left, top, right, bottom) = CarGuidanceLogic.insetsDp(c.width, c.height, area.left, area.top, area.right, area.bottom, c.dpi)
+      val dpi = CarGuidanceLogic.mapDpi(c.dpi)
+      val (left, top, right, bottom) = CarGuidanceLogic.insetsDp(c.width, c.height, area.left, area.top, area.right, area.bottom, dpi)
       insets.putDouble("left", left)
       insets.putDouble("top", top)
       insets.putDouble("right", right)
@@ -121,6 +126,7 @@ internal class CarMapSurface(private val carContext: CarContext) : SurfaceCallba
     return Bundle().apply {
       putBoolean("dark", carContext.isDarkMode)
       putBundle("insets", insets)
+      putDouble("scale", CarGuidanceLogic.MAP_SCALE)
     }
   }
 

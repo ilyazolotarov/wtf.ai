@@ -31,9 +31,10 @@ Android Auto ─▶ CarScreenService ─▶ CarScreenSession (Kotlin, main threa
                                       ├─ CarMapSurface: Surface ─▶ VirtualDisplay ─▶ Presentation ─▶ React root "CarMap"
                                       └─ CarSessionTask: headless JS task "WtfCarSession"
                                                  │
-src/components/car-screen/car-session.ts ◀───────┘  route, places, words, voice, notice ─▶ AndroidAutoModule ─▶ CarLink ─▶ templates
-                                                     ◀─ onCarAction (end-route, go, toggle-voice, confirm-held, cancel-held,
-                                                                     permission, notes, session-ended)
+src/components/car-screen/car-session.ts ◀───────┘  route, places, words, voice, notice, search ─▶ AndroidAutoModule ─▶ CarLink ─▶ templates
+                                                     ◀─ onCarAction (end-route, go, search, request, toggle-voice,
+                                                                     confirm-held, cancel-held, permission, notes,
+                                                                     session-ended)
 ```
 
 - A **session** is one connection of the car's screen with the app opened there. Its JS side is a headless task, run
@@ -76,6 +77,14 @@ src/components/car-screen/car-session.ts ◀───────┘  route, pla
   keep to the route (checked every 5 s while it shows). The card has a short title and two short lines, cut beyond
   them in split screen: the car's words are its own (`car*` strings), one instruction at a time. Its button gives the word and starts the route; its
   close button drops it.
+- **Places asked for** (navigation intents, quality guideline NF-6): Android Auto gives the car assistant's "navigate
+  to" (and another car app's) to the navigator last opened on the car, as `androidx.car.app.action.NAVIGATE` with a
+  `geo:` URI; `ACTION_VIEW` asks only to look. The module's manifest declares it on the phone's activity (merged into
+  the app's), as Android Auto requires; the session gets it in `onCreateScreen` or `onNewIntent`, and CarLink keeps it
+  until the task takes it (`takeRequest`, at its start and on `request`). Read as SEARCH-SPEC §4.6: a point is gone to,
+  by the link's name; words are searched, and one answer gone to. Several, none, or asked only to look: the search
+  screen opens with the words and the answers to pick from. Gone to as a destination picked: recent, held without an
+  adapter. Trip log: `navigation asked for: <uri>`, then `place asked for on the car` or how many were found.
 - **Words:** the app's language, sent again when the driver changes it and when the phone's app comes to the front
   (the system's language changed meanwhile).
 - **Location**: Android Auto binds the app's service as a top app's binding, with the location capability while the
@@ -96,7 +105,7 @@ src/components/car-screen/car-session.ts ◀───────┘  route, pla
   style, dot, route and camera are the phone's and over-the-air JS updates reach the car. React Native and MapLibre lay
   out in the car's density (`ReactSurfaceImpl` takes it from its context). The root's props: the car's own day or night
   (`CarContext.isDarkMode`, not the phone's scheme) and the visible area as insets in dp: the camera keeps the dot in
-  the part the cards leave free, at heading-up's three quarters down it (`useMapCamera` `insets`).
+  the part the cards leave free, low in it in heading-up (`useMapCamera` `insets`, below).
 - **Two things React Native and MapLibre do for the phone's activity, undone for the car's display:**
   - React Native applies a render's changes to the views on display frames it stops when the activity pauses
     (`FabricUIManager.onHostPause`) and never starts without one. The car's map showed its first frame for good, only
@@ -108,14 +117,22 @@ src/components/car-screen/car-session.ts ◀───────┘  route, pla
     context down (`ReactTagResolver`; unpatched, a NullPointerException). The car's map sends one every frame, so it
     meets that window.
 - The car's map follows heading-up, smoothed every frame as the phone's is in front (`useSmoothedPosition`'s
-  `onScreen`).
+  `onScreen`), its dot 0.85 of the way down the visible map (the phone's: 0.8 of its whole map): a car's screen is wide
+  and short. Google Maps keeps its arrow about 0.9 down on both.
+- **Bigger, as Android for Cars asks** (map text off the roads 24 dp, markers 36 dp): the virtual display has the car's
+  density × 1.4 (`CarGuidanceLogic.MAP_SCALE`, JUnit), so everything on the map is drawn 1.4 times the car's dp (the
+  dot 26 → 36 dp), and the follow zooms are lowered by log₂ 1.4 to show the same ground. The insets are in the map's dp.
+  Of the POIs only fuel and charging stations, and rail stations (the metro's too) and airports as landmarks to check
+  the dot by; their names 24 dp, their icons 36 dp. No ways a car can't take (footways, steps, cycleways, pedestrian
+  streets: in parks and yards their dashes were the busiest thing on the screen); service roads and tracks stay
+  (`carMapStyle`, src/config/map-car.ts).
 - **Templates** (`CarScreens.kt`), built from the last state the session sent:
 
   | State | NavigationTemplate shows |
   | --- | --- |
   | A notice: no location permission | Its message card, before any route; button: Allow (parked only) |
   | A notice: a route held without an adapter | Its message card; buttons: I'll follow the route, close |
-  | No route | The map; buttons: Destinations, voice |
+  | No route | The map; buttons: Search, Destinations, voice |
   | Planning, or planning again after leaving the route | A loading turn card; buttons: Stop guidance, voice |
   | Followed | The next maneuver (the phone banner's words and icon, the distance rounded as the banner rounds it), the one after when it follows closely; the trip card (time and distance left, arrival time at the plan's pace); buttons: Stop guidance, voice |
   | Arrived, failed | A message card with the phone's words |
@@ -123,8 +140,15 @@ src/components/car-screen/car-session.ts ◀───────┘  route, pla
   Which card shows is `CarGuidanceLogic.card` (JUnit).
 
   Destinations: saved places (Home, Work, favourites) then recent ones, as many as the car allows; one picked routes
-  to it as the phone's route screen does (and becomes recent). The car's words are the app's (en/uk), sent by the
-  session; English until it has.
+  to it as the phone's route screen does (and becomes recent).
+
+  Search (`SearchTemplate`): each change of the field goes to the session, which searches the phone's offline index
+  (SEARCH-SPEC §5, near the car) and sends the answers with the text they answer. The screen shows them only for the
+  text in the field, loading meanwhile (`CarGuidanceLogic.searchList`, JUnit), as many as the car allows: what and
+  where each is, and how far. One picked routes to it, as a destination does. The host offers the keyboard only while
+  parked; a place the car's assistant asked for opens the screen with its words, the keyboard closed.
+
+  The car's words are the app's (en/uk), sent by the session; English until it has.
 - **The navigation session** (`NavigationManager`): started when a route is planned or followed, the trip (the steps
   ahead, each with its distance and time from the car; the destination) sent with each change, loading while it is
   planned; ended at arrival, a failure or no route. The host's "stop navigation" (another navigator started) ends the
@@ -176,14 +200,12 @@ in phone-only mode held as a notice, its button starting the route; a JS reload 
 
 ## 7. Open items
 
-1. A real car, from the Play internal test track (§2).
+1. A real car, from the Play internal test track (§2); there, the car's assistant (VC-1) asking for places.
 2. Moving the map from the car: Android Auto's map buttons (pan, zoom, recentre) and gestures (`SurfaceCallback`).
-3. Search in the car (the search template, limited while driving) and navigation intents from other apps and the
-   car's assistant (`geo:`, `google.navigation:`): required for production (quality guidelines NF-6, VC-1).
-4. A route's alternatives before following one (the route preview, ROUTING-SPEC §8.7).
-5. The instrument cluster (`FEATURE_CLUSTER`) and turn-by-turn notifications while another app fills the car's
+3. A route's alternatives before following one (the route preview, ROUTING-SPEC §8.7).
+4. The instrument cluster (`FEATURE_CLUSTER`) and turn-by-turn notifications while another app fills the car's
    screen.
-6. The quality review's other navigation guidelines, before production: turn-by-turn notifications (NF-3, item 5),
+5. The quality review's other navigation guidelines, before production: turn-by-turn notifications (NF-3, item 4),
    the cluster (NF-4), a test-drive mode that simulates driving (NF-7).
-7. Debug builds need Metro as for the phone. A car's map started before the development launcher loaded the JS stayed
+6. Debug builds need Metro as for the phone. A car's map started before the development launcher loaded the JS stayed
    blank; `CarMapSurface.restartIfStopped` starts it again in the new React context, not yet seen doing so.

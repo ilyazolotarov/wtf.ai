@@ -45,8 +45,9 @@ export function houseNumberLayer(source: string): MapStyleLayer {
       "text-size": ["interpolate", ["linear"], ["zoom"], 15, 9, 16, 10, 18, 12, 20, 14],
       "text-padding": 2,
     },
-    // Darker than Liberty's buildings (hsl(35,8%,85%)), in their hue; the halo is the building itself.
-    paint: { "text-color": "hsl(30,8%,42%)", "text-halo-color": "hsla(35,8%,85%,0.9)", "text-halo-width": 1 },
+    // In the buildings' hue (Liberty's hsl(35,8%,85%)), 6.9:1 on them as the dark map's are (6.6:1), below the names'
+    // black; the halo is the building itself.
+    paint: { "text-color": "hsl(30,8%,27%)", "text-halo-color": "hsla(35,8%,85%,0.9)", "text-halo-width": 1 },
   };
 }
 
@@ -107,7 +108,58 @@ export function withStreetPick(style: MapStyleJson): MapStyleJson {
   return { ...style, layers: [...style.layers, pick] };
 }
 
-/** All: house numbers from z15, POI names from z16, no bins, playgrounds and the like, the streets a press names. */
+/**
+ * Names along a line (streets, rivers) stand up facing the driver in the tilted heading-up view instead of lying on the
+ * road, where they were foreshortened into a blur (Google Maps draws them upright too). Flat, nothing changes.
+ */
+export function withUprightLineNames(style: MapStyleJson): MapStyleJson {
+  return {
+    ...style,
+    layers: style.layers.map((l) =>
+      l.type === "symbol" && l.layout?.["symbol-placement"] === "line" && l.layout["text-field"] !== undefined
+        ? { ...l, layout: { ...l.layout, "text-pitch-alignment": "viewport" } }
+        : l,
+    ),
+  };
+}
+
+/** The light map's names: black, as much contrast as it has (Liberty's greys and brown-grey read faintly). */
+export const LIGHT_LABEL_COLOR = "#000";
+/** …on a light halo, where the style has none (its street names): black on a road's casing needs one. */
+const LIGHT_LABEL_HALO = "rgba(255,255,255,0.9)";
+
+/**
+ * The light map's street, place and POI names black on a light halo. Water and transit names keep their blue (what
+ * they name), house numbers their quieter tone (they would compete with the street's name), road shields their own.
+ * The dark map sets its own (`tintDarkStyle`).
+ */
+export function withBlackLabels(style: MapStyleJson): MapStyleJson {
+  return {
+    ...style,
+    layers: style.layers.map((l) => {
+      if (l.type !== "symbol" || l.layout?.["text-field"] === undefined) return l;
+      const source = l["source-layer"];
+      const name =
+        (source === "transportation_name" && !/shield/i.test(l.id)) ||
+        (source === "poi" && l.id !== "poi_transit") ||
+        source === "place" ||
+        /airport|aerodrome/i.test(l.id);
+      if (!name) return l;
+      const paint = {
+        ...l.paint,
+        "text-color": LIGHT_LABEL_COLOR,
+        "text-halo-color": l.paint?.["text-halo-color"] ?? LIGHT_LABEL_HALO,
+        "text-halo-width": Math.max(Number(l.paint?.["text-halo-width"] ?? 0), 1),
+      };
+      return { ...l, paint };
+    }),
+  };
+}
+
+/**
+ * All: house numbers from z15, POI names from z16, no bins, playgrounds and the like, the streets a press names, names
+ * along lines upright.
+ */
 export function withStreetLabels(style: MapStyleJson): MapStyleJson {
-  return withStreetPick(withPoisFromStreetLevel(withHouseNumbers(style)));
+  return withUprightLineNames(withStreetPick(withPoisFromStreetLevel(withHouseNumbers(style))));
 }

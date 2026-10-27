@@ -6,6 +6,7 @@ import ai.wtf.androidauto.logic.CarGuidanceLogic
 import ai.wtf.androidauto.logic.CarManeuverType
 import ai.wtf.androidauto.logic.CarPlace
 import ai.wtf.androidauto.logic.CarRoute
+import ai.wtf.androidauto.logic.CarSearchList
 import ai.wtf.androidauto.logic.CarStep
 import androidx.car.app.CarContext
 import androidx.car.app.Screen
@@ -19,6 +20,7 @@ import androidx.car.app.model.ItemList
 import androidx.car.app.model.ListTemplate
 import androidx.car.app.model.ParkedOnlyOnClickListener
 import androidx.car.app.model.Row
+import androidx.car.app.model.SearchTemplate
 import androidx.car.app.model.SectionedItemList
 import androidx.car.app.model.Template
 import androidx.car.app.navigation.model.Destination
@@ -34,8 +36,9 @@ import java.util.TimeZone
 
 /**
  * The car's main screen (docs/ANDROID-AUTO-SPEC.md §4): the map under Android Auto's navigation template, with the next
- * maneuver and the one after, the time and distance left, and the buttons: a destination to pick, or the route to end,
- * and the voice. What the driver must do first (allow location, agree to a route without an adapter) comes before.
+ * maneuver and the one after, the time and distance left, and the buttons: a place to search for or pick, or the route
+ * to end, and the voice. What the driver must do first (allow location, agree to a route without an adapter) comes
+ * before.
  */
 internal class NavigationScreen(carContext: CarContext) : Screen(carContext) {
   override fun onGetTemplate(): Template {
@@ -55,6 +58,12 @@ internal class NavigationScreen(carContext: CarContext) : Screen(carContext) {
           .build(),
       )
     } else {
+      actions.addAction(
+        Action.Builder()
+          .setIcon(CarTemplates.icon(carContext, R.drawable.car_search))
+          .setOnClickListener { screenManager.push(SearchScreen(carContext, "", keyboard = true)) }
+          .build(),
+      )
       actions.addAction(
         Action.Builder()
           .setTitle(labels.destinations)
@@ -141,12 +150,8 @@ internal class DestinationsScreen(carContext: CarContext) : Screen(carContext) {
       template.setSingleList(ItemList.Builder().setNoItemsMessage(labels.noDestinations).build())
       return template.build()
     }
-    // The car allows this many rows (fewer while driving); saved places first.
-    var left = try {
-      carContext.getCarService(ConstraintManager::class.java).getContentLimit(ConstraintManager.CONTENT_LIMIT_TYPE_LIST)
-    } catch (e: Exception) {
-      6
-    }
+    // Saved places first.
+    var left = CarTemplates.listLimit(carContext)
     val (recent, saved) = places.partition { it.kind == "recent" }
     for ((header, list) in listOf(labels.saved to saved, labels.recent to recent)) {
       if (list.isEmpty() || left <= 0) continue
@@ -171,15 +176,83 @@ internal class DestinationsScreen(carContext: CarContext) : Screen(carContext) {
   }
 }
 
+/**
+ * Search (docs/ANDROID-AUTO-SPEC.md §4): the phone's offline search as the driver types, or the answers to a place the
+ * car's assistant asked for (`typed` given, no keyboard); with nothing typed, the destinations. The host offers the
+ * keyboard only while parked; picking a result routes to it, as a destination does.
+ */
+internal class SearchScreen(carContext: CarContext, private var typed: String, private val keyboard: Boolean) : Screen(carContext) {
+  init {
+    if (typed.isNotBlank()) CarLink.send("search", mapOf("text" to typed))
+  }
+
+  override fun onGetTemplate(): Template {
+    val labels = CarLink.labels
+    val template = SearchTemplate.Builder(
+      object : SearchTemplate.SearchCallback {
+        override fun onSearchTextChanged(searchText: String) = search(searchText)
+
+        override fun onSearchSubmitted(searchText: String) = search(searchText)
+      },
+    )
+      .setHeaderAction(Action.BACK)
+      .setSearchHint(labels.searchHint)
+      .setInitialSearchText(typed)
+      .setShowKeyboardByDefault(keyboard)
+    when (val list = CarGuidanceLogic.searchList(CarLink.search, typed)) {
+      CarSearchList.Empty -> {
+        val items = ItemList.Builder().setNoItemsMessage(labels.noDestinations)
+        CarLink.places.take(CarTemplates.listLimit(carContext)).forEach { items.addItem(row(it)) }
+        template.setItemList(items.build())
+      }
+      CarSearchList.Loading -> template.setLoading(true)
+      is CarSearchList.Results -> {
+        val items = ItemList.Builder().setNoItemsMessage(labels.noResults)
+        list.places.take(CarTemplates.listLimit(carContext)).forEach { items.addItem(row(it)) }
+        template.setItemList(items.build())
+      }
+    }
+    return template.build()
+  }
+
+  private fun search(text: String) {
+    if (text == typed) return
+    typed = text
+    CarLink.send("search", mapOf("text" to text))
+    invalidate()
+  }
+
+  private fun row(place: CarPlace): Row {
+    val row = Row.Builder()
+      .setTitle(place.title.ifEmpty { "·" })
+      .setImage(CarTemplates.icon(carContext, CarTemplates.placeIcon(place.kind)))
+      .setOnClickListener {
+        CarLink.send("go", mapOf("id" to place.id))
+        screenManager.popToRoot()
+      }
+    place.detail?.takeIf { it.isNotEmpty() }?.let { row.addText(it) }
+    return row.build()
+  }
+}
+
 /** The Car App Library's models for what the JS side sent. */
 internal object CarTemplates {
   fun icon(context: CarContext, res: Int): CarIcon = CarIcon.Builder(IconCompat.createWithResource(context, res)).build()
+
+  /** The rows a list may have in this car (fewer while driving). */
+  fun listLimit(context: CarContext): Int =
+    try {
+      context.getCarService(ConstraintManager::class.java).getContentLimit(ConstraintManager.CONTENT_LIMIT_TYPE_LIST)
+    } catch (e: Exception) {
+      6
+    }
 
   fun placeIcon(kind: String): Int =
     when (kind) {
       "home" -> R.drawable.car_home
       "work" -> R.drawable.car_work
       "favorite" -> R.drawable.car_star
+      "result" -> R.drawable.car_location_on
       else -> R.drawable.car_history
     }
 

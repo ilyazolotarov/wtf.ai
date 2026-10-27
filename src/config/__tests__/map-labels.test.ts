@@ -1,5 +1,14 @@
 import { DARK_PALETTE, tintDarkStyle, type MapStyleJson } from "@/config/map-dark";
-import { HOUSE_NUMBER_LAYER, POI_MINZOOM, STREET_PICK_LAYER, withHouseNumbers, withStreetLabels } from "@/config/map-labels";
+import {
+  HOUSE_NUMBER_LAYER,
+  LIGHT_LABEL_COLOR,
+  POI_MINZOOM,
+  STREET_PICK_LAYER,
+  withBlackLabels,
+  withHouseNumbers,
+  withStreetLabels,
+  withUprightLineNames,
+} from "@/config/map-labels";
 
 /** Evaluates the few expressions the POI filter uses (all, !, in, get, literal) against a feature's properties. */
 function evaluate(e: unknown, props: Record<string, string>): unknown {
@@ -73,5 +82,57 @@ describe("house numbers", () => {
     const layers = withStreetLabels(style()).layers;
     expect(layers.at(-1)).toMatchObject({ id: STREET_PICK_LAYER, type: "line", "source-layer": "transportation_name", paint: { "line-opacity": 0.01 } });
     expect(withStreetLabels(withStreetLabels(style())).layers.filter((l) => l.id === STREET_PICK_LAYER)).toHaveLength(1);
+  });
+});
+
+describe("names along lines", () => {
+  test("stand up facing the driver when the map is tilted; point labels and unnamed lines are left alone", () => {
+    const out = withUprightLineNames({
+      version: 8,
+      layers: [
+        { id: "highway-name-minor", type: "symbol", "source-layer": "transportation_name", layout: { "symbol-placement": "line", "text-field": ["get", "name"] } },
+        { id: "road_one_way_arrow", type: "symbol", "source-layer": "transportation", layout: { "symbol-placement": "line", "icon-image": "arrow" } },
+        { id: "poi_r1", type: "symbol", "source-layer": "poi", layout: { "text-field": ["get", "name"] } },
+      ],
+    });
+    expect(out.layers.map((l) => l.layout?.["text-pitch-alignment"])).toEqual(["viewport", undefined, undefined]);
+  });
+});
+
+describe("the light map's names", () => {
+  test("streets, places and POIs black on a light halo; water, transit, house numbers and shields keep theirs", () => {
+    const named = (id: string, sourceLayer: string, paint: Record<string, unknown>) => ({
+      id,
+      type: "symbol",
+      "source-layer": sourceLayer,
+      layout: { "text-field": ["get", "name"] },
+      paint,
+    });
+    const out = withBlackLabels({
+      version: 8,
+      layers: [
+        named("highway-name-major", "transportation_name", { "text-color": "#666", "text-halo-width": 1 }),
+        named("highway-name-path", "transportation_name", { "text-color": "hsl(30,23%,62%)", "text-halo-color": "#f8f4f0", "text-halo-width": 0.5 }),
+        named("poi_r1", "poi", { "text-color": "#666", "text-halo-color": "#ffffff", "text-halo-width": 1 }),
+        named("label_other", "place", { "text-color": "#333" }),
+        named("poi_transit", "poi", { "text-color": "#2e5a80" }),
+        named("water_name_line_label", "water_name", { "text-color": "#495e91" }),
+        named("housenumber", "housenumber", { "text-color": "hsl(30,8%,27%)" }),
+        named("highway-shield-non-us", "transportation_name", { "text-color": "#000" }),
+      ],
+    });
+    expect(out.layers.map((l) => l.paint?.["text-color"])).toEqual([
+      LIGHT_LABEL_COLOR,
+      LIGHT_LABEL_COLOR,
+      LIGHT_LABEL_COLOR,
+      LIGHT_LABEL_COLOR,
+      "#2e5a80",
+      "#495e91",
+      "hsl(30,8%,27%)",
+      "#000",
+    ]);
+    // A halo where the style had none; the path's own, a little wider.
+    expect(out.layers[0].paint).toMatchObject({ "text-halo-color": "rgba(255,255,255,0.9)", "text-halo-width": 1 });
+    expect(out.layers[1].paint).toMatchObject({ "text-halo-color": "#f8f4f0", "text-halo-width": 1 });
   });
 });

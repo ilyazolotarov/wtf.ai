@@ -1,4 +1,4 @@
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Keyboard, Pressable, StyleSheet, TextInput, View } from "react-native";
 
@@ -18,14 +18,14 @@ import {
 } from "@/components/status/format-geo";
 import { formatDurationS, PROBLEM_TEXT } from "@/components/route/guidance-text";
 import { Flash, SaveConfirmation } from "@/components/route/save-feedback";
-import { resultDetail, resultTitle } from "@/components/route/search-text";
+import { pointPlace, resultPlace } from "@/components/route/place-search";
 import { Icon, type IconName } from "@/components/ui/icon";
 import { INPUT_MAX_FONT_SCALE, T } from "@/components/ui/text";
 import { Font, Radius, usePalette } from "@/constants/theme";
 import type { Strings } from "@/i18n/en";
 import { useT } from "@/i18n/provider";
 import { bearingRad, haversineM, type Coordinate } from "@/nav/geo";
-import { orientPoint, parseCoordinates } from "@/nav/search/coordinates";
+import { geoSearchText } from "@/nav/search/geo-uri";
 import type { SearchIndex, SearchResult } from "@/nav/search/search-index";
 import { inBounds, places, usePlaces } from "@/providers/places";
 import { usePosition } from "@/providers/position-provider";
@@ -74,42 +74,6 @@ function useAddressSearch(query: string, near: Coordinate | null): { results: Se
   return { results: dropped ? [] : found.results, settled: !dropped && found.query === query };
 }
 
-/**
- * Coordinates typed or pasted (SEARCH-SPEC §5): the place at that point, named by the house there (within 75 m, as a
- * dropped pin), else "Selected location" in its settlement; the coordinates follow. The route goes to the exact point.
- */
-function pointPlace(
-  text: string,
-  index: SearchIndex | null,
-  bounds: [number, number, number, number] | null,
-  language: "en" | "uk",
-  t: (key: keyof Strings) => string,
-): Place | null {
-  const typed = parseCoordinates(text);
-  if (!typed) return null;
-  const at = orientPoint(typed, (c) => inBounds(bounds, c));
-  let named: { title: string; detail: string | null } | null = null;
-  try {
-    const town = index?.settlementAt(at) ?? null;
-    const house = index?.nearestAddress(at) ?? null;
-    // A house's detail is its settlement; one addressed by its quarter or village names none of its own.
-    const detail = house && (house.settlement || !town ? resultDetail(house, language, t) : resultTitle(town, language, t));
-    named = house
-      ? { title: resultTitle(house, language, t), detail }
-      : { title: t("selectedLocation"), detail: town ? resultTitle(town, language, t) : null };
-  } catch (e) {
-    console.warn(`point name: ${e instanceof Error ? e.message : String(e)}`);
-  }
-  const coordinates = `${at.lat.toFixed(5)}, ${at.lon.toFixed(5)}`;
-  return {
-    id: `point:${at.lat.toFixed(6)},${at.lon.toFixed(6)}`,
-    title: named?.title ?? t("selectedLocation"),
-    detail: named?.detail ? `${named.detail} · ${coordinates}` : coordinates,
-    lat: at.lat,
-    lon: at.lon,
-  };
-}
-
 /** The active region's cities and towns from its search index; null without one (older releases). */
 function useMajorSettlements(region: string | null): Place[] | null {
   const { language, t } = useT();
@@ -117,13 +81,7 @@ function useMajorSettlements(region: string | null): Place[] | null {
   return useMemo(() => {
     if (!index) return null;
     try {
-      return index.majorSettlements(8).map((r) => ({
-        id: `search:${r.key}`,
-        title: resultTitle(r, language, t),
-        detail: resultDetail(r, language, t),
-        lat: r.lat,
-        lon: r.lon,
-      }));
+      return index.majorSettlements(8).map((r) => resultPlace(r, language, t));
     } catch (e) {
       console.warn(`major settlements: ${e instanceof Error ? e.message : String(e)}`);
       return null;
@@ -143,26 +101,39 @@ export default function RouteScreen() {
   const routeId = route?.destination.id ?? null;
   const region = installed.active ? installed.regions[installed.active] : null;
   const bounds = region?.bounds ?? null;
+  // A place another app sent (a `geo:` link, +native-intent.tsx): its words or coordinates, searched.
+  const { q: linked = "" } = useLocalSearchParams<{ q?: string }>();
   const [selected, setSelected] = useState<Place | null>(() => {
     const d = route?.destination;
-    return d?.id ? { id: d.id, title: d.name ?? "", detail: null, lat: d.lat, lon: d.lon } : null;
+    return !linked && d?.id ? { id: d.id, title: d.name ?? "", detail: null, lat: d.lat, lon: d.lon } : null;
   });
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(linked);
+  // Another link while the screen is open: searched instead.
+  const [shownLink, setShownLink] = useState(linked);
+  if (linked !== shownLink) {
+    setShownLink(linked);
+    if (linked) {
+      setQuery(linked);
+      setSelected(null);
+    }
+  }
+  // A pasted `geo:` link reads as its place.
+  const text = geoSearchText(query) ?? query;
   // "I'm here": the car is at the place, not going there (NAVIGATOR-SPEC §6.2); the map puts it there, at any speed.
   // Distances from the car; without a fix, from the region's middle.
   const origin: Coordinate =
     position ?? (bounds ? { lat: (bounds[1] + bounds[3]) / 2, lon: (bounds[0] + bounds[2]) / 2 } : { lat: 50.45, lon: 30.52 });
   // Coordinates are a place of their own, not words to search.
   const index = activeSearchIndex(installed);
-  const point = useMemo(() => pointPlace(query, index, bounds, language, t), [query, index, bounds, language, t]);
-  const searched = useAddressSearch(point ? "" : query, position);
+  const point = useMemo(() => pointPlace(text, index, bounds, language, t), [text, index, bounds, language, t]);
+  const searched = useAddressSearch(point ? "" : text, position);
   const majors = useMajorSettlements(installed.active);
   const summary = (d: Coordinate) => {
     const distanceM = haversineM(origin, d);
     const bearing = toDegrees(bearingRad(origin, d));
     return { distanceM, bearing };
   };
-  const q = query.trim().toLocaleLowerCase();
+  const q = text.trim().toLocaleLowerCase();
   // Only what a route can reach: places inside the active region.
   const reachable = <P extends Coordinate>(list: P[]) => list.filter((p) => inBounds(bounds, p));
   // The region's cities: from its search index, else the built-in list inside its bounds.
@@ -174,14 +145,7 @@ export default function RouteScreen() {
     : point
       ? [point]
       : searched
-        ? searched.results.map((r) => ({
-            id: `search:${r.key}`,
-            title: resultTitle(r, language, t),
-            detail: resultDetail(r, language, t),
-            lat: r.lat,
-            lon: r.lon,
-            ...(r.entrances.length > 0 ? { entrances: r.entrances.map((e) => ({ ref: e.ref!, lat: e.lat, lon: e.lon })) } : {}),
-          }))
+        ? searched.results.map((r) => resultPlace(r, language, t))
         : cities.filter((c) => c.title.toLocaleLowerCase().includes(q));
   const savedHere = reachable(saved);
   const recentHere = reachable(recent);
@@ -283,10 +247,11 @@ export default function RouteScreen() {
         <Icon name="search" size={18} color={palette.text2} />
         <TextInput
           value={query}
-          onChangeText={(text) => {
-            setQuery(text);
+          onChangeText={(typed) => {
+            setQuery(typed);
             // Coordinates pasted (not typed a digit at a time): straight to their card.
-            select(text.length - query.length > 1 ? pointPlace(text, index, bounds, language, t) : null);
+            const pasted = typed.length - query.length > 1;
+            select(pasted ? pointPlace(geoSearchText(typed) ?? typed, index, bounds, language, t) : null);
           }}
           onSubmitEditing={() => point && select(point)}
           placeholder={t(searched ? "searchPlaces" : "routeSearch")}
