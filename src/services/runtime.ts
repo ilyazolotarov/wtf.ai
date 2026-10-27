@@ -422,6 +422,7 @@ export function getRuntime(): Runtime {
   // During a trip the navigator keeps running with the map off screen, so dead reckoning
   // doesn't start over each time the app comes back. So it does while a car's screen shows it, the phone's app closed.
   let carScreen = false;
+  const carScreenListeners = new Set<() => void>();
   const syncKeepAlive = () => position.setKeepAlive(recorder.getSnapshot().state === "recording" || carScreen);
   recorder.subscribe(syncKeepAlive);
   syncKeepAlive();
@@ -486,11 +487,17 @@ export function getRuntime(): Runtime {
 
   // iOS's background location session (TRIP-LOGGER-SPEC §4.3): held whenever the app is in front, so a trip that starts
   // after the driver switched away gets GNSS and iOS can relaunch the app it ended; let go 30 min after leaving it idle.
+  // CarPlay showing the app is in front too: iOS calls the app inactive then, with the phone locked or elsewhere, and a
+  // session opened from the car alone held none, so GNSS stopped once the driver opened music on the car. While the
+  // car's session runs it is busy: GNSS goes on whatever the car's screen shows.
   const busyStates = new Set(["recording", "lingering"]);
   const locationSession = new LocationSession({
     set: (on) => SensorCaptureModule.setLocationSession(on),
     always: async () => (await Location.getBackgroundPermissionsAsync()).granted,
-    appState: () => AppState.currentState ?? "unknown",
+    appState: () => {
+      const state = AppState.currentState ?? "unknown";
+      return carScreen && state === "inactive" ? "active" : state;
+    },
     onAppState: (listener) => {
       const sub = AppState.addEventListener("change", listener);
       return () => sub.remove();
@@ -498,10 +505,11 @@ export function getRuntime(): Runtime {
     busy: () => {
       const state = recorder.getSnapshot().state;
       const engine = link.getSnapshot().engine;
-      return busyStates.has(state) || (state === "armed" && (engine === "engine-off" || engine === "engine-running"));
+      return carScreen || busyStates.has(state) || (state === "armed" && (engine === "engine-off" || engine === "engine-running"));
     },
     onBusy: (listener) => {
-      const off = [recorder.subscribe(listener), link.subscribe(listener)];
+      carScreenListeners.add(listener);
+      const off = [recorder.subscribe(listener), link.subscribe(listener), () => carScreenListeners.delete(listener)];
       return () => off.forEach((o) => o());
     },
     note: (text) => recorder.note(text),
@@ -623,9 +631,11 @@ export function getRuntime(): Runtime {
       route: routes.getSnapshot() != null,
       link: link.getSnapshot().link,
       speedMps: position.getSnapshot()?.speedMps,
+      carScreen,
     }),
     subscribeActivity: (listener) => {
-      const off = [recorder.subscribe(listener), routes.subscribe(listener), link.subscribe(listener)];
+      carScreenListeners.add(listener);
+      const off = [recorder.subscribe(listener), routes.subscribe(listener), link.subscribe(listener), () => carScreenListeners.delete(listener)];
       return () => off.forEach((o) => o());
     },
     subscribeDriving: (listener) => {
@@ -702,6 +712,7 @@ export function getRuntime(): Runtime {
       carScreen = on;
       recorder.note(`car screen ${on ? "on" : "off"}`);
       syncKeepAlive();
+      carScreenListeners.forEach((l) => l());
     },
   };
   // Last, once everything that listens to the recorder does: the resumed log gets the launch notes, and Android's trip

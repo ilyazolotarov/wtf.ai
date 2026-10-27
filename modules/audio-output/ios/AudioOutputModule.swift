@@ -49,6 +49,18 @@ public class AudioOutputModule: Module {
       try session.setCategory(.playback, mode: on ? .voicePrompt : .default, options: options)
     }
 
+    /**
+     * What CarPlay asks of the next voice prompt (`AVAudioSession.promptStyle`, in the voice-prompt mode): `none` during
+     * a call or Siri, `short` (a tone) when spoken audio would clash, else `normal`.
+     */
+    Function("promptStyle") { () -> String in
+      switch AVAudioSession.sharedInstance().promptStyle {
+      case .none: return "none"
+      case .short: return "short"
+      default: return "normal"
+      }
+    }
+
     View(AudioOutputPickerView.self) {
       Prop("tint") { (view: AudioOutputPickerView, color: UIColor) in
         view.picker.tintColor = color

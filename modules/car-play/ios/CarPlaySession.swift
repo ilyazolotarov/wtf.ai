@@ -62,6 +62,9 @@ final class CarPlaySession: NSObject {
   private var trailing: [CarBarButton] = []
   private var shownMapButtons: [CarMapButton] = []
   private var panning = false
+  /** The car allows no keyboard now (many while driving): `CPSessionConfiguration`. */
+  private var keyboardLimited = false
+  private var sessionConfiguration: CPSessionConfiguration?
   private var panFrom = (x: 0.0, y: 0.0)
   private var zoomFrom = 1.0
 
@@ -72,21 +75,32 @@ final class CarPlaySession: NSObject {
   private var tripShows = CarTripShows.none
   private var maneuversKey: String?
   private var maneuvers: [CPManeuver] = []
+  /** The estimates last sent, as CarPlay shows them: sent again only when that changes (Apple's guide). */
+  private var stepEstimatesKey: String?
+  private var tripEstimatesKey: String?
   /** The maneuver popped up for last, and the one CarPlay may pop up now (`CarPlayLogic.turnAlert`). */
   private var alerted: String?
   private var alertDue: String?
 
   // The alert over the map: a notice, or why the route failed.
   private enum AlertContent: Equatable {
-    case notice(CarNotice, checkPhone: Bool)
+    /** `canAsk`: iOS can still ask for location (never asked); else only the phone's Settings allow it. */
+    case notice(CarNotice, canAsk: Bool)
     case failure(message: String, destination: String)
   }
+  /** What the alert over the map shows, or is about to (nil: none). */
   private var alertShown: AlertContent?
+  /** The alert presented, and what it shows: CarPlay's own (x) closes it without its action. */
   private weak var alertPresented: CPNavigationAlert?
+  private var alertPresentedContent: AlertContent?
   /** A failure the driver closed: not shown again. */
   private var failureClosed: AlertContent?
-  /** The location notice's button was pressed: it says to look at the phone, where the permission is asked. */
+  /** A location notice the driver closed (iOS can't ask any more): not shown again until another notice. */
+  private var noticeClosed: CarNotice?
+  /** The location notice's button asked iOS: its answer goes to the session. */
   private var askedLocation = false
+  /** iOS's location permission as last seen: a change redraws the alert's button. */
+  private var authorization: CLAuthorizationStatus?
 
   // Lists and the search over the map, while open.
   private weak var destinationsList: CPListTemplate?
@@ -109,13 +123,18 @@ final class CarPlaySession: NSObject {
     interfaceController = controller
     self.window = window
     controller.delegate = self
+    let configuration = CPSessionConfiguration(delegate: self)
+    sessionConfiguration = configuration
+    keyboardLimited = configuration.limitedUserInterfaces.contains(.keyboard)
     let template = CPMapTemplate()
     template.mapDelegate = self
     // The map is what the driver needs: the buttons go with the navigation bar while nobody touches the screen.
     template.automaticallyHidesNavigationBar = true
     template.hidesButtonsWithNavigationBar = true
     mapTemplate = template
-    controller.setRootTemplate(template, animated: false, completion: nil)
+    controller.setRootTemplate(template, animated: false) { [weak self] _, error in
+      if let error { self?.note("map template not shown: \(error.localizedDescription)", problem: true) }
+    }
     // What the last session sent stays: a route followed when the car's screen came on again shows at once.
     syncTrip()
     refresh()
@@ -168,6 +187,7 @@ final class CarPlaySession: NSObject {
     searchCompletion?([])
     searchCompletion = nil
     panning = false
+    sessionConfiguration = nil
     leading = []
     trailing = []
     shownMapButtons = []
@@ -311,6 +331,7 @@ final class CarPlaySession: NSObject {
   func setNotice(_ value: CarNotice?) {
     guard value != notice else { return }
     if value?.kind != CarNotice.location { askedLocation = false }
+    if value != noticeClosed { noticeClosed = nil }
     notice = value
     refresh()
   }
@@ -327,19 +348,17 @@ final class CarPlaySession: NSObject {
 
   /** The answers to a place asked for, in a list over the map (CarPlay's search template can't be given a text). */
   func openSearch(_ query: String) {
-    guard let interfaceController else { return }
+    guard interfaceController != nil else { return }
     resultsQuery = query
     let list = CPListTemplate(title: query, sections: resultsSections())
     list.emptyViewSubtitleVariants = [labels.noResults]
     resultsList = list
-    interfaceController.popToRootTemplate(animated: false, completion: nil)
-    push(list)
+    popToRoot(animated: false) { [weak self] in self?.push(list) }
   }
 
   /** The map, with whatever list or search was open over it gone: the route to a place asked for shows. */
   func showMapTemplate() {
-    guard let interfaceController, interfaceController.templates.count > 1 else { return }
-    interfaceController.popToRootTemplate(animated: true, completion: nil)
+    popToRoot()
   }
 
   func takeRequest() -> [String: Any]? {
@@ -399,7 +418,8 @@ final class CarPlaySession: NSObject {
   /** Labels, places, the route, the voice or the notice changed: the buttons, the alert and open lists follow. */
   private func refresh() {
     guard let mapTemplate else { return }
-    let bar = CarPlayLogic.barButtons(route: route, notice: notice, voiceMuted: voiceMuted, panning: panning)
+    let bar = CarPlayLogic.barButtons(
+      route: route, notice: notice, voiceMuted: voiceMuted, panning: panning, keyboard: !keyboardLimited)
     if bar.leading != leading {
       leading = bar.leading
       mapTemplate.leadingNavigationBarButtons = bar.leading.map(barButton)
@@ -487,6 +507,7 @@ final class CarPlaySession: NSObject {
       tripKey = key
       tripShows = .none
       maneuversKey = nil
+      tripEstimatesKey = nil
       note("trip started")
     }
     guard let navigation, let route else { return }
@@ -526,15 +547,25 @@ final class CarPlaySession: NSObject {
         return made
       }
       navigation.upcomingManeuvers = maneuvers
+      stepEstimatesKey = nil
     }
     if let next = maneuvers.first, let step = route.steps.first {
-      navigation.updateEstimates(Self.estimates(step.shownDistance, step.shownUnit, step.timeS), for: next)
+      let shown = CarPlayLogic.estimatesKey(step.shownDistance, step.shownUnit, step.timeS)
+      if shown != stepEstimatesKey {
+        stepEstimatesKey = shown
+        navigation.updateEstimates(Self.estimates(step.shownDistance, step.shownUnit, step.timeS), for: next)
+      }
       if #available(iOS 17.4, *) {
-        navigation.maneuverState = CPManeuverState(rawValue: CarPlayLogic.maneuverState(step)) ?? .continue
+        let state = CPManeuverState(rawValue: CarPlayLogic.maneuverState(step)) ?? .continue
+        if navigation.maneuverState != state { navigation.maneuverState = state }
       }
     }
-    mapTemplate?.updateEstimates(
-      Self.estimates(route.remainingShown, route.remainingUnit, route.remainingS), for: navigation.trip)
+    let left = CarPlayLogic.estimatesKey(route.remainingShown, route.remainingUnit, route.remainingS)
+    if left != tripEstimatesKey {
+      tripEstimatesKey = left
+      mapTemplate?.updateEstimates(
+        Self.estimates(route.remainingShown, route.remainingUnit, route.remainingS), for: navigation.trip)
+    }
   }
 
   /** `gapM`: from the maneuver before (the first: from the car), which CarPlay shows with the one after. */
@@ -582,7 +613,9 @@ final class CarPlaySession: NSObject {
   // MARK: - The alert: a notice, or why the route failed
 
   private var alertWanted: AlertContent? {
-    if let notice { return .notice(notice, checkPhone: askedLocation && notice.kind == CarNotice.location) }
+    if let notice, notice != noticeClosed {
+      return .notice(notice, canAsk: notice.kind != CarNotice.location || locationUndetermined)
+    }
     if let route, route.status == "failed" {
       let failure = AlertContent.failure(message: route.message ?? "", destination: route.destinationName)
       return failure == failureClosed ? nil : failure
@@ -596,31 +629,42 @@ final class CarPlaySession: NSObject {
     let wanted = alertWanted
     guard wanted != alertShown else { return }
     alertShown = wanted
-    let present = { [weak self] in
-      guard let self, let wanted, self.alertShown == wanted, let template = self.mapTemplate else { return }
-      let alert = self.alert(wanted)
-      self.alertPresented = alert
-      template.present(navigationAlert: alert, animated: true)
-    }
+    // Whatever shows goes first (it calls back with `didDismiss`, which ignores an alert no longer presented).
     if mapTemplate.currentNavigationAlert != nil {
       alertPresented = nil
-      mapTemplate.dismissNavigationAlert(animated: true) { _ in present() }
+      alertPresentedContent = nil
+      mapTemplate.dismissNavigationAlert(animated: true) { [weak self] _ in self?.presentAlert() }
     } else {
-      present()
+      presentAlert()
     }
+  }
+
+  /** The alert wanted now, if none is up (a dismissal still going on presents it when done). */
+  private func presentAlert() {
+    guard let template = mapTemplate, let wanted = alertShown, template.currentNavigationAlert == nil else { return }
+    let alert = alert(wanted)
+    alertPresented = alert
+    alertPresentedContent = wanted
+    carPlayLog.notice("alert shown")
+    template.present(navigationAlert: alert, animated: true)
   }
 
   private func alert(_ content: AlertContent) -> CPNavigationAlert {
     switch content {
-    case .notice(let notice, let checkPhone):
+    case .notice(let notice, let canAsk):
       let location = notice.kind == CarNotice.location
-      let primary = CPAlertAction(title: notice.action, style: .default) { [weak self] _ in
-        location ? self?.requestLocation() : self?.send("confirm-held")
-      }
+      // Location refused before: nothing on the car's screen can allow it, and its words may not send the driver to the
+      // phone (Apple's guidelines): the alert says so and closes.
+      let primary =
+        canAsk
+        ? CPAlertAction(title: notice.action, style: .default) { [weak self] _ in
+          location ? self?.requestLocation() : self?.send("confirm-held")
+        }
+        : CPAlertAction(title: labels.close, style: .cancel) { [weak self] _ in self?.noticeClosed = notice }
       let secondary = location ? nil : CPAlertAction(title: labels.cancel, style: .cancel) { [weak self] _ in
         self?.send("cancel-held")
       }
-      let text = checkPhone ? labels.checkPhone : notice.text
+      let text = notice.text
       return CPNavigationAlert(
         titleVariants: [notice.title], subtitleVariants: text.isEmpty ? [] : [text],
         image: CarPlayImages.icon(location ? "car_location_off" : "car_alt_route"),
@@ -629,28 +673,31 @@ final class CarPlaySession: NSObject {
       let close = CPAlertAction(title: labels.close, style: .cancel) { [weak self] _ in
         self?.failureClosed = content
       }
+      // The reason in the subtitle, which takes more lines than the title (two).
       return CPNavigationAlert(
-        titleVariants: [message], subtitleVariants: destination.isEmpty ? [] : [destination], image: nil,
-        primaryAction: close, secondaryAction: nil, duration: 0)
+        titleVariants: [destination.isEmpty ? message : destination], subtitleVariants: destination.isEmpty ? [] : [message],
+        image: nil, primaryAction: close, secondaryAction: nil, duration: 0)
     }
   }
 
-  /**
-   * The location notice's button: iOS's permission dialog, on the phone's screen (CarPlay shows none), and the notice
-   * says to look at the phone only when it's safe. Refused before: only the phone's Settings can allow it now.
-   */
-  private func requestLocation() {
-    askedLocation = true
+  private var locationAuthorizer: CLLocationManager {
     let manager = locationManager ?? CLLocationManager()
     locationManager = manager
     manager.delegate = self
-    if manager.authorizationStatus == .notDetermined {
-      note("location permission asked on the car's screen")
-      manager.requestWhenInUseAuthorization()
-    } else {
-      note("location permission asked on the car's screen: refused before, the phone's Settings allow it")
-    }
-    // Pressing the button closed the alert: the notice comes back, saying where to look, until location is allowed.
+    return manager
+  }
+
+  /** iOS has never asked for location: the notice's button can ask. */
+  private var locationUndetermined: Bool { locationAuthorizer.authorizationStatus == .notDetermined }
+
+  /**
+   * The location notice's button: iOS asks (its dialog is the system's, on the phone). Pressing it closed the alert: the
+   * notice comes back until location is allowed, with Close once iOS can't ask any more.
+   */
+  private func requestLocation() {
+    askedLocation = true
+    note("location permission asked on the car's screen")
+    locationAuthorizer.requestWhenInUseAuthorization()
     alertShown = nil
     DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.syncAlert() }
   }
@@ -692,7 +739,7 @@ final class CarPlaySession: NSObject {
 
   private func go(_ id: String) {
     send("go", ["id": id])
-    interfaceController?.popToRootTemplate(animated: true, completion: nil)
+    popToRoot()
   }
 
   /** The route followed first, then each other way by the street it goes by; one picked is followed instead. */
@@ -708,7 +755,7 @@ final class CarPlaySession: NSObject {
       detailText: route?.detail.isEmpty == false ? route?.detail : nil,
       image: CarPlayImages.icon("car_navigation", size: CarPlayImages.rowSize))
     current.handler = { [weak self] _, completion in
-      self?.interfaceController?.popToRootTemplate(animated: true, completion: nil)
+      self?.popToRoot()
       completion()
     }
     let others = (route?.alternatives ?? []).prefix(Int(CPListTemplate.maximumItemCount) - 1).map { alternative in
@@ -717,7 +764,7 @@ final class CarPlaySession: NSObject {
         image: CarPlayImages.icon("car_alt_route", size: CarPlayImages.rowSize))
       item.handler = { [weak self] _, completion in
         self?.send("choose-alternative", ["index": alternative.index])
-        self?.interfaceController?.popToRootTemplate(animated: true, completion: nil)
+        self?.popToRoot()
         completion()
       }
       return item
@@ -737,6 +784,22 @@ final class CarPlaySession: NSObject {
     searchTemplate = template
     typed = ""
     push(template)
+  }
+
+  /**
+   * Back to the map, when something is over it. Every template operation has a completion: one that fails without
+   * one raises an exception, and the app ended ("No templates were available to be popped": a place asked for, with
+   * nothing open over the map).
+   */
+  private func popToRoot(animated: Bool = true, then: (() -> Void)? = nil) {
+    guard let interfaceController, interfaceController.templates.count > 1 else {
+      then?()
+      return
+    }
+    interfaceController.popToRootTemplate(animated: animated) { [weak self] _, error in
+      if let error { self?.note("lists not closed: \(error.localizedDescription)", problem: true) }
+      then?()
+    }
   }
 
   /** Over the map; CarPlay refusing it says why in the trip log. */
@@ -815,8 +878,13 @@ extension CarPlaySession: CPMapTemplateDelegate {
     dismissalContext: CPNavigationAlert.DismissalContext
   ) {
     guard navigationAlert === alertPresented else { return }
+    let content = alertPresentedContent
     alertPresented = nil
+    alertPresentedContent = nil
     alertShown = nil
+    carPlayLog.notice("alert dismissed (\(dismissalContext.rawValue))")
+    // Closed by the driver (its button, or CarPlay's own x): a failure stays closed.
+    if dismissalContext == .userDismissed, case .failure = content { failureClosed = content }
     // Taken down by CarPlay (another alert, the app sent away): shown again; the driver's own buttons decide theirs.
     if dismissalContext == .systemDismissed {
       DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.syncAlert() }
@@ -908,11 +976,30 @@ extension CarPlaySession: CPInterfaceControllerDelegate {
   }
 }
 
+extension CarPlaySession: CPSessionConfigurationDelegate {
+  // The car limits the keyboard (and its lists, which CarPlay shortens itself) while driving: no search button then.
+  func sessionConfiguration(
+    _ sessionConfiguration: CPSessionConfiguration, limitedUserInterfacesChanged limitedUserInterfaces: CPLimitableUserInterface
+  ) {
+    let limited = limitedUserInterfaces.contains(.keyboard)
+    guard limited != keyboardLimited else { return }
+    keyboardLimited = limited
+    note("keyboard \(limited ? "limited" : "allowed") by the car")
+    refresh()
+  }
+}
+
 extension CarPlaySession: CLLocationManagerDelegate {
   func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
-    guard askedLocation else { return }
     let status = manager.authorizationStatus
-    guard status != .notDetermined else { return }
+    let was = authorization
+    authorization = status
+    guard status != .notDetermined, was != nil, was != status else { return }
+    // Answered or changed (in Settings): the alert's button follows (Close when iOS can't ask any more).
+    alertShown = nil
+    syncAlert()
+    guard askedLocation else { return }
+    askedLocation = false
     let granted = status == .authorizedAlways || status == .authorizedWhenInUse
     note(granted ? "location permission granted" : "location permission refused")
     send("permission")

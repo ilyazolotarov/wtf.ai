@@ -95,6 +95,7 @@ final class ButtonsTests: XCTestCase {
     XCTAssertEqual(CarPlayLogic.barButtons(route: nil, notice: nil, voiceMuted: nil, panning: false).trailing, [])
     XCTAssertEqual(CarPlayLogic.barButtons(route: nil, notice: notice, voiceMuted: false, panning: false).trailing, [])
     XCTAssertEqual(CarPlayLogic.barButtons(route: route(), notice: notice, voiceMuted: false, panning: false).trailing, [.endRoute])
+    XCTAssertEqual(CarPlayLogic.barButtons(route: nil, notice: nil, voiceMuted: nil, panning: false, keyboard: false).leading, [.destinations])
     let panning = CarPlayLogic.barButtons(route: route(), notice: nil, voiceMuted: false, panning: true)
     XCTAssertEqual(panning.leading, [.endPanning])
     XCTAssertEqual(panning.trailing, [])
@@ -113,6 +114,12 @@ final class SearchAndDistanceTests: XCTestCase {
     XCTAssertEqual(CarPlayLogic.searchList(nil, typed: "khre"), .loading)
     XCTAssertEqual(CarPlayLogic.searchList(found, typed: "khres"), .loading)
     XCTAssertEqual(CarPlayLogic.searchList(found, typed: "khre "), .results(found.results))
+  }
+
+  func testEstimatesChangeOnlyWithWhatCarPlayShows() {
+    XCTAssertEqual(CarPlayLogic.estimatesKey(800, "m", 60), CarPlayLogic.estimatesKey(800, "m", 80))
+    XCTAssertNotEqual(CarPlayLogic.estimatesKey(800, "m", 60), CarPlayLogic.estimatesKey(750, "m", 60))
+    XCTAssertNotEqual(CarPlayLogic.estimatesKey(12, "km1", 900), CarPlayLogic.estimatesKey(12, "km1", 960))
   }
 
   func testDistancesRoundedAsThePhonesBanner() {

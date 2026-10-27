@@ -45,6 +45,8 @@ declare class AudioOutputNativeModule extends NativeModule<AudioOutputEvents> {
   stopOnSpeaker?(): Promise<void>;
   /** iOS: the audio session's mode as voice prompts (CarPlay connected), or the plain one again. */
   setVoicePrompt?(on: boolean): void;
+  /** iOS: what the next voice prompt may be (`AVAudioSession.promptStyle`). */
+  promptStyle?(): VoicePromptStyle;
 }
 
 const native = requireOptionalNativeModule<AudioOutputNativeModule>("AudioOutput");
@@ -104,6 +106,14 @@ export function setVoicePrompt(on: boolean): boolean {
   if (!native?.setVoicePrompt) return false;
   native.setVoicePrompt(on);
   return true;
+}
+
+/** CarPlay's word on the next voice prompt: none (a call, Siri), a short tone, or the whole prompt. */
+export type VoicePromptStyle = "none" | "short" | "normal";
+
+/** iOS: what the next voice prompt may be; "normal" without the module. */
+export function voicePromptStyle(): VoicePromptStyle {
+  return native?.promptStyle?.() ?? "normal";
 }
 
 /** Stops the clip `playOnSpeaker` or `playGuidance` plays (its promise then resolves false). */

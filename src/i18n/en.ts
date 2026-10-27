@@ -445,6 +445,8 @@ export const en = {
   carHeldTitle: "Without an adapter",
   carHeldSetPosition: "Stop and set your position on the phone.",
   carHeldFollow: "Follow the route exactly.",
+  carPlayLocationNeeded: "Without location access the car's position can't be shown.",
+  carPlayHeldNoPosition: "The car's position isn't set yet.",
   thenManeuver: "then",
   mDepart: "Head off",
   mSlightLeft: "Bear left",

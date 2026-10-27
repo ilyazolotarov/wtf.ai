@@ -146,6 +146,7 @@ describe("reloadBlocker", () => {
     expect(reloadBlocker({ ...idle, recorder: "lingering" })).toBe("trip lingering");
     expect(reloadBlocker({ ...idle, recorder: "armed" })).toBe("trip armed");
     expect(reloadBlocker({ ...idle, route: true })).toBe("route");
+    expect(reloadBlocker({ ...idle, carScreen: true })).toBe("car screen");
     expect(reloadBlocker({ ...idle, link: "standby" })).toBe("adapter standby");
     expect(reloadBlocker({ ...idle, link: "connecting" })).toBe("adapter connecting");
     expect(reloadBlocker({ ...idle, link: "polling" })).toBe("adapter polling");

@@ -30,6 +30,11 @@ type T = (key: keyof Strings) => string;
 export interface CarSessionDeps {
   /** The car's screen in the trip log: "android auto", "carplay". */
   name: string;
+  /**
+   * The car's words never send the driver to the phone (CarPlay: Apple's guidelines forbid wording that asks people to
+   * use their iPhone); Android Auto's say where to look, when it's safe.
+   */
+  phoneFree?: boolean;
   native: {
     isConnected(): boolean;
     /** Android Auto asked for its test drive (CarPlay has none). */
@@ -143,12 +148,21 @@ export function carLabels(t: T): CarLabelsPayload {
 /**
  * What the driver must do before the car can guide: allow location (unknown until checked: nothing yet), then agree
  * to a route held without an adapter, once the position is set (the card says to set it first, else to follow the
- * route exactly). The car's card has two short lines: one instruction at a time.
+ * route exactly). The car's card has two short lines: one instruction at a time. `phoneFree`: the condition only, no
+ * word of the phone (CarPlay).
  */
-export function carNotice(located: boolean | null, held: RouteDestination | null, positionSet: boolean, t: T): CarNoticePayload | null {
-  if (located === false) return { kind: "location", title: t("locationOff"), text: t("carLocationNeeded"), action: t("carAllowLocation") };
+export function carNotice(
+  located: boolean | null,
+  held: RouteDestination | null,
+  positionSet: boolean,
+  t: T,
+  phoneFree = false,
+): CarNoticePayload | null {
+  if (located === false) {
+    return { kind: "location", title: t("locationOff"), text: t(phoneFree ? "carPlayLocationNeeded" : "carLocationNeeded"), action: t("carAllowLocation") };
+  }
   if (held) {
-    const text = t(positionSet ? "carHeldFollow" : "carHeldSetPosition");
+    const text = t(positionSet ? "carHeldFollow" : phoneFree ? "carPlayHeldNoPosition" : "carHeldSetPosition");
     return { kind: "held-route", title: t("carHeldTitle"), text, action: t("noAdapterRouteAgree") };
   }
   return null;
@@ -233,7 +247,7 @@ export function runCarSession(deps: CarSessionDeps): Promise<void> {
     let notice: CarNoticePayload | null | undefined;
     let stopChecks: (() => void) | null = null;
     const sendNotice = () => {
-      const next = carNotice(located, held.get(), deps.positionSet(), deps.strings().t);
+      const next = carNotice(located, held.get(), deps.positionSet(), deps.strings().t, deps.phoneFree);
       if (notice === undefined || !sameNotice(next, notice)) {
         notice = next;
         send(native.setNotice(next));

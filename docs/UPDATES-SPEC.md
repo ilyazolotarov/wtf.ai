@@ -102,7 +102,8 @@ its own, so a failed prune never fails a publish. It never removes what `latest`
 - **JS update downloaded** (`isUpdatePending`): prompt "Restart" (§5.3). Otherwise it runs from the next start, or
   sooner: 5 s after the app goes to the background, it restarts into the update by itself when nothing would be cut
   short (`reloadBlocker`): the trip recorder idle (not armed by an adapter, recording, or in its parked minutes after
-  the engine stops), no route, the adapter not connecting or answering (retrying after it went quiet at a stop is
+  the engine stops), no route, no car's screen session (Android Auto, CarPlay: the car shows the app while the phone's
+  is in the background), the adapter not connecting or answering (retrying after it went quiet at a stop is
   fine), not moving, no map or app download, none of the app's own system dialogs up. Any change of these while the
   app is in the background is that chance too: typically the trip ending when its parked minutes are over. Android keeps the app's process for days, so "the next start" could be after many
   drives. Not when the timer fires more than 5 s late: the process was frozen and wakes because the driver opens it.

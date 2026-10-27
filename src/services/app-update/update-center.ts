@@ -106,7 +106,7 @@ export interface UpdateCenterState {
 export interface UpdateCenterDeps {
   driving(): boolean;
   subscribeDriving(listener: () => void): () => void;
-  activity(): Pick<ReloadContext, "recorder" | "route" | "link" | "speedMps">;
+  activity(): Pick<ReloadContext, "recorder" | "route" | "link" | "speedMps" | "carScreen">;
   /** Any of `activity` changed: the trip, the route, the vehicle link. */
   subscribeActivity(listener: () => void): () => void;
 }

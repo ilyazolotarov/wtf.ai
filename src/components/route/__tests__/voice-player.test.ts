@@ -54,7 +54,15 @@ const mockSpeaker: {
   end: ((played: boolean) => void) | null;
   stops: number;
 } = { plays: [], guidance: [], end: null, stops: 0 };
+let mockPromptStyle = "normal";
+const mockVoicePrompt: boolean[] = [];
 jest.mock("../../../../modules/audio-output/src/AudioOutputModule", () => ({
+  // iOS's: the voice-prompt mode while CarPlay is connected, and what it allows before each prompt.
+  setVoicePrompt: jest.fn((on: boolean) => {
+    mockVoicePrompt.push(on);
+    return true;
+  }),
+  voicePromptStyle: jest.fn(() => mockPromptStyle),
   canPlayOnSpeaker: true,
   canPlayGuidance: true,
   playOnSpeaker: jest.fn((uri: string, volume: number) => {
@@ -93,6 +101,8 @@ beforeEach(() => {
   mockSpeaker.guidance.length = 0;
   mockSpeaker.end = null;
   mockSpeaker.stops = 0;
+  mockPromptStyle = "normal";
+  mockVoicePrompt.length = 0;
   setVoiceNote((t) => notes.push(t));
   setVoiceVolume(1);
 });
@@ -252,6 +262,20 @@ describe("voice player", () => {
     sayOnSpeaker([{ id: "then-left", text: "Then left" }], "en");
     await flush();
     expect(mockSpeaker.plays).toEqual([{ uri: "file:///clip-3.mp3", volume: 0.6 }]);
+  });
+
+  test("with CarPlay connected (iOS), a prompt it asks none for (a call, Siri) is not said; the next one is", async () => {
+    // jest-expo's default platform is iOS; Android's own guidance player stands aside for the test.
+    setVoiceAsGuidance(true);
+    mockPromptStyle = "none";
+    sayOnSpeaker([{ id: "now-left", text: "Turn left" }], "en");
+    await flush();
+    expect(mockSpeaker.plays).toHaveLength(0);
+    expect(notes).toContain("voice: not said, CarPlay asks for no prompt: Turn left");
+    mockPromptStyle = "normal";
+    sayOnSpeaker([{ id: "now-right", text: "Turn right" }], "en");
+    await flush();
+    expect(mockSpeaker.plays.map((p) => p.uri)).toEqual(["file:///clip-2.mp3"]);
   });
 
   test("a clip that won't play as guidance goes where the audio goes; without Android Auto, clips play as before", async () => {

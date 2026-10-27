@@ -82,7 +82,8 @@ the ignition off and no linger, the app may be suspended.
 
 - **Ended by the OS** (not by the user), the app comes back by itself on iOS:
   - **Location** (iOS 17+): a `CLBackgroundActivitySession` (`LocationKeepAlive`, `src/services/location-session.ts`)
-    is held from every time the app is in front, whatever is connected: only one started in front counts, and "When
+    is held from every time the app is in front (CarPlay showing it counts, though iOS calls the app `inactive` then;
+    a CarPlay session keeps it, CARPLAY-SPEC §4), whatever is connected: only one started in front counts, and "When
     In Use" can't start GNSS from the background without it (2026-10-21: the app placed the car, went behind the
     music, the engine started, and the whole 37 min drive had no fix, satellite or Wi-Fi). Held, a trip that starts
     with the app in the background gets GNSS, and iOS relaunches an app it ended; the app joins the session at launch

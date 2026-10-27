@@ -10,6 +10,7 @@ import {
   playOnSpeaker,
   setVoicePrompt,
   stopOnSpeaker,
+  voicePromptStyle,
 } from "../../../modules/audio-output/src/AudioOutputModule";
 import { VOICE_CLIPS } from "./voice-clips";
 import type { Phrase, VoiceLang } from "./voice-phrases";
@@ -113,6 +114,16 @@ function next(): void {
   busy = item !== undefined;
   if (!item) return;
   const gen = generation;
+  // CarPlay connected: before each prompt, what it allows now (Apple's guide). None during a call or Siri; a short
+  // tone instead when spoken audio would clash: the app has none, so nothing then either.
+  if (voicePrompt) {
+    const style = voicePromptStyle();
+    if (style !== "normal") {
+      note(`voice: not said, CarPlay asks for ${style === "none" ? "no prompt" : "a short one"}: ${item.text.slice(0, 40)}`);
+      next();
+      return;
+    }
+  }
   let finished = false;
   // Exactly once per item, whatever reports its end (or fails to).
   const done = () => {

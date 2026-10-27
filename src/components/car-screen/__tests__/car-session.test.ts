@@ -648,4 +648,14 @@ describe("car session", () => {
     expect(carNotice(false, lviv, true, tEn)).toMatchObject({ kind: "location" });
     expect(carNotice(null, lviv, true, tEn)).toMatchObject({ kind: "held-route", text: en.carHeldFollow });
   });
+
+  test("CarPlay's notices say what is wrong, never to use the phone (Apple's guidelines)", () => {
+    expect(carNotice(false, null, false, tEn, true)).toMatchObject({ kind: "location", text: en.carPlayLocationNeeded });
+    expect(carNotice(null, lviv, false, tEn, true)).toMatchObject({ kind: "held-route", text: en.carPlayHeldNoPosition });
+    expect(carNotice(null, lviv, true, tEn, true)).toMatchObject({ text: en.carHeldFollow });
+    for (const key of ["carPlayLocationNeeded", "carPlayHeldNoPosition", "carHeldFollow", "carAllowLocation", "noAdapterRouteAgree"] as const) {
+      expect(en[key]).not.toMatch(/phone/i);
+      expect(uk[key]).not.toMatch(/телефон/i);
+    }
+  });
 });

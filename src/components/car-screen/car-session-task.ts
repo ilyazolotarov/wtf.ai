@@ -38,7 +38,7 @@ export const CAR_SESSION_TASK = "WtfCarSession";
 /** Android Auto's car screen connected (docs/ANDROID-AUTO-SPEC.md §3): runs until it is gone. */
 export async function carSessionTask(): Promise<void> {
   if (!AndroidAuto) return;
-  await runCarScreen(AndroidAuto, "android auto", "android-auto");
+  await runCarScreen(AndroidAuto, "android auto", "android-auto", false);
 }
 
 let carPlayRunning = false;
@@ -54,7 +54,7 @@ export function listenForCarPlay(): void {
   const start = () => {
     if (carPlayRunning || !native.isConnected()) return;
     carPlayRunning = true;
-    void runCarScreen(native, "carplay", "carplay").finally(() => {
+    void runCarScreen(native, "carplay", "carplay", true).finally(() => {
       carPlayRunning = false;
     });
   };
@@ -62,8 +62,11 @@ export function listenForCarPlay(): void {
   start();
 }
 
-/** One connection of a car's screen, the same on both platforms but for its native side and its name in the log. */
-async function runCarScreen(native: CarSessionDeps["native"], name: string, feature: string): Promise<void> {
+/**
+ * One connection of a car's screen, the same on both platforms but for its native side, its name in the log, and
+ * whether its words may send the driver to the phone (`phoneFree`: CarPlay's may not).
+ */
+async function runCarScreen(native: CarSessionDeps["native"], name: string, feature: string, phoneFree: boolean): Promise<void> {
   // The process may have started for the car, the phone's screens (and the root layout's setup) never loaded.
   initSentry();
   const runtime = getRuntime();
@@ -87,6 +90,7 @@ async function runCarScreen(native: CarSessionDeps["native"], name: string, feat
   try {
     await runCarSession({
       name,
+      phoneFree,
       native,
       routes,
       places,

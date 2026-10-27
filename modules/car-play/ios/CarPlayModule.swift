@@ -60,7 +60,6 @@ struct CarLabelsRecord: Record {
   @Field var search: String = ""
   @Field var searchHint: String = ""
   @Field var noResults: String = ""
-  @Field var checkPhone: String = ""
   @Field var routes: String = ""
   @Field var thisRoute: String = ""
   @Field var cancel: String = ""
@@ -105,7 +104,7 @@ public class CarPlayModule: Module {
           saved: or(labels.saved, d.saved), recent: or(labels.recent, d.recent),
           noDestinations: or(labels.noDestinations, d.noDestinations), search: or(labels.search, d.search),
           searchHint: or(labels.searchHint, d.searchHint), noResults: or(labels.noResults, d.noResults),
-          checkPhone: or(labels.checkPhone, d.checkPhone), routes: or(labels.routes, d.routes),
+          routes: or(labels.routes, d.routes),
           thisRoute: or(labels.thisRoute, d.thisRoute), cancel: or(labels.cancel, d.cancel), close: or(labels.close, d.close)))
     }.runOnQueue(.main)
 

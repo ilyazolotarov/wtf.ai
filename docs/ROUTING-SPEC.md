@@ -272,7 +272,8 @@ car left. Optimistic as the simulator is.
   plays (ANDROID-AUTO-SPEC §3); one that won't play that way goes through expo-audio. While a CarPlay session is open,
   expo-audio's session is set to the voice-prompt mode with spoken audio interrupted and others ducked (`setVoicePrompt`,
   after expo-audio sets its own category), as Apple asks of navigation apps: CarPlay mixes it over the car's audio
-  (CARPLAY-SPEC §4).
+  (CARPLAY-SPEC §4); before each announcement the session's `promptStyle`, and nothing is said when it asks for none
+  (a call, Siri) or a short tone.
 - **When:** each maneuver is said twice. Ahead of it at a spoken distance (50, 100, 200, 300, 400, 500, 600, 800 m,
   1, 1.5, 2 km), the first at or beyond max(250 m, 15 s at the current speed). At it, early enough to hear, react and
   slow down (`nowDistanceM`): 10 m before the maneuver point + 2.8 s at the current speed + braking at 2 m/s² to the

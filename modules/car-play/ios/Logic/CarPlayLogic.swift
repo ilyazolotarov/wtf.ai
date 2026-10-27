@@ -79,8 +79,6 @@ struct CarLabels: Equatable {
   var search = "Search"
   var searchHint = "Search addresses and places"
   var noResults = "Nothing found in the downloaded region"
-  /** Shown when the car sends the driver to the phone (the permission dialog). */
-  var checkPhone = "Check your phone only when it's safe."
   var routes = "Routes"
   var thisRoute = "This route"
   var cancel = "Cancel"
@@ -298,6 +296,15 @@ enum CarPlayLogic {
     route.steps.map(\.id).joined(separator: "|") + "!" + (alert ?? "")
   }
 
+  /**
+   * Estimates as CarPlay shows them: the distance as rounded, the time in whole minutes. Apple's guide asks for updates
+   * only when they change, not with every position.
+   */
+  static func estimatesKey(_ shown: Double, _ unit: String, _ seconds: Double) -> String {
+    let d = distance(shown, unit: unit)
+    return "\(d.value)\(d.kilometers ? "km" : "m") \(Int((max(0, seconds) / 60).rounded()))"
+  }
+
   /** The results shown answer the text typed (an older text's would mislead); none yet while it is searched. */
   static func searchList(_ search: CarSearch?, typed: String) -> CarSearchList {
     let text = typed.trimmingCharacters(in: .whitespaces)
@@ -317,11 +324,14 @@ enum CarPlayLogic {
    * the left; with one, the routes there while there are others to choose. On the right the voice, but under a notice
    * (no route to speak, its alert takes the driver's attention), and left of it the X that stops guidance. While
    * panning, only the button that ends it. The bar hides with the map's buttons while nobody touches the screen; while
-   * it shows, CarPlay sets the guidance card below its row, buttons in it or not.
+   * it shows, CarPlay sets the guidance card below its row, buttons in it or not. No search while the car allows no
+   * keyboard (`keyboard` false: many do while driving): the destinations are the way then.
    */
-  static func barButtons(route: CarRoute?, notice: CarNotice?, voiceMuted: Bool?, panning: Bool) -> (leading: [CarBarButton], trailing: [CarBarButton]) {
+  static func barButtons(
+    route: CarRoute?, notice: CarNotice?, voiceMuted: Bool?, panning: Bool, keyboard: Bool = true
+  ) -> (leading: [CarBarButton], trailing: [CarBarButton]) {
     if panning { return ([.endPanning], []) }
-    let leading: [CarBarButton] = route == nil ? [.destinations, .search] : showsRoutes(route) ? [.routes] : []
+    let leading: [CarBarButton] = route == nil ? (keyboard ? [.destinations, .search] : [.destinations]) : showsRoutes(route) ? [.routes] : []
     // CarPlay puts the first of them rightmost.
     var trailing: [CarBarButton] = []
     if notice == nil, let muted = voiceMuted { trailing.append(.voice(muted: muted)) }

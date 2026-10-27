@@ -117,6 +117,12 @@ export interface ReloadContext {
   jsPending: boolean;
   recorder: "idle" | "armed" | "recording" | "lingering";
   route: boolean;
+  /**
+   * A car's screen session runs (Android Auto, CarPlay): the car shows the app while the phone's is in the background
+   * (iOS calls it inactive then), and a restart would blank the car's map and start its session over in front of the
+   * driver.
+   */
+  carScreen?: boolean;
   /** The vehicle link's state (`LinkState`). */
   link: string;
   speedMps: number | undefined;
@@ -150,6 +156,7 @@ export function reloadBlocker(c: ReloadContext): string | null {
   if (c.backgroundSinceMs == null || c.now - c.backgroundSinceMs < RELOAD_BACKGROUND_MS) return "in front";
   if (c.recorder !== "idle") return `trip ${c.recorder}`;
   if (c.route) return "route";
+  if (c.carScreen) return "car screen";
   if (LINK_BUSY.has(c.link)) return `adapter ${c.link}`;
   if ((c.speedMps ?? 0) > MOVING_MPS) return "moving";
   if (c.downloading) return "download";
