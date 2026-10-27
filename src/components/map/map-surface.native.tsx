@@ -20,9 +20,19 @@ import { useEntrancesUrl } from "@/services/offline-map/entrance-file";
 import { useMapPacks } from "@/services/offline-map/map-packs";
 
 import { dotOnCar, type CameraView } from "./map-features";
+import { nearPoint } from "./map-near";
 import { BUILDING_ZOOM, FINGER_PT, nearestStreet, type PinPick } from "./pin-pick";
 
-import { DebugLayers, EntranceLayers, MarkLayers, ParkedCarLayers, PositionLayers, PuckLayers, RouteLayers } from "./map-layers";
+import {
+  DebugLayers,
+  EntranceLayers,
+  MarkLayers,
+  NearLayers,
+  ParkedCarLayers,
+  PositionLayers,
+  PuckLayers,
+  RouteLayers,
+} from "./map-layers";
 import type { CameraMode } from "./use-camera-mode";
 import type { CompassHeading } from "./use-compass-heading";
 import { useMapCamera } from "./use-map-camera";
@@ -201,6 +211,11 @@ export function MapSurface({
   const [dotHidden, setDotHidden] = useState(false);
   const onCar = car != null && shown != null && dotOnCar(shown, car, view.zoom, STANDING_MPS, dotHidden);
   if (onCar !== dotHidden) setDotHidden(onCar);
+  // Heading-up: far house numbers, entrances and POIs other than a driver's gone (map-near.ts), measured from a point
+  // that moves on in steps. (State adjusted during render, not in an effect.)
+  const [near, setNear] = useState<Coordinate | null>(null);
+  const nearNow = nearPoint(near, mode === "follow-heading" ? position : null);
+  if (nearNow !== near) setNear(nearNow);
   const mapRef = useRef<MapRef>(null);
   const moves = useMapControl(mapRef, cameraRef, mapSize);
   useImperativeHandle(control, () => ({
@@ -307,7 +322,13 @@ export function MapSurface({
           }
         />
         {/* Placed in the style, above its house numbers: not part of the stack below. */}
-        <EntranceLayers url={entrancesUrl} />
+        <EntranceLayers url={entrancesUrl} near={near} />
+        {/*
+          Taking over the style's layers: once it has loaded them. Sent before, a layer found none to take, made its
+          own, and the style's loading replaced it (its filter then reached nothing). The car's style has only a
+          driver's POIs already.
+        */}
+        {mapReady && <NearLayers style={mapStyle} near={near} pois={!carScale} />}
         {/* Bottom to top: MapLibre stacks layers in the order they are declared. */}
         <RouteLayers route={route} palette={palette} onChoose={chooseAlternative} />
         <ParkedCarLayers car={car} scheme={scheme} zoom={view.zoom} />

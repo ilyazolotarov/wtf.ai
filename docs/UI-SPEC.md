@@ -75,7 +75,11 @@ persisted in kv-store. No hardcoded user-facing strings in components.
   Ukrainian `name:uk`, else the local name; English `name:en`, else the tiles' Latin form; the world's country names
   stay English (its file has no `name_uk` for them yet); the route's lines under every name (right below the house
   numbers, `RouteLayers`), so a street's name reads on the route along it, its dots and the alternatives' times on
-  top; `map-dark.ts` re-tints Liberty for the dark scheme (Night Drive: near-black ground, amber primary roads, orange
+  top; in heading-up, house numbers and entrances only within 250 m of the car (`map-near.ts`, MapLibre's `distance`
+  from a point that moves on every 40 m), far ahead they were clutter (buildings not: `distance` is wrong for polygons);
+  so are the POIs other than a driver's: within 250 m only, while the car's map's (fuel and charging, railway and
+  metro stations: `DRIVER_POI_FILTER`) show at any distance (`NearLayers`); north-up and free show them all;
+  `map-dark.ts` re-tints Liberty for the dark scheme (Night Drive: near-black ground, amber primary roads, orange
   motorways and trunk roads, dark road names on a white halo, quiet grey house numbers);
   `map-palette.ts` reads the style's colours for the guide's drawn maps.
 

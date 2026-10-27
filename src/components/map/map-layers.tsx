@@ -1,7 +1,9 @@
-import { GeoJSONSource, Layer } from "@maplibre/maplibre-react-native";
+import { GeoJSONSource, Layer, type FilterSpecification, type SymbolLayerSpecification } from "@maplibre/maplibre-react-native";
 import { useMemo } from "react";
 import { type NativeSyntheticEvent, PixelRatio } from "react-native";
 
+import { DRIVER_POI_FILTER } from "@/config/map-car";
+import type { MapStyleJson } from "@/config/map-dark";
 import { HOUSE_NUMBER_LAYER } from "@/config/map-labels";
 import type { Palette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
@@ -39,6 +41,7 @@ import {
   PUCK_OUTER,
   ROUTE_LINE,
 } from "./puck-style";
+import { NEAR_NUMBERS_M, NEAR_POIS_M, nearFilter } from "./map-near";
 import type { CompassHeading } from "./use-compass-heading";
 
 /**
@@ -588,11 +591,39 @@ export function PuckLayers({
 const ENTRANCE_MINZOOM = 16;
 
 /**
+ * One of the style's own symbol layers taken over by id to change its filter, once the style has loaded. Always
+ * rendered while the map is: taking it off the map removes the style's layer. Given its whole definition, so that one
+ * already gone (a JS reload remounted it) is made again, on top, instead of failing without a source.
+ */
+function StyleSymbolLayer({ layer, filter }: { layer: MapStyleJson["layers"][number]; filter: unknown[] }) {
+  return <Layer {...(layer as unknown as SymbolLayerSpecification)} filter={filter as FilterSpecification} />;
+}
+
+/**
+ * Heading-up's near area (`map-near.ts`): house numbers only near the car; of the POIs, a driver's (the car's map's,
+ * `DRIVER_POI_FILTER`) wherever they are, the rest only near the car (null: all, as the style has them). `pois: false`:
+ * the car's style, which has only a driver's.
+ */
+export function NearLayers({ style, near, pois }: { style: MapStyleJson; near: Coordinate | null; pois: boolean }) {
+  return (
+    <>
+      {style.layers.map((l) => {
+        const base = l.filter as unknown[] | undefined;
+        if (l.id === HOUSE_NUMBER_LAYER && l.type === "symbol") return <StyleSymbolLayer key={l.id} layer={l} filter={nearFilter(near, NEAR_NUMBERS_M, base)} />;
+        if (pois && l["source-layer"] === "poi" && l.type === "symbol")
+          return <StyleSymbolLayer key={l.id} layer={l} filter={nearFilter(near, NEAR_POIS_M, base, DRIVER_POI_FILTER)} />;
+        return null;
+      })}
+    </>
+  );
+}
+
+/**
  * Building entrances (SEARCH-SPEC §5): a numbered one as its number on a round enamel-blue badge, one without a
  * number as a small dot, from street level. Right above the house numbers (`map-labels.ts`): a badge wins over a
  * number where they meet, every other label over both. Drawn with a circle and text, no images.
  */
-export function EntranceLayers({ url }: { url: string | null }) {
+export function EntranceLayers({ url, near }: { url: string | null; near: Coordinate | null }) {
   if (!url) return null;
   return (
     <GeoJSONSource id="entrances" data={url}>
@@ -601,7 +632,7 @@ export function EntranceLayers({ url }: { url: string | null }) {
         type="circle"
         afterId="housenumber"
         minzoom={ENTRANCE_MINZOOM}
-        filter={["==", ["get", "r"], ""]}
+        filter={nearFilter(near, NEAR_NUMBERS_M, ["==", ["get", "r"], ""]) as FilterSpecification}
         paint={{
           "circle-radius": ["interpolate", ["linear"], ["zoom"], 16, 2, 19, 3],
           "circle-color": "#ffffff",
@@ -614,7 +645,7 @@ export function EntranceLayers({ url }: { url: string | null }) {
         type="circle"
         afterId="housenumber"
         minzoom={ENTRANCE_MINZOOM}
-        filter={["!=", ["get", "r"], ""]}
+        filter={nearFilter(near, NEAR_NUMBERS_M, ["!=", ["get", "r"], ""]) as FilterSpecification}
         paint={{
           // Grows with the number: "1", "12", "12А".
           "circle-radius": [
@@ -636,7 +667,7 @@ export function EntranceLayers({ url }: { url: string | null }) {
         type="symbol"
         afterId="entrance-badges"
         minzoom={ENTRANCE_MINZOOM}
-        filter={["!=", ["get", "r"], ""]}
+        filter={nearFilter(near, NEAR_NUMBERS_M, ["!=", ["get", "r"], ""]) as FilterSpecification}
         layout={{
           "text-field": ["get", "r"],
           "text-font": ["noto-sans-bold"],
