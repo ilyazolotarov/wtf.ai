@@ -17,10 +17,11 @@ import { useSmoothedPosition } from "./use-smoothed-position";
 import { useRoute } from "@/providers/route-provider";
 import { STANDING_MPS } from "@/services/navigation/place-request";
 import { useEntrancesUrl } from "@/services/offline-map/entrance-file";
+import { activeSearchIndex } from "@/services/offline-map/search-file";
 import { useMapPacks } from "@/services/offline-map/map-packs";
 
 import { dotOnCar, type CameraView } from "./map-features";
-import { nearPoint } from "./map-near";
+import { nearHouses, nearPoint } from "./map-near";
 import { BUILDING_ZOOM, FINGER_PT, nearestStreet, type PinPick } from "./pin-pick";
 
 import {
@@ -229,6 +230,8 @@ export function MapSurface({
   const [near, setNear] = useState<Coordinate | null>(null);
   const nearNow = nearPoint(near, mode === "follow-heading" ? position : null);
   if (nearNow !== near) setNear(nearNow);
+  // Their house numbers from the search file, a point a house: the tiles merge a tile's houses of one number.
+  const houses = useMemo(() => nearHouses(activeSearchIndex(installed), near), [installed, near]);
   const mapRef = useRef<MapRef>(null);
   const moves = useMapControl(mapRef, cameraRef, mapSize);
   useImperativeHandle(control, () => ({
@@ -357,7 +360,7 @@ export function MapSurface({
           own, and the style's loading replaced it (its filter then reached nothing). The car's style has only a
           driver's POIs already.
         */}
-        {mapReady && <NearLayers style={mapStyle} near={near} pois={!carScale} />}
+        {mapReady && <NearLayers style={mapStyle} near={near} houses={houses} pois={!carScale} />}
         {/* Bottom to top: MapLibre stacks layers in the order they are declared. */}
         <RouteLayers route={route} palette={palette} onChoose={chooseAlternative} />
         <ParkedCarLayers car={car} scheme={scheme} zoom={view.zoom} />

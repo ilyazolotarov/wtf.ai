@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
+import { haversineM } from "@/nav/geo";
 import { bufferByteSource } from "@/nav/mapmatch/graph/byte-source";
 import { fold, foldHouse, parseQuery, splitEntrance } from "@/nav/search/fold";
 import { SearchIndex, typoBudget, withoutRepeats, type SearchResult } from "@/nav/search/search-index";
@@ -159,6 +160,21 @@ describe("SearchIndex", () => {
     expect(index.nearestAddress(km(0.1, 3.2))).toBeNull();
     expect(index.settlementAt(km(0.1, 3.2))?.name).toBe("Петрівка");
     expect(index.settlementAt(km(2, -1))?.name).toBe("Залісся");
+  });
+
+  it("lists every house near a point, each where its building is (the map's house numbers near the car)", () => {
+    const index = open();
+    const at = { lat: 51.4939 + 0.00125, lon: 31.2947 + 0.00105 };
+    const near = index.housesNear(at, 30);
+    expect(near.map((h) => h.house)).toContain("1");
+    const wide = index.housesNear(at, 2_000);
+    expect(wide.length).toBeGreaterThan(near.length);
+    for (const h of wide) expect(haversineM(at, h)).toBeLessThan(2_000 * 1.01);
+    // The "10" mapped four times nearby: every one of them, each its own point.
+    const tens = wide.filter((h) => h.house === "10");
+    expect(tens.length).toBeGreaterThan(1);
+    expect(new Set(tens.map((h) => `${h.lat},${h.lon}`)).size).toBe(tens.length);
+    expect(index.housesNear({ lat: 51.4939 + 0.02, lon: 31.2947 + 0.02 }, 250)).toEqual([]);
   });
 
   it("reads the region's entrances for the map, numbered or not", () => {
