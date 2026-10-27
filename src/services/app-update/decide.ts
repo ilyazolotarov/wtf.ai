@@ -42,14 +42,16 @@ export interface MapUpdate {
   region: string;
   name: { en: string; uk: string };
   osmDate: string;
+  /** The release by its files' content (`releaseFingerprint`): what Skip and Later remember. */
+  release: string;
   /** What the download would fetch (only the files that changed). */
   bytes: number;
 }
 
 export type MapAction = "auto" | "prompt" | "dot" | "none";
 
-export function mapAction(update: MapUpdate | null, unmetered: boolean, skippedOsmDate: string | null): MapAction {
-  if (!update || skippedOsmDate === update.osmDate) return "none";
+export function mapAction(update: MapUpdate | null, unmetered: boolean, skippedRelease: string | null): MapAction {
+  if (!update || skippedRelease === update.release) return "none";
   if (!unmetered) return "dot";
   return update.bytes <= AUTO_MAP_BYTES ? "auto" : "prompt";
 }
@@ -68,7 +70,7 @@ export interface Found {
 export function promptKey(kind: PromptKind, found: Found): string | null {
   if (kind === "native") return found.native ? `native:${found.native.build}` : null;
   if (kind === "js") return found.js ? `js:${found.js}` : null;
-  return found.map && found.mapAction === "prompt" ? `map:${found.map.region}:${found.map.osmDate}` : null;
+  return found.map && found.mapAction === "prompt" ? `map:${found.map.region}:${found.map.release}` : null;
 }
 
 export interface PromptContext {

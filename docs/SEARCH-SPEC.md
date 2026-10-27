@@ -65,7 +65,7 @@ Both sides are tested against `src/nav/search/__fixtures__/fold-cases.json`. Str
 
 | Section | Content |
 | --- | --- |
-| header, 76 B | `"WTFS"`, u16 format, u16 flags (1: entrances), u32 entities, settlements, addresses, tokens, offsets of the 7 sections, 16 B OSM date, u32 build time, u32 file size |
+| header, 76 B | `"WTFS"`, u16 format, u16 flags (1: entrances), u32 entities, settlements, addresses, tokens, offsets of the 7 sections, 16 B OSM date, u32 build stamp (the OSM date's midnight UTC, as the road graph's: a rebuild of the same data is byte-identical), u32 file size |
 | strings | u16 byte length + UTF-8, deduplicated |
 | entities, 44 B | u8 kind (1 place, 2 street, 3 POI), u8 reach, u16 rank, i32 lat, lon (1e-6°), u32 name, name_en (or NONE), tag, u32 parent (settlement or NONE), u32 first address, count, u32 first child, count |
 | addresses, 12 B | u32 house number (string), i32 lat, lon |

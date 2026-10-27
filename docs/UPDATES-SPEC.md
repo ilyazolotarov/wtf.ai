@@ -77,7 +77,8 @@ its own, so a failed prune never fails a publish. It never removes what `latest`
 
 - `map-packs.yml` uploads `tools/tiles/out/release/` to `maps/<osm_date>/` (`index.json` last), then publishes it:
   `maps/latest.json` names it. A forced rebuild of the same date uploads over it; the app's MD5 check catches a
-  download that mixed the two.
+  download that mixed the two. Road graphs and search indexes are stamped with the OSM date, not the build time, so a
+  rebuild writes the same bytes where the data didn't change, and the app downloads only the files that did.
 - The app reads `maps/latest.json`, then `maps/<osm_date>/index.json`, and downloads from that directory.
 
 ## 5. In the app
@@ -92,7 +93,8 @@ its own, so a failed prune never fails a publish. It never removes what `latest`
   expensive: a phone's hotspot is Wi-Fi but metered), at most every 30 minutes: the newest build and JS
   (`checkForUpdateAsync` → `fetchUpdateAsync`).
 - **The map catalog** (`index.json`, ~300 kB) with either, at most every 6 hours across restarts; in between, the
-  last check's answer for the active region stands (kept in kv-store), so the dots survive a restart.
+  last check's answer for the active region stands (kept in kv-store), so the dots survive a restart. Opening
+  Offline maps fetches it again when the copy in memory is over 10 minutes old: a rebuild may have come since.
 - Nothing is checked while the app is in the background. A failed check is silent and retried at the next one.
 
 ### 5.2 What it does with what it finds
@@ -115,7 +117,7 @@ its own, so a failed prune never fails a publish. It never removes what `latest`
     the same way.
   - on a metered network: only the dots.
   An automatic download pauses when the phone leaves for a metered network and goes on back on an unmetered one.
-  Cancelling it in Offline maps skips that OSM date (as "Skip" does).
+  Cancelling it in Offline maps skips that release (as "Skip" does).
   Other downloaded regions aren't checked: Offline maps shows their update when opened.
 - A map release in a newer catalog `format` than the app reads: "Update the app to get newer maps" in Offline maps;
   no prompt, no dot.
@@ -134,8 +136,10 @@ A system alert, one per check, the most important first: native update, then JS 
 - **Only when nothing is going on**: the map on screen (no page, onboarding, map setup or tour over it, no pin or
   placing card), no trip recording, no route, no adapter connected, not moving (speed under 2 m/s or none). Otherwise
   the dots only, and the prompt waits for a later check. Each prompt shows at most once per launch.
-- **Later**: no prompt for that version for 3 days; the dots stay. **Skip** (maps): no prompt and no dot for that OSM
-  date; Offline maps still offers it.
+- **Later**: no prompt for that version for 3 days; the dots stay. **Skip** (maps): no prompt and no dot for that
+  release; Offline maps still offers it. A map release is known by its files (the region's tiles, road graph and search
+  index MD5s and the shared files'), not its OSM date: a forced rebuild of the same extract that changes a file is a
+  new question, for Later too.
 - The app never installs or opens AltStore by itself; it restarts by itself only into a downloaded JS update, in the
   background, with nothing going on (§5.2).
 

@@ -9,7 +9,7 @@ from shapely.geometry import Polygon
 from tiles.graph import (
     ATTRIBUTES, BRIDGE, CITY, CLASSES, FEATURE_ATTRIBUTES, LINK, MINOR_SERVICE, NODE_BOUNDARY, NODE_DEAD_END,
     NODE_SIGNALS, NODE_STOP, ONEWAY_BACKWARD, ONEWAY_FORWARD, ONEWAY_NONE, PRIVATE, RESTRICT_NO, RESTRICT_ONLY,
-    ROUNDABOUT, SIGNALS, UNPAVED, URBAN, Settlements, population, build_graph, maxspeed_kph, read_graph, read_locations,
+    ROUNDABOUT, SIGNALS, UNPAVED, URBAN, Settlements, date_stamp, population, build_graph, maxspeed_kph, read_graph, read_locations,
     read_roads, read_settlements, restriction_kind, road_attrs, segment_tiles, urban_mask, validate, write_graph,
 )
 
@@ -226,6 +226,16 @@ def test_restrictions_mapped_to_edges(built):
     got = {(int(graph.node_ids[v]), k, int(way[f]), int(way[t])) for v, k, f, t in graph.restrictions}
     assert got == {(2, RESTRICT_NO, 101, 103), (2, RESTRICT_ONLY, 103, 104)}
     assert graph.stats["restrictions_skipped"] == 2
+
+
+def test_a_rebuild_of_the_same_extract_writes_the_same_bytes(built, tmp_path):
+    # Stamped with the OSM date's midnight, not the clock: the app downloads only the files whose MD5 changed.
+    _, graph, _ = built
+    a, b = tmp_path / "a.graph.bin", tmp_path / "b.graph.bin"
+    write_graph(graph, a, "2026-10-01")
+    write_graph(graph, b, "2026-10-01")
+    assert a.read_bytes() == b.read_bytes()
+    assert read_graph(a).built_at == date_stamp("2026-10-01") == 1_790_812_800  # 2026-10-01T00:00Z
 
 
 def test_file_round_trip(built):

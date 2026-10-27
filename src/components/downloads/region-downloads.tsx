@@ -20,11 +20,15 @@ import {
     loadCatalog,
     pauseDownload,
     regionNeedsUpdate,
+    releaseFingerprint,
     removeRegion,
     resumeDownload,
     setActiveRegion,
     useMapPacks,
 } from "@/services/offline-map/map-packs";
+
+/** Opening Offline maps fetches the catalog again when the one in memory is older than this (ms). */
+const CATALOG_FRESH_MS = 10 * 60 * 1000;
 
 export const formatMb = (bytes: number) =>
   bytes >= 1e9 ? `${(bytes / 1e9).toFixed(2)} GB` : `${(bytes / 1e6).toFixed(bytes < 1e8 ? 1 : 0)} MB`;
@@ -54,13 +58,13 @@ export function IconButton({ icon, label, danger, filled, onPress }: { icon: Ico
 
 /**
  * Progress text, bar and pause/resume/cancel controls of the running download. Cancelling an update the app started by
- * itself skips that map release (no prompt, no dot: docs/UPDATES-SPEC.md §5.3); Offline maps still offers it.
+ * itself skips that map release, its files (no prompt, no dot: docs/UPDATES-SPEC.md §5.3); Offline maps still offers it.
  */
-function DownloadProgress({ download, osmDate }: { download: MapDownload; osmDate?: string }) {
+function DownloadProgress({ download, release }: { download: MapDownload; release: string | null }) {
   const { t } = useT();
   const palette = usePalette();
   const cancel = () => {
-    if (download.auto && osmDate) skipMap(osmDate);
+    if (download.auto && release) skipMap(release);
     cancelDownload();
   };
   return (
@@ -108,11 +112,13 @@ function DownloadProgress({ download, osmDate }: { download: MapDownload; osmDat
 export function RegionDownloads() {
   const { t, language } = useT();
   const palette = usePalette();
-  const { installed, catalog, catalogLoading, catalogError, catalogTooNew, download, downloadError } = useMapPacks();
+  const { installed, catalog, catalogAt, catalogLoading, catalogError, catalogTooNew, download, downloadError } = useMapPacks();
 
+  // What is published now: the update center fetches the catalog at most every 6 hours, a rebuild may have come since.
   useEffect(() => {
-    if (!catalog) void loadCatalog();
-  }, [catalog]);
+    if (!catalog || catalogAt == null || Date.now() - catalogAt > CATALOG_FRESH_MS) void loadCatalog();
+  }, [catalog, catalogAt]);
+  const release = catalog && download ? releaseFingerprint(catalog, download.region) : null;
 
   // Catalog regions plus installed ones (so they stay manageable offline); Ukraine first.
   const rows = new Map<string, RegionRow>();
@@ -159,7 +165,7 @@ export function RegionDownloads() {
             </T>
           )}
         </View>
-        {activeBusy && download && <DownloadProgress download={download} osmDate={catalog?.osm_date} />}
+        {activeBusy && download && <DownloadProgress download={download} release={release} />}
       </ScreenCard>
 
       {downloadError && <ScreenNote color={palette.bad.c}>{downloadError}</ScreenNote>}
@@ -217,7 +223,7 @@ export function RegionDownloads() {
                   <IconButton icon="delete" danger label={t("delete")} onPress={() => removeRegion(row.region)} />
                 )}
               </View>
-              {busy && !isActive && download && <DownloadProgress download={download} osmDate={catalog?.osm_date} />}
+              {busy && !isActive && download && <DownloadProgress download={download} release={release} />}
             </Pressable>
           );
         })}

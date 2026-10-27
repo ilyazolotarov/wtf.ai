@@ -85,7 +85,8 @@ Little-endian; every record a multiple of 4 bytes, so the reader uses typed-arra
 
 ```
 header      64 B   "WTFG", u16 format, u16 zoom (14), u32 x0, y0, nx, ny, u32 nodes, edges,
-                   u32 directory offset (64), u32 data offset, char[16] OSM date, u32 build time (unix s),
+                   u32 directory offset (64), u32 data offset, char[16] OSM date, u32 build stamp (unix s: the OSM date's midnight UTC,
+                   not the clock, so a rebuild of the same extract is byte-identical and isn't downloaded again),
                    u32 features (1: speed attributes)
 directory          u32[nx·ny + 1]: tile i = (y − y0)·nx + (x − x0) spans [off[i], off[i+1]) after the data offset
 tiles              per non-empty tile, in tile order:

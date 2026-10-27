@@ -25,7 +25,7 @@ const build = (n: number, runtime = `fp${n}`): AppBuildInfo => ({
   notes: [],
 });
 
-const MAP: MapUpdate = { region: "kyiv", name: { en: "Kyiv", uk: "Київ" }, osmDate: "2026-10-08", bytes: 50e6 };
+const MAP: MapUpdate = { region: "kyiv", name: { en: "Kyiv", uk: "Київ" }, osmDate: "2026-10-08", release: "a1b2c3d4", bytes: 50e6 };
 const NONE: Found = { native: null, js: null, map: null, mapAction: "none" };
 const ctx = (patch: Partial<Parameters<typeof nextPrompt>[1]> = {}) => ({ busy: false, now: 1000, snoozed: {}, shown: new Set<string>(), ...patch });
 
@@ -56,10 +56,13 @@ describe("mapAction", () => {
     expect(mapAction({ ...MAP, bytes: 1.7e9 }, false, null)).toBe("dot");
   });
 
-  it("does nothing for a skipped OSM date, until a newer one", () => {
-    expect(mapAction({ ...MAP, bytes: 1.7e9 }, true, "2026-10-08")).toBe("none");
-    expect(mapAction(MAP, false, "2026-10-08")).toBe("none");
-    expect(mapAction(MAP, false, "2026-10-01")).toBe("dot");
+  it("does nothing for a skipped release, until other files come, even with the same OSM date", () => {
+    expect(mapAction({ ...MAP, bytes: 1.7e9 }, true, "a1b2c3d4")).toBe("none");
+    expect(mapAction(MAP, false, "a1b2c3d4")).toBe("none");
+    // A forced rebuild of the same extract with a changed file: offered again.
+    expect(mapAction({ ...MAP, release: "e5f60718", bytes: 1.7e9 }, true, "a1b2c3d4")).toBe("prompt");
+    // A skip saved by an older app (an OSM date) matches no release.
+    expect(mapAction(MAP, false, "2026-10-08")).toBe("dot");
     expect(mapAction(null, true, null)).toBe("none");
   });
 });
@@ -70,7 +73,7 @@ describe("nextPrompt", () => {
   it("asks about the native build first, then the JS update, then the map", () => {
     expect(nextPrompt(all, ctx())).toEqual({ kind: "native", key: "native:101" });
     expect(nextPrompt({ ...all, native: null }, ctx())).toEqual({ kind: "js", key: "js:upd-1" });
-    expect(nextPrompt({ ...all, native: null, js: null }, ctx())).toEqual({ kind: "map", key: "map:kyiv:2026-10-08" });
+    expect(nextPrompt({ ...all, native: null, js: null }, ctx())).toEqual({ kind: "map", key: "map:kyiv:a1b2c3d4" });
   });
 
   it("never interrupts while something is going on", () => {
