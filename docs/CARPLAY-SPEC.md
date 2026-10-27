@@ -286,26 +286,30 @@ build's runner). The GitHub runner builds what ships, not what is iterated on.
 9. CarPlay on the simulator can wedge (its screen frozen, then black, "no paired vehicle" in its log; a device reboot
    doesn't help): kill `CarPlay.app`, `CarPlayTemplateUIHost` and `carkitd` in the simulator (`kill -9`; launchd starts
    them again), then turn the external display off and on.
+10. Other CarPlay screens (Apple's test sizes: 748×456 and 800×480 @2x, 1920×720 @3x, a portrait one):
+    `defaults write com.apple.iphonesimulator CarPlayExtraOptions -bool YES`, the Simulator started again; choosing
+    I/O › External Displays › CarPlay then opens a setup window (width, height, scale, touch screen, knob) whose Run
+    connects it. CarPlay keeps its old layout inside the new display until its processes are killed as in 9.
 
-Settled on the simulator (iOS 26.3, the 400×240 pt display): the app listed and opened on the CarPlay home screen; the
-scene connected in the background when the display comes on, the session opened when the app comes to the foreground
-there. In Debug: a launch from the phone; a launch from the car alone (React Native started without the phone's scene,
-the map about 5 s after the tap); the phone opened after that; Metro's and the development launcher's reloads, the
-map and guidance back each time. In a Release build with expo-updates on: a launch from the car alone (the map about
-1 s after the tap), the phone opened after it, and a launch from the phone. The session: search typed on CarPlay's
-keyboard and a result routed to; destinations; a route followed with its card and estimates, the routes list and an
-alternative chosen; Stop guidance; the voice muted and back; zoom, recentre, the panning interface; the location notice
-with location refused, cleared once it was allowed again; the turn banner over Settings at 290 m on a simulated drive;
-the map's root released while another app showed and made again on return; a held route's alert and its word given;
-a failed plan's alert closed by CarPlay's x and not back on the next route; arrival on a simulated drive; a request's
-answers in a list over the map; the background location session held from a session opened on the car alone. Not seen
-there: a link to the car's scene (the simulator gives links to the phone), the night style (its CarPlay has no night
-mode), iOS 26's pinch, a car that limits the keyboard. CarPlay's Settings › Appearance offers Automatic or Always Dark;
-Automatic follows the car, and the simulated car stays at night whatever the phone's appearance, its location (midday
-in Cupertino, the display reconnected) or the Mac's; the Simulator's hidden CarPlay options set only size and scale.
-Day mode is previewed by a temporary build that sets the CarPlay window's `overrideUserInterfaceStyle` to light and
-the root's `dark` to false: the map, the bar and the map's buttons go light (on iOS 26.3 a template image was tinted
-dark there), CarPlay's guidance card stays dark.
+Settled on the simulator (iOS 26.3, the 400×240 pt display; the layout also at 1920×720 @3x): the app listed and opened
+on the CarPlay home screen; the scene connected in the background when the display comes on, the session opened when the
+app comes to the foreground there. In Debug: a launch from the phone; a launch from the car alone (React Native started
+without the phone's scene, the map about 5 s after the tap); the phone opened after that; Metro's and the development
+launcher's reloads, the map and guidance back each time. In a Release build with expo-updates on: a launch from the car
+alone (the map about 1 s after the tap), the phone opened after it, and a launch from the phone. The session: search
+typed on CarPlay's keyboard and a result routed to; destinations; a route followed with its card and estimates, the
+routes list and an alternative chosen; Stop guidance; the voice muted and back; zoom, recentre, the panning interface;
+the location notice with location refused, cleared once it was allowed again; the turn banner over Settings at 290 m on
+a simulated drive; the map's root released while another app showed and made again on return; a held route's alert and
+its word given; a failed plan's alert closed by CarPlay's x and not back on the next route; arrival on a simulated
+drive; a request's answers in a list over the map; the background location session held from a session opened on the car
+alone. Not seen there: a link to the car's scene (the simulator gives links to the phone), the night style (its CarPlay
+has no night mode), iOS 26's pinch, a car that limits the keyboard. CarPlay's Settings › Appearance offers Automatic or
+Always Dark; Automatic follows the car, and the simulated car stays at night whatever the phone's appearance, its
+location (midday in Cupertino, the display reconnected) or the Mac's; the Simulator's hidden CarPlay options set only
+size and scale. Day mode is previewed by a temporary build that sets the CarPlay window's `overrideUserInterfaceStyle`
+to light and the root's `dark` to false: the map, the bar and the map's buttons go light (on iOS 26.3 a template image
+was tinted dark there), CarPlay's guidance card stays dark.
 
 States the simulator gives no way into are set from a temporary file required by index.ts in `__DEV__` (`routes.start`
 to a place outside the region for a failed plan, `holdRouteForGuide` for a held route, `CarPlay.setSearch` and
@@ -331,17 +335,21 @@ to a place outside the region for a failed plan, `holdRouteForGuide` for a held 
 - **Guidance drawn by the app over the map** (a card of its own, smaller): Apple's guidelines keep the map template's
   base view to the map; the card, its layout and its padding are CarPlay's.
 
+- **Places asked for by Siri** ("Navigate with wtf.ai"): out of scope until Siri speaks Ukrainian. It doesn't, and
+  Apple has announced no date. The way would be App Intents (third-party apps get no SiriKit navigation domain): an App
+  Shortcut whose phrase holds only the app's name, Siri then asking where to, compiled into the app target (Xcode
+  extracts App Intents from the app's own code, not from a pod), the words handed to the car session as a
+  `google.navigation:` link.
+
 ## 7. Open items
 
 1. **On a phone and in a car**, from TestFlight (the simulator can't): the adapter's restoration relaunch (§3); the
-   map at the car's own points in motion; the voice over the car's audio; the banners; the cluster's metadata; the
-   night style switching with the car.
+   map at the car's own points in motion; the voice over the car's audio; the banners; the cluster's metadata.
 2. **AppState with only the car's screen in front**: iOS reports the app `inactive`. The navigator and the location
    session follow the car's session (§4); the update check and the map packs' refresh key off `active` and wait for the
    phone's app to open.
 3. Whether the CarPlay scene connects with `UIApplicationSupportsMultipleScenes` false (set true after Apple's sample).
-4. Places asked for by Siri on CarPlay: no navigation domain for third-party apps; App Intents would be the way. Links
-   to the car's scene are read (§4) but not seen yet: the simulator gives links to the phone.
+4. Links to the car's scene are read (§4) but not seen yet: the simulator gives links to the phone.
 5. Two MapLibre views on one JS thread with the particle filter's budget (SPEC §8.6): the car's exists only while it
    shows.
 6. Quick actions through Expo's scene delegate (§3).
