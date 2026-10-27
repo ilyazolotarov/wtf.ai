@@ -207,6 +207,9 @@ final class CarPlaySession: NSObject {
   func contentStyleChanged() {
     window?.backgroundColor = dark ? .black : .white
     updateMapProps()
+    // The map's buttons are drawn in the day's or the night's colours.
+    shownMapButtons = []
+    refresh()
   }
 
   /**
@@ -498,8 +501,8 @@ final class CarPlaySession: NSObject {
       made = CPMapButton { [weak self] _ in self?.send("toggle-voice") }
       icon = muted ? "car_volume_off" : "car_volume_up"
     }
-    made.image = CarPlayImages.mapIcon(icon)
-    made.focusedImage = CarPlayImages.mapIcon(icon, focused: true)
+    made.image = CarPlayImages.mapIcon(icon, color: dark ? .white : .black, edge: dark ? .black : .white)
+    made.focusedImage = CarPlayImages.mapIcon(icon, color: .black, edge: .white)
     return made
   }
 
@@ -1110,40 +1113,34 @@ enum CarPlayImages {
    */
   static let mapDrawingShare = 14.0 / 24
 
-  /** How far the white edge of a focused button's icon reaches, points. */
-  private static let focusedEdge = 1.5
+  /** How far the edge around a map button's drawing reaches, points. */
+  private static let edgeWidth = 1.5
 
   /** The share of its box each icon's drawing spans, measured once. Main thread. */
   private static var drawingShares: [String: Double] = [:]
 
   /**
-   * A map button's icon, its drawing as big as the X's. Focused (a knob's, a touchpad's, or where the focus came back
-   * to after a list): black with a white edge. CarPlay fills a focused button white, or leaves it dark glass: its tint
-   * left the icon white on white, and plain black was lost on the glass. Readable on either, whatever fill the car's
-   * day uses.
+   * A map button's icon, its drawing as big as the X's, in `color` with an `edge` around it, never tinted by CarPlay:
+   * on iOS 26 its tint of map buttons is wrong (Apple's known issue; developer forums 798735, 799192, 842273): white
+   * on its white focus fill, and by day white glyphs on near-white buttons. The session draws them white by night,
+   * black by day, and focused (a knob's, a touchpad's, or where the focus came back after a list) black, which CarPlay
+   * shows on a white fill or on the glass: the edge keeps each readable on whatever the glass shows behind it.
    */
-  static func mapIcon(_ name: String, focused: Bool = false) -> UIImage {
+  static func mapIcon(_ name: String, color: UIColor, edge: UIColor) -> UIImage {
     guard let image = vector(name) else { return UIImage() }
     let share = drawingShares[name] ?? drawingShare(image)
     drawingShares[name] = share
     let size = buttonSize * min(1, mapDrawingShare / share)
     let inset = (buttonSize - size) / 2
-    let side = CGSize(width: buttonSize, height: buttonSize)
-    guard focused else {
-      let drawn = UIGraphicsImageRenderer(size: side).image { _ in
-        image.draw(in: CGRect(x: inset, y: inset, width: size, height: size))
-      }
-      return drawn.withRenderingMode(.alwaysTemplate)
-    }
-    let white = image.withTintColor(.white, renderingMode: .alwaysOriginal)
-    let black = image.withTintColor(.black, renderingMode: .alwaysOriginal)
-    return UIGraphicsImageRenderer(size: side).image { _ in
+    let around = image.withTintColor(edge, renderingMode: .alwaysOriginal)
+    let drawing = image.withTintColor(color, renderingMode: .alwaysOriginal)
+    return UIGraphicsImageRenderer(size: CGSize(width: buttonSize, height: buttonSize)).image { _ in
       for i in 0..<8 {
         let angle = Double(i) * .pi / 4
-        let at = CGRect(x: inset + cos(angle) * focusedEdge, y: inset + sin(angle) * focusedEdge, width: size, height: size)
-        white.draw(in: at)
+        let at = CGRect(x: inset + cos(angle) * edgeWidth, y: inset + sin(angle) * edgeWidth, width: size, height: size)
+        around.draw(in: at)
       }
-      black.draw(in: CGRect(x: inset, y: inset, width: size, height: size))
+      drawing.draw(in: CGRect(x: inset, y: inset, width: size, height: size))
     }.withRenderingMode(.alwaysOriginal)
   }
 

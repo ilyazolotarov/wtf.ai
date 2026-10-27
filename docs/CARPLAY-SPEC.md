@@ -213,10 +213,12 @@ GNSS and the adapter as they were. What the JS side sent is kept on the native s
   `modules/car-play/ios/CarIcons.xcassets` (the pod's `WtfCarPlay.bundle`), with Android Auto's drawables; CarPlay tints
   them. Drawn at their size from the vector: bar buttons 24 pt, list rows 32 pt, maneuvers 18 pt. A map button's
   drawing is scaled to the X's, 14 of its 24 pt (`CarPlayImages.mapIcon`, the ink measured once): the symbols leave
-  different room around their drawing, and the voice and my location filled the round button. Focused (a knob, a
-  touchpad, where the focus comes back after a list) CarPlay fills a map button white or leaves it glass and shows its
-  `focusedImage`: black with a white edge, readable on either; CarPlay's tint left it white on white. Day mode can't
-  be seen on the simulator (§5), so the icon doesn't depend on the fill.
+  different room around their drawing, and the voice and my location filled the round button. The map's buttons are
+  not CarPlay's to tint: on iOS 26 its tint of map buttons is wrong (Apple's known issue; developer forums 798735,
+  799192, 842273), white on its white focus fill, and reported white on near-white buttons by day. They are drawn white
+  by night and black by day (the scene's `contentStyle`, as the map; drawn again when it changes), with an edge of the
+  other colour for whatever the glass shows behind them; focused (a knob, a touchpad, where the focus comes back after
+  a list) black with a white edge, which CarPlay shows on a white fill or on the glass.
 - Device log (`ai.wtf.navigator`, category `carplay`): the scene connected, in the foreground, active, in the
   background, disconnected; React Native started without the phone's scene or on a new host; what drew the map;
   actions sent (info level); the notes also go to the trip log.
@@ -299,6 +301,9 @@ there: a link to the car's scene (the simulator gives links to the phone), the n
 mode), iOS 26's pinch, a car that limits the keyboard. CarPlay's Settings › Appearance offers Automatic or Always Dark;
 Automatic follows the car, and the simulated car stays at night whatever the phone's appearance, its location (midday
 in Cupertino, the display reconnected) or the Mac's; the Simulator's hidden CarPlay options set only size and scale.
+Day mode is previewed by a temporary build that sets the CarPlay window's `overrideUserInterfaceStyle` to light and
+the root's `dark` to false: the map, the bar and the map's buttons go light (on iOS 26.3 a template image was tinted
+dark there), CarPlay's guidance card stays dark.
 
 States the simulator gives no way into are set from a temporary file required by index.ts in `__DEV__` (`routes.start`
 to a place outside the region for a failed plan, `holdRouteForGuide` for a held route, `CarPlay.setSearch` and
