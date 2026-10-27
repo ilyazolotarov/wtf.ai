@@ -19,7 +19,7 @@ extra to install: Android Auto is part of Android, and the car's screen is part 
 | A Car App Library navigation app | A `CarAppService` with the `androidx.car.app.category.NAVIGATION` intent category, the permissions `androidx.car.app.NAVIGATION_TEMPLATES` and `ACCESS_SURFACE`, `automotive_app_desc.xml` with `<uses name="template"/>`, `androidx.car.app.minCarApiLevel`. | `modules/android-auto`'s own manifest (merged into the app's; no config plugin). Car App Library 1.7.0 (stable); every template used is from API level 1, so `minCarApiLevel` 1. |
 | Host validation | The service answers only hosts it trusts. | Release builds: the library's allowlist (`hosts_allowlist_sample`: Android Auto, Android Automotive OS's template host). Debug builds: any host (the Desktop Head Unit). |
 | Distribution | Android Auto lists a Car App Library app in a car only when it was installed from a trusted source: Google Play, including internal testing and internal app sharing. Its developer setting "Unknown sources" covers other kinds of apps, not these (developer.android.com, *Test Android apps for cars*). The Desktop Head Unit lists a sideloaded build with developer mode and "Unknown sources" on (§5). | The sideloaded APK (ANDROID-SPEC §1) brings Android Auto to the desktop test, not to testers' cars. Testers get it in a car from the Play internal test track (the store build, SPEC §2.2). Not yet tried in a car. |
-| Review | Production on Play needs the Android Auto form factor added in the console (Advanced settings → Form factors), Android Auto screenshots, and Android for Cars' app quality review for navigation apps (the NF guidelines). The location foreground service is declared for navigation already; its Android Auto use (§3) goes in that declaration too. | Open (§7). |
+| Review | Production on Play needs the Android Auto form factor added in the console (Advanced settings → Form factors), Android Auto screenshots, and Android for Cars' app quality review for navigation apps (the NF guidelines). The review drives the app with the host's test drive (`NavigationManagerCallback.onAutoDriveEnabled`, NF-7). The location foreground service is declared for navigation already; its Android Auto use (§3) goes in that declaration too. | The test drive: §3. The console's part: open (§7). |
 
 ## 3. Session
 
@@ -32,9 +32,9 @@ Android Auto ─▶ CarScreenService ─▶ CarScreenSession (Kotlin, main threa
                                       └─ CarSessionTask: headless JS task "WtfCarSession"
                                                  │
 src/components/car-screen/car-session.ts ◀───────┘  route, places, words, voice, notice, search ─▶ AndroidAutoModule ─▶ CarLink ─▶ templates
-                                                     ◀─ onCarAction (end-route, go, search, request, toggle-voice,
-                                                                     confirm-held, cancel-held, permission, notes,
-                                                                     session-ended)
+                                                     ◀─ onCarAction (end-route, go, choose-alternative, search,
+                                                                     request, toggle-voice, confirm-held, cancel-held,
+                                                                     permission, notes, test-drive, session-ended)
 ```
 
 - A **session** is one connection of the car's screen with the app opened there. Its JS side is a headless task, run
@@ -95,6 +95,19 @@ src/components/car-screen/car-session.ts ◀───────┘  route, pla
   the session, with a quiet notification in the app's language. It starts only with location permission (a service
   started for the foreground must go there, which a location service can't without it). A trip's own service
   (ANDROID-SPEC §3) is apart.
+- **The test drive** (quality guideline NF-7, the Play review's way to see guidance without driving): Android Auto
+  asks for it with `onAutoDriveEnabled` (by hand: `adb shell dumpsys activity service
+  <package>/ai.wtf.androidauto.CarScreenService AUTO_DRIVE`). CarLink keeps it for the session (`isTestDrive`, read
+  when the task starts; `test-drive` while it runs), and from then on each route the driver starts, or the one followed
+  already, is driven along by a simulated car (`TestDrive`; `RouteDrive` in src/nav/sim/route-drive.ts, Jest): on the
+  route's line exactly, from standing to 50 km/h, slowing for bends (to 16 km/h through a right angle) and to a stop at
+  the end, moved every 250 ms by the time gone. A new plan (an alternative, a re-plan) is driven on from where the car
+  is. Its dot is published instead of the navigator's (`NavigatorService.setTestDrive`; the navigator runs on), so the
+  route service, the voice, the cards, the pop-ups, the cluster and both maps follow it as a drive. The dot is
+  `testDrive` (trusted, ±3 m), never shared with other navigators (ANDROID-SPEC §8); no parked car shows meanwhile.
+  Between routes it stands where the last one left it; the session's end gives the navigator's dot back. Trip log:
+  `test drive asked for by the car`, `test drive on`, `test drive: along <m> m of route`, `… at the route's end`,
+  `test drive off`.
 - **Teardown** is the current session's: a session ended after a new one began (the car reconnected) leaves the task,
   the location service and CarLink's session to the new one.
 
@@ -174,8 +187,10 @@ src/components/car-screen/car-session.ts ◀───────┘  route, pla
   The car's words are the app's (en/uk), sent by the session; English until it has.
 - **The navigation session** (`NavigationManager`): started when a route is planned or followed, the trip (the steps
   ahead, each with its distance and time from the car; the destination) sent with each change, loading while it is
-  planned; ended at arrival, a failure or no route. The host's "stop navigation" (another navigator started) ends the
-  route.
+  planned; ended at arrival, a failure or no route. The car's own displays draw from the trip: a cluster that shows
+  the next turn gets its maneuver, words and distances, and the destination's distance, time and arrival (quality
+  guideline NF-4). The host's "stop navigation" (another navigator started) ends the route, so the voice, the
+  pop-ups and the cluster's turn are the other navigator's alone (NF-5).
 - **Turn-by-turn notification** (`CarTurnNotifications`, quality guideline NF-3): while the car navigates, one ongoing
   navigation notification with a `CarAppExtender`, which Android Auto shows while another app fills the car's screen.
   Nothing of it shows while the car shows the app's own guidance: on a wide screen Android Auto keeps the app's map
@@ -218,7 +233,18 @@ No Android device and no car: Android Auto runs on the emulator, the car's scree
    takes console commands: `tap x y`, `screenshot <file>`, `day`, `night`. A newly installed build appears in the
    car's launcher after the head unit reconnects; so do its icons when a build adds drawables (until then Android
    Auto draws the old build's at the shifted resource ids: a briefcase for the U-turn).
-4. `adb emu geo fix` along the route the app logs as `wtf-demo-route` (debug builds) drives the car.
+4. `adb emu geo fix` along the route the app logs as `wtf-demo-route` (debug builds) drives the car; so does the
+   test drive (§3).
+5. Other heads: `instrumentcluster = true` in `[general]` adds a window with the cluster's readout of the trip (text
+   only; its font has Russian Cyrillic alone, so і ї є ґ show as boxes). `config/rotary.ini` (knob, no touch),
+   `touchpad.ini`, `loaded_720p.ini` (touch, touchpad, knob and cluster): the knob takes `dpad …` console commands, the
+   touchpad only the mouse. A cluster display the app draws on (`[display:cluster]`) needs head unit 2.1, on the SDK's
+   beta channel.
+6. This emulator can't draw a car's map in motion: on a drive (GPS fixes or the test drive) the car's map shows a
+   frame now and then, stale or without its tiles, while the cards follow. Standing, it draws. The phone's map in the
+   same drive does. Android Auto under ARM translation, two maps and the projection's video saturate it: at times
+   Android Auto stops answering (an "isn't responding" on the car's screen) and its head unit server must be started
+   again.
 
 Checked this way (debug and release builds): the map, dot and route on the car with the phone's app in front, in the
 background and with the phone's screen off; the app opened from the car with no activity (release: the embedded
@@ -236,7 +262,12 @@ screen with the route; none on the 1280×720 one, where the app's side panel sta
 map: a drag with the mouse leaving following, the recentre button then showing and bringing it back; − and + moving
 the follow zoom, recentre then showing and putting it back. Alternative routes: framed when they came while
 standing; the routes list titled by street ("Михайлівська вулиця, This route", "вулиця Хрещатик, +1 min"), the one
-picked followed; a tap on a grey line and on its label each taking that route.
+picked followed; a tap on a grey line and on its label each taking that route. The cluster window (head unit 2.0)
+showing the trip's next turn, its words, both distances and the arrival. The test drive asked for by `AUTO_DRIVE`: the
+route followed already driven along, the turn card, the trip card and the cluster counting down, the turn pop-ups;
+after a JS reload driven again from the route's start. Google Maps starting navigation on the car while the app
+navigated: `navigation stopped by the car`, the route ended, the cluster showing Google Maps' turn. The knob moving
+focus among the host's cards; nothing of the app's own focused with touch on too (no map buttons then).
 
 ## 6. Not chosen
 
@@ -247,12 +278,15 @@ picked followed; a tap on a grey line and on its label each taking that route.
 
 ## 7. Open items
 
-1. A real car, from the Play internal test track (§2); there, the car's assistant (VC-1) asking for places.
-2. Moving the map with a rotary knob or touchpad (the host's pan mode), not yet seen: the Desktop Head Unit is a
-   touch screen, and its console taps but can't drag or pinch.
-3. The instrument cluster (`FEATURE_CLUSTER`). The turn-by-turn notification in a rail, where an Android Auto
-   version or a car draws one.
-4. The quality review's other navigation guidelines, before production: the cluster (NF-4, item 3), a test-drive mode
-   that simulates driving (NF-7).
+1. A real car, from the Play internal test track (§2); there, the car's assistant (VC-1) asking for places, the car's
+   map in motion (§5: the emulator can't draw it) and the time to launch and load (DR-2, DR-3: 10 s each; a debug
+   build's says nothing).
+2. Moving the map with a rotary knob or touchpad (the host's pan mode), not yet seen: on `rotary.ini` Android Auto
+   stopped answering before the map's buttons took focus; the touchpad takes only the mouse.
+3. A cluster display the app draws on (`FEATURE_CLUSTER`, a session of `DISPLAY_TYPE_CLUSTER` with map tiles only,
+   quality guideline NF-9, optional): held off; the turn reaches the cluster without it (§4). The turn-by-turn
+   notification in a rail, where an Android Auto version or a car draws one.
+4. The Play console before production: the Android Auto form factor, its screenshots, the location service's
+   declaration (§2).
 5. Debug builds need Metro as for the phone. A car's map started before the development launcher loaded the JS stayed
    blank; `CarMapSurface.restartIfStopped` starts it again in the new React context, not yet seen doing so.

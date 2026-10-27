@@ -102,6 +102,9 @@ class AndroidAutoModule : Module() {
     /** A car's screen is connected to the app now (its session is open). */
     Function("isConnected") { CarLink.session != null }
 
+    /** The car asked for its test drive in this session (quality guideline NF-7). */
+    Function("isTestDrive") { CarLink.testDrive }
+
     AsyncFunction("setLabels") { labels: CarLabelsRecord ->
       val d = CarLabels()
       CarLink.setLabels(

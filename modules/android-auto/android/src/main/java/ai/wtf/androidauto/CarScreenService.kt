@@ -74,6 +74,7 @@ class CarScreenSession : Session() {
           // was destroyed has them now.
           if (CarLink.session !== this@CarScreenSession) return
           CarLink.session = null
+          CarLink.endTestDrive()
           turns?.clear()
           CarLocationService.stop(carContext)
           CarSessionTask.stop()
@@ -96,6 +97,11 @@ class CarScreenSession : Session() {
             navigating = false
             CarLink.note("navigation stopped by the car")
             CarLink.send("end-route")
+          }
+
+          // The car's test drive (quality guideline NF-7): from now on, each route started is driven along.
+          override fun onAutoDriveEnabled() {
+            CarLink.startTestDrive()
           }
         },
       )

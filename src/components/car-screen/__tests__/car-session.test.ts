@@ -40,7 +40,7 @@ function fakeFind(text: string): Place[] {
 /** The promises the session waits on (the permission, the native notes) settled. */
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-function setup({ connected = true, located = true }: { connected?: boolean; located?: boolean } = {}) {
+function setup({ connected = true, located = true, testDrive = false }: { connected?: boolean; located?: boolean; testDrive?: boolean } = {}) {
   const calls: { method: string; arg: unknown }[] = [];
   let actionListener: ((e: CarAction) => void) | null = null;
   const routeListeners = new Set<() => void>();
@@ -73,6 +73,7 @@ function setup({ connected = true, located = true }: { connected?: boolean; loca
   const reports: string[] = [];
   const carScreen: boolean[] = [];
   let claims = 0;
+  const testDrives: ("start" | "stop")[] = [];
   let hushes = 0;
   let retries = 0;
   const call = (method: string) => (arg: unknown) => {
@@ -83,6 +84,7 @@ function setup({ connected = true, located = true }: { connected?: boolean; loca
   const deps: CarSessionDeps = {
     native: {
       isConnected: () => connected,
+      isTestDrive: () => testDrive,
       setLabels: call("setLabels"),
       setRoute: call("setRoute"),
       setPlaces: call("setPlaces"),
@@ -177,6 +179,7 @@ function setup({ connected = true, located = true }: { connected?: boolean; loca
     find: fakeFind,
     away: () => "1 km",
     streetAt: () => null,
+    testDrive: { start: () => testDrives.push("start"), stop: () => testDrives.push("stop") },
     located: () => Promise.resolve(granted),
     retryLocation: () => retries++,
     setCarScreen: (on) => carScreen.push(on),
@@ -235,6 +238,7 @@ function setup({ connected = true, located = true }: { connected?: boolean; loca
     notes,
     reports,
     carScreen,
+    testDrives,
     claims: () => claims,
     hushes: () => hushes,
     retries: () => retries,
@@ -481,6 +485,21 @@ describe("car session", () => {
     expect(s.timers()).toBe(0);
     expect(s.hasListener()).toBe(false);
     expect(s.notes.at(-1)).toBe("android auto disconnected");
+  });
+
+  test("the car's test drive: started when the car asks for it, or asked before; stopped with the car's screen", async () => {
+    const s = setup();
+    const session = runCarSession(s.deps);
+    expect(s.testDrives).toEqual([]);
+    s.act({ action: "test-drive" });
+    expect(s.testDrives).toEqual(["start"]);
+    s.act({ action: "session-ended" });
+    await session;
+    expect(s.testDrives).toEqual(["start", "stop"]);
+
+    const asked = setup({ testDrive: true });
+    void runCarSession(asked.deps);
+    expect(asked.testDrives).toEqual(["start"]);
   });
 
   test("a car gone before the task listened ends it at once", async () => {

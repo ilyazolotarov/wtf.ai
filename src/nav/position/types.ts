@@ -64,4 +64,9 @@ export interface PositionEstimate {
    * car speed comes. Wall clock, ms. `asking`: it is 15 min since it was confirmed, ask "are you still here?".
    */
   manual?: { placedAt: number; confirmedAt: number; asking: boolean };
+  /**
+   * The car's test drive (ANDROID-AUTO-SPEC §4): a dot driven along the route, published instead of the navigator's.
+   * Not where the car is: never shared with other apps.
+   */
+  testDrive?: boolean;
 }

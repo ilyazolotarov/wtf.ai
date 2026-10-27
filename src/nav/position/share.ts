@@ -52,6 +52,8 @@ export function shareDecision(p: PositionEstimate | null, holding: ShareHold | n
   if (!p || !Number.isFinite(p.lat) || !Number.isFinite(p.lon)) return { hold: "none" };
   if (p.source === "manual") return { hold: "manual" };
   if (p.phoneOnly) return { hold: "phone-only" };
+  // The car's test drive: not where the car is, no position to share.
+  if (p.testDrive) return { hold: "none" };
   const limit = holding === "uncertain" ? SHARE_RESUME_ACCURACY_M : SHARE_HOLD_ACCURACY_M;
   if (!(p.accuracyM > 0 && p.accuracyM <= limit)) return { hold: "uncertain" };
   const fix: SharedFix = { lat: p.lat, lon: p.lon, accuracyM: p.accuracyM };

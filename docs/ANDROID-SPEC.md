@@ -184,7 +184,8 @@ refused, a fix refused) stops sharing until the next trip or the driver opens th
 
 - About once a second (`SHARE_MIN_INTERVAL_MS` 900 ms over the navigator's 0.5 s publishes), and only a position the
   navigator published: **nothing is invented**. No new position, no fix; the other apps then show no location.
-- **Never shared:** the driver's held placing (`manual`), phone-only mode (`phoneOnly`), and a dot whose radius is over
+- **Never shared:** the driver's held placing (`manual`), phone-only mode (`phoneOnly`), the car's test drive
+  (`testDrive`, ANDROID-AUTO-SPEC §3: not where the car is), and a dot whose radius is over
   **200 m**, until it is under 150 m again (`SHARE_HOLD_ACCURACY_M`, `SHARE_RESUME_ACCURACY_M`). The other apps
   can't show how sure the position is or the other roads the car may be on; "no GPS" there beats a confident arrow on
   the wrong street.

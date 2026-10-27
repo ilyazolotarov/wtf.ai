@@ -65,6 +65,10 @@ describe("shareDecision", () => {
     expect(shareDecision(dot({ phoneOnly: true }), null)).toEqual({ hold: "phone-only" });
   });
 
+  test("never the car's test drive: its dot isn't where the car is", () => {
+    expect(shareDecision(dot({ testDrive: true }), null)).toEqual({ hold: "none" });
+  });
+
   test("over the limit the other apps get nothing, and get the dot again only well under it", () => {
     expect(shareDecision(dot({ accuracyM: SHARE_HOLD_ACCURACY_M }), null).fix).toBeDefined();
     expect(shareDecision(dot({ accuracyM: SHARE_HOLD_ACCURACY_M + 1 }), null)).toEqual({ hold: "uncertain" });

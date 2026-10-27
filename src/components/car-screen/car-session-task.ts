@@ -20,6 +20,7 @@ import { haversineM } from "@/nav/geo";
 import { inBounds, places } from "@/providers/places";
 import { destinations } from "@/providers/route-provider";
 import { heldRoute, holdRouteForGuide, onHeldRoute, takeHeldRoute } from "@/services/navigation/route-without-adapter";
+import { TestDrive } from "@/services/navigation/test-drive";
 import { getMapPacks } from "@/services/offline-map/map-packs";
 import { activeSearchIndex } from "@/services/offline-map/search-file";
 import { autoConnect, getRuntime } from "@/services/runtime";
@@ -46,6 +47,16 @@ export async function carSessionTask(): Promise<void> {
   setVoiceVolume(gainOf(loadVoiceVolume()));
   setVoiceAsGuidance(true);
   const guide = new VoiceGuide();
+  const testDrive = new TestDrive({
+    routes,
+    show: (dot) => position.setTestDrive(dot && { lat: dot.lat, lon: dot.lon, headingRad: dot.headingRad, speedMps: dot.speedMps }),
+    every: (ms, fn) => {
+      const id = setInterval(fn, ms);
+      return () => clearInterval(id);
+    },
+    nowMs: Date.now,
+    note: (text) => recorder.note(text),
+  });
   try {
     await runCarSession({
       native: AndroidAuto,
@@ -88,6 +99,7 @@ export async function carSessionTask(): Promise<void> {
           .map((d) => ({ id: d.id, title: d.name[language], detail: null, lat: d.lat, lon: d.lon }));
         return findPlaces(text, { index: activeSearchIndex(installed), bounds, near: position.getSnapshot(), cities, language, t });
       },
+      testDrive,
       streetAt: (at, language) => {
         const address = activeSearchIndex(getMapPacks().installed)?.nearestAddress(at, VIA_HOUSE_M);
         return address ? (language === "en" ? (address.nameEn ?? address.name) : address.name) : null;

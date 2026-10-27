@@ -29,6 +29,7 @@ type T = (key: keyof Strings) => string;
 export interface CarSessionDeps {
   native: {
     isConnected(): boolean;
+    isTestDrive(): boolean;
     setLabels(labels: CarLabelsPayload): Promise<void>;
     setRoute(route: CarRoutePayload | null): Promise<void>;
     setPlaces(places: CarPlacePayload[]): Promise<void>;
@@ -87,6 +88,8 @@ export interface CarSessionDeps {
   speedMps(): number;
   /** What a search finds at once (place-search.ts `findPlaces`): a point, the region's index, or its cities. */
   find(text: string): Place[];
+  /** The car's test drive (test-drive.ts): each route started is driven along, until stopped. */
+  testDrive: { start(): void; stop(): void };
   /** The street of a point (its nearest house's, in the app's language), to say which way a route goes; null: none near. */
   streetAt(at: Coordinate, language: "en" | "uk"): string | null;
   /** How far a place is from the car ("1.2 km"); null without a position. */
@@ -365,6 +368,9 @@ export function runCarSession(deps: CarSessionDeps): Promise<void> {
         case "notes":
           takeNotes();
           return;
+        case "test-drive":
+          deps.testDrive.start();
+          return;
         case "session-ended":
           end();
       }
@@ -382,6 +388,7 @@ export function runCarSession(deps: CarSessionDeps): Promise<void> {
         if (located === false) checkLocation();
       }),
       () => stopChecks?.(),
+      () => deps.testDrive.stop(),
     );
     takeNotes();
     sendPlaces();
@@ -390,6 +397,8 @@ export function runCarSession(deps: CarSessionDeps): Promise<void> {
     sendNotice();
     checkLocation();
     takeRequest();
+    // Asked for before the listener was there.
+    if (native.isTestDrive()) deps.testDrive.start();
     // Gone before the listener was there.
     if (!native.isConnected()) end();
   });

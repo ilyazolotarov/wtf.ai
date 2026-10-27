@@ -34,6 +34,15 @@ internal object CarLink {
   var recentre = false
     private set
 
+  /**
+   * The car asked for its test drive (quality guideline NF-7; the Play review, or `adb shell dumpsys activity service
+   * <package>/ai.wtf.androidauto.CarScreenService AUTO_DRIVE`): each route started is driven along, until the session
+   * ends. The JS side reads it when it starts too (`isTestDrive`).
+   */
+  @Volatile
+  var testDrive = false
+    private set
+
   /** What the driver must do first, shown instead of the route; null: nothing. */
   var notice: CarNotice? = null
     private set
@@ -124,6 +133,18 @@ internal object CarLink {
   /** The car's map has drawn its style. */
   fun mapDrawn() {
     session?.mapDrawn()
+  }
+
+  fun startTestDrive() {
+    if (testDrive) return
+    testDrive = true
+    note("test drive asked for by the car")
+    send("test-drive")
+  }
+
+  /** The car's session ended: a new one drives for real. */
+  fun endTestDrive() {
+    testDrive = false
   }
 
   /** Kept until the JS side takes it (`takeRequest`): the session's task may not run yet. A newer one replaces it. */

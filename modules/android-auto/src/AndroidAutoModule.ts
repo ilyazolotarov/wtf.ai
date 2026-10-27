@@ -136,6 +136,8 @@ export type CarAction =
   | { action: "cancel-held" }
   | { action: "permission" }
   | { action: "notes" }
+  /** The car asks for its test drive (quality guideline NF-7): each route started is driven along. */
+  | { action: "test-drive" }
   | { action: "session-ended" };
 
 /**
@@ -159,6 +161,8 @@ export type AndroidAutoEvents = {
 declare class AndroidAutoNativeModule extends NativeModule<AndroidAutoEvents> {
   /** A car's screen is connected to the app (its session is open). */
   isConnected(): boolean;
+  /** The car asked for its test drive in this session (`test-drive`, maybe before the JS side listened). */
+  isTestDrive(): boolean;
   setLabels(labels: CarLabelsPayload): Promise<void>;
   setRoute(route: CarRoutePayload | null): Promise<void>;
   setPlaces(places: CarPlacePayload[]): Promise<void>;

@@ -47,6 +47,8 @@ const OWNER = "navigator";
 /** Trip-log note with what is stored for the phone or the car as a navigator starts: JSON of a StoredSnapshot. */
 export const STORAGE_NOTE = "nav storage ";
 const TICK_MS = 500;
+/** The test drive's dot: on its route exactly, its circle hidden under the dot. */
+const TEST_DRIVE_ACCURACY_M = 3;
 /** Inputs are held this long and fed in time order: IMU arrives in 100 ms batches, fixes ~50 ms late. */
 export const REORDER_US = 300_000;
 /**
@@ -325,6 +327,8 @@ export class NavigatorService implements PositionSource {
   /** Developer setting: navigation from the phone alone while no OBD speed comes (§9.6). */
   private phoneOnly = false;
   private phone: { engine: PhoneNavigator; graph: { key: string; close(): void }; car: string; started: boolean; parkedSaved: boolean } | null = null;
+  /** The car's test drive's dot, published instead of the navigator's (`setTestDrive`). */
+  private testDot: PositionEstimate | null = null;
 
   private readonly clock: ServiceClock;
 
@@ -339,7 +343,24 @@ export class NavigatorService implements PositionSource {
     return this.held.current;
   }
 
-  getSnapshot = (): PositionEstimate | null => this.position;
+  getSnapshot = (): PositionEstimate | null => this.testDot ?? this.position;
+
+  /**
+   * The car's test drive (ANDROID-AUTO-SPEC §4, quality guideline NF-7): this dot is published instead of the
+   * navigator's, which runs on meanwhile; null: the navigator's again.
+   */
+  setTestDrive(dot: { lat: number; lon: number; headingRad: number; speedMps: number } | null): void {
+    if (!dot && !this.testDot) return;
+    this.testDot = dot && {
+      ...dot,
+      accuracyM: TEST_DRIVE_ACCURACY_M,
+      source: "fused",
+      trust: "TRUSTED",
+      timestamp: this.clock.nowMs(),
+      testDrive: true,
+    };
+    this.listeners.forEach((listener) => listener());
+  }
 
   /**
    * Experimental (§9.6): without OBD speed, show the phone's own dead reckoning on the map (its speed from the IMU,
@@ -529,7 +550,7 @@ export class NavigatorService implements PositionSource {
    * Where the car was left (UI-SPEC §6.1), while it isn't the dot: no speed from it for 10 s, so the map shows the
    * phone (or a placing). Its stored parked pose, saved standing; null once it drives, or none stored.
    */
-  getParkedCar = (): ParkedCar | null => this.shownCar;
+  getParkedCar = (): ParkedCar | null => (this.testDot ? null : this.shownCar);
 
   /** Particles and hypotheses now (null: map matching off); recomputed once per published position. */
   getMapMatchOverlay(): MapMatchOverlay | null {
