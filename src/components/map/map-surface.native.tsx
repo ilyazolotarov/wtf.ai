@@ -113,6 +113,11 @@ interface MapSurfaceProps {
    * out by as much, showing the same ground bigger, and of the POIs only a driver's, as big as the guidelines ask.
    */
   carScale?: number;
+  /**
+   * The car's POIs at Android for Cars' sizes for `carScale` (Android Auto's dp); false: at the style's own sizes
+   * (CarPlay's points are already made for the car's screen).
+   */
+  carGuidelineSizes?: boolean;
   /** Heading-up's dot this far down the map (top 0, bottom 1), if not the phone's. */
   headingUpDotAt?: number;
   /**
@@ -147,6 +152,7 @@ export function MapSurface({
   insets,
   onOwnScreen,
   carScale,
+  carGuidelineSizes = true,
   headingUpDotAt,
   control,
   followZoomShift = 0,
@@ -159,8 +165,8 @@ export function MapSurface({
   // The parked car's images come with the style (car-sprite.ts); the first time, the style is reloaded with them.
   const carSprite = useCarSprite();
   const mapStyle = useMemo(
-    () => packStyle && withCarSprite(carScale ? carMapStyle(packStyle, carScale) : packStyle, carSprite),
-    [packStyle, carSprite, carScale],
+    () => packStyle && withCarSprite(carScale ? carMapStyle(packStyle, carGuidelineSizes ? carScale : null) : packStyle, carSprite),
+    [packStyle, carSprite, carScale, carGuidelineSizes],
   );
   const entrancesUrl = useEntrancesUrl();
   const { installed } = useMapPacks();
@@ -186,10 +192,12 @@ export function MapSurface({
   if (mapStyle == null && mapReady) setMapReady(false);
   // Heading-up places the dot by the map's own height (turned sideways, it is the screen's width).
   const [mapHeightPt, setMapHeightPt] = useState(0);
+  const [mapWidthPt, setMapWidthPt] = useState(0);
   const mapSize = useRef({ width: 0, height: 0 });
   const { cameraRef, onRegionIsChanging, onRegionDidChange, onOutsideGesture } = useMapCamera({
     mapReady,
     mapHeightPt,
+    mapWidthPt,
     insets,
     zoomOffset: (carScale ? -Math.log2(carScale) : 0) + followZoomShift,
     headingUpDotAt,
@@ -294,6 +302,7 @@ export function MapSurface({
           const { width, height } = event.nativeEvent.layout;
           mapSize.current = { width, height };
           setMapHeightPt(Math.round(height));
+          setMapWidthPt(Math.round(width));
         }}
         // The panels' blur redraws the views under it, and a GLSurfaceView (the default) isn't part of that drawing:
         // the blur came out empty. A TextureView is, so use it wherever blur runs (Android 12+).

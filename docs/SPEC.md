@@ -282,7 +282,7 @@ modules/sensor-capture/  Expo module (Swift, Kotlin): GNSS and IMU capture, batc
 modules/audio-output/    Expo module (Swift, Kotlin): where the phone plays audio, the system output picker, play on the speaker
 modules/app-notice/      Expo module (Kotlin): Android's local "update ready" notification (UPDATES-SPEC §5.2)
 modules/android-auto/    Expo module (Kotlin): the Android Auto car app: templates, the map's surface, the session (ANDROID-AUTO-SPEC)
-modules/car-play/        Expo module (Swift): the CarPlay scene, its map template and guidance (CARPLAY-SPEC)
+modules/car-play/        Expo module (Swift): the CarPlay scene, its templates for the car session (CARPLAY-SPEC)
 native-tests/            XCTest for the modules' Foundation-only Swift logic (Package.swift at the root)
 native-tests-android/    JUnit for the modules' plain-Kotlin logic
 tools/replay/            replay CLI, viewer, benchmarks, route tools over src/nav/replay (Node)

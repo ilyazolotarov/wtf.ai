@@ -1,4 +1,5 @@
 import { useEffect, useEffectEvent, useReducer, useRef, useState } from "react";
+import { Platform } from "react-native";
 
 import { cameraReducer, INITIAL_CAMERA, type CameraState } from "@/components/map/camera-policy";
 import { shiftedFollowZoom } from "@/components/map/map-moves";
@@ -9,9 +10,21 @@ import { I18nProvider } from "@/i18n/provider";
 import { PositionProvider, usePosition } from "@/providers/position-provider";
 import { useRoute } from "@/providers/route-provider";
 
-import AndroidAuto, { type CarMapGesture } from "../../../modules/android-auto/src/AndroidAutoModule";
+import AndroidAuto from "../../../modules/android-auto/src/AndroidAutoModule";
+import CarPlay from "../../../modules/car-play/src/CarPlayModule";
+import type { CarMapGesture } from "./car-types";
 
-/** The part of the car's screen under Android Auto's cards and buttons, in dp from each edge. */
+/** What the car's map needs of its platform's module: the driver's gestures, and the buttons to show. */
+interface CarMapNative {
+  addListener(event: "onMapGesture", listener: (g: CarMapGesture) => void): { remove(): void };
+  setRecentre?(shown: boolean): Promise<void>;
+  /** Android Auto draws the map data credit natively (CarMapSurface), from when the map has drawn. */
+  mapDrawn?(): Promise<void>;
+}
+
+const native: CarMapNative | null = Platform.OS === "ios" ? CarPlay : AndroidAuto;
+
+/** The part of the car's screen under the template's cards and buttons, in dp (points on iOS) from each edge. */
 export interface CarInsets {
   left?: number;
   top?: number;
@@ -23,13 +36,14 @@ export interface CarMapProps {
   /** The car's night mode (its own, not the phone's). */
   dark?: boolean;
   insets?: CarInsets;
-  /** The map drawn this many times the car's density (CarMapSurface): bigger, as Android for Cars asks. */
+  /** The map drawn this many times the car's density (CarMapSurface; CarPlay's root): bigger, for a driver. */
   scale?: number;
 }
 
 /**
- * The car's map (docs/ANDROID-AUTO-SPEC.md §4): the React root `CarMap` (index.ts), which modules/android-auto mounts on
- * the car's screen while it shows the app, on the same JS runtime and services as the phone's screens. The phone's map,
+ * The car's map (docs/ANDROID-AUTO-SPEC.md §4, docs/CARPLAY-SPEC.md §4): the React root `CarMap` that
+ * modules/android-auto mounts on the car's screen while it shows the app, `CarPlayMap` that modules/car-play mounts
+ * while CarPlay is connected (index.ts), on the same JS runtime and services as the phone's screens. The phone's map,
  * heading-up and following the car in the part of the screen the template leaves free. What it shows of the route
  * besides the map, and the navigator kept running, are the car session's (car-session-task.ts).
  */
@@ -46,7 +60,14 @@ export function CarMapRoot({ dark = false, insets = {}, scale = 1 }: CarMapProps
 
 const noop = () => {};
 // A build older than `mapDrawn` (an update reaches it) has none.
-const onMapDrawn = () => void AndroidAuto?.mapDrawn?.().catch(noop);
+const onMapDrawn = () => void native?.mapDrawn?.().catch(noop);
+/**
+ * CarPlay's map: it draws its own credit (Android Auto's is native, React Native text on its display being drawn at the
+ * phone's density), and its points are made for the car's screen, so the POIs keep the style's sizes.
+ */
+const carPlay = Platform.OS === "ios";
+/** The credit this far in from the visible map's bottom left corner, as Android Auto's (CarMapSurface). */
+const CREDIT_GAP = 8;
 
 /**
  * Heading-up puts the dot this far down the car's visible map (the phone: 0.8 of its whole map): a car's screen is
@@ -82,7 +103,7 @@ function CarMap({ dark, insets, scale }: Required<CarMapProps>) {
   // Recentre shows while the map is free or its follow zoom moved: it also resets the zoom.
   const recentre = free || zoomShift !== 0;
   useEffect(() => {
-    void AndroidAuto?.setRecentre?.(recentre).catch(noop);
+    void native?.setRecentre?.(recentre).catch(noop);
   }, [recentre]);
   // A new route's alternatives while the car stands: the map frames them all once (ROUTING-SPEC §8.7), as the phone's;
   // driving off or recentre goes back to following. Once per destination across the map's remounts (a list shown over
@@ -127,7 +148,7 @@ function CarMap({ dark, insets, scale }: Required<CarMapProps>) {
     }
   });
   useEffect(() => {
-    const subscription = AndroidAuto?.addListener("onMapGesture", (g) => onGesture(g));
+    const subscription = native?.addListener("onMapGesture", (g) => onGesture(g));
     return () => subscription?.remove();
   }, []);
   const padding = {
@@ -149,9 +170,10 @@ function CarMap({ dark, insets, scale }: Required<CarMapProps>) {
       insets={padding}
       onOwnScreen
       carScale={scale}
+      carGuidelineSizes={!carPlay}
       headingUpDotAt={CAR_HEADING_UP_DOT_AT}
-      // The credit is native there (CarMapSurface): this display draws React Native text clipped.
-      creditAt={null}
+      // Between the card and the map's buttons, wrapped when the room is narrow.
+      creditAt={carPlay ? { bottom: padding.bottom + CREDIT_GAP, left: padding.left + CREDIT_GAP, right: padding.right + CREDIT_GAP } : null}
       onReady={onMapDrawn}
       control={control}
       followZoomShift={zoomShift}

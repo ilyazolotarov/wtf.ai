@@ -9,6 +9,7 @@ let package = Package(
   targets: [
     .target(name: "VehicleLinkLogic", path: "modules/vehicle-link/ios/Logic"),
     .target(name: "SensorCaptureLogic", path: "modules/sensor-capture/ios/Logic"),
+    .target(name: "CarPlayLogic", path: "modules/car-play/ios/Logic"),
     .testTarget(
       name: "VehicleLinkLogicTests",
       dependencies: ["VehicleLinkLogic"],
@@ -18,6 +19,11 @@ let package = Package(
       name: "SensorCaptureLogicTests",
       dependencies: ["SensorCaptureLogic"],
       path: "native-tests/SensorCaptureLogicTests"
+    ),
+    .testTarget(
+      name: "CarPlayLogicTests",
+      dependencies: ["CarPlayLogic"],
+      path: "native-tests/CarPlayLogicTests"
     ),
   ],
   swiftLanguageVersions: [.v5]

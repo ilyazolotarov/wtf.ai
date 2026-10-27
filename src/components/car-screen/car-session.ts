@@ -14,12 +14,13 @@ import type {
   CarRequest,
   CarRoutePayload,
   CarSearchPayload,
-} from "../../../modules/android-auto/src/AndroidAutoModule";
+} from "./car-types";
 import { carRoute } from "./car-guidance";
 
-// One connection of the car's screen, on the JS side (docs/ANDROID-AUTO-SPEC.md §3): the headless task CarSessionTask
-// runs this while Android Auto shows the app, whatever is on the car's screen. It keeps the navigator running, sends the
-// car what to show and acts on what the driver does there, and speaks the route when no other screen does.
+// One connection of the car's screen, on the JS side (docs/ANDROID-AUTO-SPEC.md §3, docs/CARPLAY-SPEC.md §4): Android
+// Auto's headless task CarSessionTask runs this while the car shows the app, CarPlay's connection while its scene is
+// connected, whatever is on the car's screen. It keeps the navigator running, sends the car what to show and acts on
+// what the driver does there, and speaks the route when no other screen does.
 
 /** While a notice shows, what it waits for (the permission, the position for a held route) is checked this often. */
 export const NOTICE_CHECK_MS = 5000;
@@ -27,9 +28,12 @@ export const NOTICE_CHECK_MS = 5000;
 type T = (key: keyof Strings) => string;
 
 export interface CarSessionDeps {
+  /** The car's screen in the trip log: "android auto", "carplay". */
+  name: string;
   native: {
     isConnected(): boolean;
-    isTestDrive(): boolean;
+    /** Android Auto asked for its test drive (CarPlay has none). */
+    isTestDrive?(): boolean;
     setLabels(labels: CarLabelsPayload): Promise<void>;
     setRoute(route: CarRoutePayload | null): Promise<void>;
     setPlaces(places: CarPlacePayload[]): Promise<void>;
@@ -131,6 +135,8 @@ export function carLabels(t: T): CarLabelsPayload {
     notification: t("carNotification"),
     routes: t("carRoutes"),
     thisRoute: t("carThisRoute"),
+    cancel: t("cancel"),
+    close: t("close"),
   };
 }
 
@@ -156,7 +162,7 @@ const sameNotice = (a: CarNoticePayload | null, b: CarNoticePayload | null) =>
 
 /** Runs until the car's screen is gone; resolves then. */
 export function runCarSession(deps: CarSessionDeps): Promise<void> {
-  const { native, routes, places, voice, held } = deps;
+  const { native, routes, places, voice, held, name } = deps;
   return new Promise<void>((resolve) => {
     const cleanups: (() => void)[] = [];
     let ended = false;
@@ -165,12 +171,12 @@ export function runCarSession(deps: CarSessionDeps): Promise<void> {
       ended = true;
       cleanups.forEach((c) => c());
       deps.setCarScreen(false);
-      deps.note("android auto disconnected");
+      deps.note(`${name} disconnected`);
       resolve();
     };
-    const send = (call: Promise<void>) => void call.catch((e: unknown) => deps.note(`android auto: ${e instanceof Error ? e.message : String(e)}`));
+    const send = (call: Promise<void>) => void call.catch((e: unknown) => deps.note(`${name}: ${e instanceof Error ? e.message : String(e)}`));
 
-    deps.note("android auto connected");
+    deps.note(`${name} connected`);
     deps.setCarScreen(true);
     deps.connect();
 
@@ -180,11 +186,11 @@ export function runCarSession(deps: CarSessionDeps): Promise<void> {
         .takeNotes()
         .then((notes) => {
           for (const n of notes) {
-            deps.note(`android auto: ${n.text}`);
-            if (n.problem) deps.report(`android auto: ${n.text}`);
+            deps.note(`${name}: ${n.text}`);
+            if (n.problem) deps.report(`${name}: ${n.text}`);
           }
         })
-        .catch((e: unknown) => deps.note(`android auto: notes not taken: ${e instanceof Error ? e.message : String(e)}`));
+        .catch((e: unknown) => deps.note(`${name}: notes not taken: ${e instanceof Error ? e.message : String(e)}`));
 
     // Again when the driver changes the app's language.
     let labelsIn: string | null = null;
@@ -206,7 +212,7 @@ export function runCarSession(deps: CarSessionDeps): Promise<void> {
       if (viaFor?.alternatives !== alternatives || viaFor.language !== language) {
         viaFor = { alternatives, language };
         via = viaNames([route.plan.coordinates, ...alternatives.map((a) => a.plan.coordinates)], (at) => deps.streetAt(at, language));
-        deps.note(`android auto: routes by ${via.map((v) => v ?? "?").join(" / ")}`);
+        deps.note(`${name}: routes by ${via.map((v) => v ?? "?").join(" / ")}`);
       }
       return via;
     };
@@ -245,14 +251,14 @@ export function runCarSession(deps: CarSessionDeps): Promise<void> {
           if (ended) return;
           const was = located;
           located = granted;
-          if (!granted && was !== false) deps.note("android auto: no location permission");
+          if (!granted && was !== false) deps.note(`${name}: no location permission`);
           if (granted && was === false) {
-            deps.note("android auto: location allowed");
+            deps.note(`${name}: location allowed`);
             deps.retryLocation();
           }
           sendNotice();
         })
-        .catch((e: unknown) => deps.note(`android auto: location permission unknown: ${e instanceof Error ? e.message : String(e)}`));
+        .catch((e: unknown) => deps.note(`${name}: location permission unknown: ${e instanceof Error ? e.message : String(e)}`));
     const check = () => (located === false ? checkLocation() : sendNotice());
     const refreshWords = () => {
       onRoute();
@@ -265,12 +271,12 @@ export function runCarSession(deps: CarSessionDeps): Promise<void> {
       places.addRecent(place);
       const destination = { lat: place.lat, lon: place.lon, name: place.title, id: place.id };
       if (deps.withoutAdapter()) {
-        deps.note(`android auto: ${how}, held: no adapter`);
+        deps.note(`${name}: ${how}, held: no adapter`);
         routes.stop();
         held.hold(destination);
         return;
       }
-      deps.note(`android auto: ${how}`);
+      deps.note(`${name}: ${how}`);
       routes.start(destination);
     };
 
@@ -292,7 +298,7 @@ export function runCarSession(deps: CarSessionDeps): Promise<void> {
     const request = ({ navigate, uri }: CarRequest) => {
       const geo = parseGeoUri(uri);
       if (!geo) {
-        deps.note("android auto: a place asked for, not understood");
+        deps.note(`${name}: a place asked for, not understood`);
         return;
       }
       const wordings = geo.point ? [geoSearchText(uri)!] : addressQueries(geo.query!);
@@ -314,7 +320,7 @@ export function runCarSession(deps: CarSessionDeps): Promise<void> {
         send(native.showMap());
         return;
       }
-      deps.note(`android auto: place asked for on the car: ${answers.length} found`);
+      deps.note(`${name}: place asked for on the car: ${answers.length} found`);
       send(native.openSearch(text));
     };
     const takeRequest = () =>
@@ -323,12 +329,12 @@ export function runCarSession(deps: CarSessionDeps): Promise<void> {
         .then((r) => {
           if (r && !ended) request(r);
         })
-        .catch((e: unknown) => deps.note(`android auto: request not taken: ${e instanceof Error ? e.message : String(e)}`));
+        .catch((e: unknown) => deps.note(`${name}: request not taken: ${e instanceof Error ? e.message : String(e)}`));
 
     const listener = native.addListener("onCarAction", (e) => {
       switch (e.action) {
         case "end-route":
-          deps.note("android auto: route ended on the car's screen");
+          deps.note(`${name}: route ended on the car's screen`);
           routes.stop();
           return;
         case "go": {
@@ -340,7 +346,7 @@ export function runCarSession(deps: CarSessionDeps): Promise<void> {
           return;
         }
         case "choose-alternative":
-          deps.note(`android auto: alternative ${e.index} picked on the car's screen`);
+          deps.note(`${name}: alternative ${e.index} picked on the car's screen`);
           routes.chooseAlternative(e.index);
           return;
         case "search":
@@ -357,7 +363,7 @@ export function runCarSession(deps: CarSessionDeps): Promise<void> {
           return;
         }
         case "cancel-held":
-          if (held.take()) deps.note("android auto: route without an adapter dropped on the car's screen");
+          if (held.take()) deps.note(`${name}: route without an adapter dropped on the car's screen`);
           return;
         case "toggle-voice":
           voice.setMuted(!voice.muted());
@@ -398,7 +404,7 @@ export function runCarSession(deps: CarSessionDeps): Promise<void> {
     checkLocation();
     takeRequest();
     // Asked for before the listener was there.
-    if (native.isTestDrive()) deps.testDrive.start();
+    if (native.isTestDrive?.()) deps.testDrive.start();
     // Gone before the listener was there.
     if (!native.isConnected()) end();
   });

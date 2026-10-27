@@ -2,11 +2,36 @@ import ExpoModulesCore
 import UIKit
 
 /**
+ * A launch in the background (iOS relaunching the app for location or the adapter, VEHICLE-LINK-SPEC §11) connects no
+ * scene, and Expo's scene delegate starts React Native only as the phone's scene connects: without this the drive
+ * wake (index.ts) never ran (CARPLAY-SPEC §3 point 2). Woken for location or Bluetooth, React Native starts at once as
+ * for the car's screen; otherwise when no scene has connected a while after launch, the app still in the background.
+ */
+public class AppReactHostAppDelegate: ExpoAppDelegateSubscriber {
+  /** A user's launch connects the phone's scene within this, s (1.5 s after the car's on the simulator). */
+  private static let sceneWait = 3.0
+
+  public func application(
+    _ application: UIApplication,
+    didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+  ) -> Bool {
+    let woken = launchOptions?[.location] != nil || launchOptions?[.bluetoothCentrals] != nil
+    DispatchQueue.main.asyncAfter(deadline: .now() + (woken ? 0 : Self.sceneWait)) {
+      let app = UIApplication.shared
+      guard app.applicationState == .background, app.connectedScenes.isEmpty, !AppReactHost.isRunning else { return }
+      carPlayLog.notice("background launch\(woken ? " for location or the adapter" : "", privacy: .public), no scene")
+      AppReactHost.startWithoutPhone()
+    }
+    return true
+  }
+}
+
+/**
  * The app's one React Native host, seen from the car's screen (docs/CARPLAY-SPEC.md §3 point 2, §4). Views are made
  * only on a running host: making one starts the host when there is none, past Expo's React delegate handlers, and
  * expo-updates is then asked for the bundle before it is set up (an assertion in Debug, a force-unwrap in Release).
- * The phone's scene starts the host (Expo's scene delegate); without it, the app opened from the car with the phone
- * locked, `startWithoutPhone` starts it the same way, through the handlers.
+ * The phone's scene starts the host (Expo's scene delegate); without it (the app opened from the car with the phone
+ * locked, or relaunched in the background), `startWithoutPhone` starts it the same way, through the handlers.
  */
 enum AppReactHost {
   /** The root a start without the phone's screen asks for: it renders nothing (index.ts). */
@@ -81,12 +106,13 @@ enum AppReactHost {
    * ExpoReactNativeFactory reads it): expo-splash-screen's would put the launch screen over the car's map for good, and
    * move its one splash to this view, so the phone's would never go if CarPlay connected while it showed.
    */
-  static func rootView(moduleName: String) -> UIView? {
+  static func rootView(moduleName: String, initialProperties: [AnyHashable: Any]?) -> UIView? {
     guard isRunning, let factory else { return nil }
     let configuration = rootViewFactory?.value(forKey: "_configuration") as? NSObject
     let customize = configuration?.value(forKey: "customizeRootView")
     configuration?.setValue(nil, forKey: "customizeRootView")
     defer { configuration?.setValue(customize, forKey: "customizeRootView") }
-    return factory.recreateRootView(withBundleURL: nil, moduleName: moduleName, initialProps: nil, launchOptions: nil)
+    return factory.recreateRootView(
+      withBundleURL: nil, moduleName: moduleName, initialProps: initialProperties, launchOptions: nil)
   }
 }

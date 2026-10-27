@@ -56,6 +56,13 @@ describe("the car's POIs", () => {
     // Street names go with their road: only the car's scale makes them bigger.
     expect(street).toEqual(style().layers[0]);
   });
+
+  test("CarPlay's: the same POIs at the style's own sizes", () => {
+    const [, r1] = withCarPois(style(), null).layers;
+    const [, original] = style().layers;
+    expect(r1.layout).toEqual(original.layout);
+    expect(r1.filter).toEqual(withCarPois(style(), 1.4).layers[1].filter);
+  });
 });
 
 describe("the car's ways", () => {

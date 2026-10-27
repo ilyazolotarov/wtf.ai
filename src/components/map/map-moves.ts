@@ -25,6 +25,30 @@ export function shiftedFollowZoom(shift: number, by: number): number {
   return Math.min(FOLLOW_ZOOM_SHIFT.max, Math.max(FOLLOW_ZOOM_SHIFT.min, shift + by));
 }
 
+/** Framing keeps at least this share of the map's width and of its height for what it frames. */
+export const FRAME_KEEPS = 0.4;
+
+/**
+ * Room around what is framed, `padding` as asked unless it leaves less than `FRAME_KEEPS` of the map's `width` or
+ * `height` (points): then that side's two shrink alike. A small car screen's panels (CarPlay's guidance card, bar and
+ * buttons) cover most of its width: the routes were framed into a sliver, zoomed into an empty block.
+ */
+export function fittedPadding(
+  padding: { top: number; bottom: number; left: number; right: number },
+  width: number,
+  height: number,
+): { top: number; bottom: number; left: number; right: number } {
+  const fit = (a: number, b: number, size: number): [number, number] => {
+    const most = size * (1 - FRAME_KEEPS);
+    if (size <= 0 || a + b <= most) return [a, b];
+    const k = most / (a + b);
+    return [a * k, b * k];
+  };
+  const [left, right] = fit(padding.left, padding.right, width);
+  const [top, bottom] = fit(padding.top, padding.bottom, height);
+  return { top, bottom, left, right };
+}
+
 /** A fling carries the map on as far as the finger's speed would in this long, eased out. */
 export const FLING_S = 0.3;
 export const FLING_EASE_MS = 600;

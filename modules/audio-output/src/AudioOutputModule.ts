@@ -43,6 +43,8 @@ declare class AudioOutputNativeModule extends NativeModule<AudioOutputEvents> {
   playGuidance?(uri: string, volume: number): Promise<boolean>;
   /** Stops the clip `playOnSpeaker` or `playGuidance` plays. */
   stopOnSpeaker?(): Promise<void>;
+  /** iOS: the audio session's mode as voice prompts (CarPlay connected), or the plain one again. */
+  setVoicePrompt?(on: boolean): void;
 }
 
 const native = requireOptionalNativeModule<AudioOutputNativeModule>("AudioOutput");
@@ -92,6 +94,16 @@ export const canPlayGuidance = native?.playGuidance != null;
 /** Android: plays a local clip (`file://`) as navigation guidance at `volume` (0–1); true once it played to its end. */
 export function playGuidance(uri: string, volume: number): Promise<boolean> {
   return native?.playGuidance?.(uri, volume) ?? Promise.resolve(false);
+}
+
+/**
+ * iOS: the audio session in the voice-prompt mode (CarPlay connected), which CarPlay mixes over the car's audio as a
+ * navigation app's guidance; false: plain playback again. False when it couldn't be set (a build without it).
+ */
+export function setVoicePrompt(on: boolean): boolean {
+  if (!native?.setVoicePrompt) return false;
+  native.setVoicePrompt(on);
+  return true;
 }
 
 /** Stops the clip `playOnSpeaker` or `playGuidance` plays (its promise then resolves false). */

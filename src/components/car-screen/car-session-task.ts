@@ -26,7 +26,8 @@ import { activeSearchIndex } from "@/services/offline-map/search-file";
 import { autoConnect, getRuntime } from "@/services/runtime";
 
 import AndroidAuto from "../../../modules/android-auto/src/AndroidAutoModule";
-import { runCarSession } from "./car-session";
+import CarPlay from "../../../modules/car-play/src/CarPlayModule";
+import { runCarSession, type CarSessionDeps } from "./car-session";
 
 /** A route goes by the street of the houses within this of its own stretch (`viaNames`). */
 const VIA_HOUSE_M = 60;
@@ -34,9 +35,35 @@ const VIA_HOUSE_M = 60;
 /** The headless task's name (CarSessionTask.TASK in modules/android-auto). */
 export const CAR_SESSION_TASK = "WtfCarSession";
 
-/** The car's screen connected (docs/ANDROID-AUTO-SPEC.md §3): runs until it is gone. */
+/** Android Auto's car screen connected (docs/ANDROID-AUTO-SPEC.md §3): runs until it is gone. */
 export async function carSessionTask(): Promise<void> {
   if (!AndroidAuto) return;
+  await runCarScreen(AndroidAuto, "android auto", "android-auto");
+}
+
+let carPlayRunning = false;
+
+/**
+ * CarPlay's car screen (docs/CARPLAY-SPEC.md §4): a session for each connection of its scene, in the app's one JS
+ * runtime (index.ts). A runtime that comes up while the car is connected (a launch from the car, a reload) starts one
+ * at once; the native side kept what the last one sent.
+ */
+export function listenForCarPlay(): void {
+  const native = CarPlay;
+  if (!native) return;
+  const start = () => {
+    if (carPlayRunning || !native.isConnected()) return;
+    carPlayRunning = true;
+    void runCarScreen(native, "carplay", "carplay").finally(() => {
+      carPlayRunning = false;
+    });
+  };
+  native.addListener("onConnect", start);
+  start();
+}
+
+/** One connection of a car's screen, the same on both platforms but for its native side and its name in the log. */
+async function runCarScreen(native: CarSessionDeps["native"], name: string, feature: string): Promise<void> {
   // The process may have started for the car, the phone's screens (and the root layout's setup) never loaded.
   initSentry();
   const runtime = getRuntime();
@@ -59,7 +86,8 @@ export async function carSessionTask(): Promise<void> {
   });
   try {
     await runCarSession({
-      native: AndroidAuto,
+      name,
+      native,
       routes,
       places,
       held: { get: heldRoute, hold: holdRouteForGuide, take: takeHeldRoute, subscribe: onHeldRoute },
@@ -113,7 +141,7 @@ export async function carSessionTask(): Promise<void> {
       setCarScreen: (on) => runtime.setCarScreen(on),
       connect: () => void autoConnect().catch((error) => console.warn("auto-connect failed", error)),
       note: (text) => recorder.note(text),
-      report: (text) => Sentry.captureMessage(text, { level: "warning", tags: { feature: "android-auto" } }),
+      report: (text) => Sentry.captureMessage(text, { level: "warning", tags: { feature } }),
       every: (ms, fn) => {
         const id = setInterval(fn, ms);
         return () => clearInterval(id);

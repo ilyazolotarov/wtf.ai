@@ -36,6 +36,19 @@ public class AudioOutputModule: Module {
       self.observer = nil
     }
 
+    /**
+     * CarPlay connected (CARPLAY-SPEC §4): the voice as navigation guidance, as Apple asks of navigation apps. The
+     * session's mode is voice prompts, which CarPlay mixes over the car's audio, and a prompt interrupts a podcast or
+     * an audiobook instead of talking over it. Set over expo-audio's category (playback, ducking others) after it sets
+     * its own; off: the plain mode again.
+     */
+    Function("setVoicePrompt") { (on: Bool) in
+      let session = AVAudioSession.sharedInstance()
+      var options: AVAudioSession.CategoryOptions = [.duckOthers]
+      if on { options.insert(.interruptSpokenAudioAndMixWithOthers) }
+      try session.setCategory(.playback, mode: on ? .voicePrompt : .default, options: options)
+    }
+
     View(AudioOutputPickerView.self) {
       Prop("tint") { (view: AudioOutputPickerView, color: UIColor) in
         view.picker.tintColor = color

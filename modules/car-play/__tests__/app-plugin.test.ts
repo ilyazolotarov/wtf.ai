@@ -9,7 +9,7 @@ jest.mock("expo/config-plugins", () => ({
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const withCarPlay = require("../app.plugin.js");
-const { addCarPlayScene } = withCarPlay;
+const { addCarPlayScene, addMapLinks } = withCarPlay;
 
 /** What expo-build-properties' `ios.enableSceneSupport` writes. */
 const PHONE_SCENE = {
@@ -41,6 +41,14 @@ describe("car-play config plugin", () => {
     const before = JSON.stringify(PHONE_SCENE);
     addCarPlayScene(PHONE_SCENE);
     expect(JSON.stringify(PHONE_SCENE)).toBe(before);
+  });
+
+  test("takes the map links other apps open a navigator with, beside the app's own scheme, once", () => {
+    const own = [{ CFBundleURLSchemes: ["wtfai", "ai.wtf.navigator"] }];
+    const links = addMapLinks(own);
+    expect(links).toEqual([...own, { CFBundleURLSchemes: ["geo", "google.navigation"] }]);
+    expect(addMapLinks(links)).toEqual(links);
+    expect(addMapLinks(undefined)).toEqual([{ CFBundleURLSchemes: ["geo", "google.navigation"] }]);
   });
 
   test("refuses to run without the phone's scene", () => {

@@ -6,7 +6,7 @@ import { uk } from "@/i18n/uk";
 import type { RouteDestination, RouteSnapshot } from "@/services/navigation/route-service";
 import type { Place, PlacesSnapshot } from "@/services/navigation/places-store";
 
-import type { CarAction, CarNote, CarRequest } from "../../../../modules/android-auto/src/AndroidAutoModule";
+import type { CarAction, CarNote, CarRequest } from "../car-types";
 import { carNotice, carPlaces, NOTICE_CHECK_MS, runCarSession, type CarSessionDeps } from "../car-session";
 
 const tEn = (key: keyof typeof en) => en[key];
@@ -40,7 +40,12 @@ function fakeFind(text: string): Place[] {
 /** The promises the session waits on (the permission, the native notes) settled. */
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-function setup({ connected = true, located = true, testDrive = false }: { connected?: boolean; located?: boolean; testDrive?: boolean } = {}) {
+function setup({
+  connected = true,
+  located = true,
+  testDrive = false,
+  carPlay = false,
+}: { connected?: boolean; located?: boolean; testDrive?: boolean; carPlay?: boolean } = {}) {
   const calls: { method: string; arg: unknown }[] = [];
   let actionListener: ((e: CarAction) => void) | null = null;
   const routeListeners = new Set<() => void>();
@@ -82,9 +87,11 @@ function setup({ connected = true, located = true, testDrive = false }: { connec
   };
   const emitHeld = () => heldListeners.forEach((l) => l());
   const deps: CarSessionDeps = {
+    name: carPlay ? "carplay" : "android auto",
     native: {
       isConnected: () => connected,
-      isTestDrive: () => testDrive,
+      // CarPlay has no test drive.
+      isTestDrive: carPlay ? undefined : () => testDrive,
       setLabels: call("setLabels"),
       setRoute: call("setRoute"),
       setPlaces: call("setPlaces"),
@@ -271,6 +278,8 @@ describe("car session", () => {
       notification: en.carNotification,
       routes: en.carRoutes,
       thisRoute: en.carThisRoute,
+      cancel: en.cancel,
+      close: en.close,
     });
     expect(sent.setPlaces).toEqual([
       { id: "home", title: "Home", detail: "Khreshchatyk 1", kind: "home" },
@@ -282,6 +291,17 @@ describe("car session", () => {
     // checks running for it.
     expect(sent.setNotice).toBeNull();
     expect(s.timers()).toBe(0);
+  });
+
+  test("CarPlay's connection is the same session, in the trip log as carplay, without a test drive", () => {
+    const s = setup({ carPlay: true });
+    void runCarSession(s.deps);
+    expect(s.notes).toEqual(["carplay connected", "connect"]);
+    expect(s.testDrives).toEqual([]);
+    s.act({ action: "end-route" });
+    expect(s.notes.at(-1)).toBe("carplay: route ended on the car's screen");
+    s.act({ action: "session-ended" });
+    expect(s.notes.at(-1)).toBe("carplay disconnected");
   });
 
   test("the route goes to the car and to the car's voice as it changes; the words only once", () => {

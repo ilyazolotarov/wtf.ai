@@ -21,4 +21,6 @@ Pod::Spec.new do |s|
   }
 
   s.source_files = "**/*.{h,m,mm,swift,hpp,cpp}"
+  # The car screen's icons (scripts/car-icons.py), compiled into WtfCarPlay.bundle.
+  s.resource_bundles = { 'WtfCarPlay' => ['CarIcons.xcassets'] }
 end

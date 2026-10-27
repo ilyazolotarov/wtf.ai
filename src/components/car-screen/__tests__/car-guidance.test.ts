@@ -77,6 +77,8 @@ describe("car route", () => {
     expect(r).toMatchObject({
       status: "active",
       destinationName: "Kyiv",
+      destinationLat: 50.45,
+      destinationLon: 30.52,
       replanning: false,
       remainingM: 10_000,
       remainingS: 900,

@@ -6,7 +6,7 @@ import type { Maneuver } from "@/nav/routing/maneuvers";
 import type { RoutePlan } from "@/nav/routing/router";
 import type { RouteSnapshot } from "@/services/navigation/route-service";
 
-import type { CarDistanceUnit, CarRoutePayload, CarStepPayload } from "../../../modules/android-auto/src/AndroidAutoModule";
+import type { CarDistanceUnit, CarRoutePayload, CarStepPayload } from "./car-types";
 
 /**
  * A distance as the car shows it, rounded as the phone's banner rounds it (`formatManeuverDistance`): 10 m under 300 m,
@@ -21,7 +21,7 @@ export function carDistance(meters: number): { shown: number; unit: CarDistanceU
 }
 
 /**
- * What the car's screen shows of the route service's snapshot (docs/ANDROID-AUTO-SPEC.md §4): the next maneuver with
+ * What the car's screen shows of the route service's snapshot (docs/ANDROID-AUTO-SPEC.md §4, CARPLAY-SPEC §4): the next maneuver with
  * the distance to it, the one after when it follows closely, the distance and time left; or why there is no maneuver
  * to show (planning, a failure, arrival). Each maneuver's distance and time are from the car, as the trip in the car's
  * other displays wants them. Null: no route.
@@ -37,6 +37,8 @@ export function carRoute(
   const { destination, guidance, maneuvers, plan } = route;
   const base = {
     destinationName: destination.name ?? "",
+    destinationLat: destination.lat,
+    destinationLon: destination.lon,
     replanning: route.replanning,
     quiet: route.ownWay === true,
     steps: [] as CarStepPayload[],

@@ -1,8 +1,20 @@
-import { FOLLOW_ZOOM_SHIFT, pannedCenter, shiftedFollowZoom, zoomedCenter } from "../map-moves";
+import { fittedPadding, FOLLOW_ZOOM_SHIFT, pannedCenter, shiftedFollowZoom, zoomedCenter } from "../map-moves";
 
 const KYIV = { lat: 50.45, lon: 30.52 };
 
 describe("map moves", () => {
+  test("framing keeps 40 % of the map for what it frames, the panels' room shrunk alike when they take more", () => {
+    const phone = { top: 120, bottom: 200, left: 24, right: 24 };
+    expect(fittedPadding(phone, 390, 844)).toEqual(phone);
+    // CarPlay's 400×240 screen with its guidance card on the left and buttons on the right.
+    const car = fittedPadding({ top: 72, bottom: 32, left: 262, right: 92 }, 400, 240);
+    expect(car.left + car.right).toBeCloseTo(240, 9);
+    expect(car.left / car.right).toBeCloseTo(262 / 92, 9);
+    expect(car.top).toBe(72);
+    // Before the map is laid out: as asked.
+    expect(fittedPadding(phone, 0, 0)).toEqual(phone);
+  });
+
   test("a drag shifts the centre as it shifted the ground under the finger", () => {
     const from = { lat: 50.451, lon: 30.523 };
     const to = { lat: 50.452, lon: 30.521 };

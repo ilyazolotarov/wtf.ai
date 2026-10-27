@@ -1,58 +1,179 @@
 import ExpoModulesCore
 
-// The route's guidance on the car's screen (docs/CARPLAY-SPEC.md §4). The JS side that calls it is the car screen's
-// own React root (src/components/car-play), mounted only while a car is connected: no connection events are needed.
-// Every function runs on the main queue, where CarPlaySession lives.
+// The car's screen for the JS side (docs/CARPLAY-SPEC.md §4): what it shows, sent by the car session
+// (src/components/car-screen/car-session.ts, the same as Android Auto's), and what the driver did there, as
+// `onCarAction`; `onConnect` when the driver first opens the app on CarPlay, so a session starts. Every function that touches the
+// templates runs on the main queue, where CarPlaySession lives.
 
-struct CarTripRecord: Record {
-  @Field var originLat: Double = 0
-  @Field var originLon: Double = 0
-  @Field var destinationLat: Double = 0
-  @Field var destinationLon: Double = 0
-  @Field var destinationName: String?
-  /** The route as the driver reads it in the trip's card ("18 min · 12 km"). */
-  @Field var summary: String = ""
-}
-
-struct CarManeuverRecord: Record {
+struct CarStepRecord: Record {
+  @Field var id: String = ""
+  @Field var kind: String = ""
+  @Field var exit: Int?
   @Field var instruction: String = ""
-  /** An SF Symbol (a stand-in for the app's own turn icons). */
-  @Field var symbol: String = ""
-  /** From the previous maneuver (the first: from the car), m and s. */
   @Field var distanceM: Double = 0
   @Field var timeS: Double = 0
+  @Field var shownDistance: Double = 0
+  @Field var shownUnit: String = "m"
 }
 
-struct CarEstimatesRecord: Record {
-  @Field var toNextM: Double = 0
-  @Field var toNextS: Double = 0
+struct CarAlternativeRecord: Record {
+  @Field var index: Int = 0
+  @Field var title: String = ""
+  @Field var detail: String = ""
+}
+
+struct CarRouteRecord: Record {
+  @Field var status: String = "planning"
+  @Field var message: String?
+  @Field var destinationName: String = ""
+  @Field var destinationLat: Double = 0
+  @Field var destinationLon: Double = 0
+  @Field var replanning: Bool = false
+  @Field var quiet: Bool = false
+  @Field var steps: [CarStepRecord] = []
   @Field var remainingM: Double = 0
   @Field var remainingS: Double = 0
+  @Field var remainingShown: Double = 0
+  @Field var remainingUnit: String = "m"
+  @Field var title: String = ""
+  @Field var detail: String = ""
+  @Field var alternatives: [CarAlternativeRecord] = []
+}
+
+struct CarPlaceRecord: Record {
+  @Field var id: String = ""
+  @Field var title: String = ""
+  @Field var detail: String?
+  @Field var kind: String = "recent"
+}
+
+struct CarSearchRecord: Record {
+  @Field var query: String = ""
+  @Field var results: [CarPlaceRecord] = []
+}
+
+struct CarLabelsRecord: Record {
+  @Field var destinations: String = ""
+  @Field var saved: String = ""
+  @Field var recent: String = ""
+  @Field var noDestinations: String = ""
+  @Field var search: String = ""
+  @Field var searchHint: String = ""
+  @Field var noResults: String = ""
+  @Field var checkPhone: String = ""
+  @Field var routes: String = ""
+  @Field var thisRoute: String = ""
+  @Field var cancel: String = ""
+  @Field var close: String = ""
+}
+
+struct CarNoticeRecord: Record {
+  @Field var kind: String = ""
+  @Field var title: String = ""
+  @Field var text: String = ""
+  @Field var action: String = ""
 }
 
 public class CarPlayModule: Module {
   public func definition() -> ModuleDefinition {
     Name("CarPlay")
 
-    // Made with each JS runtime: the car's map waits for one, and is made again on a reload's.
+    Events("onConnect", "onCarAction", "onMapGesture")
+
+    // Made with each JS runtime: the car's map waits for one, and is made again on a reload's; this runtime's car
+    // session listens from now.
     OnCreate {
-      DispatchQueue.main.async { CarPlaySession.shared.reactNativeStarted() }
+      DispatchQueue.main.async {
+        CarPlaySession.shared.listen(self) { [weak self] event, body in self?.sendEvent(event, body) }
+        CarPlaySession.shared.reactNativeStarted()
+      }
     }
 
-    AsyncFunction("startTrip") { (trip: CarTripRecord) in
-      CarPlaySession.shared.startTrip(trip)
+    OnDestroy {
+      DispatchQueue.main.async { CarPlaySession.shared.listen(self, nil) }
+    }
+
+    /** The car session is open: the driver opened the app on CarPlay since its scene connected. */
+    Function("isConnected") { CarPlaySession.shared.isOpen }
+
+    AsyncFunction("setLabels") { (labels: CarLabelsRecord) in
+      let d = CarLabels()
+      let or = { (value: String, fallback: String) in value.isEmpty ? fallback : value }
+      CarPlaySession.shared.setLabels(
+        CarLabels(
+          destinations: or(labels.destinations, d.destinations),
+          saved: or(labels.saved, d.saved), recent: or(labels.recent, d.recent),
+          noDestinations: or(labels.noDestinations, d.noDestinations), search: or(labels.search, d.search),
+          searchHint: or(labels.searchHint, d.searchHint), noResults: or(labels.noResults, d.noResults),
+          checkPhone: or(labels.checkPhone, d.checkPhone), routes: or(labels.routes, d.routes),
+          thisRoute: or(labels.thisRoute, d.thisRoute), cancel: or(labels.cancel, d.cancel), close: or(labels.close, d.close)))
     }.runOnQueue(.main)
 
-    AsyncFunction("setManeuvers") { (maneuvers: [CarManeuverRecord]) in
-      CarPlaySession.shared.setManeuvers(maneuvers)
+    /** The route to show, or null: none. */
+    AsyncFunction("setRoute") { (route: CarRouteRecord?) in
+      CarPlaySession.shared.setRoute(
+        route.map { r in
+          CarRoute(
+            status: r.status, message: r.message, destinationName: r.destinationName, destinationLat: r.destinationLat,
+            destinationLon: r.destinationLon, replanning: r.replanning, quiet: r.quiet,
+            steps: r.steps.map {
+              CarStep(
+                id: $0.id, kind: $0.kind, exit: $0.exit, instruction: $0.instruction, distanceM: $0.distanceM,
+                timeS: $0.timeS, shownDistance: $0.shownDistance, shownUnit: $0.shownUnit)
+            },
+            remainingM: r.remainingM, remainingS: r.remainingS, remainingShown: r.remainingShown,
+            remainingUnit: r.remainingUnit, title: r.title, detail: r.detail,
+            alternatives: r.alternatives.map { CarAlternative(index: $0.index, title: $0.title, detail: $0.detail) })
+        })
     }.runOnQueue(.main)
 
-    AsyncFunction("updateEstimates") { (estimates: CarEstimatesRecord) in
-      CarPlaySession.shared.updateEstimates(estimates)
+    AsyncFunction("setPlaces") { (places: [CarPlaceRecord]) in
+      CarPlaySession.shared.setPlaces(places.map(Self.place))
     }.runOnQueue(.main)
 
-    AsyncFunction("endTrip") { (arrived: Bool) in
-      CarPlaySession.shared.endTrip(arrived: arrived)
+    /** Muted or not; null: no voice, no button. */
+    AsyncFunction("setVoiceMuted") { (muted: Bool?) in
+      CarPlaySession.shared.setVoiceMuted(muted)
     }.runOnQueue(.main)
+
+    /** The recentre button: shown while the driver has moved the car's map or zoomed it from the follow zoom. */
+    AsyncFunction("setRecentre") { (shown: Bool) in
+      CarPlaySession.shared.setRecentre(shown)
+    }.runOnQueue(.main)
+
+    /** What the driver must do first (`location`, `held-route`), in an alert over the map; null: nothing. */
+    AsyncFunction("setNotice") { (notice: CarNoticeRecord?) in
+      CarPlaySession.shared.setNotice(
+        notice.map { CarNotice(kind: $0.kind, title: $0.title, text: $0.text, action: $0.action) })
+    }.runOnQueue(.main)
+
+    /** What the search's text found; null: nothing searched. */
+    AsyncFunction("setSearch") { (search: CarSearchRecord?) in
+      CarPlaySession.shared.setSearch(search.map { CarSearch(query: $0.query, results: $0.results.map(Self.place)) })
+    }.runOnQueue(.main)
+
+    /** The answers to `query` in a list over the map (after `setSearch` with them). */
+    AsyncFunction("openSearch") { (query: String) in
+      CarPlaySession.shared.openSearch(query)
+    }.runOnQueue(.main)
+
+    /** The map, with a list or the search open over it gone (a place asked for is gone to). */
+    AsyncFunction("showMap") {
+      CarPlaySession.shared.showMapTemplate()
+    }.runOnQueue(.main)
+
+    /** A place asked for while CarPlay shows the app, once: `{ navigate, uri }`, or null. */
+    AsyncFunction("takeRequest") { () -> [String: Any]? in
+      CarPlaySession.shared.takeRequest()
+    }.runOnQueue(.main)
+
+    /** The native side's notes since the last call, for the trip log (`problem`: reported too). */
+    AsyncFunction("takeNotes") { () -> [[String: Any]] in
+      CarPlaySession.shared.takeNotes()
+    }.runOnQueue(.main)
+  }
+
+  private static func place(_ r: CarPlaceRecord) -> CarPlace {
+    CarPlace(id: r.id, title: r.title, detail: r.detail, kind: r.kind)
   }
 }

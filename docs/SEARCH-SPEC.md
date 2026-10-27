@@ -145,6 +145,13 @@ for or `lat,lon(name)`; `0,0` is no point) or Google Maps' `google.navigation:q=
 link's name and is its one result; words are searched as typed. `mode`, `avoid` and `intent` are ignored: the app
 routes by car, and a link's place replaces the destination.
 
+Apple Maps links, pasted into the search (Apple Maps' Share → Copy; iOS opens them in Apple Maps only, so they never
+come as links): `https://maps.apple.com/place?…`, `/directions?…`, `/search?…`, the older `https://maps.apple.com/?…`
+and `maps://?…`. The point is `coordinate`, `ll`, or a `destination`, `daddr` or `q` of coordinates, named by `name` or
+`q`; without one, the words are the `address` (the index holds it better than a business's name), else `destination`,
+`daddr`, `q`, `query`, `name`. `sll`, `place-id` and `auid` are ignored; a short `maps.apple/p/…` link needs Apple's
+server and is not read.
+
 Measured in Node on a synthetic Ukraine-sized index (28 000 settlements, 496 000 streets, 4.7 M addresses, 53 000
 POIs: 97 MB): queries 9–25 ms. The phone is several times slower; an oblast is about a 25th of this.
 
@@ -159,10 +166,11 @@ POIs: 97 MB): queries 9–25 ms. The phone is several times slower; an oblast is
   direction. Start guidance routes to it (`id` `search:<key>`, the name shown on the banner). Coordinates (§4.5) are one
   result, opened at once when pasted (or on the keyboard's Search): named by the house within 75 m (as a dropped pin),
   else "Selected location", then its settlement and the coordinates; the route goes to the exact point
-  (`id` `point:<lat>,<lon>`). A `geo:` link pasted reads as its place or its words (§4.6).
+  (`id` `point:<lat>,<lon>`). A `geo:` or Apple Maps link pasted reads as its place or its words (§4.6).
 - **Links** (`src/app/+native-intent.tsx`): Android offers the app for `geo:` and `google.navigation:` links
-  (`app.json` intent filter: view, browsable); the route screen opens over the map (the router's anchor) with the
-  link's point (its coordinates) or words in the field, searched. iOS gives these links to Apple Maps only.
+  (`app.json` intent filter: view, browsable), iOS opens it for them (URL types added by `modules/car-play/app.plugin.js`;
+  iOS asks the first time); the route screen opens over the map (the router's anchor) with the link's point (its
+  coordinates) or words in the field, searched.
 - **The car's search** (ANDROID-AUTO-SPEC §3, §4; `findPlaces` in `src/components/route/place-search.ts`): the same
   index on each change of the car's field, with no delay (the car's keyboard is slow), a point as one result, the
   built-in cities without an index. Each result shows what and where it is, then its distance.

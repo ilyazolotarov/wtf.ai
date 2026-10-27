@@ -8,6 +8,7 @@ import {
   canPlayOnSpeaker,
   playGuidance,
   playOnSpeaker,
+  setVoicePrompt,
   stopOnSpeaker,
 } from "../../../modules/audio-output/src/AudioOutputModule";
 import { VOICE_CLIPS } from "./voice-clips";
@@ -41,6 +42,8 @@ let note: (text: string) => void = () => {};
 let volume = 1;
 /** Clips as navigation guidance (Android's own player) while Android Auto is connected; else through expo-audio. */
 let asGuidance = false;
+/** iOS: expo-audio's session in the voice-prompt mode while CarPlay is connected. */
+let voicePrompt = false;
 
 export function setVoiceNote(fn: (text: string) => void): void {
   note = fn;
@@ -51,11 +54,16 @@ export function setVoiceVolume(v: number): void {
 }
 
 /**
- * Android Auto connected (docs/ANDROID-AUTO-SPEC.md §3): clips play as navigation guidance, which the car mixes over
- * whatever it plays, its own radio too. As media they would be heard only with the phone as the car's source.
+ * A car's screen connected: clips play as navigation guidance, which the car mixes over whatever it plays, its own
+ * radio too. As media they would be heard only with the phone as the car's source. Android Auto (docs/ANDROID-AUTO-SPEC.md
+ * §3): Android's own player; CarPlay (docs/CARPLAY-SPEC.md §4): expo-audio's session in the voice-prompt mode, set
+ * again before the next clip.
  */
 export function setVoiceAsGuidance(on: boolean): void {
   asGuidance = on && canPlayGuidance;
+  if (Platform.OS !== "ios" || on === voicePrompt) return;
+  voicePrompt = on;
+  audioMode = null;
 }
 
 const languageOf = (lang: VoiceLang) => (lang === "uk" ? "uk-UA" : "en-US");
@@ -184,9 +192,18 @@ async function playNative(item: Extract<Item, { clip: number }>, gen: number, do
 
 async function playClip(item: Extract<Item, { clip: number }>, gen: number, done: () => void): Promise<void> {
   // In the background too (the screen locked, another app in front): without it expo-audio pauses its players there.
-  audioMode ??= setAudioModeAsync({ playsInSilentMode: true, interruptionMode: "duckOthers", shouldPlayInBackground: true }).catch((e: unknown) => {
-    note(`voice: audio mode not set: ${String(e)}`);
-  });
+  audioMode ??= setAudioModeAsync({ playsInSilentMode: true, interruptionMode: "duckOthers", shouldPlayInBackground: true })
+    .then(() => {
+      if (Platform.OS !== "ios") return;
+      try {
+        if (setVoicePrompt(voicePrompt) && voicePrompt) note("voice: as navigation guidance (CarPlay)");
+      } catch (e) {
+        note(`voice: voice-prompt mode not set: ${String(e)}`);
+      }
+    })
+    .catch((e: unknown) => {
+      note(`voice: audio mode not set: ${String(e)}`);
+    });
   await audioMode;
   if (gen !== generation) return;
   // Said by the system voice instead, and the audio mode set again before the next clip.

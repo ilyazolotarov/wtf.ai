@@ -30,7 +30,38 @@ describe("parseGeoUri", () => {
     expect(parseGeoUri("google.navigation:ll=49.84,24.03")).toEqual({ point: { lat: 49.84, lon: 24.03 }, query: null });
   });
 
+  it("reads Apple Maps' links, pasted from its Share button", () => {
+    expect(
+      parseGeoUri(
+        "https://maps.apple.com/place?place-id=I1234ABCD&address=Khreshchatyk+St,+22,+Kyiv,+Ukraine,+02000&coordinate=50.447,30.522&name=Khreshchatyk+22&_provider=9902",
+      ),
+    ).toEqual({ point: { lat: 50.447, lon: 30.522 }, query: "Khreshchatyk 22" });
+    expect(parseGeoUri("https://maps.apple.com/?address=Khreshchatyk%20St,%2022,%20Kyiv&auid=123&ll=50.447,30.522&lsp=9902&q=Passage")).toEqual({
+      point: { lat: 50.447, lon: 30.522 },
+      query: "Passage",
+    });
+    expect(parseGeoUri("http://maps.apple.com/?q=Maidan&ll=50.45,30.52")).toEqual({ point: { lat: 50.45, lon: 30.52 }, query: "Maidan" });
+    expect(parseGeoUri("maps://?q=50.45,30.52")).toEqual({ point: { lat: 50.45, lon: 30.52 }, query: null });
+  });
+
+  it("searches an Apple Maps link without a point by its address, or else its words", () => {
+    expect(parseGeoUri("https://maps.apple.com/place?address=Lesi+Ukrainky+Blvd,+26,+Kyiv&name=Office+Centre")).toEqual({
+      point: null,
+      query: "Lesi Ukrainky Blvd, 26, Kyiv",
+    });
+    expect(parseGeoUri("https://maps.apple.com/directions?destination=Lviv+Rynok+Square&mode=driving")).toEqual({
+      point: null,
+      query: "Lviv Rynok Square",
+    });
+    expect(parseGeoUri("https://maps.apple.com/directions?destination=49.84,24.03")).toEqual({ point: { lat: 49.84, lon: 24.03 }, query: null });
+    expect(parseGeoUri("https://maps.apple.com/search?query=fuel")).toEqual({ point: null, query: "fuel" });
+    expect(parseGeoUri("maps:?daddr=Khreshchatyk+22&sll=50.4,30.5")).toEqual({ point: null, query: "Khreshchatyk 22" });
+  });
+
   it("is null for anything else, or a link that asks for nothing", () => {
+    expect(parseGeoUri("https://maps.apple.com/place?place-id=I1234ABCD")).toBeNull();
+    expect(parseGeoUri("https://maps.apple/p/abc123")).toBeNull();
+    expect(parseGeoUri("https://maps.apple.com.evil.example/?q=x")).toBeNull();
     expect(parseGeoUri("https://maps.google.com/?q=50.45,30.52")).toBeNull();
     expect(parseGeoUri("wtfai://route")).toBeNull();
     expect(parseGeoUri("geo:0,0")).toBeNull();
@@ -46,6 +77,8 @@ describe("geoSearchText", () => {
     expect(geoSearchText("geo:0,0?q=Khreshchatyk+22")).toBe("Khreshchatyk 22");
     expect(geoSearchText("Khreshchatyk 22")).toBeNull();
     expect(geoSearchText("geo:0,0?q=Khreshchatyk+St,+22,+Kyiv,+Ukraine,+02000")).toBe("Khreshchatyk St, 22, Kyiv");
+    expect(geoSearchText("https://maps.apple.com/place?address=Khreshchatyk+St,+22,+Kyiv,+Ukraine,+02000")).toBe("Khreshchatyk St, 22, Kyiv");
+    expect(geoSearchText("https://maps.apple.com/place?coordinate=50.447,30.522&name=Passage")).toBe("50.447000, 30.522000");
   });
 });
 

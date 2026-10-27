@@ -7,6 +7,7 @@ import type { PositionEstimate } from "@/nav/position/types";
 import type { RouteSnapshot } from "@/services/navigation/route-service";
 
 import { fitCircleZoom } from "./map-features";
+import { fittedPadding } from "./map-moves";
 import type { CameraMode } from "./use-camera-mode";
 import { COURSE_MIN_SPEED_MPS, mapBearingDeg } from "./use-compass-heading";
 import type { PlacingStep } from "./use-placing";
@@ -87,6 +88,7 @@ function send(command: () => unknown): void {
 export function useMapCamera({
   mapReady,
   mapHeightPt,
+  mapWidthPt = 0,
   insets = NO_INSETS,
   zoomOffset = 0,
   headingUpDotAt = HEADING_UP_DOT_AT,
@@ -108,6 +110,8 @@ export function useMapCamera({
   mapReady: boolean;
   /** The map's own height (turned sideways, the screen's width); 0 before its layout: the screen's height. */
   mapHeightPt: number;
+  /** The map's own width; 0 before its layout: the screen's. */
+  mapWidthPt?: number;
   /** Edges of the map covered by others' panels (the car's screen): following keeps the position in the rest. */
   insets?: Insets;
   /** Added to the follow zooms: the car's map, drawn bigger, zooms out to show the same ground. */
@@ -141,6 +145,9 @@ export function useMapCamera({
   const screenPt = useWindowDimensions();
   const fitRadiusPt = FIT_CIRCLE_SHARE * Math.min(screenPt.width, screenPt.height);
   const mapHeight = mapHeightPt > 0 ? mapHeightPt : screenPt.height;
+  const mapWidth = mapWidthPt > 0 ? mapWidthPt : screenPt.width;
+  // A small map under big panels (the car's) keeps some of itself for what is framed.
+  const framing = () => fittedPadding(framePadding, mapWidth, mapHeight);
   // By their numbers: the insets are a new object with every render.
   const { top: insetTop, bottom: insetBottom, left: insetLeft, right: insetRight } = insets;
   const ghost = position?.trust === "UNTRUSTED" && position.rawGnss ? position.rawGnss : null;
@@ -304,7 +311,7 @@ export function useMapCamera({
     const lons = all.map((c) => c.lon);
     const lats = all.map((c) => c.lat);
     commands.fitBounds([Math.min(...lons), Math.min(...lats), Math.max(...lons), Math.max(...lats)], {
-      padding: framePadding,
+      padding: framing(),
       bearing: 0,
       pitch: 0,
       duration: 900,
@@ -323,7 +330,7 @@ export function useMapCamera({
         Math.max(position.lat, ghost.lat),
       ],
       {
-        padding: framePadding,
+        padding: framing(),
         bearing: 0,
         pitch: 0,
         duration: 900,

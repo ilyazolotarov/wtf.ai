@@ -117,7 +117,7 @@ export default function RouteScreen() {
       setSelected(null);
     }
   }
-  // A pasted `geo:` link reads as its place.
+  // A pasted `geo:` or Apple Maps link reads as its place.
   const text = geoSearchText(query) ?? query;
   // "I'm here": the car is at the place, not going there (NAVIGATOR-SPEC §6.2); the map puts it there, at any speed.
   // Distances from the car; without a fix, from the region's middle.

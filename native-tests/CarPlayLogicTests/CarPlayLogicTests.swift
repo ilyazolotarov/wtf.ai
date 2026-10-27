@@ -1,0 +1,157 @@
+import Foundation
+import XCTest
+
+@testable import CarPlayLogic
+
+private func step(_ id: String = "left:@50.45,30.52", kind: String = "left", distanceM: Double = 800, timeS: Double = 60) -> CarStep {
+  CarStep(
+    id: id, kind: kind, exit: nil, instruction: "Turn left", distanceM: distanceM, timeS: timeS, shownDistance: 800,
+    shownUnit: "m")
+}
+
+private func route(
+  _ status: String = "active", steps: [CarStep] = [step()], replanning: Bool = false, quiet: Bool = false,
+  lat: Double = 49.84, lon: Double = 24.03, alternatives: [CarAlternative] = []
+) -> CarRoute {
+  CarRoute(
+    status: status, message: nil, destinationName: "Lviv", destinationLat: lat, destinationLon: lon,
+    replanning: replanning, quiet: quiet, steps: steps, remainingM: 12_000, remainingS: 900, remainingShown: 12,
+    remainingUnit: "km1", alternatives: alternatives)
+}
+
+private let lviv = "49.840000,24.030000"
+private let notice = CarNotice(kind: CarNotice.location, title: "Location is off", text: "Allow it", action: "Allow")
+
+final class TripPlanTests: XCTestCase {
+  func testARouteStartsATripThatFollowsItsStates() {
+    XCTAssertEqual(CarPlayLogic.tripPlan(current: nil, arrived: false, route: route("planning", steps: [])), CarTripPlan(end: nil, start: lviv, shows: .loading(rerouting: false)))
+    XCTAssertEqual(CarPlayLogic.tripPlan(current: lviv, arrived: false, route: route()), CarTripPlan(end: nil, start: nil, shows: .steps))
+    XCTAssertEqual(
+      CarPlayLogic.tripPlan(current: lviv, arrived: false, route: route(replanning: true)),
+      CarTripPlan(end: nil, start: nil, shows: .loading(rerouting: true)))
+    XCTAssertEqual(CarPlayLogic.tripPlan(current: lviv, arrived: false, route: route("arrived", steps: [])), CarTripPlan(end: nil, start: nil, shows: .arrived))
+  }
+
+  func testArrivalFinishesTheTripWhenTheRouteGoesAndOtherwiseItIsCancelled() {
+    XCTAssertEqual(CarPlayLogic.tripPlan(current: lviv, arrived: true, route: nil), CarTripPlan(end: .finish, start: nil, shows: .none))
+    XCTAssertEqual(CarPlayLogic.tripPlan(current: lviv, arrived: false, route: nil), CarTripPlan(end: .cancel, start: nil, shows: .none))
+    XCTAssertEqual(CarPlayLogic.tripPlan(current: lviv, arrived: false, route: route("failed", steps: [])), CarTripPlan(end: .cancel, start: nil, shows: .none))
+    XCTAssertEqual(CarPlayLogic.tripPlan(current: nil, arrived: false, route: nil), CarTripPlan(end: nil, start: nil, shows: .none))
+  }
+
+  func testAnotherDestinationIsAnotherTripAndSoIsSettingOffAgainAfterArriving() {
+    let kyiv = route(lat: 50.45, lon: 30.52)
+    XCTAssertEqual(CarPlayLogic.tripPlan(current: lviv, arrived: false, route: kyiv), CarTripPlan(end: .cancel, start: "50.450000,30.520000", shows: .steps))
+    XCTAssertEqual(CarPlayLogic.tripPlan(current: lviv, arrived: true, route: route()), CarTripPlan(end: .finish, start: lviv, shows: .steps))
+  }
+}
+
+final class TurnAlertTests: XCTestCase {
+  func testTheNextManeuverPopsUpOnceWhenNear() {
+    XCTAssertNil(CarPlayLogic.turnAlert(route(steps: [step(distanceM: 800, timeS: 60)]), alerted: nil))
+    XCTAssertEqual(CarPlayLogic.turnAlert(route(steps: [step(distanceM: 300, timeS: 30)]), alerted: nil), "left:@50.45,30.52")
+    XCTAssertEqual(CarPlayLogic.turnAlert(route(steps: [step(distanceM: 600, timeS: 20)]), alerted: nil), "left:@50.45,30.52")
+    XCTAssertNil(CarPlayLogic.turnAlert(route(steps: [step(distanceM: 100, timeS: 8)]), alerted: "left:@50.45,30.52"))
+  }
+
+  func testNothingPopsUpForTheDepartureOnTheDriversOwnWayOrWhilePlannedAgain() {
+    XCTAssertNil(CarPlayLogic.turnAlert(route(steps: [step(kind: "depart", distanceM: 50)]), alerted: nil))
+    XCTAssertNil(CarPlayLogic.turnAlert(route(steps: [step(distanceM: 50)], quiet: true), alerted: nil))
+    XCTAssertNil(CarPlayLogic.turnAlert(route(steps: [step(distanceM: 50)], replanning: true), alerted: nil))
+    XCTAssertNil(CarPlayLogic.turnAlert(nil, alerted: nil))
+  }
+
+  func testTheManeuversAreNewToCarPlayWhenOthersAreNextOrTheNextCanPopUp() {
+    let far = route(steps: [step(distanceM: 800)])
+    XCTAssertEqual(CarPlayLogic.maneuversKey(far, alert: nil), CarPlayLogic.maneuversKey(route(steps: [step(distanceM: 700)]), alert: nil))
+    XCTAssertNotEqual(CarPlayLogic.maneuversKey(far, alert: nil), CarPlayLogic.maneuversKey(far, alert: "left:@50.45,30.52"))
+    XCTAssertNotEqual(CarPlayLogic.maneuversKey(far, alert: nil), CarPlayLogic.maneuversKey(route(steps: [step("right:@1,2")]), alert: nil))
+  }
+
+  func testTheManeuverStateForTheCarsCluster() {
+    XCTAssertEqual(CarPlayLogic.maneuverState(step(distanceM: 800, timeS: 60)), 0)
+    XCTAssertEqual(CarPlayLogic.maneuverState(step(distanceM: 250, timeS: 25)), 2)
+    XCTAssertEqual(CarPlayLogic.maneuverState(step(distanceM: 40, timeS: 4)), 3)
+  }
+}
+
+final class ButtonsTests: XCTestCase {
+  func testWithoutARouteTheDestinationsAndSearchWithOneItsAlternativesAndTheXBesideTheVoice() {
+    let none = CarPlayLogic.barButtons(route: nil, notice: nil, voiceMuted: false, panning: false)
+    XCTAssertEqual(none.leading, [.destinations, .search])
+    XCTAssertEqual(none.trailing, [.voice(muted: false)])
+    let followed = CarPlayLogic.barButtons(route: route(), notice: nil, voiceMuted: true, panning: false)
+    XCTAssertEqual(followed.leading, [])
+    XCTAssertEqual(followed.trailing, [.voice(muted: true), .endRoute])
+    let alternatives = [CarAlternative(index: 0, title: "Zelena", detail: "+2 min")]
+    let choosing = CarPlayLogic.barButtons(route: route(alternatives: alternatives), notice: nil, voiceMuted: nil, panning: false)
+    XCTAssertEqual(choosing.leading, [.routes])
+    XCTAssertEqual(choosing.trailing, [.endRoute])
+    XCTAssertEqual(
+      CarPlayLogic.barButtons(route: route(replanning: true, alternatives: alternatives), notice: nil, voiceMuted: nil, panning: false).leading, [])
+  }
+
+  func testNoVoiceButtonAtVolumeZeroOrUnderANoticeAndOnlyTheEndWhilePanning() {
+    XCTAssertEqual(CarPlayLogic.barButtons(route: nil, notice: nil, voiceMuted: nil, panning: false).trailing, [])
+    XCTAssertEqual(CarPlayLogic.barButtons(route: nil, notice: notice, voiceMuted: false, panning: false).trailing, [])
+    XCTAssertEqual(CarPlayLogic.barButtons(route: route(), notice: notice, voiceMuted: false, panning: false).trailing, [.endRoute])
+    let panning = CarPlayLogic.barButtons(route: route(), notice: nil, voiceMuted: false, panning: true)
+    XCTAssertEqual(panning.leading, [.endPanning])
+    XCTAssertEqual(panning.trailing, [])
+  }
+
+  func testTheMapButtonsFourAtMostRecentreOnlyWhenItApplies() {
+    XCTAssertEqual(CarPlayLogic.mapButtons(recentre: false), [.pan, .zoomIn, .zoomOut])
+    XCTAssertEqual(CarPlayLogic.mapButtons(recentre: true), [.pan, .recentre, .zoomIn, .zoomOut])
+  }
+}
+
+final class SearchAndDistanceTests: XCTestCase {
+  func testTheResultsShownAnswerTheTextTyped() {
+    let found = CarSearch(query: "khre", results: [CarPlace(id: "search:a1", title: "Khreshchatyk, 22", detail: nil, kind: "result")])
+    XCTAssertEqual(CarPlayLogic.searchList(found, typed: " "), .empty)
+    XCTAssertEqual(CarPlayLogic.searchList(nil, typed: "khre"), .loading)
+    XCTAssertEqual(CarPlayLogic.searchList(found, typed: "khres"), .loading)
+    XCTAssertEqual(CarPlayLogic.searchList(found, typed: "khre "), .results(found.results))
+  }
+
+  func testDistancesRoundedAsThePhonesBanner() {
+    XCTAssertEqual(CarPlayLogic.shownDistance(144).value, 140)
+    XCTAssertFalse(CarPlayLogic.shownDistance(144).kilometers)
+    XCTAssertEqual(CarPlayLogic.shownDistance(730).value, 750)
+    XCTAssertEqual(CarPlayLogic.shownDistance(1_260).value, 1.3, accuracy: 1e-9)
+    XCTAssertTrue(CarPlayLogic.shownDistance(1_260).kilometers)
+    XCTAssertEqual(CarPlayLogic.shownDistance(123_400).value, 123)
+    XCTAssertEqual(CarPlayLogic.distance(1.2, unit: "km1").kilometers, true)
+    XCTAssertEqual(CarPlayLogic.distance(-5, unit: "m").value, 0)
+  }
+
+  func testManeuverKindsAndTheirIcons() {
+    XCTAssertEqual(CarPlayLogic.maneuverKind("keep-left"), .keepLeft)
+    XCTAssertEqual(CarPlayLogic.maneuverKind("roundabout").icon, "car_roundabout_left")
+    XCTAssertEqual(CarPlayLogic.maneuverKind("arrive").icon, "car_flag")
+    XCTAssertEqual(CarPlayLogic.maneuverKind("something new"), .straight)
+  }
+}
+
+final class GestureTests: XCTestCase {
+  func testAPanAsTheDistanceTheFingerWentBack() {
+    let scroll = CarPlayLogic.scroll(from: (10, 5), to: (25, -5))
+    XCTAssertEqual(scroll.dx, -15)
+    XCTAssertEqual(scroll.dy, 10)
+  }
+
+  func testThePanningArrowsShowMoreOfTheirSide() {
+    XCTAssertEqual(CarPlayLogic.panScroll(direction: 1).dx, -CarPlayLogic.panStep)
+    XCTAssertEqual(CarPlayLogic.panScroll(direction: 2).dx, CarPlayLogic.panStep)
+    let upRight = CarPlayLogic.panScroll(direction: 4 | 2)
+    XCTAssertEqual(upRight.dx, CarPlayLogic.panStep)
+    XCTAssertEqual(upRight.dy, -CarPlayLogic.panStep)
+  }
+
+  func testAPinchAsTheChangeSinceTheLast() {
+    XCTAssertEqual(CarPlayLogic.zoomFactor(from: 1, to: 1.5), 1.5)
+    XCTAssertEqual(CarPlayLogic.zoomFactor(from: 1.5, to: 3), 2)
+    XCTAssertEqual(CarPlayLogic.zoomFactor(from: 0, to: 2), 1)
+  }
+}

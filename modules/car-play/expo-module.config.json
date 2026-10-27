@@ -1,6 +1,7 @@
 {
   "platforms": ["apple"],
   "apple": {
-    "modules": ["CarPlayModule"]
+    "modules": ["CarPlayModule"],
+    "appDelegateSubscribers": ["AppReactHostAppDelegate"]
   }
 }

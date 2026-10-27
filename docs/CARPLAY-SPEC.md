@@ -1,10 +1,10 @@
 # wtf.ai — CarPlay: Specification
 
 The map with the navigator's position, the route's guidance and a destination to pick, on the car's CarPlay screen.
-Companion to [ANDROID-AUTO-SPEC.md](ANDROID-AUTO-SPEC.md), which is ahead: CarPlay is the same car screen on iOS, and
-what it shows is decided by the same TypeScript. **Status:** branch `feature/carplay`; the map and the turn panel work
-on the simulator (§4, "Built"); the rest is the Android Auto feature list still to bring over (§4, "To build"). §7
-lists what must be settled before `main`.
+Companion to [ANDROID-AUTO-SPEC.md](ANDROID-AUTO-SPEC.md): CarPlay is the same car screen on iOS, run by the same car
+session in TypeScript; only the templates that draw it are CarPlay's. **Status:** branch `feature/carplay`; Android
+Auto's features run on the simulator (§4), what CarPlay can't do is listed there. §7 lists what must be settled before
+`main`.
 
 ## 1. Goal
 
@@ -35,110 +35,163 @@ CarPlay draws in a `CPTemplateApplicationScene`, so the app adopts the UIKit sce
   runs after expo-build-properties whatever the order in app.json (that plugin refuses a manifest it didn't write).
   Jest: `modules/car-play/__tests__/app-plugin.test.ts`.
 
-What the scene life cycle breaks, to fix before `main`:
+- The plugin also adds the map links' URL types (`geo`, `google.navigation`): iOS opens the app for them as Android does
+  (SEARCH-SPEC §4.6, §5), the phone's route screen, or the car session's request (§4) when they come to the car's scene.
 
-1. **Launch options are nil** in a scene app. `VehicleLinkAppDelegate` reads `.bluetoothCentrals` to create the
-   central at once when iOS restored the adapter's connection, and `AppHealth` reads the launch reason behind
-   `launchedOnTheWay` (index.ts, VEHICLE-LINK-SPEC §11). Apple's advice for scene apps: create the central with the
-   restore id at every launch and take the restoration from `willRestoreState`; the location relaunch from the
-   location manager's own callbacks.
-2. **React Native starts with the phone's scene.** Expo's scene delegate starts the host as the phone's scene
-   connects. The car's screen starts it without that scene (§4, `AppReactHost.startWithoutPhone`). Still open: a
-   background launch (location relaunch, Bluetooth restoration) is expected to connect no scene, so no JS runs and
-   the drive wake doesn't happen (to verify on the phone). Fix: the same start, called from an app delegate
-   subscriber on such a launch.
-3. Links (`wtfai://`, `geo:`, universal links) and quick actions are forwarded by Expo's scene delegate; check them
-   once.
+What the scene life cycle changes:
+
+1. **Launch options.** In a scene app UIKit hands a URL, a user activity, a notification or a quick action to the
+   scene's connection options instead. `VehicleLinkAppDelegate` reads `.bluetoothCentrals` to create the central at
+   once when iOS restored the adapter's connection, and `AppHealth` reads `.location` behind `launchedOnTheWay`
+   (index.ts, VEHICLE-LINK-SPEC §11): neither is a scene's, and they are expected in the app delegate still (to verify
+   on the phone, §7). If they are not: the central made with the restore id at every launch, the restoration taken from
+   `willRestoreState`, the location relaunch from the location manager's callbacks.
+2. **React Native starts with the phone's scene** (Expo's scene delegate). Without it: the car's screen starts it
+   (§4); a launch in the background (iOS relaunching the app for location or the adapter) connects no scene, so
+   `AppReactHostAppDelegate` (modules/car-play) starts it the same way: at once when the launch options say location
+   or Bluetooth, otherwise when no scene has connected 3 s after launch with the app still in the background (a launch
+   from the phone connects its scene within that; 1.5 s after the car's on the simulator). Device log: `background
+   launch …, no scene`. Not seen on a device yet (§7).
+3. Links (`wtfai://`, `geo:`) are forwarded by Expo's scene delegate: the development client's links and a `geo:` link
+   open the phone's screens on the simulator. Quick actions are unchecked.
 
 ## 4. The car's screen
 
 ```
-CarPlay ─▶ WTFCarPlaySceneDelegate ─▶ CarPlaySession (Swift, main thread)
-                                        ├─ CPMapTemplate (root): map buttons, nav bar buttons, guidance panel, trip estimates
-                                        │    ├─ CPListTemplate: destinations (saved, recent); routes (the alternatives)
+CarPlay ─▶ WTFCarPlaySceneDelegate ─▶ CarPlaySession (Swift, main thread; logic: ios/Logic/CarPlayLogic.swift)
+                                        ├─ CPMapTemplate (root): bar buttons, map buttons, guidance card, trip estimates
+                                        │    ├─ CPListTemplate: destinations (saved, recent); routes; a request's answers
                                         │    ├─ CPSearchTemplate
-                                        │    └─ CPAlertTemplate: a notice (location, a route held without an adapter)
-                                        ├─ CPNavigationSession: the trip, for CarPlay's own panel, cluster and banners
-                                        └─ CPWindow.rootViewController ◀─ React root "CarPlayMap" on the app's one host
-                                                                              │
-src/components/car-play/car-play-root.tsx ◀───────────────────────────────────┘
+                                        │    └─ CPNavigationAlert: a notice (location, a route held without an adapter), a failed plan
+                                        ├─ CPNavigationSession: the trip, for the guidance card, banners and the car's cluster
+                                        └─ CPWindow ◀─ CarPlayMapController ◀─ React root "CarPlayMap" on the app's one host
+                                                                                   │
+src/components/car-screen/car-map-root.tsx (Android Auto's CarMap too) ◀───────────┘
 
 src/components/car-screen/car-session.ts  route, places, words, voice, notice, search ─▶ CarPlayModule ─▶ CarPlaySession
-  (the same session as Android Auto's)    ◀─ onCarAction (the same actions)
+  (the same session as Android Auto's)    ◀─ onCarAction, onMapGesture (the same actions and gestures)
 ```
 
 **One session, two cars.** The JS side of a connection is `runCarSession` (src/components/car-screen/car-session.ts,
 Jest), the one Android Auto runs: it keeps the navigator running (`Runtime.setCarScreen`), connects the adapter,
-sends the route (`carRoute`), places, words, voice and notices, and acts on what the driver does. CarPlay's module
-implements its `native` interface (the same payloads and `CarAction`s as `AndroidAutoModule`, with the shared types
-moved out of the Android module), so the TypeScript that decides what the car shows is shared, and each platform's
-native side only draws it with its templates. What differs by platform comes in through `CarSessionDeps`: the trip
-log's name (`carplay connected`, `carplay: …`, Sentry tag `feature: carplay`), and what has no CarPlay counterpart
-(the test drive). On iOS the session starts on the module's connect event (a listener registered in index.ts, the app's
-one JS runtime) and ends on `session-ended`, apart from the map's root: the map is a view, the session is the
-connection.
+sends the route (`carRoute`), places, words, voice and notices, and acts on what the driver does. Its payloads and
+actions are `car-types.ts`, which both modules' bindings declare. CarPlay's differs by its name in the trip log
+(`carplay connected`, `carplay: …`), the Sentry tag (`feature: carplay`), and no test drive. `listenForCarPlay`
+(car-session-task.ts, from index.ts) starts it on the module's `onConnect`, or at once in a JS runtime that comes up
+with the session open (a launch from the car, a reload); it ends on `session-ended`. The session opens when the driver
+first opens the app on the car's screen and lasts until the car disconnects, as Android Auto's: CarPlay connects the
+scene as soon as its screen comes on, whatever the driver opens there, and an app never opened on that drive keeps
+GNSS and the adapter as they were. What the JS side sent is kept on the native side across runtimes and connections
+(CarLink's role on Android): the route followed shows at once when the car's screen comes back.
 
 ### Built
 
-- **The map is React Native**: the root `CarPlayMap` (registered in index.ts) renders the phone's `MapSurface`, so the
-  style, dot, route and camera are the phone's, and over-the-air JS updates reach the car's screen. The view comes
-  from `ExpoReactNativeFactory.recreateRootView` (ExpoModulesCore's protocol; the factory is the template AppDelegate's
-  `reactNativeFactory`, reached by reflection since a module can't depend on the Expo pod), in
-  `modules/car-play/ios/AppReactHost.swift`. It is made without the app delegate subscribers' root view
-  customizations: expo-splash-screen keeps one splash and moves it to the newest root view, which covered the car's
-  map with the launch screen for good and would leave the phone's on screen if CarPlay connected while it showed.
+- **The map is React Native**: the root `CarPlayMap` is `CarMapRoot` (car-map-root.tsx), Android Auto's car map with
+  CarPlay's module for its gestures and buttons, rendering the phone's `MapSurface`: style, dot, route and camera are
+  the phone's, and over-the-air JS updates reach the car's screen. Heading-up, smoothed every frame, the dot 0.85 down
+  the visible map. The root's props: `dark` from the scene's `contentStyle` (the car's day and night, followed on
+  `contentStyleDidChange`), `insets` from the window's safe area (CarPlay's guidance card and bar) and, on the right,
+  the map buttons' layout guide: the camera keeps the dot in the rest; `scale`. Sent again only when they change; they
+  follow the bar and the buttons showing and hiding. The view comes from `ExpoReactNativeFactory.recreateRootView` (ExpoModulesCore's
+  protocol; the factory is the template AppDelegate's `reactNativeFactory`, reached by reflection since a module can't
+  depend on the Expo pod), in `AppReactHost.swift`, without the app delegate subscribers' root view customizations:
+  expo-splash-screen keeps one splash and moves it to the newest root view.
+- **At the car's own points** (`CarPlayLogic.mapScale` 1): CarPlay's points are made for the car's screen (its own
+  text is in them), unlike Android Auto's dp, which its map draws 1.4 times bigger; at 1.4 the car's map looked
+  zoomed in, little of it on a 400×240 pt screen. The car's style (no footways, only a driver's POIs) at the style's
+  own sizes (`carGuidelineSizes` false; Android for Cars' 24 dp and 36 dp are Android Auto's). `CarPlayMapController`
+  can still draw the root bigger (laid out smaller, scaled up; gestures and insets divided by it).
+- **The map's root lives only while the car's screen shows the app**: made when the scene comes to the foreground,
+  released when another app fills the screen (the guidance, banners and voice go on). Mounted in the background, its
+  smoothing loop would spin the JS thread with the app in the background (the CPU kill of `use-smoothed-position.ts`)
+  and MapLibre would draw for nobody. Android Auto's surface comes and goes the same way.
 - **The map waits for React Native.** The root is made only on a running host (the factory's `reactHost`); until
   then the car's screen is blank. A root view made with no host starts one past Expo's React delegate handlers, and
-  expo-updates is then asked for the bundle before it is set up (an assertion in Debug, a force-unwrap in Release:
-  any launch with the car connected crashed). `CarPlayModule`'s `OnCreate` runs with each JS runtime; on a host
-  other than the one the root was made on, the root is made again. The development launcher makes a new host at
-  each load, and a root left on the old one is a black screen. A reload on the same host (Metro, the dev menu, an
-  update's relaunch) restarts the root by itself, and making it again then too crashes ("Surface must not be
-  running").
+  expo-updates is then asked for the bundle before it is set up (an assertion in Debug, a force-unwrap in Release).
+  `CarPlayModule`'s `OnCreate` runs with each JS runtime; on a host other than the one the root was made on, the root
+  is made again (the development launcher makes a new host at each load; a root left on the old one is a black
+  screen). A reload on the same host (Metro, the dev menu, an update's relaunch) restarts the root by itself, and
+  making it again then too crashes ("Surface must not be running").
 - **The car starts React Native when the phone's scene doesn't** (the app opened from the car, the phone locked): one
-  turn of the main loop after the car's scene connects, if no phone scene is connected, `startWithoutPhone` goes
+  turn of the main loop after the car's screen shows the app, if no phone scene is connected, `startWithoutPhone` goes
   through the handlers as the phone's scene does (expo-updates chooses the bundle, the development launcher loads the
   last one), asking for the root `NoScreen` (index.ts), which renders nothing. The handlers put the root in place of
   the view they returned, found through its view controller and the app's window, so that view is held by a child
   controller in a window of its own (never shown: it has no window scene), which stands in as the app delegate's
-  window until the phone's scene sets its own: without a window expo-updates stops the app. At a launch from the
-  phone the car's scene may connect first (1.5 s before the phone's on the simulator): both start, and expo-updates
-  still starts once (the second call finds its controller started); in Debug the development launcher loads twice.
-- The root is mounted while a car is connected and unmounted when it goes. CarPlay connects the scene in the
-  background as soon as the car's screen comes on, and makes it active when the driver opens the app there:
-  "connected" doesn't mean shown. Device log (`ai.wtf.navigator`, category `carplay`): the scene connected, active,
-  in the background, disconnected, React Native started without the phone's scene or on a new host, and what drew
-  the map.
-- **Guidance** on `CPNavigationSession`: a trip per destination (a re-plan to the same one is the same trip), the next
-  maneuver and the one after when close (the phone banner's words, SF Symbols for icons), the estimates to the next
-  maneuver and to the destination with every snapshot, finished at arrival, cancelled when the route stops or the
-  scene ends. Today from `src/components/car-play/car-guidance.ts`, which the shared session's `carRoute` replaces.
-- **Voice** plays through expo-audio wherever iOS routes it, CarPlay's audio included (`carplay` in the trip log's
-  audio output, ROUTING-SPEC §8.5).
+  window until the phone's scene sets its own: without a window expo-updates stops the app. When both scenes connect
+  at one launch, both start; expo-updates still starts once (the second call finds its controller started); in Debug
+  the development launcher loads twice.
+- **Templates**, built from the last state the session sent (which buttons: `CarPlayLogic.barButtons`, `mapButtons`;
+  the trip: `tripPlan`; `swift test`):
 
-### To build: Android Auto's features on CarPlay
+  | State | The map template shows |
+  | --- | --- |
+  | A notice: no location permission | An alert over the map with its words; button: Allow |
+  | A notice: a route held without an adapter | An alert; buttons: I'll follow the route, Cancel |
+  | No route | The map; bar: Destinations, Search; voice |
+  | Planning, or planning again after leaving the route | The card waiting (`pauseTrip` `.loading`, `.rerouting`); bar: the X; voice |
+  | Followed | The next maneuver (the phone banner's words and icon, the distance rounded as the banner rounds it), the one after when it follows closely; the trip estimates (arrival, time and distance left); bar: the routes while there are others, the X; voice |
+  | Arrived | The card says so (`pauseTrip` `.arrived`); the trip finishes when the route goes |
+  | Failed | The trip cancelled, an alert with the phone's words; Close |
 
-| Android Auto (ANDROID-AUTO-SPEC) | CarPlay |
-| --- | --- |
-| Session as a headless task, the navigator kept running, the adapter connected (§3) | The shared session on the module's connect event (above). Location: the app's background location mode covers GNSS while CarPlay shows another app; no service of its own. |
-| Turn and trip cards from `carRoute` (§4 Templates) | `CPNavigationSession.upcomingManeuvers` and `updateEstimates`, `CPMapTemplate.updateEstimates(_:for:)`; planning: `pauseTrip(for: .loading)`, planning again after leaving the route: `.rerouting`; arrived: `finishTrip`; failed: a `CPNavigationAlert` with the phone's words, then the trip cancelled. Steps keep `carManeuverId`, so a re-plan doesn't renew a maneuver CarPlay already shows. |
-| Stop guidance, Search, Destinations, voice buttons | `CPMapTemplate` navigation bar buttons: Destinations and Search with no route, Stop guidance and Routes while one is followed; the voice button among them, gone at volume 0. |
-| Destinations: saved, then recent (§4) | `CPListTemplate` pushed over the map, sections Saved and Recent, as many as `CPListTemplate.maximumItemCount` allows; one picked: `go`, the map popped back. |
-| Search: the phone's offline index, answers for the text in the field (§4) | `CPSearchTemplate`: `updatedSearchText` sends `search`, its completion takes the answers when they come for that text; `selectedResult` sends `go`. CarPlay limits the keyboard while driving. |
-| Alternative routes: drawn on the map, the routes list, a tap on a line (§4) | Drawn by the shared map. The routes list as a `CPListTemplate` (the same titles by street, `choose-alternative`). A tap on the map has no CarPlay event on a template app: the list only. |
-| Moving the map: drag, fling, pinch, +/−, recentre (§4) | `CPMapTemplateDelegate` pan callbacks (`didUpdatePanGestureWithTranslation`, `didEndPanGestureWithVelocity`, and `panWith` direction from a knob in the panning interface) sent as the same `CarMapGesture`s; + and −, recentre and pan as `CPMapButton`s (four at most). |
-| Notices: no location permission, a route held without an adapter (§3) | A `CPAlertTemplate` with the notice's title and words and its button(s): Allow (the request shows on the phone; CarPlay can't show the system dialog) or I'll follow the route and close. |
-| Turn pop-ups while another app fills the screen (NF-3) | CarPlay's maneuver banners, allowed by `CPMapTemplateDelegate.shouldShowNotificationFor` / `shouldUpdateNotificationFor` by Android Auto's rule (`CarGuidanceLogic.turnNotification`: within 300 m or 20 s, once per maneuver, never on the driver's own way), ported to Swift logic in `modules/car-play/ios/Logic/` (`swift test`). |
-| Voice as navigation guidance, mixed over the car's audio (§3) | The audio session in the `.voicePrompt` mode with `.interruptSpokenAudioAndMixWithOthers` and `.duckOthers` while a car is connected, as Apple asks of navigation apps; the system voice in the same session. |
-| One voice whatever the screens (`VoiceGuide`) | The same: the session claims it; the phone's map while mounted. |
-| Places asked for (NF-6: the assistant, another app) | `geo:` and `maps:` links and Siri: how iOS hands a place to a third-party navigator while CarPlay shows it is open (§7). |
-| The car's day and night, the visible area as insets (§4) | The root's `dark` from `CPInterfaceController.carTraitCollection`, its insets from the window's safe area and the map buttons' layout guide; the same `CarMapProps`. |
-| Bigger map: `MAP_SCALE`, POIs and ways of `carMapStyle` (§4) | `carMapStyle` as is; the scale measured on the simulator's car screens (§5). |
-| The map data credit, fading after 5 s | The same, drawn by the root (no density mismatch on iOS). |
-| The cluster gets the trip (NF-4) | `CPNavigationSession`'s maneuvers reach a car's cluster and CarPlay Dashboard by themselves; a cluster or dashboard map of the app's own (`CPSupportsInstrumentClusterNavigationScene`, `CPSupportsDashboardNavigationScene`, Info.plist) is later (§7). |
-| Another navigator starts: the route ends (NF-5) | `CPMapTemplateDelegate.mapTemplateDidCancelNavigation`: `end-route`, so the voice and the banners are the other navigator's alone. |
-| The test drive (NF-7) | Apple's review asks none. On the simulator `xcrun simctl location … start` drives along waypoints; the shared `TestDrive` can be started from a debug button if the simulator's GNSS isn't enough. |
-| Maneuver icons: the app's own Material Symbols (`scripts/car-icons.py`) | The same glyphs as template images for `CPManeuver.symbolImage`, light and dark, in place of the SF Symbols. |
+  The bar holds as little as it can: Stop guidance is an X (Android Auto's words would widen it), X and voice on the
+  right. It hides with the map's buttons while nobody touches the screen; while it shows (some seconds after a touch)
+  CarPlay sets the guidance card below its whole row, buttons in it or not. The map's buttons: pan, recentre while
+  the map is free or its follow zoom moved, + and −. The guidance card is CarPlay's: the icon beside the words
+  (`displayStyleFor` `.leadingSymbol`), 18 pt, two rows.
+
+  Destinations: saved places, then recent ones, as many as `CPListTemplate.maximumItemCount`; one picked routes to it
+  (`go`), the map popped back. Search (`CPSearchTemplate`): each change of the field goes to the session (`search`),
+  whose answers complete it once they answer the text in it (`CarPlayLogic.searchList`); nothing typed lists the
+  destinations; nothing found is one row saying so. CarPlay offers the keyboard only while parked. A place asked for
+  with several answers opens them in a list (`openSearch`): CarPlay's search can't be given a text. The routes list:
+  the route followed, then each alternative, titled by the street it goes by, then how it compares, its time and
+  distance (`choose-alternative`). The car's words are the app's (en/uk), sent by the session; English until it has.
+- **The navigation session** (`CPNavigationSession`): a trip per destination (a re-plan or an alternative to the same
+  one is the same trip; setting off again after arriving is a new one), started when a route is planned. Maneuvers
+  are set again only when other ones are next, or when the next comes near enough for a banner; the estimates with
+  every update. With them, metadata for the car's own cluster and head-up display
+  (`mapTemplateShouldProvideNavigationMetadata`): the maneuver type, roundabout junctions, right-hand traffic, and the
+  maneuver's state (prepare within 300 m or 20 s, execute within 50 m or 5 s; `CarPlayLogic.maneuverState`). CarPlay
+  Dashboard and the instrument cluster show the maneuvers by themselves. The car's "cancel navigation" (its own
+  navigator started) ends the route (`mapTemplateDidCancelNavigation`: `end-route`), so the voice and the banners are
+  the other navigator's alone.
+- **Turn banners** while another app fills the car's screen: CarPlay asks about a banner for each maneuver it is
+  given; the next maneuver pops up once within 300 m or 20 s at the plan's pace, not the departure, nothing on the
+  driver's own way (`CarPlayLogic.turnAlert`, Android Auto's rule). Its distance follows while it shows. Trip log:
+  `carplay: turn notification popped up: <words>`.
+- **Notices** as alerts over the map (`CPNavigationAlert`, until dismissed), one at a time, a notice before a failed
+  plan. Location: Allow asks iOS on the phone when it hasn't been asked (`requestWhenInUseAuthorization`); refused
+  before, only the phone's Settings can allow it. Either way the alert comes back saying to look at the phone only
+  when it's safe, until location is allowed (the session checks every 5 s); the answer goes to the session
+  (`permission`). A route held without an adapter: its button gives the driver's word (`confirm-held`), Cancel drops
+  it (`cancel-held`). An alert CarPlay takes down comes back; a failure the driver closed doesn't.
+- **Moving the map**: a finger on a touch screen (`didUpdatePanGestureWithTranslation`, `didEndPanGestureWithVelocity`)
+  and, from iOS 26, a pinch (`didUpdateZoomGestureWithCenter`) come to the JS map as Android Auto's scroll, fling and
+  scale (`CarPlayLogic.scroll`, `zoomFactor`); the panning interface's arrows (cars with a knob or a touchpad) as a
+  scroll of 120 pt. While panning the bar has only the button that ends it. The camera rules are Android Auto's
+  (`CarMap`).
+- **Alternative routes** are drawn and framed by the shared map; the framing keeps at least 40 % of the map's width
+  and height for the routes (`fittedPadding`, Jest): CarPlay's card and buttons cover most of a small screen, and
+  MapLibre refuses padding larger than the map.
+- **The map data credit** is the root's own (`MapCredit`), at the visible map's bottom, between the card and the map's
+  buttons (wrapped when the room is narrow), fading after 5 s.
+- **Voice** as navigation guidance while the session is open (ROUTING-SPEC §8.5): expo-audio's session in the
+  voice-prompt mode, spoken audio interrupted and others ducked, which CarPlay mixes over the car's audio. One voice
+  whatever the screens (`VoiceGuide`).
+- **Places asked for**: a `geo:` (look for it) or `google.navigation:` (go there) link that comes to the car's scene is
+  the session's request (SEARCH-SPEC §4.6), as Android Auto's navigation intents. Links opened on the phone go to the
+  phone's route screen; Apple Maps links open Apple Maps, and are read when pasted into the search.
+- **Icons**: the app's Material Symbols, drawn by `scripts/car-icons.py` as SVG template images into
+  `modules/car-play/ios/CarIcons.xcassets` (the pod's `WtfCarPlay.bundle`), with Android Auto's drawables; CarPlay tints
+  them. Drawn at their size from the vector: bar and map buttons 24 pt, list rows 32 pt, maneuvers 18 pt.
+- Device log (`ai.wtf.navigator`, category `carplay`): the scene connected, in the foreground, active, in the
+  background, disconnected; React Native started without the phone's scene or on a new host; what drew the map;
+  actions sent (info level); the notes also go to the trip log.
+
+What CarPlay doesn't do of Android Auto's: the test drive (NF-7; Apple asks none: `xcrun simctl location start` drives
+on the simulator, §5); a tap on a grey route (the map template has no tap event: the routes list); the search screen
+opened with a place's words (a list of its answers instead).
 
 Must not drift:
 
@@ -149,6 +202,9 @@ Must not drift:
   Android Auto.
 - The car never makes a React root without a running host, and starts React Native only through Expo's React
   delegate handlers: expo-updates chooses the bundle the car's screen runs, as it does the phone's.
+- The map's root lives only while the car's screen shows the app.
+- The map stays the biggest thing on the car's screen: no panels of the app's own over it (Apple's guidelines keep the
+  base view to the map), the bar as small as it can be.
 
 ## 5. Development: a Mac with the Simulator
 
@@ -171,13 +227,29 @@ build's runner). The GitHub runner builds what ships, not what is iterated on.
    the same host; the development launcher's (`xcrun simctl openurl <udid>
    "wtfai://expo-development-client/?url=http%3A%2F%2Flocalhost%3A8081"`) makes a new host. A launch from the car
    alone: the app terminated, then its icon on the CarPlay screen clicked.
+7. A prebuild with `UPDATES_ORIGIN` set (`.env.local`) writes the update code-signing certificate into the generated
+   `Expo.plist`, and the development client then asks Metro for a signed manifest, which it can't give ("Must specify
+   --private-key-path"): for a local Debug build, prebuild without it or take `EXUpdatesCodeSigningCertificate` and
+   `EXUpdatesCodeSigningMetadata` out of the generated plist.
+8. Driving the car's screen from a script: clicks posted as CGEvents on the CarPlay window (the Mac unlocked; the
+   first click on an unfocused window only focuses it). The bar and the map's buttons hide while idle: a tap on the map
+   shows them, the next one presses. `xcrun simctl location <udid> start --speed=12 <lat,lon> …` drives along
+   waypoints (the banners pop up with another app on the car's screen).
+9. CarPlay on the simulator can wedge (its screen frozen, then black, "no paired vehicle" in its log; a device reboot
+   doesn't help): kill `CarPlay.app`, `CarPlayTemplateUIHost` and `carkitd` in the simulator (`kill -9`; launchd starts
+   them again), then turn the external display off and on.
 
-Settled on the simulator: the app listed and opened on the CarPlay home screen; the map drawn by the React root; the
-scene connected in the background when the display comes on and active when the app is opened there. In Debug, with
-the car's display on: a launch from the phone, a launch from the car alone (the map about 5 s after the tap, the
-phone left on its home screen), the phone opened after that, and both reloads, each with the map on the car's screen.
-In a Release build with expo-updates on: a launch from the car alone (the map about 1 s after the tap), the phone
-opened after it, and a launch from the phone.
+Settled on the simulator (iOS 26.3, the 400×240 pt display): the app listed and opened on the CarPlay home screen; the
+scene connected in the background when the display comes on, the session opened when the app comes to the foreground
+there. In Debug: a launch from the phone; a launch from the car alone (React Native started without the phone's scene,
+the map about 5 s after the tap); the phone opened after that; Metro's and the development launcher's reloads, the
+map and guidance back each time. In a Release build with expo-updates on: a launch from the car alone (the map about
+1 s after the tap), the phone opened after it, and a launch from the phone. The session: search typed on CarPlay's
+keyboard and a result routed to; destinations; a route followed with its card and estimates, the routes list and an
+alternative chosen; Stop guidance; the voice muted and back; zoom, recentre, the panning interface; the location notice
+with location refused, cleared once it was allowed again; the turn banner over Settings at 290 m on a simulated drive;
+the map's root released while another app showed and made again on return. Not seen there: a held route's alert, a
+failed plan's, arrival, a link to the car's scene, the night style switching, iOS 26's pinch.
 
 ## 6. Not chosen
 
@@ -191,17 +263,29 @@ opened after it, and a launch from the phone.
   Android Auto's (§4).
 - **Trip previews** (`showTripPreviews`) before driving: Android Auto starts a route at once and offers the
   alternatives while following; CarPlay does the same.
+- **The X and the voice among the map's buttons**, to keep the guidance card at the top: CarPlay sets the card below
+  the bar's row whenever its controls show after a touch, even an empty bar, and the map's four buttons then had no
+  room for + and − during a route. They stay in the bar, which CarPlay reserves anyway.
+- **Guidance drawn by the app over the map** (a card of its own, smaller): Apple's guidelines keep the map template's
+  base view to the map; the card, its layout and its padding are CarPlay's.
 
 ## 7. Open items
 
-1. The scene life cycle's breakages (§3), before `main`.
-2. The features of §4 "To build".
-3. **AppState with only the car's screen in front** (phone locked): React Native's AppState follows the application
-   state; GNSS on the phone's screen and the trip recorder key off `active` and `background`.
-4. Whether the CarPlay scene connects with `UIApplicationSupportsMultipleScenes` false (set true after Apple's sample).
-5. Places asked for: what Siri and other apps give a third-party navigator on CarPlay (URLs to the scene, App
-   Intents), read as Android Auto's request (SEARCH-SPEC §4.6).
-6. Two MapLibre views on one JS thread with the particle filter's budget (SPEC §8.6).
-7. Later: the dashboard and instrument cluster scenes; iOS 27's panels on the map template and route sharing with the
-   car.
-8. A real car, from TestFlight: the map in motion, the voice over the car's audio, the banners, the cluster.
+1. **On a phone and in a car**, from TestFlight (the simulator can't): a background relaunch for location and for the
+   adapter starting React Native (`AppReactHostAppDelegate`) and its launch options still in the app delegate (§3);
+   the map at the car's own points in motion; the voice over the car's audio; the banners; the cluster's metadata; the
+   night style switching with the car.
+2. **AppState with only the car's screen in front**: iOS reports the app `inactive` (the simulator: CarPlay active, the
+   phone on its home screen), not `active`. The car session runs the navigator regardless (`setCarScreen`); what the
+   phone's screens key off `active` (GNSS while the map shows, the location session's background check) to check on a
+   phone with it locked.
+3. Whether the CarPlay scene connects with `UIApplicationSupportsMultipleScenes` false (set true after Apple's sample).
+4. Places asked for by Siri on CarPlay: no navigation domain for third-party apps; App Intents would be the way. Links
+   to the car's scene are read (§4) but not seen yet: the simulator gives links to the phone.
+5. Two MapLibre views on one JS thread with the particle filter's budget (SPEC §8.6): the car's exists only while it
+   shows.
+6. Quick actions through Expo's scene delegate (§3).
+7. Review: CarPlay's guidelines for navigation apps, against §4.
+8. Later: the dashboard and instrument cluster scenes of the app's own (`CPSupportsDashboardNavigationScene`,
+   `CPSupportsInstrumentClusterNavigationScene`); iOS 26.4's route sharing with the car; iOS 27's panels on the map
+   template.

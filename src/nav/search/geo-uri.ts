@@ -2,8 +2,9 @@ import type { Coordinate } from "@/nav/geo";
 
 /**
  * A place another app or the car's assistant asks for (SEARCH-SPEC §4.6): a `geo:` URI (RFC 5870 and Android's `?q=`:
- * `geo:50.45,30.52`, `geo:0,0?q=Khreshchatyk+22`, `geo:50.45,30.52?q=Name`, `geo:0,0?q=50.45,30.52(Name)`) or Google
- * Maps' `google.navigation:q=…`.
+ * `geo:50.45,30.52`, `geo:0,0?q=Khreshchatyk+22`, `geo:50.45,30.52?q=Name`, `geo:0,0?q=50.45,30.52(Name)`), Google
+ * Maps' `google.navigation:q=…`, or an Apple Maps link pasted (`https://maps.apple.com/place?coordinate=…&name=…`,
+ * the older `?ll=…&q=…`, `/directions?destination=…`, `maps://?q=…`).
  */
 export interface GeoRequest {
   /** The point, when the link gives one. */
@@ -14,6 +15,8 @@ export interface GeoRequest {
 
 const NUMBER = String.raw`[-+]?\d+(?:\.\d+)?`;
 const SCHEME = /^(geo|google\.navigation):(.*)$/is;
+// Apple Maps: its web links (the path `place`, `directions`, `search`, or none) and its own scheme.
+const APPLE_MAPS = /^(?:https?:\/\/maps\.apple\.com|maps:(?:\/\/)?)(?:\/[a-z-]*)?\/?(?:\?([^#]*))?(?:#.*)?$/is;
 // "50.45,30.52" with an optional "(Name)", as a query.
 const LABELLED_POINT = new RegExp(String.raw`^(${NUMBER})\s*,\s*(${NUMBER})\s*(?:\((.*)\))?$`, "s");
 const PATH_POINT = new RegExp(String.raw`^(${NUMBER}),(${NUMBER})(?:,${NUMBER})?(?:;.*)?$`, "s");
@@ -21,7 +24,7 @@ const PATH_POINT = new RegExp(String.raw`^(${NUMBER}),(${NUMBER})(?:,${NUMBER})?
 /** What the link asks for; null when it is not one, or asks for nothing. */
 export function parseGeoUri(uri: string): GeoRequest | null {
   const m = SCHEME.exec(uri.trim());
-  if (!m) return null;
+  if (!m) return parseAppleMaps(uri.trim());
   const geo = m[1].toLowerCase() === "geo";
   const rest = m[2];
   const mark = rest.indexOf("?");
@@ -43,6 +46,31 @@ export function parseGeoUri(uri: string): GeoRequest | null {
   if (llPoint) point ??= checked(Number(llPoint[1]), Number(llPoint[2]));
   if (!point && !name) return null;
   return { point, query: name };
+}
+
+/**
+ * An Apple Maps link: the point it gives (`coordinate`, `ll`; a `destination`, `daddr` or `q` of coordinates), with its name
+ * (`name`, `q`, else its address); without one, the words to search: the address first, which the index holds better
+ * than a business's name. `sll` (where a search was made from), `place-id` and `auid` (Apple's own ids) say nothing
+ * the app can use offline; a short `maps.apple/p/…` link needs Apple's server and is not read.
+ */
+function parseAppleMaps(uri: string): GeoRequest | null {
+  const m = APPLE_MAPS.exec(uri);
+  if (!m) return null;
+  const params = parameters(m[1] ?? "");
+  const pointOf = (value: string | undefined) => {
+    const p = value ? LABELLED_POINT.exec(value.trim()) : null;
+    return p ? checked(Number(p[1]), Number(p[2])) : null;
+  };
+  const destination = params.get("destination") ?? params.get("daddr");
+  const q = params.get("q");
+  const point = pointOf(params.get("coordinate")) ?? pointOf(params.get("ll")) ?? pointOf(destination) ?? pointOf(q);
+  const first = (...keys: (string | undefined)[]) => keys.map((k) => (k ? words(k) : null)).find((w) => w != null) ?? null;
+  const name = first(params.get("name"), pointOf(q) ? undefined : q, params.get("query"));
+  const address = first(params.get("address"), point ? undefined : destination);
+  const query = point ? (name ?? address) : (address ?? name);
+  if (!point && !query) return null;
+  return { point, query };
 }
 
 function pathPoint(path: string): Coordinate | null {

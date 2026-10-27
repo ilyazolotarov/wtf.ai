@@ -1,4 +1,5 @@
 import CarPlay
+import CoreLocation
 import MapKit
 import os
 
@@ -6,36 +7,210 @@ import os
 let carPlayLog = Logger(subsystem: "ai.wtf.navigator", category: "carplay")
 
 /**
- * The connected car's screen: the map template, the React Native view under it, and the navigation session of a
- * route. Main thread only (the scene delegate's callbacks and the module's functions).
+ * The car's screen (docs/CARPLAY-SPEC.md §4): what the car session's JS side last sent through CarPlayModule, drawn
+ * with CarPlay's templates while its scene is connected, and what the driver does there, sent back as the module's
+ * events. The scene and the JS runtime come and go independently, so what was sent is kept for whichever comes next,
+ * as Android Auto's CarLink keeps it. Main thread only, but for `isOpen`.
  */
-final class CarPlaySession {
+final class CarPlaySession: NSObject {
   static let shared = CarPlaySession()
 
-  /** The JS root of the car's screen (index.ts). */
+  /** The JS root of the car's map (index.ts). */
   static let moduleName = "CarPlayMap"
 
+  /** Notes kept for the JS side at most: the oldest go first. */
+  private static let maxNotes = 50
+
+  // What the JS side sent.
+  private var labels = CarLabels()
+  private var route: CarRoute?
+  private var places: [CarPlace] = []
+  /** Spoken guidance: muted or not; nil: no voice (its volume is 0), no button. */
+  private var voiceMuted: Bool?
+  private var recentre = false
+  private var notice: CarNotice?
+  private var search: CarSearch?
+
+  /** The JS side's listener (CarPlayModule's events) and the module it is from; nil while no runtime has the module. */
+  private var emit: ((String, [String: Any]) -> Void)?
+  private var emitter: ObjectIdentifier?
+  private var notes: [(text: String, problem: Bool)] = []
+  /** A place asked for (a `geo:` link to the car's scene), kept until the JS side takes it. */
+  private var request: (navigate: Bool, uri: String)?
+
+  /**
+   * The car session is open: the driver opened the app on the car's screen since its scene connected, until it
+   * disconnects (Android Auto's session, made when the app is opened there). Read on the JS thread too.
+   */
+  private let openLock = NSLock()
+  private var openFlag = false
+  var isOpen: Bool {
+    openLock.lock()
+    defer { openLock.unlock() }
+    return openFlag
+  }
+
+  // The connected scene's.
+  private var scene: CPTemplateApplicationScene?
   private var interfaceController: CPInterfaceController?
   private var window: CPWindow?
   private var mapTemplate: CPMapTemplate?
-  private var trip: CPTrip?
-  private var navigation: CPNavigationSession?
+  private var mapView: UIView?
   /** The React Native host the map's root was made on. */
   private weak var mapHost: AnyObject?
+  private var leading: [CarBarButton] = []
+  private var trailing: [CarBarButton] = []
+  private var shownMapButtons: [CarMapButton] = []
+  private var panning = false
+  private var panFrom = (x: 0.0, y: 0.0)
+  private var zoomFrom = 1.0
 
-  func connect(_ controller: CPInterfaceController, window: CPWindow) {
-    carPlayLog.notice("CarPlay scene connected")
+  // The trip.
+  private var navigation: CPNavigationSession?
+  /** The destination of the trip shown (`CarPlayLogic.tripKey`), and what its panel shows. */
+  private var tripKey: String?
+  private var tripShows = CarTripShows.none
+  private var maneuversKey: String?
+  private var maneuvers: [CPManeuver] = []
+  /** The maneuver popped up for last, and the one CarPlay may pop up now (`CarPlayLogic.turnAlert`). */
+  private var alerted: String?
+  private var alertDue: String?
+
+  // The alert over the map: a notice, or why the route failed.
+  private enum AlertContent: Equatable {
+    case notice(CarNotice, checkPhone: Bool)
+    case failure(message: String, destination: String)
+  }
+  private var alertShown: AlertContent?
+  private weak var alertPresented: CPNavigationAlert?
+  /** A failure the driver closed: not shown again. */
+  private var failureClosed: AlertContent?
+  /** The location notice's button was pressed: it says to look at the phone, where the permission is asked. */
+  private var askedLocation = false
+
+  // Lists and the search over the map, while open.
+  private weak var destinationsList: CPListTemplate?
+  private weak var routesList: CPListTemplate?
+  private weak var resultsList: CPListTemplate?
+  private var resultsQuery = ""
+  private weak var searchTemplate: CPSearchTemplate?
+  private var typed = ""
+  private var searchCompletion: (([CPListItem]) -> Void)?
+
+  private var locationManager: CLLocationManager?
+
+  // MARK: - The scene
+
+  func connect(_ scene: CPTemplateApplicationScene, _ controller: CPInterfaceController, window: CPWindow) {
+    let states = ["unattached", "foreground active", "foreground inactive", "background"]
+    let state = states.indices.contains(scene.activationState.rawValue + 1) ? states[scene.activationState.rawValue + 1] : "?"
+    carPlayLog.notice("CarPlay scene connected (\(state, privacy: .public))")
+    self.scene = scene
     interfaceController = controller
     self.window = window
+    controller.delegate = self
     let template = CPMapTemplate()
+    template.mapDelegate = self
+    // The map is what the driver needs: the buttons go with the navigation bar while nobody touches the screen.
+    template.automaticallyHidesNavigationBar = true
+    template.hidesButtonsWithNavigationBar = true
     mapTemplate = template
     controller.setRootTemplate(template, animated: false, completion: nil)
-    showMap()
+    // What the last session sent stays: a route followed when the car's screen came on again shows at once.
+    syncTrip()
+    refresh()
+    // Opened from the car's screen: in the foreground already (else it comes there later, sceneWillEnterForeground).
+    if scene.activationState == .foregroundActive || scene.activationState == .foregroundInactive { shown() }
+  }
+
+  /**
+   * The car's screen shows the app. The first time since the scene connected the car session opens (CarPlay connects
+   * the scene as soon as its screen comes on, whatever the driver opens there): the navigator runs and the adapter
+   * connects from now until the car disconnects. The map's root is made each time: it lives only while it shows.
+   */
+  func shown() {
+    guard window != nil else { return }
+    if !isOpen {
+      setOpen(true)
+      note("opened on the car's screen")
+      emit?("onConnect", [:])
+    }
+    if mapView == nil { showMap() }
     // After the scenes connecting at this launch: the phone's starts React Native as it connects.
     if !AppReactHost.isRunning {
       DispatchQueue.main.async { AppReactHost.startWithoutPhone() }
     }
   }
+
+  /**
+   * Another app fills the car's screen: the map's root goes (its frames and MapLibre's drawing for nobody, its
+   * smoothing loop spinning the JS thread with the app in the background); the trip, its banners and the voice go on.
+   */
+  func hidden() {
+    guard let window, mapView != nil else { return }
+    carPlayLog.notice("CarPlay map: gone while another app shows")
+    window.rootViewController = CarPlayMapController(nil, scale: CarPlayLogic.mapScale) {}
+    mapView = nil
+    mapHost = nil
+  }
+
+  func disconnect() {
+    carPlayLog.notice("CarPlay scene disconnected")
+    let wasOpen = isOpen
+    setOpen(false)
+    navigation?.cancelTrip()
+    navigation = nil
+    tripKey = nil
+    tripShows = .none
+    maneuversKey = nil
+    maneuvers = []
+    alertShown = nil
+    searchCompletion?([])
+    searchCompletion = nil
+    panning = false
+    leading = []
+    trailing = []
+    shownMapButtons = []
+    mapTemplate = nil
+    // Unmounts the map's React root.
+    window?.rootViewController = nil
+    window = nil
+    mapView = nil
+    mapHost = nil
+    interfaceController = nil
+    scene = nil
+    if wasOpen { send("session-ended") }
+  }
+
+  /** The car switched between day and night (the scene's content style). */
+  func contentStyleChanged() {
+    window?.backgroundColor = dark ? .black : .white
+    updateMapProps()
+  }
+
+  /**
+   * A place asked for while CarPlay shows the app (a `geo:` link, or `google.navigation:` to go there), kept until the
+   * JS side takes it: its session may not run yet. A newer one replaces it.
+   */
+  func request(_ url: URL) {
+    let uri = url.absoluteString
+    let scheme = url.scheme?.lowercased()
+    guard scheme == "geo" || scheme == "google.navigation" else { return }
+    let navigate = scheme == "google.navigation"
+    note("\(navigate ? "navigation" : "search") asked for: \(uri)")
+    request = (navigate, uri)
+    emit?("onCarAction", ["action": "request"])
+  }
+
+  private func setOpen(_ value: Bool) {
+    openLock.lock()
+    openFlag = value
+    openLock.unlock()
+  }
+
+  private var dark: Bool { scene?.contentStyle == .dark }
+
+  // MARK: - The map's React root
 
   /**
    * A JS runtime came up (CarPlayModule's OnCreate). On a new host (the development launcher makes one at each load)
@@ -44,7 +219,9 @@ final class CarPlaySession {
    * Native's restart still held it (a debug assertion: "Surface must not be running").
    */
   func reactNativeStarted() {
-    guard window != nil, let host = AppReactHost.host, host !== mapHost else { return }
+    guard window != nil, scene?.activationState != .background, let host = AppReactHost.host, host !== mapHost else {
+      return
+    }
     carPlayLog.notice("React Native on a new host")
     showMap()
   }
@@ -52,83 +229,711 @@ final class CarPlaySession {
   /** The React root `CarPlayMap` once React Native runs, a blank view until then. */
   private func showMap() {
     guard let window else { return }
-    let react = AppReactHost.rootView(moduleName: Self.moduleName)
+    let react = AppReactHost.rootView(moduleName: Self.moduleName, initialProperties: mapProps())
     mapHost = react == nil ? nil : AppReactHost.host
+    mapView = react
+    sentMapProps = nil
     let drawnBy = react == nil ? "a blank view until React Native runs" : "the React root"
     carPlayLog.notice("CarPlay map: \(drawnBy, privacy: .public)")
-    window.rootViewController = CarPlayMapController(react)
-  }
-
-  func disconnect() {
-    carPlayLog.notice("CarPlay scene disconnected")
-    navigation?.cancelTrip()
-    navigation = nil
-    trip = nil
-    mapTemplate = nil
-    // Unmounts the React root, and with it the guidance that calls the module.
-    window?.rootViewController = nil
-    window = nil
-    mapHost = nil
-    interfaceController = nil
-  }
-
-  func startTrip(_ record: CarTripRecord) {
-    guard let mapTemplate else { return }
-    navigation?.cancelTrip()
-    let destination = Self.mapItem(record.destinationLat, record.destinationLon)
-    destination.name = record.destinationName
-    let choice = CPRouteChoice(
-      summaryVariants: [record.summary], additionalInformationVariants: [], selectionSummaryVariants: [])
-    let trip = CPTrip(
-      origin: Self.mapItem(record.originLat, record.originLon), destination: destination, routeChoices: [choice])
-    self.trip = trip
-    navigation = mapTemplate.startNavigationSession(for: trip)
-  }
-
-  /** The next maneuver first; replaced only when they change, so the panel doesn't redraw at every position. */
-  func setManeuvers(_ records: [CarManeuverRecord]) {
-    navigation?.upcomingManeuvers = records.map { record in
-      let maneuver = CPManeuver()
-      maneuver.instructionVariants = [record.instruction]
-      maneuver.symbolImage = UIImage(systemName: record.symbol)
-      maneuver.initialTravelEstimates = Self.estimates(record.distanceM, record.timeS)
-      return maneuver
+    window.backgroundColor = dark ? .black : .white
+    window.rootViewController = CarPlayMapController(react, scale: CarPlayLogic.mapScale) { [weak self] in
+      self?.updateMapProps()
     }
   }
 
-  func updateEstimates(_ record: CarEstimatesRecord) {
-    guard let navigation, let trip, let mapTemplate else { return }
-    if let next = navigation.upcomingManeuvers.first {
-      navigation.updateEstimates(Self.estimates(record.toNextM, record.toNextS), for: next)
+  /**
+   * `dark`, the car's day or night; `insets`, what CarPlay's panels cover, in the map's points from each edge: the
+   * window's safe area (the guidance card, the bar) and on the right the map's buttons (their layout guide), so the
+   * camera keeps the car in the rest and the credit clear of them; `scale`, the map drawn bigger than the car's points
+   * (CarMapRoot).
+   */
+  private func mapProps() -> [String: Any] {
+    let safe = window?.safeAreaInsets ?? .zero
+    var right = safe.right
+    if let window {
+      let buttons = window.mapButtonSafeAreaLayoutGuide.layoutFrame
+      if !buttons.isEmpty { right = max(right, window.bounds.maxX - buttons.maxX) }
     }
-    mapTemplate.updateEstimates(Self.estimates(record.remainingM, record.remainingS), for: trip)
+    let s = CarPlayLogic.mapScale
+    return [
+      "dark": dark,
+      "insets": ["left": safe.left / s, "top": safe.top / s, "right": right / s, "bottom": safe.bottom / s],
+      "scale": s,
+    ]
   }
 
-  func endTrip(arrived: Bool) {
-    if arrived {
-      navigation?.finishTrip()
+  /** Sent again only when they changed: each is a render of the car's map. */
+  private var sentMapProps: NSDictionary?
+
+  private func updateMapProps() {
+    guard let view = mapView, view.responds(to: NSSelectorFromString("setAppProperties:")) else { return }
+    let props = mapProps() as NSDictionary
+    guard props != sentMapProps else { return }
+    sentMapProps = props
+    view.setValue(props, forKey: "appProperties")
+  }
+
+  // MARK: - What the JS side sends
+
+  func setLabels(_ value: CarLabels) {
+    guard value != labels else { return }
+    labels = value
+    leading = []
+    trailing = []
+    refresh()
+  }
+
+  func setRoute(_ value: CarRoute?) {
+    guard value != route else { return }
+    route = value
+    syncTrip()
+    refresh()
+  }
+
+  func setPlaces(_ value: [CarPlace]) {
+    guard value != places else { return }
+    places = value
+    refresh()
+  }
+
+  func setVoiceMuted(_ value: Bool?) {
+    guard value != voiceMuted else { return }
+    voiceMuted = value
+    refresh()
+  }
+
+  func setRecentre(_ value: Bool) {
+    guard value != recentre else { return }
+    recentre = value
+    refresh()
+  }
+
+  func setNotice(_ value: CarNotice?) {
+    guard value != notice else { return }
+    if value?.kind != CarNotice.location { askedLocation = false }
+    notice = value
+    refresh()
+  }
+
+  func setSearch(_ value: CarSearch?) {
+    guard value != search else { return }
+    search = value
+    if let completion = searchCompletion, case .results = CarPlayLogic.searchList(search, typed: typed) {
+      searchCompletion = nil
+      completion(searchItems())
+    }
+    refresh()
+  }
+
+  /** The answers to a place asked for, in a list over the map (CarPlay's search template can't be given a text). */
+  func openSearch(_ query: String) {
+    guard let interfaceController else { return }
+    resultsQuery = query
+    let list = CPListTemplate(title: query, sections: resultsSections())
+    list.emptyViewSubtitleVariants = [labels.noResults]
+    resultsList = list
+    interfaceController.popToRootTemplate(animated: false, completion: nil)
+    push(list)
+  }
+
+  /** The map, with whatever list or search was open over it gone: the route to a place asked for shows. */
+  func showMapTemplate() {
+    guard let interfaceController, interfaceController.templates.count > 1 else { return }
+    interfaceController.popToRootTemplate(animated: true, completion: nil)
+  }
+
+  func takeRequest() -> [String: Any]? {
+    defer { request = nil }
+    return request.map { ["navigate": $0.navigate, "uri": $0.uri] }
+  }
+
+  func takeNotes() -> [[String: Any]] {
+    defer { notes = [] }
+    return notes.map { ["text": $0.text, "problem": $0.problem] }
+  }
+
+  /** The module of a new JS runtime listens from now; a module going only stops listening if it is the one. */
+  func listen(_ module: AnyObject, _ emit: ((String, [String: Any]) -> Void)?) {
+    if let emit {
+      self.emit = emit
+      emitter = ObjectIdentifier(module)
+    } else if emitter == ObjectIdentifier(module) {
+      self.emit = nil
+      emitter = nil
+    }
+  }
+
+  // MARK: - Sending to the JS side
+
+  /** The driver's action on the car's screen, or the car's, for the JS side. */
+  private func send(_ action: String, _ body: [String: Any] = [:]) {
+    carPlayLog.info("action \(action, privacy: .public)")
+    guard let emit else {
+      carPlayLog.notice("no JS runtime for \(action, privacy: .public)")
+      return
+    }
+    var event = body
+    event["action"] = action
+    emit("onCarAction", event)
+  }
+
+  /** The driver moved or zoomed the car's map, or pressed one of its buttons. Not logged: a drag sends one every frame. */
+  private func gesture(_ body: [String: Any]) {
+    emit?("onMapGesture", body)
+  }
+
+  /** A note for the trip log, kept until the JS side takes it. `problem`: what went wrong, reported too. */
+  func note(_ text: String, problem: Bool = false) {
+    if problem {
+      carPlayLog.error("\(text, privacy: .public)")
     } else {
-      navigation?.cancelTrip()
+      carPlayLog.notice("\(text, privacy: .public)")
     }
+    notes.append((text, problem))
+    if notes.count > Self.maxNotes { notes.removeFirst(notes.count - Self.maxNotes) }
+    emit?("onCarAction", ["action": "notes"])
+  }
+
+  // MARK: - The map template
+
+  /** Labels, places, the route, the voice or the notice changed: the buttons, the alert and open lists follow. */
+  private func refresh() {
+    guard let mapTemplate else { return }
+    let bar = CarPlayLogic.barButtons(route: route, notice: notice, voiceMuted: voiceMuted, panning: panning)
+    if bar.leading != leading {
+      leading = bar.leading
+      mapTemplate.leadingNavigationBarButtons = bar.leading.map(barButton)
+    }
+    if bar.trailing != trailing {
+      trailing = bar.trailing
+      mapTemplate.trailingNavigationBarButtons = bar.trailing.map(barButton)
+    }
+    let buttons = CarPlayLogic.mapButtons(recentre: recentre)
+    if buttons != shownMapButtons {
+      shownMapButtons = buttons
+      mapTemplate.mapButtons = buttons.map(mapButton)
+    }
+    syncAlert()
+    destinationsList?.updateSections(destinationSections())
+    routesList?.updateSections(routeSections())
+    resultsList?.updateSections(resultsSections())
+  }
+
+  private func barButton(_ button: CarBarButton) -> CPBarButton {
+    switch button {
+    case .destinations:
+      return CPBarButton(title: labels.destinations) { [weak self] _ in self?.openDestinations() }
+    case .search:
+      return CPBarButton(image: CarPlayImages.icon("car_search")) { [weak self] _ in
+        carPlayLog.notice("search pressed")
+        self?.openSearchTemplate()
+      }
+    // Icons, not Android Auto's words: the bar stays narrow over the map.
+    case .endRoute:
+      return CPBarButton(image: CarPlayImages.icon("car_close")) { [weak self] _ in self?.send("end-route") }
+    case .routes:
+      return CPBarButton(image: CarPlayImages.icon("car_alt_route")) { [weak self] _ in self?.openRoutes() }
+    case .voice(let muted):
+      return CPBarButton(image: CarPlayImages.icon(muted ? "car_volume_off" : "car_volume_up")) { [weak self] _ in
+        self?.send("toggle-voice")
+      }
+    case .endPanning:
+      return CPBarButton(image: CarPlayImages.icon("car_close")) { [weak self] _ in
+        self?.mapTemplate?.dismissPanningInterface(animated: true)
+      }
+    }
+  }
+
+  private func mapButton(_ button: CarMapButton) -> CPMapButton {
+    let made: CPMapButton
+    switch button {
+    case .pan:
+      made = CPMapButton { [weak self] _ in self?.mapTemplate?.showPanningInterface(animated: true) }
+      made.image = CarPlayImages.icon("car_drag_pan")
+    case .recentre:
+      made = CPMapButton { [weak self] _ in self?.gesture(["kind": "recentre"]) }
+      made.image = CarPlayImages.icon("car_my_location")
+    case .zoomIn:
+      made = CPMapButton { [weak self] _ in self?.gesture(["kind": "zoom", "by": 1]) }
+      made.image = CarPlayImages.icon("car_add")
+    case .zoomOut:
+      made = CPMapButton { [weak self] _ in self?.gesture(["kind": "zoom", "by": -1]) }
+      made.image = CarPlayImages.icon("car_remove")
+    }
+    return made
+  }
+
+  // MARK: - The trip
+
+  /** The navigation session follows the route: CarPlay's guidance panel, its banners, the car's cluster. */
+  private func syncTrip() {
+    guard let mapTemplate else { return }
+    let plan = CarPlayLogic.tripPlan(current: tripKey, arrived: tripShows == .arrived, route: route)
+    if let end = plan.end {
+      if end == .finish { navigation?.finishTrip() } else { navigation?.cancelTrip() }
+      navigation = nil
+      tripKey = nil
+      tripShows = .none
+    }
+    if let key = plan.start, let route {
+      let destination = MKMapItem(
+        placemark: MKPlacemark(coordinate: CLLocationCoordinate2D(latitude: route.destinationLat, longitude: route.destinationLon)))
+      destination.name = route.destinationName
+      let choice = CPRouteChoice(
+        summaryVariants: [route.detail.isEmpty ? route.destinationName : route.detail],
+        additionalInformationVariants: [], selectionSummaryVariants: [])
+      let trip = CPTrip(origin: MKMapItem.forCurrentLocation(), destination: destination, routeChoices: [choice])
+      navigation = mapTemplate.startNavigationSession(for: trip)
+      tripKey = key
+      tripShows = .none
+      maneuversKey = nil
+      note("trip started")
+    }
+    guard let navigation, let route else { return }
+    switch plan.shows {
+    case .loading(let rerouting):
+      if tripShows != plan.shows {
+        navigation.pauseTrip(for: rerouting ? .rerouting : .loading, description: route.message)
+        maneuversKey = nil
+      }
+    case .arrived:
+      if tripShows != .arrived {
+        navigation.pauseTrip(for: .arrived, description: route.message ?? route.destinationName)
+        maneuversKey = nil
+      }
+    case .steps:
+      guide(navigation, route)
+    case .none:
+      break
+    }
+    tripShows = plan.shows
+  }
+
+  /**
+   * The next maneuvers, set again only when other ones are next or the next one comes near enough to pop up (CarPlay
+   * asks about a banner for the maneuvers it is given); the estimates with every position.
+   */
+  private func guide(_ navigation: CPNavigationSession, _ route: CarRoute) {
+    let alert = CarPlayLogic.turnAlert(route, alerted: alerted)
+    let key = CarPlayLogic.maneuversKey(route, alert: alert)
+    if key != maneuversKey {
+      maneuversKey = key
+      alertDue = alert
+      var from = 0.0
+      maneuvers = route.steps.map { step in
+        let made = maneuver(step, gapM: step.distanceM - from)
+        from = step.distanceM
+        return made
+      }
+      navigation.upcomingManeuvers = maneuvers
+    }
+    if let next = maneuvers.first, let step = route.steps.first {
+      navigation.updateEstimates(Self.estimates(step.shownDistance, step.shownUnit, step.timeS), for: next)
+      if #available(iOS 17.4, *) {
+        navigation.maneuverState = CPManeuverState(rawValue: CarPlayLogic.maneuverState(step)) ?? .continue
+      }
+    }
+    mapTemplate?.updateEstimates(
+      Self.estimates(route.remainingShown, route.remainingUnit, route.remainingS), for: navigation.trip)
+  }
+
+  /** `gapM`: from the maneuver before (the first: from the car), which CarPlay shows with the one after. */
+  private func maneuver(_ step: CarStep, gapM: Double) -> CPManeuver {
+    let kind = CarPlayLogic.maneuverKind(step.kind)
+    let maneuver = CPManeuver()
+    maneuver.instructionVariants = [step.instruction]
+    maneuver.symbolImage = CarPlayImages.icon(kind.icon, size: CarPlayImages.maneuverSize)
+    let gap = CarPlayLogic.shownDistance(gapM)
+    maneuver.initialTravelEstimates = Self.estimates(gap.value, gap.kilometers ? "km1" : "m", step.timeS)
+    maneuver.userInfo = step.id
+    if #available(iOS 17.4, *) {
+      maneuver.maneuverType = Self.maneuverType(kind)
+      maneuver.trafficSide = .right
+      maneuver.junctionType = kind == .roundabout ? .roundabout : .intersection
+    }
+    return maneuver
+  }
+
+  @available(iOS 17.4, *)
+  private static func maneuverType(_ kind: CarManeuverKind) -> CPManeuverType {
+    switch kind {
+    case .depart: return .startRoute
+    case .straight: return .straightAhead
+    case .slightLeft: return .slightLeftTurn
+    case .slightRight: return .slightRightTurn
+    case .left: return .leftTurn
+    case .right: return .rightTurn
+    case .sharpLeft: return .sharpLeftTurn
+    case .sharpRight: return .sharpRightTurn
+    case .keepLeft: return .keepLeft
+    case .keepRight: return .keepRight
+    case .uTurn: return .uTurn
+    case .roundabout: return .enterRoundabout
+    case .arrive: return .arriveAtDestination
+    }
+  }
+
+  private static func estimates(_ shown: Double, _ unit: String, _ seconds: Double) -> CPTravelEstimates {
+    let distance = CarPlayLogic.distance(shown, unit: unit)
+    let length = Measurement(value: distance.value, unit: distance.kilometers ? UnitLength.kilometers : UnitLength.meters)
+    return CPTravelEstimates(distanceRemaining: length, timeRemaining: max(0, seconds))
+  }
+
+  // MARK: - The alert: a notice, or why the route failed
+
+  private var alertWanted: AlertContent? {
+    if let notice { return .notice(notice, checkPhone: askedLocation && notice.kind == CarNotice.location) }
+    if let route, route.status == "failed" {
+      let failure = AlertContent.failure(message: route.message ?? "", destination: route.destinationName)
+      return failure == failureClosed ? nil : failure
+    }
+    return nil
+  }
+
+  /** One alert over the map at a time: a notice first, as on Android Auto, where it takes the route's card. */
+  private func syncAlert() {
+    guard let mapTemplate else { return }
+    let wanted = alertWanted
+    guard wanted != alertShown else { return }
+    alertShown = wanted
+    let present = { [weak self] in
+      guard let self, let wanted, self.alertShown == wanted, let template = self.mapTemplate else { return }
+      let alert = self.alert(wanted)
+      self.alertPresented = alert
+      template.present(navigationAlert: alert, animated: true)
+    }
+    if mapTemplate.currentNavigationAlert != nil {
+      alertPresented = nil
+      mapTemplate.dismissNavigationAlert(animated: true) { _ in present() }
+    } else {
+      present()
+    }
+  }
+
+  private func alert(_ content: AlertContent) -> CPNavigationAlert {
+    switch content {
+    case .notice(let notice, let checkPhone):
+      let location = notice.kind == CarNotice.location
+      let primary = CPAlertAction(title: notice.action, style: .default) { [weak self] _ in
+        location ? self?.requestLocation() : self?.send("confirm-held")
+      }
+      let secondary = location ? nil : CPAlertAction(title: labels.cancel, style: .cancel) { [weak self] _ in
+        self?.send("cancel-held")
+      }
+      let text = checkPhone ? labels.checkPhone : notice.text
+      return CPNavigationAlert(
+        titleVariants: [notice.title], subtitleVariants: text.isEmpty ? [] : [text],
+        image: CarPlayImages.icon(location ? "car_location_off" : "car_alt_route"),
+        primaryAction: primary, secondaryAction: secondary, duration: 0)
+    case .failure(let message, let destination):
+      let close = CPAlertAction(title: labels.close, style: .cancel) { [weak self] _ in
+        self?.failureClosed = content
+      }
+      return CPNavigationAlert(
+        titleVariants: [message], subtitleVariants: destination.isEmpty ? [] : [destination], image: nil,
+        primaryAction: close, secondaryAction: nil, duration: 0)
+    }
+  }
+
+  /**
+   * The location notice's button: iOS's permission dialog, on the phone's screen (CarPlay shows none), and the notice
+   * says to look at the phone only when it's safe. Refused before: only the phone's Settings can allow it now.
+   */
+  private func requestLocation() {
+    askedLocation = true
+    let manager = locationManager ?? CLLocationManager()
+    locationManager = manager
+    manager.delegate = self
+    if manager.authorizationStatus == .notDetermined {
+      note("location permission asked on the car's screen")
+      manager.requestWhenInUseAuthorization()
+    } else {
+      note("location permission asked on the car's screen: refused before, the phone's Settings allow it")
+    }
+    // Pressing the button closed the alert: the notice comes back, saying where to look, until location is allowed.
+    alertShown = nil
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.syncAlert() }
+  }
+
+  // MARK: - Lists and search over the map
+
+  private func openDestinations() {
+    let list = CPListTemplate(title: labels.destinations, sections: destinationSections())
+    // A subtitle: the title is one line.
+    list.emptyViewSubtitleVariants = [labels.noDestinations]
+    destinationsList = list
+    push(list)
+  }
+
+  /** Saved places first, then recent destinations, as many as CarPlay lists. */
+  private func destinationSections() -> [CPListSection] {
+    var left = Int(CPListTemplate.maximumItemCount)
+    let saved = places.filter { $0.kind != "recent" }
+    let recent = places.filter { $0.kind == "recent" }
+    var sections: [CPListSection] = []
+    for (header, list) in [(labels.saved, saved), (labels.recent, recent)] where !list.isEmpty && left > 0 {
+      sections.append(CPListSection(items: list.prefix(left).map(placeItem), header: header, sectionIndexTitle: nil))
+      left -= list.count
+    }
+    return sections
+  }
+
+  private func placeItem(_ place: CarPlace) -> CPListItem {
+    let item = CPListItem(
+      text: place.title.isEmpty ? "·" : place.title, detailText: place.detail?.isEmpty == false ? place.detail : nil,
+      image: CarPlayImages.icon(CarPlayImages.placeIcon(place.kind), size: CarPlayImages.rowSize))
+    item.userInfo = place.id
+    item.handler = { [weak self] _, completion in
+      self?.go(place.id)
+      completion()
+    }
+    return item
+  }
+
+  private func go(_ id: String) {
+    send("go", ["id": id])
+    interfaceController?.popToRootTemplate(animated: true, completion: nil)
+  }
+
+  /** The route followed first, then each other way by the street it goes by; one picked is followed instead. */
+  private func openRoutes() {
+    let list = CPListTemplate(title: labels.routes, sections: routeSections())
+    routesList = list
+    push(list)
+  }
+
+  private func routeSections() -> [CPListSection] {
+    let current = CPListItem(
+      text: route?.title.isEmpty == false ? route?.title : labels.thisRoute,
+      detailText: route?.detail.isEmpty == false ? route?.detail : nil,
+      image: CarPlayImages.icon("car_navigation", size: CarPlayImages.rowSize))
+    current.handler = { [weak self] _, completion in
+      self?.interfaceController?.popToRootTemplate(animated: true, completion: nil)
+      completion()
+    }
+    let others = (route?.alternatives ?? []).prefix(Int(CPListTemplate.maximumItemCount) - 1).map { alternative in
+      let item = CPListItem(
+        text: alternative.title.isEmpty ? "·" : alternative.title, detailText: alternative.detail,
+        image: CarPlayImages.icon("car_alt_route", size: CarPlayImages.rowSize))
+      item.handler = { [weak self] _, completion in
+        self?.send("choose-alternative", ["index": alternative.index])
+        self?.interfaceController?.popToRootTemplate(animated: true, completion: nil)
+        completion()
+      }
+      return item
+    }
+    return [CPListSection(items: [current] + others)]
+  }
+
+  private func resultsSections() -> [CPListSection] {
+    guard case .results(let found) = CarPlayLogic.searchList(search, typed: resultsQuery) else { return [] }
+    return found.isEmpty ? [] : [CPListSection(items: found.prefix(Int(CPListTemplate.maximumItemCount)).map(placeItem))]
+  }
+
+  /** The search: the phone's offline index as the driver types (CarPlay offers the keyboard only while parked). */
+  private func openSearchTemplate() {
+    let template = CPSearchTemplate()
+    template.delegate = self
+    searchTemplate = template
+    typed = ""
+    push(template)
+  }
+
+  /** Over the map; CarPlay refusing it says why in the trip log. */
+  private func push(_ template: CPTemplate) {
+    interfaceController?.pushTemplate(template, animated: true) { [weak self] _, error in
+      if let error { self?.note("\(type(of: template)) not shown: \(error.localizedDescription)", problem: true) }
+    }
+  }
+
+  /** The answers for the text typed; with nothing typed, the destinations; nothing found says so. */
+  private func searchItems() -> [CPListItem] {
+    let limit = Int(CPListTemplate.maximumItemCount)
+    switch CarPlayLogic.searchList(search, typed: typed) {
+    case .empty:
+      return places.prefix(limit).map(placeItem)
+    case .loading:
+      return []
+    case .results(let found):
+      if found.isEmpty { return [CPListItem(text: labels.noResults, detailText: nil)] }
+      return found.prefix(limit).map(placeItem)
+    }
+  }
+
+  // MARK: - Turn banners and the car's own
+
+  fileprivate func endedByCar() {
+    note("navigation stopped by the car")
     navigation = nil
-    trip = nil
+    tripKey = nil
+    tripShows = .none
+    send("end-route")
   }
 
-  private static func estimates(_ meters: Double, _ seconds: Double) -> CPTravelEstimates {
-    CPTravelEstimates(distanceRemaining: Measurement(value: meters, unit: UnitLength.meters), timeRemaining: seconds)
-  }
-
-  private static func mapItem(_ lat: Double, _ lon: Double) -> MKMapItem {
-    MKMapItem(placemark: MKPlacemark(coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon)))
+  fileprivate func showBanner(for maneuver: CPManeuver) -> Bool {
+    guard let id = maneuver.userInfo as? String, id == alertDue else { return false }
+    alerted = id
+    alertDue = nil
+    note("turn notification popped up: \(maneuver.instructionVariants.first ?? "")")
+    return true
   }
 }
 
-/** The car's map: the React root `CarPlayMap`, or a blank view while there is none. */
+// MARK: - CarPlay's callbacks
+
+extension CarPlaySession: CPMapTemplateDelegate {
+  func mapTemplate(_ mapTemplate: CPMapTemplate, shouldShowNotificationFor maneuver: CPManeuver) -> Bool {
+    showBanner(for: maneuver)
+  }
+
+  func mapTemplate(
+    _ mapTemplate: CPMapTemplate, shouldUpdateNotificationFor maneuver: CPManeuver, with travelEstimates: CPTravelEstimates
+  ) -> Bool {
+    (maneuver.userInfo as? String) == alerted
+  }
+
+  func mapTemplate(_ mapTemplate: CPMapTemplate, shouldShowNotificationFor navigationAlert: CPNavigationAlert) -> Bool {
+    false
+  }
+
+  func mapTemplateShouldProvideNavigationMetadata(_ mapTemplate: CPMapTemplate) -> Bool {
+    true
+  }
+
+  // The icon beside the words, not above them: a shorter card, more of the map.
+  func mapTemplate(_ mapTemplate: CPMapTemplate, displayStyleFor maneuver: CPManeuver) -> CPManeuverDisplayStyle {
+    .leadingSymbol
+  }
+
+  // Another navigator started (the car's own): this app's route ends, so the voice and banners are the other's alone.
+  func mapTemplateDidCancelNavigation(_ mapTemplate: CPMapTemplate) {
+    endedByCar()
+  }
+
+  func mapTemplate(
+    _ mapTemplate: CPMapTemplate, didDismiss navigationAlert: CPNavigationAlert,
+    dismissalContext: CPNavigationAlert.DismissalContext
+  ) {
+    guard navigationAlert === alertPresented else { return }
+    alertPresented = nil
+    alertShown = nil
+    // Taken down by CarPlay (another alert, the app sent away): shown again; the driver's own buttons decide theirs.
+    if dismissalContext == .systemDismissed {
+      DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.syncAlert() }
+    }
+  }
+
+  // The panning interface (cars with a knob or a touchpad): its arrows move the map; a button ends it.
+  func mapTemplateDidShowPanningInterface(_ mapTemplate: CPMapTemplate) {
+    panning = true
+    note("map pan mode on")
+    refresh()
+  }
+
+  func mapTemplateDidDismissPanningInterface(_ mapTemplate: CPMapTemplate) {
+    panning = false
+    note("map pan mode off")
+    refresh()
+  }
+
+  func mapTemplate(_ mapTemplate: CPMapTemplate, panWith direction: CPMapTemplate.PanDirection) {
+    let scroll = CarPlayLogic.panScroll(direction: direction.rawValue)
+    gesture(["kind": "scroll", "dx": scroll.dx, "dy": scroll.dy])
+  }
+
+  // A finger on a touch screen, in the map's points (the car's over `mapScale`), as Android Auto's scroll and fling.
+  func mapTemplateDidBeginPanGesture(_ mapTemplate: CPMapTemplate) {
+    panFrom = (0, 0)
+  }
+
+  func mapTemplate(_ mapTemplate: CPMapTemplate, didUpdatePanGestureWithTranslation translation: CGPoint, velocity: CGPoint) {
+    let s = CarPlayLogic.mapScale
+    let to = (x: Double(translation.x) / s, y: Double(translation.y) / s)
+    let scroll = CarPlayLogic.scroll(from: panFrom, to: to)
+    panFrom = to
+    gesture(["kind": "scroll", "dx": scroll.dx, "dy": scroll.dy])
+  }
+
+  func mapTemplate(_ mapTemplate: CPMapTemplate, didEndPanGestureWithVelocity velocity: CGPoint) {
+    let s = CarPlayLogic.mapScale
+    gesture(["kind": "fling", "vx": Double(velocity.x) / s, "vy": Double(velocity.y) / s])
+  }
+
+  @available(iOS 26.0, *)
+  func mapTemplateDidBeginZoomGesture(_ mapTemplate: CPMapTemplate) {
+    zoomFrom = 1
+  }
+
+  @available(iOS 26.0, *)
+  func mapTemplate(_ mapTemplate: CPMapTemplate, didUpdateZoomGestureWithCenter center: CGPoint, scale: CGFloat, velocity: CGFloat) {
+    let factor = CarPlayLogic.zoomFactor(from: zoomFrom, to: Double(scale))
+    zoomFrom = Double(scale)
+    let s = CarPlayLogic.mapScale
+    gesture(["kind": "scale", "x": Double(center.x) / s, "y": Double(center.y) / s, "factor": factor])
+  }
+}
+
+extension CarPlaySession: CPSearchTemplateDelegate {
+  func searchTemplate(
+    _ searchTemplate: CPSearchTemplate, updatedSearchText searchText: String,
+    completionHandler: @escaping ([CPListItem]) -> Void
+  ) {
+    // Each text gets an answer: an older one still waiting gets none.
+    searchCompletion?([])
+    searchCompletion = nil
+    typed = searchText
+    if case .loading = CarPlayLogic.searchList(search, typed: typed) {
+      searchCompletion = completionHandler
+      send("search", ["text": searchText])
+    } else {
+      completionHandler(searchItems())
+    }
+  }
+
+  func searchTemplate(
+    _ searchTemplate: CPSearchTemplate, selectedResult item: CPListItem, completionHandler: @escaping () -> Void
+  ) {
+    if let id = item.userInfo as? String { go(id) }
+    completionHandler()
+  }
+}
+
+extension CarPlaySession: CPInterfaceControllerDelegate {
+  // Back from the search: an answer still waited for goes nowhere.
+  func templateDidDisappear(_ aTemplate: CPTemplate, animated: Bool) {
+    if aTemplate === searchTemplate, interfaceController?.templates.contains(aTemplate) != true {
+      searchCompletion?([])
+      searchCompletion = nil
+    }
+  }
+}
+
+extension CarPlaySession: CLLocationManagerDelegate {
+  func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+    guard askedLocation else { return }
+    let status = manager.authorizationStatus
+    guard status != .notDetermined else { return }
+    let granted = status == .authorizedAlways || status == .authorizedWhenInUse
+    note(granted ? "location permission granted" : "location permission refused")
+    send("permission")
+  }
+}
+
+/**
+ * The car's map: the React root `CarPlayMap`, or a blank view while there is none. The root is laid out `scale` times
+ * smaller than the car's screen and drawn that much bigger, as Android Auto draws its map at `MAP_SCALE` times the car's
+ * density: the map's points are the car's divided by it.
+ */
 final class CarPlayMapController: UIViewController {
   private let react: UIView?
+  private let scale: Double
+  /** What CarPlay's panels cover changed: the map's insets follow. */
+  private let onInsets: () -> Void
 
-  init(_ react: UIView?) {
+  init(_ react: UIView?, scale: Double, onInsets: @escaping () -> Void) {
     self.react = react
+    self.scale = scale
+    self.onInsets = onInsets
     super.init(nibName: nil, bundle: nil)
   }
 
@@ -137,7 +942,63 @@ final class CarPlayMapController: UIViewController {
   }
 
   override func loadView() {
-    view = react ?? UIView()
-    view.backgroundColor = .systemBackground
+    view = UIView()
+    view.backgroundColor = .clear
+    if let react { view.addSubview(react) }
+  }
+
+  override func viewDidLayoutSubviews() {
+    super.viewDidLayoutSubviews()
+    guard let react else { return }
+    let s = CGFloat(scale)
+    react.transform = .identity
+    react.bounds = CGRect(x: 0, y: 0, width: view.bounds.width / s, height: view.bounds.height / s)
+    react.center = CGPoint(x: view.bounds.midX, y: view.bounds.midY)
+    react.transform = CGAffineTransform(scaleX: s, y: s)
+    // The map buttons' layout guide follows the layout, not the safe area.
+    onInsets()
+  }
+
+  override func viewSafeAreaInsetsDidChange() {
+    super.viewSafeAreaInsetsDidChange()
+    onInsets()
+  }
+}
+
+/** The module's icons: the app's own (scripts/car-icons.py), template images CarPlay tints for the car's day or night. */
+enum CarPlayImages {
+  private static let bundle: Bundle = {
+    let code = Bundle(for: CarPlaySession.self)
+    guard let url = code.url(forResource: "WtfCarPlay", withExtension: "bundle"), let bundle = Bundle(url: url) else {
+      carPlayLog.error("WtfCarPlay.bundle not found: no icons")
+      return code
+    }
+    return bundle
+  }()
+
+  /** Buttons' size; a list's rows; the guidance panel's maneuvers, points. Drawn from the vector at that size. */
+  static let buttonSize = 24.0
+  static let rowSize = 32.0
+  static let maneuverSize = 18.0
+
+  static func icon(_ name: String, size: Double = buttonSize) -> UIImage {
+    guard let image = UIImage(named: name, in: bundle, compatibleWith: nil) else {
+      carPlayLog.error("icon \(name, privacy: .public) not found")
+      return UIImage()
+    }
+    let side = CGSize(width: size, height: size)
+    if image.size == side { return image.withRenderingMode(.alwaysTemplate) }
+    let drawn = UIGraphicsImageRenderer(size: side).image { _ in image.draw(in: CGRect(origin: .zero, size: side)) }
+    return drawn.withRenderingMode(.alwaysTemplate)
+  }
+
+  static func placeIcon(_ kind: String) -> String {
+    switch kind {
+    case "home": return "car_home"
+    case "work": return "car_work"
+    case "favorite": return "car_star"
+    case "result": return "car_location_on"
+    default: return "car_history"
+    }
   }
 }

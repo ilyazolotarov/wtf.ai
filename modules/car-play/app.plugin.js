@@ -1,6 +1,7 @@
 // Config plugin for modules/car-play (docs/CARPLAY-SPEC.md §3). Never edit ios/ by hand; prebuild applies this.
 // The phone's scene comes from expo-build-properties' `ios.enableSceneSupport` (SDK 57; the template's own from SDK 58);
-// this adds the CarPlay scene beside it, and the navigation app's entitlement when `CARPLAY_ENTITLEMENT` is set.
+// this adds the CarPlay scene beside it, the navigation app's entitlement when `CARPLAY_ENTITLEMENT` is set, and the
+// map links another app opens a navigator with.
 const { withBaseMod, withEntitlementsPlist } = require("expo/config-plugins");
 
 /**
@@ -18,6 +19,20 @@ const CARPLAY_SCENE = {
   // resolve, so it is found by its Objective-C name, as Expo's own EXExpoAppSceneDelegate is.
   UISceneDelegateClassName: "WTFCarPlaySceneDelegate",
 };
+
+/**
+ * Links a place is handed to a navigator with (SEARCH-SPEC §4.6), as Android's intent filters take them: `geo:` to look
+ * for it, `google.navigation:` to go there. The phone's route screen searches them (+native-intent.tsx); the car's
+ * screen, while CarPlay shows the app, searches or routes (CARPLAY-SPEC §4).
+ */
+const MAP_LINK_SCHEMES = ["geo", "google.navigation"];
+
+/** The Info.plist's URL types with the map links added, once. */
+function addMapLinks(urlTypes) {
+  const types = urlTypes ?? [];
+  const missing = MAP_LINK_SCHEMES.filter((s) => !types.some((t) => t.CFBundleURLSchemes?.includes(s)));
+  return missing.length ? [...types, { CFBundleURLSchemes: missing }] : types;
+}
 
 /** The scene manifest with the CarPlay scene added; throws without the phone's scene. */
 function addCarPlayScene(manifest) {
@@ -53,9 +68,11 @@ module.exports = function withCarPlay(config) {
     action: async ({ modRequest: { nextMod, ...modRequest }, ...cfg }) => {
       const results = await nextMod({ ...cfg, modRequest });
       results.modResults.UIApplicationSceneManifest = addCarPlayScene(results.modResults.UIApplicationSceneManifest);
+      results.modResults.CFBundleURLTypes = addMapLinks(results.modResults.CFBundleURLTypes);
       return results;
     },
   });
 };
 
 module.exports.addCarPlayScene = addCarPlayScene;
+module.exports.addMapLinks = addMapLinks;
