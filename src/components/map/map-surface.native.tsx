@@ -1,5 +1,5 @@
 import { Camera, LogManager, Map, type MapRef, type PressEvent, type ViewStateChangeEvent } from "@maplibre/maplibre-react-native";
-import { useMemo, useRef, useState, type ComponentProps } from "react";
+import { useImperativeHandle, useMemo, useRef, useState, type ComponentProps, type Ref } from "react";
 import { useColorScheme, View, type NativeSyntheticEvent } from "react-native";
 
 import { ANDROID_BLURS } from "@/components/ui/glass-fill";
@@ -26,6 +26,7 @@ import { DebugLayers, EntranceLayers, MarkLayers, ParkedCarLayers, PositionLayer
 import type { CameraMode } from "./use-camera-mode";
 import type { CompassHeading } from "./use-compass-heading";
 import { useMapCamera } from "./use-map-camera";
+import { useMapControl, type MapControl } from "./use-map-control";
 import type { PlacingStep } from "./use-placing";
 
 /** The camera's zoom until the map reports one (and the start without a region's bounds). */
@@ -103,6 +104,13 @@ interface MapSurfaceProps {
   carScale?: number;
   /** Heading-up's dot this far down the map (top 0, bottom 1), if not the phone's. */
   headingUpDotAt?: number;
+  /**
+   * The map moved by gestures it doesn't see itself (the car's screen, `MapControl`); the screen sets the camera mode to
+   * free as they start (`onUserInteraction` is the map view's own).
+   */
+  control?: Ref<MapControl | null>;
+  /** Zoom levels added to the follow zoom (the car's zoom buttons and pinches while following). */
+  followZoomShift?: number;
 }
 
 export function MapSurface({
@@ -127,6 +135,8 @@ export function MapSurface({
   onOwnScreen,
   carScale,
   headingUpDotAt,
+  control,
+  followZoomShift = 0,
 }: MapSurfaceProps) {
   const phoneScheme = useColorScheme() === "dark" ? "dark" : "light";
   const scheme = schemeOverride ?? phoneScheme;
@@ -162,11 +172,12 @@ export function MapSurface({
   if (mapStyle == null && mapReady) setMapReady(false);
   // Heading-up places the dot by the map's own height (turned sideways, it is the screen's width).
   const [mapHeightPt, setMapHeightPt] = useState(0);
-  const { cameraRef, onRegionIsChanging, onRegionDidChange } = useMapCamera({
+  const mapSize = useRef({ width: 0, height: 0 });
+  const { cameraRef, onRegionIsChanging, onRegionDidChange, onOutsideGesture } = useMapCamera({
     mapReady,
     mapHeightPt,
     insets,
-    zoomOffset: carScale ? -Math.log2(carScale) : 0,
+    zoomOffset: (carScale ? -Math.log2(carScale) : 0) + followZoomShift,
     headingUpDotAt,
     mode,
     // Heading-up turns with the smoothed heading too, unless the walking compass leads.
@@ -191,6 +202,21 @@ export function MapSurface({
   const onCar = car != null && shown != null && dotOnCar(shown, car, view.zoom, STANDING_MPS, dotHidden);
   if (onCar !== dotHidden) setDotHidden(onCar);
   const mapRef = useRef<MapRef>(null);
+  const moves = useMapControl(mapRef, cameraRef, mapSize);
+  useImperativeHandle(control, () => ({
+    pan: (dx, dy) => {
+      onOutsideGesture();
+      moves.pan(dx, dy);
+    },
+    fling: (vx, vy) => {
+      onOutsideGesture();
+      moves.fling(vx, vy);
+    },
+    zoom: (factor, focus, animated) => {
+      onOutsideGesture();
+      moves.zoom(factor, focus, animated);
+    },
+  }));
   // A long press where buildings are drawn: the street under the finger and whether it is on a building; then the pin
   // with what the map knew there.
   const longPress = (at: Coordinate, [x, y]: [number, number]) => {
@@ -229,7 +255,11 @@ export function MapSurface({
         ref={mapRef}
         mapStyle={mapStyle as ComponentProps<typeof Map>["mapStyle"]}
         style={{ flex: 1 }}
-        onLayout={(event) => setMapHeightPt(Math.round(event.nativeEvent.layout.height))}
+        onLayout={(event) => {
+          const { width, height } = event.nativeEvent.layout;
+          mapSize.current = { width, height };
+          setMapHeightPt(Math.round(height));
+        }}
         // The panels' blur redraws the views under it, and a GLSurfaceView (the default) isn't part of that drawing:
         // the blur came out empty. A TextureView is, so use it wherever blur runs (Android 12+).
         androidView={ANDROID_BLURS ? "texture" : "surface"}

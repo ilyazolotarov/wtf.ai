@@ -119,8 +119,21 @@ export type CarAction =
   | { action: "notes" }
   | { action: "session-ended" };
 
+/**
+ * The driver on the car's map, in the map's dp: `scroll`, the distance the finger went back since the last (the camera
+ * moves by it); `fling`, the finger's velocity, dp/s; `scale`, a pinch or double tap about a focus (-1, -1: none);
+ * `zoom`, the zoom buttons (+1 in, -1 out); `recentre`, the recentre button.
+ */
+export type CarMapGesture =
+  | { kind: "scroll"; dx: number; dy: number }
+  | { kind: "fling"; vx: number; vy: number }
+  | { kind: "scale"; x: number; y: number; factor: number }
+  | { kind: "zoom"; by: number }
+  | { kind: "recentre" };
+
 export type AndroidAutoEvents = {
   onCarAction: (event: CarAction) => void;
+  onMapGesture: (event: CarMapGesture) => void;
 };
 
 declare class AndroidAutoNativeModule extends NativeModule<AndroidAutoEvents> {
@@ -137,6 +150,8 @@ declare class AndroidAutoNativeModule extends NativeModule<AndroidAutoEvents> {
   openSearch(query: string): Promise<void>;
   /** The map, with a list or the search open over it gone (a place asked for is gone to). */
   showMap(): Promise<void>;
+  /** The recentre button: shown while the driver has moved the car's map or zoomed it from the follow zoom. */
+  setRecentre(shown: boolean): Promise<void>;
   /** The car's map has drawn its style: the map data credit shows from now. */
   mapDrawn(): Promise<void>;
   /** A place asked for, once: taking it clears it. */

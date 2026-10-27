@@ -131,6 +131,16 @@ src/components/car-screen/car-session.ts ◀───────┘  route, pla
   side calls `mapDrawn`) and fades after 5 s, as on the phone (UI-SPEC §6.1); no (i) button. It is a native view over
   the React root: React Native text on the car's display is drawn at the phone's density into a box laid out at the
   car's, and clipped (LogBox's too).
+- **Moving the map** (`CarMap`, `MapControl`): the map action strip has Android Auto's pan button (a touch screen
+  shows none; the finger moves the map), + and −, and recentre while the map is free or its follow zoom moved, so it
+  is also the way back to the zoom (`setRecentre`). The host hands the gestures to `CarMapSurface` (`SurfaceCallback`:
+  drag, fling, pinch or double tap; a rotary knob or touchpad in the host's pan mode), which sends them to the car's
+  JS map in its dp (`onMapGesture`). A drag or fling leaves following for free, the map where the finger took it, its
+  tilt and bearing kept; a pinch or the buttons zoom the free map, or while it follows move the follow zoom (−4 to +2
+  levels, `shiftedFollowZoom`). Free ends as on the phone (camera-policy.ts): 10 s after the last touch while the car
+  drives, the follow zoom kept; or recentre, which also puts the follow zoom back to its own level. Moves that come
+  while the last is applied (async, through `unproject`) are added up into one (`useMapControl`); the arithmetic is
+  `map-moves.ts` (Jest).
 - **Templates** (`CarScreens.kt`), built from the last state the session sent:
 
   | State | NavigationTemplate shows |
@@ -198,7 +208,8 @@ No Android device and no car: Android Auto runs on the emulator, the car's scree
    allow_listener` grants without the screens.
 3. The Desktop Head Unit (SDK package `extras;google;auto`): `desktop-head-unit.exe -c config/default_720p.ini`. It
    takes console commands: `tap x y`, `screenshot <file>`, `day`, `night`. A newly installed build appears in the
-   car's launcher after the head unit reconnects.
+   car's launcher after the head unit reconnects; so do its icons when a build adds drawables (until then Android
+   Auto draws the old build's at the shifted resource ids: a briefcase for the U-turn).
 4. `adb emu geo fix` along the route the app logs as `wtf-demo-route` (debug builds) drives the car.
 
 Checked this way (debug and release builds): the map, dot and route on the car with the phone's app in front, in the
@@ -213,7 +224,9 @@ the navigation guidance usage after a route started from the car (`dumpsys audio
 in phone-only mode held as a notice, its button starting the route; a JS reload clearing a stale notice. The
 turn-by-turn notification on a narrow head unit (`config/default.ini`, 800×480) with another app filling the screen:
 each maneuver popped up once with its arrow, distance and words in the app's language; a tap on it opening the app's
-screen with the route; none on the 1280×720 one, where the app's side panel stays; taken down at arrival.
+screen with the route; none on the 1280×720 one, where the app's side panel stays; taken down at arrival. Moving the
+map: a drag with the mouse leaving following, the recentre button then showing and bringing it back; − and + moving
+the follow zoom, recentre then showing and putting it back.
 
 ## 6. Not chosen
 
@@ -225,7 +238,8 @@ screen with the route; none on the 1280×720 one, where the app's side panel sta
 ## 7. Open items
 
 1. A real car, from the Play internal test track (§2); there, the car's assistant (VC-1) asking for places.
-2. Moving the map from the car: Android Auto's map buttons (pan, zoom, recentre) and gestures (`SurfaceCallback`).
+2. Moving the map with a rotary knob or touchpad (the host's pan mode), not yet seen: the Desktop Head Unit is a
+   touch screen, and its console taps but can't drag or pinch.
 3. A route's alternatives before following one (the route preview, ROUTING-SPEC §8.7).
 4. The instrument cluster (`FEATURE_CLUSTER`). The turn-by-turn notification in a rail, where an Android Auto
    version or a car draws one.

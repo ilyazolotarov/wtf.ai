@@ -93,6 +93,30 @@ internal class CarMapSurface(private val carContext: CarContext) : SurfaceCallba
     updateProps()
   }
 
+  // The driver's gestures on the map (touch screens; rotary and touchpad in pan mode), in the map's dp for the JS camera
+  // (ANDROID-AUTO-SPEC §4): a scroll's distance as the finger went back (the camera moves by it), a fling's velocity as
+  // the finger went, a scale's focus (-1: none, the map's centre) and factor.
+  override fun onScroll(distanceX: Float, distanceY: Float) {
+    val dp = density() ?: return
+    CarLink.gesture(mapOf("kind" to "scroll", "dx" to distanceX / dp, "dy" to distanceY / dp))
+  }
+
+  override fun onFling(velocityX: Float, velocityY: Float) {
+    val dp = density() ?: return
+    CarLink.gesture(mapOf("kind" to "fling", "vx" to velocityX / dp, "vy" to velocityY / dp))
+  }
+
+  override fun onScale(focusX: Float, focusY: Float, scaleFactor: Float) {
+    val dp = density() ?: return
+    val focused = focusX >= 0 && focusY >= 0
+    CarLink.gesture(
+      mapOf("kind" to "scale", "x" to if (focused) focusX / dp else -1f, "y" to if (focused) focusY / dp else -1f, "factor" to scaleFactor),
+    )
+  }
+
+  /** The map display's pixels per dp (its density is the car's times MAP_SCALE). */
+  private fun density(): Float? = container?.let { CarGuidanceLogic.mapDpi(it.dpi) / 160f }
+
   override fun onSurfaceDestroyed(surfaceContainer: SurfaceContainer) {
     CarLink.note("map surface destroyed")
     release()

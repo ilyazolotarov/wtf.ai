@@ -81,7 +81,11 @@ internal class NavigationScreen(carContext: CarContext) : Screen(carContext) {
           .build(),
       )
     }
-    val template = NavigationTemplate.Builder().setActionStrip(actions.build())
+    val template = NavigationTemplate.Builder()
+      .setActionStrip(actions.build())
+      .setMapActionStrip(mapActions())
+      // The host's pan mode (rotary and touchpad cars): its gestures come as on a touch screen; the camera is the JS map's.
+      .setPanModeListener { panning -> CarLink.note("map pan mode ${if (panning) "on" else "off"}") }
     when (card) {
       CarCard.NONE -> Unit
       CarCard.NOTICE -> {
@@ -110,6 +114,21 @@ internal class NavigationScreen(carContext: CarContext) : Screen(carContext) {
     }
     return template.build()
   }
+
+  /**
+   * The map's buttons (ANDROID-AUTO-SPEC §4): pan (on a touch screen the host shows none, the map takes the finger),
+   * zoom in and out, and recentre while the driver has moved the map or zoomed it from the follow zoom. The camera is the JS map's (`onMapGesture`).
+   */
+  private fun mapActions(): ActionStrip {
+    val strip = ActionStrip.Builder().addAction(Action.PAN)
+    if (CarLink.recentre) strip.addAction(mapAction(R.drawable.car_my_location, mapOf("kind" to "recentre")))
+    strip.addAction(mapAction(R.drawable.car_add, mapOf("kind" to "zoom", "by" to 1)))
+    strip.addAction(mapAction(R.drawable.car_remove, mapOf("kind" to "zoom", "by" to -1)))
+    return strip.build()
+  }
+
+  private fun mapAction(icon: Int, gesture: Map<String, Any?>) =
+    Action.Builder().setIcon(CarTemplates.icon(carContext, icon)).setOnClickListener { CarLink.gesture(gesture) }.build()
 
   /**
    * The notice's buttons. Location: Android's permission dialog on the phone, parked only (the host says so while the

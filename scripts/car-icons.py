@@ -50,6 +50,9 @@ ICONS = [
     "volume_up",
     "volume_off",
     "search",
+    "add",
+    "remove",
+    "my_location",
 ]
 
 TEMPLATE = """<?xml version="1.0" encoding="utf-8"?>

@@ -77,7 +77,7 @@ class AndroidAutoModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("AndroidAuto")
 
-    Events("onCarAction")
+    Events("onCarAction", "onMapGesture")
 
     OnCreate {
       CarLink.emit = { event, body -> sendEvent(event, body) }
@@ -137,6 +137,11 @@ class AndroidAutoModule : Module() {
     /** Muted or not; null: no voice, no button. */
     AsyncFunction("setVoiceMuted") { muted: Boolean? ->
       CarLink.setVoiceMuted(muted)
+    }.runOnQueue(Queues.MAIN)
+
+    /** The recentre button: shown while the driver has moved the car's map or zoomed it from the follow zoom. */
+    AsyncFunction("setRecentre") { shown: Boolean ->
+      CarLink.setRecentre(shown)
     }.runOnQueue(Queues.MAIN)
 
     /** What the driver must do first (`location`, `held-route`), shown instead of the route; null: nothing. */

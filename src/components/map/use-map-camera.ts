@@ -386,5 +386,13 @@ export function useMapCamera({
     }, 80);
   };
 
-  return { cameraRef, onRegionIsChanging, onRegionDidChange };
+  /**
+   * A gesture the map view didn't see (the car's screen) leaves following: the map stays where the finger took it, as
+   * after one of its own, not stepping back to `FREE_ZOOM`.
+   */
+  const onOutsideGesture = () => {
+    if (follow) leftByGesture.current = true;
+  };
+
+  return { cameraRef, onRegionIsChanging, onRegionDidChange, onOutsideGesture };
 }

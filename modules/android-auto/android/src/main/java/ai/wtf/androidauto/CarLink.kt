@@ -30,6 +30,10 @@ internal object CarLink {
   var voiceMuted: Boolean? = null
     private set
 
+  /** The recentre button: shown while the driver has moved the car's map or zoomed it from the follow zoom. */
+  var recentre = false
+    private set
+
   /** What the driver must do first, shown instead of the route; null: nothing. */
   var notice: CarNotice? = null
     private set
@@ -79,6 +83,12 @@ internal object CarLink {
   fun setVoiceMuted(value: Boolean?) {
     if (value == voiceMuted) return
     voiceMuted = value
+    session?.refresh()
+  }
+
+  fun setRecentre(value: Boolean) {
+    if (value == recentre) return
+    recentre = value
     session?.refresh()
   }
 
@@ -134,6 +144,14 @@ internal object CarLink {
       return
     }
     emit("onCarAction", body + ("action" to action))
+  }
+
+  /**
+   * The driver moved or zoomed the car's map, or pressed one of its buttons, for the car's JS map (`onMapGesture`). Not
+   * logged: a drag sends one every frame.
+   */
+  fun gesture(body: Map<String, Any?>) {
+    emit?.invoke("onMapGesture", body)
   }
 
   /**
