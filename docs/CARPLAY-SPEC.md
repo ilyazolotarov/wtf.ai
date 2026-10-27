@@ -53,7 +53,7 @@ What the scene life cycle changes:
    no scene has connected 3 s after a launch in the background (at once when launch options say location or
    Bluetooth). Device log: `background launch …, no scene`.
 3. Links (`wtfai://`, `geo:`) are forwarded by Expo's scene delegate: the development client's links and a `geo:` link
-   open the phone's screens on the simulator. Quick actions are unchecked.
+   open the phone's screens on the simulator.
 
 ## 4. The car's screen
 
@@ -205,7 +205,8 @@ GNSS and the adapter as they were. What the JS side sent is kept on the native s
 - **Location while the car shows the app**: iOS calls the app `inactive` then (the phone locked or elsewhere), not
   `active`; the background location session (TRIP-LOGGER-SPEC §4.3) counts the car's session as the app in front and
   as busy, so it is held from a session opened on the car alone and GNSS goes on while another app fills the car's
-  screen.
+  screen. The update check and the map packs' refresh key off `active`: a drive with only the car's screen updates
+  nothing, and they run when the phone's app opens.
 - **Places asked for**: a `geo:` (look for it) or `google.navigation:` (go there) link that comes to the car's scene is
   the session's request (SEARCH-SPEC §4.6), as Android Auto's navigation intents. Links opened on the phone go to the
   phone's route screen; Apple Maps links open Apple Maps, and are read when pasted into the search.
@@ -344,16 +345,11 @@ to a place outside the region for a failed plan, `holdRouteForGuide` for a held 
 ## 7. Open items
 
 1. **On a phone and in a car**, from TestFlight (the simulator can't): the adapter's restoration relaunch (§3); the
-   map at the car's own points in motion; the voice over the car's audio; the banners; the cluster's metadata.
-2. **AppState with only the car's screen in front**: iOS reports the app `inactive`. The navigator and the location
-   session follow the car's session (§4); the update check and the map packs' refresh key off `active` and wait for the
-   phone's app to open.
-3. Whether the CarPlay scene connects with `UIApplicationSupportsMultipleScenes` false (set true after Apple's sample).
-4. Links to the car's scene are read (§4) but not seen yet: the simulator gives links to the phone.
-5. Two MapLibre views on one JS thread with the particle filter's budget (SPEC §8.6): the car's exists only while it
-   shows.
-6. Quick actions through Expo's scene delegate (§3).
-7. Review: §4 meets the guidelines as read; App Review's verdict on the map data credit over the map is unknown.
-8. Later: the dashboard and instrument cluster scenes of the app's own (`CPSupportsDashboardNavigationScene`,
+   map at the car's own points in motion; the voice over the car's audio; the banners; the cluster's metadata; a link
+   to the car's scene (§4; the simulator gives links to the phone); the JS thread with the app open on both screens,
+   two maps smoothed ~30 times a second beside the particle filter, already over its budget (SPEC §8 risk 6). If it
+   drops frames, the phone's map stops smoothing while the car shows the app.
+2. Review: §4 meets the guidelines as read; App Review's verdict on the map data credit over the map is unknown.
+3. Later: the dashboard and instrument cluster scenes of the app's own (`CPSupportsDashboardNavigationScene`,
    `CPSupportsInstrumentClusterNavigationScene`); iOS 26.4's route sharing with the car; iOS 27's panels on the map
    template.
