@@ -6,6 +6,7 @@ import {
   STREET_PICK_LAYER,
   withBlackLabels,
   withHouseNumbers,
+  withLabelLanguage,
   withStreetLabels,
   withUprightLineNames,
 } from "@/config/map-labels";
@@ -134,5 +135,51 @@ describe("the light map's names", () => {
     // A halo where the style had none; the path's own, a little wider.
     expect(out.layers[0].paint).toMatchObject({ "text-halo-color": "rgba(255,255,255,0.9)", "text-halo-width": 1 });
     expect(out.layers[1].paint).toMatchObject({ "text-halo-color": "#f8f4f0", "text-halo-width": 1 });
+  });
+});
+
+describe("labels in the app's language", () => {
+  const liberty = ["case", ["has", "name:nonlatin"], ["concat", ["get", "name:latin"], "\n", ["get", "name:nonlatin"]], ["coalesce", ["get", "name_en"], ["get", "name"]]];
+  const named = (): MapStyleJson => ({
+    version: 8,
+    layers: [
+      { id: "label_city", type: "symbol", layout: { "text-field": liberty } },
+      { id: "housenumber", type: "symbol", layout: { "text-field": ["get", "housenumber"] } },
+      { id: "road_shield", type: "symbol", layout: { "text-field": ["to-string", ["get", "ref"]] } },
+      { id: "world_label_country_1", type: "symbol", layout: { "text-field": ["get", "name"] } },
+      { id: "world_water_name", type: "symbol", layout: { "text-field": ["concat", ["get", "name"], "\n", ["get", "name_uk"]] } },
+    ],
+  });
+  /** coalesce and get, as MapLibre reads them. */
+  const read = (e: unknown, props: Record<string, string>): unknown => {
+    const [op, ...args] = e as [string, ...unknown[]];
+    if (op === "get") return props[args[0] as string] ?? null;
+    if (op === "coalesce") return args.map((a) => read(a, props)).find((v) => v != null) ?? null;
+    throw new Error(`unexpected ${op}`);
+  };
+  const field = (s: MapStyleJson, id: string) => s.layers.find((l) => l.id === id)?.layout?.["text-field"];
+  const street = { name: "Софіївська вулиця", "name:uk": "Софіївська вулиця", "name:en": "Sofiivska Street", "name:latin": "Sofiivska vulytsia" };
+
+  test("one name, in Ukrainian or English, where Liberty wrote both", () => {
+    expect(read(field(withLabelLanguage(named(), "uk"), "label_city"), street)).toBe("Софіївська вулиця");
+    expect(read(field(withLabelLanguage(named(), "en"), "label_city"), street)).toBe("Sofiivska Street");
+  });
+
+  test("without a name in the language: the name on the ground, or its Latin form in English", () => {
+    const local = { name: "Lidl" };
+    expect(read(field(withLabelLanguage(named(), "uk"), "label_city"), local)).toBe("Lidl");
+    const noEnglish = { name: "вулиця Лугова", "name:latin": "vulytsia Luhova" };
+    expect(read(field(withLabelLanguage(named(), "en"), "label_city"), noEnglish)).toBe("vulytsia Luhova");
+  });
+
+  test("the world's names in the language where it has them; numbers and shields untouched", () => {
+    const sea = { name: "Ukrainian Sea", name_uk: "Українське море" };
+    expect(read(field(withLabelLanguage(named(), "uk"), "world_water_name"), sea)).toBe("Українське море");
+    expect(read(field(withLabelLanguage(named(), "en"), "world_water_name"), sea)).toBe("Ukrainian Sea");
+    expect(read(field(withLabelLanguage(named(), "uk"), "world_label_country_1"), { name: "Poland" })).toBe("Poland");
+    for (const language of ["en", "uk"] as const) {
+      expect(field(withLabelLanguage(named(), language), "housenumber")).toEqual(["get", "housenumber"]);
+      expect(field(withLabelLanguage(named(), language), "road_shield")).toEqual(["to-string", ["get", "ref"]]);
+    }
   });
 });

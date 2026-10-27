@@ -16,6 +16,7 @@ import { VoiceVolumeSection } from "@/components/route/voice-volume-section";
 import { SwitchRow } from "@/components/screens/setting-rows";
 import { WakeWithCar } from "@/components/vehicle/wake-with-car";
 import { privacyPolicyUrl, STORE_BUILD, SUPPORT_EMAIL } from "@/config/distribution";
+import { MAP_CREDIT } from "@/config/map";
 import { appCode } from "@/components/update/app-code";
 import { Icon } from "@/components/ui/icon";
 import { installId } from "@/services/telemetry";
@@ -159,7 +160,7 @@ export default function SettingsScreen() {
         {developerShown && <ScreenNote>{t("developerUnlocked")}</ScreenNote>}
         <ScreenRow labelKey="appCode" value={appCode(t)} />
         <ScreenRow labelKey="supportCode" value={installId()} />
-        <ScreenRow labelKey="mapData" value="© OpenStreetMap contributors · © OpenMapTiles" />
+        <ScreenRow labelKey="mapData" value={MAP_CREDIT} />
       </ScreenSection>
       {SUPPORT_EMAIL && (
         <ScreenAction

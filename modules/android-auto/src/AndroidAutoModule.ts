@@ -137,6 +137,8 @@ declare class AndroidAutoNativeModule extends NativeModule<AndroidAutoEvents> {
   openSearch(query: string): Promise<void>;
   /** The map, with a list or the search open over it gone (a place asked for is gone to). */
   showMap(): Promise<void>;
+  /** The car's map has drawn its style: the map data credit shows from now. */
+  mapDrawn(): Promise<void>;
   /** A place asked for, once: taking it clears it. */
   takeRequest(): Promise<CarRequest | null>;
   /** The native side's notes since the last call. */

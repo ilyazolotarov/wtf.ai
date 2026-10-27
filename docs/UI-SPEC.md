@@ -70,8 +70,12 @@ persisted in kv-store. No hardcoded user-facing strings in components.
   with the world drawn around it (`map-world.ts`) and street-level labels (`map-labels.ts`): house numbers from z15
   (the tiles' `housenumber` layer, which Liberty doesn't draw, above the buildings and below every other label) and
   shop and other POI names from z16, not Liberty's z15, without the POIs of no use to a driver (bins, recycling,
-  playgrounds, pitches, bicycle parking, shelters, bollards, information boards, drinking water, artworks);
-  `map-dark.ts` re-tints Liberty for the dark scheme (Night Drive: near-black ground, amber primary roads, orange
+  playgrounds, pitches, bicycle parking, shelters, bollards, information boards, drinking water, artworks); names in
+  the app's language only, one line each where Liberty writes the Latin and the local name (`withLabelLanguage`):
+  Ukrainian `name:uk`, else the local name; English `name:en`, else the tiles' Latin form; the world's country names
+  stay English (its file has no `name_uk` for them yet); the route's lines under every name (right below the house
+  numbers, `RouteLayers`), so a street's name reads on the route along it, its dots and the alternatives' times on
+  top; `map-dark.ts` re-tints Liberty for the dark scheme (Night Drive: near-black ground, amber primary roads, orange
   motorways and trunk roads, dark road names on a white halo, quiet grey house numbers);
   `map-palette.ts` reads the style's colours for the guide's drawn maps.
 
@@ -154,8 +158,10 @@ persisted in kv-store. No hardcoded user-facing strings in components.
 - **Navigate without an adapter** (Developer, off by default): with no OBD speed and GNSS not trusted, the dot is the
   phone's own dead reckoning (NAVIGATOR-SPEC §9.6), drawn as `dr` with its alternatives; its circle over 75 m, or
   5 km since its start, a placing or a trusted fix, offers the placing chip.
-- **Map data credit:** MapLibre's (i) button, bottom left, level with the camera button, opens "© OpenStreetMap
-  contributors · © OpenMapTiles" with links; Settings → About repeats it.
+- **Map data credit:** "© OpenStreetMap contributors · © OpenMapTiles" at the bottom left, level with the camera
+  button, as the map opens; it fades after 5 s (`MapCredit`; OSMF's attribution guidelines allow a credit that
+  collapses by itself after five seconds while the licence stays easy to find). Settings → About keeps it. No (i)
+  button on the map. The car's map does the same (ANDROID-AUTO-SPEC §4).
 - `useKeepAwake()` while the map screen is focused.
 
 ### 6.2 Camera modes and the dot's motion

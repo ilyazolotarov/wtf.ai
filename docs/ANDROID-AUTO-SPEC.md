@@ -127,6 +127,10 @@ src/components/car-screen/car-session.ts ◀───────┘  route, pla
   landmarks to check the dot by; their names 24 dp, their icons 36 dp. Airports keep their own label layer. No ways a car can't take (footways, steps, cycleways, pedestrian
   streets: in parks and yards their dashes were the busiest thing on the screen); service roads and tracks stay
   (`carMapStyle`, src/config/map-car.ts).
+- The map data credit shows in the visible map's bottom left corner once the car's map has drawn its style (the JS
+  side calls `mapDrawn`) and fades after 5 s, as on the phone (UI-SPEC §6.1); no (i) button. It is a native view over
+  the React root: React Native text on the car's display is drawn at the phone's density into a box laid out at the
+  car's, and clipped (LogBox's too).
 - **Templates** (`CarScreens.kt`), built from the last state the session sent:
 
   | State | NavigationTemplate shows |

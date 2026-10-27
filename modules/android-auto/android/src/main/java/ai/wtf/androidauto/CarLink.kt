@@ -111,6 +111,11 @@ internal object CarLink {
     session?.showMap()
   }
 
+  /** The car's map has drawn its style. */
+  fun mapDrawn() {
+    session?.mapDrawn()
+  }
+
   /** Kept until the JS side takes it (`takeRequest`): the session's task may not run yet. A newer one replaces it. */
   fun request(value: Request) {
     note("${if (value.navigate) "navigation" else "search"} asked for: ${value.uri}")

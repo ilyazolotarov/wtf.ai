@@ -3,6 +3,8 @@ import { useHeadingUp } from "@/components/map/use-compass-heading";
 import { I18nProvider } from "@/i18n/provider";
 import { PositionProvider, usePosition } from "@/providers/position-provider";
 
+import AndroidAuto from "../../../modules/android-auto/src/AndroidAutoModule";
+
 /** The part of the car's screen under Android Auto's cards and buttons, in dp from each edge. */
 export interface CarInsets {
   left?: number;
@@ -37,6 +39,8 @@ export function CarMapRoot({ dark = false, insets = {}, scale = 1 }: CarMapProps
 }
 
 const noop = () => {};
+// A build older than `mapDrawn` (an update reaches it) has none.
+const onMapDrawn = () => void AndroidAuto?.mapDrawn?.().catch(noop);
 
 /**
  * Heading-up puts the dot this far down the car's visible map (the phone: 0.8 of its whole map): a car's screen is
@@ -68,7 +72,9 @@ function CarMap({ dark, insets, scale }: Required<CarMapProps>) {
       onOwnScreen
       carScale={scale}
       headingUpDotAt={CAR_HEADING_UP_DOT_AT}
-      attributionPosition={{ bottom: padding.bottom + 8, left: padding.left + 8 }}
+      // The credit is native there (CarMapSurface): this display draws React Native text clipped.
+      creditAt={null}
+      onReady={onMapDrawn}
     />
   );
 }

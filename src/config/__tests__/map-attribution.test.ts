@@ -1,4 +1,4 @@
-import { MAP_ATTRIBUTION, withAttribution } from "@/config/map";
+import { MAP_ATTRIBUTION, MAP_CREDIT, withAttribution } from "@/config/map";
 
 describe("map attribution", () => {
   test("a vector source without a credit gets the OSM / OpenMapTiles one; others are left as they are", () => {
@@ -15,5 +15,10 @@ describe("map attribution", () => {
     expect(MAP_ATTRIBUTION).toContain("openstreetmap.org/copyright");
     expect(sources.credited.attribution).toBe("own");
     expect(sources.shade.attribution).toBeUndefined();
+  });
+
+  test("the credit the map and About show names both", () => {
+    expect(MAP_CREDIT).toContain("© OpenStreetMap contributors");
+    expect(MAP_CREDIT).toContain("© OpenMapTiles");
   });
 });

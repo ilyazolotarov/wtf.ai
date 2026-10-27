@@ -12,6 +12,7 @@ import type { Coordinate } from "@/nav/geo";
 import { useParkedCar, usePosition } from "@/providers/position-provider";
 
 import { useCarSprite, withCarSprite } from "./car-sprite";
+import { MapCredit, type CreditAt } from "./map-credit";
 import { useSmoothedPosition } from "./use-smoothed-position";
 import { useRoute } from "@/providers/route-provider";
 import { STANDING_MPS } from "@/services/navigation/place-request";
@@ -80,10 +81,12 @@ interface MapSurfaceProps {
   /** Changes when the route and its alternatives should be framed (they came while the car stood). */
   overview?: number | null;
   /**
-   * Where MapLibre's attribution button goes, in points from the map's edges: clear of the screen's panels, which
-   * would cover it.
+   * Where the map data credit shows as the map opens (`MapCredit`), in points from the map's edges: clear of the
+   * screen's panels, which would cover it. Null: none (the car's screen draws its own, CarMapSurface).
    */
-  attributionPosition?: { top?: number; bottom?: number; left?: number; right?: number };
+  creditAt?: CreditAt | null;
+  /** The map has drawn its style (the car's screen shows its credit from then). */
+  onReady?(): void;
   /** Light or dark: the phone's scheme by default; the car's screen has its own (ANDROID-AUTO-SPEC §4). */
   scheme?: "light" | "dark";
   /**
@@ -117,7 +120,8 @@ export function MapSurface({
   onTap,
   placedMark = null,
   overview = null,
-  attributionPosition = { bottom: 8, left: 18 },
+  creditAt = { bottom: 8, left: 18 },
+  onReady,
   scheme: schemeOverride,
   insets,
   onOwnScreen,
@@ -220,63 +224,69 @@ export function MapSurface({
     return <View style={{ flex: 1, backgroundColor: palette.bg }} />;
 
   return (
-    <Map
-      ref={mapRef}
-      mapStyle={mapStyle as ComponentProps<typeof Map>["mapStyle"]}
-      style={{ flex: 1 }}
-      onLayout={(event) => setMapHeightPt(Math.round(event.nativeEvent.layout.height))}
-      // The panels' blur redraws the views under it, and a GLSurfaceView (the default) isn't part of that drawing:
-      // the blur came out empty. A TextureView is, so use it wherever blur runs (Android 12+).
-      androidView={ANDROID_BLURS ? "texture" : "surface"}
-      attribution
-      attributionPosition={attributionPosition as ComponentProps<typeof Map>["attributionPosition"]}
-      compass={false}
-      logo={false}
-      scaleBar={false}
-      // Two-finger rotation fires during pinch zoom and can't be given a threshold; the map
-      // still turns in heading-up mode.
-      touchRotate={false}
-      // Tilt is the camera's (heading-up's navigator view): a two-finger drag, easily set off by a pinch, tilted the
-      // map while placing the car.
-      touchPitch={false}
-      onLongPress={(event: NativeSyntheticEvent<PressEvent>) => {
-        if (placing) return;
-        const [lon, lat] = event.nativeEvent.lngLat;
-        longPress({ lat, lon }, event.nativeEvent.point);
-      }}
-      onPress={(event: NativeSyntheticEvent<PressEvent>) => {
-        if (placing !== "heading") return;
-        const [lon, lat] = event.nativeEvent.lngLat;
-        onTap?.({ lat, lon });
-      }}
-      onRegionIsChanging={(event: NativeSyntheticEvent<ViewStateChangeEvent>) => {
-        onRegionIsChanging(event);
-        trackView(event);
-      }}
-      onRegionDidChange={(event: NativeSyntheticEvent<ViewStateChangeEvent>) => {
-        onRegionDidChange(event);
-        trackView(event);
-      }}
-      onDidFinishLoadingStyle={() => setMapReady(true)}
-    >
-      {/* Until the first position: the downloaded region, never a place outside it (an empty black map). */}
-      <Camera
-        ref={cameraRef}
-        initialViewState={
-          region
-            ? { bounds: region.bounds, pitch: 0, bearing: 0 }
-            : { zoom: INITIAL_ZOOM, pitch: 0, bearing: 0 }
-        }
-      />
-      {/* Placed in the style, above its house numbers: not part of the stack below. */}
-      <EntranceLayers url={entrancesUrl} />
-      {/* Bottom to top: MapLibre stacks layers in the order they are declared. */}
-      <RouteLayers route={route} palette={palette} onChoose={chooseAlternative} />
-      <ParkedCarLayers car={car} scheme={scheme} zoom={view.zoom} />
-      <MarkLayers pin={pin} placedMark={placedMark?.draft ? placedMark : null} palette={palette} scheme={scheme} />
-      <PositionLayers position={shown} compass={compass} palette={palette} scheme={scheme} view={view} hideCone={onCar} />
-      <DebugLayers position={position} palette={palette} />
-      <PuckLayers position={shown} palette={palette} scheme={scheme} hideDot={onCar} />
-    </Map>
+    <View style={{ flex: 1 }}>
+      <Map
+        ref={mapRef}
+        mapStyle={mapStyle as ComponentProps<typeof Map>["mapStyle"]}
+        style={{ flex: 1 }}
+        onLayout={(event) => setMapHeightPt(Math.round(event.nativeEvent.layout.height))}
+        // The panels' blur redraws the views under it, and a GLSurfaceView (the default) isn't part of that drawing:
+        // the blur came out empty. A TextureView is, so use it wherever blur runs (Android 12+).
+        androidView={ANDROID_BLURS ? "texture" : "surface"}
+        // The credit is MapCredit's, shown as the map opens: MapLibre's (i) stayed on the map for good.
+        attribution={false}
+        compass={false}
+        logo={false}
+        scaleBar={false}
+        // Two-finger rotation fires during pinch zoom and can't be given a threshold; the map
+        // still turns in heading-up mode.
+        touchRotate={false}
+        // Tilt is the camera's (heading-up's navigator view): a two-finger drag, easily set off by a pinch, tilted the
+        // map while placing the car.
+        touchPitch={false}
+        onLongPress={(event: NativeSyntheticEvent<PressEvent>) => {
+          if (placing) return;
+          const [lon, lat] = event.nativeEvent.lngLat;
+          longPress({ lat, lon }, event.nativeEvent.point);
+        }}
+        onPress={(event: NativeSyntheticEvent<PressEvent>) => {
+          if (placing !== "heading") return;
+          const [lon, lat] = event.nativeEvent.lngLat;
+          onTap?.({ lat, lon });
+        }}
+        onRegionIsChanging={(event: NativeSyntheticEvent<ViewStateChangeEvent>) => {
+          onRegionIsChanging(event);
+          trackView(event);
+        }}
+        onRegionDidChange={(event: NativeSyntheticEvent<ViewStateChangeEvent>) => {
+          onRegionDidChange(event);
+          trackView(event);
+        }}
+        onDidFinishLoadingStyle={() => {
+          setMapReady(true);
+          onReady?.();
+        }}
+      >
+        {/* Until the first position: the downloaded region, never a place outside it (an empty black map). */}
+        <Camera
+          ref={cameraRef}
+          initialViewState={
+            region
+              ? { bounds: region.bounds, pitch: 0, bearing: 0 }
+              : { zoom: INITIAL_ZOOM, pitch: 0, bearing: 0 }
+          }
+        />
+        {/* Placed in the style, above its house numbers: not part of the stack below. */}
+        <EntranceLayers url={entrancesUrl} />
+        {/* Bottom to top: MapLibre stacks layers in the order they are declared. */}
+        <RouteLayers route={route} palette={palette} onChoose={chooseAlternative} />
+        <ParkedCarLayers car={car} scheme={scheme} zoom={view.zoom} />
+        <MarkLayers pin={pin} placedMark={placedMark?.draft ? placedMark : null} palette={palette} scheme={scheme} />
+        <PositionLayers position={shown} compass={compass} palette={palette} scheme={scheme} view={view} hideCone={onCar} />
+        <DebugLayers position={position} palette={palette} />
+        <PuckLayers position={shown} palette={palette} scheme={scheme} hideDot={onCar} />
+      </Map>
+      {creditAt && <MapCredit at={creditAt} scheme={scheme} start={mapReady} />}
+    </View>
   );
 }

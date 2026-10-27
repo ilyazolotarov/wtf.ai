@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomBar } from "@/components/map/bottom-bar";
 import { CAMERA_BUTTON_SIZE, CameraButton } from "@/components/map/camera-button";
+import { MAP_CREDIT_HEIGHT } from "@/components/map/map-credit";
 import { NoFixCard, PermissionCard } from "@/components/map/center-cards";
 import { HeldRouteCard, PinCard } from "@/components/map/destination-cards";
 import { HudCard, HudChip, usePanelStyle } from "@/components/map/hud-card";
@@ -76,13 +77,13 @@ function mapFrame(turn: MapTurn, screen: { width: number; height: number }) {
 }
 
 /**
- * Where MapLibre's (i) goes, in the map's own frame: upright, above the bottom bar by the camera button; turned, where
- * no panel covers it: the middle of the screen's side edge (sideways), the bottom left (upside down).
+ * Where the map data credit shows, in the map's own frame: upright, above the bottom bar level with the camera button;
+ * turned, where no panel covers it: the middle of the screen's side edge (sideways), the bottom left (upside down).
  */
-function attributionAt(turn: MapTurn, bottom: number, screenHeight: number) {
+function creditAt(turn: MapTurn, bottom: number) {
   if (turn === 0) return { bottom, left: 18 };
   if (turn === 180) return { top: bottom, right: 18 };
-  return { bottom: OVERLAY_GUTTER, left: screenHeight / 2 - ATTRIBUTION_BUTTON / 2 };
+  return { bottom: OVERLAY_GUTTER, left: 0, right: 0 };
 }
 
 /** The walking compass for a phone held sideways: where the screen's top now points. */
@@ -93,14 +94,6 @@ function turnCompass<C extends { headingRad: number }>(compass: C | null, turn: 
 /** The map's panels from the screen's sides (and the side insets). */
 const OVERLAY_GUTTER = 14;
 
-/** MapLibre's attribution (i) button: a system info button on iOS (22 pt), the SDK's icon on Android (24 dp). */
-const ATTRIBUTION_BUTTON = Platform.OS === "ios" ? 22 : 24;
-/**
- * MapLibre places its ornaments from the system bars, not the screen's edge: iOS from the safe area (the home
- * indicator), Android above the navigation bar (2026-10-14: the (i) sat 46 dp above the camera button with a 48 dp
- * three-button bar). The bottom inset is already in.
- */
-const ATTRIBUTION_INSET = (bottomInset: number) => bottomInset;
 
 export default function HomeScreen() {
   useKeepAwake();
@@ -111,8 +104,7 @@ export default function HomeScreen() {
   // iOS: the bar may reach a little into the home indicator's strip. Android's bottom inset is its navigation bar (the
   // 3-button one is 48 dp of buttons): the bar stays above it, or its lower edge hid behind the buttons.
   const bottomPadding = Platform.OS === "android" ? insets.bottom + 8 : Math.max(insets.bottom - 6, 14);
-  // The bottom bar's height, for MapLibre's attribution button above it (OSM credit, UI-SPEC §6.1), level with the
-  // camera button: its centre is the bar, the stack's gap and half the button up from the bottom padding.
+  // The bottom bar's height, for the map data credit above it (UI-SPEC §6.1), level with the camera button: its centre is the bar, the stack's gap and half the button up from the bottom padding.
   const [barHeight, setBarHeight] = useState(72);
   const cameraCentre = bottomPadding + barHeight + styles.bottomStack.gap + CAMERA_BUTTON_SIZE / 2;
   const { t } = useT();
@@ -295,11 +287,7 @@ export default function HomeScreen() {
               onCenter={place.setCenter}
               onTap={place.aim}
               overview={overview}
-              attributionPosition={attributionAt(
-                turn,
-                cameraCentre - ATTRIBUTION_BUTTON / 2 - ATTRIBUTION_INSET(insets.bottom),
-                window.height,
-              )}
+              creditAt={creditAt(turn, cameraCentre - MAP_CREDIT_HEIGHT / 2)}
               placedMark={place.mark}
             />
           </View>

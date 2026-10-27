@@ -1,9 +1,10 @@
 import { useMemo } from "react";
 
 import { tintDarkStyle, type MapStyleJson } from "@/config/map-dark";
-import { withBlackLabels, withStreetLabels } from "@/config/map-labels";
+import { withBlackLabels, withLabelLanguage, withStreetLabels } from "@/config/map-labels";
 import { stylePalette, type MapPalette } from "@/config/map-palette";
 import { withWorld } from "@/config/map-world";
+import { useT } from "@/i18n/provider";
 import { readActiveStyle, readActiveWorld, useMapPacks, type InstalledState } from "@/services/offline-map/map-packs";
 
 /**
@@ -14,9 +15,14 @@ import { readActiveStyle, readActiveWorld, useMapPacks, type InstalledState } fr
 export type MapStyle = MapStyleJson;
 
 /**
- * The map data credit MapLibre's (i) button shows (OSMF attribution guidelines: in a corner of the map; OpenMapTiles
- * schema, CC BY 4.0). Map packs built before 2026-10-10 carry none in their style, so it is set on every vector source
- * that lacks one.
+ * The map data credit (OSMF attribution guidelines; OpenMapTiles schema, CC BY 4.0): the map shows it as it opens
+ * (`MapCredit`), Settings → About keeps it.
+ */
+export const MAP_CREDIT = "© OpenStreetMap contributors · © OpenMapTiles";
+
+/**
+ * The credit with links, on each vector source of the style, for whatever reads a style's attribution. Map packs built
+ * before 2026-10-10 carry none in their style, so it is set on every vector source that lacks one.
  */
 export const MAP_ATTRIBUTION =
   '<a href="https://www.openstreetmap.org/copyright">© OpenStreetMap contributors</a> ' +
@@ -31,12 +37,16 @@ export function withAttribution(style: MapStyleJson): MapStyleJson {
   return { ...style, sources: fixed };
 }
 
-/** Active offline region's style for the scheme, or `null` when there is no usable pack. */
-function packStyle(installed: InstalledState, scheme: "light" | "dark"): MapStyleJson | null {
+/**
+ * Active offline region's style for the scheme, its names in `language` (both, as the packs have them, without), or
+ * `null` when there is no usable pack.
+ */
+function packStyle(installed: InstalledState, scheme: "light" | "dark", language?: "en" | "uk"): MapStyleJson | null {
   try {
     const read = readActiveStyle(installed);
     if (!read) return null;
-    const style = withWorld(withStreetLabels(withAttribution(read)), readActiveWorld(installed));
+    const world = withWorld(withStreetLabels(withAttribution(read)), readActiveWorld(installed));
+    const style = language ? withLabelLanguage(world, language) : world;
     return scheme === "dark" ? tintDarkStyle(style) : withBlackLabels(style);
   } catch (error) {
     console.warn("Offline map style unreadable", error);
@@ -44,10 +54,11 @@ function packStyle(installed: InstalledState, scheme: "light" | "dark"): MapStyl
   }
 }
 
-/** Style for the current scheme; `null` while no offline region is usable. */
+/** Style for the current scheme, named in the app's language; `null` while no offline region is usable. */
 export function useMapStyle(scheme: "light" | "dark"): MapStyle | null {
   const { installed } = useMapPacks();
-  return useMemo(() => packStyle(installed, scheme), [installed, scheme]);
+  const { language } = useT();
+  return useMemo(() => packStyle(installed, scheme, language), [installed, scheme, language]);
 }
 
 /** Palettes read from each install's styles, so every lesson map doesn't parse the style again. */

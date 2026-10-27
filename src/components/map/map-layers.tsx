@@ -2,6 +2,7 @@ import { GeoJSONSource, Layer } from "@maplibre/maplibre-react-native";
 import { useMemo } from "react";
 import { type NativeSyntheticEvent, PixelRatio } from "react-native";
 
+import { HOUSE_NUMBER_LAYER } from "@/config/map-labels";
 import type { Palette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
 import type { Coordinate } from "@/nav/geo";
@@ -64,6 +65,13 @@ const ROUTE_HEAD_LAYOUT = { "line-cap": "butt", "line-join": "round" } as const;
 function deadReckoning(position: PositionEstimate | null): boolean {
   return position != null && position.trust !== "TRUSTED";
 }
+
+/**
+ * The route's lines go under the map's names: right below the house numbers, the first label above the buildings
+ * (`map-labels.ts`), so a street's name stays readable on the route along it. Its dots and the alternatives' times
+ * stay on top.
+ */
+const UNDER_NAMES = HOUSE_NUMBER_LAYER;
 
 /**
  * The route (ROUTING-SPEC §8): only what is ahead of the car, faded while planning again, its next maneuver, the
@@ -136,12 +144,12 @@ export function RouteLayers({
   return (
     <>
       <GeoJSONSource id="alternative-routes" data={alternativeLines} onPress={pickAlternative}>
-        <Layer id="alternative-route-casing" type="line" layout={ROUTE_LAYOUT} paint={{ "line-color": palette.routeAltCasing, "line-width": 8 }} />
-        <Layer id="alternative-route-line" type="line" layout={ROUTE_LAYOUT} paint={{ "line-color": palette.routeAlt, "line-width": 5 }} />
+        <Layer id="alternative-route-casing" type="line" beforeId={UNDER_NAMES} layout={ROUTE_LAYOUT} paint={{ "line-color": palette.routeAltCasing, "line-width": 8 }} />
+        <Layer id="alternative-route-line" type="line" beforeId={UNDER_NAMES} layout={ROUTE_LAYOUT} paint={{ "line-color": palette.routeAlt, "line-width": 5 }} />
       </GeoJSONSource>
       <GeoJSONSource id="active-route" data={routeAhead}>
-        <Layer id="active-route-casing" type="line" layout={ROUTE_LAYOUT} paint={routeCasing} />
-        <Layer id="active-route-line" type="line" layout={ROUTE_LAYOUT} paint={routePaint} />
+        <Layer id="active-route-casing" type="line" beforeId={UNDER_NAMES} layout={ROUTE_LAYOUT} paint={routeCasing} />
+        <Layer id="active-route-line" type="line" beforeId={UNDER_NAMES} layout={ROUTE_LAYOUT} paint={routePaint} />
       </GeoJSONSource>
       {/*
         The stretch the car is on: the route dashed over its solid casing, the route dimmed in the gaps (the dashes
@@ -149,9 +157,9 @@ export function RouteLayers({
         `ROUTE_LINE`).
       */}
       <GeoJSONSource id="active-route-head" data={routeHead}>
-        <Layer id="active-route-head-casing" type="line" layout={ROUTE_HEAD_LAYOUT} paint={routeHeadCasing} />
-        <Layer id="active-route-head-underlay" type="line" layout={ROUTE_HEAD_LAYOUT} paint={routeHeadUnderlay} />
-        <Layer id="active-route-head-line" type="line" layout={ROUTE_HEAD_LAYOUT} paint={routeHeadPaint} />
+        <Layer id="active-route-head-casing" type="line" beforeId={UNDER_NAMES} layout={ROUTE_HEAD_LAYOUT} paint={routeHeadCasing} />
+        <Layer id="active-route-head-underlay" type="line" beforeId={UNDER_NAMES} layout={ROUTE_HEAD_LAYOUT} paint={routeHeadUnderlay} />
+        <Layer id="active-route-head-line" type="line" beforeId={UNDER_NAMES} layout={ROUTE_HEAD_LAYOUT} paint={routeHeadPaint} />
       </GeoJSONSource>
       <GeoJSONSource id="route-next-maneuver" data={maneuverPoint}>
         <Layer

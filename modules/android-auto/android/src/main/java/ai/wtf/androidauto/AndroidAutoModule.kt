@@ -159,6 +159,11 @@ class AndroidAutoModule : Module() {
       CarLink.showMap()
     }.runOnQueue(Queues.MAIN)
 
+    /** The car's map has drawn its style: the map data credit shows from now (CarMapSurface). */
+    AsyncFunction("mapDrawn") {
+      CarLink.mapDrawn()
+    }.runOnQueue(Queues.MAIN)
+
     /** A place the car's assistant or another app asked for, once: `{ navigate, uri }`, or null. */
     AsyncFunction("takeRequest") {
       CarLink.takeRequest()?.let { mapOf("navigate" to it.navigate, "uri" to it.uri) }

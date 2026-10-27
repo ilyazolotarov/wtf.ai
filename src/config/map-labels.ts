@@ -157,6 +157,36 @@ export function withBlackLabels(style: MapStyleJson): MapStyleJson {
 }
 
 /**
+ * Names in the app's language only, one line each: Liberty writes every name twice where the local one isn't Latin
+ * ("Sofiivska Street" over "Софіївська вулиця"), twice the room on a crowded screen. Ukrainian: `name:uk`, else the
+ * name on the ground; English: `name:en`, else the tiles' Latin form (Planetiler transliterates). The world's labels
+ * (`map-world`) the same: `name_uk` where it has one.
+ */
+export function labelName(language: "en" | "uk"): unknown[] {
+  return language === "uk"
+    ? ["coalesce", ["get", "name:uk"], ["get", "name"]]
+    : ["coalesce", ["get", "name:en"], ["get", "name:latin"], ["get", "name"]];
+}
+
+const worldName = (language: "en" | "uk") => (language === "uk" ? ["coalesce", ["get", "name_uk"], ["get", "name"]] : ["get", "name"]);
+
+/** Liberty's two-language name field: the tiles' `name:latin` and `name:nonlatin`. */
+const isBilingual = (field: unknown) => JSON.stringify(field).includes('"name:nonlatin"');
+
+export function withLabelLanguage(style: MapStyleJson, language: "en" | "uk"): MapStyleJson {
+  return {
+    ...style,
+    layers: style.layers.map((l) => {
+      const field = l.layout?.["text-field"];
+      if (l.type !== "symbol" || field === undefined) return l;
+      const world = l.id.startsWith("world_") && JSON.stringify(field).includes('"name"');
+      if (!isBilingual(field) && !world) return l;
+      return { ...l, layout: { ...l.layout, "text-field": world ? worldName(language) : labelName(language) } };
+    }),
+  };
+}
+
+/**
  * All: house numbers from z15, POI names from z16, no bins, playgrounds and the like, the streets a press names, names
  * along lines upright.
  */

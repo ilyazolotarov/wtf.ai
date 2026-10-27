@@ -5,9 +5,16 @@ import android.app.Presentation
 import android.graphics.Color
 import android.graphics.Rect
 import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.GradientDrawable
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.os.Bundle
+import android.util.TypedValue
+import android.view.Gravity
+import android.view.View
+import android.view.ViewGroup
+import android.widget.FrameLayout
+import android.widget.TextView
 import androidx.car.app.CarContext
 import androidx.car.app.SurfaceCallback
 import androidx.car.app.SurfaceContainer
@@ -25,6 +32,9 @@ import com.facebook.react.runtime.ReactSurfaceImpl
  *
  * The root gets the car's day or night and the part of the screen the template's cards leave visible as props, and is
  * stopped when the surface goes (the driver opened another app on the car's screen, or the car disconnected).
+ *
+ * The map data credit over it is a native view: React Native text on this display is drawn at the phone's density and
+ * clipped to a box laid out at the car's.
  */
 internal class CarMapSurface(private val carContext: CarContext) : SurfaceCallback {
   private var display: VirtualDisplay? = null
@@ -33,6 +43,7 @@ internal class CarMapSurface(private val carContext: CarContext) : SurfaceCallba
   private var frames: CarFabricFrames? = null
   private var container: SurfaceContainer? = null
   private var visibleArea: Rect? = null
+  private var credit: TextView? = null
 
   override fun onSurfaceAvailable(surfaceContainer: SurfaceContainer) {
     val target = surfaceContainer.surface
@@ -59,8 +70,15 @@ internal class CarMapSurface(private val carContext: CarContext) : SurfaceCallba
       this.surface = surface
       val view = surface.view ?: throw IllegalStateException("React surface without a view")
       presentation.window?.setBackgroundDrawable(ColorDrawable(if (carContext.isDarkMode) Color.BLACK else Color.WHITE))
-      presentation.setContentView(view)
+      val root = FrameLayout(presentation.context)
+      root.addView(view, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+      val credit = creditView(presentation.context)
+      this.credit = credit
+      root.addView(credit)
+      placeCredit()
+      presentation.setContentView(root)
       presentation.show()
+
       surface.start()
       frames = CarFabricFrames(host) { restartIfStopped() }.also { it.start() }
     } catch (e: Exception) {
@@ -71,6 +89,7 @@ internal class CarMapSurface(private val carContext: CarContext) : SurfaceCallba
 
   override fun onVisibleAreaChanged(visibleArea: Rect) {
     this.visibleArea = Rect(visibleArea)
+    placeCredit()
     updateProps()
   }
 
@@ -82,6 +101,7 @@ internal class CarMapSurface(private val carContext: CarContext) : SurfaceCallba
   /** The car switched between day and night. */
   fun onDarkModeChanged() {
     presentation?.window?.setBackgroundDrawable(ColorDrawable(if (carContext.isDarkMode) Color.BLACK else Color.WHITE))
+    credit?.let { paintCredit(it) }
     updateProps()
   }
 
@@ -102,6 +122,8 @@ internal class CarMapSurface(private val carContext: CarContext) : SurfaceCallba
       CarLink.note("map presentation dismiss failed: ${e.javaClass.simpleName}: ${e.message}", problem = true)
     }
     presentation = null
+    credit?.animate()?.cancel()
+    credit = null
     display?.release()
     display = null
     container = null
@@ -130,6 +152,49 @@ internal class CarMapSurface(private val carContext: CarContext) : SurfaceCallba
     }
   }
 
+  /**
+   * The map data credit (UI-SPEC §6.1, `MAP_CREDIT` in src/config/map.ts): in the visible map's bottom left corner once
+   * the map has drawn (`showCredit`), faded after 5 s, as on the phone.
+   */
+  private fun creditView(context: android.content.Context) = TextView(context).apply {
+    text = CREDIT
+    setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+    val dp = resources.displayMetrics.density
+    setPadding((6 * dp).toInt(), (3 * dp).toInt(), (6 * dp).toInt(), (3 * dp).toInt())
+    paintCredit(this)
+    visibility = View.GONE
+  }
+
+  /** The phone's map colours (constants/theme.ts): `text2` on `bg` at 80 %. */
+  private fun paintCredit(view: TextView) {
+    val dark = carContext.isDarkMode
+    view.setTextColor(if (dark) 0xFFA6A29B.toInt() else 0xFF6B675F.toInt())
+    view.background = GradientDrawable().apply {
+      cornerRadius = 6 * view.resources.displayMetrics.density
+      setColor(if (dark) 0xCC121211.toInt() else 0xCCF5F4F1.toInt())
+    }
+  }
+
+  /** Once the map has drawn (the JS side says so): before, the screen is blank, and the credit would fade over it. */
+  fun showCredit() {
+    val view = credit ?: return
+    if (view.visibility == View.VISIBLE || view.alpha < 1f) return
+    view.visibility = View.VISIBLE
+    view.animate().alpha(0f).setStartDelay(CREDIT_SHOWN_MS).setDuration(CREDIT_FADE_MS).withEndAction { view.visibility = View.GONE }
+  }
+
+  /** 8 dp in from the visible map's bottom left corner: clear of the template's cards. */
+  private fun placeCredit() {
+    val view = credit ?: return
+    val c = container ?: return
+    val area = visibleArea ?: Rect(0, 0, c.width, c.height)
+    val gap = (8 * view.resources.displayMetrics.density).toInt()
+    view.layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.START).apply {
+      leftMargin = area.left + gap
+      bottomMargin = c.height - area.bottom + gap
+    }
+  }
+
   private fun updateProps() {
     (surface as? ReactSurfaceImpl)?.updateInitProps(props())
   }
@@ -152,5 +217,8 @@ internal class CarMapSurface(private val carContext: CarContext) : SurfaceCallba
     const val MODULE = "CarMap"
     private const val DISPLAY_NAME = "wtf.ai car map"
     private const val RESTART_CHECK_MS = 1000L
+    private const val CREDIT = "© OpenStreetMap contributors · © OpenMapTiles"
+    private const val CREDIT_SHOWN_MS = 5000L
+    private const val CREDIT_FADE_MS = 600L
   }
 }
