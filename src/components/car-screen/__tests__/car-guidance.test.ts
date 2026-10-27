@@ -59,21 +59,21 @@ describe("car distance", () => {
 
 describe("car route", () => {
   test("none without a route", () => {
-    expect(carRoute(null, t)).toBeNull();
+    expect(carRoute(null, t, "en")).toBeNull();
   });
 
   test("planning, and a plan without progress on it yet, say so", () => {
-    expect(carRoute(route(undefined, { status: "planning", plan: undefined }), t)).toMatchObject({ status: "planning", message: en.planningRoute, steps: [] });
-    expect(carRoute(route(undefined), t)).toMatchObject({ status: "planning" });
+    expect(carRoute(route(undefined, { status: "planning", plan: undefined }), t, "en")).toMatchObject({ status: "planning", message: en.planningRoute, steps: [] });
+    expect(carRoute(route(undefined), t, "en")).toMatchObject({ status: "planning" });
   });
 
   test("a failed plan says why", () => {
-    expect(carRoute(route(undefined, { status: "failed", failure: "no-route" }), t)).toMatchObject({ status: "failed", message: en.routeNoRoute });
-    expect(carRoute(route(undefined, { status: "failed" }), t)).toMatchObject({ status: "failed", message: en.routeCancelled });
+    expect(carRoute(route(undefined, { status: "failed", failure: "no-route" }), t, "en")).toMatchObject({ status: "failed", message: en.routeNoRoute });
+    expect(carRoute(route(undefined, { status: "failed" }), t, "en")).toMatchObject({ status: "failed", message: en.routeCancelled });
   });
 
   test("the next maneuver with the distance to it, its time at the plan's pace, and what is left", () => {
-    const r = carRoute(route(step({})), t)!;
+    const r = carRoute(route(step({})), t, "en")!;
     expect(r).toMatchObject({
       status: "active",
       destinationName: "Kyiv",
@@ -84,24 +84,46 @@ describe("car route", () => {
       remainingUnit: "km1",
     });
     expect(r.steps).toEqual([
-      { kind: "left", exit: null, instruction: "Turn left", distanceM: 400, timeS: 36, shownDistance: 400, shownUnit: "m" },
+      {
+        id: "left:@50.45000,30.52000",
+        kind: "left",
+        exit: null,
+        instruction: "Turn left",
+        distanceM: 400,
+        timeS: 36,
+        shownDistance: 400,
+        shownUnit: "m",
+        distanceText: "400 m",
+      },
     ]);
   });
 
+  test("the distance written in the app's language, for the notification", () => {
+    const r = carRoute(route(step({ toNextM: 1_234 })), t, "uk")!;
+    expect(r.steps[0].distanceText).toBe("1,2 км");
+  });
+
+  test("a maneuver keeps its id across plans, and two at one place differ", () => {
+    const a = carRoute(route(step({ thenIndex: 2 })), t, "en")!;
+    const b = carRoute(route(step({ thenIndex: 2 }), { planId: 4, maneuvers: [m("depart", 0), m("left", 900), m("roundabout", 1000, 2), m("arrive", 9000)] }), t, "en")!;
+    expect(b.steps.map((s) => s.id)).toEqual(a.steps.map((s) => s.id));
+    expect(a.steps[0].id).not.toBe(a.steps[1].id);
+  });
+
   test("the maneuver after it when it follows closely, measured from the car as the trip's estimates are", () => {
-    const r = carRoute(route(step({ thenIndex: 2 })), t)!;
+    const r = carRoute(route(step({ thenIndex: 2 })), t, "en")!;
     expect(r.steps.map((s) => [s.instruction, s.distanceM, s.timeS, s.shownDistance, s.exit])).toEqual([
       ["Turn left", 400, 36, 400, null],
       ["At the roundabout, exit 2", 500, 45, 500, 2],
     ]);
   });
 
-  test("planning again keeps the route, flagged", () => {
-    expect(carRoute(route(step({}), { replanning: true }), t)).toMatchObject({ status: "active", replanning: true });
+  test("planning again keeps the route, flagged, and says so", () => {
+    expect(carRoute(route(step({}), { replanning: true }), t, "en")).toMatchObject({ status: "active", replanning: true, message: en.planningRoute });
   });
 
   test("arrival", () => {
-    expect(carRoute(route(step({ state: "arrived", nextIndex: 3, toNextM: 0, remainingM: 0, remainingS: 0 })), t)).toMatchObject({
+    expect(carRoute(route(step({ state: "arrived", nextIndex: 3, toNextM: 0, remainingM: 0, remainingS: 0 })), t, "en")).toMatchObject({
       status: "arrived",
       message: en.arrived,
       steps: [],

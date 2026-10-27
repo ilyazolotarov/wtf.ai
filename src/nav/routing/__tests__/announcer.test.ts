@@ -87,6 +87,62 @@ describe("Announcer", () => {
     ]);
   });
 
+  test("re-plans in a row with nothing said between them say 'route recalculated' once", () => {
+    const a = new Announcer();
+    a.update(at(0));
+    expect(a.update({ ...at(0, {}, 2), planReason: "off-route" })).toEqual([{ kind: "replanned" }]);
+    expect(a.update({ ...at(0, {}, 3), planReason: "off-route" })).toEqual([]);
+    // Something said since: the next re-plan says it again.
+    expect(a.update({ ...at(700, {}, 3), planReason: "off-route" })).toEqual([expect.objectContaining({ stage: "prepare" })]);
+    expect(a.update({ ...at(710, {}, 4), planReason: "off-route" })).toEqual([{ kind: "replanned" }]);
+  });
+
+  test("a re-plan doesn't say again the maneuver still ahead; one reached again round the block is said", () => {
+    const a = new Announcer();
+    expect(a.update(at(700))).toEqual([expect.objectContaining({ stage: "prepare" })]);
+    // Re-planned 300 m before the same left turn (a new plan from the car: its distances start there).
+    const again = [m("depart", 0), m("left", 300), m("arrive", 1300)];
+    const replan = (planId: number, maneuvers: Maneuver[], alongM: number, nextIndex: number): AnnouncerInput => ({
+      ...at(0, { alongM, nextIndex, toNextM: maneuvers[nextIndex].atM - alongM, thenIndex: null }, planId),
+      planReason: "off-route",
+      maneuvers,
+    });
+    expect(a.update(replan(2, again, 0, 1))).toEqual([{ kind: "replanned" }]);
+    // The car missed it: the route goes round the block, back to the same turn 900 m on.
+    const round = [m("depart", 0), m("right", 200), m("right", 500), m("left", 900), m("arrive", 1900)];
+    a.update(replan(3, round, 0, 1));
+    const said = [];
+    for (let along = 600; along <= 900; along += 10) said.push(...a.update(replan(3, round, along, 3)));
+    expect(said).toEqual([expect.objectContaining({ stage: "prepare" }), expect.objectContaining({ stage: "now" })]);
+  });
+
+  test("turning around at the start is said once while the car drives on away from it; made, a new one is said", () => {
+    const turn = (lat: number): Maneuver[] => [m("depart", 0), { ...m("u-turn", 0), lat }, m("left", 600), m("arrive", 1500)];
+    const start = (planId: number, lat: number, more: Partial<GuidanceStep> = {}): AnnouncerInput => ({
+      ...at(0, { alongM: 0, nextIndex: 1, toNextM: 0, thenIndex: null, ...more }, planId),
+      planReason: "off-route",
+      maneuvers: turn(lat),
+    });
+    const a = new Announcer();
+    a.update(at(0));
+    expect(a.update(start(2, 51))).toEqual([{ kind: "replanned" }, expect.objectContaining({ stage: "now" })]);
+    // 200 m further on, the car still going the other way.
+    expect(a.update(start(3, 51.002))).toEqual([{ kind: "replanned" }]);
+    // Turned around and drove on; later the route needs turning around again.
+    a.update(start(3, 51.002, { alongM: 300, nextIndex: 2, toNextM: 300 }));
+    expect(a.update(start(4, 51.01))).toEqual([{ kind: "replanned" }, expect.objectContaining({ stage: "now" })]);
+  });
+
+  test("the driver keeps to their own way: nothing but arrival until they follow the route", () => {
+    const a = new Announcer();
+    a.update(at(0));
+    expect(a.update({ ...at(700, {}, 2), planReason: "off-route", ownWay: true })).toEqual([]);
+    expect(a.update({ ...at(990, {}, 2), planReason: "off-route", ownWay: true })).toEqual([]);
+    // Following it: what is ahead is said again as it comes.
+    expect(a.update({ ...at(1000, {}, 2), planReason: "off-route" })).toEqual([expect.objectContaining({ stage: "now" })]);
+    expect(a.update({ ...at(2000, { state: "arrived" }, 3), planReason: "off-route", ownWay: true })).toEqual([{ kind: "arrived" }]);
+  });
+
   test("a maneuver already closer than the spoken distance (a route starting near it): the nearest", () => {
     const a = new Announcer();
     expect(a.update({ ...at(780), planId: 3 })).toEqual([expect.objectContaining({ stage: "prepare", distanceM: 200 })]);

@@ -223,7 +223,7 @@ One small component each; the screen only places them and wires their state. Car
 
 | Position | Component | Content |
 | --- | --- | --- |
-| Top | `StatusRow` | The status pill: the trust state in words, coloured by it ("Position trusted", "GPS looks spoofed", "GPS is back — verifying", "No GPS signal", and "Approximate location" when the only position is a Wi-Fi/cell one), the source ("GNSS", "Car sensors", "Phone sensors only", "Verifying GNSS", "Set on the map"); the speed in km/h beside it. A tap unfolds the details: the alert text and the last trusted fix's strip, the outage card and "Cut GPS", the manual position's chip |
+| Top | `StatusRow` | The status pill: the trust state in words, coloured by it ("Position trusted", "GPS looks spoofed", "GPS is back — verifying", "No GPS signal", and "Approximate location" when the only position is a Wi-Fi/cell one), the source ("GPS", "Car sensors", "Phone sensors only", "Verifying GPS", "Set on the map"); user-facing text uses GPS rather than GNSS. The speed in km/h beside it. A tap unfolds the details: the alert text and the last trusted fix's strip, the outage card and "Cut GPS", the manual position's chip |
 | Top | `SinceTrustedStrip` (`trust-cards.tsx`) | Unfolded under the trust alert, while GNSS isn't trusted, from a minute after the last trusted fix: "Last trusted GPS: 4 min ago, 2.3 km back" |
 | Top | `RouteBanner` | Only with a route (below) |
 | Top | `trust-cards.tsx`, `placing-cards.tsx` | Trust alert, simulated outage, the parked-pose question, placing (`usePlacing`), "Are you still here?", the manual chip |

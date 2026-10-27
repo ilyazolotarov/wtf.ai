@@ -316,7 +316,7 @@ internal object CarTemplates {
     }
 
   /** The phone banner's icons (MANEUVER_ICON in src/components/route/guidance-text.ts), drawn by scripts/car-icons.py. */
-  private fun maneuverIcon(type: CarManeuverType): Int =
+  fun maneuverIcon(type: CarManeuverType): Int =
     when (type) {
       CarManeuverType.DEPART, CarManeuverType.STRAIGHT -> R.drawable.car_straight
       CarManeuverType.TURN_SLIGHT_LEFT -> R.drawable.car_turn_slight_left

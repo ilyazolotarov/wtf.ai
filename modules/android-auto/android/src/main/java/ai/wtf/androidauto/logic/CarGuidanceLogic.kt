@@ -27,6 +27,8 @@ enum class CarDistanceUnit { METERS, KILOMETERS, KILOMETERS_P1 }
 
 /** One maneuver ahead, as the JS side sends it (src/components/car-screen/car-guidance.ts). */
 data class CarStep(
+  /** The same maneuver on the road keeps it across plans (`carManeuverId`). */
+  val id: String,
   /** The app's maneuver kind (src/nav/routing/maneuvers.ts). */
   val kind: String,
   /** Roundabouts: the exit to take, 1-based. */
@@ -39,17 +41,21 @@ data class CarStep(
   /** The distance from the car as the phone's banner rounds it: a value and "m", "km" or "km1" (one decimal). */
   val shownDistance: Double,
   val shownUnit: String,
+  /** The same as the phone's banner writes it, in the app's language ("1,2 км"). */
+  val distanceText: String,
 )
 
 /** The route as the car's screen shows it. */
 data class CarRoute(
   /** `planning`, `active`, `arrived` or `failed`. */
   val status: String,
-  /** What the screen says instead of a maneuver: planning, a failure, arrival. */
+  /** What the screen says instead of a maneuver: planning (again), a failure, arrival. */
   val message: String?,
   val destinationName: String,
   /** Planning again after leaving the route: the old maneuvers are no guide meanwhile. */
   val replanning: Boolean,
+  /** The driver keeps to their own way (another navigator's): the route shows, nothing pops up until they follow it. */
+  val quiet: Boolean,
   /** The next maneuver, and the one after when it follows closely. */
   val steps: List<CarStep>,
   val remainingM: Double,
@@ -115,6 +121,22 @@ enum class CarCard {
 
 /** What the car's navigation session (NavigationManager) is told for a route state. */
 enum class SessionStep { NONE, START, UPDATE, END }
+
+/**
+ * The turn-by-turn notification (quality guideline NF-3): the next maneuver in the car's rail while another app fills
+ * its screen, popping up (`alert`, a heads-up notification) once per maneuver as it comes near. While the route is
+ * planned (again) it says so, with no maneuver.
+ */
+data class CarTurnNotification(
+  /** The distance to the maneuver ("300 m"), or the planning message. */
+  val title: String,
+  /** The maneuver's words; empty while planning. */
+  val text: String,
+  /** Null: no maneuver (planning), the app's navigation icon. */
+  val maneuver: CarManeuverType?,
+  /** The maneuver to pop up for now (`CarStep.id`); null: an update of the rail alone. */
+  val alertFor: String?,
+)
 
 object CarGuidanceLogic {
   fun maneuverType(kind: String): CarManeuverType? =
@@ -183,6 +205,27 @@ object CarGuidanceLogic {
       wasNavigating -> SessionStep.END
       else -> SessionStep.NONE
     }
+  }
+
+  /**
+   * A maneuver pops up within this distance, m, or this time at the plan's pace, s: about when the voice first says it
+   * (ahead of it at max(250 m, 15 s), ROUTING-SPEC §8.5), at a round distance.
+   */
+  const val ALERT_M = 300.0
+  const val ALERT_S = 20.0
+
+  /**
+   * The turn-by-turn notification for a route state, while the car navigates (null: none, or taken down). `alerted`: the
+   * maneuver popped up for last. The departure doesn't pop up: the driver has just started the route. Nothing pops up
+   * while the driver keeps to their own way, as the voice says nothing (ROUTING-SPEC §8.5).
+   */
+  fun turnNotification(route: CarRoute?, alerted: String?): CarTurnNotification? {
+    if (route == null || !navigating(route)) return null
+    if (!showsSteps(route)) return CarTurnNotification(route.message ?: route.destinationName, "", null, null)
+    val step = route.steps[0]
+    val near = step.distanceM <= ALERT_M || step.timeS <= ALERT_S
+    val alert = near && step.id != alerted && step.kind != "depart" && !route.quiet
+    return CarTurnNotification(step.distanceText, step.instruction, maneuverType(step.kind) ?: CarManeuverType.STRAIGHT, if (alert) step.id else null)
   }
 
   /**

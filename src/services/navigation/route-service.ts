@@ -87,6 +87,12 @@ export interface RouteSnapshot {
   guidance?: GuidanceStep;
   /** Planning again after leaving the route: the old route stays drawn meanwhile. */
   replanning: boolean;
+  /**
+   * The driver keeps to their own way (another navigator's, say): this plan's route is the second re-plan in a row
+   * whose route before it they didn't follow. Its guidance shows but isn't spoken or popped up on the car until they
+   * follow it (`REPLAN_FOLLOWED_M` along it). The re-plan they left first was announced.
+   */
+  ownWay?: boolean;
   /** The last re-plan failed (the old route stays). */
   replanFailure?: RouteProblem;
   /** Other ways to the destination; empty or absent: none (yet). */
@@ -189,6 +195,8 @@ export class RouteService {
   private offSincePlanAt: number | null = null;
   /** How far along the last plan's route the car has been on it. */
   private followedM = 0;
+  /** Why the last plan was made: a re-plan left unfollowed after another one is the driver's own way. */
+  private lastReason: Reason | null = null;
   /** The driver's placing (`manual.placedAt`) last seen: another one is a new placing. */
   private seenPlacedAt: number | undefined = undefined;
   /** A placing not planned from yet (it came while a plan was on its way). */
@@ -341,6 +349,9 @@ export class RouteService {
     // Measured from when the last plan's route went off, not from this plan: the wait itself must not end the streak.
     const quick = this.offSincePlanAt !== null && this.offSincePlanAt - this.lastPlanAt < REPLAN_SETTLED_MS && this.followedM < REPLAN_FOLLOWED_M;
     this.replanStreak = reason === "off-route" && quick ? this.replanStreak + 1 : 0;
+    // Leaving a re-planned route the car never followed, after leaving the route before it: the driver's own way.
+    const ownWay = reason === "off-route" && this.lastReason === "off-route" && this.followedM < REPLAN_FOLLOWED_M;
+    this.lastReason = reason;
     this.lastPlanAt = startedAt;
     this.offSincePlanAt = null;
     this.followedM = 0;
@@ -369,8 +380,9 @@ export class RouteService {
       this.notedState = null;
       this.trip ??= { startedAt, plannedS: r.plan.durationS, plannedM: r.plan.lengthM, drivenM: 0, lastAt: null };
       const cur = this.snapshot!;
-      this.set({ ...cur, status: "active", failure: undefined, replanFailure: undefined, planId: id, planReason: reason, plan: r.plan, maneuvers, guidance: undefined, replanning: false });
+      this.set({ ...cur, status: "active", failure: undefined, replanFailure: undefined, planId: id, planReason: reason, plan: r.plan, maneuvers, guidance: undefined, replanning: false, ownWay });
       this.logPlan(id, reason, r.plan, maneuvers, { states: r.stats.states, tiles: r.stats.tilesRead, planMs: r.stats.ms, wallMs, slices, fellBackAt: r.stats.fellBackAt }, position);
+      if (ownWay && !cur.ownWay) this.note("route not followed again: guidance shown, not spoken");
       this.deps.onRoute?.(r.plan);
       this.onPosition();
       // The route is on its way; alternatives only now, in slices of their own.
@@ -616,8 +628,11 @@ export class RouteService {
       toNextM: step.toNextM,
     });
     this.noteState(step, p);
-    this.set({ ...s, guidance: step, ...(this.others.length ? {} : { alternatives: undefined }) });
     if (step.state === "on" && !this.planning) this.followedM = Math.max(this.followedM, step.alongM);
+    // Following the route now: it is spoken again.
+    const ownWay = s.ownWay && this.followedM < REPLAN_FOLLOWED_M;
+    if (s.ownWay && !ownWay) this.note("route followed: guidance spoken again");
+    this.set({ ...s, guidance: step, ownWay, ...(this.others.length ? {} : { alternatives: undefined }) });
     if (step.state === "off" && !this.planning) this.offSincePlanAt ??= this.now();
     // The driver just put the car on the map, off this route: plan from there now, whatever the wait or map matching
     // says (2026-10-13: placed 501 m from the dot on a lot, the route stayed "unsure, 378 m off" for 7 minutes).

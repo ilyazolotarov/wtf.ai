@@ -52,6 +52,7 @@ class CarScreenSession : Session() {
   private var navigation: NavigationScreen? = null
   private var manager: NavigationManager? = null
   private var navigating = false
+  private var turns: CarTurnNotifications? = null
 
   init {
     lifecycle.addObserver(
@@ -73,6 +74,7 @@ class CarScreenSession : Session() {
           // was destroyed has them now.
           if (CarLink.session !== this@CarScreenSession) return
           CarLink.session = null
+          turns?.clear()
           CarLocationService.stop(carContext)
           CarSessionTask.stop()
         }
@@ -98,6 +100,7 @@ class CarScreenSession : Session() {
         },
       )
     }
+    turns = CarTurnNotifications(carContext)
     CarSessionTask.start(carContext.applicationContext as Application)
     syncNavigation()
     request(intent)
@@ -119,6 +122,12 @@ class CarScreenSession : Session() {
       CarContext.ACTION_NAVIGATE -> CarLink.request(CarLink.Request(navigate = true, uri = uri))
       Intent.ACTION_VIEW -> CarLink.request(CarLink.Request(navigate = false, uri = uri))
     }
+  }
+
+  /** The map with the route's cards: a list or the search open over it goes (a place asked for is gone to). */
+  fun showMap() {
+    val screens = carContext.getCarService(ScreenManager::class.java)
+    if (screens.stackSize > 1) screens.popToRoot()
   }
 
   /** The search screen with `query` typed, right over the map (a list open before goes). */
@@ -194,5 +203,6 @@ class CarScreenSession : Session() {
     } catch (e: Exception) {
       CarLink.note("navigation session failed: ${e.javaClass.simpleName}: ${e.message}", problem = true)
     }
+    turns?.update(route)
   }
 }

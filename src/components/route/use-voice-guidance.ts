@@ -111,6 +111,7 @@ export class VoiceGuide {
     const said = this.current.announcer.update({
       planId: route.planId,
       planReason: route.planReason,
+      ownWay: route.ownWay,
       maneuvers: route.maneuvers,
       guidance: route.guidance,
       speedMps,

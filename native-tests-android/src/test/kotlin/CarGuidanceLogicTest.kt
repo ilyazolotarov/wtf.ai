@@ -8,6 +8,7 @@ import ai.wtf.androidauto.logic.CarRoute
 import ai.wtf.androidauto.logic.CarSearch
 import ai.wtf.androidauto.logic.CarSearchList
 import ai.wtf.androidauto.logic.CarStep
+import ai.wtf.androidauto.logic.CarTurnNotification
 import ai.wtf.androidauto.logic.SessionStep
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -16,10 +17,18 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class CarGuidanceLogicTest {
-  private val left = CarStep("left", null, "Turn left", 400.0, 36.0, 400.0, "m")
+  private val left = step("left", 400.0, 36.0)
 
-  private fun route(status: String, steps: List<CarStep> = listOf(left), replanning: Boolean = false) =
-    CarRoute(status, null, "Kyiv", replanning, steps, 10_000.0, 900.0, 10.0, "km1")
+  private fun step(kind: String, distanceM: Double, timeS: Double, id: String = "$kind@50.45,30.52") =
+    CarStep(id, kind, null, "Turn ${kind.replace('-', ' ')}", distanceM, timeS, distanceM, "m", "${distanceM.toInt()} m")
+
+  private fun route(
+    status: String,
+    steps: List<CarStep> = listOf(left),
+    replanning: Boolean = false,
+    message: String? = null,
+    quiet: Boolean = false,
+  ) = CarRoute(status, message, "Kyiv", replanning, quiet, steps, 10_000.0, 900.0, 10.0, "km1")
 
   @Test
   fun everyManeuverKindOfTheAppHasACarType() {
@@ -81,6 +90,50 @@ class CarGuidanceLogicTest {
     assertEquals(CarCard.LOADING, CarGuidanceLogic.card(route("active", replanning = true), null))
     assertEquals(CarCard.MESSAGE, CarGuidanceLogic.card(route("arrived", steps = emptyList()), null))
     assertEquals(CarCard.MESSAGE, CarGuidanceLogic.card(route("failed", steps = emptyList()), null))
+  }
+
+  @Test
+  fun theTurnNotificationShowsTheNextManeuverWhileTheCarNavigates() {
+    val far = CarGuidanceLogic.turnNotification(route("active", listOf(step("left", 900.0, 81.0))), null)
+    assertEquals(CarTurnNotification("900 m", "Turn left", CarManeuverType.TURN_LEFT, null), far)
+    // Planned (again): the message, no maneuver, no pop-up.
+    assertEquals(
+      CarTurnNotification("Planning route…", "", null, null),
+      CarGuidanceLogic.turnNotification(route("active", replanning = true, message = "Planning route…"), null),
+    )
+    assertEquals(CarTurnNotification("Kyiv", "", null, null), CarGuidanceLogic.turnNotification(route("planning", emptyList()), null))
+    // Arrival, a failed plan, no route: taken down.
+    assertNull(CarGuidanceLogic.turnNotification(route("arrived", emptyList(), message = "You've arrived"), null))
+    assertNull(CarGuidanceLogic.turnNotification(route("failed", emptyList()), null))
+    assertNull(CarGuidanceLogic.turnNotification(null, null))
+  }
+
+  @Test
+  fun aManeuverPopsUpOnceAsItComesNear() {
+    val near = step("right", 290.0, 26.0)
+    assertEquals(near.id, CarGuidanceLogic.turnNotification(route("active", listOf(near)), null)?.alertFor)
+    // Popped up already: the rail updates, nothing pops up again (a re-plan keeping the maneuver keeps its id).
+    assertNull(CarGuidanceLogic.turnNotification(route("active", listOf(step("right", 120.0, 11.0))), near.id)?.alertFor)
+    // Near by time on a fast road, not yet by distance.
+    val fast = step("keep-right", 550.0, 18.0)
+    assertEquals(fast.id, CarGuidanceLogic.turnNotification(route("active", listOf(fast)), near.id)?.alertFor)
+    // Far: not yet.
+    assertNull(CarGuidanceLogic.turnNotification(route("active", listOf(step("left", 650.0, 40.0))), near.id)?.alertFor)
+    // The same turn again at the next junction is another maneuver.
+    val again = step("right", 200.0, 18.0, id = "right@50.46,30.53")
+    assertEquals(again.id, CarGuidanceLogic.turnNotification(route("active", listOf(again)), near.id)?.alertFor)
+    // The departure: the driver has just started.
+    assertNull(CarGuidanceLogic.turnNotification(route("active", listOf(step("depart", 20.0, 2.0))), null)?.alertFor)
+  }
+
+  @Test
+  fun nothingPopsUpWhileTheDriverKeepsToTheirOwnWay() {
+    val near = step("right", 120.0, 11.0)
+    val quiet = CarGuidanceLogic.turnNotification(route("active", listOf(near), quiet = true), null)
+    // The rail still shows the turn; it doesn't pop up.
+    assertEquals(CarTurnNotification("120 m", "Turn right", CarManeuverType.TURN_RIGHT, null), quiet)
+    // Following the route again: the turn ahead pops up.
+    assertEquals(near.id, CarGuidanceLogic.turnNotification(route("active", listOf(near)), null)?.alertFor)
   }
 
   @Test

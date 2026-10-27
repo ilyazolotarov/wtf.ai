@@ -1,6 +1,6 @@
 // When to say what during guidance (ROUTING-SPEC §8.5): each maneuver once ahead of it ("in 300 m, turn left")
-// and once at it ("turn left"), the route being planned again, and arrival. Pure logic: the app turns these into
-// speech in the driver's language.
+// and once at it ("turn left"), the route being planned again, and arrival; nothing new while the driver keeps to
+// their own way. Pure logic: the app turns these into speech in the driver's language.
 
 import { haversineM } from "../geo";
 import type { GuidanceStep } from "./guidance";
@@ -74,6 +74,8 @@ export interface AnnouncerInput {
   planId: number;
   /** Why this plan replaced the last: an alternative taken is the driver's choice, not a re-plan to announce. */
   planReason?: "new" | "off-route" | "resume" | "alternative" | "placed";
+  /** The driver keeps to their own way (`RouteSnapshot.ownWay`): nothing said but arrival, until they follow the route. */
+  ownWay?: boolean;
   maneuvers: Maneuver[];
   guidance: GuidanceStep;
   speedMps: number;
@@ -87,6 +89,15 @@ const SAME_MANEUVER_M = 20;
 
 const sameManeuver = (a: Maneuver, b: Maneuver) =>
   a.kind === b.kind && (a.exit ?? 1) === (b.exit ?? 1) && haversineM(a, b) <= SAME_MANEUVER_M;
+
+/**
+ * The same maneuver on another plan is still the one the car approaches when the two put it this close in distance
+ * from the car. A route back round the block to a turn the car missed reaches it later: said again.
+ */
+const SAME_AHEAD_M = 100;
+
+/** Turning around where the route starts (`plan.startTurnaround`): it is wherever the car is when planned. */
+export const isStartTurnaround = (m: Maneuver) => m.kind === "u-turn" && m.atM === 0;
 
 /** The spoken distance nearest to `m`. */
 export function spokenDistanceM(m: number): number {
@@ -105,8 +116,13 @@ export class Announcer {
   private planId: number | null = null;
   /** Announced, as `<maneuver index>:<stage>`, for the current plan. */
   private said = new Set<string>();
-  /** The current plan's maneuvers: what was said of them carries over to an alternative taken. */
+  /** The current plan's maneuvers: what was said of them carries over to the next plan. */
   private maneuvers: Maneuver[] = [];
+  /** The current plan's next maneuver and the car's place on it when last seen. */
+  private nextIndex = 0;
+  private alongM = 0;
+  /** "Route replanned" said, and nothing since: a re-plan after it says nothing of its own. */
+  private replannedLast = false;
   private arrived = false;
 
   constructor(config: Partial<AnnouncerConfig> = {}) {
@@ -114,35 +130,51 @@ export class Announcer {
   }
 
   update(input: AnnouncerInput): Announcement[] {
+    const out = this.announce(input);
+    if (out.some((a) => a.kind !== "replanned")) this.replannedLast = false;
+    return out;
+  }
+
+  private announce(input: AnnouncerInput): Announcement[] {
     const c = this.config;
     const out: Announcement[] = [];
     const { guidance: g, maneuvers } = input;
     if (input.planId !== this.planId) {
       // A new plan: the first is the route starting (its first maneuver says enough), later ones are re-plans,
-      // unless the driver took an alternative (by a tap, or by driving onto it).
-      if (this.planId !== null && input.planReason !== "alternative") out.push({ kind: "replanned" });
-      // An alternative taken: what was said stays said where it is the same maneuver ("turn right" at the junction
-      // all the routes share isn't said again on switching between them).
+      // unless the driver took an alternative (by a tap, or by driving onto it). Re-plans in a row with nothing said
+      // between them say it once; none while the driver keeps to their own way.
+      if (this.planId !== null && input.planReason !== "alternative" && !this.replannedLast && !input.ownWay) {
+        out.push({ kind: "replanned" });
+        this.replannedLast = true;
+      }
+      // What was said stays said where it is the same maneuver, still as far ahead: "turn right" at the junction all
+      // the routes share isn't said again on switching between them, nor on a re-plan. A turnaround at the start not
+      // made yet is the same one wherever the car is now: a re-plan while the car drives on away doesn't say it again.
       const carried = new Set<string>();
-      if (input.planReason === "alternative") {
-        for (const k of this.said) {
-          const [i, stage] = k.split(":");
-          const was = this.maneuvers[Number(i)];
-          const j = was ? maneuvers.findIndex((x) => sameManeuver(x, was)) : -1;
-          if (j >= 0) carried.add(`${j}:${stage}`);
-        }
+      for (const k of this.said) {
+        const [i, stage] = k.split(":");
+        const was = this.maneuvers[Number(i)];
+        if (!was) continue;
+        const aheadM = was.atM - this.alongM;
+        const turnaround = isStartTurnaround(was) && this.nextIndex <= Number(i);
+        const j = maneuvers.findIndex(
+          (x) => (turnaround && isStartTurnaround(x)) || (sameManeuver(x, was) && Math.abs(x.atM - g.alongM - aheadM) <= SAME_AHEAD_M),
+        );
+        if (j >= 0) carried.add(`${j}:${stage}`);
       }
       this.planId = input.planId;
       this.said = carried;
     }
     this.maneuvers = maneuvers;
+    this.nextIndex = g.nextIndex;
+    this.alongM = g.alongM;
     if (g.state === "arrived") {
       if (!this.arrived) out.push({ kind: "arrived" });
       this.arrived = true;
       return out;
     }
-    // Off the route, a re-plan is coming: nothing about this one's maneuvers.
-    if (g.state !== "on" && g.state !== "unsure") return out;
+    // Off the route, a re-plan is coming: nothing about this one's maneuvers. The driver's own way: none either.
+    if ((g.state !== "on" && g.state !== "unsure") || input.ownWay) return out;
     const next = maneuvers[g.nextIndex];
     if (!next || next.kind === "depart" || next.kind === "arrive") return out;
     const v = Math.max(0, input.speedMps);

@@ -1,11 +1,12 @@
 import { CAR_MIN_ICON_DP, CAR_MIN_TEXT_DP, withCarPois, withoutFootways } from "@/config/map-car";
 import type { MapStyleJson } from "@/config/map-dark";
 
-/** Evaluates the few expressions the filters use (all, !, in, get, literal, ==) against a feature's properties. */
+/** Evaluates the few expressions the filters use (all, any, !, in, get, literal, ==) against a feature's properties. */
 function evaluate(e: unknown, props: Record<string, string>): unknown {
   if (!Array.isArray(e)) return e;
   const [op, ...args] = e as [string, ...unknown[]];
   if (op === "all") return args.every((a) => evaluate(a, props) === true);
+  if (op === "any") return args.some((a) => evaluate(a, props) === true);
   if (op === "!") return !evaluate(args[0], props);
   if (op === "get") return props[args[0] as string];
   if (op === "literal") return args[0];
@@ -24,11 +25,23 @@ const style = (): MapStyleJson => ({
 });
 
 describe("the car's POIs", () => {
-  test("only fuel, charging and the landmarks: stations and airports, not bus stops", () => {
-    const [, r1, transit] = withCarPois(style(), 1.4).layers;
-    const shows = (layer: typeof r1, cls: string) => evaluate(layer.filter, { class: cls }) === true;
-    expect(["fuel", "charging_station", "cafe", "shop", "parking"].filter((c) => shows(r1, c))).toEqual(["fuel", "charging_station"]);
-    expect(["airport", "bus", "rail"].filter((c) => shows(transit, c))).toEqual(["airport", "rail"]);
+  test("only fuel, charging and the landmarks: railway and metro stations, not tram or bus stops", () => {
+    const [, r1] = withCarPois(style(), 1.4).layers;
+    // As the tiles carry them (OpenMapTiles poi: class and subclass).
+    const pois = [
+      ["fuel", "fuel"],
+      ["fuel", "charging_station"],
+      ["railway", "station"],
+      ["railway", "halt"],
+      ["railway", "subway"],
+      ["railway", "tram_stop"],
+      ["bus", "bus_stop"],
+      ["entrance", "subway_entrance"],
+      ["cafe", "cafe"],
+      ["parking", "parking"],
+    ];
+    const shown = pois.filter(([cls, subclass]) => evaluate(r1.filter, { class: cls, subclass }) === true).map(([, s]) => s);
+    expect(shown).toEqual(["fuel", "charging_station", "station", "halt", "subway"]);
   });
 
   test("names and icons at the guidelines' sizes once the car draws the map bigger", () => {

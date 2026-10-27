@@ -65,23 +65,31 @@ class CarLocationService : Service() {
       }
     }
 
-    private fun notification(context: Context): Notification {
+    /** The phone's quiet channel for the car session's notifications (this one, the turn-by-turn one). */
+    fun channel(context: Context): String {
       val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
       if (manager.getNotificationChannel(CHANNEL_ID) == null) {
         manager.createNotificationChannel(NotificationChannel(CHANNEL_ID, "Android Auto", NotificationManager.IMPORTANCE_LOW))
       }
-      val launch = context.packageManager.getLaunchIntentForPackage(context.packageName)
-      val open = launch?.let { PendingIntent.getActivity(context, 0, it, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT) }
-      return NotificationCompat.Builder(context, CHANNEL_ID)
+      return CHANNEL_ID
+    }
+
+    /** Tapped on the phone: the app opens there. */
+    fun openApp(context: Context): PendingIntent? =
+      context.packageManager.getLaunchIntentForPackage(context.packageName)?.let {
+        PendingIntent.getActivity(context, 0, it, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+      }
+
+    private fun notification(context: Context): Notification =
+      NotificationCompat.Builder(context, channel(context))
         .setContentTitle(context.applicationInfo.loadLabel(context.packageManager))
         .setContentText(CarLink.labels.notification)
         .setSmallIcon(context.applicationInfo.icon)
         .setOngoing(true)
         .setOnlyAlertOnce(true)
         .setCategory(NotificationCompat.CATEGORY_NAVIGATION)
-        .setContentIntent(open)
+        .setContentIntent(openApp(context))
         .build()
-    }
   }
 
   override fun onBind(intent: Intent?): IBinder? = null

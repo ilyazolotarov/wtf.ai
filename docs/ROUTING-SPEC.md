@@ -220,6 +220,11 @@ and the one after when it follows within 120 m.
   the car followed 100 m did, and the driver took another way). The minute is measured from the plan to its route
   going off, never from one plan to the next. A flat 10 s cooldown re-planned a 62 km route 25 times in 12 min from a
   dot kilometres from the car.
+- **The driver's own way** (`ownWay`): an off-route plan made after leaving an off-route plan the car never followed
+  100 m along. The driver keeps to a way of their own (another navigator's): its route shows, but neither the voice
+  (§8.5) nor the car's screen (ANDROID-AUTO-SPEC §4) announces it, until the car is on a route for 100 m along it.
+  The first re-plan after a route the car followed is announced as ever. Notes: `route not followed again: guidance
+  shown, not spoken`, `route followed: guidance spoken again`.
 - Arrival ends the route a minute later; × ends it at once.
 - The active destination is kept (kv-store `route.active`): an app restarted within 12 h plans it again from the
   first position, noted `route resumed after an app restart, to …`.
@@ -272,8 +277,12 @@ car left. Optimistic as the simulator is.
   40 m. "Ahead" is skipped when "at it" would follow within 6 s. "потім …" when the next follows within 120 m; "і ви
   на місці" for the destination; roundabout exits as ordinals; "Маршрут перебудовано" for a re-plan, "Ви прибули" at
   the end. Nothing about the plan's maneuvers while off it. Taking an alternative (either way) says nothing of
-  its own and doesn't say again what was said of the same maneuver (same kind and exit, within 20 m) on the route
-  left: the turn at a junction the routes share is said once. `npm run replay:voice` checks "turn now" against when
+  its own. Neither an alternative taken nor a re-plan says again what was said of the same maneuver (same kind and
+  exit, within 20 m) still as far from the car (within 100 m): the turn at a junction the routes share is said once,
+  and a turn missed and reached again round the block is said again. Turning around at the start, not made yet, is
+  one maneuver wherever the car is when planned: a re-plan while the car drives on away doesn't say it again. Re-plans
+  in a row with nothing said between them say "Маршрут перебудовано" once. On the driver's own way (§8.2's
+  `ownWay`) nothing is said but arrival. `npm run replay:voice` checks "turn now" against when
   the car turned (the gyro).
 - **Controls:** the banner's speaker button mutes it (kept across launches). Settings has the volume, 0–100 % (a
   sample is said when the finger leaves the slider; 0 turns the voice off and hides the button). The player's gain is

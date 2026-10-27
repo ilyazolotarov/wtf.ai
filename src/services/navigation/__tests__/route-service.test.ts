@@ -271,6 +271,60 @@ describe("RouteService", () => {
     expect(h.routes.map((r) => r.reason)).toEqual(["new", "off-route", "off-route", "off-route"]);
   });
 
+  test("leaving a re-planned route never driven is the driver's own way, until they drive 100 m on a route", () => {
+    const h = harness({ network: "ladder" });
+    h.moveTo(ladderAt(0, 0));
+    h.service.start(ladderAt(2200, 0));
+    h.flush();
+    let e = 100;
+    let n = 0;
+    const step = (headingRad: number) => {
+      h.tick(1000);
+      h.moveTo(ladderAt(e, n), { headingRad });
+    };
+    for (e = 10; e <= 100; e += 10) step(Math.PI / 2);
+    e = 100;
+    for (n = 10; n <= 200; n += 10) step(0);
+    n = 200;
+    const offUntilPlan = () => {
+      for (let i = 1; i <= 200; i++) {
+        e += 10;
+        step(Math.PI / 2);
+        if (h.service.getSnapshot()?.replanning) {
+          h.flush();
+          return;
+        }
+      }
+      throw new Error("no plan");
+    };
+    // Left the route, driven 300 m: the re-plan is said as ever.
+    offUntilPlan();
+    expect(h.service.getSnapshot()).toMatchObject({ planReason: "off-route", ownWay: false });
+    // Left that one, never on it: the driver's own way.
+    offUntilPlan();
+    expect(h.service.getSnapshot()!.ownWay).toBe(true);
+    expect(h.notes).toContain("route not followed again: guidance shown, not spoken");
+    // Driving the route it planned, 10 m a second: past 100 m along it, it is spoken again.
+    const route = h.service.getSnapshot()!.plan!.coordinates;
+    const m = 111_320;
+    let followed = 0;
+    for (let i = 1; i < route.length && followed < 160; i++) {
+      const a = route[i - 1];
+      const b = route[i];
+      const dn = (b.lat - a.lat) * m;
+      const de = (b.lon - a.lon) * m * Math.cos((a.lat * Math.PI) / 180);
+      const len = Math.hypot(dn, de);
+      for (let d = 10; d <= len; d += 10) {
+        h.tick(1000);
+        h.moveTo({ lat: a.lat + ((b.lat - a.lat) * d) / len, lon: a.lon + ((b.lon - a.lon) * d) / len }, { headingRad: Math.atan2(de, dn) });
+        followed += 10;
+        if (followed === 60) expect(h.service.getSnapshot()!.ownWay).toBe(true);
+      }
+    }
+    expect(h.service.getSnapshot()).toMatchObject({ ownWay: false, guidance: { state: "on" } });
+    expect(h.notes).toContain("route followed: guidance spoken again");
+  });
+
   test("a destination without a road route fails, and says why", () => {
     const h = harness();
     h.move(0.5, 0);

@@ -35,6 +35,8 @@ export interface CarSessionDeps {
     setNotice(notice: CarNoticePayload | null): Promise<void>;
     setSearch(search: CarSearchPayload | null): Promise<void>;
     openSearch(query: string): Promise<void>;
+    /** The map, with a list or the search open over it gone. */
+    showMap(): Promise<void>;
     takeRequest(): Promise<CarRequest | null>;
     takeNotes(): Promise<CarNote[]>;
     addListener(event: "onCarAction", listener: (e: CarAction) => void): { remove(): void };
@@ -188,7 +190,7 @@ export function runCarSession(deps: CarSessionDeps): Promise<void> {
       const { t, language } = deps.strings();
       sendLabels(t, language);
       const route = routes.getSnapshot();
-      send(native.setRoute(carRoute(route, t)));
+      send(native.setRoute(carRoute(route, t, language)));
       voice.update(route, deps.speedMps(), voice.muted() || voice.volume() === 0, t, language);
       // Ending the route ends what it was saying (the phone's map does the same while it is mounted).
       if (hadRoute && !route) voice.hush();
@@ -284,6 +286,8 @@ export function runCarSession(deps: CarSessionDeps): Promise<void> {
       if (navigate && sure && answers.length > 0) {
         const place = answers[0];
         goTo(geo.point && geo.query ? { ...place, title: geo.query } : place, "place asked for on the car");
+        // A list or the search the driver had open would hide the route, or the card asking for their word.
+        send(native.showMap());
         return;
       }
       deps.note(`android auto: place asked for on the car: ${answers.length} found`);

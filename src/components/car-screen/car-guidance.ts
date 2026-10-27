@@ -1,5 +1,6 @@
-import { maneuverInstruction, PROBLEM_TEXT } from "@/components/route/guidance-text";
+import { formatManeuverDistance, maneuverInstruction, PROBLEM_TEXT } from "@/components/route/guidance-text";
 import type { Strings } from "@/i18n/en";
+import { isStartTurnaround } from "@/nav/routing/announcer";
 import type { Maneuver } from "@/nav/routing/maneuvers";
 import type { RouteSnapshot } from "@/services/navigation/route-service";
 
@@ -23,12 +24,13 @@ export function carDistance(meters: number): { shown: number; unit: CarDistanceU
  * to show (planning, a failure, arrival). Each maneuver's distance and time are from the car, as the trip in the car's
  * other displays wants them. Null: no route.
  */
-export function carRoute(route: RouteSnapshot | null, t: (key: keyof Strings) => string): CarRoutePayload | null {
+export function carRoute(route: RouteSnapshot | null, t: (key: keyof Strings) => string, language: "en" | "uk"): CarRoutePayload | null {
   if (!route) return null;
   const { destination, guidance, maneuvers, plan } = route;
   const base = {
     destinationName: destination.name ?? "",
     replanning: route.replanning,
+    quiet: route.ownWay === true,
     steps: [] as CarStepPayload[],
     remainingM: 0,
     remainingS: 0,
@@ -51,6 +53,7 @@ export function carRoute(route: RouteSnapshot | null, t: (key: keyof Strings) =>
   const step = (m: Maneuver, distanceM: number): CarStepPayload => {
     const { shown, unit } = carDistance(distanceM);
     return {
+      id: carManeuverId(m),
       kind: m.kind,
       exit: m.exit ?? null,
       instruction: maneuverInstruction(m, t),
@@ -58,10 +61,22 @@ export function carRoute(route: RouteSnapshot | null, t: (key: keyof Strings) =>
       timeS: distanceM * sPerM,
       shownDistance: shown,
       shownUnit: unit,
+      distanceText: formatManeuverDistance(distanceM, language),
     };
   };
   const then = guidance.thenIndex != null ? maneuvers[guidance.thenIndex] : undefined;
   const steps = [step(next, guidance.toNextM)];
   if (then) steps.push(step(then, guidance.toNextM + Math.max(0, then.atM - next.atM)));
-  return { ...base, ...left, status: "active", message: null, steps };
+  // Planning again: the old maneuvers are no guide, the car's notification says so.
+  return { ...base, ...left, status: "active", message: route.replanning ? t("planningRoute") : null, steps };
+}
+
+/**
+ * A maneuver the same on the road whatever plan holds it (its kind, exit and place, to about a metre): the car pops
+ * up a turn once, not again when a re-plan or an alternative taken keeps it. Turning around at the start is one
+ * wherever the car is when planned: a re-plan while it drives on away doesn't pop it up again.
+ */
+export function carManeuverId(m: Maneuver): string {
+  if (isStartTurnaround(m)) return "u-turn@start";
+  return `${m.kind}:${m.exit ?? ""}@${m.lat.toFixed(5)},${m.lon.toFixed(5)}`;
 }

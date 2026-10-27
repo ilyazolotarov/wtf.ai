@@ -84,7 +84,8 @@ src/components/car-screen/car-session.ts ◀───────┘  route, pla
   until the task takes it (`takeRequest`, at its start and on `request`). Read as SEARCH-SPEC §4.6: a point is gone to,
   by the link's name; words are searched, and one answer gone to. Several, none, or asked only to look: the search
   screen opens with the words and the answers to pick from. Gone to as a destination picked: recent, held without an
-  adapter. Trip log: `navigation asked for: <uri>`, then `place asked for on the car` or how many were found.
+  adapter, and a list or the search open over the map goes (`showMap`), so the route or the card asking for the
+  driver's word shows. Trip log: `navigation asked for: <uri>`, then `place asked for on the car` or how many were found.
 - **Words:** the app's language, sent again when the driver changes it and when the phone's app comes to the front
   (the system's language changed meanwhile).
 - **Location**: Android Auto binds the app's service as a top app's binding, with the location capability while the
@@ -122,8 +123,8 @@ src/components/car-screen/car-session.ts ◀───────┘  route, pla
 - **Bigger, as Android for Cars asks** (map text off the roads 24 dp, markers 36 dp): the virtual display has the car's
   density × 1.4 (`CarGuidanceLogic.MAP_SCALE`, JUnit), so everything on the map is drawn 1.4 times the car's dp (the
   dot 26 → 36 dp), and the follow zooms are lowered by log₂ 1.4 to show the same ground. The insets are in the map's dp.
-  Of the POIs only fuel and charging stations, and rail stations (the metro's too) and airports as landmarks to check
-  the dot by; their names 24 dp, their icons 36 dp. No ways a car can't take (footways, steps, cycleways, pedestrian
+  Of the POIs only fuel and charging stations, and railway stations and halts (the metro's too; not tram stops) as
+  landmarks to check the dot by; their names 24 dp, their icons 36 dp. Airports keep their own label layer. No ways a car can't take (footways, steps, cycleways, pedestrian
   streets: in parks and yards their dashes were the busiest thing on the screen); service roads and tracks stay
   (`carMapStyle`, src/config/map-car.ts).
 - **Templates** (`CarScreens.kt`), built from the last state the session sent:
@@ -153,6 +154,22 @@ src/components/car-screen/car-session.ts ◀───────┘  route, pla
   ahead, each with its distance and time from the car; the destination) sent with each change, loading while it is
   planned; ended at arrival, a failure or no route. The host's "stop navigation" (another navigator started) ends the
   route.
+- **Turn-by-turn notification** (`CarTurnNotifications`, quality guideline NF-3): while the car navigates, one ongoing
+  navigation notification with a `CarAppExtender`, which Android Auto shows while another app fills the car's screen.
+  Nothing of it shows while the car shows the app's own guidance: on a wide screen Android Auto keeps the app's map
+  and cards in a side panel whatever is in front, so it shows only on a narrow one. It shows the next maneuver's icon,
+  its distance as the banner writes it, and its words, or the planning message without a maneuver. It is posted again
+  only when what it shows changes, and taken down at arrival, a failure, no route or the session's end. Each maneuver
+  pops up once (`IMPORTANCE_HIGH`, a heads-up notification) when it comes within 300 m or 20 s at the plan's pace,
+  about when the voice first says it (ROUTING-SPEC §8.5). A maneuver is the same across plans (`carManeuverId`: kind,
+  exit, place), so a re-plan or an alternative taken doesn't pop it up again; turning around at the start is one
+  wherever the car is when planned. The departure doesn't pop up, nor anything on the driver's own way (ROUTING-SPEC
+  §8.2, `quiet`), as the voice says nothing then. Every other update is
+  `IMPORTANCE_LOW`, for the rail (the rail widget of Google's docs; Android Auto 17.9 on the Desktop Head Unit shows
+  none, only the pop-ups). Tapped on the car it opens the app's screen there. On the phone it is a quiet
+  notification on the location service's channel. Trip log: `turn notification popped up: <words>, <distance>`, and
+  a note when the app's notifications are off on the phone (then neither shows). Which one pops up when is
+  `CarGuidanceLogic.turnNotification` (JUnit).
 - **Icons**: Material Symbols drawn as vector drawables by `scripts/car-icons.py` from the font the phone draws its
   icons with: the same arrows as the banner.
 
@@ -189,7 +206,10 @@ sides); the car's night mode; the spoofed GPS shown as on the phone (the dot kep
 Also (debug build): the location notice with the permission revoked, its Allow button opening the phone's dialog,
 and after the grant the notice gone, the location service running and the dot on the car's map; a clip played with
 the navigation guidance usage after a route started from the car (`dumpsys audio`); a destination picked on the car
-in phone-only mode held as a notice, its button starting the route; a JS reload clearing a stale notice.
+in phone-only mode held as a notice, its button starting the route; a JS reload clearing a stale notice. The
+turn-by-turn notification on a narrow head unit (`config/default.ini`, 800×480) with another app filling the screen:
+each maneuver popped up once with its arrow, distance and words in the app's language; a tap on it opening the app's
+screen with the route; none on the 1280×720 one, where the app's side panel stays; taken down at arrival.
 
 ## 6. Not chosen
 
@@ -203,9 +223,9 @@ in phone-only mode held as a notice, its button starting the route; a JS reload 
 1. A real car, from the Play internal test track (§2); there, the car's assistant (VC-1) asking for places.
 2. Moving the map from the car: Android Auto's map buttons (pan, zoom, recentre) and gestures (`SurfaceCallback`).
 3. A route's alternatives before following one (the route preview, ROUTING-SPEC §8.7).
-4. The instrument cluster (`FEATURE_CLUSTER`) and turn-by-turn notifications while another app fills the car's
-   screen.
-5. The quality review's other navigation guidelines, before production: turn-by-turn notifications (NF-3, item 4),
-   the cluster (NF-4), a test-drive mode that simulates driving (NF-7).
+4. The instrument cluster (`FEATURE_CLUSTER`). The turn-by-turn notification in a rail, where an Android Auto
+   version or a car draws one.
+5. The quality review's other navigation guidelines, before production: the cluster (NF-4, item 4), a test-drive mode
+   that simulates driving (NF-7).
 6. Debug builds need Metro as for the phone. A car's map started before the development launcher loaded the JS stayed
    blank; `CarMapSurface.restartIfStopped` starts it again in the new React context, not yet seen doing so.

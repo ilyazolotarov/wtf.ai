@@ -5,10 +5,13 @@ export const CAR_MIN_TEXT_DP = 24;
 export const CAR_MIN_ICON_DP = 36;
 /** The POI icons' size in the style's sprite (OpenFreeMap's), dp. */
 const POI_ICON_DP = 19;
-/** What a driver stops for (OpenMapTiles `poi.class`). */
-export const CAR_POI_CLASSES = ["fuel", "charging_station"];
-/** Landmarks to check the dot by: stations, the metro's too, and airports; not bus stops. */
-export const CAR_TRANSIT_CLASSES = ["rail", "airport"];
+/** What a driver stops for (OpenMapTiles `poi.class`; charging stations are `fuel` too, subclass `charging_station`). */
+export const CAR_POI_CLASSES = ["fuel"];
+/**
+ * Landmarks to check the dot by: railway stations and halts, the metro's too (`poi.class` `railway`); not tram stops,
+ * as not bus stops. Airports come with their own layer (`aerodrome_label`), untouched.
+ */
+export const CAR_RAILWAY_SUBCLASSES = ["station", "halt", "subway"];
 /**
  * Ways a car can't take (OpenMapTiles `transportation.class`: footways, cycleways, steps, paths; pedestrian streets):
  * in parks and yards their dashes were the busiest thing on the car's screen. Service roads and tracks stay.
@@ -38,7 +41,11 @@ export function withoutFootways(style: MapStyleJson): MapStyleJson {
  * POIs only what a driver stops for and the landmarks, their names and icons as big as the guidelines ask.
  */
 export function withCarPois(style: MapStyleJson, scale: number): MapStyleJson {
-  const keep = ["in", ["get", "class"], ["literal", [...CAR_POI_CLASSES, ...CAR_TRANSIT_CLASSES]]];
+  const keep = [
+    "any",
+    ["in", ["get", "class"], ["literal", CAR_POI_CLASSES]],
+    ["all", ["==", ["get", "class"], "railway"], ["in", ["get", "subclass"], ["literal", CAR_RAILWAY_SUBCLASSES]]],
+  ];
   const textSize = Math.ceil(CAR_MIN_TEXT_DP / scale);
   const iconSize = Math.ceil((CAR_MIN_ICON_DP / (POI_ICON_DP * scale)) * 100) / 100;
   return {

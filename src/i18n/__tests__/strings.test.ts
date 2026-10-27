@@ -46,6 +46,11 @@ describe("Ukrainian strings", () => {
     expect(same.map(([key]) => key)).toEqual([]);
   });
 
+  test("use GPS rather than GNSS in both languages", () => {
+    const technical = [...Object.entries(en), ...entries].filter(([, text]) => /\bGNSS\b/i.test(text));
+    expect(technical).toEqual([]);
+  });
+
   test("do not confuse OBD speed with individual wheel speeds", () => {
     expect(entries.filter(([, text]) => /швидкост[ію] коліс/i.test(text)).map(([key]) => key)).toEqual([]);
   });

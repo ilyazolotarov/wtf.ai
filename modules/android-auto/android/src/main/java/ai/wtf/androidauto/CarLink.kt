@@ -106,6 +106,11 @@ internal object CarLink {
     session?.openSearch(query)
   }
 
+  /** The map, with whatever list or search was open over it gone: the route to a place asked for shows. */
+  fun showMap() {
+    session?.showMap()
+  }
+
   /** Kept until the JS side takes it (`takeRequest`): the session's task may not run yet. A newer one replaces it. */
   fun request(value: Request) {
     note("${if (value.navigate) "navigation" else "search"} asked for: ${value.uri}")

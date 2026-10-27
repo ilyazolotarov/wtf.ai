@@ -89,6 +89,7 @@ function setup({ connected = true, located = true }: { connected?: boolean; loca
       setNotice: call("setNotice"),
       setSearch: call("setSearch"),
       openSearch: call("openSearch"),
+      showMap: () => call("showMap")(null),
       takeRequest: () => {
         const taken = request;
         request = null;
@@ -219,6 +220,7 @@ function setup({ connected = true, located = true }: { connected?: boolean; loca
     },
     searches: () => calls.filter((c) => c.method === "setSearch").map((c) => c.arg),
     opened: () => calls.filter((c) => c.method === "openSearch").map((c) => c.arg),
+    mapsShown: () => calls.filter((c) => c.method === "showMap").length,
     tick: () => [...timers.values()].forEach((f) => f()),
     timers: () => timers.size,
     held: () => held,
@@ -523,12 +525,16 @@ describe("car session", () => {
       s.ask({ navigate: true, uri: "geo:50.45,30.52?q=Maidan" });
       await settle();
       expect(s.started).toEqual([{ lat: 50.45, lon: 30.52, name: "Maidan", id: "point:50.45,30.52" }]);
+      // A list open over the map goes: the route shows.
+      expect(s.mapsShown()).toBe(1);
 
       s.setWithoutAdapter(true);
       s.ask({ navigate: true, uri: "google.navigation:q=50.46,30.53" });
       await settle();
       expect(s.started).toHaveLength(1);
       expect(s.held()).toEqual({ lat: 50.46, lon: 30.53, name: "Khreshchatyk, 1", id: "point:50.46,30.53" });
+      // …and the card asking for the driver's word.
+      expect(s.mapsShown()).toBe(2);
       expect(s.notes).toContain("android auto: place asked for on the car, held: no adapter");
     });
 
@@ -564,6 +570,8 @@ describe("car session", () => {
       await settle();
       expect(s.started).toHaveLength(1);
       expect(s.opened()).toEqual(["Lesi Ukrainky, 26, Kyiv"]);
+      // Shown to pick from: the search, not the map.
+      expect(s.mapsShown()).toBe(1);
     });
 
     test("a link that asks for nothing is noted, not acted on", async () => {

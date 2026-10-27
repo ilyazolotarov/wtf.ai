@@ -5,6 +5,8 @@ import { NativeModule, requireOptionalNativeModule } from "expo";
 
 /** One maneuver ahead. */
 export interface CarStepPayload {
+  /** The same maneuver on the road keeps it across plans (`carManeuverId`): the car's notification pops up once. */
+  id: string;
   /** The app's maneuver kind (src/nav/routing/maneuvers.ts). */
   kind: string;
   /** Roundabouts: the exit to take, 1-based. */
@@ -17,17 +19,21 @@ export interface CarStepPayload {
   /** The distance from the car as the phone's banner rounds it: "m", "km", or "km1" (one decimal). */
   shownDistance: number;
   shownUnit: CarDistanceUnit;
+  /** The same as the banner writes it, in the app's language ("1,2 км"): the notification's title. */
+  distanceText: string;
 }
 
 export type CarDistanceUnit = "m" | "km" | "km1";
 
 export interface CarRoutePayload {
   status: "planning" | "active" | "arrived" | "failed";
-  /** Shown instead of a maneuver: planning, a failure, arrival. */
+  /** Shown instead of a maneuver: planning (again), a failure, arrival. */
   message?: string | null;
   destinationName: string;
   /** Planning again after leaving the route. */
   replanning: boolean;
+  /** The driver keeps to their own way: the route shows, nothing pops up (`RouteSnapshot.ownWay`). */
+  quiet: boolean;
   /** The next maneuver, and the one after when it follows closely. */
   steps: CarStepPayload[];
   remainingM: number;
@@ -129,6 +135,8 @@ declare class AndroidAutoNativeModule extends NativeModule<AndroidAutoEvents> {
   setSearch(search: CarSearchPayload | null): Promise<void>;
   /** The search screen with `query` typed, over the map (after `setSearch` with its answers). */
   openSearch(query: string): Promise<void>;
+  /** The map, with a list or the search open over it gone (a place asked for is gone to). */
+  showMap(): Promise<void>;
   /** A place asked for, once: taking it clears it. */
   takeRequest(): Promise<CarRequest | null>;
   /** The native side's notes since the last call. */

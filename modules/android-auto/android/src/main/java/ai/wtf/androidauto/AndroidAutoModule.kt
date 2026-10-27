@@ -17,6 +17,7 @@ import expo.modules.kotlin.records.Record
 // TypeScript.
 
 class CarStepRecord : Record {
+  @Field var id: String = ""
   @Field var kind: String = ""
   @Field var exit: Int? = null
   @Field var instruction: String = ""
@@ -24,6 +25,7 @@ class CarStepRecord : Record {
   @Field var timeS: Double = 0.0
   @Field var shownDistance: Double = 0.0
   @Field var shownUnit: String = "m"
+  @Field var distanceText: String = ""
 }
 
 class CarRouteRecord : Record {
@@ -31,6 +33,7 @@ class CarRouteRecord : Record {
   @Field var message: String? = null
   @Field var destinationName: String = ""
   @Field var replanning: Boolean = false
+  @Field var quiet: Boolean = false
   @Field var steps: List<CarStepRecord> = emptyList()
   @Field var remainingM: Double = 0.0
   @Field var remainingS: Double = 0.0
@@ -114,7 +117,10 @@ class AndroidAutoModule : Module() {
             message = r.message,
             destinationName = r.destinationName,
             replanning = r.replanning,
-            steps = r.steps.map { CarStep(it.kind, it.exit, it.instruction, it.distanceM, it.timeS, it.shownDistance, it.shownUnit) },
+            quiet = r.quiet,
+            steps = r.steps.map {
+              CarStep(it.id, it.kind, it.exit, it.instruction, it.distanceM, it.timeS, it.shownDistance, it.shownUnit, it.distanceText)
+            },
             remainingM = r.remainingM,
             remainingS = r.remainingS,
             remainingShown = r.remainingShown,
@@ -146,6 +152,11 @@ class AndroidAutoModule : Module() {
     /** The search screen with `query` typed, over the map (after `setSearch` with its answers). */
     AsyncFunction("openSearch") { query: String ->
       CarLink.openSearch(query)
+    }.runOnQueue(Queues.MAIN)
+
+    /** The map, with a list or the search open over it gone (a place asked for is gone to). */
+    AsyncFunction("showMap") {
+      CarLink.showMap()
     }.runOnQueue(Queues.MAIN)
 
     /** A place the car's assistant or another app asked for, once: `{ navigate, uri }`, or null. */
