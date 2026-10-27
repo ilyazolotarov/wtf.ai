@@ -15,6 +15,8 @@ import { WAKE_TASK } from "@/services/vehicle-wake";
 import { iosDriveWake, vehicleWakeTask } from "@/services/vehicle-wake-task";
 
 const NoScreen = () => null;
+/** A launch reason learnt after launch has come by then (AppHealth `learnt`). */
+const LAUNCH_REASON_LATE_MS = 3000;
 
 AppRegistry.registerHeadlessTask(WAKE_TASK, () => (data) => vehicleWakeTask(data as { how?: string } | undefined));
 
@@ -29,6 +31,14 @@ if (Platform.OS === "ios") {
   listenForCarPlay();
 }
 
-if (Platform.OS === "ios" && launchedOnTheWay(SensorCaptureModule.launchInfo(), VehicleLinkModule.nowUs())) {
-  void iosDriveWake();
+if (Platform.OS === "ios") {
+  const onTheWay = () => launchedOnTheWay(SensorCaptureModule.launchInfo(), VehicleLinkModule.nowUs());
+  if (onTheWay()) void iosDriveWake();
+  // With the scene life cycle iOS gives no launch options: the location the launch was for reaches the drive wake's
+  // manager a moment after launch (AppHealth `learnt`), maybe after this ran.
+  else if (SensorCaptureModule.launchInfo().inBackground) {
+    setTimeout(() => {
+      if (onTheWay()) void iosDriveWake();
+    }, LAUNCH_REASON_LATE_MS);
+  }
 }

@@ -40,18 +40,18 @@ CarPlay draws in a `CPTemplateApplicationScene`, so the app adopts the UIKit sce
 
 What the scene life cycle changes:
 
-1. **Launch options.** In a scene app UIKit hands a URL, a user activity, a notification or a quick action to the
-   scene's connection options instead. `VehicleLinkAppDelegate` reads `.bluetoothCentrals` to create the central at
-   once when iOS restored the adapter's connection, and `AppHealth` reads `.location` behind `launchedOnTheWay`
-   (index.ts, VEHICLE-LINK-SPEC §11): neither is a scene's, and they are expected in the app delegate still (to verify
-   on the phone, §7). If they are not: the central made with the restore id at every launch, the restoration taken from
-   `willRestoreState`, the location relaunch from the location manager's callbacks.
-2. **React Native starts with the phone's scene** (Expo's scene delegate). Without it: the car's screen starts it
-   (§4); a launch in the background (iOS relaunching the app for location or the adapter) connects no scene, so
-   `AppReactHostAppDelegate` (modules/car-play) starts it the same way: at once when the launch options say location
-   or Bluetooth, otherwise when no scene has connected 3 s after launch with the app still in the background (a launch
-   from the phone connects its scene within that; 1.5 s after the car's on the simulator). Device log: `background
-   launch …, no scene`. Not seen on a device yet (§7).
+1. **Launch options and the launch state.** A scene app gets no launch options (on the simulator a relaunch for a
+   significant location change came with none: no `.location`), and every launch starts in the background state, the
+   user's too. Both broke the drive wake (VEHICLE-LINK-SPEC §11) and the adapter's restoration: `AppHealth` now takes a
+   scene in front within 5 s as the user's launch, and the update `DriveWake` gets within 30 s of a launch with none in
+   front as its reason (`location`), index.ts looking again 3 s after launch; `VehicleLinkAppDelegate` creates the
+   central with its restore id at every launch with Bluetooth allowed, as Apple advises for scene apps. Seen on the
+   simulator: a user launch is not a wake; a relaunch for a significant change is, and the drive wake runs.
+2. **React Native starts with a scene** (Expo's scene delegate starts it as the phone's connects). A relaunch in the
+   background connects the phone's scene in the background too (seen on the simulator: JS ran for the drive wake).
+   Without the phone's: the car's screen starts it (§4), and `AppReactHostAppDelegate` (modules/car-play) starts it when
+   no scene has connected 3 s after a launch in the background (at once when launch options say location or
+   Bluetooth). Device log: `background launch …, no scene`.
 3. Links (`wtfai://`, `geo:`) are forwarded by Expo's scene delegate: the development client's links and a `geo:` link
    open the phone's screens on the simulator. Quick actions are unchecked.
 
@@ -305,9 +305,8 @@ to a place outside the region for a failed plan, `holdRouteForGuide` for a held 
 
 ## 7. Open items
 
-1. **On a phone and in a car**, from TestFlight (the simulator can't): a background relaunch for location and for the
-   adapter starting React Native (`AppReactHostAppDelegate`) and its launch options still in the app delegate (§3);
-   the map at the car's own points in motion; the voice over the car's audio; the banners; the cluster's metadata; the
+1. **On a phone and in a car**, from TestFlight (the simulator can't): the adapter's restoration relaunch (§3); the
+   map at the car's own points in motion; the voice over the car's audio; the banners; the cluster's metadata; the
    night style switching with the car.
 2. **AppState with only the car's screen in front**: iOS reports the app `inactive`. The navigator and the location
    session follow the car's session (§4); the update check and the map packs' refresh key off `active` and wait for the

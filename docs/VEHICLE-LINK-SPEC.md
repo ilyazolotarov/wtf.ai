@@ -465,8 +465,9 @@ within ~20 s of its ignition.
 - **Woken by the adapter (iOS):** the central has a restoration id (`RESTORE_IDENTIFIER`, the same in Swift). With a
   connection up or a connect pending when iOS ends the app (memory, a crash; not a swipe: the app cancels it in
   `applicationWillTerminate`, TRIP-LOGGER-SPEC §4.3), iOS keeps it and relaunches the app in the background when the
-  adapter's link has news: mid-drive within moments, parked when the car is next switched on. At such a launch the
-  central is created at once (`VehicleLinkAppDelegate`), before JS; JS auto-connects as at any launch, and a
+  adapter's link has news: mid-drive within moments, parked when the car is next switched on. With Bluetooth allowed
+  the central is created at every launch, at once (`VehicleLinkAppDelegate`), before JS: the app's scene life cycle
+  (CARPLAY-SPEC §3) leaves the launch options empty, so the restoration launch can't be told apart; JS auto-connects as at any launch, and a
   peripheral restored still connected is set up without a new connect. GNSS then needs the location session
   (TRIP-LOGGER-SPEC §4.3); without it the trip dead-reckons. MFi (`EAAccessoryDidConnect`) wakes nothing: not built.
 - **Started with a drive (iOS, opt-in):** the same opt-in on iOS (onboarding and the Vehicle screen) asks for
@@ -475,8 +476,10 @@ within ~20 s of its ignition.
   drive whatever the adapter (cell and Wi-Fi, so under jamming too). iOS shows *Change to Always Allow* once per
   install and ignores a second request, and expo-location can't tell (a new process reports "While Using" as not asked
   yet): the app keeps that it asked (`location-always-asked`), and from then on, as for any refusal, says where to go in
-  Settings and opens them. Monitoring starts again at every launch, and when "Always" is granted later. A relaunch on
-  the way (in the background for `location`, `on-the-way.ts`) runs the same wait as Android's task (`iosDriveWake`):
+  Settings and opens them. Monitoring starts again at every launch, and when "Always" is granted later. With the scene
+  life cycle iOS gives the relaunch no launch options: the update `DriveWake` gets within 30 s of a launch with no
+  scene in front is the launch's reason (`AppHealth.learnt`), and index.ts looks again 3 s after a launch in the
+  background. A relaunch on the way (in the background for `location`, `on-the-way.ts`) runs the same wait as Android's task (`iosDriveWake`):
   GNSS, which "Always" may start from the background, keeps the app running while it auto-connects; a trip then keeps
   it, and if none records in 9 min GNSS stops unless the app is open (the map starts GNSS only in front). The parked
   pose is left aside unless the relaunch's location, accuracy included, is within 150 m of it (the car still stands

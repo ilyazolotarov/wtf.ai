@@ -31,7 +31,10 @@ public class VehicleLinkAppDelegate: ExpoAppDelegateSubscriber {
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
   ) -> Bool {
     let ids = launchOptions?[.bluetoothCentrals] as? [String] ?? []
-    LinkCore.restoring = ids.contains(LinkCore.restoreIdentifier)
+    // An app with the scene life cycle is given no launch options (CARPLAY-SPEC §3): with Bluetooth allowed, every
+    // launch creates the central with its restore id at once, as Apple advises for scene apps; iOS hands it the
+    // restoration (`willRestoreState`) when there is one. JS would create it on its first connect anyway.
+    LinkCore.restoring = ids.contains(LinkCore.restoreIdentifier) || CBManager.authorization == .allowedAlways
     return true
   }
 

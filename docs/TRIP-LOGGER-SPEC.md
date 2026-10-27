@@ -127,7 +127,9 @@ ended can't log why. What it can, it logs; the next process logs the rest.
   recorder did (`recording <trip id>`), memory, memory warnings. iOS also notes `applicationWillTerminate` (the OS
   saying it will end the app), synchronously.
 - **At launch** (native, before JS): whether in the background and why (iOS launch options: `location`,
-  `bluetooth`), the previous heartbeat, and what the OS reported: iOS MetricKit (exits by reason a day at a time,
+  `bluetooth`), the previous heartbeat. With the scene life cycle (CARPLAY-SPEC §3) iOS starts every launch in the
+  background and gives no launch options: a scene in front within 5 s makes the launch the user's, and a significant
+  location change within 30 s of one with none is its `location` (`AppHealth.learnt`); and what the OS reported: iOS MetricKit (exits by reason a day at a time,
   crash, hang and CPU reports; kept until a trip takes them, 20 at most), Android `ApplicationExitInfo` (reason,
   importance, memory; those newer than the last read).
 - **Into the trip log** as notes at each trip's start: `app launched N s before this, in front | in the background

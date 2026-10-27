@@ -78,12 +78,52 @@ final class AppHealth: NSObject, MXMetricManagerSubscriber, @unchecked Sendable 
     launch = info
     lock.unlock()
     MXMetricManager.shared.add(self)
+    // An app with the scene life cycle starts every launch in the background, the user's too: a scene in front soon
+    // after makes it the user's (the phone's, or CarPlay's when the driver opened the app there).
+    if inBackground {
+      sceneObserver = NotificationCenter.default.addObserver(
+        forName: UIScene.willEnterForegroundNotification, object: nil, queue: .main
+      ) { [weak self] _ in self?.sceneInFront() }
+    }
+  }
+
+  /** A scene in front within this of the launch: the user launched the app. */
+  private static let userLaunchWithinUs = 5e6
+  private var sceneObserver: NSObjectProtocol?
+
+  private func sceneInFront() {
+    if let observer = sceneObserver { NotificationCenter.default.removeObserver(observer) }
+    sceneObserver = nil
+    lock.lock()
+    defer { lock.unlock() }
+    guard let uptimeUs = launch["uptimeUs"] as? Double, SensorCapture.nowUs() - uptimeUs <= Self.userLaunchWithinUs else {
+      return
+    }
+    launch["inBackground"] = false
   }
 
   func launchInfo() -> [String: Any] {
     lock.lock()
     defer { lock.unlock() }
     return launch
+  }
+
+  /** A launch reason only learnt within this of a launch in the background is the launch's own. */
+  private static let learntWithinUs = 30e6
+
+  /**
+   * A reason for a launch in the background learnt after it: an app with the scene life cycle is given no launch
+   * options (iOS 26: a relaunch for a significant location change came with none), so DriveWake tells the location
+   * the launch was for as its manager gets it (CARPLAY-SPEC §3).
+   */
+  func learnt(reason: String) {
+    lock.lock()
+    defer { lock.unlock() }
+    guard launch["inBackground"] as? Bool == true, var reasons = launch["reasons"] as? [String], !reasons.contains(reason),
+      let uptimeUs = launch["uptimeUs"] as? Double, SensorCapture.nowUs() - uptimeUs <= Self.learntWithinUs
+    else { return }
+    reasons.append(reason)
+    launch["reasons"] = reasons
   }
 
   /** Written at once: nothing runs after it. */
@@ -354,9 +394,11 @@ final class DriveWake: NSObject, CLLocationManagerDelegate, @unchecked Sendable 
     lastFix = location
   }
 
-  // The relaunch is the point: GNSS and the trip start from JS. Delivered while running too, every few hundred metres.
+  // The relaunch is the point: GNSS and the trip start from JS. Delivered while running too, every few hundred metres;
+  // right after a launch in the background, it is what the launch was for (a scene app gets no launch options).
   func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
     if let last = locations.last { keep(last) }
+    AppHealth.shared.learnt(reason: "location")
   }
 
   func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {}
