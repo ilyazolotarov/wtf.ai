@@ -465,6 +465,8 @@ export const uk = {
   carLocationNeeded: "Надайте доступ до геопозиції на телефоні.",
   carAllowLocation: "Надати доступ",
   carCheckPhone: "Перевірте телефон, лише коли це безпечно.",
+  carRoutes: "Маршрути",
+  carThisRoute: "Цей маршрут",
   carHeldTitle: "Без адаптера",
   carHeldSetPosition: "Зупиніться й укажіть позицію на телефоні.",
   carHeldFollow: "Не відхиляйтеся від маршруту.",

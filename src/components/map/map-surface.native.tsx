@@ -24,6 +24,7 @@ import { nearPoint } from "./map-near";
 import { BUILDING_ZOOM, FINGER_PT, nearestStreet, type PinPick } from "./pin-pick";
 
 import {
+  ALTERNATIVE_PICK_LAYERS,
   DebugLayers,
   EntranceLayers,
   MarkLayers,
@@ -121,6 +122,8 @@ interface MapSurfaceProps {
   control?: Ref<MapControl | null>;
   /** Zoom levels added to the follow zoom (the car's zoom buttons and pinches while following). */
   followZoomShift?: number;
+  /** Room for what covers the map when framing the routes at once, points from each edge (the phone's panels by default). */
+  framePadding?: { top: number; bottom: number; left: number; right: number };
 }
 
 export function MapSurface({
@@ -147,6 +150,7 @@ export function MapSurface({
   headingUpDotAt,
   control,
   followZoomShift = 0,
+  framePadding,
 }: MapSurfaceProps) {
   const phoneScheme = useColorScheme() === "dark" ? "dark" : "light";
   const scheme = schemeOverride ?? phoneScheme;
@@ -199,6 +203,7 @@ export function MapSurface({
     placing,
     placeFrom,
     overview,
+    framePadding,
     onCenter,
     onUserInteraction,
     logCamera,
@@ -230,6 +235,21 @@ export function MapSurface({
     zoom: (factor, focus, animated) => {
       onOutsideGesture();
       moves.zoom(factor, focus, animated);
+    },
+    tap: (x, y) => {
+      const map = mapRef.current;
+      if (!map) return;
+      const box: [[number, number], [number, number]] = [
+        [x - FINGER_PT, y - FINGER_PT],
+        [x + FINGER_PT, y + FINGER_PT],
+      ];
+      map
+        .queryRenderedFeatures(box, { layers: ALTERNATIVE_PICK_LAYERS })
+        .then((features) => {
+          const index = features[0]?.properties?.index;
+          if (typeof index === "number") chooseAlternative(index);
+        })
+        .catch(() => {});
     },
   }));
   // A long press where buildings are drawn: the street under the finger and whether it is on a building; then the pin

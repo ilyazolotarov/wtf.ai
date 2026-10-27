@@ -6,6 +6,7 @@ import { DRIVER_POI_FILTER } from "@/config/map-car";
 import type { MapStyleJson } from "@/config/map-dark";
 import { HOUSE_NUMBER_LAYER } from "@/config/map-labels";
 import type { Palette } from "@/constants/theme";
+import { formatAlternativeDelta } from "@/components/route/guidance-text";
 import { useT } from "@/i18n/provider";
 import type { Coordinate } from "@/nav/geo";
 import type { PositionEstimate } from "@/nav/position/types";
@@ -76,6 +77,9 @@ function deadReckoning(position: PositionEstimate | null): boolean {
  */
 const UNDER_NAMES = HOUSE_NUMBER_LAYER;
 
+/** The alternatives' lines and labels, for a tap the map view doesn't see itself (the car's screen). */
+export const ALTERNATIVE_PICK_LAYERS = ["alternative-route-casing", "alternative-route-line", "alternative-route-label"];
+
 /**
  * The route (ROUTING-SPEC §8): only what is ahead of the car, faded while planning again, its next maneuver, the
  * destination. Alternatives (§8.7): fainter lines under it, each labelled with its time against it; a tap on either
@@ -134,10 +138,7 @@ export function RouteLayers({
   const destination = route ? pointFeatures(route.destination) : emptyPoints();
   const alternativeRoutes = route?.alternatives;
   const alternativeLines = useMemo(() => alternativeLineFeatures(alternativeRoutes), [alternativeRoutes]);
-  const alternativeLabels = alternativeLabelFeatures(alternativeRoutes, (deltaS) => {
-    const n = Math.round(Math.abs(deltaS) / 60);
-    return n === 0 ? t("alternativeSame") : t(deltaS > 0 ? "alternativeSlower" : "alternativeFaster").replace("{n}", String(n));
-  });
+  const alternativeLabels = alternativeLabelFeatures(alternativeRoutes, (deltaS) => formatAlternativeDelta(deltaS, t));
   const pickAlternative = (event: NativeSyntheticEvent<{ features: GeoJSON.Feature[] }>) => {
     const index = event.nativeEvent.features?.[0]?.properties?.index;
     if (typeof index !== "number") return;

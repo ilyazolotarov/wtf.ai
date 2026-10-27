@@ -99,6 +99,7 @@ export function useMapCamera({
   placing,
   placeFrom,
   overview,
+  framePadding = FRAME_PADDING,
   onCenter,
   onUserInteraction,
   logCamera,
@@ -123,6 +124,8 @@ export function useMapCamera({
   placing: PlacingStep | null;
   placeFrom: Coordinate | null;
   overview: number | null;
+  /** Room for what covers the map when framing several things at once, points from each edge. */
+  framePadding?: Insets;
   onCenter?(at: Coordinate): void;
   onUserInteraction(): void;
   logCamera?(text: string): void;
@@ -292,21 +295,22 @@ export function useMapCamera({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapReady, follow, position, ghostView, followBearing, smoothing, fitRadiusPt, mapHeight, insetTop, insetBottom, insetLeft, insetRight, headingUpDotAt]);
 
-  // The route and its alternatives at once (ROUTING-SPEC §8.7), north up: framed once when asked.
+  // The route and its alternatives at once (ROUTING-SPEC §8.7), north up: framed once when asked, once the map can
+  // take it (the car's map, made again after a list over it, asked before its style had loaded).
   useEffect(() => {
-    if (overview == null || !route?.plan) return;
+    if (!mapReady || overview == null || !route?.plan) return;
     const all = [route.plan, ...(route.alternatives ?? []).map((a) => a.plan)].flatMap((p) => p.coordinates);
     if (all.length < 2) return;
     const lons = all.map((c) => c.lon);
     const lats = all.map((c) => c.lat);
     commands.fitBounds([Math.min(...lons), Math.min(...lats), Math.max(...lons), Math.max(...lats)], {
-      padding: FRAME_PADDING,
+      padding: framePadding,
       bearing: 0,
       pitch: 0,
       duration: 900,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [overview]);
+  }, [overview, mapReady]);
 
   const hasGhost = ghost != null;
   useEffect(() => {
@@ -319,7 +323,7 @@ export function useMapCamera({
         Math.max(position.lat, ghost.lat),
       ],
       {
-        padding: FRAME_PADDING,
+        padding: framePadding,
         bearing: 0,
         pitch: 0,
         duration: 900,

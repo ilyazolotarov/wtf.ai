@@ -141,6 +141,14 @@ src/components/car-screen/car-session.ts ◀───────┘  route, pla
   drives, the follow zoom kept; or recentre, which also puts the follow zoom back to its own level. Moves that come
   while the last is applied (async, through `unproject`) are added up into one (`useMapControl`); the arithmetic is
   `map-moves.ts` (Jest).
+- **Alternative routes** (ROUTING-SPEC §8.7): drawn on the car's map as on the phone's, grey under the route, each
+  labelled with its time against it. When they come while the car stands, the map frames them all once per
+  destination (inside the template's cards; not again when the map is made again after a list) until recentre or
+  driving off. A tap on a grey line or its label follows it (`SurfaceCallback.onClick`, `MapControl.tap`). While the
+  route is followed with alternatives (`CarGuidanceLogic.showsRoutes`, JUnit), a routes button opens the list: the
+  route, then each alternative, each titled by the street it goes by where the others don't (`viaNames`), then how it
+  compares ("This route", "+3 min") and its whole time and distance; without a street, the comparison is the title.
+  One picked is followed (`choose-alternative`).
 - **Templates** (`CarScreens.kt`), built from the last state the session sent:
 
   | State | NavigationTemplate shows |
@@ -226,7 +234,9 @@ turn-by-turn notification on a narrow head unit (`config/default.ini`, 800×480)
 each maneuver popped up once with its arrow, distance and words in the app's language; a tap on it opening the app's
 screen with the route; none on the 1280×720 one, where the app's side panel stays; taken down at arrival. Moving the
 map: a drag with the mouse leaving following, the recentre button then showing and bringing it back; − and + moving
-the follow zoom, recentre then showing and putting it back.
+the follow zoom, recentre then showing and putting it back. Alternative routes: framed when they came while
+standing; the routes list titled by street ("Михайлівська вулиця, This route", "вулиця Хрещатик, +1 min"), the one
+picked followed; a tap on a grey line and on its label each taking that route.
 
 ## 6. Not chosen
 
@@ -240,10 +250,9 @@ the follow zoom, recentre then showing and putting it back.
 1. A real car, from the Play internal test track (§2); there, the car's assistant (VC-1) asking for places.
 2. Moving the map with a rotary knob or touchpad (the host's pan mode), not yet seen: the Desktop Head Unit is a
    touch screen, and its console taps but can't drag or pinch.
-3. A route's alternatives before following one (the route preview, ROUTING-SPEC §8.7).
-4. The instrument cluster (`FEATURE_CLUSTER`). The turn-by-turn notification in a rail, where an Android Auto
+3. The instrument cluster (`FEATURE_CLUSTER`). The turn-by-turn notification in a rail, where an Android Auto
    version or a car draws one.
-5. The quality review's other navigation guidelines, before production: the cluster (NF-4, item 4), a test-drive mode
+4. The quality review's other navigation guidelines, before production: the cluster (NF-4, item 3), a test-drive mode
    that simulates driving (NF-7).
-6. Debug builds need Metro as for the phone. A car's map started before the development launcher loaded the JS stayed
+5. Debug builds need Metro as for the phone. A car's map started before the development launcher loaded the JS stayed
    blank; `CarMapSurface.restartIfStopped` starts it again in the new React context, not yet seen doing so.

@@ -440,6 +440,8 @@ export const en = {
   carLocationNeeded: "Allow location access on your phone.",
   carAllowLocation: "Allow access",
   carCheckPhone: "Check your phone only when it's safe.",
+  carRoutes: "Routes",
+  carThisRoute: "This route",
   carHeldTitle: "Without an adapter",
   carHeldSetPosition: "Stop and set your position on the phone.",
   carHeldFollow: "Follow the route exactly.",

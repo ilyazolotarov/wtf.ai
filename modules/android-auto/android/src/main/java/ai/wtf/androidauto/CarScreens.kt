@@ -1,5 +1,6 @@
 package ai.wtf.androidauto
 
+import ai.wtf.androidauto.logic.CarAlternative
 import ai.wtf.androidauto.logic.CarCard
 import ai.wtf.androidauto.logic.CarDistanceUnit
 import ai.wtf.androidauto.logic.CarGuidanceLogic
@@ -57,6 +58,14 @@ internal class NavigationScreen(carContext: CarContext) : Screen(carContext) {
           .setOnClickListener { CarLink.send("end-route") }
           .build(),
       )
+      if (CarGuidanceLogic.showsRoutes(route, card)) {
+        actions.addAction(
+          Action.Builder()
+            .setIcon(CarTemplates.icon(carContext, R.drawable.car_alt_route))
+            .setOnClickListener { screenManager.push(RoutesScreen(carContext)) }
+            .build(),
+        )
+      }
     } else {
       actions.addAction(
         Action.Builder()
@@ -193,6 +202,37 @@ internal class DestinationsScreen(carContext: CarContext) : Screen(carContext) {
     place.detail?.takeIf { it.isNotEmpty() }?.let { row.addText(it) }
     return row.build()
   }
+}
+
+/**
+ * The route's other ways (ROUTING-SPEC §8.7, docs/ANDROID-AUTO-SPEC.md §4): the route followed first, then each
+ * alternative, each by the street it goes by, its time against the route and its own; one picked is followed instead.
+ */
+internal class RoutesScreen(carContext: CarContext) : Screen(carContext) {
+  @Suppress("DEPRECATION") // setTitle / setHeaderAction: Header needs Car API 7.
+  override fun onGetTemplate(): Template {
+    val labels = CarLink.labels
+    val route = CarLink.route
+    val template = ListTemplate.Builder().setTitle(labels.routes).setHeaderAction(Action.BACK)
+    val items = ItemList.Builder()
+    // The route followed, even once its alternatives are gone (then nothing else to pick).
+    val current = Row.Builder().setTitle(route?.title?.ifEmpty { null } ?: labels.thisRoute).setImage(CarTemplates.icon(carContext, R.drawable.car_navigation))
+    route?.detail?.takeIf { it.isNotEmpty() }?.let { current.addText(it) }
+    items.addItem(current.setOnClickListener { screenManager.pop() }.build())
+    route?.alternatives?.take(CarTemplates.listLimit(carContext) - 1)?.forEach { items.addItem(row(it)) }
+    return template.setSingleList(items.build()).build()
+  }
+
+  private fun row(alternative: CarAlternative): Row =
+    Row.Builder()
+      .setTitle(alternative.title.ifEmpty { "·" })
+      .addText(alternative.detail.ifEmpty { " " })
+      .setImage(CarTemplates.icon(carContext, R.drawable.car_alt_route))
+      .setOnClickListener {
+        CarLink.send("choose-alternative", mapOf("index" to alternative.index))
+        screenManager.pop()
+      }
+      .build()
 }
 
 /**

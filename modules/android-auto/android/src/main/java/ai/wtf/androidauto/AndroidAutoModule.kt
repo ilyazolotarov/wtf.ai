@@ -1,5 +1,6 @@
 package ai.wtf.androidauto
 
+import ai.wtf.androidauto.logic.CarAlternative
 import ai.wtf.androidauto.logic.CarLabels
 import ai.wtf.androidauto.logic.CarNotice
 import ai.wtf.androidauto.logic.CarPlace
@@ -39,6 +40,15 @@ class CarRouteRecord : Record {
   @Field var remainingS: Double = 0.0
   @Field var remainingShown: Double = 0.0
   @Field var remainingUnit: String = "m"
+  @Field var title: String = ""
+  @Field var detail: String = ""
+  @Field var alternatives: List<CarAlternativeRecord> = emptyList()
+}
+
+class CarAlternativeRecord : Record {
+  @Field var index: Int = 0
+  @Field var title: String = ""
+  @Field var detail: String = ""
 }
 
 class CarPlaceRecord : Record {
@@ -59,6 +69,8 @@ class CarLabelsRecord : Record {
   @Field var noResults: String = ""
   @Field var checkPhone: String = ""
   @Field var notification: String = ""
+  @Field var routes: String = ""
+  @Field var thisRoute: String = ""
 }
 
 class CarSearchRecord : Record {
@@ -104,6 +116,8 @@ class AndroidAutoModule : Module() {
           noResults = labels.noResults.ifEmpty { d.noResults },
           checkPhone = labels.checkPhone.ifEmpty { d.checkPhone },
           notification = labels.notification.ifEmpty { d.notification },
+          routes = labels.routes.ifEmpty { d.routes },
+          thisRoute = labels.thisRoute.ifEmpty { d.thisRoute },
         ),
       )
     }.runOnQueue(Queues.MAIN)
@@ -125,6 +139,9 @@ class AndroidAutoModule : Module() {
             remainingS = r.remainingS,
             remainingShown = r.remainingShown,
             remainingUnit = r.remainingUnit,
+            title = r.title,
+            detail = r.detail,
+            alternatives = r.alternatives.map { CarAlternative(it.index, it.title, it.detail) },
           )
         },
       )

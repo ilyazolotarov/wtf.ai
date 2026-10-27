@@ -40,6 +40,21 @@ export interface CarRoutePayload {
   remainingS: number;
   remainingShown: number;
   remainingUnit: CarDistanceUnit;
+  /** The routes list's row for the route followed: the street it goes by, else "This route"; its time and distance. */
+  title: string;
+  detail: string;
+  /** The other ways to choose from (ROUTING-SPEC §8.7): none while planning, planned again or arrived. */
+  alternatives: CarAlternativePayload[];
+}
+
+/**
+ * Another way to the destination: `index` in the route's alternatives; the street it goes by (else its time against
+ * the route); its time against the route, its own time and distance.
+ */
+export interface CarAlternativePayload {
+  index: number;
+  title: string;
+  detail: string;
 }
 
 /** A destination to pick: a saved place, a recent one, or a search result. */
@@ -80,6 +95,9 @@ export interface CarLabelsPayload {
   checkPhone: string;
   /** The phone's notification while the car session keeps the position. */
   notification: string;
+  /** The routes list's title; its row for the route followed. */
+  routes: string;
+  thisRoute: string;
 }
 
 /**
@@ -103,13 +121,14 @@ export interface CarNote {
 
 /**
  * `end-route`: the driver ended the route on the car's screen, or the host did (another navigator started one);
- * `go`: a destination or search result picked (`id`); `search`: the search screen's text changed; `request`: a place
+ * `go`: a destination or search result picked (`id`); `choose-alternative`: a route picked in the routes list; `search`: the search screen's text changed; `request`: a place
  * asked for, to take; `toggle-voice`; `confirm-held`, `cancel-held`: the held route's buttons; `permission`: the
  * location request answered; `notes`: native notes to take; `session-ended`: the car's screen is gone.
  */
 export type CarAction =
   | { action: "end-route" }
   | { action: "go"; id: string }
+  | { action: "choose-alternative"; index: number }
   | { action: "search"; text: string }
   | { action: "request" }
   | { action: "toggle-voice" }
@@ -122,14 +141,15 @@ export type CarAction =
 /**
  * The driver on the car's map, in the map's dp: `scroll`, the distance the finger went back since the last (the camera
  * moves by it); `fling`, the finger's velocity, dp/s; `scale`, a pinch or double tap about a focus (-1, -1: none);
- * `zoom`, the zoom buttons (+1 in, -1 out); `recentre`, the recentre button.
+ * `zoom`, the zoom buttons (+1 in, -1 out); `recentre`, the recentre button; `click`, a tap on the map.
  */
 export type CarMapGesture =
   | { kind: "scroll"; dx: number; dy: number }
   | { kind: "fling"; vx: number; vy: number }
   | { kind: "scale"; x: number; y: number; factor: number }
   | { kind: "zoom"; by: number }
-  | { kind: "recentre" };
+  | { kind: "recentre" }
+  | { kind: "click"; x: number; y: number };
 
 export type AndroidAutoEvents = {
   onCarAction: (event: CarAction) => void;

@@ -1,3 +1,4 @@
+import ai.wtf.androidauto.logic.CarAlternative
 import ai.wtf.androidauto.logic.CarCard
 import ai.wtf.androidauto.logic.CarDistanceUnit
 import ai.wtf.androidauto.logic.CarGuidanceLogic
@@ -28,7 +29,20 @@ class CarGuidanceLogicTest {
     replanning: Boolean = false,
     message: String? = null,
     quiet: Boolean = false,
-  ) = CarRoute(status, message, "Kyiv", replanning, quiet, steps, 10_000.0, 900.0, 10.0, "km1")
+    alternatives: List<CarAlternative> = emptyList(),
+  ) = CarRoute(status, message, "Kyiv", replanning, quiet, steps, 10_000.0, 900.0, 10.0, "km1", "Khreshchatyk Street", "15 min · 10 km", alternatives)
+
+  @Test
+  fun theRoutesButtonOnlyWithOtherWaysWhileFollowed() {
+    val other = listOf(CarAlternative(0, "+2 min", "17 min · 11 km"))
+    val followed = route("active", alternatives = other)
+    assertTrue(CarGuidanceLogic.showsRoutes(followed, CarGuidanceLogic.card(followed, null)))
+    assertFalse(CarGuidanceLogic.showsRoutes(route("active"), CarCard.STEPS))
+    val again = route("active", replanning = true, alternatives = other)
+    assertFalse(CarGuidanceLogic.showsRoutes(again, CarGuidanceLogic.card(again, null)))
+    val notice = CarNotice("location", "Location off", "", "Allow")
+    assertFalse(CarGuidanceLogic.showsRoutes(followed, CarGuidanceLogic.card(followed, notice)))
+  }
 
   @Test
   fun everyManeuverKindOfTheAppHasACarType() {

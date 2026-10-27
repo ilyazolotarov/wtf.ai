@@ -129,4 +129,34 @@ describe("car route", () => {
       steps: [],
     });
   });
+
+  test("the other ways to choose from, timed against the route, each with its own time and distance", () => {
+    const slower = { plan: { ...plan, lengthM: 13_100, durationS: 1260 }, deltaS: 180, labelAt: { lat: 50.4, lon: 30.5 } };
+    const same = { plan: { ...plan, lengthM: 12_900, durationS: 1100 }, deltaS: 20, labelAt: { lat: 50.4, lon: 30.5 } };
+    const r = carRoute(route(step({}), { alternatives: [slower, same] }), t, "en")!;
+    expect(r.detail).toBe("18 min · 12.3 km");
+    expect(r.alternatives).toEqual([
+      { index: 0, title: "+3 min", detail: "21 min · 13.1 km" },
+      { index: 1, title: "Same time", detail: "18 min · 12.9 km" },
+    ]);
+  });
+
+  test("each way by the street it goes by, how it compares after it", () => {
+    const slower = { plan: { ...plan, lengthM: 13_100, durationS: 1260 }, deltaS: 180, labelAt: { lat: 50.4, lon: 30.5 } };
+    const other = { plan, deltaS: -60, labelAt: { lat: 50.4, lon: 30.5 } };
+    const r = carRoute(route(step({}), { alternatives: [slower, other] }), t, "en", ["Khreshchatyk Street", "Naberezhne Highway", null])!;
+    expect(r.title).toBe("Khreshchatyk Street");
+    expect(r.detail).toBe("This route · 18 min · 12.3 km");
+    expect(r.alternatives).toEqual([
+      { index: 0, title: "Naberezhne Highway", detail: "+3 min · 21 min · 13.1 km" },
+      { index: 1, title: "−1 min", detail: "18 min · 12.3 km" },
+    ]);
+  });
+
+  test("none to choose while planning again or once arrived", () => {
+    const alternatives = [{ plan, deltaS: 180, labelAt: { lat: 50.4, lon: 30.5 } }];
+    expect(carRoute(route(step({}), { alternatives, replanning: true }), t, "en")!.alternatives).toEqual([]);
+    const arrived = step({ state: "arrived", nextIndex: 3, toNextM: 0, remainingM: 0, remainingS: 0 });
+    expect(carRoute(route(arrived, { alternatives }), t, "en")!.alternatives).toEqual([]);
+  });
 });

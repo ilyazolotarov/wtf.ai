@@ -66,6 +66,7 @@ function setup({ connected = true, located = true }: { connected?: boolean; loca
     recent: [{ id: "search:1", title: "Lviv", detail: null, lat: 49.84, lon: 24.03, usedAt: 2 }],
   };
   const started: RouteDestination[] = [];
+  const chosen: number[] = [];
   const recents: string[] = [];
   const spoken: { route: RouteSnapshot | null; muted: boolean }[] = [];
   const notes: string[] = [];
@@ -116,6 +117,7 @@ function setup({ connected = true, located = true }: { connected?: boolean; loca
         route = null;
         routeListeners.forEach((l) => l());
       },
+      chooseAlternative: (index) => chosen.push(index),
     },
     places: {
       getSnapshot: () => placesSnapshot,
@@ -174,6 +176,7 @@ function setup({ connected = true, located = true }: { connected?: boolean; loca
     speedMps: () => 10,
     find: fakeFind,
     away: () => "1 km",
+    streetAt: () => null,
     located: () => Promise.resolve(granted),
     retryLocation: () => retries++,
     setCarScreen: (on) => carScreen.push(on),
@@ -226,6 +229,7 @@ function setup({ connected = true, located = true }: { connected?: boolean; loca
     held: () => held,
     notices: () => calls.filter((c) => c.method === "setNotice").map((c) => c.arg),
     started,
+    chosen,
     recents,
     spoken,
     notes,
@@ -261,6 +265,8 @@ describe("car session", () => {
       noResults: en.noSearchResults,
       checkPhone: en.carCheckPhone,
       notification: en.carNotification,
+      routes: en.carRoutes,
+      thisRoute: en.carThisRoute,
     });
     expect(sent.setPlaces).toEqual([
       { id: "home", title: "Home", detail: "Khreshchatyk 1", kind: "home" },
@@ -310,6 +316,14 @@ describe("car session", () => {
 
     s.act({ action: "toggle-voice" });
     expect(s.calls.at(-1)).toEqual({ method: "setVoiceMuted", arg: true });
+  });
+
+  test("a route picked in the car's routes list is followed", () => {
+    const s = setup();
+    void runCarSession(s.deps);
+    s.act({ action: "choose-alternative", index: 1 });
+    expect(s.chosen).toEqual([1]);
+    expect(s.notes.at(-1)).toBe("android auto: alternative 1 picked on the car's screen");
   });
 
   test("no voice button with the volume at 0, and the voice said nothing then", () => {

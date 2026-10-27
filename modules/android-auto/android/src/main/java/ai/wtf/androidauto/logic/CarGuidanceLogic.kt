@@ -62,7 +62,15 @@ data class CarRoute(
   val remainingS: Double,
   val remainingShown: Double,
   val remainingUnit: String,
+  /** The routes list's row for the route followed: the street it goes by (empty: "This route"); its time and distance. */
+  val title: String = "",
+  val detail: String = "",
+  /** The other ways to the destination (ROUTING-SPEC §8.7), to choose from. */
+  val alternatives: List<CarAlternative> = emptyList(),
 )
+
+/** Another way to the destination: `index` in the route's alternatives; the street it goes by, else its time; more. */
+data class CarAlternative(val index: Int, val title: String, val detail: String)
 
 /** A destination to pick on the car's screen: a saved place, a recent one, or a search result (`result`). */
 data class CarPlace(val id: String, val title: String, val detail: String?, val kind: String)
@@ -96,6 +104,9 @@ data class CarLabels(
   val checkPhone: String = "Check your phone only when it's safe.",
   /** The phone's notification while the car session holds location (CarLocationService). */
   val notification: String = "Tracks your car's position even when another app is open in Android Auto.",
+  /** The routes list's title; its row for the route followed. */
+  val routes: String = "Routes",
+  val thisRoute: String = "This route",
 )
 
 /**
@@ -192,6 +203,10 @@ object CarGuidanceLogic {
       route.status == "planning" || route.replanning -> CarCard.LOADING
       else -> CarCard.MESSAGE
     }
+
+  /** The routes button: while the route is followed with other ways to choose from (not while planned again). */
+  fun showsRoutes(route: CarRoute?, card: CarCard): Boolean =
+    card == CarCard.STEPS && route != null && !route.replanning && route.alternatives.isNotEmpty()
 
   /**
    * The session's step for a new route state: started when a route begins (the host then shows it in the cluster

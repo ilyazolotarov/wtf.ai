@@ -1,7 +1,9 @@
-import { formatManeuverDistance, maneuverInstruction, PROBLEM_TEXT } from "@/components/route/guidance-text";
+import { formatAlternativeDelta, formatDurationS, formatManeuverDistance, maneuverInstruction, PROBLEM_TEXT } from "@/components/route/guidance-text";
+import { formatDistance } from "@/components/status/format-geo";
 import type { Strings } from "@/i18n/en";
 import { isStartTurnaround } from "@/nav/routing/announcer";
 import type { Maneuver } from "@/nav/routing/maneuvers";
+import type { RoutePlan } from "@/nav/routing/router";
 import type { RouteSnapshot } from "@/services/navigation/route-service";
 
 import type { CarDistanceUnit, CarRoutePayload, CarStepPayload } from "../../../modules/android-auto/src/AndroidAutoModule";
@@ -24,7 +26,13 @@ export function carDistance(meters: number): { shown: number; unit: CarDistanceU
  * to show (planning, a failure, arrival). Each maneuver's distance and time are from the car, as the trip in the car's
  * other displays wants them. Null: no route.
  */
-export function carRoute(route: RouteSnapshot | null, t: (key: keyof Strings) => string, language: "en" | "uk"): CarRoutePayload | null {
+export function carRoute(
+  route: RouteSnapshot | null,
+  t: (key: keyof Strings) => string,
+  language: "en" | "uk",
+  /** The street each route goes by (`viaNames`): the route's, then its alternatives'. */
+  via: (string | null)[] = [],
+): CarRoutePayload | null {
   if (!route) return null;
   const { destination, guidance, maneuvers, plan } = route;
   const base = {
@@ -36,6 +44,9 @@ export function carRoute(route: RouteSnapshot | null, t: (key: keyof Strings) =>
     remainingS: 0,
     remainingShown: 0,
     remainingUnit: "m" as CarDistanceUnit,
+    title: "",
+    detail: "",
+    alternatives: [],
   };
   if (route.status === "failed") {
     return { ...base, status: "failed", message: t(route.failure ? PROBLEM_TEXT[route.failure] : "routeCancelled") };
@@ -67,8 +78,26 @@ export function carRoute(route: RouteSnapshot | null, t: (key: keyof Strings) =>
   const then = guidance.thenIndex != null ? maneuvers[guidance.thenIndex] : undefined;
   const steps = [step(next, guidance.toNextM)];
   if (then) steps.push(step(then, guidance.toNextM + Math.max(0, then.atM - next.atM)));
+  // The routes list: each way by the street it goes by, then how it compares; its whole time and distance, as the
+  // alternatives are timed against the route's whole plan. A time difference alone says nothing of why to take it.
+  const whole = (p: RoutePlan) => `${formatDurationS(p.durationS, t)} · ${formatDistance(p.lengthM, language)}`;
+  const row = (name: string | null | undefined, compared: string, p: RoutePlan) =>
+    name ? { title: name, detail: `${compared} · ${whole(p)}` } : { title: compared, detail: whole(p) };
+  const current = row(via[0], t("carThisRoute"), plan);
+  const alternatives = route.replanning
+    ? []
+    : (route.alternatives ?? []).map((a, index) => ({ index, ...row(via[index + 1], formatAlternativeDelta(a.deltaS, t), a.plan) }));
   // Planning again: the old maneuvers are no guide, the car's notification says so.
-  return { ...base, ...left, status: "active", message: route.replanning ? t("planningRoute") : null, steps };
+  return {
+    ...base,
+    ...left,
+    status: "active",
+    message: route.replanning ? t("planningRoute") : null,
+    steps,
+    title: via[0] ? current.title : "",
+    detail: current.detail,
+    alternatives,
+  };
 }
 
 /**

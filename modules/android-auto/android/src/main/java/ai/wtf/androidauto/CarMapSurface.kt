@@ -114,6 +114,12 @@ internal class CarMapSurface(private val carContext: CarContext) : SurfaceCallba
     )
   }
 
+  // A tap on the map (Car API 5): a grey route or its label there is chosen (the JS map looks).
+  override fun onClick(x: Float, y: Float) {
+    val dp = density() ?: return
+    CarLink.gesture(mapOf("kind" to "click", "x" to x / dp, "y" to y / dp))
+  }
+
   /** The map display's pixels per dp (its density is the car's times MAP_SCALE). */
   private fun density(): Float? = container?.let { CarGuidanceLogic.mapDpi(it.dpi) / 160f }
 

@@ -7,6 +7,7 @@ import { COURSE_MIN_SPEED_MPS, useHeadingUp } from "@/components/map/use-compass
 import type { MapControl } from "@/components/map/use-map-control";
 import { I18nProvider } from "@/i18n/provider";
 import { PositionProvider, usePosition } from "@/providers/position-provider";
+import { useRoute } from "@/providers/route-provider";
 
 import AndroidAuto, { type CarMapGesture } from "../../../modules/android-auto/src/AndroidAutoModule";
 
@@ -54,6 +55,12 @@ const onMapDrawn = () => void AndroidAuto?.mapDrawn?.().catch(noop);
  */
 const CAR_HEADING_UP_DOT_AT = 0.85;
 
+/** The destination whose routes the car's map last framed, kept across its remounts. */
+let overviewShownFor: object | null = null;
+
+/** Framing the routes: this much room inside the cards (map dp), for the routes' labels at their ends. */
+const FRAME_GAP = 32;
+
 /** The car's map follows heading-up; the driver's drag or pinch leaves it free (camera-policy.ts, as on the phone). */
 const CAR_CAMERA: CameraState = { ...INITIAL_CAMERA, mode: "follow-heading" };
 
@@ -77,6 +84,22 @@ function CarMap({ dark, insets, scale }: Required<CarMapProps>) {
   useEffect(() => {
     void AndroidAuto?.setRecentre?.(recentre).catch(noop);
   }, [recentre]);
+  // A new route's alternatives while the car stands: the map frames them all once (ROUTING-SPEC §8.7), as the phone's;
+  // driving off or recentre goes back to following. Once per destination across the map's remounts (a list shown over
+  // it takes it down): back from the routes list it follows. (State adjusted during render, not in an effect.)
+  const { route } = useRoute();
+  const [overview, setOverview] = useState<number | null>(null);
+  const [overviewFor, setOverviewFor] = useState<object | null>(() => overviewShownFor);
+  useEffect(() => {
+    overviewShownFor = overviewFor;
+  }, [overviewFor]);
+  if (route?.alternatives?.length && overviewFor !== route.destination) {
+    setOverviewFor(route.destination);
+    if (!driving) {
+      dispatch({ type: "set", mode: "free" });
+      setOverview(route.planId);
+    }
+  }
   const onGesture = useEffectEvent((g: CarMapGesture) => {
     const moved = () => dispatch({ type: "gesture", nowMs: Date.now() });
     switch (g.kind) {
@@ -94,6 +117,8 @@ function CarMap({ dark, insets, scale }: Required<CarMapProps>) {
         const focus: [number, number] | null = g.kind === "scale" && g.x >= 0 && g.y >= 0 ? [g.x, g.y] : null;
         return control.current?.zoom(factor, focus, g.kind === "zoom");
       }
+      case "click":
+        return control.current?.tap(g.x, g.y);
       // Back to the car at the follow zoom's own level, whatever + and − did before.
       case "recentre":
         setZoomShift(0);
@@ -130,6 +155,13 @@ function CarMap({ dark, insets, scale }: Required<CarMapProps>) {
       onReady={onMapDrawn}
       control={control}
       followZoomShift={zoomShift}
+      overview={overview}
+      framePadding={{
+        top: padding.top + FRAME_GAP,
+        bottom: padding.bottom + FRAME_GAP,
+        left: padding.left + FRAME_GAP,
+        right: padding.right + FRAME_GAP,
+      }}
     />
   );
 }

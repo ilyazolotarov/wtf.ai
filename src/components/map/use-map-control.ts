@@ -14,6 +14,8 @@ export interface MapControl {
   fling(vx: number, vy: number): void;
   /** Zoom `factor` times about a point of the map (null: its centre). */
   zoom(factor: number, focus: [number, number] | null, animated?: boolean): void;
+  /** A tap: a grey route or its label under it is followed instead (ROUTING-SPEC §8.7). */
+  tap(x: number, y: number): void;
 }
 
 interface Pending {
@@ -27,14 +29,14 @@ interface Pending {
 const NONE: Pending = { dx: 0, dy: 0, factor: 1, focus: null, durationMs: 0 };
 
 /**
- * `MapControl` for a map: each move reads the camera and the ground under the screen (async), so moves that come
+ * `MapControl`'s moves for a map (the tap is the map surface's, which knows the routes): each move reads the camera and the ground under the screen (async), so moves that come
  * meanwhile (a drag sends one every frame) are added up and sent as one.
  */
 export function useMapControl(
   mapRef: RefObject<MapRef | null>,
   cameraRef: RefObject<CameraRef | null>,
   size: RefObject<{ width: number; height: number }>,
-): MapControl {
+): Omit<MapControl, "tap"> {
   const pending = useRef<Pending>(NONE);
   const busy = useRef(false);
 

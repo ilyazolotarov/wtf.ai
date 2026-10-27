@@ -1,5 +1,6 @@
 import type { Strings } from "@/i18n/en";
 import type { Coordinate } from "@/nav/geo";
+import { viaNames } from "@/nav/routing/route-via";
 import { addressQueries, geoSearchText, parseGeoUri } from "@/nav/search/geo-uri";
 import type { RouteDestination, RouteSnapshot } from "@/services/navigation/route-service";
 import type { Place, PlacesSnapshot } from "@/services/navigation/places-store";
@@ -46,6 +47,8 @@ export interface CarSessionDeps {
     subscribe(listener: () => void): () => void;
     start(destination: RouteDestination): void;
     stop(): void;
+    /** Follow `alternatives[index]` instead (ROUTING-SPEC §8.7). */
+    chooseAlternative(index: number): void;
   };
   places: {
     getSnapshot(): PlacesSnapshot;
@@ -84,6 +87,8 @@ export interface CarSessionDeps {
   speedMps(): number;
   /** What a search finds at once (place-search.ts `findPlaces`): a point, the region's index, or its cities. */
   find(text: string): Place[];
+  /** The street of a point (its nearest house's, in the app's language), to say which way a route goes; null: none near. */
+  streetAt(at: Coordinate, language: "en" | "uk"): string | null;
   /** How far a place is from the car ("1.2 km"); null without a position. */
   away(at: Coordinate): string | null;
   /** Location permission granted (fine or approximate). */
@@ -121,6 +126,8 @@ export function carLabels(t: T): CarLabelsPayload {
     noResults: t("noSearchResults"),
     checkPhone: t("carCheckPhone"),
     notification: t("carNotification"),
+    routes: t("carRoutes"),
+    thisRoute: t("carThisRoute"),
   };
 }
 
@@ -186,11 +193,25 @@ export function runCarSession(deps: CarSessionDeps): Promise<void> {
     const sendPlaces = () => send(native.setPlaces(carPlaces(places.getSnapshot())));
     const sendVoice = () => send(native.setVoiceMuted(voice.volume() === 0 ? null : voice.muted()));
     let hadRoute = false;
+    // The street each route goes by, for the routes list: worked out once per set of alternatives (each name a scan of
+    // the region's houses), not with every position.
+    let viaFor: { alternatives: object; language: string } | null = null;
+    let via: (string | null)[] = [];
+    const viaOf = (route: RouteSnapshot | null, language: "en" | "uk") => {
+      const alternatives = route?.alternatives;
+      if (!route?.plan || !alternatives?.length) return [];
+      if (viaFor?.alternatives !== alternatives || viaFor.language !== language) {
+        viaFor = { alternatives, language };
+        via = viaNames([route.plan.coordinates, ...alternatives.map((a) => a.plan.coordinates)], (at) => deps.streetAt(at, language));
+        deps.note(`android auto: routes by ${via.map((v) => v ?? "?").join(" / ")}`);
+      }
+      return via;
+    };
     const onRoute = () => {
       const { t, language } = deps.strings();
       sendLabels(t, language);
       const route = routes.getSnapshot();
-      send(native.setRoute(carRoute(route, t, language)));
+      send(native.setRoute(carRoute(route, t, language, viaOf(route, language))));
       voice.update(route, deps.speedMps(), voice.muted() || voice.volume() === 0, t, language);
       // Ending the route ends what it was saying (the phone's map does the same while it is mounted).
       if (hadRoute && !route) voice.hush();
@@ -315,6 +336,10 @@ export function runCarSession(deps: CarSessionDeps): Promise<void> {
           else if (result) goTo(result, "search result picked on the car's screen");
           return;
         }
+        case "choose-alternative":
+          deps.note(`android auto: alternative ${e.index} picked on the car's screen`);
+          routes.chooseAlternative(e.index);
+          return;
         case "search":
           search(e.text);
           return;

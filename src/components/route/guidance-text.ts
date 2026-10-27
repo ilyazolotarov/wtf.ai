@@ -68,6 +68,12 @@ export function formatDurationS(seconds: number, t: (key: keyof Strings) => stri
   return h ? `${h} ${t("hoursShort")} ${r} ${t("minutesShort")}` : `${r} ${t("minutesShort")}`;
 }
 
+/** An alternative's time against the route (ROUTING-SPEC §8.7): "+3 min", "−2 min", "Same time". */
+export function formatAlternativeDelta(deltaS: number, t: (key: keyof Strings) => string): string {
+  const n = Math.round(Math.abs(deltaS) / 60);
+  return n === 0 ? t("alternativeSame") : t(deltaS > 0 ? "alternativeSlower" : "alternativeFaster").replace("{n}", String(n));
+}
+
 /** Clock time `seconds` from now, "14:32". */
 export function formatArrival(seconds: number, nowMs: number): string {
   const d = new Date(nowMs + seconds * 1000);

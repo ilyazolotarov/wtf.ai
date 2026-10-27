@@ -27,6 +27,9 @@ import { autoConnect, getRuntime } from "@/services/runtime";
 import AndroidAuto from "../../../modules/android-auto/src/AndroidAutoModule";
 import { runCarSession } from "./car-session";
 
+/** A route goes by the street of the houses within this of its own stretch (`viaNames`). */
+const VIA_HOUSE_M = 60;
+
 /** The headless task's name (CarSessionTask.TASK in modules/android-auto). */
 export const CAR_SESSION_TASK = "WtfCarSession";
 
@@ -84,6 +87,10 @@ export async function carSessionTask(): Promise<void> {
           .filter((d) => inBounds(bounds, d))
           .map((d) => ({ id: d.id, title: d.name[language], detail: null, lat: d.lat, lon: d.lon }));
         return findPlaces(text, { index: activeSearchIndex(installed), bounds, near: position.getSnapshot(), cities, language, t });
+      },
+      streetAt: (at, language) => {
+        const address = activeSearchIndex(getMapPacks().installed)?.nearestAddress(at, VIA_HOUSE_M);
+        return address ? (language === "en" ? (address.nameEn ?? address.name) : address.name) : null;
       },
       away: (at) => {
         const from = position.getSnapshot();
