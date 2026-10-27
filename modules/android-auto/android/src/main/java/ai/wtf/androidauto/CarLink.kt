@@ -1,5 +1,6 @@
 package ai.wtf.androidauto
 
+import ai.wtf.androidauto.logic.CarGuidanceLogic
 import ai.wtf.androidauto.logic.CarLabels
 import ai.wtf.androidauto.logic.CarNotice
 import ai.wtf.androidauto.logic.CarPlace
@@ -46,6 +47,13 @@ internal object CarLink {
   /** What the driver must do first, shown instead of the route; null: nothing. */
   var notice: CarNotice? = null
     private set
+
+  /** The notice the driver closed (its Close button), not shown until the JS side sends another. */
+  private var noticeClosed: CarNotice? = null
+
+  /** The notice the car shows: `notice`, unless the driver closed it. */
+  val shownNotice: CarNotice?
+    get() = CarGuidanceLogic.shownNotice(notice, noticeClosed)
 
   /** What the search screen's text found (the JS side searches as the driver types). */
   var search: CarSearch? = null
@@ -105,10 +113,19 @@ internal object CarLink {
     if (value == notice) return
     val wasLocation = notice?.kind == NOTICE_LOCATION
     notice = value
+    if (value != noticeClosed) noticeClosed = null
     val session = session ?: return
     // Allowed now (on the phone, or by the car's button): the session holds location from here.
     if (wasLocation && value?.kind != NOTICE_LOCATION) session.locationAllowed()
     session.refresh()
+  }
+
+  /** The driver closed the notice: the map and its buttons come back. */
+  fun closeNotice() {
+    val closed = notice ?: return
+    noticeClosed = closed
+    note("notice closed (${closed.kind})")
+    session?.refresh()
   }
 
   fun setSearch(value: CarSearch?) {
@@ -194,6 +211,7 @@ internal object CarLink {
   }
 
   /** `CarNotice.kind`s. */
+  const val NOTICE_NO_MAP = "no-map"
   const val NOTICE_LOCATION = "location"
   const val NOTICE_HELD_ROUTE = "held-route"
 }

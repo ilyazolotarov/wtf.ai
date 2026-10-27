@@ -67,6 +67,12 @@ src/components/car-screen/car-session.ts ◀───────┘  route, pla
   mixes over whatever the car plays, its own radio too. As media they would be heard only with the phone as the car's
   source. A clip that won't play that way goes through expo-audio as media; the system voice (an announcement without
   clips) is media always. Without a car the voice plays as before.
+- **No offline map:** without an installed region the car's map is a plain canvas and search finds cities only, so
+  the car shows a notice first, before any other (`carNotice`, Jest), in CarPlay's words: No offline map, routes and
+  search need a downloaded region. Nothing on the car's screen downloads one: its only button is Close, and closed it
+  stays closed until the JS side sends another notice (`CarGuidanceLogic.shownNotice`, JUnit). It goes when a region
+  is installed (the session follows the map packs). The action strip throws without a button, so a notice of a kind
+  the build doesn't know gets Close too (`CarGuidanceLogic.noticeButtons`, JUnit).
 - **Location permission:** without it (fine or approximate) the navigator has no GNSS and the car shows a notice
   instead of the route (§4): its button, parked only (`ParkedOnlyOnClickListener`), opens Android's permission dialog
   on the phone (`CarContext.requestPermissions`), and a toast on the car says to look at the phone only when it's safe
@@ -169,6 +175,7 @@ src/components/car-screen/car-session.ts ◀───────┘  route, pla
 
   | State | NavigationTemplate shows |
   | --- | --- |
+  | A notice: no offline map installed | Its message card, before any other notice or route; button: Close |
   | A notice: no location permission | Its message card, before any route; button: Allow (parked only) |
   | A notice: a route held without an adapter | Its message card; buttons: I'll follow the route, close |
   | No route | The map; buttons: Search, Destinations, voice |

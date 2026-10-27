@@ -110,11 +110,22 @@ data class CarLabels(
 )
 
 /**
- * What the driver must do before the car can guide, shown instead of the route (the JS side decides when):
+ * What the driver must do before the car can guide, shown instead of the route (the JS side decides when): `no-map`:
+ * no offline map is installed (the condition only: its button closes it, nothing on the car's screen downloads one);
  * `location`: the app has no location permission (its button asks for it, parked only); `held-route`: a route picked
  * without an adapter waits for the driver's word (its button gives it, the close button drops the route).
  */
 data class CarNotice(val kind: String, val title: String, val text: String, val action: String)
+
+/** A notice's buttons. The action strip throws without one, so every notice has at least one. */
+enum class CarNoticeButtons {
+  /** Its action opens Android's location dialog. */
+  ALLOW,
+  /** The driver's word for a held route, or the route dropped. */
+  CONFIRM_OR_CANCEL,
+  /** Only Close: the condition said (no map), or a kind this build doesn't know. */
+  CLOSE,
+}
 
 /** The navigation template's card. */
 enum class CarCard {
@@ -193,6 +204,17 @@ object CarGuidanceLogic {
       else -> CarSearchList.Results(search.results)
     }
   }
+
+  /** A notice's buttons by its kind; one this build doesn't know only closes (an empty action strip throws). */
+  fun noticeButtons(kind: String): CarNoticeButtons =
+    when (kind) {
+      "location" -> CarNoticeButtons.ALLOW
+      "held-route" -> CarNoticeButtons.CONFIRM_OR_CANCEL
+      else -> CarNoticeButtons.CLOSE
+    }
+
+  /** The notice shown: one the driver closed stays closed until the JS side sends another. */
+  fun shownNotice(notice: CarNotice?, closed: CarNotice?): CarNotice? = notice?.takeIf { it != closed }
 
   /** A notice comes first: the route can't be followed until the driver has done what it asks. */
   fun card(route: CarRoute?, notice: CarNotice?): CarCard =

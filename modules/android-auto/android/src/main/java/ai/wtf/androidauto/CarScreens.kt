@@ -5,6 +5,7 @@ import ai.wtf.androidauto.logic.CarCard
 import ai.wtf.androidauto.logic.CarDistanceUnit
 import ai.wtf.androidauto.logic.CarGuidanceLogic
 import ai.wtf.androidauto.logic.CarManeuverType
+import ai.wtf.androidauto.logic.CarNoticeButtons
 import ai.wtf.androidauto.logic.CarPlace
 import ai.wtf.androidauto.logic.CarRoute
 import ai.wtf.androidauto.logic.CarSearchList
@@ -38,14 +39,14 @@ import java.util.TimeZone
 /**
  * The car's main screen (docs/ANDROID-AUTO-SPEC.md §4): the map under Android Auto's navigation template, with the next
  * maneuver and the one after, the time and distance left, and the buttons: a place to search for or pick, or the route
- * to end, and the voice. What the driver must do first (allow location, agree to a route without an adapter) comes
- * before.
+ * to end, and the voice. What the driver must do first (download a map, allow location, agree to a route without an
+ * adapter) comes before.
  */
 internal class NavigationScreen(carContext: CarContext) : Screen(carContext) {
   override fun onGetTemplate(): Template {
     val labels = CarLink.labels
     val route = CarLink.route
-    val notice = CarLink.notice
+    val notice = CarLink.shownNotice
     val card = CarGuidanceLogic.card(route, notice)
     val actions = ActionStrip.Builder()
     if (card == CarCard.NOTICE && notice != null) {
@@ -99,7 +100,11 @@ internal class NavigationScreen(carContext: CarContext) : Screen(carContext) {
       CarCard.NONE -> Unit
       CarCard.NOTICE -> {
         val n = notice!!
-        val icon = if (n.kind == CarLink.NOTICE_LOCATION) R.drawable.car_location_off else R.drawable.car_alt_route
+        val icon = when (n.kind) {
+          CarLink.NOTICE_LOCATION -> R.drawable.car_location_off
+          CarLink.NOTICE_NO_MAP -> R.drawable.car_map
+          else -> R.drawable.car_alt_route
+        }
         val message = MessageInfo.Builder(n.title.ifEmpty { " " }).setImage(CarTemplates.icon(carContext, icon))
         if (n.text.isNotEmpty()) message.setText(n.text)
         template.setNavigationInfo(message.build())
@@ -140,19 +145,20 @@ internal class NavigationScreen(carContext: CarContext) : Screen(carContext) {
     Action.Builder().setIcon(CarTemplates.icon(carContext, icon)).setOnClickListener { CarLink.gesture(gesture) }.build()
 
   /**
-   * The notice's buttons. Location: Android's permission dialog on the phone, parked only (the host says so while the
-   * car moves). A route without an adapter: the driver's word, or the route dropped.
+   * The notice's buttons, never none (the action strip throws). Location: Android's permission dialog on the phone,
+   * parked only (the host says so while the car moves). A route without an adapter: the driver's word, or the route
+   * dropped. No map, or a kind this build doesn't know: Close, the map and its buttons back.
    */
   private fun noticeActions(kind: String, title: String): List<Action> =
-    when (kind) {
-      CarLink.NOTICE_LOCATION -> listOf(
+    when (CarGuidanceLogic.noticeButtons(kind)) {
+      CarNoticeButtons.ALLOW -> listOf(
         Action.Builder()
           .setTitle(title)
           .setIcon(CarTemplates.icon(carContext, R.drawable.car_location_on))
           .setOnClickListener(ParkedOnlyOnClickListener.create { CarLink.session?.requestLocation() })
           .build(),
       )
-      CarLink.NOTICE_HELD_ROUTE -> listOf(
+      CarNoticeButtons.CONFIRM_OR_CANCEL -> listOf(
         Action.Builder()
           .setTitle(title)
           .setIcon(CarTemplates.icon(carContext, R.drawable.car_navigation))
@@ -163,7 +169,13 @@ internal class NavigationScreen(carContext: CarContext) : Screen(carContext) {
           .setOnClickListener { CarLink.send("cancel-held") }
           .build(),
       )
-      else -> emptyList()
+      CarNoticeButtons.CLOSE -> listOf(
+        Action.Builder()
+          .apply { if (title.isNotEmpty()) setTitle(title) }
+          .setIcon(CarTemplates.icon(carContext, R.drawable.car_close))
+          .setOnClickListener { CarLink.closeNotice() }
+          .build(),
+      )
     }
 }
 

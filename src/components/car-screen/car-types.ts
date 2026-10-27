@@ -106,12 +106,12 @@ export interface CarLabelsPayload {
 }
 
 /**
- * What the driver must do before the car can guide, shown instead of the route. `location`: no location permission
+ * What the driver must do before the car can guide, shown instead of the route. `no-map`: no offline map installed
+ * (the button only closes it: nothing on the car's screen downloads one); `location`: no location permission
  * (the button asks for it on the phone, parked only); `held-route`: a route without an adapter waits for the driver's
  * word (the button gives it, a close button drops the route).
  */
 export interface CarNoticePayload {
-  /** `no-map`: CarPlay's only (`CarSessionDeps.mapNotice`). */
   kind: "location" | "held-route" | "no-map";
   title: string;
   text: string;

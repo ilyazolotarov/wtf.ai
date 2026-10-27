@@ -176,11 +176,10 @@ GNSS and the adapter as they were. What the JS side sent is kept on the native s
 - **Notices** as alerts over the map (`CPNavigationAlert`, until dismissed), one at a time, a notice before a failed
   plan. Their words state the condition and never send the driver to the phone (`carNotice`'s `phoneFree`, Jest:
   "Without location access the car's position can't be shown.", "The car's position isn't set yet."), as Apple's
-  guidelines require; Android Auto's say where to look. No offline map first (`mapNotice`): without one the map is a
-  plain canvas and search finds cities only, and a driver who opened the car's screen first saw nothing say why. It
-  only closes (`CarPlayLogic.noticeButtons`), by its button or CarPlay's x, and goes when a region is installed (the
-  session follows the map packs). CarPlay's only: Android Auto's installed builds draw a notice's buttons by its kind,
-  have none for this one, and its action strip throws without a button. Location: while iOS has never asked, Allow asks
+  guidelines require; Android Auto's say where to look. No offline map first: without one the map is a plain canvas
+  and search finds cities only, and a driver who opened the car's screen first saw nothing say why. It only closes
+  (`CarPlayLogic.noticeButtons`), by its button or CarPlay's x, and goes when a region is installed (the session
+  follows the map packs); Android Auto shows it too (ANDROID-AUTO-SPEC §3). Location: while iOS has never asked, Allow asks
   (`requestWhenInUseAuthorization`; the dialog is the system's), and the alert comes back until the answer; refused
   before, nothing on the car's screen can allow it: the alert has Close, and stays closed until the notice changes. A
   change of the permission redraws it; the session checks it every 5 s and takes the answer (`permission`). A route

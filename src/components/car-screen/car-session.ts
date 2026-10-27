@@ -35,12 +35,6 @@ export interface CarSessionDeps {
    * use their iPhone); Android Auto's say where to look, when it's safe.
    */
   phoneFree?: boolean;
-  /**
-   * The car's screen says so while no offline map is installed (CarPlay): its map is a plain canvas then, and search
-   * finds cities only. Not Android Auto's: its installed builds draw a notice's buttons by its kind, have none for
-   * this one, and an action strip without a button throws.
-   */
-  mapNotice?: boolean;
   native: {
     isConnected(): boolean;
     /** Android Auto asked for its test drive (CarPlay has none). */
@@ -257,8 +251,7 @@ export function runCarSession(deps: CarSessionDeps): Promise<void> {
     let notice: CarNoticePayload | null | undefined;
     let stopChecks: (() => void) | null = null;
     const sendNotice = () => {
-      const noMap = deps.mapNotice === true && !deps.map.installed();
-      const next = carNotice(located, held.get(), deps.positionSet(), deps.strings().t, deps.phoneFree, noMap);
+      const next = carNotice(located, held.get(), deps.positionSet(), deps.strings().t, deps.phoneFree, !deps.map.installed());
       if (notice === undefined || !sameNotice(next, notice)) {
         notice = next;
         send(native.setNotice(next));

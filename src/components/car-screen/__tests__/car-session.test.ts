@@ -92,7 +92,6 @@ function setup({
   const deps: CarSessionDeps = {
     name: carPlay ? "carplay" : "android auto",
     phoneFree: carPlay,
-    mapNotice: carPlay,
     native: {
       isConnected: () => connected,
       // CarPlay has no test drive.
@@ -441,23 +440,25 @@ describe("car session", () => {
     });
 
     test("no map installed: CarPlay says so before anything else, until a region is downloaded", async () => {
-    const s = setup({ carPlay: true, mapInstalled: false, located: false });
-    void runCarSession(s.deps);
-    await settle();
-    expect(s.notices().at(-1)).toEqual({ kind: "no-map", title: en.carNoMapTitle, text: en.carNoMap, action: en.close });
-    expect(s.timers()).toBe(1);
-    s.setMapInstalled(true);
-    expect(s.notices().at(-1)).toMatchObject({ kind: "location" });
-  });
+      const s = setup({ carPlay: true, mapInstalled: false, located: false });
+      void runCarSession(s.deps);
+      await settle();
+      expect(s.notices().at(-1)).toEqual({ kind: "no-map", title: en.carNoMapTitle, text: en.carNoMap, action: en.close });
+      expect(s.timers()).toBe(1);
+      s.setMapInstalled(true);
+      expect(s.notices().at(-1)).toMatchObject({ kind: "location" });
+    });
 
-  test("no map installed on Android Auto: no notice (its installed builds have no button for one)", async () => {
-    const s = setup({ mapInstalled: false });
-    void runCarSession(s.deps);
-    await settle();
-    expect(s.notices()).toEqual([null]);
-  });
+    test("no map installed on Android Auto: the same notice", async () => {
+      const s = setup({ mapInstalled: false });
+      void runCarSession(s.deps);
+      await settle();
+      expect(s.notices().at(-1)).toEqual({ kind: "no-map", title: en.carNoMapTitle, text: en.carNoMap, action: en.close });
+      s.setMapInstalled(true);
+      expect(s.notices().at(-1)).toBeNull();
+    });
 
-  test("granted from the start: no notice, no retry", async () => {
+    test("granted from the start: no notice, no retry", async () => {
       const s = setup();
       void runCarSession(s.deps);
       await settle();

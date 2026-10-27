@@ -38,7 +38,7 @@ export const CAR_SESSION_TASK = "WtfCarSession";
 /** Android Auto's car screen connected (docs/ANDROID-AUTO-SPEC.md §3): runs until it is gone. */
 export async function carSessionTask(): Promise<void> {
   if (!AndroidAuto) return;
-  await runCarScreen(AndroidAuto, "android auto", "android-auto", { phoneFree: false, mapNotice: false });
+  await runCarScreen(AndroidAuto, "android auto", "android-auto", false);
 }
 
 let carPlayRunning = false;
@@ -54,7 +54,7 @@ export function listenForCarPlay(): void {
   const start = () => {
     if (carPlayRunning || !native.isConnected()) return;
     carPlayRunning = true;
-    void runCarScreen(native, "carplay", "carplay", { phoneFree: true, mapNotice: true }).finally(() => {
+    void runCarScreen(native, "carplay", "carplay", true).finally(() => {
       carPlayRunning = false;
     });
   };
@@ -63,16 +63,10 @@ export function listenForCarPlay(): void {
 }
 
 /**
- * One connection of a car's screen, the same on both platforms but for its native side, its name in the log, whether
- * its words may send the driver to the phone (`phoneFree`: CarPlay's may not), and whether it says when no map is
- * installed (`mapNotice`: CarPlay's; CarSessionDeps).
+ * One connection of a car's screen, the same on both platforms but for its native side, its name in the log, and
+ * whether its words may send the driver to the phone (`phoneFree`: CarPlay's may not).
  */
-async function runCarScreen(
-  native: CarSessionDeps["native"],
-  name: string,
-  feature: string,
-  { phoneFree, mapNotice }: Pick<CarSessionDeps, "phoneFree" | "mapNotice">,
-): Promise<void> {
+async function runCarScreen(native: CarSessionDeps["native"], name: string, feature: string, phoneFree: boolean): Promise<void> {
   // The process may have started for the car, the phone's screens (and the root layout's setup) never loaded.
   initSentry();
   const runtime = getRuntime();
@@ -97,7 +91,6 @@ async function runCarScreen(
     await runCarSession({
       name,
       phoneFree,
-      mapNotice,
       native,
       routes,
       places,

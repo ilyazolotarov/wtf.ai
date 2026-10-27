@@ -4,6 +4,7 @@ import ai.wtf.androidauto.logic.CarDistanceUnit
 import ai.wtf.androidauto.logic.CarGuidanceLogic
 import ai.wtf.androidauto.logic.CarManeuverType
 import ai.wtf.androidauto.logic.CarNotice
+import ai.wtf.androidauto.logic.CarNoticeButtons
 import ai.wtf.androidauto.logic.CarPlace
 import ai.wtf.androidauto.logic.CarRoute
 import ai.wtf.androidauto.logic.CarSearch
@@ -91,6 +92,24 @@ class CarGuidanceLogicTest {
     assertFalse(CarGuidanceLogic.showsSteps(route("active", steps = emptyList())))
     assertFalse(CarGuidanceLogic.showsSteps(route("planning")))
     assertFalse(CarGuidanceLogic.showsSteps(null))
+  }
+
+  @Test
+  fun everyNoticeHasAButtonNoMapAndUnknownKindsOnlyClose() {
+    assertEquals(CarNoticeButtons.ALLOW, CarGuidanceLogic.noticeButtons("location"))
+    assertEquals(CarNoticeButtons.CONFIRM_OR_CANCEL, CarGuidanceLogic.noticeButtons("held-route"))
+    assertEquals(CarNoticeButtons.CLOSE, CarGuidanceLogic.noticeButtons("no-map"))
+    assertEquals(CarNoticeButtons.CLOSE, CarGuidanceLogic.noticeButtons("from-a-newer-js"))
+  }
+
+  @Test
+  fun aClosedNoticeStaysClosedUntilAnotherComes() {
+    val noMap = CarNotice("no-map", "No offline map", "Download a region in Offline maps on your phone.", "Close")
+    val location = CarNotice("location", "Location is off", "Allow it on the phone.", "Allow")
+    assertEquals(noMap, CarGuidanceLogic.shownNotice(noMap, null))
+    assertNull(CarGuidanceLogic.shownNotice(noMap, noMap.copy()))
+    assertEquals(location, CarGuidanceLogic.shownNotice(location, noMap))
+    assertNull(CarGuidanceLogic.shownNotice(null, noMap))
   }
 
   @Test

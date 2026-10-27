@@ -473,7 +473,7 @@ export const uk = {
   carPlayLocationNeeded: "Щоб показати, де авто, потрібен доступ до геопозиції.",
   carPlayHeldNoPosition: "Розташування авто ще не вказано.",
   carNoMapTitle: "Немає офлайн-мапи",
-  carNoMap: "Для маршрутів і пошуку потрібна завантажена мапа регіону.",
+  carNoMap: "Для маршрутів і пошуку потрібна мапа регіону.",
   carPlayNoRoadGraph: "Мапу цього регіону не завантажено.",
   thenManeuver: "потім",
   mDepart: "Рушайте",
