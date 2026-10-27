@@ -42,10 +42,11 @@ What the scene life cycle breaks, to fix before `main`:
    `launchedOnTheWay` (index.ts, VEHICLE-LINK-SPEC §11). Apple's advice for scene apps: create the central with the
    restore id at every launch and take the restoration from `willRestoreState`; the location relaunch from the
    location manager's own callbacks.
-2. **React Native starts with the phone's scene.** A background launch (location relaunch, Bluetooth restoration) is
-   expected to connect no scene, so no JS runs and the drive wake doesn't happen (to verify on the phone). Fix: start
-   the host on such a launch from an app delegate subscriber, with a root that renders nothing, the way the car's
-   screen starts it (§4).
+2. **React Native starts with the phone's scene.** Expo's scene delegate starts the host as the phone's scene
+   connects. The car's screen starts it without that scene (§4, `AppReactHost.startWithoutPhone`). Still open: a
+   background launch (location relaunch, Bluetooth restoration) is expected to connect no scene, so no JS runs and
+   the drive wake doesn't happen (to verify on the phone). Fix: the same start, called from an app delegate
+   subscriber on such a launch.
 3. Links (`wtfai://`, `geo:`, universal links) and quick actions are forwarded by Expo's scene delegate; check them
    once.
 
@@ -82,15 +83,32 @@ connection.
 - **The map is React Native**: the root `CarPlayMap` (registered in index.ts) renders the phone's `MapSurface`, so the
   style, dot, route and camera are the phone's, and over-the-air JS updates reach the car's screen. The view comes
   from `ExpoReactNativeFactory.recreateRootView` (ExpoModulesCore's protocol; the factory is the template AppDelegate's
-  `reactNativeFactory`, reached by reflection since a module can't depend on the Expo pod). It starts the host when
-  the phone's scene hasn't: the app opened from the car with the phone locked. It is made without the app delegate
-  subscribers' root view customizations: expo-splash-screen keeps one splash and moves it to the newest root view,
-  which covered the car's map with the launch screen for good and would leave the phone's on screen if CarPlay
-  connected while it showed.
+  `reactNativeFactory`, reached by reflection since a module can't depend on the Expo pod), in
+  `modules/car-play/ios/AppReactHost.swift`. It is made without the app delegate subscribers' root view
+  customizations: expo-splash-screen keeps one splash and moves it to the newest root view, which covered the car's
+  map with the launch screen for good and would leave the phone's on screen if CarPlay connected while it showed.
+- **The map waits for React Native.** The root is made only on a running host (the factory's `reactHost`); until
+  then the car's screen is blank. A root view made with no host starts one past Expo's React delegate handlers, and
+  expo-updates is then asked for the bundle before it is set up (an assertion in Debug, a force-unwrap in Release:
+  any launch with the car connected crashed). `CarPlayModule`'s `OnCreate` runs with each JS runtime; on a host
+  other than the one the root was made on, the root is made again. The development launcher makes a new host at
+  each load, and a root left on the old one is a black screen. A reload on the same host (Metro, the dev menu, an
+  update's relaunch) restarts the root by itself, and making it again then too crashes ("Surface must not be
+  running").
+- **The car starts React Native when the phone's scene doesn't** (the app opened from the car, the phone locked): one
+  turn of the main loop after the car's scene connects, if no phone scene is connected, `startWithoutPhone` goes
+  through the handlers as the phone's scene does (expo-updates chooses the bundle, the development launcher loads the
+  last one), asking for the root `NoScreen` (index.ts), which renders nothing. The handlers put the root in place of
+  the view they returned, found through its view controller and the app's window, so that view is held by a child
+  controller in a window of its own (never shown: it has no window scene), which stands in as the app delegate's
+  window until the phone's scene sets its own: without a window expo-updates stops the app. At a launch from the
+  phone the car's scene may connect first (1.5 s before the phone's on the simulator): both start, and expo-updates
+  still starts once (the second call finds its controller started); in Debug the development launcher loads twice.
 - The root is mounted while a car is connected and unmounted when it goes. CarPlay connects the scene in the
   background as soon as the car's screen comes on, and makes it active when the driver opens the app there:
   "connected" doesn't mean shown. Device log (`ai.wtf.navigator`, category `carplay`): the scene connected, active,
-  in the background, disconnected, and what drew the map.
+  in the background, disconnected, React Native started without the phone's scene or on a new host, and what drew
+  the map.
 - **Guidance** on `CPNavigationSession`: a trip per destination (a re-plan to the same one is the same trip), the next
   maneuver and the one after when close (the phone banner's words, SF Symbols for icons), the estimates to the next
   maneuver and to the destination with every snapshot, finished at arrival, cancelled when the route stops or the
@@ -129,6 +147,8 @@ Must not drift:
 - Offline like the phone: the map packs, no network.
 - Native stays thin (SPEC §6): templates and sessions in Swift, what they show decided in TypeScript, shared with
   Android Auto.
+- The car never makes a React root without a running host, and starts React Native only through Expo's React
+  delegate handlers: expo-updates chooses the bundle the car's screen runs, as it does the phone's.
 
 ## 5. Development: a Mac with the Simulator
 
@@ -147,9 +167,17 @@ build's runner). The GitHub runner builds what ships, not what is iterated on.
    entitlement alone; the scene connects as soon as the display comes on.
 4. `xcrun simctl location <udid> set|start` gives the phone's GNSS (phone-only mode trusts it, UI-SPEC §6.3).
 5. The device log: `xcrun simctl spawn <udid> log stream --predicate 'subsystem == "ai.wtf.navigator"'`.
+6. Reloads: Metro's (its `r` key) is a `{"version":2,"method":"reload"}` message on `ws://localhost:8081/message`,
+   the same host; the development launcher's (`xcrun simctl openurl <udid>
+   "wtfai://expo-development-client/?url=http%3A%2F%2Flocalhost%3A8081"`) makes a new host. A launch from the car
+   alone: the app terminated, then its icon on the CarPlay screen clicked.
 
 Settled on the simulator: the app listed and opened on the CarPlay home screen; the map drawn by the React root; the
-scene connected in the background when the display comes on and active when the app is opened there.
+scene connected in the background when the display comes on and active when the app is opened there. In Debug, with
+the car's display on: a launch from the phone, a launch from the car alone (the map about 5 s after the tap, the
+phone left on its home screen), the phone opened after that, and both reloads, each with the map on the car's screen.
+In a Release build with expo-updates on: a launch from the car alone (the map about 1 s after the tap), the phone
+opened after it, and a launch from the phone.
 
 ## 6. Not chosen
 
@@ -174,7 +202,6 @@ scene connected in the background when the display comes on and active when the 
 5. Places asked for: what Siri and other apps give a third-party navigator on CarPlay (URLs to the scene, App
    Intents), read as Android Auto's request (SEARCH-SPEC §4.6).
 6. Two MapLibre views on one JS thread with the particle filter's budget (SPEC §8.6).
-7. Debug builds: the car's root under the development launcher and Metro.
-8. Later: the dashboard and instrument cluster scenes; iOS 27's panels on the map template and route sharing with the
+7. Later: the dashboard and instrument cluster scenes; iOS 27's panels on the map template and route sharing with the
    car.
-9. A real car, from TestFlight: the map in motion, the voice over the car's audio, the banners, the cluster.
+8. A real car, from TestFlight: the map in motion, the voice over the car's audio, the banners, the cluster.

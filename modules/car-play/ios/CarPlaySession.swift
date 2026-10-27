@@ -1,5 +1,4 @@
 import CarPlay
-import ExpoModulesCore
 import MapKit
 import os
 
@@ -21,6 +20,8 @@ final class CarPlaySession {
   private var mapTemplate: CPMapTemplate?
   private var trip: CPTrip?
   private var navigation: CPNavigationSession?
+  /** The React Native host the map's root was made on. */
+  private weak var mapHost: AnyObject?
 
   func connect(_ controller: CPInterfaceController, window: CPWindow) {
     carPlayLog.notice("CarPlay scene connected")
@@ -29,7 +30,33 @@ final class CarPlaySession {
     let template = CPMapTemplate()
     mapTemplate = template
     controller.setRootTemplate(template, animated: false, completion: nil)
-    window.rootViewController = CarPlayMapController()
+    showMap()
+    // After the scenes connecting at this launch: the phone's starts React Native as it connects.
+    if !AppReactHost.isRunning {
+      DispatchQueue.main.async { AppReactHost.startWithoutPhone() }
+    }
+  }
+
+  /**
+   * A JS runtime came up (CarPlayModule's OnCreate). On a new host (the development launcher makes one at each load)
+   * the map's root is made again: a root stays on the host it was made on, and the car's screen went black. A reload
+   * on the same host restarts the root by itself, and making it again then too released the old one while React
+   * Native's restart still held it (a debug assertion: "Surface must not be running").
+   */
+  func reactNativeStarted() {
+    guard window != nil, let host = AppReactHost.host, host !== mapHost else { return }
+    carPlayLog.notice("React Native on a new host")
+    showMap()
+  }
+
+  /** The React root `CarPlayMap` once React Native runs, a blank view until then. */
+  private func showMap() {
+    guard let window else { return }
+    let react = AppReactHost.rootView(moduleName: Self.moduleName)
+    mapHost = react == nil ? nil : AppReactHost.host
+    let drawnBy = react == nil ? "a blank view until React Native runs" : "the React root"
+    carPlayLog.notice("CarPlay map: \(drawnBy, privacy: .public)")
+    window.rootViewController = CarPlayMapController(react)
   }
 
   func disconnect() {
@@ -41,6 +68,7 @@ final class CarPlaySession {
     // Unmounts the React root, and with it the guidance that calls the module.
     window?.rootViewController = nil
     window = nil
+    mapHost = nil
     interfaceController = nil
   }
 
@@ -93,36 +121,22 @@ final class CarPlaySession {
   private static func mapItem(_ lat: Double, _ lon: Double) -> MKMapItem {
     MKMapItem(placemark: MKPlacemark(coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon)))
   }
-
-  /**
-   * A root view of `moduleName` on the app's one React Native host, started first when nothing has (the app opened
-   * from the car's screen, no phone scene). The template's AppDelegate keeps the factory in `reactNativeFactory`
-   * (Expo's ExpoReactNativeFactoryProvider, in the Expo pod, which a module can't depend on); it is an
-   * ExpoReactNativeFactory, reached through ExpoModulesCore's protocol. Nil: no such AppDelegate.
-   */
-  static func reactView() -> UIView? {
-    guard let delegate = UIApplication.shared.delegate else { return nil }
-    let factory = Mirror(reflecting: delegate).children.first { $0.label == "reactNativeFactory" }?.value
-    guard let factory = factory as? ExpoReactNativeFactoryProtocol else { return nil }
-    // Made without the app delegate subscribers' root view customizations (RCTRootViewFactoryConfiguration's
-    // customizeRootView, read the way ExpoReactNativeFactory reads it): expo-splash-screen's would put the launch
-    // screen over the car's map for good, and move its one splash to this view, so the phone's would never go if
-    // CarPlay connected while it showed.
-    let rootViewFactory = (factory as? NSObject)?.value(forKey: "rootViewFactory") as? NSObject
-    let configuration = rootViewFactory?.value(forKey: "_configuration") as? NSObject
-    let customize = configuration?.value(forKey: "customizeRootView")
-    configuration?.setValue(nil, forKey: "customizeRootView")
-    defer { configuration?.setValue(customize, forKey: "customizeRootView") }
-    return factory.recreateRootView(withBundleURL: nil, moduleName: moduleName, initialProps: nil, launchOptions: nil)
-  }
 }
 
-/** The car's map: the React root `CarPlayMap`. */
+/** The car's map: the React root `CarPlayMap`, or a blank view while there is none. */
 final class CarPlayMapController: UIViewController {
+  private let react: UIView?
+
+  init(_ react: UIView?) {
+    self.react = react
+    super.init(nibName: nil, bundle: nil)
+  }
+
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) is not used")
+  }
+
   override func loadView() {
-    let react = CarPlaySession.reactView()
-    let drawnBy = react == nil ? "no React Native factory, a blank view" : "the React root"
-    carPlayLog.notice("CarPlay map: \(drawnBy, privacy: .public)")
     view = react ?? UIView()
     view.backgroundColor = .systemBackground
   }

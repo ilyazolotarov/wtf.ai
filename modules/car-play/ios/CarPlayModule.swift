@@ -34,6 +34,11 @@ public class CarPlayModule: Module {
   public func definition() -> ModuleDefinition {
     Name("CarPlay")
 
+    // Made with each JS runtime: the car's map waits for one, and is made again on a reload's.
+    OnCreate {
+      DispatchQueue.main.async { CarPlaySession.shared.reactNativeStarted() }
+    }
+
     AsyncFunction("startTrip") { (trip: CarTripRecord) in
       CarPlaySession.shared.startTrip(trip)
     }.runOnQueue(.main)
