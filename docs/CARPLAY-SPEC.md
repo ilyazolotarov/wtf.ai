@@ -76,7 +76,8 @@ src/components/car-screen/car-session.ts  route, places, words, voice, notice, s
 Jest), the one Android Auto runs: it keeps the navigator running (`Runtime.setCarScreen`), connects the adapter,
 sends the route (`carRoute`), places, words, voice and notices, and acts on what the driver does. Its payloads and
 actions are `car-types.ts`, which both modules' bindings declare. CarPlay's differs by its name in the trip log
-(`carplay connected`, `carplay: …`), the Sentry tag (`feature: carplay`), and no test drive. `listenForCarPlay`
+(`carplay connected`, `carplay: …`), the Sentry tags (`feature: carplay` on its reported problems, `car_screen: carplay`
+on every event and native crash while the session runs, `none` after), and no test drive. `listenForCarPlay`
 (car-session-task.ts, from index.ts) starts it on the module's `onConnect`, or at once in a JS runtime that comes up
 with the session open (a launch from the car, a reload); it ends on `session-ended`. The session opens when the driver
 first opens the app on the car's screen and lasts until the car disconnects, as Android Auto's: CarPlay connects the

@@ -32,6 +32,13 @@ import { runCarSession, type CarSessionDeps } from "./car-session";
 /** A route goes by the street of the houses within this of its own stretch (`viaNames`). */
 const VIA_HOUSE_M = 60;
 
+/**
+ * On every Sentry event while a car's screen session runs, the native crash reports too (the SDK copies the scope's
+ * tags to the native one): `carplay` or `android-auto`, then `none` when it ends (an empty tag would reach the native
+ * SDK as nil).
+ */
+const CAR_SCREEN_TAG = "car_screen";
+
 /** The headless task's name (CarSessionTask.TASK in modules/android-auto). */
 export const CAR_SESSION_TASK = "WtfCarSession";
 
@@ -69,6 +76,7 @@ export function listenForCarPlay(): void {
 async function runCarScreen(native: CarSessionDeps["native"], name: string, feature: string, phoneFree: boolean): Promise<void> {
   // The process may have started for the car, the phone's screens (and the root layout's setup) never loaded.
   initSentry();
+  Sentry.setTag(CAR_SCREEN_TAG, feature);
   const runtime = getRuntime();
   const { recorder, routes, position, link } = runtime;
   // The voice as the phone's map sets it up: its notes, the driver's volume (Settings), and as navigation guidance,
@@ -154,5 +162,6 @@ async function runCarScreen(native: CarSessionDeps["native"], name: string, feat
     });
   } finally {
     setVoiceAsGuidance(false);
+    Sentry.setTag(CAR_SCREEN_TAG, "none");
   }
 }

@@ -49,7 +49,8 @@ src/components/car-screen/car-session.ts ◀───────┘  route, pla
   surface, the location service, the permission asked, what failed). CarLink keeps those notes until the task takes
   them (`takeNotes`, at its start and on each `notes` action), since some come before a task runs or listens. A failure
   among them is also reported to Sentry (warning, tag `feature: android-auto`), since the trip log keeps notes only
-  while a trip records.
+  while a trip records. While the session runs every Sentry event carries `car_screen: android-auto`, native crash
+  reports too (the SDK copies the scope's tags to the native one); `none` after it ends (car-session-task.ts).
 - **The route** goes to the car at every change of the route service's snapshot (`carRoute`, pure, Jest-tested). A
   plan with no progress on it yet (the next position brings it; an alternative taken while the car stands waits for
   the car to move) shows from its start, as the phone's banner does: shown as planning, it stayed so until another
