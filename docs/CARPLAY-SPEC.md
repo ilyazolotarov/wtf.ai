@@ -100,7 +100,10 @@ GNSS and the adapter as they were. What the JS side sent is kept on the native s
   text is in them), unlike Android Auto's dp, which its map draws 1.4 times bigger; at 1.4 the car's map looked
   zoomed in, little of it on a 400×240 pt screen. The car's style (no footways, only a driver's POIs) at the style's
   own sizes (`carGuidelineSizes` false; Android for Cars' 24 dp and 36 dp are Android Auto's). `CarPlayMapController`
-  can still draw the root bigger (laid out smaller, scaled up; gestures and insets divided by it).
+  can still draw the root bigger (laid out smaller, scaled up; gestures and insets divided by it). The follow zoom is
+  moved out by the screen's scale (`zoom`, `CarPlayLogic.followZoomShift`: one level at 2×): as much road per pixel as
+  Android Auto shows, whose map keeps the phone's zoom per dp, about one of the car's pixels. At the phone's zoom a
+  400×240 pt screen showed 150 m across, the road ahead within a block.
 - **The map's root lives only while the car's screen shows the app**: made when the scene comes to the foreground,
   released when another app fills the screen (the guidance, banners and voice go on). Mounted in the background, its
   smoothing loop would spin the JS thread with the app in the background (the CPU kill of `use-smoothed-position.ts`)
@@ -128,22 +131,28 @@ GNSS and the adapter as they were. What the JS side sent is kept on the native s
   | --- | --- |
   | A notice: no location permission | An alert over the map with its words; button: Allow |
   | A notice: a route held without an adapter | An alert; buttons: I'll follow the route, Cancel |
-  | No route | The map; bar: Destinations, Search; voice |
-  | Planning, or planning again after leaving the route | The card waiting (`pauseTrip` `.loading`, `.rerouting`); bar: the X; voice |
-  | Followed | The next maneuver (the phone banner's words and icon, the distance rounded as the banner rounds it), the one after when it follows closely; the trip estimates (arrival, time and distance left); bar: the routes while there are others, the X; voice |
+  | No route | The map; bar: Destinations, Search; voice. Buttons: pan, recentre, +, − |
+  | Planning, or planning again after leaving the route | The card waiting (`pauseTrip` `.loading`, `.rerouting`); buttons: the X, voice, pan |
+  | Followed | The next maneuver (the phone banner's words and icon, the distance rounded as the banner rounds it), the one after when it follows closely; the trip estimates (arrival, time and distance left); buttons: the X, voice, the routes while there are others, pan |
   | Arrived | The card says so (`pauseTrip` `.arrived`); the trip finishes when the route goes |
   | Failed | The trip cancelled, an alert with the phone's words; Close |
 
-  The bar holds as little as it can: Stop guidance is an X (Android Auto's words would widen it), X and voice on the
-  right. It hides with the map's buttons while nobody touches the screen; while it shows (some seconds after a touch)
-  CarPlay sets the guidance card below its whole row, buttons in it or not. The map's buttons: pan, recentre while
-  the map is free or its follow zoom moved, + and −. The guidance card is CarPlay's: the icon beside the words
-  (`displayStyleFor` `.leadingSymbol`), 18 pt, two rows.
+  While the bar shows (a touch on the map, and for about 20 s after a list closes) CarPlay sets the guidance card
+  below its whole row, buttons in it or not. So on a route the bar stays empty and the map's buttons, on the right,
+  hold what it held: Stop guidance as an X (Android Auto's words would not fit), the voice, the routes while there are
+  others, then pan, or recentre in its place while the map is free or its follow zoom moved (`CarPlayLogic.mapButtons`;
+  four at most). They stay while the bar hides (`hidesButtonsWithNavigationBar` false, `buttonsStay`): pressed, they
+  don't bring the bar, and the card stays at the top. + and − are the panning interface's then; a pinch zooms on a
+  touch screen. Without a route the bar holds Destinations, Search and the voice, and the map's buttons (pan, recentre,
+  + and −) hide with it. The guidance card is CarPlay's: the icon beside the words (`displayStyleFor`
+  `.leadingSymbol`), 18 pt, two rows.
 
   Destinations: saved places, then recent ones, as many as `CPListTemplate.maximumItemCount`; one picked routes to it
   (`go`), the map popped back. Search (`CPSearchTemplate`): each change of the field goes to the session (`search`),
   whose answers complete it once they answer the text in it (`CarPlayLogic.searchList`); nothing typed lists the
-  destinations; nothing found is one row saying so. While the car allows no keyboard (`CPSessionConfiguration`'s
+  destinations; nothing found is one row saying so. Above the keyboard there is room for one answer or two, and nothing
+  puts the keyboard away: its search key opens the answers in a list over the search
+  (`searchTemplateSearchButtonPressed`). While the car allows no keyboard (`CPSessionConfiguration`'s
   `limitedUserInterfaces`, many cars while driving) the search button goes: the destinations are the way then, and
   CarPlay shortens the lists itself. A place asked for
   with several answers opens them in a list (`openSearch`): CarPlay's search can't be given a text. The routes list:
@@ -178,11 +187,14 @@ GNSS and the adapter as they were. What the JS side sent is kept on the native s
 - **Moving the map**: a finger on a touch screen (`didUpdatePanGestureWithTranslation`, `didEndPanGestureWithVelocity`)
   and, from iOS 26, a pinch (`didUpdateZoomGestureWithCenter`) come to the JS map as Android Auto's scroll, fling and
   scale (`CarPlayLogic.scroll`, `zoomFactor`); the panning interface's arrows (cars with a knob or a touchpad) as a
-  scroll of 120 pt. While panning the bar has only the button that ends it. The camera rules are Android Auto's
-  (`CarMap`).
+  scroll of 120 pt. While panning the bar has only the X that ends it, on its right; the map's buttons are + and −:
+  CarPlay shows only as many as fit beside the arrows (the last two on a 400×240 pt screen), and keeps the arrows below
+  the bar's row, empty or not. The camera rules are Android Auto's (`CarMap`).
 - **Alternative routes** are drawn and framed by the shared map; the framing keeps at least 40 % of the map's width
   and height for the routes (`fittedPadding`, Jest): CarPlay's card and buttons cover most of a small screen, and
-  MapLibre refuses padding larger than the map.
+  MapLibre refuses padding larger than the map. The camera goes flat and north up before the fit (UI-SPEC §6.2). A
+  route picked with no progress on it yet (an alternative taken while the car stands) shows from its start, as the
+  phone's banner does (`carRoute`).
 - **The map data credit** is the root's own (`MapCredit`), at the visible map's bottom, between the card and the map's
   buttons (wrapped when the room is narrow), fading after 5 s.
 - **Voice** as navigation guidance while the session is open (ROUTING-SPEC §8.5): expo-audio's session in the
@@ -199,7 +211,12 @@ GNSS and the adapter as they were. What the JS side sent is kept on the native s
   phone's route screen; Apple Maps links open Apple Maps, and are read when pasted into the search.
 - **Icons**: the app's Material Symbols, drawn by `scripts/car-icons.py` as SVG template images into
   `modules/car-play/ios/CarIcons.xcassets` (the pod's `WtfCarPlay.bundle`), with Android Auto's drawables; CarPlay tints
-  them. Drawn at their size from the vector: bar and map buttons 24 pt, list rows 32 pt, maneuvers 18 pt.
+  them. Drawn at their size from the vector: bar buttons 24 pt, list rows 32 pt, maneuvers 18 pt. A map button's
+  drawing is scaled to the X's, 14 of its 24 pt (`CarPlayImages.mapIcon`, the ink measured once): the symbols leave
+  different room around their drawing, and the voice and my location filled the round button. Focused (a knob, a
+  touchpad, where the focus comes back after a list) CarPlay fills a map button white or leaves it glass and shows its
+  `focusedImage`: black with a white edge, readable on either; CarPlay's tint left it white on white. Day mode can't
+  be seen on the simulator (§5), so the icon doesn't depend on the fill.
 - Device log (`ai.wtf.navigator`, category `carplay`): the scene connected, in the foreground, active, in the
   background, disconnected; React Native started without the phone's scene or on a new host; what drew the map;
   actions sent (info level); the notes also go to the trip log.
@@ -259,8 +276,8 @@ build's runner). The GitHub runner builds what ships, not what is iterated on.
    --private-key-path"): for a local Debug build, prebuild without it or take `EXUpdatesCodeSigningCertificate` and
    `EXUpdatesCodeSigningMetadata` out of the generated plist.
 8. Driving the car's screen from a script: clicks posted as CGEvents on the CarPlay window (the Mac unlocked; the
-   first click on an unfocused window only focuses it). The bar and the map's buttons hide while idle: a tap on the map
-   shows them, the next one presses. `xcrun simctl location <udid> start --speed=12 <lat,lon> …` drives along
+   first click on an unfocused window only focuses it). The bar (and without a route the map's buttons) hides while
+   idle: a tap on the map shows it, the next one presses. `xcrun simctl location <udid> start --speed=12 <lat,lon> …` drives along
    waypoints (the banners pop up with another app on the car's screen).
 9. CarPlay on the simulator can wedge (its screen frozen, then black, "no paired vehicle" in its log; a device reboot
    doesn't help): kill `CarPlay.app`, `CarPlayTemplateUIHost` and `carkitd` in the simulator (`kill -9`; launchd starts
@@ -279,7 +296,9 @@ the map's root released while another app showed and made again on return; a hel
 a failed plan's alert closed by CarPlay's x and not back on the next route; arrival on a simulated drive; a request's
 answers in a list over the map; the background location session held from a session opened on the car alone. Not seen
 there: a link to the car's scene (the simulator gives links to the phone), the night style (its CarPlay has no night
-mode), iOS 26's pinch, a car that limits the keyboard.
+mode), iOS 26's pinch, a car that limits the keyboard. CarPlay's Settings › Appearance offers Automatic or Always Dark;
+Automatic follows the car, and the simulated car stays at night whatever the phone's appearance, its location (midday
+in Cupertino, the display reconnected) or the Mac's; the Simulator's hidden CarPlay options set only size and scale.
 
 States the simulator gives no way into are set from a temporary file required by index.ts in `__DEV__` (`routes.start`
 to a place outside the region for a failed plan, `holdRouteForGuide` for a held route, `CarPlay.setSearch` and
@@ -297,9 +316,11 @@ to a place outside the region for a failed plan, `holdRouteForGuide` for a held 
   Android Auto's (§4).
 - **Trip previews** (`showTripPreviews`) before driving: Android Auto starts a route at once and offers the
   alternatives while following; CarPlay does the same.
-- **The X and the voice among the map's buttons**, to keep the guidance card at the top: CarPlay sets the card below
-  the bar's row whenever its controls show after a touch, even an empty bar, and the map's four buttons then had no
-  room for + and − during a route. They stay in the bar, which CarPlay reserves anyway.
+- **Route buttons in the bar** (the X, the voice, the routes): pressing one meant a touch on the map to show the bar,
+  and with it CarPlay moved the guidance card down a row. They are the map's buttons, shown while the bar hides; + and
+  − moved to the panning interface.
+- **The X that ends panning among the map's buttons**: CarPlay shows only those that fit beside the panning arrows (+
+  and − on a 400×240 pt screen) and hid it, leaving no way out; the arrows stay below the bar's row, empty or not.
 - **Guidance drawn by the app over the map** (a card of its own, smaller): Apple's guidelines keep the map template's
   base view to the map; the card, its layout and its padding are CarPlay's.
 

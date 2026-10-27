@@ -50,7 +50,10 @@ src/components/car-screen/car-session.ts ◀───────┘  route, pla
   them (`takeNotes`, at its start and on each `notes` action), since some come before a task runs or listens. A failure
   among them is also reported to Sentry (warning, tag `feature: android-auto`), since the trip log keeps notes only
   while a trip records.
-- **The route** goes to the car at every change of the route service's snapshot (`carRoute`, pure, Jest-tested);
+- **The route** goes to the car at every change of the route service's snapshot (`carRoute`, pure, Jest-tested). A
+  plan with no progress on it yet (the next position brings it; an alternative taken while the car stands waits for
+  the car to move) shows from its start, as the phone's banner does: shown as planning, it stayed so until another
+  route was taken;
   the native side keeps the last state for whichever comes next (the session or the JS runtime). Each session's task
   sends all of it at its start, the notice too when there is none: a JS reload loses what JS held (a held route),
   while the car still shows what the runtime before sent.

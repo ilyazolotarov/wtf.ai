@@ -38,6 +38,8 @@ export interface CarMapProps {
   insets?: CarInsets;
   /** The map drawn this many times the car's density (CarMapSurface; CarPlay's root): bigger, for a driver. */
   scale?: number;
+  /** The follow zoom moved by this many levels for the car's screen (CarPlay: its points are several pixels). */
+  zoom?: number;
 }
 
 /**
@@ -47,12 +49,12 @@ export interface CarMapProps {
  * heading-up and following the car in the part of the screen the template leaves free. What it shows of the route
  * besides the map, and the navigator kept running, are the car session's (car-session-task.ts).
  */
-export function CarMapRoot({ dark = false, insets = {}, scale = 1 }: CarMapProps) {
+export function CarMapRoot({ dark = false, insets = {}, scale = 1, zoom = 0 }: CarMapProps) {
   return (
     <I18nProvider>
       {/* The session runs the navigator: this map only draws it. */}
       <PositionProvider gnss={false}>
-        <CarMap dark={dark} insets={insets} scale={scale} />
+        <CarMap dark={dark} insets={insets} scale={scale} zoom={zoom} />
       </PositionProvider>
     </I18nProvider>
   );
@@ -85,7 +87,7 @@ const FRAME_GAP = 32;
 /** The car's map follows heading-up; the driver's drag or pinch leaves it free (camera-policy.ts, as on the phone). */
 const CAR_CAMERA: CameraState = { ...INITIAL_CAMERA, mode: "follow-heading" };
 
-function CarMap({ dark, insets, scale }: Required<CarMapProps>) {
+function CarMap({ dark, insets, scale, zoom }: Required<CarMapProps>) {
   const position = usePosition();
   const headingUp = useHeadingUp(position, null);
   const [camera, dispatch] = useReducer(cameraReducer, CAR_CAMERA);
@@ -176,7 +178,7 @@ function CarMap({ dark, insets, scale }: Required<CarMapProps>) {
       creditAt={carPlay ? { bottom: padding.bottom + CREDIT_GAP, left: padding.left + CREDIT_GAP, right: padding.right + CREDIT_GAP } : null}
       onReady={onMapDrawn}
       control={control}
-      followZoomShift={zoomShift}
+      followZoomShift={zoom + zoomShift}
       overview={overview}
       framePadding={{
         top: padding.top + FRAME_GAP,

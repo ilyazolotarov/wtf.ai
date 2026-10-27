@@ -128,7 +128,8 @@ final class CarPlaySession: NSObject {
     keyboardLimited = configuration.limitedUserInterfaces.contains(.keyboard)
     let template = CPMapTemplate()
     template.mapDelegate = self
-    // The map is what the driver needs: the buttons go with the navigation bar while nobody touches the screen.
+    // The map is what the driver needs: the bar goes while nobody touches the screen, the buttons with it but on a
+    // route (`refresh`, `CarPlayLogic.buttonsStay`).
     template.automaticallyHidesNavigationBar = true
     template.hidesButtonsWithNavigationBar = true
     mapTemplate = template
@@ -275,10 +276,12 @@ final class CarPlaySession: NSObject {
       if !buttons.isEmpty { right = max(right, window.bounds.maxX - buttons.maxX) }
     }
     let s = CarPlayLogic.mapScale
+    let screenScale = window?.traitCollection.displayScale ?? 1
     return [
       "dark": dark,
       "insets": ["left": safe.left / s, "top": safe.top / s, "right": right / s, "bottom": safe.bottom / s],
       "scale": s,
+      "zoom": CarPlayLogic.followZoomShift(screenScale: Double(screenScale)),
     ]
   }
 
@@ -349,11 +352,17 @@ final class CarPlaySession: NSObject {
   /** The answers to a place asked for, in a list over the map (CarPlay's search template can't be given a text). */
   func openSearch(_ query: String) {
     guard interfaceController != nil else { return }
+    let list = resultsTemplate(query)
+    popToRoot(animated: false) { [weak self] in self?.push(list) }
+  }
+
+  /** The answers to `query` in a list, filled as they come. */
+  private func resultsTemplate(_ query: String) -> CPListTemplate {
     resultsQuery = query
     let list = CPListTemplate(title: query, sections: resultsSections())
     list.emptyViewSubtitleVariants = [labels.noResults]
     resultsList = list
-    popToRoot(animated: false) { [weak self] in self?.push(list) }
+    return list
   }
 
   /** The map, with whatever list or search was open over it gone: the route to a place asked for shows. */
@@ -428,11 +437,14 @@ final class CarPlaySession: NSObject {
       trailing = bar.trailing
       mapTemplate.trailingNavigationBarButtons = bar.trailing.map(barButton)
     }
-    let buttons = CarPlayLogic.mapButtons(recentre: recentre)
+    let buttons = CarPlayLogic.mapButtons(
+      route: route, notice: notice, voiceMuted: voiceMuted, panning: panning, recentre: recentre)
     if buttons != shownMapButtons {
       shownMapButtons = buttons
       mapTemplate.mapButtons = buttons.map(mapButton)
     }
+    let stay = CarPlayLogic.buttonsStay(route: route)
+    if mapTemplate.hidesButtonsWithNavigationBar == stay { mapTemplate.hidesButtonsWithNavigationBar = !stay }
     syncAlert()
     destinationsList?.updateSections(destinationSections())
     routesList?.updateSections(routeSections())
@@ -448,11 +460,6 @@ final class CarPlaySession: NSObject {
         carPlayLog.notice("search pressed")
         self?.openSearchTemplate()
       }
-    // Icons, not Android Auto's words: the bar stays narrow over the map.
-    case .endRoute:
-      return CPBarButton(image: CarPlayImages.icon("car_close")) { [weak self] _ in self?.send("end-route") }
-    case .routes:
-      return CPBarButton(image: CarPlayImages.icon("car_alt_route")) { [weak self] _ in self?.openRoutes() }
     case .voice(let muted):
       return CPBarButton(image: CarPlayImages.icon(muted ? "car_volume_off" : "car_volume_up")) { [weak self] _ in
         self?.send("toggle-voice")
@@ -466,20 +473,33 @@ final class CarPlaySession: NSObject {
 
   private func mapButton(_ button: CarMapButton) -> CPMapButton {
     let made: CPMapButton
+    let icon: String
     switch button {
     case .pan:
       made = CPMapButton { [weak self] _ in self?.mapTemplate?.showPanningInterface(animated: true) }
-      made.image = CarPlayImages.icon("car_drag_pan")
+      icon = "car_drag_pan"
     case .recentre:
       made = CPMapButton { [weak self] _ in self?.gesture(["kind": "recentre"]) }
-      made.image = CarPlayImages.icon("car_my_location")
+      icon = "car_my_location"
     case .zoomIn:
       made = CPMapButton { [weak self] _ in self?.gesture(["kind": "zoom", "by": 1]) }
-      made.image = CarPlayImages.icon("car_add")
+      icon = "car_add"
     case .zoomOut:
       made = CPMapButton { [weak self] _ in self?.gesture(["kind": "zoom", "by": -1]) }
-      made.image = CarPlayImages.icon("car_remove")
+      icon = "car_remove"
+    // Icons, not Android Auto's words.
+    case .endRoute:
+      made = CPMapButton { [weak self] _ in self?.send("end-route") }
+      icon = "car_close"
+    case .routes:
+      made = CPMapButton { [weak self] _ in self?.openRoutes() }
+      icon = "car_alt_route"
+    case .voice(let muted):
+      made = CPMapButton { [weak self] _ in self?.send("toggle-voice") }
+      icon = muted ? "car_volume_off" : "car_volume_up"
     }
+    made.image = CarPlayImages.mapIcon(icon)
+    made.focusedImage = CarPlayImages.mapIcon(icon, focused: true)
     return made
   }
 
@@ -958,6 +978,13 @@ extension CarPlaySession: CPSearchTemplateDelegate {
     }
   }
 
+  // The keyboard's search key: the answers in a list of their own, over the search. Above the keyboard there is room
+  // for one or two, and nothing on CarPlay's keyboard puts it away.
+  func searchTemplateSearchButtonPressed(_ searchTemplate: CPSearchTemplate) {
+    guard !typed.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+    push(resultsTemplate(typed))
+  }
+
   func searchTemplate(
     _ searchTemplate: CPSearchTemplate, selectedResult item: CPListItem, completionHandler: @escaping () -> Void
   ) {
@@ -1069,14 +1096,90 @@ enum CarPlayImages {
   static let maneuverSize = 18.0
 
   static func icon(_ name: String, size: Double = buttonSize) -> UIImage {
-    guard let image = UIImage(named: name, in: bundle, compatibleWith: nil) else {
-      carPlayLog.error("icon \(name, privacy: .public) not found")
-      return UIImage()
-    }
+    guard let image = vector(name) else { return UIImage() }
     let side = CGSize(width: size, height: size)
     if image.size == side { return image.withRenderingMode(.alwaysTemplate) }
     let drawn = UIGraphicsImageRenderer(size: side).image { _ in image.draw(in: CGRect(origin: .zero, size: side)) }
     return drawn.withRenderingMode(.alwaysTemplate)
+  }
+
+  /**
+   * A map button's drawing spans this share of the button's icon at most: the X's own (14 of 24). The symbols leave
+   * different room around their drawing (the voice 3 of 24 a side, my location 1): drawn alike, they filled the round
+   * button but the X, + and −.
+   */
+  static let mapDrawingShare = 14.0 / 24
+
+  /** How far the white edge of a focused button's icon reaches, points. */
+  private static let focusedEdge = 1.5
+
+  /** The share of its box each icon's drawing spans, measured once. Main thread. */
+  private static var drawingShares: [String: Double] = [:]
+
+  /**
+   * A map button's icon, its drawing as big as the X's. Focused (a knob's, a touchpad's, or where the focus came back
+   * to after a list): black with a white edge. CarPlay fills a focused button white, or leaves it dark glass: its tint
+   * left the icon white on white, and plain black was lost on the glass. Readable on either, whatever fill the car's
+   * day uses.
+   */
+  static func mapIcon(_ name: String, focused: Bool = false) -> UIImage {
+    guard let image = vector(name) else { return UIImage() }
+    let share = drawingShares[name] ?? drawingShare(image)
+    drawingShares[name] = share
+    let size = buttonSize * min(1, mapDrawingShare / share)
+    let inset = (buttonSize - size) / 2
+    let side = CGSize(width: buttonSize, height: buttonSize)
+    guard focused else {
+      let drawn = UIGraphicsImageRenderer(size: side).image { _ in
+        image.draw(in: CGRect(x: inset, y: inset, width: size, height: size))
+      }
+      return drawn.withRenderingMode(.alwaysTemplate)
+    }
+    let white = image.withTintColor(.white, renderingMode: .alwaysOriginal)
+    let black = image.withTintColor(.black, renderingMode: .alwaysOriginal)
+    return UIGraphicsImageRenderer(size: side).image { _ in
+      for i in 0..<8 {
+        let angle = Double(i) * .pi / 4
+        let at = CGRect(x: inset + cos(angle) * focusedEdge, y: inset + sin(angle) * focusedEdge, width: size, height: size)
+        white.draw(in: at)
+      }
+      black.draw(in: CGRect(x: inset, y: inset, width: size, height: size))
+    }.withRenderingMode(.alwaysOriginal)
+  }
+
+  /** The share of its box the drawing of `image` spans, across or down, whichever is more: drawn and its ink found. */
+  private static func drawingShare(_ image: UIImage) -> Double {
+    let side = 96
+    guard
+      let context = CGContext(
+        data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: side,
+        space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue)
+    else { return 1 }
+    context.setFillColor(gray: 1, alpha: 1)
+    context.fill(CGRect(x: 0, y: 0, width: side, height: side))
+    UIGraphicsPushContext(context)
+    image.withTintColor(.black, renderingMode: .alwaysOriginal).draw(in: CGRect(x: 0, y: 0, width: side, height: side))
+    UIGraphicsPopContext()
+    guard let data = context.data else { return 1 }
+    let pixels = data.bindMemory(to: UInt8.self, capacity: side * side)
+    var low = (x: side, y: side)
+    var high = (x: -1, y: -1)
+    for y in 0..<side {
+      for x in 0..<side where pixels[y * side + x] < 128 {
+        low = (min(low.x, x), min(low.y, y))
+        high = (max(high.x, x), max(high.y, y))
+      }
+    }
+    guard high.x >= low.x else { return 1 }
+    return Double(max(high.x - low.x, high.y - low.y) + 1) / Double(side)
+  }
+
+  private static func vector(_ name: String) -> UIImage? {
+    guard let image = UIImage(named: name, in: bundle, compatibleWith: nil) else {
+      carPlayLog.error("icon \(name, privacy: .public) not found")
+      return nil
+    }
+    return image
   }
 
   static func placeIcon(_ kind: String) -> String {

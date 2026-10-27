@@ -158,9 +158,9 @@ enum CarSearchList: Equatable {
   case results([CarPlace])
 }
 
-/** The map template's navigation bar buttons. */
+/** The map template's navigation bar buttons: without a route, and while panning. */
 enum CarBarButton: Equatable {
-  case destinations, search, endRoute, routes
+  case destinations, search
   case voice(muted: Bool)
   /** Leaves the panning interface (cars with a knob or a touchpad). */
   case endPanning
@@ -169,6 +169,9 @@ enum CarBarButton: Equatable {
 /** The map's own buttons on the right, top to bottom (CarPlay shows four at most). */
 enum CarMapButton: Equatable {
   case pan, recentre, zoomIn, zoomOut
+  /** On a route: stop guidance, the voice, the other ways to choose from. */
+  case endRoute, routes
+  case voice(muted: Bool)
 }
 
 enum CarPlayLogic {
@@ -320,28 +323,57 @@ enum CarPlayLogic {
   }
 
   /**
-   * The navigation bar (two buttons a side), kept small over the map: without a route, the destinations and search on
-   * the left; with one, the routes there while there are others to choose. On the right the voice, but under a notice
-   * (no route to speak, its alert takes the driver's attention), and left of it the X that stops guidance. While
-   * panning, only the button that ends it. The bar hides with the map's buttons while nobody touches the screen; while
-   * it shows, CarPlay sets the guidance card below its row, buttons in it or not. No search while the car allows no
-   * keyboard (`keyboard` false: many do while driving): the destinations are the way then.
+   * The navigation bar (two buttons a side), without a route: the destinations and search on the left, the voice on
+   * the right, but under a notice (no route to speak, its alert takes the driver's attention). While it shows (some
+   * seconds after a touch) CarPlay sets the guidance card below its row, buttons in it or not: on a route it stays
+   * empty, and the map's buttons hold what it held. While panning, only the X that ends it, on the right: the map's
+   * buttons there show only as many as fit beside the panning arrows (two on a 400×240 pt screen), and CarPlay keeps
+   * the arrows below the bar's row, empty or not. No search while the car allows no keyboard (`keyboard` false: many
+   * do while driving): the destinations are the way then.
    */
   static func barButtons(
     route: CarRoute?, notice: CarNotice?, voiceMuted: Bool?, panning: Bool, keyboard: Bool = true
   ) -> (leading: [CarBarButton], trailing: [CarBarButton]) {
-    if panning { return ([.endPanning], []) }
-    let leading: [CarBarButton] = route == nil ? (keyboard ? [.destinations, .search] : [.destinations]) : showsRoutes(route) ? [.routes] : []
-    // CarPlay puts the first of them rightmost.
-    var trailing: [CarBarButton] = []
-    if notice == nil, let muted = voiceMuted { trailing.append(.voice(muted: muted)) }
-    if route != nil { trailing.append(.endRoute) }
-    return (leading, trailing)
+    if panning { return ([], [.endPanning]) }
+    if route != nil { return ([], []) }
+    let leading: [CarBarButton] = keyboard ? [.destinations, .search] : [.destinations]
+    guard notice == nil, let muted = voiceMuted else { return (leading, []) }
+    return (leading, [.voice(muted: muted)])
   }
 
-  /** Pan (CarPlay's panning interface, for cars without a touch screen), recentre while it applies, zoom in and out. */
-  static func mapButtons(recentre: Bool) -> [CarMapButton] {
-    recentre ? [.pan, .recentre, .zoomIn, .zoomOut] : [.pan, .zoomIn, .zoomOut]
+  /**
+   * The map's buttons. Without a route: pan (CarPlay's panning interface, for cars without a touch screen), recentre
+   * while it applies, zoom in and out. On a route, what the bar held: the X that stops guidance, the voice (not under a
+   * notice), the routes while there are others to choose; then pan, or recentre in its place while it applies (the
+   * overview of a new route's alternatives, a look around). Zooming is the panning interface's then. While panning,
+   * zoom in and out: CarPlay shows the last two beside its arrows.
+   */
+  static func mapButtons(route: CarRoute?, notice: CarNotice?, voiceMuted: Bool?, panning: Bool, recentre: Bool) -> [CarMapButton] {
+    if panning { return [.zoomIn, .zoomOut] }
+    guard route != nil else { return recentre ? [.pan, .recentre, .zoomIn, .zoomOut] : [.pan, .zoomIn, .zoomOut] }
+    var buttons: [CarMapButton] = [.endRoute]
+    if notice == nil, let muted = voiceMuted { buttons.append(.voice(muted: muted)) }
+    if showsRoutes(route) { buttons.append(.routes) }
+    buttons.append(recentre ? .recentre : .pan)
+    return buttons
+  }
+
+  /**
+   * The map's buttons stay while the bar hides, on a route: the driver reaches them without touching the map, and the
+   * bar, with the guidance card moved down below it, shows only for a touch on the map itself. Without a route they go
+   * with the bar: there is no card to move, and the map is whole.
+   */
+  static func buttonsStay(route: CarRoute?) -> Bool {
+    route != nil
+  }
+
+  /**
+   * The follow zoom moved for the car's screen, levels: as much road per pixel as Android Auto shows (its map keeps
+   * the phone's follow zoom per density-independent pixel, about one of the car's pixels), not per CarPlay point, which
+   * is two or three of them. At the phone's zoom a 400×240 pt screen showed 150 m across, the road ahead within a block.
+   */
+  static func followZoomShift(screenScale: Double) -> Double {
+    -log2(max(1, screenScale))
   }
 
   /** A pan gesture's change since the last, as the distance the finger went back (Android Auto's scroll). */

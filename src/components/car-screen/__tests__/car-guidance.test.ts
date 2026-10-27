@@ -62,9 +62,16 @@ describe("car route", () => {
     expect(carRoute(null, t, "en")).toBeNull();
   });
 
-  test("planning, and a plan without progress on it yet, say so", () => {
+  test("planning says so", () => {
     expect(carRoute(route(undefined, { status: "planning", plan: undefined }), t, "en")).toMatchObject({ status: "planning", message: en.planningRoute, steps: [] });
-    expect(carRoute(route(undefined), t, "en")).toMatchObject({ status: "planning" });
+  });
+
+  test("a plan without progress on it yet (an alternative taken at a stop) shows from its start, as the phone's banner", () => {
+    const r = carRoute(route(undefined), t, "en")!;
+    expect(r).toMatchObject({ status: "active", message: null, remainingM: 12_300, remainingS: 1080, remainingShown: 12.3, remainingUnit: "km1" });
+    expect(r.steps).toHaveLength(1);
+    expect(r.steps[0]).toMatchObject({ instruction: "Turn left", distanceM: 2700, shownDistance: 2.7, shownUnit: "km1" });
+    expect(r.steps[0].timeS).toBeCloseTo(237.1, 1);
   });
 
   test("a failed plan says why", () => {

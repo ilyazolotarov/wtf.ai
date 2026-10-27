@@ -76,34 +76,66 @@ final class TurnAlertTests: XCTestCase {
 }
 
 final class ButtonsTests: XCTestCase {
-  func testWithoutARouteTheDestinationsAndSearchWithOneItsAlternativesAndTheXBesideTheVoice() {
+  private let alternatives = [CarAlternative(index: 0, title: "Zelena", detail: "+2 min")]
+
+  private func mapButtons(
+    _ route: CarRoute?, notice: CarNotice? = nil, voiceMuted: Bool? = false, panning: Bool = false, recentre: Bool = false
+  ) -> [CarMapButton] {
+    CarPlayLogic.mapButtons(route: route, notice: notice, voiceMuted: voiceMuted, panning: panning, recentre: recentre)
+  }
+
+  func testTheBarHoldsTheDestinationsSearchAndVoiceOnlyWithoutARoute() {
     let none = CarPlayLogic.barButtons(route: nil, notice: nil, voiceMuted: false, panning: false)
     XCTAssertEqual(none.leading, [.destinations, .search])
     XCTAssertEqual(none.trailing, [.voice(muted: false)])
-    let followed = CarPlayLogic.barButtons(route: route(), notice: nil, voiceMuted: true, panning: false)
-    XCTAssertEqual(followed.leading, [])
-    XCTAssertEqual(followed.trailing, [.voice(muted: true), .endRoute])
-    let alternatives = [CarAlternative(index: 0, title: "Zelena", detail: "+2 min")]
-    let choosing = CarPlayLogic.barButtons(route: route(alternatives: alternatives), notice: nil, voiceMuted: nil, panning: false)
-    XCTAssertEqual(choosing.leading, [.routes])
-    XCTAssertEqual(choosing.trailing, [.endRoute])
-    XCTAssertEqual(
-      CarPlayLogic.barButtons(route: route(replanning: true, alternatives: alternatives), notice: nil, voiceMuted: nil, panning: false).leading, [])
+    for followed in [route(), route(alternatives: alternatives), route("failed")] {
+      let bar = CarPlayLogic.barButtons(route: followed, notice: nil, voiceMuted: true, panning: false)
+      XCTAssertEqual(bar.leading, [])
+      XCTAssertEqual(bar.trailing, [])
+    }
+    for followed in [nil, route()] {
+      let panning = CarPlayLogic.barButtons(route: followed, notice: nil, voiceMuted: false, panning: true)
+      XCTAssertEqual(panning.leading, [])
+      XCTAssertEqual(panning.trailing, [.endPanning])
+    }
   }
 
-  func testNoVoiceButtonAtVolumeZeroOrUnderANoticeAndOnlyTheEndWhilePanning() {
+  func testNoVoiceButtonAtVolumeZeroOrUnderANoticeNorSearchWithoutAKeyboard() {
     XCTAssertEqual(CarPlayLogic.barButtons(route: nil, notice: nil, voiceMuted: nil, panning: false).trailing, [])
     XCTAssertEqual(CarPlayLogic.barButtons(route: nil, notice: notice, voiceMuted: false, panning: false).trailing, [])
-    XCTAssertEqual(CarPlayLogic.barButtons(route: route(), notice: notice, voiceMuted: false, panning: false).trailing, [.endRoute])
     XCTAssertEqual(CarPlayLogic.barButtons(route: nil, notice: nil, voiceMuted: nil, panning: false, keyboard: false).leading, [.destinations])
-    let panning = CarPlayLogic.barButtons(route: route(), notice: nil, voiceMuted: false, panning: true)
-    XCTAssertEqual(panning.leading, [.endPanning])
-    XCTAssertEqual(panning.trailing, [])
+    XCTAssertEqual(mapButtons(route(), notice: notice), [.endRoute, .pan])
+    XCTAssertEqual(mapButtons(route(), voiceMuted: nil), [.endRoute, .pan])
   }
 
-  func testTheMapButtonsFourAtMostRecentreOnlyWhenItApplies() {
-    XCTAssertEqual(CarPlayLogic.mapButtons(recentre: false), [.pan, .zoomIn, .zoomOut])
-    XCTAssertEqual(CarPlayLogic.mapButtons(recentre: true), [.pan, .recentre, .zoomIn, .zoomOut])
+  func testWithoutARoutePanRecentreOnlyWhenItAppliesAndZoom() {
+    XCTAssertEqual(mapButtons(nil), [.pan, .zoomIn, .zoomOut])
+    XCTAssertEqual(mapButtons(nil, recentre: true), [.pan, .recentre, .zoomIn, .zoomOut])
+  }
+
+  func testOnARouteTheXTheVoiceTheRoutesWhileThereAreOthersThenPanOrRecentreInItsPlace() {
+    XCTAssertEqual(mapButtons(route(), voiceMuted: true), [.endRoute, .voice(muted: true), .pan])
+    XCTAssertEqual(mapButtons(route(alternatives: alternatives)), [.endRoute, .voice(muted: false), .routes, .pan])
+    XCTAssertEqual(mapButtons(route(alternatives: alternatives), recentre: true), [.endRoute, .voice(muted: false), .routes, .recentre])
+    XCTAssertEqual(mapButtons(route(replanning: true, alternatives: alternatives)), [.endRoute, .voice(muted: false), .pan])
+    XCTAssertEqual(mapButtons(route("failed")), [.endRoute, .voice(muted: false), .pan])
+  }
+
+  func testWhilePanningTheMapsButtonsZoom() {
+    XCTAssertEqual(mapButtons(route(alternatives: alternatives), panning: true), [.zoomIn, .zoomOut])
+    XCTAssertEqual(mapButtons(nil, panning: true, recentre: true), [.zoomIn, .zoomOut])
+  }
+
+  func testTheButtonsStayWhileTheBarHidesOnlyOnARoute() {
+    XCTAssertTrue(CarPlayLogic.buttonsStay(route: route()))
+    XCTAssertFalse(CarPlayLogic.buttonsStay(route: nil))
+  }
+
+  func testTheFollowZoomShowsAsMuchRoadPerPixelAsAndroidAuto() {
+    XCTAssertEqual(CarPlayLogic.followZoomShift(screenScale: 1), 0)
+    XCTAssertEqual(CarPlayLogic.followZoomShift(screenScale: 2), -1)
+    XCTAssertEqual(CarPlayLogic.followZoomShift(screenScale: 3), -log2(3))
+    XCTAssertEqual(CarPlayLogic.followZoomShift(screenScale: 0), 0)
   }
 }
 

@@ -148,6 +148,13 @@ export function useMapCamera({
   const mapWidth = mapWidthPt > 0 ? mapWidthPt : screenPt.width;
   // A small map under big panels (the car's) keeps some of itself for what is framed.
   const framing = () => fittedPadding(framePadding, mapWidth, mapHeight);
+  // North up and flat. MapLibre on iOS fits bounds as the camera looks at the moment of asking: tilted and turned
+  // close in (heading-up), a route's far end lies past the horizon and the fit landed zoomed into an empty block near
+  // the destination (CarPlay's map). Flat first, then the fit.
+  const frameFlat = (bounds: [number, number, number, number]) => {
+    commands.setStop({ pitch: 0, bearing: 0, duration: 0 });
+    commands.fitBounds(bounds, { padding: framing(), bearing: 0, pitch: 0, duration: 900 });
+  };
   // By their numbers: the insets are a new object with every render.
   const { top: insetTop, bottom: insetBottom, left: insetLeft, right: insetRight } = insets;
   const ghost = position?.trust === "UNTRUSTED" && position.rawGnss ? position.rawGnss : null;
@@ -310,32 +317,14 @@ export function useMapCamera({
     if (all.length < 2) return;
     const lons = all.map((c) => c.lon);
     const lats = all.map((c) => c.lat);
-    commands.fitBounds([Math.min(...lons), Math.min(...lats), Math.max(...lons), Math.max(...lats)], {
-      padding: framing(),
-      bearing: 0,
-      pitch: 0,
-      duration: 900,
-    });
+    frameFlat([Math.min(...lons), Math.min(...lats), Math.max(...lons), Math.max(...lats)]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [overview, mapReady]);
 
   const hasGhost = ghost != null;
   useEffect(() => {
     if (!ghostView || !position || !ghost) return;
-    commands.fitBounds(
-      [
-        Math.min(position.lon, ghost.lon),
-        Math.min(position.lat, ghost.lat),
-        Math.max(position.lon, ghost.lon),
-        Math.max(position.lat, ghost.lat),
-      ],
-      {
-        padding: framing(),
-        bearing: 0,
-        pitch: 0,
-        duration: 900,
-      },
-    );
+    frameFlat([Math.min(position.lon, ghost.lon), Math.min(position.lat, ghost.lat), Math.max(position.lon, ghost.lon), Math.max(position.lat, ghost.lat)]);
     // Frame once when the ghost view opens, not on every fix.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ghostView, hasGhost]);

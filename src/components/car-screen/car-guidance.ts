@@ -53,16 +53,23 @@ export function carRoute(
   if (route.status === "failed") {
     return { ...base, status: "failed", message: t(route.failure ? PROBLEM_TEXT[route.failure] : "routeCancelled") };
   }
-  const next = guidance && maneuvers ? maneuvers[guidance.nextIndex] : undefined;
-  // Planned, but no progress on it yet (the first position on the route comes with the next update): still planning.
-  if (route.status === "planning" || !plan || !guidance || !maneuvers || !next) {
+  if (route.status === "planning" || !plan || !maneuvers?.length) {
     return { ...base, status: "planning", message: t("planningRoute") };
   }
-  const remaining = carDistance(guidance.remainingM);
-  const left = { remainingM: guidance.remainingM, remainingS: guidance.remainingS, remainingShown: remaining.shown, remainingUnit: remaining.unit };
-  if (guidance.state === "arrived") return { ...base, ...left, status: "arrived", message: t("arrived") };
+  // No progress on it yet (the first position on it comes with the next update; an alternative taken while the car
+  // stands waits for the car to move): from the plan's start, as the phone's banner shows it. Shown as planning, a
+  // route taken at a stop stayed "Planning route…" until another was.
+  const nextIndex = guidance?.nextIndex ?? Math.min(1, maneuvers.length - 1);
+  const next = maneuvers[nextIndex];
+  if (!next) return { ...base, status: "planning", message: t("planningRoute") };
+  const toNextM = guidance?.toNextM ?? next.atM;
+  const remainingM = guidance?.remainingM ?? plan.lengthM;
+  const remainingS = guidance?.remainingS ?? plan.durationS;
+  const remaining = carDistance(remainingM);
+  const left = { remainingM, remainingS, remainingShown: remaining.shown, remainingUnit: remaining.unit };
+  if (guidance?.state === "arrived") return { ...base, ...left, status: "arrived", message: t("arrived") };
   // The plan's own pace for what is left: guidance has no time per maneuver.
-  const sPerM = guidance.remainingM > 0 ? guidance.remainingS / guidance.remainingM : 0;
+  const sPerM = remainingM > 0 ? remainingS / remainingM : 0;
   const step = (m: Maneuver, distanceM: number): CarStepPayload => {
     const { shown, unit } = carDistance(distanceM);
     return {
@@ -77,9 +84,9 @@ export function carRoute(
       distanceText: formatManeuverDistance(distanceM, language),
     };
   };
-  const then = guidance.thenIndex != null ? maneuvers[guidance.thenIndex] : undefined;
-  const steps = [step(next, guidance.toNextM)];
-  if (then) steps.push(step(then, guidance.toNextM + Math.max(0, then.atM - next.atM)));
+  const then = guidance?.thenIndex != null ? maneuvers[guidance.thenIndex] : undefined;
+  const steps = [step(next, toNextM)];
+  if (then) steps.push(step(then, toNextM + Math.max(0, then.atM - next.atM)));
   // The routes list: each way by the street it goes by, then how it compares; its whole time and distance, as the
   // alternatives are timed against the route's whole plan. A time difference alone says nothing of why to take it.
   const whole = (p: RoutePlan) => `${formatDurationS(p.durationS, t)} · ${formatDistance(p.lengthM, language)}`;
