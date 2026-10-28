@@ -241,6 +241,7 @@ One small component each; the screen only places them and wires their state. Car
 | Top | `StatusRow` | The status pill: the trust state in words, coloured by it ("Position trusted", "GPS looks spoofed", "GPS is back" (the source under it says "Verifying GPS"), "No GPS signal", and "Approximate location" when the only position is a Wi-Fi/cell one), the source ("GPS", "Car sensors", "Phone sensors only", "Verifying GPS", "Set on the map"); user-facing text uses GPS rather than GNSS. The speed in km/h beside it, with the limit's sign (§6.4). A tap unfolds the details: the alert text and the last trusted fix's strip, the outage card and "Cut GPS", the manual position's chip |
 | Top | `SinceTrustedStrip` (`trust-cards.tsx`) | Unfolded under the trust alert, while GNSS isn't trusted, from a minute after the last trusted fix: "Last trusted GPS: 4 min ago, 2.3 km back" |
 | Top | `RouteBanner` | Only with a route (below) |
+| Top | `CameraCard` | A speed camera ahead (§6.5), under the route banner |
 | Top | `trust-cards.tsx`, `placing-cards.tsx` | Trust alert, simulated outage, the parked-pose question, placing (`usePlacing`), "Are you still here?", the manual chip |
 | Top | `RegionPromptCard`, `HudChip` | Outside the region (below), protocol search |
 | Bottom | `destination-cards.tsx` | Dropped pin (`PinCard`), a route held without an adapter (`HeldRouteCard`) |
@@ -307,7 +308,9 @@ One small component each; the screen only places them and wires their state. Car
   fix can't tell which lane is whose. A dead-reckoned dot without map matching, a refused or held fix, and a dot with
   other roads beside it get no sign. A re-publish of the same position (a trust change, the outage card, the pose
   question) keeps the map matching roads it came with.
-- **Held** (`LimitHold`): a sign appears after 1 s; another limit, or none, replaces it after holding 2 s.
+- **Held** (`LimitHold`): a sign appears after 1 s; another limit, or none, replaces it after holding 2 s. A change
+  waiting while no position comes (standing on the driver's placing, a fix that doesn't change) comes with the
+  service's tick re-publishing the dot.
 - `SpeedLimitSource` (the navigator service, `set`) reads the active region's graph on a reader of its own (16 tiles,
   its frame around the car, moved past 20 km), opened again when the active graph changes, and puts the result in
   `PositionEstimate.speedLimit`; `speed limit <kph> (OSM|default)` / `none` notes in the trip log.
@@ -322,6 +325,47 @@ One small component each; the screen only places them and wires their state. Car
   yet; when they do, they call the same hook: one warning, one chime, however many screens show it.
 - Must not drift: no amber or other in-between state (tried in the design, dropped: the driver is fine until the
   margin); no sign rather than a wrong one.
+
+### 6.5 Speed cameras (`src/nav/speed/`, `camera-source.ts`, `use-camera-warning.ts`, `camera-card.tsx`)
+
+- **The cameras:** the map release's shared `cameras.json` (tools/tiles `cameras.py`, all Ukraine): every OSM speed
+  camera and the Interior Ministry's list of cameras in service (mvs.gov.ua), with the direction of the traffic each
+  checks (none: both ways) and its limit (none: the road's, `edgeLimit`, at it). An OSM camera the list lacks stays
+  (switched off, or new): a needless card costs less than a missed camera. Maps from before it: no cameras.
+- **On the road ahead** (`road-ahead.ts`): from where the car may be on the roads, the way it goes along them (map
+  matching's weight per road and direction, `ParticleFilter.roadWeights`; for a trusted fix, the driver's placing or
+  phone-only mode the roads around it along the course, as the speed limit's snap, §6.4), 1 km along the roads: at a
+  junction along the route when the car is on it, else straight on (every exit within 45°: both ways of a fork) or
+  along its own OSM way where it bends; never back, against a one-way or a turn restriction. A camera is on the roads
+  within 30 m of it along its direction (± 45°), the nearest and any within 5 m more (both edges at a node); no
+  driveways. A camera counts when the positions that have it ahead hold ≥ 40 % of the weight (a parallel road, a
+  hypothesis passing by: no card), at the distance from the heaviest of them.
+- **When** (`CameraAlert`): the nearest within 30 s at the speed (250–900 m), after 1 s in sight; it counts down as
+  the car comes. Out of sight it runs down at the speed and goes after 3 s moving (a car standing keeps it), at once
+  within 60 m: passed, and not shown again for 2 min. Gone farther away and back within a minute (a junction that
+  split the belief), it is the same card at once, its bar where it was. With no road position to look from (GNSS
+  gives no course under 11 km/h: a queue creeping to a light before the camera) it isn't out of sight, just unseen:
+  held up to a minute, never passed meanwhile. A camera 50 m nearer than the card's takes it. In the trip log:
+  `camera ahead #<id> in <m> m, limit <kph>` (`(OSM only)` for one the list lacks), `camera passed #<id>`, `camera out
+  of sight #<id> at <m> m`, and from the screen `camera warning #<id>: …` and `camera slow down #<id>: …`.
+- **The card** (`CameraCard`), under the status row and the route banner: the camera icon on a dark tile, "Speed
+  camera in 600 m" (10 m steps under 200 m, 50 m above), the limit at the camera as its sign at the right (in words
+  only to a screen reader: the sign says it), and a bar filling from where it showed to the camera. Past the driver's
+  margin over the camera's limit by the speed warning's rules (§6.4: after 1.5 s past it, until 3 km/h back under, so
+  hovering at the line doesn't flicker): red, "Slow down" (the sign says to what), the distance under it, the sign
+  ringed in white. No limit known: no sign, never red. While the card shows its sign the speed bubble shows none (one
+  sign on the screen); the speed there still turns red past the margin over the road's limit.
+- **The voice** once per camera when its card shows, and not again for that camera within 2 min (lost and found
+  isn't news): "Speed camera ahead", or "Speed camera ahead. Slow down" when past the margin then (recorded, `camera`,
+  `camera-slow-down`); not with the voice muted or at 0.
+- **On the map:** every camera from zoom 13, the card's camera glyph in white on a red badge (the sign's red, banded
+  as the dot), upright whatever the map's bearing and tilt, growing with the zoom; the card's camera larger, on top. The
+  badge is the car sprite's `map-camera` (`scripts/map-car.py`), loaded with the style.
+- **Settings → Speed:** **Warn about speed cameras** (on by default; kv-store `speed.preferences` `cameras`): off, no
+  card, no voice. The dots stay.
+- **Screens:** the phone's only. CarPlay and Android Auto show neither the card nor the dots yet.
+- Must not drift: no camera warning from a dot the car can't be placed on a road by (no card rather than a wrong
+  one); a camera the list lacks is still warned of.
 
 ## 7. Pages
 
@@ -378,9 +422,10 @@ background app's network, so a whole country used to fail and start from zero un
 ### 7.6 `settings`
 
 Language (System / English / Українська); Appearance (System / Light / Dark); Voice volume (ROUTING-SPEC §8.5); Speed
-(§6.4): **Show the speed limit** (on by default; where limits come from, Ukraine's general limits where none is
-recorded, that road signs come first) and, with it, **Speed warning threshold** +10 / +15 / +20 km/h (fines start
-at more than 20 over; kv-store `speed.preferences`); Car:
+(§6.4, §6.5): **Show the speed limit** (on by default; where limits come from, Ukraine's general limits where none is
+recorded, that road signs come first), **Warn about speed cameras** (on by default; what shows and is said, where the
+cameras come from) and, with either, **Speed warning threshold (km/h)** +10 / +15 / +20
+(fines start at more than 20 over; kv-store `speed.preferences`); Car:
 **Precise speed from the car's data bus** (the wheels; on by default; VEHICLE-LINK-SPEC §16.3) and, with it, **Detect
 turns using the car's data bus (experimental)** (NAVIGATOR-SPEC §5.4) and **Send anonymous car reports** (on by default;
 VEHICLE-LINK-SPEC §16.5), each with a line on what it does (turns: requires a compatible car and adapter, and the Car

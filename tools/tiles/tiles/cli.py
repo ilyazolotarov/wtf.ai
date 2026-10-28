@@ -3,7 +3,11 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from .build import REGIONS, ROOT, WORLD, build_all, build_common, build_graphs, build_searches, remote_osm_date, write_index
+from .build import (
+    REGIONS, ROOT, WORLD, build_all, build_camera_release, build_common, build_graphs, build_searches, remote_osm_date,
+    write_index,
+)
+from .cameras import SNAPSHOT, refresh_snapshot
 from .graph import read_graph, validate
 from .region import border_ts, load_registry, write_regions
 from .search import build_region_search, read_search
@@ -61,6 +65,11 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--refresh-osm", action="store_true")
     p.add_argument("--heap", default="4g")
 
+    p = sub.add_parser("cameras", help="build out/release/cameras.json (speed cameras, OSM and the MVS list) and refresh index.json")
+    p.add_argument("--refresh-osm", action="store_true")
+    p = sub.add_parser("mvs", help="refresh the committed copy of the MVS camera list (cameras/mvs.json) from its page")
+    p.add_argument("--force", action="store_true", help="write it even when it fails the build's checks against the copy")
+
     sub.add_parser("index", help="rewrite shared files and index.json in out/release/")
     sub.add_parser("osm-date", help="print the date of the current Geofabrik Ukraine extract")
 
@@ -104,6 +113,14 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(1 if failed else 0)
     elif args.cmd == "build-region":
         build_all([args.region], refresh_osm=args.refresh_osm, heap=args.heap)
+    elif args.cmd == "cameras":
+        build_camera_release(refresh_osm=args.refresh_osm)
+    elif args.cmd == "mvs":
+        written, notes = refresh_snapshot(force=args.force)
+        for note in notes:
+            print(f"  {note}")
+        print(f"{SNAPSHOT}: {'written' if written else 'not written (--force writes it anyway)'}")
+        raise SystemExit(0 if written else 1)
     elif args.cmd == "index":
         write_index(build_common())
     elif args.cmd == "osm-date":

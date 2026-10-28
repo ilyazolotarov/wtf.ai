@@ -5,6 +5,7 @@ import path from "node:path";
 import { syntheticDrive, type DriveSegment, type SyntheticDrive } from "@/nav/__fixtures__/synthetic-drive";
 import { destinationAtBearing, haversineM } from "@/nav/geo";
 import { LocalFrame } from "@/nav/geo/local-frame";
+import { CameraIndex } from "@/nav/speed/cameras";
 import { bufferByteSource } from "@/nav/mapmatch/graph/byte-source";
 import { TiledRoadGraph } from "@/nav/mapmatch/graph/road-graph";
 import type { GnssFix } from "@/nav/types";
@@ -84,6 +85,8 @@ function harness(
     phoneGraph?: () => TiledRoadGraph;
     /** The speed limit's own reader on this graph, under the active graph's key (UI-SPEC §6.4). */
     limitGraph?: { key: string; graph: () => TiledRoadGraph };
+    /** The installed maps' speed cameras (UI-SPEC §6.5). */
+    cameras?: CameraIndex;
     /** The uptime the app starts at (a later session of the same drive). */
     startUs?: number;
     /** iOS started the app on the way (NAVIGATOR-SPEC §6.1). */
@@ -122,6 +125,7 @@ function harness(
     onTheWay: options.onTheWay,
     ...(options.phoneGraph ? { openPhoneGraph: () => ({ key: "fixture", graph: options.phoneGraph!(), close: () => {} }) } : {}),
     ...(options.limitGraph ? { openLimitGraph: () => ({ key: options.limitGraph!.key, graph: options.limitGraph!.graph(), close: () => {} }) } : {}),
+    ...(options.cameras ? { cameras: () => ({ key: "cameras:1", index: options.cameras! }) } : {}),
   });
 
   /** Deliver a trip the way the phone does: IMU in 100 ms batches, OBD live, fixes 50 ms late. */
@@ -1525,6 +1529,39 @@ describe("map matching", () => {
     service.setSimulatedOutage(false);
     expect(service.getSnapshot()?.speedLimit).toEqual(p.speedLimit);
     service.stop();
+  });
+
+  test("a camera on the road ahead of where map matching puts the car, through an outage, until passed", async () => {
+    const drive = syntheticDrive({ segments: JUNCTION_DRIVE, origin: GRAPH_ORIGIN, startHeadingRad: Math.PI / 2, gnss: "clean", obdScale: 0.99 });
+    const limitGraph = { key: "net:1", graph: () => new TiledRoadGraph(bufferByteSource(new Uint8Array(GRAPH_FILE)), new LocalFrame(GRAPH_ORIGIN)) };
+    // 1.4 km east along the drive's road, on a pole beside it, the east-bound traffic.
+    const camera = { id: 0, ...new LocalFrame(GRAPH_ORIGIN).toCoordinate(1400, 4), bearingRad: Math.PI / 2, listed: true };
+    const { service, play, notes } = harness({ roadGraph: fixtureGraphSource(), limitGraph, cameras: new CameraIndex([camera]) });
+    await service.start();
+    play(drive, { withoutGnssFromS: 60, untilS: 100 });
+    const p = service.getSnapshot()!;
+    expect(p).toMatchObject({ source: "dr", mapMatch: "tracking" });
+    // 97 s at 12 m/s from a standing start: ~1130 m driven.
+    expect(p.cameraAhead?.distanceM).toBeGreaterThan(200);
+    expect(p.cameraAhead?.distanceM).toBeLessThan(330);
+    expect(notes).toContainEqual(expect.stringMatching(/^camera ahead #0 in \d+ m, limit \d+$/));
+    play(drive, { withoutGnssFromS: 60 });
+    expect(service.getSnapshot()?.cameraAhead).toBeUndefined();
+    expect(notes).toContain("camera passed #0");
+    service.stop();
+  });
+
+  test("a sign comes to the driver's placing, though no new position follows it while the car stands", async () => {
+    const limitGraph = { key: "net:1", graph: () => new TiledRoadGraph(bufferByteSource(new Uint8Array(GRAPH_FILE)), new LocalFrame(GRAPH_ORIGIN)) };
+    const h = harness({ vin: null, roadGraph: fixtureGraphSource(), limitGraph });
+    await h.service.start();
+    expect(h.service.setUserPosition(GRAPH_ORIGIN, Math.PI / 2)).toBe(true);
+    // A sign waits its moment before it shows (UI-SPEC §6.4): placed, nothing else publishes the dot again.
+    expect(h.service.getSnapshot()).toMatchObject({ source: "manual" });
+    expect(h.service.getSnapshot()?.speedLimit).toBeUndefined();
+    jest.advanceTimersByTime(1500);
+    expect(h.service.getSnapshot()?.speedLimit?.kph).toBeGreaterThan(0);
+    h.service.stop();
   });
 
   test("without a graph nothing changes", async () => {

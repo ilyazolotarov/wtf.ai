@@ -165,7 +165,8 @@ output.
 
 `NavEstimate.mapMatch`: `state` (`off` | `init` | `tracking` | `multimodal` | `offroad`), up to 5 `clusters` by weight
 (`{ weight, lat, lon, headingRad, headingSpreadRad, spreadM, covariance, edge, road, particles }`), `roads` (the
-weight on each road, heaviest first, off-road as no road, past 16 the rest as one: the speed limit's, UI-SPEC §6.4),
+weight on each road and direction along it with its mean distance along the road, heaviest first, off-road as no
+road, past 16 the rest as one: the speed limit's and the road ahead's, UI-SPEC §6.4, §6.5),
 `particles`, `updateMs`. How the map draws it: §11. Integrity uses all clusters as hypotheses after a gap (NAVIGATOR-SPEC §8).
 
 ## 7. Particle filter (`particle-filter.ts`)

@@ -2,7 +2,8 @@ import { LocalFrame } from "@/nav/geo/local-frame";
 import { EdgeFlag, RoadClass } from "@/nav/mapmatch/graph/format";
 import { MemoryRoadGraph } from "@/nav/mapmatch/graph/memory-graph";
 import type { PositionEstimate } from "@/nav/position/types";
-import { SpeedLimitSource, type LimitGraph } from "@/services/navigation/speed-limit-source";
+import { RoadReader, type LimitGraph } from "@/services/navigation/road-reader";
+import { SpeedLimitSource } from "@/services/navigation/speed-limit-source";
 
 // A 60 road north–south, a 30 street west–east 200 m north. The source's reader starts its frame at the first position:
 // the tests start at the memory graph's origin, so the two frames are the same.
@@ -24,7 +25,7 @@ function source(key: () => string | null = () => "kyiv:1") {
     opened++;
     return { key: key()!, graph: Object.assign(graph, { setFrame: () => {} }), close: () => {} };
   };
-  const s = new SpeedLimitSource({ open, activeKey: key, note: (t) => notes.push(t) });
+  const s = new SpeedLimitSource({ reader: new RoadReader({ open, activeKey: key }), note: (t) => notes.push(t) });
   return { s, notes, opened: () => opened };
 }
 

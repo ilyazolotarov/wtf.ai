@@ -1,7 +1,8 @@
-"""The parked car drawn on the map (UI-SPEC §6.1): a car seen from straight above, shaded to read as 3D.
+"""The parked car drawn on the map (UI-SPEC §6.1): a car seen from straight above, shaded to read as 3D. And the speed
+camera's badge (§6.5), in the same sprite.
 
     python scripts/map-car.py                     # assets/images/map-car-{light,dark}@{1,2,3}x.png, map-car-sprite.png
-    python scripts/map-car.py --preview out.png   # and a sheet of it on light and dark map ground
+    python scripts/map-car.py --preview out.png   # and a sheet of it (and the badge) on light and dark map ground
 
 The windscreen and windows in the trusted dot's blue per theme (theme.ts `puck`); the body dark on light ground and
 white on dark (as the lessons' car), banded as the dot (a white ring, a dark edge), with a soft shadow. Nose up, centred on the image, `LENGTH_PT` long at 1x: the map rotates and scales it.
@@ -36,6 +37,19 @@ NEAR = (6, 12)
 # index beside the code. A sprite, not images added from JS: those load late on iOS and the car never showed.
 SPRITE_PNG = OUT / "map-car-sprite.png"
 SPRITE_JSON = ROOT / "src" / "components" / "map" / "map-car-sprite.json"
+
+# The speed camera on the map (UI-SPEC §6.5): the card's camera glyph (Material Symbols `speed_camera`, as icon.tsx) in
+# white on the speed limit sign's red (theme.ts `signRing`), a rounded square banded as the dot (a white ring, a dark
+# edge), with a soft shadow. `BADGE_PT` square at 1x, its canvas larger for the shadow; the map draws it at 0.55–0.8 of
+# that, the camera the card warns of at full size (map-layers.tsx `CameraLayers`).
+BADGE_PT = 30
+BADGE_CANVAS_PT = 38
+BADGE_RADIUS_PT = 9
+BADGE_RING_PT, BADGE_EDGE_PT = 2.0, 0.6
+BADGE_GLYPH_PT = 18
+BADGE_RED = (0xD5, 0x2B, 0x1E)
+SYMBOLS_FONT = ROOT / "node_modules" / "@expo-google-fonts" / "material-symbols" / "600SemiBold" / "MaterialSymbols_600SemiBold.ttf"
+SPEED_CAMERA = chr(0xF470)
 
 GLASS = {"light": (0x0A, 0x84, 0xFF), "dark": (0x3D, 0x6B, 0xFF)}
 # The paint per theme: the body's colour, how much it darkens to its sides, the sheen down its middle, and the colours
@@ -233,6 +247,35 @@ def car(theme: str, px_per_pt: float) -> Image.Image:
     return img.resize((round(CANVAS_PT[0] * px_per_pt), round(CANVAS_PT[1] * px_per_pt)), Image.LANCZOS)
 
 
+def camera_badge(px_per_pt: float) -> Image.Image:
+    """The speed camera's badge, `px_per_pt` pixels a point, centred on its canvas."""
+    from PIL import ImageFont
+
+    s = px_per_pt * SUPERSAMPLE
+    size = round(BADGE_CANVAS_PT * s)
+    c = size / 2
+
+    def square(half_pt: float, dy_pt: float = 0.0) -> list[float]:
+        return [c - half_pt * s, c - half_pt * s + dy_pt * s, c + half_pt * s, c + half_pt * s + dy_pt * s]
+
+    half = BADGE_PT / 2
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    shadow = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    ImageDraw.Draw(shadow).rounded_rectangle(square(half, 1.2), BADGE_RADIUS_PT * s, fill=(0, 0, 0, 80))
+    img.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(1.6 * s)))
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle(square(half), BADGE_RADIUS_PT * s, fill=(0x1C, 0x1F, 0x24, 255))
+    inner = half - BADGE_EDGE_PT
+    d.rounded_rectangle(square(inner), (BADGE_RADIUS_PT - BADGE_EDGE_PT) * s, fill=(255, 255, 255, 255))
+    body = inner - BADGE_RING_PT
+    d.rounded_rectangle(square(body), (BADGE_RADIUS_PT - BADGE_EDGE_PT - BADGE_RING_PT) * s, fill=BADGE_RED + (255,))
+    font = ImageFont.truetype(str(SYMBOLS_FONT), round(BADGE_GLYPH_PT * s))
+    x0, y0, x1, y1 = font.getbbox(SPEED_CAMERA)
+    d.text((c - (x0 + x1) / 2, c - (y0 + y1) / 2), SPEED_CAMERA, font=font, fill=(255, 255, 255, 255))
+    out = round(BADGE_CANVAS_PT * px_per_pt)
+    return img.resize((out, out), Image.LANCZOS)
+
+
 def preview(path: Path) -> None:
     """The car on light and dark map ground, at its size and zoomed in, straight and turned."""
     density = 3
@@ -244,6 +287,10 @@ def preview(path: Path) -> None:
         for k, (scale, angle, at) in enumerate(((1.0, 0, (60, 110)), (1.0, -35, (150, 100)), (2.0, -70, (235, 105)))):
             icon = car(theme, density * scale).rotate(angle, resample=Image.BICUBIC, expand=True)
             tile.alpha_composite(icon, (at[0] * density - icon.width // 2, at[1] * density - icon.height // 2))
+        # The camera's badge as the map draws it: zoomed out, zoomed in, warned of.
+        for scale, at in ((0.55, (30, 40)), (0.8, (70, 40)), (1.0, (115, 40))):
+            badge = camera_badge(density * scale)
+            tile.alpha_composite(badge, (at[0] * density - badge.width // 2, at[1] * density - badge.height // 2))
         tiles.append(tile)
     sheet = Image.new("RGBA", (tiles[0].width, sum(t.height for t in tiles)))
     y0 = 0
@@ -255,9 +302,11 @@ def preview(path: Path) -> None:
 
 
 def sprite() -> None:
-    """The sheet, the near images in rows above the 3x car, and its index (name: x, y, width, height, pixelRatio)."""
+    """The sheet, the near images in rows above the 3x car and the camera's badge, and its index (name: x, y, width,
+    height, pixelRatio)."""
     rows = [[(f"map-car-{t}-x{k}", car(t, k), 1) for t in ("light", "dark")] for k in reversed(NEAR)]
     rows[-1] += [(f"map-car-{t}", car(t, 3), 3) for t in ("light", "dark")]
+    rows[-1] += [("map-camera", camera_badge(3), 3)]
     width = max(sum(im.width for _, im, _ in row) for row in rows)
     height = sum(max(im.height for _, im, _ in row) for row in rows)
     sheet = Image.new("RGBA", (width, height), (0, 0, 0, 0))

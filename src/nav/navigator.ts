@@ -19,7 +19,7 @@ import { LocalFrame } from "./geo/local-frame";
 import { insideUkraine } from "./integrity/border";
 import { GnssIntegrity, type IntegrityConfig, type IntegrityContext, type IntegrityVerdict } from "./integrity/integrity";
 import type { EdgeId, RoadGraph } from "./mapmatch/graph/road-graph";
-import { ParticleFilter, type MapMatchConfig, type MapMatchState } from "./mapmatch/particle-filter";
+import { ParticleFilter, type MapMatchConfig, type MapMatchState, type RoadWeight } from "./mapmatch/particle-filter";
 import { ImuProcessor, type ImuConfig } from "./odometry/imu/imu-processor";
 import { OdometryChunker, type OdometryStep } from "./odometry/odometry-output";
 import type { TrustState } from "./position/types";
@@ -281,8 +281,11 @@ export interface MapMatchEstimate {
     /** An off-road cluster: the nearest road it could be driving along (position/puck.ts draws it there at speed). */
     road?: { lat: number; lon: number; headingRad: number };
   }[];
-  /** The weight on each road, heaviest first (`ParticleFilter.roadWeights`): the speed limit's (UI-SPEC §6.4). */
-  roads: { edge: EdgeId | null; weight: number }[];
+  /**
+   * The weight on each road and way along it, heaviest first (`ParticleFilter.roadWeights`): the speed limit's and the
+   * road ahead's (UI-SPEC §6.4, §6.5).
+   */
+  roads: RoadWeight[];
   particles: number;
   updateMs: number;
 }

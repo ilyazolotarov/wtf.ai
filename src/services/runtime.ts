@@ -24,6 +24,7 @@ import { CalibrationStore } from "./navigation/calibration-store";
 import { NavigatorService } from "./navigation/navigator-service";
 import { ROUTER_CACHE_TILES, RouteService } from "./navigation/route-service";
 import { startUpdateCenter, waitingUpdateInfo } from "./app-update/update-center";
+import { activeCameras } from "./offline-map/camera-file";
 import { onMapDownloadFailed } from "./offline-map/map-packs";
 import { activeRoadGraph, openActiveRoadGraph } from "./offline-map/road-graph-file";
 import { SensorService } from "./sensor-capture/sensor-service";
@@ -79,8 +80,11 @@ export interface DevSettings {
 const DEV_SETTINGS_KEY = "dev.settings";
 /** Tiles the phone-only navigator's own graph reader keeps decoded (a few km around the car). */
 const PHONE_GRAPH_CACHE_TILES = 64;
-/** Tiles the speed limit's graph reader keeps decoded: the few under the car (UI-SPEC §6.4). */
-const LIMIT_GRAPH_CACHE_TILES = 16;
+/**
+ * Tiles the speed limit's and the road ahead's graph reader keeps decoded: under the car, along the kilometre ahead and
+ * around the cameras near it (UI-SPEC §6.4, §6.5).
+ */
+const LIMIT_GRAPH_CACHE_TILES = 24;
 /** How long after a start the trip service has taken its types. */
 const TRIP_SERVICE_TYPES_CHECK_MS = 2000;
 
@@ -409,6 +413,7 @@ export function getRuntime(): Runtime {
     // Phone-only mode reads the graph in a frame of its own (NAVIGATOR-SPEC §9.6).
     openPhoneGraph: () => openActiveRoadGraph(PHONE_GRAPH_CACHE_TILES),
     openLimitGraph: () => openActiveRoadGraph(LIMIT_GRAPH_CACHE_TILES),
+    cameras: () => activeCameras(),
     permission: { get: Location.getForegroundPermissionsAsync, request: Location.requestForegroundPermissionsAsync },
     // iOS relaunches the app for location "Always" a few hundred metres into a drive (VEHICLE-LINK-SPEC §11).
     onTheWay: {
@@ -446,8 +451,9 @@ export function getRuntime(): Runtime {
     openGraph: () => openActiveRoadGraph(ROUTER_CACHE_TILES),
     nowUs,
     store: kvStore,
-    onRoute: (plan) => {
+    onRoute: (plan, graphKey) => {
       position.setPhoneRoute(plan ? plan.coordinates : null);
+      position.setRouteRoads(plan && graphKey ? { key: graphKey, legs: plan.legs } : null);
       // The store video drives the car along the app's own route (scripts/store-screenshots.py reads it in logcat).
       if (dev.showEmulators && plan) {
         console.log(`wtf-demo-route ${JSON.stringify(plan.coordinates.map((c) => [+c.lat.toFixed(6), +c.lon.toFixed(6)]))}`);

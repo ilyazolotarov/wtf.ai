@@ -67,6 +67,8 @@ const SF = {
   refresh: "arrow.clockwise",
   open_in_new: "arrow.up.right.square",
   ios_share: "square.and.arrow.up",
+  // A speed camera ahead (UI-SPEC §6.5).
+  speed_camera: "camera.fill",
 } as const satisfies Record<string, SFSymbol>;
 
 export type IconName = keyof typeof SF;

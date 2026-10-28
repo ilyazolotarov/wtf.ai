@@ -10,6 +10,7 @@ import { formatAlternativeDelta } from "@/components/route/guidance-text";
 import { useT } from "@/i18n/provider";
 import type { Coordinate } from "@/nav/geo";
 import type { PositionEstimate } from "@/nav/position/types";
+import type { SpeedCamera } from "@/nav/speed/cameras";
 import { useDevSettings, useRuntime } from "@/providers/runtime-provider";
 import type { RouteSnapshot } from "@/services/navigation/route-service";
 
@@ -193,6 +194,46 @@ export function RouteLayers({
         />
       </GeoJSONSource>
     </>
+  );
+}
+
+/** Speed cameras show on the map from this zoom (a street's few hundred metres on the screen). */
+const CAMERA_MINZOOM = 13;
+/** The camera's badge in the car sprite (scripts/map-car.py `camera_badge`): drawn at most at its size, never blurred. */
+const CAMERA_IMAGE = `${MAP_CAR.sprite}:map-camera`;
+
+/**
+ * The speed cameras on the map (UI-SPEC §6.5): the card's camera glyph in white on a red badge, upright whatever the
+ * map's bearing and tilt, growing as the map is zoomed in; the one the card warns of larger and on top. Under the
+ * parked car and the dot. The badge is the style's car sprite's, loaded with the style (car-sprite.ts).
+ */
+export function CameraLayers({ cameras, aheadId }: { cameras: readonly SpeedCamera[] | null; aheadId?: number }) {
+  const shape = useMemo<GeoJSON.FeatureCollection<GeoJSON.Point>>(
+    () => ({
+      type: "FeatureCollection",
+      features: (cameras ?? []).map((c) => ({ type: "Feature", properties: { id: c.id }, geometry: { type: "Point", coordinates: [c.lon, c.lat] } })),
+    }),
+    [cameras],
+  );
+  if (!cameras?.length) return null;
+  const id = aheadId ?? -1;
+  const layout: SymbolLayerSpecification["layout"] = {
+    "icon-image": CAMERA_IMAGE,
+    "icon-size": [
+      "interpolate", ["linear"], ["zoom"],
+      CAMERA_MINZOOM, ["case", ["==", ["get", "id"], id], 0.8, 0.55],
+      17, ["case", ["==", ["get", "id"], id], 1, 0.8],
+    ],
+    "icon-allow-overlap": true,
+    "icon-ignore-placement": true,
+    "symbol-sort-key": ["case", ["==", ["get", "id"], id], 1, 0],
+    "icon-rotation-alignment": "viewport",
+    "icon-pitch-alignment": "viewport",
+  };
+  return (
+    <GeoJSONSource id="speed-cameras" data={shape}>
+      <Layer id="speed-camera-badge" type="symbol" minzoom={CAMERA_MINZOOM} layout={layout} />
+    </GeoJSONSource>
   );
 }
 

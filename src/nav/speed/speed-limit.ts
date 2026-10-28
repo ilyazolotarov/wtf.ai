@@ -36,10 +36,15 @@ export function edgeLimit(edge: RoadEdge): SpeedLimit | null {
   return oneWayMain ? null : { kph: DEFAULT_LIMITS.rural, tagged: false };
 }
 
-/** A road the car may be on and the share of belief in it; `edge` null: off the roads. */
+/**
+ * A road the car may be on and the share of belief in it; `edge` null: off the roads. Moving, the way along it the
+ * car goes (`dir`, along the geometry or against it) and where on it (`alongM`): the road ahead's start (§6.5).
+ */
 export interface LimitCandidate {
   edge: RoadEdge | null;
   weight: number;
+  dir?: 1 | -1;
+  alongM?: number;
 }
 
 /**
@@ -104,12 +109,17 @@ export function snapCandidates(near: NearEdge[], accuracyM: number, headingRad?:
     if (n.distanceM > snapRadiusM(accuracyM)) continue;
     const e = n.edge;
     if (fast && e.cls === RoadClass.service) continue;
+    let dir: 1 | -1 | undefined;
     if (course !== undefined) {
       const along = angleBetween(course, n.headingRad) <= SNAP_COURSE_TOLERANCE_RAD;
       const against = angleBetween(course, n.headingRad + Math.PI) <= SNAP_COURSE_TOLERANCE_RAD;
-      if (!((along && e.oneway !== Oneway.backward) || (against && e.oneway !== Oneway.forward))) continue;
+      if (along && e.oneway !== Oneway.backward) dir = 1;
+      else if (against && e.oneway !== Oneway.forward) dir = -1;
+      else continue;
     }
-    out.push({ edge: e.flags & EdgeFlag.minorService ? null : e, weight: Math.exp(-0.5 * (n.distanceM / sigma) ** 2) });
+    const weight = Math.exp(-0.5 * (n.distanceM / sigma) ** 2);
+    if (e.flags & EdgeFlag.minorService) out.push({ edge: null, weight });
+    else out.push({ edge: e, weight, ...(dir ? { dir, alongM: n.alongM } : {}) });
   }
   return out;
 }
@@ -139,6 +149,11 @@ export class LimitHold {
       this.pending = null;
     }
     return this.shown;
+  }
+
+  /** A change is waiting out its moment: it shows only with a position after it. */
+  waiting(): boolean {
+    return this.pending !== null;
   }
 
   reset(): void {

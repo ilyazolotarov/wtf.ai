@@ -308,6 +308,12 @@ export interface MapMatchCluster {
   particles: number;
 }
 
+/**
+ * A share of the weight (`ParticleFilter.roadWeights`): on a road travelling `dir` along its geometry, `alongM` its
+ * mean distance along it; or off the roads (`edge` null).
+ */
+export type RoadWeight = { edge: EdgeId; dir: 1 | -1; alongM: number; weight: number } | { edge: null; dir?: undefined; alongM?: undefined; weight: number };
+
 export interface MapMatchOutput {
   state: MapMatchState;
   /** Up to 5, heaviest first. */
@@ -1044,22 +1050,32 @@ export class ParticleFilter {
   }
 
   /**
-   * The weight on each road, heaviest first, normalized to 1; `edge` null: off the roads. Past `max` roads the rest is
-   * one entry without a road, so nobody reads a share of the weight as more than it is (the speed limit, UI-SPEC §6.4).
+   * The weight on each road and each way along it, heaviest first, normalized to 1, with the weight's mean distance
+   * along the road; `edge` null: off the roads. Past `max` entries the rest is one entry without a road, so nobody
+   * reads a share of the weight as more than it is (the speed limit, UI-SPEC §6.4; the road ahead, §6.5).
    */
-  roadWeights(max = 16): { edge: EdgeId | null; weight: number }[] {
+  roadWeights(max = 16): RoadWeight[] {
     if (!this.active) return [];
     const p = this.p;
-    const byEdge = new Map<EdgeId | null, number>();
+    const byRoad = new Map<string, { edge: EdgeId | null; dir?: 1 | -1; weight: number; along: number }>();
     let total = 0;
     for (let i = 0; i < p.size; i++) {
       const w = Math.exp(p.logw[i]);
-      const edge = p.offRoad[i] ? null : p.edge[i];
-      byEdge.set(edge, (byEdge.get(edge) ?? 0) + w);
       total += w;
+      const off = p.offRoad[i] === 1;
+      const key = off ? "off" : `${p.edge[i]}:${p.dir[i]}`;
+      const road = byRoad.get(key);
+      if (road) {
+        road.weight += w;
+        road.along += w * p.offset[i];
+      } else byRoad.set(key, off ? { edge: null, weight: w, along: 0 } : { edge: p.edge[i], dir: p.dir[i] as 1 | -1, weight: w, along: w * p.offset[i] });
     }
     if (!(total > 0)) return [];
-    const all = [...byEdge].map(([edge, w]) => ({ edge, weight: w / total })).sort((a, b) => b.weight - a.weight);
+    const all: RoadWeight[] = [...byRoad.values()]
+      .map(({ edge, dir, weight, along }) =>
+        edge === null || dir === undefined ? { edge: null, weight: weight / total } : { edge, dir, alongM: along / weight, weight: weight / total },
+      )
+      .sort((a, b) => b.weight - a.weight);
     if (all.length <= max) return all;
     const rest = all.slice(max - 1).reduce((s, r) => s + r.weight, 0);
     return [...all.slice(0, max - 1), { edge: null, weight: rest }];

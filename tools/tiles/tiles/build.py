@@ -18,6 +18,7 @@ any number of regions:
       <region>.pmtiles           OpenMapTiles-schema vector tiles, one per region
       <region>.graph.bin         road graph for map matching (graph.py, MAPMATCH-SPEC §4)
       <region>.search.bin        address search index (search.py, SEARCH-SPEC)
+      cameras.json               speed cameras of all Ukraine, OSM and the MVS list (cameras.py, UI-SPEC §6.5)
       style.json                 Liberty with `{common}` / `{tiles}` placeholders (style.py)
       sprite-ofm{,@2x}.{json,png}
       font-<slug>-<range>.pbf
@@ -46,6 +47,7 @@ from pathlib import Path
 
 from shapely.geometry import mapping
 
+from .cameras import build_cameras
 from .graph import build_region_graph
 from .region import load_registry, read_poly, region_outline
 from .search import build_region_search
@@ -59,6 +61,7 @@ RELEASE = OUT / "release"
 REGIONS = ROOT / "regions"
 LIBERTY = ROOT / "style" / "liberty.json"
 WORLD = ROOT / "style" / "world.geojson"  # tiles/world.py
+CAMERAS = "cameras.json"  # tiles/cameras.py
 
 PLANETILER_VERSION = "0.10.2"
 PLANETILER_URL = f"https://github.com/onthegomap/planetiler/releases/download/v{PLANETILER_VERSION}/planetiler.jar"
@@ -213,7 +216,8 @@ def fetch_cached(url: str, cache_path: Path) -> Path | None:
 
 
 def build_common(release: Path = RELEASE) -> list[dict[str, str]]:
-    """Style, sprites, glyphs and the world around the region, shared by all regions; returns [{asset, path}]."""
+    """Style, sprites, glyphs, the world around the region and the speed cameras (when built), shared by all regions;
+    returns [{asset, path}]."""
     liberty = json.loads(LIBERTY.read_text(encoding="utf-8"))
     release.mkdir(parents=True, exist_ok=True)
     files: list[dict[str, str]] = []
@@ -242,6 +246,8 @@ def build_common(release: Path = RELEASE) -> list[dict[str, str]]:
         put(src, f"sprite-{SPRITE_NAME}{suffix}", f"sprites/{SPRITE_NAME}{suffix}")
 
     put(WORLD, "world.geojson", "world.geojson")
+    if (release / CAMERAS).exists():
+        files.append({"asset": CAMERAS, "path": CAMERAS})
 
     style = offline_style(liberty, "wtf.ai Liberty offline")
     (release / "style.json").write_text(json.dumps(style, ensure_ascii=False), encoding="utf-8", newline="\n")
@@ -300,6 +306,13 @@ def build_search(region: str, clipped: Path, release: Path = RELEASE) -> Path:
     """Search index from the region's clipped extract → out/release/<region>.search.bin."""
     output = release / f"{region}.search.bin"
     build_region_search(clipped, output, osm_date())
+    return output
+
+
+def build_camera_file(pbf: Path, release: Path = RELEASE) -> Path:
+    """Speed cameras from the whole extract and the MVS list → out/release/cameras.json."""
+    output = release / CAMERAS
+    build_cameras(pbf, output, osm_date())
     return output
 
 
@@ -366,10 +379,12 @@ def build_all(regions: list[str] | None = None, refresh_osm: bool = False, heap:
     for name in names:
         if name != WHOLE:
             extract_region(name)
-    # Graphs and search indexes: one process each, the biggest regions first (Ukraine's take minutes).
+    # Graphs and search indexes: one process each, the biggest regions first (Ukraine's take minutes); the cameras
+    # alongside, from the whole extract.
     by_size = sorted(names, key=lambda n: clipped[n].stat().st_size, reverse=True)
     with ProcessPoolExecutor(jobs or os.cpu_count()) as pool:
-        tasks = [pool.submit(build, name, clipped[name]) for name in by_size for build in (build_graph, build_search)]
+        tasks = [pool.submit(build_camera_file, pbf)]
+        tasks += [pool.submit(build, name, clipped[name]) for name in by_size for build in (build_graph, build_search)]
         for task in tasks:
             task.result()
     return write_index(build_common())
@@ -404,4 +419,11 @@ def build_graphs(regions: list[str] | None = None, refresh_osm: bool = False) ->
         clip_regions(pbf, missing)
     for name in names:
         build_graph(name, CACHE / "extracts" / f"{name}.osm.pbf")
+    return write_index(build_common())
+
+
+def build_camera_release(refresh_osm: bool = False) -> dict:
+    """The speed cameras only, then index.json."""
+    pbf, _ = ensure_osm(refresh_osm)
+    build_camera_file(pbf)
     return write_index(build_common())

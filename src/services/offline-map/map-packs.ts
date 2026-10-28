@@ -762,6 +762,16 @@ export function readActiveStyle(installed: InstalledState): MapStyleJson | null 
   return JSON.parse(raw) as MapStyleJson;
 }
 
+/**
+ * The speed cameras of the installed maps (`cameras.json`, shared files since 2026-10-28; UI-SPEC §6.5), all of Ukraine,
+ * and their key (the shared files' fingerprint); `null` without them.
+ */
+export function activeCamerasFile(installed: InstalledState): { key: string; file: File } | null {
+  if (!installed.common) return null;
+  const file = new File(COMMON(), "cameras.json");
+  return file.exists ? { key: installed.common.fingerprint ?? installed.common.osm_date, file } : null;
+}
+
 /** The world drawn around the active region (`world.geojson`, shared files since 2026-10-10), or `null`. */
 export function readActiveWorld(installed: InstalledState): { url: string; region: string } | null {
   const region = installed.active;

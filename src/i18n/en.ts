@@ -488,13 +488,23 @@ export const en = {
   speedLimitSetting: "Show the speed limit",
   speedLimitNote:
     "Shows a speed limit sign next to your speed. Limits come from OpenStreetMap. Where no limit is recorded, Ukraine's general limits for that road type are used. The data may be incomplete or out of date, so always follow road signs.",
-  speedMarginSetting: "Speed warning threshold",
-  speedMarginOption: "+{n} km/h",
+  speedMarginSetting: "Speed warning threshold (km/h)",
+  speedMarginOption: "+{n}",
   speedMarginNote: "When you exceed the speed limit by more than the selected amount, the speed display turns red and a chime sounds once. In Ukraine, fines apply for exceeding the limit by more than 20 km/h.",
   speedLimitA11y: "Speed {speed} km/h, limit {limit} km/h",
   speedOverLimitA11y: "Speed {speed} km/h. Over the limit of {limit} km/h",
   /** Said when the speed warning's chime won't play. */
   speedWarningSpoken: "Slow down",
+  cameraSetting: "Warn about speed cameras",
+  cameraNote:
+    "A card appears and a voice alert sounds once when a speed camera ahead monitors traffic in your direction. Camera data comes from OpenStreetMap and Ukraine's official Ministry of Internal Affairs list.",
+  /** {distance}: "600 m", "1.2 km". */
+  cameraIn: "Speed camera in {distance}",
+  /** Said by a screen reader only: the card shows the limit as its sign. */
+  cameraLimit: "Speed limit at the camera: {limit} km/h",
+  cameraSlowDown: "Slow down",
+  sayCamera: "Speed camera ahead",
+  sayCameraSlowDown: "Speed camera ahead. Slow down",
   tripUpload: "Trip log upload",
   tripUploadAbout: "Testers can send their trip logs to the developer. A log holds the car's VIN, the GPS track of the drive and the phone's sensor data. It goes only to the developer's private storage, and only with a personal code from the developer. Ask them to delete your logs at any time.",
   tripUploadCode: "Code from the developer",

@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomBar } from "@/components/map/bottom-bar";
 import { CAMERA_BUTTON_SIZE, CameraButton } from "@/components/map/camera-button";
+import { CameraCard } from "@/components/map/camera-card";
 import { MAP_CREDIT_HEIGHT } from "@/components/map/map-credit";
 import { NoFixCard, PermissionCard } from "@/components/map/center-cards";
 import { HeldRouteCard, PinCard } from "@/components/map/destination-cards";
@@ -20,6 +21,7 @@ import { SheetBlur } from "@/components/map/sheet-blur";
 import { StatusRow } from "@/components/map/status-row";
 import { OutageCard, SinceTrustedStrip, TrustAlertCard, trustAlertText } from "@/components/map/trust-cards";
 import { useCameraMode } from "@/components/map/use-camera-mode";
+import { useCameraWarning } from "@/components/map/use-camera-warning";
 import { useSpeedWarning } from "@/components/map/use-speed-warning";
 import { usePlaceReminder } from "@/components/map/use-place-reminder";
 import { useCompassHeading, useHeadingUp, walkingCompass } from "@/components/map/use-compass-heading";
@@ -148,6 +150,7 @@ export default function HomeScreen() {
   }, [turn, runtime]);
   useVoiceGuidance(route, position?.speedMps, voiceMuted || voiceOff);
   const speed = useSpeedWarning(position, voiceMuted || voiceOff);
+  const camera = useCameraWarning(position, speed.speedKph, voiceMuted || voiceOff);
   const audioOutput = useAudioOutput(route?.status === "active");
 
   // The map tour (UI-SPEC §7.7): offered once after the first map, or asked for from the Guide. Three of its stops
@@ -321,6 +324,8 @@ export default function HomeScreen() {
               <StatusRow
                 nav={nav}
                 speed={speed}
+                // The camera's card shows its sign: one on the screen (UI-SPEC §6.5).
+                hideSign={!placing && camera?.limitKph !== undefined}
                 expandable={hasDetails}
                 expanded={detailsOpen}
                 onToggle={() => {
@@ -409,6 +414,8 @@ export default function HomeScreen() {
               {route && (
                 <RouteBanner route={route} nowMs={position?.timestamp ?? 0} onStop={stopRoute} muted={voiceMuted} onToggleVoice={voiceOff ? undefined : toggleVoice} offPhone={audioOutput.offPhone} />
               )}
+
+              {camera && !placing && <CameraCard camera={camera} />}
             </View>
 
             {!position && !placing && (permission != null && !permission.granted ? <PermissionCard /> : <NoFixCard onPlace={() => place.start()} />)}

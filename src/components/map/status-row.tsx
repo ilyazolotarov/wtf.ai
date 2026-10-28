@@ -20,7 +20,8 @@ const ROUGH_ACCURACY_M = 25;
 /**
  * The map's top row: the status pill (trust in words, where the position comes from, its accuracy) and the speed with
  * the limit's sign beside it (UI-SPEC §6.4), red when too fast. A tap on the pill unfolds its explanation when there is
- * one (`expandable`).
+ * one (`expandable`). `hideSign`: a speed camera's card shows a sign of its own (§6.5): one sign on the screen, the
+ * speed alone here, still red when too fast.
  */
 export function StatusRow({
   nav,
@@ -28,12 +29,14 @@ export function StatusRow({
   expandable,
   expanded,
   onToggle,
+  hideSign = false,
 }: {
   nav: ReturnType<typeof useNavStatus>;
   speed: SpeedShown;
   expandable: boolean;
   expanded: boolean;
   onToggle(): void;
+  hideSign?: boolean;
 }) {
   const { t, language } = useT();
   const palette = usePalette();
@@ -44,6 +47,7 @@ export function StatusRow({
     accuracy != null && accuracy > ROUGH_ACCURACY_M && trust !== "TRUSTED" ? palette.warn.c : palette.text;
   const speed = shown.speedKph === undefined ? "—" : String(shown.speedKph);
   const { limitKph, over } = shown;
+  const sign = limitKph !== undefined && !hideSign;
   const speedLabel =
     limitKph === undefined
       ? `${speed} ${t("speed")}`
@@ -83,13 +87,13 @@ export function StatusRow({
         )}
       </Pressable>
       <View
-        style={[panel, styles.speed, limitKph !== undefined && styles.withSign]}
+        style={[panel, styles.speed, sign && styles.withSign]}
         accessible
         accessibilityRole="text"
         accessibilityLabel={speedLabel}
       >
         <GlassFill radius={28} />
-        {limitKph !== undefined && <SpeedLimitSign kph={limitKph} />}
+        {sign && <SpeedLimitSign kph={limitKph} />}
         <View style={styles.speedValue}>
           {/*
             The red in a view of its own, made red and round at once: a background colour added later to the speed's

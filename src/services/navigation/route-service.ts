@@ -153,8 +153,8 @@ export interface RouteServiceDeps {
   log?: RouteLog;
   /** Runs `fn` later (between frames); tests pass their own. */
   defer?(fn: () => void, ms: number): () => void;
-  /** The route in force changed (a plan, a re-plan, the end): its plan, or null. */
-  onRoute?(plan: RoutePlan | null): void;
+  /** The route in force changed (a plan, a re-plan, the end): its plan, or null; and the graph file it is on. */
+  onRoute?(plan: RoutePlan | null, graphKey?: string): void;
   /** Keeps the active destination across app restarts. */
   store?: { getJson<T>(key: string): T | null; setJson(key: string, value: unknown): void };
 }
@@ -383,7 +383,7 @@ export class RouteService {
       this.set({ ...cur, status: "active", failure: undefined, replanFailure: undefined, planId: id, planReason: reason, plan: r.plan, maneuvers, guidance: undefined, replanning: false, ownWay });
       this.logPlan(id, reason, r.plan, maneuvers, { states: r.stats.states, tiles: r.stats.tilesRead, planMs: r.stats.ms, wallMs, slices, fellBackAt: r.stats.fellBackAt }, position);
       if (ownWay && !cur.ownWay) this.note("route not followed again: guidance shown, not spoken");
-      this.deps.onRoute?.(r.plan);
+      this.deps.onRoute?.(r.plan, this.graph?.key);
       this.onPosition();
       // The route is on its way; alternatives only now, in slices of their own.
       if (reason === "new") this.searchAlternatives(id, graph, frame, from, r.plan);
@@ -460,7 +460,7 @@ export class RouteService {
     this.set({ ...s, planId: id, planReason: "alternative", plan: next.plan, maneuvers: next.maneuvers, guidance: next.guidance.step ?? undefined, replanning: false, replanFailure: undefined });
     this.logPlan(id, "alternative", next.plan, next.maneuvers, null, this.deps.position.getSnapshot() ?? undefined);
     this.publishAlternatives();
-    this.deps.onRoute?.(next.plan);
+    this.deps.onRoute?.(next.plan, this.graph?.key);
   }
 
   /** The alternatives into the snapshot, timed against the route and labelled off its roads. */

@@ -1,5 +1,5 @@
 {
-  "version": "5f8384e3",
+  "version": "22a48b2c",
   "images": {
     "map-car-light-x12": {
       "x": 0,
@@ -41,6 +41,13 @@
       "y": 816,
       "width": 120,
       "height": 204,
+      "pixelRatio": 3
+    },
+    "map-camera": {
+      "x": 720,
+      "y": 816,
+      "width": 114,
+      "height": 114,
       "pixelRatio": 3
     }
   }

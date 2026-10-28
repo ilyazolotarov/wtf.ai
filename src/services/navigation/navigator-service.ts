@@ -5,6 +5,7 @@
 
 import type { LocationPermissionResponse } from "expo-location";
 
+import type { EdgeId } from "@/nav/mapmatch/graph/road-graph";
 import type { MapMatchConfig } from "@/nav/mapmatch/particle-filter";
 import type { UpdateTimingSummary } from "@/nav/mapmatch/update-timing";
 import type { PoseAfterWake } from "@/services/on-the-way";
@@ -16,6 +17,7 @@ import { haversineM } from "@/nav/geo";
 import { FUSED_WINDOW_US, puckAccuracyM, puckHypothesis, steadyDot, type DrawnDot, type LastPuck } from "@/nav/position/puck";
 import type { PositionEstimate, PositionSourceKind, RawGnssFix } from "@/nav/position/types";
 import type { CompassTrust } from "@/nav/compass/compass";
+import type { CameraIndex } from "@/nav/speed/cameras";
 import type { GnssFix, ImuSample, MagSample, ObdSpeedSample } from "@/nav/types";
 import type { CanSpeedSample } from "@/nav/odometry/can/can-speed";
 import { DEFAULT_WHEEL_YAW_CALIBRATION_CONFIG, type WheelYawCalibration } from "@/nav/odometry/can/wheel-yaw-calibration";
@@ -25,7 +27,9 @@ import type { EngineState, SpeedSample, VehicleLinkSnapshot } from "@/obd/types"
 import { UNKNOWN_CAR } from "@/obd/types";
 import { isSatelliteRecord, mapFixToPosition } from "@/services/position/gnss-position-source";
 import type { RoadGraphSource } from "@/services/offline-map/road-graph-file";
-import { SpeedLimitSource, type LimitGraph, type RoadWeights } from "@/services/navigation/speed-limit-source";
+import { CameraSource } from "@/services/navigation/camera-source";
+import { RoadReader, type LimitGraph, type RoadWeights } from "@/services/navigation/road-reader";
+import { SpeedLimitSource } from "@/services/navigation/speed-limit-source";
 import type { PositionSource } from "@/services/position/position-source";
 import type { SensorService } from "@/services/sensor-capture/sensor-service";
 import {
@@ -194,8 +198,13 @@ export interface NavigatorServiceDeps {
   observer?: NavigatorObserver;
   /** A reader of the active region's road graph of its own, for phone-only mode (§9.6); null: none. */
   openPhoneGraph?(): { key: string; graph: PhoneGraph; close(): void } | null;
-  /** A reader of the active region's road graph for the speed limit (UI-SPEC §6.4); without it, no limits. */
+  /**
+   * A reader of the active region's road graph for the speed limit and the road ahead (UI-SPEC §6.4, §6.5); without
+   * it, no limits and no cameras.
+   */
   openLimitGraph?(): LimitGraph | null;
+  /** The installed maps' speed cameras (null: none), asked at each position; a new `key` when they change (§6.5). */
+  cameras?(): { key: string; index: CameraIndex } | null;
   /** The CAN wheel samples (CAN primary), for the navigator's turning with `setWheelYaw` (NAVIGATOR-SPEC §5.4). */
   canSpeed?: { onSample(listener: (s: CanSpeedSample) => void): () => void };
   /**
@@ -334,26 +343,30 @@ export class NavigatorService implements PositionSource {
   private testDot: PositionEstimate | null = null;
 
   private readonly clock: ServiceClock;
+  /** The road graph reader the speed limit and the road ahead share. */
+  private readonly roadReader: RoadReader | null;
   /** The speed limit for each published position (UI-SPEC §6.4). */
   private readonly limits: SpeedLimitSource | null;
+  /** The speed camera ahead for each published position (UI-SPEC §6.5). */
+  private readonly cameras: CameraSource | null;
   /**
    * Map matching's roads and the position they came with: a re-publish of that position (a trust change, the outage
    * card, the pose question) keeps them, instead of reading as a dot without map matching and taking the sign away.
    */
   private lastRoads: { timestamp: number; roads: RoadWeights } | null = null;
+  /** When a position was last published (wall clock, ms). */
+  private lastSetMs = -Infinity;
 
   constructor(deps: NavigatorServiceDeps) {
     this.deps = deps;
     this.clock = deps.clock ?? SYSTEM_CLOCK;
     this.held = new ManualHold(deps.calibration, () => this.clock.nowMs());
     this.timing = new MapMatchTiming(() => this.clock.nowMs());
-    this.limits = deps.openLimitGraph
-      ? new SpeedLimitSource({
-          open: deps.openLimitGraph,
-          activeKey: () => this.deps.roadGraph?.current()?.key ?? null,
-          note: (text) => this.note(text),
-        })
-      : null;
+    const open = deps.openLimitGraph;
+    this.roadReader = open ? new RoadReader({ open, activeKey: () => this.deps.roadGraph?.current()?.key ?? null }) : null;
+    const reader = this.roadReader;
+    this.limits = reader ? new SpeedLimitSource({ reader, note: (text) => this.note(text) }) : null;
+    this.cameras = reader && deps.cameras ? new CameraSource({ reader, cameras: deps.cameras, note: (text) => this.note(text) }) : null;
   }
 
   private get manual() {
@@ -450,6 +463,11 @@ export class NavigatorService implements PositionSource {
   setPhoneRoute(points: { lat: number; lon: number }[] | null): void {
     this.phoneRoute = points;
     this.phone?.engine.setRoute(points);
+  }
+
+  /** The active route's roads (null: none) on the graph file `key`: the road ahead follows them (UI-SPEC §6.5). */
+  setRouteRoads(route: { key: string; legs: readonly { edge: EdgeId; dir: 1 | -1 }[] } | null): void {
+    this.cameras?.setRoute(route);
   }
 
   /**
@@ -749,7 +767,9 @@ export class NavigatorService implements PositionSource {
     this.flush(Infinity);
     this.saveCalibration();
     this.closePhone();
-    this.limits?.close();
+    this.roadReader?.close();
+    this.limits?.reset();
+    this.cameras?.reset();
     this.lastRoads = null;
     this.noteDrive();
     this.unsubscribers.forEach((u) => u());
@@ -1173,9 +1193,13 @@ export class NavigatorService implements PositionSource {
     this.publishPosition();
     this.publishParkedCar();
     // The pose question is drawn with the position (`set`), but parked on the phone's GPS an unchanged position isn't
-    // published again (no new fix): an answered question stayed on the map, "Yes" doing nothing (2026-10-15).
+    // published again (no new fix): an answered question stayed on the map, "Yes" doing nothing (2026-10-15). So with
+    // a speed limit sign waiting out its moment when no position came since the last tick: on the driver's placing it
+    // never came (2026-10-28). Driving, positions come faster and bring it.
     const p = this.position;
-    if (p && (p.poseQuestion?.distanceM ?? null) !== (this.shownPoseQuestion(p)?.distanceM ?? null)) this.set(p);
+    const question = p && (p.poseQuestion?.distanceM ?? null) !== (this.shownPoseQuestion(p)?.distanceM ?? null);
+    const sign = this.clock.nowMs() - this.lastSetMs >= TICK_MS && this.limits?.waiting();
+    if (p && (question || sign)) this.set(p);
   }
 
   /**
@@ -1407,15 +1431,18 @@ export class NavigatorService implements PositionSource {
    */
   private set(position: PositionEstimate, behindUs = 0, roads?: RoadWeights): void {
     this.drainUpdateTimes();
-    const { simulatedOutage: _, poseQuestion: _q, manual: _m, speedLimit: _l, ...rest } = position;
+    this.lastSetMs = this.clock.nowMs();
+    const { simulatedOutage: _, poseQuestion: _q, manual: _m, speedLimit: _l, cameraAhead: _c, ...rest } = position;
     const outage = this.outage.info(rest, this.clock.nowMs(), this.nav?.stats.obdDistanceM);
     const m = this.manual;
     if (roads) this.lastRoads = { timestamp: rest.timestamp, roads };
     const believed = roads ?? (this.lastRoads?.timestamp === rest.timestamp ? this.lastRoads.roads : undefined);
     const speedLimit = this.limits?.at(rest, this.clock.nowMs(), believed);
+    const cameraAhead = this.cameras?.at(rest, this.clock.nowMs(), believed);
     this.position = {
       ...rest,
       ...(speedLimit ? { speedLimit } : {}),
+      ...(cameraAhead ? { cameraAhead } : {}),
       ...(outage ? { simulatedOutage: outage } : {}),
       ...(this.shownPoseQuestion(rest) ? { poseQuestion: this.poseQuestion! } : {}),
       ...(m ? { manual: { placedAt: m.placedAt, confirmedAt: m.confirmedAt, asking: this.held.asking() } } : {}),

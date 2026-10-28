@@ -237,7 +237,8 @@ device and in replay.
   schema, Liberty style), the **road graph** (`<region>.graph.bin`, MAPMATCH-SPEC §4: drivable ways split at
   junctions, turn restrictions, speed attributes for route times; tiled internally at z14 so the Ukraine graph costs
   what an oblast's does), the **address search index** (`<region>.search.bin`, SEARCH-SPEC). Shared: the style, glyphs,
-  sprites and `world.geojson`, the world drawn around the region (`tools/tiles/README.md`).
+  sprites, `world.geojson`, the world drawn around the region, and `cameras.json`, the speed cameras of all Ukraine
+  from OSM and the Interior Ministry's list (UI-SPEC §6.5) (`tools/tiles/README.md`).
 - Published weekly to the update Worker (UPDATES-SPEC §4); the in-app download manager is resumable and
   checksum-verified (small shared files six at a time, each tried three times before the download fails), and the
   active region updates itself on Wi-Fi up to 300 MB. Each install of a region's tiles

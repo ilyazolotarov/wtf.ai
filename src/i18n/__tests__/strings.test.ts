@@ -14,6 +14,8 @@ const SAME_IN_BOTH = new Set<keyof typeof en>([
   "ukrainianLanguage",
   "unavailableValue",
   "srcGnss",
+  // "+15": the unit is in the setting's name.
+  "speedMarginOption",
 ]);
 
 /**

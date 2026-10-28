@@ -4,6 +4,7 @@ import { StyleSheet, View } from "react-native";
 import { LessonsInvite, TourInvite } from "@/components/guide/map-tour";
 import { BottomBar } from "@/components/map/bottom-bar";
 import { CameraButton } from "@/components/map/camera-button";
+import { CameraCard } from "@/components/map/camera-card";
 import { NoFixCard, PermissionCard } from "@/components/map/center-cards";
 import { HeldRouteCard, PinCard } from "@/components/map/destination-cards";
 import { HudChip, usePanelStyle } from "@/components/map/hud-card";
@@ -35,6 +36,7 @@ import type { PositionEstimate, TrustState } from "@/nav/position/types";
 import type { GuidanceState, GuidanceStep } from "@/nav/routing/guidance";
 import type { Maneuver } from "@/nav/routing/maneuvers";
 import type { RouteSnapshot } from "@/services/navigation/route-service";
+import type { CameraShown } from "@/components/map/use-camera-warning";
 import type { SpeedShown } from "@/components/map/use-speed-warning";
 
 /** A status row's speed without a limit. */
@@ -79,6 +81,14 @@ export default function UiGalleryScreen() {
     [label("within the margin", "у межах допуску"), { speedKph: 62, limitKph: 50, over: false }],
     [label("over by the margin", "понад допуск"), { speedKph: 67, limitKph: 50, over: true }],
     [label("three-digit limit", "тризначне обмеження"), { speedKph: 128, limitKph: 110, over: true }],
+  ];
+
+  // A camera ahead (UI-SPEC §6.5): on its way, without a known limit, red past the margin, and red under a route.
+  const cameras: [string, CameraShown][] = [
+    [label("camera ahead", "камера попереду"), { distanceM: 600, progress: 0.4, limitKph: 50, slowDown: false }],
+    [label("no limit known", "обмеження невідоме"), { distanceM: 1200, progress: 0.05, slowDown: false }],
+    [label("slow down", "зменште швидкість"), { distanceM: 180, progress: 0.78, limitKph: 50, slowDown: true }],
+    [label("slow down, three digits", "зменште швидкість, тризначне"), { distanceM: 90, progress: 0.9, limitKph: 110, slowDown: true }],
   ];
 
   const statuses: [string, ReturnType<typeof nav>][] = [
@@ -127,6 +137,18 @@ export default function UiGalleryScreen() {
             <StatusRow nav={longestStatus} speed={speed} expandable expanded={false} onToggle={none} />
           </Item>
         ))}
+      </Group>
+
+      <Group title={label("Speed cameras", "Камери")}>
+        {cameras.map(([name, camera]) => (
+          <Item key={name} name={name}>
+            <CameraCard camera={camera} />
+          </Item>
+        ))}
+        <Item name={label("slow down, under a route", "зменште швидкість, під маршрутом")}>
+          <RouteBanner route={routeStates[0][1]} nowMs={now} onStop={none} muted={false} onToggleVoice={none} />
+          <CameraCard camera={cameras[2][1]} />
+        </Item>
       </Group>
 
       <Group title={label("Under the pill", "Під індикатором стану")}>

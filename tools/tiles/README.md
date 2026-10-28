@@ -18,6 +18,8 @@ python -m tiles.cli graph kyiv            # road graph only, from the cached ext
 python -m tiles.cli graph-check out/release/kyiv.graph.bin
 python -m tiles.cli search kyiv            # address search index only (+ index.json)
 python -m tiles.cli search-check out/release/kyiv.search.bin
+python -m tiles.cli cameras                    # speed cameras only (+ index.json)
+python -m tiles.cli mvs                        # refresh cameras/mvs.json, the committed copy of the MVS camera list
 python -m tiles.cli index                      # shared files + index.json
 python -m tiles.cli osm-date                   # date of the current Geofabrik extract
 python -m pytest
@@ -62,6 +64,7 @@ One flat directory, published as-is to the update Worker's R2 bucket (`maps/<osm
 | `<region>.pmtiles` | OpenMapTiles-schema vector tiles: Ukraine's by Planetiler (1.2 GB), the others cut from it on the region polygon, whole tiles (oblasts ~40–90 MB) |
 | `style.json` | OpenFreeMap Liberty (`style/liberty.json`, pinned snapshot); URLs use `{common}` (shared files directory) and `{tiles}` (region file), substituted by the app |
 | `world.geojson` | the world drawn around the active region (`style/world.geojson`, below) |
+| `cameras.json` | the speed cameras of all Ukraine, OSM's and the MVS list's (below) |
 | `sprite-ofm*`, `font-<slug>-<range>.pbf` | Liberty sprite and Noto Sans glyphs (every range below U+3000: all alphabets and symbols, no CJK; plus variation selectors and full-width forms); `path` in index.json says where the app stores each |
 
 The OpenMapTiles schema keeps the style identical to the online Liberty map, including the
@@ -86,6 +89,39 @@ with a ~3 GB peak, an oblast in seconds.
 The file is tiled at z14 with a directory, so the app reads only the tiles near its position
 hypotheses: the 452 MB Ukraine graph costs about what a 15 MB oblast does. Byte layout:
 MAPMATCH-SPEC §4.5; sizes: §4.7.
+
+## Speed cameras (`tiles/cameras.py`)
+
+The app's camera warnings ([UI-SPEC.md](../../docs/UI-SPEC.md) §6.5), one shared file for all Ukraine: every OSM
+speed camera (`highway=speed_camera` nodes, the devices of `enforcement=maxspeed` relations) and every camera on the
+Interior Ministry's list of cameras in service ([mvs.gov.ua](https://mvs.gov.ua/katalog-poslug/servisi-ta-poslugi-organiv-sistemi-vnutrisnix-sprav/avtofotovideofiksaciia-porusen-pdr/adresi-kamer-fotovideofiksaciyi-ta-dozvolena-svidkist-ruxu):
+a national road and km or a town address, the direction, the limit). Mappers copy the list into camera names
+(`ККШ "М-06 46+050"`): a row whose road and km, or street and house, a camera's name carries is that camera and gives
+it its limit. A row no camera carries is placed: a town address on its house snapped onto the street, a crossing at
+the streets' shared node, a road km on the road's main path calibrated on the same road's named cameras on either
+side (only within 10 km of one: past that the error grows to hundreds of metres); placed within 150 m of an OSM
+camera no row names, it is that camera. OSM cameras the list lacks stay. Each camera's direction is the traffic it
+checks: `direction=forward|backward` along its way, a one-way road's, an enforcement relation's `from` → device, or a
+row's "у напрямку X": away from X (the list names where the camera looks). Numeric `direction` values are left out
+(mappers use both the camera's view and the traffic's): without one, both ways.
+
+The page is read at build time and used only in the list's shape: every row readable (a road's index, km and limit;
+a town row's address and limit; unreadable rows are left out, but past 5 % of a kind they set the page aside: its
+columns moved), at least 50 road and 50 town rows in 10 towns, and 70–200 % of each count in the committed copy
+(fewer or many more at once is for someone to look at). Otherwise (unreachable, blocked, a new layout) the committed
+copy of its tables `cameras/mvs.json` is used. The build never fails over it: OSM's cameras stay whole. What went
+wrong, left-out rows and a copy over 60 days old are warnings in the log, in the workflow's job summary
+(`GITHUB_STEP_SUMMARY`, with `::warning` annotations) and in `cameras.json` (`mvs.warnings`); `mvs.source` says which
+list was used. `tiles mvs` refreshes the copy from the page with the same checks against the copy there, and writes it
+only when they pass (`--force` for a list that really changed that much). On the 2026-10-03 extract with the 2026-10-28 list: 720 cameras, 685 from OSM; of 425 rows 297 named
+in OSM, 57 placed, 71 not (an address not in OSM, a bridge, a km far from any named camera); 482 with a direction,
+625 with a limit; 22 KB.
+
+    {"format": 1, "osm_date": "…", "mvs": {"rows": 425, "source": "mvs.gov.ua 2026-10-28", "warnings": […]?},
+     "cameras": [[lat, lon, bearing, limit, flags], …]}
+
+`bearing`: degrees clockwise from north of the traffic checked, −1 both ways; `limit`: km/h, 0 none given (the app
+takes the road's); `flags`: 1 in OSM, 2 on the list.
 
 ## World around the region (`tiles/world.py`)
 

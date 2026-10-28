@@ -17,6 +17,7 @@ import { useSmoothedPosition } from "./use-smoothed-position";
 import { useRoute } from "@/providers/route-provider";
 import { STANDING_MPS } from "@/services/navigation/place-request";
 import { useEntrancesUrl } from "@/services/offline-map/entrance-file";
+import { activeCameras } from "@/services/offline-map/camera-file";
 import { activeSearchIndex } from "@/services/offline-map/search-file";
 import { useMapPacks } from "@/services/offline-map/map-packs";
 
@@ -26,6 +27,7 @@ import { BUILDING_ZOOM, FINGER_PT, nearestStreet, type PinPick } from "./pin-pic
 
 import {
   ALTERNATIVE_PICK_LAYERS,
+  CameraLayers,
   DebugLayers,
   EntranceLayers,
   MarkLayers,
@@ -172,6 +174,7 @@ export function MapSurface({
   const entrancesUrl = useEntrancesUrl();
   const { installed } = useMapPacks();
   const region = installed.active ? installed.regions[installed.active] : null;
+  const cameras = activeCameras(installed)?.index.cameras ?? null;
   const position = usePosition();
   const parkedCar = useParkedCar();
   // One car on the map: the driver's confirmed placing while it stays, the newest word on where it is; else where it
@@ -363,6 +366,8 @@ export function MapSurface({
         {mapReady && <NearLayers style={mapStyle} near={near} houses={houses} pois={!carScale} />}
         {/* Bottom to top: MapLibre stacks layers in the order they are declared. */}
         <RouteLayers route={route} palette={palette} onChoose={chooseAlternative} />
+        {/* The phone's map only, so far (UI-SPEC §6.5). */}
+        {!carScale && <CameraLayers cameras={cameras} aheadId={position?.cameraAhead?.id} />}
         <ParkedCarLayers car={car} scheme={scheme} zoom={view.zoom} />
         <MarkLayers pin={pin} placedMark={placedMark?.draft ? placedMark : null} palette={palette} scheme={scheme} />
         <PositionLayers position={shown} compass={compass} palette={palette} scheme={scheme} view={view} hideCone={onCar} />

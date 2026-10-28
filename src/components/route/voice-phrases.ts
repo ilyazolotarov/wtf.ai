@@ -81,6 +81,11 @@ export function placeCarPhrase(t: T): Phrase {
   return { id: "place-car", text: t("sayPlaceCar") };
 }
 
+/** A speed camera ahead (UI-SPEC §6.5); `slowDown`: the car is past the driver's margin over its limit. */
+export function cameraPhrase(t: T, slowDown: boolean): Phrase {
+  return slowDown ? { id: "camera-slow-down", text: t("sayCameraSlowDown") } : { id: "camera", text: t("sayCamera") };
+}
+
 /** Every phrase that gets a recorded clip. */
 export function recordedPhrases(t: T, lang: VoiceLang): Phrase[] {
   const maneuvers = SPOKEN_KINDS.flatMap((kind): Pick<Maneuver, "kind" | "exit">[] =>
@@ -90,6 +95,8 @@ export function recordedPhrases(t: T, lang: VoiceLang): Phrase[] {
     { id: "replanned", text: t("sayReplanned") },
     { id: "arrived", text: t("arrived") },
     placeCarPhrase(t),
+    cameraPhrase(t, false),
+    cameraPhrase(t, true),
     ...maneuvers.map((m) => {
       const i = instruction(m, t);
       return { id: `now-${i.id}`, text: i.text };

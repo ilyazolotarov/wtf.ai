@@ -1,4 +1,5 @@
 import type { MapMatchState } from "../mapmatch/particle-filter";
+import type { CameraAhead } from "../speed/camera-alert";
 import type { SpeedLimit } from "../speed/speed-limit";
 
 export type TrustState = "TRUSTED" | "UNTRUSTED" | "REACQUIRING" | "NO_FIX";
@@ -57,6 +58,8 @@ export interface PositionEstimate {
    * has none we know, or there is no road graph.
    */
   speedLimit?: SpeedLimit;
+  /** The speed camera on the road ahead to warn of (UI-SPEC §6.5); absent: none within 30 s, or no road to stand behind. */
+  cameraAhead?: CameraAhead;
   /** Other roads the car may be on while map matching is ambiguous, heaviest first. */
   alternatives?: { lat: number; lon: number; weight: number }[];
   simulatedOutage?: SimulatedOutage;

@@ -450,7 +450,8 @@ to the nearest hypothesis, and nothing uses it. The map's trust is `Navigator.tr
   accepted in the last 3 s, else `'dr'`; `anchored` → `'gnss'` with the grown radius; `rawGnss` = the latest fix;
   `distanceSinceTrustedM` from OBD; `alternatives` the other map-matching hypotheses; `speedLimit` from map
   matching's weight per road, or for GNSS-only, placed and phone-only positions the roads around the dot
-  (`SpeedLimitSource`, UI-SPEC §6.4).
+  (`SpeedLimitSource`, UI-SPEC §6.4); `cameraAhead` the speed camera on the road ahead from the same roads
+  (`CameraSource`, §6.5). The two share one road graph reader (`RoadReader`).
 - **Without OBD speed** (no adapter, or none for 10 s): phone GNSS only, published once the navigator has taken a
   fix (so a spoofed fix never flashes on the map); while integrity refuses, the last passed fix with its circle
   growing at 15 m/s. **After the navigator's own dot** (engine off, link dropped) only a satellite fix replaces it: a
