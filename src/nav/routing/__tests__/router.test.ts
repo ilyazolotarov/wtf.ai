@@ -63,6 +63,11 @@ describe("cost model", () => {
     expect(kph(road(RoadClass.primary, A | EdgeFlag.urban))).toBeCloseTo(c.urbanLimitKph * c.townMainLimitShare);
     expect(kph(road(RoadClass.tertiary, A | EdgeFlag.urban))).toBeCloseTo(c.urbanLimitKph * c.townLimitShare);
     expect(kph(road(RoadClass.primary, A | EdgeFlag.urban | EdgeFlag.city))).toBeCloseTo(c.urbanLimitKph * c.cityLimitShare);
+    // A big city's main roads drive faster than its limit, up to a cap; its other streets as any city's.
+    const BIG = A | EdgeFlag.urban | EdgeFlag.city | EdgeFlag.bigCity;
+    expect(kph(road(RoadClass.primary, BIG))).toBeCloseTo(c.urbanLimitKph * c.bigCityMainLimitShare);
+    expect(kph(road(RoadClass.trunk, BIG, 90))).toBeCloseTo(c.bigCityMainMaxKph);
+    expect(kph(road(RoadClass.tertiary, BIG))).toBeCloseTo(c.urbanLimitKph * c.cityLimitShare);
     // Capped by class whatever the limit, and on unpaved roads.
     expect(kph(road(RoadClass.residential, A))).toBeCloseTo(c.capKph[RoadClass.residential]);
     expect(kph(road(RoadClass.unclassified, A | EdgeFlag.unpaved))).toBeCloseTo(c.unpavedMaxKph);

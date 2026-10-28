@@ -49,6 +49,12 @@ export interface RouteCosts {
   townMainLimitShare: number;
   townLimitShare: number;
   cityLimitShare: number;
+  /**
+   * A big city's (`EdgeFlag.bigCity`) trunk, primary and secondary roads: share of the limit, and no faster than
+   * `bigCityMainMaxKph` (traffic holds them there, not the limit). Its other streets take `cityLimitShare`.
+   */
+  bigCityMainLimitShare: number;
+  bigCityMainMaxKph: number;
   /** km/h by road class, in `RoadClass` order: no faster than this whatever the limit. */
   capKph: readonly number[];
   unpavedMaxKph: number;
@@ -89,6 +95,11 @@ export const DEFAULT_ROUTE_COSTS: RouteCosts = {
   townMainLimitShare: 1.3,
   townLimitShare: 1.0,
   cityLimitShare: 0.9,
+  // Kyiv (one 42 km drive, 2026-10-26, midday): 58 km/h over trunks and 55 over primaries limited to 50, lights
+  // included, where 0.9 planned 42; 1.15 puts its planned time within 2 % of the real one. Small streets there
+  // drove as planned, and a regional city's primaries as 0.9 plans them.
+  bigCityMainLimitShare: 1.15,
+  bigCityMainMaxKph: 70,
   //       motorway trunk primary secondary tertiary unclassified residential living service track road
   capKph: [120, 110, 100, 90, 80, 60, 30, 10, 15, 15, 30],
   unpavedMaxKph: 30,
@@ -99,8 +110,12 @@ export const DEFAULT_ROUTE_COSTS: RouteCosts = {
 
 const MAIN_CLASSES = new Set<number>([RoadClass.trunk, RoadClass.primary, RoadClass.secondary, RoadClass.tertiary]);
 const THROUGH_CLASSES = new Set<number>([RoadClass.motorway, RoadClass.trunk, RoadClass.primary, RoadClass.secondary]);
+const BIG_CITY_MAIN_CLASSES = new Set<number>([RoadClass.trunk, RoadClass.primary, RoadClass.secondary]);
+
+const bigCityMain = (edge: RoadEdge) => (edge.flags & EdgeFlag.bigCity) !== 0 && BIG_CITY_MAIN_CLASSES.has(edge.cls);
 
 function limitShare(edge: RoadEdge, c: RouteCosts): number {
+  if (bigCityMain(edge)) return c.bigCityMainLimitShare;
   if (edge.flags & EdgeFlag.city) return c.cityLimitShare;
   if (!(edge.flags & EdgeFlag.urban)) return c.ruralLimitShare;
   return THROUGH_CLASSES.has(edge.cls) ? c.townMainLimitShare : c.townLimitShare;
@@ -114,6 +129,7 @@ export function edgeSpeedMps(edge: RoadEdge, c: RouteCosts): number {
     const limit =
       edge.maxspeedKph || (edge.cls === RoadClass.motorway ? c.motorwayLimitKph : urban ? c.urbanLimitKph : c.ruralLimitKph);
     kph = Math.min(limit * limitShare(edge, c), c.capKph[edge.cls] ?? c.capKph[RoadClass.road]);
+    if (bigCityMain(edge)) kph = Math.min(kph, c.bigCityMainMaxKph);
     if (edge.flags & EdgeFlag.unpaved) kph = Math.min(kph, c.unpavedMaxKph);
   } else {
     kph = c.speedKph[edge.cls] ?? c.speedKph[RoadClass.road];

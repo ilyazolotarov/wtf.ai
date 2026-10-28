@@ -65,8 +65,11 @@ ETA is this time (`plan.durationS`).
 - **Limit:** the tagged one, else by law: 50 in a settlement (`urban`), 90 outside, 130 on motorways.
 - **Share** of the limit driven between junctions, free-flowing: outside settlements 1.1; in a town or village 1.3 on
   its through roads (motorway, trunk, primary, secondary) and 1.0 on its other streets; in a city 0.9, its traffic
-  lights priced apart. From the logged drives: ~102 km/h on rural roads limited to 90, 75 on 50 through villages,
-  39 on untagged town tertiaries, 24–29 on a regional city's primaries.
+  lights priced apart; in a big city (`bigCity`) 1.15 on its trunk, primary and secondary roads, at most 70 km/h.
+  From the logged drives: ~102 km/h on rural roads limited to 90, 75 on 50 through villages, 39 on untagged town
+  tertiaries, 24–29 on a regional city's primaries; in Kyiv 58 on trunks and 55 on primaries limited to 50, lights
+  included, where 0.9 planned 42 (one 42 km drive across Kyiv: planned 16 % too long, within 2 % at 1.15). Kyiv's
+  smaller streets drove as 0.9 plans them. More Kyiv drives should confirm or move the 1.15.
 - **Caps** (km/h): motorway 120, trunk 110, primary 100, secondary 90, tertiary 80, unclassified 60, residential 30,
   living_street 10, service 15, track 15, road 30. Unpaved: at most 30.
 - The A* heuristic's speed is the fastest in either table (120 km/h; 110 on graphs without attributes).
@@ -77,6 +80,13 @@ A junction with traffic lights (`NodeFlag.signals`): +15 s, the mean wait for gr
 junctions (`EdgeFlag.signals`, a signalled crossing): +5 s, charged by the share of the edge driven. Stop and
 give-way signs are in the graph but cost nothing: they hold only the minor road, and which approach that is isn't
 known when passing the node.
+
+Measured against the testers' drives (time lost from 150 m before a junction to 40 m after it, by the wheels, against
+the speed driven nearby; nodes within 60 m one crossing; 10 % trimmed each side): straight through lights 15 s
+(planned 17), left at lights 41 s (41), right at lights 17 s (27), out of a side road onto a main road without
+lights 16–22 s (14–18). The untrimmed means are far higher (parking, stops to let someone out), and charging them
+(+15 s for left at lights, +15 / +25 s out of a side road) made the planned times worse over all the drives: 15 %
+too long instead of 9 %, windows scattered 29 % instead of 26 %.
 
 ### 4.3 Rush hours (`congestion.ts`)
 
