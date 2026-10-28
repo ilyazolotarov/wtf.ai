@@ -427,7 +427,7 @@ export function startUpdateCenter(appDeps: UpdateCenterDeps): void {
     setState({ unmetered });
     const { download } = getMapPacks();
     if (download?.auto && download.phase === "downloading" && !unmetered) pauseDownload();
-    if (download?.auto && download.phase === "paused" && unmetered) void resumeDownload();
+    if (download?.auto && download.phase === "paused" && !download.checkEnded && unmetered) void resumeDownload();
     refreshMap({ start: unmetered });
   });
   AppState.addEventListener("change", onAppState);

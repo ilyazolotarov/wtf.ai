@@ -25,7 +25,7 @@ import { NavigatorService } from "./navigation/navigator-service";
 import { ROUTER_CACHE_TILES, RouteService } from "./navigation/route-service";
 import { startUpdateCenter, waitingUpdateInfo } from "./app-update/update-center";
 import { activeCameras } from "./offline-map/camera-file";
-import { onMapDownloadFailed } from "./offline-map/map-packs";
+import { onMapDownloadFailed, onMapDownloadStep } from "./offline-map/map-packs";
 import { activeRoadGraph, openActiveRoadGraph } from "./offline-map/road-graph-file";
 import { SensorService } from "./sensor-capture/sensor-service";
 import { createTripFiles } from "./trip-recorder/trip-files";
@@ -627,6 +627,7 @@ export function getRuntime(): Runtime {
     Sentry.addBreadcrumb({ category: "trip-recorder", message });
     if (message.startsWith("recorder error")) Sentry.captureMessage(message, "error");
   });
+  onMapDownloadStep((message) => Sentry.addBreadcrumb({ category: "map-download", message }));
   onMapDownloadFailed((e, { region, ...where }) =>
     Sentry.captureException(e, { tags: { feature: "map-download", map_region: region }, extra: where }),
   );

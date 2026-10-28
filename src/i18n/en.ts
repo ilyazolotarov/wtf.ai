@@ -94,6 +94,7 @@ export const en = {
   removeSaved: "Remove",
   paused: "Paused",
   mapDownloadInterrupted: "Connection lost. Keep the app open — the download will resume automatically.",
+  mapCheckEnded: "The app closed during map verification. Tap Resume to retry the check, or Cancel to delete the downloaded data.",
   verifying: "Verifying…",
   pause: "Pause",
   resume: "Resume",

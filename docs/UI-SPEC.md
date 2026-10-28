@@ -419,6 +419,11 @@ paused it (an automatic update waits for its own network rules). Android goes on
 request from the part file's length), iOS starts the cut file again; the files fetched before it stay. Android cuts a
 background app's network, so a whole country used to fail and start from zero until the app stayed open (2026-10-23/24).
 
+Checking and installing the files never starts again by itself after the app ended in it: the job records each step
+before it runs, and a start that finds one paused there shows "The app closed during map verification…" with Resume
+and Cancel, and reports the step to Sentry (each step is a `map-download` breadcrumb too). An iPhone killed for memory
+while checking the Ukraine map otherwise checked again, and was killed again, at every launch (2026-10-28).
+
 ### 7.6 `settings`
 
 Language (System / English / Українська); Appearance (System / Light / Dark); Voice volume (ROUTING-SPEC §8.5); Speed

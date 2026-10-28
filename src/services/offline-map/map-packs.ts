@@ -60,6 +60,8 @@ export interface MapDownload {
   auto: boolean;
   /** Paused by a dropped connection, not by the driver: it goes on by itself while the app is in front. */
   interrupted?: boolean;
+  /** Paused because the app ended while checking or installing the files: waits for the driver's Resume. */
+  checkEnded?: boolean;
 }
 
 export interface MapPacksState {
@@ -109,6 +111,13 @@ interface DownloadJob {
   resume?: DownloadPauseState;
   /** Paused with Pause: waits for Resume. Otherwise a job stopped (a dropped connection, the app ended) goes on. */
   pausedByDriver?: boolean;
+  /** The step being checked or installed (a file's label, "small files", "install"); still set at start: the app ended in it. */
+  checking?: string;
+  /**
+   * The app ended while checking or installing: the job waits for Resume and never goes on by itself, since the step
+   * may end the app again (an iPhone killed for memory as the 1.19 GB Ukraine map was checked, at every launch).
+   */
+  checkEnded?: boolean;
 }
 
 const ROOT = () => new Directory(Paths.document, "maps");
@@ -157,6 +166,12 @@ function readInstalled(): InstalledState {
 function initialState(): MapPacksState {
   kvStore.setJson(LEGACY_PAUSED_KEY, null);
   job = kvStore.getJson<DownloadJob>(JOB_KEY);
+  if (job?.checking) {
+    endedIn = job.checking;
+    job.checking = undefined;
+    job.checkEnded = true;
+    saveJob();
+  }
   return {
     installed: readInstalled(),
     catalog: null,
@@ -167,7 +182,14 @@ function initialState(): MapPacksState {
     // A job found at start is paused: the app was closed (or killed) during the download. Unless the driver paused
     // it (or it is an update, which waits for Wi-Fi), it goes on by itself.
     download: job
-      ? { region: job.region.region, phase: "paused", bytes: job.done, total: job.total, auto: !!job.auto, ...(resumesItself(job) ? { interrupted: true } : {}) }
+      ? {
+          region: job.region.region,
+          phase: "paused",
+          bytes: job.done,
+          total: job.total,
+          auto: !!job.auto,
+          ...(job.checkEnded ? { checkEnded: true } : resumesItself(job) ? { interrupted: true } : {}),
+        }
       : null,
     downloadError: null,
   };
@@ -185,6 +207,10 @@ let retryTimer: ReturnType<typeof setTimeout> | null = null;
 let retries = 0;
 /** Told of every download that failed (the app sends it to Sentry); the screen shows the message itself. */
 let reportFailure: (error: unknown, where: { region: string; file: string; index: number; files: number }) => void = () => {};
+/** Told of each step of checking and installing (the app adds them to Sentry's breadcrumbs). */
+let noteStep: (message: string) => void = () => {};
+/** The step the app ended in last time (`DownloadJob.checking`), until reported. */
+let endedIn: string | null = null;
 
 /**
  * When an automatic update may replace the map in use, and a region just downloaded may become the map: not during a
@@ -219,8 +245,18 @@ function clearPendingActive() {
   pendingActive = null;
 }
 
+/** Also told, once, when the app ended during a check or an install the last time it ran. */
 export function onMapDownloadFailed(report: typeof reportFailure): void {
   reportFailure = report;
+  getState();
+  if (job && endedIn) {
+    report(new Error(`The app ended while checking the map: ${endedIn}`), { region: job.region.region, file: endedIn, index: job.index, files: job.files.length });
+  }
+  endedIn = null;
+}
+
+export function onMapDownloadStep(note: typeof noteStep): void {
+  noteStep = note;
 }
 
 function getState(): MapPacksState {
@@ -575,17 +611,34 @@ async function run(id: number) {
   }
   setDownload("verifying", j.total);
   await letRender(); // "verifying" before MD5 blocks
-  for (const f of j.files) verify(new File(ROOT(), f.dest), f, f.label);
+  for (const f of j.files) {
+    // Saved before each step, so a step that ends the app is known at the next start (one mark for the small files).
+    const step = f.size < SMALL_FILE ? "small files" : f.label;
+    if (j.checking !== step) markStep(j, step, `${f.size} bytes`);
+    const t0 = Date.now();
+    verify(new File(ROOT(), f.dest), f, f.label);
+    if (f.size >= SMALL_FILE) noteStep(`checked ${f.label} in ${Date.now() - t0} ms`);
+  }
+  j.checking = undefined;
+  saveJob();
   if (id !== runId) return;
   if (j.auto && !installGate.allowed()) {
     setDownload("waiting", j.total);
     await gateOpen(() => id === runId);
     if (id !== runId) return;
   }
+  markStep(j, "install");
   install(j);
+  noteStep(`installed ${j.region.region}`);
   job = null;
   saveJob();
   setState({ download: null });
+}
+
+function markStep(j: DownloadJob, step: string, detail?: string) {
+  j.checking = step;
+  saveJob();
+  noteStep(detail ? `${step}: ${detail}` : step);
 }
 
 /** Drops the job and its partial files; shows `error` if given. */
@@ -663,6 +716,7 @@ export async function resumeDownload(): Promise<void> {
   if (!job || getState().download?.phase !== "paused") return;
   clearRetry();
   job.pausedByDriver = false;
+  job.checkEnded = false;
   setDownload("downloading", getState().download?.bytes ?? job.done);
   await runGuarded(++runId);
 }
@@ -694,9 +748,12 @@ export function setActiveRegion(region: string): void {
   if (installed.regions[region]) saveInstalled({ ...installed, active: region });
 }
 
-/** A job stopped without the driver's Pause, and not an update (which waits for Wi-Fi): it goes on by itself. */
+/**
+ * A job stopped without the driver's Pause, and not an update (which waits for Wi-Fi), nor one whose check ended the
+ * app: it goes on by itself.
+ */
 function resumesItself(j: DownloadJob): boolean {
-  return !j.pausedByDriver && !j.auto;
+  return !j.pausedByDriver && !j.auto && !j.checkEnded;
 }
 
 /**
