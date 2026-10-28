@@ -48,6 +48,7 @@ import { CalibrationStore } from "../../src/services/navigation/calibration-stor
 import { readTripLog, type TripLog } from "../../src/triplog/trip-log-reader";
 import { carOf, drawnStartPose, graphFor, phoneRouteFor } from "./app-chain";
 import { isMainThread, Pool, serveJobs, threadsArg } from "./pool";
+import { moreBadByChance, twoOutcomes } from "./two-outcomes";
 
 const LOGS = path.join(path.dirname(fileURLToPath(import.meta.url)), "../triplog/logs");
 const SAVED = path.join(LOGS, "regress");
@@ -327,39 +328,60 @@ const name = (log: string) => {
 /** Worse beyond what seeds move by: half again as much plus a floor. */
 const worse = (a: number | null, b: number | null, floor: number) => a !== null && b !== null && b > a * 1.5 + floor;
 
-function compare(before: Group, now: Group): { worse: string[]; better: string[] } {
+/** What `totals` sums, and what a two-outcome drive (`twoOutcomes`) is left out of. */
+type Metric = "drawn" | "gps" | "wifi" | "offRoad" | "jumps" | "incidents";
+const MAIN_METRIC: Record<string, Metric> = { "off the drawn road": "drawn", "GPS back / cut, worst": "gps", "from Wi-Fi fixes, median": "wifi" };
+
+/** A two-outcome drive changed beyond chance below this. */
+const TWO_OUTCOMES_P = 0.05;
+
+/** `chance`: two-outcome drives (`twoOutcomes`) that moved within chance; `apart`: the metrics they are apart in. */
+function compare(before: Group, now: Group): { worse: string[]; better: string[]; chance: string[]; apart: Metric[] } {
   const w: string[] = [];
   const b: string[] = [];
-  const checks: [string, (r: DriveResult) => number | null, number, string][] = [];
+  const chance: string[] = [];
+  const apart: Metric[] = [];
+  const checks: [string, (r: DriveResult) => number | null, number, string, Metric][] = [];
   const m = mainScore(now.runs[0]);
-  if (mainScore(before.runs[0]).what === m.what && m.value !== null) checks.push([m.what, (r) => mainScore(r).value, m.unit === "s" ? 10 : 20, m.unit]);
-  checks.push(["off the roads above 20 km/h", (r) => r.offRoadS, 10, "s"], ["jumps", (r) => r.jumps, 2, ""]);
-  if (now.runs[0].incidents && before.runs[0].incidents) checks.push(["incidents", (r) => r.incidents?.length ?? null, 1, ""]);
-  for (const [what, f, floor, unit] of checks) {
+  if (mainScore(before.runs[0]).what === m.what && m.value !== null) checks.push([m.what, (r) => mainScore(r).value, m.unit === "s" ? 10 : 20, m.unit, MAIN_METRIC[m.what]]);
+  checks.push(["off the roads above 20 km/h", (r) => r.offRoadS, 10, "s", "offRoad"], ["jumps", (r) => r.jumps, 2, "", "jumps"]);
+  if (now.runs[0].incidents && before.runs[0].incidents) checks.push(["incidents", (r) => r.incidents?.length ?? null, 1, "", "incidents"]);
+  for (const [what, f, floor, unit, metric] of checks) {
     const a = before.runs.map(f).filter((v): v is number => v !== null);
     const c = now.runs.map(f).filter((v): v is number => v !== null);
-    const [ma, mc, xa, xc] = [median(a), median(c), a.length ? Math.max(...a) : null, c.length ? Math.max(...c) : null];
     const line = `${what} ${seedsOf(before, f, unit)} → ${seedsOf(now, f, unit)}${unit ? " " + unit : ""}`;
+    const split = twoOutcomes(a, c, floor);
+    if (split !== null) {
+      apart.push(metric);
+      const [ka, kc] = [a.filter((x) => x > split).length, c.filter((x) => x > split).length];
+      const counted = `${line} (two outcomes, bad above ${fmt(split, unit)}: ${ka}/${a.length} → ${kc}/${c.length} seeds)`;
+      if (moreBadByChance(ka, a.length, kc, c.length) < TWO_OUTCOMES_P) w.push(counted);
+      else if (moreBadByChance(a.length - ka, a.length, c.length - kc, c.length) < TWO_OUTCOMES_P) b.push(counted);
+      else if (ka !== kc || worse(median(a), median(c), floor) || worse(median(c), median(a), floor)) chance.push(counted);
+      continue;
+    }
+    const [ma, mc, xa, xc] = [median(a), median(c), a.length ? Math.max(...a) : null, c.length ? Math.max(...c) : null];
     if (worse(ma, mc, floor) || worse(xa, xc, 2.5 * floor)) w.push(line);
     else if (worse(mc, ma, floor) || worse(xc, xa, 2.5 * floor)) b.push(line);
   }
-  return { worse: w, better: b };
+  return { worse: w, better: b, chance, apart };
 }
 
-function totals(results: DriveResult[]) {
-  const sum = (f: (g: Group) => number | null) => {
+/** `apart`: per drive and start (`log|start`), the metrics left out (two-outcome drives). */
+function totals(results: DriveResult[], apart = new Map<string, Metric[]>()) {
+  const sum = (metric: Metric, f: (g: Group) => number | null) => {
     let s = 0;
-    for (const g of groups(results).values()) s += f(g) ?? 0;
+    for (const [key, g] of groups(results)) if (!apart.get(key)?.includes(metric)) s += f(g) ?? 0;
     return Math.round(s);
   };
   const med = (f: (r: DriveResult) => number | null | undefined) => (g: Group) => median(g.runs.map(f).filter((v): v is number => v != null));
   return {
-    drawnOffS: sum(med((r) => r.drawn?.offPathS)),
-    gpsWorstM: sum(med((r) => (r.gps ? Math.max(r.gps.afterMaxM ?? 0, r.gps.cutMaxM ?? 0) : null))),
-    wifiM: sum(med((r) => r.wifi?.medianM)),
-    offRoadS: sum(med((r) => r.offRoadS)),
-    jumps: sum(med((r) => r.jumps)),
-    incidents: sum(med((r) => r.incidents?.length)),
+    drawnOffS: sum("drawn", med((r) => r.drawn?.offPathS)),
+    gpsWorstM: sum("gps", med((r) => (r.gps ? Math.max(r.gps.afterMaxM ?? 0, r.gps.cutMaxM ?? 0) : null))),
+    wifiM: sum("wifi", med((r) => r.wifi?.medianM)),
+    offRoadS: sum("offRoad", med((r) => r.offRoadS)),
+    jumps: sum("jumps", med((r) => r.jumps)),
+    incidents: sum("incidents", med((r) => r.incidents?.length)),
   };
 }
 
@@ -438,28 +460,40 @@ async function main() {
     const before = groups(saved.results);
     const worseRows: string[] = [];
     const betterRows: string[] = [];
+    const chanceRows: string[] = [];
+    let even = 0;
+    const apart = new Map<string, Metric[]>();
     let same = 0;
     for (const [key, g] of now) {
       const b = before.get(key);
       if (!b) continue;
       const c = compare(b, g);
       const head = `  ${name(g.log)} ${g.start.padEnd(6)} `;
+      if (c.apart.length) apart.set(key, c.apart);
+      if (c.apart.length && !c.chance.length && !c.worse.length && !c.better.length) even++;
+      if (c.chance.length) chanceRows.push(head + c.chance.join(" · "));
       if (c.worse.length) worseRows.push(head + c.worse.join(" · ") + (c.better.length ? `  (better: ${c.better.join(" · ")})` : ""));
       else if (c.better.length) betterRows.push(head + c.better.join(" · "));
-      else same++;
+      else if (!c.chance.length) same++;
     }
     console.log(`against "${against}" (${saved.commit}, ${saved.createdAt.slice(0, 16)}): per drive, the seeds before → now`);
     console.log(`worse (${worseRows.length}):${worseRows.length ? "\n" + worseRows.join("\n") : " none"}`);
     console.log(`better (${betterRows.length}):${betterRows.length ? "\n" + betterRows.join("\n") : " none"}`);
+    console.log(`two outcomes, moved within chance (${chanceRows.length}):${chanceRows.length ? "\n" + chanceRows.join("\n") : " none"}`);
     console.log(`unchanged: ${same} of ${now.size}`);
-    console.log("totals (median over seeds, summed over drives):");
-    for (const start of starts) {
-      const [ta, tb] = [totals(saved.results.filter((r) => picked.includes(r.log) && r.start === start)), totals(results.filter((r) => r.start === start))];
-      if (!saved.results.some((r) => r.start === start)) continue;
-      console.log(
-        `  ${start.padEnd(6)} off the drawn road ${ta.drawnOffS} → ${tb.drawnOffS} s · GPS back / cut worst ${ta.gpsWorstM} → ${tb.gpsWorstM} m · ` +
-          `from Wi-Fi fixes ${ta.wifiM} → ${tb.wifiM} m · off the roads above 20 km/h ${ta.offRoadS} → ${tb.offRoadS} s · jumps ${ta.jumps} → ${tb.jumps} · incidents ${ta.incidents} → ${tb.incidents}`,
+    if (even) console.log(`  of them ${even} two-outcome, as many bad seeds (left out of the second totals too)`);
+    const totalsLine = (start: Start, leftOut?: Map<string, Metric[]>) => {
+      const [ta, tb] = [totals(saved.results.filter((r) => picked.includes(r.log) && r.start === start), leftOut), totals(results.filter((r) => r.start === start), leftOut)];
+      return (
+        `off the drawn road ${ta.drawnOffS} → ${tb.drawnOffS} s · GPS back / cut worst ${ta.gpsWorstM} → ${tb.gpsWorstM} m · ` +
+        `from Wi-Fi fixes ${ta.wifiM} → ${tb.wifiM} m · off the roads above 20 km/h ${ta.offRoadS} → ${tb.offRoadS} s · jumps ${ta.jumps} → ${tb.jumps} · incidents ${ta.incidents} → ${tb.incidents}`
       );
+    };
+    console.log("totals (median over seeds, summed over drives; then without the two-outcome drives, each in what it is two-outcome in):");
+    for (const start of starts) {
+      if (!saved.results.some((r) => r.start === start)) continue;
+      console.log(`  ${start.padEnd(6)} ${totalsLine(start)}`);
+      if ([...apart.keys()].some((k) => k.endsWith(`|${start}`))) console.log(`  ${"".padEnd(6)} ${totalsLine(start, apart)}`);
     }
   } else {
     console.log("drive                  start   km    truth: main score per seed          off the roads >20 km/h s   jumps   incidents   start gap m   pose");

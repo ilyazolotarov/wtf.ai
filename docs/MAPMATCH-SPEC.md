@@ -419,7 +419,8 @@ each drive through the app as the viewer does, with several seeds, from three st
 each drawn drive parked where its drawing starts, and cold), and lists every drive that got worse against its drawn
 truth, else its clean fixes, else its Wi-Fi fixes, plus the dot off the roads at speed and its jumps. An average hides
 one drive gone from 15 to 490 m off, and most jammed drives have no satellite fix at all, so every metric scored
-against GPS skips exactly them.
+against GPS skips exactly them. A drive whose seeds land on one of two results far apart is judged by how many seeds
+went bad, not by its median, and left out of a second line of totals (tools/replay/README.md, *Two outcomes*).
 
 **Incidents** (`src/nav/replay/incidents.ts`): what a driver would see go wrong, every 0.2 s, the dot as drawn
 against the truth:

@@ -54,13 +54,24 @@ npm run replay:regress -- --from after --against before   # two saved runs, noth
   jumps), or its worst seed by half again plus 2.5 floors (one seed in three lost is a finding). Each line shows
   the seeds before → now. The totals come last, per start: on 2026-10-07 they read fewer jumps overall for the two
   changes that broke 8 drives.
+- **Two outcomes** (`two-outcomes.ts`): some drives land on one of two results far apart, seed by seed (fwx8ms: about
+  40 s or about 200 s off the drawn road), and their median flips with a single seed. A drive is two-outcome in a
+  metric when its seeds of both runs split into two groups, the bad one at least twice the good one plus twice the
+  floor, two seeds or more on each side, and the run before already had both. It is judged by how many seeds went
+  bad ("4/8 → 5/8 seeds"), with a one-sided Fisher test: worse or better only below p 0.05, else listed under *two
+  outcomes, moved within chance*. A bad result new in this run is no coin flip: the rule above judges it. Each
+  start's totals get a second line without the two-outcome drives (each left out of the metric it is two-outcome
+  in): read that one. Keep such drives in the logs: their bad half is a real failure, and a fix shows as fewer bad
+  seeds. Eight seeds tell only big shifts apart (0/8 → 4/8 is beyond chance, 3/8 → 6/8 is not, p 0.16): a line
+  under *within chance* that moved that far wants `--seeds 16` on both runs before it is believed either way.
 - One seed in three going bad is often the filter's luck: before keeping or dropping a change on such lines, run
   `--seeds 8` on both.
 - About 2 min for every log, three starts, three seeds on 32 cores, at low priority. It replays the app's settings (`app-defaults.ts`), not
   the version a log was recorded with, and gives the dot the routes the log planned, as the app does.
 - **Incidents** on drawn drives: the moments a driver would see go wrong (next section), counted per seed; a drive
   is worse when they grow.
-- `--testers` adds the testers' drawn drives, each folder on its own chain (its phone's storage).
+- `--testers` adds the testers' drawn drives, each folder on its own chain (its phone's storage). Pass it with
+  `--from` too when the saved runs had it: without, only the own drives are compared.
 - **Memory:** each worker holds a road graph and a drive (~0.5–1 GB). Pass `--threads 8` and run one benchmark at a
   time: four side by side ran a 32 GB laptop out of memory.
 - `--puck '{"headingCueFactor":1}'` switches the dot's heading cue off (`position/puck.ts`) for a before.
