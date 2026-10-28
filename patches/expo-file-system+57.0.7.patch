@@ -1,23 +1,43 @@
 diff --git a/node_modules/expo-file-system/ios/FileSystemFile.swift b/node_modules/expo-file-system/ios/FileSystemFile.swift
-index bd07716..e0970bd 100644
+index bd07716..5b941ef 100644
 --- a/node_modules/expo-file-system/ios/FileSystemFile.swift
 +++ b/node_modules/expo-file-system/ios/FileSystemFile.swift
-@@ -59,8 +59,16 @@ internal final class FileSystemFile: FileSystemPath {
-         defer { try? handle.close() }
+@@ -53,14 +53,33 @@ internal final class FileSystemFile: FileSystemPath {
+   var md5: String {
+     get throws {
+       return try withCorrectTypeAndScopedAccess(permission: .read) {
+-        let bufferSize = 65536
++        // POSIX reads into one reused buffer, past the page cache: FileHandle's chunks are Data objects, and on iOS 27.2
++        // they stayed in memory until the JS call returned, even with an autorelease pool per chunk (an iPhone was
++        // killed checking a 1.7 GB offline map).
++        let fd = Darwin.open(url.path, O_RDONLY)
++        guard fd >= 0 else {
++          throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
++        }
++        defer { _ = Darwin.close(fd) }
++        _ = fcntl(fd, F_NOCACHE, 1)
+ 
+-        let handle = try FileHandle(forReadingFrom: url)
+-        defer { try? handle.close() }
++        let bufferSize = 1 << 20
++        let buffer = UnsafeMutableRawPointer.allocate(byteCount: bufferSize, alignment: 16)
++        defer { buffer.deallocate() }
  
          var hasher = Insecure.MD5()
 -        while let chunk = try handle.read(upToCount: bufferSize), !chunk.isEmpty {
 -          hasher.update(data: chunk)
-+        // Each chunk is autoreleased: without a pool per chunk, a 1 GB file stays in memory until the call returns.
-+        var done = false
-+        while !done {
-+          try autoreleasepool {
-+            if let chunk = try handle.read(upToCount: bufferSize), !chunk.isEmpty {
-+              hasher.update(data: chunk)
-+            } else {
-+              done = true
++        while true {
++          let count = Darwin.read(fd, buffer, bufferSize)
++          if count < 0 {
++            if errno == EINTR {
++              continue
 +            }
++            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
 +          }
++          if count == 0 {
++            break
++          }
++          hasher.update(bufferPointer: UnsafeRawBufferPointer(start: buffer, count: count))
          }
  
          let hash = hasher.finalize()
