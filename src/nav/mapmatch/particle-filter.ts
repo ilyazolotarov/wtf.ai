@@ -536,8 +536,9 @@ export class ParticleFilter {
   /**
    * Start around a known pose (§7.2): particles on edges within 3σ whose direction fits the
    * heading, weighted by the position likelihood; the off-road share at the pose (`parkedOffRoadShare` with
-   * `offRoadStart`: the car was parked off the roads). `distanceM` / `turnRad` are the odometry totals now, so turn
-   * comparisons start here.
+   * `offRoadStart`: the car was parked off the roads). `atStartSpot`: where the car was left (its parked pose, the
+   * driver's placing), roads against a one-way at the soft factor. `distanceM` / `turnRad` are the odometry totals
+   * now, so turn comparisons start here.
    */
   init(
     e: number,
@@ -547,6 +548,7 @@ export class ParticleFilter {
     psiSigma: number,
     odometry: { distanceM: number; turnRad: number },
     offRoadStart = false,
+    atStartSpot = false,
   ): void {
     const c = this.config;
     const t0 = now();
@@ -555,13 +557,23 @@ export class ParticleFilter {
     this.resolved = true;
     const radius = Math.max(c.initMinRadiusM, c.initSigmas * posSigmaM);
     const margin = c.initSigmas * psiSigma + c.initHeadingMarginRad;
-    const candidates: { edge: RoadEdge; dir: 1 | -1; along: number }[] = [];
+    const candidates: { edge: RoadEdge; dir: 1 | -1; along: number; againstOneway: boolean }[] = [];
     for (const near of this.graph.edgesNear(e, n, radius)) {
       for (const dir of [1, -1] as const) {
         const heading = dir === 1 ? near.headingRad : near.headingRad + Math.PI;
-        if (Math.abs(wrap(heading - psi)) <= margin) candidates.push({ edge: near.edge, dir, along: near.alongM });
+        const againstOneway = near.edge.oneway === (dir === 1 ? Oneway.backward : Oneway.forward);
+        if (Math.abs(wrap(heading - psi)) <= margin) candidates.push({ edge: near.edge, dir, along: near.alongM, againstOneway });
       }
     }
+    // At the start spot a dual carriageway's other side fits the heading too, driven against its one-way: at the soft
+    // factor, as at a node. Nothing later takes it away: along the carriageway every exit is against the one-way
+    // alike. As at a node, the factor weighs the roads against each other and leaves their total as it was: with every
+    // road against a one-way (a heading turned round, a wrong tag) the off-road share took the start. Not on a restart
+    // during a drive: the filter lost the car there, its heading or road may be what is wrong, and the factor sent
+    // drives off their roads (MAPMATCH-SPEC §7.2).
+    const againstOneway = atStartSpot ? Math.log(c.againstOnewayFactor) : 0;
+    let roadsBefore = 0;
+    let roadsAfter = 0;
     const p = this.p;
     const offRoad = candidates.length ? Math.ceil((offRoadStart ? c.parkedOffRoadShare : c.offRoadShare) * p.size) : p.size;
     const sigma2 = posSigmaM * posSigmaM + c.laneSigmaM * c.laneSigmaM;
@@ -586,9 +598,16 @@ export class ParticleFilter {
         p.logw[i] = (-0.5 * (de * de + dn * dn)) / sigma2;
         const dh = wrap(p.psi[i] - psi);
         p.logw[i] += (-0.5 * dh * dh) / (psiSigma * psiSigma + c.roadSigmaRad * c.roadSigmaRad);
+        roadsBefore += Math.exp(p.logw[i]);
+        if (cand.againstOneway) p.logw[i] += againstOneway;
+        roadsAfter += Math.exp(p.logw[i]);
       }
       p.anchorTurn[i] = p.roadTurn[i];
       p.straightTurn[i] = p.roadTurn[i];
+    }
+    if (roadsAfter > 0 && roadsAfter < roadsBefore) {
+      const keep = Math.log(roadsBefore / roadsAfter);
+      for (let i = offRoad; i < p.size; i++) p.logw[i] += keep;
     }
     this.normalize();
     this.updateWorkingSet();

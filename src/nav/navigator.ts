@@ -589,6 +589,8 @@ export class Navigator {
   /** Start the EKF from the map at the end of the current step. */
   private mapStartDue = false;
   private started: { method: InitMethod; tUs: number } | null = null;
+  /** The OBD distance when the EKF started (`started`). */
+  private startedAtM = 0;
   readonly stats: NavStats = { imuInvalidS: 0, standstillS: 0, obdDistanceM: 0, unknownSpeedS: 0, resets: 0, roadHeadingAccepted: 0, roadHeadingRejected: 0, roadPositionAccepted: 0, roadPositionRejected: 0, relocations: 0, lostTurns: 0, manoeuvres: 0 };
   private readonly integrity: GnssIntegrity;
   /** The relative track's piece (a break starts the next), and whether it is broken now (integrity's shape test). */
@@ -1099,6 +1101,12 @@ export class Navigator {
     return { ...this.frame.toCoordinate(this.ekf.east, this.ekf.north), headingRad: psi, posSigmaM, headingSigmaRad: this.ekf.psiSigma };
   }
 
+  /** Started from the parked pose or the driver's placing and not yet driven away from it (MAPMATCH-SPEC §7.2). */
+  private atStartSpot(): boolean {
+    const method = this.started?.method;
+    return (method === "pose" || method === "user") && this.stats.obdDistanceM - this.startedAtM < PARKED_SPOT_M;
+  }
+
   /** Started from a pose parked off the roads (or placed there) and not yet driven away from it. */
   private atParkedOffRoadSpot(): boolean {
     return this.poseOffRoadAtM !== null && this.stats.obdDistanceM - this.poseOffRoadAtM < PARKED_SPOT_M;
@@ -1379,7 +1387,7 @@ export class Navigator {
     this.offRoadFromM = null;
     this.trackingFromM = null;
     this.alongFromTurnM = null;
-    this.pf.init(ekf.east, ekf.north, sigmaScale * ekf.positionSigma, ekf.psi, ekf.psiSigma, this.odometry.totals, this.atParkedOffRoadSpot());
+    this.pf.init(ekf.east, ekf.north, sigmaScale * ekf.positionSigma, ekf.psi, ekf.psiSigma, this.odometry.totals, this.atParkedOffRoadSpot(), this.atStartSpot());
   }
 
   /**
@@ -1693,6 +1701,7 @@ export class Navigator {
     this.anchor = null;
     this.rejectedSat = 0;
     this.started = { method, tUs: this.lastTUs ?? 0 };
+    this.startedAtM = this.stats.obdDistanceM;
     if (method === "user") this.poseOffRoadAtM = this.placedOffRoads() ? this.stats.obdDistanceM : null;
     else if (method !== "pose") this.poseOffRoadAtM = null;
     this.trackingFromM = null;

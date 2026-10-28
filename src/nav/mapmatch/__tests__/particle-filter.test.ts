@@ -4,6 +4,8 @@ import path from "node:path";
 import { syntheticCompassCalibration, syntheticDrive, type DriveSegment } from "@/nav/__fixtures__/synthetic-drive";
 import { LocalFrame } from "@/nav/geo/local-frame";
 import { bufferByteSource } from "@/nav/mapmatch/graph/byte-source";
+import { Oneway, RoadClass } from "@/nav/mapmatch/graph/format";
+import { MemoryRoadGraph } from "@/nav/mapmatch/graph/memory-graph";
 import { TiledRoadGraph } from "@/nav/mapmatch/graph/road-graph";
 import { replayTrip } from "@/nav/replay/replay";
 import { rotateCalibration } from "@/nav/compass/compass";
@@ -497,6 +499,48 @@ describe("a start where the car was parked off the roads (MAPMATCH-SPEC §7.2)",
     const pf = start(true);
     expect(pf.output().state).toBe("offroad");
     expect(pf.offRoadWeight()).toBeGreaterThanOrEqual(0.6);
+  });
+});
+
+// 2026-10-28: parked on a dual carriageway without GPS, a third of the weight stayed on the other side driven against
+// its one-way (along it, every exit is against the one-way alike), and its other speed limit kept the sign away.
+describe("a known start beside a dual carriageway (MAPMATCH-SPEC §7.2)", () => {
+  const DEG = Math.PI / 180;
+  const frame = new LocalFrame({ lat: 50.45, lon: 30.53 });
+  const at = (e: number, n: number) => frame.toCoordinate(e, n);
+  // Both sides drawn west to east, 12 m apart: the north one eastbound, the south one westbound.
+  const g = new MemoryRoadGraph(frame, [
+    { cls: RoadClass.primary, oneway: Oneway.forward, points: [at(-300, 6), at(300, 6)] },
+    { cls: RoadClass.primary, oneway: Oneway.backward, points: [at(-300, -6), at(300, -6)] },
+  ]);
+
+  // Of the weight on the roads (the rest: the off-road share at the pose), the share on the westbound side.
+  const westbound = (pf: ParticleFilter) => {
+    const share = (n: number) => {
+      const edge = g.edgesNear(0, n, 1)[0].edge.id;
+      return pf.roadWeights().reduce((s, r) => (r.edge === edge ? s + r.weight : s), 0);
+    };
+    return share(-6) / (share(6) + share(-6));
+  };
+
+  test("parked between the two sides, heading east: the westbound side gets the soft factor", () => {
+    const pf = new ParticleFilter(g);
+    pf.init(0, 0, 10, 90 * DEG, 15 * DEG, { distanceM: 0, turnRad: 0 }, false, true);
+    expect(westbound(pf)).toBeLessThan(0.05);
+  });
+
+  // A restart during a drive: the filter lost the car, and its heading may be what is wrong.
+  test("restarted there during a drive: both sides as they come", () => {
+    const pf = new ParticleFilter(g);
+    pf.init(0, 0, 10, 90 * DEG, 15 * DEG, { distanceM: 0, turnRad: 0 });
+    expect(westbound(pf)).toBeGreaterThan(0.3);
+  });
+
+  test("heading west, every road near against its one-way (a heading turned round): it still starts on the roads", () => {
+    const lone = new ParticleFilter(new MemoryRoadGraph(frame, [{ cls: RoadClass.primary, oneway: Oneway.forward, points: [at(-300, 6), at(300, 6)] }]));
+    lone.init(0, 6, 10, -90 * DEG, 15 * DEG, { distanceM: 0, turnRad: 0 }, false, true);
+    expect(lone.offRoadWeight()).toBeLessThan(0.5);
+    expect(lone.output().state).not.toBe("offroad");
   });
 });
 

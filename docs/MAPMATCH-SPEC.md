@@ -182,7 +182,15 @@ Structure of arrays over typed arrays, for Hermes. The values below are `DEFAULT
 ### 7.2 Initialization
 
 - **Known heading** (EKF running; parked pose; placing): candidate edges within 3σ of the position, travel
-  directions within 3σ_ψ + 10° of the heading, particles spread by the position likelihood; the off-road share
+  directions within 3σ_ψ + 10° of the heading, particles spread by the position likelihood. At the start spot (the
+  parked pose or the driver's placing, until the car has driven 20 m) a road against a one-way gets the soft factor,
+  relative to the other roads as at a node: the roads' total weight stays as without it, so with every road against
+  a one-way (a heading turned round, a wrong tag) the start is still on the roads. A dual carriageway's other side
+  fits the heading driven against its one-way, and nothing later weighs it down (along it every exit is against the
+  one-way alike, §7.3): without the factor it kept a third of the weight on a road with another speed limit, and no
+  sign showed (UI-SPEC §6.4). Not on a restart during a drive: the filter lost the car there, its heading or road may
+  be what is wrong, and the factor there sent real drives off their roads (parked chain, 8 seeds). The off-road
+  share
   (5 %) around the position. **Parked off the roads** (the pose's `offRoad`, or a driver's placing off the roads,
   NAVIGATOR-SPEC §6.2): the off-road share is 60 %, so the
   start is `offroad` at the spot until the car drives onto a road (with 5 % the roads within 3σ took the weight and
