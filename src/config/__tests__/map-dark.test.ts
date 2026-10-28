@@ -45,6 +45,15 @@ describe("dark map tint", () => {
     expect(place.paint).toEqual({ "text-color": "hsla(0, 0%, 100%, 1)", "text-halo-color": "hsla(0, 0%, 0%, 0.8)", "text-halo-width": 1.2 });
   });
 
+  test("hatched fills (squares, wetland) go flat: a light pattern shimmers on the dark map", () => {
+    const [square, wetland] = tint([
+      { id: "road_area_pattern", type: "fill", paint: { "fill-pattern": "pedestrian_polygon" } },
+      { id: "landcover_wetland", type: "fill", paint: { "fill-pattern": "wetland_bg_11", "fill-opacity": 0.8 } },
+    ]);
+    expect(square.paint).toEqual({ "fill-color": DARK_PALETTE.square });
+    expect(wetland.paint).toEqual({ "fill-color": DARK_PALETTE.park, "fill-opacity": 0.8 });
+  });
+
   test("does not mutate the input style", () => {
     const layer: MapStyleLayer = { id: "background", type: "background", paint: { "background-color": "#fff" } };
     tint([layer]);

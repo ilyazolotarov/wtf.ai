@@ -38,6 +38,8 @@ export interface DarkPalette {
   water: string;
   building: string;
   buildingEdge: string;
+  /** Squares and other pedestrian areas: flat, between the ground and a footway. */
+  square: string;
   casing: string;
   /** Footways, service roads, tracks. */
   path: string;
@@ -71,6 +73,7 @@ export const DARK_PALETTE: DarkPalette = {
   water: "#05264a",
   building: "#191d26",
   buildingEdge: "#242a37",
+  square: "#1c212b",
   casing: "#000000",
   path: "#2f3542",
   minor: "#4c5566",
@@ -284,7 +287,12 @@ function tintLayer(
       set("background-color", t.land);
       break;
     case "fill":
-      if (isWater) {
+      if (paint["fill-pattern"] != null) {
+        // Liberty's hatches (squares, wetland) are light images the tint can't reach: white stripes on the dark map
+        // that shimmer tilted and moving (moiré). A flat colour instead.
+        delete paint["fill-pattern"];
+        paint["fill-color"] = /wetland/i.test(id) ? p.park : p.square;
+      } else if (isWater) {
         set("fill-color", t.water);
         set("fill-outline-color", t.water);
       } else if (isBuilding) {
