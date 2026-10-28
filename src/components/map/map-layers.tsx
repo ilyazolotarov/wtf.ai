@@ -43,7 +43,7 @@ import {
   PUCK_OUTER,
   ROUTE_LINE,
 } from "./puck-style";
-import { NEAR_NUMBERS_M, NEAR_POIS_M, nearFilter, type NearHouses } from "./map-near";
+import { NEAR_NUMBERS_M, NEAR_POIS_M, nearFilter, nearOpacity, type NearHouses } from "./map-near";
 import type { CompassHeading } from "./use-compass-heading";
 
 /**
@@ -638,12 +638,25 @@ const ENTRANCE_MINZOOM = 16;
  * already gone (a JS reload remounted it) is made again, on top, instead of failing without a source. `hidden`: by
  * visibility, set either way (a filter that keeps nothing, `["==", 0, 1]`, reads as a legacy one and is refused).
  */
-function StyleSymbolLayer({ layer, filter, hidden = false }: { layer: MapStyleJson["layers"][number]; filter: unknown[]; hidden?: boolean }) {
+function StyleSymbolLayer({
+  layer,
+  filter,
+  opacity,
+  hidden = false,
+}: {
+  layer: MapStyleJson["layers"][number];
+  filter: unknown[];
+  /** Its text's and icon's (the style's layers set none), as `nearOpacity`. */
+  opacity?: unknown;
+  hidden?: boolean;
+}) {
   const spec = layer as unknown as SymbolLayerSpecification;
+  const paint = opacity === undefined ? spec.paint : { ...spec.paint, "text-opacity": opacity, "icon-opacity": opacity };
   return (
     <Layer
       {...spec}
       layout={{ ...spec.layout, visibility: hidden ? "none" : (spec.layout?.visibility ?? "visible") }}
+      paint={paint as SymbolLayerSpecification["paint"]}
       filter={filter as FilterSpecification}
     />
   );
@@ -665,7 +678,7 @@ function NearHouseNumbers({ layer, houses }: { layer: MapStyleJson["layers"][num
         afterId={HOUSE_NUMBER_LAYER}
         minzoom={spec.minzoom}
         layout={{ ...spec.layout, "text-field": ["get", "n"] }}
-        paint={spec.paint}
+        paint={{ ...spec.paint, "text-opacity": ["get", "o"] }}
       />
     </GeoJSONSource>
   );
@@ -698,7 +711,14 @@ export function NearLayers({
             <NearHouseNumbers key="near-housenumbers" layer={l} houses={houses} />,
           ];
         if (pois && l["source-layer"] === "poi" && l.type === "symbol")
-          return <StyleSymbolLayer key={l.id} layer={l} filter={nearFilter(near, NEAR_POIS_M, base, DRIVER_POI_FILTER)} />;
+          return (
+            <StyleSymbolLayer
+              key={l.id}
+              layer={l}
+              filter={nearFilter(near, NEAR_POIS_M, base, DRIVER_POI_FILTER)}
+              opacity={nearOpacity(near, NEAR_POIS_M, DRIVER_POI_FILTER)}
+            />
+          );
         return null;
       })}
     </>
@@ -712,6 +732,7 @@ export function NearLayers({
  */
 export function EntranceLayers({ url, near }: { url: string | null; near: Coordinate | null }) {
   if (!url) return null;
+  const opacity = nearOpacity(near, NEAR_NUMBERS_M) as number;
   return (
     <GeoJSONSource id="entrances" data={url}>
       <Layer
@@ -725,6 +746,8 @@ export function EntranceLayers({ url, near }: { url: string | null; near: Coordi
           "circle-color": "#ffffff",
           "circle-stroke-color": "#3b4652",
           "circle-stroke-width": 1.2,
+          "circle-opacity": opacity,
+          "circle-stroke-opacity": opacity,
         }}
       />
       <Layer
@@ -747,6 +770,8 @@ export function EntranceLayers({ url, near }: { url: string | null; near: Coordi
           "circle-color": "#1d4f91",
           "circle-stroke-color": "#ffffff",
           "circle-stroke-width": 1.5,
+          "circle-opacity": opacity,
+          "circle-stroke-opacity": opacity,
         }}
       />
       <Layer
@@ -762,7 +787,7 @@ export function EntranceLayers({ url, near }: { url: string | null; near: Coordi
           "text-allow-overlap": true,
           "text-ignore-placement": true,
         }}
-        paint={{ "text-color": "#ffffff" }}
+        paint={{ "text-color": "#ffffff", "text-opacity": opacity }}
       />
     </GeoJSONSource>
   );

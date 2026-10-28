@@ -76,7 +76,9 @@ persisted in kv-store. No hardcoded user-facing strings in components.
   stay English (its file has no `name_uk` for them yet); the route's lines under every name (right below the house
   numbers, `RouteLayers`), so a street's name reads on the route along it, its dots and the alternatives' times on
   top; in heading-up, house numbers and entrances only within 250 m of the car (`map-near.ts`, MapLibre's `distance`
-  from a point that moves on every 40 m), far ahead they were clutter (buildings not: `distance` is wrong for polygons);
+  from a point that moves on every 40 m), far ahead they were clutter (buildings not: `distance` is wrong for polygons),
+  fading out over the 70 m beyond rather than popping in and out (the same `distance` in the layer's opacity, a
+  search-file house's worked out in JS);
   the house numbers there are the search file's (`SearchIndex.housesNear`, a point a house, in the style's look), not
   the tiles': a tile merges its houses of one number into one feature, which a distance filter keeps or drops whole
   (without a search file the tiles' show, all of them);
