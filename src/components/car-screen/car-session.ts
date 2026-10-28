@@ -1,3 +1,4 @@
+import type { SpeedAlertsSnapshot } from "@/components/map/speed-alerts";
 import type { Strings } from "@/i18n/en";
 import type { Coordinate } from "@/nav/geo";
 import { viaNames } from "@/nav/routing/route-via";
@@ -14,8 +15,9 @@ import type {
   CarRequest,
   CarRoutePayload,
   CarSearchPayload,
+  CarSpeedPayload,
 } from "./car-types";
-import { carRoute } from "./car-guidance";
+import { carRoute, carSpeed } from "./car-guidance";
 
 // One connection of the car's screen, on the JS side (docs/ANDROID-AUTO-SPEC.md §3, docs/CARPLAY-SPEC.md §4): Android
 // Auto's headless task CarSessionTask runs this while the car shows the app, CarPlay's connection while its scene is
@@ -45,6 +47,11 @@ export interface CarSessionDeps {
     setVoiceMuted(muted: boolean | null): Promise<void>;
     setNotice(notice: CarNoticePayload | null): Promise<void>;
     setSearch(search: CarSearchPayload | null): Promise<void>;
+    /**
+     * The speed and the camera ahead: Android Auto draws both, CarPlay the camera (its alert; its map's root draws the
+     * speed). A build without it draws neither, and its session doesn't follow them.
+     */
+    setSpeed?(speed: CarSpeedPayload | null): Promise<void>;
     openSearch(query: string): Promise<void>;
     /** The map, with a list or the search open over it gone. */
     showMap(): Promise<void>;
@@ -97,6 +104,8 @@ export interface CarSessionDeps {
     hush(): void;
   };
   speedMps(): number;
+  /** The speed, the limit and the camera ahead, with their warnings (speed-alerts.ts), followed while retained. */
+  speed: { getSnapshot(): SpeedAlertsSnapshot; subscribe(listener: () => void): () => void; retain(): () => void };
   /** What a search finds at once (place-search.ts `findPlaces`): a point, the region's index, or its cities. */
   find(text: string): Place[];
   /** The car's test drive (test-drive.ts): each route started is driven along, until stopped. */
@@ -245,6 +254,18 @@ export function runCarSession(deps: CarSessionDeps): Promise<void> {
       hadRoute = route != null;
     };
 
+    // The speed and the camera ahead, where the car draws them: sent as they change (the speed each second, driving).
+    let speedSent: string | null = null;
+    const sendSpeed = () => {
+      if (!native.setSpeed) return;
+      const { t, language } = deps.strings();
+      const payload = carSpeed(deps.speed.getSnapshot(), t, language);
+      const key = JSON.stringify(payload);
+      if (key === speedSent) return;
+      speedSent = key;
+      send(native.setSpeed(payload));
+    };
+
     // The notice, and while one shows, a check now and then for what it waits for.
     let located: boolean | null = null;
     // Undefined until sent: the native side keeps the last one, also from a JS runtime before a reload.
@@ -281,6 +302,7 @@ export function runCarSession(deps: CarSessionDeps): Promise<void> {
     const refreshWords = () => {
       onRoute();
       sendNotice();
+      sendSpeed();
     };
 
     // A place to go to, as the phone's route screen goes: a recent destination from now; without an adapter, the route
@@ -415,9 +437,12 @@ export function runCarSession(deps: CarSessionDeps): Promise<void> {
       () => stopChecks?.(),
       () => deps.testDrive.stop(),
     );
+    // Its warnings speak while the car's screen shows them, with no phone screen too.
+    if (native.setSpeed) cleanups.push(deps.speed.retain(), deps.speed.subscribe(sendSpeed));
     takeNotes();
     sendPlaces();
     sendVoice();
+    sendSpeed();
     onRoute();
     sendNotice();
     checkLocation();

@@ -36,11 +36,11 @@ export function saveSpeedPreferences(change: Partial<SpeedPreferences>): void {
   listeners.forEach((l) => l());
 }
 
-const subscribe = (l: () => void) => {
+export function subscribeSpeedPreferences(l: () => void): () => void {
   listeners.add(l);
   return () => void listeners.delete(l);
-};
+}
 
 export function useSpeedPreferences(): SpeedPreferences {
-  return useSyncExternalStore(subscribe, loadSpeedPreferences);
+  return useSyncExternalStore(subscribeSpeedPreferences, loadSpeedPreferences);
 }

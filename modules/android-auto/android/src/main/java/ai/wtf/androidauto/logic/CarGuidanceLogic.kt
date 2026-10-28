@@ -160,6 +160,37 @@ data class CarTurnNotification(
   val alertFor: String?,
 )
 
+/**
+ * A speed camera ahead (UI-SPEC §6.5), as the JS side sends it (src/components/car-screen/car-guidance.ts `carSpeed`):
+ * the card on the car's map.
+ */
+data class CarCamera(
+  val id: Int,
+  /** "Speed camera in 600 m"; past the driver's margin, "Slow down". */
+  val title: String,
+  /** Past the margin: the distance; else null. */
+  val line: String?,
+  /** The camera's limit, the card's sign; null: none known. */
+  val limitKph: Int?,
+  /** Past the margin: the card red. */
+  val slowDown: Boolean,
+  /** How much of the way from where the card first showed is driven, 0–1: its bar. */
+  val progress: Double,
+)
+
+/** The speed on the car's map with the limit's sign (UI-SPEC §6.4), and the camera ahead. */
+data class CarSpeed(
+  /** km/h; null: unknown, no pill. */
+  val speedKph: Int?,
+  /** The limit's sign; null: none (none known, or the camera's card shows one). */
+  val limitKph: Int?,
+  /** Past the driver's margin over the limit: the speed red. */
+  val over: Boolean,
+  /** "km/h", in the app's language. */
+  val unit: String,
+  val camera: CarCamera?,
+)
+
 object CarGuidanceLogic {
   fun maneuverType(kind: String): CarManeuverType? =
     when (kind) {
@@ -273,6 +304,15 @@ object CarGuidanceLogic {
 
   /** The map's display density for the car's: 160 when the host gives none. */
   fun mapDpi(dpi: Int): Int = Math.round((if (dpi > 0) dpi else 160) * MAP_SCALE).toInt()
+
+  /** The camera's card and the speed pill this far in from the visible map's edges, map dp. */
+  const val CORNER_GAP_DP = 8.0
+
+  /** The camera's card at most this wide (the phone's on a narrow phone), map dp. */
+  const val CAMERA_CARD_MAX_DP = 340.0
+
+  /** The camera's card's width in a visible map this wide: the phone's, or all the room there is. */
+  fun cameraCardWidthDp(visibleWidthDp: Double): Double = maxOf(0.0, minOf(CAMERA_CARD_MAX_DP, visibleWidthDp - 2 * CORNER_GAP_DP))
 
   /** The visible area as insets from the surface's edges, in the map display's density-independent pixels. */
   fun insetsDp(

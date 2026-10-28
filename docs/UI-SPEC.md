@@ -284,7 +284,7 @@ One small component each; the screen only places them and wires their state. Car
   then "follow the route exactly: the app keeps track of the car by its turns, and a turn off the route loses it".
   The route is planned only on **I'll follow the route**; its ✕ drops it.
 
-### 6.4 Speed limit (`src/nav/speed/`, `speed-limit-source.ts`, `use-speed-warning.ts`)
+### 6.4 Speed limit (`src/nav/speed/`, `speed-limit-source.ts`, `speed-alerts.ts`)
 
 - **The sign:** the road sign drivers know (white disc, red ring #D52B1E, the number in black; the disc #F2F0EC in the
   dark scheme so it doesn't glare), 44 pt, at the left end of the speed bubble, which widens for it; it keeps its size
@@ -321,12 +321,14 @@ One small component each; the screen only places them and wires their state. Car
   won't play; not with the voice muted or at 0); it ends 3 km/h back under the line, or after 30 s without a sign
   (not red meanwhile: a sign gone for a moment and back finds the warning still on, no second chime), and only then
   may chime again. The speed compared is the one shown (rounded km/h). `speed warning: …` note in the trip log.
-- **Screens:** the phone's map only. The car's screens (CarPlay, Android Auto) show neither the sign nor the warning
-  yet; when they do, they call the same hook: one warning, one chime, however many screens show it.
+- **Screens:** the phone's map, Android Auto's and CarPlay's (a pill on the car's map, ANDROID-AUTO-SPEC §4,
+  CARPLAY-SPEC §4). One warning and one chime however many screens show it (`SpeedAlerts`, followed while any screen
+  does: the phone's map while mounted, the car's session while connected, so the chime sounds with no phone screen
+  too).
 - Must not drift: no amber or other in-between state (tried in the design, dropped: the driver is fine until the
   margin); no sign rather than a wrong one.
 
-### 6.5 Speed cameras (`src/nav/speed/`, `camera-source.ts`, `use-camera-warning.ts`, `camera-card.tsx`)
+### 6.5 Speed cameras (`src/nav/speed/`, `camera-source.ts`, `speed-alerts.ts`, `camera-card.tsx`)
 
 - **The cameras:** the map release's shared `cameras.json` (tools/tiles `cameras.py`, all Ukraine): every OSM speed
   camera and the Interior Ministry's list of cameras in service (mvs.gov.ua), with the direction of the traffic each
@@ -352,9 +354,13 @@ One small component each; the screen only places them and wires their state. Car
   camera in 600 m" (10 m steps under 200 m, 50 m above), the limit at the camera as its sign at the right (in words
   only to a screen reader: the sign says it), and a bar filling from where it showed to the camera. Past the driver's
   margin over the camera's limit by the speed warning's rules (§6.4: after 1.5 s past it, until 3 km/h back under, so
-  hovering at the line doesn't flicker): red, "Slow down" (the sign says to what), the distance under it, the sign
-  ringed in white. No limit known: no sign, never red. While the card shows its sign the speed bubble shows none (one
-  sign on the screen); the speed there still turns red past the margin over the road's limit.
+  hovering at the line doesn't flicker; kept through a moment out of sight for 2 min, as the voice remembers the
+  camera): red, "Slow down" (the sign says to what), the distance under it, the sign ringed in white. No limit known:
+  no sign, never red. While the card shows its sign the speed bubble shows none (one sign on the screen) and is red
+  past the lower of the two limits, the road's or the camera's (either warning on, `speedBesideCard`). They differ
+  before 8–14 % of cameras (Kyiv and Chernihiv graphs, 2026-10), the camera's always lower: a 50 on a road tagged 90
+  or 110, or the limit dropping between the car and the camera; a higher one is a tagging error, and the road's red
+  isn't hidden for it.
 - **The voice** once per camera when its card shows, and not again for that camera within 2 min (lost and found
   isn't news): "Speed camera ahead", or "Speed camera ahead. Slow down" when past the margin then (recorded, `camera`,
   `camera-slow-down`); not with the voice muted or at 0.
@@ -363,7 +369,10 @@ One small component each; the screen only places them and wires their state. Car
   badge is the car sprite's `map-camera` (`scripts/map-car.py`), loaded with the style.
 - **Settings → Speed:** **Warn about speed cameras** (on by default; kv-store `speed.preferences` `cameras`): off, no
   card, no voice. The dots stay.
-- **Screens:** the phone's only. CarPlay and Android Auto show neither the card nor the dots yet.
+- **Screens:** the phone's; Android Auto's: the same card and badges on its map, beside the turn card
+  (ANDROID-AUTO-SPEC §4); CarPlay's: the badges, and the card's words and sign as CarPlay's navigation alert (its
+  guidelines keep the app's own panels off the map; no bar, no red: "Slow down" says it; CARPLAY-SPEC §4). One voice
+  line per camera however many screens show it (`SpeedAlerts`, §6.4).
 - Must not drift: no camera warning from a dot the car can't be placed on a road by (no card rather than a wrong
   one); a camera the list lacks is still warned of.
 

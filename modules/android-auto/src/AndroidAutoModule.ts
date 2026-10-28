@@ -10,6 +10,7 @@ import type {
   CarRequest,
   CarRoutePayload,
   CarSearchPayload,
+  CarSpeedPayload,
 } from "../../../src/components/car-screen/car-types";
 
 // Typed binding for modules/android-auto (docs/ANDROID-AUTO-SPEC.md §4): what the car's screen shows, and what the driver
@@ -33,6 +34,8 @@ declare class AndroidAutoNativeModule extends NativeModule<AndroidAutoEvents> {
   setVoiceMuted(muted: boolean | null): Promise<void>;
   setNotice(notice: CarNoticePayload | null): Promise<void>;
   setSearch(search: CarSearchPayload | null): Promise<void>;
+  /** The speed with the limit's sign on the car's map, and the speed camera ahead's card; null: none. */
+  setSpeed(speed: CarSpeedPayload | null): Promise<void>;
   /** The search screen with `query` typed, over the map (after `setSearch` with its answers). */
   openSearch(query: string): Promise<void>;
   /** The map, with a list or the search open over it gone (a place asked for is gone to). */

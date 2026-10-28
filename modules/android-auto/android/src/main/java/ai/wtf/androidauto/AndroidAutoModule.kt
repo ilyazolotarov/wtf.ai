@@ -1,11 +1,13 @@
 package ai.wtf.androidauto
 
 import ai.wtf.androidauto.logic.CarAlternative
+import ai.wtf.androidauto.logic.CarCamera
 import ai.wtf.androidauto.logic.CarLabels
 import ai.wtf.androidauto.logic.CarNotice
 import ai.wtf.androidauto.logic.CarPlace
 import ai.wtf.androidauto.logic.CarRoute
 import ai.wtf.androidauto.logic.CarSearch
+import ai.wtf.androidauto.logic.CarSpeed
 import ai.wtf.androidauto.logic.CarStep
 import expo.modules.kotlin.functions.Queues
 import expo.modules.kotlin.modules.Module
@@ -85,6 +87,23 @@ class CarNoticeRecord : Record {
   @Field var action: String = ""
 }
 
+class CarCameraRecord : Record {
+  @Field var id: Int = 0
+  @Field var title: String = ""
+  @Field var line: String? = null
+  @Field var limitKph: Int? = null
+  @Field var slowDown: Boolean = false
+  @Field var progress: Double = 0.0
+}
+
+class CarSpeedRecord : Record {
+  @Field var speedKph: Int? = null
+  @Field var limitKph: Int? = null
+  @Field var over: Boolean = false
+  @Field var unit: String = ""
+  @Field var camera: CarCameraRecord? = null
+}
+
 class AndroidAutoModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("AndroidAuto")
@@ -157,6 +176,21 @@ class AndroidAutoModule : Module() {
     /** Muted or not; null: no voice, no button. */
     AsyncFunction("setVoiceMuted") { muted: Boolean? ->
       CarLink.setVoiceMuted(muted)
+    }.runOnQueue(Queues.MAIN)
+
+    /** The speed with the limit's sign on the car's map, and the speed camera ahead's card; null: nothing. */
+    AsyncFunction("setSpeed") { speed: CarSpeedRecord? ->
+      CarLink.setSpeed(
+        speed?.let { s ->
+          CarSpeed(
+            speedKph = s.speedKph,
+            limitKph = s.limitKph,
+            over = s.over,
+            unit = s.unit.ifEmpty { "km/h" },
+            camera = s.camera?.let { CarCamera(it.id, it.title, it.line, it.limitKph, it.slowDown, it.progress) },
+          )
+        },
+      )
     }.runOnQueue(Queues.MAIN)
 
     /** The recentre button: shown while the driver has moved the car's map or zoomed it from the follow zoom. */

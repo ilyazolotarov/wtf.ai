@@ -10,6 +10,7 @@ import type {
   CarRequest,
   CarRoutePayload,
   CarSearchPayload,
+  CarSpeedPayload,
 } from "../../../src/components/car-screen/car-types";
 
 // Typed binding for modules/car-play (iOS; docs/CARPLAY-SPEC.md §4): what the car's screen shows, and what the driver
@@ -36,6 +37,8 @@ declare class CarPlayNativeModule extends NativeModule<CarPlayEvents> {
   setVoiceMuted(muted: boolean | null): Promise<void>;
   setNotice(notice: CarNoticePayload | null): Promise<void>;
   setSearch(search: CarSearchPayload | null): Promise<void>;
+  /** The speed camera ahead as CarPlay's alert over the map; null: none. The speed itself the map's root draws. */
+  setSpeed(speed: CarSpeedPayload | null): Promise<void>;
   /** The answers to `query` in a list over the map (after `setSearch` with them): CarPlay's search can't be typed in. */
   openSearch(query: string): Promise<void>;
   /** The map, with a list or the search open over it gone (a place asked for is gone to). */

@@ -6,6 +6,7 @@ import ai.wtf.androidauto.logic.CarNotice
 import ai.wtf.androidauto.logic.CarPlace
 import ai.wtf.androidauto.logic.CarRoute
 import ai.wtf.androidauto.logic.CarSearch
+import ai.wtf.androidauto.logic.CarSpeed
 import android.util.Log
 
 /**
@@ -33,6 +34,10 @@ internal object CarLink {
 
   /** The recentre button: shown while the driver has moved the car's map or zoomed it from the follow zoom. */
   var recentre = false
+    private set
+
+  /** The speed with the limit's sign on the map, and the speed camera ahead's card; null: nothing to show. */
+  var speed: CarSpeed? = null
     private set
 
   /**
@@ -101,6 +106,12 @@ internal object CarLink {
     if (value == voiceMuted) return
     voiceMuted = value
     session?.refresh()
+  }
+
+  fun setSpeed(value: CarSpeed?) {
+    if (value == speed) return
+    speed = value
+    session?.speedChanged()
   }
 
   fun setRecentre(value: Boolean) {

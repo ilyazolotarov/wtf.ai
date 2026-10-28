@@ -1,6 +1,5 @@
 import { StyleSheet, View } from "react-native";
 
-import { formatDistance } from "@/components/status/format-geo";
 import { GlassFill } from "@/components/ui/glass-fill";
 import { Icon } from "@/components/ui/icon";
 import { T } from "@/components/ui/text";
@@ -9,10 +8,7 @@ import { useT } from "@/i18n/provider";
 
 import { usePanelStyle } from "./hud-card";
 import { SpeedLimitSign } from "./speed-limit-sign";
-import type { CameraShown } from "./use-camera-warning";
-
-/** The distance as the card says it: 10 m steps near, 50 m farther, so the number doesn't tick every metre. */
-const shownDistanceM = (m: number) => (m < 200 ? Math.round(m / 10) * 10 : Math.round(m / 50) * 50);
+import { cameraWords, type CameraShown } from "./speed-alerts";
 
 /**
  * A speed camera ahead (UI-SPEC §6.5): "Speed camera in 600 m", the limit at the camera as its sign (said only to a
@@ -23,10 +19,7 @@ export function CameraCard({ camera }: { camera: CameraShown }) {
   const { t, language } = useT();
   const palette = usePalette();
   const panel = usePanelStyle();
-  const red = camera.slowDown && camera.limitKph !== undefined;
-  const distance = t("cameraIn").replace("{distance}", formatDistance(shownDistanceM(camera.distanceM), language));
-  const title = red ? t("cameraSlowDown") : distance;
-  const line = red ? distance : null;
+  const { title, line, red } = cameraWords(camera, t, language);
   const limit = camera.limitKph !== undefined ? t("cameraLimit").replace("{limit}", String(camera.limitKph)) : null;
   const ink = red ? palette.bad.fg : palette.text;
   return (

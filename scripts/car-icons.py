@@ -57,6 +57,8 @@ ICONS = [
     "remove",
     "my_location",
     "map",
+    # A speed camera ahead (UI-SPEC §6.5): the card's glyph on Android Auto, the alert's on CarPlay without a limit.
+    "speed_camera",
 ]
 # CarPlay's own: its map's pan button (Android Auto's is the host's).
 IOS_ICONS = ICONS + ["drag_pan"]

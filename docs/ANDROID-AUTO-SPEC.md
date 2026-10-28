@@ -31,7 +31,7 @@ Android Auto ─▶ CarScreenService ─▶ CarScreenSession (Kotlin, main threa
                                       ├─ CarMapSurface: Surface ─▶ VirtualDisplay ─▶ Presentation ─▶ React root "CarMap"
                                       └─ CarSessionTask: headless JS task "WtfCarSession"
                                                  │
-src/components/car-screen/car-session.ts ◀───────┘  route, places, words, voice, notice, search ─▶ AndroidAutoModule ─▶ CarLink ─▶ templates
+src/components/car-screen/car-session.ts ◀───────┘  route, places, words, voice, notice, search, speed ─▶ AndroidAutoModule ─▶ CarLink ─▶ templates
                                                      ◀─ onCarAction (end-route, go, choose-alternative, search,
                                                                      request, toggle-voice, confirm-held, cancel-held,
                                                                      permission, notes, test-drive, session-ended)
@@ -154,6 +154,22 @@ src/components/car-screen/car-session.ts ◀───────┘  route, pla
   side calls `mapDrawn`) and fades after 5 s, as on the phone (UI-SPEC §6.1); no (i) button. It is a native view over
   the React root: React Native text on the car's display is drawn at the phone's density into a box laid out at the
   car's, and clipped (LogBox's too).
+- **The speed and speed cameras** (UI-SPEC §6.4, §6.5): the session follows the app's one speed and camera warning
+  (`SpeedAlerts`) while it runs, so the chime and "Speed camera ahead" sound with no phone screen too, once whatever
+  screens show them, and sends the car what it shows as it changes (`carSpeed` in car-guidance.ts, Jest; `setSpeed`).
+  Quality guideline NF-2 allows the speed limit and road warnings in the map's safe area. Both are native views over
+  the React root (CarSpeedViews.kt), as the credit, in the phone's colours and sizes in the map's dp.
+  - **The speed:** a pill in the visible map's bottom left corner, where Google Maps has it, the credit beside it: the
+    limit's sign and the speed with its unit, the speed red past the driver's margin. No speed: none. Beside the
+    camera's card with a sign, as on the phone (UI-SPEC §6.5): no sign of its own, red past the lower of the road's
+    and the camera's limits.
+  - **The camera ahead:** the phone's card (`CameraCard`), at the top left of the visible map, level with the turn
+    card, the phone card's width or all the room there is (`cameraCardWidthDp`, JUnit): the camera's glyph, "Speed
+    camera in 600 m", the camera's sign, and the bar filling from where it showed to the camera; past the margin red,
+    "Slow down" over the distance, the sign ringed in white. While the action strip and the map's buttons show (a tap
+    on the map) it steps down out of their way, as the map's insets do. Not by the stable area (the visible map with
+    them shown): that puts it in the middle of the map, level with nothing.
+  - **On the map:** the cameras' badges, as on the phone's.
 - **Moving the map** (`CarMap`, `MapControl`): the map action strip has Android Auto's pan button (a touch screen
   shows none; the finger moves the map), + and −, and recentre while the map is free or its follow zoom moved, so it
   is also the way back to the zoom (`setRecentre`). The host hands the gestures to `CarMapSurface` (`SurfaceCallback`:
@@ -278,7 +294,12 @@ showing the trip's next turn, its words, both distances and the arrival. The tes
 route followed already driven along, the turn card, the trip card and the cluster counting down, the turn pop-ups;
 after a JS reload driven again from the route's start. Google Maps starting navigation on the car while the app
 navigated: `navigation stopped by the car`, the route ended, the cluster showing Google Maps' turn. The knob moving
-focus among the host's cards; nothing of the app's own focused with touch on too (no map buttons then).
+focus among the host's cards; nothing of the app's own focused with touch on too (no map buttons then). Speed cameras
+on the 800×480 head unit, GPS driven past a camera at 60, then 75, then 45 km/h along a route: the card beside the
+turn card from 450 m, the distance counting down in the card's steps and the bar filling, red ("Slow down", the
+distance under it) past the margin and back after slowing, gone at the camera; a tap on the map: the card stepping down
+out of the action strip's way and back when it hid; the pill's sign hidden while the card showed one and back after
+it, the speed red past the margin; the camera's line and the chime played as navigation guidance.
 
 ## 6. Not chosen
 
@@ -286,6 +307,11 @@ focus among the host's cards; nothing of the app's own focused with touch on too
   over-the-air updates for it.
 - **Android Automotive OS** (the car's own Android): another build (`app-automotive`, `CarAppActivity`), cars few of
   the testers have; the same templates would serve it later.
+- **The speed camera as the host's alert** (`Alert`, Car API 5), under the turn card: an alert
+  can't be updated, only replaced, and its bar is the host's timer of its duration, required and drawn by the host.
+  Replaced as the distance counted down (each 50 m at 75 km/h, at once, no animation), the bar started again each
+  time: it never showed the approach, only a stub snapping back. With a route the host put the alert top left and
+  squeezed the turn card into a one-line strip beside it.
 
 ## 7. Open items
 

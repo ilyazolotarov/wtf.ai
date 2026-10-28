@@ -366,8 +366,8 @@ export function MapSurface({
         {mapReady && <NearLayers style={mapStyle} near={near} houses={houses} pois={!carScale} />}
         {/* Bottom to top: MapLibre stacks layers in the order they are declared. */}
         <RouteLayers route={route} palette={palette} onChoose={chooseAlternative} />
-        {/* The phone's map only, so far (UI-SPEC §6.5). */}
-        {!carScale && <CameraLayers cameras={cameras} aheadId={position?.cameraAhead?.id} />}
+        {/* The phone's map and the car's (UI-SPEC §6.5). */}
+        <CameraLayers cameras={cameras} aheadId={position?.cameraAhead?.id} />
         <ParkedCarLayers car={car} scheme={scheme} zoom={view.zoom} />
         <MarkLayers pin={pin} placedMark={placedMark?.draft ? placedMark : null} palette={palette} scheme={scheme} />
         <PositionLayers position={shown} compass={compass} palette={palette} scheme={scheme} view={view} hideCone={onCar} />
