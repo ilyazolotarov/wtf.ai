@@ -1,6 +1,7 @@
 import * as Sentry from "@sentry/react-native";
 import { AppState } from "react-native";
 
+import { speedAlerts } from "@/components/map/use-speed-alerts";
 import { findPlaces } from "@/components/route/place-search";
 import { formatDistance } from "@/components/status/format-geo";
 import { adapterStatusOf } from "@/components/status/use-nav-status";
@@ -130,6 +131,7 @@ async function runCarScreen(native: CarSessionDeps["native"], name: string, feat
         hush: hushVoice,
       },
       speedMps: () => position.getSnapshot()?.speedMps ?? 0,
+      speed: speedAlerts(),
       // As the phone's route screen searches: the active region, near the car; its cities without an index.
       find: (text) => {
         const { language, t } = appStrings();

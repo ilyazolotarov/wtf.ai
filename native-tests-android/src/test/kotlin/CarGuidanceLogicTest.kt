@@ -197,4 +197,11 @@ class CarGuidanceLogicTest {
     // A dpi the host didn't give: as 160.
     assertEquals(listOf(10.0, 0.0, 0.0, 0.0), CarGuidanceLogic.insetsDp(100, 100, 10, 0, 100, 100, 0))
   }
+
+  @Test
+  fun theCameraCardIsThePhonesWidthOrAllTheRoomThereIs() {
+    assertEquals(340.0, CarGuidanceLogic.cameraCardWidthDp(600.0))
+    assertEquals(310.0, CarGuidanceLogic.cameraCardWidthDp(326.0))
+    assertEquals(0.0, CarGuidanceLogic.cameraCardWidthDp(10.0))
+  }
 }

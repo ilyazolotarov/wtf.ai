@@ -1,4 +1,5 @@
 import { formatAlternativeDelta, formatDurationS, formatManeuverDistance, maneuverInstruction, PROBLEM_TEXT } from "@/components/route/guidance-text";
+import { cameraWords, speedBesideCard, type SpeedAlertsSnapshot } from "@/components/map/speed-alerts";
 import { formatDistance } from "@/components/status/format-geo";
 import type { Strings } from "@/i18n/en";
 import { isStartTurnaround } from "@/nav/routing/announcer";
@@ -6,7 +7,7 @@ import type { Maneuver } from "@/nav/routing/maneuvers";
 import type { RoutePlan } from "@/nav/routing/router";
 import type { RouteProblem, RouteSnapshot } from "@/services/navigation/route-service";
 
-import type { CarDistanceUnit, CarRoutePayload, CarStepPayload } from "./car-types";
+import type { CarDistanceUnit, CarRoutePayload, CarSpeedPayload, CarStepPayload } from "./car-types";
 
 /** The failures whose phone words name a phone screen ("… in Offline maps"): the condition only, for CarPlay. */
 const PHONE_FREE_PROBLEM: Partial<Record<RouteProblem, keyof Strings>> = { "no-road-graph": "carPlayNoRoadGraph" };
@@ -112,6 +113,33 @@ export function carRoute(
     title: via[0] ? current.title : "",
     detail: current.detail,
     alternatives,
+  };
+}
+
+/**
+ * What the car's map shows of the speed and the camera ahead (speed-alerts.ts; ANDROID-AUTO-SPEC §4): the speed with
+ * the limit's sign, red past the driver's margin, and the phone's camera card. Beside a card with a sign, as on the
+ * phone: no sign of its own, red past the lower of the road's and the camera's limits (`speedBesideCard`).
+ */
+export function carSpeed({ speed: road, camera }: SpeedAlertsSnapshot, t: (key: keyof Strings) => string, language: "en" | "uk"): CarSpeedPayload {
+  const speed = speedBesideCard(road, camera);
+  const words = camera && cameraWords(camera, t, language);
+  return {
+    speedKph: speed.speedKph ?? null,
+    limitKph: speed.limitKph ?? null,
+    over: speed.over,
+    unit: t("speed"),
+    camera:
+      camera && words
+        ? {
+            id: camera.id,
+            title: words.title,
+            line: words.line,
+            limitKph: camera.limitKph ?? null,
+            slowDown: words.red,
+            progress: camera.progress,
+          }
+        : null,
   };
 }
 

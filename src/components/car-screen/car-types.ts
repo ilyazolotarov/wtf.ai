@@ -119,6 +119,37 @@ export interface CarNoticePayload {
   action: string;
 }
 
+/**
+ * The speed and the speed camera ahead (UI-SPEC §6.4, §6.5; ANDROID-AUTO-SPEC §4), on the car's map: the speed with
+ * the limit's sign in a pill, the camera's card. Null: nothing to show.
+ */
+export interface CarSpeedPayload {
+  /** km/h; null: unknown (no position, or none with a speed). */
+  speedKph: number | null;
+  /** The limit's sign beside it; null: none to stand behind, off in Settings, or the camera's card shows one. */
+  limitKph: number | null;
+  /** Past the driver's margin over the limit (beside a camera's card, the lower of its and the road's): the speed red. */
+  over: boolean;
+  /** "km/h", under the speed. */
+  unit: string;
+  camera: CarCameraPayload | null;
+}
+
+/** A speed camera ahead: the phone's card, on the car's map. */
+export interface CarCameraPayload {
+  id: number;
+  /** "Speed camera in 600 m"; past the margin, "Slow down". */
+  title: string;
+  /** Past the margin: the distance ("Speed camera in 150 m"); else null. */
+  line: string | null;
+  /** The camera's limit, the card's sign; null: none known. */
+  limitKph: number | null;
+  /** Past the margin: the card red. */
+  slowDown: boolean;
+  /** How much of the way from where the card first showed is driven, 0–1: its bar. */
+  progress: number;
+}
+
 /** What happened on the native side, for the trip log; `problem`: reported too. */
 export interface CarNote {
   text: string;

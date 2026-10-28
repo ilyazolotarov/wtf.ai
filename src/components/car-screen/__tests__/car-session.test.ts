@@ -1,6 +1,7 @@
 // One Android Auto connection on the JS side (car-session.ts, docs/ANDROID-AUTO-SPEC.md §3), on fakes of the native
 // module, the route service, the places, the held route, the search and the voice.
 
+import type { SpeedAlertsSnapshot } from "@/components/map/speed-alerts";
 import { en } from "@/i18n/en";
 import { uk } from "@/i18n/uk";
 import type { RouteDestination, RouteSnapshot } from "@/services/navigation/route-service";
@@ -56,6 +57,9 @@ function setup({
   const languageListeners = new Set<() => void>();
   const frontListeners = new Set<() => void>();
   const mapListeners = new Set<() => void>();
+  const speedListeners = new Set<() => void>();
+  let speed: SpeedAlertsSnapshot = { speed: { speedKph: undefined, limitKph: undefined, over: false }, camera: null };
+  let speedRetained = 0;
   let installed = mapInstalled;
   let route: RouteSnapshot | null = null;
   let muted = false;
@@ -102,6 +106,8 @@ function setup({
       setVoiceMuted: call("setVoiceMuted"),
       setNotice: call("setNotice"),
       setSearch: call("setSearch"),
+      // CarPlay doesn't draw the speed yet.
+      setSpeed: carPlay ? undefined : call("setSpeed"),
       openSearch: call("openSearch"),
       showMap: () => call("showMap")(null),
       takeRequest: () => {
@@ -194,6 +200,17 @@ function setup({
       hush: () => hushes++,
     },
     speedMps: () => 10,
+    speed: {
+      getSnapshot: () => speed,
+      subscribe: (l) => {
+        speedListeners.add(l);
+        return () => speedListeners.delete(l);
+      },
+      retain: () => {
+        speedRetained++;
+        return () => speedRetained--;
+      },
+    },
     find: fakeFind,
     away: () => "1 km",
     streetAt: () => null,
@@ -236,6 +253,12 @@ function setup({
       installed = v;
       mapListeners.forEach((f) => f());
     },
+    setSpeed: (next: SpeedAlertsSnapshot) => {
+      speed = next;
+      speedListeners.forEach((f) => f());
+    },
+    speedsSent: () => calls.filter((c) => c.method === "setSpeed").map((c) => c.arg),
+    speedRetained: () => speedRetained,
     setLanguage: (l: "en" | "uk") => {
       language = l;
       languageListeners.forEach((f) => f());
@@ -272,7 +295,8 @@ function setup({
       heldListeners.size +
       languageListeners.size +
       frontListeners.size +
-      mapListeners.size,
+      mapListeners.size +
+      speedListeners.size,
   };
 }
 
@@ -542,10 +566,46 @@ describe("car session", () => {
     await session;
     expect(s.carScreen).toEqual([true, false]);
     expect(s.claims()).toBe(0);
+    expect(s.speedRetained()).toBe(0);
     expect(s.listeners()).toBe(0);
     expect(s.timers()).toBe(0);
     expect(s.hasListener()).toBe(false);
     expect(s.notes.at(-1)).toBe("android auto disconnected");
+  });
+
+  test("the speed and the camera ahead: followed while the session runs, sent as they change, in the app's words", () => {
+    const s = setup();
+    void runCarSession(s.deps);
+    // Its warnings speak while the car shows them, a phone screen or not.
+    expect(s.speedRetained()).toBe(1);
+    expect(s.speedsSent()).toEqual([{ speedKph: null, limitKph: null, over: false, unit: "km/h", camera: null }]);
+    s.setSpeed({
+      speed: { speedKph: 72, limitKph: 50, over: true },
+      camera: { id: 7, distanceM: 432, progress: 0.4, limitKph: 50, slowDown: true },
+    });
+    expect(s.speedsSent().at(-1)).toEqual({
+      speedKph: 72,
+      // The camera's card shows the sign: none beside the speed.
+      limitKph: null,
+      over: true,
+      unit: "km/h",
+      camera: { id: 7, title: "Slow down", line: expect.stringMatching(/^Speed camera in 450\sm$/), limitKph: 50, slowDown: true, progress: 0.4 },
+    });
+    // The same again (a position that changed nothing the car shows): not sent.
+    s.setSpeed({ speed: { speedKph: 72, limitKph: 50, over: true }, camera: { id: 7, distanceM: 432, progress: 0.4, limitKph: 50, slowDown: true } });
+    expect(s.speedsSent()).toHaveLength(2);
+    s.setLanguage("uk");
+    expect(s.speedsSent().at(-1)).toMatchObject({ unit: uk.speed, camera: { title: uk.cameraSlowDown } });
+    // Past the camera: the road's sign back beside the speed.
+    s.setSpeed({ speed: { speedKph: 48, limitKph: 50, over: false }, camera: null });
+    expect(s.speedsSent().at(-1)).toMatchObject({ speedKph: 48, limitKph: 50, camera: null });
+  });
+
+  test("CarPlay: no speed on the car yet, so its session doesn't follow it", () => {
+    const s = setup({ carPlay: true });
+    void runCarSession(s.deps);
+    expect(s.speedRetained()).toBe(0);
+    expect(s.speedsSent()).toEqual([]);
   });
 
   test("the car's test drive: started when the car asks for it, or asked before; stopped with the car's screen", async () => {

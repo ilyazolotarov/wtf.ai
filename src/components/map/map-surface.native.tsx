@@ -1,6 +1,6 @@
 import { Camera, LogManager, Map, type MapRef, type PressEvent, type ViewStateChangeEvent } from "@maplibre/maplibre-react-native";
 import { useImperativeHandle, useMemo, useRef, useState, type ComponentProps, type Ref } from "react";
-import { useColorScheme, View, type NativeSyntheticEvent } from "react-native";
+import { Platform, useColorScheme, View, type NativeSyntheticEvent } from "react-native";
 
 import { ANDROID_BLURS } from "@/components/ui/glass-fill";
 import { useMapStyle } from "@/config/map";
@@ -366,8 +366,8 @@ export function MapSurface({
         {mapReady && <NearLayers style={mapStyle} near={near} houses={houses} pois={!carScale} />}
         {/* Bottom to top: MapLibre stacks layers in the order they are declared. */}
         <RouteLayers route={route} palette={palette} onChoose={chooseAlternative} />
-        {/* The phone's map only, so far (UI-SPEC §6.5). */}
-        {!carScale && <CameraLayers cameras={cameras} aheadId={position?.cameraAhead?.id} />}
+        {/* The phone's map and Android Auto's; CarPlay's not yet (UI-SPEC §6.5). */}
+        {(!carScale || Platform.OS === "android") && <CameraLayers cameras={cameras} aheadId={position?.cameraAhead?.id} />}
         <ParkedCarLayers car={car} scheme={scheme} zoom={view.zoom} />
         <MarkLayers pin={pin} placedMark={placedMark?.draft ? placedMark : null} palette={palette} scheme={scheme} />
         <PositionLayers position={shown} compass={compass} palette={palette} scheme={scheme} view={view} hideCone={onCar} />

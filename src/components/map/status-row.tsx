@@ -9,7 +9,7 @@ import { useT } from "@/i18n/provider";
 
 import { usePanelStyle } from "./hud-card";
 import { SpeedLimitSign } from "./speed-limit-sign";
-import type { SpeedShown } from "./use-speed-warning";
+import type { SpeedShown } from "./speed-alerts";
 
 /** How far the speed numeral grows with the system's text size (the rest of the app: up to 150 %). */
 const SPEED_MAX_FONT_SCALE = 1.2;
@@ -20,8 +20,7 @@ const ROUGH_ACCURACY_M = 25;
 /**
  * The map's top row: the status pill (trust in words, where the position comes from, its accuracy) and the speed with
  * the limit's sign beside it (UI-SPEC §6.4), red when too fast. A tap on the pill unfolds its explanation when there is
- * one (`expandable`). `hideSign`: a speed camera's card shows a sign of its own (§6.5): one sign on the screen, the
- * speed alone here, still red when too fast.
+ * one (`expandable`). Beside a speed camera's card, the speed as `speedBesideCard` gives it (§6.5).
  */
 export function StatusRow({
   nav,
@@ -29,14 +28,12 @@ export function StatusRow({
   expandable,
   expanded,
   onToggle,
-  hideSign = false,
 }: {
   nav: ReturnType<typeof useNavStatus>;
   speed: SpeedShown;
   expandable: boolean;
   expanded: boolean;
   onToggle(): void;
-  hideSign?: boolean;
 }) {
   const { t, language } = useT();
   const palette = usePalette();
@@ -47,7 +44,7 @@ export function StatusRow({
     accuracy != null && accuracy > ROUGH_ACCURACY_M && trust !== "TRUSTED" ? palette.warn.c : palette.text;
   const speed = shown.speedKph === undefined ? "—" : String(shown.speedKph);
   const { limitKph, over } = shown;
-  const sign = limitKph !== undefined && !hideSign;
+  const sign = limitKph !== undefined;
   const speedLabel =
     limitKph === undefined
       ? `${speed} ${t("speed")}`

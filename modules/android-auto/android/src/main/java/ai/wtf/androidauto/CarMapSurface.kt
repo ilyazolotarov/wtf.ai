@@ -1,6 +1,7 @@
 package ai.wtf.androidauto
 
 import ai.wtf.androidauto.logic.CarGuidanceLogic
+import ai.wtf.androidauto.logic.CarSpeed
 import android.app.Presentation
 import android.graphics.Color
 import android.graphics.Rect
@@ -14,6 +15,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.car.app.CarContext
 import androidx.car.app.SurfaceCallback
@@ -33,8 +35,8 @@ import com.facebook.react.runtime.ReactSurfaceImpl
  * The root gets the car's day or night and the part of the screen the template's cards leave visible as props, and is
  * stopped when the surface goes (the driver opened another app on the car's screen, or the car disconnected).
  *
- * The map data credit over it is a native view: React Native text on this display is drawn at the phone's density and
- * clipped to a box laid out at the car's.
+ * The map data credit and the speed (CarSpeedViews.kt) over it are native views: React Native text on this display is
+ * drawn at the phone's density and clipped to a box laid out at the car's.
  */
 internal class CarMapSurface(private val carContext: CarContext) : SurfaceCallback {
   private var display: VirtualDisplay? = null
@@ -44,6 +46,13 @@ internal class CarMapSurface(private val carContext: CarContext) : SurfaceCallba
   private var container: SurfaceContainer? = null
   private var visibleArea: Rect? = null
   private var credit: TextView? = null
+  /** The visible map's bottom left corner: the speed, the credit beside it. */
+  private var corner: LinearLayout? = null
+  private var pill: SpeedPill? = null
+  /** The speed camera ahead, at the visible map's top left. */
+  private var card: CameraCard? = null
+  /** What the pill and the card show, kept for a new surface and the car's night. */
+  private var speed: CarSpeed? = null
 
   override fun onSurfaceAvailable(surfaceContainer: SurfaceContainer) {
     val target = surfaceContainer.surface
@@ -74,8 +83,25 @@ internal class CarMapSurface(private val carContext: CarContext) : SurfaceCallba
       root.addView(view, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
       val credit = creditView(presentation.context)
       this.credit = credit
-      root.addView(credit)
-      placeCredit()
+      val pill = SpeedPill(presentation.context)
+      this.pill = pill
+      val corner = LinearLayout(presentation.context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.BOTTOM
+        // The pill's shadow is drawn outside it.
+        clipChildren = false
+        clipToPadding = false
+      }
+      this.corner = corner
+      corner.addView(pill)
+      corner.addView(credit)
+      root.clipChildren = false
+      root.addView(corner)
+      val card = CameraCard(presentation.context)
+      this.card = card
+      root.addView(card)
+      placeCorner()
+      showSpeed(speed)
       presentation.setContentView(root)
       presentation.show()
 
@@ -89,7 +115,7 @@ internal class CarMapSurface(private val carContext: CarContext) : SurfaceCallba
 
   override fun onVisibleAreaChanged(visibleArea: Rect) {
     this.visibleArea = Rect(visibleArea)
-    placeCredit()
+    placeCorner()
     updateProps()
   }
 
@@ -132,6 +158,7 @@ internal class CarMapSurface(private val carContext: CarContext) : SurfaceCallba
   fun onDarkModeChanged() {
     presentation?.window?.setBackgroundDrawable(ColorDrawable(if (carContext.isDarkMode) Color.BLACK else Color.WHITE))
     credit?.let { paintCredit(it) }
+    showSpeed(speed)
     updateProps()
   }
 
@@ -154,6 +181,9 @@ internal class CarMapSurface(private val carContext: CarContext) : SurfaceCallba
     presentation = null
     credit?.animate()?.cancel()
     credit = null
+    pill = null
+    card = null
+    corner = null
     display?.release()
     display = null
     container = null
@@ -213,15 +243,47 @@ internal class CarMapSurface(private val carContext: CarContext) : SurfaceCallba
     view.animate().alpha(0f).setStartDelay(CREDIT_SHOWN_MS).setDuration(CREDIT_FADE_MS).withEndAction { view.visibility = View.GONE }
   }
 
-  /** 8 dp in from the visible map's bottom left corner: clear of the template's cards. */
-  private fun placeCredit() {
-    val view = credit ?: return
+  /**
+   * The speed (UI-SPEC §6.4) in the visible map's bottom left corner, where Google Maps has it, red past the driver's
+   * margin; the speed camera ahead's card (§6.5) at its top left. Null: neither.
+   */
+  fun showSpeed(speed: CarSpeed?) {
+    this.speed = speed
+    val palette = CarPalette(carContext.isDarkMode)
+    card?.show(speed?.camera, palette)
+    val pill = pill ?: return
+    pill.show(speed, palette)
+    // The credit beside the pill, or in the corner itself.
+    val credit = credit ?: return
+    val gap = if (pill.visibility == View.VISIBLE) (GAP_DP * credit.resources.displayMetrics.density).toInt() else 0
+    credit.layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = gap }
+  }
+
+  /**
+   * 8 dp in from the visible map's corners, clear of the template's cards: the speed and the credit at the bottom left,
+   * the camera's card at the top left, level with the turn card, the phone card's width or all the room there is. While
+   * the action strip and the map's buttons show (a tap on the map) the visible area is smaller and the card steps down
+   * out of their way, as the map's own insets do. Not the stable area (the visible area with them shown): that puts it
+   * in the middle of the map, level with nothing.
+   */
+  private fun placeCorner() {
     val c = container ?: return
     val area = visibleArea ?: Rect(0, 0, c.width, c.height)
-    val gap = (8 * view.resources.displayMetrics.density).toInt()
-    view.layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.START).apply {
-      leftMargin = area.left + gap
-      bottomMargin = c.height - area.bottom + gap
+    corner?.let { view ->
+      val gap = (GAP_DP * view.resources.displayMetrics.density).toInt()
+      view.layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.START).apply {
+        leftMargin = area.left + gap
+        bottomMargin = c.height - area.bottom + gap
+      }
+    }
+    card?.let { view ->
+      val density = view.resources.displayMetrics.density
+      val gap = (GAP_DP * density).toInt()
+      val width = (CarGuidanceLogic.cameraCardWidthDp(area.width() / density.toDouble()) * density).toInt()
+      view.layoutParams = FrameLayout.LayoutParams(width, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START).apply {
+        leftMargin = area.left + gap
+        topMargin = area.top + gap
+      }
     }
   }
 
@@ -250,5 +312,7 @@ internal class CarMapSurface(private val carContext: CarContext) : SurfaceCallba
     private const val CREDIT = "© OpenStreetMap contributors · © OpenMapTiles"
     private const val CREDIT_SHOWN_MS = 5000L
     private const val CREDIT_FADE_MS = 600L
+    /** The corner's views this far in from the visible map's edges, and apart. */
+    private const val GAP_DP = CarGuidanceLogic.CORNER_GAP_DP.toInt()
   }
 }

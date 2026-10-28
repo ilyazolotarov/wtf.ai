@@ -107,6 +107,7 @@ class CarScreenSession : Session() {
       )
     }
     turns = CarTurnNotifications(carContext)
+    map.showSpeed(CarLink.speed)
     CarSessionTask.start(carContext.applicationContext as Application)
     syncNavigation()
     request(intent)
@@ -187,6 +188,11 @@ class CarScreenSession : Session() {
     } catch (e: Exception) {
       CarLink.note("location permission request failed: ${e.javaClass.simpleName}: ${e.message}", problem = true)
     }
+  }
+
+  /** The speed or the camera ahead changed: drawn on the map. */
+  fun speedChanged() {
+    map?.showSpeed(CarLink.speed)
   }
 
   fun routeChanged() {
