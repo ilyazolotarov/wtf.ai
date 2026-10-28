@@ -321,9 +321,10 @@ One small component each; the screen only places them and wires their state. Car
   won't play; not with the voice muted or at 0); it ends 3 km/h back under the line, or after 30 s without a sign
   (not red meanwhile: a sign gone for a moment and back finds the warning still on, no second chime), and only then
   may chime again. The speed compared is the one shown (rounded km/h). `speed warning: …` note in the trip log.
-- **Screens:** the phone's map and Android Auto's (its pill on the map, ANDROID-AUTO-SPEC §4). One warning and one
-  chime however many screens show it (`SpeedAlerts`, followed while any screen does: the phone's map while mounted,
-  the car's session while connected, so the chime sounds with no phone screen too). CarPlay shows neither yet.
+- **Screens:** the phone's map, Android Auto's and CarPlay's (a pill on the car's map, ANDROID-AUTO-SPEC §4,
+  CARPLAY-SPEC §4). One warning and one chime however many screens show it (`SpeedAlerts`, followed while any screen
+  does: the phone's map while mounted, the car's session while connected, so the chime sounds with no phone screen
+  too).
 - Must not drift: no amber or other in-between state (tried in the design, dropped: the driver is fine until the
   margin); no sign rather than a wrong one.
 
@@ -368,9 +369,10 @@ One small component each; the screen only places them and wires their state. Car
   badge is the car sprite's `map-camera` (`scripts/map-car.py`), loaded with the style.
 - **Settings → Speed:** **Warn about speed cameras** (on by default; kv-store `speed.preferences` `cameras`): off, no
   card, no voice. The dots stay.
-- **Screens:** the phone's, and Android Auto's: the same card and badges on its map, beside the turn card
-  (ANDROID-AUTO-SPEC §4). One voice line per camera however many screens show it
-  (`SpeedAlerts`, §6.4). CarPlay shows neither the card nor the badges yet.
+- **Screens:** the phone's; Android Auto's: the same card and badges on its map, beside the turn card
+  (ANDROID-AUTO-SPEC §4); CarPlay's: the badges, and the card's words and sign as CarPlay's navigation alert (its
+  guidelines keep the app's own panels off the map; no bar, no red: "Slow down" says it; CARPLAY-SPEC §4). One voice
+  line per camera however many screens show it (`SpeedAlerts`, §6.4).
 - Must not drift: no camera warning from a dot the car can't be placed on a road by (no card rather than a wrong
   one); a camera the list lacks is still warned of.
 

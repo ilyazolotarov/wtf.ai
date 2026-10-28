@@ -57,11 +57,11 @@ ICONS = [
     "remove",
     "my_location",
     "map",
+    # A speed camera ahead (UI-SPEC §6.5): the card's glyph on Android Auto, the alert's on CarPlay without a limit.
+    "speed_camera",
 ]
 # CarPlay's own: its map's pan button (Android Auto's is the host's).
 IOS_ICONS = ICONS + ["drag_pan"]
-# Android Auto's own so far: the speed camera card's glyph (UI-SPEC §6.5; CarPlay's is to come).
-ANDROID_ICONS = ICONS + ["speed_camera"]
 
 TEMPLATE = """<?xml version="1.0" encoding="utf-8"?>
 <!-- Material Symbols "{name}" (Apache License 2.0), drawn by scripts/car-icons.py: don't edit by hand. -->
@@ -124,9 +124,9 @@ def main() -> int:
         glyphs[cmap[codepoints[name]]].draw(TransformPen(pen, (1, 0, 0, -1, 0, em)))
         return pen.getCommands()
 
-    for name in ANDROID_ICONS:
+    for name in ICONS:
         (OUT / f"car_{name}.xml").write_bytes(TEMPLATE.format(name=name, em=em, path=path(name)).encode("utf-8"))
-    print(f"{len(ANDROID_ICONS)} icons in {OUT.relative_to(ROOT)}")
+    print(f"{len(ICONS)} icons in {OUT.relative_to(ROOT)}")
     IOS_OUT.mkdir(parents=True, exist_ok=True)
     (IOS_OUT / "Contents.json").write_bytes(CATALOG.encode("utf-8"))
     for name in IOS_ICONS:

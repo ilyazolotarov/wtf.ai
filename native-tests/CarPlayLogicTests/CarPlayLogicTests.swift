@@ -157,6 +157,42 @@ final class NoticeTests: XCTestCase {
   }
 }
 
+final class CameraAlertTests: XCTestCase {
+  private func camera(_ id: Int, limit: Int? = 50, title: String = "Speed camera in 600 m", line: String? = nil) -> CarCamera {
+    CarCamera(id: id, title: title, line: line, limitKph: limit, slowDown: line != nil)
+  }
+
+  func testTheSameCameraSignAndRedIsTheSameAlertAsTheDistanceCountsDown() {
+    let far = CarPlayLogic.cameraAlert(camera(7), closed: [])
+    XCTAssertEqual(far, CarCameraAlert(id: 7, limitKph: 50, slowDown: false))
+    XCTAssertEqual(CarPlayLogic.cameraAlert(camera(7, title: "Speed camera in 450 m"), closed: []), far)
+    XCTAssertNotEqual(CarPlayLogic.cameraAlert(camera(8), closed: []), far)
+    XCTAssertNotEqual(CarPlayLogic.cameraAlert(camera(7, limit: nil), closed: []), far)
+    // "Slow down" slides in as an alert of its own, then counts down in place.
+    let red = CarPlayLogic.cameraAlert(camera(7, title: "Slow down", line: "Speed camera in 300 m"), closed: [])
+    XCTAssertNotEqual(red, far)
+    XCTAssertEqual(CarPlayLogic.cameraAlert(camera(7, title: "Slow down", line: "Speed camera in 150 m"), closed: []), red)
+  }
+
+  func testAClosedAlertStaysClosedButSlowDownStillComesAndNoneWithoutACamera() {
+    let far = CarCameraAlert(id: 7, limitKph: 50, slowDown: false)
+    XCTAssertNil(CarPlayLogic.cameraAlert(camera(7, title: "Speed camera in 450 m"), closed: [far]))
+    XCTAssertEqual(CarPlayLogic.cameraAlert(camera(8), closed: [far]), CarCameraAlert(id: 8, limitKph: 50, slowDown: false))
+    let red = camera(7, title: "Slow down", line: "Speed camera in 300 m")
+    XCTAssertEqual(CarPlayLogic.cameraAlert(red, closed: [far]), CarCameraAlert(id: 7, limitKph: 50, slowDown: true))
+    XCTAssertNil(CarPlayLogic.cameraAlert(red, closed: [far, CarCameraAlert(id: 7, limitKph: 50, slowDown: true)]))
+    XCTAssertNil(CarPlayLogic.cameraAlert(nil, closed: []))
+  }
+
+  func testTheWordsTheDistanceUnderSlowDown() {
+    XCTAssertEqual(CarPlayLogic.cameraWords(camera(7)).titles, ["Speed camera in 600 m"])
+    XCTAssertEqual(CarPlayLogic.cameraWords(camera(7)).subtitles, [])
+    let red = CarPlayLogic.cameraWords(camera(7, title: "Slow down", line: "Speed camera in 150 m"))
+    XCTAssertEqual(red.titles, ["Slow down"])
+    XCTAssertEqual(red.subtitles, ["Speed camera in 150 m"])
+  }
+}
+
 final class SearchAndDistanceTests: XCTestCase {
   func testTheResultsShownAnswerTheTextTyped() {
     let found = CarSearch(query: "khre", results: [CarPlace(id: "search:a1", title: "Khreshchatyk, 22", detail: nil, kind: "result")])

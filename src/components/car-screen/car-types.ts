@@ -120,8 +120,9 @@ export interface CarNoticePayload {
 }
 
 /**
- * The speed and the speed camera ahead (UI-SPEC §6.4, §6.5; ANDROID-AUTO-SPEC §4), on the car's map: the speed with
- * the limit's sign in a pill, the camera's card. Null: nothing to show.
+ * The speed and the speed camera ahead (UI-SPEC §6.4, §6.5; ANDROID-AUTO-SPEC §4, CARPLAY-SPEC §4), on the car's
+ * map: the speed with the limit's sign in a pill, the camera's card (CarPlay: its alert; the pill is its map root's
+ * own). Null: nothing to show.
  */
 export interface CarSpeedPayload {
   /** km/h; null: unknown (no position, or none with a speed). */
@@ -135,7 +136,7 @@ export interface CarSpeedPayload {
   camera: CarCameraPayload | null;
 }
 
-/** A speed camera ahead: the phone's card, on the car's map. */
+/** A speed camera ahead: the phone's card on Android Auto's map, CarPlay's alert over its map. */
 export interface CarCameraPayload {
   id: number;
   /** "Speed camera in 600 m"; past the margin, "Slow down". */
@@ -146,7 +147,7 @@ export interface CarCameraPayload {
   limitKph: number | null;
   /** Past the margin: the card red. */
   slowDown: boolean;
-  /** How much of the way from where the card first showed is driven, 0–1: its bar. */
+  /** How much of the way from where the card first showed is driven, 0–1: its bar (CarPlay's alert has none). */
   progress: number;
 }
 

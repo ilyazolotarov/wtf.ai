@@ -12,6 +12,7 @@ import { useRoute } from "@/providers/route-provider";
 
 import AndroidAuto from "../../../modules/android-auto/src/AndroidAutoModule";
 import CarPlay from "../../../modules/car-play/src/CarPlayModule";
+import { CarSpeedPill } from "./car-speed-pill";
 import type { CarMapGesture } from "./car-types";
 
 /** What the car's map needs of its platform's module: the driver's gestures, and the buttons to show. */
@@ -40,6 +41,8 @@ export interface CarMapProps {
   scale?: number;
   /** The follow zoom moved by this many levels for the car's screen (CarPlay: its points are several pixels). */
   zoom?: number;
+  /** CarPlay: the camera's alert is up with its sign (CarPlaySession), so the speed's pill shows none of its own. */
+  cameraSign?: boolean;
 }
 
 /**
@@ -49,12 +52,12 @@ export interface CarMapProps {
  * heading-up and following the car in the part of the screen the template leaves free. What it shows of the route
  * besides the map, and the navigator kept running, are the car session's (car-session-task.ts).
  */
-export function CarMapRoot({ dark = false, insets = {}, scale = 1, zoom = 0 }: CarMapProps) {
+export function CarMapRoot({ dark = false, insets = {}, scale = 1, zoom = 0, cameraSign = false }: CarMapProps) {
   return (
     <I18nProvider>
       {/* The session runs the navigator: this map only draws it. */}
       <PositionProvider gnss={false}>
-        <CarMap dark={dark} insets={insets} scale={scale} zoom={zoom} />
+        <CarMap dark={dark} insets={insets} scale={scale} zoom={zoom} cameraSign={cameraSign} />
       </PositionProvider>
     </I18nProvider>
   );
@@ -64,11 +67,14 @@ const noop = () => {};
 // A build older than `mapDrawn` (an update reaches it) has none.
 const onMapDrawn = () => void native?.mapDrawn?.().catch(noop);
 /**
- * CarPlay's map: it draws its own credit (Android Auto's is native, React Native text on its display being drawn at the
- * phone's density), and its points are made for the car's screen, so the POIs keep the style's sizes.
+ * CarPlay's map: it draws its own credit and speed (Android Auto's are native, React Native text on its display being
+ * drawn at the phone's density), and its points are made for the car's screen, so the POIs keep the style's sizes.
  */
 const carPlay = Platform.OS === "ios";
-/** The credit this far in from the visible map's bottom left corner, as Android Auto's (CarMapSurface). */
+/**
+ * The speed and the credit this far in from the visible map's bottom left corner, and apart, as Android Auto's
+ * (CarMapSurface).
+ */
 const CREDIT_GAP = 8;
 
 /**
@@ -87,7 +93,7 @@ const FRAME_GAP = 32;
 /** The car's map follows heading-up; the driver's drag or pinch leaves it free (camera-policy.ts, as on the phone). */
 const CAR_CAMERA: CameraState = { ...INITIAL_CAMERA, mode: "follow-heading" };
 
-function CarMap({ dark, insets, scale, zoom }: Required<CarMapProps>) {
+function CarMap({ dark, insets, scale, zoom, cameraSign }: Required<CarMapProps>) {
   const position = usePosition();
   const headingUp = useHeadingUp(position, null);
   const [camera, dispatch] = useReducer(cameraReducer, CAR_CAMERA);
@@ -95,6 +101,8 @@ function CarMap({ dark, insets, scale, zoom }: Required<CarMapProps>) {
   // The zoom buttons and pinches while following move the follow zoom; while free, the map's own.
   const [zoomShift, setZoomShift] = useState(0);
   const control = useRef<MapControl | null>(null);
+  // CarPlay's speed in the corner, the credit beside it.
+  const [speedWidth, setSpeedWidth] = useState(0);
   // Driving, a look around ends 10 s after the last touch, as on the phone (`RETURN_AFTER_TOUCH_MS`).
   const driving = (position?.speedMps ?? 0) > COURSE_MIN_SPEED_MPS;
   useEffect(() => {
@@ -159,33 +167,44 @@ function CarMap({ dark, insets, scale, zoom }: Required<CarMapProps>) {
     right: Math.round(insets.right ?? 0),
     bottom: Math.round(insets.bottom ?? 0),
   };
+  const creditLeft = padding.left + CREDIT_GAP + (speedWidth > 0 ? speedWidth + CREDIT_GAP : 0);
   return (
-    <MapSurface
-      mode={camera.mode}
-      ghostView={false}
-      compass={null}
-      headingUpRad={headingUp}
-      onUserInteraction={noop}
-      onLongPress={noop}
-      pin={null}
-      scheme={dark ? "dark" : "light"}
-      insets={padding}
-      onOwnScreen
-      carScale={scale}
-      carGuidelineSizes={!carPlay}
-      headingUpDotAt={CAR_HEADING_UP_DOT_AT}
-      // Between the card and the map's buttons, wrapped when the room is narrow.
-      creditAt={carPlay ? { bottom: padding.bottom + CREDIT_GAP, left: padding.left + CREDIT_GAP, right: padding.right + CREDIT_GAP } : null}
-      onReady={onMapDrawn}
-      control={control}
-      followZoomShift={zoom + zoomShift}
-      overview={overview}
-      framePadding={{
-        top: padding.top + FRAME_GAP,
-        bottom: padding.bottom + FRAME_GAP,
-        left: padding.left + FRAME_GAP,
-        right: padding.right + FRAME_GAP,
-      }}
-    />
+    <>
+      <MapSurface
+        mode={camera.mode}
+        ghostView={false}
+        compass={null}
+        headingUpRad={headingUp}
+        onUserInteraction={noop}
+        onLongPress={noop}
+        pin={null}
+        scheme={dark ? "dark" : "light"}
+        insets={padding}
+        onOwnScreen
+        carScale={scale}
+        carGuidelineSizes={!carPlay}
+        headingUpDotAt={CAR_HEADING_UP_DOT_AT}
+        // Beside the speed, between the card and the map's buttons, wrapped when the room is narrow.
+        creditAt={carPlay ? { bottom: padding.bottom + CREDIT_GAP, left: creditLeft, right: padding.right + CREDIT_GAP } : null}
+        onReady={onMapDrawn}
+        control={control}
+        followZoomShift={zoom + zoomShift}
+        overview={overview}
+        framePadding={{
+          top: padding.top + FRAME_GAP,
+          bottom: padding.bottom + FRAME_GAP,
+          left: padding.left + FRAME_GAP,
+          right: padding.right + FRAME_GAP,
+        }}
+      />
+      {carPlay && (
+        <CarSpeedPill
+          at={{ left: padding.left + CREDIT_GAP, bottom: padding.bottom + CREDIT_GAP }}
+          dark={dark}
+          cameraSign={cameraSign}
+          onWidth={setSpeedWidth}
+        />
+      )}
+    </>
   );
 }

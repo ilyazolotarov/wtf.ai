@@ -73,6 +73,19 @@ struct CarNoticeRecord: Record {
   @Field var action: String = ""
 }
 
+struct CarCameraRecord: Record {
+  @Field var id: Int = 0
+  @Field var title: String = ""
+  @Field var line: String?
+  @Field var limitKph: Int?
+  @Field var slowDown: Bool = false
+}
+
+/** Android Auto's payload (`CarSpeedPayload`): CarPlay takes the camera; the speed is its map root's to draw. */
+struct CarSpeedRecord: Record {
+  @Field var camera: CarCameraRecord?
+}
+
 public class CarPlayModule: Module {
   public func definition() -> ModuleDefinition {
     Name("CarPlay")
@@ -144,6 +157,14 @@ public class CarPlayModule: Module {
     AsyncFunction("setNotice") { (notice: CarNoticeRecord?) in
       CarPlaySession.shared.setNotice(
         notice.map { CarNotice(kind: $0.kind, title: $0.title, text: $0.text, action: $0.action) })
+    }.runOnQueue(.main)
+
+    /** The speed camera ahead, as an alert over the map; null: none. */
+    AsyncFunction("setSpeed") { (speed: CarSpeedRecord?) in
+      CarPlaySession.shared.setCamera(
+        speed?.camera.map {
+          CarCamera(id: $0.id, title: $0.title, line: $0.line, limitKph: $0.limitKph, slowDown: $0.slowDown)
+        })
     }.runOnQueue(.main)
 
     /** What the search's text found; null: nothing searched. */

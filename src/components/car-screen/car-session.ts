@@ -47,7 +47,10 @@ export interface CarSessionDeps {
     setVoiceMuted(muted: boolean | null): Promise<void>;
     setNotice(notice: CarNoticePayload | null): Promise<void>;
     setSearch(search: CarSearchPayload | null): Promise<void>;
-    /** The speed and the camera ahead: Android Auto draws them (CarPlay doesn't yet). */
+    /**
+     * The speed and the camera ahead: Android Auto draws both, CarPlay the camera (its alert; its map's root draws the
+     * speed). A build without it draws neither, and its session doesn't follow them.
+     */
     setSpeed?(speed: CarSpeedPayload | null): Promise<void>;
     openSearch(query: string): Promise<void>;
     /** The map, with a list or the search open over it gone. */

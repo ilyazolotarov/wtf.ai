@@ -30,6 +30,8 @@ final class CarPlaySession: NSObject {
   private var recentre = false
   private var notice: CarNotice?
   private var search: CarSearch?
+  /** The speed camera ahead: its alert over the map. */
+  private var camera: CarCamera?
 
   /** The JS side's listener (CarPlayModule's events) and the module it is from; nil while no runtime has the module. */
   private var emit: ((String, [String: Any]) -> Void)?
@@ -82,8 +84,10 @@ final class CarPlaySession: NSObject {
   private var alerted: String?
   private var alertDue: String?
 
-  // The alert over the map: a notice, or why the route failed.
+  // The alert over the map: a speed camera ahead, a notice, or why the route failed.
   private enum AlertContent: Equatable {
+    /** Its words are updated in place as the camera comes nearer (`camera`). */
+    case camera(CarCameraAlert)
     /** `canAsk`: iOS can still ask for location (never asked); else only the phone's Settings allow it. */
     case notice(CarNotice, canAsk: Bool)
     case failure(message: String, destination: String)
@@ -92,11 +96,16 @@ final class CarPlaySession: NSObject {
   private var alertShown: AlertContent?
   /** The alert presented, and what it shows: CarPlay's own (x) closes it without its action. */
   private weak var alertPresented: CPNavigationAlert?
-  private var alertPresentedContent: AlertContent?
+  private var alertPresentedContent: AlertContent? {
+    // Whether the camera's sign is up: the map's pill shows its own or none.
+    didSet { if alertPresentedContent != oldValue { updateMapProps() } }
+  }
   /** A failure the driver closed: not shown again. */
   private var failureClosed: AlertContent?
   /** A location notice the driver closed (iOS can't ask any more): not shown again until another notice. */
   private var noticeClosed: CarNotice?
+  /** The camera alerts the driver closed while the car is connected: not shown again ("Slow down" after one still is). */
+  private var camerasClosed: Set<CarCameraAlert> = []
   /** The location notice's button asked iOS: its answer goes to the session. */
   private var askedLocation = false
   /** iOS's location permission as last seen: a change redraws the alert's button. */
@@ -185,6 +194,7 @@ final class CarPlaySession: NSObject {
     maneuversKey = nil
     maneuvers = []
     alertShown = nil
+    camerasClosed = []
     searchCompletion?([])
     searchCompletion = nil
     panning = false
@@ -269,7 +279,8 @@ final class CarPlaySession: NSObject {
    * `dark`, the car's day or night; `insets`, what CarPlay's panels cover, in the map's points from each edge: the
    * window's safe area (the guidance card, the bar) and on the right the map's buttons (their layout guide), so the
    * camera keeps the car in the rest and the credit clear of them; `scale`, the map drawn bigger than the car's points
-   * (CarMapRoot).
+   * (CarMapRoot); `cameraSign`, the camera's alert is up with its sign, so the speed's pill shows none of its own
+   * (CarSpeedPill): closed by the driver, the road's sign is back beside the speed.
    */
   private func mapProps() -> [String: Any] {
     let safe = window?.safeAreaInsets ?? .zero
@@ -285,7 +296,13 @@ final class CarPlaySession: NSObject {
       "insets": ["left": safe.left / s, "top": safe.top / s, "right": right / s, "bottom": safe.bottom / s],
       "scale": s,
       "zoom": CarPlayLogic.followZoomShift(screenScale: Double(screenScale)),
+      "cameraSign": cameraSignShown,
     ]
+  }
+
+  private var cameraSignShown: Bool {
+    if case .camera(let camera) = alertPresentedContent { return camera.limitKph != nil }
+    return false
   }
 
   /** Sent again only when they changed: each is a render of the car's map. */
@@ -340,6 +357,13 @@ final class CarPlaySession: NSObject {
     if value != noticeClosed { noticeClosed = nil }
     notice = value
     refresh()
+  }
+
+  /** The speed camera ahead (UI-SPEC §6.5), or nil: none. The speed itself is the map root's (CarMapRoot). */
+  func setCamera(_ value: CarCamera?) {
+    guard value != camera else { return }
+    camera = value
+    syncAlert()
   }
 
   func setSearch(_ value: CarSearch?) {
@@ -633,9 +657,10 @@ final class CarPlaySession: NSObject {
     return CPTravelEstimates(distanceRemaining: length, timeRemaining: max(0, seconds))
   }
 
-  // MARK: - The alert: a notice, or why the route failed
+  // MARK: - The alert: a speed camera ahead, a notice, or why the route failed
 
   private var alertWanted: AlertContent? {
+    if let camera = CarPlayLogic.cameraAlert(camera, closed: camerasClosed) { return .camera(camera) }
     if let notice, notice != noticeClosed {
       return .notice(notice, canAsk: notice.kind != CarNotice.location || locationUndetermined)
     }
@@ -646,11 +671,17 @@ final class CarPlaySession: NSObject {
     return nil
   }
 
-  /** One alert over the map at a time: a notice first, as on Android Auto, where it takes the route's card. */
+  /**
+   * One alert over the map at a time: a camera ahead first (it lasts seconds, and the road doesn't wait; what it took
+   * down comes back after it), then a notice, as on Android Auto, where it takes the route's card.
+   */
   private func syncAlert() {
     guard let mapTemplate else { return }
     let wanted = alertWanted
-    guard wanted != alertShown else { return }
+    guard wanted != alertShown else {
+      updateCameraWords()
+      return
+    }
     alertShown = wanted
     // Whatever shows goes first (it calls back with `didDismiss`, which ignores an alert no longer presented).
     if mapTemplate.currentNavigationAlert != nil {
@@ -672,8 +703,36 @@ final class CarPlaySession: NSObject {
     template.present(navigationAlert: alert, animated: true)
   }
 
+  /**
+   * The camera's alert up: its words follow the distance in place (`updateTitleVariants`), as Android Auto's card
+   * counts down; a new alert would slide in again at each step.
+   */
+  private func updateCameraWords() {
+    guard case .camera = alertPresentedContent, let alert = alertPresented, let camera else { return }
+    let words = CarPlayLogic.cameraWords(camera)
+    guard words.titles != alert.titleVariants || words.subtitles != alert.subtitleVariants else { return }
+    alert.updateTitleVariants(words.titles, subtitleVariants: words.subtitles)
+  }
+
+  /** The driver closed a camera's alert (its x): not shown again; "Slow down" after it still is. */
+  private func closeCamera(_ alert: CarCameraAlert) {
+    guard camerasClosed.insert(alert).inserted else { return }
+    note("camera alert closed by the driver #\(alert.id)\(alert.slowDown ? ", slow down" : "")")
+  }
+
   private func alert(_ content: AlertContent) -> CPNavigationAlert {
     switch content {
+    case .camera(let shown):
+      // The phone card's words; its sign as the image (the glyph when no limit is known). No bar and no red:
+      // CarPlay draws the alert, "Slow down" says it. Only CarPlay's x, until the camera is passed.
+      let close = CPAlertAction(title: labels.close, style: .cancel) { [weak self] _ in self?.closeCamera(shown) }
+      let words = camera.map(CarPlayLogic.cameraWords) ?? (titles: [], subtitles: [])
+      let image =
+        shown.limitKph.map { CarPlayImages.speedSign($0, dark: dark) }
+        ?? CarPlayImages.icon("car_speed_camera", size: CarPlayImages.signSize)
+      return CPNavigationAlert(
+        titleVariants: words.titles, subtitleVariants: words.subtitles, image: image, primaryAction: close,
+        secondaryAction: nil, duration: 0)
     case .notice(let notice, let canAsk):
       // Location refused before, or no map: nothing on the car's screen changes it, and its words may not send the
       // driver to the phone (Apple's guidelines): the alert says so and closes.
@@ -858,6 +917,12 @@ final class CarPlaySession: NSObject {
     send("end-route")
   }
 
+  fileprivate func showBanner(for alert: CPNavigationAlert) -> Bool {
+    guard alert === alertPresented, case .camera(let camera) = alertPresentedContent else { return false }
+    note("camera notification popped up #\(camera.id): \(alert.titleVariants.first ?? "")")
+    return true
+  }
+
   fileprivate func showBanner(for maneuver: CPManeuver) -> Bool {
     guard let id = maneuver.userInfo as? String, id == alertDue else { return false }
     alerted = id
@@ -880,8 +945,11 @@ extension CarPlaySession: CPMapTemplateDelegate {
     (maneuver.userInfo as? String) == alerted
   }
 
+  // A camera's alert while another app fills the car's screen: a notification, as Apple's guide has navigation alerts
+  // in the background, its words as it popped up (CarPlay updates none) for its few seconds; a notice waits for the
+  // app.
   func mapTemplate(_ mapTemplate: CPMapTemplate, shouldShowNotificationFor navigationAlert: CPNavigationAlert) -> Bool {
-    false
+    showBanner(for: navigationAlert)
   }
 
   func mapTemplateShouldProvideNavigationMetadata(_ mapTemplate: CPMapTemplate) -> Bool {
@@ -908,10 +976,11 @@ extension CarPlaySession: CPMapTemplateDelegate {
     alertPresentedContent = nil
     alertShown = nil
     carPlayLog.notice("alert dismissed (\(dismissalContext.rawValue))")
-    // Closed by the driver (its button, or CarPlay's own x): a failure stays closed, and a notice that only says
-    // something (no map, location iOS can't ask for any more).
+    // Closed by the driver (its button, or CarPlay's own x): a failure stays closed, a camera's, and a notice that
+    // only says something (no map, location iOS can't ask for any more).
     if dismissalContext == .userDismissed {
       if case .failure = content { failureClosed = content }
+      if case .camera(let camera) = content { closeCamera(camera) }
       if case .notice(let notice, let canAsk) = content, CarPlayLogic.closedByCarPlaysX(notice, canAsk: canAsk) {
         noticeClosed = notice
       }
@@ -1179,6 +1248,38 @@ enum CarPlayImages {
       cg.endTransparencyLayer()
       cg.restoreGState()
       drawing.draw(in: CGRect(x: inset, y: inset, width: size, height: size))
+    }.withRenderingMode(.alwaysOriginal)
+  }
+
+  /** A camera alert's image, its sign or the camera's glyph, points: CarPlay draws it smaller, both alike. */
+  static let signSize = 40.0
+
+  /**
+   * The speed limit as the road sign drivers know (speed-limit-sign.tsx): a white disc in a red ring, the number black;
+   * the disc dimmed by night so it doesn't glare. Its own colours, not CarPlay's tint.
+   */
+  static func speedSign(_ kph: Int, dark: Bool, size: Double = signSize) -> UIImage {
+    let rgb = { (hex: Int) in
+      UIColor(
+        red: CGFloat(hex >> 16 & 0xFF) / 255, green: CGFloat(hex >> 8 & 0xFF) / 255, blue: CGFloat(hex & 0xFF) / 255,
+        alpha: 1)
+    }
+    let box = CGRect(x: 0, y: 0, width: size, height: size)
+    let ring = size * 0.11
+    return UIGraphicsImageRenderer(size: box.size).image { _ in
+      rgb(0xD52B1E).setFill()
+      UIBezierPath(ovalIn: box).fill()
+      rgb(dark ? 0xF2F0EC : 0xFFFFFF).setFill()
+      UIBezierPath(ovalIn: box.insetBy(dx: ring, dy: ring)).fill()
+      let text = NSAttributedString(
+        string: String(kph),
+        attributes: [
+          .font: UIFont.systemFont(ofSize: size * (kph >= 100 ? 0.34 : 0.41), weight: .bold),
+          .foregroundColor: rgb(0x1D1C1A),
+          .kern: -size * 0.015,
+        ])
+      let drawn = text.size()
+      text.draw(at: CGPoint(x: (size - drawn.width) / 2, y: (size - drawn.height) / 2))
     }.withRenderingMode(.alwaysOriginal)
   }
 

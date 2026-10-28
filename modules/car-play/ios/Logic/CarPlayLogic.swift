@@ -102,6 +102,29 @@ struct CarNotice: Equatable {
   static let heldRoute = "held-route"
 }
 
+/**
+ * A speed camera ahead (UI-SPEC §6.5), as the JS side sends it (src/components/car-screen/car-guidance.ts `carSpeed`):
+ * CarPlay's alert over the map.
+ */
+struct CarCamera: Equatable {
+  var id: Int
+  /** "Speed camera in 600 m"; past the driver's margin, "Slow down". */
+  var title: String
+  /** Past the margin: the distance; else nil. */
+  var line: String?
+  /** The camera's limit, the alert's image as its sign; nil: none known (the camera's glyph). */
+  var limitKph: Int?
+  /** Past the margin. */
+  var slowDown: Bool
+}
+
+/** The camera's alert as presented: the same while this holds, its words updated in place. */
+struct CarCameraAlert: Hashable {
+  var id: Int
+  var limitKph: Int?
+  var slowDown: Bool
+}
+
 /** A notice's alert buttons. */
 enum CarNoticeButtons: Equatable {
   /** Its action asks iOS for location. */
@@ -338,6 +361,24 @@ enum CarPlayLogic {
    */
   static func closedByCarPlaysX(_ notice: CarNotice, canAsk: Bool) -> Bool {
     noticeButtons(notice, canAsk: canAsk) == .close
+  }
+
+  /**
+   * The camera's alert: the camera ahead, unless the driver closed this alert (not again while the car is
+   * connected). The same camera, sign and red is the same alert, its words updated as the distance counts down
+   * (`updateTitleVariants`); another camera or sign is another alert (its image can't be updated), and so is "Slow
+   * down": a subtitle given to an alert made without one never shows (iOS 26.3), and a warning sliding in is news.
+   * "Slow down" comes after a far alert closed: the voice speaks once, as the camera is first in sight.
+   */
+  static func cameraAlert(_ camera: CarCamera?, closed: Set<CarCameraAlert>) -> CarCameraAlert? {
+    guard let camera else { return nil }
+    let alert = CarCameraAlert(id: camera.id, limitKph: camera.limitKph, slowDown: camera.slowDown)
+    return closed.contains(alert) ? nil : alert
+  }
+
+  /** The camera alert's words: "Speed camera in 600 m"; past the margin "Slow down", the distance under it. */
+  static func cameraWords(_ camera: CarCamera) -> (titles: [String], subtitles: [String]) {
+    ([camera.title], camera.line.map { [$0] } ?? [])
   }
 
   /** The results shown answer the text typed (an older text's would mislead); none yet while it is searched. */

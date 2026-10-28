@@ -47,7 +47,16 @@ function setup({
   testDrive = false,
   carPlay = false,
   mapInstalled = true,
-}: { connected?: boolean; located?: boolean; testDrive?: boolean; carPlay?: boolean; mapInstalled?: boolean } = {}) {
+  drawsSpeed = true,
+}: {
+  connected?: boolean;
+  located?: boolean;
+  testDrive?: boolean;
+  carPlay?: boolean;
+  mapInstalled?: boolean;
+  /** False: a native build from before the speed. */
+  drawsSpeed?: boolean;
+} = {}) {
   const calls: { method: string; arg: unknown }[] = [];
   let actionListener: ((e: CarAction) => void) | null = null;
   const routeListeners = new Set<() => void>();
@@ -106,8 +115,7 @@ function setup({
       setVoiceMuted: call("setVoiceMuted"),
       setNotice: call("setNotice"),
       setSearch: call("setSearch"),
-      // CarPlay doesn't draw the speed yet.
-      setSpeed: carPlay ? undefined : call("setSpeed"),
+      setSpeed: drawsSpeed ? call("setSpeed") : undefined,
       openSearch: call("openSearch"),
       showMap: () => call("showMap")(null),
       takeRequest: () => {
@@ -601,8 +609,23 @@ describe("car session", () => {
     expect(s.speedsSent().at(-1)).toMatchObject({ speedKph: 48, limitKph: 50, camera: null });
   });
 
-  test("CarPlay: no speed on the car yet, so its session doesn't follow it", () => {
+  test("CarPlay: the same speed and camera sent (its alert shows the camera), followed while the session runs", () => {
     const s = setup({ carPlay: true });
+    void runCarSession(s.deps);
+    expect(s.speedRetained()).toBe(1);
+    s.setSpeed({
+      speed: { speedKph: 64, limitKph: 50, over: true },
+      camera: { id: 3, distanceM: 610, progress: 0.1, limitKph: 50, slowDown: false },
+    });
+    expect(s.speedsSent().at(-1)).toMatchObject({
+      speedKph: 64,
+      limitKph: null,
+      camera: { id: 3, title: expect.stringMatching(/^Speed camera in 600\sm$/), line: null, limitKph: 50, slowDown: false },
+    });
+  });
+
+  test("a car's build without the speed: its session neither follows nor sends it", () => {
+    const s = setup({ drawsSpeed: false });
     void runCarSession(s.deps);
     expect(s.speedRetained()).toBe(0);
     expect(s.speedsSent()).toEqual([]);
