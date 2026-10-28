@@ -71,6 +71,24 @@ describe("a check that ended the app", () => {
     expect(report2).not.toHaveBeenCalled();
   });
 
+  it("goes on by itself from the file it stopped at when iOS ended it in the background, unreported", () => {
+    mockSaved.set("map-download-job", job({ checking: "ukraine.graph.bin", checkingInBackground: true, checked: 1, auto: true }));
+    const packs = start();
+    const report = jest.fn();
+    packs.onMapDownloadFailed(report);
+    expect(packs.getMapPacks().download).toMatchObject({ phase: "paused", interrupted: true });
+    expect(packs.getMapPacks().download?.checkEnded).toBeUndefined();
+    expect(report).not.toHaveBeenCalled();
+    expect(mockSaved.get("map-download-job")).toMatchObject({ checked: 1, checking: undefined, checkingInBackground: undefined });
+  });
+
+  it("leaves an update stopped mid-file to wait for Wi-Fi", () => {
+    mockSaved.set("map-download-job", job({ index: 0, done: 0, auto: true }));
+    const packs = start();
+    expect(packs.getMapPacks().download).toMatchObject({ phase: "paused" });
+    expect(packs.getMapPacks().download?.interrupted).toBeUndefined();
+  });
+
   it("does not touch a download stopped by a dropped connection", () => {
     mockSaved.set("map-download-job", job({}));
     const packs = start();

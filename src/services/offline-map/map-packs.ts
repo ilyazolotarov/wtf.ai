@@ -114,8 +114,17 @@ interface DownloadJob {
   /** The step being checked or installed (a file's label, "small files", "install"); still set at start: the app ended in it. */
   checking?: string;
   /**
-   * The app ended while checking or installing: the job waits for Resume and never goes on by itself, since the step
-   * may end the app again (an iPhone killed for memory as the 1.19 GB Ukraine map was checked, at every launch).
+   * The app was in the background during that step. iOS suspends an app soon after its background downloads finish
+   * and may end it there: a check cut off like that goes on by itself (an iPhone stopped in the 453 MB graph, every
+   * time in the background, holding 3 MB; 2026-10-28).
+   */
+  checkingInBackground?: boolean;
+  /** Files before this one are checked: a check that goes on again starts here. */
+  checked?: number;
+  /**
+   * The app ended in the front while checking or installing: the job waits for Resume and never goes on by itself,
+   * since the step may end the app again (an iPhone killed for memory as the 1.19 GB Ukraine map was checked, at every
+   * launch).
    */
   checkEnded?: boolean;
 }
@@ -167,9 +176,13 @@ function initialState(): MapPacksState {
   kvStore.setJson(LEGACY_PAUSED_KEY, null);
   job = kvStore.getJson<DownloadJob>(JOB_KEY);
   if (job?.checking) {
-    endedIn = job.checking;
+    // In the front: maybe the step itself (memory), reported and left to the driver. In the background: iOS's doing.
+    if (!job.checkingInBackground) {
+      endedIn = job.checking;
+      job.checkEnded = true;
+    }
     job.checking = undefined;
-    job.checkEnded = true;
+    job.checkingInBackground = undefined;
     saveJob();
   }
   return {
@@ -179,8 +192,9 @@ function initialState(): MapPacksState {
     catalogLoading: false,
     catalogError: null,
     catalogTooNew: false,
-    // A job found at start is paused: the app was closed (or killed) during the download. Unless the driver paused
-    // it (or it is an update, which waits for Wi-Fi), it goes on by itself.
+    // A job found at start is paused: the app was closed (or killed) during the download or its check. Unless the
+    // driver paused it (or it is an update, which waits for Wi-Fi), or its check ended the app in the front, it goes on
+    // by itself; a check always does.
     download: job
       ? {
           region: job.region.region,
@@ -611,13 +625,16 @@ async function run(id: number) {
   }
   setDownload("verifying", j.total);
   await letRender(); // "verifying" before MD5 blocks
-  for (const f of j.files) {
+  for (let i = j.checked ?? 0; i < j.files.length; i++) {
+    const f = j.files[i];
     // Saved before each step, so a step that ends the app is known at the next start (one mark for the small files).
     const step = f.size < SMALL_FILE ? "small files" : f.label;
     if (j.checking !== step) markStep(j, step, `${f.size} bytes`);
     const t0 = Date.now();
     verify(new File(ROOT(), f.dest), f, f.label);
+    j.checked = i + 1;
     if (f.size < SMALL_FILE) continue;
+    saveJob();
     noteStep(`checked ${f.label} in ${Date.now() - t0} ms`);
     // Back to the JS thread's run loop between big files, which frees what the check left in its autorelease pool:
     // checked in one go, an iPhone held the 1.19 GB tiles and was killed in the 453 MB graph (iOS 27.2, 2026-10-28).
@@ -641,9 +658,11 @@ async function run(id: number) {
 }
 
 function markStep(j: DownloadJob, step: string, detail?: string) {
+  const background = AppState.currentState !== "active";
   j.checking = step;
+  j.checkingInBackground = background;
   saveJob();
-  noteStep(detail ? `${step}: ${detail}` : step);
+  noteStep(`${step}${detail ? `: ${detail}` : ""}${background ? " (in the background)" : ""}`);
 }
 
 /** Drops the job and its partial files; shows `error` if given. */
@@ -754,11 +773,12 @@ export function setActiveRegion(region: string): void {
 }
 
 /**
- * A job stopped without the driver's Pause, and not an update (which waits for Wi-Fi), nor one whose check ended the
- * app: it goes on by itself.
+ * A job stopped without the driver's Pause, and not an update (which waits for Wi-Fi), goes on by itself; so does one
+ * with every file fetched (its check needs no network). Not one whose check ended the app in the front.
  */
 function resumesItself(j: DownloadJob): boolean {
-  return !j.pausedByDriver && !j.auto && !j.checkEnded;
+  if (j.checkEnded) return false;
+  return j.index >= j.files.length || (!j.pausedByDriver && !j.auto);
 }
 
 /**
@@ -805,6 +825,11 @@ function scheduleRetry() {
 }
 
 AppState.addEventListener("change", (appState) => {
+  // Gone to the background during a step (heard between big files): iOS may suspend the app and end it there.
+  if (appState !== "active" && job?.checking && !job.checkingInBackground) {
+    job.checkingInBackground = true;
+    saveJob();
+  }
   if (appState !== "active" || !getState().download?.interrupted) return;
   retries = 0;
   void resumeDownload();

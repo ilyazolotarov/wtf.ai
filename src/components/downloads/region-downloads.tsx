@@ -74,7 +74,9 @@ function DownloadProgress({ download, release }: { download: MapDownload; releas
           (download.phase === "paused"
             ? download.checkEnded
               ? t("mapCheckEnded")
-              : (download.interrupted ? t("mapDownloadInterrupted") : t("paused")) + (download.bytes ? ` · ${formatMb(download.bytes)} / ${formatMb(download.total)}` : "")
+              : download.interrupted && download.bytes >= download.total
+                ? t("verifying") // every file fetched: only the check goes on
+                : (download.interrupted ? t("mapDownloadInterrupted") : t("paused")) + (download.bytes ? ` · ${formatMb(download.bytes)} / ${formatMb(download.total)}` : "")
             : download.phase === "verifying"
               ? t("verifying")
               : download.phase === "waiting"
