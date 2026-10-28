@@ -658,6 +658,14 @@ export class NavigatorService implements PositionSource {
     if (vin) this.note(`${STORAGE_NOTE}${JSON.stringify(calibration.snapshot(vin))}`);
   }
 
+  /**
+   * A simulated outage still on at a trip's start, noted again (its `on` note fell before the log): a replay withholds
+   * GNSS from the log's start (`appOutageCuts`), also in a log that ends before the outage does.
+   */
+  logSimulatedOutage(): void {
+    if (this.outage.on) this.note("sim gnss outage on");
+  }
+
   /** Online values worth keeping: written now (also every 30 s and when the navigator stops). */
   saveCalibration(): void {
     this.savePhone();

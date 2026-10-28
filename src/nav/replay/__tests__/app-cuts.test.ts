@@ -42,6 +42,24 @@ describe("appOutageCuts", () => {
     ]);
   });
 
+  test("an outage already on when the log began runs from its start", () => {
+    const cuts = appOutageCuts(
+      trip([
+        [2, "nav storage {}"],
+        [148, "sim gnss outage off: 179 s, 0.94 km, dot 118766 m from GPS (max 118802 m)"],
+        [200, "sim gnss outage on"],
+      ]),
+    );
+    expect(cuts).toEqual([
+      { fromS: 0, toS: 148 },
+      { fromS: 200, toS: Infinity },
+    ]);
+  });
+
+  test("the outage noted again at a trip's start is one cut", () => {
+    expect(appOutageCuts(trip([[2, "sim gnss outage on"]]))).toEqual([{ fromS: 2, toS: Infinity }]);
+  });
+
   test("no notes, no cuts", () => {
     expect(appOutageCuts(trip([[5, "gnss trust TRUSTED (±5 m)"]]))).toEqual([]);
   });

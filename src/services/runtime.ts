@@ -530,6 +530,7 @@ export function getRuntime(): Runtime {
   recorder.tripStarted.on(() => {
     routes.logActiveRoute();
     position.logStorage();
+    position.logSimulatedOutage();
     health.tripStarted();
   });
   let wasRecording = recorder.getSnapshot().state === "recording";

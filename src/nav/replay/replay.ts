@@ -27,17 +27,22 @@ export interface ReplayCut {
 
 /**
  * The GNSS outages simulated in the app (NavigatorService test tool), from its `sim gnss outage on`
- * / `off` notes, as cuts: replay withholds the same fixes. One still on at the end runs to the end.
+ * / `off` notes, as cuts: replay withholds the same fixes. One still on at the end runs to the end; one already on at
+ * the start (an `off` before any `on`: a log before the app noted it at a trip's start) runs from the start.
  */
 export function appOutageCuts(trip: TripLog): ReplayCut[] {
   const cuts: ReplayCut[] = [];
   let fromS: number | null = null;
+  let noted = false;
   for (const m of trip.messages) {
     const tS = (m.tUs - trip.startUs) / 1e6;
-    if (m.text === "sim gnss outage on") fromS = tS;
-    else if (m.text.startsWith("sim gnss outage off") && fromS !== null) {
-      cuts.push({ fromS, toS: tS });
+    if (m.text === "sim gnss outage on") {
+      fromS ??= tS;
+      noted = true;
+    } else if (m.text.startsWith("sim gnss outage off") && (fromS !== null || !noted)) {
+      cuts.push({ fromS: fromS ?? 0, toS: tS });
       fromS = null;
+      noted = true;
     }
   }
   if (fromS !== null) cuts.push({ fromS, toS: Infinity });

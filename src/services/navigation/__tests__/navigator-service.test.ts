@@ -231,6 +231,16 @@ test("logStorage carries a held manual position: a replay starts from the driver
   expect(seeded.manualPosition()).toEqual(manual);
 });
 
+test("a simulated outage on at a trip's start is noted again: a replay of that log withholds GNSS from its start", () => {
+  const { service, notes } = harness();
+  service.logSimulatedOutage();
+  expect(notes).not.toContain("sim gnss outage on");
+  service.setSimulatedOutage(true);
+  notes.length = 0;
+  service.logSimulatedOutage();
+  expect(notes).toEqual(["sim gnss outage on"]);
+});
+
 describe("NavigatorService", () => {
   test("asks for GNSS and IMU while running and releases them on stop", async () => {
     const { service, want } = harness();
