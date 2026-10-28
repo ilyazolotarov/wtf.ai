@@ -617,7 +617,12 @@ async function run(id: number) {
     if (j.checking !== step) markStep(j, step, `${f.size} bytes`);
     const t0 = Date.now();
     verify(new File(ROOT(), f.dest), f, f.label);
-    if (f.size >= SMALL_FILE) noteStep(`checked ${f.label} in ${Date.now() - t0} ms`);
+    if (f.size < SMALL_FILE) continue;
+    noteStep(`checked ${f.label} in ${Date.now() - t0} ms`);
+    // Back to the JS thread's run loop between big files, which frees what the check left in its autorelease pool:
+    // checked in one go, an iPhone held the 1.19 GB tiles and was killed in the 453 MB graph (iOS 27.2, 2026-10-28).
+    await letRender();
+    if (id !== runId) return;
   }
   j.checking = undefined;
   saveJob();
