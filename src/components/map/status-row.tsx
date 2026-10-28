@@ -162,8 +162,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  // The font's own line height, no tighter: below it iOS trims the line from the top and the numerals sat high in the
+  // bubble. Without Android's font padding, its line is the font's ascent and descent as on iOS: centred alike.
   speedNumber: {
-    lineHeight: 28,
+    includeFontPadding: false,
     letterSpacing: -0.8,
     fontVariant: ["tabular-nums"],
   },
