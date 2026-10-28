@@ -37,13 +37,22 @@ export function speedAt(profile: SpeedProfile, t: number): number {
   return profile[profile.length - 1][1];
 }
 
+/** The cruise's spurt, km/h over its 60: up over 4 s from 30 s in, held 10 s, down over 4 s. */
+function spurt(t: number): number {
+  return 10 * Math.min(1, Math.max(0, (t - 30) / 4), Math.max(0, (48 - t) / 4));
+}
+
 /** The next emulator connected drives this profile instead of the cycle (`wtfai://vehicle?emulators=1&cycle=…`). */
 let nextProfile: SpeedProfile | null = null;
 export function driveProfileNext(profile: SpeedProfile | null): void {
   nextProfile = profile;
 }
 
-/** Dev-only fake adapter with a repeating drive cycle: idle → accelerate → cruise → brake → stop-start → key off. */
+/**
+ * Dev-only fake adapter with a repeating drive cycle: idle → accelerate → cruise → brake → stop-start → key off. Every
+ * second cycle the cruise speeds up to 70 for about 10 s and back: past a 50 limit's margin, so the speed warning
+ * (UI-SPEC §6.4) turns on, chimes and ends again.
+ */
 export class DrivingEmulator extends Elm327Emulator {
   private timer: ReturnType<typeof setInterval> | null = null;
   private t0 = 0;
@@ -72,10 +81,12 @@ export class DrivingEmulator extends Elm327Emulator {
       this.setVehicle({ ignition: true, rpm: speedKph > 0 ? 800 + speedKph * 25 : 800, speedKph });
       return;
     }
-    const t = ((Date.now() - this.t0) / 1000) % 120;
+    const elapsed = (Date.now() - this.t0) / 1000;
+    const t = elapsed % 120;
+    const speeding = Math.floor(elapsed / 120) % 2 === 1;
     if (t < 10) this.setVehicle({ ignition: true, rpm: 800, speedKph: 0 });
     else if (t < 25) this.setVehicle({ ignition: true, rpm: 2500, speedKph: ((t - 10) / 15) * 60 });
-    else if (t < 50) this.setVehicle({ ignition: true, rpm: 1800, speedKph: 60 + 3 * Math.sin(t) });
+    else if (t < 50) this.setVehicle({ ignition: true, rpm: 1800, speedKph: 60 + (speeding ? spurt(t) : 0) + 3 * Math.sin(t) });
     else if (t < 60) this.setVehicle({ ignition: true, rpm: 1000, speedKph: 60 * (1 - (t - 50) / 10) });
     else if (t < 75) this.setVehicle({ ignition: true, rpm: 0, speedKph: 0 }); // auto stop-start
     else if (t < 95) this.setVehicle({ ignition: true, rpm: 2000, speedKph: ((t - 75) / 20) * 40 });

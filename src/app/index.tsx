@@ -20,6 +20,7 @@ import { SheetBlur } from "@/components/map/sheet-blur";
 import { StatusRow } from "@/components/map/status-row";
 import { OutageCard, SinceTrustedStrip, TrustAlertCard, trustAlertText } from "@/components/map/trust-cards";
 import { useCameraMode } from "@/components/map/use-camera-mode";
+import { useSpeedWarning } from "@/components/map/use-speed-warning";
 import { usePlaceReminder } from "@/components/map/use-place-reminder";
 import { useCompassHeading, useHeadingUp, walkingCompass } from "@/components/map/use-compass-heading";
 import { isLost, usePlacing } from "@/components/map/use-placing";
@@ -146,6 +147,7 @@ export default function HomeScreen() {
     runtime.recorder.note(`map turned ${turn}°`);
   }, [turn, runtime]);
   useVoiceGuidance(route, position?.speedMps, voiceMuted || voiceOff);
+  const speed = useSpeedWarning(position, voiceMuted || voiceOff);
   const audioOutput = useAudioOutput(route?.status === "active");
 
   // The map tour (UI-SPEC §7.7): offered once after the first map, or asked for from the Guide. Three of its stops
@@ -318,6 +320,7 @@ export default function HomeScreen() {
             >
               <StatusRow
                 nav={nav}
+                speed={speed}
                 expandable={hasDetails}
                 expanded={detailsOpen}
                 onToggle={() => {

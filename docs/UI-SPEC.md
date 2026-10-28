@@ -238,7 +238,7 @@ One small component each; the screen only places them and wires their state. Car
 
 | Position | Component | Content |
 | --- | --- | --- |
-| Top | `StatusRow` | The status pill: the trust state in words, coloured by it ("Position trusted", "GPS looks spoofed", "GPS is back — verifying", "No GPS signal", and "Approximate location" when the only position is a Wi-Fi/cell one), the source ("GPS", "Car sensors", "Phone sensors only", "Verifying GPS", "Set on the map"); user-facing text uses GPS rather than GNSS. The speed in km/h beside it. A tap unfolds the details: the alert text and the last trusted fix's strip, the outage card and "Cut GPS", the manual position's chip |
+| Top | `StatusRow` | The status pill: the trust state in words, coloured by it ("Position trusted", "GPS looks spoofed", "GPS is back" (the source under it says "Verifying GPS"), "No GPS signal", and "Approximate location" when the only position is a Wi-Fi/cell one), the source ("GPS", "Car sensors", "Phone sensors only", "Verifying GPS", "Set on the map"); user-facing text uses GPS rather than GNSS. The speed in km/h beside it, with the limit's sign (§6.4). A tap unfolds the details: the alert text and the last trusted fix's strip, the outage card and "Cut GPS", the manual position's chip |
 | Top | `SinceTrustedStrip` (`trust-cards.tsx`) | Unfolded under the trust alert, while GNSS isn't trusted, from a minute after the last trusted fix: "Last trusted GPS: 4 min ago, 2.3 km back" |
 | Top | `RouteBanner` | Only with a route (below) |
 | Top | `trust-cards.tsx`, `placing-cards.tsx` | Trust alert, simulated outage, the parked-pose question, placing (`usePlacing`), "Are you still here?", the manual chip |
@@ -282,6 +282,46 @@ One small component each; the screen only places them and wires their state. Car
   has it; set on the map {age} ago; or "set your position on the map while the car stands" with **Set position**),
   then "follow the route exactly: the app keeps track of the car by its turns, and a turn off the route loses it".
   The route is planned only on **I'll follow the route**; its ✕ drops it.
+
+### 6.4 Speed limit (`src/nav/speed/`, `speed-limit-source.ts`, `use-speed-warning.ts`)
+
+- **The sign:** the road sign drivers know (white disc, red ring #D52B1E, the number in black; the disc #F2F0EC in the
+  dark scheme so it doesn't glare), 44 pt, at the left end of the speed bubble, which widens for it; it keeps its size
+  at any text size (`SpeedLimitSign`). No sign: the bubble as before. The speed has no unit under it (all the app's
+  speeds are km/h; its accessibility label says it): the status pill beside it needs the width.
+- **The limit** (`edgeLimit`): the edge's OSM `maxspeed` (MAPMATCH-SPEC §4.3), else Ukraine's default for it: 20 in a
+  living street, 130 on a motorway, 50 `urban`, 90 elsewhere. None on driveways and parking aisles (`minorService`),
+  on a graph without speed attributes, and on an untagged one-way trunk or primary road outside settlements (not
+  links or roundabouts): a dual carriageway's side (110) or a split around a village or works (90, 50); a sign too high
+  warns too late, one too low warns a legal driver, and dual carriageways are almost all tagged (`UA:trunk` is a
+  tagged 110). Without the defaults the sign would be rare: OSM 2026-10 tags 90 % of Kyiv's
+  primary roads but 44–50 % of a rural oblast's, 2–10 % of its minor roads; in towns the tagged limits are 50 or lower
+  almost everywhere, so a default 50 seldom turns the speed red where it shouldn't.
+- **Only where it can be stood behind** (`agreedLimit`): the roads holding ≥ 80 % of the belief must have the same
+  limit, else no sign (a junction, a parallel road, map matching torn between two; off-road weight counts against).
+  The belief: with map matching, the particles' weight per road (`ParticleFilter.roadWeights`, the navigator's
+  `mapMatch.roads`); for a trusted GNSS fix, the driver's placing or phone-only mode, the roads within 2.5 × accuracy
+  (25–60 m), weighted by a Gaussian of the fix's accuracy (≥ 10 m), moving (≥ 3 m/s) only those within 35° of the
+  course and not against a one-way, and at 40 km/h or more no service roads (one along an avenue 15 m off would hold
+  a quarter of the weight) (`snapCandidates`). A parallel road with another limit as close still leaves no sign: a
+  fix can't tell which lane is whose. A dead-reckoned dot without map matching, a refused or held fix, and a dot with
+  other roads beside it get no sign. A re-publish of the same position (a trust change, the outage card, the pose
+  question) keeps the map matching roads it came with.
+- **Held** (`LimitHold`): a sign appears after 1 s; another limit, or none, replaces it after holding 2 s.
+- `SpeedLimitSource` (the navigator service, `set`) reads the active region's graph on a reader of its own (16 tiles,
+  its frame around the car, moved past 20 km), opened again when the active graph changes, and puts the result in
+  `PositionEstimate.speedLimit`; `speed limit <kph> (OSM|default)` / `none` notes in the trip log.
+- **Too fast** (`SpeedWarning`): only past the driver's margin over the limit (Settings: +10, **+15**, +20 km/h): fines
+  start at more than 20 km/h over, so up to the margin nothing changes, no colour and no sound. Past it for 1.5 s the
+  speed shows red (`bad`, a 44 pt pill inside the bubble) and one chime sounds (`assets/sounds/speed-warning.mp3`, two
+  falling notes at −17 LUFS, `tools/voice/speed-warning.sh`; ahead of waiting voice phrases; said "Slow down" if it
+  won't play; not with the voice muted or at 0); it ends 3 km/h back under the line, or after 30 s without a sign
+  (not red meanwhile: a sign gone for a moment and back finds the warning still on, no second chime), and only then
+  may chime again. The speed compared is the one shown (rounded km/h). `speed warning: …` note in the trip log.
+- **Screens:** the phone's map only. The car's screens (CarPlay, Android Auto) show neither the sign nor the warning
+  yet; when they do, they call the same hook: one warning, one chime, however many screens show it.
+- Must not drift: no amber or other in-between state (tried in the design, dropped: the driver is fine until the
+  margin); no sign rather than a wrong one.
 
 ## 7. Pages
 
@@ -337,7 +377,10 @@ background app's network, so a whole country used to fail and start from zero un
 
 ### 7.6 `settings`
 
-Language (System / English / Українська); Appearance (System / Light / Dark); Voice volume (ROUTING-SPEC §8.5); Car:
+Language (System / English / Українська); Appearance (System / Light / Dark); Voice volume (ROUTING-SPEC §8.5); Speed
+(§6.4): **Show the speed limit** (on by default; where limits come from, Ukraine's general limits where none is
+recorded, that road signs come first) and, with it, **Speed warning threshold** +10 / +15 / +20 km/h (fines start
+at more than 20 over; kv-store `speed.preferences`); Car:
 **Precise speed from the car's data bus** (the wheels; on by default; VEHICLE-LINK-SPEC §16.3) and, with it, **Detect
 turns using the car's data bus (experimental)** (NAVIGATOR-SPEC §5.4) and **Send anonymous car reports** (on by default;
 VEHICLE-LINK-SPEC §16.5), each with a line on what it does (turns: requires a compatible car and adapter, and the Car

@@ -66,6 +66,10 @@ export const Colors = {
     puckEdge: "rgba(0,0,0,0.9)",
     /** Pins and marks the driver puts on the map (a dropped pin, the placing pin, the placed position): the accent. */
     mapPin: "#4371B7",
+    /** The speed limit sign (UI-SPEC §6.4): a road sign's white disc and red ring, whatever the theme. */
+    signFill: "#FFFFFF",
+    signRing: "#D52B1E",
+    signText: "#1D1C1A",
     // Legacy names used by dev-only screens (trips, ELM terminal, device list).
     background: "#F5F4F1",
     backgroundElement: "#FFFFFF",
@@ -111,6 +115,10 @@ export const Colors = {
     puckEdge: "#000000",
     // The trusted dot's deep blue: the light accent read pale and washed out on the dark map.
     mapPin: "#3D6BFF",
+    // The sign's white dimmed, so it doesn't glare at night.
+    signFill: "#F2F0EC",
+    signRing: "#D52B1E",
+    signText: "#1D1C1A",
     background: "#121211",
     backgroundElement: "#232220",
     backgroundSelected: "#2C2B29",

@@ -281,6 +281,8 @@ export interface MapMatchEstimate {
     /** An off-road cluster: the nearest road it could be driving along (position/puck.ts draws it there at speed). */
     road?: { lat: number; lon: number; headingRad: number };
   }[];
+  /** The weight on each road, heaviest first (`ParticleFilter.roadWeights`): the speed limit's (UI-SPEC §6.4). */
+  roads: { edge: EdgeId | null; weight: number }[];
   particles: number;
   updateMs: number;
 }
@@ -1599,6 +1601,7 @@ export class Navigator {
     const out = pf.output();
     return {
       ...out,
+      roads: pf.roadWeights(),
       clusters: out.clusters.map(({ e, n, ...c }, k) => {
         // An off-road hypothesis: the road it could be on (the dot at speed, position/puck.ts).
         const prefer = this.snapEdge === null ? null : { edge: this.snapEdge, slackM: ROAD_SNAP_KEEP_M };

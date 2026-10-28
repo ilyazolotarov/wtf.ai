@@ -25,6 +25,7 @@ import type { EngineState, SpeedSample, VehicleLinkSnapshot } from "@/obd/types"
 import { UNKNOWN_CAR } from "@/obd/types";
 import { isSatelliteRecord, mapFixToPosition } from "@/services/position/gnss-position-source";
 import type { RoadGraphSource } from "@/services/offline-map/road-graph-file";
+import { SpeedLimitSource, type LimitGraph, type RoadWeights } from "@/services/navigation/speed-limit-source";
 import type { PositionSource } from "@/services/position/position-source";
 import type { SensorService } from "@/services/sensor-capture/sensor-service";
 import {
@@ -193,6 +194,8 @@ export interface NavigatorServiceDeps {
   observer?: NavigatorObserver;
   /** A reader of the active region's road graph of its own, for phone-only mode (§9.6); null: none. */
   openPhoneGraph?(): { key: string; graph: PhoneGraph; close(): void } | null;
+  /** A reader of the active region's road graph for the speed limit (UI-SPEC §6.4); without it, no limits. */
+  openLimitGraph?(): LimitGraph | null;
   /** The CAN wheel samples (CAN primary), for the navigator's turning with `setWheelYaw` (NAVIGATOR-SPEC §5.4). */
   canSpeed?: { onSample(listener: (s: CanSpeedSample) => void): () => void };
   /**
@@ -331,12 +334,26 @@ export class NavigatorService implements PositionSource {
   private testDot: PositionEstimate | null = null;
 
   private readonly clock: ServiceClock;
+  /** The speed limit for each published position (UI-SPEC §6.4). */
+  private readonly limits: SpeedLimitSource | null;
+  /**
+   * Map matching's roads and the position they came with: a re-publish of that position (a trust change, the outage
+   * card, the pose question) keeps them, instead of reading as a dot without map matching and taking the sign away.
+   */
+  private lastRoads: { timestamp: number; roads: RoadWeights } | null = null;
 
   constructor(deps: NavigatorServiceDeps) {
     this.deps = deps;
     this.clock = deps.clock ?? SYSTEM_CLOCK;
     this.held = new ManualHold(deps.calibration, () => this.clock.nowMs());
     this.timing = new MapMatchTiming(() => this.clock.nowMs());
+    this.limits = deps.openLimitGraph
+      ? new SpeedLimitSource({
+          open: deps.openLimitGraph,
+          activeKey: () => this.deps.roadGraph?.current()?.key ?? null,
+          note: (text) => this.note(text),
+        })
+      : null;
   }
 
   private get manual() {
@@ -732,6 +749,8 @@ export class NavigatorService implements PositionSource {
     this.flush(Infinity);
     this.saveCalibration();
     this.closePhone();
+    this.limits?.close();
+    this.lastRoads = null;
     this.noteDrive();
     this.unsubscribers.forEach((u) => u());
     this.unsubscribers = [];
@@ -1361,6 +1380,7 @@ export class NavigatorService implements PositionSource {
       ...(this.lastSatelliteFix ? { satelliteFix: rawOf(this.lastSatelliteFix) } : {}),
       },
       nowUs - estimate.tUs,
+      mm && this.graph ? { key: this.graph.key, weights: mm.roads } : undefined,
     );
   }
 
@@ -1381,14 +1401,21 @@ export class NavigatorService implements PositionSource {
     this.deps.note?.(text);
   }
 
-  /** `behindUs`: how far the navigator's state lags now (the drawn position is extrapolated over it). */
-  private set(position: PositionEstimate, behindUs = 0): void {
+  /**
+   * `behindUs`: how far the navigator's state lags now (the drawn position is extrapolated over it). `roads`: map
+   * matching's belief in each road, for the speed limit.
+   */
+  private set(position: PositionEstimate, behindUs = 0, roads?: RoadWeights): void {
     this.drainUpdateTimes();
-    const { simulatedOutage: _, poseQuestion: _q, manual: _m, ...rest } = position;
+    const { simulatedOutage: _, poseQuestion: _q, manual: _m, speedLimit: _l, ...rest } = position;
     const outage = this.outage.info(rest, this.clock.nowMs(), this.nav?.stats.obdDistanceM);
     const m = this.manual;
+    if (roads) this.lastRoads = { timestamp: rest.timestamp, roads };
+    const believed = roads ?? (this.lastRoads?.timestamp === rest.timestamp ? this.lastRoads.roads : undefined);
+    const speedLimit = this.limits?.at(rest, this.clock.nowMs(), believed);
     this.position = {
       ...rest,
+      ...(speedLimit ? { speedLimit } : {}),
       ...(outage ? { simulatedOutage: outage } : {}),
       ...(this.shownPoseQuestion(rest) ? { poseQuestion: this.poseQuestion! } : {}),
       ...(m ? { manual: { placedAt: m.placedAt, confirmedAt: m.confirmedAt, asking: this.held.asking() } } : {}),

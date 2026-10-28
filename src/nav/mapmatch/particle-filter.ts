@@ -1043,6 +1043,28 @@ export class ParticleFilter {
     return w;
   }
 
+  /**
+   * The weight on each road, heaviest first, normalized to 1; `edge` null: off the roads. Past `max` roads the rest is
+   * one entry without a road, so nobody reads a share of the weight as more than it is (the speed limit, UI-SPEC §6.4).
+   */
+  roadWeights(max = 16): { edge: EdgeId | null; weight: number }[] {
+    if (!this.active) return [];
+    const p = this.p;
+    const byEdge = new Map<EdgeId | null, number>();
+    let total = 0;
+    for (let i = 0; i < p.size; i++) {
+      const w = Math.exp(p.logw[i]);
+      const edge = p.offRoad[i] ? null : p.edge[i];
+      byEdge.set(edge, (byEdge.get(edge) ?? 0) + w);
+      total += w;
+    }
+    if (!(total > 0)) return [];
+    const all = [...byEdge].map(([edge, w]) => ({ edge, weight: w / total })).sort((a, b) => b.weight - a.weight);
+    if (all.length <= max) return all;
+    const rest = all.slice(max - 1).reduce((s, r) => s + r.weight, 0);
+    return [...all.slice(0, max - 1), { edge: null, weight: rest }];
+  }
+
   /** True when some on-road particle satisfies `test` (replay: is any particle on the true road?). */
   someParticle(test: (edge: EdgeId, offsetM: number) => boolean): boolean {
     const p = this.p;

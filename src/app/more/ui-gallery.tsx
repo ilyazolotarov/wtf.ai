@@ -35,6 +35,14 @@ import type { PositionEstimate, TrustState } from "@/nav/position/types";
 import type { GuidanceState, GuidanceStep } from "@/nav/routing/guidance";
 import type { Maneuver } from "@/nav/routing/maneuvers";
 import type { RouteSnapshot } from "@/services/navigation/route-service";
+import type { SpeedShown } from "@/components/map/use-speed-warning";
+
+/** A status row's speed without a limit. */
+const plainSpeed = (p: PositionEstimate | null): SpeedShown => ({
+  speedKph: p?.speedMps === undefined ? undefined : Math.round(p.speedMps * 3.6),
+  limitKph: undefined,
+  over: false,
+});
 
 /**
  * Every panel the map shows only in some state, drawn at once with made-up data (Developer → UI gallery): the way to
@@ -62,6 +70,16 @@ export default function UiGalleryScreen() {
       palette,
       t,
     );
+
+  // The sign widens the speed bubble: beside it the longest status, to see it wrap and shrink (spoofed without an
+  // adapter: in Ukrainian the longest title and the longest source).
+  const longestStatus = nav("UNTRUSTED", "off");
+  const speeds: [string, SpeedShown][] = [
+    [label("under the limit", "у межах обмеження"), { speedKph: 47, limitKph: 50, over: false }],
+    [label("within the margin", "у межах допуску"), { speedKph: 62, limitKph: 50, over: false }],
+    [label("over by the margin", "понад допуск"), { speedKph: 67, limitKph: 50, over: true }],
+    [label("three-digit limit", "тризначне обмеження"), { speedKph: 128, limitKph: 110, over: true }],
+  ];
 
   const statuses: [string, ReturnType<typeof nav>][] = [
     [label("trusted", "надійна позиція"), nav("TRUSTED", "on")],
@@ -94,10 +112,19 @@ export default function UiGalleryScreen() {
           <Item key={name} name={name}>
             <StatusRow
               nav={status}
+              speed={plainSpeed(status.position)}
               expandable
               expanded={false}
               onToggle={none}
             />
+          </Item>
+        ))}
+      </Group>
+
+      <Group title={label("Speed limit", "Обмеження швидкості")}>
+        {speeds.map(([name, speed]) => (
+          <Item key={name} name={name}>
+            <StatusRow nav={longestStatus} speed={speed} expandable expanded={false} onToggle={none} />
           </Item>
         ))}
       </Group>

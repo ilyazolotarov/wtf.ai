@@ -89,6 +89,19 @@ export function sayOnSpeaker(phrases: Phrase[], lang: VoiceLang): void {
   say(phrases, lang, undefined, canPlayOnSpeaker);
 }
 
+/** Rendered by tools/voice/speed-warning.sh. */
+const SPEED_WARNING_CLIP: number = require("../../../assets/sounds/speed-warning.mp3");
+
+/**
+ * The speed warning's chime (UI-SPEC §6.4), ahead of anything waiting to be said: a turn can wait a second. A chime
+ * that won't play is said instead (`fallback`, in `lang`).
+ */
+export function playSpeedWarning(fallback: string, lang: VoiceLang): void {
+  queue.unshift({ clip: SPEED_WARNING_CLIP, id: "speed-warning", text: fallback, language: languageOf(lang) });
+  note(`voice chime speed-warning${busy ? ", ahead of what waits" : ""}`);
+  if (!busy) next();
+}
+
 function say(phrases: Phrase[], lang: VoiceLang, gain: number | undefined, speaker: boolean): void {
   const language = languageOf(lang);
   const clips = phrases.map((p) => VOICE_CLIPS[lang]?.[p.id]);

@@ -79,6 +79,8 @@ export interface DevSettings {
 const DEV_SETTINGS_KEY = "dev.settings";
 /** Tiles the phone-only navigator's own graph reader keeps decoded (a few km around the car). */
 const PHONE_GRAPH_CACHE_TILES = 64;
+/** Tiles the speed limit's graph reader keeps decoded: the few under the car (UI-SPEC §6.4). */
+const LIMIT_GRAPH_CACHE_TILES = 16;
 /** How long after a start the trip service has taken its types. */
 const TRIP_SERVICE_TYPES_CHECK_MS = 2000;
 
@@ -406,6 +408,7 @@ export function getRuntime(): Runtime {
     canSpeed: canSpeed,
     // Phone-only mode reads the graph in a frame of its own (NAVIGATOR-SPEC §9.6).
     openPhoneGraph: () => openActiveRoadGraph(PHONE_GRAPH_CACHE_TILES),
+    openLimitGraph: () => openActiveRoadGraph(LIMIT_GRAPH_CACHE_TILES),
     permission: { get: Location.getForegroundPermissionsAsync, request: Location.requestForegroundPermissionsAsync },
     // iOS relaunches the app for location "Always" a few hundred metres into a drive (VEHICLE-LINK-SPEC §11).
     onTheWay: {

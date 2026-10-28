@@ -13,6 +13,7 @@ import {
     Segmented,
 } from "@/components/screens/screen-ui";
 import { VoiceVolumeSection } from "@/components/route/voice-volume-section";
+import { SpeedSettingsSection } from "@/components/map/speed-settings-section";
 import { SwitchRow } from "@/components/screens/setting-rows";
 import { WakeWithCar } from "@/components/vehicle/wake-with-car";
 import { privacyPolicyUrl, STORE_BUILD, SUPPORT_EMAIL } from "@/config/distribution";
@@ -91,6 +92,7 @@ export default function SettingsScreen() {
         />
       </View>
       <VoiceVolumeSection />
+      <SpeedSettingsSection />
       {/* The car's own sensors through the adapter (VEHICLE-LINK-SPEC §16.3, NAVIGATOR-SPEC §5.4). */}
       <View style={styles.group}>
         <SectionLabel>{t("vehicle")}</SectionLabel>

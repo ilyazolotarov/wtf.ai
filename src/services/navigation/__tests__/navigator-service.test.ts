@@ -82,6 +82,8 @@ function harness(
     store?: ReturnType<typeof memoryStore>;
     roadGraph?: RoadGraphSource;
     phoneGraph?: () => TiledRoadGraph;
+    /** The speed limit's own reader on this graph, under the active graph's key (UI-SPEC §6.4). */
+    limitGraph?: { key: string; graph: () => TiledRoadGraph };
     /** The uptime the app starts at (a later session of the same drive). */
     startUs?: number;
     /** iOS started the app on the way (NAVIGATOR-SPEC §6.1). */
@@ -119,6 +121,7 @@ function harness(
     canSpeed: { onSample: (l) => wheels.on(l) },
     onTheWay: options.onTheWay,
     ...(options.phoneGraph ? { openPhoneGraph: () => ({ key: "fixture", graph: options.phoneGraph!(), close: () => {} }) } : {}),
+    ...(options.limitGraph ? { openLimitGraph: () => ({ key: options.limitGraph!.key, graph: options.limitGraph!.graph(), close: () => {} }) } : {}),
   });
 
   /** Deliver a trip the way the phone does: IMU in 100 ms batches, OBD live, fixes 50 ms late. */
@@ -1501,6 +1504,26 @@ describe("map matching", () => {
     expect(debug.roadPosition!.accepted).toBeGreaterThanOrEqual(1);
     engine.emit("engine-off", now());
     expect(notes.find((n) => n.startsWith("mm loop closed:"))).toMatch(/^mm loop closed: road heading \d+ \(0 refused\), road position \d+ \(0 refused\)$/);
+    service.stop();
+  });
+
+  test("the speed limit comes from the roads map matching believes in; a re-publish of the dot keeps it", async () => {
+    const drive = syntheticDrive({ segments: JUNCTION_DRIVE, origin: GRAPH_ORIGIN, startHeadingRad: Math.PI / 2, gnss: "clean", obdScale: 0.99 });
+    const limitGraph = { key: "net:1", graph: () => new TiledRoadGraph(bufferByteSource(new Uint8Array(GRAPH_FILE)), new LocalFrame(GRAPH_ORIGIN)) };
+    const { service, play, notes } = harness({ roadGraph: fixtureGraphSource(), limitGraph });
+    await service.start();
+    play(drive, { withoutGnssFromS: 100 });
+    const p = service.getSnapshot()!;
+    expect(p).toMatchObject({ source: "dr", mapMatch: "tracking" });
+    expect(p.speedLimit?.kph).toBeGreaterThan(0);
+    expect(notes).toContainEqual(expect.stringMatching(/^speed limit \d+ \((OSM|default)\)$/));
+
+    // The same dot published again with no navigator update between (the outage card on, and off 3 s later): read as
+    // a dot without map matching, the sign would go once its 2 s had passed.
+    service.setSimulatedOutage(true);
+    jest.setSystemTime(Date.now() + 3000);
+    service.setSimulatedOutage(false);
+    expect(service.getSnapshot()?.speedLimit).toEqual(p.speedLimit);
     service.stop();
   });
 

@@ -1,4 +1,5 @@
 import type { MapMatchState } from "../mapmatch/particle-filter";
+import type { SpeedLimit } from "../speed/speed-limit";
 
 export type TrustState = "TRUSTED" | "UNTRUSTED" | "REACQUIRING" | "NO_FIX";
 
@@ -51,6 +52,11 @@ export interface PositionEstimate {
   phoneOnly?: boolean;
   /** Driven since the driver put the car on the map (or confirmed the parked pose), m (NAVIGATOR-SPEC §6.2). */
   sinceDriverM?: number;
+  /**
+   * The speed limit where the car is (UI-SPEC §6.4): absent when the roads it may be on don't agree on one, the road
+   * has none we know, or there is no road graph.
+   */
+  speedLimit?: SpeedLimit;
   /** Other roads the car may be on while map matching is ambiguous, heaviest first. */
   alternatives?: { lat: number; lon: number; weight: number }[];
   simulatedOutage?: SimulatedOutage;
