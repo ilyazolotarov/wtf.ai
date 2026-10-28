@@ -30,6 +30,34 @@ describe("parseGeoUri", () => {
     expect(parseGeoUri("google.navigation:ll=49.84,24.03")).toEqual({ point: { lat: 49.84, lon: 24.03 }, query: null });
   });
 
+  it("reads Waze's links: a taxi driver app's navigate button, or pasted from Waze's Share", () => {
+    expect(parseGeoUri("waze://?ll=50.45012,30.52341&navigate=yes")).toEqual({ point: { lat: 50.45012, lon: 30.52341 }, query: null });
+    expect(parseGeoUri("waze://?q=Khreshchatyk+22&navigate=yes")).toEqual({ point: null, query: "Khreshchatyk 22" });
+    expect(parseGeoUri("https://www.waze.com/ul?ll=49.84%2C24.03&navigate=yes&zoom=17")).toEqual({
+      point: { lat: 49.84, lon: 24.03 },
+      query: null,
+    });
+    expect(parseGeoUri("https://ul.waze.com/ul?ll=49.84%2C24.03&q=Rynok+Square&utm_source=share")).toEqual({
+      point: { lat: 49.84, lon: 24.03 },
+      query: "Rynok Square",
+    });
+    expect(parseGeoUri("waze://?ll=0,0&navigate=yes")).toBeNull();
+    expect(parseGeoUri("https://waze.com.evil.example/ul?ll=49.84,24.03")).toBeNull();
+  });
+
+  it("reads 2GIS's route links, longitude first", () => {
+    expect(parseGeoUri("dgis://2gis.ru/routeSearch/rsType/car/to/30.52341,50.45012")).toEqual({
+      point: { lat: 50.45012, lon: 30.52341 },
+      query: null,
+    });
+    expect(parseGeoUri("dgis://2gis.ua/routeSearch/rsType/car/from/30.4,50.4/to/24.03,49.84")).toEqual({
+      point: { lat: 49.84, lon: 24.03 },
+      query: null,
+    });
+    expect(parseGeoUri("dgis://2gis.ru/routeSearch/rsType/car/to/")).toBeNull();
+    expect(parseGeoUri("dgis://2gis.ru/routeSearch/rsType/car/to/200,50")).toBeNull();
+  });
+
   it("reads Apple Maps' links, pasted from its Share button", () => {
     expect(
       parseGeoUri(

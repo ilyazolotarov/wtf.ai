@@ -126,7 +126,7 @@
         {
           "action": "VIEW",
           "category": ["DEFAULT", "BROWSABLE"],
-          "data": [{ "scheme": "geo" }, { "scheme": "google.navigation" }]
+          "data": [{ "scheme": "geo" }, { "scheme": "google.navigation" }, { "scheme": "waze" }, { "scheme": "dgis" }]
         }
       ],
       "package": "ai.wtf.navigator"

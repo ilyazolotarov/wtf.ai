@@ -3,8 +3,10 @@ import type { Coordinate } from "@/nav/geo";
 /**
  * A place another app or the car's assistant asks for (SEARCH-SPEC §4.6): a `geo:` URI (RFC 5870 and Android's `?q=`:
  * `geo:50.45,30.52`, `geo:0,0?q=Khreshchatyk+22`, `geo:50.45,30.52?q=Name`, `geo:0,0?q=50.45,30.52(Name)`), Google
- * Maps' `google.navigation:q=…`, or an Apple Maps link pasted (`https://maps.apple.com/place?coordinate=…&name=…`,
- * the older `?ll=…&q=…`, `/directions?destination=…`, `maps://?q=…`).
+ * Maps' `google.navigation:q=…`, Waze's `waze://?ll=…&navigate=yes` and 2GIS's `dgis://2gis.ru/routeSearch/…/to/lon,lat`
+ * (what a taxi driver app opens those navigators with), or an Apple Maps or Waze link pasted
+ * (`https://maps.apple.com/place?coordinate=…&name=…`, the older `?ll=…&q=…`, `/directions?destination=…`,
+ * `maps://?q=…`; `https://waze.com/ul?ll=…`).
  */
 export interface GeoRequest {
   /** The point, when the link gives one. */
@@ -17,6 +19,10 @@ const NUMBER = String.raw`[-+]?\d+(?:\.\d+)?`;
 const SCHEME = /^(geo|google\.navigation):(.*)$/is;
 // Apple Maps: its web links (the path `place`, `directions`, `search`, or none) and its own scheme.
 const APPLE_MAPS = /^(?:https?:\/\/maps\.apple\.com|maps:(?:\/\/)?)(?:\/[a-z-]*)?\/?(?:\?([^#]*))?(?:#.*)?$/is;
+// Waze: its own scheme and its web links (`waze.com/ul`, `www.`, `ul.waze.com`), parameters only.
+const WAZE = /^(?:waze:\/\/(?:ul)?|https?:\/\/(?:www\.|ul\.)?waze\.com\/ul)\/?\?([^#]*)(?:#.*)?$/is;
+// 2GIS: a route's destination, longitude first (`/from/…` may come before it).
+const DGIS = /^dgis:\/\/2gis\.[a-z.]+\/routeSearch\/(?:[^?#]*\/)?to\/([^/?#]+)/is;
 // "50.45,30.52" with an optional "(Name)", as a query.
 const LABELLED_POINT = new RegExp(String.raw`^(${NUMBER})\s*,\s*(${NUMBER})\s*(?:\((.*)\))?$`, "s");
 const PATH_POINT = new RegExp(String.raw`^(${NUMBER}),(${NUMBER})(?:,${NUMBER})?(?:;.*)?$`, "s");
@@ -24,7 +30,7 @@ const PATH_POINT = new RegExp(String.raw`^(${NUMBER}),(${NUMBER})(?:,${NUMBER})?
 /** What the link asks for; null when it is not one, or asks for nothing. */
 export function parseGeoUri(uri: string): GeoRequest | null {
   const m = SCHEME.exec(uri.trim());
-  if (!m) return parseAppleMaps(uri.trim());
+  if (!m) return parseAppleMaps(uri.trim()) ?? parseWaze(uri.trim()) ?? parse2Gis(uri.trim());
   const geo = m[1].toLowerCase() === "geo";
   const rest = m[2];
   const mark = rest.indexOf("?");
@@ -71,6 +77,26 @@ function parseAppleMaps(uri: string): GeoRequest | null {
   const query = point ? (name ?? address) : (address ?? name);
   if (!point && !query) return null;
   return { point, query };
+}
+
+/** A Waze link: the point `ll`, named by `q`; without one, `q`'s words. `navigate`, `zoom` and `utm_*` are ignored. */
+function parseWaze(uri: string): GeoRequest | null {
+  const m = WAZE.exec(uri);
+  if (!m) return null;
+  const params = parameters(m[1]);
+  const ll = LABELLED_POINT.exec(params.get("ll")?.trim() ?? "");
+  const point = ll ? checked(Number(ll[1]), Number(ll[2])) : null;
+  const query = words(params.get("q") ?? "");
+  if (!point && !query) return null;
+  return { point, query };
+}
+
+/** A 2GIS route link: its destination, `lon,lat`; the start and the means of travel are ignored. */
+function parse2Gis(uri: string): GeoRequest | null {
+  const m = DGIS.exec(uri);
+  const p = m ? LABELLED_POINT.exec(decode(m[1]).trim()) : null;
+  const point = p ? checked(Number(p[2]), Number(p[1])) : null;
+  return point ? { point, query: null } : null;
 }
 
 function pathPoint(path: string): Coordinate | null {

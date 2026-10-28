@@ -145,6 +145,14 @@ for or `lat,lon(name)`; `0,0` is no point) or Google Maps' `google.navigation:q=
 link's name and is its one result; words are searched as typed. `mode`, `avoid` and `intent` are ignored: the app
 routes by car, and a link's place replaces the destination.
 
+Taxi driver apps open a navigator from a fixed list of their own, so the app is reached only through a link that names
+no app: Uklon opens Waze with `waze://?ll=lat,lon&navigate=yes` and 2GIS with
+`dgis://2gis.ru/routeSearch/rsType/car/to/lon,lat` (longitude first; a `/from/…` before it is ignored), and Android
+asks which app opens it. Waze's `q=` is words to search, or the point's name with `ll=`; `navigate`, `zoom` and `utm_*`
+are ignored. Uklon's Waze integration (its "automatic return" after the trip) talks to Waze's own service instead and
+never reaches the app; Bolt names each navigator's package, so it never does either. The same Waze parameters are read
+from its web links pasted (`https://waze.com/ul?…`, `www.`, `ul.waze.com`); a `waze.com/ul/h…` short link is not read.
+
 Apple Maps links, pasted into the search (Apple Maps' Share → Copy; iOS opens them in Apple Maps only, so they never
 come as links): `https://maps.apple.com/place?…`, `/directions?…`, `/search?…`, the older `https://maps.apple.com/?…`
 and `maps://?…`. The point is `coordinate`, `ll`, or a `destination`, `daddr` or `q` of coordinates, named by `name` or
@@ -166,11 +174,12 @@ POIs: 97 MB): queries 9–25 ms. The phone is several times slower; an oblast is
   direction. Start guidance routes to it (`id` `search:<key>`, the name shown on the banner). Coordinates (§4.5) are one
   result, opened at once when pasted (or on the keyboard's Search): named by the house within 75 m (as a dropped pin),
   else "Selected location", then its settlement and the coordinates; the route goes to the exact point
-  (`id` `point:<lat>,<lon>`). A `geo:` or Apple Maps link pasted reads as its place or its words (§4.6).
-- **Links** (`src/app/+native-intent.tsx`): Android offers the app for `geo:` and `google.navigation:` links
-  (`app.json` intent filter: view, browsable), iOS opens it for them (URL types added by `modules/car-play/app.plugin.js`;
-  iOS asks the first time); the route screen opens over the map (the router's anchor) with the link's point (its
-  coordinates) or words in the field, searched.
+  (`id` `point:<lat>,<lon>`). A `geo:`, Apple Maps or Waze link pasted reads as its place or its words (§4.6).
+- **Links** (`src/app/+native-intent.tsx`): Android offers the app for `geo:`, `google.navigation:`, `waze:` and
+  `dgis:` links (`app.json` intent filter: view, browsable), iOS opens it for `geo:` and `google.navigation:` (URL types
+  added by `modules/car-play/app.plugin.js`; iOS asks the first time). Not `waze:` or `dgis:` on iOS: it has no chooser,
+  and with the navigator installed either app may get the link. The route screen opens over the map (the router's
+  anchor) with the link's point (its coordinates) or words in the field, searched.
 - **The car's search** (ANDROID-AUTO-SPEC §3, §4; `findPlaces` in `src/components/route/place-search.ts`): the same
   index on each change of the car's field, with no delay (the car's keyboard is slow), a point as one result, the
   built-in cities without an index. Each result shows what and where it is, then its distance.
