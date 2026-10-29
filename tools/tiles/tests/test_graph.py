@@ -443,12 +443,48 @@ def test_controls_mark_junctions_and_crossings(controls):
 def test_urban_maxspeed_and_surface(controls):
     g = controls
     edges = {(int(g.node_ids[a]), int(g.node_ids[b])): i for i, (a, b) in enumerate(zip(g.edge_from, g.edge_to))}
-    assert g.edge_flags[edges[(3, 5)]] & URBAN  # middle 400 m from the village point
-    assert not g.edge_flags[edges[(1, 3)]] & URBAN  # middle 850 m from it
+    assert g.edge_flags[edges[(3, 5)]] & URBAN  # its quarter points 550, 400 and 250 m from the village point
+    assert not g.edge_flags[edges[(1, 3)]] & URBAN  # 925, 850 and 775 m from it
     assert g.edge_maxspeed[edges[(3, 5)]] == 90 and g.edge_maxspeed[edges[(8, 1)]] == 0
     assert g.edge_flags[edges[(1, 7)]] & UNPAVED
     assert all(f & ATTRIBUTES for f in g.edge_flags.tolist())
     assert g.stats["signal_nodes"] == 1 and g.stats["signal_edges"] == 1 and g.stats["stop_nodes"] == 1
+
+
+# A trunk tagged 110 end to end through a village's residential landuse (−600…600 × −300…300, no place point);
+# a secondary tagged 80 across it; a tertiary 50 m beside it. The village's 1 km of trunk: the settlement's 50; the
+# 80 is a sign, kept; the road beside the homes is not the village's.
+THROUGH_NODES = {
+    1: (_m(-3000, 0), {}), 2: (_m(-500, 0), {}), 3: (_m(500, 0), {}), 4: (_m(3000, 0), {}),
+    21: (_m(100, -200), {}), 22: (_m(100, 200), {}), 41: (_m(-600, 350), {}), 42: (_m(600, 350), {}),
+    31: (_m(-600, -300), {}), 32: (_m(600, -300), {}), 33: (_m(600, 300), {}), 34: (_m(-600, 300), {}),
+}
+THROUGH_WAYS = [
+    (501, [1, 2], {"highway": "trunk", "maxspeed": "110"}),
+    (502, [2, 3], {"highway": "trunk", "maxspeed": "110"}),
+    (503, [3, 4], {"highway": "trunk", "maxspeed": "110"}),
+    (504, [21, 22], {"highway": "secondary", "maxspeed": "80"}),
+    (505, [41, 42], {"highway": "tertiary"}),
+    (510, [31, 32, 33, 34, 31], {"landuse": "residential"}),
+]
+
+
+def test_a_class_default_tagged_through_a_settlement_gives_way_to_it(tmp_path: Path):
+    xml = ['<osm version="0.6">']
+    for nid, ((lon, lat), tags) in THROUGH_NODES.items():
+        xml.append(f'<node id="{nid}" version="1" lat="{lat:.7f}" lon="{lon:.7f}"/>')
+    for wid, refs, tags in THROUGH_WAYS:
+        xml.append(f'<way id="{wid}" version="1">' + "".join(f'<nd ref="{r}"/>' for r in refs)
+                   + "".join(f'<tag k="{k}" v="{v}"/>' for k, v in tags.items()) + "</way>")
+    xml.append("</osm>")
+    pbf = tmp_path / "through.osm"
+    pbf.write_text("\n".join(xml), encoding="utf-8")
+    roads = read_roads(pbf)
+    region = Polygon([(LON0 - 0.05, LAT0 - 0.05), (LON0 + 0.05, LAT0 - 0.05), (LON0 + 0.05, LAT0 + 0.05), (LON0 - 0.05, LAT0 + 0.05)])
+    g = build_graph(roads, read_locations(pbf, np.unique(roads.refs)), region, settlements=read_settlements(pbf))
+    by_way = {int(w): (int(v), bool(f & URBAN)) for w, v, f in zip(g.edge_way, g.edge_maxspeed, g.edge_flags.tolist())}
+    assert by_way == {501: (110, False), 502: (0, True), 503: (110, False), 504: (80, True), 505: (0, False)}
+    assert g.stats["maxspeed_in_settlements"] == 1
 
 
 def test_urban_mask_city_radius_and_size():

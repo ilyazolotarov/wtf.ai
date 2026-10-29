@@ -297,8 +297,9 @@ One small component each; the screen only places them and wires their state. Car
   dark scheme so it doesn't glare), 44 pt, at the left end of the speed bubble, which widens for it; it keeps its size
   at any text size (`SpeedLimitSign`). No sign: the bubble as before. The speed has no unit under it (all the app's
   speeds are km/h; its accessibility label says it): the status pill beside it needs the width.
-- **The limit** (`edgeLimit`): the edge's OSM `maxspeed` (MAPMATCH-SPEC §4.3), else Ukraine's default for it: 20 in a
-  living street, 130 on a motorway, 50 `urban`, 90 elsewhere. None on driveways and parking aisles (`minorService`),
+- **The limit** (`edgeLimit`): the edge's OSM `maxspeed` (MAPMATCH-SPEC §4.3; a 90 or 110 through a village's homes
+  is dropped there, a road-class default mapped along a whole highway), else Ukraine's default for it: 20 in a living
+  street, 130 on a motorway, 50 `urban`, 90 elsewhere. None on driveways and parking aisles (`minorService`),
   on a graph without speed attributes, and on an untagged one-way trunk or primary road outside settlements (not
   links or roundabouts): a dual carriageway's side (110) or a split around a village or works (90, 50); a sign too high
   warns too late, one too low warns a legal driver, and dual carriageways are almost all tagged (`UA:trunk` is a

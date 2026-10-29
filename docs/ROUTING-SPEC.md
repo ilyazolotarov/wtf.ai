@@ -62,7 +62,8 @@ ETA is this time (`plan.durationS`).
 
 `edgeSpeedMps`: the limit × a share for where the road is, capped by class and surface.
 
-- **Limit:** the tagged one, else by law: 50 in a settlement (`urban`), 90 outside, 130 on motorways.
+- **Limit:** the tagged one, else by law: 50 in a settlement (`urban`), 90 outside, 130 on motorways. A tagged 90 or
+  110 through a village's homes is no limit (MAPMATCH-SPEC §4.3): its 50 is.
 - **Share** of the limit driven between junctions, free-flowing: outside settlements 1.1; in a town or village 1.3 on
   its through roads (motorway, trunk, primary, secondary) and 1.0 on its other streets; in a city 0.9, its traffic
   lights priced apart; in a big city (`bigCity`) 1.15 on its trunk, primary and secondary roads, at most 70 km/h.

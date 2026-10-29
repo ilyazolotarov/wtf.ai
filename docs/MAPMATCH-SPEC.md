@@ -66,9 +66,16 @@ carry `nav_mapmatch`. Open: the update time on the phone (§14), drives in bigge
 - **Speed attributes** for routing time (ROUTING-SPEC §4.1), every edge flagged `attributes`: speed limit (u8 km/h,
   0 untagged; `maxspeed`, else `:forward`/`:backward`; numbers, `mph`, `UA:urban` 50, `UA:rural` 90, `UA:trunk` 110,
   `UA:motorway` 130, `UA:living_street` 20, and `RU:*`); `unpaved` (surface unpaved, gravel, compacted, dirt, earth,
-  ground, grass, sand, mud, …); `urban` (the edge's middle in a `place=city|town|village|hamlet` area, within 100 m of
-  built-up `landuse`, or near a place point: town 1.5 km, village 600 m, hamlet 300 m); `city` (in a `place=city` area
-  or within 4 km × √(population ÷ 300 000) of its point); `big_city` (the same for ≥ 500 000). Traffic lights and
+  ground, grass, sand, mud, …); `urban` (in a `place=city|town|village|hamlet` area or built-up `landuse`
+  (residential, commercial, retail), or near a place point: town 1.5 km, village 600 m, hamlet 300 m); `city` (in a
+  `place=city` area or within 4 km × √(population ÷ 300 000) of its point); `big_city` (the same for ≥ 500 000). Each
+  judged at two of the points a quarter, half and three quarters along the edge, so it holds for most of it: one
+  middle vertex was an end on a long straight. In the landuse, not near it: within 100 m called roads skirting villages
+  and roadside businesses towns, 1,950 km of open main road in Kyiv oblast, the town's 50 shown on them. A tagged limit
+  of 90 or more on an edge inside `landuse=residential` is dropped and the edge is `urban`: a road-class default
+  (`UA:trunk` 110) mapped along a whole highway, villages and all (tagged ≥ 80 both sides of 31 % of Kyiv oblast's
+  `city_limit` signs, 10 % of the test oblast's). Only the homes: a place area or roadside businesses reach past the signs
+  along the highway. Traffic lights and
   stop / give-way signs on a graph node flag the node (`signals`, `stop`); on a way within 40 m of a junction they
   flag that junction; a light farther from any junction flags its edge (`signals`: a signalled crossing).
 - Names are not stored.

@@ -74,10 +74,14 @@ MAXSPEED_RE = re.compile(r"^(\d+(?:\.\d+)?)\s*(mph|km/h|kmh)?$")
 # A traffic light or stop sign this close to a junction (along the way) controls it: OSM maps them
 # on the junction node or at the stop line before it.
 CONTROL_NODE_M = 40.0
-# Urban: within a place area, this close to built-up landuse, or this close to a place point.
+# Urban: in a place area or built-up landuse, or this close to a place point. In the landuse, not near it: within
+# 100 m took roads skirting villages and roadside businesses, 1,950 km of open main road in Kyiv oblast.
 URBAN_LANDUSE = {"residential", "commercial", "retail"}
-URBAN_LANDUSE_M = 100.0
 URBAN_PLACE_M = {"city": 4000.0, "town": 1500.0, "village": 600.0, "hamlet": 300.0}
+# A tagged limit this high is a road-class default (UA:trunk 110, UA:rural 90) mapped along a whole road, villages
+# and all: on an edge inside a settlement's homes (`landuse=residential`) it gives way to the settlement's 50 (the
+# edge untagged, urban). Not by its place area or its businesses: along a highway they reach past its signs.
+SETTLEMENT_TAG_KPH = 90
 # Rush hours slow traffic in cities this big (ROUTING-SPEC §4.3): a smaller city's evening peak drove free-flowing.
 BIG_CITY_POPULATION = 500_000
 
@@ -302,6 +306,7 @@ class Settlements:
     city_areas: list = field(default_factory=list)  # the place=city ones among `areas`
     city_population: np.ndarray = field(default_factory=lambda: np.zeros(0))  # per points["city"]
     city_area_population: np.ndarray = field(default_factory=lambda: np.zeros(0))  # per city_areas
+    residential: list = field(default_factory=list)  # the landuse=residential ones among `landuse`
 
 
 def population(tags: Mapping[str, str]) -> float:
@@ -313,7 +318,7 @@ def population(tags: Mapping[str, str]) -> float:
 def read_settlements(pbf: Path) -> Settlements:
     """Pass 3: place=city/town/village/hamlet points and areas, residential/commercial/retail landuse."""
     points: dict[str, list[tuple[float, float]]] = {k: [] for k in URBAN_PLACE_M}
-    areas, landuse, city_areas = [], [], []
+    areas, landuse, city_areas, residential = [], [], [], []
     city_pop, city_area_pop = [], []
     wkb = osmium.geom.WKBFactory()
     keep = osmium.filter.TagFilter(*[("place", k) for k in URBAN_PLACE_M], *[("landuse", k) for k in URBAN_LANDUSE])
@@ -332,12 +337,14 @@ def read_settlements(pbf: Path) -> Settlements:
                 continue  # broken multipolygon
             place = obj.tags.get("place")
             (areas if place in URBAN_PLACE_M else landuse).append(geom)
+            if obj.tags.get("landuse") == "residential" and place not in URBAN_PLACE_M:
+                residential.append(geom)
             if place == "city":
                 city_areas.append(geom)
                 city_area_pop.append(population(obj.tags))
     return Settlements(
         {k: np.array(v, dtype=np.float64).reshape(-1, 2) for k, v in points.items()}, areas, landuse, city_areas,
-        np.array(city_pop, dtype=np.float64), np.array(city_area_pop, dtype=np.float64),
+        np.array(city_pop, dtype=np.float64), np.array(city_area_pop, dtype=np.float64), residential,
     )
 
 
@@ -348,10 +355,23 @@ def city_radius_m(population: np.ndarray) -> np.ndarray:
     return np.clip(r, 3000.0, 15_000.0)
 
 
+def inside_mask(lon: np.ndarray, lat: np.ndarray, geoms: list) -> np.ndarray:
+    """Points (°) inside any of the polygons (lon/lat °), in a local frame (x scaled by the cosine of their mean
+    latitude)."""
+    inside = np.zeros(len(lon), dtype=bool)
+    if not len(lon) or not geoms:
+        return inside
+    k = math.cos(math.radians(float(np.mean(lat))))
+    local = [shapely.transform(g, lambda xy: xy * [k, 1.0]) for g in geoms]
+    inside[np.unique(shapely.STRtree(local).query(shapely.points(lon * k, lat), predicate="intersects")[0])] = True
+    return inside
+
+
 def urban_mask(lon: np.ndarray, lat: np.ndarray, s: Settlements) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """(urban, city, big city) for points (°). Urban: in a place area, near built-up landuse or near
-    a place point; scored on the main roads with a tagged limit (≤ 60 urban, ≥ 80 rural): 80 % right
-    in the test oblast, 86 % in Kyiv oblast (ROUTING-SPEC §4.1). City: in a place=city area or near
+    """(urban, city, big city) for points (°). Urban: in a place area or built-up landuse, or near a
+    place point; scored by length on the main roads with a tagged limit (≤ 60 urban, ≥ 80 rural): 86 %
+    right in Kyiv oblast, 78 % in the test oblast (OSM 2026-10; tags of 110 through villages count
+    against it). City: in a place=city area or near
     its point (`city_radius_m`). Big city: one of `BIG_CITY_POPULATION` or more, where rush hours
     slow traffic. Distances in a local frame (x scaled by the cosine of the mean latitude)."""
     urban = np.zeros(len(lon), dtype=bool)
@@ -363,16 +383,12 @@ def urban_mask(lon: np.ndarray, lat: np.ndarray, s: Settlements) -> tuple[np.nda
     to_m = EARTH_R * math.pi / 180
     pts = shapely.points(lon * k, lat)
     local = lambda geoms: [shapely.transform(g, lambda xy: xy * [k, 1.0]) for g in geoms]  # noqa: E731
-    if s.areas:
-        urban[np.unique(shapely.STRtree(local(s.areas)).query(pts, predicate="intersects")[0])] = True
+    urban |= inside_mask(lon, lat, s.areas) | inside_mask(lon, lat, s.landuse)
     if s.city_areas:
         hit = shapely.STRtree(local(s.city_areas)).query(pts, predicate="intersects")
         city[np.unique(hit[0])] = True
         pop = s.city_area_population if len(s.city_area_population) == len(s.city_areas) else np.full(len(s.city_areas), np.nan)
         big[np.unique(hit[0][pop[hit[1]] >= BIG_CITY_POPULATION])] = True
-    if s.landuse:
-        hit = shapely.STRtree(local(s.landuse)).query(pts, predicate="dwithin", distance=URBAN_LANDUSE_M / to_m)
-        urban[np.unique(hit[0])] = True
     for kind, radius in URBAN_PLACE_M.items():
         p = s.points.get(kind)
         if p is None or not len(p):
@@ -495,15 +511,34 @@ def build_graph(roads: Roads, loc: Locations, region_poly, zoom: int = ZOOM, set
     del vert_ref, vi
     length, cum = edge_lengths(vlon, vlat, counts)
     edge_flags = roads.flags[e_way].copy()
-    # Urban: the edge's middle (the full-resolution vertex nearest half its length).
-    mid = np.clip(np.searchsorted(cum, cum[first] + length / 2), first, first + counts - 1)
+    edge_maxspeed = roads.maxspeed[e_way].copy()
+    # Urban, city, big city, and a class default through a settlement: two of the points a quarter, half and three
+    # quarters along the edge, so they hold for most of it. Not the vertex nearest its middle: an edge of a long
+    # straight has only its two ends, and one inside a village took a trunk's 110 off kilometres of open road.
     if settlements is not None:
-        urban, city, big = urban_mask(vlon[mid] * 1e-7, vlat[mid] * 1e-7, settlements)
+        lons, lats = [], []
+        for share in (0.25, 0.5, 0.75):
+            at = cum[first] + share * length
+            j = np.clip(np.searchsorted(cum, at), first + 1, first + counts - 1)
+            step = cum[j] - cum[j - 1]
+            t = np.clip(np.divide(at - cum[j - 1], step, out=np.zeros_like(step), where=step > 0), 0.0, 1.0)
+            lons.append((vlon[j - 1] + t * (vlon[j] - vlon[j - 1])) * 1e-7)
+            lats.append((vlat[j - 1] + t * (vlat[j] - vlat[j - 1])) * 1e-7)
+        lon3, lat3 = np.concatenate(lons), np.concatenate(lats)
+        two_of_three = lambda m: m.reshape(3, -1).sum(axis=0) >= 2  # noqa: E731
+        urban, city, big = (two_of_three(m) for m in urban_mask(lon3, lat3, settlements))
         edge_flags[urban] |= URBAN
         edge_flags[city] |= CITY
         edge_flags[big] |= BIG_CITY
+        # A road-class default tagged through a settlement: the settlement's limit.
+        blanket = np.flatnonzero(edge_maxspeed >= SETTLEMENT_TAG_KPH)
+        if len(blanket):
+            pick = np.concatenate([blanket + i * len(edge_maxspeed) for i in range(3)])
+            through = blanket[two_of_three(inside_mask(lon3[pick], lat3[pick], settlements.residential))]
+            edge_maxspeed[through] = 0
+            edge_flags[through] |= URBAN
     vert_lon, vert_lat, edge_vert = simplify_edges(vlon, vlat, counts)
-    del vlon, vlat, mid
+    del vlon, vlat
 
     # Node flags.
     degree = np.bincount(edge_from, minlength=len(node_ids)) + np.bincount(edge_to, minlength=len(node_ids))
@@ -529,7 +564,8 @@ def build_graph(roads: Roads, loc: Locations, region_poly, zoom: int = ZOOM, set
         "boundary_nodes": int((~inside).sum()), "dead_ends": int((degree == 1).sum()),
         "urban_edges": int((edge_flags & URBAN != 0).sum()), "city_edges": int((edge_flags & CITY != 0).sum()),
         "big_city_edges": int((edge_flags & BIG_CITY != 0).sum()),
-        "maxspeed_edges": int((roads.maxspeed[e_way] > 0).sum()),
+        "maxspeed_edges": int((edge_maxspeed > 0).sum()),
+        "maxspeed_in_settlements": int(((roads.maxspeed[e_way] > 0) & (edge_maxspeed == 0)).sum()),
         "signal_nodes": int((node_flags & NODE_SIGNALS != 0).sum()), "signal_edges": int((edge_flags & SIGNALS != 0).sum()),
         "stop_nodes": int((node_flags & NODE_STOP != 0).sum()),
     }
@@ -537,7 +573,7 @@ def build_graph(roads: Roads, loc: Locations, region_poly, zoom: int = ZOOM, set
         zoom, x0, y0, nx, ny,
         node_ids, node_lon, node_lat, node_flags,
         roads.way_ids[e_way], edge_from, edge_to,
-        roads.cls[e_way], roads.oneway[e_way], edge_flags, roads.maxspeed[e_way], length,
+        roads.cls[e_way], roads.oneway[e_way], edge_flags, edge_maxspeed, length,
         edge_vert, vert_lon, vert_lat, restrictions, stats,
     )
 
