@@ -15,6 +15,7 @@ public class AppReactHostAppDelegate: ExpoAppDelegateSubscriber {
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
   ) -> Bool {
+    _ = ReactTimerPace.install
     let woken = launchOptions?[.location] != nil || launchOptions?[.bluetoothCentrals] != nil
     DispatchQueue.main.asyncAfter(deadline: .now() + (woken ? 0 : Self.sceneWait)) {
       let app = UIApplication.shared

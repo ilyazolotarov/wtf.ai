@@ -211,8 +211,10 @@ persisted in kv-store. No hardcoded user-facing strings in components.
   cone and the following camera are drawn ~30 times a second in even steps (every second 60 Hz frame): between the
   navigator's 2 Hz positions the pose goes on along the heading at the speed (≤ 1 s), the gap to each new position
   closes with a 250 ms time constant, and the camera follows frame by frame (`jumpTo`). A step over 80 m or a turn
-  over 90° is shown at once. Only while the app is active: in the background a `requestAnimationFrame` loop spins the
-  JS thread flat out and iOS kills the app for CPU. Standing, positions are drawn as they come, each eased over
+  over 90° is shown at once. Only while the app is active (the car's map: while the car shows it). Each frame waits on
+  a timer, not `requestAnimationFrame`: React Native's is a setTimeout(0) that only the phone's display paces, and
+  elsewhere (the background, the car's screen alone) a loop on it spins the JS thread flat out and iOS kills the app
+  for CPU. Standing, positions are drawn as they come, each eased over
   450 ms; a step over 80 m is a snap and the camera jumps to it. Leaving follow clears the last centre. The map opens
   on the active region's bounds and the camera follows only once the style has loaded; while following, a view the
   map settles on by itself more than 80 m from the dot is put back on it, once per follow stop (iOS applies the

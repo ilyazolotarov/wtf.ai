@@ -24,21 +24,23 @@ function Probe({ position }: { position: PositionEstimate }) {
 describe("useSmoothedPosition", () => {
   let state: AppStateStatus;
   let onChange: ((s: AppStateStatus) => void) | null;
-  let frames: number;
+  /** The loop's frame timers asked for: the first at once, then each a frame (~29 ms) on. */
+  const frameTimers = () =>
+    (globalThis.setTimeout as unknown as jest.Mock).mock.calls.filter(([, ms]) => ms === 0 || (ms > 25 && ms < 34)).length;
 
   beforeEach(() => {
+    jest.useFakeTimers();
+    jest.spyOn(globalThis, "setTimeout");
     state = "active";
     onChange = null;
-    frames = 0;
     Object.defineProperty(AppState, "currentState", { configurable: true, get: () => state });
     jest.spyOn(AppState, "addEventListener").mockImplementation((_type, listener) => {
       onChange = listener as (s: AppStateStatus) => void;
       return { remove: () => (onChange = null) } as ReturnType<typeof AppState.addEventListener>;
     });
-    jest.spyOn(globalThis, "requestAnimationFrame").mockImplementation(() => ++frames);
-    jest.spyOn(globalThis, "cancelAnimationFrame").mockImplementation(() => undefined);
   });
   afterEach(() => {
+    jest.useRealTimers();
     jest.restoreAllMocks();
     Object.defineProperty(AppState, "currentState", { configurable: true, writable: true, value: "active" });
   });
@@ -49,23 +51,35 @@ describe("useSmoothedPosition", () => {
       onChange?.(s);
     });
 
-  // React Native's requestAnimationFrame is a setTimeout(0): in the background nothing paces it, and the loop spun the
-  // JS thread until iOS killed the app for its CPU use (2026-10-16).
   it("asks for frames on screen, none in the background, and again back on screen", () => {
     let renderer: ReactTestRenderer;
     act(() => {
       renderer = create(<Probe position={moving} />);
     });
-    expect(frames).toBe(1);
+    expect(frameTimers()).toBe(1);
 
     switchTo("background");
-    const asked = frames;
+    const asked = frameTimers();
     act(() => renderer.update(<Probe position={{ ...moving, timestamp: moving.timestamp + 500 }} />));
-    expect(frames).toBe(asked);
-    expect(globalThis.cancelAnimationFrame).toHaveBeenCalled();
+    act(() => jest.advanceTimersByTime(1_000));
+    expect(frameTimers()).toBe(asked);
 
     switchTo("active");
-    expect(frames).toBe(asked + 1);
+    expect(frameTimers()).toBe(asked + 1);
+    act(() => renderer.unmount());
+  });
+
+  // React Native's requestAnimationFrame is a setTimeout(0): unless the phone's display paces it, it fires at once, and
+  // a loop on it spun the JS thread until iOS killed the app for its CPU use (2026-10-16). The car's map draws while
+  // the phone's display doesn't pace timers (CARPLAY-SPEC §4): its loop waits a frame on its own.
+  it("draws about 30 frames a second, however fast timers fire", () => {
+    let renderer: ReactTestRenderer;
+    act(() => {
+      renderer = create(<Probe position={moving} />);
+    });
+    act(() => jest.advanceTimersByTime(1_000));
+    expect(frameTimers()).toBeGreaterThanOrEqual(30);
+    expect(frameTimers()).toBeLessThanOrEqual(36);
     act(() => renderer.unmount());
   });
 });

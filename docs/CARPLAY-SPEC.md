@@ -254,6 +254,16 @@ GNSS and the adapter as they were. What the JS side sent is kept on the native s
   while a clip plays (expo-audio lets it go after). Before each prompt the session's `promptStyle`: none (a call, Siri)
   or short (the app has no tone) says nothing (`voice: not said, CarPlay asks for …`). One voice whatever the screens
   (`VoiceGuide`).
+- **JS timers while only the car shows the app** (`ReactTimerPace`, `TimerPaceLogic`): React Native's `RCTTiming`
+  fires setTimeout, setInterval and requestAnimationFrame from a CADisplayLink of the phone's screen unless the app is
+  in the background (NSTimers then), and the car's screen keeps it out of the background. With the phone's screen dark
+  that display link stops, and with it every JS timer: the navigator's tick, the dot on the car's map (MapLibre, on
+  the car screen's own display link, goes on drawing a still map). So the timers keep React Native's background mode
+  unless a phone scene is in the foreground: its `appDidMoveToForeground` and its setup (a runtime started for the car's
+  screen alone) are replaced at launch, and a phone scene activating or going to the background moves each timing
+  between the two. React Native is prebuilt, so its source can't be patched. Nothing paces requestAnimationFrame
+  there (a setTimeout(0)): a loop on it spins the JS thread, so the dot's smoothing waits a frame on a timer
+  (UI-SPEC §6.2). Device log: `JS timers on their own, the phone's screen not showing the app` / `on the phone's display`.
 - **Location while the car shows the app**: iOS calls the app `inactive` then (the phone locked or elsewhere), not
   `active`; the background location session (TRIP-LOGGER-SPEC §4.3) counts the car's session as the app in front and
   as busy, so it is held from a session opened on the car alone and GNSS goes on while another app fills the car's
