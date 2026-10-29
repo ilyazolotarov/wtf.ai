@@ -318,6 +318,10 @@ One small component each; the screen only places them and wires their state. Car
 - **Held** (`LimitHold`): a sign appears after 1 s; another limit, or none, replaces it after holding 2 s. A change
   waiting while no position comes (standing on the driver's placing, a fix that doesn't change) comes with the
   service's tick re-publishing the dot.
+- **Ahead by the hold** (`LIMIT_LEAD_S`, `edgeAhead`): moving, each road the car may be on gives the limit 2 s ahead
+  at the speed, as far as the road can only go on (one way on at a node, driveways and parking aisles aside; a node
+  with a choice stops it, the car may turn there). A new limit shows where the car meets it: judged where the car is, it
+  came the hold's 2 s past the sign (60 m at 110 km/h), a town's 50 inside the town and the 90 after leaving it.
 - `SpeedLimitSource` (the navigator service, `set`) reads the active region's graph on a reader of its own (16 tiles,
   its frame around the car, moved past 20 km), opened again when the active graph changes, and puts the result in
   `PositionEstimate.speedLimit`; `speed limit <kph> (OSM|default)` / `none` notes in the trip log.

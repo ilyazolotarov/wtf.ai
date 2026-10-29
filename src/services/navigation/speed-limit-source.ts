@@ -2,7 +2,8 @@
 
 import type { EdgeId, RoadEdge } from "@/nav/mapmatch/graph/road-graph";
 import type { PositionEstimate } from "@/nav/position/types";
-import { agreedLimit, LimitHold, snapCandidates, snapRadiusM, type SpeedLimit } from "@/nav/speed/speed-limit";
+import { edgeAhead } from "@/nav/speed/road-ahead";
+import { agreedLimit, LIMIT_LEAD_S, LimitHold, snapCandidates, snapRadiusM, type LimitCandidate, type SpeedLimit } from "@/nav/speed/speed-limit";
 import { snapsToRoads, type LimitGraph, type RoadReader, type RoadWeights } from "@/services/navigation/road-reader";
 
 export type { LimitGraph, RoadWeights };
@@ -21,7 +22,8 @@ export class SpeedLimitSource {
   /**
    * The limit to show at `p`. With map matching's `roads`, from the roads it believes in; else, for a position from a
    * trusted GNSS fix, the driver's placing or phone-only mode, from the roads around it. A dead-reckoned dot without
-   * map matching gets none: it may be anywhere in its circle.
+   * map matching gets none: it may be anywhere in its circle. Moving, each road's limit where the car will be on it once
+   * a change has held (`LIMIT_LEAD_S`).
    */
   at(p: PositionEstimate, nowMs: number, roads?: RoadWeights): SpeedLimit | null {
     const shown = this.hold.update(this.limitAt(p, roads), nowMs);
@@ -45,11 +47,22 @@ export class SpeedLimitSource {
   private limitAt(p: PositionEstimate, roads?: RoadWeights): SpeedLimit | null {
     const reader = this.deps.reader.near(p);
     if (!reader) return null;
-    if (roads && roads.key === reader.key) return agreedLimit(roads.weights.map((r) => ({ edge: r.edge === null ? null : edgeOf(reader, r.edge), weight: r.weight })));
+    const leadM = (p.speedMps ?? 0) * LIMIT_LEAD_S;
+    const ahead = (c: LimitCandidate): LimitCandidate => {
+      if (!c.edge || !c.dir || c.alongM === undefined || !(leadM > 0)) return c;
+      try {
+        return { ...c, edge: edgeAhead(reader.graph, { edge: c.edge.id, dir: c.dir, alongM: c.alongM }, leadM) };
+      } catch {
+        return c;
+      }
+    };
+    if (roads && roads.key === reader.key) {
+      return agreedLimit(roads.weights.map((r) => ahead({ ...r, edge: r.edge === null ? null : edgeOf(reader, r.edge) })));
+    }
     if (!snapsToRoads(p)) return null;
     const [e, n] = reader.frame.toEnu(p);
     const near = reader.graph.edgesNear(e, n, snapRadiusM(p.accuracyM));
-    return agreedLimit(snapCandidates(near, p.accuracyM, p.headingRad, p.speedMps));
+    return agreedLimit(snapCandidates(near, p.accuracyM, p.headingRad, p.speedMps).map(ahead));
   }
 }
 

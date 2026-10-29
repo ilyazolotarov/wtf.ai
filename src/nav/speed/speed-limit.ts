@@ -129,6 +129,13 @@ const SHOW_AFTER_MS = 1000;
 const CHANGE_AFTER_MS = 2000;
 
 /**
+ * Moving, the limit is the road's where the car will be once a change has held (`LimitHold`): this long ahead at its
+ * speed, as far as the road can only go on (`edgeAhead`). A new limit then shows where the car meets it, not 2 s past
+ * it (60 m at 110 km/h): a town's 50 came after its sign, the 90 leaving it after the end of the town.
+ */
+export const LIMIT_LEAD_S = CHANGE_AFTER_MS / 1000;
+
+/**
  * The limit as shown: a new one after it held a moment, so a junction or a hypothesis passing by doesn't flash a sign.
  * A limit that comes back within the wait cancels the change.
  */

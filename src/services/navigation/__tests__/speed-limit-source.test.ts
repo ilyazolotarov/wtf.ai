@@ -80,4 +80,61 @@ describe("SpeedLimitSource", () => {
     s.at(position(0, 20), 2000);
     expect(s.at(position(0, 30), 5000)).toBeNull();
   });
+
+  // A main road tagged 110 into a town, whose untagged street goes on from the sign (a node where the road only goes
+  // on); 1 km on, a junction with a 70 road straight on and a 50 street to the right. Driven north at 110 km/h, a fix
+  // a second.
+  describe("the limit where the car will be once it has held", () => {
+    const T = EdgeFlag.attributes;
+    const roads = new MemoryRoadGraph(frame, [
+      { cls: RoadClass.primary, flags: T, maxspeedKph: 110, points: [at(0, -3000), at(0, 0)] },
+      { cls: RoadClass.primary, flags: A, points: [at(0, 0), at(0, 1000)] },
+      { cls: RoadClass.primary, flags: A, maxspeedKph: 70, points: [at(0, 1000), at(0, 2000)] },
+      { cls: RoadClass.residential, flags: A, points: [at(0, 1000), at(800, 1000)] },
+    ]);
+    const mph110 = 110 / 3.6;
+    const onRoads = () => {
+      const open = (): LimitGraph => ({ key: "kyiv:1", graph: Object.assign(roads, { setFrame: () => {} }), close: () => {} });
+      const s = new SpeedLimitSource({ reader: new RoadReader({ open, activeKey: () => "kyiv:1" }), note: () => {} });
+      // The reader's frame where the graph's is (the first position's).
+      s.at(position(0, 0, { speedMps: 0 }), -60_000);
+      s.reset();
+      return s;
+    };
+    /** Where (n, m) the shown limit first is `kph`, driving north from `fromN` at `mps`. */
+    const changesAt = (s: SpeedLimitSource, fromN: number, kph: number, mps = mph110) => {
+      for (let t = 0; t < 120; t++) {
+        const n = fromN + t * mps;
+        if (s.at(position(0, n, { speedMps: mps }), t * 1000)?.kph === kph) return n;
+      }
+      return null;
+    };
+
+    test("a town's limit shows at its sign, not 60 m past it", () => {
+      const s = onRoads();
+      const n = changesAt(s, -600, 50)!;
+      expect(n).toBeGreaterThan(-35);
+      expect(n).toBeLessThan(35);
+    });
+
+    test("leaving the town, the next road's limit shows where it starts", () => {
+      // Driven south from the junction: the 110 begins at the sign.
+      const s = onRoads();
+      let shownAt: number | null = null;
+      for (let t = 0; t < 60 && shownAt === null; t++) {
+        const n = 900 - t * 20;
+        if (s.at(position(0, n, { speedMps: 20, headingRad: Math.PI }), t * 1000)?.kph === 110) shownAt = n;
+      }
+      expect(shownAt).not.toBeNull();
+      expect(shownAt!).toBeLessThan(30);
+      expect(shownAt!).toBeGreaterThan(-30);
+    });
+
+    test("not past a junction, where the car may turn: the road's own limit until it is on the next", () => {
+      const s = onRoads();
+      expect(changesAt(s, 200, 50)).toBeLessThan(250);
+      const n = changesAt(s, 200, 70)!;
+      expect(n).toBeGreaterThan(1000);
+    });
+  });
 });

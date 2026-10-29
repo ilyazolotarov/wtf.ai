@@ -126,6 +126,26 @@ export function roadAhead(graph: RoadGraph, start: RoadPosition, maxM: number, r
   return out;
 }
 
+/**
+ * The road `aheadM` on from a position, as far as it can only go on: one way on at each node (driveways and parking
+ * aisles aside). At a node with a choice it stops, the car may turn there: the road it stopped on.
+ */
+export function edgeAhead(graph: RoadGraph, start: Omit<RoadPosition, "weight">, aheadM: number): RoadEdge {
+  let edge = graph.edge(start.edge);
+  let dir = start.dir;
+  let left = aheadM - (dir > 0 ? edge.lengthM - start.alongM : start.alongM);
+  for (let i = 0; left > 0 && i < MAX_STRETCHES; i++) {
+    const on = graph
+      .exits(edge.id, dir)
+      .filter((x) => !x.uTurn && !x.againstOneway && !x.restricted && !(graph.edge(x.edge).flags & EdgeFlag.minorService));
+    if (on.length !== 1) break;
+    edge = graph.edge(on[0].edge);
+    dir = on[0].dir;
+    left -= edge.lengthM;
+  }
+  return edge;
+}
+
 function goesOn(graph: RoadGraph, via: RoadEdge, dir: 1 | -1, route?: RouteNext): Exit[] {
   const exits = graph.exits(via.id, dir).filter((x) => !x.uTurn && !x.againstOneway && !x.restricted);
   const planned = route?.get(directed(via.id, dir));
