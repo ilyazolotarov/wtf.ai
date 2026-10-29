@@ -137,6 +137,13 @@ final class ButtonsTests: XCTestCase {
     XCTAssertEqual(CarPlayLogic.followZoomShift(screenScale: 3), -log2(3))
     XCTAssertEqual(CarPlayLogic.followZoomShift(screenScale: 0), 0)
   }
+
+  func testTheSpeedSitsInTheCornerAboveTheButtons() {
+    XCTAssertEqual(CarPlayLogic.speedRight(right: 40), 0)
+    // A right-hand drive car's dock beside the buttons: the pill beside the dock.
+    XCTAssertEqual(CarPlayLogic.speedRight(right: 90), 50)
+    XCTAssertEqual(CarPlayLogic.speedRight(right: 0), 0)
+  }
 }
 
 final class NoticeTests: XCTestCase {

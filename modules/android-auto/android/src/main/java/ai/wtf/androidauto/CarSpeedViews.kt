@@ -17,7 +17,7 @@ import android.widget.TextView
 
 // The speed and the speed camera ahead on the car's map (docs/ANDROID-AUTO-SPEC.md §4, UI-SPEC §6.4, §6.5), as the JS
 // side sends them (`CarLink.speed`): the speed with the limit's sign in a pill, the camera's card. Native views over
-// the React root, as the map's credit: React Native text on the car's display is drawn at the phone's density. What
+// the React root: React Native text on the car's display is drawn at the phone's density. What
 // they say is decided in TypeScript (car-guidance.ts `carSpeed`); sizes are the phone's, in the map's dp (the car's ×
 // MAP_SCALE).
 

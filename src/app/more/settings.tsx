@@ -26,6 +26,7 @@ import { T } from "@/components/ui/text";
 import { usePalette } from "@/constants/theme";
 import { useT, type LanguagePreference } from "@/i18n/provider";
 import { useDevSettings, useRuntime } from "@/providers/runtime-provider";
+import { saveMapPreferences, useMapPreferences, type Buildings3d } from "@/services/map-preferences";
 import {
     isDeveloperUnlocked,
     loadAppearance,
@@ -53,6 +54,7 @@ export default function SettingsScreen() {
   const { setDevSettings } = useRuntime();
   const settings = useDevSettings();
   const [appearance, setAppearanceState] = useState(loadAppearance);
+  const { buildings3d } = useMapPreferences();
   const policyUrl = privacyPolicyUrl(language);
   const versionTaps = useRef(0);
   const [developerShown, setDeveloperShown] = useState(false);
@@ -90,6 +92,19 @@ export default function SettingsScreen() {
             { value: "dark", label: t("darkAppearance") },
           ]}
         />
+      </View>
+      <View style={styles.group}>
+        <SectionLabel>{t("buildings3d")}</SectionLabel>
+        <Segmented<Buildings3d>
+          value={buildings3d}
+          onChange={(value) => saveMapPreferences({ buildings3d: value })}
+          options={[
+            { value: "on", label: t("buildings3dOn") },
+            { value: "phone", label: t("buildings3dPhone") },
+            { value: "off", label: t("buildings3dOff") },
+          ]}
+        />
+        <ScreenNote>{t("buildings3dNote")}</ScreenNote>
       </View>
       <VoiceVolumeSection />
       <SpeedSettingsSection />

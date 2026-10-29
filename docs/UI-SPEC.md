@@ -84,6 +84,8 @@ persisted in kv-store. No hardcoded user-facing strings in components.
   (without a search file the tiles' show, all of them);
   so are the POIs other than a driver's: within 250 m only, while the car's map's (fuel and charging, railway and
   metro stations: `DRIVER_POI_FILTER`) show at any distance (`NearLayers`); north-up and free show them all;
+  buildings flat at z13, raised from z14 (Liberty's extrusions), unless Settings → 3D buildings keeps them flat on
+  that screen (`map-buildings.ts`: no extrusions, Liberty's flat fill drawn past z14 instead; §7.6);
   `map-dark.ts` re-tints Liberty for the dark scheme (Night Drive: near-black ground, amber primary roads, orange
   motorways and trunk roads, dark road names on a white halo, quiet grey house numbers);
   `map-palette.ts` reads the style's colours for the guide's drawn maps.
@@ -170,7 +172,8 @@ persisted in kv-store. No hardcoded user-facing strings in components.
 - **Map data credit:** "© OpenStreetMap contributors · © OpenMapTiles" at the bottom left, level with the camera
   button, as the map opens; it fades after 5 s (`MapCredit`; OSMF's attribution guidelines allow a credit that
   collapses by itself after five seconds while the licence stays easy to find). Settings → About keeps it. No (i)
-  button on the map. The car's map does the same (ANDROID-AUTO-SPEC §4).
+  button on the map. The car's screens show none (CARPLAY-SPEC §4, ANDROID-AUTO-SPEC §4): the phone's map at the app's
+  start and Settings carry it.
 - `useKeepAwake()` while the map screen is focused.
 
 ### 6.2 Camera modes and the dot's motion
@@ -440,7 +443,9 @@ downloads finish and may end it there, and the 1.7 GB Ukraine check stopped in i
 
 ### 7.6 `settings`
 
-Language (System / English / Українська); Appearance (System / Light / Dark); Voice volume (ROUTING-SPEC §8.5); Speed
+Language (System / English / Українська); Appearance (System / Light / Dark); 3D buildings (On / Phone only / Off,
+On by default; kv-store `map.preferences`): Phone only keeps them flat on the car's screen (CarPlay, Android Auto),
+Off on every map, applied at once (§4.6's style); Voice volume (ROUTING-SPEC §8.5); Speed
 (§6.4, §6.5): **Show the speed limit** (on by default; where limits come from, Ukraine's general limits where none is
 recorded, that road signs come first), **Warn about speed cameras** (on by default; what shows and is said, where the
 cameras come from) and, with either, **Speed warning threshold (km/h)** +10 / +15 / +20

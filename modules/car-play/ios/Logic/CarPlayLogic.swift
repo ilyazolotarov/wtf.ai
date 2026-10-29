@@ -449,6 +449,22 @@ enum CarPlayLogic {
     -log2(max(1, screenScale))
   }
 
+  /**
+   * The map's buttons' column, points from the screen's right edge: CarPlay's safe area ends there whether the
+   * buttons show or not (iOS 26.3, 400×240 pt).
+   */
+  static let mapButtonColumn = 40.0
+
+  /**
+   * The speed's pill's room on the right, points, in the corner above the map's buttons, which CarPlay stacks from the
+   * bottom: out of the buttons' column, beside anything else there (a right-hand drive car's dock). `right`: the safe
+   * area's right inset or the buttons' layout guide, whichever is more. (While the bar shows the pill is at the bottom
+   * left: CarMapRoot.)
+   */
+  static func speedRight(right: Double) -> Double {
+    max(0, right - mapButtonColumn)
+  }
+
   /** A pan gesture's change since the last, as the distance the finger went back (Android Auto's scroll). */
   static func scroll(from last: (x: Double, y: Double), to translation: (x: Double, y: Double)) -> (dx: Double, dy: Double) {
     (last.x - translation.x, last.y - translation.y)

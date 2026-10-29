@@ -42,8 +42,6 @@ declare class AndroidAutoNativeModule extends NativeModule<AndroidAutoEvents> {
   showMap(): Promise<void>;
   /** The recentre button: shown while the driver has moved the car's map or zoomed it from the follow zoom. */
   setRecentre(shown: boolean): Promise<void>;
-  /** The car's map has drawn its style: the map data credit shows from now. */
-  mapDrawn(): Promise<void>;
   /** A place asked for, once: taking it clears it. */
   takeRequest(): Promise<CarRequest | null>;
   /** The native side's notes since the last call. */

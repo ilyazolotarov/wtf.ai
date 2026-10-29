@@ -2,9 +2,9 @@
 
 The map with the navigator's position, the route's guidance and a destination to pick, on the car's CarPlay screen.
 Companion to [ANDROID-AUTO-SPEC.md](ANDROID-AUTO-SPEC.md): CarPlay is the same car screen on iOS, run by the same car
-session in TypeScript; only the templates that draw it are CarPlay's. **Status:** branch `feature/carplay`; Android
-Auto's features run on the simulator (§4), what CarPlay can't do is listed there. §7 lists what must be settled before
-`main`.
+session in TypeScript; only the templates that draw it are CarPlay's. **Status:** in testers' cars from TestFlight: a
+route followed on the car's screen with its card, estimates and speed. Android Auto's features run (§4), what CarPlay
+can't do is listed there. §7 lists what is open.
 
 ## 1. Goal
 
@@ -149,7 +149,12 @@ GNSS and the adapter as they were. What the JS side sent is kept on the native s
   don't bring the bar, and the card stays at the top. + and − are the panning interface's then; a pinch zooms on a
   touch screen. Without a route the bar holds Destinations, Search and the voice, and the map's buttons (pan, recentre,
   + and −) hide with it. The guidance card is CarPlay's: the icon beside the words (`displayStyleFor`
-  `.leadingSymbol`), 18 pt, two rows.
+  `.leadingSymbol`), 18 pt, two rows. Its colour is the dark grey of the trip estimates under it (#3B3B3B,
+  `CarPlayImages.cardColor`) by day and night, as the template's `guidanceBackgroundColor` and each maneuver's
+  `cardBackgroundColor`; the maneuver's icon white on it (`maneuverIcon`), not CarPlay's tint, which follows the car's
+  day and drew it black. Drawn white into its pixels: CarPlay draws the image in its own process, and a
+  `withTintColor` tint is lost there (the vector's black showed, night too). iOS 26.4 draws the card red when the app gives no colour, and a colour given after the
+  template shows stays red (developer forums 822242): it is set as the template is made.
 
   Destinations: saved places, then recent ones, as many as `CPListTemplate.maximumItemCount`; one picked routes to it
   (`go`), the map popped back. Search (`CPSearchTemplate`): each change of the field goes to the session (`search`),
@@ -204,14 +209,24 @@ GNSS and the adapter as they were. What the JS side sent is kept on the native s
   MapLibre refuses padding larger than the map. The camera goes flat and north up before the fit (UI-SPEC §6.2). A
   route picked with no progress on it yet (an alternative taken while the car stands) shows from its start, as the
   phone's banner does (`carRoute`).
-- **The map data credit** is the root's own (`MapCredit`), at the visible map's bottom, beside the speed, between the
-  card and the map's buttons (wrapped when the room is narrow), fading after 5 s.
+- **No map data credit** on the car's screen: the phone's map shows it as it opens and Settings › About keeps it
+  (UI-SPEC §6.1). OSMF's attribution guidelines allow a credit at an application's start that isn't shown each time it
+  is looked at, if the licence stays easy to find; they say nothing of a second screen. Apple's guide keeps the base view
+  to the map.
 - **The speed and speed cameras** (UI-SPEC §6.4, §6.5): the session follows the app's one speed and camera warning
   (`SpeedAlerts`) while it runs, as Android Auto's, so the chime and "Speed camera ahead" sound with no phone screen
   too, once whatever screens show them; it sends the car what it shows (`carSpeed`, `setSpeed`, Android Auto's
   payload).
-  - **The speed:** Android Auto's pill, drawn by the map's root (`CarSpeedPill`), in the visible map's bottom left
-    corner: the limit's sign and the speed with its unit, red past the driver's margin; no speed, none. In the car's
+  - **The speed:** Android Auto's pill, drawn by the map's root (`CarSpeedPill`): the limit's sign and the speed with
+    its unit, red past the driver's margin; no speed, none. While the bar hides, in the top right corner above the
+    map's buttons, which CarPlay stacks from the bottom (on a 240 pt high screen the fourth one's top is 68 pt down);
+    the safe area ends at the buttons' 40 pt column whether they show or not, so the pill's room on the right is the
+    safe area's less that column (`CarPlayLogic.speedRight`, the root's `speedRight`; a right-hand drive car's dock
+    stays out). Not Android Auto's bottom left there: on a route the visible map is the narrow band between the
+    guidance column and the buttons, and at its bottom left the pill covered the car's dot (0.85 down, in the band's
+    middle). While the bar shows (a top inset; a touch, and about 20 s after a list), the card and the corner come
+    down level with the X: the pill goes to the visible map's bottom left. A build without
+    `speedRight` puts it beside the buttons' column. In the car's
     day or night, at its points (the sign 30 pt), not grown by the phone's text size; nothing on it to press, inside
     the safe area. A review risk (§7): the guide allows nothing but the map in the base view, overlays included, even
     information as passive as lane guidance, and no template shows a speed (iOS 26). The pill rests on one Apple
@@ -219,7 +234,7 @@ GNSS and the adapter as they were. What the JS side sent is kept on the native s
     safe area, are allowed (developer forums 852888), which is not policy.
   - **The camera ahead:** CarPlay's navigation alert, Apple's panel for real-time feedback, where CarPlay puts it: the
     visible map's bottom left, on a route in the guidance card's column in place of the trip estimates; the safe area
-    shrinks for it, and the pill moves beside it. The phone card's words ("Speed camera in 600 m"; past the margin "Slow
+    shrinks for it. The phone card's words ("Speed camera in 600 m"; past the margin "Slow
     down", the distance under it), the camera's sign as its image (`CarPlayImages.speedSign`; the camera's glyph when no
     limit is known, drawn as big: CarPlay fits both to one slot), CarPlay's x. The words are updated in place as the
     distance counts down (`updateTitleVariants`), the same alert while the camera, its sign and its red are
@@ -253,12 +268,13 @@ GNSS and the adapter as they were. What the JS side sent is kept on the native s
   drawing is scaled to the X's, 14 of its 24 pt (`CarPlayImages.mapIcon`, the ink measured once): the symbols leave
   different room around their drawing, and the voice and my location filled the round button. The map's buttons are
   not CarPlay's to tint: on iOS 26 its tint of map buttons is wrong (Apple's known issue; developer forums 798735,
-  799192, 842273), white on its white focus fill, and reported white on near-white buttons by day. They are drawn by the
-  scene's `contentStyle`, as the map, and again when it changes: by night white with a faint dark edge (a quarter
-  opaque, 1 pt) for where the glass shows something light; by day the app's text colour (#1D1C1A, about CarPlay's own
-  glyphs) with no edge. Focused (a knob, a touchpad, where the focus comes back after a list) by night black with a
-  full white edge, which CarPlay shows on a white fill or on the glass; by day as unfocused. Pure black in a white
-  edge looked heavy by day; grey looked disabled, and the app's blue reads as a mode turned on.
+  799192, 842273), white on its white focus fill, and reported white on near-white buttons by day. They are drawn
+  white in a black edge (1.25 pt, `MapIconStyle.outlined`), by day and night, focused or not (a knob, a touchpad,
+  where the focus comes back after a list, and on a touch screen the first button, which CarPlay keeps focused): the
+  glass takes its shade from the map behind each button, near white over a light map and dark over water side by
+  side (the day preview, §5), a mid grey in a car by day, and the focus fill is white. One colour alone vanished on one
+  of them: the app's dark text colour on the grey, white with a faint edge on the near white; a focused black icon
+  read as another kind of button. Grey looked disabled, and the app's blue reads as a mode turned on.
 - Device log (`ai.wtf.navigator`, category `carplay`): the scene connected, in the foreground, active, in the
   background, disconnected; React Native started without the phone's scene or on a new host; what drew the map;
   actions sent (info level); the notes also go to the trip log.
@@ -269,8 +285,8 @@ opened with a place's words (a list of its answers instead); the camera card's b
 
 **Apple's guidelines** (CarPlay App Programming Guide, navigation apps), and how the app meets them: turn-by-turn with
 upcoming maneuvers (the navigation session); the base view only for the map (the React root draws map content: roads,
-the dot, the route and its labels; the map data credit, the licence's, fades after 5 s, a reviewer may still count it an
-overlay), but for the speed's pill, an overlay the guide's letter rules out (§7); templates for their purpose (the icons
+the dot, the route and its labels; no map data credit), but for the speed's pill, an overlay the guide's letter rules
+out (§7); templates for their purpose (the icons
 are maneuvers' only); a pan button and the panning interface; touch gestures only to move and zoom the map; guidance
 ended at once when the car cancels it; voice prompts in the voice-prompt mode, mixed with the car's audio, the session
 active only while one plays, `promptStyle` checked; no wording that asks the driver to use the iPhone, and every flow
@@ -290,9 +306,9 @@ Must not drift:
 - The map's root lives only while the car's screen shows the app.
 - No words on the car's screen that ask the driver to use the phone.
 - Every CarPlay template operation passes a completion.
+- The guidance card's colour is given as the map template is made, before it shows: iOS 26.4 draws it red otherwise.
 - The map stays the biggest thing on the car's screen: no panels of the app's own over it (Apple's guidelines keep the
-  base view to the map), the bar as small as it can be. The speed's pill and the credit are the only exceptions, both
-  a review risk (§7).
+  base view to the map), the bar as small as it can be. The speed's pill is the only exception, a review risk (§7).
 
 ## 5. Development: a Mac with the Simulator
 
@@ -349,7 +365,10 @@ Always Dark; Automatic follows the car, and the simulated car stays at night wha
 location (midday in Cupertino, the display reconnected) or the Mac's; the Simulator's hidden CarPlay options set only
 size and scale. Day mode is previewed by a temporary build that sets the CarPlay window's `overrideUserInterfaceStyle`
 to light and the root's `dark` to false: the map, the bar and the map's buttons go light (on iOS 26.3 a template image
-was tinted dark there), CarPlay's guidance card stays dark.
+was tinted dark there), CarPlay's guidance card stays dark. Each map button's glass takes its shade from the map
+behind it there: near white over land, dark over the river beside it. The simulator's CarPlay setup window
+(`CarPlayExtraOptions`) keeps scale 3 whatever is chosen: 1200×720 @3x is the 400×240 pt screen. Its Knob draws a knob
+under the screen; drags on it posted from a script showed the bar but moved no focus.
 
 States the simulator gives no way into are set from a temporary file required by index.ts in `__DEV__` (`routes.start`
 to a place outside the region for a failed plan, `holdRouteForGuide` for a held route, `CarPlay.setSearch` and
@@ -391,14 +410,9 @@ over CarPlay's Settings. The cameras' badges and the pill's speed on a simulated
 
 ## 7. Open items
 
-1. **On a phone and in a car**, from TestFlight (the simulator can't): the adapter's restoration relaunch (§3); the
-   map at the car's own points in motion; the voice over the car's audio; the banners; the cluster's metadata; a link
-   to the car's scene (§4; the simulator gives links to the phone); the JS thread with the app open on both screens,
-   two maps smoothed ~30 times a second beside the particle filter, already over its budget (SPEC §8 risk 6). If it
-   drops frames, the phone's map stops smoothing while the car shows the app.
-2. Review: §4 meets the guidelines as read, but for the map data credit and the speed's pill over the map, which the
-   guide's letter rules out; App Review's verdict on them is unknown. Before the first submission with the pill, ask
+1. Review: §4 meets the guidelines as read, but for the speed's pill over the map, which the guide's letter rules
+   out; App Review's verdict on them is unknown. Before the first submission with the pill, ask
    Apple (a developer support request). Dropping it is a change to the car map's JS alone, no native build.
-3. Later: the dashboard and instrument cluster scenes of the app's own (`CPSupportsDashboardNavigationScene`,
+2. Later: the dashboard and instrument cluster scenes of the app's own (`CPSupportsDashboardNavigationScene`,
    `CPSupportsInstrumentClusterNavigationScene`); iOS 26.4's route sharing with the car; iOS 27's panels on the map
    template.

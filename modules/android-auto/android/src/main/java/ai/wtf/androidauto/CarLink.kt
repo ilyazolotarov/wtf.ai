@@ -158,11 +158,6 @@ internal object CarLink {
     session?.showMap()
   }
 
-  /** The car's map has drawn its style. */
-  fun mapDrawn() {
-    session?.mapDrawn()
-  }
-
   fun startTestDrive() {
     if (testDrive) return
     testDrive = true

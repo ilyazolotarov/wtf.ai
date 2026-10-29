@@ -18,7 +18,7 @@ extra to install: Android Auto is part of Android, and the car's screen is part 
 | --- | --- | --- |
 | A Car App Library navigation app | A `CarAppService` with the `androidx.car.app.category.NAVIGATION` intent category, the permissions `androidx.car.app.NAVIGATION_TEMPLATES` and `ACCESS_SURFACE`, `automotive_app_desc.xml` with `<uses name="template"/>`, `androidx.car.app.minCarApiLevel`. | `modules/android-auto`'s own manifest (merged into the app's; no config plugin). Car App Library 1.7.0 (stable); every template used is from API level 1, so `minCarApiLevel` 1. |
 | Host validation | The service answers only hosts it trusts. | Release builds: the library's allowlist (`hosts_allowlist_sample`: Android Auto, Android Automotive OS's template host). Debug builds: any host (the Desktop Head Unit). |
-| Distribution | Android Auto lists a Car App Library app in a car only when it was installed from a trusted source: Google Play, including internal testing and internal app sharing. Its developer setting "Unknown sources" covers other kinds of apps, not these (developer.android.com, *Test Android apps for cars*). The Desktop Head Unit lists a sideloaded build with developer mode and "Unknown sources" on (§5). | The sideloaded APK (ANDROID-SPEC §1) brings Android Auto to the desktop test, not to testers' cars. Testers get it in a car from the Play internal test track (the store build, SPEC §2.2). Not yet tried in a car. |
+| Distribution | Android Auto lists a Car App Library app in a car only when it was installed from a trusted source: Google Play, including internal testing and internal app sharing. Its developer setting "Unknown sources" covers other kinds of apps, not these (developer.android.com, *Test Android apps for cars*). The Desktop Head Unit lists a sideloaded build with developer mode and "Unknown sources" on (§5). | The sideloaded APK (ANDROID-SPEC §1) brings Android Auto to the desktop test, not to testers' cars. Testers get it in a car from the Play internal test track (the store build, SPEC §2.2), and a tester's car runs it. |
 | Review | Production on Play needs the Android Auto form factor added in the console (Advanced settings → Form factors), Android Auto screenshots, and Android for Cars' app quality review for navigation apps (the NF guidelines). The review drives the app with the host's test drive (`NavigationManagerCallback.onAutoDriveEnabled`, NF-7). The location foreground service is declared for navigation already; its Android Auto use (§3) goes in that declaration too. | The test drive: §3. The console's part: open (§7). |
 
 ## 3. Session
@@ -150,16 +150,15 @@ src/components/car-screen/car-session.ts ◀───────┘  route, pla
   landmarks to check the dot by; their names 24 dp, their icons 36 dp. Airports keep their own label layer. No ways a car can't take (footways, steps, cycleways, pedestrian
   streets: in parks and yards their dashes were the busiest thing on the screen); service roads and tracks stay
   (`carMapStyle`, src/config/map-car.ts).
-- The map data credit shows in the visible map's bottom left corner once the car's map has drawn its style (the JS
-  side calls `mapDrawn`) and fades after 5 s, as on the phone (UI-SPEC §6.1); no (i) button. It is a native view over
-  the React root: React Native text on the car's display is drawn at the phone's density into a box laid out at the
-  car's, and clipped (LogBox's too).
+- No map data credit on the car's screen: the phone's map shows it as it opens and Settings › About keeps it
+  (UI-SPEC §6.1; CARPLAY-SPEC §4 has the reading of OSMF's guidelines).
 - **The speed and speed cameras** (UI-SPEC §6.4, §6.5): the session follows the app's one speed and camera warning
   (`SpeedAlerts`) while it runs, so the chime and "Speed camera ahead" sound with no phone screen too, once whatever
   screens show them, and sends the car what it shows as it changes (`carSpeed` in car-guidance.ts, Jest; `setSpeed`).
   Quality guideline NF-2 allows the speed limit and road warnings in the map's safe area. Both are native views over
-  the React root (CarSpeedViews.kt), as the credit, in the phone's colours and sizes in the map's dp.
-  - **The speed:** a pill in the visible map's bottom left corner, where Google Maps has it, the credit beside it: the
+  the React root (CarSpeedViews.kt), in the phone's colours and sizes in the map's dp: React Native text on the car's
+  display is drawn at the phone's density into a box laid out at the car's, and clipped (LogBox's too).
+  - **The speed:** a pill in the visible map's bottom left corner, where Google Maps has it: the
     limit's sign and the speed with its unit, the speed red past the driver's margin. No speed: none. Beside the
     camera's card with a sign, as on the phone (UI-SPEC §6.5): no sign of its own, red past the lower of the road's
     and the camera's limits.
@@ -315,15 +314,12 @@ it, the speed red past the margin; the camera's line and the chime played as nav
 
 ## 7. Open items
 
-1. A real car, from the Play internal test track (§2); there, the car's assistant (VC-1) asking for places, the car's
-   map in motion (§5: the emulator can't draw it) and the time to launch and load (DR-2, DR-3: 10 s each; a debug
-   build's says nothing).
-2. Moving the map with a rotary knob or touchpad (the host's pan mode), not yet seen: on `rotary.ini` Android Auto
+1. Moving the map with a rotary knob or touchpad (the host's pan mode), not yet seen: on `rotary.ini` Android Auto
    stopped answering before the map's buttons took focus; the touchpad takes only the mouse.
-3. A cluster display the app draws on (`FEATURE_CLUSTER`, a session of `DISPLAY_TYPE_CLUSTER` with map tiles only,
+2. A cluster display the app draws on (`FEATURE_CLUSTER`, a session of `DISPLAY_TYPE_CLUSTER` with map tiles only,
    quality guideline NF-9, optional): held off; the turn reaches the cluster without it (§4). The turn-by-turn
    notification in a rail, where an Android Auto version or a car draws one.
-4. The Play console before production: the Android Auto form factor, its screenshots, the location service's
+3. The Play console before production: the Android Auto form factor, its screenshots, the location service's
    declaration (§2).
-5. Debug builds need Metro as for the phone. A car's map started before the development launcher loaded the JS stayed
+4. Debug builds need Metro as for the phone. A car's map started before the development launcher loaded the JS stayed
    blank; `CarMapSurface.restartIfStopped` starts it again in the new React context, not yet seen doing so.

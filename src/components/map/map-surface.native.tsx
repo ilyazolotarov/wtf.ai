@@ -4,6 +4,7 @@ import { useColorScheme, View, type NativeSyntheticEvent } from "react-native";
 
 import { ANDROID_BLURS } from "@/components/ui/glass-fill";
 import { useMapStyle } from "@/config/map";
+import { raisesBuildings, withFlatBuildings } from "@/config/map-buildings";
 import { carMapStyle } from "@/config/map-car";
 import { STREET_PICK_LAYER } from "@/config/map-labels";
 import { Sentry } from "@/config/sentry";
@@ -20,6 +21,7 @@ import { useEntrancesUrl } from "@/services/offline-map/entrance-file";
 import { activeCameras } from "@/services/offline-map/camera-file";
 import { activeSearchIndex } from "@/services/offline-map/search-file";
 import { useMapPacks } from "@/services/offline-map/map-packs";
+import { useMapPreferences } from "@/services/map-preferences";
 
 import { dotOnCar, type CameraView } from "./map-features";
 import { nearHouses, nearPoint } from "./map-near";
@@ -167,10 +169,13 @@ export function MapSurface({
   const packStyle = useMapStyle(scheme);
   // The parked car's images come with the style (car-sprite.ts); the first time, the style is reloaded with them.
   const carSprite = useCarSprite();
-  const mapStyle = useMemo(
-    () => packStyle && withCarSprite(carScale ? carMapStyle(packStyle, carGuidelineSizes ? carScale : null) : packStyle, carSprite),
-    [packStyle, carSprite, carScale, carGuidelineSizes],
-  );
+  // Settings → 3D buildings: raised everywhere, on the phone alone, or nowhere.
+  const raised = raisesBuildings(useMapPreferences().buildings3d, !!carScale);
+  const mapStyle = useMemo(() => {
+    if (!packStyle) return packStyle;
+    const forScreen = carScale ? carMapStyle(packStyle, carGuidelineSizes ? carScale : null) : packStyle;
+    return withCarSprite(raised ? forScreen : withFlatBuildings(forScreen), carSprite);
+  }, [packStyle, carSprite, carScale, carGuidelineSizes, raised]);
   const entrancesUrl = useEntrancesUrl();
   const { installed } = useMapPacks();
   const region = installed.active ? installed.regions[installed.active] : null;

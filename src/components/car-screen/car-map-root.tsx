@@ -19,8 +19,6 @@ import type { CarMapGesture } from "./car-types";
 interface CarMapNative {
   addListener(event: "onMapGesture", listener: (g: CarMapGesture) => void): { remove(): void };
   setRecentre?(shown: boolean): Promise<void>;
-  /** Android Auto draws the map data credit natively (CarMapSurface), from when the map has drawn. */
-  mapDrawn?(): Promise<void>;
 }
 
 const native: CarMapNative | null = Platform.OS === "ios" ? CarPlay : AndroidAuto;
@@ -43,6 +41,11 @@ export interface CarMapProps {
   zoom?: number;
   /** CarPlay: the camera's alert is up with its sign (CarPlaySession), so the speed's pill shows none of its own. */
   cameraSign?: boolean;
+  /**
+   * CarPlay: the speed's pill's room on the right in the corner above the map's buttons, points (CarPlaySession). A
+   * build without it: beside the buttons' column (`insets.right`).
+   */
+  speedRight?: number;
 }
 
 /**
@@ -52,30 +55,28 @@ export interface CarMapProps {
  * heading-up and following the car in the part of the screen the template leaves free. What it shows of the route
  * besides the map, and the navigator kept running, are the car session's (car-session-task.ts).
  */
-export function CarMapRoot({ dark = false, insets = {}, scale = 1, zoom = 0, cameraSign = false }: CarMapProps) {
+export function CarMapRoot({ dark = false, insets = {}, scale = 1, zoom = 0, cameraSign = false, speedRight }: CarMapProps) {
   return (
     <I18nProvider>
       {/* The session runs the navigator: this map only draws it. */}
       <PositionProvider gnss={false}>
-        <CarMap dark={dark} insets={insets} scale={scale} zoom={zoom} cameraSign={cameraSign} />
+        <CarMap dark={dark} insets={insets} scale={scale} zoom={zoom} cameraSign={cameraSign} speedRight={speedRight} />
       </PositionProvider>
     </I18nProvider>
   );
 }
 
 const noop = () => {};
-// A build older than `mapDrawn` (an update reaches it) has none.
-const onMapDrawn = () => void native?.mapDrawn?.().catch(noop);
 /**
- * CarPlay's map: it draws its own credit and speed (Android Auto's are native, React Native text on its display being
- * drawn at the phone's density), and its points are made for the car's screen, so the POIs keep the style's sizes.
+ * CarPlay's map: it draws its own speed (Android Auto's is native, React Native text on its display being drawn at the
+ * phone's density), and its points are made for the car's screen, so the POIs keep the style's sizes. Neither car's map
+ * shows the map data credit: the phone's map shows it as it opens and Settings keeps it (UI-SPEC §6.1), and on CarPlay
+ * Apple's guide keeps the base view to the map. (Older Android Auto builds draw one natively only once told the map
+ * has drawn, which nothing does now.)
  */
 const carPlay = Platform.OS === "ios";
-/**
- * The speed and the credit this far in from the visible map's bottom left corner, and apart, as Android Auto's
- * (CarMapSurface).
- */
-const CREDIT_GAP = 8;
+/** The speed this far in from its corner, as Android Auto's (CarMapSurface). */
+const SPEED_GAP = 8;
 
 /**
  * Heading-up puts the dot this far down the car's visible map (the phone: 0.8 of its whole map): a car's screen is
@@ -93,7 +94,7 @@ const FRAME_GAP = 32;
 /** The car's map follows heading-up; the driver's drag or pinch leaves it free (camera-policy.ts, as on the phone). */
 const CAR_CAMERA: CameraState = { ...INITIAL_CAMERA, mode: "follow-heading" };
 
-function CarMap({ dark, insets, scale, zoom, cameraSign }: Required<CarMapProps>) {
+function CarMap({ dark, insets, scale, zoom, cameraSign, speedRight }: Required<Omit<CarMapProps, "speedRight">> & Pick<CarMapProps, "speedRight">) {
   const position = usePosition();
   const headingUp = useHeadingUp(position, null);
   const [camera, dispatch] = useReducer(cameraReducer, CAR_CAMERA);
@@ -101,8 +102,6 @@ function CarMap({ dark, insets, scale, zoom, cameraSign }: Required<CarMapProps>
   // The zoom buttons and pinches while following move the follow zoom; while free, the map's own.
   const [zoomShift, setZoomShift] = useState(0);
   const control = useRef<MapControl | null>(null);
-  // CarPlay's speed in the corner, the credit beside it.
-  const [speedWidth, setSpeedWidth] = useState(0);
   // Driving, a look around ends 10 s after the last touch, as on the phone (`RETURN_AFTER_TOUCH_MS`).
   const driving = (position?.speedMps ?? 0) > COURSE_MIN_SPEED_MPS;
   useEffect(() => {
@@ -167,7 +166,12 @@ function CarMap({ dark, insets, scale, zoom, cameraSign }: Required<CarMapProps>
     right: Math.round(insets.right ?? 0),
     bottom: Math.round(insets.bottom ?? 0),
   };
-  const creditLeft = padding.left + CREDIT_GAP + (speedWidth > 0 ? speedWidth + CREDIT_GAP : 0);
+  // CarPlay's speed in the corner above the map's buttons; while CarPlay's bar shows (a top inset: the card and the
+  // pill would come down level with the buttons) at the visible map's bottom left.
+  const speedAt =
+    padding.top > 0
+      ? { left: padding.left + SPEED_GAP, bottom: padding.bottom + SPEED_GAP }
+      : { right: Math.round(speedRight ?? padding.right) + SPEED_GAP, top: padding.top + SPEED_GAP };
   return (
     <>
       <MapSurface
@@ -184,9 +188,7 @@ function CarMap({ dark, insets, scale, zoom, cameraSign }: Required<CarMapProps>
         carScale={scale}
         carGuidelineSizes={!carPlay}
         headingUpDotAt={CAR_HEADING_UP_DOT_AT}
-        // Beside the speed, between the card and the map's buttons, wrapped when the room is narrow.
-        creditAt={carPlay ? { bottom: padding.bottom + CREDIT_GAP, left: creditLeft, right: padding.right + CREDIT_GAP } : null}
-        onReady={onMapDrawn}
+        creditAt={null}
         control={control}
         followZoomShift={zoom + zoomShift}
         overview={overview}
@@ -198,12 +200,7 @@ function CarMap({ dark, insets, scale, zoom, cameraSign }: Required<CarMapProps>
         }}
       />
       {carPlay && (
-        <CarSpeedPill
-          at={{ left: padding.left + CREDIT_GAP, bottom: padding.bottom + CREDIT_GAP }}
-          dark={dark}
-          cameraSign={cameraSign}
-          onWidth={setSpeedWidth}
-        />
+        <CarSpeedPill at={speedAt} dark={dark} cameraSign={cameraSign} />
       )}
     </>
   );

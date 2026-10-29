@@ -137,11 +137,6 @@ class CarScreenSession : Session() {
     if (screens.stackSize > 1) screens.popToRoot()
   }
 
-  /** The car's map has drawn its style: its credit shows. */
-  fun mapDrawn() {
-    map?.showCredit()
-  }
-
   /** The search screen with `query` typed, right over the map (a list open before goes). */
   fun openSearch(query: String) {
     val screens = carContext.getCarService(ScreenManager::class.java)

@@ -141,6 +141,8 @@ final class CarPlaySession: NSObject {
     // route (`refresh`, `CarPlayLogic.buttonsStay`).
     template.automaticallyHidesNavigationBar = true
     template.hidesButtonsWithNavigationBar = true
+    // Set before the template shows: iOS 26.4 draws the card red by default, and a colour set later stayed red.
+    template.guidanceBackgroundColor = CarPlayImages.cardColor
     mapTemplate = template
     controller.setRootTemplate(template, animated: false) { [weak self] _, error in
       if let error { self?.note("map template not shown: \(error.localizedDescription)", problem: true) }
@@ -217,8 +219,6 @@ final class CarPlaySession: NSObject {
   func contentStyleChanged() {
     window?.backgroundColor = dark ? .black : .white
     updateMapProps()
-    // The map's buttons are drawn in the day's or the night's colours.
-    shownMapButtons = []
     refresh()
   }
 
@@ -280,7 +280,8 @@ final class CarPlaySession: NSObject {
    * window's safe area (the guidance card, the bar) and on the right the map's buttons (their layout guide), so the
    * camera keeps the car in the rest and the credit clear of them; `scale`, the map drawn bigger than the car's points
    * (CarMapRoot); `cameraSign`, the camera's alert is up with its sign, so the speed's pill shows none of its own
-   * (CarSpeedPill): closed by the driver, the road's sign is back beside the speed.
+   * (CarSpeedPill): closed by the driver, the road's sign is back beside the speed; `speedRight`, the pill's room on
+   * the right in the corner above the map's buttons (`CarPlayLogic.speedRight`).
    */
   private func mapProps() -> [String: Any] {
     let safe = window?.safeAreaInsets ?? .zero
@@ -297,6 +298,7 @@ final class CarPlaySession: NSObject {
       "scale": s,
       "zoom": CarPlayLogic.followZoomShift(screenScale: Double(screenScale)),
       "cameraSign": cameraSignShown,
+      "speedRight": CarPlayLogic.speedRight(right: Double(right)) / s,
     ]
   }
 
@@ -525,8 +527,10 @@ final class CarPlaySession: NSObject {
       made = CPMapButton { [weak self] _ in self?.send("toggle-voice") }
       icon = muted ? "car_volume_off" : "car_volume_up"
     }
-    made.image = CarPlayImages.mapIcon(icon, dark ? .night : .day)
-    made.focusedImage = CarPlayImages.mapIcon(icon, dark ? .focusedAtNight : .day)
+    // Focused alike: without a focused image of its own CarPlay tints the button's, white on its white focus fill.
+    let drawn = CarPlayImages.mapIcon(icon, .outlined)
+    made.image = drawn
+    made.focusedImage = drawn
     return made
   }
 
@@ -620,7 +624,8 @@ final class CarPlaySession: NSObject {
     let kind = CarPlayLogic.maneuverKind(step.kind)
     let maneuver = CPManeuver()
     maneuver.instructionVariants = [step.instruction]
-    maneuver.symbolImage = CarPlayImages.icon(kind.icon, size: CarPlayImages.maneuverSize)
+    maneuver.symbolImage = CarPlayImages.maneuverIcon(kind.icon)
+    maneuver.cardBackgroundColor = CarPlayImages.cardColor
     let gap = CarPlayLogic.shownDistance(gapM)
     maneuver.initialTravelEstimates = Self.estimates(gap.value, gap.kilometers ? "km1" : "m", step.timeS)
     maneuver.userInfo = step.id
@@ -1184,6 +1189,24 @@ enum CarPlayImages {
   }
 
   /**
+   * The guidance card, by day and night: the dark grey of CarPlay's trip estimates under it, as CarPlay drew it before
+   * iOS 26.4, which draws it red by default. Also each maneuver's card.
+   */
+  static let cardColor = UIColor(white: 0x3B / 255.0, alpha: 1)
+
+  /**
+   * A maneuver's icon, white on the dark card (`cardColor`), not CarPlay's tint: that follows the car's day, and by
+   * day a car drew it black on the card. Drawn white into its pixels: CarPlay draws the image in its own process, where
+   * a tint given with `withTintColor` is lost and the vector's black ink shows.
+   */
+  static func maneuverIcon(_ name: String) -> UIImage {
+    let side = CGSize(width: maneuverSize, height: maneuverSize)
+    let white = icon(name, size: maneuverSize).withTintColor(.white, renderingMode: .alwaysOriginal)
+    return UIGraphicsImageRenderer(size: side).image { _ in white.draw(in: CGRect(origin: .zero, size: side)) }
+      .withRenderingMode(.alwaysOriginal)
+  }
+
+  /**
    * A map button's drawing spans this share of the button's icon at most: the X's own (14 of 24). The symbols leave
    * different room around their drawing (the voice 3 of 24 a side, my location 1): drawn alike, they filled the round
    * button but the X, + and −.
@@ -1197,20 +1220,12 @@ enum CarPlayImages {
     var edgeAlpha: Double
     var edgeWidth: Double
 
-    /** White on the night's dark glass, a faint dark edge for where it shows something light. */
-    static let night = MapIconStyle(color: .white, edge: .black, edgeAlpha: 0.25, edgeWidth: 1)
     /**
-     * By day the app's text colour (src/constants/theme.ts, light `text` #1D1C1A), about CarPlay's own glyphs by day,
-     * with no edge: the light glass needs none, and pure black in a white edge looked heavy.
+     * White in a black edge, by day and night, focused or not: CarPlay's glass takes its shade from the map behind each
+     * button, near white over a light map, dark over water or a dark map, a mid grey in a car by day, and its focus fill
+     * is white. One colour alone vanished on one of them (the app's dark text colour on the grey; white on the light).
      */
-    static let day = MapIconStyle(
-      color: UIColor(red: 0x1D / 255.0, green: 0x1C / 255.0, blue: 0x1A / 255.0, alpha: 1), edge: .white, edgeAlpha: 0,
-      edgeWidth: 0)
-    /**
-     * Focused by night: on CarPlay's white focus fill or on the dark glass, black with a full white edge. By day the
-     * fill and the glass are light alike: the day's own.
-     */
-    static let focusedAtNight = MapIconStyle(color: .black, edge: .white, edgeAlpha: 1, edgeWidth: 1.5)
+    static let outlined = MapIconStyle(color: .white, edge: .black, edgeAlpha: 1, edgeWidth: 1.25)
   }
 
   /** The share of its box each icon's drawing spans, measured once. Main thread. */
@@ -1219,9 +1234,9 @@ enum CarPlayImages {
   /**
    * A map button's icon, its drawing as big as the X's, never tinted by CarPlay: on iOS 26 its tint of map buttons is
    * wrong (Apple's known issue; developer forums 798735, 799192, 842273), white on its white focus fill, and reported
-   * white on near-white buttons by day. The session draws them by the car's night or day, and focused (a knob's, a
-   * touchpad's, or where the focus came back after a list) by night for a white fill or the glass. The edge's copies
-   * make one layer, faded as a whole: overlapping, they would add up to solid.
+   * white on near-white buttons by day. The session draws them white in a black edge (`outlined`), focused (a knob's,
+   * a touchpad's, or where the focus came back after a list) alike. The edge's copies make one layer, faded as a
+   * whole: overlapping, they would add up to solid.
    */
   static func mapIcon(_ name: String, _ style: MapIconStyle) -> UIImage {
     guard let image = vector(name) else { return UIImage() }

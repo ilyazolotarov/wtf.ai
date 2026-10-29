@@ -115,6 +115,11 @@ export const en = {
   englishLanguage: "English",
   ukrainianLanguage: "Українська",
   appearance: "Appearance",
+  buildings3d: "3D buildings",
+  buildings3dOn: "On",
+  buildings3dPhone: "Phone only",
+  buildings3dOff: "Off",
+  buildings3dNote: "Buildings appear in 3D when the map tilts while driving. Choose “Phone only” to keep them flat on your car's screen (CarPlay, Android Auto).",
   privacy: "Privacy",
   privacyMessage:
     "Your position stays on this phone unless you choose to share it with other navigators on Android. No account needed. Crash reports and anonymous car reports (Settings → Vehicle) contain no location or personal data. Downloaded maps work offline; maps and app updates come from the project's own server, which doesn't receive your position or routes. Trip logs leave the phone only when you share them or enable tester uploads (More → Trip recorder).",
