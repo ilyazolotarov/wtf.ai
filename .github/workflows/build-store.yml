@@ -83,6 +83,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Runtime as an export sees it
+        # publish-ota resolves the runtime from a fresh checkout, without prebuild: the same fingerprint, with its
+        # sources, to compare with the one the build embeds (below).
+        run: npx expo-updates fingerprint:generate --platform android --debug > "$RUNNER_TEMP/fingerprint-export.json"
+
       - name: Run Expo Prebuild
         run: npx expo prebuild --platform android --clean
 
@@ -120,6 +125,20 @@ jobs:
           # Play serves each phone its ABI: all four, so emulators and Chromebooks get the app too.
           cd android
           ./gradlew bundleRelease -PreactNativeArchitectures=arm64-v8a,armeabi-v7a,x86_64,x86 --no-daemon
+
+      - name: Compare the runtime with the export's
+        # Unequal, the JS updates of main (publish-ota) never reach this build. The diff names the sources that differ.
+        run: |
+          EMBEDDED=$(unzip -p android/app/build/outputs/bundle/release/app-release.aab base/assets/fingerprint 2>/dev/null || true)
+          EXPORT=$(node -p 'require(process.argv[1]).hash' "$RUNNER_TEMP/fingerprint-export.json")
+          echo "Embedded: $EMBEDDED"
+          echo "Export:   $EXPORT"
+          if [ "$EMBEDDED" != "$EXPORT" ]; then
+            npx expo-updates fingerprint:generate --platform android --debug > "$RUNNER_TEMP/fingerprint-after.json"
+            echo "After the build: $(node -p 'require(process.argv[1]).hash' "$RUNNER_TEMP/fingerprint-after.json")"
+            npx @expo/fingerprint fingerprint:diff "$RUNNER_TEMP/fingerprint-export.json" "$RUNNER_TEMP/fingerprint-after.json" || true
+            echo "::warning::The bundle's runtime $EMBEDDED is not the one publish-ota resolves ($EXPORT): no JS update will reach it"
+          fi
 
       - name: Check the store manifest
         # The policy-sensitive permissions, from the bundle Play will read.
