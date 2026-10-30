@@ -5,6 +5,7 @@ import type { LocalFrame } from "../geo/local-frame";
 import { EdgeFlag } from "../mapmatch/graph/format";
 import type { EdgeId, Exit, NearEdge, RoadEdge, RoadGraph } from "../mapmatch/graph/road-graph";
 import type { SpeedCamera } from "./cameras";
+import { edgeLimit, LIMIT_LEAD_S, slowingM, type SpeedLimit } from "./speed-limit";
 
 /** Where the car may be: on `edge`, travelling `dir` along its geometry, `alongM` from its start; `weight` its share. */
 export interface RoadPosition {
@@ -144,6 +145,69 @@ export function edgeAhead(graph: RoadGraph, start: Omit<RoadPosition, "weight">,
     left -= edge.lengthM;
   }
   return edge;
+}
+
+/**
+ * The road whose limit a car on it at `speedMps` is shown (UI-SPEC §6.4): the one it will be on once a change has
+ * shown (`LIMIT_LEAD_S`, `edgeAhead`), or sooner, a lower limit next on its road (`nextLimits`) as soon as slowing
+ * gently from the limit here (`slowingM`; without one, from the speed) would take it there by the start: the warning
+ * comes in time to slow down, and a higher limit still shows where it starts.
+ */
+export function limitRoad(graph: RoadGraph, start: Omit<RoadPosition, "weight">, speedMps: number, route?: RouteNext): RoadEdge {
+  const leadM = speedMps * LIMIT_LEAD_S;
+  let pick = edgeAhead(graph, start, leadM);
+  let pickKph = edgeLimit(pick)?.kph ?? Infinity;
+  const fromKph = edgeLimit(graph.edge(start.edge))?.kph ?? speedMps * 3.6;
+  for (const next of nextLimits(graph, start, leadM + slowingM(fromKph, 0), route)) {
+    const kph = next.limit.kph;
+    if (kph < fromKph && kph < pickKph && next.startM <= leadM + slowingM(fromKph, kph)) {
+      pick = next.edge;
+      pickKph = kph;
+    }
+  }
+  return pick;
+}
+
+/**
+ * The next other limit on the car's road within `maxM`, on each way it may go, and how far ahead it starts. The road:
+ * the route's way when the car is on it, else straight on (within 45°, every way of a fork) to roads of its class or
+ * higher, not onto a slip road from a road that isn't one: a side road or an exit with a lower limit isn't the car's
+ * until it turns there. Roads without a limit don't end it.
+ */
+export function nextLimits(graph: RoadGraph, start: Omit<RoadPosition, "weight">, maxM: number, route?: RouteNext): { edge: RoadEdge; limit: SpeedLimit; startM: number }[] {
+  const first = graph.edge(start.edge);
+  const hereKph = edgeLimit(first)?.kph;
+  const out: { edge: RoadEdge; limit: SpeedLimit; startM: number }[] = [];
+  const seen = new Set<string>([directed(first.id, start.dir)]);
+  const queue = [{ edge: first, dir: start.dir, endM: start.dir > 0 ? first.lengthM - start.alongM : start.alongM }];
+  while (queue.length && seen.size < MAX_STRETCHES) {
+    const s = queue.shift()!;
+    if (s.endM >= maxM) continue;
+    for (const x of onItsRoad(graph, s.edge, s.dir, route)) {
+      const key = directed(x.edge, x.dir);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const edge = graph.edge(x.edge);
+      const limit = edgeLimit(edge);
+      if (limit && limit.kph !== hereKph) out.push({ edge, limit, startM: s.endM });
+      else queue.push({ edge, dir: x.dir, endM: s.endM + edge.lengthM });
+    }
+  }
+  return out;
+}
+
+function onItsRoad(graph: RoadGraph, via: RoadEdge, dir: 1 | -1, route?: RouteNext): Exit[] {
+  const exits = graph
+    .exits(via.id, dir)
+    .filter((x) => !x.uTurn && !x.againstOneway && !x.restricted && !(graph.edge(x.edge).flags & EdgeFlag.minorService));
+  const planned = route?.get(directed(via.id, dir));
+  const onRoute = planned && exits.find((x) => x.edge === planned.edge && x.dir === planned.dir);
+  if (onRoute) return [onRoute];
+  const onLink = (via.flags & EdgeFlag.link) !== 0;
+  return exits.filter((x) => {
+    const e = graph.edge(x.edge);
+    return Math.abs(x.turnRad) <= STRAIGHT_RAD && e.cls <= via.cls && (onLink || !(e.flags & EdgeFlag.link));
+  });
 }
 
 function goesOn(graph: RoadGraph, via: RoadEdge, dir: 1 | -1, route?: RouteNext): Exit[] {

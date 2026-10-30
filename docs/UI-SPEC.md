@@ -319,10 +319,19 @@ One small component each; the screen only places them and wires their state. Car
 - **Held** (`LimitHold`): a sign appears after 1 s; another limit, or none, replaces it after holding 2 s. A change
   waiting while no position comes (standing on the driver's placing, a fix that doesn't change) comes with the
   service's tick re-publishing the dot.
-- **Ahead by the hold** (`LIMIT_LEAD_S`, `edgeAhead`): moving, each road the car may be on gives the limit 2 s ahead
-  at the speed, as far as the road can only go on (one way on at a node, driveways and parking aisles aside; a node
-  with a choice stops it, the car may turn there). A new limit shows where the car meets it: judged where the car is, it
-  came the hold's 2 s past the sign (60 m at 110 km/h), a town's 50 inside the town and the 90 after leaving it.
+- **Ahead of the car** (`limitRoad`): moving, each road the car may be on gives the limit where the car will be once a
+  change has shown, or sooner a lower one, so the warning comes in time to slow down:
+  - **Where it will be** (`LIMIT_LEAD_S`, `edgeAhead`): 3 s ahead at the speed, the hold's 2 s and 1 s for the next
+    position and the roads agreeing on the new limit; as far as the road can only go on (one way on at a node,
+    driveways and parking aisles aside; a node with a choice stops it, the car may turn there). A higher limit shows
+    where the car meets it: judged where the car is, it came 2.6–3.4 s past the sign on real drives.
+  - **A lower limit early** (`nextLimits`, `slowingM`): the next other limit on the car's road, once it is within the
+    distance to slow down to it from the limit here at 1.5 m/s² (lifting off, braking lightly; from the speed where the
+    road has none), plus the lead: 110 → 50 shows 250 m before the town's sign, 90 → 50 140 m, 50 → 30 40 m. The car's
+    road: the route's way, else straight on (within 45°, every way of a fork) to roads of its class or higher, never
+    onto a slip road from a road that isn't one; it stops at the first other limit, so stepped signs show one after
+    another (110, 70, 50) and none comes back up. Slowing is reckoned from the road's limit, not the speed, so the sign
+    doesn't flick back up as the driver slows.
 - `SpeedLimitSource` (the navigator service, `set`) reads the active region's graph on a reader of its own (16 tiles,
   its frame around the car, moved past 20 km), opened again when the active graph changes, and puts the result in
   `PositionEstimate.speedLimit`; `speed limit <kph> (OSM|default)` / `none` notes in the trip log.

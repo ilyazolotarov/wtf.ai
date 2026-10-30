@@ -129,11 +129,32 @@ const SHOW_AFTER_MS = 1000;
 const CHANGE_AFTER_MS = 2000;
 
 /**
- * Moving, the limit is the road's where the car will be once a change has held (`LimitHold`): this long ahead at its
- * speed, as far as the road can only go on (`edgeAhead`). A new limit then shows where the car meets it, not 2 s past
- * it (60 m at 110 km/h): a town's 50 came after its sign, the 90 leaving it after the end of the town.
+ * Besides the hold, a change shows this much after the car meets it, s: the next position (every 0.4–0.5 s) and the
+ * roads the car may be on agreeing on the new limit (no sign while they split, and the hold starts again). Measured at
+ * town signs on real drives: shown 2.6–3.4 s after the car passed them with the 2 s hold.
  */
-export const LIMIT_LEAD_S = CHANGE_AFTER_MS / 1000;
+const LIMIT_LATENCY_S = 1;
+
+/**
+ * Moving, the limit is the road's where the car will be once a change has shown: this long ahead at its speed, as far
+ * as the road can only go on (`edgeAhead`). A new limit then shows where the car meets it, not 3 s past it (90 m at
+ * 110 km/h): a town's 50 came after its sign, the 90 leaving it after the end of the town. A lower one comes sooner
+ * (`limitRoad`).
+ */
+export const LIMIT_LEAD_S = CHANGE_AFTER_MS / 1000 + LIMIT_LATENCY_S;
+
+/**
+ * A lower limit ahead shows early enough to slow down to it by its start at this rate, m/s²: lifting off and braking
+ * lightly. From 110 to a town's 50 that is 250 m before its sign, from 90 140 m, from 50 to 30 40 m.
+ */
+export const SLOW_FOR_LIMIT_MPS2 = 1.5;
+
+/** Metres to slow from `fromKph` to `toKph` at `SLOW_FOR_LIMIT_MPS2` (0 when not slower). */
+export function slowingM(fromKph: number, toKph: number): number {
+  const from = fromKph / 3.6;
+  const to = toKph / 3.6;
+  return to < from ? (from * from - to * to) / (2 * SLOW_FOR_LIMIT_MPS2) : 0;
+}
 
 /**
  * The limit as shown: a new one after it held a moment, so a junction or a hypothesis passing by doesn't flash a sign.

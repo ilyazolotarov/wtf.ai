@@ -465,8 +465,9 @@ export class NavigatorService implements PositionSource {
     this.phone?.engine.setRoute(points);
   }
 
-  /** The active route's roads (null: none) on the graph file `key`: the road ahead follows them (UI-SPEC §6.5). */
+  /** The active route's roads (null: none) on the graph file `key`: the road ahead follows them (UI-SPEC §6.4–6.5). */
   setRouteRoads(route: { key: string; legs: readonly { edge: EdgeId; dir: 1 | -1 }[] } | null): void {
+    this.limits?.setRoute(route);
     this.cameras?.setRoute(route);
   }
 

@@ -2,8 +2,8 @@
 
 import type { EdgeId, RoadEdge } from "@/nav/mapmatch/graph/road-graph";
 import type { PositionEstimate } from "@/nav/position/types";
-import { edgeAhead } from "@/nav/speed/road-ahead";
-import { agreedLimit, LIMIT_LEAD_S, LimitHold, snapCandidates, snapRadiusM, type LimitCandidate, type SpeedLimit } from "@/nav/speed/speed-limit";
+import { limitRoad, routeNext, type RouteNext } from "@/nav/speed/road-ahead";
+import { agreedLimit, LimitHold, snapCandidates, snapRadiusM, type LimitCandidate, type SpeedLimit } from "@/nav/speed/speed-limit";
 import { snapsToRoads, type LimitGraph, type RoadReader, type RoadWeights } from "@/services/navigation/road-reader";
 
 export type { LimitGraph, RoadWeights };
@@ -16,14 +16,21 @@ export interface SpeedLimitSourceDeps {
 export class SpeedLimitSource {
   private readonly hold = new LimitHold();
   private noted: string | null = null;
+  /** The active route's legs as the road ahead follows them, on the graph file `key`. */
+  private route: { key: string; next: RouteNext } | null = null;
 
   constructor(private readonly deps: SpeedLimitSourceDeps) {}
+
+  /** The active route (null: none), planned on the graph file `key`: a lower limit ahead is looked for along it. */
+  setRoute(route: { key: string; legs: readonly { edge: EdgeId; dir: 1 | -1 }[] } | null): void {
+    this.route = route ? { key: route.key, next: routeNext(route.legs) } : null;
+  }
 
   /**
    * The limit to show at `p`. With map matching's `roads`, from the roads it believes in; else, for a position from a
    * trusted GNSS fix, the driver's placing or phone-only mode, from the roads around it. A dead-reckoned dot without
    * map matching gets none: it may be anywhere in its circle. Moving, each road's limit where the car will be on it once
-   * a change has held (`LIMIT_LEAD_S`).
+   * a change has shown, or a lower one ahead in time to slow down (`limitRoad`).
    */
   at(p: PositionEstimate, nowMs: number, roads?: RoadWeights): SpeedLimit | null {
     const shown = this.hold.update(this.limitAt(p, roads), nowMs);
@@ -47,11 +54,12 @@ export class SpeedLimitSource {
   private limitAt(p: PositionEstimate, roads?: RoadWeights): SpeedLimit | null {
     const reader = this.deps.reader.near(p);
     if (!reader) return null;
-    const leadM = (p.speedMps ?? 0) * LIMIT_LEAD_S;
+    const speedMps = p.speedMps ?? 0;
+    const route = this.route?.key === reader.key ? this.route.next : undefined;
     const ahead = (c: LimitCandidate): LimitCandidate => {
-      if (!c.edge || !c.dir || c.alongM === undefined || !(leadM > 0)) return c;
+      if (!c.edge || !c.dir || c.alongM === undefined || !(speedMps > 0)) return c;
       try {
-        return { ...c, edge: edgeAhead(reader.graph, { edge: c.edge.id, dir: c.dir, alongM: c.alongM }, leadM) };
+        return { ...c, edge: limitRoad(reader.graph, { edge: c.edge.id, dir: c.dir, alongM: c.alongM }, speedMps, route) };
       } catch {
         return c;
       }
