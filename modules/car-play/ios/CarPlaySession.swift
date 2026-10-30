@@ -257,7 +257,10 @@ final class CarPlaySession: NSObject {
       return
     }
     carPlayLog.notice("React Native on a new host")
-    showMap()
+    // The car shows the app: the session opens if it hasn't yet (`shown` makes the map's root too), never the map alone
+    // (2026-10-30: a launch from the car's screen showed the map with no session's marks in the trip log).
+    if !isOpen { shown() }
+    if mapHost !== host { showMap() }
   }
 
   /** The React root `CarPlayMap` once React Native runs, a blank view until then. */
@@ -485,18 +488,21 @@ final class CarPlaySession: NSObject {
   private func barButton(_ button: CarBarButton) -> CPBarButton {
     switch button {
     case .destinations:
-      return CPBarButton(title: labels.destinations) { [weak self] _ in self?.openDestinations() }
+      return CPBarButton(title: labels.destinations) { [weak self] _ in
+        self?.note("destinations pressed")
+        self?.openDestinations()
+      }
     case .search:
-      return CPBarButton(image: CarPlayImages.icon("car_search")) { [weak self] _ in
-        carPlayLog.notice("search pressed")
+      return CPBarButton(image: CarPlayImages.barIcon("car_search")) { [weak self] _ in
+        self?.note("search pressed")
         self?.openSearchTemplate()
       }
     case .voice(let muted):
-      return CPBarButton(image: CarPlayImages.icon(muted ? "car_volume_off" : "car_volume_up")) { [weak self] _ in
+      return CPBarButton(image: CarPlayImages.barIcon(muted ? "car_volume_off" : "car_volume_up")) { [weak self] _ in
         self?.send("toggle-voice")
       }
     case .endPanning:
-      return CPBarButton(image: CarPlayImages.icon("car_close")) { [weak self] _ in
+      return CPBarButton(image: CarPlayImages.barIcon("car_close")) { [weak self] _ in
         self?.mapTemplate?.dismissPanningInterface(animated: true)
       }
     }
@@ -893,10 +899,19 @@ final class CarPlaySession: NSObject {
     }
   }
 
-  /** Over the map; CarPlay refusing it says why in the trip log. */
+  /**
+   * Over the map; the outcome goes to the trip log, CarPlay refusing it as a problem (2026-10-30: Destinations and
+   * Search did nothing in a car for a while, and nothing said whether the presses reached the app).
+   */
   private func push(_ template: CPTemplate) {
-    interfaceController?.pushTemplate(template, animated: true) { [weak self] _, error in
-      if let error { self?.note("\(type(of: template)) not shown: \(error.localizedDescription)", problem: true) }
+    guard let interfaceController else {
+      note("\(type(of: template)) not shown: no interface controller", problem: true)
+      return
+    }
+    let over = interfaceController.templates.count
+    interfaceController.pushTemplate(template, animated: true) { [weak self] shown, error in
+      if let error { self?.note("\(type(of: template)) not shown over \(over): \(error.localizedDescription)", problem: true) }
+      else { self?.note("\(type(of: template)) \(shown ? "shown" : "not shown") over \(over)") }
     }
   }
 
@@ -1166,7 +1181,7 @@ final class CarPlayMapController: UIViewController {
   }
 }
 
-/** The module's icons: the app's own (scripts/car-icons.py), drawn white in a black edge (`IconStyle.outlined`). */
+/** The module's icons: the app's own (scripts/car-icons.py), drawn white in a black edge (`IconStyle.outlined`) but the bar's. */
 enum CarPlayImages {
   private static let bundle: Bundle = {
     let code = Bundle(for: CarPlaySession.self)
@@ -1191,6 +1206,18 @@ enum CarPlayImages {
    */
   static func icon(_ name: String, size: Double = buttonSize) -> UIImage {
     drawn(name, box: size, drawing: size)
+  }
+
+  /**
+   * A bar button's icon: the vector as a template, CarPlay's tint. The bar draws its images as a mask in its own
+   * colour, so the white and its black edge made one black blob, twice as bold (seen in a car, 2026-10-30).
+   */
+  static func barIcon(_ name: String) -> UIImage {
+    guard let image = vector(name) else { return UIImage() }
+    let side = CGSize(width: buttonSize, height: buttonSize)
+    if image.size == side { return image.withRenderingMode(.alwaysTemplate) }
+    return UIGraphicsImageRenderer(size: side).image { _ in image.draw(in: CGRect(origin: .zero, size: side)) }
+      .withRenderingMode(.alwaysTemplate)
   }
 
   /**

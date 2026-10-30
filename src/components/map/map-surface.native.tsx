@@ -95,7 +95,7 @@ interface MapSurfaceProps {
    * one is drawn as the car, kept until the car has driven away from it.
    */
   placedMark?: { at: Coordinate; headingRad: number | null; draft: boolean } | null;
-  /** Changes when the route and its alternatives should be framed (they came while the car stood). */
+  /** Changes when the route and its alternatives should be framed (planned while the car stood, then its alternatives). */
   overview?: number | null;
   /**
    * Where the map data credit shows as the map opens (`MapCredit`), in points from the map's edges: clear of the

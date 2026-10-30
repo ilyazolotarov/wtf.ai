@@ -115,7 +115,10 @@ GNSS and the adapter as they were. What the JS side sent is kept on the native s
   expo-updates is then asked for the bundle before it is set up (an assertion in Debug, a force-unwrap in Release).
   `CarPlayModule`'s `OnCreate` runs with each JS runtime; on a host other than the one the root was made on, the root
   is made again (the development launcher makes a new host at each load; a root left on the old one is a black
-  screen). A reload on the same host (Metro, the dev menu, an update's relaunch) restarts the root by itself, and
+  screen), and the session opens if it hasn't. The car's map root, mounting, starts the JS session if none runs
+  (`ensureCarPlaySession`, noted `carplay: no session was running with the car's map shown: started`): on
+  2026-10-30, launched from the car's screen after a force-quit, the map showed while Destinations and Search behaved
+  as if the phone didn't answer, and the run's log has no mark of a session; the cause is open. A reload on the same host (Metro, the dev menu, an update's relaunch) restarts the root by itself, and
   making it again then too crashes ("Surface must not be running").
 - **The car starts React Native when the phone's scene doesn't** (the app opened from the car, the phone locked): one
   turn of the main loop after the car's screen shows the app, if no phone scene is connected, `startWithoutPhone` goes
@@ -282,7 +285,7 @@ GNSS and the adapter as they were. What the JS side sent is kept on the native s
 - **Icons**: the app's Material Symbols, drawn by `scripts/car-icons.py` as SVG images into
   `modules/car-play/ios/CarIcons.xcassets` (the pod's `WtfCarPlay.bundle`), with Android Auto's drawables. Every one
   is drawn white in a black edge (1.25 pt, `CarPlayImages.IconStyle.outlined`) into its pixels, by day and night,
-  focused or not: the bar's buttons, the map's, list rows, maneuvers and the alerts' images. Never CarPlay's tint,
+  focused or not: the map's buttons, list rows, maneuvers and the alerts' images. Never CarPlay's tint,
   which follows the car's day and not what is under the icon: by day it drew the list rows' icons black on the black
   of a focused row and a maneuver's black on the dark guidance card, and on iOS 26 its tint of map buttons is wrong
   (Apple's known issue; developer forums 798735, 799192, 842273), white on its white focus fill, and reported white on
@@ -295,7 +298,8 @@ GNSS and the adapter as they were. What the JS side sent is kept on the native s
   a mode turned on. Drawn at their size from the vector: bar buttons 24 pt, list rows 32 pt, maneuvers 18 pt, an
   alert's 24 pt (a camera's glyph 40 pt). A map button's drawing is scaled to the X's, 14 of its 24 pt
   (`CarPlayImages.mapIcon`, the ink measured once): the symbols leave different room around their drawing, and the
-  voice and my location filled the round button.
+  voice and my location filled the round button. The bar's buttons alone are template images in CarPlay's tint
+  (`CarPlayImages.barIcon`): the bar draws its images as a mask, and the white with its edge became one black blob.
 - Device log (`ai.wtf.navigator`, category `carplay`): the scene connected, in the foreground, active, in the
   background, disconnected; React Native started without the phone's scene or on a new host; what drew the map;
   actions sent (info level); the notes also go to the trip log.

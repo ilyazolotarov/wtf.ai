@@ -608,10 +608,14 @@ adapter (`BUFFER FULL`, and the MX+ answered `STOPPED` to polls for seconds afte
   ids, listening to the 2 navigation needs`).
 - **The adapter froze in the monitor:** a stop gets no byte back at all, CR sent twice. The shadow goes off and the
   link is reset with `ATI` after a 1 s pause, one `ATWS`, then `ATZ` (each answer a `frozen` link event); without an
-  answer, closed and reopened (§10.5). The adapter id with its chip and firmware are stored and the shadow stays off
-  on it (`can-shadow: off: the adapter froze in the monitor on this firmware (…)`) until the firmware changes: at
-  once when the car was moving; standing, only when the reconnect still reaches the adapter 20 s later and it
-  doesn't answer (standing, the silence may be the car switched off and the MX+ powering down).
+  answer, closed and reopened (§10.5). While the car moves, the adapter id with its chip and firmware are stored and
+  the shadow stays off on it (`can-shadow: off: the adapter froze in the monitor on this firmware (…)`) until the
+  firmware changes: the car isn't switched off at speed, and no other phone takes the adapter then. Standing, a
+  silence is not a freeze: the car switched off (the adapter powers down), the link dropping, or another phone's app
+  taking the adapter near home. Every silent monitor on the vLinker (2026-10-20..30, both phones) came at 0 km/h with
+  the link lost within a second and back within seconds to minutes, and the adapter answered a reset moments later;
+  one phone had stored a freeze from such a silence and lost the wheels' speed for good. Verdicts stored under that
+  rule are not read (the key changed).
 - **Into the log, per window** (`can_window`, TRIP-LOGGER-SPEC §6.3): duration, frames, bytes, frames of other ids,
   the stop's latency, whether the first stop character got no prompt, how the filter was opened. Frames the stop
   drained are timed at the stop character. The transcript gets the shadow's own exchanges for the first three of each

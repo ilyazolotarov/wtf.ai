@@ -2,7 +2,7 @@ import { useEffect, useReducer, useRef, useState } from "react";
 
 import type { RouteSnapshot } from "@/services/navigation/route-service";
 
-import { cameraReducer, INITIAL_CAMERA, type CameraMode } from "./camera-policy";
+import { cameraReducer, INITIAL_CAMERA, OVERVIEW_MIN_M, type CameraMode } from "./camera-policy";
 import { COURSE_MIN_SPEED_MPS } from "./use-compass-heading";
 
 export type { CameraMode } from "./camera-policy";
@@ -75,17 +75,25 @@ export function useCameraMode({
   const onGesture = () => dispatch({ type: "gesture", nowMs: Date.now() });
   const toggleCameraMode = () => dispatch({ type: "button", onTrip });
 
-  // Alternatives for a new route while the car stands: the map shows them all once (ROUTING-SPEC §8.7); driving off,
-  // the button or the route going (stopped, arrived) goes back to following. Moving, the camera is left alone.
+  // A new route while the car stands: the map shows it as soon as it is planned, then with its alternatives
+  // (ROUTING-SPEC §8.7); driving off, the button or the route going (stopped, arrived) goes back to following. Moving,
+  // the camera is left alone.
   // (State adjusted during render, not in an effect.)
   const [overview, setOverview] = useState<number | null>(null);
   const [overviewFor, setOverviewFor] = useState<object | null>(null);
-  if (route?.alternatives?.length && overviewFor !== route.destination) {
+  const [framedWith, setFramedWith] = useState<object | null>(null);
+  const framable = route?.plan != null && (route.plan.lengthM >= OVERVIEW_MIN_M || !!route.alternatives?.length);
+  if (route && framable && overviewFor !== route.destination) {
     setOverviewFor(route.destination);
+    setFramedWith(route.alternatives ?? null);
     if ((speedMps ?? 0) <= COURSE_MIN_SPEED_MPS) {
       dispatch({ type: "overview" });
-      setOverview(route.planId);
+      setOverview((n) => (n ?? 0) + 1);
     }
+  } else if (route?.alternatives?.length && overviewFor === route.destination && framedWith !== route.alternatives) {
+    // The alternatives came after the plan was framed: framed again with them, unless the map was moved since.
+    setFramedWith(route.alternatives);
+    if (camera.overview && camera.freeBy === "app") setOverview((n) => (n ?? 0) + 1);
   }
   if (!route && overviewFor !== null) {
     setOverviewFor(null);

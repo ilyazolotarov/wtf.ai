@@ -84,15 +84,11 @@ export interface VehicleLinkDeps {
 
 const ADAPTERS_KEY = "vehicleLink.adapters";
 /**
- * Adapters whose CAN monitor froze them, with the firmware it happened on (§16.2). (The first key also held a car
- * switched off taken for a freeze: not read.)
+ * Adapters whose CAN monitor froze them while the car moved, with the firmware it happened on (§16.2). (Two earlier
+ * keys are not read: the first held a car switched off taken for a freeze; the second, `canShadowFrozeOn`, held
+ * silences while standing, which were the link dropping near home, not the adapter: 2026-10-30.)
  */
-const SHADOW_FROZE_KEY = "vehicleLink.canShadowFrozeOn";
-/**
- * Standing, a monitor gone silent may be the car switched off (the adapter powers down; iOS reports it gone within
- * seconds). It counts as a freeze only when the adapter is still there this long after, and doesn't answer.
- */
-const FROZE_CONFIRM_US = 20_000_000;
+const SHADOW_FROZE_KEY = "vehicleLink.canShadowFrozeDriving";
 const CARS_KEY = "vehicleLink.cars";
 const STATS_INTERVAL_US = 250_000;
 
@@ -188,7 +184,6 @@ export class VehicleLinkCore implements VehicleLink {
   private lastStatsUs = 0;
   private reiniting = false;
   /** The CAN monitor went silent while standing: a freeze, or the car switched off (§16.2). */
-  private shadowFrozeSuspect: { deviceId: string; chip: string; sinceUs: number } | null = null;
   private rpmPeriods: Partial<PollerConfig> = {};
   /** Bumped by every init: a VIN retry belongs to the init that started it. */
   private initSeq = 0;
@@ -629,9 +624,6 @@ export class VehicleLinkCore implements VehicleLink {
       onSearch: (active) => this.update({ protocolSearch: active }),
     });
     this.check(gen);
-    const suspect = this.shadowFrozeSuspect;
-    if (!probe.ok && suspect && this.deps.clock.nowUs() - suspect.sinceUs >= FROZE_CONFIRM_US) this.markShadowFroze(suspect);
-    if (probe.ok) this.shadowFrozeSuspect = null;
     if (!probe.ok) {
       // Under a reconnect it is retried, no fault yet: the detail says so (Sentry leaves those out).
       this.event("probe-failed", reconnect ? `${probe.failedStep}${RECONNECTING}` : probe.failedStep);
@@ -1012,12 +1004,12 @@ export class VehicleLinkCore implements VehicleLink {
               void this.restoreAfterShadow();
               return;
             }
-            // Not again on this adapter until its firmware changes (§16.2): at once while moving (the car isn't
-            // switched off at speed); standing, once the adapter is still there and silent (`runSession`).
-            if (adapter?.chip) {
-              const froze = { deviceId: adapter.deviceId, chip: adapter.chip, sinceUs: this.deps.clock.nowUs() };
-              if ((this.snapshot.lastSpeed?.raw ?? 0) > 0) this.markShadowFroze(froze);
-              else this.shadowFrozeSuspect = froze;
+            // Not again on this adapter until its firmware changes (§16.2), only while the car moves: it isn't switched
+            // off at speed, and no other phone is taking the adapter. Standing, the silence is the car switched off,
+            // the link dropping or another phone near home (every silence of 2026-10-20..30 was at 0 km/h, and the
+            // link dropped within a second of each): the link is recovered and the monitor goes on next time.
+            if (adapter?.chip && (this.snapshot.lastSpeed?.raw ?? 0) > 0) {
+              this.markShadowFroze({ deviceId: adapter.deviceId, chip: adapter.chip });
             }
             // Recover the link now rather than after the polls time out.
             void this.reinit(gen, "adapter silent in the CAN monitor", true);
@@ -1037,7 +1029,6 @@ export class VehicleLinkCore implements VehicleLink {
   }
 
   private markShadowFroze(froze: { deviceId: string; chip: string }): void {
-    this.shadowFrozeSuspect = null;
     this.event("can-shadow", `froze the adapter: off on ${froze.chip} from now on`);
     this.update({ canOff: "firmware" });
     this.deps.store.setJson(SHADOW_FROZE_KEY, { ...this.shadowFroze(), [froze.deviceId]: froze.chip });

@@ -51,23 +51,37 @@ export async function carSessionTask(): Promise<void> {
 
 let carPlayRunning = false;
 
+/** A session for CarPlay's connection while it is open and none runs. */
+function startCarPlaySession(): void {
+  const native = CarPlay;
+  if (!native || carPlayRunning || !native.isConnected()) return;
+  carPlayRunning = true;
+  void runCarScreen(native, "carplay", "carplay", true).finally(() => {
+    carPlayRunning = false;
+  });
+}
+
 /**
  * CarPlay's car screen (docs/CARPLAY-SPEC.md §4): a session for each connection of its scene, in the app's one JS
  * runtime (index.ts). A runtime that comes up while the car is connected (a launch from the car, a reload) starts one
  * at once; the native side kept what the last one sent.
  */
 export function listenForCarPlay(): void {
-  const native = CarPlay;
-  if (!native) return;
-  const start = () => {
-    if (carPlayRunning || !native.isConnected()) return;
-    carPlayRunning = true;
-    void runCarScreen(native, "carplay", "carplay", true).finally(() => {
-      carPlayRunning = false;
-    });
-  };
-  native.addListener("onConnect", start);
-  start();
+  if (!CarPlay) return;
+  CarPlay.addListener("onConnect", startCarPlaySession);
+  startCarPlaySession();
+}
+
+/**
+ * The car's map mounted (CarMapRoot): the car shows the app, so a session must run. One does, unless its start was
+ * missed; then it starts here, and the trip log says so (2026-10-30: launched from the car's screen after a force-quit,
+ * the map showed and Destinations and Search behaved as if the phone didn't answer, and the run's log has no mark of
+ * a session; the cause is open).
+ */
+export function ensureCarPlaySession(): void {
+  if (!CarPlay || carPlayRunning || !CarPlay.isConnected()) return;
+  getRuntime().recorder.note("carplay: no session was running with the car's map shown: started");
+  startCarPlaySession();
 }
 
 /**

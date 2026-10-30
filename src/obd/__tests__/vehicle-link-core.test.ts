@@ -704,9 +704,9 @@ describe("VehicleLinkCore", () => {
         expect(events.filter((e) => e.type === "reinit").map((e) => e.detail)).toEqual(["adapter silent in the CAN monitor"]);
         await until(() => core.getSnapshot().link === "polling" && events.some((e) => e.type === "link-restored"));
         await until(() => events.some((e) => e.detail === `off: the adapter froze in the monitor on this firmware (${chip})`));
-        expect(store.getJson<Record<string, string>>("vehicleLink.canShadowFrozeOn")).toEqual({ "emu-1": chip });
+        expect(store.getJson<Record<string, string>>("vehicleLink.canShadowFrozeDriving")).toEqual({ "emu-1": chip });
         // Other firmware (updated): it listens again.
-        store.setJson("vehicleLink.canShadowFrozeOn", { "emu-1": "STN2255 v5.10.2" });
+        store.setJson("vehicleLink.canShadowFrozeDriving", { "emu-1": "STN2255 v5.10.2" });
         const n = windows.length;
         core.setCanShadow(null);
         core.setCanShadow([0x215, 0x228]);
@@ -716,18 +716,21 @@ describe("VehicleLinkCore", () => {
       }
     });
 
-    test("standing, a freeze counts once the adapter is still there and silent 20 s later", async () => {
+    // 2026-10-20..30: every silent monitor on the vLinker (STN1151 v4.3.2) came at 0 km/h, the link dropping within a
+    // second of each (near home, the other phone's app taking the adapter); one phone stored a freeze and lost the
+    // wheels' speed for good, while the adapter answered a reset moments later.
+    test("standing, a silent monitor is not a freeze: the link is recovered and the monitor goes on", async () => {
       const { core, windows, emu, events, store, clock } = await shadowOn({});
       try {
         await until(() => windows.length >= 3);
         emu.freezeInMonitor(false);
         await until(() => events.some((e) => e.type === "reopen"));
-        const silentUs = events.find((e) => e.detail?.startsWith("off: no answer at all"))!.tUs;
-        expect(store.getJson("vehicleLink.canShadowFrozeOn")).toBeNull();
         // The forensics first, each answer in the events: ATI after a pause, ATWS, ATZ.
         expect(events.filter((e) => e.type === "frozen").map((e) => e.detail)).toEqual(["ATI: no answer 1 s after the silent stop", "ATZ: no answer either"]);
-        await until(() => store.getJson("vehicleLink.canShadowFrozeOn") !== null);
-        expect(clock.nowUs() - silentUs).toBeGreaterThanOrEqual(20_000_000);
+        const t0 = clock.nowUs();
+        await until(() => clock.nowUs() - t0 > 60_000_000);
+        expect(store.getJson("vehicleLink.canShadowFrozeDriving")).toBeNull();
+        expect(events.find((e) => e.detail?.startsWith("off: the adapter froze"))).toBeUndefined();
       } finally {
         await core.disconnect();
       }
@@ -743,7 +746,7 @@ describe("VehicleLinkCore", () => {
         await until(() => events.some((e) => e.type === "reopen"));
         const t0 = clock.nowUs();
         await until(() => clock.nowUs() - t0 > 60_000_000);
-        expect(store.getJson("vehicleLink.canShadowFrozeOn")).toBeNull();
+        expect(store.getJson("vehicleLink.canShadowFrozeDriving")).toBeNull();
         emu.powerOn();
         await until(() => core.getSnapshot().link === "polling" && windows.length > 3 && core.getSnapshot().canShadow?.state !== "failed");
         const n = windows.length;

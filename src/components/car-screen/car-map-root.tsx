@@ -1,7 +1,7 @@
 import { useEffect, useEffectEvent, useReducer, useRef, useState } from "react";
 import { Platform } from "react-native";
 
-import { cameraReducer, INITIAL_CAMERA, type CameraState } from "@/components/map/camera-policy";
+import { cameraReducer, INITIAL_CAMERA, OVERVIEW_MIN_M, type CameraState } from "@/components/map/camera-policy";
 import { shiftedFollowZoom } from "@/components/map/map-moves";
 import { MapSurface } from "@/components/map/map-surface";
 import { COURSE_MIN_SPEED_MPS, useHeadingUp } from "@/components/map/use-compass-heading";
@@ -12,6 +12,7 @@ import { useRoute } from "@/providers/route-provider";
 
 import AndroidAuto from "../../../modules/android-auto/src/AndroidAutoModule";
 import CarPlay from "../../../modules/car-play/src/CarPlayModule";
+import { ensureCarPlaySession } from "./car-session-task";
 import { CarSpeedPill } from "./car-speed-pill";
 import type { CarMapGesture } from "./car-types";
 
@@ -97,6 +98,10 @@ const CAR_CAMERA: CameraState = { ...INITIAL_CAMERA, mode: "follow-heading" };
 function CarMap({ dark, insets, scale, zoom, cameraSign, speedRight }: Required<Omit<CarMapProps, "speedRight">> & Pick<CarMapProps, "speedRight">) {
   const position = usePosition();
   const headingUp = useHeadingUp(position, null);
+  // The car shows the app: its session runs (car-session-task.ts), started here if its start was missed.
+  useEffect(() => {
+    if (carPlay) ensureCarPlaySession();
+  }, []);
   const [camera, dispatch] = useReducer(cameraReducer, CAR_CAMERA);
   const free = camera.mode === "free";
   // The zoom buttons and pinches while following move the follow zoom; while free, the map's own.
@@ -114,22 +119,29 @@ function CarMap({ dark, insets, scale, zoom, cameraSign, speedRight }: Required<
   useEffect(() => {
     void native?.setRecentre?.(recentre).catch(noop);
   }, [recentre]);
-  // A new route's alternatives while the car stands: the map frames them all once (ROUTING-SPEC §8.7), as the phone's;
-  // driving off, recentre or the route going (stopped, arrived) goes back to following. Once per destination across
-  // the map's remounts (a list shown over it takes it down): back from the routes list it follows. (State adjusted
-  // during render, not in an effect.)
+  // A new route while the car stands: the map frames it as soon as it is planned, then with its alternatives
+  // (ROUTING-SPEC §8.7), as the phone's; driving off, recentre or the route going (stopped, arrived) goes back to
+  // following. Once per destination across the map's remounts (a list shown over it takes it down): back from the
+  // routes list it follows. (State adjusted during render, not in an effect.)
   const { route } = useRoute();
   const [overview, setOverview] = useState<number | null>(null);
   const [overviewFor, setOverviewFor] = useState<object | null>(() => overviewShownFor);
   useEffect(() => {
     overviewShownFor = overviewFor;
   }, [overviewFor]);
-  if (route?.alternatives?.length && overviewFor !== route.destination) {
+  const [framedWith, setFramedWith] = useState<object | null>(null);
+  const framable = route?.plan != null && (route.plan.lengthM >= OVERVIEW_MIN_M || !!route.alternatives?.length);
+  if (route && framable && overviewFor !== route.destination) {
     setOverviewFor(route.destination);
+    setFramedWith(route.alternatives ?? null);
     if (!driving) {
       dispatch({ type: "overview" });
-      setOverview(route.planId);
+      setOverview((n) => (n ?? 0) + 1);
     }
+  } else if (route?.alternatives?.length && overviewFor === route.destination && framedWith !== route.alternatives) {
+    // The alternatives came after the plan was framed: framed again with them, unless the map was moved since.
+    setFramedWith(route.alternatives);
+    if (camera.overview && camera.freeBy === "app") setOverview((n) => (n ?? 0) + 1);
   }
   if (!route && overviewFor !== null) {
     setOverviewFor(null);

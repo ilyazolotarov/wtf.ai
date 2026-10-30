@@ -10,6 +10,12 @@
 export type CameraMode = "follow" | "follow-heading" | "free";
 export type FollowMode = Exclude<CameraMode, "free">;
 
+/**
+ * A new route is framed as soon as it is planned once it is this long (shorter, the follow view shows most of it), and
+ * again with its alternatives, which come seconds later (2026-10-30: framed only then, the overview came late).
+ */
+export const OVERVIEW_MIN_M = 1000;
+
 /** Driving, a pan or zoom stays this long after the last touch, then the camera follows the car again. */
 export const RETURN_AFTER_TOUCH_MS = 10_000;
 

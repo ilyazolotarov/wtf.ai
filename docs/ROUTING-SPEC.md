@@ -333,7 +333,8 @@ After a new route (reason `new`), up to two other ways to the destination.
   `on`, that one becomes the route instead of planning again (`route alternative taken (taken)`). On the route and
   off every alternative, they go away.
 - **Map** (UI-SPEC §6.3): quieter lines under the route, each labelled with its time against the route. They come
-  while the car stands: the map frames all routes once.
+  while the car stands: the map frames the route as soon as it is planned (one over 1 km; a shorter one with its
+  alternatives), then all routes once they come, unless the map was moved meanwhile.
 - **What sets each apart** (`route-via.ts`): the street its own stretch runs along, where it is over 40 m from every
   other route: points every 75 m there (at most 12, spread over it) each ask the search index for their nearest
   house's street within 60 m, and the most named wins (the road graph has no names). The car's routes list titles
