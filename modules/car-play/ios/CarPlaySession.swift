@@ -578,8 +578,13 @@ final class CarPlaySession: NSObject {
       }
     case .arrived:
       if tripShows != .arrived {
-        navigation.pauseTrip(for: .arrived, description: route.message ?? route.destinationName)
+        maneuvers = [arrival(route)]
+        navigation.upcomingManeuvers = maneuvers
         maneuversKey = nil
+        stepEstimatesKey = nil
+        // Nothing left: the last estimates sent were from some metres before (arrival counts within a radius).
+        mapTemplate.updateEstimates(Self.estimates(0, "m", 0), for: navigation.trip)
+        tripEstimatesKey = nil
       }
     case .steps:
       guide(navigation, route)
@@ -641,6 +646,23 @@ final class CarPlaySession: NSObject {
       maneuver.maneuverType = Self.maneuverType(kind)
       maneuver.trafficSide = .right
       maneuver.junctionType = kind == .roundabout ? .roundabout : .intersection
+    }
+    return maneuver
+  }
+
+  /**
+   * Arrival as the guidance card: the flag beside the words, as on Android Auto's card. A paused trip's card
+   * (`pauseTrip` `.arrived`) holds words alone, black, and the destination's flag was nowhere (seen in a car, 2026-10-30).
+   * No distance, and no banner (no `userInfo`): the car is there.
+   */
+  private func arrival(_ route: CarRoute) -> CPManeuver {
+    let maneuver = CPManeuver()
+    maneuver.instructionVariants = [route.message ?? route.destinationName]
+    maneuver.symbolImage = CarPlayImages.icon(CarManeuverKind.arrive.icon, size: CarPlayImages.maneuverSize)
+    maneuver.cardBackgroundColor = CarPlayImages.cardColor
+    if #available(iOS 17.4, *) {
+      maneuver.maneuverType = .arriveAtDestination
+      maneuver.trafficSide = .right
     }
     return maneuver
   }

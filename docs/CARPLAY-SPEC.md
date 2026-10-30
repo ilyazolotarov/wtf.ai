@@ -141,7 +141,7 @@ GNSS and the adapter as they were. What the JS side sent is kept on the native s
   | No route | The map; bar: Destinations, Search; voice. Buttons: pan, recentre, +, − |
   | Planning, or planning again after leaving the route | The card waiting (`pauseTrip` `.loading`, `.rerouting`); buttons: the X, voice, pan |
   | Followed | The next maneuver (the phone banner's words and icon, the distance rounded as the banner rounds it), the one after when it follows closely; the trip estimates (arrival, time and distance left); buttons: the X, voice, the routes while there are others, pan |
-  | Arrived | The card says so (`pauseTrip` `.arrived`); the trip finishes when the route goes |
+  | Arrived | The card says so beside the flag, as Android Auto's: one maneuver, `.arriveAtDestination`, no distance; the trip's estimates 0. Not `pauseTrip` `.arrived`, whose card holds words alone; the trip finishes when the route goes |
   | Failed | The trip cancelled, an alert with the phone's words; Close |
 
   While the bar shows (a touch on the map, and for about 20 s after a list closes) CarPlay sets the guidance card

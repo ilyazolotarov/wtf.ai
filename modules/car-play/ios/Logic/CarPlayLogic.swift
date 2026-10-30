@@ -271,7 +271,7 @@ enum CarPlayLogic {
 
   /**
    * The navigation session for a new route state, given the trip shown (`current`, its key) and whether it arrived.
-   * Arrival keeps the trip, paused, until the route goes: CarPlay says so in the panel. A failed plan cancels it
+   * Arrival keeps the trip until the route goes: the panel says so, with the flag. A failed plan cancels it
    * (an alert says why).
    */
   static func tripPlan(current: String?, arrived: Bool, route: CarRoute?) -> CarTripPlan {
