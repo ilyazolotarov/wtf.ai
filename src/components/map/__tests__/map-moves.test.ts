@@ -1,4 +1,4 @@
-import { fittedPadding, FOLLOW_ZOOM_SHIFT, pannedCenter, shiftedFollowZoom, zoomedCenter } from "../map-moves";
+import { fittedPadding, FOLLOW_ZOOM_SHIFT, FRAME_MAX_ZOOM, framedCamera, pannedCenter, shiftedFollowZoom, zoomedCenter } from "../map-moves";
 
 const KYIV = { lat: 50.45, lon: 30.52 };
 
@@ -13,6 +13,23 @@ describe("map moves", () => {
     expect(car.top).toBe(72);
     // Before the map is laid out: as asked.
     expect(fittedPadding(phone, 0, 0)).toEqual(phone);
+  });
+
+  test("framing a route fits its wider side between the panels, centred in Mercator; a point at most FRAME_MAX_ZOOM", () => {
+    const none = { top: 0, bottom: 0, left: 0, right: 0 };
+    // The whole world's width across 512 points is zoom 0; 1/1024 of it across 512 points is zoom 10.
+    expect(framedCamera([-180, -10, 180, 10], none, 512, 2000).zoom).toBeCloseTo(0, 9);
+    const box: [number, number, number, number] = [30, 50, 30 + 360 / 1024, 50.0001];
+    expect(framedCamera(box, none, 512, 2000).zoom).toBeCloseTo(10, 9);
+    // Panels take 256 of the 512 points: one zoom level out.
+    expect(framedCamera(box, { top: 0, bottom: 0, left: 200, right: 56 }, 512, 2000).zoom).toBeCloseTo(9, 9);
+    // A tall box is fitted by its height; the centre is the Mercator middle, north of the latitudes' mean.
+    const tall = framedCamera([30, 45, 30.001, 55], none, 1000, 400);
+    expect(tall.center.lat).toBeGreaterThan(50);
+    expect(tall.center.lon).toBeCloseTo(30.0005, 9);
+    expect(tall.zoom).toBeLessThan(framedCamera([30, 45, 30.001, 46], none, 1000, 400).zoom);
+    // The ghost on the position: one point, shown close in.
+    expect(framedCamera([30.52, 50.45, 30.52, 50.45], none, 390, 844)).toEqual({ center: { lat: expect.closeTo(50.45, 9), lon: 30.52 }, zoom: FRAME_MAX_ZOOM });
   });
 
   test("a drag shifts the centre as it shifted the ground under the finger", () => {

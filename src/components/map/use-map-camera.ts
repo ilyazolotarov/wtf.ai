@@ -7,7 +7,7 @@ import type { PositionEstimate } from "@/nav/position/types";
 import type { RouteSnapshot } from "@/services/navigation/route-service";
 
 import { fitCircleZoom } from "./map-features";
-import { fittedPadding } from "./map-moves";
+import { fittedPadding, framedCamera } from "./map-moves";
 import type { CameraMode } from "./use-camera-mode";
 import { COURSE_MIN_SPEED_MPS, mapBearingDeg } from "./use-compass-heading";
 import type { PlacingStep } from "./use-placing";
@@ -139,21 +139,20 @@ export function useMapCamera({
   const commands = {
     jumpTo: (...a: Parameters<CameraRef["jumpTo"]>) => send(() => cameraRef.current?.jumpTo(...a)),
     easeTo: (...a: Parameters<CameraRef["easeTo"]>) => send(() => cameraRef.current?.easeTo(...a)),
-    fitBounds: (...a: Parameters<CameraRef["fitBounds"]>) => send(() => cameraRef.current?.fitBounds(...a)),
     setStop: (...a: Parameters<CameraRef["setStop"]>) => send(() => cameraRef.current?.setStop(...a)),
   };
   const screenPt = useWindowDimensions();
   const fitRadiusPt = FIT_CIRCLE_SHARE * Math.min(screenPt.width, screenPt.height);
   const mapHeight = mapHeightPt > 0 ? mapHeightPt : screenPt.height;
   const mapWidth = mapWidthPt > 0 ? mapWidthPt : screenPt.width;
-  // A small map under big panels (the car's) keeps some of itself for what is framed.
-  const framing = () => fittedPadding(framePadding, mapWidth, mapHeight);
-  // North up and flat. MapLibre on iOS fits bounds as the camera looks at the moment of asking: tilted and turned
-  // close in (heading-up), a route's far end lies past the horizon and the fit landed zoomed into an empty block near
-  // the destination (CarPlay's map). Flat first, then the fit.
+  // North up and flat, by our own fit (`framedCamera`), as a centre with padding like the follow camera: MapLibre's
+  // bounds fit on iOS measured as the camera looked at the moment of asking (tilted close in, a route's far end lay past
+  // the horizon) and by the map's size as of its last layout. A small map under big panels (the car's) keeps some of
+  // itself for what is framed.
   const frameFlat = (bounds: [number, number, number, number]) => {
-    commands.setStop({ pitch: 0, bearing: 0, duration: 0 });
-    commands.fitBounds(bounds, { padding: framing(), bearing: 0, pitch: 0, duration: 900 });
+    const padding = fittedPadding(framePadding, mapWidth, mapHeight);
+    const { center, zoom } = framedCamera(bounds, padding, mapWidth, mapHeight);
+    commands.easeTo({ center: [center.lon, center.lat], zoom, bearing: 0, pitch: 0, padding, duration: 900 });
   };
   // By their numbers: the insets are a new object with every render.
   const { top: insetTop, bottom: insetBottom, left: insetLeft, right: insetRight } = insets;

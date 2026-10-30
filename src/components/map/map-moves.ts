@@ -49,6 +49,34 @@ export function fittedPadding(
   return { top, bottom, left, right };
 }
 
+/** Framing a single point (the ghost on the position) shows it this close in, no closer. */
+export const FRAME_MAX_ZOOM = 18;
+
+/**
+ * The camera that shows `bounds` ([west, south, east, north]) in the map's `width` × `height` points less `padding`:
+ * the bounds' centre, to be given with that padding, and the zoom (512-point tiles, as MapLibre's). Worked out here,
+ * not by MapLibre's bounds fit: on iOS that one measures by the map's size as of its last layout, and it left the zoom
+ * as it was, "padding is greater than map's height or width", when the route was planned on the car's screen.
+ */
+export function framedCamera(
+  bounds: [number, number, number, number],
+  padding: { top: number; bottom: number; left: number; right: number },
+  width: number,
+  height: number,
+): { center: Coordinate; zoom: number } {
+  const [west, south, east, north] = bounds;
+  const yS = mercatorY(south);
+  const yN = mercatorY(north);
+  // The bounds as shares of the world's width and height, and the points each share may take.
+  const across = (east - west) / 360;
+  const tall = (yN - yS) / (2 * Math.PI);
+  const freeWidth = width - padding.left - padding.right;
+  const freeHeight = height - padding.top - padding.bottom;
+  const worldPt = Math.min(across > 0 ? freeWidth / across : Infinity, tall > 0 ? freeHeight / tall : Infinity);
+  const zoom = worldPt > 0 ? Math.min(FRAME_MAX_ZOOM, Math.max(0, Math.log2(worldPt / 512))) : 0;
+  return { center: { lat: latOf((yS + yN) / 2), lon: (west + east) / 2 }, zoom };
+}
+
 /** A fling carries the map on as far as the finger's speed would in this long, eased out. */
 export const FLING_S = 0.3;
 export const FLING_EASE_MS = 600;

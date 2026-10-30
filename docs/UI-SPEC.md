@@ -201,9 +201,11 @@ persisted in kv-store. No hardcoded user-facing strings in components.
   it shrinks. A circle that fills the screen reads as a tint, not as a circle. Once the car has moved, the follow
   zooms are fixed. Logged as `camera follow: zoom <z> to fit the circle (<m> m)`.
 - **Tilt:** heading-up 50°; north-up, free, the ghost view, the routes' overview and placing are top-down. The ghost
-  view and the overview go flat and north up before they frame: MapLibre on iOS fits bounds as the camera looks when
-  asked, and from a tilted, turned view close in a far route's end lies past the horizon (the fit landed zoomed into
-  an empty block near the destination on CarPlay's map). No tilt or rotate gesture. A gesture that leaves heading-up flattens the map once it settles. Names along streets and rivers
+  view and the overview frame flat and north up, by the app's own fit (`framedCamera`): a centre and zoom from the
+  map's measured size less the panels, sent with that padding. Never MapLibre's bounds fit: on iOS it measures as the
+  camera looks when asked (from a tilted view close in a far route's end lies past the horizon, and the fit landed in
+  an empty block) and by the map's size as of its last layout (it kept the zoom, "padding is greater than map's height
+  or width", when a route was planned on CarPlay). No tilt or rotate gesture. A gesture that leaves heading-up flattens the map once it settles. Names along streets and rivers
   stand up facing the driver (`text-pitch-alignment: viewport`): lying on the tilted road they blurred.
 - **Where the dot sits:** heading-up puts it 80 % down the map's own height (a top padding on the follow stop), so the
   road ahead fills the screen between the route banner and the bottom bar: about 88 % of the map between them, where
