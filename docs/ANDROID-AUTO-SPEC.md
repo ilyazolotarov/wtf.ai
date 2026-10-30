@@ -216,7 +216,9 @@ src/components/car-screen/car-session.ts ◀───────┘  route, pla
   planned; ended at arrival, a failure or no route. The car's own displays draw from the trip: a cluster that shows
   the next turn gets its maneuver, words and distances, and the destination's distance, time and arrival (quality
   guideline NF-4). The host's "stop navigation" (another navigator started) ends the route, so the voice, the
-  pop-ups and the cluster's turn are the other navigator's alone (NF-5).
+  pop-ups and the cluster's turn are the other navigator's alone (NF-5). A new destination is the same session, its
+  trip sent again. When the car's screen goes, CarLink keeps a followed route for the next session to show at once,
+  but not an arrived one (`CarGuidanceLogic.keptAfterSession`, as CarPlay's).
 - **Turn-by-turn notification** (`CarTurnNotifications`, quality guideline NF-3): while the car navigates, one ongoing
   navigation notification with a `CarAppExtender`, which Android Auto shows while another app fills the car's screen.
   Nothing of it shows while the car shows the app's own guidance: on a wide screen Android Auto keeps the app's map

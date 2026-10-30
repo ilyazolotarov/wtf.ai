@@ -75,6 +75,9 @@ final class CarPlaySession: NSObject {
   /** The destination of the trip shown (`CarPlayLogic.tripKey`), and what its panel shows. */
   private var tripKey: String?
   private var tripShows = CarTripShows.none
+  /** When the last trip ended (system uptime, s), and the start waiting for CarPlay to have ended it (`tripStartWait`). */
+  private var tripEndedAt: TimeInterval?
+  private var tripStartLater: DispatchWorkItem?
   private var maneuversKey: String?
   private var maneuvers: [CPManeuver] = []
   /** The estimates last sent, as CarPlay shows them: sent again only when that changes (Apple's guide). */
@@ -189,8 +192,14 @@ final class CarPlaySession: NSObject {
     carPlayLog.notice("CarPlay scene disconnected")
     let wasOpen = isOpen
     setOpen(false)
+    if navigation != nil { tripEndedAt = ProcessInfo.processInfo.systemUptime }
     navigation?.cancelTrip()
     navigation = nil
+    tripStartLater?.cancel()
+    tripStartLater = nil
+    // An arrival is over with the car's screen: shown again, it would start a trip for a place reached, ended as soon as
+    // the session sends the route it has now. A route still followed stays, to show at once.
+    if tripShows == .arrived { route = nil }
     tripKey = nil
     tripShows = .none
     maneuversKey = nil
@@ -553,8 +562,14 @@ final class CarPlaySession: NSObject {
       navigation = nil
       tripKey = nil
       tripShows = .none
+      tripEndedAt = ProcessInfo.processInfo.systemUptime
     }
     if let key = plan.start, let route {
+      let wait = CarPlayLogic.tripStartWait(endedAt: tripEndedAt, now: ProcessInfo.processInfo.systemUptime)
+      if wait > 0 {
+        startTripLater(after: wait)
+        return
+      }
       let destination = MKMapItem(
         placemark: MKPlacemark(coordinate: CLLocationCoordinate2D(latitude: route.destinationLat, longitude: route.destinationLon)))
       destination.name = route.destinationName
@@ -592,6 +607,17 @@ final class CarPlaySession: NSObject {
       break
     }
     tripShows = plan.shows
+  }
+
+  /** The trip's start once CarPlay has ended the one before: the route as it is then (gone by then, none starts). */
+  private func startTripLater(after wait: TimeInterval) {
+    guard tripStartLater == nil else { return }
+    let work = DispatchWorkItem { [weak self] in
+      self?.tripStartLater = nil
+      self?.syncTrip()
+    }
+    tripStartLater = work
+    DispatchQueue.main.asyncAfter(deadline: .now() + wait, execute: work)
   }
 
   /**

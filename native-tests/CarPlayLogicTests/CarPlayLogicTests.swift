@@ -44,6 +44,14 @@ final class TripPlanTests: XCTestCase {
     XCTAssertEqual(CarPlayLogic.tripPlan(current: lviv, arrived: false, route: kyiv), CarTripPlan(end: .cancel, start: "50.450000,30.520000", shows: .steps))
     XCTAssertEqual(CarPlayLogic.tripPlan(current: lviv, arrived: true, route: route()), CarTripPlan(end: .finish, start: lviv, shows: .steps))
   }
+
+  func testATripStartsOnlyOnceCarPlayHasHadTimeToEndTheOneBefore() {
+    XCTAssertEqual(CarPlayLogic.tripStartWait(endedAt: nil, now: 100), 0)
+    XCTAssertEqual(CarPlayLogic.tripStartWait(endedAt: 100, now: 100), CarPlayLogic.tripRestartS)
+    XCTAssertEqual(CarPlayLogic.tripStartWait(endedAt: 100, now: 100.25), CarPlayLogic.tripRestartS - 0.25, accuracy: 1e-9)
+    XCTAssertEqual(CarPlayLogic.tripStartWait(endedAt: 100, now: 100 + CarPlayLogic.tripRestartS), 0)
+    XCTAssertEqual(CarPlayLogic.tripStartWait(endedAt: 100, now: 500), 0)
+  }
 }
 
 final class TurnAlertTests: XCTestCase {

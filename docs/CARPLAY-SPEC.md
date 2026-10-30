@@ -170,7 +170,10 @@ GNSS and the adapter as they were. What the JS side sent is kept on the native s
   the route followed, then each alternative, titled by the street it goes by, then how it compares, its time and
   distance (`choose-alternative`). The car's words are the app's (en/uk), sent by the session; English until it has.
 - **The navigation session** (`CPNavigationSession`): a trip per destination (a re-plan or an alternative to the same
-  one is the same trip; setting off again after arriving is a new one), started when a route is planned. Maneuvers
+  one is the same trip; setting off again after arriving is a new one), started when a route is planned. A trip
+  starts at least `CarPlayLogic.tripRestartS` (1 s) after the one before it ended: CarPlay ends a trip outside the
+  app, and a start in the same turn as an end finds the old trip active and CarPlay ends the app. The car's screen
+  going keeps a followed route, shown at once when it comes on again, but not an arrived one. Maneuvers
   are set again only when other ones are next, or when the next comes near enough for a banner; the estimates only
   when what CarPlay shows of them changes (the rounded distance, whole minutes: `CarPlayLogic.estimatesKey`), as
   Apple's guide asks. With them, metadata for the car's own cluster and head-up display

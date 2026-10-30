@@ -96,6 +96,11 @@ internal object CarLink {
     session?.routeChanged()
   }
 
+  /** The car's session ended: what of the route the next one shows (`keptAfterSession`). */
+  fun sessionEnded() {
+    route = CarGuidanceLogic.keptAfterSession(route)
+  }
+
   fun setPlaces(value: List<CarPlace>) {
     if (value == places) return
     places = value

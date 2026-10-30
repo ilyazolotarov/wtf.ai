@@ -276,6 +276,12 @@ object CarGuidanceLogic {
   }
 
   /**
+   * The route kept when the car's screen goes, for the next session: a route followed shows at once, an arrival is
+   * over (the phone sends the route it has now; CarPlay's the same, CarPlaySession `disconnect`).
+   */
+  fun keptAfterSession(route: CarRoute?): CarRoute? = route?.takeIf { it.status != "arrived" }
+
+  /**
    * A maneuver pops up within this distance, m, or this time at the plan's pace, s: about when the voice first says it
    * (ahead of it at max(250 m, 15 s), ROUTING-SPEC §8.5), at a round distance.
    */

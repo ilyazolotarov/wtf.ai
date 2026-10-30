@@ -294,6 +294,19 @@ enum CarPlayLogic {
   }
 
   /**
+   * A trip starts at least this long after the one before it ended, s. CarPlay ends a trip outside the app: one started
+   * in the same turn as the last one ended found that one still active, and CarPlay ended the app (2026-10-30: the
+   * car's screen came on again with the last session's arrived route, then the phone's route to another place came).
+   */
+  static let tripRestartS = 1.0
+
+  /** How long a trip waits to start, s (0: now), given when the last one ended (nil: none did) and the time now. */
+  static func tripStartWait(endedAt: Double?, now: Double) -> Double {
+    guard let endedAt else { return 0 }
+    return max(0, tripRestartS - (now - endedAt))
+  }
+
+  /**
    * A maneuver pops up within this distance, m, or this time at the plan's pace, s: about when the voice first says it
    * (ROUTING-SPEC §8.5), as on Android Auto (`CarGuidanceLogic.ALERT_M`, `ALERT_S`).
    */

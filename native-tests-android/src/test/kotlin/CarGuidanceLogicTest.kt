@@ -86,6 +86,16 @@ class CarGuidanceLogicTest {
   }
 
   @Test
+  fun aFollowedRouteOutlivesTheCarsScreenAndAnArrivalDoesNot() {
+    val followed = route("active")
+    assertEquals(followed, CarGuidanceLogic.keptAfterSession(followed))
+    val planned = route("planning")
+    assertEquals(planned, CarGuidanceLogic.keptAfterSession(planned))
+    assertNull(CarGuidanceLogic.keptAfterSession(route("arrived")))
+    assertNull(CarGuidanceLogic.keptAfterSession(null))
+  }
+
+  @Test
   fun stepsShowOnlyOnAFollowedRoute() {
     assertTrue(CarGuidanceLogic.showsSteps(route("active")))
     assertFalse(CarGuidanceLogic.showsSteps(route("active", replanning = true)))

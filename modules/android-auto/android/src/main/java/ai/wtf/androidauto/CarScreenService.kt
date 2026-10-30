@@ -74,6 +74,7 @@ class CarScreenSession : Session() {
           // was destroyed has them now.
           if (CarLink.session !== this@CarScreenSession) return
           CarLink.session = null
+          CarLink.sessionEnded()
           CarLink.endTestDrive()
           turns?.clear()
           CarLocationService.stop(carContext)
