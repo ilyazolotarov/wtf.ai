@@ -10,7 +10,7 @@ import { cameraWords, SAY_AGAIN_MS, speedBesideCard, SpeedAlerts } from "../spee
 
 function setup(prefs: Partial<SpeedPreferences> = {}) {
   let position: PositionEstimate | null = null;
-  let preferences: SpeedPreferences = { showLimit: true, cameras: true, marginKph: 15, ...prefs };
+  let preferences: SpeedPreferences = { limitChime: true, cameras: true, marginKph: 15, ...prefs };
   let silent = false;
   let wall = 1_000_000;
   const positionListeners = new Set<() => void>();
@@ -128,6 +128,16 @@ describe("speed alerts", () => {
     s.drive(70, 50, undefined, 1500);
     expect(s.chimes).toEqual([]);
     expect(s.notes).toEqual(["speed warning: 70 km/h, limit 50 + 15 (silent)"]);
+  });
+
+  test("the chime off in Settings: the sign and the red still show, no chime", () => {
+    const s = setup({ limitChime: false });
+    s.alerts.retain();
+    s.drive(70, 50);
+    s.drive(70, 50, undefined, 1500);
+    expect(s.alerts.getSnapshot().speed).toEqual({ speedKph: 70, limitKph: 50, over: true });
+    expect(s.chimes).toEqual([]);
+    expect(s.notes).toEqual(["speed warning: 70 km/h, limit 50 + 15 (chime off)"]);
   });
 
   test("the same position again (another listener's notice) changes nothing: the snapshot stays the same object", () => {

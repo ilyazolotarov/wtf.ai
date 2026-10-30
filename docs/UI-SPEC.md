@@ -339,7 +339,7 @@ One small component each; the screen only places them and wires their state. Car
   start at more than 20 km/h over, so up to the margin nothing changes, no colour and no sound. Past it for 1.5 s the
   speed shows red (`bad`, a 44 pt pill inside the bubble) and one chime sounds (`assets/sounds/speed-warning.mp3`, two
   falling notes at −17 LUFS, `tools/voice/speed-warning.sh`; ahead of waiting voice phrases; said "Slow down" if it
-  won't play; not with the voice muted or at 0); it ends 3 km/h back under the line, or after 30 s without a sign
+  won't play; not with the chime off in Settings, the voice muted or at 0); it ends 3 km/h back under the line, or after 30 s without a sign
   (not red meanwhile: a sign gone for a moment and back finds the warning still on, no second chime), and only then
   may chime again. The speed compared is the one shown (rounded km/h). `speed warning: …` note in the trip log.
 - **Screens:** the phone's map, Android Auto's and CarPlay's (a pill on the car's map, ANDROID-AUTO-SPEC §4,
@@ -462,9 +462,10 @@ downloads finish and may end it there, and the 1.7 GB Ukraine check stopped in i
 Language (System / English / Українська); Appearance (System / Light / Dark); 3D buildings (On / Phone only / Off,
 On by default; kv-store `map.preferences`): Phone only keeps them flat on the car's screen (CarPlay, Android Auto),
 Off on every map, applied at once (§4.6's style); Voice volume (ROUTING-SPEC §8.5); Speed
-(§6.4, §6.5): **Show the speed limit** (on by default; where limits come from, Ukraine's general limits where none is
-recorded, that road signs come first), **Warn about speed cameras** (on by default; what shows and is said, where the
-cameras come from) and, with either, **Speed warning threshold (km/h)** +10 / +15 / +20
+(§6.4, §6.5): **Speed warning chime** (`limitChime`, on by default; the chime only: the limit's sign and the red
+always show; where limits come from, Ukraine's general limits where none is recorded, that road signs come first; a
+stored `showLimit` off, from when the switch hid the sign, turns the chime off), **Warn about speed cameras** (on by
+default; what shows and is said, where the cameras come from) and **Speed warning threshold (km/h)** +10 / +15 / +20
 (fines start at more than 20 over; kv-store `speed.preferences`); Car:
 **Precise speed from the car's data bus** (the wheels; on by default; VEHICLE-LINK-SPEC §16.3) and, with it, **Detect
 turns using the car's data bus (experimental)** (NAVIGATOR-SPEC §5.4) and **Send anonymous car reports** (on by default;

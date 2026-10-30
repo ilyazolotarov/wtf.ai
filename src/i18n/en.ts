@@ -491,12 +491,12 @@ export const en = {
   voiceVolumeOff: "Off",
   voiceVolumeOffNote: "No voice guidance, and the sound button on the map is hidden.",
   speedSection: "Speed",
-  speedLimitSetting: "Show the speed limit",
+  speedLimitSetting: "Speed warning chime",
   speedLimitNote:
-    "Shows a speed limit sign next to your speed. Limits come from OpenStreetMap. Where no limit is recorded, Ukraine's general limits for that road type are used. The data may be incomplete or out of date, so always follow road signs.",
+    "Limits come from OpenStreetMap. If no limit is recorded, the general Ukrainian limit for that road type is used. The data may be incomplete or out of date, so always follow road signs.",
   speedMarginSetting: "Speed warning threshold (km/h)",
   speedMarginOption: "+{n}",
-  speedMarginNote: "When you exceed the speed limit by more than the selected amount, the speed display turns red and a chime sounds once. In Ukraine, fines apply for exceeding the limit by more than 20 km/h.",
+  speedMarginNote: "When you exceed the speed limit by more than the selected amount, the speed display turns red. If the warning chime is enabled, it also sounds once. In Ukraine, fines apply for exceeding the limit by more than 20 km/h.",
   speedLimitA11y: "Speed {speed} km/h, limit {limit} km/h",
   speedOverLimitA11y: "Speed {speed} km/h. Over the limit of {limit} km/h",
   /** Said when the speed warning's chime won't play. */

@@ -12,7 +12,7 @@ import { formatDistance, type Lang } from "../status/format-geo";
 export interface SpeedShown {
   /** The speed as the map shows it, km/h. */
   speedKph: number | undefined;
-  /** The limit's sign, when there is one to stand behind and Settings shows it. */
+  /** The limit's sign, when there is one to stand behind. */
   limitKph: number | undefined;
   /** Over the limit by more than the driver's margin: the speed shows red. */
   over: boolean;
@@ -119,15 +119,15 @@ export class SpeedAlerts {
   /** A new position or new preferences: the warnings move on (the same position again changes nothing). */
   private update = (): void => {
     const position = this.deps.position.getSnapshot();
-    const { showLimit, cameras, marginKph } = this.deps.preferences.getSnapshot();
+    const { limitChime, cameras, marginKph } = this.deps.preferences.getSnapshot();
     const nowMs = position?.timestamp ?? 0;
     const speedKph = position?.speedMps === undefined ? undefined : Math.round(position.speedMps * 3.6);
-    const limitKph = showLimit ? position?.speedLimit?.kph : undefined;
+    const limitKph = position?.speedLimit?.kph;
     const { over, chime } = this.speedWarning.update(speedKph, limitKph, marginKph, nowMs);
     if (chime) {
       this.act(() => {
-        const silent = this.deps.silent();
-        this.deps.note(`speed warning: ${speedKph} km/h, limit ${limitKph} + ${marginKph}${silent ? " (silent)" : ""}`);
+        const silent = !limitChime || this.deps.silent();
+        this.deps.note(`speed warning: ${speedKph} km/h, limit ${limitKph} + ${marginKph}${!limitChime ? " (chime off)" : silent ? " (silent)" : ""}`);
         if (!silent) this.deps.chime();
       });
     }
