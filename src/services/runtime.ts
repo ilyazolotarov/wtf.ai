@@ -30,7 +30,7 @@ import { activeRoadGraph, openActiveRoadGraph } from "./offline-map/road-graph-f
 import { SensorService } from "./sensor-capture/sensor-service";
 import { createTripFiles } from "./trip-recorder/trip-files";
 import { TripRecorder, tripsOverLimit } from "./trip-recorder/trip-recorder";
-import { get, networkKind, onNetworkChange, putFile, uploadSecrets } from "./trip-upload/native";
+import { get, networkKind, onNetworkChange, post, putFile, putPart, sizeOf, uploadSecrets } from "./trip-upload/native";
 import { TripUploader } from "./trip-upload/trip-uploader";
 import { NativeDiscovery } from "./vehicle-link/discovery";
 import { adapterModel, TelemetryReporter } from "./telemetry";
@@ -355,7 +355,10 @@ export function getRuntime(): Runtime {
           if (trip) recorder.deleteTrip(trip.id);
         },
         putFile,
+        putPart,
+        sizeOf,
         get,
+        post,
         now: () => Date.now(),
       })
     : null;

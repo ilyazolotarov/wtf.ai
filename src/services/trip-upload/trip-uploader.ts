@@ -1,7 +1,7 @@
 // Trip log upload (TRIP-LOGGER-SPEC §7.1): finished logs go to the upload Worker with the tester's code, opt-in.
 // Platform pieces (keychain, network type, file upload) are injected (trip-upload/native.ts) so this stays testable.
 import type { KeyValueStore } from "@/obd/vehicle-link-core";
-import { normalizeCode } from "@/triplog/upload-protocol";
+import { MAX_UPLOAD_BYTES, normalizeCode, PART_BYTES, partCount, partSize } from "@/triplog/upload-protocol";
 
 import type { RecorderSnapshot } from "../trip-recorder/trip-recorder";
 
@@ -24,7 +24,12 @@ export interface TripUploaderDeps {
   removeTrip(fileName: string): void;
   /** PUT a local file; resolves with any HTTP status, rejects on network failure. */
   putFile(url: string, fileUri: string, headers: Record<string, string>): Promise<HttpResult>;
+  /** PUT `length` bytes of a local file from `offset`, likewise. */
+  putPart(url: string, fileUri: string, offset: number, length: number, headers: Record<string, string>): Promise<HttpResult>;
+  /** A local file's size in bytes. */
+  sizeOf(fileUri: string): number;
   get(url: string, headers: Record<string, string>): Promise<HttpResult>;
+  post(url: string, headers: Record<string, string>, body?: string): Promise<HttpResult>;
   now(): number;
 }
 
@@ -78,7 +83,7 @@ export class TripUploader {
       current: null,
       sentCount: saved?.sentCount ?? 0,
       uploaded: saved?.uploaded ?? {},
-      refused: saved?.refused ?? {},
+      refused: retriedForSize(saved?.refused ?? {}),
       lastError: null,
     };
   }
@@ -175,10 +180,7 @@ export class TripUploader {
       this.update({ status: "uploading", current: file });
       let res: HttpResult;
       try {
-        res = await this.deps.putFile(`${this.deps.baseUrl}/logs/${file}`, this.deps.recorder.tripUri(file), {
-          Authorization: `Bearer ${code}`,
-          "Content-Type": "application/octet-stream",
-        });
+        res = await this.send(file, code);
       } catch (e) {
         // Lost the network mid-way: the next trigger retries from this file.
         return this.update({ status: "error", current: null, lastError: e instanceof Error ? e.message : String(e) });
@@ -197,6 +199,33 @@ export class TripUploader {
       }
     }
     this.update({ status: "idle", current: null, lastError: null });
+  }
+
+  /**
+   * One log to the Worker: in one request, or over `MAX_UPLOAD_BYTES` in parts (Cloudflare refuses bodies over 100 MB):
+   * start, each part, done. The answer to act on: the last one, or the first that isn't the next step's go-ahead.
+   * Cut off mid-way, the next pass starts the log over; R2 drops an unfinished upload after a week.
+   */
+  private async send(file: string, code: string): Promise<HttpResult> {
+    const uri = this.deps.recorder.tripUri(file);
+    const auth = { Authorization: `Bearer ${code}` };
+    const url = `${this.deps.baseUrl}/logs/${file}`;
+    const size = this.deps.sizeOf(uri);
+    if (size <= MAX_UPLOAD_BYTES) return this.deps.putFile(url, uri, { ...auth, "Content-Type": "application/octet-stream" });
+    const headers = { ...auth, "X-Log-Size": String(size) };
+    const start = await this.deps.post(`${url}/parts`, headers);
+    if (start.status !== 201) return start;
+    const upload = encodeURIComponent((JSON.parse(start.body) as { uploadId: string }).uploadId);
+    const parts: { partNumber: number; etag: string }[] = [];
+    for (let n = 1; n <= partCount(size); n++) {
+      const res = await this.deps.putPart(`${url}/parts/${n}?upload=${upload}`, uri, (n - 1) * PART_BYTES, partSize(size, n), {
+        ...headers,
+        "Content-Type": "application/octet-stream",
+      });
+      if (res.status !== 200) return res;
+      parts.push(JSON.parse(res.body) as { partNumber: number; etag: string });
+    }
+    return this.deps.post(`${url}/parts/done?upload=${upload}`, { ...headers, "Content-Type": "application/json" }, JSON.stringify({ parts }));
   }
 
   private update(patch: Partial<UploaderSnapshot>): void {
@@ -225,6 +254,14 @@ export function pendingLogs(recorder: Pick<RecorderSnapshot, "trips" | "current"
     .filter((t) => t.id !== recorder.current?.id && !(t.fileName in upload.uploaded) && !(t.fileName in upload.refused))
     .sort((a, b) => a.startUtcMs - b.startUtcMs)
     .map((t) => t.fileName);
+}
+
+/**
+ * Refusals for size, from before long logs went in parts (Cloudflare's own 413 page, or the Worker's "too large"):
+ * forgotten, so the log is sent again.
+ */
+function retriedForSize(refused: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(Object.entries(refused).filter(([, reason]) => !/413 Payload Too Large|^too large$/.test(reason)));
 }
 
 function errorOf(res: HttpResult): string {

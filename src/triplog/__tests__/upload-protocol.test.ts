@@ -6,6 +6,9 @@ import {
   formatCode,
   generateCode,
   normalizeCode,
+  PART_BYTES,
+  partCount,
+  partSize,
   TRIP_FILE_RE,
   uploadKey,
   VOWELS,
@@ -67,5 +70,15 @@ describe("upload keys", () => {
     const created = "2026-10-08T00:00:00Z";
     expect(uploadKey({ name: "me", owner: true, created }, "a.ulg")).toBe("logs/a.ulg");
     expect(uploadKey({ name: "tester-a", created }, "a.ulg")).toBe("logs/testers/tester-a/a.ulg");
+  });
+
+  it("a long log's parts: equal ones of PART_BYTES and a shorter last, adding up to the log", () => {
+    const size = 125_800_000;
+    expect(partCount(size)).toBe(3);
+    expect([1, 2, 3].map((n) => partSize(size, n))).toEqual([PART_BYTES, PART_BYTES, 25_800_000]);
+    expect(partSize(size, 0)).toBe(0);
+    expect(partSize(size, 4)).toBe(0);
+    expect(partSize(size, 1.5)).toBe(0);
+    expect([partCount(PART_BYTES), partSize(PART_BYTES, 1)]).toEqual([1, PART_BYTES]);
   });
 });

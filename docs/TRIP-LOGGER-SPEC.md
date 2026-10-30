@@ -279,6 +279,13 @@ logs back.
   app or the repo; the Worker can only add objects: `GET /me` (who a code belongs to), `PUT /logs/<trip file>` (201
   stored, 200 same name and size already there, 409 a different log has the name, 400 not a recorder file name, 413
   over 95 MB). Nothing lists, reads, overwrites or deletes.
+- **Long logs in parts:** Cloudflare refuses a request body over 100 MB before the Worker sees it (its own HTML 413;
+  a 3 h drive's log is 125 MB), so a log over 95 MB goes in parts of 50 MB (R2 multipart), each request with
+  `X-Log-Size`: `POST /logs/<file>/parts` (201 its upload id; 200 / 409 as above), `PUT …/parts/<n>?upload=<id>` (the
+  part's etag; its length must be the part's), `POST …/parts/done?upload=<id>` with the parts' etags (201 stored; a
+  log whose parts don't add up to its size is deleted again, 400). The app copies each part to a file of its own (1 MB
+  at a time) and sends that; cut off, the next pass starts the log over, and R2 drops the unfinished upload after a
+  week. Logs refused for size before this are sent again.
 - **Codes:** one per person, `npm run testers:add -- <name> [--owner]`, shown once: three pronounceable groups
   (`bakim-tuvod-segap`, ~51 bits; case, spaces and dashes ignored). The bucket keeps only the SHA-256
   (`testers/<hash>.json` → name, owner flag). `testers:remove` revokes a code; the logs stay. Shared rules:

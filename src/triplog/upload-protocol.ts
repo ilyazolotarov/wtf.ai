@@ -60,5 +60,22 @@ export const testerKey = (codeSha256Hex: string) => `testers/${codeSha256Hex}.js
 export const uploadKey = (tester: TesterRecord, file: string) =>
   tester.owner ? `logs/${file}` : `logs/testers/${tester.name}/${file}`;
 
-/** The largest log the Worker takes (Workers accept 100 MB bodies on the free plan; logs are 3–25 MB). */
+/**
+ * The largest log sent in one request: Cloudflare refuses bodies over 100 MB on the free plan, before the Worker
+ * (an HTML 413). A longer drive's log (3 h: 125 MB) goes in parts.
+ */
 export const MAX_UPLOAD_BYTES = 95_000_000;
+/** A log over `MAX_UPLOAD_BYTES` goes in parts this long, the last shorter (R2 multipart: equal parts, ≥ 5 MiB). */
+export const PART_BYTES = 50_000_000;
+/** The largest log taken in parts. */
+export const MAX_LOG_BYTES = 2_000_000_000;
+
+/** How many parts a log of `size` bytes goes in. */
+export const partCount = (size: number) => Math.max(1, Math.ceil(size / PART_BYTES));
+
+/** Part `n`'s length (1-based), or 0 when a log of `size` has no such part. */
+export function partSize(size: number, n: number): number {
+  const count = partCount(size);
+  if (!Number.isInteger(n) || n < 1 || n > count) return 0;
+  return n < count ? PART_BYTES : size - PART_BYTES * (count - 1);
+}
