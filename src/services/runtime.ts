@@ -496,9 +496,9 @@ export function getRuntime(): Runtime {
 
   // iOS's background location session (TRIP-LOGGER-SPEC §4.3): held whenever the app is in front, so a trip that starts
   // after the driver switched away gets GNSS and iOS can relaunch the app it ended; let go 30 min after leaving it idle.
-  // CarPlay showing the app is in front too: iOS calls the app inactive then, with the phone locked or elsewhere, and a
-  // session opened from the car alone held none, so GNSS stopped once the driver opened music on the car. While the
-  // car's session runs it is busy: GNSS goes on whatever the car's screen shows.
+  // CarPlay showing the app is in front too: iOS calls the app active then, with the phone locked or elsewhere, and
+  // inactive in passing; a session opened from the car alone held none, so GNSS stopped once the driver opened music on
+  // the car. While the car's session runs it is busy: GNSS goes on whatever the car's screen shows.
   const busyStates = new Set(["recording", "lingering"]);
   const locationSession = new LocationSession({
     set: (on) => SensorCaptureModule.setLocationSession(on),

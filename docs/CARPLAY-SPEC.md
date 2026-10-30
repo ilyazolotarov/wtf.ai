@@ -264,11 +264,14 @@ GNSS and the adapter as they were. What the JS side sent is kept on the native s
   between the two. React Native is prebuilt, so its source can't be patched. Nothing paces requestAnimationFrame
   there (a setTimeout(0)): a loop on it spins the JS thread, so the dot's smoothing waits a frame on a timer
   (UI-SPEC §6.2). Device log: `JS timers on their own, the phone's screen not showing the app` / `on the phone's display`.
-- **Location while the car shows the app**: iOS calls the app `inactive` then (the phone locked or elsewhere), not
-  `active`; the background location session (TRIP-LOGGER-SPEC §4.3) counts the car's session as the app in front and
-  as busy, so it is held from a session opened on the car alone and GNSS goes on while another app fills the car's
-  screen. The update check and the map packs' refresh key off `active`: a drive with only the car's screen updates
-  nothing, and they run when the phone's app opens.
+- **The app's state while the car shows it**: iOS calls the app `active` while the car's screen shows it, the phone
+  locked, dark or elsewhere (the trip log's `app_stats`; JS timers stopped with the phone's screen dark in that state
+  before `ReactTimerPace`); `background` while another app fills the car's screen and the phone doesn't show the app;
+  `inactive` only in passing.
+- **Location while the car shows the app**: the background location session (TRIP-LOGGER-SPEC §4.3) counts the car's
+  session as the app in front (an `inactive` moment too) and as busy, so it is held from a session opened on the car
+  alone and GNSS goes on while another app fills the car's screen. The update check and the map packs' refresh key off
+  `active`, which the car's screen gives too: they run on a drive with only the car's screen showing the app.
 - **Places asked for**: a `geo:` (look for it) or `google.navigation:` (go there) link that comes to the car's scene is
   the session's request (SEARCH-SPEC §4.6), as Android Auto's navigation intents. Links opened on the phone go to the
   phone's route screen; Apple Maps links open Apple Maps, and are read when pasted into the search.
