@@ -22,6 +22,7 @@ covered again by the next run.
 | `build-android` (signed APK)          | see Android below                                                           |
 | `publish-ota` (JS update)             | `main` only, see below and [OTA.md](OTA.md)                                 |
 | `publish-builds` (to the update Worker) | `main`'s Release builds: their runtime for OTA, the IPA/APK for the in-app update ([UPDATES-SPEC.md](UPDATES-SPEC.md) §3) |
+| `store-ios`, `store-android` (App Store Connect, Google Play) | `main`'s native builds, see Store builds below |
 
 ## Builds
 
@@ -94,16 +95,31 @@ runs `.github/workflows/build-android.yml` with it.
     compiles, dexing).
   - ccache (`~/.ccache`) for the C/C++ of React Native's CMake builds, through `CMAKE_C(XX)_COMPILER_LAUNCHER`.
     `ccache statistics` in the log shows invocations and hit rate.
-- Google Play: Actions → **Build Google Play bundle** (`build-store.yml`, by hand only) builds the store AAB
-  (`DISTRIBUTION=store`, all four ABIs, `wtfai-play.aab`) and fails if its manifest asks for
-  `REQUEST_INSTALL_PACKAGES` or an unused permission ([SPEC.md](SPEC.md) §2.2). Never published or
-  announced.
-- App Store: Actions → **Build App Store iOS App** (`build-ios-store.yml`, by hand only): the store build, signed and
-  uploaded to App Store Connect when the `ASC_KEY_*` secrets or the certificate, profile and app-specific password
-  secrets exist, else unsigned as a compile check. Run from `main`, a signed build registers its runtime, and the
-  JS updates of `main` reach it ([OTA.md](OTA.md) → Store builds);
-  fails on a library's generic purpose string or a missing privacy manifest
-  ([SPEC.md](SPEC.md) §2.2). Its secrets are listed at the top of the workflow.
+
+## Store builds
+
+The store builds (`DISTRIBUTION=store`, [SPEC.md](SPEC.md) §2.2) follow `main`'s native builds: when a push to
+`main` builds a platform's Release, `store-ios` / `store-android` also build that platform's store app and upload it.
+JS-only changes reach the uploaded builds as updates ([OTA.md](OTA.md) → Store builds), so nothing is uploaded for
+them. Both can also be run by hand, from any branch.
+
+- App Store: `build-ios-store.yml` (**Build App Store iOS App**), on once the `APPLE_TEAM_ID` variable is set. Signed
+  and uploaded to App Store Connect, where it lands in TestFlight; submitting it for review stays a step in App Store
+  Connect. Its secrets are listed at the top of the workflow. Run by CI, missing secrets fail the job; run by hand, it
+  builds unsigned as a compile check. App Store Connect refuses a build whose version (`app.json` `version`) is one
+  already released: bump the version after each App Store release, or `main`'s next native change fails here. Fails
+  on a library's generic purpose string or a missing privacy manifest ([SPEC.md](SPEC.md) §2.2).
+- Google Play: `build-store.yml` (**Build Google Play bundle**), on once the `PLAY_TRACK` variable is set (`internal`,
+  `alpha`, `beta` or `production`; by hand without it: `internal`). Builds the AAB (all four ABIs) and uploads it to
+  that track with `npm run store:play` (`tools/store/play-upload.ts`, the Play Developer API) as release status
+  `PLAY_RELEASE_STATUS` (default `completed`; an app Play still holds as a draft gets a draft release, rolled out
+  in Play Console). The secret `PLAY_SERVICE_ACCOUNT_JSON` of the `android-release` environment is the JSON key of a
+  Google Cloud service account (Android Publisher API on) invited in Play Console → Users and permissions with
+  release rights for the app. Uploads come only from `main` (a branch has the debug key, which Play refuses: a
+  compile check, no artifact) and one at a time. Fails if the manifest asks for `REQUEST_INSTALL_PACKAGES` or an
+  unused permission ([SPEC.md](SPEC.md) §2.2).
+- A signed upload from `main` registers its runtime with the update Worker (`register` job), so `main`'s JS updates
+  reach it. Telegram is not told: the stores tell their testers.
 
 ## Changing the rules
 

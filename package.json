@@ -110,6 +110,7 @@
     "ota:prepare": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/ota/prepare.ts",
     "ota:publish": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/ota/publish.ts",
     "ota:upload": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/ota/upload.ts",
+    "store:play": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/store/play-upload.ts",
     "updates-worker:deploy": "npx wrangler deploy --config workers/app-updates/wrangler.toml",
     "updates-worker:dev": "npx wrangler dev --config workers/app-updates/wrangler.toml",
     "route:eta": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/eta.ts",

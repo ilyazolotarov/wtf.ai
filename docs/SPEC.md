@@ -79,7 +79,8 @@ wheel speeds from the CAN bus where the adapter and car allow) and heading rate 
 ### 2.2 Store builds
 
 `DISTRIBUTION=store` at build time (`app.config.js`, `STORE_BUILD` in `src/config/distribution.ts`): the App Store /
-TestFlight build (`build-ios-store.yml`) and the Google Play bundle (`build-store.yml`), both by hand ([CI.md](CI.md)).
+TestFlight build (`build-ios-store.yml`) and the Google Play bundle (`build-store.yml`), both uploaded by `main`'s
+native changes ([CI.md](CI.md) → Store builds).
 One source tree; only this differs:
 
 | Sideloaded build | Store build |

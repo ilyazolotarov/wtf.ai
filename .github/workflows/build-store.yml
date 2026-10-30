@@ -1,12 +1,34 @@
 name: Build Google Play bundle
 
-# The Android App Bundle for Google Play (docs/SPEC.md §2.2), run by hand. DISTRIBUTION=store (app.config.js):
-# no REQUEST_INSTALL_PACKAGES, no in-app APK installer, the tester trip upload behind the Developer unlock. Signed with the android-release key,
-# which Play App Signing takes as the upload key; from a branch (no keystore) it is signed with the debug key, which
-# Play refuses: a compile check only. Never published to our update server, never announced: Play delivers it.
-# The App Store build is build-ios-store.yml.
+# The Android App Bundle for Google Play (docs/SPEC.md §2.2). DISTRIBUTION=store (app.config.js): no
+# REQUEST_INSTALL_PACKAGES, no in-app APK installer, the tester trip upload behind the Developer unlock. Signed with
+# the android-release key, which Play App Signing takes as the upload key, and uploaded to the Play track PLAY_TRACK
+# (variable, default internal) with the release status PLAY_RELEASE_STATUS (default completed). ci.yml runs it for
+# main's Android native changes once PLAY_TRACK is set; it can also be run by hand. From a branch (no keystore) it is
+# signed with the debug key, which Play refuses: a compile check, nothing uploaded. Never published to our update
+# server's downloads, never announced: Play delivers it. Run from main, the uploaded build registers its runtime with
+# the update Worker (the register job), and the JS updates of main reach it from then on (publish-ota.yml,
+# docs/OTA.md). Secret: PLAY_SERVICE_ACCOUNT_JSON (android-release environment), the JSON key of a service account
+# invited in Play Console with release rights for the app. The App Store build is build-ios-store.yml.
 on:
   workflow_dispatch:
+  workflow_call:
+    secrets:
+      SENTRY_AUTH_TOKEN:
+        required: false
+      # Declared for the linter: on main the jobs' android-release and ota environments hold them, and their values win.
+      ANDROID_KEYSTORE_BASE64:
+        required: false
+      ANDROID_KEYSTORE_PASSWORD:
+        required: false
+      ANDROID_KEY_ALIAS:
+        required: false
+      ANDROID_KEY_PASSWORD:
+        required: false
+      PLAY_SERVICE_ACCOUNT_JSON:
+        required: false
+      OTA_PUBLISH_TOKEN:
+        required: false
 
 env:
   DISTRIBUTION: store
@@ -23,8 +45,15 @@ permissions:
 jobs:
   build-aab:
     environment: ${{ github.ref == 'refs/heads/main' && 'android-release' || '' }}
+    # One upload at a time: Play keeps one edit per app, and a second one opened meanwhile fails. A newer push waiting
+    # replaces an older one still waiting.
+    concurrency:
+      group: ${{ github.ref == 'refs/heads/main' && 'google-play' || format('google-play-{0}', github.run_id) }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    outputs:
+      runtime: ${{ steps.runtime.outputs.runtime }}
     env:
       SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
       SENTRY_ORG: ${{ vars.SENTRY_ORG }}
@@ -107,12 +136,57 @@ jobs:
             fi
           done
 
-      - name: Name the bundle
-        run: cp android/app/build/outputs/bundle/release/app-release.aab wtfai-play.aab
+      - name: Upload to Google Play
+        # main only: a branch's bundle has the debug key, which Play refuses.
+        if: ${{ github.ref == 'refs/heads/main' }}
+        env:
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          PLAY_TRACK: ${{ vars.PLAY_TRACK || 'internal' }}
+          PLAY_RELEASE_STATUS: ${{ vars.PLAY_RELEASE_STATUS || 'completed' }}
+        run: |
+          [ -n "$ANDROID_KEYSTORE_PATH" ] || { echo "::error::No ANDROID_KEYSTORE_BASE64 in the android-release environment: Play refuses the debug key"; exit 1; }
+          [ -n "$PLAY_SERVICE_ACCOUNT_JSON" ] || { echo "::error::PLAY_SERVICE_ACCOUNT_JSON is missing from the android-release environment (docs/CI.md)"; exit 1; }
+          # play-upload needs no dependencies.
+          npm run -s store:play -- --file android/app/build/outputs/bundle/release/app-release.aab \
+            --track "$PLAY_TRACK" --status "$PLAY_RELEASE_STATUS"
 
-      - name: Upload bundle
-        uses: actions/upload-artifact@v7
+      - name: OTA runtime of the build
+        # The fingerprint the uploaded bundle embedded (docs/OTA.md): the register job below makes the JS updates of main
+        # go to it. Only after an upload: a bundle no phone gets needs no updates.
+        id: runtime
+        if: ${{ github.ref == 'refs/heads/main' }}
+        run: |
+          RUNTIME=$(unzip -p android/app/build/outputs/bundle/release/app-release.aab base/assets/fingerprint 2>/dev/null || true)
+          if [ -n "$RUNTIME" ]; then
+            echo "runtime=$RUNTIME" >> "$GITHUB_OUTPUT"
+            echo "Runtime: $RUNTIME"
+          else
+            echo "::warning::No embedded fingerprint in the bundle: this build will take no JS updates"
+          fi
+
+  register:
+    # The JS updates of main go to the runtimes registered with the update Worker (docs/OTA.md). A job of its own: the
+    # token lives in the ota environment, which only main may use.
+    needs: build-aab
+    if: ${{ github.ref == 'refs/heads/main' && needs.build-aab.outputs.runtime != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: ota
+    env:
+      OTA_PUBLISH_TOKEN: ${{ secrets.OTA_PUBLISH_TOKEN }}
+      RUNTIME: ${{ needs.build-aab.outputs.runtime }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
         with:
-          archive: false
-          path: wtfai-play.aab
-          retention-days: 30
+          node-version: 24
+
+      - name: Register the build
+        # ota:publish needs no dependencies.
+        run: |
+          [ -n "$OTA_PUBLISH_TOKEN" ] || { echo "::error::OTA_PUBLISH_TOKEN is missing from the ota environment (docs/OTA.md)"; exit 1; }
+          [ -n "$UPDATES_ORIGIN" ] || { echo "::error::The UPDATES_ORIGIN repository variable is not set (docs/OTA.md)"; exit 1; }
+          npm run -s ota:publish -- --register-build --platform android --runtime "$RUNTIME" --distribution store

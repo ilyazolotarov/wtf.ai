@@ -22,13 +22,14 @@ Unsigned iOS App** is neither registered nor published: start it from **CI** ins
 
 ### Store builds
 
-A store build (TestFlight, the App Store: `build-ios-store.yml`, by hand) has `DISTRIBUTION=store` in its config, which is
-part of the runtime version, so no sideloaded build's update fits it. After a signed build run from `main`, its
-`register` job registers the runtime as a store build (`--distribution store`). `publish-ota.yml` then exports, signs and
-publishes every update a second time with `DISTRIBUTION=store`, so the update also carries the config the store app
-reads (`Constants.expoConfig`: no AltStore, no trip upload). That publish uses `--if-built`: a store runtime no store
-build has yet (a native change since the last one) is left out, never an error. A store build from a branch is not
-registered. The Google Play bundle is never published, so it registers nothing.
+A store build (TestFlight and the App Store: `build-ios-store.yml`; Google Play: `build-store.yml`; both run by
+`main`'s native changes, [CI.md](CI.md) → Store builds) has `DISTRIBUTION=store` in its config, which is part of the
+runtime version, so no sideloaded build's update fits it. After a build uploaded from `main`, its `register` job
+registers the runtime as a store build (`--distribution store`). `publish-ota.yml` then exports, signs and publishes
+every update a second time with `DISTRIBUTION=store`, so the update also carries the config the store app reads
+(`Constants.expoConfig`: no AltStore, no trip upload). That publish uses `--if-built`: a store runtime no store build
+has yet (a native change whose store build has not finished, or failed) is left out, never an error. A store build
+from a branch is not registered.
 
 ## Rules
 

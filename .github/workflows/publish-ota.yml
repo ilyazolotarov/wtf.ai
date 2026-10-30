@@ -95,7 +95,7 @@ jobs:
       - name: Export, sign and publish for the store builds
         # TestFlight and the App Store run a store build (build-ios-store.yml): DISTRIBUTION=store is in its config, so
         # its runtime is another one and its JS update is exported and signed again, with the config it reads as
-        # Constants.expoConfig. Made by hand, a store build often has no build of this runtime: then nothing goes out.
+        # Constants.expoConfig. A runtime whose store build has not finished (or failed) has no build: then nothing goes out.
         env:
           DISTRIBUTION: store
           EXPO_PUBLIC_BUILD_SHA: ${{ github.sha }}

@@ -1,6 +1,7 @@
 name: Build App Store iOS App
 
-# The App Store build (docs/SPEC.md §2.2), run by hand. DISTRIBUTION=store (app.config.js): no AltStore, the
+# The App Store build (docs/SPEC.md §2.2). ci.yml runs it for main's iOS native changes once the APPLE_TEAM_ID variable
+# is set; it can also be run by hand. DISTRIBUTION=store (app.config.js): no AltStore, the
 # Developer screen and the tester upload hidden until unlocked. Signed and uploaded to App Store Connect, where it goes
 # to TestFlight and review, in one of two ways, chosen by which secrets exist:
 # - key: the App Store Connect API key (Admin role). Xcode signs with cloud-managed certificates and profiles.
@@ -9,11 +10,35 @@ name: Build App Store iOS App
 #   Apple ID with an app-specific password for the upload. For an account that cannot create API keys.
 #   Secrets IOS_DIST_P12_BASE64, IOS_DIST_P12_PASSWORD, IOS_PROFILE_BASE64, ASC_APPLE_ID (the Apple ID's email),
 #   ASC_APP_PASSWORD (app-specific). Variables APPLE_TEAM_ID, ASC_APP_ID (the app's Apple ID in App Store Connect).
-# Without either it builds the same app unsigned: a compile check of the store build.
+# Without either, a run by hand builds the same app unsigned: a compile check of the store build. Run by ci.yml, it
+# fails instead: an empty secret would otherwise go unnoticed.
 # Run from main, a signed build registers its runtime with the update Worker (the register job), and the JS updates of
 # main reach it from then on (publish-ota.yml, docs/OTA.md).
 on:
   workflow_dispatch:
+  workflow_call:
+    secrets:
+      # Declared for the linter; ci.yml passes them all.
+      SENTRY_AUTH_TOKEN:
+        required: false
+      ASC_KEY_ID:
+        required: false
+      ASC_ISSUER_ID:
+        required: false
+      ASC_KEY_P8:
+        required: false
+      IOS_DIST_P12_BASE64:
+        required: false
+      IOS_DIST_P12_PASSWORD:
+        required: false
+      IOS_PROFILE_BASE64:
+        required: false
+      ASC_APPLE_ID:
+        required: false
+      ASC_APP_PASSWORD:
+        required: false
+      OTA_PUBLISH_TOKEN:
+        required: false
 
 env:
   DISTRIBUTION: store
@@ -52,6 +77,13 @@ jobs:
         && secrets.ASC_APP_PASSWORD != '' && vars.APPLE_TEAM_ID != '' && vars.ASC_APP_ID != '') && 'manual'
         || 'none' }}
     steps:
+      - name: Check the signing secrets
+        # Called by ci.yml (a push event), the build is meant for App Store Connect.
+        if: ${{ github.event_name != 'workflow_dispatch' && env.SIGNING == 'none' }}
+        run: |
+          echo "::error::Neither the App Store Connect key nor the certificate secrets are complete: nothing to upload (see the top of build-ios-store.yml)"
+          exit 1
+
       - name: Checkout repository
         uses: actions/checkout@v7
 

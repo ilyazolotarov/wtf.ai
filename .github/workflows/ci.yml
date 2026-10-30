@@ -8,7 +8,8 @@ name: CI
 #   Xcode). `[build]`, `[build ios]` or `[build android]` in a commit message also builds and
 #   sends the result to Telegram.
 # - Pushes to main: checks; app code changes go to Telegram: a Release build after a native change, else an OTA JS
-#   update for the installed builds (docs/OTA.md).
+#   update for the installed builds (docs/OTA.md). A native change also uploads the store builds: TestFlight and
+#   Google Play (docs/CI.md → Store builds).
 # - Pull requests: from forks only (branches of this repo are covered by their pushes).
 # - Manual run (Actions → CI → Run workflow): all checks, builds as chosen.
 
@@ -253,6 +254,27 @@ jobs:
       variant: ${{ needs.plan.outputs.build_android }}
       notify: ${{ needs.plan.outputs.notify == 'true' }}
       retention-days: ${{ fromJSON(needs.plan.outputs.retention) }}
+    secrets: inherit
+
+  store-ios:
+    # main's iOS native changes also go to App Store Connect (TestFlight), beside the sideloaded build (docs/CI.md →
+    # Store builds). JS changes reach it as updates. On once the APPLE_TEAM_ID variable is set (a fork without an Apple
+    # account builds nothing).
+    needs: [plan, checks, native-logic]
+    if: >-
+      ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.APPLE_TEAM_ID != ''
+      && needs.plan.outputs.build_ios == 'Release' && needs.checks.result == 'success' && needs.native-logic.result != 'failure' }}
+    uses: ./.github/workflows/build-ios-store.yml
+    secrets: inherit
+
+  store-android:
+    # main's Android native changes also go to Google Play, on the PLAY_TRACK track (docs/CI.md → Store builds). JS
+    # changes reach it as updates. On once the PLAY_TRACK variable is set.
+    needs: [plan, checks, native-logic-android]
+    if: >-
+      ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.PLAY_TRACK != ''
+      && needs.plan.outputs.build_android != '' && needs.checks.result == 'success' && needs.native-logic-android.result != 'failure' }}
+    uses: ./.github/workflows/build-store.yml
     secrets: inherit
 
   publish-ota:
