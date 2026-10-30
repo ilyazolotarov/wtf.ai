@@ -14,11 +14,10 @@ import {
   getMapPacks,
   installedRelease,
   loadCatalog,
-  pauseDownload,
   plannedBytes,
   regionNeedsUpdate,
   releaseFingerprint,
-  resumeDownload,
+  setDownloadNetwork,
   setInstallGate,
   subscribeMapPacks,
 } from "@/services/offline-map/map-packs";
@@ -46,7 +45,7 @@ import {
   ownBuild,
   shareIpa,
 } from "./native-build";
-import { isUnmetered, onNetworkChange } from "./network";
+import { currentDownloadNetwork, isUnmetered, onDownloadNetwork, onNetworkChange } from "./network";
 
 /** Back in front on an unmetered network: checks at most this often. */
 const RESUME_CHECK_MS = 30 * 60 * 1000;
@@ -400,8 +399,8 @@ function onAppState(appState: string): void {
 }
 
 /**
- * Starts the checks: at launch, on return to the foreground, and the automatic map update's network rule (an update
- * started on Wi-Fi pauses on mobile data and goes on back on Wi-Fi). Once per app life.
+ * Starts the checks: at launch, on return to the foreground, and on a network change; gives the map downloads the
+ * network (an update started on Wi-Fi pauses on mobile data and goes on back on Wi-Fi). Once per app life.
  */
 export function startUpdateCenter(appDeps: UpdateCenterDeps): void {
   if (started) return;
@@ -422,12 +421,12 @@ export function startUpdateCenter(appDeps: UpdateCenterDeps): void {
     seen = next;
     refreshMap();
   });
+  // Downloads follow the network themselves (map-packs `followNetwork`): an update pauses off Wi-Fi, any download
+  // with no network.
+  setDownloadNetwork({ current: currentDownloadNetwork, subscribe: onDownloadNetwork });
   onNetworkChange((unmetered) => {
     if (unmetered === state.unmetered) return;
     setState({ unmetered });
-    const { download } = getMapPacks();
-    if (download?.auto && download.phase === "downloading" && !unmetered) pauseDownload();
-    if (download?.auto && download.phase === "paused" && !download.checkEnded && unmetered) void resumeDownload();
     refreshMap({ start: unmetered });
   });
   AppState.addEventListener("change", onAppState);

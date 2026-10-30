@@ -449,6 +449,13 @@ paused it (an automatic update waits for its own network rules). Android goes on
 request from the part file's length), iOS starts the cut file again; the files fetched before it stay. Android cuts a
 background app's network, so a whole country used to fail and start from zero until the app stayed open (2026-10-23/24).
 
+The network rule (`followNetwork`) is applied on every network change and whenever the app returns to the foreground,
+when it checks the connection again. All downloads pause when the connection is lost; automatic updates also pause
+on metered networks ("Waiting for Wi-Fi. The download will resume automatically when you’re connected."). Both show
+Resume and resume automatically in the foreground once a suitable connection is available. iOS background sessions
+wait rather than fail when the connection is lost; without this rule, a stalled download would still show Pause.
+Tapping Resume allows an update to continue over mobile data too. Downloads paused by the driver never resume automatically.
+
 The job records each step of checking and installing before it runs, whether the app was in the background then, and
 the files already checked (each step is a `map-download` breadcrumb too). A start that finds a step the app ended in
 the front never runs it again by itself: it shows "The app closed during map verification…" with Resume and Cancel,

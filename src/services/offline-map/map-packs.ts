@@ -58,8 +58,13 @@ export interface MapDownload {
   total: number;
   /** Started by the app (an update on Wi-Fi), not by the driver. */
   auto: boolean;
-  /** Paused by a dropped connection, not by the driver: it goes on by itself while the app is in front. */
+  /**
+   * Paused by a dropped connection or the network rule (no network; mobile data for an update), not by the driver: it
+   * goes on by itself while the app is in front, once its network is there.
+   */
   interrupted?: boolean;
+  /** Interrupted until Wi-Fi: an update the app started, on mobile data. */
+  wifi?: boolean;
   /** Paused because the app ended while checking or installing the files: waits for the driver's Resume. */
   checkEnded?: boolean;
 }
@@ -111,6 +116,8 @@ interface DownloadJob {
   resume?: DownloadPauseState;
   /** Paused with Pause: waits for Resume. Otherwise a job stopped (a dropped connection, the app ended) goes on. */
   pausedByDriver?: boolean;
+  /** An update the driver resumed: it goes on over mobile data too. */
+  anyNetwork?: boolean;
   /** The step being checked or installed (a file's label, "small files", "install"); still set at start: the app ended in it. */
   checking?: string;
   /**
@@ -193,8 +200,8 @@ function initialState(): MapPacksState {
     catalogError: null,
     catalogTooNew: false,
     // A job found at start is paused: the app was closed (or killed) during the download or its check. Unless the
-    // driver paused it (or it is an update, which waits for Wi-Fi), or its check ended the app in the front, it goes on
-    // by itself; a check always does.
+    // driver paused it, or its check ended the app in the front, it goes on by itself once its network allows (an
+    // update waits for Wi-Fi); a check always does.
     download: job
       ? {
           region: job.region.region,
@@ -213,8 +220,8 @@ let state: MapPacksState | null = null;
 const listeners = new Set<() => void>();
 let job: DownloadJob | null = null;
 let task: DownloadTask | null = null;
-/** Set by pause; honoured between small-file batches (the big files pause their task). */
-let pauseRequested = false;
+/** Set by a pause, the driver's or the network rule's; honoured between small-file batches (the big files pause their task). */
+let pauseFor: "driver" | "network" | null = null;
 /** Incremented by every start, resume and cancel; a stale run ignores its own result. */
 let runId = 0;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -288,7 +295,19 @@ function setState(patch: Partial<MapPacksState>) {
 }
 
 function setDownload(phase: MapDownload["phase"], bytes: number, interrupted = false) {
-  if (job) setState({ download: { region: job.region.region, phase, bytes, total: job.total, auto: !!job.auto, ...(interrupted ? { interrupted } : {}) } });
+  if (!job) return;
+  const wifi = interrupted && network === "metered" && !allowedOn(job, "metered");
+  setState({
+    download: {
+      region: job.region.region,
+      phase,
+      bytes,
+      total: job.total,
+      auto: !!job.auto,
+      ...(interrupted ? { interrupted } : {}),
+      ...(wifi ? { wifi } : {}),
+    },
+  });
 }
 
 function saveJob() {
@@ -551,11 +570,11 @@ async function run(id: number) {
   const j = job;
   if (!j) return;
   setState({ downloadError: null });
-  pauseRequested = false;
+  pauseFor = null;
   while (j.index < j.files.length) {
-    // Pause pressed while no task was running (between files).
-    if (pauseRequested && task?.state !== "paused") {
-      setDownload("paused", j.done);
+    // Paused while no task was running (between files).
+    if (pauseFor && task?.state !== "paused") {
+      setDownload("paused", j.done, pauseFor === "network");
       return;
     }
     const f = j.files[j.index];
@@ -580,8 +599,8 @@ async function run(id: number) {
       j.index += batch.length;
       saveJob();
       // Pause lands between batches; a batch takes a moment.
-      if (pauseRequested) {
-        setDownload("paused", j.done);
+      if (pauseFor) {
+        setDownload("paused", j.done, pauseFor === "network");
         return;
       }
       continue;
@@ -614,7 +633,7 @@ async function run(id: number) {
     if (file == null) {
       j.resume = task?.savable();
       saveJob();
-      setDownload("paused", getState().download?.bytes ?? j.done);
+      setDownload("paused", getState().download?.bytes ?? j.done, pauseFor === "network");
       return;
     }
     task = null;
@@ -732,17 +751,77 @@ export async function downloadRegion(region: string, { auto = false }: { auto?: 
 export function pauseDownload(): void {
   if (getState().download?.phase !== "downloading") return;
   if (job) job.pausedByDriver = true;
-  pauseRequested = true;
+  pauseFor = "driver";
   if (task?.state === "active") task.pause();
 }
 
-export async function resumeDownload(): Promise<void> {
+/** Resume pressed (an update the driver resumes goes on over mobile data too), or `byDriver: false`: by itself. */
+export async function resumeDownload({ byDriver = true }: { byDriver?: boolean } = {}): Promise<void> {
   if (!job || getState().download?.phase !== "paused") return;
   clearRetry();
   job.pausedByDriver = false;
   job.checkEnded = false;
+  if (byDriver && job.auto) job.anyNetwork = true;
   setDownload("downloading", getState().download?.bytes ?? job.done);
   await runGuarded(++runId);
+}
+
+/** The network as downloads see it: Wi-Fi or Ethernet the OS doesn't call expensive, any other, or none. */
+export type DownloadNetwork = "unmetered" | "metered" | "none";
+
+/** Where downloads hear of the network (the update center gives NetInfo's). */
+export interface DownloadNetworkSource {
+  current(): Promise<DownloadNetwork>;
+  subscribe(listener: (network: DownloadNetwork) => void): () => void;
+}
+
+/** The network now; null until a source has told (then only an update is held back). */
+let network: DownloadNetwork | null = null;
+let networkSource: DownloadNetworkSource | null = null;
+
+export function setDownloadNetwork(source: DownloadNetworkSource): void {
+  networkSource = source;
+  source.subscribe(networkIs);
+  void source.current().then(networkIs, () => {});
+}
+
+function networkIs(now: DownloadNetwork): void {
+  network = now;
+  followNetwork();
+}
+
+/**
+ * Whether job `j` may fetch on `net`: with every file fetched, always (its check needs none); with no network, never;
+ * on mobile data, the driver's own download or an update the driver resumed, not one the app started (UPDATES-SPEC
+ * §5.2). An unknown network holds back only an update.
+ */
+function allowedOn(j: DownloadJob, net: DownloadNetwork | null): boolean {
+  if (j.index >= j.files.length) return true;
+  if (net === "none") return false;
+  return net === "unmetered" || !j.auto || !!j.anyNetwork;
+}
+
+/**
+ * The network rule, held whenever the network or the app's state changes: a download its network doesn't allow stops,
+ * shown paused ("interrupted"), and goes on by itself, in front, once it does. A background download session doesn't
+ * fail without a network, it waits: without this the download stood still with Pause showing, and an update went on
+ * over mobile data when the phone left Wi-Fi in the background (the next update check took the change in unseen).
+ * Never a pause the driver chose.
+ */
+function followNetwork(): void {
+  const d = getState().download;
+  if (!job || !d) return;
+  if (d.phase === "downloading" && !allowedOn(job, network)) {
+    pauseFor = "network";
+    if (task?.state === "active") task.pause();
+  } else if (d.phase === "paused" && d.interrupted) {
+    if (allowedOn(job, network) && AppState.currentState === "active") {
+      retries = 0;
+      void resumeDownload({ byDriver: false });
+    } else {
+      setDownload("paused", d.bytes, true);
+    }
+  }
 }
 
 export function cancelDownload(): void {
@@ -773,12 +852,13 @@ export function setActiveRegion(region: string): void {
 }
 
 /**
- * A job stopped without the driver's Pause, and not an update (which waits for Wi-Fi), goes on by itself; so does one
- * with every file fetched (its check needs no network). Not one whose check ended the app in the front.
+ * A job stopped without the driver's Pause goes on by itself once its network allows (an update waits for Wi-Fi:
+ * `allowedOn`); so does one with every file fetched (its check needs no network). Not one whose check ended the app in
+ * the front.
  */
 function resumesItself(j: DownloadJob): boolean {
   if (j.checkEnded) return false;
-  return j.index >= j.files.length || (!j.pausedByDriver && !j.auto);
+  return j.index >= j.files.length || !j.pausedByDriver;
 }
 
 /**
@@ -820,7 +900,7 @@ function scheduleRetry() {
   retryTimer = setTimeout(() => {
     retryTimer = null;
     retries++;
-    if (getState().download?.interrupted) void resumeDownload();
+    if (getState().download?.interrupted && job && allowedOn(job, network)) void resumeDownload({ byDriver: false });
   }, RETRY_MS[retries]);
 }
 
@@ -830,9 +910,10 @@ AppState.addEventListener("change", (appState) => {
     job.checkingInBackground = true;
     saveJob();
   }
-  if (appState !== "active" || !getState().download?.interrupted) return;
-  retries = 0;
-  void resumeDownload();
+  if (appState !== "active" || !getState().download) return;
+  // The network may have changed in the background unheard: asked again, then the rule.
+  if (networkSource) void networkSource.current().then(networkIs, followNetwork);
+  else followNetwork();
 });
 
 /** Style for the active region, or `null` when no pack is usable. */

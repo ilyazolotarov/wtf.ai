@@ -2,6 +2,8 @@
 // expensive: a phone's hotspot is Wi-Fi to us, but iOS and Android both flag it as metered.
 import NetInfo, { type NetInfoState } from "@react-native-community/netinfo";
 
+import type { DownloadNetwork } from "@/services/offline-map/map-packs";
+
 // NetInfo probes a Google URL to tell whether the internet is reachable; the app needs only the connection type, and
 // contacts nothing but its own servers.
 NetInfo.configure({ reachabilityShouldRun: () => false });
@@ -18,4 +20,18 @@ export async function isUnmetered(): Promise<boolean> {
 
 export function onNetworkChange(listener: (unmetered: boolean) => void): () => void {
   return NetInfo.addEventListener((state) => listener(unmetered(state)));
+}
+
+/** The network as map downloads see it (map-packs `followNetwork`): unmetered, metered, or none at all. */
+export function downloadNetwork(state: NetInfoState): DownloadNetwork {
+  if (state.isConnected === false || state.type === "none") return "none";
+  return unmetered(state) ? "unmetered" : "metered";
+}
+
+export async function currentDownloadNetwork(): Promise<DownloadNetwork> {
+  return downloadNetwork(await NetInfo.fetch());
+}
+
+export function onDownloadNetwork(listener: (network: DownloadNetwork) => void): () => void {
+  return NetInfo.addEventListener((state) => listener(downloadNetwork(state)));
 }

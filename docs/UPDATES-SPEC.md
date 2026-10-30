@@ -117,7 +117,10 @@ its own, so a failed prune never fails a publish. It never removes what `latest`
   - on an unmetered network and bigger (Ukraine, ~1.7 GB): prompt. "Download" starts the same download, installed
     the same way.
   - on a metered network: only the dots.
-  An automatic download pauses when the phone leaves for a metered network and goes on back on an unmetered one.
+  An automatic download pauses on a metered network and resumes when an unmetered connection is available again.
+  This also applies if the phone leaves Wi-Fi while the app is in the background: the connection is checked again
+  when the app returns to the foreground (UI-SPEC §7.4, the network rule). Tapping Resume allows the download to
+  continue over mobile data.
   Cancelling it in Offline maps skips that release (as "Skip" does).
   Other downloaded regions aren't checked: Offline maps shows their update when opened.
 - A map release in a newer catalog `format` than the app reads: "Update the app to get newer maps" in Offline maps;

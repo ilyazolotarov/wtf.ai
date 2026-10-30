@@ -82,11 +82,10 @@ describe("a check that ended the app", () => {
     expect(mockSaved.get("map-download-job")).toMatchObject({ checked: 1, checking: undefined, checkingInBackground: undefined });
   });
 
-  it("leaves an update stopped mid-file to wait for Wi-Fi", () => {
+  it("leaves an update stopped mid-file to go on by itself on Wi-Fi only (network-rule.test.ts)", () => {
     mockSaved.set("map-download-job", job({ index: 0, done: 0, auto: true }));
     const packs = start();
-    expect(packs.getMapPacks().download).toMatchObject({ phase: "paused" });
-    expect(packs.getMapPacks().download?.interrupted).toBeUndefined();
+    expect(packs.getMapPacks().download).toMatchObject({ phase: "paused", interrupted: true });
   });
 
   it("does not touch a download stopped by a dropped connection", () => {
