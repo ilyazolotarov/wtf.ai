@@ -56,8 +56,9 @@ export interface SpeedAlertsDeps {
 }
 
 /**
- * When the voice last spoke of each camera: again only after this, so a camera lost for a moment and found isn't news
- * (a passed one isn't shown again sooner either, CameraAlert).
+ * The voice speaks of a camera again only after it was off the card this long, so a camera lost for a moment and found
+ * isn't news, nor one on the card for minutes (a car standing before it; a passed one isn't shown again sooner either,
+ * CameraAlert).
  */
 export const SAY_AGAIN_MS = 120_000;
 
@@ -87,7 +88,7 @@ export class SpeedAlerts {
    * (a blink of the card doesn't start its 1.5 s again) for as long as the voice remembers the camera.
    */
   private red: { id: number; warning: SpeedWarning; seenMs: number } | null = null;
-  /** When the voice last spoke of each camera (wall clock). */
+  /** Each camera the voice spoke of, and when it was last on the card since (wall clock). */
   private readonly said = new Map<number, number>();
 
   constructor(private readonly deps: SpeedAlertsDeps) {}
@@ -151,9 +152,10 @@ export class SpeedAlerts {
     // `chime`: the warning has just started (not again on coming back from a gap still on).
     const red = this.red.warning.update(speedKph, limitKph, marginKph, nowMs);
     const at = `${speedKph ?? "?"} km/h, limit ${limitKph ?? "none"} + ${marginKph}`;
-    for (const [camera, saidAt] of this.said) if (now - saidAt > SAY_AGAIN_MS) this.said.delete(camera);
-    if (!this.said.has(ahead.id)) {
-      this.said.set(ahead.id, now);
+    for (const [camera, shownAt] of this.said) if (now - shownAt > SAY_AGAIN_MS) this.said.delete(camera);
+    const news = !this.said.has(ahead.id);
+    this.said.set(ahead.id, now);
+    if (news) {
       // Said once: the speed now, not the card's red, which waits its moment.
       const overNow = limitKph !== undefined && speedKph !== undefined && speedKph > limitKph + marginKph;
       this.act(() => {

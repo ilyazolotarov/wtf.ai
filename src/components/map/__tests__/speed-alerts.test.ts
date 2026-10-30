@@ -149,7 +149,7 @@ describe("speed alerts", () => {
     expect(s.alerts.getSnapshot()).toBe(before);
   });
 
-  test("a camera: said once when it shows, again only after 2 min; its card red past the margin, by the warning's rules", () => {
+  test("a camera: said once when it shows, again only after 2 min off the card; its card red past the margin, by the warning's rules", () => {
     const s = setup();
     s.alerts.retain();
     s.drive(60, 50, camera(3, 500, 50));
@@ -171,6 +171,13 @@ describe("speed alerts", () => {
     s.drive(70, 50, undefined, SAY_AGAIN_MS);
     s.drive(70, 50, camera(3, 300, 50));
     expect(s.said).toEqual([false, true]);
+  });
+
+  test("a camera on the card for minutes (standing before it) is said once", () => {
+    const s = setup();
+    s.alerts.retain();
+    for (let i = 0; i < 6; i++) s.drive(0, 50, camera(4, 80, 50), 60_000);
+    expect(s.said).toEqual([false]);
   });
 
   test("a red card blinking out of sight comes back red at once, its slow down noted once", () => {

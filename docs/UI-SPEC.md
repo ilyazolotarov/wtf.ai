@@ -186,6 +186,9 @@ persisted in kv-store. No hardcoded user-facing strings in components.
   route's alternatives, placing the car) become the driving view at once; a look around (a pan/zoom) once the map
   hasn't been touched for 10 s. Standing, `free` stays.
 - **The button** (`CameraButton`): from `free` always `follow-heading`, then between `follow-heading` and `follow`.
+- **The route goes** (stopped, arrived): its alternatives' overview goes back to the driving view, on the phone and
+  the car's screen alike, also after the driver zoomed or panned over it (a closer look at the routes; the intent is
+  to drive one), as driving off does at once; placing the car begun over it stays.
 - **The trip ends**: `follow-heading` goes back to `follow`, unless the driver toggled during it.
 - Into the trip log: every mode (`camera <mode>`) and the policy's own changes (`camera <mode> by itself: …`).
 - **Heading-up bearing:** the walking compass when shown; else the navigator heading (`dr`/`fused`, valid while
@@ -365,7 +368,9 @@ One small component each; the screen only places them and wires their state. Car
   hypothesis passing by: no card), at the distance from the heaviest of them.
 - **When** (`CameraAlert`): the nearest within 30 s at the speed (250–900 m), after 1 s in sight; it counts down as
   the car comes. Out of sight it runs down at the speed and goes after 3 s moving (a car standing keeps it), at once
-  within 60 m: passed, and not shown again for 2 min. Gone farther away and back within a minute (a junction that
+  within 60 m: passed, and not shown again for 2 min. The car farther from it as the crow flies than its distance on
+  the card and 250 m isn't where the card counted from (placed by hand elsewhere, a restart from another pose): it
+  goes at once, standing or not. Gone farther away and back within a minute (a junction that
   split the belief), it is the same card at once, its bar where it was. With no road position to look from (GNSS
   gives no course under 11 km/h: a queue creeping to a light before the camera) it isn't out of sight, just unseen:
   held up to a minute, never passed meanwhile. A camera 50 m nearer than the card's takes it. In the trip log:
@@ -382,8 +387,8 @@ One small component each; the screen only places them and wires their state. Car
   before 8–14 % of cameras (Kyiv and Chernihiv graphs, 2026-10), the camera's always lower: a 50 on a road tagged 90
   or 110, or the limit dropping between the car and the camera; a higher one is a tagging error, and the road's red
   isn't hidden for it.
-- **The voice** once per camera when its card shows, and not again for that camera within 2 min (lost and found
-  isn't news): "Speed camera ahead", or "Speed camera ahead. Slow down" when past the margin then (recorded, `camera`,
+- **The voice** once per camera when its card shows, and not again for that camera until it has been off the card
+  for 2 min (lost and found isn't news, nor a card shown for minutes to a car standing before the camera): "Speed camera ahead", or "Speed camera ahead. Slow down" when past the margin then (recorded, `camera`,
   `camera-slow-down`); not with the voice muted or at 0.
 - **On the map:** every camera from zoom 13, the card's camera glyph in white on a red badge (the sign's red, banded
   as the dot), upright whatever the map's bearing and tilt, growing with the zoom; the card's camera larger, on top. The

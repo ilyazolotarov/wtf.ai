@@ -315,9 +315,15 @@ export function useMapCamera({
     if (!mapReady || overview == null || !route?.plan) return;
     const all = [route.plan, ...(route.alternatives ?? []).map((a) => a.plan)].flatMap((p) => p.coordinates);
     if (all.length < 2) return;
-    const lons = all.map((c) => c.lon);
-    const lats = all.map((c) => c.lat);
-    frameFlat([Math.min(...lons), Math.min(...lats), Math.max(...lons), Math.max(...lats)]);
+    // A loop, not Math.min(...all): spread, a long route's points could pass the engine's limit on arguments.
+    const box: [number, number, number, number] = [Infinity, Infinity, -Infinity, -Infinity];
+    for (const c of all) {
+      box[0] = Math.min(box[0], c.lon);
+      box[1] = Math.min(box[1], c.lat);
+      box[2] = Math.max(box[2], c.lon);
+      box[3] = Math.max(box[3], c.lat);
+    }
+    frameFlat(box);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [overview, mapReady]);
 

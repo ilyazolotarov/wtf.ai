@@ -80,6 +80,16 @@ describe("CameraAlert", () => {
     expect(a.ended).toMatchObject({ id: 1, passed: true });
   });
 
+  test("a car put elsewhere (placed by hand 119 km off) loses its camera at once, standing", () => {
+    const a = new CameraAlert();
+    // 190 m south of the camera (50, 30), then a step nearer: still its camera.
+    a.update([sight(1, 200)], 10, 0, true, { lat: 49.99829, lon: 30 });
+    expect(a.update([sight(1, 190)], 10, 1000, true, { lat: 49.99829, lon: 30 })?.id).toBe(1);
+    expect(a.update([], 0, 60_000, true, { lat: 49.9985, lon: 30.001 })?.id).toBe(1);
+    expect(a.update([], 0, 61_000, true, { lat: 51.0716, lon: 30.2311 })).toBeNull();
+    expect(a.ended).toMatchObject({ id: 1, passed: false });
+  });
+
   test("not on roads holding less than 0.4 of the belief; a nearer camera takes the card", () => {
     const a = new CameraAlert();
     a.update([sight(1, 300, 0.3)], 15, 0);

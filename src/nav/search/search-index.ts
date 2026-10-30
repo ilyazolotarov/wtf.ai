@@ -233,6 +233,8 @@ export class SearchIndex {
   private entranceTable: EntranceTable | null = null;
   /** The last house scan (a dropped pin asks for its settlement, then its address). */
   private lastHouse: { at: Coordinate; maxM: number; best: { owner: Entity; house: House; d: number } | null } | null = null;
+  /** Where each settlement is, and the farthest any of them reaches, read once (`settlementsNear`). */
+  private settlementPlaces: { lat: Float64Array; lon: Float64Array; reachM: number } | null = null;
 
   constructor(private readonly source: ByteSource) {
     this.header = parseHeader(source.read(0, HEADER_BYTES));
@@ -369,7 +371,7 @@ export class SearchIndex {
     visit: (s: Entity, index: number, d: number, lat: number, lon: number, numberAt: number) => void,
   ): void {
     const kx = Math.cos((at.lat * Math.PI) / 180);
-    for (const s of this.settlementsNear(at, PIN_SETTLEMENTS, (e) => (e.reach || this.kindReach(e)) + pastReach)) {
+    for (const s of this.settlementsNear(at, PIN_SETTLEMENTS, (e) => (e.reach || this.kindReach(e)) + pastReach, pastReach)) {
       // The settlement's own houses (`addr:place`), then its children's: one contiguous run of the address table.
       const ranges: [number, number][] = [[s.addr, s.addr + s.naddr]];
       if (s.nchild > 0) {
@@ -397,15 +399,41 @@ export class SearchIndex {
     return SETTLEMENT_REACH_M[this.string(e.tagAt)] ?? 1_200;
   }
 
-  /** Settlements whose `reach` the point is in, nearest for it first. */
-  private settlementsNear(at: Coordinate, limit: number, reach: (e: Entity) => number): Entity[] {
+  /**
+   * Settlements whose `reach` the point is in, nearest for it first. `beyondM`: how far `reach` goes past a settlement's
+   * own reach or its kind's. Those farther than any reaches are passed by on their place alone, unread: the house scan
+   * asks each time the near point moves (every 40 m heading-up), and reading every settlement in the country took
+   * milliseconds each time.
+   */
+  private settlementsNear(at: Coordinate, limit: number, reach: (e: Entity) => number, beyondM = 0): Entity[] {
+    const places = this.places();
+    // In degrees north, and east at the point's latitude; 5 % spare for the flat measure over a city's reach.
+    const far = ((places.reachM + beyondM) * 1.05) / 111_195;
+    const farLon = far / Math.max(0.01, Math.cos((at.lat * Math.PI) / 180));
     const near: { e: Entity; score: number }[] = [];
-    for (let id = 0; id < this.header.settlements; id++) {
+    for (let id = 0; id < places.lat.length; id++) {
+      if (Math.abs(places.lat[id] - at.lat) > far || Math.abs(places.lon[id] - at.lon) > farLon) continue;
       const e = this.entity(id);
       const score = haversineM(at, e) / reach(e);
       if (score <= 1) near.push({ e, score });
     }
     return near.sort((a, b) => a.score - b.score).slice(0, limit).map((n) => n.e);
+  }
+
+  private places(): { lat: Float64Array; lon: Float64Array; reachM: number } {
+    if (this.settlementPlaces) return this.settlementPlaces;
+    const n = this.header.settlements;
+    const lat = new Float64Array(n);
+    const lon = new Float64Array(n);
+    let reachM = 0;
+    for (let id = 0; id < n; id++) {
+      const e = this.entity(id);
+      lat[id] = e.lat;
+      lon[id] = e.lon;
+      reachM = Math.max(reachM, e.reach, this.kindReach(e));
+    }
+    this.settlementPlaces = { lat, lon, reachM };
+    return this.settlementPlaces;
   }
 
   /** The child of `settlement` whose houses include address `index` (children's address runs ascend with their ids). */

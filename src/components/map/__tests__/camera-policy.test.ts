@@ -10,9 +10,27 @@ describe("map camera policy", () => {
 
   // 2026-10-11: a destination set while standing showed the alternatives; the map stayed on them for 28 s of driving.
   test("a route's overview (the app's free) ends as soon as the car drives", () => {
-    const s = run([{ type: "set", mode: "free" }]);
+    const s = run([{ type: "overview" }]);
     expect(s.mode).toBe("free");
     expect(run([drive(1_000)], s).mode).toBe("follow-heading");
+  });
+
+  // 2026-10-30: the route stopped on the car's screen, its map stayed zoomed out on the routes until recentre.
+  test("a route's overview ends with its route, in the driving view, a look over it too", () => {
+    expect(run([{ type: "overview" }, { type: "overviewEnded" }])).toMatchObject({ mode: "follow-heading", by: "overviewEnded" });
+    const looked = run([{ type: "overview" }, { type: "gesture", nowMs: 0 }, { type: "overviewEnded" }]);
+    expect(looked).toMatchObject({ mode: "follow-heading", freeBy: null });
+    // Over already: nothing to end.
+    expect(run([{ type: "overview" }, drive(1_000), { type: "button", onTrip: true }, { type: "overviewEnded" }]).mode).toBe("follow");
+  });
+
+  test("driving off after a look over the overview follows at once, not 10 s after the touch", () => {
+    expect(run([{ type: "overview" }, { type: "gesture", nowMs: 1_000 }, drive(2_000)]).mode).toBe("follow-heading");
+  });
+
+  test("placing the car over the overview: the route going leaves it placing", () => {
+    const placing = run([{ type: "overview" }, { type: "set", mode: "free" }, { type: "overviewEnded" }]);
+    expect(placing).toMatchObject({ mode: "free", freeBy: "app" });
   });
 
   test("a look around while driving returns 10 s after the last touch, not before", () => {

@@ -115,8 +115,9 @@ function CarMap({ dark, insets, scale, zoom, cameraSign, speedRight }: Required<
     void native?.setRecentre?.(recentre).catch(noop);
   }, [recentre]);
   // A new route's alternatives while the car stands: the map frames them all once (ROUTING-SPEC §8.7), as the phone's;
-  // driving off or recentre goes back to following. Once per destination across the map's remounts (a list shown over
-  // it takes it down): back from the routes list it follows. (State adjusted during render, not in an effect.)
+  // driving off, recentre or the route going (stopped, arrived) goes back to following. Once per destination across
+  // the map's remounts (a list shown over it takes it down): back from the routes list it follows. (State adjusted
+  // during render, not in an effect.)
   const { route } = useRoute();
   const [overview, setOverview] = useState<number | null>(null);
   const [overviewFor, setOverviewFor] = useState<object | null>(() => overviewShownFor);
@@ -126,9 +127,13 @@ function CarMap({ dark, insets, scale, zoom, cameraSign, speedRight }: Required<
   if (route?.alternatives?.length && overviewFor !== route.destination) {
     setOverviewFor(route.destination);
     if (!driving) {
-      dispatch({ type: "set", mode: "free" });
+      dispatch({ type: "overview" });
       setOverview(route.planId);
     }
+  }
+  if (!route && overviewFor !== null) {
+    setOverviewFor(null);
+    dispatch({ type: "overviewEnded" });
   }
   const onGesture = useEffectEvent((g: CarMapGesture) => {
     const moved = () => dispatch({ type: "gesture", nowMs: Date.now() });

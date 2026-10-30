@@ -39,7 +39,7 @@ export class CameraSource {
   /** The camera to warn of at `p`; null: none ahead within 30 s (or no cameras, no map, no road the car is sure of). */
   at(p: PositionEstimate, nowMs: number, roads?: RoadWeights): CameraAhead | null {
     const { sightings, looked } = this.inSight(p, roads);
-    const ahead = this.alert.update(sightings, p.speedMps, nowMs, looked);
+    const ahead = this.alert.update(sightings, p.speedMps, nowMs, looked, p);
     const ended = this.alert.ended;
     if (ended && ended.id === this.shownId) {
       this.deps.note(ended.passed ? `camera passed #${ended.id}` : `camera out of sight #${ended.id} at ${ended.distanceM} m`);

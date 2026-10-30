@@ -2,6 +2,7 @@
 // is within 30 s at the speed, held through a moment out of sight and while the road ahead can't be seen, gone once
 // passed; one lost for a while and found again is the same warning.
 
+import { haversineM, type Coordinate } from "../geo";
 import type { SpeedCamera } from "./cameras";
 
 /** A camera on the road ahead with its limit: its own, else the road's at it. */
@@ -56,6 +57,11 @@ const PASSED_FOR_MS = 120_000;
 const NEARER_M = 50;
 /** Below this the car stands: a camera out of sight stays (at a stop the road ahead may not be known). */
 const MOVING_MPS = 1;
+/**
+ * The car this much farther from the camera as the crow flies than the card's distance along the road isn't where the
+ * card counted from (placed by hand elsewhere, a restart from another pose): the camera goes at once, standing or not.
+ */
+const JUMPED_M = 250;
 
 export class CameraAlert {
   private shown: (CameraAhead & { seenMs: number; atMs: number }) | null = null;
@@ -70,9 +76,9 @@ export class CameraAlert {
 
   /**
    * `looked`: the road ahead was looked along (there was a road position to look from); false, `sightings` is empty
-   * for want of one, not because the camera is behind.
+   * for want of one, not because the camera is behind. `at`: where the car is.
    */
-  update(sightings: readonly CameraInSight[], speedMps: number | undefined, nowMs: number, looked = true): CameraAhead | null {
+  update(sightings: readonly CameraInSight[], speedMps: number | undefined, nowMs: number, looked = true, at?: Coordinate): CameraAhead | null {
     this.ended = null;
     for (const [id, at] of this.passed) if (nowMs - at > PASSED_FOR_MS) this.passed.delete(id);
     for (const [id, l] of this.lost) if (nowMs - l.atMs > LOST_FOR_MS) this.lost.delete(id);
@@ -97,6 +103,7 @@ export class CameraAlert {
           shown.seenMs = nowMs;
         } else if (shown.distanceM <= PASSED_M || nowMs - shown.seenMs > KEEP_MS) this.end(nowMs);
       }
+      if (this.shown && at && haversineM(at, this.shown) > this.shown.distanceM + JUMPED_M) this.end(nowMs);
       if (this.shown) this.shown.atMs = nowMs;
     }
 

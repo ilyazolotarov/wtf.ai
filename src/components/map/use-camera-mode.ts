@@ -12,7 +12,8 @@ const DRIVE_OFF_MS = 2000;
 
 /**
  * The map camera's mode (UI-SPEC §6.2; the rules in `camera-policy.ts`): heading-up while driving, back to it by
- * itself after an overview or a look around, and the overview of a new route's alternatives while the car stands.
+ * itself after an overview or a look around, and the overview of a new route's alternatives while the car stands,
+ * until the route goes.
  *
  * `onGesture`: the driver moved the map. `toggleCameraMode`: the camera button. `setCameraMode`: the screen's own
  * change (placing the car, the tour), which doesn't change the view the trip drives in.
@@ -38,8 +39,15 @@ export function useCameraMode({
   useEffect(() => {
     const was = shown.current;
     shown.current = camera;
-    if (camera.by !== "driving" || was.mode === camera.mode) return;
-    const why = was.mode !== "free" ? "driving off" : was.freeBy === "app" ? "driving, after the app's view" : "driving, the map left alone";
+    if ((camera.by !== "driving" && camera.by !== "overviewEnded") || was.mode === camera.mode) return;
+    const why =
+      camera.by === "overviewEnded"
+        ? "the route of its overview went"
+        : was.mode !== "free"
+          ? "driving off"
+          : was.freeBy === "app"
+            ? "driving, after the app's view"
+            : "driving, the map left alone";
     log?.(`camera ${camera.mode} by itself: ${why}`);
     // Only on a change of mode.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -67,17 +75,21 @@ export function useCameraMode({
   const onGesture = () => dispatch({ type: "gesture", nowMs: Date.now() });
   const toggleCameraMode = () => dispatch({ type: "button", onTrip });
 
-  // Alternatives for a new route while the car stands: the map shows them all once (ROUTING-SPEC §8.7); driving off
-  // or the button goes back to following. Moving, the camera is left alone.
+  // Alternatives for a new route while the car stands: the map shows them all once (ROUTING-SPEC §8.7); driving off,
+  // the button or the route going (stopped, arrived) goes back to following. Moving, the camera is left alone.
   // (State adjusted during render, not in an effect.)
   const [overview, setOverview] = useState<number | null>(null);
   const [overviewFor, setOverviewFor] = useState<object | null>(null);
   if (route?.alternatives?.length && overviewFor !== route.destination) {
     setOverviewFor(route.destination);
     if ((speedMps ?? 0) <= COURSE_MIN_SPEED_MPS) {
-      dispatch({ type: "set", mode: "free" });
+      dispatch({ type: "overview" });
       setOverview(route.planId);
     }
+  }
+  if (!route && overviewFor !== null) {
+    setOverviewFor(null);
+    dispatch({ type: "overviewEnded" });
   }
 
   return { cameraMode: camera.mode, setCameraMode, onGesture, toggleCameraMode, overview };

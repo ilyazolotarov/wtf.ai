@@ -83,7 +83,8 @@ SVG = """<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox=
 </svg>
 """
 
-# A template image: CarPlay tints it for the car's day or night. Kept as a vector, drawn at the size it is shown.
+# A template image, kept as a vector: the module draws it at the size it is shown, white in a black edge
+# (CarPlayImages.icon), never tinted by CarPlay.
 IMAGESET = """{{
   "images" : [
     {{

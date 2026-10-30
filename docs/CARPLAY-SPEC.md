@@ -151,10 +151,9 @@ GNSS and the adapter as they were. What the JS side sent is kept on the native s
   + and −) hide with it. The guidance card is CarPlay's: the icon beside the words (`displayStyleFor`
   `.leadingSymbol`), 18 pt, two rows. Its colour is the dark grey of the trip estimates under it (#3B3B3B,
   `CarPlayImages.cardColor`) by day and night, as the template's `guidanceBackgroundColor` and each maneuver's
-  `cardBackgroundColor`; the maneuver's icon white on it (`maneuverIcon`), not CarPlay's tint, which follows the car's
-  day and drew it black. Drawn white into its pixels: CarPlay draws the image in its own process, and a
-  `withTintColor` tint is lost there (the vector's black showed, night too). iOS 26.4 draws the card red when the app gives no colour, and a colour given after the
-  template shows stays red (developer forums 822242): it is set as the template is made.
+  `cardBackgroundColor`; the maneuver's icon white in a black edge on it, as every icon (Icons, below), not CarPlay's
+  tint, which follows the car's day and drew it black. iOS 26.4 draws the card red when the app gives no colour, and a
+  colour given after the template shows stays red (developer forums 822242): it is set as the template is made.
 
   Destinations: saved places, then recent ones, as many as `CPListTemplate.maximumItemCount`; one picked routes to it
   (`go`), the map popped back. Search (`CPSearchTemplate`): each change of the field goes to the session (`search`),
@@ -264,6 +263,11 @@ GNSS and the adapter as they were. What the JS side sent is kept on the native s
   between the two. React Native is prebuilt, so its source can't be patched. Nothing paces requestAnimationFrame
   there (a setTimeout(0)): a loop on it spins the JS thread, so the dot's smoothing waits a frame on a timer
   (UI-SPEC §6.2). Device log: `JS timers on their own, the phone's screen not showing the app` / `on the phone's display`.
+- **The phone's theme** stays the app's (Settings › Appearance) whatever the car's day and night
+  (`ReactSceneGuards`): React Native keeps one colour scheme for the app and takes it from any React root whose traits
+  change, and the car map's root has the car's. A car by day turned the phone's dark theme light, until the setting
+  was switched off and on. The car's roots are left out; the car's map takes its day and night from its `dark` prop.
+  The theme setting reaches the phone's windows only, not the car's (CarPlay's scene has none for React Native's loop).
 - **The app's state while the car shows it**: iOS calls the app `active` while the car's screen shows it, the phone
   locked, dark or elsewhere (the trip log's `app_stats`; JS timers stopped with the phone's screen dark in that state
   before `ReactTimerPace`); `background` while another app fills the car's screen and the phone doesn't show the app;
@@ -275,19 +279,23 @@ GNSS and the adapter as they were. What the JS side sent is kept on the native s
 - **Places asked for**: a `geo:` (look for it) or `google.navigation:` (go there) link that comes to the car's scene is
   the session's request (SEARCH-SPEC §4.6), as Android Auto's navigation intents. Links opened on the phone go to the
   phone's route screen; Apple Maps links open Apple Maps, and are read when pasted into the search.
-- **Icons**: the app's Material Symbols, drawn by `scripts/car-icons.py` as SVG template images into
-  `modules/car-play/ios/CarIcons.xcassets` (the pod's `WtfCarPlay.bundle`), with Android Auto's drawables; CarPlay tints
-  them. Drawn at their size from the vector: bar buttons 24 pt, list rows 32 pt, maneuvers 18 pt. A map button's
-  drawing is scaled to the X's, 14 of its 24 pt (`CarPlayImages.mapIcon`, the ink measured once): the symbols leave
-  different room around their drawing, and the voice and my location filled the round button. The map's buttons are
-  not CarPlay's to tint: on iOS 26 its tint of map buttons is wrong (Apple's known issue; developer forums 798735,
-  799192, 842273), white on its white focus fill, and reported white on near-white buttons by day. They are drawn
-  white in a black edge (1.25 pt, `MapIconStyle.outlined`), by day and night, focused or not (a knob, a touchpad,
-  where the focus comes back after a list, and on a touch screen the first button, which CarPlay keeps focused): the
-  glass takes its shade from the map behind each button, near white over a light map and dark over water side by
-  side (the day preview, §5), a mid grey in a car by day, and the focus fill is white. One colour alone vanished on one
-  of them: the app's dark text colour on the grey, white with a faint edge on the near white; a focused black icon
-  read as another kind of button. Grey looked disabled, and the app's blue reads as a mode turned on.
+- **Icons**: the app's Material Symbols, drawn by `scripts/car-icons.py` as SVG images into
+  `modules/car-play/ios/CarIcons.xcassets` (the pod's `WtfCarPlay.bundle`), with Android Auto's drawables. Every one
+  is drawn white in a black edge (1.25 pt, `CarPlayImages.IconStyle.outlined`) into its pixels, by day and night,
+  focused or not: the bar's buttons, the map's, list rows, maneuvers and the alerts' images. Never CarPlay's tint,
+  which follows the car's day and not what is under the icon: by day it drew the list rows' icons black on the black
+  of a focused row and a maneuver's black on the dark guidance card, and on iOS 26 its tint of map buttons is wrong
+  (Apple's known issue; developer forums 798735, 799192, 842273), white on its white focus fill, and reported white on
+  near-white buttons by day. A tint given with `withTintColor` is lost too: CarPlay draws the image in its own
+  process, and the vector's black ink showed. Under the icons: a list, light by day with a black focused row; the
+  map buttons' glass, which takes its shade from the map behind each button, near white over a light map and dark
+  over water side by side (the day preview, §5), a mid grey in a car by day, its focus fill white; the dark card.
+  One colour alone vanished on one of them: the app's dark text colour on the grey, white with a faint edge on the
+  near white; a focused black icon read as another kind of button. Grey looked disabled, and the app's blue reads as
+  a mode turned on. Drawn at their size from the vector: bar buttons 24 pt, list rows 32 pt, maneuvers 18 pt, an
+  alert's 24 pt (a camera's glyph 40 pt). A map button's drawing is scaled to the X's, 14 of its 24 pt
+  (`CarPlayImages.mapIcon`, the ink measured once): the symbols leave different room around their drawing, and the
+  voice and my location filled the round button.
 - Device log (`ai.wtf.navigator`, category `carplay`): the scene connected, in the foreground, active, in the
   background, disconnected; React Native started without the phone's scene or on a new host; what drew the map;
   actions sent (info level); the notes also go to the trip log.
@@ -318,6 +326,7 @@ Must not drift:
   delegate handlers: expo-updates chooses the bundle the car's screen runs, as it does the phone's.
 - The map's root lives only while the car's screen shows the app.
 - No words on the car's screen that ask the driver to use the phone.
+- The car's day and night never set the phone's theme.
 - Every CarPlay template operation passes a completion.
 - The guidance card's colour is given as the map template is made, before it shows: iOS 26.4 draws it red otherwise.
 - The map stays the biggest thing on the car's screen: no panels of the app's own over it (Apple's guidelines keep the

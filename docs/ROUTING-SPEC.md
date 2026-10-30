@@ -337,7 +337,9 @@ After a new route (reason `new`), up to two other ways to the destination.
 - **What sets each apart** (`route-via.ts`): the street its own stretch runs along, where it is over 40 m from every
   other route: points every 75 m there (at most 12, spread over it) each ask the search index for their nearest
   house's street within 60 m, and the most named wins (the road graph has no names). The car's routes list titles
-  each route by it (ANDROID-AUTO-SPEC §4).
+  each route by it (ANDROID-AUTO-SPEC §4). Each point is measured only against the other routes' segments near it
+  (a grid of 100 m cells): measured against every vertex, a 200 km route and two alternatives froze the JS thread
+  for 15–23 s on a phone in Low Power Mode.
 
 ## 9. Verification
 

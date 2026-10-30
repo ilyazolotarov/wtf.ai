@@ -216,7 +216,15 @@ export class RouteGuidance {
     const pts = this.plan.coordinates;
     const frame = new LocalFrame(p);
     let best: { alongPoly: number; offM: number } | null = null;
-    for (let i = 0; i + 1 < pts.length; i++) {
+    // From the segment that ends at or past `fromM`, found by halves: a long route's thousands before it aren't walked.
+    let lo = 1;
+    let hi = this.cum.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (this.cum[mid] >= fromM) hi = mid;
+      else lo = mid + 1;
+    }
+    for (let i = lo - 1; i + 1 < pts.length; i++) {
       if (this.cum[i + 1] < fromM) continue;
       if (this.cum[i] > toM) break;
       const [ax, ay] = frame.toEnu(pts[i]);

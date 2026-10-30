@@ -40,20 +40,59 @@ export function alongEvery(line: Coordinate[], stepM: number): Coordinate[] {
   return out;
 }
 
-/** How far a point is from a line, m. */
-export function distanceToLineM(p: Coordinate, line: Coordinate[]): number {
-  const xy = local(p);
-  let best = Infinity;
-  for (let i = 1; i < line.length; i++) {
-    const [ax, ay] = xy(line[i - 1]);
-    const [bx, by] = xy(line[i]);
-    const dx = bx - ax;
-    const dy = by - ay;
-    const len2 = dx * dx + dy * dy;
-    const t = len2 > 0 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / len2)) : 0;
-    best = Math.min(best, Math.hypot(ax + t * dx, ay + t * dy));
+/** The grid's cells, m: a point is measured only against the segments passing within `apartM` of its cell. */
+const CELL_M = 100;
+
+/**
+ * Whether each point is further than `apartM` from every line. The lines' segments are filed by the grid cells they
+ * pass near, so a point is measured against those around it alone: against every vertex, a 200 km route and two
+ * alternatives took 20 s of the phone's JS thread. The grid is one flat frame, its east–west scale the first point's;
+ * a point is measured in its own frame, as before. The cells reach half as far again: the grid's east–west scale is
+ * off by the ratio of the two latitudes' cosines (under 20 % across Ukraine).
+ */
+function apartFrom(points: Coordinate[], lines: Coordinate[][], apartM: number): boolean[] {
+  if (points.length === 0) return [];
+  const origin = points[0];
+  const xy = local(origin);
+  const cosOrigin = Math.cos((origin.lat * Math.PI) / 180);
+  const reach = apartM * 1.5;
+  const cells = new Map<string, number[][]>();
+  for (const line of lines) {
+    const flat = line.map(xy);
+    // A line of one point is a segment from it to itself.
+    for (let i = flat.length > 1 ? 1 : 0; i < flat.length; i++) {
+      const [ax, ay] = flat[Math.max(0, i - 1)];
+      const [bx, by] = flat[i];
+      const segment = [ax, ay, bx, by];
+      const x0 = Math.floor((Math.min(ax, bx) - reach) / CELL_M);
+      const x1 = Math.floor((Math.max(ax, bx) + reach) / CELL_M);
+      const y0 = Math.floor((Math.min(ay, by) - reach) / CELL_M);
+      const y1 = Math.floor((Math.max(ay, by) + reach) / CELL_M);
+      for (let cx = x0; cx <= x1; cx++) {
+        for (let cy = y0; cy <= y1; cy++) {
+          const key = `${cx},${cy}`;
+          const list = cells.get(key);
+          if (list) list.push(segment);
+          else cells.set(key, [segment]);
+        }
+      }
+    }
   }
-  return line.length === 1 ? Math.hypot(...xy(line[0])) : best;
+  return points.map((p) => {
+    const [px, py] = xy(p);
+    // East–west in the point's own frame, as `local(p)` would have it.
+    const k = Math.cos((p.lat * Math.PI) / 180) / cosOrigin;
+    for (const segment of cells.get(`${Math.floor(px / CELL_M)},${Math.floor(py / CELL_M)}`) ?? []) {
+      const ax = (segment[0] - px) * k;
+      const ay = segment[1] - py;
+      const dx = (segment[2] - px) * k - ax;
+      const dy = segment[3] - py - ay;
+      const len2 = dx * dx + dy * dy;
+      const t = len2 > 0 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / len2)) : 0;
+      if (Math.hypot(ax + t * dx, ay + t * dy) <= apartM) return false;
+    }
+    return true;
+  });
 }
 
 /**
@@ -62,8 +101,9 @@ export function distanceToLineM(p: Coordinate, line: Coordinate[]): number {
  */
 export function viaNames(routes: Coordinate[][], nameAt: (at: Coordinate) => string | null): (string | null)[] {
   return routes.map((route, i) => {
-    const others = routes.filter((_, j) => j !== i);
-    const own = alongEvery(route, VIA_STEP_M).filter((p) => others.every((o) => distanceToLineM(p, o) > VIA_APART_M));
+    const along = alongEvery(route, VIA_STEP_M);
+    const apart = apartFrom(along, routes.filter((_, j) => j !== i), VIA_APART_M);
+    const own = along.filter((_, k) => apart[k]);
     // Spread over the whole stretch, not its first metres.
     const asked = own.length <= VIA_ASKED ? own : Array.from({ length: VIA_ASKED }, (_, k) => own[Math.floor(((k + 0.5) * own.length) / VIA_ASKED)]);
     const votes = new Map<string, number>();
