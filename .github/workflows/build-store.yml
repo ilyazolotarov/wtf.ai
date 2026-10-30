@@ -84,9 +84,14 @@ jobs:
         run: npm ci
 
       - name: Runtime as an export sees it
-        # publish-ota resolves the runtime from a fresh checkout, without prebuild: the same fingerprint, with its
-        # sources, to compare with the one the build embeds (below).
-        run: npx expo-updates fingerprint:generate --platform android --debug > "$RUNNER_TEMP/fingerprint-export.json"
+        # publish-ota resolves the runtime from a fresh checkout, without prebuild; the build embeds this one. Left to
+        # itself, expo-updates' Gradle task fingerprints the tree mid-build, while the four ABIs' native builds write
+        # into node_modules: each bundle got another runtime (f1c6e11a, f4556504 for 07cd5b72), and no update reached it.
+        run: |
+          RUNTIME=$(npx expo-updates fingerprint:generate --platform android | node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(0, "utf8")).hash)')
+          [ -n "$RUNTIME" ] || { echo "::error::Could not resolve the runtime"; exit 1; }
+          echo "EXPO_UPDATES_FINGERPRINT_OVERRIDE=$RUNTIME" >> "$GITHUB_ENV"
+          echo "Runtime: $RUNTIME"
 
       - name: Run Expo Prebuild
         run: npx expo prebuild --platform android --clean
@@ -126,18 +131,12 @@ jobs:
           cd android
           ./gradlew bundleRelease -PreactNativeArchitectures=arm64-v8a,armeabi-v7a,x86_64,x86 --no-daemon
 
-      - name: Compare the runtime with the export's
-        # Unequal, the JS updates of main (publish-ota) never reach this build. The diff names the sources that differ.
+      - name: Check the embedded runtime
+        # Unequal, the JS updates of main (publish-ota) never reach this build.
         run: |
           EMBEDDED=$(unzip -p android/app/build/outputs/bundle/release/app-release.aab base/assets/fingerprint 2>/dev/null || true)
-          EXPORT=$(node -p 'require(process.argv[1]).hash' "$RUNNER_TEMP/fingerprint-export.json")
-          echo "Embedded: $EMBEDDED"
-          echo "Export:   $EXPORT"
-          if [ "$EMBEDDED" != "$EXPORT" ]; then
-            npx expo-updates fingerprint:generate --platform android --debug > "$RUNNER_TEMP/fingerprint-after.json"
-            echo "After the build: $(node -p 'require(process.argv[1]).hash' "$RUNNER_TEMP/fingerprint-after.json")"
-            npx @expo/fingerprint fingerprint:diff "$RUNNER_TEMP/fingerprint-export.json" "$RUNNER_TEMP/fingerprint-after.json" || true
-            echo "::warning::The bundle's runtime $EMBEDDED is not the one publish-ota resolves ($EXPORT): no JS update will reach it"
+          if [ "$EMBEDDED" != "$EXPO_UPDATES_FINGERPRINT_OVERRIDE" ]; then
+            echo "::error::The bundle embeds runtime '$EMBEDDED', publish-ota resolves $EXPO_UPDATES_FINGERPRINT_OVERRIDE"; exit 1
           fi
 
       - name: Check the store manifest

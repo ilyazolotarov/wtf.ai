@@ -41,6 +41,9 @@ from a branch is not registered.
   binary without the native code it needs. Resolve it in CI (Linux/macOS), never on Windows: line endings change it.
   `.fingerprintignore` leaves out the library `AndroidManifest.xml` files in `node_modules`: React Native's Gradle
   plugin rewrites some of them during the build, so the build and an export would never agree on Android's runtime.
+  The Play bundle (`build-store.yml`) goes further: it resolves the runtime before prebuild and hands it to the build
+  (`EXPO_UPDATES_FINGERPRINT_OVERRIDE`). Left to itself, expo-updates' Gradle task fingerprinted the tree while the four
+  ABIs' native builds wrote into it, and every bundle got another runtime. The job fails if the bundle embeds another.
 - **Few runtimes.** Each new runtime leaves every installed build without JS updates until its driver installs a
   new one. Batch native changes; Expo patch releases
   are a warning in CI, bumped with the next native change, never alone. Config that native code doesn't read goes in
