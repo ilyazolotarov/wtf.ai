@@ -5,7 +5,6 @@ import { speedBesideCard } from "@/components/map/speed-alerts";
 import { useSpeedAlerts } from "@/components/map/use-speed-alerts";
 import { T } from "@/components/ui/text";
 import { Colors } from "@/constants/theme";
-import { useT } from "@/i18n/provider";
 
 /** The pill this far in from a corner of the car's map, points: the top right, or the visible map's bottom left. */
 export type CarSpeedAt = { right: number; top: number } | { left: number; bottom: number };
@@ -17,7 +16,8 @@ const PAD = 4;
  * CarPlay's speed (docs/CARPLAY-SPEC.md §4, UI-SPEC §6.4): Android Auto's pill (CarSpeedViews.kt) drawn by the map's
  * root, where CarMapRoot puts it (`at`): the top right corner above the map's buttons, the visible map's bottom left
  * while CarPlay's bar shows. In the car's day or night and at its own points (the car's text, not the phone's text
- * size). The limit's sign and the speed with its unit, the speed red past the driver's margin; no speed, no pill.
+ * size). The limit's sign and the speed, red past the driver's margin; no speed, no pill. No unit under the speed, as
+ * on the phone's pill (UI-SPEC §6.4): all the app's speeds are km/h.
  * While the camera's alert shows the camera's sign (`cameraSign`, CarPlaySession): none of its own
  * (`speedBesideCard`); the alert closed by the driver, the road's again.
  * Nothing on it to press, inside the safe area. Apple's guide allows no overlays in the base view; the pill rests on
@@ -25,7 +25,6 @@ const PAD = 4;
  */
 export function CarSpeedPill({ at, dark, cameraSign }: { at: CarSpeedAt; dark: boolean; cameraSign: boolean }) {
   const { speed, camera } = useSpeedAlerts();
-  const { t } = useT();
   const scheme = dark ? "dark" : "light";
   const palette = Colors[scheme];
   const { speedKph, limitKph, over } = cameraSign ? speedBesideCard(speed, camera) : speed;
@@ -47,9 +46,6 @@ export function CarSpeedPill({ at, dark, cameraSign }: { at: CarSpeedAt; dark: b
         >
           {speedKph}
         </T>
-        <T size={9} color={over ? palette.bad.fg : palette.text2} maxFontSizeMultiplier={1} style={styles.unit}>
-          {t("speed")}
-        </T>
       </View>
     </View>
   );
@@ -64,16 +60,14 @@ const styles = StyleSheet.create({
     padding: PAD,
     borderRadius: SIGN / 2 + PAD,
   },
-  // Not round as the sign: the unit under the number met a capsule's curve.
+  // A capsule as tall as the sign, the number centred in it.
   value: {
     minWidth: 40,
     minHeight: SIGN,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 10,
+    paddingHorizontal: 8,
+    borderRadius: SIGN / 2,
     alignItems: "center",
     justifyContent: "center",
   },
-  number: { lineHeight: 19, letterSpacing: -0.5, fontVariant: ["tabular-nums"] },
-  unit: { lineHeight: 9 },
+  number: { lineHeight: 22, letterSpacing: -0.5, fontVariant: ["tabular-nums"] },
 });

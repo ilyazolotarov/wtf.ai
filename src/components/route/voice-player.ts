@@ -91,11 +91,11 @@ export function sayOnSpeaker(phrases: Phrase[], lang: VoiceLang): void {
 
 /** Rendered by tools/voice/speed-warning.sh. */
 const SPEED_WARNING_CLIP: number = require("../../../assets/sounds/speed-warning.mp3");
-/** Rendered by tools/voice/lead-in.sh: a second of silence. */
+/** Rendered by tools/voice/lead-in.sh: half a second of silence. */
 const LEAD_IN_CLIP: number = require("../../../assets/sounds/lead-in.mp3");
 
 /**
- * Starts the queue when nothing is being said. With CarPlay connected, a second of silence goes first: the car opens
+ * Starts the queue when nothing is being said. With CarPlay connected, half a second of silence goes first: the car opens
  * its prompt channel as the audio session activates, which takes it a moment, and a clip started right then lost its
  * first words (heard in a car, 2026-10-31; the phone's own speaker has no such hand-off). The clips that follow in the
  * same breath start while the session is still active (expo-audio lets it go 100 ms after a clip ends), so one lead-in

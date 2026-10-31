@@ -228,8 +228,8 @@ GNSS and the adapter as they were. What the JS side sent is kept on the native s
   (`SpeedAlerts`) while it runs, as Android Auto's, so the chime and "Speed camera ahead" sound with no phone screen
   too, once whatever screens show them; it sends the car what it shows (`carSpeed`, `setSpeed`, Android Auto's
   payload).
-  - **The speed:** Android Auto's pill, drawn by the map's root (`CarSpeedPill`): the limit's sign and the speed with
-    its unit, red past the driver's margin; no speed, none. While the bar hides, in the top right corner above the
+  - **The speed:** Android Auto's pill, drawn by the map's root (`CarSpeedPill`): the limit's sign and the speed (no
+    unit under it, as on the phone), red past the driver's margin; no speed, none. While the bar hides, in the top right corner above the
     map's buttons, which CarPlay stacks from the bottom (on a 240 pt high screen the fourth one's top is 68 pt down);
     the safe area ends at the buttons' 40 pt column whether they show or not, so the pill's room on the right is the
     safe area's less that column (`CarPlayLogic.speedRight`, the root's `speedRight`; a right-hand drive car's dock
@@ -264,7 +264,7 @@ GNSS and the adapter as they were. What the JS side sent is kept on the native s
   voice-prompt mode, spoken audio interrupted and others ducked, which CarPlay mixes over the car's audio, active only
   while a clip plays (expo-audio lets it go after). Before each prompt the session's `promptStyle`: none (a call, Siri)
   or short (the app has no tone) says nothing (`voice: not said, CarPlay asks for …`). Each announcement starts with
-  a second of silence (`lead-in.mp3`, ROUTING-SPEC §8.5): the car opens its prompt channel as the session activates,
+  half a second of silence (`lead-in.mp3`, ROUTING-SPEC §8.5): the car opens its prompt channel as the session activates,
   and a clip started right then reached the speakers without its first words (`voice say …, after a lead-in`). One
   voice whatever the screens (`VoiceGuide`).
 - **JS timers while only the car shows the app** (`ReactTimerPace`, `TimerPaceLogic`): React Native's `RCTTiming`

@@ -131,7 +131,7 @@ export interface CarSpeedPayload {
   limitKph: number | null;
   /** Past the driver's margin over the limit (beside a camera's card, the lower of its and the road's): the speed red. */
   over: boolean;
-  /** "km/h", under the speed. */
+  /** "km/h": drawn under the speed by the Android Auto builds before 2026-10-31; the current pills show none. */
   unit: string;
   camera: CarCameraPayload | null;
 }

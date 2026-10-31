@@ -284,7 +284,7 @@ car left. Optimistic as the simulator is.
   expo-audio's session is set to the voice-prompt mode with spoken audio interrupted and others ducked (`setVoicePrompt`,
   after expo-audio sets its own category), as Apple asks of navigation apps: CarPlay mixes it over the car's audio
   (CARPLAY-SPEC §4); before each announcement the session's `promptStyle`, and nothing is said when it asks for none
-  (a call, Siri) or a short tone. Each announcement then starts with a second of silence (`assets/sounds/lead-in.mp3`,
+  (a call, Siri) or a short tone. Each announcement then starts with half a second of silence (`assets/sounds/lead-in.mp3`,
   `npm run voice:lead-in`): the car opens its prompt channel as the audio session activates, which takes it a
   moment, and a clip started right then lost its first words; the clips after it in the same announcement start
   while the session is still active, so one lead-in covers it. Off CarPlay there is none.
