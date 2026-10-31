@@ -142,7 +142,9 @@ src/components/car-screen/car-session.ts ◀───────┘  route, pla
     meets that window.
 - The car's map follows heading-up, smoothed every frame as the phone's is in front (`useSmoothedPosition`'s
   `onScreen`), its dot 0.85 of the way down the visible map (the phone's: 0.8 of its whole map): a car's screen is wide
-  and short. Google Maps keeps its arrow about 0.9 down on both.
+  and short. Google Maps keeps its arrow about 0.9 down on both. The phone's camera button recentres the car's map
+  too, as the car's own recentre button does (`requestRecentre`, UI-SPEC §6.2): back to this tilted heading-up view
+  at the follow zoom, whatever the phone's own mode becomes (the phone's north-up doesn't reach the car).
 - **Bigger, as Android for Cars asks** (map text off the roads 24 dp, markers 36 dp): the virtual display has the car's
   density × 1.4 (`CarGuidanceLogic.MAP_SCALE`, JUnit), so everything on the map is drawn 1.4 times the car's dp (the
   dot 26 → 36 dp), and the follow zooms are lowered by log₂ 1.4 to show the same ground. The insets are in the map's dp.
@@ -180,9 +182,9 @@ src/components/car-screen/car-session.ts ◀───────┘  route, pla
   while the last is applied (async, through `unproject`) are added up into one (`useMapControl`); the arithmetic is
   `map-moves.ts` (Jest).
 - **Alternative routes** (ROUTING-SPEC §8.7): drawn on the car's map as on the phone's, grey under the route, each
-  labelled with its time against it. When they come while the car stands, the map frames them all once per
-  destination (inside the template's cards; not again when the map is made again after a list) until recentre or
-  driving off. A tap on a grey line or its label follows it (`SurfaceCallback.onClick`, `MapControl.tap`). While the
+  labelled with its time against it, but not framed: the car's map keeps following while the phone frames them
+  (UI-SPEC §6.2; a car's screen is too small to read an overview on, and without a touch screen nothing zooms it or
+  picks on it). A tap on a grey line or its label follows it (`SurfaceCallback.onClick`, `MapControl.tap`). While the
   route is followed with alternatives (`CarGuidanceLogic.showsRoutes`, JUnit), a routes button opens the list: the
   route, then each alternative, each titled by the street it goes by where the others don't (`viaNames`), then how it
   compares ("This route", "+3 min") and its whole time and distance; without a street, the comparison is the title.

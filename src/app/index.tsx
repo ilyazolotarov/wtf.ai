@@ -66,9 +66,8 @@ const CAN_TURN_MAP = Platform.OS !== "android" || ANDROID_BLURS;
  */
 function mapFrame(turn: MapTurn, screen: { width: number; height: number }) {
   if (turn === 0) return StyleSheet.absoluteFill;
-  const sideways = turn !== 180;
-  const width = sideways ? screen.height : screen.width;
-  const height = sideways ? screen.width : screen.height;
+  const width = screen.height;
+  const height = screen.width;
   return {
     position: "absolute" as const,
     width,
@@ -81,11 +80,10 @@ function mapFrame(turn: MapTurn, screen: { width: number; height: number }) {
 
 /**
  * Where the map data credit shows, in the map's own frame: upright, above the bottom bar level with the camera button;
- * turned, where no panel covers it: the middle of the screen's side edge (sideways), the bottom left (upside down).
+ * turned sideways, where no panel covers it: the middle of the screen's side edge.
  */
 function creditAt(turn: MapTurn, bottom: number) {
   if (turn === 0) return { bottom, left: 18 };
-  if (turn === 180) return { top: bottom, right: 18 };
   return { bottom: OVERLAY_GUTTER, left: 0, right: 0 };
 }
 

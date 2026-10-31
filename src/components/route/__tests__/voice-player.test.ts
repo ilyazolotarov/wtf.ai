@@ -55,6 +55,7 @@ const mockSpeaker: {
   stops: number;
 } = { plays: [], guidance: [], end: null, stops: 0 };
 let mockPromptStyle = "normal";
+let mockCanPlayGuidance = true;
 const mockVoicePrompt: boolean[] = [];
 jest.mock("../../../../modules/audio-output/src/AudioOutputModule", () => ({
   // iOS's: the voice-prompt mode while CarPlay is connected, and what it allows before each prompt.
@@ -64,7 +65,10 @@ jest.mock("../../../../modules/audio-output/src/AudioOutputModule", () => ({
   }),
   voicePromptStyle: jest.fn(() => mockPromptStyle),
   canPlayOnSpeaker: true,
-  canPlayGuidance: true,
+  // Android's; false stands for iOS, where the clips go through expo-audio.
+  get canPlayGuidance() {
+    return mockCanPlayGuidance;
+  },
   playOnSpeaker: jest.fn((uri: string, volume: number) => {
     mockSpeaker.plays.push({ uri, volume });
     return new Promise<boolean>((resolve) => (mockSpeaker.end = resolve));
@@ -83,6 +87,8 @@ jest.mock("expo-asset", () => ({
 }));
 
 jest.mock("../voice-clips", () => ({ VOICE_CLIPS: { en: { "now-left": 1, "now-right": 2, "then-left": 3 } } }));
+// The second of silence ahead of each announcement on CarPlay (every asset is 1 to jest-expo otherwise).
+jest.mock("../../../../assets/sounds/lead-in.mp3", () => 99);
 
 const notes: string[] = [];
 const flush = async () => {
@@ -102,6 +108,7 @@ beforeEach(() => {
   mockSpeaker.end = null;
   mockSpeaker.stops = 0;
   mockPromptStyle = "normal";
+  mockCanPlayGuidance = true;
   mockVoicePrompt.length = 0;
   setVoiceNote((t) => notes.push(t));
   setVoiceVolume(1);
@@ -276,6 +283,60 @@ describe("voice player", () => {
     sayOnSpeaker([{ id: "now-right", text: "Turn right" }], "en");
     await flush();
     expect(mockSpeaker.plays.map((p) => p.uri)).toEqual(["file:///clip-2.mp3"]);
+  });
+
+  test("with CarPlay connected, a second of silence leads each announcement, not each clip in it", async () => {
+    // iOS: no guidance player of Android's; the clips go through expo-audio, whose session the lead-in opens.
+    mockCanPlayGuidance = false;
+    setVoiceAsGuidance(true);
+    sayPhrases([{ id: "now-left", text: "Turn left" }, { id: "then-left", text: "then left" }], "en");
+    // Queued while the first is said: no lead-in of its own.
+    sayPhrases([{ id: "now-right", text: "Turn right" }], "en");
+    await flush();
+    expect(notes[0]).toBe("voice say now-left + then-left, after a lead-in");
+    expect(notes[1]).toBe("voice say now-right, after 2 waiting");
+    expect(mockPlayers.map((p) => p.clip)).toEqual([99]);
+    for (let i = 0; i < 3; i++) {
+      finish(i);
+      await flush();
+    }
+    expect(mockPlayers.map((p) => p.clip)).toEqual([99, 1, 3, 2]);
+    finish(3);
+    await flush();
+    // The next announcement, with nothing being said, gets its own.
+    sayPhrases([{ id: "now-right", text: "Turn right" }], "en");
+    await flush();
+    expect(notes.at(-1)).toBe("voice say now-right, after a lead-in");
+    expect(mockPlayers.map((p) => p.clip)).toEqual([99, 1, 3, 2, 99]);
+    finish(4);
+    await flush();
+    expect(mockPlayers.map((p) => p.clip)).toEqual([99, 1, 3, 2, 99, 2]);
+    finish(5);
+    await flush();
+    // Without CarPlay: none.
+    setVoiceAsGuidance(false);
+    sayPhrases([{ id: "now-left", text: "Turn left" }], "en");
+    await flush();
+    expect(notes.at(-1)).toBe("voice say now-left");
+    expect(mockPlayers.map((p) => p.clip)).toEqual([99, 1, 3, 2, 99, 2, 1]);
+  });
+
+  test("a lead-in that won't play is not said by the system voice; the announcement is", async () => {
+    mockCanPlayGuidance = false;
+    setVoiceAsGuidance(true);
+    mockFailPlay = true;
+    sayPhrases([{ id: "now-left", text: "Turn left" }], "en");
+    await flush();
+    expect(mockSpoken.map((s) => s.text)).toEqual(["Turn left"]);
+    expect(notes.some((n) => n.startsWith("voice lead-in did not play"))).toBe(true);
+  });
+
+  test("with Android Auto connected, the car's guidance player gets no lead-in", async () => {
+    setVoiceAsGuidance(true);
+    sayPhrases([{ id: "now-left", text: "Turn left" }], "en");
+    await flush();
+    expect(notes[0]).toBe("voice say now-left");
+    expect(mockSpeaker.guidance.map((g) => g.uri)).toEqual(["file:///clip-1.mp3"]);
   });
 
   test("a clip that won't play as guidance goes where the audio goes; without Android Auto, clips play as before", async () => {

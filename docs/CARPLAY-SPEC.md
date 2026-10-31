@@ -208,12 +208,14 @@ GNSS and the adapter as they were. What the JS side sent is kept on the native s
   scale (`CarPlayLogic.scroll`, `zoomFactor`); the panning interface's arrows (cars with a knob or a touchpad) as a
   scroll of 120 pt. While panning the bar has only the X that ends it, on its right; the map's buttons are + and −:
   CarPlay shows only as many as fit beside the arrows (the last two on a 400×240 pt screen), and keeps the arrows below
-  the bar's row, empty or not. The camera rules are Android Auto's (`CarMap`).
-- **Alternative routes** are drawn and framed by the shared map; the framing keeps at least 40 % of the map's width
-  and height for the routes (`fittedPadding`, Jest): CarPlay's card and buttons cover most of a small screen, and
-  MapLibre refuses padding larger than the map. The camera goes flat and north up before the fit (UI-SPEC §6.2). A
-  route picked with no progress on it yet (an alternative taken while the car stands) shows from its start, as the
-  phone's banner does (`carRoute`).
+  the bar's row, empty or not. The camera rules are Android Auto's (`CarMap`). The phone's camera button recentres
+  the car's map too (UI-SPEC §6.2): a driver whose knob reaches no button has the phone in its holder.
+- **Alternative routes** are drawn by the shared map, grey under the route with their times, but not framed: the
+  car's map keeps following while the phone frames them (UI-SPEC §6.2). An overview was of no use on the car's screen:
+  too small to read the routes on, no zoom without a touch screen, and a knob picks no route on the map. The routes
+  button and its list are the way to pick one; a touch screen also takes a tap on a grey line. A route picked with no
+  progress on it yet (an alternative taken while the car stands) shows from its start, as the phone's banner does
+  (`carRoute`).
 - **No map data credit** on the car's screen: the phone's map shows it as it opens and Settings › About keeps it
   (UI-SPEC §6.1). OSMF's attribution guidelines allow a credit at an application's start that isn't shown each time it
   is looked at, if the licence stays easy to find; they say nothing of a second screen. Apple's guide keeps the base view
@@ -257,8 +259,10 @@ GNSS and the adapter as they were. What the JS side sent is kept on the native s
 - **Voice** as navigation guidance while the session is open (ROUTING-SPEC §8.5): expo-audio's session in the
   voice-prompt mode, spoken audio interrupted and others ducked, which CarPlay mixes over the car's audio, active only
   while a clip plays (expo-audio lets it go after). Before each prompt the session's `promptStyle`: none (a call, Siri)
-  or short (the app has no tone) says nothing (`voice: not said, CarPlay asks for …`). One voice whatever the screens
-  (`VoiceGuide`).
+  or short (the app has no tone) says nothing (`voice: not said, CarPlay asks for …`). Each announcement starts with
+  a second of silence (`lead-in.mp3`, ROUTING-SPEC §8.5): the car opens its prompt channel as the session activates,
+  and a clip started right then reached the speakers without its first words (`voice say …, after a lead-in`). One
+  voice whatever the screens (`VoiceGuide`).
 - **JS timers while only the car shows the app** (`ReactTimerPace`, `TimerPaceLogic`): React Native's `RCTTiming`
   fires setTimeout, setInterval and requestAnimationFrame from a CADisplayLink of the phone's screen unless the app is
   in the background (NSTimers then), and the car's screen keeps it out of the background. With the phone's screen dark

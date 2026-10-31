@@ -98,6 +98,7 @@
     "replay:can": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/can-report.ts",
     "replay:offset": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/replay/road-offset.ts",
     "voice:render": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/voice/render.ts",
+    "voice:lead-in": "sh tools/voice/lead-in.sh",
     "logs:status": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/triplog/sync.ts status",
     "logs:push": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/triplog/sync.ts push",
     "logs:pull": "node --experimental-transform-types --no-warnings --import ./tools/replay/register.mjs tools/triplog/sync.ts pull",

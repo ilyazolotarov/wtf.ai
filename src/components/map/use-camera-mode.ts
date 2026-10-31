@@ -3,6 +3,7 @@ import { useEffect, useReducer, useRef, useState } from "react";
 import type { RouteSnapshot } from "@/services/navigation/route-service";
 
 import { cameraReducer, INITIAL_CAMERA, OVERVIEW_MIN_M, type CameraMode } from "./camera-policy";
+import { requestRecentre } from "./recentre-request";
 import { COURSE_MIN_SPEED_MPS } from "./use-compass-heading";
 
 export type { CameraMode } from "./camera-policy";
@@ -15,8 +16,9 @@ const DRIVE_OFF_MS = 2000;
  * itself after an overview or a look around, and the overview of a new route's alternatives while the car stands,
  * until the route goes.
  *
- * `onGesture`: the driver moved the map. `toggleCameraMode`: the camera button. `setCameraMode`: the screen's own
- * change (placing the car, the tour), which doesn't change the view the trip drives in.
+ * `onGesture`: the driver moved the map. `toggleCameraMode`: the camera button, which also recentres the car's screen's
+ * map (`requestRecentre`). `setCameraMode`: the screen's own change (placing the car, the tour), which doesn't change
+ * the view the trip drives in.
  */
 export function useCameraMode({
   recording,
@@ -73,7 +75,10 @@ export function useCameraMode({
 
   const setCameraMode = (mode: CameraMode) => dispatch({ type: "set", mode });
   const onGesture = () => dispatch({ type: "gesture", nowMs: Date.now() });
-  const toggleCameraMode = () => dispatch({ type: "button", onTrip });
+  const toggleCameraMode = () => {
+    dispatch({ type: "button", onTrip });
+    requestRecentre();
+  };
 
   // A new route while the car stands: the map shows it as soon as it is planned, then with its alternatives
   // (ROUTING-SPEC §8.7); driving off, the button or the route going (stopped, arrived) goes back to following. Moving,

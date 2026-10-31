@@ -20,7 +20,7 @@ import type { Phrase, VoiceLang } from "./voice-phrases";
  * `speaker`: on the phone's own speaker where it can be (`canPlayOnSpeaker`), whatever else is connected.
  */
 type Item =
-  | { clip: number; id: string; text: string; language: string; gain?: number; speaker?: boolean }
+  | { clip: number; id: string; text: string; language: string; gain?: number; speaker?: boolean; silent?: boolean }
   | { text: string; language: string; gain?: number };
 
 /** A clip that never reports its end (failed to load) doesn't hold up what comes after it. */
@@ -91,6 +91,25 @@ export function sayOnSpeaker(phrases: Phrase[], lang: VoiceLang): void {
 
 /** Rendered by tools/voice/speed-warning.sh. */
 const SPEED_WARNING_CLIP: number = require("../../../assets/sounds/speed-warning.mp3");
+/** Rendered by tools/voice/lead-in.sh: a second of silence. */
+const LEAD_IN_CLIP: number = require("../../../assets/sounds/lead-in.mp3");
+
+/**
+ * Starts the queue when nothing is being said. With CarPlay connected, a second of silence goes first: the car opens
+ * its prompt channel as the audio session activates, which takes it a moment, and a clip started right then lost its
+ * first words (heard in a car, 2026-10-31; the phone's own speaker has no such hand-off). The clips that follow in the
+ * same breath start while the session is still active (expo-audio lets it go 100 ms after a clip ends), so one lead-in
+ * covers an announcement. Only through expo-audio (Android's guidance player is the car's own way).
+ */
+function begin(): void {
+  if (busy) return;
+  if (leadsIn()) queue.unshift({ clip: LEAD_IN_CLIP, id: "lead-in", text: "", language: "en-US", silent: true });
+  next();
+}
+
+const leadsIn = () => voicePrompt && !asGuidance;
+/** For the notes: whether `begin` would put the lead-in first. */
+const leadIn = () => (leadsIn() && !busy ? ", after a lead-in" : "");
 
 /**
  * The speed warning's chime (UI-SPEC §6.4), ahead of anything waiting to be said: a turn can wait a second. A chime
@@ -98,8 +117,8 @@ const SPEED_WARNING_CLIP: number = require("../../../assets/sounds/speed-warning
  */
 export function playSpeedWarning(fallback: string, lang: VoiceLang): void {
   queue.unshift({ clip: SPEED_WARNING_CLIP, id: "speed-warning", text: fallback, language: languageOf(lang) });
-  note(`voice chime speed-warning${busy ? ", ahead of what waits" : ""}`);
-  if (!busy) next();
+  note(`voice chime speed-warning${busy ? ", ahead of what waits" : leadIn()}`);
+  begin();
 }
 
 function say(phrases: Phrase[], lang: VoiceLang, gain: number | undefined, speaker: boolean): void {
@@ -108,8 +127,8 @@ function say(phrases: Phrase[], lang: VoiceLang, gain: number | undefined, speak
   const recorded = clips.every((c) => c !== undefined);
   if (recorded) queue.push(...phrases.map((p, i) => ({ clip: clips[i]!, id: p.id, text: p.text, language, gain, speaker })));
   else queue.push({ text: phrases.map((p) => p.text).join(", "), language, gain });
-  note(`voice say ${phrases.map((p) => p.id).join(" + ")}${recorded ? (speaker ? " (phone speaker)" : "") : " (system voice)"}${busy ? `, after ${queue.length - 1} waiting` : ""}`);
-  if (!busy) next();
+  note(`voice say ${phrases.map((p) => p.id).join(" + ")}${recorded ? (speaker ? " (phone speaker)" : "") : " (system voice)"}${busy ? `, after ${queue.length - 1} waiting` : leadIn()}`);
+  begin();
 }
 
 /** Stops what is being said and drops what was waiting. */
@@ -132,7 +151,9 @@ function next(): void {
   if (voicePrompt) {
     const style = voicePromptStyle();
     if (style !== "normal") {
-      note(`voice: not said, CarPlay asks for ${style === "none" ? "no prompt" : "a short one"}: ${item.text.slice(0, 40)}`);
+      if (!("silent" in item && item.silent)) {
+        note(`voice: not said, CarPlay asks for ${style === "none" ? "no prompt" : "a short one"}: ${item.text.slice(0, 40)}`);
+      }
       next();
       return;
     }
@@ -230,10 +251,16 @@ async function playClip(item: Extract<Item, { clip: number }>, gen: number, done
     });
   await audioMode;
   if (gen !== generation) return;
-  // Said by the system voice instead, and the audio mode set again before the next clip.
+  // Said by the system voice instead (the silent lead-in: nothing to say, the next item goes on), and the audio mode
+  // set again before the next clip.
   const fallBack = (why: string) => {
-    note(`voice clip ${item.id} ${why}: system voice instead`);
     audioMode = null;
+    if (item.silent) {
+      note(`voice ${item.id} ${why}`);
+      done();
+      return;
+    }
+    note(`voice clip ${item.id} ${why}: system voice instead`);
     speak(item.text, item.language, done, item.gain);
   };
   let player: ReturnType<typeof createAudioPlayer>;

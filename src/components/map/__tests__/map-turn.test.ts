@@ -17,10 +17,20 @@ describe("the map's turn for how the phone is held", () => {
     ["upright", 0, 0],
     ["turned left (the screen's right side up)", -90, 90],
     ["turned right (the screen's left side up)", 90, -90],
-    ["upside down", 180, 180],
   ])("%s", (_, deg, turn) => {
     expect(turnFor(gravity(deg), 0)).toBe(turn);
     expect(turnFor(gravity(deg), turn)).toBe(turn);
+  });
+
+  test("upside down (a pocket) the turn it has stays: the map never turns over", () => {
+    for (const current of [0, 90, -90] as const) {
+      expect(turnFor(gravity(180), current)).toBe(current);
+      expect(turnFor(gravity(160), current)).toBe(current);
+      expect(turnFor(gravity(-160), current)).toBe(current);
+    }
+    // Back from a pocket, sideways or upright, it turns as before.
+    expect(turnFor(gravity(0), 90)).toBe(0);
+    expect(turnFor(gravity(-90), 0)).toBe(90);
   });
 
   test("near the diagonal, the turn it has stays", () => {

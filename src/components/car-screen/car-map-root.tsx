@@ -1,14 +1,14 @@
 import { useEffect, useEffectEvent, useReducer, useRef, useState } from "react";
 import { Platform } from "react-native";
 
-import { cameraReducer, INITIAL_CAMERA, OVERVIEW_MIN_M, type CameraState } from "@/components/map/camera-policy";
+import { cameraReducer, INITIAL_CAMERA, type CameraState } from "@/components/map/camera-policy";
 import { shiftedFollowZoom } from "@/components/map/map-moves";
 import { MapSurface } from "@/components/map/map-surface";
+import { onRecentreRequest } from "@/components/map/recentre-request";
 import { COURSE_MIN_SPEED_MPS, useHeadingUp } from "@/components/map/use-compass-heading";
 import type { MapControl } from "@/components/map/use-map-control";
 import { I18nProvider } from "@/i18n/provider";
 import { PositionProvider, usePosition } from "@/providers/position-provider";
-import { useRoute } from "@/providers/route-provider";
 
 import AndroidAuto from "../../../modules/android-auto/src/AndroidAutoModule";
 import CarPlay from "../../../modules/car-play/src/CarPlayModule";
@@ -86,13 +86,11 @@ const SPEED_GAP = 8;
  */
 const CAR_HEADING_UP_DOT_AT = 0.85;
 
-/** The destination whose routes the car's map last framed, kept across its remounts. */
-let overviewShownFor: object | null = null;
-
-/** Framing the routes: this much room inside the cards (map dp), for the routes' labels at their ends. */
-const FRAME_GAP = 32;
-
-/** The car's map follows heading-up; the driver's drag or pinch leaves it free (camera-policy.ts, as on the phone). */
+/**
+ * The car's map follows heading-up; the driver's drag or pinch leaves it free (camera-policy.ts, as on the phone). It
+ * frames no overview of a new route's alternatives as the phone does: a car's screen is too small to read the routes
+ * on, a car without a touch screen can't zoom or pick one on the map, and the routes button lists them (2026-10-31).
+ */
 const CAR_CAMERA: CameraState = { ...INITIAL_CAMERA, mode: "follow-heading" };
 
 function CarMap({ dark, insets, scale, zoom, cameraSign, speedRight }: Required<Omit<CarMapProps, "speedRight">> & Pick<CarMapProps, "speedRight">) {
@@ -119,34 +117,6 @@ function CarMap({ dark, insets, scale, zoom, cameraSign, speedRight }: Required<
   useEffect(() => {
     void native?.setRecentre?.(recentre).catch(noop);
   }, [recentre]);
-  // A new route while the car stands: the map frames it as soon as it is planned, then with its alternatives
-  // (ROUTING-SPEC §8.7), as the phone's; driving off, recentre or the route going (stopped, arrived) goes back to
-  // following. Once per destination across the map's remounts (a list shown over it takes it down): back from the
-  // routes list it follows. (State adjusted during render, not in an effect.)
-  const { route } = useRoute();
-  const [overview, setOverview] = useState<number | null>(null);
-  const [overviewFor, setOverviewFor] = useState<object | null>(() => overviewShownFor);
-  useEffect(() => {
-    overviewShownFor = overviewFor;
-  }, [overviewFor]);
-  const [framedWith, setFramedWith] = useState<object | null>(null);
-  const framable = route?.plan != null && (route.plan.lengthM >= OVERVIEW_MIN_M || !!route.alternatives?.length);
-  if (route && framable && overviewFor !== route.destination) {
-    setOverviewFor(route.destination);
-    setFramedWith(route.alternatives ?? null);
-    if (!driving) {
-      dispatch({ type: "overview" });
-      setOverview((n) => (n ?? 0) + 1);
-    }
-  } else if (route?.alternatives?.length && overviewFor === route.destination && framedWith !== route.alternatives) {
-    // The alternatives came after the plan was framed: framed again with them, unless the map was moved since.
-    setFramedWith(route.alternatives);
-    if (camera.overview && camera.freeBy === "app") setOverview((n) => (n ?? 0) + 1);
-  }
-  if (!route && overviewFor !== null) {
-    setOverviewFor(null);
-    dispatch({ type: "overviewEnded" });
-  }
   const onGesture = useEffectEvent((g: CarMapGesture) => {
     const moved = () => dispatch({ type: "gesture", nowMs: Date.now() });
     switch (g.kind) {
@@ -177,6 +147,9 @@ function CarMap({ dark, insets, scale, zoom, cameraSign, speedRight }: Required<
     const subscription = native?.addListener("onMapGesture", (g) => onGesture(g));
     return () => subscription?.remove();
   }, []);
+  // The phone's camera button recentres the car's map too (UI-SPEC §6.2), as the car's own recentre button does: the
+  // driver who can't reach the car's buttons (a knob that gives no focus) has the phone in the holder.
+  useEffect(() => onRecentreRequest(() => onGesture({ kind: "recentre" })), []);
   const padding = {
     left: Math.round(insets.left ?? 0),
     top: Math.round(insets.top ?? 0),
@@ -208,13 +181,6 @@ function CarMap({ dark, insets, scale, zoom, cameraSign, speedRight }: Required<
         creditAt={null}
         control={control}
         followZoomShift={zoom + zoomShift}
-        overview={overview}
-        framePadding={{
-          top: padding.top + FRAME_GAP,
-          bottom: padding.bottom + FRAME_GAP,
-          left: padding.left + FRAME_GAP,
-          right: padding.right + FRAME_GAP,
-        }}
       />
       {carPlay && (
         <CarSpeedPill at={speedAt} dark={dark} cameraSign={cameraSign} />

@@ -106,11 +106,13 @@ persisted in kv-store. No hardcoded user-facing strings in components.
 - **System bars:** Android draws edge to edge, so every screen pads itself by the safe-area insets. The map's bottom
   bar sits fully above Android's navigation bar; iOS lets it reach into the home indicator's strip. The status bar
   icons follow the app's scheme.
-- **Orientation:** portrait only (`app.json`). **The map turns with the phone** (`map-turn.ts`): held sideways or
-  upside down, only the map view is rotated 90°/180° about the screen's centre, from the IMU's gravity, so north-up
-  has north at the physical top; the panels stay. A new turn holds 0.7 s, ±15° of hysteresis past the diagonal, kept
-  while the phone lies flat; `map turned <deg>°` goes into the trip log. Not on Android 10–11 (a GLSurfaceView can't
-  be rotated).
+- **Orientation:** portrait only (`app.json`). **The map turns with the phone** (`map-turn.ts`): held sideways, only
+  the map view is rotated ±90° about the screen's centre, from the IMU's gravity, so north-up has north at the
+  physical top; the panels stay. Never upside down: nobody holds a phone so and means it, and in a pocket the map
+  turned over and didn't always turn back; held upside down, the turn stays as it was. Nor does it turn while the app
+  isn't in front (the screen off, another app; `AppState`): the IMU runs on for the navigator, and a pocket turned the
+  map. A new turn holds 0.7 s, ±15° of hysteresis past the diagonal, kept while the phone lies flat; `map turned
+  <deg>°` goes into the trip log. Not on Android 10–11 (a GLSurfaceView can't be rotated).
 - **Tablets** (Android 16 ignores the portrait lock at 600 dp and wider; a tablet's natural orientation is landscape):
   the system turns the window itself. Gravity for the map turn is taken in the screen's frame (`screenGravity`, by
   `Display.getRotation`: `useDisplayRotation`, also told of a 180° flip, which keeps the window's size), so the map
@@ -186,9 +188,13 @@ persisted in kv-store. No hardcoded user-facing strings in components.
   route's alternatives, placing the car) become the driving view at once; a look around (a pan/zoom) once the map
   hasn't been touched for 10 s. Standing, `free` stays.
 - **The button** (`CameraButton`): from `free` always `follow-heading`, then between `follow-heading` and `follow`.
-- **The route goes** (stopped, arrived): its alternatives' overview goes back to the driving view, on the phone and
-  the car's screen alike, also after the driver zoomed or panned over it (a closer look at the routes; the intent is
-  to drive one), as driving off does at once; placing the car begun over it stays.
+  Pressed, it also recentres the car's screen's map (`requestRecentre`, car-map-root.tsx): back to its tilted
+  heading-up driving view at the follow zoom, whatever the phone's own mode becomes (the phone's north-up doesn't
+  reach the car). A driver whose car gives no way to its buttons has the phone in its holder.
+- **The route goes** (stopped, arrived): its alternatives' overview goes back to the driving view, also after the
+  driver zoomed or panned over it (a closer look at the routes; the intent is to drive one), as driving off does at
+  once; placing the car begun over it stays. The car's screens frame no overview (ANDROID-AUTO-SPEC §4, CARPLAY-SPEC
+  §4): their map keeps following.
 - **The trip ends**: `follow-heading` goes back to `follow`, unless the driver toggled during it.
 - Into the trip log: every mode (`camera <mode>`) and the policy's own changes (`camera <mode> by itself: …`).
 - **Heading-up bearing:** the walking compass when shown; else the navigator heading (`dr`/`fused`, valid while
