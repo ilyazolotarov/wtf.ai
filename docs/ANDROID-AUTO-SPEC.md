@@ -161,7 +161,7 @@ src/components/car-screen/car-session.ts ◀───────┘  route, pla
   the React root (CarSpeedViews.kt), in the phone's colours and sizes in the map's dp: React Native text on the car's
   display is drawn at the phone's density into a box laid out at the car's, and clipped (LogBox's too).
   - **The speed:** a pill in the visible map's bottom left corner, where Google Maps has it: the
-    limit's sign and the speed with its unit, the speed red past the driver's margin. No speed: none. Beside the
+    limit's sign and the speed (no unit under it, as on the phone), the speed red past the driver's margin. No speed: none. Beside the
     camera's card with a sign, as on the phone (UI-SPEC §6.5): no sign of its own, red past the lower of the road's
     and the camera's limits.
   - **The camera ahead:** the phone's card (`CameraCard`), at the top left of the visible map, level with the turn

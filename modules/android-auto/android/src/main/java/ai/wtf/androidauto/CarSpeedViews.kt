@@ -100,7 +100,8 @@ private class BarView(context: Context) : View(context) {
 
 /**
  * The speed on the car's map, in the visible map's bottom left corner as Google Maps has it: the limit's sign and the
- * speed with its unit, the speed red past the driver's margin. No sign while the camera's card shows one (the JS side
+ * speed, red past the driver's margin. No unit under the speed, as on the phone's pill (all the app's speeds are
+ * km/h; the payload's `unit` is for the builds that drew it). No sign while the camera's card shows one (the JS side
  * leaves it out: one sign on the screen, as on the phone).
  */
 internal class SpeedPill(context: Context) : LinearLayout(context) {
@@ -108,7 +109,6 @@ internal class SpeedPill(context: Context) : LinearLayout(context) {
   private val sign = SpeedSignView(context)
   private val value = LinearLayout(context)
   private val number = TextView(context)
-  private val unit = TextView(context)
 
   init {
     orientation = HORIZONTAL
@@ -118,20 +118,16 @@ internal class SpeedPill(context: Context) : LinearLayout(context) {
     elevation = px(6).toFloat()
     addView(sign, LayoutParams(px(SIGN_DP), px(SIGN_DP)))
     value.orientation = VERTICAL
+    // The number centred in a capsule as tall as the sign.
     value.gravity = Gravity.CENTER
     value.minimumWidth = px(52)
     value.minimumHeight = px(SIGN_DP)
     value.setPadding(px(8), 0, px(8), 0)
-    // Centred over the unit: a vertical LinearLayout's children span its width.
-    number.gravity = Gravity.CENTER_HORIZONTAL
-    unit.gravity = Gravity.CENTER_HORIZONTAL
+    number.gravity = Gravity.CENTER
     number.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 24f)
     number.includeFontPadding = false
     number.letterSpacing = -0.02f
-    unit.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 10f)
-    unit.includeFontPadding = false
     value.addView(number)
-    value.addView(unit)
     addView(value)
     visibility = GONE
   }
@@ -154,7 +150,6 @@ internal class SpeedPill(context: Context) : LinearLayout(context) {
     sign.invalidate()
     value.layoutParams = (value.layoutParams as LayoutParams).apply { marginStart = if (limitKph != null) px(6) else 0 }
     number.text = kph.toString()
-    unit.text = speed.unit
     if (speed.over) {
       value.background = GradientDrawable().apply {
         cornerRadius = px(SIGN_DP / 2).toFloat()
@@ -162,12 +157,10 @@ internal class SpeedPill(context: Context) : LinearLayout(context) {
       }
       number.typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
       number.setTextColor(palette.badText)
-      unit.setTextColor(palette.badText)
     } else {
       value.background = null
       number.typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
       number.setTextColor(palette.text)
-      unit.setTextColor(palette.text2)
     }
   }
 
