@@ -102,6 +102,11 @@ export interface NavConfig {
   coarseDoubtFixes: number;
   /** The earlier doubt rule's share of a fix's own accuracy, which `replay:doubt` still measures. */
   coarseDoubtShare: number;
+  /**
+   * A gap in the samples with the car standing counts as a second of standing, not as time the car could have used
+   * (`PARKED_GAP_S`, `PARKED_STEP_S`, §6.1). Off only to measure what it changed (`replay:regress --nav`).
+   */
+  parkedGapCapped: boolean;
   ekf: Partial<EkfConfig>;
   gnssLag: Partial<GnssLagConfig>;
   imu: Partial<ImuConfig>;
@@ -198,6 +203,7 @@ export const DEFAULT_NAV_CONFIG: NavConfig = {
   // including the 58 km drive that dead reckoned correctly the whole way.
   coarseDoubtShare: 2,
   coarseDoubtFixes: 3,
+  parkedGapCapped: true,
   ekf: {},
   gnssLag: {},
   imu: {},
@@ -469,7 +475,14 @@ const MANOEUVRE_TURN_RAD = (30 * Math.PI) / 180;
  * in: the wheels read in 0.01 km/h steps, and their 0.01 released the pose frozen at a coffee stop where the dead
  * reckoning had since followed the driver 30 m; the next drive started from there (gnv7ti, 2026-10-23).
  */
-const DRIVE_OFF_KPH = 1;
+export const DRIVE_OFF_KPH = 1;
+/**
+ * No sample for this long with the car last seen standing is the app suspended (iOS, in the background with no trip
+ * running), not the car on the move: the gap counts as `PARKED_STEP_S` of standing, not as time the car could have
+ * used (§6.1). Held parked, any gap longer than a step does.
+ */
+const PARKED_GAP_S = 30;
+const PARKED_STEP_S = 1;
 const MANOEUVRE_M_PER_RAD = 6;
 /** A Wi-Fi/cell fix claiming up to this is narrow: it can doubt the track inside its reach, and move a lost one. */
 const NARROW_FIX_M = 450;
@@ -1261,14 +1274,22 @@ export class Navigator {
       this.lagEstimator.onTrack(tUs, this.rel.e, this.rel.n, this.rel.psi, speed);
     }
 
-    if (this.mapMatchListening || this.odometryListeners.length) this.addOdometry(tUs, dt, speed, yaw, hold, obdFresh);
+    // A gap in the samples with the car standing (held parked, or last seen standing and the gap longer than any
+    // stall) is the app suspended in the background, not time the car could have used: iOS suspends it once no trip
+    // runs, and the first sample after it wakes spans the whole pause. One prediction over 4.3 h integrated the speed's
+    // spread over it all, ±466 m around a car that hadn't moved, and the map offered a placing (2026-10-31). The gap
+    // counts as a second of standing; fixes confirm or drop the pose, waiting never widens it. (Not predicting at all
+    // while held left map matching without its standing steps and put three drives a few seconds more off the road.)
+    const stood = this.config.parkedGapCapped && (this.heldParked || (dt > PARKED_GAP_S && (this.lastObd === null || this.lastObd.rawKph === 0)));
+    const dtStep = stood ? Math.min(dt, PARKED_STEP_S) : dt;
+    if (this.mapMatchListening || this.odometryListeners.length) this.addOdometry(tUs, dtStep, speed, yaw, hold, obdFresh);
 
     if (this.ekf) {
       // Standing: hold the heading (yaw input = bias → no rotation).
-      this.ekf.predict(dt, hold ? this.ekf.params().bw : yaw, this.gyroNoise);
+      this.ekf.predict(dtStep, hold ? this.ekf.params().bw : yaw, this.gyroNoise);
       this.ekfHistory.push(tUs, [this.ekf.east, this.ekf.north, this.ekf.psi, this.ekf.speed]);
       if (this.twin) {
-        this.twin.predict(dt, hold ? this.twin.params().bw : yaw, this.gyroNoise);
+        this.twin.predict(dtStep, hold ? this.twin.params().bw : yaw, this.gyroNoise);
         this.twinHistory.push(tUs, [this.twin.east, this.twin.north, this.twin.psi, this.twin.speed]);
       }
       if (this.frame && Math.hypot(this.ekf.east, this.ekf.north) > this.config.reanchorM) this.reanchor();

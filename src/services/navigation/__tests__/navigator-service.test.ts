@@ -198,7 +198,7 @@ function harness(
     nowUs += us;
     jest.advanceTimersByTime(us / 1000);
   };
-  return { service, gnss, engine, want, notes, logged, loggedMapMatch, store, play, setVehicle, advance, now: () => nowUs };
+  return { service, gnss, speed, engine, want, notes, logged, loggedMapMatch, store, play, setVehicle, advance, now: () => nowUs };
 }
 
 beforeEach(() => jest.useFakeTimers());
@@ -541,6 +541,23 @@ describe("started on the way (NAVIGATOR-SPEC §6.1)", () => {
     await service.start();
     expect(notes.some((n) => n.startsWith("nav mode dr (parked pose"))).toBe(true);
     expect(behind).not.toHaveBeenCalled();
+    service.stop();
+  });
+
+  // The wheels read in 0.01 km/h steps, and a car rocking as someone gets in reads 0.01: that cleared the stored pose,
+  // which an app swiped away in the next 30 s then started without (2026-10-31). Driving off is 1 km/h, as the
+  // navigator releases the frozen pose.
+  test("the car rocking at 0.01 km/h doesn't clear the stored pose; driving off at 1 km/h does", async () => {
+    const { service, notes, speed, store } = startedOnTheWay(60);
+    await service.start();
+    expect(notes.some((n) => n.startsWith("nav mode dr (parked pose"))).toBe(true);
+    const sample = (tUs: number, raw: number) => ({ txUs: tUs - 10_000, rxUs: tUs + 10_000, tUs, speedMps: raw / 3.6, raw, source: "can" as const });
+    speed.emit(sample(1_001_000_000, 0));
+    speed.emit(sample(1_002_000_000, 0.01));
+    speed.emit(sample(1_003_000_000, 0));
+    expect(storedPose(store)).toMatchObject({ lat: POSE.lat, lon: POSE.lon });
+    speed.emit(sample(1_004_000_000, 1));
+    expect(storedPose(store)).toBeNull();
     service.stop();
   });
 

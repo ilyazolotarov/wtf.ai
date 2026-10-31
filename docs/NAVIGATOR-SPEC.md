@@ -185,7 +185,8 @@ navigate with the phone in a hand, a pocket or on a seat.
   off, every 30 s while parked, and when it stops, while the car answered in the last 150 s (ignition off comes 120 s
   after the last answer when the key turns right after stopping): later the navigator may follow the phone (a fix the
   pose lost to, below; a walk), and its pose is where the phone is (noted once, `nav parked pose not saved: …`). The
-  first speed > 0 clears it. Dead-reckoned there without a
+  first drive-off speed clears it (1 km/h, as the release below; not the wheels' 0.01 km/h of a car rocking as
+  someone gets in, which cleared it and dropped a placing while the car stood). Dead-reckoned there without a
   trusted satellite fix in the last 300 m, its σ is at least 30 m (the EKF claimed 5–7 m where the car was 12–80 m
   off, and the next drive's map matching missed the street). The pose is the EKF's, not the map's dot: saving the
   dominant map-matching hypothesis carried a wrong street into the next drive.
@@ -212,7 +213,13 @@ navigate with the phone in a hand, a pocket or on a seat.
   link's state, `setEngine`; the service and replay pass it on) or the speed gone stale, the pose the car's (not one
   started from that no fix has confirmed: the fixes check that one). Until it drives off or the engine starts: fixes
   move nothing (status `parked`, integrity still sees them) and the speed is held at 0, so the car is where it was
-  left when the driver comes back. Without it the dead reckoning followed the walk: OBD answering 0 with the ECU
+  left when the driver comes back. A gap in the samples counts as a second of standing, not as time the car could
+  have used: while held, and over a gap of 30 s or more with the car last seen standing (`PARKED_GAP_S`,
+  `PARKED_STEP_S`; iOS suspends the app in the background once no trip runs, and the first sample after it wakes spans
+  the whole pause: one prediction over 4.3 h integrated the speed's spread over it all, ±466 m around a car that
+  hadn't moved, and the map offered a placing, 2026-10-31. Not predicting at all while held put three drawn drives a
+  few seconds more off the road: map matching lost its standing steps). Without it the dead reckoning followed the
+  walk: OBD answering 0 with the ECU
   awake, each fix pulled it a little; with the speed stale, a walking fix's speed carried it off at walking pace.
   The map still shows the phone while the car doesn't answer (§9). Not at a light where the driver picks the phone up
   (the engine runs): fixes there are the car's, and holding at every such stop put drawn drives more often off the

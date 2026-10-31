@@ -10,7 +10,7 @@ import type { MapMatchConfig } from "@/nav/mapmatch/particle-filter";
 import type { UpdateTimingSummary } from "@/nav/mapmatch/update-timing";
 import type { PoseAfterWake } from "@/services/on-the-way";
 import type { FixOutcome, MapMatchEstimate, NavConfig, NavMode, ParkedPose } from "@/nav/navigator";
-import { Navigator } from "@/nav/navigator";
+import { DRIVE_OFF_KPH, Navigator } from "@/nav/navigator";
 import { PhoneNavigator, type PhoneGraph, type PhonePose, type PhoneRouteState } from "@/nav/phone/phone-navigator";
 import { carryDrivePose, DRIVE_POSE_MAX_AGE_S } from "@/nav/drive-pose";
 import { haversineM } from "@/nav/geo";
@@ -1059,17 +1059,20 @@ export class NavigatorService implements PositionSource {
       this.createNavigator();
     }
     if (s.source === "can") this.lastCanUs = this.deps.nowUs();
-    if (s.raw > 0) {
+    // Driving, as the navigator releases the frozen pose (§6.1): not the wheels' 0.01 km/h of a car rocking as someone
+    // gets in, which cleared the stored pose and dropped a placing while the car stood.
+    const drivesOff = Math.abs(s.raw) >= DRIVE_OFF_KPH;
+    if (drivesOff) {
       this.lastMovingUs = this.deps.nowUs();
       // Driving: the navigator is the car's again, and the kept pose is cleared below as any stored one.
       this.poseKeptForCar = false;
     }
-    if (s.raw > 0 && this.manual) {
+    if (drivesOff && this.manual) {
       // Driving: the navigator carries the placing on (it started from it, or from something newer).
       this.note("nav manual position released: the car drives");
       this.held.drop();
     }
-    if (s.raw > 0 && this.poseStored) {
+    if (drivesOff && this.poseStored) {
       // Driving: the stored pose is stale until the next stop.
       if (this.car) this.clearPose(this.car);
       this.poseStored = false;

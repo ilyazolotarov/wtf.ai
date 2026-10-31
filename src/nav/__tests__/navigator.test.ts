@@ -453,6 +453,32 @@ describe("Navigator from a parked pose", () => {
     expect(r.summary.fixes.parked).toBeGreaterThan(0);
   });
 
+  // 2026-10-31: parked at home with the engine off, the app suspended in the background for 4.3 h; opened again, its
+  // first sample spanned the pause, and one prediction over it widened the circle to ±333 m around a car that hadn't
+  // moved (the map offered a placing). Time doesn't pass for a car held parked.
+  test("held parked through a 4.3 h gap in the samples (the app suspended): the circle doesn't grow", () => {
+    const parked = syntheticDrive({
+      segments: [
+        { durationS: 30, speedMps: 12, yawRateDegS: 0 },
+        { durationS: 5, speedMps: 0, yawRateDegS: 0 },
+        { durationS: 60, speedMps: 0, yawRateDegS: 0 },
+      ],
+      gnss: "clean",
+    });
+    const at = (s: number) => parked.trip.startUs + s * 1e6;
+    parked.trip.engine = [{ tUs: at(40), state: "engine-off" }];
+    const gapUs = 4.3 * 3600e6;
+    const later = <T extends { tUs: number }>(xs: T[]) => xs.map((s) => (s.tUs >= at(60) ? { ...s, tUs: s.tUs + gapUs } : s));
+    parked.trip.imu = later(parked.trip.imu);
+    parked.trip.obdSpeed = later(parked.trip.obdSpeed);
+    parked.trip.gnss = later(parked.trip.gnss);
+    parked.trip.mag = later(parked.trip.mag);
+    const r = replayTrip(parked.trip);
+    const end = r.track.at(-1)!;
+    expect(haversineM(end, parked.truth.at(-1)!)).toBeLessThan(10);
+    expect(end.accuracyM).toBeLessThan(25);
+  });
+
   test("walked off and back while parked, then driven off: the fixes count again once the car drives", () => {
     const trip = syntheticDrive({
       segments: [
