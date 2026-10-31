@@ -116,17 +116,33 @@ final class ButtonsTests: XCTestCase {
     XCTAssertEqual(mapButtons(route(), voiceMuted: nil), [.endRoute, .pan])
   }
 
-  func testWithoutARoutePanRecentreOnlyWhenItAppliesAndZoom() {
+  func testWithoutARoutePanOrRecentreInItsPlaceWhileTheMapIsMovedAndZoom() {
     XCTAssertEqual(mapButtons(nil), [.pan, .zoomIn, .zoomOut])
-    XCTAssertEqual(mapButtons(nil, recentre: true), [.pan, .recentre, .zoomIn, .zoomOut])
+    XCTAssertEqual(mapButtons(nil, recentre: true), [.recentre, .zoomIn, .zoomOut])
   }
 
-  func testOnARouteTheXTheVoiceTheRoutesWhileThereAreOthersThenPanOrRecentreInItsPlace() {
+  func testOnARouteTheXTheVoiceTheRoutesWhileThereAreOthersThenPan() {
     XCTAssertEqual(mapButtons(route(), voiceMuted: true), [.endRoute, .voice(muted: true), .pan])
-    XCTAssertEqual(mapButtons(route(alternatives: alternatives)), [.endRoute, .voice(muted: false), .routes, .pan])
-    XCTAssertEqual(mapButtons(route(alternatives: alternatives), recentre: true), [.endRoute, .voice(muted: false), .routes, .recentre])
+    XCTAssertEqual(mapButtons(route(alternatives: alternatives)), [.endRoute, .voice(muted: false), .routes])
     XCTAssertEqual(mapButtons(route(replanning: true, alternatives: alternatives)), [.endRoute, .voice(muted: false), .pan])
     XCTAssertEqual(mapButtons(route("failed")), [.endRoute, .voice(muted: false), .pan])
+    // Without the voice there is room for the routes and pan.
+    XCTAssertEqual(mapButtons(route(alternatives: alternatives), voiceMuted: nil), [.endRoute, .routes, .pan])
+  }
+
+  // CarPlay documents three map buttons; a fourth was drawn, and a knob focused none of them (a car, 2026-10-31).
+  func testNeverMoreThanThreeMapButtonsAndRecentreComesRightAfterTheX() {
+    XCTAssertEqual(mapButtons(route(alternatives: alternatives), recentre: true), [.endRoute, .recentre, .voice(muted: false)])
+    XCTAssertEqual(mapButtons(route(), recentre: true), [.endRoute, .recentre, .voice(muted: false)])
+    XCTAssertEqual(mapButtons(route(alternatives: alternatives), voiceMuted: nil, recentre: true), [.endRoute, .recentre, .routes])
+    for recentre in [false, true] {
+      for alternatives in [[], alternatives] {
+        for voiceMuted in [nil, false] as [Bool?] {
+          XCTAssertLessThanOrEqual(mapButtons(route(alternatives: alternatives), voiceMuted: voiceMuted, recentre: recentre).count, CarPlayLogic.maxMapButtons)
+        }
+      }
+      XCTAssertLessThanOrEqual(mapButtons(nil, recentre: recentre).count, CarPlayLogic.maxMapButtons)
+    }
   }
 
   func testWhilePanningTheMapsButtonsZoom() {

@@ -427,21 +427,25 @@ enum CarPlayLogic {
     return (leading, [.voice(muted: muted)])
   }
 
+  /** CarPlay's map buttons: it documents three; a fourth is drawn, but a knob then focuses none (a car, 2026-10-31). */
+  static let maxMapButtons = 3
+
   /**
-   * The map's buttons. Without a route: pan (CarPlay's panning interface, for cars without a touch screen), recentre
-   * while it applies, zoom in and out. On a route, what the bar held: the X that stops guidance, the voice (not under a
-   * notice), the routes while there are others to choose; then pan, or recentre in its place while it applies (the
-   * overview of a new route's alternatives, a look around). Zooming is the panning interface's then. While panning,
-   * zoom in and out: CarPlay shows the last two beside its arrows.
+   * The map's buttons, three at most (`maxMapButtons`). Without a route: pan (CarPlay's panning interface, for cars
+   * without a touch screen), or recentre in its place while the map is moved, then zoom in and out. On a route, what
+   * the bar held, in the order of need: the X that stops guidance; recentre while the map is moved (a look around; the
+   * way back comes first); the voice (not under a notice); the routes while there are others to choose; pan. Zooming
+   * is the panning interface's then. While panning, zoom in and out: CarPlay shows them beside its arrows.
    */
   static func mapButtons(route: CarRoute?, notice: CarNotice?, voiceMuted: Bool?, panning: Bool, recentre: Bool) -> [CarMapButton] {
     if panning { return [.zoomIn, .zoomOut] }
-    guard route != nil else { return recentre ? [.pan, .recentre, .zoomIn, .zoomOut] : [.pan, .zoomIn, .zoomOut] }
+    guard route != nil else { return [recentre ? .recentre : .pan, .zoomIn, .zoomOut] }
     var buttons: [CarMapButton] = [.endRoute]
+    if recentre { buttons.append(.recentre) }
     if notice == nil, let muted = voiceMuted { buttons.append(.voice(muted: muted)) }
     if showsRoutes(route) { buttons.append(.routes) }
-    buttons.append(recentre ? .recentre : .pan)
-    return buttons
+    if !recentre { buttons.append(.pan) }
+    return Array(buttons.prefix(maxMapButtons))
   }
 
   /**

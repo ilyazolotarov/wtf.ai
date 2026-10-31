@@ -138,17 +138,21 @@ GNSS and the adapter as they were. What the JS side sent is kept on the native s
   | A notice: no offline map installed | An alert over the map: No offline map, routes and search need a downloaded region; button: Close (CarPlay draws it as its x) |
   | A notice: no location permission | An alert over the map with its words; button: Allow |
   | A notice: a route held without an adapter | An alert; buttons: I'll follow the route, Cancel |
-  | No route | The map; bar: Destinations, Search; voice. Buttons: pan, recentre, +, − |
+  | No route | The map; bar: Destinations, Search; voice. Buttons: pan (recentre in its place while the map is moved), +, − |
   | Planning, or planning again after leaving the route | The card waiting (`pauseTrip` `.loading`, `.rerouting`); buttons: the X, voice, pan |
-  | Followed | The next maneuver (the phone banner's words and icon, the distance rounded as the banner rounds it), the one after when it follows closely; the trip estimates (arrival, time and distance left); buttons: the X, voice, the routes while there are others, pan |
+  | Followed | The next maneuver (the phone banner's words and icon, the distance rounded as the banner rounds it), the one after when it follows closely; the trip estimates (arrival, time and distance left); buttons: the X, voice, then the routes while there are others, else pan; the map moved: the X, recentre, voice |
   | Arrived | The card says so beside the flag, as Android Auto's: one maneuver, `.arriveAtDestination`, no distance; the trip's estimates 0. Not `pauseTrip` `.arrived`, whose card holds words alone; the trip finishes when the route goes |
   | Failed | The trip cancelled, an alert with the phone's words; Close |
 
   While the bar shows (a touch on the map, and for about 20 s after a list closes) CarPlay sets the guidance card
   below its whole row, buttons in it or not. So on a route the bar stays empty and the map's buttons, on the right,
-  hold what it held: Stop guidance as an X (Android Auto's words would not fit), the voice, the routes while there are
-  others, then pan, or recentre in its place while the map is free or its follow zoom moved (`CarPlayLogic.mapButtons`;
-  four at most). They stay while the bar hides (`hidesButtonsWithNavigationBar` false, `buttonsStay`): pressed, they
+  hold what it held, **three at most** (`CarPlayLogic.mapButtons`, `maxMapButtons`): CarPlay documents three map
+  buttons, and while it drew a fourth, a knob then focused none of them (the overview of a long route's alternatives
+  with the X, voice, routes and recentre: nothing to choose or cancel with; a car, 2026-10-31). In the order of need:
+  Stop guidance as an X (Android Auto's words would not fit); recentre while the map is free or its follow zoom moved
+  (the way back comes first); the voice; the routes while there are others; pan. So a followed route with
+  alternatives has no pan button, and a moved map hides the routes until recentre. They stay while the bar hides
+  (`hidesButtonsWithNavigationBar` false, `buttonsStay`): pressed, they
   don't bring the bar, and the card stays at the top. + and − are the panning interface's then; a pinch zooms on a
   touch screen. Without a route the bar holds Destinations, Search and the voice, and the map's buttons (pan, recentre,
   + and −) hide with it. The guidance card is CarPlay's: the icon beside the words (`displayStyleFor`
