@@ -195,7 +195,7 @@ src/components/car-screen/car-session.ts ◀───────┘  route, pla
   | --- | --- |
   | A notice: no offline map installed | Its message card, before any other notice or route; button: Close |
   | A notice: no location permission | Its message card, before any route; button: Allow (parked only) |
-  | A notice: a route held without an adapter | Its message card; buttons: I'll follow the route, close |
+  | A notice: a route held without an adapter | Its message card; buttons: Stay on route / Лише маршрутом (the button names the condition even when the message asks to set the position), close |
   | No route | The map; buttons: Search, Destinations, voice |
   | Planning, or planning again after leaving the route | A loading turn card; buttons: Stop guidance, voice |
   | Followed | The next maneuver (the phone banner's words and icon, the distance rounded as the banner rounds it), the one after when it follows closely; the trip card (time and distance left, arrival time at the plan's pace); buttons: Stop guidance, voice |

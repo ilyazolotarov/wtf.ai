@@ -137,7 +137,7 @@ GNSS and the adapter as they were. What the JS side sent is kept on the native s
   | A speed camera ahead (before any notice or failure, which come back after it) | An alert over the map: the camera's words and sign, counting down; CarPlay's x |
   | A notice: no offline map installed | An alert over the map: No offline map, routes and search need a downloaded region; button: Close (CarPlay draws it as its x) |
   | A notice: no location permission | An alert over the map with its words; button: Allow |
-  | A notice: a route held without an adapter | An alert; buttons: I'll follow the route, Cancel |
+  | A notice: a route held without an adapter | An alert; buttons: Stay on route / Лише маршрутом (at most 14 characters: CarPlay cuts a longer title in the middle; the button names the condition even when the message only says the position isn't set), Cancel |
   | No route | The map; bar: Destinations, Search; voice. Buttons: pan (recentre in its place while the map is moved), +, − |
   | Planning, or planning again after leaving the route | The card waiting (`pauseTrip` `.loading`, `.rerouting`); buttons: the X, voice, pan |
   | Followed | The next maneuver (the phone banner's words and icon, the distance rounded as the banner rounds it), the one after when it follows closely; the trip estimates (arrival, time and distance left); buttons: the X, voice, then the routes while there are others, else pan; the map moved: the X, recentre, voice |

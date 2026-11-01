@@ -514,7 +514,7 @@ describe("car session", () => {
         kind: "held-route",
         title: en.carHeldTitle,
         text: en.carHeldSetPosition,
-        action: en.noAdapterRouteAgree,
+        action: en.carHeldAgree,
       });
       // The position set on the phone meanwhile: seen by the next check.
       s.setPositionSet(true);
@@ -777,9 +777,17 @@ describe("car session", () => {
     expect(carNotice(false, null, false, tEn, true)).toMatchObject({ kind: "location", text: en.carPlayLocationNeeded });
     expect(carNotice(null, lviv, false, tEn, true)).toMatchObject({ kind: "held-route", text: en.carPlayHeldNoPosition });
     expect(carNotice(null, lviv, true, tEn, true)).toMatchObject({ text: en.carHeldFollow });
-    for (const key of ["carPlayLocationNeeded", "carPlayHeldNoPosition", "carHeldFollow", "carAllowLocation", "noAdapterRouteAgree"] as const) {
+    for (const key of ["carPlayLocationNeeded", "carPlayHeldNoPosition", "carHeldFollow", "carAllowLocation", "carHeldAgree"] as const) {
       expect(en[key]).not.toMatch(/phone/i);
       expect(uk[key]).not.toMatch(/телефон/i);
+    }
+  });
+
+  test("the car's alert buttons are short: CarPlay cuts a longer title in the middle", () => {
+    // "Їхатиму за маршрутом" (20) showed as "Їхатиму з...аршрутом" on a 1920×720 screen.
+    for (const key of ["carHeldAgree", "carAllowLocation", "close"] as const) {
+      expect(en[key].length).toBeLessThanOrEqual(14);
+      expect(uk[key].length).toBeLessThanOrEqual(14);
     }
   });
 });

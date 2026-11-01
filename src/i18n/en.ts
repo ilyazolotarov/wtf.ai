@@ -452,6 +452,8 @@ export const en = {
   carHeldTitle: "Without an adapter",
   carHeldSetPosition: "Stop and set your position on the phone.",
   carHeldFollow: "Follow the route exactly.",
+  /** The car's alert button: CarPlay cuts a longer title in the middle ("Їхатиму з...аршрутом"). */
+  carHeldAgree: "Stay on route",
   carPlayLocationNeeded: "Without location access the car's position can't be shown.",
   carPlayHeldNoPosition: "The car's position isn't set yet.",
   carNoMapTitle: "No offline map",

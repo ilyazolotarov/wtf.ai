@@ -477,6 +477,7 @@ export const uk = {
   carHeldTitle: "Без адаптера",
   carHeldSetPosition: "Зупиніться й укажіть позицію на телефоні.",
   carHeldFollow: "Не відхиляйтеся від маршруту.",
+  carHeldAgree: "Лише маршрутом",
   carPlayLocationNeeded: "Щоб показати, де авто, потрібен доступ до геопозиції.",
   carPlayHeldNoPosition: "Розташування авто ще не вказано.",
   carNoMapTitle: "Немає офлайн-мапи",

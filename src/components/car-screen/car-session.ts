@@ -176,7 +176,7 @@ export function carNotice(
   }
   if (held) {
     const text = t(positionSet ? "carHeldFollow" : phoneFree ? "carPlayHeldNoPosition" : "carHeldSetPosition");
-    return { kind: "held-route", title: t("carHeldTitle"), text, action: t("noAdapterRouteAgree") };
+    return { kind: "held-route", title: t("carHeldTitle"), text, action: t("carHeldAgree") };
   }
   return null;
 }
