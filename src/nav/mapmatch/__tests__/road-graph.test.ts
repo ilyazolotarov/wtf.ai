@@ -152,6 +152,26 @@ describe("TiledRoadGraph", () => {
     expect(before).toBeGreaterThan(loads);
   });
 
+  test("trim keeps the most recently used tiles and the pinned ones, and the graph reads on", () => {
+    const g = open();
+    const ways = byWay(g); // touches every tile
+    const all = g.stats.cachedTiles;
+    expect(all).toBeGreaterThan(2);
+    const home = idTile(ways.get(160)![0].id);
+    g.pin([home]);
+    g.trim(1);
+    expect(g.stats.cachedTiles).toBeLessThanOrEqual(2);
+    const loads = g.stats.tileLoads;
+    g.edge(ways.get(160)![0].id); // pinned: kept
+    expect(g.stats.tileLoads).toBe(loads);
+    g.pin([]);
+    g.trim(0);
+    expect(g.stats.cachedTiles).toBe(0);
+    // Read again from the file, the same graph.
+    expect([...byWay(g).keys()].sort()).toEqual([...ways.keys()].sort());
+    expect(g.stats.tileLoads).toBeGreaterThan(loads);
+  });
+
   test("setFrame re-projects decoded geometry", () => {
     const g = open();
     const id = byWay(g).get(102)![0].id;

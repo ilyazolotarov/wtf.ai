@@ -463,6 +463,18 @@ export class TiledRoadGraph implements RoadGraph {
     return tile;
   }
 
+  /**
+   * Keep only the `keep` most recently used tiles (and the pinned ones): a planner done with its search gives the rest
+   * back. Decoded, a tile holds about 80 KB of the JS heap; a 146 km route touched 1,458 of them (iOS, 2026-11-01).
+   */
+  trim(keep: number): void {
+    if (this.cache.size <= keep) return;
+    const tiles = [...this.cache.values()].filter((t) => !this.pinned.has(t.index)).sort((a, b) => b.used - a.used);
+    for (const t of tiles.slice(Math.max(0, keep))) this.cache.delete(t.index);
+    if (this.last && !this.cache.has(this.last.index)) this.last = null;
+    this.stats.cachedTiles = this.cache.size;
+  }
+
   /** Drop the least recently used unpinned tiles, an eighth of the cache at a time (a scan per eviction, not per use). */
   private evict(): void {
     const target = Math.max(1, this.cacheTiles - (this.cacheTiles >> 3));

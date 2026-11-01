@@ -7,7 +7,7 @@ import { TiledRoadGraph } from "@/nav/mapmatch/graph/road-graph";
 import type { Coordinate } from "@/nav/geo";
 import type { PositionEstimate } from "@/nav/position/types";
 import { at as ladderAt, ladder } from "@/nav/routing/__fixtures__/ladder";
-import { RouteService, type RoutingGraph } from "@/services/navigation/route-service";
+import { ROUTER_IDLE_TILES, RouteService, type RoutingGraph } from "@/services/navigation/route-service";
 import type { NavRouteProgressRecord, NavRouteRecord } from "@/triplog/schema";
 
 // The fixture network (src/nav/routing/__tests__/router.test.ts): 101 = 1–2 east, 102 = 2–4 east, 104 = 2–6 south,
@@ -30,6 +30,7 @@ function harness(options: { graph?: boolean; store?: Map<string, unknown>; netwo
   let maneuvers = 0;
   let opened = 0;
   let closed = 0;
+  const trims: number[] = [];
   const service = new RouteService({
     position: { getSnapshot: () => position, subscribe: (l) => (listeners.add(l), () => listeners.delete(l)) },
     openGraph: (): RoutingGraph | null => {
@@ -37,6 +38,8 @@ function harness(options: { graph?: boolean; store?: Map<string, unknown>; netwo
       opened++;
       if (options.network === "ladder") return { key: "ladder", graph: Object.assign(ladder(), { setFrame: () => {} }), close: () => closed++ };
       const graph = new TiledRoadGraph(bufferByteSource(new Uint8Array(FIXTURE)), new LocalFrame({ lat: LAT0, lon: LON0 }));
+      const trim = graph.trim.bind(graph);
+      graph.trim = (keep) => (trims.push(keep), trim(keep));
       return { key: "net", graph, close: () => closed++ };
     },
     nowUs: () => clock * 1000,
@@ -72,7 +75,7 @@ function harness(options: { graph?: boolean; store?: Map<string, unknown>; netwo
   const move = (x: number, y: number, more: Partial<PositionEstimate> = {}) => moveTo(at(x, y), more);
   const tick = (ms: number) => (clock += ms);
   const pending = () => deferred.length;
-  return { service, flush, flushUntil, pending, move, moveTo, tick, notes, routes, progress, counts: () => ({ points, maneuvers, opened, closed }) };
+  return { service, flush, flushUntil, pending, move, moveTo, tick, notes, routes, progress, trims, counts: () => ({ points, maneuvers, opened, closed }) };
 }
 
 describe("RouteService", () => {
@@ -96,6 +99,25 @@ describe("RouteService", () => {
     h.move(0.8, 0);
     expect(h.service.getSnapshot()!.guidance).toMatchObject({ state: "on" });
     expect(h.progress.at(-1)).toMatchObject({ planId: 1, state: "on", nextIndex: 1 });
+  });
+
+  test("a search over, the planner gives its decoded tiles back: after a route's alternatives, and after a re-plan", () => {
+    const h = harness();
+    h.move(0.2, 0);
+    h.service.start(at(1, -0.6));
+    h.flushUntil(() => h.service.getSnapshot()?.status === "active");
+    expect(h.trims).toEqual([]); // the alternatives still to search
+    h.flush();
+    expect(h.trims).toEqual([ROUTER_IDLE_TILES]);
+    // Off the route: a re-plan, no alternatives after it.
+    for (let i = 1; i <= 12; i++) {
+      h.tick(1000);
+      h.move(1 + 0.25 * i, 0);
+    }
+    h.flush();
+    expect(h.routes.some((r) => r.reason === "off-route")).toBe(true);
+    expect(h.trims.length).toBeGreaterThanOrEqual(2);
+    expect(h.trims.every((k) => k === ROUTER_IDLE_TILES)).toBe(true);
   });
 
   test("leaving the route plans again from where the car is (reason off-route), the old route shown meanwhile", () => {

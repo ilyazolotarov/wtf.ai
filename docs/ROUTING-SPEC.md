@@ -14,7 +14,7 @@ on the map-matching road graph ([MAPMATCH-SPEC.md](MAPMATCH-SPEC.md) §4–5). S
 
 | Topic | Decision |
 | --- | --- |
-| Engine | **A\* in pure TS** over the region's `<region>.graph.bin`, read by its own `TiledRoadGraph` (own tile cache of 2048 tiles, so planning never evicts the filter's working set). |
+| Engine | **A\* in pure TS** over the region's `<region>.graph.bin`, read by its own `TiledRoadGraph` (own tile cache, so planning never evicts the filter's working set; its size in §8.2). |
 | Search state | **Directed edges** (edge, direction), not nodes, so turn costs and `from → via node → to` restrictions are exact. |
 | Cost | **Time** (s): length at a speed from the map's limit, setting and surface (by class on graphs without attributes), plus junction, turn and traffic-light time, rush hours in big cities, penalties for private, minor service and track roads (§4). No live traffic: none is open for Ukraine (TomTom answers nothing for Ukrainian points, Google switched public traffic off, the open collections list no Ukrainian speeds). |
 | OSM rules | **Hard** for planning: never against a one-way, never a restricted turn, U-turns only at dead ends or at the start. (The filter keeps them soft: a route must be legal, a position must survive wrong tags.) |
@@ -215,6 +215,11 @@ and the one after when it follows within 120 m.
 
 - `start(destination)` plans from the published position (with its heading, how sure, and accuracy) on its own
   reader of the active region's graph, in slices (§5.4), yielding to the UI in between.
+- **Its decoded tiles**: at most 512 while it searches (`ROUTER_CACHE_TILES`), 32 once a search is over (a plan with
+  its alternatives, a re-plan, a failure; `ROUTER_IDLE_TILES`). A decoded tile holds about 80 KB of the JS heap,
+  and Hermes keeps the heap it grew to: with 2048, a 146 km route's 1,458 tiles left about 250 MB in the app for
+  good. 512 slowed a route's alternatives by 4 % in Node, 256 by 32 %; a re-plan with the tiles still decoded was
+  only 5 % faster on the phone.
 - `off` (and not planning, and the wait below elapsed) plans again from where the car is; the old route stays drawn,
   faded. A failed re-plan keeps the old route and retries at the next `off` after the cooldown. A failed first plan
   ends in `failed` with the reason.

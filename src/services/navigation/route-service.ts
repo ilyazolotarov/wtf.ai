@@ -21,8 +21,14 @@ import type {
   ROUTE_REASON_CODES,
 } from "@/triplog/schema";
 
-/** Decoded tiles the planner keeps (ROUTING-SPEC §7: ~20 MB, 0.57 s for 172 km in Node). */
-export const ROUTER_CACHE_TILES = 2048;
+/**
+ * Decoded tiles the planner keeps while it searches (ROUTING-SPEC §8.2). A decoded tile holds about 80 KB of the JS
+ * heap, and Hermes keeps the heap it grew to: 2048 left a 146 km route's 1,458 tiles at ~250 MB of the app's memory
+ * for good (iOS, 2026-11-01). 512 slowed a route's alternatives by 4 % in Node; 256 by 32 %.
+ */
+export const ROUTER_CACHE_TILES = 512;
+/** …and once a search is over (a plan with its alternatives, a re-plan, a failure): a re-plan starts near the car. */
+export const ROUTER_IDLE_TILES = 32;
 /**
  * Each slice settles states for about this long, then yields to the UI. The map draws on its own thread; a yield
  * waits for the next timer tick (about a frame), so short slices spent most of a long plan's wall time waiting.
@@ -130,6 +136,8 @@ export interface RoutingGraph {
     info?: { builtAt: number };
     /** The graph's tile at a point, −1 outside the region's tiles. */
     tileAt?(c: Coordinate): number;
+    /** Keeps only the `keep` most recently used decoded tiles. */
+    trim?(keep: number): void;
   };
   close(): void;
 }
@@ -372,6 +380,7 @@ export class RouteService {
       const wallMs = this.now() - startedAt;
       if (r.status === "failed") {
         this.failed(id, reason, r.reason, position, wallMs, { states: r.stats.states, tiles: r.stats.tilesRead, planMs: r.stats.ms, slices });
+        graph.graph.trim?.(ROUTER_IDLE_TILES);
         return;
       }
       const maneuvers = routeManeuvers(graph.graph, r.plan);
@@ -387,6 +396,7 @@ export class RouteService {
       this.onPosition();
       // The route is on its way; alternatives only now, in slices of their own.
       if (reason === "new") this.searchAlternatives(id, graph, frame, from, r.plan);
+      else graph.graph.trim?.(ROUTER_IDLE_TILES);
     };
     this.planning = { id, cancel: this.defer(step, 0) };
   }
@@ -408,30 +418,42 @@ export class RouteService {
         return;
       }
       this.altSearch = null;
-      const cur = this.snapshot;
-      if (!cur || cur.planId !== id || !cur.plan) return;
-      this.others = r.alternatives.map((plan) => {
-        const maneuvers = routeManeuvers(graph.graph, plan);
-        return { plan, maneuvers, guidance: new RouteGuidance(plan, maneuvers) };
-      });
-      const mainEdges = edgeSet(main);
-      this.note(
-        `route alternatives: ${r.alternatives.length}` +
-          r.alternatives.map((a) => ` (${signedMin(a.durationS - main.durationS)}, ${km(a.lengthM)}, ${Math.round((sharedM(graph.graph, a, mainEdges) / a.lengthM) * 100)} % shared)`).join("") +
-          `; ${r.stats.searches} searches, ${r.stats.states} states, ${Math.round(r.stats.ms)} ms (${Math.round(this.now() - startedAt)} ms wall)`,
-      );
-      let fastest = -1;
-      this.others.forEach((o, i) => {
-        if (o.plan.durationS < (fastest < 0 ? main.durationS : this.others[fastest].plan.durationS)) fastest = i;
-      });
-      const along = this.guidance?.step?.alongM ?? 0;
-      if (fastest >= 0 && main.durationS - this.others[fastest].plan.durationS >= SWAP_MIN_GAIN_S && along <= SWAP_NEAR_START_M) {
-        this.takeAlternative(fastest, "faster");
-        return;
-      }
-      this.publishAlternatives();
+      this.settleAlternatives(id, graph, main, r, startedAt);
+      graph.graph.trim?.(ROUTER_IDLE_TILES);
     };
     this.altSearch = { id, cancel: this.defer(step, 0) };
+  }
+
+  /** The alternatives found: kept, the fastest taken while the car hasn't left the start, or published. */
+  private settleAlternatives(
+    id: number,
+    graph: RoutingGraph,
+    main: RoutePlan,
+    r: { alternatives: RoutePlan[]; stats: { searches: number; states: number; ms: number } },
+    startedAt: number,
+  ): void {
+    const cur = this.snapshot;
+    if (!cur || cur.planId !== id || !cur.plan) return;
+    this.others = r.alternatives.map((plan) => {
+      const maneuvers = routeManeuvers(graph.graph, plan);
+      return { plan, maneuvers, guidance: new RouteGuidance(plan, maneuvers) };
+    });
+    const mainEdges = edgeSet(main);
+    this.note(
+      `route alternatives: ${r.alternatives.length}` +
+        r.alternatives.map((a) => ` (${signedMin(a.durationS - main.durationS)}, ${km(a.lengthM)}, ${Math.round((sharedM(graph.graph, a, mainEdges) / a.lengthM) * 100)} % shared)`).join("") +
+        `; ${r.stats.searches} searches, ${r.stats.states} states, ${Math.round(r.stats.ms)} ms (${Math.round(this.now() - startedAt)} ms wall)`,
+    );
+    let fastest = -1;
+    this.others.forEach((o, i) => {
+      if (o.plan.durationS < (fastest < 0 ? main.durationS : this.others[fastest].plan.durationS)) fastest = i;
+    });
+    const along = this.guidance?.step?.alongM ?? 0;
+    if (fastest >= 0 && main.durationS - this.others[fastest].plan.durationS >= SWAP_MIN_GAIN_S && along <= SWAP_NEAR_START_M) {
+      this.takeAlternative(fastest, "faster");
+      return;
+    }
+    this.publishAlternatives();
   }
 
   /** Follow alternative `index` instead of the route: tapped on the map. */
