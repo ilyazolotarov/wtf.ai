@@ -9,6 +9,7 @@ import ai.wtf.androidauto.logic.CarRoute
 import ai.wtf.androidauto.logic.CarSearch
 import ai.wtf.androidauto.logic.CarSpeed
 import ai.wtf.androidauto.logic.CarStep
+import ai.wtf.androidauto.logic.CarStopEntry
 import expo.modules.kotlin.functions.Queues
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition

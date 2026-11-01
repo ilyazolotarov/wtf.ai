@@ -1,6 +1,7 @@
 // What pulling in at a place costs (STOPS-SPEC §6.3): from the route a little before the place to it, plus from it
-// back to the route a little after, minus the route's own time between the two. Two small searches per place, not a
-// plan of the whole trip: a list of ten places is ready in a few hundred milliseconds.
+// back to the route a little after, minus the route's own time between the two, searched too: the plan's time is its
+// average pace, and a stretch in a city centre is slower than a whole route with its avenues (a place on the route
+// came out at +2 min). Three small searches per place, not a plan of the whole trip.
 
 import type { Coordinate } from "../geo";
 import type { LocalFrame } from "../geo/local-frame";
@@ -34,9 +35,10 @@ export type DetourResult = { key: string; detourS: number | null };
  */
 export class DetourSearch {
   private job = 0;
-  private stage: 0 | 1 = 0;
+  private stage: 0 | 1 | 2 = 0;
   private search: RouteSearch | null = null;
   private toPlaceS = 0;
+  private fromPlaceS = 0;
   private readonly results: DetourResult[] = [];
 
   constructor(
@@ -62,8 +64,11 @@ export class DetourSearch {
         if (this.stage === 0) {
           const at = this.line.at(inM);
           this.search = new RouteSearch(this.graph, this.frame, { ...at.point, headingRad: at.headingRad, speedMps: LEAVE_SPEED_MPS, accuracyM: 5 }, job.point, opts);
-        } else {
+        } else if (this.stage === 1) {
           this.search = new RouteSearch(this.graph, this.frame, { ...job.point, speedMps: 0 }, this.line.at(outM).point, opts);
+        } else {
+          const at = this.line.at(inM);
+          this.search = new RouteSearch(this.graph, this.frame, { ...at.point, headingRad: at.headingRad, speedMps: LEAVE_SPEED_MPS, accuracyM: 5 }, this.line.at(outM).point, opts);
         }
       }
       const before = this.search.run(0).stats.states;
@@ -72,7 +77,9 @@ export class DetourSearch {
       if (r.status === "more") break;
       this.search = null;
       if (r.status === "failed") {
-        this.finish(job, null);
+        // The route's own stretch not found (it was planned, so hardly): its time on the plan instead.
+        if (this.stage === 2) this.finish(job, Math.max(0, this.toPlaceS + this.fromPlaceS - (elapsedS(plan, outM) - elapsedS(plan, inM))));
+        else this.finish(job, null);
         continue;
       }
       if (this.stage === 0) {
@@ -80,8 +87,12 @@ export class DetourSearch {
         this.stage = 1;
         continue;
       }
-      const routeS = elapsedS(plan, outM) - elapsedS(plan, inM);
-      this.finish(job, Math.max(0, this.toPlaceS + r.plan.durationS - routeS));
+      if (this.stage === 1) {
+        this.fromPlaceS = r.plan.durationS;
+        this.stage = 2;
+        continue;
+      }
+      this.finish(job, Math.max(0, this.toPlaceS + this.fromPlaceS - r.plan.durationS));
     }
     const results = this.results.splice(0);
     return { done: this.job >= this.jobs.length, results };
@@ -92,6 +103,7 @@ export class DetourSearch {
     this.job++;
     this.stage = 0;
     this.toPlaceS = 0;
+    this.fromPlaceS = 0;
   }
 }
 
@@ -101,7 +113,7 @@ function nextEndM(plan: RoutePlan, alongM: number): number {
   return plan.lengthM;
 }
 
-/** "+n min" from a detour: rounded up, "on the way" under `ON_THE_WAY_S`. */
+/** "+n min" from a detour: the nearest minute, at least 1; "on the way" under `ON_THE_WAY_S`. */
 export function detourMinutes(detourS: number): number {
-  return detourS < ON_THE_WAY_S ? 0 : Math.max(1, Math.ceil(detourS / 60));
+  return detourS < ON_THE_WAY_S ? 0 : Math.max(1, Math.round(detourS / 60));
 }

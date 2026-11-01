@@ -171,9 +171,10 @@ describe("detours (STOPS-SPEC §6.3)", () => {
     expect(results[1].detourS!).toBeGreaterThan(results[0].detourS! + 10);
   });
 
-  test("minutes: rounded up, none under 30 s", () => {
+  test("minutes: the nearest, at least 1, none under 30 s", () => {
     expect(detourMinutes(10)).toBe(0);
     expect(detourMinutes(31)).toBe(1);
-    expect(detourMinutes(61)).toBe(2);
+    expect(detourMinutes(84)).toBe(1);
+    expect(detourMinutes(100)).toBe(2);
   });
 });

@@ -142,8 +142,11 @@ the car's screen replaces the whole trip, as "Route here" does.
 - **Detour** (`DetourSearch`) per place, in list order, in slices after the list shows (a row waiting says "…"): from
   the route point 1 km before its projection (the car's progress point if nearer), driving, to the place; plus from the
   place, standing, to the route point 1 km after it (the next stop or the end if nearer); minus the route's own time
-  between the two. Each search is capped at 20,000 states; a place it can't reach in that is left out. Under 30 s:
-  "on the way"; otherwise "+n min", rounded up.
+  between the two, searched as well: the plan's time is its average pace, and a stretch in a city centre is slower
+  than a whole route with its avenues (a place on the route came out at +2 min). Each search is capped at 20,000
+  states; a place it can't reach in that is left out. Under 30 s: "on the way"; otherwise "+n min" to the nearest
+  minute, at least 1. A station on the driver's side costs about a minute and a half (turning in, its forecourt at
+  15 km/h, turning out); one across a divided road 6–14 minutes (the U-turn) on Kyiv's avenues.
 - **Search results** (adding a stop, §7.1): the same detours for the first 10 results, each projected on the route
   within 20 km, 2 km either side and 150,000 states a search.
 - **Searched again** along a new plan; the list goes with the page.
