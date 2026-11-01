@@ -17,13 +17,13 @@ import { MapCredit, type CreditAt } from "./map-credit";
 import { useSmoothedPosition } from "./use-smoothed-position";
 import { useRoute } from "@/providers/route-provider";
 import { STANDING_MPS } from "@/services/navigation/place-request";
-import { useEntrancesUrl } from "@/services/offline-map/entrance-file";
 import { activeCameras } from "@/services/offline-map/camera-file";
 import { activeSearchIndex } from "@/services/offline-map/search-file";
 import { useMapPacks } from "@/services/offline-map/map-packs";
 import { useMapPreferences } from "@/services/map-preferences";
 
 import { dotOnCar, type CameraView } from "./map-features";
+import { entranceArea, entranceFeatures, type Box } from "./map-entrances";
 import { nearHouses, nearPoint } from "./map-near";
 import { BUILDING_ZOOM, FINGER_PT, nearestStreet, type PinPick } from "./pin-pick";
 
@@ -176,7 +176,6 @@ export function MapSurface({
     const forScreen = carScale ? carMapStyle(packStyle, carGuidelineSizes ? carScale : null) : packStyle;
     return withCarSprite(raised ? forScreen : withFlatBuildings(forScreen), carSprite);
   }, [packStyle, carSprite, carScale, carGuidelineSizes, raised]);
-  const entrancesUrl = useEntrancesUrl();
   const { installed } = useMapPacks();
   const region = installed.active ? installed.regions[installed.active] : null;
   const cameras = activeCameras(installed)?.index.cameras ?? null;
@@ -240,6 +239,9 @@ export function MapSurface({
   if (nearNow !== near) setNear(nearNow);
   // Their house numbers from the search file, a point a house: the tiles merge a tile's houses of one number.
   const houses = useMemo(() => nearHouses(activeSearchIndex(installed), near), [installed, near]);
+  // The entrances around the view (map-entrances.ts), cut again once it leaves them.
+  const [entranceBox, setEntranceBox] = useState<Box | null>(null);
+  const entrances = useMemo(() => entranceFeatures(activeSearchIndex(installed), entranceBox), [installed, entranceBox]);
   const mapRef = useRef<MapRef>(null);
   const moves = useMapControl(mapRef, cameraRef, mapSize);
   useImperativeHandle(control, () => ({
@@ -291,7 +293,8 @@ export function MapSurface({
       .catch(() => onLongPress(at, { zoom, street: null }));
   };
   const trackView = (event: NativeSyntheticEvent<ViewStateChangeEvent>) => {
-    const { zoom, bearing, pitch } = event.nativeEvent;
+    const { zoom, bearing, pitch, bounds } = event.nativeEvent;
+    setEntranceBox((was) => entranceArea(was, Array.isArray(bounds) && bounds.length === 4 ? (bounds as Box) : null, zoom));
     if (![zoom, bearing, pitch].every(Number.isFinite)) return;
     const next = { zoom: Math.round(zoom * 10) / 10, bearingDeg: Math.round(bearing), pitchDeg: Math.round(pitch) };
     setView((was) =>
@@ -362,7 +365,7 @@ export function MapSurface({
           }
         />
         {/* Placed in the style, above its house numbers: not part of the stack below. */}
-        <EntranceLayers url={entrancesUrl} near={near} />
+        <EntranceLayers entrances={entrances} near={near} />
         {/*
           Taking over the style's layers: once it has loaded them. Sent before, a layer found none to take, made its
           own, and the style's loading replaced it (its filter then reached nothing). The car's style has only a

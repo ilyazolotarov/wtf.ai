@@ -249,12 +249,20 @@ export class SearchIndex {
     }
   }
 
-  /** Every entrance of the region, numbered or not (the map draws them). */
-  allEntrances(): Entrance[] {
+  /**
+   * The entrances in a box (degrees), numbered or not: what a map draws around its view. A scan of the table, its
+   * numbers decoded only for those inside (Ukraine's 118,000: a few ms).
+   */
+  entrancesIn(west: number, south: number, east: number, north: number): Entrance[] {
     const t = this.entrances();
     if (!t) return [];
+    const [w, s, e, n] = [west / COORD_SCALE, south / COORD_SCALE, east / COORD_SCALE, north / COORD_SCALE];
     const out: Entrance[] = [];
-    for (let i = 0; i < t.address.length; i++) out.push(this.entranceAt(t, i));
+    for (let i = 0; i < t.address.length; i++) {
+      const lat = t.lat[i];
+      const lon = t.lon[i];
+      if (lat >= s && lat <= n && lon >= w && lon <= e) out.push(this.entranceAt(t, i));
+    }
     return out;
   }
 

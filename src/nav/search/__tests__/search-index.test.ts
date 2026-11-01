@@ -177,9 +177,15 @@ describe("SearchIndex", () => {
     expect(index.housesNear({ lat: 51.4939 + 0.02, lon: 31.2947 + 0.02 }, 250)).toEqual([]);
   });
 
-  it("reads the region's entrances for the map, numbered or not", () => {
-    const all = open().allEntrances();
+  it("reads the entrances in a box for the map, numbered or not", () => {
+    const index = open();
+    const all = index.entrancesIn(-180, -90, 180, 90);
     expect(all.map((e) => e.ref)).toEqual(["1", "2", null]);
+    // A box around one of them: that one alone.
+    const [one] = all;
+    const d = 1e-5;
+    expect(index.entrancesIn(one.lon - d, one.lat - d, one.lon + d, one.lat + d)).toEqual([one]);
+    expect(index.entrancesIn(one.lon + 1, one.lat + 1, one.lon + 2, one.lat + 2)).toEqual([]);
   });
 
   it("counts a number mapped several times nearby once, so other numbers still fit", () => {

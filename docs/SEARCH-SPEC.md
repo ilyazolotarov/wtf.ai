@@ -174,8 +174,10 @@ POIs: 97 MB): queries 9–25 ms. The phone is several times slower; an oblast is
 - **The car's search** (ANDROID-AUTO-SPEC §3, §4; `findPlaces` in `src/components/route/place-search.ts`): the same
   index on each change of the car's field, with no delay (the car's keyboard is slow), a point as one result, the
   built-in cities without an index. Each result shows what and where it is, then its distance.
-- **Entrances on the map** (`src/services/offline-map/entrance-file.ts`, `EntranceLayers`): the active search
-  file's entrances written once to a GeoJSON file in the cache (per file MD5); from z16 a numbered one as its number
+- **Entrances on the map** (`src/components/map/map-entrances.ts`, `EntranceLayers`): the active search file's
+  entrances around each map's view (`SearchIndex.entrancesIn`: the view, counted as no taller than about 3 km, grown
+  by half its size on each side, cut again once the view leaves it), never the region's all: as one GeoJSON source, Ukraine's
+  118,000 cost MapLibre about 300 MB a map, twice with the car's screen on. From z16 a numbered one as its number
   on a round blue badge (a circle and text, no icon images), one without
   as a small dot, right above the house numbers. A house's card (route screen) offers its numbered entrances:
   Building (default) or a number; the route then ends at that door ("вулиця Шевченка, 10, під'їзд 3"). Picking a result closes the keyboard.

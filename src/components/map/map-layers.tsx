@@ -14,6 +14,7 @@ import type { SpeedCamera } from "@/nav/speed/cameras";
 import { useDevSettings, useRuntime } from "@/providers/runtime-provider";
 import type { RouteSnapshot } from "@/services/navigation/route-service";
 
+import { ENTRANCE_MINZOOM, type EntranceFeatures } from "./map-entrances";
 import {
   accuracyFeatures,
   alternativeFeatures,
@@ -630,8 +631,6 @@ export function PuckLayers({
   );
 }
 
-const ENTRANCE_MINZOOM = 16;
-
 /**
  * One of the style's own symbol layers taken over by id to change its filter, once the style has loaded. Always
  * rendered while the map is: taking it off the map removes the style's layer. Given its whole definition, so that one
@@ -728,13 +727,14 @@ export function NearLayers({
 /**
  * Building entrances (SEARCH-SPEC §5): a numbered one as its number on a round enamel-blue badge, one without a
  * number as a small dot, from street level. Right above the house numbers (`map-labels.ts`): a badge wins over a
- * number where they meet, every other label over both. Drawn with a circle and text, no images.
+ * number where they meet, every other label over both. Drawn with a circle and text, no images. Those around the view
+ * only (`map-entrances.ts`).
  */
-export function EntranceLayers({ url, near }: { url: string | null; near: Coordinate | null }) {
-  if (!url) return null;
+export function EntranceLayers({ entrances, near }: { entrances: EntranceFeatures | null; near: Coordinate | null }) {
+  if (!entrances) return null;
   const opacity = nearOpacity(near, NEAR_NUMBERS_M) as number;
   return (
-    <GeoJSONSource id="entrances" data={url}>
+    <GeoJSONSource id="entrances" data={entrances as GeoJSON.FeatureCollection}>
       <Layer
         id="entrance-dots"
         type="circle"

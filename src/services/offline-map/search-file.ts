@@ -1,6 +1,8 @@
 // The active region's address search index (SEARCH-SPEC §6): the downloaded
 // `<region>.search.bin`, read by random access like the road graph.
 
+import { Directory, Paths } from "expo-file-system";
+
 import { SearchIndex } from "@/nav/search/search-index";
 import { fileHandleByteSource } from "@/services/offline-map/road-graph-file";
 import { activeSearchFile, getMapPacks, type InstalledState } from "@/services/offline-map/map-packs";
@@ -24,10 +26,28 @@ export function activeSearchIndex(installed: InstalledState = getMapPacks().inst
     const source = fileHandleByteSource(active.file);
     open = { key, region: active.region, index: new SearchIndex(source), close: source.close };
     failedKey = null;
+    dropEntranceFiles();
     return open.index;
   } catch (e) {
     failedKey = key;
     console.warn(`search index ${active.region}: ${e instanceof Error ? e.message : String(e)}`);
     return null;
+  }
+}
+
+let entranceFilesDropped = false;
+
+/**
+ * The region's entrances as one GeoJSON file in the cache, which the map read until 2026-11-01 (`map-entrances.ts`
+ * says why it no longer does): deleted once a run, a dozen MB for Ukraine.
+ */
+function dropEntranceFiles(): void {
+  if (entranceFilesDropped) return;
+  entranceFilesDropped = true;
+  try {
+    const dir = new Directory(Paths.cache, "entrances");
+    if (dir.exists) dir.delete();
+  } catch {
+    // The cache is the OS's to clear too.
   }
 }
