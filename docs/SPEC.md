@@ -7,6 +7,7 @@ Companion specs: [UI-SPEC.md](UI-SPEC.md) (screens and the map), [VEHICLE-LINK-S
 (the OBD adapter), [TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md) (trip detection, logging, export),
 [NAVIGATOR-SPEC.md](NAVIGATOR-SPEC.md) (EKF, calibration, integrity, replay), [MAPMATCH-SPEC.md](MAPMATCH-SPEC.md)
 (road graph, particle filter), [ROUTING-SPEC.md](ROUTING-SPEC.md) (routing and guidance),
+[STOPS-SPEC.md](STOPS-SPEC.md) (stops on the way),
 [SEARCH-SPEC.md](SEARCH-SPEC.md) (offline address search), [UPDATES-SPEC.md](UPDATES-SPEC.md) (app and map updates),
 [ANDROID-SPEC.md](ANDROID-SPEC.md) (the Android build),
 [ANDROID-AUTO-SPEC.md](ANDROID-AUTO-SPEC.md) and [CARPLAY-SPEC.md](CARPLAY-SPEC.md) (the car's screen).
@@ -311,7 +312,7 @@ Android, and the car's position for Waze and Google Maps (Android, opt-in).
 
 Built, not yet seen on a drive: automatic startup on iOS (VEHICLE-LINK-SPEC §11).
 
-Not built: CAN yaw rate (Stage 3: a parking-lot drive with unfiltered CAN logging, regression of every candidate field
+Not built: stops on the way and places along the route (STOPS-SPEC §3); CAN yaw rate (Stage 3: a parking-lot drive with unfiltered CAN logging, regression of every candidate field
 against the gyro's vertical yaw rate).
 
 ## 6. Conventions for agents

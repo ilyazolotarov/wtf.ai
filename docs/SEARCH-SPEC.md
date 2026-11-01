@@ -213,3 +213,5 @@ npm run search -- tools/tiles/out/release/kyiv.search.bin "Шевченка 10" 
    letters and slashes, a renamed street by its old name, Latin spellings, POIs by brand, a street crossing two
    settlements); timing on the phone with the Ukraine region.
 3. Show the result on the map before routing; search from the map screen.
+4. Places along the route (fuel, charging, food, pharmacies, parking, unnamed ones too): a new section after the
+   entrances, header flag 2 (STOPS-SPEC §6.1).
