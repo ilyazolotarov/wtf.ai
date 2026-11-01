@@ -265,7 +265,7 @@ index 0000000..ba435af
 +    }
 +}
 diff --git a/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/LocationComponentManager.kt b/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/LocationComponentManager.kt
-index fca5b22..1d18329 100644
+index fca5b22..2dec495 100644
 --- a/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/LocationComponentManager.kt
 +++ b/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/LocationComponentManager.kt
 @@ -2,14 +2,21 @@ package org.maplibre.reactnative.components.location
@@ -290,7 +290,7 @@ index fca5b22..1d18329 100644
  import org.maplibre.reactnative.R
  import org.maplibre.reactnative.components.mapview.MLRNMapView
  import org.maplibre.reactnative.location.LocationManager
-@@ -38,6 +45,250 @@ class LocationComponentManager(
+@@ -38,6 +45,254 @@ class LocationComponentManager(
  
      private var mShowingUserLocation = false
  
@@ -314,6 +314,7 @@ index fca5b22..1d18329 100644
 +    // applied when it ends.
 +    private var appTransitioning = false
 +    private var appPendingStop: Triple<Double?, Double?, Long>? = null
++    private var appTransitionId = 0
 +
 +    // The last stop's duration: the dot eases to a new anchor over it, as it does with a new mode.
 +    private var appEaseMs = 0L
@@ -498,6 +499,7 @@ index fca5b22..1d18329 100644
 +        }
 +        appTransitioning = true
 +        appPendingStop = null
++        val id = ++appTransitionId
 +        component.setCameraMode(
 +            mode,
 +            durationMs.coerceAtLeast(0),
@@ -505,14 +507,16 @@ index fca5b22..1d18329 100644
 +            bearing,
 +            tilt,
 +            object : OnLocationCameraTransitionListener {
-+                override fun onLocationCameraTransitionFinished(cameraMode: Int) = appTransitionEnded()
++                override fun onLocationCameraTransitionFinished(cameraMode: Int) = appTransitionEnded(id)
 +
-+                override fun onLocationCameraTransitionCanceled(cameraMode: Int) = appTransitionEnded()
++                override fun onLocationCameraTransitionCanceled(cameraMode: Int) = appTransitionEnded(id)
 +            },
 +        )
 +    }
 +
-+    private fun appTransitionEnded() {
++    private fun appTransitionEnded(id: Int) {
++        // One replaced by a newer transition is cancelled while that one runs: only the latest one's end counts.
++        if (id != appTransitionId) return
 +        appTransitioning = false
 +        val pending = appPendingStop
 +        appPendingStop = null
@@ -541,7 +545,7 @@ index fca5b22..1d18329 100644
      private var mOnCameraTrackingChangedListener: OnCameraTrackingChangedListener? = null
  
      init {
-@@ -94,6 +345,11 @@ class LocationComponentManager(
+@@ -94,6 +349,11 @@ class LocationComponentManager(
  
      @SuppressLint("MissingPermission")
      private fun stateChanged() {
@@ -553,7 +557,7 @@ index fca5b22..1d18329 100644
          mLocationComponent?.setLocationComponentEnabled((mFollowUserLocation || mShowUserLocation))
  
          if (mShowingUserLocation != mShowUserLocation) {
-@@ -122,6 +378,10 @@ class LocationComponentManager(
+@@ -122,6 +382,10 @@ class LocationComponentManager(
          displayUserLocation: Boolean,
          style: Style,
      ) {
