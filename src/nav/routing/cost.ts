@@ -2,7 +2,7 @@
 // Speeds come from the map's attributes where the graph has them (§4.1), else from the road class alone.
 
 import { EdgeFlag, NodeFlag, RoadClass } from "../mapmatch/graph/format";
-import type { Exit, RoadEdge, RoadNode } from "../mapmatch/graph/road-graph";
+import { nodeDegree, type Exit, type RoadEdge, type RoadNode } from "../mapmatch/graph/road-graph";
 
 const DEG = Math.PI / 180;
 
@@ -176,7 +176,7 @@ export function turnSeconds(turnRad: number, c: RouteCosts): number {
  */
 export function passSeconds(node: RoadNode, exit: Exit, c: RouteCosts, priority = false): number {
   if (exit.uTurn) return c.uTurnS;
-  const junction = node.edges.length >= 3;
+  const junction = nodeDegree(node) >= 3;
   const lights = node.flags & NodeFlag.signals ? (junction ? c.signalS : c.crossingSignalS) : 0;
   if (!junction) return lights;
   const turn = turnSeconds(exit.turnRad, c);

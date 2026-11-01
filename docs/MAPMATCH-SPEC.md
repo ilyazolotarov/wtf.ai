@@ -144,9 +144,15 @@ restrictions, spatial lists, the round trip and the speed attributes; the TS rea
   only reports, the PF applies the soft factors); `node(id)`.
 - **Frame:** decoded geometry is in the navigator's local ENU frame; `setFrame` on re-anchoring drops the decoded
   edges, the tile bytes stay cached.
+- **Decoded lazily** (`TileEdge`, `TileNode`): an edge's attributes at once, its geometry arrays (`lonLat`, `xy`,
+  `cum`) on first use; its length in the frame and its end headings (`geometryLength`, `startHeading`,
+  `endHeading`) straight from the tile's vertices, bit-identical to the arrays'; a node's edge list on first use
+  (`degree`, and `exits` reading the tile's references, without it). Routing reads no edge's geometry but the route's
+  own: three Float64Arrays an edge for every edge a long route's searches passed were most of the JS heap the app
+  grew to and kept (iOS, 2026-11-01). Replays unchanged (128 of 128).
 - **Working set:** after each resample and at least every 50 m, the tiles inside circles around each cluster
   (radius 3 × spread + 300 m) plus the init area are loaded; decoded tiles sit in an LRU of 128 (`pin` keeps some);
-  a particle stepping into an unloaded tile loads it synchronously. The router has its own reader with 2048 tiles.
+  a particle stepping into an unloaded tile loads it synchronously. The router has its own reader (ROUTING-SPEC §8.2).
 - Measured in Node: open 0.1 ms (oblast), 0.8 ms (Ukraine: the 1.8 MB directory); tile load 0.07–0.3 ms;
   `edgesNear(50 m)` from cache 40–90 µs. The oblast and Ukraine files give identical matches.
 

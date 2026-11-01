@@ -4,7 +4,8 @@
 import type { Coordinate } from "../geo";
 import type { LocalFrame } from "../geo/local-frame";
 import { EdgeFlag, Oneway, RoadClass } from "../mapmatch/graph/format";
-import type { EdgeId, GraphStats, NearEdge, RoadEdge, RoadGraph } from "../mapmatch/graph/road-graph";
+import { geometryLength, type EdgeId, type GraphStats, type NearEdge, type RoadEdge, type RoadGraph } from "../mapmatch/graph/road-graph";
+import { KeyIndex } from "./key-index";
 import { DEFAULT_ROUTE_COSTS, edgeSeconds, entrySeconds, maxSpeedMps, onPriorityRoad, passSeconds, type RouteCosts } from "./cost";
 import { MinHeap } from "./min-heap";
 
@@ -155,9 +156,9 @@ const TWO_PI = 2 * Math.PI;
 const wrap = (a: number) => a - TWO_PI * Math.floor((a + Math.PI) / TWO_PI);
 const now = () => globalThis.performance?.now() ?? Date.now();
 
-/** Search states (directed edges settled or queued) in growable typed arrays, found by key through one map. */
+/** Search states (directed edges settled or queued) in growable typed arrays, found by key through one index. */
 class StateTable {
-  private readonly index = new Map<number, number>();
+  private readonly index = new KeyIndex();
   keys = new Float64Array(4096);
   /** Time to the end of the directed edge. */
   g = new Float64Array(4096);
@@ -169,7 +170,7 @@ class StateTable {
   size = 0;
 
   find(key: number): number {
-    return this.index.get(key) ?? -1;
+    return this.index.get(key);
   }
 
   add(key: number, g: number, h: number, parent: number): number {
@@ -202,7 +203,6 @@ class StateTable {
 const keyOf = (edge: EdgeId, dir: 1 | -1) => 2 * edge + (dir === 1 ? 0 : 1);
 const edgeOf = (key: number) => Math.floor(key / 2);
 const dirOf = (key: number): 1 | -1 => (key % 2 === 0 ? 1 : -1);
-const geometryLength = (edge: RoadEdge) => edge.cum[edge.cum.length - 1];
 const allowed = (edge: RoadEdge, dir: 1 | -1) => edge.oneway !== (dir === 1 ? Oneway.backward : Oneway.forward);
 const isPublic = (edge: RoadEdge) => !(edge.flags & (EdgeFlag.private | EdgeFlag.minorService));
 

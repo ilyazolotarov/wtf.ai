@@ -35,6 +35,16 @@ export class LocalFrame {
     }
   }
 
+  /** `toEnu`'s east of a longitude alone: the same operations, bit-identical. */
+  east(lon: number): number {
+    return (lon - this.origin.lon) * DEG * EARTH_RADIUS_M * this.cosLat;
+  }
+
+  /** `toEnu`'s north of a latitude alone: the same operations, bit-identical. */
+  north(lat: number): number {
+    return (lat - this.origin.lat) * DEG * EARTH_RADIUS_M;
+  }
+
   toCoordinate(east: number, north: number): Coordinate {
     return {
       lat: this.origin.lat + north / (EARTH_RADIUS_M * DEG),

@@ -22,8 +22,8 @@ import type {
 } from "@/triplog/schema";
 
 /**
- * Decoded tiles the planner keeps while it searches (ROUTING-SPEC §8.2). A decoded tile holds about 80 KB of the JS
- * heap, and Hermes keeps the heap it grew to: 2048 left a 146 km route's 1,458 tiles at ~250 MB of the app's memory
+ * Decoded tiles the planner keeps while it searches (ROUTING-SPEC §8.2). Hermes keeps the heap it grew to: 2048,
+ * with every edge's geometry decoded (~80 KB a tile), left a 146 km route's 1,458 tiles at ~250 MB of the app's memory
  * for good (iOS, 2026-11-01). 512 slowed a route's alternatives by 4 % in Node; 256 by 32 %.
  */
 export const ROUTER_CACHE_TILES = 512;

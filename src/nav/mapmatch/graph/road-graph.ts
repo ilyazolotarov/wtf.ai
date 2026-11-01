@@ -47,7 +47,12 @@ export interface RoadNode {
   readonly flags: number;
   /** Every edge touching the node; end 0: the edge starts here, 1: it ends here. */
   readonly edges: readonly { edge: EdgeId; end: 0 | 1 }[];
+  /** `edges.length`, without building the list (a tiled graph's node builds it when first asked for). */
+  readonly degree?: number;
 }
+
+/** How many edges touch the node. */
+export const nodeDegree = (node: RoadNode): number => node.degree ?? node.edges.length;
 
 export interface NearEdge {
   edge: RoadEdge;
@@ -122,6 +127,157 @@ interface Restriction {
   to: EdgeId;
 }
 
+/**
+ * An edge of a tiled graph: its attributes at once, its geometry (`lonLat`, `xy`, `cum`) when first asked for. Routing
+ * reads only its length and its two end headings (`geometryLength`, `startHeading`, `endHeading`), worked out from
+ * the tile's vertices without the arrays: three Float64Arrays an edge, decoded for every edge a long route's searches
+ * passed, were most of the JS heap the app grew to and kept (iOS, 2026-11-01).
+ */
+export class TileEdge implements RoadEdge {
+  startHeadingRad?: number;
+  endHeadingRad?: number;
+  /** `cum`'s last value. */
+  private lengthInFrameM?: number;
+  private geometry: { lonLat: Float64Array; xy: Float64Array; cum: Float64Array } | null = null;
+  /** The tile's vertex records, until the geometry is decoded (then let go, with the tile's blob). */
+  private vertices: Int32Array | null;
+
+  constructor(
+    readonly id: EdgeId,
+    readonly wayId: number,
+    readonly from: NodeId,
+    readonly to: NodeId,
+    readonly lengthM: number,
+    readonly cls: number,
+    readonly oneway: number,
+    readonly flags: number,
+    readonly maxspeedKph: number,
+    vertices: Int32Array,
+    /** Of the first vertex's lon in `vertices`. */
+    private readonly at: number,
+    private readonly nv: number,
+    private readonly frame: LocalFrame,
+  ) {
+    this.vertices = vertices;
+  }
+
+  get lonLat(): Float64Array {
+    return this.decoded().lonLat;
+  }
+  get xy(): Float64Array {
+    return this.decoded().xy;
+  }
+  get cum(): Float64Array {
+    return this.decoded().cum;
+  }
+
+  private decoded(): { lonLat: Float64Array; xy: Float64Array; cum: Float64Array } {
+    if (this.geometry) return this.geometry;
+    const v = this.vertices!;
+    const nv = this.nv;
+    const lonLat = new Float64Array(2 * nv);
+    for (let j = 0; j < 2 * nv; j++) lonLat[j] = v[this.at + j] * COORD_SCALE;
+    const xy = new Float64Array(2 * nv);
+    const cum = new Float64Array(nv);
+    this.frame.toEnuArray(lonLat, xy);
+    for (let j = 1; j < nv; j++) {
+      const dx = xy[2 * j] - xy[2 * j - 2];
+      const dy = xy[2 * j + 1] - xy[2 * j - 1];
+      cum[j] = cum[j - 1] + Math.sqrt(dx * dx + dy * dy);
+    }
+    this.vertices = null;
+    return (this.geometry = { lonLat, xy, cum });
+  }
+
+  /**
+   * `cum`'s last value and the first and last headings, straight from the vertices: the same arithmetic in the same
+   * order as `decoded` and `segmentHeading`, so bit-identical.
+   */
+  private scan(): void {
+    if (this.geometry) {
+      const { cum, xy } = this.geometry;
+      this.lengthInFrameM = cum[cum.length - 1];
+      let first = 0;
+      let last = 0;
+      let found = false;
+      for (let i = 0; i + 1 < cum.length; i++) {
+        if (!(cum[i + 1] > cum[i])) continue;
+        last = segmentHeading(xy, i);
+        if (!found) first = last;
+        found = true;
+      }
+      this.startHeadingRad ??= first;
+      this.endHeadingRad ??= last;
+      return;
+    }
+    const v = this.vertices!;
+    const frame = this.frame;
+    let px = frame.east(v[this.at] * COORD_SCALE);
+    let py = frame.north(v[this.at + 1] * COORD_SCALE);
+    let length = 0;
+    let first = 0;
+    let last = 0;
+    let found = false;
+    for (let j = 1; j < this.nv; j++) {
+      const x = frame.east(v[this.at + 2 * j] * COORD_SCALE);
+      const y = frame.north(v[this.at + 2 * j + 1] * COORD_SCALE);
+      const dx = x - px;
+      const dy = y - py;
+      const next = length + Math.sqrt(dx * dx + dy * dy);
+      if (next > length) {
+        last = Math.atan2(dx, dy);
+        if (!found) first = last;
+        found = true;
+      }
+      length = next;
+      px = x;
+      py = y;
+    }
+    this.lengthInFrameM = length;
+    this.startHeadingRad ??= first;
+    this.endHeadingRad ??= last;
+  }
+
+  /** The geometry's length in the frame (`cum`'s last value). */
+  frameLengthM(): number {
+    if (this.lengthInFrameM === undefined) this.scan();
+    return this.lengthInFrameM!;
+  }
+
+  /** Memoised first and last headings (see `startHeading`). */
+  headings(): void {
+    if (this.startHeadingRad === undefined || this.endHeadingRad === undefined) this.scan();
+  }
+}
+
+/** A node of a tiled graph: its edge list built when first asked for (routing needs only how many there are). */
+class TileNode implements RoadNode {
+  private list: { edge: EdgeId; end: 0 | 1 }[] | null = null;
+  private tile: Tile | null;
+
+  constructor(
+    readonly id: NodeId,
+    readonly lat: number,
+    readonly lon: number,
+    readonly e: number,
+    readonly n: number,
+    readonly flags: number,
+    readonly degree: number,
+    tile: Tile,
+    private readonly k: number,
+  ) {
+    this.tile = tile;
+  }
+
+  get edges(): readonly { edge: EdgeId; end: 0 | 1 }[] {
+    if (!this.list) {
+      this.list = this.tile!.nodeEdges(this.k);
+      this.tile = null;
+    }
+    return this.list;
+  }
+}
+
 /** One decoded tile: typed views over its blob (records are 4-byte aligned). */
 class Tile {
   readonly nodeCount: number;
@@ -191,32 +347,44 @@ class Tile {
   nodeFlags(k: number) {
     return this.nU16[8 * k + 7];
   }
+  nodeDegree(k: number): number {
+    return this.nU16[8 * k + 6];
+  }
+  /** The node's `j`th edge reference (an index into the tile's references). */
+  nodeRef(k: number, j: number): number {
+    return this.nU32[4 * k + 2] + j;
+  }
+  refEdge(ref: number): EdgeId {
+    return graphId(this.iU32[2 * ref], this.iU16[4 * ref + 2]);
+  }
+  refEnd(ref: number): 0 | 1 {
+    return this.iU16[4 * ref + 3] ? 1 : 0;
+  }
   nodeEdges(k: number): { edge: EdgeId; end: 0 | 1 }[] {
-    const first = this.nU32[4 * k + 2];
-    const count = this.nU16[8 * k + 6];
     const out: { edge: EdgeId; end: 0 | 1 }[] = [];
-    for (let j = first; j < first + count; j++) {
-      out.push({ edge: graphId(this.iU32[2 * j], this.iU16[4 * j + 2]), end: this.iU16[4 * j + 3] ? 1 : 0 });
+    for (let j = 0; j < this.nodeDegree(k); j++) {
+      const ref = this.nodeRef(k, j);
+      out.push({ edge: this.refEdge(ref), end: this.refEnd(ref) });
     }
     return out;
   }
 
-  edgeRecord(k: number) {
-    const geom = this.eU32[7 * k + 5];
-    const nvert = this.eU16[14 * k + 3];
-    const lonLat = new Float64Array(2 * nvert);
-    for (let j = 0; j < 2 * nvert; j++) lonLat[j] = this.vI32[2 * geom + j] * COORD_SCALE;
-    return {
-      from: graphId(this.index, this.eU16[14 * k]),
-      cls: this.eU8[28 * k + 2],
-      oneway: this.eU8[28 * k + 3],
-      flags: this.eU16[14 * k + 2],
-      maxspeedKph: this.eU8[28 * k + 14],
-      to: graphId(this.eU32[7 * k + 2], this.eU16[14 * k + 6]),
-      lengthM: this.eF32[7 * k + 4],
-      wayId: this.eU32[7 * k + 6],
-      lonLat,
-    };
+  edge(k: number, id: EdgeId, frame: LocalFrame): TileEdge {
+    return new TileEdge(
+      id,
+      this.eU32[7 * k + 6],
+      graphId(this.index, this.eU16[14 * k]),
+      graphId(this.eU32[7 * k + 2], this.eU16[14 * k + 6]),
+      this.eF32[7 * k + 4],
+      this.eU8[28 * k + 2],
+      this.eU8[28 * k + 3],
+      this.eU16[14 * k + 2],
+      this.eU8[28 * k + 14],
+      this.vI32,
+      2 * this.eU32[7 * k + 5],
+      this.eU16[14 * k + 3],
+      frame,
+    );
   }
 
   spatial(j: number): EdgeId {
@@ -373,17 +541,7 @@ export class TiledRoadGraph implements RoadGraph {
     const cached = tile.edgeCache[k];
     if (cached) return cached;
     if (k >= tile.edgeCount) throw new RangeError(`no edge ${id}`);
-    const r = tile.edgeRecord(k);
-    const nv = r.lonLat.length / 2;
-    const xy = new Float64Array(2 * nv);
-    const cum = new Float64Array(nv);
-    this.frame.toEnuArray(r.lonLat, xy);
-    for (let j = 1; j < nv; j++) {
-      const dx = xy[2 * j] - xy[2 * j - 2];
-      const dy = xy[2 * j + 1] - xy[2 * j - 1];
-      cum[j] = cum[j - 1] + Math.sqrt(dx * dx + dy * dy);
-    }
-    const edge: RoadEdge = { id, ...r, xy, cum };
+    const edge = tile.edge(k, id, this.frame);
     tile.edgeCache[k] = edge;
     return edge;
   }
@@ -397,7 +555,7 @@ export class TiledRoadGraph implements RoadGraph {
     const lat = tile.nodeLat(k);
     const lon = tile.nodeLon(k);
     const [e, n] = this.frame.toEnu({ lat, lon });
-    const node: RoadNode = { id, lat, lon, e, n, flags: tile.nodeFlags(k), edges: tile.nodeEdges(k) };
+    const node = new TileNode(id, lat, lon, e, n, tile.nodeFlags(k), tile.nodeDegree(k), tile, k);
     tile.nodeCache[k] = node;
     return node;
   }
@@ -405,29 +563,38 @@ export class TiledRoadGraph implements RoadGraph {
   exits(via: EdgeId, dir: 1 | -1): Exit[] {
     const arrival = this.edge(via);
     const nodeId = dir === 1 ? arrival.to : arrival.from;
-    const node = this.node(nodeId);
     const headingIn = dir === 1 ? endHeading(arrival) : wrap(startHeading(arrival) + Math.PI);
-    const all = this.tileOrThrow(idTile(nodeId)).restrictionsAt(idIndex(nodeId));
+    // The node's edge references straight from its tile: no edge list built for it (routing passes most nodes once).
+    const tile = this.tileOrThrow(idTile(nodeId));
+    const k = idIndex(nodeId);
+    const all = tile.restrictionsAt(k);
     const restrictions = all.length ? all.filter((r) => r.from === via) : all;
     const only = restrictions.length ? restrictions.filter((r) => r.kind === RestrictionKind.only) : restrictions;
-    return node.edges.map(({ edge: id, end }) => {
-      const out = this.edge(id);
-      const exitDir: 1 | -1 = end === 0 ? 1 : -1;
-      const headingOut = exitDir === 1 ? startHeading(out) : wrap(endHeading(out) + Math.PI);
-      const restricted = restrictions.length
-        ? only.length
-          ? !only.some((r) => r.to === id)
-          : restrictions.some((r) => r.kind === RestrictionKind.no && r.to === id)
-        : false;
-      return {
-        edge: id,
-        dir: exitDir,
-        turnRad: wrap(headingOut - headingIn),
-        againstOneway: out.oneway === (exitDir === 1 ? Oneway.backward : Oneway.forward),
-        restricted,
-        uTurn: id === via,
-      };
-    });
+    const exits: Exit[] = [];
+    for (let j = 0; j < tile.nodeDegree(k); j++) {
+      const ref = tile.nodeRef(k, j);
+      exits.push(this.exit(via, tile.refEdge(ref), tile.refEnd(ref), headingIn, restrictions, only));
+    }
+    return exits;
+  }
+
+  private exit(via: EdgeId, id: EdgeId, end: 0 | 1, headingIn: number, restrictions: Restriction[], only: Restriction[]): Exit {
+    const out = this.edge(id);
+    const exitDir: 1 | -1 = end === 0 ? 1 : -1;
+    const headingOut = exitDir === 1 ? startHeading(out) : wrap(endHeading(out) + Math.PI);
+    const restricted = restrictions.length
+      ? only.length
+        ? !only.some((r) => r.to === id)
+        : restrictions.some((r) => r.kind === RestrictionKind.no && r.to === id)
+      : false;
+    return {
+      edge: id,
+      dir: exitDir,
+      turnRad: wrap(headingOut - headingIn),
+      againstOneway: out.oneway === (exitDir === 1 ? Oneway.backward : Oneway.forward),
+      restricted,
+      uTurn: id === via,
+    };
   }
 
   private tileOrThrow(index: number): Tile {
@@ -465,7 +632,7 @@ export class TiledRoadGraph implements RoadGraph {
 
   /**
    * Keep only the `keep` most recently used tiles (and the pinned ones): a planner done with its search gives the rest
-   * back. Decoded, a tile holds about 80 KB of the JS heap; a 146 km route touched 1,458 of them (iOS, 2026-11-01).
+   * back. A 146 km route's searches touched 1,458 tiles (iOS, 2026-11-01).
    */
   trim(keep: number): void {
     if (this.cache.size <= keep) return;
@@ -503,9 +670,18 @@ function segmentHeading(xy: Float64Array, i: number): number {
   return Math.atan2(xy[2 * i + 2] - xy[2 * i], xy[2 * i + 3] - xy[2 * i + 1]);
 }
 
+/** The geometry's length in the graph's frame (`cum`'s last value); a tiled graph's edge works it out undecoded. */
+export function geometryLength(edge: RoadEdge): number {
+  return edge instanceof TileEdge ? edge.frameLengthM() : edge.cum[edge.cum.length - 1];
+}
+
 /** Heading of the first non-degenerate segment, in geometry direction. */
 export function startHeading(edge: RoadEdge): number {
   if (edge.startHeadingRad !== undefined) return edge.startHeadingRad;
+  if (edge instanceof TileEdge) {
+    edge.headings();
+    return edge.startHeadingRad!;
+  }
   const segs = edge.cum.length - 1;
   let heading = 0;
   for (let i = 0; i < segs; i++) {
@@ -520,6 +696,10 @@ export function startHeading(edge: RoadEdge): number {
 /** Heading of the last non-degenerate segment, in geometry direction. */
 export function endHeading(edge: RoadEdge): number {
   if (edge.endHeadingRad !== undefined) return edge.endHeadingRad;
+  if (edge instanceof TileEdge) {
+    edge.headings();
+    return edge.endHeadingRad!;
+  }
   let heading = 0;
   for (let i = edge.cum.length - 2; i >= 0; i--) {
     if (edge.cum[i + 1] > edge.cum[i]) {

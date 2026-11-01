@@ -216,10 +216,14 @@ and the one after when it follows within 120 m.
 - `start(destination)` plans from the published position (with its heading, how sure, and accuracy) on its own
   reader of the active region's graph, in slices (§5.4), yielding to the UI in between.
 - **Its decoded tiles**: at most 512 while it searches (`ROUTER_CACHE_TILES`), 32 once a search is over (a plan with
-  its alternatives, a re-plan, a failure; `ROUTER_IDLE_TILES`). A decoded tile holds about 80 KB of the JS heap,
-  and Hermes keeps the heap it grew to: with 2048, a 146 km route's 1,458 tiles left about 250 MB in the app for
+  its alternatives, a re-plan, a failure; `ROUTER_IDLE_TILES`). Hermes keeps the heap it grew to: with 2048 and
+  every edge's geometry decoded, a 146 km route's 1,458 tiles (about 80 KB each) left about 250 MB in the app for
   good. 512 slowed a route's alternatives by 4 % in Node, 256 by 32 %; a re-plan with the tiles still decoded was
   only 5 % faster on the phone.
+- **What a search allocates**: its states in typed arrays found through a typed-array hash (`KeyIndex`; a `Map`
+  entry is an object in Hermes), the edges it passes without their geometry (MAPMATCH-SPEC §5). The same 146 km
+  route with alternatives (717,000 states): the JS heap grew 102 MB during guidance, not 269 MB (iOS simulator,
+  Debug, 2026-11-01); in Node the heap a search grows by halved twice, the plans identical.
 - `off` (and not planning, and the wait below elapsed) plans again from where the car is; the old route stays drawn,
   faded. A failed re-plan keeps the old route and retries at the next `off` after the cooldown. A failed first plan
   ends in `failed` with the reason.
