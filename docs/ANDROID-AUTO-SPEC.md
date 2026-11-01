@@ -329,5 +329,5 @@ it, the speed red past the margin; the camera's line and the chime played as nav
    declaration (§2).
 4. Debug builds need Metro as for the phone. A car's map started before the development launcher loaded the JS stayed
    blank; `CarMapSurface.restartIfStopped` starts it again in the new React context, not yet seen doing so.
-5. Stops on the way (not built): shown only, a `Trip` destination per remaining point (STOPS-SPEC §9); none added on
-   the car.
+5. Stops on the way are shown only (STOPS-SPEC §9): a `Trip` destination per stop ahead, the stop maneuver on its
+   side, the message card at a stop. None are added on the car.

@@ -312,7 +312,9 @@ Android, and the car's position for Waze and Google Maps (Android, opt-in).
 
 Built, not yet seen on a drive: automatic startup on iOS (VEHICLE-LINK-SPEC §11).
 
-Not built: stops on the way and places along the route (STOPS-SPEC §3); CAN yaw rate (Stage 3: a parking-lot drive with unfiltered CAN logging, regression of every candidate field
+Built, not yet driven: stops on the way and places along the route (STOPS-SPEC §3).
+
+Not built: CAN yaw rate (Stage 3: a parking-lot drive with unfiltered CAN logging, regression of every candidate field
 against the gyro's vertical yaw rate).
 
 ## 6. Conventions for agents

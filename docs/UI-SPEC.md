@@ -451,8 +451,7 @@ One small component each; the screen only places them and wires their state. Car
   ends it. **I'm here** on the summary card, at any speed: placing starting at the place
   (`place-request.ts`).
 - Footnote: long-press the map to route anywhere or to say the car is there; routes stay inside the region.
-- Stops and places along the route (not built): the trip list, "Pull in on the way" and "Add a stop" are
-  STOPS-SPEC §7.
+- With a route on, the page opens on its trip: "Pull in on the way", the stops, "Add a stop" (STOPS-SPEC §7).
 
 ### 7.2 `vehicle`
 

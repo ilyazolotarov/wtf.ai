@@ -73,7 +73,11 @@ export function RouteBanner({
     icon = "close";
     iconBg = palette.bad.c;
     title = t("routeFailedTitle");
-    sub = t(route.failure ? PROBLEM_TEXT[route.failure] : "routeCancelled");
+    // A trip that found no way to one of its stops says which (STOPS-SPEC §4).
+    const stop = route.failedStop ? route.stops.find((x) => x.key === route.failedStop) : undefined;
+    sub = stop
+      ? t("routeNoRouteToStop").replace("{name}", stop.name ?? t("droppedPin"))
+      : t(route.failure ? PROBLEM_TEXT[route.failure] : "routeCancelled");
   } else if (route.atStop && route.guidance?.state !== "arrived") {
     // At a stop on the way (STOPS-SPEC §5.2): the wait, until the car goes on.
     icon = "flag";

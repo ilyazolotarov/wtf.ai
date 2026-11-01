@@ -20,7 +20,7 @@ on the map-matching road graph ([MAPMATCH-SPEC.md](MAPMATCH-SPEC.md) §4–5). S
 | OSM rules | **Hard** for planning: never against a one-way, never a restricted turn, U-turns only at dead ends or at the start. (The filter keeps them soft: a route must be legal, a position must survive wrong tags.) |
 | Extent | One region: no cross-region routes. |
 | Destination | A point on the map (long press), a city from the list, or an address search result ([SEARCH-SPEC.md](SEARCH-SPEC.md)). |
-| Stops | Up to 5 between the car and the destination, a leg each, joined into one plan: [STOPS-SPEC.md](STOPS-SPEC.md) (not built). |
+| Stops | Up to 5 between the car and the destination, a leg each, joined into one plan: [STOPS-SPEC.md](STOPS-SPEC.md). |
 | Instructions | From the route's geometry and the graph (turn angle, roundabouts); no street names (not in the graph). |
 | Thread | The JS thread, in slices (§5.4): a long search must not freeze the map. |
 
