@@ -248,7 +248,6 @@ export function MapSurface({
     if (!nativePuck || !mapReady) return;
     const map = mapRef.current;
     if (!map) return;
-    map.setUserLocationSource("app", { x: anchorX, y: anchorY }, nativePuckStyle(scheme)).catch(() => {});
     return () => {
       // Back to the device's location when the setting goes off.
       try {
@@ -257,6 +256,12 @@ export function MapSurface({
         // The map is gone (unmounted): the wrapper finds no view and throws at once. Nothing to reset.
       }
     };
+  }, [nativePuck, mapReady]);
+  // The source on, and then its anchor and look as they change: once on, "app" again only updates them. (Through the
+  // device's location and back, iOS would drop the dot and following at every change of mode.)
+  useEffect(() => {
+    if (!nativePuck || !mapReady) return;
+    mapRef.current?.setUserLocationSource("app", { x: anchorX, y: anchorY }, nativePuckStyle(scheme)).catch(() => {});
   }, [nativePuck, mapReady, scheme, anchorX, anchorY]);
   const onCarRef = useRef(onCar);
   useEffect(() => {

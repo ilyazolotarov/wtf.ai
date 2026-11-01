@@ -61,6 +61,7 @@ export class PuckFeed {
   private baseAdvance: NavAdvance | null = null;
   private lastAdvance: NavAdvance | null = null;
   private lastAdvanceAtMs = 0;
+  private lastPublishAtMs = 0;
   private intervalMs = DEFAULT_INTERVAL_MS;
   private lastFed: FedPose | null = null;
   private lastSource: PositionEstimate["source"] | null = null;
@@ -69,6 +70,10 @@ export class PuckFeed {
 
   /** A published position: fed as drawn, and the advances count from here on. */
   publish(p: PositionEstimate | null): FedPose | null {
+    const now = this.nowMs();
+    // Without the navigator's steps (a test drive) the publishes pace the feed.
+    if (this.lastPublishAtMs && now - this.lastAdvanceAtMs > LEAD_MAX_MS) this.pace(now - this.lastPublishAtMs);
+    this.lastPublishAtMs = now;
     this.published = p;
     this.baseAdvance = this.lastAdvance;
     if (!p) {
@@ -83,10 +88,7 @@ export class PuckFeed {
   /** The navigator advanced: the published dot moved on by the estimate's displacement since the publish. */
   advance(a: NavAdvance): FedPose | null {
     const now = this.nowMs();
-    if (this.lastAdvanceAtMs) {
-      const dt = now - this.lastAdvanceAtMs;
-      if (dt > 0 && dt < 2 * LEAD_MAX_MS) this.intervalMs = 0.7 * this.intervalMs + 0.3 * dt;
-    }
+    if (this.lastAdvanceAtMs) this.pace(now - this.lastAdvanceAtMs);
     this.lastAdvanceAtMs = now;
     this.lastAdvance = a;
     const p = this.published;
@@ -96,6 +98,10 @@ export class PuckFeed {
     const heading =
       a.headingRad !== undefined && Math.abs(wrapRad(a.headingRad - p.headingRad)) > HEADING_TAKES_OVER_RAD ? a.headingRad : p.headingRad;
     return this.pose(p, d.e, d.n, heading, this.intervalMs);
+  }
+
+  private pace(dt: number): void {
+    if (dt > 0 && dt < 2 * LEAD_MAX_MS) this.intervalMs = 0.7 * this.intervalMs + 0.3 * dt;
   }
 
   private pose(p: PositionEstimate, dE: number, dN: number, headingRad: number | undefined, leadMs: number): FedPose {

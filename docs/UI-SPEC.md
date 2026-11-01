@@ -223,19 +223,22 @@ persisted in kv-store. No hardcoded user-facing strings in components.
   wide circle at open, keep it centred. iOS reports the screen's centre as the map's, so the settle-back check below
   allows 1 km more while the dot is lowered.
 - **Motion, native** (`puck-feed.ts`, the map draws the dot itself): MapLibre eases the dot and the follow camera
-  linearly from each fed pose to the next over the time between them (iOS `dynamicNavigationCameraAnimationDuration`,
-  Android's look-ahead `forceLocationUpdate`), on its own render thread: no JS work per frame, and the dot keeps moving
+  linearly to each fed pose, reaching it one lead (the feed interval) later however close together two feeds come
+  (iOS `dynamicNavigationCameraAnimationDuration` with each location stamped its lead after the one before, Android's
+  look-ahead `forceLocationUpdate` to now + lead), on its own render thread: no JS work per frame, and the dot keeps moving
   with the phone's screen dark on the car's. The feed runs at the navigator's pace, each IMU batch (~10 Hz, the
   service's `onAdvance`): the published dot (map matching's, the one the parity tool checks) moved on by the EKF's
   displacement since that publish and predicted one feed interval ahead, so the ease lands where the car is when it
-  gets there; the estimate's heading takes over once it turned 3° from the published one; each publish re-bases.
+  gets there (without the navigator's steps, the publishes set that interval); the estimate's heading takes over once
+  it turned 3° from the published one; each publish re-bases.
   Standing (< 2 m/s, no heading, or a placed position) the dot is fed as published, without lead. A step over 80 m,
   a turn over 90° or a change to or from a placed position is placed, not animated. The phone's map is fed while the
   app is in front, the car's always. The follow camera is MapLibre's tracking (`Camera` `trackUserLocation`:
   `course` heading-up, `default` north-up with bearing 0) with the dot pinned at the anchor (`dotAnchor`: the same spot
-  the padding put it at), the stop's zoom and pitch; entering follow is one 450 ms ease to that view, then tracking
-  takes over; a zoom change while following eases without leaving it; a pan ends tracking natively and
-  `onTrackUserLocationChange` turns the mode free. While following, `regionIsChanging` reaches JS at most 5 times a
+  the padding put it at), the stop's zoom and pitch; entering follow, or a new mode, zoom or tilt while following, is one
+  450 ms ease to that view, then tracking takes over. Only the driver's gesture turns the mode free: a pan ends tracking
+  natively and `onTrackUserLocationChange` reports it; the patch's own tracking switches (the ease, a placed dot) are
+  kept from JS, and the source's anchor and look change without leaving the app's location. While following, `regionIsChanging` reaches JS at most 5 times a
   second.
 - **Motion, JS** (`pose-smoother.ts`, the setting off): moving (≥ 2 m/s, with a heading, not a placed position) the
   dot, its circle and cone and the following camera are drawn ~30 times a second in even steps (every second 60 Hz

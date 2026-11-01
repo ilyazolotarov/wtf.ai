@@ -123,10 +123,10 @@ index a789f4d..f1b3762 100644
          }
 diff --git a/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/AppPuck.kt b/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/AppPuck.kt
 new file mode 100644
-index 0000000..337dcee
+index 0000000..ba435af
 --- /dev/null
 +++ b/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/AppPuck.kt
-@@ -0,0 +1,135 @@
+@@ -0,0 +1,137 @@
 +package org.maplibre.reactnative.components.location
 +
 +import android.graphics.Bitmap
@@ -205,7 +205,9 @@ index 0000000..337dcee
 +    ): Bitmap {
 +        val s = Style(styleJson)
 +        val d = metrics.density
-+        val half = max(s.coneR, max(s.haloR, s.r + s.ringWidth + s.edgeWidth))
++        // The cone's outlines are stroked on its edge, half outside it; the shadow reaches below the dot. 1 dp to spare.
++        val coneOuter = if (withCone && s.coneR > 0) s.coneR + max(s.coneEdge, s.coneRing) else 0.0
++        val half = maxOf(coneOuter, s.haloR, s.r + s.ringWidth + s.edgeWidth + 2 + 2.5 + 2) + 1
 +        val side = ceil(2 * half * d).toInt().coerceAtLeast(1)
 +        val bitmap = Bitmap.createBitmap(metrics, side, side, Bitmap.Config.ARGB_8888)
 +        if (hidden) return bitmap
@@ -748,52 +750,91 @@ index b257692..225886d 100644
                  val resolvedView: View? = manager.resolveView(reactTag)
                  val view = resolvedView as? V
 diff --git a/node_modules/@maplibre/maplibre-react-native/ios/components/camera/MLRNCamera.m b/node_modules/@maplibre/maplibre-react-native/ios/components/camera/MLRNCamera.m
-index f5c8dec..361e826 100644
+index f5c8dec..de1396b 100644
 --- a/node_modules/@maplibre/maplibre-react-native/ios/components/camera/MLRNCamera.m
 +++ b/node_modules/@maplibre/maplibre-react-native/ios/components/camera/MLRNCamera.m
-@@ -94,6 +94,51 @@ - (void)_updateCameraFromStop {
+@@ -11,6 +11,8 @@
+ @implementation MLRNCamera {
+   CameraUpdateQueue *cameraUpdateQueue;
+   MLRNCamera *followCamera;
++  // wtf.ai: counts camera updates; an ease to the followed view hands over to following only if none came since.
++  NSUInteger _appEaseSeq;
+ }
+ 
+ - (instancetype)init {
+@@ -73,6 +75,7 @@ - (void)handleImperativeStop:(NSDictionary<NSString *, id> *)stop {
+ }
+ 
+ - (void)updateCamera {
++  _appEaseSeq += 1;
+   if (_map != nil) {
+     if ([self _userTrackingMode] == MLNUserTrackingModeNone) {
+       [self _updateCameraFromStop];
+@@ -94,6 +97,73 @@ - (void)_updateCameraFromStop {
  }
  
  - (void)_updateCameraFromTrackUserLocation {
-+  // wtf.ai: with the app-fed location, a stop with a duration is one ease to the followed view (the dot at its
-+  // anchor, the stop's zoom and pitch, the course as bearing), and following takes over where it ends; while
-+  // following, a zoom change eases without a jump. The device-location path below is the wrapper's own.
++  // wtf.ai: with the app-fed location, a new mode, zoom or pitch is one ease to the followed view (the dot at its
++  // anchor, the course as bearing), and following takes over where it ends. MapLibre's own zoom calls end following
++  // (setZoomLevel goes through setCenterCoordinate), and a feed's tracking step would cut an ease short: following is
++  // set aside for the ease, quietly, as it is this switch and not the driver's. The device-location path below is the
++  // wrapper's own.
 +  if ([_map usesAppUserLocation]) {
 +    MLNUserTrackingMode target = [self _userTrackingMode];
 +    CLLocation *location = _map.userLocation.location;
 +    NSTimeInterval duration = _stop[@"duration"] ? [MLRNUtils fromMS:_stop[@"duration"]] : 0;
 +    BOOL hasZoom = _stop[@"zoom"] != nil;
 +    BOOL hasPitch = _stop[@"pitch"] != nil;
-+    if (target != MLNUserTrackingModeNone && _map.userTrackingMode == target) {
-+      if (hasZoom && fabs(_map.zoomLevel - [_stop[@"zoom"] doubleValue]) > 0.01) {
-+        [_map setZoomLevel:[_stop[@"zoom"] doubleValue] animated:duration > 0];
-+      }
++    if (target != MLNUserTrackingModeNone && _map.userTrackingMode == target &&
++        (!hasZoom || fabs(_map.zoomLevel - [_stop[@"zoom"] doubleValue]) < 0.01) &&
++        (!hasPitch || fabs(_map.camera.pitch - [_stop[@"pitch"] doubleValue]) < 0.5)) {
 +      return;
 +    }
 +    if (target != MLNUserTrackingModeNone && duration > 0 && location != nil &&
 +        CLLocationCoordinate2DIsValid(location.coordinate)) {
-+      MLNMapCamera *camera = [_map.camera copy];
-+      camera.centerCoordinate = location.coordinate;
++      MLRNMapView *map = _map;
++      [map withQuietTracking:^{
++        if (map.userTrackingMode != MLNUserTrackingModeNone) {
++          [map setUserTrackingMode:MLNUserTrackingModeNone animated:NO completionHandler:nil];
++        }
++      }];
++      MLNMapCamera *camera = [map.camera copy];
++      // Where the dot will be when the ease ends, so following takes over without a catch-up.
++      CLLocationCoordinate2D center = location.coordinate;
++      if (location.speed > 0 && location.course >= 0) {
++        double d = location.speed * duration;
++        double c = location.course * M_PI / 180;
++        center.latitude += d * cos(c) / 111320.0;
++        center.longitude += d * sin(c) / (111320.0 * cos(center.latitude * M_PI / 180));
++      }
++      camera.centerCoordinate = center;
 +      if (hasPitch) camera.pitch = [_stop[@"pitch"] doubleValue];
 +      if (hasZoom) {
-+        camera.altitude = [_map altitudeFromZoom:[_stop[@"zoom"] doubleValue]
-+                                      atLatitude:location.coordinate.latitude
-+                                         atPitch:camera.pitch];
++        camera.altitude = [map altitudeFromZoom:[_stop[@"zoom"] doubleValue]
++                                     atLatitude:center.latitude
++                                        atPitch:camera.pitch];
 +      }
 +      if (target == MLNUserTrackingModeFollowWithCourse && location.course >= 0) {
 +        camera.heading = location.course;
 +      } else if (target == MLNUserTrackingModeFollow && _stop[@"bearing"] != nil) {
 +        camera.heading = [_stop[@"bearing"] doubleValue];
 +      }
-+      __weak MLRNMapView *weakMap = _map;
-+      [_map setCamera:camera
++      NSUInteger seq = _appEaseSeq;
++      __weak MLRNCamera *weakSelf = self;
++      [map setCamera:camera
 +                 withDuration:duration
 +      animationTimingFunction:[CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut]
-+                  edgePadding:[_map appFollowEdgePadding]
++                  edgePadding:[map appFollowEdgePadding]
 +            completionHandler:^{
-+              MLRNMapView *map = weakMap;
-+              if (map != nil && map.userTrackingMode != target) {
-+                [map setUserTrackingMode:target animated:YES completionHandler:nil];
++              MLRNCamera *strongSelf = weakSelf;
++              MLRNMapView *m = strongSelf.map;
++              // A newer update (a gesture's free mode, another stop) has taken over: not following again here.
++              if (strongSelf == nil || m == nil || strongSelf->_appEaseSeq != seq ||
++                  [strongSelf _userTrackingMode] != target) {
++                return;
++              }
++              if (m.userTrackingMode != target) {
++                [m setUserTrackingMode:target animated:YES completionHandler:nil];
 +              }
 +            }];
 +      return;
@@ -860,10 +901,10 @@ index 0000000..6811f97
 +NS_ASSUME_NONNULL_END
 diff --git a/node_modules/@maplibre/maplibre-react-native/ios/components/map-view/MLRNAppUserLocation.m b/node_modules/@maplibre/maplibre-react-native/ios/components/map-view/MLRNAppUserLocation.m
 new file mode 100644
-index 0000000..a06b225
+index 0000000..32ac151
 --- /dev/null
 +++ b/node_modules/@maplibre/maplibre-react-native/ios/components/map-view/MLRNAppUserLocation.m
-@@ -0,0 +1,259 @@
+@@ -0,0 +1,261 @@
 +// wtf.ai: see MLRNAppUserLocation.h.
 +#import "MLRNAppUserLocation.h"
 +
@@ -1026,9 +1067,11 @@ index 0000000..a06b225
 +  MLRNAppPuckStyle *s = _style;
 +  CGRect b = self.bounds;
 +  CGPoint c = CGPointMake(CGRectGetMidX(b), CGRectGetMidY(b));
-+  for (CALayer *l in @[ _cone, _coneFill, _coneEdge, _coneRing, _shadow, _edge, _ring, _dot ]) {
++  for (CALayer *l in @[ _coneFill, _coneEdge, _coneRing, _shadow, _edge, _ring, _dot ]) {
 +    l.frame = b;
 +  }
++  // The cone turns (`update`): its frame would follow the turn and shift its paths; bounds and position don't.
++  _cone.bounds = b;
 +  _cone.anchorPoint = CGPointMake(0.5, 0.5);
 +  _cone.position = c;
 +  UIBezierPath *(^circle)(double) = ^(double r) {
@@ -1124,10 +1167,10 @@ index 0000000..a06b225
 +
 +@end
 diff --git a/node_modules/@maplibre/maplibre-react-native/ios/components/map-view/MLRNMapView.h b/node_modules/@maplibre/maplibre-react-native/ios/components/map-view/MLRNMapView.h
-index f24e510..2ed4949 100644
+index f24e510..3920bb0 100644
 --- a/node_modules/@maplibre/maplibre-react-native/ios/components/map-view/MLRNMapView.h
 +++ b/node_modules/@maplibre/maplibre-react-native/ios/components/map-view/MLRNMapView.h
-@@ -116,4 +116,22 @@ typedef void (^StyleLoadedBlock)(MLNStyle *__nonnull style);
+@@ -116,4 +116,24 @@ typedef void (^StyleLoadedBlock)(MLNStyle *__nonnull style);
  
  - (void)notifyStyleLoaded;
  
@@ -1148,10 +1191,12 @@ index f24e510..2ed4949 100644
 +- (BOOL)usesAppUserLocation;
 +/** The edge padding MapLibre follows with when the dot sits at the anchor, for a camera that should end there. */
 +- (UIEdgeInsets)appFollowEdgePadding;
++/** Runs `block` with the tracking-mode changes it makes kept from JS: the patch's own switches, not the driver's. */
++- (void)withQuietTracking:(void (^)(void))block;
 +
  @end
 diff --git a/node_modules/@maplibre/maplibre-react-native/ios/components/map-view/MLRNMapView.m b/node_modules/@maplibre/maplibre-react-native/ios/components/map-view/MLRNMapView.m
-index 2221274..50a0756 100644
+index 2221274..0f93e5d 100644
 --- a/node_modules/@maplibre/maplibre-react-native/ios/components/map-view/MLRNMapView.m
 +++ b/node_modules/@maplibre/maplibre-react-native/ios/components/map-view/MLRNMapView.m
 @@ -1,6 +1,7 @@
@@ -1162,10 +1207,11 @@ index 2221274..50a0756 100644
  #import "MLRNGeoJSONSource.h"
  #import "MLRNImageUtils.h"
  #import "MLRNImages.h"
-@@ -14,8 +15,19 @@
+@@ -14,7 +15,21 @@
  @implementation MLRNMapView {
    BOOL _pendingInitialLayout;
    CGPoint _lastTapPoint;
+-}
 +  // wtf.ai: the app-fed user location (MLRNAppUserLocation.h).
 +  MLRNFedLocationManager *_appLocationManager;
 +  BOOL _appUserLocation;
@@ -1174,15 +1220,17 @@ index 2221274..50a0756 100644
 +  BOOL _appPuckDoubt;
 +  BOOL _appPuckHidden;
 +  CFTimeInterval _lastRegionIsChangingAt;
- }
- 
++  NSInteger _appQuietTracking;
++  NSDate *_appStamp;
++  NSDate *_appFedAt;
++}
++
 +/** While the map follows the fed location, `regionIsChanging` reaches JS at most this often (it fires per frame). */
 +static CFTimeInterval const MLRN_FOLLOW_REGION_EVENT_INTERVAL = 0.2;
-+
+ 
  static double const DEG2RAD = M_PI / 180;
  static double const LAT_MAX = 85.051128779806604;
- static double const TILE_SIZE = 256;
-@@ -28,6 +40,7 @@ - (instancetype)initWithFrame:(CGRect)frame {
+@@ -28,6 +43,7 @@ - (instancetype)initWithFrame:(CGRect)frame {
  
      _pendingInitialLayout = YES;
      _lastTapPoint = CGPointZero;
@@ -1190,7 +1238,7 @@ index 2221274..50a0756 100644
      _annotationSelected = NO;
      _reactTouchZoomEnabled = YES;
      _reactDoubleTapZoomEnabled = YES;
-@@ -547,6 +560,100 @@ - (void)setReactShowUserLocation:(BOOL)reactShowUserLocation {
+@@ -547,6 +563,111 @@ - (void)setReactShowUserLocation:(BOOL)reactShowUserLocation {
    self.showsUserLocation = reactShowUserLocation;
  }
  
@@ -1253,22 +1301,33 @@ index 2221274..50a0756 100644
 +  }
 +  _appPuckDoubt = doubt;
 +  _appPuckHidden = hidden;
-+  // MapLibre's dot and follow camera ease linearly over the gap between two timestamps (capped at a second): the
-+  // app feeds a pose predicted the same interval ahead, so the ease lands where the car is when it gets there.
++  // MapLibre eases the dot and the follow camera linearly over the gap between two locations' timestamps (capped at
++  // a second), and reads them for nothing else. Moving, the pose is predicted `leadMs` ahead and stamped that long
++  // after the one before, so each ease lands where the car is when it gets there, however close together two feeds
++  // come (a publish and the next step can be a millisecond apart: stamped with the clock, the second ease is a jump).
++  // Standing (no lead), the ease spans the time since the last feed.
++  NSDate *now = [NSDate date];
++  NSTimeInterval ease = leadMs > 0 ? leadMs / 1000.0 : (_appFedAt ? [now timeIntervalSinceDate:_appFedAt] : 0);
++  NSDate *stamp = [(_appStamp ?: now) dateByAddingTimeInterval:MIN(MAX(ease, 1.0 / 60), 1.0)];
++  _appStamp = stamp;
++  _appFedAt = now;
 +  CLLocation *location = [[CLLocation alloc] initWithCoordinate:CLLocationCoordinate2DMake(lat, lon)
 +                                                       altitude:0
 +                                             horizontalAccuracy:isnan(accuracyM) ? -1 : accuracyM
 +                                               verticalAccuracy:-1
 +                                                         course:isnan(courseDeg) ? -1 : courseDeg
 +                                                          speed:isnan(speedMps) ? -1 : speedMps
-+                                                      timestamp:[NSDate date]];
++                                                      timestamp:stamp];
 +  if (snap) {
-+    // A new annotation view: the next location is placed, not animated from the old one.
++    // A new annotation view: the next location is placed, not animated from the old one. Following ends with it
++    // and comes back: neither is the driver's doing, JS hears neither.
 +    MLNUserTrackingMode mode = self.userTrackingMode;
-+    self.showsUserLocation = NO;
-+    self.showsUserLocation = YES;
-+    [_appLocationManager feed:location];
-+    if (mode != MLNUserTrackingModeNone) [self setUserTrackingMode:mode animated:NO completionHandler:nil];
++    [self withQuietTracking:^{
++      self.showsUserLocation = NO;
++      self.showsUserLocation = YES;
++      [self->_appLocationManager feed:location];
++      if (mode != MLNUserTrackingModeNone) [self setUserTrackingMode:mode animated:NO completionHandler:nil];
++    }];
 +    return;
 +  }
 +  [_appLocationManager feed:location];
@@ -1291,7 +1350,22 @@ index 2221274..50a0756 100644
  // MARK: - Methods
  
  - (NSString *)takeSnap:(BOOL)writeToDisk {
-@@ -675,6 +782,13 @@ - (MLNAnnotationView *)mapView:(MLNMapView *)mapView
+@@ -665,7 +786,14 @@ - (void)_removeAllSourcesFromMap {
+   }
+ }
+ 
++- (void)withQuietTracking:(void (^)(void))block {
++  _appQuietTracking += 1;
++  block();
++  _appQuietTracking -= 1;
++}
++
+ - (void)didChangeUserTrackingMode:(MLNUserTrackingMode)mode animated:(BOOL)animated {
++  if (_appQuietTracking > 0) return;
+   [_reactCamera didChangeUserTrackingMode:mode animated:animated];
+ }
+ 
+@@ -675,6 +803,13 @@ - (MLNAnnotationView *)mapView:(MLNMapView *)mapView
               viewForAnnotation:(id<MLNAnnotation>)annotation {
    if ([annotation isKindOfClass:[MLNUserLocation class]] && mapView.userLocation != nil) {
      MLRNMapView *reactMapView = ((MLRNMapView *)mapView);
@@ -1305,7 +1379,7 @@ index 2221274..50a0756 100644
      if (reactMapView.useNativeUserLocationAnnotationView) {
        return nil;
      }
-@@ -754,6 +868,12 @@ - (void)mapView:(MLNMapView *)mapView
+@@ -754,6 +889,12 @@ - (void)mapView:(MLNMapView *)mapView
  }
  
  - (void)mapViewRegionIsChanging:(MLNMapView *)mapView {

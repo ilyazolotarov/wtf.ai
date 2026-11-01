@@ -85,6 +85,16 @@ describe("PuckFeed", () => {
     expect(feed.advance(a)!.leadMs).toBeGreaterThan(450);
   });
 
+  it("without the navigator's steps the publishes pace the lead", () => {
+    let now = 0;
+    const feed = new PuckFeed(() => now);
+    for (let i = 0; i < 20; i++) {
+      now += 250;
+      feed.publish(position());
+    }
+    expect(feed.publish(position())!.leadMs).toBeGreaterThan(200);
+  });
+
   it("a jump, a placed position and doubt", () => {
     const feed = new PuckFeed(() => 0);
     feed.publish(position());
