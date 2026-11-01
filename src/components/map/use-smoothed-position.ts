@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { AppState } from "react-native";
 
 import type { PositionEstimate } from "@/nav/position/types";
+import { jsLongTasks } from "@/services/long-tasks";
 
 import { PoseSmoother, smoothable, type Pose } from "./pose-smoother";
 
@@ -43,8 +44,10 @@ export function useSmoothedPosition(position: PositionEstimate | null, onScreen?
     let timer: ReturnType<typeof setTimeout> | undefined;
     const tick = () => {
       timer = setTimeout(tick, FRAME_MS - FRAME_SLACK_MS);
-      const pose = s.at(performance.now());
-      if (pose) setFrame({ of: position, pose });
+      jsLongTasks.label("smooth frame", () => {
+        const pose = s.at(performance.now());
+        if (pose) setFrame({ of: position, pose });
+      });
     };
     timer = setTimeout(tick, 0);
     return () => clearTimeout(timer);

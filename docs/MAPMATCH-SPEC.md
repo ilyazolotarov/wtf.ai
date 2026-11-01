@@ -501,6 +501,11 @@ repeating; `MEASURED_JAM_ARRIVALS` reproduces the real jams' Wi-Fi bursts and ce
   (map)`, and at engine off `mm timing: <n> updates, p50 … ms, p99 … ms, max … ms, … % of the time, <k> over 5 ms; <s>
   starts, slowest … ms` (`update-timing.ts`; starts are kept apart from updates: a start lays particles on every road
   around the car and reads those roads from storage). `tools/triplog` sums them (`summary()["map_match_timing"]`).
+  Beside it, `js long tasks: <n> (<r>/min), p50 … ms, p99 … ms, max … ms, … % of the time; <label> <k> (max … ms), …`
+  (`none in … min` when there were none): every task that held the JS thread 50 ms or more (React Native's `longtask`
+  entries, `src/services/long-tasks.ts`), counted under the work running then: `mm update` (the navigator fed, the
+  filter in it), `route slice` (a plan's or its alternatives' slice), `smooth frame` (the map's dot between
+  positions), `publish`, else `other`. The map's frame is 33 ms: any of these is a dropped frame while the map moves.
 - **Developer → "Map matching on the map (particles)"** draws the 200 heaviest particles (size by weight, amber
   off-road) and each hypothesis as a dashed ring of its spread labelled with its weight: the navigator's state
   ~300 ms back.

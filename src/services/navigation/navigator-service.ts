@@ -213,6 +213,8 @@ export interface NavigatorServiceDeps {
    * was left aside.
    */
   onTheWay?: { poseAfterWake(pose: { lat: number; lon: number; savedAt: number }): PoseAfterWake; poseBehind(): void };
+  /** What blocked the JS thread (src/services/long-tasks.ts): the filter's work and each publish run labelled on it. */
+  longTasks?: { label<T>(name: string, fn: () => T): T; endDrive(): string | null };
 }
 
 export interface ServiceClock {
@@ -1088,6 +1090,7 @@ export class NavigatorService implements PositionSource {
     let n = 0;
     while (n < this.pending.length && this.pending[n].tUs <= untilUs) n++;
     const ready = this.pending.splice(0, n);
+    this.label("mm update", () => {
     for (const input of ready) {
       const late = input.tUs < this.fedUs;
       if ("fix" in input) {
@@ -1163,6 +1166,13 @@ export class NavigatorService implements PositionSource {
       this.fedUs = Math.max(this.fedUs, input.tUs);
       if (!("mag" in input)) this.deps.observer?.fed?.(input.tUs);
     }
+    });
+  }
+
+  /** Runs `fn` under a long-task label (`deps.longTasks`), or plainly. */
+  private label<T>(name: string, fn: () => T): T {
+    const tasks = this.deps.longTasks;
+    return tasks ? tasks.label(name, fn) : fn();
   }
 
   private tick(): void {
@@ -1196,22 +1206,26 @@ export class NavigatorService implements PositionSource {
     this.drainUpdateTimes();
     const timing = this.timing.endDrive();
     if (timing) this.note(timing);
+    const blocked = this.deps.longTasks?.endDrive();
+    if (blocked) this.note(blocked);
     if (this.nav) this.notes.roadCorrections(this.nav);
   }
 
   // ---- output ----
 
   private publish(): void {
-    this.publishPosition();
-    this.publishParkedCar();
-    // The pose question is drawn with the position (`set`), but parked on the phone's GPS an unchanged position isn't
-    // published again (no new fix): an answered question stayed on the map, "Yes" doing nothing (2026-10-15). So with
-    // a speed limit sign waiting out its moment when no position came since the last tick: on the driver's placing it
-    // never came (2026-10-28). Driving, positions come faster and bring it.
-    const p = this.position;
-    const question = p && (p.poseQuestion?.distanceM ?? null) !== (this.shownPoseQuestion(p)?.distanceM ?? null);
-    const sign = this.clock.nowMs() - this.lastSetMs >= TICK_MS && this.limits?.waiting();
-    if (p && (question || sign)) this.set(p);
+    this.label("publish", () => {
+      this.publishPosition();
+      this.publishParkedCar();
+      // The pose question is drawn with the position (`set`), but parked on the phone's GPS an unchanged position isn't
+      // published again (no new fix): an answered question stayed on the map, "Yes" doing nothing (2026-10-15). So with
+      // a speed limit sign waiting out its moment when no position came since the last tick: on the driver's placing it
+      // never came (2026-10-28). Driving, positions come faster and bring it.
+      const p = this.position;
+      const question = p && (p.poseQuestion?.distanceM ?? null) !== (this.shownPoseQuestion(p)?.distanceM ?? null);
+      const sign = this.clock.nowMs() - this.lastSetMs >= TICK_MS && this.limits?.waiting();
+      if (p && (question || sign)) this.set(p);
+    });
   }
 
   /**

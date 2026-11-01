@@ -25,6 +25,7 @@ import { NavigatorService } from "./navigation/navigator-service";
 import { ROUTER_CACHE_TILES, RouteService } from "./navigation/route-service";
 import { startUpdateCenter, waitingUpdateInfo } from "./app-update/update-center";
 import { activeCameras } from "./offline-map/camera-file";
+import { jsLongTasks } from "./long-tasks";
 import { onMapDownloadFailed, onMapDownloadStep } from "./offline-map/map-packs";
 import { activeRoadGraph, openActiveRoadGraph } from "./offline-map/road-graph-file";
 import { SensorService } from "./sensor-capture/sensor-service";
@@ -400,9 +401,12 @@ export function getRuntime(): Runtime {
   schedulePrune();
 
   const onTheWay = new OnTheWay();
+  // What blocks the JS thread, into each drive's trip log (MAPMATCH-SPEC §14).
+  jsLongTasks.start();
   const position = new NavigatorService({
     sensors,
     link,
+    longTasks: jsLongTasks,
     // The GNSS lag is stored per phone model and iOS version (NAVIGATOR-SPEC §7.4).
     calibration: new CalibrationStore(kvStore, { model: sysHw, os: sysOsVer }),
     nowUs,
@@ -454,6 +458,11 @@ export function getRuntime(): Runtime {
     openGraph: () => openActiveRoadGraph(ROUTER_CACHE_TILES),
     nowUs,
     store: kvStore,
+    // Each slice of a search (a plan or its alternatives) labelled for the long-task line.
+    defer: (fn, ms) => {
+      const timer = setTimeout(() => jsLongTasks.label("route slice", fn), ms);
+      return () => clearTimeout(timer);
+    },
     onRoute: (plan, graphKey) => {
       position.setPhoneRoute(plan ? plan.coordinates : null);
       position.setRouteRoads(plan && graphKey ? { key: graphKey, legs: plan.legs } : null);
