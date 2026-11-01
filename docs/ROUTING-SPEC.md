@@ -19,8 +19,7 @@ on the map-matching road graph ([MAPMATCH-SPEC.md](MAPMATCH-SPEC.md) §4–5). S
 | Cost | **Time** (s): length at a speed from the map's limit, setting and surface (by class on graphs without attributes), plus junction, turn and traffic-light time, rush hours in big cities, penalties for private, minor service and track roads (§4). No live traffic: none is open for Ukraine (TomTom answers nothing for Ukrainian points, Google switched public traffic off, the open collections list no Ukrainian speeds). |
 | OSM rules | **Hard** for planning: never against a one-way, never a restricted turn, U-turns only at dead ends or at the start. (The filter keeps them soft: a route must be legal, a position must survive wrong tags.) |
 | Extent | One region: no cross-region routes. |
-| Destination | A point on the map (long press), a city from the list, or an address search result ([SEARCH-SPEC.md](SEARCH-SPEC.md)). |
-| Instructions | From the route's geometry and the graph (turn angle, roundabouts); no street names (not in the graph). |
+| Destination | A point on the map (long press), a city from the list, or an address search result ([SEARCH-SPEC.md](SEARCH-SPEC.md)). || Instructions | From the route's geometry and the graph (turn angle, roundabouts); no street names (not in the graph). |
 | Thread | The JS thread, in slices (§5.4): a long search must not freeze the map. |
 
 ## 3. Status
@@ -272,9 +271,10 @@ car left. Optimistic as the simulator is.
 
 ### 8.5 Voice (`announcer.ts`, `src/components/route/voice-*.ts`, `modules/audio-output`, `tools/voice/`)
 
-- **Clips:** recorded phrases from a neural voice (Ukrainian `uk-UA-PolinaNeural`, English `en-GB-SoniaNeural`),
-  whole phrases with the distance in words ("Через триста метрів, поверніть ліворуч"; digits get misread), so the
-  intonation and the grammar of numbers are right. `npm run voice:render` records them into `assets/voice/<lang>/`
+- **Clips:** recorded phrases from neural voices, a female and a male one per language (Ukrainian `uk-UA-PolinaNeural`
+  and `uk-UA-OstapNeural`, English `en-GB-SoniaNeural` and `en-GB-RyanNeural`), whole phrases with the distance in words
+  ("Через триста метрів, поверніть ліворуч"; digits get misread), so the intonation and the grammar of numbers are
+  right. `npm run voice:render` records them into `assets/voice/<lang>/` (female) and `assets/voice/<lang>-male/`
   (edge-tts, silence trimmed) and writes the clip index; a Jest test fails when the words changed without recording
   again. Each clip is compressed and brought to −15 LUFS, peaks under −1.5 dBFS: the loudest the voice plays. The
   default volume (80 %) plays it near −19 LUFS, Google's reference for mono voice. An announcement without a clip for
@@ -311,14 +311,19 @@ car left. Optimistic as the simulator is.
   in a row with nothing said between them say "Маршрут перебудовано" once. On the driver's own way (§8.2's
   `ownWay`) nothing is said but arrival. `npm run replay:voice` checks "turn now" against when
   the car turned (the gyro).
-- **Controls:** the banner's speaker button mutes it (kept across launches). Settings has the volume, 0–100 % (a
-  sample is said when the finger leaves the slider; 0 turns the voice off and hides the button). The player's gain is
-  the square of the setting, so equal steps sound about equal; it applies to the clips and the system voice.
+- **Controls:** the banner's speaker button mutes it (kept across launches). Settings has the volume, 0–100 % (a sample
+  is said when the finger leaves the slider; 0 turns the voice off and hides the button). The player's gain is the
+  square of the setting, so equal steps sound about equal; it applies to the clips and the system voice. The voice,
+  female (default) or male, is whose clips play for everything the app says (route, cameras, "place the car"); a
+  language without the chosen voice's clips plays the other's. Fewer announcements: each maneuver only at it (with its
+  "потім …"), no "ahead" and no "Маршрут перебудовано"; arrival and the cameras as before. The announcer runs the same
+  either way, so switching mid-route neither repeats nor loses a maneuver.
 - **Trip log:** `audio output: <kind> "<device>", volume <n> %` when a route starts and `audio output now: …` on each
   change (speaker, receiver, wired, bluetooth, carplay, airplay; on Android `; all: …` and `capture` for a screen
-  recording or cast), `voice say <phrase ids>` per announcement (`(system voice)` without clips, `after <n> waiting`
-  when queued), `voice muted: …`, and what went wrong (a clip that never ended, one that didn't load, the system voice
-  failing, a clip paused by the system and played again). Whatever the player does, the next announcement is said.
+  recording or cast), `voice say <phrase ids>` per announcement (`(male)` in the male voice, `(system voice)` without
+  clips, `after <n> waiting` when queued), `voice muted: …`, `voice fewer: …` (not said with fewer announcements), and
+  what went wrong (a clip that never ended, one that didn't load, the system voice failing, a clip paused by the system
+  and played again). Whatever the player does, the next announcement is said.
 
 ### 8.6 Route hint (removed)
 

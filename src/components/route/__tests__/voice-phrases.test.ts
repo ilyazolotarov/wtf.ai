@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import { en } from "@/i18n/en";
@@ -46,8 +46,13 @@ describe("voice phrases", () => {
     expect(recorded.has(announcementPhrases(now(m("roundabout", 7)), tUk, "uk")[0].id)).toBe(false);
   });
 
-  test("the recorded clips are those of the current words (npm run voice:render)", () => {
-    const manifest = JSON.parse(readFileSync(path.join(__dirname, "../../../../assets/voice/uk/phrases.json"), "utf8"));
-    expect(manifest.phrases).toEqual(Object.fromEntries(recordedPhrases(tUk, "uk").map((p) => [p.id, p.text])));
+  test("the recorded clips are those of the current words, in every voice (npm run voice:render)", () => {
+    const voices = path.join(__dirname, "../../../../assets/voice");
+    for (const folder of readdirSync(voices)) {
+      const lang = folder.split("-")[0] as "en" | "uk";
+      const t = lang === "uk" ? tUk : tEn;
+      const manifest = JSON.parse(readFileSync(path.join(voices, folder, "phrases.json"), "utf8"));
+      expect([folder, manifest.phrases]).toEqual([folder, Object.fromEntries(recordedPhrases(t, lang).map((p) => [p.id, p.text]))]);
+    }
   });
 });

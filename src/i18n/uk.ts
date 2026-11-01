@@ -523,6 +523,13 @@ export const uk = {
   voiceVolumeOff: "Вимкнено",
   voiceVolumeOffNote:
     "Голосових підказок не буде, а кнопку звуку на мапі сховано.",
+  routeVoice: "Голосові підказки",
+  voiceName: "Голос",
+  voiceFemale: "Жіночий",
+  voiceMale: "Чоловічий",
+  fewerAnnouncements: "Менше підказок",
+  fewerAnnouncementsNote:
+    "Підказки звучать лише перед самим поворотом — без «через 300 метрів» і «маршрут перебудовано». Попередження про камери та повідомлення про прибуття залишаються.",
   speedSection: "Швидкість",
   speedLimitSetting: "Звукове попередження про перевищення швидкості",
   speedLimitNote:

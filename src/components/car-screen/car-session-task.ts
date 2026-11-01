@@ -8,13 +8,14 @@ import { adapterStatusOf } from "@/components/status/use-nav-status";
 import {
   gainOf,
   loadVoiceMuted,
+  loadVoiceName,
   loadVoiceVolume,
   saveVoiceMuted,
   subscribeVoiceMuted,
   subscribeVoiceVolume,
   VoiceGuide,
 } from "@/components/route/use-voice-guidance";
-import { hushVoice, setVoiceAsGuidance, setVoiceNote, setVoiceVolume } from "@/components/route/voice-player";
+import { hushVoice, setVoiceAsGuidance, setVoiceName, setVoiceNote, setVoiceVolume } from "@/components/route/voice-player";
 import { initSentry } from "@/config/sentry";
 import { appStrings, subscribeAppLanguage } from "@/i18n/provider";
 import { haversineM } from "@/nav/geo";
@@ -94,10 +95,11 @@ async function runCarScreen(native: CarSessionDeps["native"], name: string, feat
   Sentry.setTag(CAR_SCREEN_TAG, feature);
   const runtime = getRuntime();
   const { recorder, routes, position, link } = runtime;
-  // The voice as the phone's map sets it up: its notes, the driver's volume (Settings), and as navigation guidance,
-  // which the car mixes over whatever it plays (ROUTING-SPEC §8.5).
+  // The voice as the phone's map sets it up: its notes, the driver's volume and voice (Settings), and as navigation
+  // guidance, which the car mixes over whatever it plays (ROUTING-SPEC §8.5).
   setVoiceNote((text) => recorder.note(text));
   setVoiceVolume(gainOf(loadVoiceVolume()));
+  setVoiceName(loadVoiceName());
   setVoiceAsGuidance(true);
   const guide = new VoiceGuide();
   const testDrive = new TestDrive({

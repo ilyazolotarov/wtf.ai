@@ -2,16 +2,18 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 
 import type { Strings } from "@/i18n/en";
 import { useT } from "@/i18n/provider";
-import { Announcer } from "@/nav/routing/announcer";
+import { Announcer, type Announcement } from "@/nav/routing/announcer";
 import type { RouteSnapshot } from "@/services/navigation/route-service";
 import { kvStore } from "@/services/kv-store";
 import { getRuntime } from "@/services/runtime";
 
-import { announcementPhrases } from "./voice-phrases";
-import { hushVoice, sayPhrases, setVoiceNote, setVoiceVolume } from "./voice-player";
+import { announcementPhrases, type VoiceName } from "./voice-phrases";
+import { hushVoice, sayPhrases, setVoiceName, setVoiceNote, setVoiceVolume } from "./voice-player";
 
 const MUTED_KEY = "route.voice.muted";
 const VOLUME_KEY = "route.voice.volume";
+const NAME_KEY = "route.voice.name";
+const FEWER_KEY = "route.voice.fewer";
 
 /**
  * The default volume: the clips are recorded loud (−15 LUFS, for loud music), and 80 % plays them 3.9 dB lower, near
@@ -78,6 +80,54 @@ export function useVoiceMuted(): [boolean, () => void] {
   return [value, () => saveVoiceMuted(!value)];
 }
 
+/** A voice setting kept across launches, read once and followed by the screens showing it. */
+function voiceSetting<V>(key: string, fallback: V, valid: (v: unknown) => v is V) {
+  let value: V | null = null;
+  const listeners = new Set<() => void>();
+  const load = (): V => {
+    if (value === null) {
+      const v = kvStore.getJson<unknown>(key);
+      value = valid(v) ? v : fallback;
+    }
+    return value;
+  };
+  const save = (next: V) => {
+    value = next;
+    kvStore.setJson(key, next);
+    listeners.forEach((l) => l());
+  };
+  const subscribe = (l: () => void) => {
+    listeners.add(l);
+    return () => void listeners.delete(l);
+  };
+  return { load, save, useValue: () => useSyncExternalStore(subscribe, load) };
+}
+
+const voiceName = voiceSetting<VoiceName>(NAME_KEY, "female", (v): v is VoiceName => v === "female" || v === "male");
+
+/** Whose voice says the route (and the cameras): the recorded female or male one. */
+export const loadVoiceName = voiceName.load;
+export const useVoiceName = voiceName.useValue;
+
+export function saveVoiceName(next: VoiceName): void {
+  voiceName.save(next);
+  setVoiceName(next);
+}
+
+const fewer = voiceSetting<boolean>(FEWER_KEY, false, (v): v is boolean => typeof v === "boolean");
+
+/**
+ * Fewer announcements: each maneuver said only at it, no "in 300 metres" ahead of it and no "route recalculated".
+ * Arrival and the cameras still are.
+ */
+export const loadFewerAnnouncements = fewer.load;
+export const saveFewerAnnouncements = fewer.save;
+export const useFewerAnnouncements = fewer.useValue;
+
+/** Not said with fewer announcements: what is ahead, and a re-plan. */
+const isMinor = (a: Announcement) => a.kind === "replanned" || (a.kind === "maneuver" && a.stage === "prepare");
+const listed = (said: Announcement[]) => said.map((a) => (a.kind === "maneuver" ? `${a.stage} ${a.maneuver.kind}` : a.kind)).join(", ");
+
 /**
  * Who speaks the route: one voice however many screens show it (the phone's map, the car's screen). The first to claim
  * it speaks; the others follow the route in silence, ready to take over when it lets go.
@@ -118,10 +168,12 @@ export class VoiceGuide {
     });
     if (!said.length || voiceClaims[0] !== this) return;
     if (muted) {
-      getRuntime().recorder.note(`voice muted: ${said.map((a) => (a.kind === "maneuver" ? `${a.stage} ${a.maneuver.kind}` : a.kind)).join(", ")}`);
+      getRuntime().recorder.note(`voice muted: ${listed(said)}`);
       return;
     }
-    for (const a of said) sayPhrases(announcementPhrases(a, t, language), language);
+    const skipped = loadFewerAnnouncements() ? said.filter(isMinor) : [];
+    if (skipped.length) getRuntime().recorder.note(`voice fewer: ${listed(skipped)}`);
+    for (const a of said) if (!skipped.includes(a)) sayPhrases(announcementPhrases(a, t, language), language);
   }
 }
 
@@ -134,6 +186,7 @@ export function useVoiceGuidance(route: RouteSnapshot | null, speedMps: number |
   useEffect(() => {
     setVoiceNote((text) => getRuntime().recorder.note(text));
     setVoiceVolume(gainOf(loadVoiceVolume()));
+    setVoiceName(loadVoiceName());
     return guide.claim();
   }, [guide]);
 

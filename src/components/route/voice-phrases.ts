@@ -9,6 +9,8 @@ import type { Maneuver, ManeuverKind } from "@/nav/routing/maneuvers";
 import { MANEUVER_TEXT } from "./guidance-text";
 
 export type VoiceLang = "en" | "uk";
+/** The recorded voices (tools/voice/render.ts): the female one first, every language has it. */
+export type VoiceName = "female" | "male";
 type T = (key: keyof Strings) => string;
 
 export interface Phrase {

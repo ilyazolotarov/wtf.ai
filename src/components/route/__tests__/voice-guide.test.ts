@@ -6,7 +6,7 @@ import type { GuidanceStep } from "@/nav/routing/guidance";
 import type { Maneuver } from "@/nav/routing/maneuvers";
 import type { RouteSnapshot } from "@/services/navigation/route-service";
 
-import { VoiceGuide } from "../use-voice-guidance";
+import { saveFewerAnnouncements, VoiceGuide } from "../use-voice-guidance";
 import { sayPhrases } from "../voice-player";
 
 // jest.mock calls are hoisted above the imports.
@@ -16,6 +16,7 @@ jest.mock("../voice-player", () => ({
   hushVoice: jest.fn(),
   setVoiceNote: jest.fn(),
   setVoiceVolume: jest.fn(),
+  setVoiceName: jest.fn(),
 }));
 jest.mock("@/services/runtime", () => ({ getRuntime: () => ({ recorder: { note: (text: string) => mockNotes.push(text) } }) }));
 jest.mock("@/services/kv-store", () => ({ kvStore: { getJson: () => null, setJson: () => {} } }));
@@ -88,6 +89,30 @@ describe("VoiceGuide", () => {
     expect(sayPhrases).not.toHaveBeenCalled();
     expect(mockNotes).toEqual(["voice muted: arrived"]);
     releases.forEach((r) => r());
+  });
+
+  test("fewer announcements: the turn at it and arrival, not what is ahead nor a re-plan", () => {
+    saveFewerAnnouncements(true);
+    const guide = new VoiceGuide();
+    const release = guide.claim();
+    const at = (planId: number, toNextM: number, state: GuidanceStep["state"] = "on"): RouteSnapshot => {
+      const r = route(state);
+      return {
+        ...r,
+        planId,
+        maneuvers: [m("depart", 0), m("left", 1000), m("arrive", 2000)],
+        guidance: { ...r.guidance!, nextIndex: state === "arrived" ? 2 : 1, toNextM, alongM: 1000 - toNextM },
+      };
+    };
+    guide.update(at(1, 900), 10, false, t, "en");
+    guide.update(at(1, 300), 10, false, t, "en");
+    guide.update(at(2, 250), 10, false, t, "en");
+    guide.update(at(2, 30), 10, false, t, "en");
+    guide.update(at(2, 0, "arrived"), 10, false, t, "en");
+    expect(jest.mocked(sayPhrases).mock.calls.map(([phrases]) => phrases.map((p) => p.id))).toEqual([["now-left"], ["arrived"]]);
+    expect(mockNotes).toEqual(["voice fewer: prepare left", "voice fewer: replanned"]);
+    saveFewerAnnouncements(false);
+    release();
   });
 
   test("without a claim, silent", () => {

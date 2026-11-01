@@ -13,7 +13,7 @@ import {
   voicePromptStyle,
 } from "../../../modules/audio-output/src/AudioOutputModule";
 import { VOICE_CLIPS } from "./voice-clips";
-import type { Phrase, VoiceLang } from "./voice-phrases";
+import type { Phrase, VoiceLang, VoiceName } from "./voice-phrases";
 
 /**
  * `gain`: this item's own (a sample at another volume); otherwise the driver's, as the player has it when it plays.
@@ -41,6 +41,8 @@ let audioMode: Promise<void> | null = null;
 let note: (text: string) => void = () => {};
 /** The player's gain for the driver's voice volume (Settings), 0–1 of the recorded level: a clip already playing keeps its own. */
 let volume = 1;
+/** Whose recorded clips play (Settings). */
+let voiceName: VoiceName = "female";
 /** Clips as navigation guidance (Android's own player) while Android Auto is connected; else through expo-audio. */
 let asGuidance = false;
 /** iOS: expo-audio's session in the voice-prompt mode while CarPlay is connected. */
@@ -48,6 +50,10 @@ let voicePrompt = false;
 
 export function setVoiceNote(fn: (text: string) => void): void {
   note = fn;
+}
+
+export function setVoiceName(name: VoiceName): void {
+  voiceName = name;
 }
 
 export function setVoiceVolume(v: number): void {
@@ -123,11 +129,14 @@ export function playSpeedWarning(fallback: string, lang: VoiceLang): void {
 
 function say(phrases: Phrase[], lang: VoiceLang, gain: number | undefined, speaker: boolean): void {
   const language = languageOf(lang);
-  const clips = phrases.map((p) => VOICE_CLIPS[lang]?.[p.id]);
+  // The driver's voice where it is recorded for the language, else the other one: never the system voice for it.
+  const by = VOICE_CLIPS[lang]?.[voiceName] ? voiceName : "female";
+  const clips = phrases.map((p) => VOICE_CLIPS[lang]?.[by]?.[p.id]);
   const recorded = clips.every((c) => c !== undefined);
   if (recorded) queue.push(...phrases.map((p, i) => ({ clip: clips[i]!, id: p.id, text: p.text, language, gain, speaker })));
   else queue.push({ text: phrases.map((p) => p.text).join(", "), language, gain });
-  note(`voice say ${phrases.map((p) => p.id).join(" + ")}${recorded ? (speaker ? " (phone speaker)" : "") : " (system voice)"}${busy ? `, after ${queue.length - 1} waiting` : leadIn()}`);
+  const how = recorded ? [by === "male" && "male", speaker && "phone speaker"].filter(Boolean).join(", ") : "system voice";
+  note(`voice say ${phrases.map((p) => p.id).join(" + ")}${how ? ` (${how})` : ""}${busy ? `, after ${queue.length - 1} waiting` : leadIn()}`);
   begin();
 }
 

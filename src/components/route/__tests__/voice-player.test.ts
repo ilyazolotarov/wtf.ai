@@ -1,7 +1,7 @@
 // The route voice's queue (voice-player.ts) on a fake audio player: whatever the player does or fails to report, the
 // next announcement is still said.
 
-import { hushVoice, sayOnSpeaker, sayPhrases, setVoiceAsGuidance, setVoiceNote, setVoiceVolume } from "../voice-player";
+import { hushVoice, sayOnSpeaker, sayPhrases, setVoiceAsGuidance, setVoiceName, setVoiceNote, setVoiceVolume } from "../voice-player";
 
 // jest.mock calls are hoisted above the import.
 type Listener = (status: { didJustFinish: boolean; playing?: boolean }) => void;
@@ -86,7 +86,13 @@ jest.mock("expo-asset", () => ({
   Asset: { fromModule: (clip: number) => ({ downloadAsync: () => Promise.resolve({ localUri: `file:///clip-${clip}.mp3` }) }) },
 }));
 
-jest.mock("../voice-clips", () => ({ VOICE_CLIPS: { en: { "now-left": 1, "now-right": 2, "then-left": 3 } } }));
+// English in both voices, Ukrainian only in the female one.
+jest.mock("../voice-clips", () => ({
+  VOICE_CLIPS: {
+    en: { female: { "now-left": 1, "now-right": 2, "then-left": 3 }, male: { "now-left": 11, "now-right": 12, "then-left": 13 } },
+    uk: { female: { "now-left": 21 } },
+  },
+}));
 // The second of silence ahead of each announcement on CarPlay (every asset is 1 to jest-expo otherwise).
 jest.mock("../../../../assets/sounds/lead-in.mp3", () => 99);
 
@@ -112,6 +118,7 @@ beforeEach(() => {
   mockVoicePrompt.length = 0;
   setVoiceNote((t) => notes.push(t));
   setVoiceVolume(1);
+  setVoiceName("female");
 });
 afterEach(() => {
   setVoiceAsGuidance(false);
@@ -128,6 +135,17 @@ describe("voice player", () => {
     sayPhrases([{ id: "no-clip", text: "Somewhere" }], "en");
     await flush();
     expect(mockSpoken[0].options.volume).toBe(0.6);
+  });
+
+  test("the male voice plays its own clips; a language without them, the female one's", async () => {
+    setVoiceName("male");
+    sayPhrases([{ id: "now-left", text: "Turn left" }], "en");
+    await flush();
+    finish(0);
+    sayPhrases([{ id: "now-left", text: "Поверніть ліворуч" }], "uk");
+    await flush();
+    expect(mockPlayers.map((p) => p.clip)).toEqual([11, 21]);
+    expect(notes).toEqual(["voice say now-left (male)", "voice say now-left"]);
   });
 
   test("clips play one after another, each when the last reports its end", async () => {

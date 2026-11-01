@@ -494,6 +494,13 @@ export const en = {
   voiceVolumeNote: "Default: 80%. Let go of the slider to hear a sample.",
   voiceVolumeOff: "Off",
   voiceVolumeOffNote: "No voice guidance, and the sound button on the map is hidden.",
+  routeVoice: "Voice guidance",
+  voiceName: "Voice",
+  voiceFemale: "Female",
+  voiceMale: "Male",
+  fewerAnnouncements: "Fewer announcements",
+  fewerAnnouncementsNote:
+    "Turn instructions play only just before the turn — no “in 300 metres” or “route recalculated” announcements. You'll still hear speed camera alerts and arrival announcements.",
   speedSection: "Speed",
   speedLimitSetting: "Speed warning chime",
   speedLimitNote:
