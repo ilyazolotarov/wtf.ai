@@ -18,6 +18,7 @@ import { MapCredit, type CreditAt } from "./map-credit";
 import { nativePuckStyle } from "./puck-native";
 import { useRoute } from "@/providers/route-provider";
 import { STANDING_MPS } from "@/services/navigation/place-request";
+import type { PuckRegistration } from "@/services/navigation/puck-feed";
 import { activeCameras } from "@/services/offline-map/camera-file";
 import { activeSearchIndex } from "@/services/offline-map/search-file";
 import { useMapPacks } from "@/services/offline-map/map-packs";
@@ -33,15 +34,15 @@ import {
   CameraLayers,
   DebugLayers,
   EntranceLayers,
+  GhostLayers,
   MarkLayers,
   NearLayers,
   ParkedCarLayers,
-  PositionLayers,
   PuckLayers,
   RouteLayers,
 } from "./map-layers";
 import type { CameraMode } from "./use-camera-mode";
-import type { CompassHeading } from "./use-compass-heading";
+import { mapBearingDeg, type CompassHeading } from "./use-compass-heading";
 import { useMapCamera } from "./use-map-camera";
 import { useMapControl, type MapControl } from "./use-map-control";
 import type { PlacingStep } from "./use-placing";
@@ -259,16 +260,32 @@ export function MapSurface({
   useEffect(() => {
     onCarRef.current = onCar;
   }, [onCar]);
+  // Walking, the dot's cone is the compass's: where the phone points, as wide as the compass is unsure. It is fed as
+  // the dot's course, so heading-up turns the map with it too (UI-SPEC §6.2).
+  const compassCone = compass && { courseDeg: mapBearingDeg(compass.headingRad), halfDeg: (compass.uncertaintyRad * 180) / Math.PI };
+  const compassRef = useRef(compassCone);
+  const fed = useRef<PuckRegistration | null>(null);
   useEffect(() => {
     if (!mapReady) return;
     const map = mapRef.current;
     if (!map) return;
     // The phone's map is fed while the app is in front; the car's own screen always.
-    return puckFeed.register(map, {
+    const registration = puckFeed.register(map, {
       active: () => onOwnScreen || AppState.currentState === "active",
       hidden: () => onCarRef.current,
+      compass: () => compassRef.current,
     });
+    fed.current = registration;
+    return () => {
+      registration.unregister();
+      if (fed.current === registration) fed.current = null;
+    };
   }, [mapReady, onOwnScreen, puckFeed]);
+  const [compassDeg, compassHalfDeg] = [compassCone?.courseDeg ?? null, compassCone?.halfDeg ?? null];
+  useEffect(() => {
+    compassRef.current = compassDeg === null || compassHalfDeg === null ? null : { courseDeg: compassDeg, halfDeg: compassHalfDeg };
+    fed.current?.compassTurned();
+  }, [compassDeg, compassHalfDeg]);
   // Heading-up: far house numbers, entrances and POIs other than a driver's gone (map-near.ts), measured from a point
   // that moves on in steps. (State adjusted during render, not in an effect.)
   const [near, setNear] = useState<Coordinate | null>(null);
@@ -425,16 +442,8 @@ export function MapSurface({
         <CameraLayers cameras={cameras} aheadId={position?.cameraAhead?.id} />
         <ParkedCarLayers car={car} scheme={scheme} zoom={view.zoom} />
         <MarkLayers pin={pin} placedMark={placedMark?.draft ? placedMark : null} palette={palette} scheme={scheme} />
-        {/* The native dot brings its own circle and cone; the walking compass's cone stays the layer's. */}
-        <PositionLayers
-          position={position}
-          compass={compass}
-          palette={palette}
-          scheme={scheme}
-          view={view}
-          hideCone={onCar || !compass}
-          hideAccuracy
-        />
+        {/* The dot, its circle and its cone (the walking compass's too) are the map's own user location. */}
+        <GhostLayers position={position} palette={palette} />
         <DebugLayers position={position} palette={palette} />
         <PuckLayers position={position} palette={palette} scheme={scheme} hideDot />
       </Map>

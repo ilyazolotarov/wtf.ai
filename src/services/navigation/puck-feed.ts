@@ -3,7 +3,8 @@
 // The feed runs between the navigator's publishes (2–3 Hz) at the navigator's own pace (an IMU batch, ~10 Hz): the
 // published dot, which map matching placed and the parity tool checks, moved on by the EKF's displacement since that
 // publish, and predicted one feed interval ahead so the ease lands where the car is when it gets there. Standing, the
-// dot is fed as published. Pure (`PuckFeed`); `PuckFeeder` wires it to the navigator and the mounted maps.
+// dot is fed as published. A map showing the walking compass gets its heading as the course and its uncertainty as the
+// cone's width, fed again as it turns. Pure (`PuckFeed`); `PuckFeeder` wires it to the navigator and the mounted maps.
 import type { PositionEstimate } from "@/nav/position/types";
 
 /** Below this the dot is drawn where it is (standing, crawling, walking). */
@@ -137,9 +138,24 @@ export class PuckFeed {
   }
 }
 
-/** A map the feed reaches (the wrapper's `MapRef.feedUserLocation`). */
+/** A map the feed reaches (the wrapper's `MapRef.feedUserLocation`); `coneHalfDeg` NaN: the puck style's cone. */
 export interface PuckTarget {
-  feedUserLocation(lat: number, lon: number, courseDeg: number, speedMps: number, accuracyM: number, leadMs: number, flags: number): void;
+  feedUserLocation(
+    lat: number,
+    lon: number,
+    courseDeg: number,
+    speedMps: number,
+    accuracyM: number,
+    leadMs: number,
+    flags: number,
+    coneHalfDeg: number,
+  ): void;
+}
+
+/** The walking compass as the dot's cone (UI-SPEC §6.1): where the phone points, degrees from north, and its half-width. */
+export interface CompassCone {
+  courseDeg: number;
+  halfDeg: number;
 }
 
 export interface PuckTargetOptions {
@@ -147,6 +163,19 @@ export interface PuckTargetOptions {
   active(): boolean;
   /** The dot gives way (standing on the drawn car). */
   hidden(): boolean;
+  /** The walking compass shown on this map, null: none (the dot's own heading). */
+  compass?(): CompassCone | null;
+}
+
+/** A map's place in the feed. */
+export interface PuckRegistration {
+  /** Fed no more. */
+  unregister(): void;
+  /**
+   * The map's compass turned (or came or went): its last pose again, with the cone where the compass is now. Never a
+   * snap: placed again, iOS would make the dot's view anew at every step of the compass.
+   */
+  compassTurned(): void;
 }
 
 export const FEED_FLAG_SNAP = 1;
@@ -188,13 +217,21 @@ export class PuckFeeder {
     this.stop = null;
   }
 
-  /** A map to feed; it gets the last pose at once, placed. */
-  register(target: PuckTarget, options: PuckTargetOptions): () => void {
+  /**
+   * A map to feed; it gets the last pose at once, placed. Held by its registration: the wrapper's `MapRef` is a new
+   * object at each render of its map, so a later one finds no entry.
+   */
+  register(target: PuckTarget, options: PuckTargetOptions): PuckRegistration {
     const entry = { ...options, fedOnce: false };
     this.targets.set(target, entry);
     if (this.last) this.sendTo(target, entry, this.last);
-    return () => {
-      this.targets.delete(target);
+    return {
+      unregister: () => {
+        if (this.targets.get(target) === entry) this.targets.delete(target);
+      },
+      compassTurned: () => {
+        if (this.targets.get(target) === entry && this.last) this.sendTo(target, entry, { ...this.last, snap: false });
+      },
     };
   }
 
@@ -209,8 +246,10 @@ export class PuckFeeder {
     const snap = pose.snap || !entry.fedOnce;
     entry.fedOnce = true;
     const flags = (snap ? FEED_FLAG_SNAP : 0) | (pose.doubt ? FEED_FLAG_DOUBT : 0) | (entry.hidden() ? FEED_FLAG_HIDDEN : 0);
+    const compass = entry.compass?.() ?? null;
+    const courseDeg = compass ? compass.courseDeg : pose.courseDeg;
     try {
-      target.feedUserLocation(pose.lat, pose.lon, pose.courseDeg, pose.speedMps, pose.accuracyM, pose.leadMs, flags);
+      target.feedUserLocation(pose.lat, pose.lon, courseDeg, pose.speedMps, pose.accuracyM, pose.leadMs, flags, compass ? compass.halfDeg : NaN);
     } catch {
       // A map whose view is gone before its unregister throws (the wrapper finds no view): it is fed no more.
       this.targets.delete(target);

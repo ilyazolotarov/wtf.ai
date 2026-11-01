@@ -1,6 +1,6 @@
 import type { PositionEstimate } from "@/nav/position/types";
 
-import { FEED_FLAG_DOUBT, FEED_FLAG_HIDDEN, FEED_FLAG_SNAP, type NavAdvance, PuckFeed, PuckFeeder } from "../puck-feed";
+import { type CompassCone, FEED_FLAG_DOUBT, FEED_FLAG_HIDDEN, FEED_FLAG_SNAP, type NavAdvance, PuckFeed, PuckFeeder } from "../puck-feed";
 
 const M_PER_DEG_LAT = 111_320;
 
@@ -158,6 +158,32 @@ describe("PuckFeeder", () => {
     h.feeder.register({ feedUserLocation: (...args) => late.push(args) }, { active: () => true, hidden: () => false });
     expect(late).toHaveLength(1);
     expect(late[0][6]).toBe(FEED_FLAG_SNAP);
+  });
+
+  it("a map's walking compass is its dot's cone: its heading and width, fed again as it turns, never placed again", () => {
+    const h = harness();
+    const calls: number[][] = [];
+    let compass: CompassCone | null = { courseDeg: 120, halfDeg: 35 };
+    const target = { feedUserLocation: (...args: number[]) => calls.push(args) };
+    const registration = h.feeder.register(target, { active: () => true, hidden: () => false, compass: () => compass });
+    h.publish(position({ speedMps: 1 }));
+    expect([calls[0][2], calls[0][7]]).toEqual([120, 35]);
+    compass = { courseDeg: 150, halfDeg: 20 };
+    registration.compassTurned();
+    expect(calls).toHaveLength(2);
+    expect(calls[1].slice(0, 2)).toEqual(calls[0].slice(0, 2));
+    expect([calls[1][2], calls[1][7]]).toEqual([150, 20]);
+    expect(calls[1][6] & FEED_FLAG_SNAP).toBe(0);
+    // Gone: the dot's own heading (north) and the style's cone.
+    compass = null;
+    registration.compassTurned();
+    expect(calls[2][2]).toBe(0);
+    expect(calls[2][7]).toBeNaN();
+    // Unregistered: fed no more.
+    registration.unregister();
+    registration.compassTurned();
+    h.publish(position({ speedMps: 1 }));
+    expect(calls).toHaveLength(3);
   });
 
   it("a map whose view is gone is dropped, the others still fed", () => {

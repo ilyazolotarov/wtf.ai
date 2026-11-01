@@ -16,7 +16,6 @@ import type { RouteSnapshot } from "@/services/navigation/route-service";
 
 import { ENTRANCE_MINZOOM, type EntranceFeatures } from "./map-entrances";
 import {
-  accuracyFeatures,
   alternativeFeatures,
   alternativeLabelFeatures,
   alternativeLineFeatures,
@@ -28,13 +27,9 @@ import {
   particleFeatures,
   pointFeatures,
   routeFeatures,
-  screenSectorFeatures,
   sectorFeatures,
-  type CameraView,
 } from "./map-features";
 import {
-  CONE,
-  CONE_FILL_OPACITY,
   CONE_OUTLINE,
   DESTINATION_DOT,
   MAP_CAR,
@@ -45,7 +40,6 @@ import {
   ROUTE_LINE,
 } from "./puck-style";
 import { NEAR_NUMBERS_M, NEAR_POIS_M, nearFilter, nearOpacity, type NearHouses } from "./map-near";
-import type { CompassHeading } from "./use-compass-heading";
 
 /**
  * The map's own layers, in groups. MapLibre stacks layers in the order they are declared, so `MapSurface` renders
@@ -352,86 +346,14 @@ export function MarkLayers({
 }
 
 /**
- * Under the puck: its accuracy circle, the heading cone (from the walking compass, `compass`, away from the car), and the raw GNSS
- * fix while it is suspected of spoofing (the ghost).
+ * The raw GNSS fix while it is suspected of spoofing (the ghost). The dot, its circle and its heading cone, the walking
+ * compass's too, are the map's own user location (puck-feed.ts).
  */
-export function PositionLayers({
-  position,
-  compass,
-  palette,
-  scheme,
-  view,
-  hideCone = false,
-  hideAccuracy = false,
-}: {
-  position: PositionEstimate | null;
-  compass: CompassHeading | null;
-  palette: Palette;
-  scheme: "light" | "dark";
-  /** The camera now: the heading cone looks the same on screen in every one (puck-style.ts). */
-  view: CameraView;
-  /** The dot gives way to the car it stands on: no cone either (the car's nose shows the way). */
-  hideCone?: boolean;
-  /** The map draws the circle with its native dot (puck-feed.ts): none here. */
-  hideAccuracy?: boolean;
-}) {
-  const dr = deadReckoning(position);
-  const tint = dr ? palette.puckDoubt : palette.puck;
-  const coneOutline = CONE_OUTLINE[scheme];
-  const accuracy = position && !hideAccuracy ? accuracyFeatures(position) : emptyPolygons();
-  // The heading cone, the same on screen at every zoom and as in the lessons; walking (`compass`), the phone's compass
-  // draws it, as wide each side as the compass is unsure.
-  const cone = hideCone
-    ? emptyPolygons()
-    : position && compass
-      ? screenSectorFeatures(position, compass.headingRad, compass.uncertaintyRad, CONE.r, view)
-      : position && position.headingRad != null
-        ? screenSectorFeatures(position, position.headingRad, CONE.halfAngleRad, CONE.r, view)
-        : emptyPolygons();
+export function GhostLayers({ position, palette }: { position: PositionEstimate | null; palette: Palette }) {
   const ghost = position?.trust === "UNTRUSTED" && position.rawGnss ? position.rawGnss : null;
   const ghostPoint = ghost ? pointFeatures(ghost) : emptyPoints();
   return (
     <>
-      <GeoJSONSource id="position-accuracy" data={accuracy}>
-        <Layer
-          id="position-accuracy-fill"
-          type="fill"
-          paint={{
-            "fill-color": tint,
-            "fill-opacity": dr ? 0.18 : 0.16,
-          }}
-        />
-        <Layer
-          id="position-accuracy-outline"
-          type="line"
-          paint={{
-            "line-color": tint,
-            "line-width": dr ? 1.5 : 1,
-            ...(dr ? { "line-dasharray": [3, 2] } : {}),
-          }}
-        />
-      </GeoJSONSource>
-      <GeoJSONSource id="position-cone" data={cone}>
-        <Layer
-          id="position-cone-fill"
-          type="fill"
-          paint={{ "fill-color": tint, "fill-opacity": CONE_FILL_OPACITY }}
-        />
-        {/* Its outline, as the dot's bands (puck-style.ts); the ring line is drawn at width 0 in light, not unmounted,
-            so the layers keep their order when the theme changes. */}
-        <Layer
-          id="position-cone-edge"
-          type="line"
-          layout={{ "line-join": "round" }}
-          paint={{ "line-color": palette.puckEdge, "line-width": coneOutline.edge }}
-        />
-        <Layer
-          id="position-cone-ring"
-          type="line"
-          layout={{ "line-join": "round" }}
-          paint={{ "line-color": dr ? palette.puckDoubt : palette.puckRing, "line-width": coneOutline.ring }}
-        />
-      </GeoJSONSource>
       <GeoJSONSource id="gnss-ghost" data={ghostPoint}>
         <Layer
           id="gnss-ghost-halo"

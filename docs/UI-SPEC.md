@@ -146,12 +146,19 @@ persisted in kv-store. No hardcoded user-facing strings in components.
   a 1.5 pt dark edge outside it. Trusted GPS: a blue fill in a white ring (light #0A84FF, dark #3D6BFF); otherwise the
   theme background in an amber ring (`puckDoubt`). In dark the trusted dot glows (a soft disc 10 pt past the edge at
   45 %). The cone is 34 pt long, 28° each side, the same on screen at every zoom and tilt (built in screen points and
-  laid on the ground for the camera), filled at 32 % and outlined as the dot. Pins and marks are banded the same way;
+  laid on the ground for the camera), filled at 32 % and outlined as the dot. Must not drift: the outline over the
+  fill, each band at its whole width across the edge (a MapLibre line's `line-width`, an SVG stroke), on both
+  platforms' native dot as in the lessons; doubled under the fill, the cone read as a black wedge on the dark map.
+  Pins and marks are banded the same way;
   the placing pin (`placing-pin.tsx`) is one component on the map and in the lessons. `map-contrast.test.ts` holds
   everything the app draws on the map to 3:1 against every surface under it, in both themes.
 - **Compass heading** (display-only, `useCompassHeading`): not in a car (no trip, adapter not connected) and speed
   < 3 m/s, the cone comes from `watchHeadingAsync` and shows where the phone points, as wide as the compass is unsure
-  (20°/35°/50°/60° for accuracy 3–0). It never reaches `PositionEstimate`.
+  (20°/35°/50°/60° for accuracy 3–0). It never reaches `PositionEstimate`. It is the native dot's own cone: the phone's
+  map is fed the compass heading as the dot's course and its uncertainty as the cone's half-width (`feedUserLocation`'s
+  `coneHalfDeg`), fed again as the compass turns, so heading-up turns with it too (§6.2). Never a cone on a map layer
+  of its own: it sits at the published position while the native dot eases (a Wi-Fi fix's jump pulled them apart),
+  and the dot's cone shows beside it.
 - Raw GNSS **ghost marker** from `rawGnss`, hidden while `source === 'gnss'`.
 - **The parked car** (`useParkedCar`, `ParkedCarLayers`): while the car isn't the dot (no speed from it for 10 s: the
   driver walked off, the app opened elsewhere), its stored parked pose (NAVIGATOR-SPEC §6.1) is drawn as a car seen
@@ -229,7 +236,9 @@ persisted in kv-store. No hardcoded user-facing strings in components.
   gets there (without the navigator's steps, the publishes set that interval); the estimate's heading takes over once
   it turned 3° from the published one; each publish re-bases.
   Standing (< 2 m/s, no heading, or a placed position) the dot is fed as published, without lead. A step over 80 m,
-  a turn over 90° or a change to or from a placed position is placed, not animated. The phone's map is fed while the
+  a turn over 90° or a change to or from a placed position is placed, not animated. iOS's user location drops a
+  location at the very spot of the one before, its course with it: a turn alone (the walking compass, a heading set at
+  a stop) is fed 1e-9° (0.1 mm) off that spot. The phone's map is fed while the
   app is in front, the car's always. The follow camera is MapLibre's tracking (`Camera` `trackUserLocation`:
   `course` heading-up, `default` north-up with bearing 0) with the dot pinned at the anchor (`dotAnchor`: the same spot
   the padding put it at), the stop's zoom and pitch; entering follow, or a new mode, zoom, tilt or anchor while
