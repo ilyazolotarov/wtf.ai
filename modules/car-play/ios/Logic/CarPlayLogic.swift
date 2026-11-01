@@ -230,7 +230,8 @@ enum CarPlayLogic {
     case "keep-right": return .keepRight
     case "u-turn": return .uTurn
     case "roundabout": return .roundabout
-    case "arrive": return .arrive
+    // A stop on the way (STOPS-SPEC §9) is its leg's arrival: CarPlay gets a trip per leg.
+    case "arrive", "stop", "stop-left", "stop-right": return .arrive
     default: return .straight
     }
   }

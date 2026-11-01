@@ -55,6 +55,10 @@ class CarGuidanceLogicTest {
     assertEquals(kinds.size, kinds.mapNotNull { CarGuidanceLogic.maneuverType(it) }.toSet().size)
     assertEquals(CarManeuverType.ROUNDABOUT_CCW, CarGuidanceLogic.maneuverType("roundabout"))
     assertEquals(CarManeuverType.DESTINATION, CarGuidanceLogic.maneuverType("arrive"))
+    // A stop on the way: a destination, on its side when the map knows it (STOPS-SPEC §9).
+    assertEquals(CarManeuverType.DESTINATION, CarGuidanceLogic.maneuverType("stop"))
+    assertEquals(CarManeuverType.DESTINATION_LEFT, CarGuidanceLogic.maneuverType("stop-left"))
+    assertEquals(CarManeuverType.DESTINATION_RIGHT, CarGuidanceLogic.maneuverType("stop-right"))
     assertNull(CarGuidanceLogic.maneuverType("fly"))
   }
 
@@ -102,6 +106,11 @@ class CarGuidanceLogicTest {
     assertFalse(CarGuidanceLogic.showsSteps(route("active", steps = emptyList())))
     assertFalse(CarGuidanceLogic.showsSteps(route("planning")))
     assertFalse(CarGuidanceLogic.showsSteps(null))
+    // At a stop: its message, not the next leg's maneuvers; the car still navigates.
+    val waiting = route("active").copy(atStop = true, message = "You're at the stop")
+    assertFalse(CarGuidanceLogic.showsSteps(waiting))
+    assertTrue(CarGuidanceLogic.navigating(waiting))
+    assertEquals(CarCard.MESSAGE, CarGuidanceLogic.card(waiting, null))
   }
 
   @Test

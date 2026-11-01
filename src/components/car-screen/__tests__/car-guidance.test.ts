@@ -177,3 +177,44 @@ describe("car route", () => {
     expect(carRoute(route(arrived, { alternatives }), t, "en")!.alternatives).toEqual([]);
   });
 });
+
+describe("stops on the way (STOPS-SPEC §9)", () => {
+  const stopped = {
+    ...plan,
+    stops: [{ key: "s1", atM: 5300, atS: 480, lat: 50.43, lon: 30.51, point: { lat: 50.43, lon: 30.51 }, side: "right" as const }],
+  } as RoutePlan;
+  const fuel = { key: "s1", lat: 50.43, lon: 30.51, name: "Fuel" };
+  const withStop = (patch: Partial<RouteSnapshot> = {}) =>
+    route(step({ alongM: 2300, remainingM: 10_000, remainingS: 900, nextIndex: 1 }), {
+      plan: stopped,
+      stops: [fuel],
+      maneuvers: [m("depart", 0), { ...m("stop", 5300), side: "right", stop: "s1" }, m("arrive", 12_300)],
+      ...patch,
+    });
+
+  test("Android Auto: each stop ahead from the car before the destination; the stop maneuver on its side", () => {
+    const r = carRoute(withStop(), t, "en")!;
+    expect(r.destinationName).toBe("Kyiv");
+    expect(r.stops).toHaveLength(1);
+    expect(r.stops[0]).toMatchObject({ name: "Fuel", remainingM: 3000, remainingShown: 3, remainingUnit: "km1" });
+    // 1080 s planned, 900 left: 180 behind the car; the stop at 480 on the plan.
+    expect(r.stops[0].remainingS).toBeCloseTo(300);
+    expect(r.steps[0]).toMatchObject({ kind: "stop-right", instruction: "Stop on the right" });
+    expect(r.atStop).toBe(false);
+  });
+
+  test("Android Auto at a stop: the stop's words, still navigating", () => {
+    const r = carRoute(withStop({ stops: [], atStop: { stop: fuel, atM: 5300 } }), t, "en")!;
+    expect(r).toMatchObject({ status: "active", atStop: true, message: "You're at the stop: Fuel" });
+  });
+
+  test("CarPlay: a trip per leg, to the next stop; a stop reached is that trip's arrival", () => {
+    const r = carRoute(withStop(), t, "en", [], true)!;
+    expect(r).toMatchObject({ destinationName: "Fuel", destinationLat: 50.43, destinationLon: 30.51, remainingM: 3000 });
+    const at = carRoute(withStop({ stops: [], atStop: { stop: fuel, atM: 5300 } }), t, "en", [], true)!;
+    expect(at).toMatchObject({ status: "arrived", message: "You're at the stop", destinationName: "Fuel", steps: [] });
+    // Gone on: the next trip is to the destination.
+    const on = carRoute(withStop({ stops: [] }), t, "en", [], true)!;
+    expect(on).toMatchObject({ status: "active", destinationName: "Kyiv" });
+  });
+});

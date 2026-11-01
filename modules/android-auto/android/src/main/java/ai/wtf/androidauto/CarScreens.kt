@@ -122,7 +122,7 @@ internal class NavigationScreen(carContext: CarContext) : Screen(carContext) {
       CarCard.MESSAGE -> {
         val r = route!!
         val message = MessageInfo.Builder(r.message ?: r.destinationName.ifEmpty { " " })
-        if (r.status == "arrived") message.setImage(CarTemplates.icon(carContext, R.drawable.car_flag))
+        if (r.status == "arrived" || r.atStop) message.setImage(CarTemplates.icon(carContext, R.drawable.car_flag))
         template.setNavigationInfo(message.build())
       }
     }
@@ -357,6 +357,10 @@ internal object CarTemplates {
     for (step in route.steps) {
       trip.addStep(step(context, step), estimate(step.shownDistance, step.shownUnit, step.timeS))
     }
+    // The stops on the way first, each with its own estimate (STOPS-SPEC §9), then the destination.
+    for (stop in route.stops) {
+      trip.addDestination(Destination.Builder().setName(stop.name.ifEmpty { " " }).build(), estimate(stop.remainingShown, stop.remainingUnit, stop.remainingS))
+    }
     val name = route.destinationName.ifEmpty { route.message ?: " " }
     trip.addDestination(Destination.Builder().setName(name).build(), estimate(route.remainingShown, route.remainingUnit, route.remainingS))
     return trip.build()
@@ -384,6 +388,8 @@ internal object CarTemplates {
       CarManeuverType.U_TURN_LEFT -> Maneuver.TYPE_U_TURN_LEFT
       CarManeuverType.ROUNDABOUT_CCW -> Maneuver.TYPE_ROUNDABOUT_ENTER_AND_EXIT_CCW
       CarManeuverType.DESTINATION -> Maneuver.TYPE_DESTINATION
+      CarManeuverType.DESTINATION_LEFT -> Maneuver.TYPE_DESTINATION_LEFT
+      CarManeuverType.DESTINATION_RIGHT -> Maneuver.TYPE_DESTINATION_RIGHT
     }
 
   /** The phone banner's icons (MANEUVER_ICON in src/components/route/guidance-text.ts), drawn by scripts/car-icons.py. */
@@ -400,6 +406,6 @@ internal object CarTemplates {
       CarManeuverType.KEEP_RIGHT -> R.drawable.car_fork_right
       CarManeuverType.U_TURN_LEFT -> R.drawable.car_u_turn_left
       CarManeuverType.ROUNDABOUT_CCW -> R.drawable.car_roundabout_left
-      CarManeuverType.DESTINATION -> R.drawable.car_flag
+      CarManeuverType.DESTINATION, CarManeuverType.DESTINATION_LEFT, CarManeuverType.DESTINATION_RIGHT -> R.drawable.car_flag
     }
 }

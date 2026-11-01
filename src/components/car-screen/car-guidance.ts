@@ -7,7 +7,7 @@ import type { Maneuver } from "@/nav/routing/maneuvers";
 import type { RoutePlan } from "@/nav/routing/router";
 import type { RouteProblem, RouteSnapshot } from "@/services/navigation/route-service";
 
-import type { CarDistanceUnit, CarRoutePayload, CarSpeedPayload, CarStepPayload } from "./car-types";
+import type { CarDistanceUnit, CarRoutePayload, CarSpeedPayload, CarStepPayload, CarStopPayload } from "./car-types";
 
 /** The failures whose phone words name a phone screen ("… in Offline maps"): the condition only, for CarPlay. */
 const PHONE_FREE_PROBLEM: Partial<Record<RouteProblem, keyof Strings>> = { "no-road-graph": "carPlayNoRoadGraph" };
@@ -36,8 +36,58 @@ export function carRoute(
   language: "en" | "uk",
   /** The street each route goes by (`viaNames`): the route's, then its alternatives'. */
   via: (string | null)[] = [],
-  /** The failures' words without the phone's screens (CarPlay: Apple's guidelines). */
+  /**
+   * CarPlay: the failures' words without the phone's screens (Apple's guidelines), and a trip per leg (STOPS-SPEC §9):
+   * the destination is the next stop, a stop reached is an arrival there.
+   */
   phoneFree = false,
+): CarRoutePayload | null {
+  const payload = carRouteAll(route, t, language, via, phoneFree);
+  return payload && phoneFree ? perLeg(payload, route!, t) : payload;
+}
+
+/** CarPlay's trip is one leg: to the next stop (its estimates), and a stop reached is that trip's arrival. */
+function perLeg(p: CarRoutePayload, route: RouteSnapshot, t: (key: keyof Strings) => string): CarRoutePayload {
+  if (route.atStop && p.status === "active") {
+    const { stop } = route.atStop;
+    return {
+      ...p,
+      status: "arrived",
+      message: t("atStopTitle"),
+      destinationName: stop.name ?? "",
+      destinationLat: stop.lat,
+      destinationLon: stop.lon,
+      steps: [],
+      alternatives: [],
+      ...carRemaining(0, 0),
+    };
+  }
+  const next = route.stops[0];
+  const ahead = p.stops[0];
+  if (!next || !ahead || (p.status !== "active" && p.status !== "planning")) return p;
+  return {
+    ...p,
+    destinationName: next.name ?? "",
+    destinationLat: next.lat,
+    destinationLon: next.lon,
+    remainingM: ahead.remainingM,
+    remainingS: ahead.remainingS,
+    remainingShown: ahead.remainingShown,
+    remainingUnit: ahead.remainingUnit,
+  };
+}
+
+const carRemaining = (remainingM: number, remainingS: number) => {
+  const r = carDistance(remainingM);
+  return { remainingM, remainingS, remainingShown: r.shown, remainingUnit: r.unit };
+};
+
+function carRouteAll(
+  route: RouteSnapshot | null,
+  t: (key: keyof Strings) => string,
+  language: "en" | "uk",
+  via: (string | null)[],
+  phoneFree: boolean,
 ): CarRoutePayload | null {
   if (!route) return null;
   const { destination, guidance, maneuvers, plan } = route;
@@ -55,6 +105,8 @@ export function carRoute(
     title: "",
     detail: "",
     alternatives: [],
+    stops: [] as CarStopPayload[],
+    atStop: false,
   };
   if (route.status === "failed") {
     const problem = route.failure ? ((phoneFree && PHONE_FREE_PROBLEM[route.failure]) || PROBLEM_TEXT[route.failure]) : "routeCancelled";
@@ -72,8 +124,14 @@ export function carRoute(
   const toNextM = guidance?.toNextM ?? next.atM;
   const remainingM = guidance?.remainingM ?? plan.lengthM;
   const remainingS = guidance?.remainingS ?? plan.durationS;
-  const remaining = carDistance(remainingM);
-  const left = { remainingM, remainingS, remainingShown: remaining.shown, remainingUnit: remaining.unit };
+  const left = carRemaining(remainingM, remainingS);
+  // The stops ahead, each from the car: its leg's own pace (the plan's time to it less the time already behind).
+  const alongM = guidance?.alongM ?? 0;
+  const doneS = plan.durationS - remainingS;
+  const stops = (plan.stops ?? []).flatMap((ps): CarStopPayload[] => {
+    const stop = route.stops.find((x) => x.key === ps.key);
+    return stop ? [{ name: stop.name ?? "", ...carRemaining(Math.max(0, ps.atM - alongM), Math.max(0, ps.atS - doneS)) }] : [];
+  });
   if (guidance?.state === "arrived") return { ...base, ...left, status: "arrived", message: t("arrived") };
   // The plan's own pace for what is left: guidance has no time per maneuver.
   const sPerM = remainingM > 0 ? remainingS / remainingM : 0;
@@ -81,7 +139,7 @@ export function carRoute(
     const { shown, unit } = carDistance(distanceM);
     return {
       id: carManeuverId(m),
-      kind: m.kind,
+      kind: m.kind === "stop" && m.side ? `stop-${m.side}` : m.kind,
       exit: m.exit ?? null,
       instruction: maneuverInstruction(m, t),
       distanceM,
@@ -103,12 +161,15 @@ export function carRoute(
   const alternatives = route.replanning
     ? []
     : (route.alternatives ?? []).map((a, index) => ({ index, ...row(via[index + 1], formatAlternativeDelta(a.deltaS, t), a.plan) }));
-  // Planning again: the old maneuvers are no guide, the car's notification says so.
+  // Planning again: the old maneuvers are no guide, the car's notification says so. At a stop, its words.
+  const atStop = route.atStop?.stop;
   return {
     ...base,
     ...left,
+    stops,
+    atStop: atStop != null,
     status: "active",
-    message: route.replanning ? t("planningRoute") : null,
+    message: route.replanning ? t("planningRoute") : atStop ? (atStop.name ? `${t("atStopTitle")}: ${atStop.name}` : t("atStopTitle")) : null,
     steps,
     title: via[0] ? current.title : "",
     detail: current.detail,

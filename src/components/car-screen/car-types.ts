@@ -6,7 +6,7 @@
 export interface CarStepPayload {
   /** The same maneuver on the road keeps it across plans (`carManeuverId`): the car's notification pops up once. */
   id: string;
-  /** The app's maneuver kind (src/nav/routing/maneuvers.ts). */
+  /** The app's maneuver kind (src/nav/routing/maneuvers.ts); a stop with its side: `stop-left`, `stop-right`. */
   kind: string;
   /** Roundabouts: the exit to take, 1-based. */
   exit?: number | null;
@@ -47,6 +47,22 @@ export interface CarRoutePayload {
   detail: string;
   /** The other ways to choose from (ROUTING-SPEC §8.7): none while planning, planned again or arrived. */
   alternatives: CarAlternativePayload[];
+  /**
+   * The stops on the way not reached yet (STOPS-SPEC §9), each from the car: Android Auto's trip lists them before the
+   * destination. CarPlay gets a trip per leg instead: the destination is then the next stop.
+   */
+  stops: CarStopPayload[];
+  /** At a stop, waiting to go on: Android Auto shows the message (the stop's words), not the next leg's maneuvers. */
+  atStop: boolean;
+}
+
+/** A stop on the way, from the car (STOPS-SPEC §9). */
+export interface CarStopPayload {
+  name: string;
+  remainingM: number;
+  remainingS: number;
+  remainingShown: number;
+  remainingUnit: CarDistanceUnit;
 }
 
 /**

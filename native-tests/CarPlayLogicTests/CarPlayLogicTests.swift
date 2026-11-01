@@ -254,6 +254,8 @@ final class SearchAndDistanceTests: XCTestCase {
     XCTAssertEqual(CarPlayLogic.maneuverKind("keep-left"), .keepLeft)
     XCTAssertEqual(CarPlayLogic.maneuverKind("roundabout").icon, "car_roundabout_left")
     XCTAssertEqual(CarPlayLogic.maneuverKind("arrive").icon, "car_flag")
+    XCTAssertEqual(CarPlayLogic.maneuverKind("stop-left"), .arrive)
+    XCTAssertEqual(CarPlayLogic.maneuverKind("stop"), .arrive)
     XCTAssertEqual(CarPlayLogic.maneuverKind("something new"), .straight)
   }
 }

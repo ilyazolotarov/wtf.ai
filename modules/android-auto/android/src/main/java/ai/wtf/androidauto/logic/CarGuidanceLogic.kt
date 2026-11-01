@@ -20,6 +20,9 @@ enum class CarManeuverType {
   /** Counter-clockwise: traffic drives on the right, as everywhere the app has maps. Takes the exit number. */
   ROUNDABOUT_CCW,
   DESTINATION,
+  /** A stop on the way (STOPS-SPEC §9), on the left or the right of the road. */
+  DESTINATION_LEFT,
+  DESTINATION_RIGHT,
 }
 
 /** `Distance.UNIT_*`: metres, whole kilometres, kilometres with one decimal. */
@@ -67,7 +70,14 @@ data class CarRoute(
   val detail: String = "",
   /** The other ways to the destination (ROUTING-SPEC §8.7), to choose from. */
   val alternatives: List<CarAlternative> = emptyList(),
+  /** The stops on the way not reached yet (STOPS-SPEC §9), each from the car: the trip lists them before the destination. */
+  val stops: List<CarStopEntry> = emptyList(),
+  /** At a stop, waiting to go on: the message (the stop's words), not the next leg's maneuvers. */
+  val atStop: Boolean = false,
 )
+
+/** A stop on the way, from the car: its name, distance (as the banner rounds it) and time. */
+data class CarStopEntry(val name: String, val remainingShown: Double, val remainingUnit: String, val remainingS: Double)
 
 /** Another way to the destination: `index` in the route's alternatives; the street it goes by, else its time; more. */
 data class CarAlternative(val index: Int, val title: String, val detail: String)
@@ -205,7 +215,9 @@ object CarGuidanceLogic {
       "keep-right" -> CarManeuverType.KEEP_RIGHT
       "u-turn" -> CarManeuverType.U_TURN_LEFT
       "roundabout" -> CarManeuverType.ROUNDABOUT_CCW
-      "arrive" -> CarManeuverType.DESTINATION
+      "arrive", "stop" -> CarManeuverType.DESTINATION
+      "stop-left" -> CarManeuverType.DESTINATION_LEFT
+      "stop-right" -> CarManeuverType.DESTINATION_RIGHT
       else -> null
     }
 
@@ -222,9 +234,9 @@ object CarGuidanceLogic {
   /** The car navigates while a route is planned or followed; arrival and a failed plan end it. */
   fun navigating(route: CarRoute?): Boolean = route != null && (route.status == "planning" || route.status == "active")
 
-  /** Turn-by-turn shows only on a followed route with a maneuver ahead, not while it is planned again. */
+  /** Turn-by-turn shows only on a followed route with a maneuver ahead, not while it is planned again or at a stop. */
   fun showsSteps(route: CarRoute?): Boolean =
-    route != null && route.status == "active" && !route.replanning && route.steps.isNotEmpty()
+    route != null && route.status == "active" && !route.replanning && !route.atStop && route.steps.isNotEmpty()
 
   /** The results shown answer the text typed (an older text's would mislead); none yet while it is searched. */
   fun searchList(search: CarSearch?, typed: String): CarSearchList {

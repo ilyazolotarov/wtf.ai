@@ -45,6 +45,15 @@ class CarRouteRecord : Record {
   @Field var title: String = ""
   @Field var detail: String = ""
   @Field var alternatives: List<CarAlternativeRecord> = emptyList()
+  @Field var stops: List<CarStopRecord> = emptyList()
+  @Field var atStop: Boolean = false
+}
+
+class CarStopRecord : Record {
+  @Field var name: String = ""
+  @Field var remainingShown: Double = 0.0
+  @Field var remainingUnit: String = "m"
+  @Field var remainingS: Double = 0.0
 }
 
 class CarAlternativeRecord : Record {
@@ -164,6 +173,8 @@ class AndroidAutoModule : Module() {
             title = r.title,
             detail = r.detail,
             alternatives = r.alternatives.map { CarAlternative(it.index, it.title, it.detail) },
+            stops = r.stops.map { CarStopEntry(it.name, it.remainingShown, it.remainingUnit, it.remainingS) },
+            atStop = r.atStop,
           )
         },
       )
