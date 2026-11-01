@@ -123,7 +123,7 @@ index a789f4d..f1b3762 100644
          }
 diff --git a/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/AppPuck.kt b/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/AppPuck.kt
 new file mode 100644
-index 0000000..eeb2a49
+index 0000000..337dcee
 --- /dev/null
 +++ b/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/AppPuck.kt
 @@ -0,0 +1,135 @@
@@ -151,7 +151,7 @@ index 0000000..eeb2a49
 +    const val IMAGE = "wtf-ai-puck"
 +
 +    private class Style(
-+        json: JSONObject?,
++        private val json: JSONObject?,
 +    ) {
 +        private fun color(
 +            key: String,
@@ -263,10 +263,10 @@ index 0000000..eeb2a49
 +    }
 +}
 diff --git a/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/LocationComponentManager.kt b/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/LocationComponentManager.kt
-index fca5b22..4aebd9b 100644
+index fca5b22..53e84e0 100644
 --- a/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/LocationComponentManager.kt
 +++ b/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/LocationComponentManager.kt
-@@ -2,10 +2,14 @@ package org.maplibre.reactnative.components.location
+@@ -2,14 +2,21 @@ package org.maplibre.reactnative.components.location
  
  import android.annotation.SuppressLint
  import android.content.Context
@@ -275,13 +275,20 @@ index fca5b22..4aebd9b 100644
 +import org.json.JSONObject
  import org.maplibre.android.location.LocationComponent
  import org.maplibre.android.location.LocationComponentActivationOptions
++import org.maplibre.android.location.LocationComponentConstants
  import org.maplibre.android.location.LocationComponentOptions
  import org.maplibre.android.location.OnCameraTrackingChangedListener
 +import org.maplibre.android.location.OnLocationCameraTransitionListener
  import org.maplibre.android.location.modes.CameraMode
  import org.maplibre.android.location.modes.RenderMode
  import org.maplibre.android.maps.MapLibreMap
-@@ -38,6 +42,201 @@ class LocationComponentManager(
+ import org.maplibre.android.maps.Style
++import org.maplibre.android.style.layers.Property
++import org.maplibre.android.style.layers.PropertyFactory
+ import org.maplibre.reactnative.R
+ import org.maplibre.reactnative.components.mapview.MLRNMapView
+ import org.maplibre.reactnative.location.LocationManager
+@@ -38,6 +45,229 @@ class LocationComponentManager(
  
      private var mShowingUserLocation = false
  
@@ -296,6 +303,11 @@ index fca5b22..4aebd9b 100644
 +    private var appDoubt = false
 +    private var appHidden = false
 +    private var appWithCone = true
++
++    // While a camera-mode transition runs, MapLibre ignores padding/zoom/tilt changes: the last stop asked for then is
++    // applied when it ends.
++    private var appTransitioning = false
++    private var appPendingStop: Triple<Double?, Double?, Long>? = null
 +
 +    fun isAppSource(): Boolean = appSource
 +
@@ -376,6 +388,10 @@ index fca5b22..4aebd9b 100644
 +    fun addAppPuckImage(style: Style) {
 +        if (!appSource) return
 +        style.addImage(AppPuck.IMAGE, AppPuck.bitmap(context.resources.displayMetrics, appStyle, appDoubt, appHidden, appWithCone))
++        // Upright on a tilted map, as the app's round dot (the layer's icon would otherwise lie flat on the map).
++        style.getLayer(LocationComponentConstants.FOREGROUND_LAYER)?.setProperties(
++            PropertyFactory.iconPitchAlignment(Property.ICON_PITCH_ALIGNMENT_VIEWPORT),
++        )
 +    }
 +
 +    /** One fed position; `flags`: 1 snap (placed, not animated), 2 doubt, 4 hidden. */
@@ -422,7 +438,7 @@ index fca5b22..4aebd9b 100644
 +    fun applyAppPadding(durationMs: Long) {
 +        val component = mLocationComponent ?: return
 +        val view = mMapView ?: return
-+        if (!isTracking()) return
++        if (!isTracking() || appTransitioning) return
 +        val w = view.width.toDouble()
 +        val h = view.height.toDouble()
 +        val left = ((2 * appAnchorX - 1) * w).coerceAtLeast(0.0)
@@ -442,6 +458,8 @@ index fca5b22..4aebd9b 100644
 +    ) {
 +        val component = mLocationComponent ?: return
 +        if (mode == CameraMode.NONE) {
++            appPendingStop = null
++            appTransitioning = false
 +            component.cameraMode = CameraMode.NONE
 +            return
 +        }
@@ -449,6 +467,15 @@ index fca5b22..4aebd9b 100644
 +            appTrackingStop(zoom, tilt, durationMs)
 +            return
 +        }
++        if (component.cameraMode != CameraMode.NONE) {
++            // Between two tracking modes MapLibre makes no transition and drops the zoom and tilt: the mode switches
++            // (the bearing follows with the next location) and the stop eases.
++            component.cameraMode = mode
++            appTrackingStop(zoom, tilt, durationMs)
++            return
++        }
++        appTransitioning = true
++        appPendingStop = null
 +        component.setCameraMode(
 +            mode,
 +            durationMs.coerceAtLeast(0),
@@ -456,15 +483,18 @@ index fca5b22..4aebd9b 100644
 +            bearing,
 +            tilt,
 +            object : OnLocationCameraTransitionListener {
-+                override fun onLocationCameraTransitionFinished(cameraMode: Int) {
-+                    applyAppPadding(0)
-+                }
++                override fun onLocationCameraTransitionFinished(cameraMode: Int) = appTransitionEnded()
 +
-+                override fun onLocationCameraTransitionCanceled(cameraMode: Int) {
-+                    applyAppPadding(0)
-+                }
++                override fun onLocationCameraTransitionCanceled(cameraMode: Int) = appTransitionEnded()
 +            },
 +        )
++    }
++
++    private fun appTransitionEnded() {
++        appTransitioning = false
++        val pending = appPendingStop
++        appPendingStop = null
++        if (pending != null) appTrackingStop(pending.first, pending.second, pending.third) else applyAppPadding(0)
 +    }
 +
 +    /** While following: the stop's zoom and tilt ease without leaving the tracking camera. */
@@ -475,6 +505,11 @@ index fca5b22..4aebd9b 100644
 +    ) {
 +        val component = mLocationComponent ?: return
 +        if (!isTracking()) return
++        if (appTransitioning) {
++            val prev = appPendingStop
++            appPendingStop = Triple(zoom ?: prev?.first, tilt ?: prev?.second, durationMs)
++            return
++        }
 +        if (zoom != null) component.zoomWhileTracking(zoom, durationMs.coerceAtLeast(1))
 +        if (tilt != null) component.tiltWhileTracking(tilt, durationMs.coerceAtLeast(1))
 +        applyAppPadding(durationMs)
@@ -483,7 +518,7 @@ index fca5b22..4aebd9b 100644
      private var mOnCameraTrackingChangedListener: OnCameraTrackingChangedListener? = null
  
      init {
-@@ -94,6 +293,11 @@ class LocationComponentManager(
+@@ -94,6 +324,11 @@ class LocationComponentManager(
  
      @SuppressLint("MissingPermission")
      private fun stateChanged() {
@@ -495,7 +530,7 @@ index fca5b22..4aebd9b 100644
          mLocationComponent?.setLocationComponentEnabled((mFollowUserLocation || mShowUserLocation))
  
          if (mShowingUserLocation != mShowUserLocation) {
-@@ -122,6 +326,10 @@ class LocationComponentManager(
+@@ -122,6 +357,10 @@ class LocationComponentManager(
          displayUserLocation: Boolean,
          style: Style,
      ) {

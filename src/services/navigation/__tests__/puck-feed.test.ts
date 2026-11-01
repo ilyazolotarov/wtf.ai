@@ -149,4 +149,24 @@ describe("PuckFeeder", () => {
     expect(late).toHaveLength(1);
     expect(late[0][6]).toBe(FEED_FLAG_SNAP);
   });
+
+  it("a map whose view is gone is dropped, the others still fed", () => {
+    const h = harness();
+    const fed: number[][] = [];
+    let gone = 0;
+    h.feeder.register(
+      {
+        feedUserLocation: () => {
+          gone += 1;
+          throw new Error("NativeComponent ref is null");
+        },
+      },
+      { active: () => true, hidden: () => false },
+    );
+    h.feeder.register({ feedUserLocation: (...args) => fed.push(args) }, { active: () => true, hidden: () => false });
+    h.publish(position());
+    h.publish(position());
+    expect(gone).toBe(1);
+    expect(fed).toHaveLength(2);
+  });
 });

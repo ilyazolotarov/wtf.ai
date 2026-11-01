@@ -203,6 +203,11 @@ export class PuckFeeder {
     const snap = pose.snap || !entry.fedOnce;
     entry.fedOnce = true;
     const flags = (snap ? FEED_FLAG_SNAP : 0) | (pose.doubt ? FEED_FLAG_DOUBT : 0) | (entry.hidden() ? FEED_FLAG_HIDDEN : 0);
-    target.feedUserLocation(pose.lat, pose.lon, pose.courseDeg, pose.speedMps, pose.accuracyM, pose.leadMs, flags);
+    try {
+      target.feedUserLocation(pose.lat, pose.lon, pose.courseDeg, pose.speedMps, pose.accuracyM, pose.leadMs, flags);
+    } catch {
+      // A map whose view is gone before its unregister throws (the wrapper finds no view): it is fed no more.
+      this.targets.delete(target);
+    }
   }
 }

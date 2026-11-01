@@ -55,8 +55,11 @@ const INITIAL_ZOOM = 15.4;
 const reportedMapErrors = new Set<string>();
 // A camera command for a map view already gone: the car's map, taken down while Android Auto shows a list over it.
 const VIEW_GONE = /resolved to `view` null/;
+// Android, the fed dot: back in the foreground or after a style load MapLibre re-feeds the last fed location, whose
+// time has passed, with look-ahead on; it places the dot there at once and says so.
+const STALE_LOOKAHEAD = /Lookahead enabled, but the target location's timestamp is smaller/;
 LogManager.onLog(({ level, tag, message }) => {
-  if (VIEW_GONE.test(message)) return true; // expected: not reported, not logged
+  if (VIEW_GONE.test(message) || STALE_LOOKAHEAD.test(message)) return true; // expected: not reported, not logged
   const kind = `${tag}: ${message.replace(/\d+/g, "#")}`;
   if (level === "error" && !reportedMapErrors.has(kind)) {
     reportedMapErrors.add(kind);
@@ -247,8 +250,12 @@ export function MapSurface({
     if (!map) return;
     map.setUserLocationSource("app", { x: anchorX, y: anchorY }, nativePuckStyle(scheme)).catch(() => {});
     return () => {
-      // Back to the device's location when the setting goes off; a map already gone rejects, which is fine.
-      map.setUserLocationSource("device", { x: 0.5, y: 0.5 }, null).catch(() => {});
+      // Back to the device's location when the setting goes off.
+      try {
+        map.setUserLocationSource("device", { x: 0.5, y: 0.5 }, null).catch(() => {});
+      } catch {
+        // The map is gone (unmounted): the wrapper finds no view and throws at once. Nothing to reset.
+      }
     };
   }, [nativePuck, mapReady, scheme, anchorX, anchorY]);
   const onCarRef = useRef(onCar);
