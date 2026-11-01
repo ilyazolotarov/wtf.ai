@@ -68,17 +68,23 @@ export function nowDistanceM(kind: ManeuverKind, speedMps: number, c: AnnouncerC
 export type Announcement =
   | { kind: "maneuver"; stage: "prepare" | "now"; maneuver: Maneuver; distanceM: number; then: Maneuver | null }
   | { kind: "replanned" }
-  | { kind: "arrived" };
+  | { kind: "arrived" }
+  /** At a trip's stop (STOPS-SPEC §8), and a stop left behind. */
+  | { kind: "stop-reached" }
+  | { kind: "stop-passed" };
 
 export interface AnnouncerInput {
   planId: number;
   /** Why this plan replaced the last: an alternative taken is the driver's choice, not a re-plan to announce. */
-  planReason?: "new" | "off-route" | "resume" | "alternative" | "placed";
+  planReason?: "new" | "off-route" | "resume" | "alternative" | "placed" | "stops" | "stop-back";
   /** The driver keeps to their own way (`RouteSnapshot.ownWay`): nothing said but arrival, until they follow the route. */
   ownWay?: boolean;
   maneuvers: Maneuver[];
   guidance: GuidanceStep;
   speedMps: number;
+  /** The key of the trip's stop the car is at, and of one it left behind (`RouteSnapshot.atStop`, `.passedStop`). */
+  atStop?: string | null;
+  passedStop?: string | null;
 }
 
 /** The distances said ahead of a maneuver, the steps drivers know from other navigators (each is a recorded phrase). */
@@ -124,6 +130,8 @@ export class Announcer {
   /** "Route replanned" said, and nothing since: a re-plan after it says nothing of its own. */
   private replannedLast = false;
   private arrived = false;
+  /** Stops said "you're at the stop" or "stop passed" of, by key. */
+  private stopsSaid = new Set<string>();
 
   constructor(config: Partial<AnnouncerConfig> = {}) {
     this.config = { ...DEFAULT_ANNOUNCER, ...config };
@@ -168,6 +176,15 @@ export class Announcer {
     this.maneuvers = maneuvers;
     this.nextIndex = g.nextIndex;
     this.alongM = g.alongM;
+    // Each once: a stop's key is its own for the whole trip.
+    if (input.atStop && !this.stopsSaid.has(`at:${input.atStop}`)) {
+      this.stopsSaid.add(`at:${input.atStop}`);
+      out.push({ kind: "stop-reached" });
+    }
+    if (input.passedStop && !this.stopsSaid.has(`passed:${input.passedStop}`)) {
+      this.stopsSaid.add(`passed:${input.passedStop}`);
+      out.push({ kind: "stop-passed" });
+    }
     if (g.state === "arrived") {
       if (!this.arrived) out.push({ kind: "arrived" });
       this.arrived = true;

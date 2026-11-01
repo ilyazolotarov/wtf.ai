@@ -101,7 +101,7 @@ export function plan(from: Point, to: Point, headingDeg: number, planId: number)
   const result = planRoute(graph, frame, { ...toCoordinate(from), headingRad: (headingDeg * Math.PI) / 180 }, destination);
   const nowMs = Date.now();
   if (result.status !== "done") {
-    return { snapshot: { destination, status: "failed", failure: result.reason, planId, replanning: false }, path: "", nowMs };
+    return { snapshot: { destination, stops: [], status: "failed", failure: result.reason, planId, replanning: false }, path: "", nowMs };
   }
   const points = result.plan.coordinates.map(toPoint);
   return {
@@ -111,6 +111,7 @@ export function plan(from: Point, to: Point, headingDeg: number, planId: number)
       planId,
       plan: result.plan,
       maneuvers: routeManeuvers(graph, result.plan),
+      stops: [],
       replanning: false,
     },
     path: points.map((p, i) => `${i ? "L" : "M"}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" "),

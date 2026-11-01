@@ -131,6 +131,7 @@ export function buildFixture(): Uint8Array {
   w.navRoutePoint({ timestampUs: t0 + 1_600_000, planId: 1, index: 1, latDeg: 50.46, lonDeg: 30.53 });
   w.navRouteManeuver({ timestampUs: t0 + 1_600_000, planId: 1, index: 0, kind: "depart", exit: 0, latDeg: 50.4501, lonDeg: 30.52, atM: 0, turnRad: 0 });
   w.navRouteManeuver({ timestampUs: t0 + 1_600_000, planId: 1, index: 1, kind: "roundabout", exit: 2, latDeg: 50.455, lonDeg: 30.525, atM: 700, turnRad: 1.5 });
+  w.navRouteStop({ timestampUs: t0 + 1_600_000, planId: 1, index: 0, latDeg: 50.455, lonDeg: 30.526, atM: 700, atS: 70, side: "right", category: "fuel" });
   w.navRouteProgress({ timestampUs: t0 + 1_700_000, planId: 1, state: "leaving", nextIndex: 1, alongM: 100, offM: 45, remainingM: 1400, remainingS: 140, toNextM: 600 });
   // CAN shadow: a 200 ms window, two frames in one chunk, one short frame.
   w.canWindow({ startUs: t0 + 1_800_000, endUs: t0 + 2_000_000, frames: 3, endedItself: false, bufferFull: 1, bytes: 123, other: 1, stopMs: 42, stopRetried: true, reopen: "wildcard" });

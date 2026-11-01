@@ -3,7 +3,7 @@
 
 import { EdgeFlag, RoadClass } from "../mapmatch/graph/format";
 import type { Exit, RoadEdge, RoadGraph } from "../mapmatch/graph/road-graph";
-import { legLengthM, type RoutePlan } from "./router";
+import { legLengthM, type RoadSide, type RoutePlan } from "./router";
 
 const DEG = Math.PI / 180;
 /** The straightest way on, turning less than this, needs no instruction (unless it's a fork). */
@@ -26,11 +26,13 @@ export type ManeuverKind =
   | "keep-right"
   | "u-turn"
   | "roundabout"
-  | "arrive";
+  | "arrive"
+  /** A trip's stop on the way (STOPS-SPEC §4), between two legs. */
+  | "stop";
 
 export const MANEUVER_KINDS: readonly ManeuverKind[] = [
   "depart", "slight-left", "slight-right", "left", "right", "sharp-left", "sharp-right",
-  "keep-left", "keep-right", "u-turn", "roundabout", "arrive",
+  "keep-left", "keep-right", "u-turn", "roundabout", "arrive", "stop",
 ];
 
 export interface Maneuver {
@@ -43,6 +45,9 @@ export interface Maneuver {
   turnRad: number;
   /** Roundabouts: the exit to take, counting the legal exits passed, 1-based. */
   exit?: number;
+  /** A stop: the side of the road it is on (absent: on it, or unknown), and its key in the trip. */
+  side?: RoadSide;
+  stop?: string;
 }
 
 const isRoundabout = (flags: number) => (flags & EdgeFlag.roundabout) !== 0;

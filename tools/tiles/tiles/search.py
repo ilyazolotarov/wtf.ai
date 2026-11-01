@@ -25,6 +25,9 @@ is read by random access on the phone:
     addresses   12 B each, grouped by owner entity, house numbers in natural order
     tokens      sorted folded tokens (fold() below, src/nav/search/fold.ts): offsets + blob
     postings    per token, ascending entity ids
+    entrances   16 B each, by address; then places to stop at (fuel, cafés, …: STOPS-SPEC §6.1),
+                16 B each, by 0.01° cell, and the used cells' table; each section's trailer
+                at the end, the entrances' last
 """
 
 from __future__ import annotations
@@ -35,7 +38,7 @@ import struct
 import time
 import unicodedata
 from collections import Counter, defaultdict
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -54,6 +57,11 @@ HEADER = struct.Struct("<4sHHIIIIIIIIIII16sII")  # 76 bytes
 FLAG_ENTRANCES = 1
 TRAILER = struct.Struct("<II4s")
 ENTRANCE_MAGIC = b"WTFE"
+# Places to stop at (STOPS-SPEC §6.1): after the entrances, the places by grid cell, the used
+# cells' table and a trailer (section offset, count, "WTFP") just before the entrance trailer,
+# which stays last: a reader without places reads the file as before.
+FLAG_PLACES = 2
+PLACE_MAGIC = b"WTFP"
 NONE = 0xFFFFFFFF
 EARTH_R = 6_371_008.8
 M_PER_DEG = EARTH_R * math.pi / 180
@@ -69,7 +77,11 @@ ENTITY_DT = np.dtype([
 ADDR_DT = np.dtype([("house", "<u4"), ("lat", "<i4"), ("lon", "<i4")])
 # address: index in the address table, NONE for an entrance of no address; ref: its number, NONE without.
 ENTRANCE_DT = np.dtype([("address", "<u4"), ("ref", "<u4"), ("lat", "<i4"), ("lon", "<i4")])
-assert (HEADER.size, ENTITY_DT.itemsize, ADDR_DT.itemsize, ENTRANCE_DT.itemsize) == (76, 44, 12, 16)
+# name: string (NONE: none, the app shows the category's word); flags: FLAG_24_7, FUEL_FLAGS; category: PLACE_CATEGORIES.
+PLACE_DT = np.dtype([("lat", "<i4"), ("lon", "<i4"), ("name", "<u4"), ("flags", "<u2"), ("category", "u1"), ("reserved", "u1")])
+# key: the 0.01° grid cell (cell_key); first: its first place. A last entry (NONE, place count) ends the table.
+CELL_DT = np.dtype([("key", "<u4"), ("first", "<u4")])
+assert (HEADER.size, ENTITY_DT.itemsize, ADDR_DT.itemsize, ENTRANCE_DT.itemsize, PLACE_DT.itemsize) == (76, 44, 12, 16, 16)
 
 # Settlements with no area own the streets, POIs and areas near them: how far (m) each kind reaches.
 SETTLEMENT_RADIUS_M = {"city": 15_000, "town": 6_000, "village": 2_500, "hamlet": 1_200}
@@ -98,6 +110,19 @@ FILTER_KEYS = ("highway", "addr:housenumber", "place", "entrance", *POI_KEYS, *P
 # `ref`, else `addr:unit`, else a `name` of up to three letters or digits ("1", "Б").
 ENTRANCE_KINDS = {"staircase", "main", "yes", "home", "secondary"}
 SHORT_NAME_RE = re.compile(r"[0-9A-Za-zА-Яа-яІіЇїЄєҐґ]{1,3}")
+# Places to stop at, named or not: `amenity` → category (u8). Parking only where anyone may park.
+PLACE_CATEGORIES = {
+    "fuel": 1, "charging_station": 2, "cafe": 3, "fast_food": 4, "restaurant": 4, "pharmacy": 5, "parking": 6,
+}
+PLACE_CATEGORY_COUNT = 6
+PARKING_CLOSED = {"private", "customers", "no"}
+PLACE_NAME_KEYS = ("name", "name:uk", "brand")
+# Flags: open 24/7, and for fuel the fuels sold (`<tag>` = yes).
+FLAG_24_7 = 1
+FUEL_FLAGS = (("fuel:diesel", 2), ("fuel:lpg", 4), ("fuel:octane_92", 8), ("fuel:octane_95", 16), ("fuel:octane_98", 32))
+# Grid cell of a place: 0.01°, key = row × CELL_COLS + column, from the stored 1e-6° coordinates.
+CELL_E6 = 10_000
+CELL_COLS = 36_000
 # An address whose street no highway of its settlement carries joins a same-named street
 # whose extent is this close (m), in any settlement; else it makes an address-only street.
 STREET_JOIN_M = 500
@@ -198,6 +223,7 @@ class Raw:
     addresses: list[Item] = field(default_factory=list)
     pois: list[Item] = field(default_factory=list)
     entrances: list[Item] = field(default_factory=list)
+    stops: list[Item] = field(default_factory=list)  # places to stop at (PLACE_CATEGORIES)
     areas: list[Area] = field(default_factory=list)
 
 
@@ -214,6 +240,21 @@ def poi_tag(tags: Mapping[str, str]) -> str | None:
         if tags.get(key) in values:
             return f"{key}={tags.get(key)}"
     return None
+
+
+def stop_place(tags: Mapping[str, str]) -> Item | None:
+    """A place to stop at (STOPS-SPEC §6.1), named or not: tags `category`, `flags`, and `name` if any."""
+    amenity = tags.get("amenity")
+    category = PLACE_CATEGORIES.get(amenity)
+    if category is None or (amenity == "parking" and (tags.get("access") or "").strip() in PARKING_CLOSED):
+        return None
+    flags = FLAG_24_7 if (tags.get("opening_hours") or "").strip().lower() == "24/7" else 0
+    if amenity == "fuel":
+        for key, bit in FUEL_FLAGS:
+            if (tags.get(key) or "").strip() == "yes":
+                flags |= bit
+    name = next((v for k in PLACE_NAME_KEYS if (v := (tags.get(k) or "").strip())), "")
+    return Item({}, {"category": str(category), "flags": str(flags), "name": name})
 
 
 def classify(tags: Mapping[str, str], refs: list[int] | None, raw: Raw, relation_street: str = "") -> list[Item]:
@@ -237,6 +278,9 @@ def classify(tags: Mapping[str, str], refs: list[int] | None, raw: Raw, relation
         made.append((raw.entrances, Item({}, {"ref": entrance_number(tags)})))
     if shown and place is None and (tag := poi_tag(tags)):
         made.append((raw.pois, Item(names, {"tag": tag}, refs)))
+    if (stop := stop_place(tags)) is not None:
+        stop.refs = refs
+        made.append((raw.stops, stop))
     for lst, item in made:
         lst.append(item)
     return [item for _, item in made]
@@ -258,7 +302,7 @@ def read_objects(pbf: Path) -> Raw:
             item.lon, item.lat, item.located = obj.location.x, obj.location.y, True
             item.osm_id = obj.id
     locate_ways(pbf, ways)
-    for name in ("places", "streets", "addresses", "pois", "entrances"):
+    for name in ("places", "streets", "addresses", "pois", "entrances", "stops"):
         setattr(raw, name, [i for i in getattr(raw, name) if i.located])
     link_entrances(raw)
     return raw
@@ -658,9 +702,35 @@ def order_entities(entities: list[Entity]) -> tuple[list[int], int]:
     return settlements + rest, len(settlements)
 
 
+def cell_key(lat6: int, lon6: int) -> int:
+    """The 0.01° grid cell of a point in 1e-6°: row × CELL_COLS + column, counted from (-90, -180)."""
+    return (lat6 + 90_000_000) // CELL_E6 * CELL_COLS + min(CELL_COLS - 1, (lon6 + 180_000_000) // CELL_E6)
+
+
+def place_section(stops: Sequence[Item], strings: Strings) -> tuple[np.ndarray, np.ndarray]:
+    """The places by (cell, lat, lon, category), their names added to `strings`, and the cell table:
+    each used cell's key and first place, ascending, then (NONE, place count)."""
+    rows = []
+    for it in stops:
+        lat, lon = q6(it.lat), q6(it.lon)
+        rows.append((cell_key(lat, lon), lat, lon, int(it.tags["category"]), int(it.tags["flags"]), it.tags["name"]))
+    rows.sort()
+    rec = np.zeros(len(rows), dtype=PLACE_DT)
+    if rows:
+        rec["lat"], rec["lon"], rec["category"], rec["flags"] = zip(*((r[1], r[2], r[3], r[4]) for r in rows))
+        rec["name"] = [strings.add(r[5] or None) for r in rows]
+    keys = np.fromiter((r[0] for r in rows), dtype=np.int64, count=len(rows))
+    used, first = np.unique(keys, return_index=True)
+    cells = np.zeros(len(used) + 1, dtype=CELL_DT)
+    cells["key"][:-1], cells["first"][:-1] = used, first
+    cells[-1] = (NONE, len(rows))
+    return rec, cells
+
+
 def write_index(entities: list[Entity], path: Path, osm_date: str, built_at: int | None = None,
-                loose_entrances: list[Item] = ()) -> dict[str, int]:
-    """`loose_entrances`: entrances on no address's outline, kept for the map (address NONE)."""
+                loose_entrances: list[Item] = (), stops: Sequence[Item] = ()) -> dict[str, int]:
+    """`loose_entrances`: entrances on no address's outline, kept for the map (address NONE).
+    `stops`: places to stop at (stop_place); the section is written even when there are none."""
     order, n_settlements = order_entities(entities)
     new_id = np.empty(len(entities), dtype=np.int64)
     new_id[order] = np.arange(len(order))
@@ -714,6 +784,7 @@ def write_index(entities: list[Entity], path: Path, osm_date: str, built_at: int
     entr_rec = np.zeros(len(entrances), dtype=ENTRANCE_DT)
     if entrances:
         entr_rec["address"], entr_rec["ref"], entr_rec["lat"], entr_rec["lon"] = zip(*entrances)
+    place_rec, cell_rec = place_section(stops, strings)  # before the strings are written
 
     tokens = sorted(postings)
     encoded = [t.encode("ascii") for t in tokens]
@@ -726,15 +797,17 @@ def write_index(entities: list[Entity], path: Path, osm_date: str, built_at: int
     sections = [
         pad4(bytes(strings.data)), ent.tobytes(), addr_rec.tobytes(), tok_off.tobytes(),
         pad4(tok_blob), post_start.tobytes(), post_arr.tobytes(), entr_rec.tobytes(),
+        place_rec.tobytes(), cell_rec.tobytes(),
     ]
     offsets, pos = [], HEADER.size
     for s in sections:
         offsets.append(pos)
         pos += len(s)
-    trailer = TRAILER.pack(offsets[-1], len(entr_rec), ENTRANCE_MAGIC)
+    # The entrances' trailer stays last: readers before places find it there.
+    trailer = TRAILER.pack(offsets[8], len(place_rec), PLACE_MAGIC) + TRAILER.pack(offsets[7], len(entr_rec), ENTRANCE_MAGIC)
     pos += len(trailer)
     header = HEADER.pack(
-        MAGIC, FORMAT, FLAG_ENTRANCES, len(ent), n_settlements, len(addr_rec), len(tokens), *offsets[:7],
+        MAGIC, FORMAT, FLAG_ENTRANCES | FLAG_PLACES, len(ent), n_settlements, len(addr_rec), len(tokens), *offsets[:7],
         osm_date.encode("ascii").ljust(16, b"\0"), int(built_at if built_at is not None else date_stamp(osm_date)), pos,
     )
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -747,6 +820,7 @@ def write_index(entities: list[Entity], path: Path, osm_date: str, built_at: int
         "pois": kinds[KIND_POI], "addresses": len(addr_rec), "tokens": len(tokens), "postings": len(post_arr),
         "string_bytes": len(strings.data), "entrances": len(entr_rec),
         "numbered_entrances": int((entr_rec["ref"] != NONE).sum()),
+        "stops": len(place_rec), "stop_cells": len(cell_rec) - 1, "stop_bytes": len(place_rec.tobytes()) + len(cell_rec.tobytes()) + TRAILER.size,
     }
 
 
@@ -775,6 +849,8 @@ class SearchFile:
     postings: np.ndarray
     strings_offset: int
     entrances: np.ndarray  # ENTRANCE_DT, sorted by address (NONE last); empty in a file without them
+    places: np.ndarray | None = None  # PLACE_DT, by cell; None in a file without the section
+    cells: np.ndarray | None = None  # CELL_DT, ending with (NONE, place count)
 
     def string(self, offset: int) -> str | None:
         if offset == NONE:
@@ -812,13 +888,21 @@ def read_search(path: Path) -> SearchFile:
         if entr_magic != ENTRANCE_MAGIC:
             raise ValueError(f"entrance trailer missing: {path}")
         entrances = np.frombuffer(data, dtype=ENTRANCE_DT, count=n_entr, offset=o_entr)
+    places = cells = None
+    if flags & FLAG_PLACES:
+        o_pl, n_pl, pl_magic = TRAILER.unpack_from(data, len(data) - 2 * TRAILER.size)
+        if pl_magic != PLACE_MAGIC:
+            raise ValueError(f"place trailer missing: {path}")
+        places = np.frombuffer(data, dtype=PLACE_DT, count=n_pl, offset=o_pl)
+        o_cells = o_pl + n_pl * PLACE_DT.itemsize
+        cells = np.frombuffer(data, dtype=CELL_DT, count=(len(data) - 2 * TRAILER.size - o_cells) // CELL_DT.itemsize, offset=o_cells)
     return SearchFile(
         date.rstrip(b"\0").decode(), built, n_settlements, data,
         np.frombuffer(data, dtype=ENTITY_DT, count=n_ent, offset=o_ent),
         np.frombuffer(data, dtype=ADDR_DT, count=n_addr, offset=o_addr),
         tokens, post_start,
         np.frombuffer(data, dtype="<u4", count=int(post_start[-1]), offset=o_post),
-        o_str, entrances,
+        o_str, entrances, places, cells,
     )
 
 
@@ -852,6 +936,32 @@ def validate(sf: SearchFile) -> list[str]:
         problems.append("entrances not sorted by address")
     if ((addr >= len(sf.addresses)) & (addr != NONE)).any():
         problems.append("entrance address out of range")
+    if sf.places is not None:
+        problems += validate_places(sf.places, sf.cells)
+    return problems
+
+
+def validate_places(places: np.ndarray, cells: np.ndarray) -> list[str]:
+    problems: list[str] = []
+    n = len(places)
+    if len(cells) == 0 or cells[-1]["key"] != NONE or cells[-1]["first"] != n:
+        return ["place cells: no closing entry (NONE, place count)"]
+    keys, first = cells["key"].astype(np.int64), cells["first"].astype(np.int64)
+    if (np.diff(keys) <= 0).any():
+        problems.append("place cells not ascending")
+    if (np.diff(first) <= 0).any() or (len(first) > 1 and first[0] != 0):
+        problems.append("place cell ranges empty, unordered or not starting at 0")
+    if n:
+        own = np.repeat(keys[:-1], np.diff(first).clip(0))
+        if len(own) != n:
+            problems.append("place cell ranges don't cover the places")
+        else:
+            lat, lon = places["lat"].astype(np.int64), places["lon"].astype(np.int64)
+            at = (lat + 90_000_000) // CELL_E6 * CELL_COLS + np.minimum(CELL_COLS - 1, (lon + 180_000_000) // CELL_E6)
+            if (at != own).any():
+                problems.append(f"{int((at != own).sum())} places outside their cell")
+        if ((places["category"] < 1) | (places["category"] > PLACE_CATEGORY_COUNT)).any():
+            problems.append("place category out of 1–6")
     return problems
 
 
@@ -864,10 +974,11 @@ def build_region_search(pbf: Path, output: Path, osm_date: str) -> dict[str, int
     t1 = time.monotonic()
     entities = build_index(raw)
     t2 = time.monotonic()
-    stats = write_index(entities, output, osm_date, loose_entrances=[e for e in raw.entrances if not e.owned])
+    stats = write_index(entities, output, osm_date, loose_entrances=[e for e in raw.entrances if not e.owned], stops=raw.stops)
     t3 = time.monotonic()
     log(f"{output.name}: {stats['bytes'] / 1e6:.1f} MB, {stats['places']} places, {stats['streets']} streets, "
         f"{stats['addresses']} addresses, {stats['pois']} POIs, {stats['tokens']} tokens, "
-        f"{stats['entrances']} entrances ({stats['numbered_entrances']} numbered); "
+        f"{stats['entrances']} entrances ({stats['numbered_entrances']} numbered), {stats['stops']} places to stop "
+        f"({stats['stop_bytes'] / 1e3:.0f} kB); "
         f"read {t1 - t0:.0f} s, build {t2 - t1:.0f} s, write {t3 - t2:.0f} s")
     return stats

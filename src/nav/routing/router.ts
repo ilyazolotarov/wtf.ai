@@ -62,6 +62,26 @@ export interface RoutePlan {
   offRoadM: { start: number; end: number };
   /** The route starts against the car's heading: turn around first. */
   startTurnaround?: boolean;
+  /** A trip's stops on the way (STOPS-SPEC §4), in order; absent or empty: the route goes straight to its end. */
+  stops?: PlanStop[];
+}
+
+export type RoadSide = "left" | "right";
+
+/** Where a trip's stop is on its joined plan (STOPS-SPEC §4). */
+export interface PlanStop {
+  /** The trip stop's key. */
+  key: string;
+  /** Distance and the plan's time from the route's start to where its leg ends, m and s. */
+  atM: number;
+  atS: number;
+  /** Where its leg ends on the road. */
+  lat: number;
+  lon: number;
+  /** The stop's own point (the place, the pin). */
+  point: Coordinate;
+  /** The side of the road it is on, driving the route; null: on it, or unknown. */
+  side: RoadSide | null;
 }
 
 export interface RouteStats {

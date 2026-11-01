@@ -308,7 +308,7 @@ function setup({
   };
 }
 
-const planning: RouteSnapshot = { destination: { lat: 49.84, lon: 24.03, name: "Lviv" }, status: "planning", planId: 1, replanning: false };
+const planning: RouteSnapshot = { destination: { lat: 49.84, lon: 24.03, name: "Lviv" }, status: "planning", planId: 1, stops: [], replanning: false };
 const lviv = { lat: 49.84, lon: 24.03, name: "Lviv", id: "search:1" };
 
 describe("car session", () => {

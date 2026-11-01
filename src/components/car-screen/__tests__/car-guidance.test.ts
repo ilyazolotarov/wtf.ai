@@ -43,6 +43,7 @@ const route = (guidance: GuidanceStep | undefined, patch: Partial<RouteSnapshot>
   plan,
   maneuvers: [m("depart", 0), m("left", 2700), m("roundabout", 2800, 2), m("arrive", 12_300)],
   guidance,
+  stops: [],
   replanning: false,
   ...patch,
 });

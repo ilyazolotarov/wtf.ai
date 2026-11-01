@@ -2,12 +2,13 @@ import json
 import os
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from tiles.graph import date_stamp
 from tiles.search import (
-    KIND_PLACE, KIND_POI, KIND_STREET, NONE, build_index, fold, fold_house, read_objects,
-    read_search, validate, write_index,
+    CELL_DT, ENTRANCE_DT, FLAG_ENTRANCES, HEADER, KIND_PLACE, KIND_POI, KIND_STREET, NONE, PLACE_DT, TRAILER,
+    build_index, cell_key, fold, fold_house, read_objects, read_search, stop_place, validate, write_index,
 )
 
 REPO = Path(__file__).resolve().parents[3]
@@ -31,7 +32,9 @@ def test_fold_cases_shared_with_the_app():
 # Chernihiv (city) at C; Ivanivka (village) at V, ~12 km south-west; Podusivka (suburb) in
 # the city. "вулиця Шевченка" in both the city (two ways, merged) and the village; "проспект
 # Миру" with name:en and old_name; houses on both Шевченка, an address-only street "вулиця
-# Нова", an `addr:place` house in the village; a fuel station node and a shop area.
+# Нова", an `addr:place` house in the village; a fuel station node and a shop area. Places to
+# stop at: the fuel stations (one unnamed), a café with a brand only, a 24/7 pharmacy, a fast-food
+# kiosk, a charging station in another cell, a public parking area and a private one (left out).
 
 C = (31.2947, 51.4939)
 V = (31.15, 51.41)
@@ -74,9 +77,17 @@ NODES = {
     67: (at(V, 0.5, -0.5), {"addr:place": "Іванівка", "addr:housenumber": "5"}),
     68: (at(C, 1, -2.2), {"addr:street": "проспект Миру", "addr:housenumber": "1"}),
     # POI
-    70: (at(C, 2, -1.5), {"amenity": "fuel", "name": "WOG", "brand": "WOG"}),
-    # unnamed fuel: dropped
+    70: (at(C, 2, -1.5), {"amenity": "fuel", "name": "WOG", "brand": "WOG", "opening_hours": "24/7",
+                          "fuel:diesel": "yes", "fuel:lpg": "yes", "fuel:octane_95": "yes", "fuel:octane_98": "no"}),
+    # unnamed fuel: no POI, a place to stop at
     71: (at(C, 2, -2.5), {"amenity": "fuel"}),
+    76: (at(C, -2, -1), {"amenity": "cafe", "brand": "Aroma Kava"}),
+    77: (at(C, -2, -3), {"amenity": "parking", "access": "private"}),
+    78: (at(C, -1, -1), {"amenity": "pharmacy", "opening_hours": " 24/7 "}),
+    79: (at(C, 8, 0), {"amenity": "charging_station"}),
+    84: (at(C, -1, -1.2), {"amenity": "fast_food"}),
+    # public parking area (way 140)
+    80: (at(C, -1, -3), {}), 81: (at(C, -0.6, -3), {}), 82: (at(C, -0.6, -2.6), {}), 83: (at(C, -1, -2.6), {}),
 }
 
 WAYS = [
@@ -88,6 +99,7 @@ WAYS = [
     (120, [50, 51, 52, 50], {"shop": "supermarket", "name": "Сільпо", "name:en": "Silpo"}),
     # unnamed road: dropped
     (130, [20, 30], {"highway": "track"}),
+    (140, [80, 81, 82, 83, 80], {"amenity": "parking", "access": "yes"}),
 ]
 
 
@@ -113,7 +125,7 @@ def built(tmp_path_factory):
     entities = build_index(raw)
     path = tmp / "town.search.bin"
     stats = write_index(entities, path, "2026-10-01", built_at=1_790_000_000,
-                        loose_entrances=[e for e in raw.entrances if not e.owned])
+                        loose_entrances=[e for e in raw.entrances if not e.owned], stops=raw.stops)
     return raw, stats, path, read_search(path)
 
 
@@ -122,7 +134,7 @@ def test_a_rebuild_writes_the_same_bytes(built, tmp_path):
     raw, _, _, _ = built
     a, b = tmp_path / "a.search.bin", tmp_path / "b.search.bin"
     for path in (a, b):
-        write_index(build_index(raw), path, "2026-10-01", loose_entrances=[e for e in raw.entrances if not e.owned])
+        write_index(build_index(raw), path, "2026-10-01", loose_entrances=[e for e in raw.entrances if not e.owned], stops=raw.stops)
     assert a.read_bytes() == b.read_bytes()
     assert read_search(a).built_at == date_stamp("2026-10-01")
 
@@ -199,6 +211,108 @@ def test_entrances_hang_off_their_address(built):
     loose = sf.entrances[sf.entrances["address"] == NONE]
     assert len(loose) == 1 and loose[0]["ref"] == NONE
     assert sf.entrances["address"][-1] == NONE  # sorted: the loose ones last
+
+
+def test_stop_place_tags():
+    def place(**tags):
+        item = stop_place({k.replace("_", ":", 1) if k.startswith("fuel_") else k: v for k, v in tags.items()})
+        return None if item is None else (int(item.tags["category"]), int(item.tags["flags"]), item.tags["name"])
+
+    assert place(amenity="fuel") == (1, 0, "")
+    assert place(amenity="charging_station") == (2, 0, "")
+    assert place(amenity="cafe", name="Кава") == (3, 0, "Кава")
+    assert place(amenity="fast_food") == place(amenity="restaurant") == (4, 0, "")
+    assert place(amenity="pharmacy", opening_hours=" 24/7") == (5, 1, "")
+    assert place(amenity="parking") == (6, 0, "")
+    assert place(amenity="bank", name="Банк") is None and place(shop="kiosk") is None
+    # name, else name:uk, else brand
+    assert place(amenity="fuel", **{"name:uk": "ОККО"}, brand="OKKO")[2] == "ОККО"
+    assert place(amenity="fuel", brand="OKKO")[2] == "OKKO"
+    assert place(amenity="fuel", name="WOG", brand="ВОГ")[2] == "WOG"
+    # fuels: = yes only, and only at a fuel station
+    assert place(amenity="fuel", fuel_diesel="yes", fuel_lpg="yes", fuel_octane_92="yes", fuel_octane_95="yes",
+                 fuel_octane_98="yes", opening_hours="24/7") == (1, 63, "")
+    assert place(amenity="fuel", fuel_diesel="no", fuel_octane_95="yes", opening_hours="Mo-Su 06:00-23:00") == (1, 16, "")
+    assert place(amenity="cafe", fuel_diesel="yes", opening_hours="24/7")[1] == 1
+    # parking only where anyone may park
+    for access in ("private", "customers", "no"):
+        assert place(amenity="parking", access=access) is None
+    assert place(amenity="parking", access="yes") == place(amenity="parking", access="permissive") == (6, 0, "")
+    assert place(amenity="cafe", access="private") is not None
+
+
+def test_places_by_cell(built):
+    _, stats, _, sf = built
+    assert validate(sf) == [] and stats["stops"] == 7
+    pl, cells = sf.places, sf.cells
+    rows = {(int(c), sf.string(int(n)), int(f)) for c, n, f in zip(pl["category"], pl["name"], pl["flags"])}
+    # named or not; the private parking left out; WOG: 24/7, diesel, LPG, 95 (98 = no)
+    assert rows == {(1, "WOG", 1 | 2 | 4 | 16), (1, None, 0), (3, "Aroma Kava", 0), (5, None, 1), (2, None, 0),
+                    (4, None, 0), (6, None, 0)}
+    assert (pl["reserved"] == 0).all()
+    # the parking area at its nodes' centroid (the closing node once)
+    (parking,) = pl[pl["category"] == 6]
+    assert (int(parking["lon"]), int(parking["lat"])) == (round((C[0] - 0.8 * D) * 1e6), round((C[1] - 2.8 * D) * 1e6))
+    # by cell, then lat, lon, category; the cells ascending, each range its cell's places, closed by (NONE, count)
+    keys = [cell_key(int(p["lat"]), int(p["lon"])) for p in pl]
+    order = sorted(range(len(pl)), key=lambda i: (keys[i], int(pl[i]["lat"]), int(pl[i]["lon"]), int(pl[i]["category"])))
+    assert order == list(range(len(pl)))
+    assert len(cells) == 2 + 1  # the town's and, east of it, the charging station's
+    assert cells["key"].tolist()[:-1] == sorted(set(keys)) and tuple(cells[-1]) == (NONE, len(pl))
+    for c in range(len(cells) - 1):
+        lo, hi = int(cells[c]["first"]), int(cells[c + 1]["first"])
+        assert lo < hi and all(keys[i] == int(cells[c]["key"]) for i in range(lo, hi))
+    # the key: 0.01° rows from -90°, columns from -180°
+    assert cell_key(51_493_900, 31_294_700) == 14149 * 36_000 + 21129
+    assert cell_key(-90_000_000, -180_000_000) == 0 and cell_key(0, 179_999_999) == 9000 * 36_000 + 35_999
+
+
+def test_place_section_checked(built, tmp_path):
+    _, _, path, sf = built
+    data = bytearray(path.read_bytes())
+    at = len(data) - 2 * TRAILER.size
+    o_places, n, magic = TRAILER.unpack_from(data, at)
+    assert magic == b"WTFP" and n == len(sf.places)
+    bad = bytearray(data)
+    bad[o_places + 14] = 7  # the first place's category
+    p = tmp_path / "bad.search.bin"
+    p.write_bytes(bytes(bad))
+    assert validate(read_search(p)) == ["place category out of 1–6"]
+    bad = bytearray(data)
+    o_cells = o_places + n * PLACE_DT.itemsize  # the first cell's key, moved off its places
+    bad[o_cells : o_cells + 4] = (int(sf.cells[0]["key"]) + 1).to_bytes(4, "little")
+    p.write_bytes(bytes(bad))
+    assert any("outside their cell" in x for x in validate(read_search(p)))
+
+
+def test_a_reader_before_places_reads_the_file_as_before(built):
+    # The app before places: the header's size, flag 1 and the last 12 bytes (the entrances' trailer).
+    _, _, path, sf = built
+    data = path.read_bytes()
+    fields = HEADER.unpack_from(data)
+    flags, size = fields[2], fields[-1]
+    assert size == len(data) and flags & FLAG_ENTRANCES and flags == 3
+    o_entr, n_entr, magic = TRAILER.unpack_from(data, len(data) - TRAILER.size)
+    assert magic == b"WTFE" and n_entr == 3
+    entrances = np.frombuffer(data, dtype=ENTRANCE_DT, count=n_entr, offset=o_entr)
+    assert entrances.tobytes() == sf.entrances.tobytes()
+    assert o_entr + n_entr * ENTRANCE_DT.itemsize == TRAILER.unpack_from(data, len(data) - 2 * TRAILER.size)[0]
+    # the places run up to their cells, the cells up to the places' trailer
+    o_pl, n_pl, _ = TRAILER.unpack_from(data, len(data) - 2 * TRAILER.size)
+    assert o_pl + n_pl * PLACE_DT.itemsize + len(sf.cells) * CELL_DT.itemsize == len(data) - 2 * TRAILER.size
+
+
+def test_a_file_without_places_to_stop(tmp_path):
+    # A region with none still has the section (flag 2): empty, its cell table only the closing entry.
+    path = tmp_path / "none.search.bin"
+    osm = tmp_path / "none.osm"
+    osm.write_text('<?xml version="1.0" encoding="UTF-8"?><osm version="0.6">'
+                   f'<node id="1" version="1" lat="{C[1]}" lon="{C[0]}"><tag k="place" v="city"/><tag k="name" v="Чернігів"/></node>'
+                   "</osm>", encoding="utf-8")
+    raw = read_objects(osm)
+    write_index(build_index(raw), path, "2026-10-01", stops=raw.stops)
+    sf = read_search(path)
+    assert validate(sf) == [] and len(sf.places) == 0 and sf.cells.tolist() == [(NONE, 0)]
 
 
 def test_associated_street_gives_houses_their_street(tmp_path):

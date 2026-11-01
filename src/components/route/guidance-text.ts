@@ -18,6 +18,7 @@ export const MANEUVER_ICON: Record<ManeuverKind, IconName> = {
   "u-turn": "u_turn_left",
   roundabout: "roundabout_left",
   arrive: "flag",
+  stop: "flag",
 };
 
 export const MANEUVER_TEXT: Record<ManeuverKind, keyof Strings> = {
@@ -33,10 +34,12 @@ export const MANEUVER_TEXT: Record<ManeuverKind, keyof Strings> = {
   "u-turn": "mUTurn",
   roundabout: "mRoundabout",
   arrive: "mArrive",
+  stop: "mStop",
 };
 
 /** "Turn left", "At the roundabout, exit 2": the route banner's, and the car screen's. */
-export function maneuverInstruction(m: Maneuver, t: (key: keyof Strings) => string): string {
+export function maneuverInstruction(m: Pick<Maneuver, "kind" | "exit" | "side">, t: (key: keyof Strings) => string): string {
+  if (m.kind === "stop") return t(m.side === "left" ? "mStopLeft" : m.side === "right" ? "mStopRight" : "mStop");
   return t(MANEUVER_TEXT[m.kind]).replace("{n}", String(m.exit ?? 1));
 }
 
@@ -48,6 +51,7 @@ export const PROBLEM_TEXT: Record<RouteProblem, keyof Strings> = {
   "no-route": "routeNoRoute",
   "too-far": "routeTooFar",
   "outside-region": "routeOutsideRegionFailed",
+  "too-many-stops": "routeTooManyStops",
 };
 
 /** Distance to a maneuver, in the steps a driver reads: 10 m under 300 m, 50 m under 1 km, then 0.1 km. */

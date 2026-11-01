@@ -6,7 +6,7 @@ import type { Strings } from "@/i18n/en";
 import { SPOKEN_DISTANCES_M, type Announcement } from "@/nav/routing/announcer";
 import type { Maneuver, ManeuverKind } from "@/nav/routing/maneuvers";
 
-import { MANEUVER_TEXT } from "./guidance-text";
+import { MANEUVER_TEXT, maneuverInstruction } from "./guidance-text";
 
 export type VoiceLang = "en" | "uk";
 /** The recorded voices (tools/voice/render.ts): the female one first, every language has it. */
@@ -38,7 +38,10 @@ const SPOKEN_KINDS: ManeuverKind[] = [
 const locale = (lang: VoiceLang) => (lang === "uk" ? "uk-UA" : "en-US");
 const lower = (s: string, lang: VoiceLang) => s.charAt(0).toLocaleLowerCase(locale(lang)) + s.slice(1);
 
-function instruction(m: Pick<Maneuver, "kind" | "exit">, t: T): Phrase {
+type Spoken = Pick<Maneuver, "kind" | "exit" | "side">;
+
+function instruction(m: Spoken, t: T): Phrase {
+  if (m.kind === "stop") return { id: m.side ? `stop-${m.side}` : "stop", text: maneuverInstruction(m, t) };
   if (m.kind !== "roundabout") return { id: m.kind, text: t(MANEUVER_TEXT[m.kind]) };
   const n = m.exit ?? 1;
   const nth = t("sayOrdinals").split("|")[n - 1] ?? t(MANEUVER_TEXT.roundabout).replace("{n}", String(n));
@@ -51,12 +54,12 @@ function distance(m: number, t: T): string {
   return t("sayDistances").split("|")[i] ?? t("sayMetres").replace("{n}", String(m));
 }
 
-function ahead(m: Pick<Maneuver, "kind" | "exit">, distanceM: number, t: T, lang: VoiceLang): Phrase {
+function ahead(m: Spoken, distanceM: number, t: T, lang: VoiceLang): Phrase {
   const i = instruction(m, t);
   return { id: `ahead-${distanceM}-${i.id}`, text: `${t("sayIn").replace("{d}", distance(distanceM, t))}, ${lower(i.text, lang)}` };
 }
 
-function then(m: Pick<Maneuver, "kind" | "exit">, t: T, lang: VoiceLang): Phrase {
+function then(m: Spoken, t: T, lang: VoiceLang): Phrase {
   if (m.kind === "arrive") return { id: "then-arrive", text: t("sayThenArrive") };
   const i = instruction(m, t);
   return { id: `then-${i.id}`, text: `${t("thenManeuver")} ${lower(i.text, lang)}` };
@@ -69,6 +72,10 @@ export function announcementPhrases(a: Announcement, t: T, lang: VoiceLang): Phr
       return [{ id: "replanned", text: t("sayReplanned") }];
     case "arrived":
       return [{ id: "arrived", text: t("arrived") }];
+    case "stop-reached":
+      return [stopReachedPhrase(t)];
+    case "stop-passed":
+      return [stopPassedPhrase(t)];
     case "maneuver": {
       if (a.stage === "prepare") return [ahead(a.maneuver, a.distanceM, t, lang)];
       const i = instruction(a.maneuver, t);
@@ -76,6 +83,15 @@ export function announcementPhrases(a: Announcement, t: T, lang: VoiceLang): Phr
       return a.then ? [now, then(a.then, t, lang)] : [now];
     }
   }
+}
+
+/** At a trip's stop, and one left behind (STOPS-SPEC §8). */
+export function stopReachedPhrase(t: T): Phrase {
+  return { id: "stop-reached", text: t("sayAtStop") };
+}
+
+export function stopPassedPhrase(t: T): Phrase {
+  return { id: "stop-passed", text: t("sayStopPassed") };
 }
 
 /** The engine started and the app can't tell where the car is: the driver is asked to put it on the map. */
@@ -90,12 +106,20 @@ export function cameraPhrase(t: T, slowDown: boolean): Phrase {
 
 /** Every phrase that gets a recorded clip. */
 export function recordedPhrases(t: T, lang: VoiceLang): Phrase[] {
-  const maneuvers = SPOKEN_KINDS.flatMap((kind): Pick<Maneuver, "kind" | "exit">[] =>
-    kind === "roundabout" ? Array.from({ length: RECORDED_EXITS }, (_, i) => ({ kind, exit: i + 1 })) : [{ kind }],
-  );
+  const maneuvers: Spoken[] = [
+    ...SPOKEN_KINDS.flatMap((kind): Spoken[] =>
+      kind === "roundabout" ? Array.from({ length: RECORDED_EXITS }, (_, i) => ({ kind, exit: i + 1 })) : [{ kind }],
+    ),
+    // A stop on either side of the road, or on it.
+    { kind: "stop", side: "left" },
+    { kind: "stop", side: "right" },
+    { kind: "stop" },
+  ];
   return [
     { id: "replanned", text: t("sayReplanned") },
     { id: "arrived", text: t("arrived") },
+    stopReachedPhrase(t),
+    stopPassedPhrase(t),
     placeCarPhrase(t),
     cameraPhrase(t, false),
     cameraPhrase(t, true),

@@ -17,6 +17,7 @@ import {
   type NavEstimateRecord,
   type NavMapMatchRecord,
   type NavRouteManeuverRecord,
+  type NavRouteStopRecord,
   type NavRoutePointRecord,
   type NavRouteProgressRecord,
   type NavRouteRecord,
@@ -325,6 +326,10 @@ export class TripRecorder {
 
   navRouteManeuver(r: NavRouteManeuverRecord): void {
     this.record(r.timestampUs, (w) => w.navRouteManeuver(r));
+  }
+
+  navRouteStop(r: NavRouteStopRecord): void {
+    this.record(r.timestampUs, (w) => w.navRouteStop(r));
   }
 
   navRouteProgress(r: NavRouteProgressRecord): void {

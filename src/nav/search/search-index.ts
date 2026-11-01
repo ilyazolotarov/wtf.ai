@@ -20,6 +20,21 @@ import {
   parseHeader,
   type SearchHeader,
 } from "@/nav/search/format";
+import {
+  CELL_BYTES,
+  CELL_COLS,
+  cellCol,
+  cellRow,
+  FLAG_PLACES,
+  PLACE_BYTES,
+  PLACE_CATEGORIES,
+  PLACE_MAGIC,
+  type PlaceBox,
+  type PlaceCategory,
+  type StopPlace,
+} from "@/nav/search/places";
+
+export { PlaceFlag, type PlaceBox, type PlaceCategory, type StopPlace } from "@/nav/search/places";
 
 export type SearchResultKind = "place" | "street" | "poi" | "address";
 
@@ -198,6 +213,18 @@ function bits(mask: number): number {
   return n;
 }
 
+/** The first of `a[0 … n)` (ascending) not below `x`. */
+function lowerBound(a: Uint32Array, n: number, x: number): number {
+  let lo = 0;
+  let hi = n;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (a[mid] < x) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
 function contains(ids: Uint32Array, id: number): boolean {
   let lo = 0;
   let hi = ids.length;
@@ -231,6 +258,10 @@ export class SearchIndex {
   /** Where the entrance section is ([offset, count]); null in a file without one. */
   private readonly entranceSection: [number, number] | null = null;
   private entranceTable: EntranceTable | null = null;
+  /** Where the places to stop at are ([offset, count]); null in a file without them. */
+  private readonly placeSection: [number, number] | null = null;
+  /** The used cells' keys and first places, the closing (NONE, count) last; read once. */
+  private placeCells: { keys: Uint32Array; first: Uint32Array } | null = null;
   /** The last house scan (a dropped pin asks for its settlement, then its address). */
   private lastHouse: { at: Coordinate; maxM: number; best: { owner: Entity; house: House; d: number } | null } | null = null;
   /** Where each settlement is, and the farthest any of them reaches, read once (`settlementsNear`). */
@@ -247,6 +278,91 @@ export class SearchIndex {
       if (String.fromCharCode(...t.subarray(8, 12)) !== ENTRANCE_MAGIC) throw new Error("search file: no entrance trailer");
       this.entranceSection = [v.getUint32(0, true), v.getUint32(4, true)];
     }
+    if (this.header.flags & FLAG_PLACES) {
+      // Just before the entrances' trailer, which stays last for readers before places.
+      const t = source.read(source.size - 2 * TRAILER_BYTES, TRAILER_BYTES);
+      const v = new DataView(t.buffer, t.byteOffset, TRAILER_BYTES);
+      if (String.fromCharCode(...t.subarray(8, 12)) !== PLACE_MAGIC) throw new Error("search file: no place trailer");
+      this.placeSection = [v.getUint32(0, true), v.getUint32(4, true)];
+    }
+  }
+
+  /** The file has places to stop at (STOPS-SPEC §6.1); one built before them has none, not even an empty list. */
+  get hasPlaces(): boolean {
+    return this.placeSection !== null;
+  }
+
+  /**
+   * Places in the box (degrees), of the categories given (all when absent), read cell by cell: per 0.01° row of the
+   * box, its cells' places are one range of the section (the cells are in key order, a row's columns contiguous).
+   */
+  placesIn(box: PlaceBox, categories?: ReadonlySet<PlaceCategory>): StopPlace[] {
+    const cells = this.cells();
+    if (!cells || !this.placeSection) return [];
+    const at = this.placeSection[0];
+    const { south, west, north, east } = box;
+    if (!(south <= north && west <= east)) return [];
+    const r0 = cellRow(Math.max(-90e6, Math.floor(south * 1e6)));
+    const r1 = cellRow(Math.min(90e6, Math.ceil(north * 1e6)));
+    const c0 = cellCol(Math.max(-180e6, Math.floor(west * 1e6)));
+    const c1 = cellCol(Math.min(180e6, Math.ceil(east * 1e6)));
+    const used = cells.keys.length - 1;
+    const out: StopPlace[] = [];
+    for (let r = r0; r <= r1; r++) {
+      const lo = lowerBound(cells.keys, used, r * CELL_COLS + c0);
+      const hi = lowerBound(cells.keys, used, r * CELL_COLS + c1 + 1);
+      if (lo < hi) this.readPlaces(at, cells.first[lo], cells.first[hi], box, categories, out);
+    }
+    return out;
+  }
+
+  /** Places `from … to` of the section at `at`, those in the box and of the categories, onto `out`. */
+  private readPlaces(
+    at: number,
+    from: number,
+    to: number,
+    box: PlaceBox,
+    categories: ReadonlySet<PlaceCategory> | undefined,
+    out: StopPlace[],
+  ) {
+    const b = this.source.read(at + from * PLACE_BYTES, (to - from) * PLACE_BYTES);
+    const v = new DataView(b.buffer, b.byteOffset, b.byteLength);
+    for (let i = 0; i < to - from; i++) {
+      const o = i * PLACE_BYTES;
+      const category = PLACE_CATEGORIES[v.getUint8(o + 14)];
+      if (!category || (categories && !categories.has(category))) continue;
+      const lat = v.getInt32(o, true) * COORD_SCALE;
+      const lon = v.getInt32(o + 4, true) * COORD_SCALE;
+      if (lat < box.south || lat > box.north || lon < box.west || lon > box.east) continue;
+      const name = v.getUint32(o + 8, true);
+      out.push({
+        key: `p${from + i}`,
+        category,
+        name: name === NONE ? null : this.string(name),
+        lat,
+        lon,
+        flags: v.getUint16(o + 12, true),
+      });
+    }
+  }
+
+  /** The cell table, read once (8 bytes a used cell: Kyiv's few thousand, tens of kB). */
+  private cells(): { keys: Uint32Array; first: Uint32Array } | null {
+    if (!this.placeSection) return null;
+    if (this.placeCells) return this.placeCells;
+    const [at, count] = this.placeSection;
+    const cellsAt = at + count * PLACE_BYTES;
+    const n = (this.source.size - 2 * TRAILER_BYTES - cellsAt) / CELL_BYTES;
+    const b = this.source.read(cellsAt, n * CELL_BYTES);
+    const v = new DataView(b.buffer, b.byteOffset, b.byteLength);
+    const keys = new Uint32Array(n);
+    const first = new Uint32Array(n);
+    for (let i = 0; i < n; i++) {
+      keys[i] = v.getUint32(i * CELL_BYTES, true);
+      first[i] = v.getUint32(i * CELL_BYTES + 4, true);
+    }
+    this.placeCells = { keys, first };
+    return this.placeCells;
   }
 
   /**

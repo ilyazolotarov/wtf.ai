@@ -30,6 +30,7 @@ function route(state: GuidanceStep["state"]): RouteSnapshot {
     destination,
     status: "active",
     planId: 1,
+    stops: [],
     replanning: false,
     maneuvers: [m("depart", 0), m("arrive", 2000)],
     guidance: {

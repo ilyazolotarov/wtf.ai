@@ -26,6 +26,7 @@ import {
   NAV_POSE_CODES,
   NAV_ROUTE,
   NAV_ROUTE_MANEUVER,
+  NAV_ROUTE_STOP,
   NAV_ROUTE_POINT,
   NAV_ROUTE_PROGRESS,
   NAV_SOURCE_CODES,
@@ -34,6 +35,8 @@ import {
   ROUTE_MANEUVER_CODES,
   ROUTE_REASON_CODES,
   ROUTE_STATE_CODES,
+  ROUTE_SIDE_CODES,
+  ROUTE_STOP_CATEGORY_CODES,
   ROUTE_STATUS_CODES,
   THERMAL_CODES,
   TIME_SYNC,
@@ -48,6 +51,7 @@ import {
   type NavEstimateRecord,
   type NavMapMatchRecord,
   type NavRouteManeuverRecord,
+  type NavRouteStopRecord,
   type NavRoutePointRecord,
   type NavRouteProgressRecord,
   type NavRouteRecord,
@@ -311,6 +315,20 @@ export class TripLogWriter {
       r.lonDeg,
       r.atM,
       r.turnRad,
+    ]);
+  }
+
+  navRouteStop(r: NavRouteStopRecord): void {
+    this.enc.data(NAV_ROUTE_STOP.name, [
+      r.timestampUs,
+      Math.min(0xffff, r.planId),
+      Math.min(0xffff, r.index),
+      r.latDeg,
+      r.lonDeg,
+      r.atM,
+      r.atS,
+      Math.max(0, ROUTE_SIDE_CODES.indexOf(r.side)),
+      Math.max(0, ROUTE_STOP_CATEGORY_CODES.indexOf(r.category)),
     ]);
   }
 

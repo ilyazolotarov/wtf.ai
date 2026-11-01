@@ -507,6 +507,7 @@ export function getRuntime(): Runtime {
       route: (r) => recorder.navRoute(r),
       point: (r) => recorder.navRoutePoint(r),
       maneuver: (r) => recorder.navRouteManeuver(r),
+      stop: (r) => recorder.navRouteStop(r),
       progress: (r) => recorder.navRouteProgress(r),
     },
   });

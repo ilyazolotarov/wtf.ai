@@ -153,6 +153,9 @@ def test_route(trip):
     assert list(trip.route_points["lat"]) == [pytest.approx(50.4501), pytest.approx(50.46)]
     assert list(trip.route_maneuvers["kind"]) == ["depart", "roundabout"]
     assert trip.route_maneuvers.iloc[1]["exit"] == 2
+    assert list(trip.route_stops["side"]) == ["right"]
+    assert list(trip.route_stops["category"]) == ["fuel"]
+    assert trip.route_stops.iloc[0]["at_m"] == 700
     progress = trip.route_progress.iloc[0]
     assert (progress["state"], progress["next_index"]) == ("leaving", 1)
     assert (progress["off_m"], progress["to_next_m"]) == (pytest.approx(45), pytest.approx(600))

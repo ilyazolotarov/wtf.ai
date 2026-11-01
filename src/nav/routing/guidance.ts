@@ -7,6 +7,7 @@ import { LocalFrame } from "../geo/local-frame";
 import type { MapMatchState } from "../mapmatch/particle-filter";
 import type { Maneuver } from "./maneuvers";
 import type { RoutePlan } from "./router";
+import { elapsedS } from "./trip";
 
 const DEG = Math.PI / 180;
 const TWO_PI = 2 * Math.PI;
@@ -34,6 +35,8 @@ export interface GuidanceConfig {
   passedM: number;
   /** The maneuver after the next is shown with it when this close to it ("then turn left"). */
   thenM: number;
+  /** A stop is passed when the car, on the route, is this far beyond it without having reached it (STOPS-SPEC §5.3). */
+  passStopM: number;
 }
 
 export const DEFAULT_GUIDANCE: GuidanceConfig = {
@@ -50,6 +53,7 @@ export const DEFAULT_GUIDANCE: GuidanceConfig = {
   arriveNearEndM: 300,
   passedM: 10,
   thenM: 120,
+  passStopM: 100,
 };
 
 /**
@@ -86,6 +90,13 @@ export interface GuidanceStep {
   /** Where progress is on the plan's polyline: the last vertex passed, and the point (the route ahead starts there). */
   passedIndex: number;
   progressAt: Coordinate;
+  /** The plan's next stop not reached or passed (index in `plan.stops`), and the distance and time to it; null: none. */
+  nextStop?: number | null;
+  toStopM?: number;
+  toStopS?: number;
+  /** The plan's stops reached (within `arriveM`) and passed (STOPS-SPEC §5), by index, in the order it happened. */
+  reachedStops?: readonly number[];
+  passedStops?: readonly number[];
 }
 
 /** Progress along one plan's polyline. */
@@ -103,6 +114,8 @@ export class RouteGuidance {
   private drivenSinceMatch = 0;
   /** The car has been on the route (it may start away from it). */
   private joined = false;
+  private readonly reached: number[] = [];
+  private readonly passed: number[] = [];
 
   /** `joined`: the car is on the route from its start (a re-plan from where it drives), not on its way to it. */
   constructor(
@@ -148,6 +161,7 @@ export class RouteGuidance {
     const alongM = this.alongPoly / this.scale;
     const remainingM = Math.max(0, (totalPoly - this.alongPoly) / this.scale);
 
+    this.updateStops(p, alongM, offM <= threshold);
     let state: GuidanceState;
     const unsure = p.reliable === false || p.mapMatch === "multimodal" || p.mapMatch === "init";
     const end = this.plan.coordinates.at(-1)!;
@@ -172,18 +186,50 @@ export class RouteGuidance {
     const nextIndex = this.nextManeuver(alongM);
     const next = this.maneuvers[nextIndex];
     const following = this.maneuvers[nextIndex + 1];
+    const nowS = elapsedS(this.plan, alongM);
+    const stops = this.plan.stops ?? [];
+    const nextStop = stops.findIndex((_, i) => !this.reached.includes(i) && !this.passed.includes(i));
     this.last = {
       state,
       alongM,
       offM,
       remainingM,
-      remainingS: this.plan.lengthM > 0 ? (this.plan.durationS * remainingM) / this.plan.lengthM : 0,
+      remainingS: Math.max(0, this.plan.durationS - nowS),
+      nextStop: nextStop >= 0 ? nextStop : null,
+      toStopM: nextStop >= 0 ? Math.max(0, stops[nextStop].atM - alongM) : 0,
+      toStopS: nextStop >= 0 ? Math.max(0, stops[nextStop].atS - nowS) : 0,
+      reachedStops: [...this.reached],
+      passedStops: [...this.passed],
       nextIndex,
       toNextM: Math.max(0, next.atM - alongM),
       thenIndex: following && following.atM - next.atM <= c.thenM ? nextIndex + 1 : null,
       ...this.progressPoint(),
     };
     return this.last;
+  }
+
+  /**
+   * A stop is reached within `arriveM` of its leg's end along the route (as an arrival), or of the road point or the
+   * place itself; passed when the car, on the route, is `passStopM` beyond it without having reached it.
+   */
+  private updateStops(p: GuidancePosition, alongM: number, onRoute: boolean): void {
+    const c = this.config;
+    const stops = this.plan.stops ?? [];
+    for (let i = 0; i < stops.length; i++) {
+      if (this.reached.includes(i) || this.passed.includes(i)) continue;
+      const s = stops[i];
+      const aheadM = s.atM - alongM;
+      if (aheadM > c.arriveNearEndM) break;
+      const near = Math.abs(aheadM) <= c.arriveNearEndM;
+      if (
+        (onRoute && Math.abs(aheadM) <= c.arriveM) ||
+        (near && (haversineM(p, s) <= c.arriveM || haversineM(p, s.point) <= c.arriveM))
+      ) {
+        this.reached.push(i);
+      } else if (onRoute && -aheadM > c.passStopM) {
+        this.passed.push(i);
+      }
+    }
   }
 
   /** The polyline vertex at or before the progress, and the progress point between it and the next. */

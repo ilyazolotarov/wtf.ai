@@ -569,13 +569,14 @@ function demoRouteStates(
     plan,
     maneuvers,
     guidance: g,
+    stops: [],
     replanning: false,
     ...extra,
   });
   return [
     [
       label("planning", "прокладаємо маршрут"),
-      { destination, status: "planning", planId: 1, replanning: false },
+      { destination, stops: [], status: "planning", planId: 1, replanning: false },
       false,
       false,
     ],
@@ -586,6 +587,7 @@ function demoRouteStates(
         status: "failed",
         failure: "no-road-at-destination",
         planId: 1,
+        stops: [],
         replanning: false,
       },
       false,

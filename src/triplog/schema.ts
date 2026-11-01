@@ -212,6 +212,22 @@ export const NAV_ROUTE_MANEUVER: ULogFormat = {
   ],
 };
 
+/** A trip's stops on the way, after each plan (STOPS-SPEC §10); their names are in the notes. */
+export const NAV_ROUTE_STOP: ULogFormat = {
+  name: "nav_route_stop",
+  fields: [
+    ts,
+    { type: "uint16_t", name: "plan_id" },
+    { type: "uint16_t", name: "index" },
+    { type: "double", name: "lat_deg" },
+    { type: "double", name: "lon_deg" },
+    { type: "float", name: "at_m" },
+    { type: "float", name: "at_s" },
+    { type: "uint8_t", name: "side" },
+    { type: "uint8_t", name: "category" },
+  ],
+};
+
 /** Guidance at each `nav_estimate` while a route is active (ROUTING-SPEC §8). */
 export const NAV_ROUTE_PROGRESS: ULogFormat = {
   name: "nav_route_progress",
@@ -274,6 +290,7 @@ export const ALL_FORMATS: readonly ULogFormat[] = [
   CAN_FRAME,
   CAN_WINDOW,
   APP_STATS,
+  NAV_ROUTE_STOP,
 ];
 
 export const ENGINE_STATE_CODES = ["unknown", "ignition-off", "engine-off", "engine-running"] as const;
@@ -335,13 +352,16 @@ export const NAV_TRUST_CODES = ["TRUSTED", "UNTRUSTED", "REACQUIRING", "NO_FIX"]
 export const NAV_POSE_CODES = ["none", "unverified", "confirmed", "rejected", "behind", "kept"] as const;
 export const NAV_MAPMATCH_STATE_CODES = ["off", "init", "tracking", "multimodal", "offroad"] as const;
 /** Why a route was planned: a new destination, the car left the route, logged again at a trip's start, or an alternative taken. */
-export const ROUTE_REASON_CODES = ["new", "off-route", "resume", "alternative", "placed"] as const;
+export const ROUTE_REASON_CODES = ["new", "off-route", "resume", "alternative", "placed", "stops", "stop-back"] as const;
 export const ROUTE_STATUS_CODES = ["done", "no-road-at-start", "no-road-at-destination", "no-route", "too-far", "cancelled"] as const;
 export const ROUTE_STATE_CODES = ["on", "leaving", "off", "unsure", "arrived"] as const;
+export const ROUTE_SIDE_CODES = ["none", "left", "right"] as const;
+/** A stop's kind (`PlaceCategory`, src/nav/search), in its order; `none`: a pin, a search result. */
+export const ROUTE_STOP_CATEGORY_CODES = ["none", "fuel", "charging", "cafe", "food", "pharmacy", "parking"] as const;
 /** `ManeuverKind` (src/nav/routing/maneuvers.ts), in its order. */
 export const ROUTE_MANEUVER_CODES = [
   "depart", "slight-left", "slight-right", "left", "right", "sharp-left", "sharp-right",
-  "keep-left", "keep-right", "u-turn", "roundabout", "arrive",
+  "keep-left", "keep-right", "u-turn", "roundabout", "arrive", "stop",
 ] as const;
 
 /** `can_window.flags`: the adapter stopped monitoring by itself; BUFFER FULL in the window. */
@@ -540,6 +560,19 @@ export interface NavRouteManeuverRecord {
   lonDeg: number;
   atM: number;
   turnRad: number;
+}
+
+export interface NavRouteStopRecord {
+  timestampUs: number;
+  planId: number;
+  index: number;
+  /** The stop's own point (the place). */
+  latDeg: number;
+  lonDeg: number;
+  atM: number;
+  atS: number;
+  side: (typeof ROUTE_SIDE_CODES)[number];
+  category: (typeof ROUTE_STOP_CATEGORY_CODES)[number];
 }
 
 export interface NavRouteProgressRecord {

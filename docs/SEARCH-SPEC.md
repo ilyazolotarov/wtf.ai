@@ -48,6 +48,10 @@ Both sides are tested against `src/nav/search/__fixtures__/fold-cases.json`. Str
   the number is `ref`, else `addr:unit`, else a `name` of up to three letters or digits. One on the outline of an
   addressed building belongs to that address (the first, if two share it); the rest are kept for the map only.
   Coverage varies widely: a quarter of Kyiv's apartment blocks have numbered entrances, 1 in 30 in an oblast.
+- **Places to stop at** (STOPS-SPEC §6.1): nodes and ways (at their nodes' centroid) with `amenity` = fuel,
+  charging_station, cafe, fast_food, restaurant, pharmacy or parking (not `access` = private, customers or no),
+  named or not. Name: `name`, else `name:uk`, else `brand`. Flags: `opening_hours` = 24/7 (trimmed, any case); at a
+  fuel station `fuel:diesel`, `fuel:lpg`, `fuel:octane_92/95/98` = yes. A named one is a POI as well.
 - **POIs**: named objects with amenity, shop, tourism, leisure, office, healthcare, craft, historic,
   `railway=station/halt` or `aeroway=aerodrome/terminal`.
 - **Settlement areas**: `boundary=administrative` and `place=city/town/village/hamlet` polygons (ways and
@@ -65,7 +69,7 @@ Both sides are tested against `src/nav/search/__fixtures__/fold-cases.json`. Str
 
 | Section | Content |
 | --- | --- |
-| header, 76 B | `"WTFS"`, u16 format, u16 flags (1: entrances), u32 entities, settlements, addresses, tokens, offsets of the 7 sections, 16 B OSM date, u32 build stamp (the OSM date's midnight UTC, as the road graph's: a rebuild of the same data is byte-identical), u32 file size |
+| header, 76 B | `"WTFS"`, u16 format, u16 flags (1: entrances, 2: places), u32 entities, settlements, addresses, tokens, offsets of the 7 sections, 16 B OSM date, u32 build stamp (the OSM date's midnight UTC, as the road graph's: a rebuild of the same data is byte-identical), u32 file size |
 | strings | u16 byte length + UTF-8, deduplicated |
 | entities, 44 B | u8 kind (1 place, 2 street, 3 POI), u8 reach, u16 rank, i32 lat, lon (1e-6°), u32 name, name_en (or NONE), tag, u32 parent (settlement or NONE), u32 first address, count, u32 first child, count |
 | addresses, 12 B | u32 house number (string), i32 lat, lon |
@@ -74,6 +78,9 @@ Both sides are tested against `src/nav/search/__fixtures__/fold-cases.json`. Str
 | posting starts | u32 × (tokens + 1) into the postings |
 | postings | u32 entity ids, ascending per token |
 | entrances, 16 B | u32 address (NONE: of no address), u32 number string (NONE: none), i32 lat, lon; by address |
+| places, 16 B | i32 lat, lon (1e-6°), u32 name (NONE: none), u16 flags (1 24/7, 2 diesel, 4 LPG, 8 92, 16 95, 32 98), u8 category (1 fuel, 2 charging, 3 cafe, 4 food: fast_food and restaurant, 5 pharmacy, 6 parking), u8 0; by (cell, lat, lon, category) |
+| place cells, 8 B | u32 cell key, u32 first place; the used cells ascending, then (NONE, place count): a cell's places are [first, next first) |
+| places trailer, 12 B | u32 offset of the places, u32 count, `"WTFP"` (the cells run from the places' end to it) |
 | trailer, 12 B | u32 offset of the entrances, u32 count, `"WTFE"` |
 
 Order: settlements first (by rank), then every settlement's children (one contiguous range per settlement), then
@@ -82,7 +89,12 @@ A settlement's *reach* is how far from its point its children and houses go, plu
 from a house), at least its kind's reach (§2), in 250 m (u8: 63.75 km); Kyiv's is ~27 km. 0 for other entities and
 in files before it: a reader takes the kind's reach then. Older apps ignore the byte (it was 0).
 The entrances and trailer come after the 7 sections, so a reader of the file before them reads it as before.
-`tiles search-check` validates a file.
+The places, their cells and trailer come before the entrances' trailer, which stays last: an app before places reads
+the file as before. Cell key: the 0.01° grid of the stored coordinates, row (from −90°) × 36,000 + column (from
+−180°). The section is always written (empty in a region with none); a file without flag 2 has no places.
+`SearchIndex.placesIn` reads the cell table once, then per 0.01° row of a box one range of places.
+`tiles search-check` validates a file: postings, children, addresses, entrances, and the places' trailer, cells
+ascending, ranges within the count, each place in its cell, categories 1–6.
 
 ## 4. Search (`src/nav/search/search-index.ts`)
 

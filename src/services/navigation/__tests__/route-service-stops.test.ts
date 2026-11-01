@@ -1,0 +1,310 @@
+import { LocalFrame } from "@/nav/geo/local-frame";
+import type { Coordinate } from "@/nav/geo";
+import { RoadClass } from "@/nav/mapmatch/graph/format";
+import { MemoryRoadGraph } from "@/nav/mapmatch/graph/memory-graph";
+import type { PositionEstimate } from "@/nav/position/types";
+import { RouteLine } from "@/nav/routing/along";
+import type { StopPlace } from "@/nav/search/search-index";
+import { RouteService, type RouteSnapshot } from "@/services/navigation/route-service";
+import type { NavRouteStopRecord } from "@/triplog/schema";
+
+// A main road east, 0–3000 m; at 1500 m a side road south to a fuel station's forecourt (1500, −150); a cul-de-sac
+// north at 2400 m to a pharmacy (2400, 200). Metres east, north of the origin.
+const frame = new LocalFrame({ lat: 50.45, lon: 30.52 });
+const at = (e: number, n: number) => frame.toCoordinate(e, n);
+const network = () =>
+  new MemoryRoadGraph(frame, [
+    { cls: RoadClass.primary, points: [at(0, 0), at(1500, 0)] },
+    { cls: RoadClass.primary, points: [at(1500, 0), at(2400, 0)] },
+    { cls: RoadClass.primary, points: [at(2400, 0), at(3000, 0)] },
+    { cls: RoadClass.service, points: [at(1500, 0), at(1500, -150)] },
+    { cls: RoadClass.residential, points: [at(2400, 0), at(2400, 200)] },
+    { cls: RoadClass.residential, points: [at(1500, 0), at(1500, 900)] },
+  ]);
+const STATION = at(1500, -150);
+const DESTINATION = { ...at(3000, 0), name: "End" };
+
+const places: StopPlace[] = [
+  { key: "p1", category: "fuel", name: "Station", ...at(1500, -150), flags: 2 },
+  { key: "p2", category: "pharmacy", name: null, ...at(2400, 200), flags: 0 },
+  { key: "p3", category: "fuel", name: "Behind", ...at(100, 50), flags: 0 },
+];
+
+function harness() {
+  let position: PositionEstimate | null = null;
+  const listeners = new Set<() => void>();
+  let clock = 1_000_000;
+  const deferred: (() => void)[] = [];
+  const notes: string[] = [];
+  const stops: NavRouteStopRecord[] = [];
+  const store = new Map<string, unknown>();
+  const service = new RouteService({
+    position: { getSnapshot: () => position, subscribe: (l) => (listeners.add(l), () => listeners.delete(l)) },
+    openGraph: () => ({ key: "net", graph: Object.assign(network(), { setFrame: () => {} }), close: () => {} }),
+    nowUs: () => clock * 1000,
+    now: () => clock,
+    note: (t) => notes.push(t),
+    log: { route: () => {}, point: () => {}, maneuver: () => {}, progress: () => {}, stop: (r) => stops.push(r) },
+    store: { getJson: <T,>(key: string) => (store.get(key) ?? null) as T | null, setJson: (key, value) => void store.set(key, value) },
+    defer: (fn) => {
+      deferred.push(fn);
+      return () => deferred.splice(deferred.indexOf(fn) >>> 0, 1);
+    },
+    places: () => ({
+      hasPlaces: true,
+      placesIn: (box, categories) =>
+        places.filter((p) => (!categories || categories.has(p.category)) && p.lat >= box.south && p.lat <= box.north && p.lon >= box.west && p.lon <= box.east),
+    }),
+  });
+  const flush = () => {
+    while (deferred.length) deferred.shift()!();
+  };
+  const moveTo = (c: Coordinate, more: Partial<PositionEstimate> = {}) => {
+    clock += 1000;
+    position = { ...c, accuracyM: 5, source: "fused", trust: "TRUSTED", timestamp: clock, headingRad: Math.PI / 2, speedMps: 10, ...more };
+    listeners.forEach((l) => l());
+  };
+  const snap = () => service.getSnapshot() as RouteSnapshot;
+  /** Drive the current plan from `fromM` to `toM` (its metres), a position every `stepM`. */
+  const follow = (fromM: number, toM: number, stepM = 10) => {
+    const line = new RouteLine(snap().plan!);
+    for (let m = fromM; m <= toM; m += stepM) {
+      const p = line.at(m);
+      moveTo(p.point, { headingRad: p.headingRad });
+    }
+  };
+  const tick = (ms: number) => (clock += ms);
+  return { service, flush, moveTo, snap, follow, notes, stops, store, tick };
+}
+
+describe("RouteService with stops (STOPS-SPEC §4–5)", () => {
+  test("a trip through a stop: planned through it, logged, kept for a restart", () => {
+    const h = harness();
+    h.moveTo(at(100, 0));
+    h.service.start(DESTINATION, { stops: [{ ...STATION, name: "Station", category: "fuel" }] });
+    h.flush();
+    const s = h.snap();
+    expect(s.status).toBe("active");
+    expect(s.stops).toHaveLength(1);
+    expect(s.plan!.stops).toHaveLength(1);
+    expect(s.plan!.lengthM).toBeGreaterThan(2900 + 300 - 100);
+    expect(s.maneuvers!.filter((m) => m.kind === "stop")).toHaveLength(1);
+    expect(h.stops).toMatchObject([{ index: 0, category: "fuel" }]);
+    expect(h.notes.some((n) => n.includes("via Station"))).toBe(true);
+    expect(h.store.get("route.active")).toMatchObject({ destination: DESTINATION, stops: [{ name: "Station", category: "fuel" }] });
+  });
+
+  test("at the stop the route waits; it goes on once the car follows the next leg; the destination still arrives", () => {
+    const h = harness();
+    h.moveTo(at(100, 0));
+    h.service.start(DESTINATION, { stops: [{ ...STATION, name: "Station", category: "fuel" }] });
+    h.flush();
+    const stopAt = h.snap().plan!.stops![0].atM;
+    h.follow(0, stopAt);
+    expect(h.snap().atStop?.stop.name).toBe("Station");
+    expect(h.snap().stops).toEqual([]);
+    expect(h.notes.some((n) => n.startsWith("route stop reached: Station"))).toBe(true);
+    // Standing on the forecourt, then walking off with the phone: off the route, but no re-plan.
+    const plans = h.snap().planId;
+    for (let i = 0; i < 30; i++) h.moveTo(at(1530 + i, -170), { speedMps: 0, headingRad: 0 });
+    h.tick(60_000);
+    h.moveTo(at(1560, -200), { speedMps: 1.2 });
+    h.flush();
+    expect(h.snap().planId).toBe(plans);
+    expect(h.snap().atStop).toBeDefined();
+    // Back on the next leg (the parked turnaround, north, then east): the wait is over.
+    h.follow(stopAt, stopAt + 300);
+    expect(h.snap().atStop).toBeUndefined();
+    expect(h.notes.some((n) => n.startsWith("route stop left: Station"))).toBe(true);
+    h.follow(stopAt + 300, h.snap().plan!.lengthM);
+    expect(h.snap().guidance?.state).toBe("arrived");
+  });
+
+  test("'go on' at a stop ends the wait at once", () => {
+    const h = harness();
+    h.moveTo(at(100, 0));
+    h.service.start(DESTINATION, { stops: [{ ...STATION, name: "Station" }] });
+    h.flush();
+    h.follow(0, h.snap().plan!.stops![0].atM);
+    expect(h.snap().atStop).toBeDefined();
+    h.service.goOn();
+    expect(h.snap().atStop).toBeUndefined();
+  });
+
+  test("driving past a stop on the route: left behind, nothing planned, offered back", () => {
+    const h = harness();
+    h.moveTo(at(100, 0));
+    h.service.start(DESTINATION, { stops: [{ ...STATION, name: "Station" }] });
+    h.flush();
+    const planId = h.snap().planId;
+    // Straight on at 1500 m instead of down the side road and back: the route goes on along the same road.
+    for (let e = 100; e <= 2000; e += 10) h.moveTo(at(e, 0));
+    h.flush();
+    const s = h.snap();
+    expect(s.stops).toEqual([]);
+    expect(s.passedStop?.stop.name).toBe("Station");
+    expect(s.planId).toBe(planId);
+    expect(s.guidance).toMatchObject({ state: "on", nextStop: null });
+    // The way back worked out: some minutes more.
+    expect(s.passedStop?.backDeltaS).toBeGreaterThan(0);
+    expect(h.notes.some((n) => n.startsWith("route stop passed: Station"))).toBe(true);
+    h.service.backToPassed();
+    h.flush();
+    expect(h.snap()).toMatchObject({ planReason: "stop-back", passedStop: undefined });
+    expect(h.snap().stops.map((x) => x.name)).toEqual(["Station"]);
+  });
+
+  test("leaving the route near a stop and driving away from it: planned on without it, not back to it", () => {
+    const h = harness();
+    h.moveTo(at(100, 0));
+    h.service.start(DESTINATION, { stops: [{ ...STATION, name: "Station" }] });
+    h.flush();
+    for (let e = 100; e <= 1490; e += 10) h.moveTo(at(e, 0));
+    // North at the junction instead (the position lost a while, back 400 m up that road).
+    for (let n = 400; n <= 600; n += 10) h.moveTo(at(1500, n), { headingRad: 0 });
+    h.flush();
+    const s = h.snap();
+    expect(s.passedStop?.stop.name).toBe("Station");
+    expect(s.stops).toEqual([]);
+    expect(s.planReason).toBe("off-route");
+    expect(s.plan!.stops ?? []).toEqual([]);
+    expect(h.notes.some((n) => /route stop passed: Station.*at the closest/.test(n))).toBe(true);
+  });
+
+  test("leaving the route before reaching a stop's turn plans through it again, as before", () => {
+    const h = harness();
+    h.moveTo(at(100, 0));
+    h.service.start(DESTINATION, { stops: [{ ...STATION, name: "Station" }] });
+    h.flush();
+    // A detour well before it.
+    for (let e = 100; e <= 600; e += 10) h.moveTo(at(e, 0));
+    for (let n = 30; n <= 200; n += 10) h.moveTo(at(600, n), { headingRad: 0 });
+    h.tick(20_000);
+    h.moveTo(at(600, 210), { headingRad: 0 });
+    h.flush();
+    expect(h.snap().planReason).toBe("off-route");
+    expect(h.snap().passedStop).toBeUndefined();
+    expect(h.snap().stops.map((x) => x.name)).toEqual(["Station"]);
+  });
+
+  test("the card of a stop left behind goes after 2 km", () => {
+    const h = harness();
+    h.moveTo(at(100, 0));
+    h.service.start({ ...at(3000, 0) }, { stops: [{ ...STATION, name: "Station" }] });
+    h.flush();
+    for (let e = 100; e <= 2000; e += 10) h.moveTo(at(e, 0));
+    h.flush();
+    expect(h.snap().passedStop).toBeDefined();
+    for (let i = 0; i < 25; i++) h.moveTo(at(2000 + i * 20, 0), { speedMps: 100 });
+    expect(h.snap().passedStop).toBeUndefined();
+  });
+
+  test("adding, moving and removing stops plans again from the car (reason stops)", () => {
+    const h = harness();
+    h.moveTo(at(100, 0));
+    h.service.start(DESTINATION);
+    h.flush();
+    h.follow(0, 200);
+    expect(h.service.addStop({ ...at(2400, 200), name: "Pharmacy" })).toBe(true);
+    h.flush();
+    expect(h.snap().planReason).toBe("stops");
+    // Placed by where it is along the route.
+    expect(h.service.addStop({ ...STATION, name: "Station" })).toBe(true);
+    h.flush();
+    expect(h.snap().stops.map((x) => x.name)).toEqual(["Station", "Pharmacy"]);
+    expect(h.snap().plan!.stops!.map((x) => x.key)).toEqual(h.snap().stops.map((x) => x.key));
+    h.service.moveStop(h.snap().stops[1].key, -1);
+    h.flush();
+    expect(h.snap().stops.map((x) => x.name)).toEqual(["Pharmacy", "Station"]);
+    h.service.removeStop(h.snap().stops[0].key);
+    h.flush();
+    expect(h.snap().stops.map((x) => x.name)).toEqual(["Station"]);
+    expect(h.snap().plan!.stops).toHaveLength(1);
+  });
+
+  test("at most five stops", () => {
+    const h = harness();
+    h.moveTo(at(100, 0));
+    h.service.start(DESTINATION, { stops: Array.from({ length: 7 }, (_, i) => ({ ...at(500 + i * 100, 0) })) });
+    expect(h.snap().stops).toHaveLength(5);
+    expect(h.service.addStop({ ...STATION })).toBe(false);
+  });
+
+  test("a restarted app goes on through the stops not yet reached", () => {
+    const h = harness();
+    h.moveTo(at(100, 0));
+    h.service.start(DESTINATION, { stops: [{ ...STATION, name: "Station" }, { ...at(2400, 200), name: "Pharmacy" }] });
+    h.flush();
+    h.follow(0, h.snap().plan!.stops![0].atM);
+    const saved = h.store.get("route.active");
+    const h2 = harness();
+    h2.store.set("route.active", saved);
+    h2.moveTo(at(100, 0), { speedMps: 0 }); // the test graph keeps its own frame: start near its origin
+    h2.service.resume();
+    h2.flush();
+    expect(h2.snap().stops.map((x) => x.name)).toEqual(["Pharmacy"]);
+    expect(h2.snap().failure).toBeUndefined();
+    expect(h2.snap().status).toBe("active");
+  });
+
+  test("places along the way: ahead only, by distance along, then their detours", () => {
+    const h = harness();
+    h.moveTo(at(100, 0));
+    h.service.start(DESTINATION);
+    h.flush();
+    h.follow(0, 300);
+    h.service.findAlong("fuel");
+    expect(h.snap().along).toMatchObject({ category: "fuel", status: "searching" });
+    expect(h.snap().along!.items.map((x) => x.place.key)).toEqual(["p1"]);
+    h.flush();
+    const item = h.snap().along!.items[0];
+    expect(h.snap().along!.status).toBe("done");
+    expect(item.side).toBe("right");
+    // Down the side road and back: about 300 m on a service road and the turns.
+    expect(item.detourS).toBeGreaterThan(30);
+    h.service.findAlong("pharmacy");
+    h.flush();
+    expect(h.snap().along!.items.map((x) => x.place.key)).toEqual(["p2"]);
+    expect(h.snap().along!.items[0].side).toBe("left");
+    h.service.closeAlong();
+    expect(h.snap().along).toBeUndefined();
+  });
+
+  test("a stop's preview: the trip through it from the car, its extra time; taken as the route without planning again", () => {
+    const h = harness();
+    h.moveTo(at(100, 0));
+    h.service.start(DESTINATION);
+    h.flush();
+    h.follow(0, 300);
+    const before = h.snap().planId;
+    h.service.previewStop({ ...STATION, name: "Station", category: "fuel", key: "p1" });
+    expect(h.snap().preview?.status).toBe("planning");
+    h.flush();
+    const pv = h.snap().preview!;
+    expect(pv.status).toBe("done");
+    expect(pv.deltaS).toBeGreaterThan(30);
+    expect(h.snap().planId).toBe(before);
+    h.service.confirmPreview();
+    expect(h.snap()).toMatchObject({ planReason: "stops", preview: undefined });
+    expect(h.snap().planId).toBeGreaterThan(before);
+    expect(h.snap().stops.map((x) => x.key)).toEqual(["p1"]);
+    expect(h.snap().plan!.stops).toHaveLength(1);
+  });
+
+  test("detours of search results, for the add-a-stop search", () => {
+    const h = harness();
+    h.moveTo(at(100, 0));
+    h.service.start(DESTINATION);
+    h.flush();
+    h.follow(0, 300);
+    h.service.estimateDetours([
+      { key: "a", ...at(2400, 200) },
+      { key: "b", ...at(2000, 0) },
+    ]);
+    expect(h.snap().estimates).toEqual({});
+    h.flush();
+    const e = h.snap().estimates!;
+    expect(e.b).toBeLessThan(30);
+    expect(e.a).toBeGreaterThan(e.b!);
+  });
+});

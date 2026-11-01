@@ -50,13 +50,15 @@ NAV_POSES = ["none", "unverified", "confirmed", "rejected", "behind"]
 NAV_MAPMATCH_STATES = ["off", "init", "tracking", "multimodal", "offroad"]
 MAPMATCH_TOP = 3
 # Routing (ROUTING-SPEC §8); the maneuver kinds in src/nav/routing/maneuvers.ts order.
-ROUTE_REASONS = ["new", "off-route", "resume", "alternative", "placed"]
+ROUTE_REASONS = ["new", "off-route", "resume", "alternative", "placed", "stops", "stop-back"]
 ROUTE_STATUSES = ["done", "no-road-at-start", "no-road-at-destination", "no-route", "too-far", "cancelled"]
 ROUTE_STATES = ["on", "leaving", "off", "unsure", "arrived"]
 ROUTE_MANEUVERS = [
     "depart", "slight-left", "slight-right", "left", "right", "sharp-left", "sharp-right",
-    "keep-left", "keep-right", "u-turn", "roundabout", "arrive",
+    "keep-left", "keep-right", "u-turn", "roundabout", "arrive", "stop",
 ]
+ROUTE_SIDES = ["none", "left", "right"]
+ROUTE_STOP_CATEGORIES = ["none", "fuel", "charging", "cafe", "food", "pharmacy", "parking"]
 _MAPMATCH_TOP_FIELDS = [("weight", "weight"), ("lat_deg", "lat"), ("lon_deg", "lon"), ("heading_rad", "heading"), ("spread_m", "spread_m")]
 LOG_TAGS = {1: "elm", 2: "link", 3: "trip", 4: "sensors", 5: "app"}
 LOG_LEVELS = {ord("3"): "error", ord("4"): "warning", ord("6"): "info", ord("7"): "debug"}
@@ -101,6 +103,7 @@ class Trip:
     route: pd.DataFrame = field(default_factory=pd.DataFrame)
     route_points: pd.DataFrame = field(default_factory=pd.DataFrame)
     route_maneuvers: pd.DataFrame = field(default_factory=pd.DataFrame)
+    route_stops: pd.DataFrame = field(default_factory=pd.DataFrame)
     route_progress: pd.DataFrame = field(default_factory=pd.DataFrame)
     # CAN shadow (VEHICLE-LINK-SPEC §16.2): raw frames (t_s = arrival of their chunk, id, len, d0..d7) and the
     # listening windows; a frame missing outside a window wasn't heard. Empty when it didn't run.
@@ -428,6 +431,21 @@ def load(path: str | Path) -> Trip:
             "turn": ("turn_rad", None),
         },
     )
+    route_stops = _frame(
+        ulog,
+        "nav_route_stop",
+        start,
+        {
+            "plan_id": ("plan_id", None),
+            "index": ("index", None),
+            "lat": ("lat_deg", None),
+            "lon": ("lon_deg", None),
+            "at_m": ("at_m", None),
+            "at_s": ("at_s", None),
+            "side": ("side", ROUTE_SIDES),
+            "category": ("category", ROUTE_STOP_CATEGORIES),
+        },
+    )
     route_progress = _frame(
         ulog,
         "nav_route_progress",
@@ -525,6 +543,7 @@ def load(path: str | Path) -> Trip:
         route=route,
         route_points=route_points,
         route_maneuvers=route_maneuvers,
+        route_stops=route_stops,
         route_progress=route_progress,
         can=can,
         can_windows=can_windows,
