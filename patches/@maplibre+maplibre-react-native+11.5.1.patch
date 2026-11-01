@@ -271,10 +271,10 @@ index 0000000..0cfcf98
 +    }
 +}
 diff --git a/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/LocationComponentManager.kt b/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/LocationComponentManager.kt
-index 5f0cc06..b115cbf 100644
+index 5f0cc06..6048148 100644
 --- a/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/LocationComponentManager.kt
 +++ b/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/LocationComponentManager.kt
-@@ -2,14 +2,21 @@ package org.maplibre.reactnative.components.location
+@@ -2,14 +2,22 @@ package org.maplibre.reactnative.components.location
  
  import android.annotation.SuppressLint
  import android.content.Context
@@ -289,6 +289,7 @@ index 5f0cc06..b115cbf 100644
 +import org.maplibre.android.location.OnLocationCameraTransitionListener
  import org.maplibre.android.location.modes.CameraMode
  import org.maplibre.android.location.modes.RenderMode
++import org.maplibre.android.log.Logger
  import org.maplibre.android.maps.MapLibreMap
  import org.maplibre.android.maps.Style
 +import org.maplibre.android.style.layers.Property
@@ -296,7 +297,7 @@ index 5f0cc06..b115cbf 100644
  import org.maplibre.reactnative.R
  import org.maplibre.reactnative.components.mapview.MLRNMapView
  import org.maplibre.reactnative.location.LocationManager
-@@ -40,6 +47,267 @@ class LocationComponentManager(
+@@ -40,6 +48,344 @@ class LocationComponentManager(
  
      private var mShowingUserLocation = false
  
@@ -323,6 +324,19 @@ index 5f0cc06..b115cbf 100644
 +    private var appTransitioning = false
 +    private var appPendingStop: Triple<Double?, Double?, Long>? = null
 +    private var appTransitionId = 0
++
++    // MapLibre also turns them down after our transition ended: a transition left by switching to NONE runs on (NONE
++    // doesn't cancel it) and keeps its flag up until it ends or its cancel, posted, arrives; and while a style loads.
++    // The stop (in appPendingStop) is asked again shortly.
++    private var appRetry: Runnable? = null
++    private var appRetries = 0
++
++    private companion object {
++        const val LOG_TAG = "wtf.ai-LocationComponent"
++        /** Longer than a follow transition (a stop's duration, ~1 s) and a style load from local tiles. */
++        const val APP_RETRIES = 30
++        const val APP_RETRY_MS = 100L
++    }
 +
 +    // The last stop's duration: the dot eases to a new anchor over it, as it does with a new mode.
 +    private var appEaseMs = 0L
@@ -477,16 +491,70 @@ index 5f0cc06..b115cbf 100644
 +
 +    /** The anchor as the tracking camera's padding: the target sits at the middle of the padded view. */
 +    fun applyAppPadding(durationMs: Long) {
-+        val component = mLocationComponent ?: return
-+        val view = mMapView ?: return
 +        if (!isTracking() || appTransitioning) return
++        if (!padToAnchor(durationMs)) retryStop(null, null, durationMs)
++    }
++
++    /** False when MapLibre turned the padding down, which it tells the callback before returning. */
++    private fun padToAnchor(durationMs: Long): Boolean {
++        val component = mLocationComponent ?: return true
++        val view = mMapView ?: return true
 +        val w = view.width.toDouble()
 +        val h = view.height.toDouble()
 +        val left = ((2 * appAnchorX - 1) * w).coerceAtLeast(0.0)
 +        val right = ((1 - 2 * appAnchorX) * w).coerceAtLeast(0.0)
 +        val top = ((2 * appAnchorY - 1) * h).coerceAtLeast(0.0)
 +        val bottom = ((1 - 2 * appAnchorY) * h).coerceAtLeast(0.0)
-+        component.paddingWhileTracking(doubleArrayOf(left, top, right, bottom), durationMs.coerceAtLeast(1))
++        // Later cancels (a newer padding replacing this one's animation) come after `asking`.
++        var asking = true
++        var refused = false
++        component.paddingWhileTracking(
++            doubleArrayOf(left, top, right, bottom),
++            durationMs.coerceAtLeast(1),
++            object : MapLibreMap.CancelableCallback {
++                override fun onCancel() {
++                    if (asking) refused = true
++                }
++
++                override fun onFinish() {}
++            },
++        )
++        asking = false
++        if (!refused) appRetries = 0
++        return !refused
++    }
++
++    /** The stop again after a moment; given up after APP_RETRIES tries, which goes to the log. */
++    private fun retryStop(
++        zoom: Double?,
++        tilt: Double?,
++        durationMs: Long,
++    ) {
++        val view = mMapView ?: return
++        val prev = appPendingStop
++        appPendingStop = Triple(zoom ?: prev?.first, tilt ?: prev?.second, durationMs)
++        if (appRetry != null) return
++        if (++appRetries > APP_RETRIES) {
++            appRetries = 0
++            appPendingStop = null
++            Logger.e(LOG_TAG, "the follow camera's padding, zoom and tilt were turned down for ${APP_RETRIES * APP_RETRY_MS} ms")
++            return
++        }
++        val retry =
++            Runnable {
++                appRetry = null
++                val pending = appPendingStop ?: return@Runnable
++                appPendingStop = null
++                appTrackingStop(pending.first, pending.second, pending.third)
++            }
++        appRetry = retry
++        view.postDelayed(retry, APP_RETRY_MS)
++    }
++
++    private fun cancelRetry() {
++        appRetry?.let { mMapView?.removeCallbacks(it) }
++        appRetry = null
++        appRetries = 0
 +    }
 +
 +    /** The follow camera of the fed location: one transition to the mode with the stop's zoom and tilt. */
@@ -500,6 +568,7 @@ index 5f0cc06..b115cbf 100644
 +        val component = mLocationComponent ?: return
 +        if (durationMs > 0) appEaseMs = durationMs
 +        if (mode == CameraMode.NONE) {
++            cancelRetry()
 +            appPendingStop = null
 +            appTransitioning = false
 +            component.cameraMode = CameraMode.NONE
@@ -516,6 +585,7 @@ index 5f0cc06..b115cbf 100644
 +            appTrackingStop(zoom, tilt, durationMs)
 +            return
 +        }
++        cancelRetry()
 +        appTransitioning = true
 +        appPendingStop = null
 +        val id = ++appTransitionId
@@ -551,20 +621,28 @@ index 5f0cc06..b115cbf 100644
 +        val component = mLocationComponent ?: return
 +        if (durationMs > 0) appEaseMs = durationMs
 +        if (!isTracking()) return
++        // A stop still waiting (for the transition's end, or a retry): its zoom or tilt where this one asks none.
++        val prev = appPendingStop
++        val z = zoom ?: prev?.first
++        val t = tilt ?: prev?.second
 +        if (appTransitioning) {
-+            val prev = appPendingStop
-+            appPendingStop = Triple(zoom ?: prev?.first, tilt ?: prev?.second, durationMs)
++            appPendingStop = Triple(z, t, durationMs)
 +            return
 +        }
-+        if (zoom != null) component.zoomWhileTracking(zoom, durationMs.coerceAtLeast(1))
-+        if (tilt != null) component.tiltWhileTracking(tilt, durationMs.coerceAtLeast(1))
-+        applyAppPadding(durationMs)
++        appPendingStop = null
++        // The padding first: MapLibre turns the zoom and tilt down for the same reasons, so they wait with it.
++        if (!padToAnchor(durationMs)) {
++            retryStop(z, t, durationMs)
++            return
++        }
++        if (z != null) component.zoomWhileTracking(z, durationMs.coerceAtLeast(1))
++        if (t != null) component.tiltWhileTracking(t, durationMs.coerceAtLeast(1))
 +    }
 +
      private var mOnCameraTrackingChangedListener: OnCameraTrackingChangedListener? = null
  
      init {
-@@ -93,6 +361,11 @@ class LocationComponentManager(
+@@ -93,6 +439,11 @@ class LocationComponentManager(
  
      @SuppressLint("MissingPermission")
      private fun stateChanged() {
@@ -576,7 +654,7 @@ index 5f0cc06..b115cbf 100644
          mLocationComponent?.setLocationComponentEnabled((mFollowUserLocation || mShowUserLocation))
  
          if (mShowingUserLocation != mShowUserLocation) {
-@@ -121,6 +394,10 @@ class LocationComponentManager(
+@@ -121,6 +472,10 @@ class LocationComponentManager(
          displayUserLocation: Boolean,
          style: Style,
      ) {

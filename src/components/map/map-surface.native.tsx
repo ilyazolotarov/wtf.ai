@@ -58,8 +58,11 @@ const VIEW_GONE = /resolved to `view` null/;
 // Android, the fed dot: back in the foreground or after a style load MapLibre re-feeds the last fed location, whose
 // time has passed, with look-ahead on; it places the dot there at once and says so.
 const STALE_LOOKAHEAD = /Lookahead enabled, but the target location's timestamp is smaller/;
+// Android, the follow camera: a padding, zoom or tilt turned down while MapLibre still runs a camera transition; the
+// patched LocationComponentManager asks again shortly, and logs it if it never takes.
+const WHILE_TRANSITIONING = /WhileTracking method call is ignored because the camera mode is transitioning/;
 LogManager.onLog(({ level, tag, message }) => {
-  if (VIEW_GONE.test(message) || STALE_LOOKAHEAD.test(message)) return true; // expected: not reported, not logged
+  if (VIEW_GONE.test(message) || STALE_LOOKAHEAD.test(message) || WHILE_TRANSITIONING.test(message)) return true; // expected: not reported, not logged
   const kind = `${tag}: ${message.replace(/\d+/g, "#")}`;
   if (level === "error" && !reportedMapErrors.has(kind)) {
     reportedMapErrors.add(kind);
