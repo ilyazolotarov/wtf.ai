@@ -2,7 +2,7 @@ import type { CameraRef } from "@maplibre/maplibre-react-native";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useWindowDimensions, type NativeSyntheticEvent } from "react-native";
 
-import { haversineM, type Coordinate } from "@/nav/geo";
+import type { Coordinate } from "@/nav/geo";
 import type { PositionEstimate } from "@/nav/position/types";
 import type { RouteSnapshot } from "@/services/navigation/route-service";
 
@@ -20,15 +20,8 @@ const PLACE_ZOOM = 18;
 const CAMERA_LOG_EVERY_MS = 15_000;
 const CAMERA_LOG_OFF_DEG = 20;
 
-/** The follow camera's ease between position updates. */
+/** The follow camera's ease to a new zoom, tilt or anchor. */
 const FOLLOW_EASE_MS = 450;
-/**
- * Beyond this, the position did not drive there: it snapped (GNSS back after an outage, a reset, a placing).
- * `easeTo` would pan the whole way at follow zoom, and the next update (2 Hz) restarts the ease from wherever
- * the pan reached, so the camera crawls in asymptotically — 10 km took a visible age (2026-10-06).
- * The camera jumps instead. At 140 km/h a car covers 19 m between two positions (2 Hz): 80 m is never driving.
- */
-const FOLLOW_JUMP_M = 80;
 
 /**
  * Camera per follow mode; heading-up gets the navigator tilt. Any gesture drops to free,
@@ -51,12 +44,6 @@ const FIT_CIRCLE_SHARE = 0.35;
  * the map between them, where Google Maps keeps its arrow. North-up stays centred: the road ahead may lie any way.
  */
 const HEADING_UP_DOT_AT = 0.8;
-/**
- * iOS reports the screen's centre as the map's centre, not the dot's padded one: in heading-up (zoom 17, tilted) the
- * dot is a few hundred metres from it. The settle-back check allows that much more.
- */
-const HEADING_UP_CENTRE_OFF_M = 1000;
-
 /** Leaving follow by the button steps back to a flat overview. */
 const FREE_ZOOM = 15.5;
 
@@ -110,8 +97,6 @@ export function useMapCamera({
   mode,
   headingUpRad,
   position,
-  smoothing = false,
-  nativeFollow = false,
   route,
   ghostView,
   placing,
@@ -137,10 +122,6 @@ export function useMapCamera({
   mode: CameraMode;
   headingUpRad: number | null;
   position: PositionEstimate | null;
-  /** `position` is redrawn every frame: follow it frame by frame, without easing. */
-  smoothing?: boolean;
-  /** MapLibre follows the fed position itself (`NativeFollow`); the follow camera sends no commands. */
-  nativeFollow?: boolean;
   route: RouteSnapshot | null;
   ghostView: boolean;
   placing: PlacingStep | null;
@@ -155,7 +136,6 @@ export function useMapCamera({
   const cameraRef = useRef<CameraRef | null>(null);
   // The car's map is taken down while Android Auto shows a list or the search over it: commands meanwhile fail.
   const commands = {
-    jumpTo: (...a: Parameters<CameraRef["jumpTo"]>) => send(() => cameraRef.current?.jumpTo(...a)),
     easeTo: (...a: Parameters<CameraRef["easeTo"]>) => send(() => cameraRef.current?.easeTo(...a)),
     setStop: (...a: Parameters<CameraRef["setStop"]>) => send(() => cameraRef.current?.setStop(...a)),
   };
@@ -257,34 +237,15 @@ export function useMapCamera({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
 
-  // Where the follow camera was last sent; cleared when it stops following, so coming back
-  // to follow still eases in from wherever the map was left.
-  const followCenter = useRef<Coordinate | null>(null);
-  // Followed since the map loaded. The first follow waits for it and jumps: sent before, it was dropped, and a dot that
-  // stands still (a held or parked position) sends no other, so the map stayed on its initial view until the button.
-  const followed = useRef(false);
-  // The last follow stop, and whether the map has since been put back on it once (`onRegionDidChange`).
-  const followStop = useRef<{
-    center: [number, number];
-    zoom: number;
-    bearing?: number;
-    pitch: number;
-    padding: { top: number; bottom: number; left: number; right: number };
-  } | null>(null);
-  const followRestored = useRef(false);
-  // The car has moved since the app opened: the follow zoom no longer makes room for the circle.
-  const movedSinceOpen = useRef(false);
-  const loggedFitZoom = useRef<number | null>(null);
-  // The native follow, from this render: MapLibre keeps the dot at the anchor and eases to the zoom and pitch; the
-  // course is the map's bearing. Nothing to follow: no tracking, no stop. The car has moved since the app opened:
-  // the follow zoom no longer makes room for the circle (as `movedSinceOpen` below, in state for this path).
-  const [movedSinceOpenNative, setMovedSinceOpenNative] = useState(false);
-  if (nativeFollow && moving && !movedSinceOpenNative) setMovedSinceOpenNative(true);
-  const native = useMemo<NativeFollow | null>(() => {
-    if (!nativeFollow) return null;
+  // The follow, from this render: MapLibre keeps the fed dot at the anchor and eases to the zoom and pitch; the course
+  // is the map's bearing. Nothing to follow: no tracking, no stop. The car has moved since the app opened: the follow
+  // zoom no longer makes room for the circle.
+  const [movedSinceOpen, setMovedSinceOpen] = useState(false);
+  if (moving && !movedSinceOpen) setMovedSinceOpen(true);
+  const native = useMemo<NativeFollow>(() => {
     const insetsNow = { top: insetTop, bottom: insetBottom, left: insetLeft, right: insetRight };
     if (!mapReady || !position || !follow || ghostView) return { anchor: dotAnchor(mapWidth, mapHeight, insetsNow, 0.5) };
-    const zoom = movedSinceOpenNative ? follow.zoom : fitCircleZoom(position.lat, Math.max(5, position.accuracyM), fitRadiusPt, follow.zoom);
+    const zoom = movedSinceOpen ? follow.zoom : fitCircleZoom(position.lat, Math.max(5, position.accuracyM), fitRadiusPt, follow.zoom);
     const lowered = camera === "follow-heading" && zoom >= follow.zoom;
     return {
       trackUserLocation: camera === "follow-heading" ? "course" : "default",
@@ -294,59 +255,7 @@ export function useMapCamera({
       duration: FOLLOW_EASE_MS,
       anchor: dotAnchor(mapWidth, mapHeight, insetsNow, lowered ? headingUpDotAt : 0.5),
     };
-  }, [nativeFollow, mapReady, position, follow, ghostView, camera, movedSinceOpenNative, fitRadiusPt, mapWidth, mapHeight, insetTop, insetBottom, insetLeft, insetRight, headingUpDotAt]);
-  useEffect(() => {
-    if (nativeFollow) return;
-    if (!mapReady) {
-      followed.current = false;
-      followCenter.current = null;
-      return;
-    }
-    if (!position || !follow || ghostView) {
-      followCenter.current = null;
-      return;
-    }
-    const was = followCenter.current;
-    const snapped = !followed.current || (was !== null && haversineM(was, position) > FOLLOW_JUMP_M);
-    followed.current = true;
-    followCenter.current = { lat: position.lat, lon: position.lon };
-    if (moving) movedSinceOpen.current = true;
-    const zoom = movedSinceOpen.current
-      ? follow.zoom
-      : fitCircleZoom(position.lat, Math.max(5, position.accuracyM), fitRadiusPt, follow.zoom);
-    const fitted = zoom < follow.zoom ? zoom : null;
-    if (fitted !== loggedFitZoom.current) {
-      loggedFitZoom.current = fitted;
-      logCamera?.(
-        fitted !== null
-          ? `camera follow: zoom ${fitted.toFixed(1)} to fit the circle (${Math.round(position.accuracyM)} m)`
-          : `camera follow: zoom ${follow.zoom}${movedSinceOpen.current ? ", the car moved" : ", the circle fits"}`,
-      );
-    }
-    // Heading-up lowers the dot, unless zoomed out for a wide circle: that stays centred so it fits between the panels.
-    // Both in the part of the map no one else's panels cover.
-    const lowered = camera === "follow-heading" && fitted === null;
-    const visibleHeight = Math.max(0, mapHeight - insetTop - insetBottom);
-    const stop = {
-      center: [position.lon, position.lat] as [number, number],
-      zoom,
-      ...(followBearing !== undefined ? { bearing: followBearing } : {}),
-      pitch: follow.pitch,
-      padding: {
-        top: insetTop + (lowered ? Math.round((2 * headingUpDotAt - 1) * visibleHeight) : 0),
-        bottom: insetBottom,
-        left: insetLeft,
-        right: insetRight,
-      },
-    };
-    followStop.current = stop;
-    followRestored.current = false;
-    // Smoothed, every frame is a small step: an ease per frame would lag and restart 30 times a second.
-    if (snapped || smoothing) commands.jumpTo(stop);
-    else commands.easeTo({ ...stop, duration: FOLLOW_EASE_MS });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapReady, follow, position, ghostView, followBearing, smoothing, nativeFollow, fitRadiusPt, mapHeight, mapWidth, insetTop, insetBottom, insetLeft, insetRight, headingUpDotAt]);
-
+  }, [mapReady, position, follow, ghostView, camera, movedSinceOpen, fitRadiusPt, mapWidth, mapHeight, insetTop, insetBottom, insetLeft, insetRight, headingUpDotAt]);
   // The route and its alternatives at once (ROUTING-SPEC §8.7), north up: framed once when asked, once the map can
   // take it (the car's map, made again after a list over it, asked before its style had loaded).
   useEffect(() => {
@@ -403,19 +312,6 @@ export function useMapCamera({
     const { bearing, center, pitch, zoom } = event.nativeEvent;
     if (bearing !== undefined && zoom !== undefined) lastView.current = { pitch, bearing, zoom };
     if (placing === "position" && center) onCenter?.({ lat: center[1], lon: center[0] });
-    // Following, the map settled by itself far from the dot: iOS applies the initial view (the region's bounds) at the
-    // map's first layout, which can come after the style has loaded and the first follow has jumped. A dot that stands
-    // still sends no other, so the map stayed on the whole region (2026-10-14). Jump back, once per follow stop.
-    const stop = followStop.current;
-    const sent = followCenter.current;
-    if (center && stop && sent && follow && !ghostView && !event.nativeEvent.userInteraction && !followRestored.current) {
-      const offM = haversineM({ lat: center[1], lon: center[0] }, sent);
-      if (offM > FOLLOW_JUMP_M + (stop.padding.top > 0 ? HEADING_UP_CENTRE_OFF_M : 0)) {
-        followRestored.current = true;
-        logCamera?.(`camera follow: the map settled ${Math.round(offM)} m from the dot by itself, back to it`);
-        commands.jumpTo(stop);
-      }
-    }
     if (logCamera && camera === "follow-heading" && bearing !== undefined && followBearing !== undefined) {
       const off = Math.abs(((bearing - followBearing + 540) % 360) - 180);
       // Tilt too: a flat heading-up view with the right bearing looks north-up and leaves no other trace.

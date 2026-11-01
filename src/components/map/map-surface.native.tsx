@@ -213,7 +213,6 @@ export function MapSurface({
     zoomOffset: (carScale ? -Math.log2(carScale) : 0) + followZoomShift,
     headingUpDotAt,
     mode,
-    nativeFollow: true,
     headingUpRad,
     position,
     route,
@@ -235,8 +234,8 @@ export function MapSurface({
   const onCar = car != null && position != null && dotOnCar(position, car, view.zoom, STANDING_MPS, dotHidden);
   if (onCar !== dotHidden) setDotHidden(onCar);
   // The native dot: the map shows and follows what the feed hands it, at the anchor the follow camera keeps it at.
-  const anchorX = native?.anchor.x ?? 0.5;
-  const anchorY = native?.anchor.y ?? 0.5;
+  const anchorX = native.anchor.x;
+  const anchorY = native.anchor.y;
   useEffect(() => {
     if (!mapReady) return;
     const map = mapRef.current;
@@ -403,11 +402,11 @@ export function MapSurface({
           }
           // The native follow (use-map-camera.ts `NativeFollow`): MapLibre tracks the fed dot; a gesture that ends
           // it says so here (the map view's own touch says it too; the car's screen's gestures don't reach the view).
-          trackUserLocation={native?.trackUserLocation}
-          zoom={native?.zoom}
-          pitch={native?.pitch}
-          bearing={native?.bearing}
-          duration={native?.duration}
+          trackUserLocation={native.trackUserLocation}
+          zoom={native.zoom}
+          pitch={native.pitch}
+          bearing={native.bearing}
+          duration={native.duration}
           onTrackUserLocationChange={(event) => {
             if (event.nativeEvent.trackUserLocation == null && mode !== "free") onFollowEnded();
           }}

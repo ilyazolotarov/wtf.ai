@@ -215,11 +215,10 @@ persisted in kv-store. No hardcoded user-facing strings in components.
   an empty block) and by the map's size as of its last layout (it kept the zoom, "padding is greater than map's height
   or width", when a route was planned on CarPlay). No tilt or rotate gesture. A gesture that leaves heading-up flattens the map once it settles, at its zoom. Names along streets and rivers
   stand up facing the driver (`text-pitch-alignment: viewport`): lying on the tilted road they blurred.
-- **Where the dot sits:** heading-up puts it 80 % down the map's own height (a top padding on the follow stop), so the
+- **Where the dot sits:** heading-up puts it 80 % down the map's own height (the follow's anchor), so the
   road ahead fills the screen between the route banner and the bottom bar: about 88 % of the map between them, where
   Google Maps keeps its arrow. The car's screen: 85 % of its visible map (ANDROID-AUTO-SPEC §4). North-up, and heading-up zoomed out for a
-  wide circle at open, keep it centred. iOS reports the screen's centre as the map's, so the settle-back check below
-  allows 1 km more while the dot is lowered.
+  wide circle at open, keep it centred.
 - **Motion** (`puck-feed.ts`): MapLibre eases the dot and the follow camera
   linearly to each fed pose, reaching it one lead (the feed interval) later however close together two feeds come
   (iOS `dynamicNavigationCameraAnimationDuration` with each location stamped its lead after the one before, Android's
@@ -244,10 +243,7 @@ persisted in kv-store. No hardcoded user-facing strings in components.
   and an empty stop moves nothing. The patch's own tracking switches (the ease, a placed dot) are
   kept from JS, and the source's anchor and look change without leaving the app's location or setting the puck's layer
   up again. While following, `regionIsChanging` reaches JS at most 5 times a second.
-- **Opening and settling:** leaving follow clears the last centre. The map opens
-  on the active region's bounds and the camera follows only once the style has loaded; while following, a view the
-  map settles on by itself more than 80 m from the dot is put back on it, once per follow stop (iOS applies the
-  initial view at the first layout, after the style has loaded).
+- **Opening:** the map opens on the active region's bounds and the camera follows only once the style has loaded.
 - **The parked-pose question** (NAVIGATOR-SPEC §6.1): a card under the status pill, "Is the car where the dot is?",
   with how far Wi-Fi puts it: "Yes, it's here" keeps the dot, "No" moves it to the Wi-Fi position and starts placing
   there. Asked only while the dot is the navigator's; it goes the moment it is answered and never blocks the map.
