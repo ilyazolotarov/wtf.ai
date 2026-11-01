@@ -53,6 +53,7 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("search-file", help="build a search index from any .osm.pbf (no index.json)")
     p.add_argument("pbf")
     p.add_argument("output")
+    p.add_argument("--date", default="2000-01-01", help="the OSM date stamped in the file (YYYY-MM-DD)")
 
     p = sub.add_parser("search-check", help="validate search files")
     p.add_argument("paths", nargs="+")
@@ -101,7 +102,7 @@ def main(argv: list[str] | None = None) -> None:
     elif args.cmd == "search":
         build_searches(args.names or None, refresh_osm=args.refresh_osm)
     elif args.cmd == "search-file":
-        build_region_search(Path(args.pbf), Path(args.output), "unknown")
+        build_region_search(Path(args.pbf), Path(args.output), args.date)
     elif args.cmd == "search-check":
         failed = False
         for path in args.paths:
