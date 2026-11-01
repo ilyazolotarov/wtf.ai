@@ -107,10 +107,9 @@ GNSS and the adapter as they were. What the JS side sent is kept on the native s
   Android Auto shows, whose map keeps the phone's zoom per dp, about one of the car's pixels. At the phone's zoom a
   400×240 pt screen showed 150 m across, the road ahead within a block.
 - **The map's root lives only while the car's screen shows the app**: made when the scene comes to the foreground,
-  released when another app fills the screen (the guidance, banners and voice go on). Mounted in the background, its
-  JS smoothing loop would spin the JS thread with the app in the background (the CPU kill of
-  `use-smoothed-position.ts`; with the native dot, UI-SPEC §6.2, the loop is gone and the feed is ~10 calls a second
-  from the navigator's own batches) and MapLibre would draw for nobody. Android Auto's surface comes and goes the same
+  released when another app fills the screen (the guidance, banners and voice go on). Mounted in the background,
+  MapLibre would draw for nobody (the native dot's feed, UI-SPEC §6.2, is ~10 calls a second from the navigator's own
+  batches). Android Auto's surface comes and goes the same
   way.
 - **The map waits for React Native.** The root is made only on a running host (the factory's `reactHost`); until
   then the car's screen is blank. A root view made with no host starts one past Expo's React delegate handlers, and

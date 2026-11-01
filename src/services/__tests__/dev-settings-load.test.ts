@@ -11,7 +11,6 @@ const defaults: DevSettings = {
   carReports: true,
   rpmPeriodS: 5,
   positionShare: false,
-  nativePuck: false,
 };
 
 describe("loadDevSettings", () => {

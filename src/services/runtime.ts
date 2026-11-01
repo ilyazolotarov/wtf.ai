@@ -77,8 +77,6 @@ export interface DevSettings {
   rpmPeriodS: number;
   /** More → Waze and Google Maps: share the car's position with other navigators during a trip (ANDROID-SPEC §8). */
   positionShare: boolean;
-  /** The dot and the follow camera drawn by MapLibre from the fed position (UI-SPEC §6.2), not by JS each frame. */
-  nativePuck: boolean;
 }
 
 const DEV_SETTINGS_KEY = "dev.settings";
@@ -139,8 +137,6 @@ export function getRuntime(): Runtime {
     carReports: true,
     rpmPeriodS: 5,
     positionShare: false,
-    // On in development builds while it is tried (UI-SPEC §6.2); the testers' builds keep the JS-drawn dot.
-    nativePuck: __DEV__,
   };
   let dev: DevSettings = loadDevSettings(kvStore.getJson(DEV_SETTINGS_KEY), defaults);
   const devListeners = new Set<() => void>();

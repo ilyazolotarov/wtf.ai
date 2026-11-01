@@ -257,7 +257,6 @@ export const en = {
   showParticles: "Map matching on the map (particles)",
   outageButton: "GPS outage button on the map",
   phoneOnlySetting: "Navigate without an adapter (experimental)",
-  nativePuckSetting: "The map draws the dot itself (experimental)",
   wheelSpeedSetting: "Precise speed from the car's data bus (experimental)",
   wheelSpeedNote:
     "Normally, the app periodically requests the car's speed through the adapter. This feature passively listens to the car's data bus for wheel sensor readings instead, providing more frequent, more precise speed readings and allowing the app to detect reversing. It requires an OBDLink or vLinker adapter and a car that exposes this data through its diagnostic port. So far, this feature has only been confirmed to work on a few cars.",

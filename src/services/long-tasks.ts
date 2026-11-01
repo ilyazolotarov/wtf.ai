@@ -1,6 +1,6 @@
 // What blocked the JS thread during a drive (MAPMATCH-SPEC §14): React Native reports every task that held the
 // thread for 50 ms or more as a `longtask` performance entry. Each is attributed to the work running then, which the
-// callers bracket with `label` (the filter's update, a routing slice, the map's smoothing frame, a publish), and the
+// callers bracket with `label` (the filter's update, a routing slice, a publish), and the
 // drive ends with one trip-log line beside `mm timing`. Pure: the clock and the observer are injected (Jest), and the
 // phone's are the defaults.
 import { UpdateTiming, type UpdateTimingSummary } from "@/nav/mapmatch/update-timing";

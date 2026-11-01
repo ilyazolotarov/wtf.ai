@@ -140,9 +140,7 @@ persisted in kv-store. No hardcoded user-facing strings in components.
 - Full-screen MapLibre map in the active region's style. Read the MapLibre RN docs for the installed version before
   coding.
 - **Custom puck** from `usePosition()`: dot + heading cone (only with a heading) + accuracy circle. Drawn one of two
-  ways, by Developer → "The map draws the dot itself" (on in development builds while it is tried): as GeoJSON layers
-  from the position JS redraws each frame, or as **MapLibre's user location fed by the app** (`puck-feed.ts`, the
-  wrapper's `setUserLocationSource` / `feedUserLocation` in the patch), which the map draws from the same style
+  as **MapLibre's user location fed by the app** (`puck-feed.ts`, the wrapper's `setUserLocationSource` / `feedUserLocation` in the patch), which the map draws from the same style
   constants (`puck-native.ts`) and animates itself. Never the device's location through MapLibre: the fed position is
   the navigator's. The dot (`puck-style.ts`): an 8 pt fill, a 3.5 pt ring and
   a 1.5 pt dark edge outside it. Trusted GPS: a blue fill in a white ring (light #0A84FF, dark #3D6BFF); otherwise the
@@ -222,7 +220,7 @@ persisted in kv-store. No hardcoded user-facing strings in components.
   Google Maps keeps its arrow. The car's screen: 85 % of its visible map (ANDROID-AUTO-SPEC §4). North-up, and heading-up zoomed out for a
   wide circle at open, keep it centred. iOS reports the screen's centre as the map's, so the settle-back check below
   allows 1 km more while the dot is lowered.
-- **Motion, native** (`puck-feed.ts`, the map draws the dot itself): MapLibre eases the dot and the follow camera
+- **Motion** (`puck-feed.ts`): MapLibre eases the dot and the follow camera
   linearly to each fed pose, reaching it one lead (the feed interval) later however close together two feeds come
   (iOS `dynamicNavigationCameraAnimationDuration` with each location stamped its lead after the one before, Android's
   look-ahead `forceLocationUpdate` to now + lead), on its own render thread: no JS work per frame, and the dot keeps moving
@@ -246,15 +244,7 @@ persisted in kv-store. No hardcoded user-facing strings in components.
   and an empty stop moves nothing. The patch's own tracking switches (the ease, a placed dot) are
   kept from JS, and the source's anchor and look change without leaving the app's location or setting the puck's layer
   up again. While following, `regionIsChanging` reaches JS at most 5 times a second.
-- **Motion, JS** (`pose-smoother.ts`, the setting off): moving (≥ 2 m/s, with a heading, not a placed position) the
-  dot, its circle and cone and the following camera are drawn ~30 times a second in even steps (every second 60 Hz
-  frame): between the navigator's 2 Hz positions the pose goes on along the heading at the speed (≤ 1 s), the gap to
-  each new position closes with a 250 ms time constant, and the camera follows frame by frame (`jumpTo`). A step over
-  80 m or a turn over 90° is shown at once. Only while the app is active (the car's map: while the car shows it). Each
-  frame waits on a timer, not `requestAnimationFrame`: React Native's is a setTimeout(0) that only the phone's display
-  paces, and elsewhere (the background, the car's screen alone) a loop on it spins the JS thread flat out and iOS
-  kills the app for CPU. Standing, positions are drawn as they come, each eased over
-  450 ms; a step over 80 m is a snap and the camera jumps to it. Leaving follow clears the last centre. The map opens
+- **Opening and settling:** leaving follow clears the last centre. The map opens
   on the active region's bounds and the camera follows only once the style has loaded; while following, a view the
   map settles on by itself more than 80 m from the dot is put back on it, once per follow stop (iOS applies the
   initial view at the first layout, after the style has loaded).

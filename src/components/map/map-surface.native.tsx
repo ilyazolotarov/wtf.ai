@@ -11,12 +11,11 @@ import { Sentry } from "@/config/sentry";
 import { Colors } from "@/constants/theme";
 import type { Coordinate } from "@/nav/geo";
 import { useParkedCar, usePosition } from "@/providers/position-provider";
-import { useDevSettings, useRuntime } from "@/providers/runtime-provider";
+import { useRuntime } from "@/providers/runtime-provider";
 
 import { useCarSprite, withCarSprite } from "./car-sprite";
 import { MapCredit, type CreditAt } from "./map-credit";
 import { nativePuckStyle } from "./puck-native";
-import { useSmoothedPosition } from "./use-smoothed-position";
 import { useRoute } from "@/providers/route-provider";
 import { STANDING_MPS } from "@/services/navigation/place-request";
 import { activeCameras } from "@/services/offline-map/camera-file";
@@ -196,12 +195,8 @@ export function MapSurface({
     [placedLat, placedLon, placedHeading],
   );
   const car = placedCar ?? parkedCar;
-  // Drawn and followed smoothly between the navigator's 2 Hz positions: by MapLibre from the fed position
-  // (puck-feed.ts), or by JS each frame (pose-smoother.ts).
-  const { nativePuck } = useDevSettings();
+  // Drawn and followed smoothly between the navigator's 2 Hz positions by MapLibre, from the fed position (puck-feed.ts).
   const { puckFeed } = useRuntime();
-  const shown = useSmoothedPosition(position, onOwnScreen, !nativePuck);
-  const smoothing = shown !== position;
   const { route, chooseAlternative } = useRoute();
   // Camera commands wait for the style (`useMapCamera`); a new map (after none) waits again.
   const [mapReady, setMapReady] = useState(false);
@@ -218,11 +213,9 @@ export function MapSurface({
     zoomOffset: (carScale ? -Math.log2(carScale) : 0) + followZoomShift,
     headingUpDotAt,
     mode,
-    nativeFollow: nativePuck,
-    // Heading-up turns with the smoothed heading too, unless the walking compass leads.
-    headingUpRad: smoothing && !compass && shown?.headingRad != null ? shown.headingRad : headingUpRad,
-    position: shown,
-    smoothing,
+    nativeFollow: true,
+    headingUpRad,
+    position,
     route,
     ghostView,
     placing,
@@ -239,36 +232,36 @@ export function MapSurface({
   const [view, setView] = useState<CameraView>({ zoom: INITIAL_ZOOM, bearingDeg: 0, pitchDeg: 0 });
   // Standing on the car, the dot gives way to it (UI-SPEC §6.1), its circle kept.
   const [dotHidden, setDotHidden] = useState(false);
-  const onCar = car != null && shown != null && dotOnCar(shown, car, view.zoom, STANDING_MPS, dotHidden);
+  const onCar = car != null && position != null && dotOnCar(position, car, view.zoom, STANDING_MPS, dotHidden);
   if (onCar !== dotHidden) setDotHidden(onCar);
   // The native dot: the map shows and follows what the feed hands it, at the anchor the follow camera keeps it at.
   const anchorX = native?.anchor.x ?? 0.5;
   const anchorY = native?.anchor.y ?? 0.5;
   useEffect(() => {
-    if (!nativePuck || !mapReady) return;
+    if (!mapReady) return;
     const map = mapRef.current;
     if (!map) return;
     return () => {
-      // Back to the device's location when the setting goes off.
+      // Back to the device's location when the map's style goes.
       try {
         map.setUserLocationSource("device", { x: 0.5, y: 0.5 }, null).catch(() => {});
       } catch {
         // The map is gone (unmounted): the wrapper finds no view and throws at once. Nothing to reset.
       }
     };
-  }, [nativePuck, mapReady]);
+  }, [mapReady]);
   // The source on, and then its anchor and look as they change: once on, "app" again only updates them. (Through the
   // device's location and back, iOS would drop the dot and following at every change of mode.)
   useEffect(() => {
-    if (!nativePuck || !mapReady) return;
+    if (!mapReady) return;
     mapRef.current?.setUserLocationSource("app", { x: anchorX, y: anchorY }, nativePuckStyle(scheme)).catch(() => {});
-  }, [nativePuck, mapReady, scheme, anchorX, anchorY]);
+  }, [mapReady, scheme, anchorX, anchorY]);
   const onCarRef = useRef(onCar);
   useEffect(() => {
     onCarRef.current = onCar;
   }, [onCar]);
   useEffect(() => {
-    if (!nativePuck || !mapReady) return;
+    if (!mapReady) return;
     const map = mapRef.current;
     if (!map) return;
     // The phone's map is fed while the app is in front; the car's own screen always.
@@ -276,7 +269,7 @@ export function MapSurface({
       active: () => onOwnScreen || AppState.currentState === "active",
       hidden: () => onCarRef.current,
     });
-  }, [nativePuck, mapReady, onOwnScreen, puckFeed]);
+  }, [mapReady, onOwnScreen, puckFeed]);
   // Heading-up: far house numbers, entrances and POIs other than a driver's gone (map-near.ts), measured from a point
   // that moves on in steps. (State adjusted during render, not in an effect.)
   const [near, setNear] = useState<Coordinate | null>(null);
@@ -416,7 +409,7 @@ export function MapSurface({
           bearing={native?.bearing}
           duration={native?.duration}
           onTrackUserLocationChange={(event) => {
-            if (nativePuck && event.nativeEvent.trackUserLocation == null && mode !== "free") onFollowEnded();
+            if (event.nativeEvent.trackUserLocation == null && mode !== "free") onFollowEnded();
           }}
         />
         {/* Placed in the style, above its house numbers: not part of the stack below. */}
@@ -435,16 +428,16 @@ export function MapSurface({
         <MarkLayers pin={pin} placedMark={placedMark?.draft ? placedMark : null} palette={palette} scheme={scheme} />
         {/* The native dot brings its own circle and cone; the walking compass's cone stays the layer's. */}
         <PositionLayers
-          position={shown}
+          position={position}
           compass={compass}
           palette={palette}
           scheme={scheme}
           view={view}
-          hideCone={onCar || (nativePuck && !compass)}
-          hideAccuracy={nativePuck}
+          hideCone={onCar || !compass}
+          hideAccuracy
         />
         <DebugLayers position={position} palette={palette} />
-        <PuckLayers position={shown} palette={palette} scheme={scheme} hideDot={onCar || nativePuck} />
+        <PuckLayers position={position} palette={palette} scheme={scheme} hideDot />
       </Map>
       {creditAt && <MapCredit at={creditAt} scheme={scheme} start={mapReady} />}
     </View>

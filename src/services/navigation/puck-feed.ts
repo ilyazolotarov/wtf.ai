@@ -6,7 +6,7 @@
 // dot is fed as published. Pure (`PuckFeed`); `PuckFeeder` wires it to the navigator and the mounted maps.
 import type { PositionEstimate } from "@/nav/position/types";
 
-/** Below this the dot is drawn where it is (as pose-smoother.ts: standing, crawling, walking). */
+/** Below this the dot is drawn where it is (standing, crawling, walking). */
 export const FEED_MIN_SPEED_MPS = 2;
 /** Further than this from the last fed pose, the position snapped (a placing, GNSS back): placed, not animated. */
 export const FEED_SNAP_M = 80;

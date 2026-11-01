@@ -137,7 +137,7 @@ export function useMapCamera({
   mode: CameraMode;
   headingUpRad: number | null;
   position: PositionEstimate | null;
-  /** `position` is redrawn every frame (use-smoothed-position.ts): follow it frame by frame, without easing. */
+  /** `position` is redrawn every frame: follow it frame by frame, without easing. */
   smoothing?: boolean;
   /** MapLibre follows the fed position itself (`NativeFollow`); the follow camera sends no commands. */
   nativeFollow?: boolean;
