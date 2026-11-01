@@ -109,15 +109,17 @@ export function RouteLayers({
           [headTo.lon, headTo.lat],
         ])
       : emptyLines();
-  const opacity = route?.replanning || route?.preview?.plan ? 0.4 : 1;
+  // Planning again, or a stop's preview drawn over it: the route quieter, its casing too (it covered the preview's line).
+  const quiet = route?.replanning || route?.preview?.plan != null;
+  const opacity = quiet ? 0.4 : 1;
   const size = ROUTE_LINE;
-  const routeCasing = { "line-color": palette.routeCasing, "line-width": size.casing, "line-opacity": route?.replanning ? 0.4 : 0.9 };
+  const routeCasing = { "line-color": palette.routeCasing, "line-width": size.casing, "line-opacity": quiet ? 0.4 : 0.9 };
   const routePaint = { "line-color": palette.route, "line-width": size.line, "line-opacity": opacity };
   // Dashes are in line widths: each layer's dash and gap come to the same points, so each dash gets its own edge.
   const routeHeadCasing = {
     "line-color": palette.routeCasing,
     "line-width": size.casing,
-    "line-opacity": route?.replanning ? 0.4 : 0.9,
+    "line-opacity": quiet ? 0.4 : 0.9,
   };
   const routeHeadUnderlay = { "line-color": palette.route, "line-width": size.line, "line-opacity": size.underlay * opacity };
   const routeHeadPaint = {

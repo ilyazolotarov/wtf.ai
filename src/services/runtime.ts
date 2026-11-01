@@ -32,6 +32,7 @@ import { activeCameras } from "./offline-map/camera-file";
 import { jsLongTasks } from "./long-tasks";
 import { PuckFeeder } from "./navigation/puck-feed";
 import { onMapDownloadFailed, onMapDownloadStep } from "./offline-map/map-packs";
+import { activeSearchIndex } from "./offline-map/search-file";
 import { activeRoadGraph, openActiveRoadGraph } from "./offline-map/road-graph-file";
 import { SensorService } from "./sensor-capture/sensor-service";
 import { createTripFiles } from "./trip-recorder/trip-files";
@@ -487,6 +488,8 @@ export function getRuntime(): Runtime {
   const routes = new RouteService({
     position,
     openGraph: () => openActiveRoadGraph(ROUTER_CACHE_TILES),
+    // Places to stop at along the route: the active region's search file (STOPS-SPEC §6.1).
+    places: () => activeSearchIndex(),
     nowUs,
     store: kvStore,
     // Each slice of a search (a plan or its alternatives) labelled for the long-task line.
