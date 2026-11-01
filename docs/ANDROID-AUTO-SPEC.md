@@ -46,8 +46,10 @@ src/components/car-screen/car-session.ts ◀───────┘  route, pla
   keeps the navigator and the phone's sensors running as on a trip (`Runtime.setCarScreen`), and connects the
   remembered adapter as the phone's app does when it opens. Trip log: `android auto connected`, `car screen on|off`,
   `android auto disconnected`, the driver's actions there, and the native side's notes as `android auto: …` (the map's
-  surface, the location service, the permission asked, what failed). CarLink keeps those notes until the task takes
-  them (`takeNotes`, at its start and on each `notes` action), since some come before a task runs or listens. A failure
+  surface, the location service, the permission asked, what failed), and the map's own first drawing, `car map: drawn
+  <ms> ms after it was made` or `car map: not drawn 10 s after it was made` (CARPLAY-SPEC §4). CarLink keeps those
+  notes until the task takes them (`takeNotes`, at its start and on each `notes` action), since some come before a
+  task runs or listens. A failure
   among them is also reported to Sentry (warning, tag `feature: android-auto`), since the trip log keeps notes only
   while a trip records. While the session runs every Sentry event carries `car_screen: android-auto`, native crash
   reports too (the SDK copies the scope's tags to the native one); `none` after it ends (car-session-task.ts).

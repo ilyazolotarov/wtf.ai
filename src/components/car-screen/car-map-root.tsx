@@ -9,6 +9,7 @@ import { COURSE_MIN_SPEED_MPS, useHeadingUp } from "@/components/map/use-compass
 import type { MapControl } from "@/components/map/use-map-control";
 import { I18nProvider } from "@/i18n/provider";
 import { PositionProvider, usePosition } from "@/providers/position-provider";
+import { getRuntime } from "@/services/runtime";
 
 import AndroidAuto from "../../../modules/android-auto/src/AndroidAutoModule";
 import CarPlay from "../../../modules/car-play/src/CarPlayModule";
@@ -93,9 +94,27 @@ const CAR_HEADING_UP_DOT_AT = 0.85;
  */
 const CAR_CAMERA: CameraState = { ...INITIAL_CAMERA, mode: "follow-heading" };
 
+/** Not drawn this long after it was made, the car's map says so in the trip log. */
+const CAR_MAP_DRAW_WAIT_MS = 10_000;
+
 function CarMap({ dark, insets, scale, zoom, cameraSign, speedRight }: Required<Omit<CarMapProps, "speedRight">> & Pick<CarMapProps, "speedRight">) {
   const position = usePosition();
   const headingUp = useHeadingUp(position, null);
+  // In the trip log: how long after it was made the map first drew its style, or that it hadn't after a while. A map
+  // left black on the car's screen (2026-11-01, not seen on the simulator) shows there which step failed.
+  const drawn = useRef<() => void>(noop);
+  useEffect(() => {
+    const { recorder } = getRuntime();
+    const madeAt = Date.now();
+    let first = true;
+    const late = setTimeout(() => recorder.note(`car map: not drawn ${CAR_MAP_DRAW_WAIT_MS / 1000} s after it was made`), CAR_MAP_DRAW_WAIT_MS);
+    drawn.current = () => {
+      clearTimeout(late);
+      if (first) recorder.note(`car map: drawn ${Date.now() - madeAt} ms after it was made`);
+      first = false;
+    };
+    return () => clearTimeout(late);
+  }, []);
   // The car shows the app: its session runs (car-session-task.ts), started here if its start was missed.
   useEffect(() => {
     if (carPlay) ensureCarPlaySession();
@@ -181,6 +200,7 @@ function CarMap({ dark, insets, scale, zoom, cameraSign, speedRight }: Required<
         creditAt={null}
         control={control}
         followZoomShift={zoom + zoomShift}
+        onReady={() => drawn.current()}
       />
       {carPlay && (
         <CarSpeedPill at={speedAt} dark={dark} cameraSign={cameraSign} />

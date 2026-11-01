@@ -313,7 +313,14 @@ GNSS and the adapter as they were. What the JS side sent is kept on the native s
   (`CarPlayImages.barIcon`): the bar draws its images as a mask, and the white with its edge became one black blob.
 - Device log (`ai.wtf.navigator`, category `carplay`): the scene connected, in the foreground, active, in the
   background, disconnected; React Native started without the phone's scene or on a new host; what drew the map;
-  actions sent (info level); the notes also go to the trip log.
+  actions sent (info level); the notes also go to the trip log. Each map root made is a note, `carplay: map: <what
+  drew it>, window <w>×<h> pt`, and the map itself notes its first drawing (car-map-root.tsx): `car map: drawn <ms> ms
+  after it was made`, or `car map: not drawn 10 s after it was made`. A map left black on the car's screen at a launch
+  it opened the app for (cards and buttons shown; opening the app again there drew it) shows which step failed.
+- The map's root is made once the map template is up (`setRootTemplate`'s completion, then a turn of the main queue):
+  CarPlay lays the window out around it. Its properties (insets, day or night, the camera's sign) go at most once a
+  turn, only when changed. Must not drift: made as the scene connected into the app, a root took five new insets within
+  100 ms as it started, and its map stayed black (2026-11-01, the only difference from the root that drew).
 
 What CarPlay doesn't do of Android Auto's: the test drive (NF-7; Apple asks none: `xcrun simctl location start` drives
 on the simulator, §5); a tap on a grey route (the map template has no tap event: the routes list); the search screen

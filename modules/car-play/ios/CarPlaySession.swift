@@ -147,8 +147,18 @@ final class CarPlaySession: NSObject {
     // Set before the template shows: iOS 26.4 draws the card red by default, and a colour set later stayed red.
     template.guidanceBackgroundColor = CarPlayImages.cardColor
     mapTemplate = template
+    templateShown = false
     controller.setRootTemplate(template, animated: false) { [weak self] _, error in
-      if let error { self?.note("map template not shown: \(error.localizedDescription)", problem: true) }
+      guard let self else { return }
+      if let error { note("map template not shown: \(error.localizedDescription)", problem: true) }
+      // The template is up and CarPlay lays the window out around it: the map waiting for that is made a turn later.
+      templateShown = true
+      guard mapPending else { return }
+      mapPending = false
+      DispatchQueue.main.async { [weak self] in
+        guard let self, window != nil, mapView == nil || mapHost !== AppReactHost.host else { return }
+        showMap()
+      }
     }
     // What the last session sent stays: a route followed when the car's screen came on again shows at once.
     syncTrip()
@@ -169,7 +179,7 @@ final class CarPlaySession: NSObject {
       note("opened on the car's screen")
       emit?("onConnect", [:])
     }
-    if mapView == nil { showMap() }
+    if mapView == nil { showMapOnceLaidOut() }
     // After the scenes connecting at this launch: the phone's starts React Native as it connects.
     if !AppReactHost.isRunning {
       DispatchQueue.main.async { AppReactHost.startWithoutPhone() }
@@ -181,6 +191,7 @@ final class CarPlaySession: NSObject {
    * smoothing loop spinning the JS thread with the app in the background); the trip, its banners and the voice go on.
    */
   func hidden() {
+    mapPending = false
     guard let window, mapView != nil else { return }
     carPlayLog.notice("CarPlay map: gone while another app shows")
     window.rootViewController = CarPlayMapController(nil, scale: CarPlayLogic.mapScale) {}
@@ -219,6 +230,8 @@ final class CarPlaySession: NSObject {
     window = nil
     mapView = nil
     mapHost = nil
+    templateShown = false
+    mapPending = false
     interfaceController = nil
     scene = nil
     if wasOpen { send("session-ended") }
@@ -269,20 +282,42 @@ final class CarPlaySession: NSObject {
     // The car shows the app: the session opens if it hasn't yet (`shown` makes the map's root too), never the map alone
     // (2026-10-30: a launch from the car's screen showed the map with no session's marks in the trip log).
     if !isOpen { shown() }
-    if mapHost !== host { showMap() }
+    if mapHost !== host { showMapOnceLaidOut() }
+  }
+
+  /** The map template is up (its `setRootTemplate` finished): CarPlay has laid the window out around it. */
+  private var templateShown = false
+  /** The car's screen showed the app before that: the map's root is made once it is up. */
+  private var mapPending = false
+
+  /**
+   * The map's root, made once CarPlay has laid out the window around its template. Made as the scene connected into the
+   * app (the car opening it at once), the root started with no insets and took five new ones within 100 ms as CarPlay
+   * laid the window out, and its map stayed black until the app was opened again there (2026-11-01).
+   */
+  private func showMapOnceLaidOut() {
+    if templateShown {
+      showMap()
+    } else {
+      mapPending = true
+    }
   }
 
   /** The React root `CarPlayMap` once React Native runs, a blank view until then. */
   private func showMap() {
     guard let window else { return }
-    let react = AppReactHost.rootView(moduleName: Self.moduleName, initialProperties: mapProps())
+    let props = mapProps()
+    let react = AppReactHost.rootView(moduleName: Self.moduleName, initialProperties: props)
     // Its traits are the car's day and night, never the app's scheme (the phone's theme).
     if let react { ReactSceneGuards.carRoot(react) }
     mapHost = react == nil ? nil : AppReactHost.host
     mapView = react
-    sentMapProps = nil
+    // Made with these: the first layout sends nothing unless they changed.
+    sentMapProps = react == nil ? nil : props as NSDictionary
     let drawnBy = react == nil ? "a blank view until React Native runs" : "the React root"
-    carPlayLog.notice("CarPlay map: \(drawnBy, privacy: .public)")
+    // In the trip log with the car map's own note of its first drawing (car-map-root.tsx): a map left black (2026-11-01,
+    // a launch the car's screen opened the app for) shows which step failed.
+    note("map: \(drawnBy), window \(Int(window.bounds.width))×\(Int(window.bounds.height)) pt")
     window.backgroundColor = dark ? .black : .white
     window.rootViewController = CarPlayMapController(react, scale: CarPlayLogic.mapScale) { [weak self] in
       self?.updateMapProps()
@@ -323,8 +358,20 @@ final class CarPlaySession: NSObject {
 
   /** Sent again only when they changed: each is a render of the car's map. */
   private var sentMapProps: NSDictionary?
+  /** An update is due at the main queue's next turn: a layout's several steps send one. */
+  private var mapPropsDue = false
 
   private func updateMapProps() {
+    guard !mapPropsDue else { return }
+    mapPropsDue = true
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      mapPropsDue = false
+      sendMapProps()
+    }
+  }
+
+  private func sendMapProps() {
     guard let view = mapView, view.responds(to: NSSelectorFromString("setAppProperties:")) else { return }
     let props = mapProps() as NSDictionary
     guard props != sentMapProps else { return }
