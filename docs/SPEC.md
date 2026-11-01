@@ -321,7 +321,10 @@ against the gyro's vertical yaw rate).
 - Code on a worker runtime (worklets Bundle Mode, `src/workers/`): its worklets import relatively (the files
   generated for them resolve no `@/`), and nothing they import at run time reaches React Native or Expo modules,
   which don't run there; files reach the worker through `modules/graph-bytes`. The navigator's host and protocol
-  (`navigator-host.ts`, `navigator-remote.ts`) keep to this.
+  (`navigator-host.ts`, `navigator-remote.ts`) keep to this. The release bundle has no file watcher, so Metro hashes
+  the worklet files Babel writes during it (`node_modules/react-native-worklets/.worklets/`) from disk
+  (`patches/metro+*.patch`): carry the patch over on every Metro upgrade, and check with `npx expo export:embed`
+  from a checkout without those files.
 - Native modules stay thin: I/O and bridging only. Non-trivial Swift logic goes in `modules/*/ios/Logic/`
   (Foundation only, XCTest in `native-tests/`); Android-free Kotlin in `modules/*/android/**/logic/` (JUnit in
   `native-tests-android/`). Payloads use the iOS conventions, so the TypeScript is the same on both platforms. The JS

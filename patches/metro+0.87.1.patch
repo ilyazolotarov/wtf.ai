@@ -1,0 +1,24 @@
+diff --git a/node_modules/metro/src/node-haste/DependencyGraph.js b/node_modules/metro/src/node-haste/DependencyGraph.js
+index 3a76e63..a32dd01 100644
+--- a/node_modules/metro/src/node-haste/DependencyGraph.js
++++ b/node_modules/metro/src/node-haste/DependencyGraph.js
+@@ -138,6 +138,19 @@ class DependencyGraph extends _nodeEvents.default {
+   }
+   async getOrComputeSha1(mixedPath) {
+     const result = await this._fileSystem.getOrComputeSha1(mixedPath);
++    // wtf.ai patch: worklets Bundle Mode writes react-native-worklets/.worklets/<hash>.js while it transforms the
++    // file holding the worklet. A build without a watcher (the release bundle) never sees those files in its file
++    // map, so they are hashed here from disk.
++    if (
++      (!result || !result.sha1) &&
++      mixedPath.includes(_nodePath.default.join("react-native-worklets", ".worklets") + _nodePath.default.sep)
++    ) {
++      const content = require("node:fs").readFileSync(mixedPath);
++      return {
++        content,
++        sha1: require("node:crypto").createHash("sha1").update(content).digest("hex"),
++      };
++    }
+     if (!result || !result.sha1) {
+       throw new Error(`Failed to get the SHA-1 for: ${mixedPath}.
+       Potential causes:
