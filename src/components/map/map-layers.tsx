@@ -362,6 +362,7 @@ export function PositionLayers({
   scheme,
   view,
   hideCone = false,
+  hideAccuracy = false,
 }: {
   position: PositionEstimate | null;
   compass: CompassHeading | null;
@@ -371,11 +372,13 @@ export function PositionLayers({
   view: CameraView;
   /** The dot gives way to the car it stands on: no cone either (the car's nose shows the way). */
   hideCone?: boolean;
+  /** The map draws the circle with its native dot (puck-feed.ts): none here. */
+  hideAccuracy?: boolean;
 }) {
   const dr = deadReckoning(position);
   const tint = dr ? palette.puckDoubt : palette.puck;
   const coneOutline = CONE_OUTLINE[scheme];
-  const accuracy = position ? accuracyFeatures(position) : emptyPolygons();
+  const accuracy = position && !hideAccuracy ? accuracyFeatures(position) : emptyPolygons();
   // The heading cone, the same on screen at every zoom and as in the lessons; walking (`compass`), the phone's compass
   // draws it, as wide each side as the compass is unsure.
   const cone = hideCone

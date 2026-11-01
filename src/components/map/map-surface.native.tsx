@@ -1,6 +1,6 @@
 import { Camera, LogManager, Map, type MapRef, type PressEvent, type ViewStateChangeEvent } from "@maplibre/maplibre-react-native";
-import { useImperativeHandle, useMemo, useRef, useState, type ComponentProps, type Ref } from "react";
-import { useColorScheme, View, type NativeSyntheticEvent } from "react-native";
+import { useEffect, useImperativeHandle, useMemo, useRef, useState, type ComponentProps, type Ref } from "react";
+import { AppState, useColorScheme, View, type NativeSyntheticEvent } from "react-native";
 
 import { ANDROID_BLURS } from "@/components/ui/glass-fill";
 import { useMapStyle } from "@/config/map";
@@ -11,9 +11,11 @@ import { Sentry } from "@/config/sentry";
 import { Colors } from "@/constants/theme";
 import type { Coordinate } from "@/nav/geo";
 import { useParkedCar, usePosition } from "@/providers/position-provider";
+import { useDevSettings, useRuntime } from "@/providers/runtime-provider";
 
 import { useCarSprite, withCarSprite } from "./car-sprite";
 import { MapCredit, type CreditAt } from "./map-credit";
+import { nativePuckStyle } from "./puck-native";
 import { useSmoothedPosition } from "./use-smoothed-position";
 import { useRoute } from "@/providers/route-provider";
 import { STANDING_MPS } from "@/services/navigation/place-request";
@@ -191,8 +193,11 @@ export function MapSurface({
     [placedLat, placedLon, placedHeading],
   );
   const car = placedCar ?? parkedCar;
-  // Drawn and followed smoothly between the navigator's 2 Hz positions (pose-smoother.ts).
-  const shown = useSmoothedPosition(position, onOwnScreen);
+  // Drawn and followed smoothly between the navigator's 2 Hz positions: by MapLibre from the fed position
+  // (puck-feed.ts), or by JS each frame (pose-smoother.ts).
+  const { nativePuck } = useDevSettings();
+  const { puckFeed } = useRuntime();
+  const shown = useSmoothedPosition(position, onOwnScreen, !nativePuck);
   const smoothing = shown !== position;
   const { route, chooseAlternative } = useRoute();
   // Camera commands wait for the style (`useMapCamera`); a new map (after none) waits again.
@@ -202,7 +207,7 @@ export function MapSurface({
   const [mapHeightPt, setMapHeightPt] = useState(0);
   const [mapWidthPt, setMapWidthPt] = useState(0);
   const mapSize = useRef({ width: 0, height: 0 });
-  const { cameraRef, onRegionIsChanging, onRegionDidChange, onOutsideGesture } = useMapCamera({
+  const { cameraRef, onRegionIsChanging, onRegionDidChange, onOutsideGesture, native } = useMapCamera({
     mapReady,
     mapHeightPt,
     mapWidthPt,
@@ -210,6 +215,7 @@ export function MapSurface({
     zoomOffset: (carScale ? -Math.log2(carScale) : 0) + followZoomShift,
     headingUpDotAt,
     mode,
+    nativeFollow: nativePuck,
     // Heading-up turns with the smoothed heading too, unless the walking compass leads.
     headingUpRad: smoothing && !compass && shown?.headingRad != null ? shown.headingRad : headingUpRad,
     position: shown,
@@ -232,6 +238,33 @@ export function MapSurface({
   const [dotHidden, setDotHidden] = useState(false);
   const onCar = car != null && shown != null && dotOnCar(shown, car, view.zoom, STANDING_MPS, dotHidden);
   if (onCar !== dotHidden) setDotHidden(onCar);
+  // The native dot: the map shows and follows what the feed hands it, at the anchor the follow camera keeps it at.
+  const anchorX = native?.anchor.x ?? 0.5;
+  const anchorY = native?.anchor.y ?? 0.5;
+  useEffect(() => {
+    if (!nativePuck || !mapReady) return;
+    const map = mapRef.current;
+    if (!map) return;
+    map.setUserLocationSource("app", { x: anchorX, y: anchorY }, nativePuckStyle(scheme)).catch(() => {});
+    return () => {
+      // Back to the device's location when the setting goes off; a map already gone rejects, which is fine.
+      map.setUserLocationSource("device", { x: 0.5, y: 0.5 }, null).catch(() => {});
+    };
+  }, [nativePuck, mapReady, scheme, anchorX, anchorY]);
+  const onCarRef = useRef(onCar);
+  useEffect(() => {
+    onCarRef.current = onCar;
+  }, [onCar]);
+  useEffect(() => {
+    if (!nativePuck || !mapReady) return;
+    const map = mapRef.current;
+    if (!map) return;
+    // The phone's map is fed while the app is in front; the car's own screen always.
+    return puckFeed.register(map, {
+      active: () => onOwnScreen || AppState.currentState === "active",
+      hidden: () => onCarRef.current,
+    });
+  }, [nativePuck, mapReady, onOwnScreen, puckFeed]);
   // Heading-up: far house numbers, entrances and POIs other than a driver's gone (map-near.ts), measured from a point
   // that moves on in steps. (State adjusted during render, not in an effect.)
   const [near, setNear] = useState<Coordinate | null>(null);
@@ -363,6 +396,16 @@ export function MapSurface({
               ? { bounds: region.bounds, pitch: 0, bearing: 0 }
               : { zoom: INITIAL_ZOOM, pitch: 0, bearing: 0 }
           }
+          // The native follow (use-map-camera.ts `NativeFollow`): MapLibre tracks the fed dot; a gesture that ends
+          // it says so here (the map view's own touch says it too; the car's screen's gestures don't reach the view).
+          trackUserLocation={native?.trackUserLocation}
+          zoom={native?.zoom}
+          pitch={native?.pitch}
+          bearing={native?.bearing}
+          duration={native?.duration}
+          onTrackUserLocationChange={(event) => {
+            if (nativePuck && event.nativeEvent.trackUserLocation == null && mode !== "free") onUserInteraction();
+          }}
         />
         {/* Placed in the style, above its house numbers: not part of the stack below. */}
         <EntranceLayers entrances={entrances} near={near} />
@@ -378,9 +421,18 @@ export function MapSurface({
         <CameraLayers cameras={cameras} aheadId={position?.cameraAhead?.id} />
         <ParkedCarLayers car={car} scheme={scheme} zoom={view.zoom} />
         <MarkLayers pin={pin} placedMark={placedMark?.draft ? placedMark : null} palette={palette} scheme={scheme} />
-        <PositionLayers position={shown} compass={compass} palette={palette} scheme={scheme} view={view} hideCone={onCar} />
+        {/* The native dot brings its own circle and cone; the walking compass's cone stays the layer's. */}
+        <PositionLayers
+          position={shown}
+          compass={compass}
+          palette={palette}
+          scheme={scheme}
+          view={view}
+          hideCone={onCar || (nativePuck && !compass)}
+          hideAccuracy={nativePuck}
+        />
         <DebugLayers position={position} palette={palette} />
-        <PuckLayers position={shown} palette={palette} scheme={scheme} hideDot={onCar} />
+        <PuckLayers position={shown} palette={palette} scheme={scheme} hideDot={onCar || nativePuck} />
       </Map>
       {creditAt && <MapCredit at={creditAt} scheme={scheme} start={mapReady} />}
     </View>

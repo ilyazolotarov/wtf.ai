@@ -26,6 +26,7 @@ import { ROUTER_CACHE_TILES, RouteService } from "./navigation/route-service";
 import { startUpdateCenter, waitingUpdateInfo } from "./app-update/update-center";
 import { activeCameras } from "./offline-map/camera-file";
 import { jsLongTasks } from "./long-tasks";
+import { PuckFeeder } from "./navigation/puck-feed";
 import { onMapDownloadFailed, onMapDownloadStep } from "./offline-map/map-packs";
 import { activeRoadGraph, openActiveRoadGraph } from "./offline-map/road-graph-file";
 import { SensorService } from "./sensor-capture/sensor-service";
@@ -76,6 +77,8 @@ export interface DevSettings {
   rpmPeriodS: number;
   /** More → Waze and Google Maps: share the car's position with other navigators during a trip (ANDROID-SPEC §8). */
   positionShare: boolean;
+  /** The dot and the follow camera drawn by MapLibre from the fed position (UI-SPEC §6.2), not by JS each frame. */
+  nativePuck: boolean;
 }
 
 const DEV_SETTINGS_KEY = "dev.settings";
@@ -97,6 +100,8 @@ export interface Runtime {
   uploader: TripUploader | null;
   /** The map's position: the navigator (NAVIGATOR-SPEC §9), or phone GNSS without an OBD adapter. */
   position: NavigatorService;
+  /** The position fed to the maps' native dot between publishes (UI-SPEC §6.2). */
+  puckFeed: PuckFeeder;
   /** Route planning and guidance (ROUTING-SPEC §8). */
   routes: RouteService;
   /** The app process in the trip log (TRIP-LOGGER-SPEC §4.4). */
@@ -134,6 +139,8 @@ export function getRuntime(): Runtime {
     carReports: true,
     rpmPeriodS: 5,
     positionShare: false,
+    // On in development builds while it is tried (UI-SPEC §6.2); the testers' builds keep the JS-drawn dot.
+    nativePuck: __DEV__,
   };
   let dev: DevSettings = loadDevSettings(kvStore.getJson(DEV_SETTINGS_KEY), defaults);
   const devListeners = new Set<() => void>();
@@ -432,6 +439,9 @@ export function getRuntime(): Runtime {
     },
   });
   position.setPhoneOnly(dev.phoneOnly);
+  // The maps' native dot, fed between publishes at the navigator's pace (UI-SPEC §6.2).
+  const puckFeed = new PuckFeeder({ position });
+  puckFeed.start();
   const syncWheelYaw = () => position.setWheelYaw(dev.wheelSpeed && dev.wheelYaw);
   syncWheelYaw();
   // During a trip the navigator keeps running with the map off screen, so dead reckoning
@@ -677,6 +687,7 @@ export function getRuntime(): Runtime {
     recorder,
     uploader,
     position,
+    puckFeed,
     routes,
     health,
     onTheWay,

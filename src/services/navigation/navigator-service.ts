@@ -28,6 +28,7 @@ import { UNKNOWN_CAR } from "@/obd/types";
 import { isSatelliteRecord, mapFixToPosition } from "@/services/position/gnss-position-source";
 import type { RoadGraphSource } from "@/services/offline-map/road-graph-file";
 import { CameraSource } from "@/services/navigation/camera-source";
+import type { NavAdvance } from "@/services/navigation/puck-feed";
 import { RoadReader, type LimitGraph, type RoadWeights } from "@/services/navigation/road-reader";
 import { SpeedLimitSource } from "@/services/navigation/speed-limit-source";
 import type { PositionSource } from "@/services/position/position-source";
@@ -272,6 +273,7 @@ export class NavigatorService implements PositionSource {
 
   private nav: Navigator | null = null;
   private pending: Input[] = [];
+  private readonly advanceListeners = new Set<(a: NavAdvance) => void>();
   /** The navigator's turning from the wheels (§5.4): the source, while on. */
   private wheelYaw: WheelYawSource | null = null;
   /** The link's last engine state, for a navigator started meanwhile. */
@@ -1167,6 +1169,25 @@ export class NavigatorService implements PositionSource {
       if (!("mag" in input)) this.deps.observer?.fed?.(input.tUs);
     }
     });
+    this.noteAdvance();
+  }
+
+  /**
+   * Each advance of the navigator (an IMU batch fed): its estimate now, between publishes. The map's native dot moves
+   * on by it (puck-feed.ts). The phone-only engine's while that is what the map shows (`publishPosition`).
+   */
+  onAdvance = (listener: (a: NavAdvance) => void): (() => void) => {
+    this.advanceListeners.add(listener);
+    return () => this.advanceListeners.delete(listener);
+  };
+
+  private noteAdvance(): void {
+    if (!this.advanceListeners.size) return;
+    const phoneEngine = this.phoneOnly && this.deps.nowUs() - this.lastObdUs >= OBD_TIMEOUT_US ? this.phone?.engine : undefined;
+    const e = phoneEngine?.estimate() ?? this.nav?.estimate();
+    if (!e) return;
+    const advance: NavAdvance = { lat: e.lat, lon: e.lon, headingRad: e.headingRad, speedMps: e.speedMps, tUs: e.tUs };
+    this.advanceListeners.forEach((l) => l(advance));
   }
 
   /** Runs `fn` under a long-task label (`deps.longTasks`), or plainly. */

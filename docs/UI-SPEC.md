@@ -139,8 +139,12 @@ persisted in kv-store. No hardcoded user-facing strings in components.
 
 - Full-screen MapLibre map in the active region's style. Read the MapLibre RN docs for the installed version before
   coding.
-- **Custom puck** from `usePosition()` via a GeoJSON source and layers: dot + heading cone (only with a heading) +
-  accuracy circle. Never MapLibre's built-in user location. The dot (`puck-style.ts`): an 8 pt fill, a 3.5 pt ring and
+- **Custom puck** from `usePosition()`: dot + heading cone (only with a heading) + accuracy circle. Drawn one of two
+  ways, by Developer → "The map draws the dot itself" (on in development builds while it is tried): as GeoJSON layers
+  from the position JS redraws each frame, or as **MapLibre's user location fed by the app** (`puck-feed.ts`, the
+  wrapper's `setUserLocationSource` / `feedUserLocation` in the patch), which the map draws from the same style
+  constants (`puck-native.ts`) and animates itself. Never the device's location through MapLibre: the fed position is
+  the navigator's. The dot (`puck-style.ts`): an 8 pt fill, a 3.5 pt ring and
   a 1.5 pt dark edge outside it. Trusted GPS: a blue fill in a white ring (light #0A84FF, dark #3D6BFF); otherwise the
   theme background in an amber ring (`puckDoubt`). In dark the trusted dot glows (a soft disc 10 pt past the edge at
   45 %). The cone is 34 pt long, 28° each side, the same on screen at every zoom and tilt (built in screen points and
@@ -218,14 +222,29 @@ persisted in kv-store. No hardcoded user-facing strings in components.
   Google Maps keeps its arrow. The car's screen: 85 % of its visible map (ANDROID-AUTO-SPEC §4). North-up, and heading-up zoomed out for a
   wide circle at open, keep it centred. iOS reports the screen's centre as the map's, so the settle-back check below
   allows 1 km more while the dot is lowered.
-- **Motion** (`pose-smoother.ts`): moving (≥ 2 m/s, with a heading, not a placed position) the dot, its circle and
-  cone and the following camera are drawn ~30 times a second in even steps (every second 60 Hz frame): between the
-  navigator's 2 Hz positions the pose goes on along the heading at the speed (≤ 1 s), the gap to each new position
-  closes with a 250 ms time constant, and the camera follows frame by frame (`jumpTo`). A step over 80 m or a turn
-  over 90° is shown at once. Only while the app is active (the car's map: while the car shows it). Each frame waits on
-  a timer, not `requestAnimationFrame`: React Native's is a setTimeout(0) that only the phone's display paces, and
-  elsewhere (the background, the car's screen alone) a loop on it spins the JS thread flat out and iOS kills the app
-  for CPU. Standing, positions are drawn as they come, each eased over
+- **Motion, native** (`puck-feed.ts`, the map draws the dot itself): MapLibre eases the dot and the follow camera
+  linearly from each fed pose to the next over the time between them (iOS `dynamicNavigationCameraAnimationDuration`,
+  Android's look-ahead `forceLocationUpdate`), on its own render thread: no JS work per frame, and the dot keeps moving
+  with the phone's screen dark on the car's. The feed runs at the navigator's pace, each IMU batch (~10 Hz, the
+  service's `onAdvance`): the published dot (map matching's, the one the parity tool checks) moved on by the EKF's
+  displacement since that publish and predicted one feed interval ahead, so the ease lands where the car is when it
+  gets there; the estimate's heading takes over once it turned 3° from the published one; each publish re-bases.
+  Standing (< 2 m/s, no heading, or a placed position) the dot is fed as published, without lead. A step over 80 m,
+  a turn over 90° or a change to or from a placed position is placed, not animated. The phone's map is fed while the
+  app is in front, the car's always. The follow camera is MapLibre's tracking (`Camera` `trackUserLocation`:
+  `course` heading-up, `default` north-up with bearing 0) with the dot pinned at the anchor (`dotAnchor`: the same spot
+  the padding put it at), the stop's zoom and pitch; entering follow is one 450 ms ease to that view, then tracking
+  takes over; a zoom change while following eases without leaving it; a pan ends tracking natively and
+  `onTrackUserLocationChange` turns the mode free. While following, `regionIsChanging` reaches JS at most 5 times a
+  second.
+- **Motion, JS** (`pose-smoother.ts`, the setting off): moving (≥ 2 m/s, with a heading, not a placed position) the
+  dot, its circle and cone and the following camera are drawn ~30 times a second in even steps (every second 60 Hz
+  frame): between the navigator's 2 Hz positions the pose goes on along the heading at the speed (≤ 1 s), the gap to
+  each new position closes with a 250 ms time constant, and the camera follows frame by frame (`jumpTo`). A step over
+  80 m or a turn over 90° is shown at once. Only while the app is active (the car's map: while the car shows it). Each
+  frame waits on a timer, not `requestAnimationFrame`: React Native's is a setTimeout(0) that only the phone's display
+  paces, and elsewhere (the background, the car's screen alone) a loop on it spins the JS thread flat out and iOS
+  kills the app for CPU. Standing, positions are drawn as they come, each eased over
   450 ms; a step over 80 m is a snap and the camera jumps to it. Leaving follow clears the last centre. The map opens
   on the active region's bounds and the camera follows only once the style has loaded; while following, a view the
   map settles on by itself more than 80 m from the dot is put back on it, once per follow stop (iOS applies the

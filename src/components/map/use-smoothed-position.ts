@@ -30,11 +30,12 @@ const appActive = () => AppState.currentState === "active";
  * driver switched to another app (2026-10-16). The car's map draws in just that state (CARPLAY-SPEC §4, JS timers).
  * `onScreen`: the map's own screen says (the car's, which shows while the phone's app is in the background).
  */
-export function useSmoothedPosition(position: PositionEstimate | null, onScreen?: boolean): PositionEstimate | null {
+export function useSmoothedPosition(position: PositionEstimate | null, onScreen?: boolean, enabled = true): PositionEstimate | null {
   const smoother = useRef<PoseSmoother | null>(null);
   const [frame, setFrame] = useState<{ of: PositionEstimate; pose: Pose } | null>(null);
   const appInFront = useSyncExternalStore(subscribeAppState, appActive, appActive);
-  const active = onScreen ?? appInFront;
+  // `enabled` false: the map draws the dot natively (puck-feed.ts); the position is shown as published.
+  const active = enabled && (onScreen ?? appInFront);
 
   useEffect(() => {
     smoother.current ??= new PoseSmoother();
@@ -55,6 +56,6 @@ export function useSmoothedPosition(position: PositionEstimate | null, onScreen?
 
   // Until the new position's first frame (≤ 1 frame), the last pose drawn: showing the position itself for that
   // frame was a jump back and forth. Not one from an earlier drive.
-  if (!frame || !smoothable(position) || Math.abs(position.timestamp - frame.of.timestamp) > STALE_FRAME_MS) return position;
+  if (!enabled || !frame || !smoothable(position) || Math.abs(position.timestamp - frame.of.timestamp) > STALE_FRAME_MS) return position;
   return { ...position, ...frame.pose };
 }

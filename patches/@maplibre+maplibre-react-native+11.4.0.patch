@@ -1,8 +1,561 @@
+diff --git a/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/camera/MLRNCamera.kt b/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/camera/MLRNCamera.kt
+index a789f4d..f1b3762 100644
+--- a/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/camera/MLRNCamera.kt
++++ b/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/camera/MLRNCamera.kt
+@@ -189,10 +189,48 @@ class MLRNCamera(
+     }
+ 
+     private fun updateCamera() {
++        // wtf.ai: following the fed location, the stop's zoom and pitch move the tracking camera; a camera update
++        // of its own would fight the LocationComponent's animation.
++        val manager = locationComponentManager
++        if (mapView?.appUserLocation == true && trackUserLocation != TrackUserLocationMode.NONE && manager != null && manager.isTracking()) {
++            manager.appTrackingStop(stop?.zoom, stop?.pitch, (stop?.duration ?: 0).toLong())
++            return
++        }
+         updateQueue.offer(stop)
+         updateQueue.execute(mapView!!)
+     }
+ 
++    /** wtf.ai: the LocationComponent's camera mode for a tracking mode of the fed location. */
++    private fun appCameraMode(mode: Int): Int =
++        when (mode) {
++            TrackUserLocationMode.DEFAULT -> org.maplibre.android.location.modes.CameraMode.TRACKING_GPS_NORTH
++            TrackUserLocationMode.COURSE -> org.maplibre.android.location.modes.CameraMode.TRACKING_GPS
++            TrackUserLocationMode.HEADING -> org.maplibre.android.location.modes.CameraMode.TRACKING_COMPASS
++            else -> org.maplibre.android.location.modes.CameraMode.NONE
++        }
++
++    private val trackingListener =
++        object : OnCameraTrackingChangedListener {
++            override fun onCameraTrackingChanged(currentMode: Int) {
++                val userTrackingMode =
++                    when (currentMode) {
++                        org.maplibre.android.location.modes.CameraMode.NONE -> TrackUserLocationMode.NONE
++                        org.maplibre.android.location.modes.CameraMode.TRACKING -> TrackUserLocationMode.DEFAULT
++                        org.maplibre.android.location.modes.CameraMode.TRACKING_GPS_NORTH -> TrackUserLocationMode.DEFAULT
++                        org.maplibre.android.location.modes.CameraMode.TRACKING_COMPASS -> TrackUserLocationMode.HEADING
++                        org.maplibre.android.location.modes.CameraMode.TRACKING_GPS -> TrackUserLocationMode.COURSE
++                        else -> TrackUserLocationMode.NONE
++                    }
++
++                updateUserTrackingMode(userTrackingMode)
++            }
++
++            override fun onCameraTrackingDismissed() {
++                // wtf.ai: a gesture ended the following: JS hears of it (as iOS says it).
++                updateUserTrackingMode(TrackUserLocationMode.NONE)
++            }
++        }
++
+     private fun updateUserTrackingMode(trackUserLocationMode: Int) {
+         userLocation.trackingMode = trackUserLocationMode
+ 
+@@ -283,6 +321,12 @@ class MLRNCamera(
+ 
+     @RequiresPermission(allOf = [Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION])
+     private fun enableLocation() {
++        // wtf.ai: the app's own position: no device location and no permission needed; the LocationComponent
++        // follows what the app feeds it (LocationComponentManager.feed).
++        if (mapView?.appUserLocation == true) {
++            mapView!!.mapLibreMap?.getStyle { style -> updateLocationLayer(style) }
++            return
++        }
+         if (!PermissionsManager.areLocationPermissionsGranted(context)) {
+             return
+         }
+@@ -301,6 +345,8 @@ class MLRNCamera(
+     private fun enableLocationComponent(style: Style) {
+         updateUserLocation()
+         updateLocationLayer(style)
++        // wtf.ai: the fed location has no device listener: the LocationComponent moves the camera itself.
++        if (mapView?.appUserLocation == true) return
+ 
+         val lastKnownLocation = locationManager.lastKnownLocation
+         locationManager.addLocationListener(locationChangeListener)
+@@ -320,32 +366,27 @@ class MLRNCamera(
+         locationComponentManager!!.update(style)
+         locationComponentManager!!.setFollowUserLocation(trackUserLocation != TrackUserLocationMode.NONE)
+ 
++        if (mapView?.appUserLocation == true) {
++            // wtf.ai: the fed location's camera: one transition to the mode, with the stop's zoom and pitch.
++            val mode = appCameraMode(trackUserLocation)
++            locationComponentManager!!.addOnCameraTrackingChangedListener(trackingListener)
++            locationComponentManager!!.setAppCameraMode(
++                mode,
++                (stop?.duration ?: 0).toLong(),
++                stop?.zoom,
++                if (mode == org.maplibre.android.location.modes.CameraMode.TRACKING_GPS_NORTH) 0.0 else null,
++                stop?.pitch,
++            )
++            return
++        }
++
+         if (trackUserLocation != TrackUserLocationMode.NONE) {
+             locationComponentManager!!.setCameraMode(
+                 TrackUserLocationMode.getCameraMode(
+                     trackUserLocation,
+                 ),
+             )
+-            locationComponentManager!!.addOnCameraTrackingChangedListener(
+-                object :
+-                    OnCameraTrackingChangedListener {
+-                    override fun onCameraTrackingChanged(currentMode: Int) {
+-                        val userTrackingMode =
+-                            when (currentMode) {
+-                                org.maplibre.android.location.modes.CameraMode.NONE -> TrackUserLocationMode.NONE
+-                                org.maplibre.android.location.modes.CameraMode.TRACKING -> TrackUserLocationMode.DEFAULT
+-                                org.maplibre.android.location.modes.CameraMode.TRACKING_COMPASS -> TrackUserLocationMode.HEADING
+-                                org.maplibre.android.location.modes.CameraMode.TRACKING_GPS -> TrackUserLocationMode.COURSE
+-                                else -> TrackUserLocationMode.NONE
+-                            }
+-
+-                        updateUserTrackingMode(userTrackingMode)
+-                    }
+-
+-                    override fun onCameraTrackingDismissed() {
+-                    }
+-                },
+-            )
++            locationComponentManager!!.addOnCameraTrackingChangedListener(trackingListener)
+         } else {
+             locationComponentManager!!.setCameraMode(org.maplibre.android.location.modes.CameraMode.NONE)
+         }
+diff --git a/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/AppPuck.kt b/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/AppPuck.kt
+new file mode 100644
+index 0000000..eeb2a49
+--- /dev/null
++++ b/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/AppPuck.kt
+@@ -0,0 +1,135 @@
++package org.maplibre.reactnative.components.location
++
++import android.graphics.Bitmap
++import android.graphics.BlurMaskFilter
++import android.graphics.Canvas
++import android.graphics.Color
++import android.graphics.Paint
++import android.graphics.Path
++import android.graphics.RadialGradient
++import android.graphics.RectF
++import android.graphics.Shader
++import android.util.DisplayMetrics
++import org.json.JSONObject
++import kotlin.math.ceil
++import kotlin.math.max
++
++/**
++ * wtf.ai: the app's dot as a style image for the LocationComponent (GPS render mode turns it by the course): a
++ * halo under it, the heading cone pointing up, then the dot's edge, ring and fill. Colours 0xAARRGGBB, sizes in dp.
++ */
++object AppPuck {
++    const val IMAGE = "wtf-ai-puck"
++
++    private class Style(
++        json: JSONObject?,
++    ) {
++        private fun color(
++            key: String,
++            fallback: Int,
++        ): Int = json?.optLong(key, fallback.toLong())?.toInt() ?: fallback
++
++        private fun num(
++            key: String,
++            fallback: Double,
++        ): Double = json?.optDouble(key, fallback) ?: fallback
++
++        val dot = color("dot", 0xFF0A84FF.toInt())
++        val doubt = color("doubt", 0xFFB47D38.toInt())
++        val bg = color("bg", Color.WHITE)
++        val ring = color("ring", Color.WHITE)
++        val edge = color("edge", 0xE6000000.toInt())
++        val halo = color("halo", dot)
++        val haloOpacity = num("haloOpacity", 0.0)
++        val r = num("r", 8.0)
++        val ringWidth = num("ringWidth", 3.5)
++        val edgeWidth = num("edgeWidth", 1.5)
++        val haloR = num("haloR", 0.0)
++        val coneR = num("coneR", 34.0)
++        val coneHalfDeg = num("coneHalfDeg", 28.0)
++        val coneOpacity = num("coneOpacity", 0.32)
++        val coneEdge = num("coneEdge", 1.5)
++        val coneRing = num("coneRing", 0.0)
++    }
++
++    private fun withAlpha(
++        color: Int,
++        opacity: Double,
++    ): Int = (color and 0x00FFFFFF) or ((opacity.coerceIn(0.0, 1.0) * 255).toInt() shl 24)
++
++    /** The dot's colour, or the doubt colour, for the LocationComponent's own accuracy circle. */
++    fun tint(
++        styleJson: JSONObject?,
++        doubt: Boolean,
++    ): Int {
++        val s = Style(styleJson)
++        return if (doubt) s.doubt else s.dot
++    }
++
++    /** The puck, or a blank of the same size when hidden (the layer keeps its place). */
++    fun bitmap(
++        metrics: DisplayMetrics,
++        styleJson: JSONObject?,
++        doubt: Boolean,
++        hidden: Boolean,
++        withCone: Boolean,
++    ): Bitmap {
++        val s = Style(styleJson)
++        val d = metrics.density
++        val half = max(s.coneR, max(s.haloR, s.r + s.ringWidth + s.edgeWidth))
++        val side = ceil(2 * half * d).toInt().coerceAtLeast(1)
++        val bitmap = Bitmap.createBitmap(metrics, side, side, Bitmap.Config.ARGB_8888)
++        if (hidden) return bitmap
++        val canvas = Canvas(bitmap)
++        val c = side / 2f
++        val tint = if (doubt) s.doubt else s.dot
++        val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
++        val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
++            style = Paint.Style.STROKE
++            strokeJoin = Paint.Join.ROUND
++        }
++        if (withCone && s.coneR > 0) {
++            val radius = (s.coneR * d).toFloat()
++            val sector = Path().apply {
++                moveTo(c, c)
++                arcTo(RectF(c - radius, c - radius, c + radius, c + radius), (-90 - s.coneHalfDeg).toFloat(), (2 * s.coneHalfDeg).toFloat())
++                close()
++            }
++            if (s.coneEdge > 0) {
++                stroke.color = s.edge
++                stroke.strokeWidth = (2 * s.coneEdge * d).toFloat()
++                canvas.drawPath(sector, stroke)
++            }
++            if (s.coneRing > 0) {
++                stroke.color = if (doubt) s.doubt else s.ring
++                stroke.strokeWidth = (2 * s.coneRing * d).toFloat()
++                canvas.drawPath(sector, stroke)
++            }
++            fill.color = withAlpha(tint, s.coneOpacity)
++            canvas.drawPath(sector, fill)
++        }
++        val outer = ((s.r + s.ringWidth + s.edgeWidth) * d).toFloat()
++        // The dot's soft shadow (the app's: black at 22 %, blurred, 2 dp down), then the halo fading out over its outer
++        // part (the app's `circle-blur`), trusted only; in doubt the fill is the theme's background in the doubt ring.
++        val shadow = Paint(Paint.ANTI_ALIAS_FLAG).apply {
++            color = withAlpha(Color.BLACK, 0.22)
++            maskFilter = BlurMaskFilter(2.5f * d, BlurMaskFilter.Blur.NORMAL)
++        }
++        canvas.drawCircle(c, c + 2 * d, outer + 2 * d, shadow)
++        if (!doubt && s.haloR > 0 && s.haloOpacity > 0) {
++            val glow = withAlpha(s.halo, s.haloOpacity)
++            val haloR = (s.haloR * d).toFloat()
++            val haloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
++                shader = RadialGradient(c, c, haloR, intArrayOf(glow, glow, withAlpha(s.halo, 0.0)), floatArrayOf(0f, 0.6f, 1f), Shader.TileMode.CLAMP)
++            }
++            canvas.drawCircle(c, c, haloR, haloPaint)
++        }
++        fill.color = s.edge
++        canvas.drawCircle(c, c, outer, fill)
++        fill.color = if (doubt) s.doubt else s.ring
++        canvas.drawCircle(c, c, ((s.r + s.ringWidth) * d).toFloat(), fill)
++        fill.color = if (doubt) s.bg else s.dot
++        canvas.drawCircle(c, c, (s.r * d).toFloat(), fill)
++        return bitmap
++    }
++}
+diff --git a/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/LocationComponentManager.kt b/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/LocationComponentManager.kt
+index fca5b22..4aebd9b 100644
+--- a/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/LocationComponentManager.kt
++++ b/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/LocationComponentManager.kt
+@@ -2,10 +2,14 @@ package org.maplibre.reactnative.components.location
+ 
+ import android.annotation.SuppressLint
+ import android.content.Context
++import android.location.Location
++import android.os.SystemClock
++import org.json.JSONObject
+ import org.maplibre.android.location.LocationComponent
+ import org.maplibre.android.location.LocationComponentActivationOptions
+ import org.maplibre.android.location.LocationComponentOptions
+ import org.maplibre.android.location.OnCameraTrackingChangedListener
++import org.maplibre.android.location.OnLocationCameraTransitionListener
+ import org.maplibre.android.location.modes.CameraMode
+ import org.maplibre.android.location.modes.RenderMode
+ import org.maplibre.android.maps.MapLibreMap
+@@ -38,6 +42,201 @@ class LocationComponentManager(
+ 
+     private var mShowingUserLocation = false
+ 
++    // wtf.ai: the app's own fused position as the user location, fed through `feed` (no device engine): MapLibre
++    // animates the puck and the follow camera to each fed location by its time. The puck is drawn from the app's
++    // style (AppPuck); the follow camera's padding puts the dot at the anchor (fractions of the view).
++    private var appSource = false
++    private var appActivated = false
++    private var appAnchorX = 0.5
++    private var appAnchorY = 0.5
++    private var appStyle: JSONObject? = null
++    private var appDoubt = false
++    private var appHidden = false
++    private var appWithCone = true
++
++    fun isAppSource(): Boolean = appSource
++
++    fun isTracking(): Boolean = (mLocationComponent?.cameraMode ?: CameraMode.NONE) != CameraMode.NONE
++
++    fun setAppSource(
++        on: Boolean,
++        anchorX: Double,
++        anchorY: Double,
++        styleJson: String?,
++    ) {
++        appAnchorX = anchorX
++        appAnchorY = anchorY
++        if (styleJson != null) {
++            appStyle =
++                try {
++                    JSONObject(styleJson)
++                } catch (e: Exception) {
++                    null
++                }
++        }
++        val was = appSource
++        appSource = on
++        val style = mMap?.style
++        if (style != null && style.isFullyLoaded) {
++            if (on) {
++                updateApp(style)
++            } else if (was) {
++                mLocationComponent?.setLocationComponentEnabled(false)
++            }
++        }
++        if (on && isTracking()) applyAppPadding(0)
++    }
++
++    @SuppressLint("MissingPermission")
++    private fun updateApp(style: Style) {
++        val map = mMap ?: return
++        if (!appActivated) {
++            mLocationComponent = map.locationComponent
++            mLocationComponent!!.activateLocationComponent(
++                LocationComponentActivationOptions
++                    .builder(context, style)
++                    .locationComponentOptions(appOptions())
++                    .useDefaultLocationEngine(false)
++                    .build(),
++            )
++            mLocationComponent!!.locationEngine = null
++            appActivated = true
++        } else {
++            mLocationComponent!!.applyStyle(appOptions())
++        }
++        mLocationComponent!!.renderMode = RenderMode.GPS
++        mLocationComponent!!.isLocationComponentEnabled = true
++        mShowingUserLocation = true
++        addAppPuckImage(style)
++    }
++
++    /** The puck image the GPS render mode draws turned by the course; the style's own images are blank. */
++    private fun appOptions(): LocationComponentOptions =
++        LocationComponentOptions
++            .builder(context)
++            .gpsDrawable(R.drawable.empty)
++            .gpsName(AppPuck.IMAGE)
++            .foregroundDrawable(R.drawable.empty)
++            .foregroundDrawableStale(R.drawable.empty)
++            .backgroundDrawable(R.drawable.empty)
++            .backgroundDrawableStale(R.drawable.empty)
++            .bearingDrawable(R.drawable.empty)
++            // The accuracy circle as the app's layer drew it: a faint fill in the dot's colour (doubt: amber).
++            .accuracyAlpha(if (appDoubt) 0.18f else 0.16f)
++            .accuracyColor(AppPuck.tint(appStyle, appDoubt))
++            .enableStaleState(false)
++            .elevation(0f)
++            .trackingAnimationDurationMultiplier(1.0f)
++            .build()
++
++    /** The puck as the style image the layer shows; again after a style load, a doubt or hidden change. */
++    fun addAppPuckImage(style: Style) {
++        if (!appSource) return
++        style.addImage(AppPuck.IMAGE, AppPuck.bitmap(context.resources.displayMetrics, appStyle, appDoubt, appHidden, appWithCone))
++    }
++
++    /** One fed position; `flags`: 1 snap (placed, not animated), 2 doubt, 4 hidden. */
++    fun feed(
++        lat: Double,
++        lon: Double,
++        courseDeg: Double,
++        speedMps: Double,
++        accuracyM: Double,
++        leadMs: Double,
++        flags: Int,
++    ) {
++        val component = mLocationComponent ?: return
++        if (!appSource || !appActivated) return
++        val snap = flags and 1 != 0
++        val doubt = flags and 2 != 0
++        val hidden = flags and 4 != 0
++        val withCone = !courseDeg.isNaN()
++        if (doubt != appDoubt || hidden != appHidden || withCone != appWithCone) {
++            val recolour = doubt != appDoubt
++            appDoubt = doubt
++            appHidden = hidden
++            appWithCone = withCone
++            // The accuracy circle's colour is in the options; the puck's own image is ours.
++            if (recolour) component.applyStyle(appOptions())
++            mMap?.style?.let { if (it.isFullyLoaded) addAppPuckImage(it) }
++        }
++        val now = System.currentTimeMillis()
++        val location =
++            Location("wtf.ai").apply {
++                latitude = lat
++                longitude = lon
++                if (!courseDeg.isNaN()) bearing = courseDeg.toFloat()
++                if (!speedMps.isNaN()) speed = speedMps.toFloat()
++                if (!accuracyM.isNaN()) accuracy = accuracyM.toFloat()
++                elapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos()
++                // The animation reaches this position at its time: the feed interval ahead, a snap at once.
++                time = if (snap) now + 1 else now + leadMs.toLong().coerceAtLeast(1)
++            }
++        component.forceLocationUpdate(listOf(location), true)
++    }
++
++    /** The anchor as the tracking camera's padding: the target sits at the middle of the padded view. */
++    fun applyAppPadding(durationMs: Long) {
++        val component = mLocationComponent ?: return
++        val view = mMapView ?: return
++        if (!isTracking()) return
++        val w = view.width.toDouble()
++        val h = view.height.toDouble()
++        val left = ((2 * appAnchorX - 1) * w).coerceAtLeast(0.0)
++        val right = ((1 - 2 * appAnchorX) * w).coerceAtLeast(0.0)
++        val top = ((2 * appAnchorY - 1) * h).coerceAtLeast(0.0)
++        val bottom = ((1 - 2 * appAnchorY) * h).coerceAtLeast(0.0)
++        component.paddingWhileTracking(doubleArrayOf(left, top, right, bottom), durationMs.coerceAtLeast(1))
++    }
++
++    /** The follow camera of the fed location: one transition to the mode with the stop's zoom and tilt. */
++    fun setAppCameraMode(
++        mode: Int,
++        durationMs: Long,
++        zoom: Double?,
++        bearing: Double?,
++        tilt: Double?,
++    ) {
++        val component = mLocationComponent ?: return
++        if (mode == CameraMode.NONE) {
++            component.cameraMode = CameraMode.NONE
++            return
++        }
++        if (component.cameraMode == mode) {
++            appTrackingStop(zoom, tilt, durationMs)
++            return
++        }
++        component.setCameraMode(
++            mode,
++            durationMs.coerceAtLeast(0),
++            zoom,
++            bearing,
++            tilt,
++            object : OnLocationCameraTransitionListener {
++                override fun onLocationCameraTransitionFinished(cameraMode: Int) {
++                    applyAppPadding(0)
++                }
++
++                override fun onLocationCameraTransitionCanceled(cameraMode: Int) {
++                    applyAppPadding(0)
++                }
++            },
++        )
++    }
++
++    /** While following: the stop's zoom and tilt ease without leaving the tracking camera. */
++    fun appTrackingStop(
++        zoom: Double?,
++        tilt: Double?,
++        durationMs: Long,
++    ) {
++        val component = mLocationComponent ?: return
++        if (!isTracking()) return
++        if (zoom != null) component.zoomWhileTracking(zoom, durationMs.coerceAtLeast(1))
++        if (tilt != null) component.tiltWhileTracking(tilt, durationMs.coerceAtLeast(1))
++        applyAppPadding(durationMs)
++    }
++
+     private var mOnCameraTrackingChangedListener: OnCameraTrackingChangedListener? = null
+ 
+     init {
+@@ -94,6 +293,11 @@ class LocationComponentManager(
+ 
+     @SuppressLint("MissingPermission")
+     private fun stateChanged() {
++        if (appSource) {
++            // wtf.ai: the fed location is always shown; its camera modes come through `setAppCameraMode`.
++            mLocationComponent?.isLocationComponentEnabled = true
++            return
++        }
+         mLocationComponent?.setLocationComponentEnabled((mFollowUserLocation || mShowUserLocation))
+ 
+         if (mShowingUserLocation != mShowUserLocation) {
+@@ -122,6 +326,10 @@ class LocationComponentManager(
+         displayUserLocation: Boolean,
+         style: Style,
+     ) {
++        if (appSource) {
++            updateApp(style)
++            return
++        }
+         val tintColor = mMapView?.tintColor
+ 
+         if (mLocationComponent == null || tintColor != null) {
 diff --git a/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/mapview/MLRNMapView.kt b/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/mapview/MLRNMapView.kt
-index b088909..9d87cdf 100644
+index b088909..40032ce 100644
 --- a/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/mapview/MLRNMapView.kt
 +++ b/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/mapview/MLRNMapView.kt
-@@ -327,7 +327,8 @@ open class MLRNMapView(
+@@ -87,6 +87,9 @@ sealed class MapChild {
+         }
+ }
+ 
++/** wtf.ai: while the map follows the fed location, `onRegionIsChanging` reaches JS at most this often. */
++private const val FOLLOW_REGION_EVENT_INTERVAL_MS = 200L
++
+ open class MLRNMapView(
+     context: Context,
+     options: MapLibreMapOptions?,
+@@ -177,6 +180,34 @@ open class MLRNMapView(
+         LocationComponentManager(this, context)
+     }
+ 
++    // wtf.ai: the app's own fused position as the map's user location (LocationComponentManager.feed): MapLibre
++    // animates the dot and the follow camera between the app's feeds.
++    var appUserLocation = false
++        private set
++    private var lastRegionIsChangingAt = 0L
++
++    fun setAppUserLocationSource(
++        source: String,
++        anchorX: Double,
++        anchorY: Double,
++        puckStyle: String?,
++    ) {
++        appUserLocation = source == "app"
++        locationComponentManager.setAppSource(appUserLocation, anchorX, anchorY, puckStyle)
++    }
++
++    fun feedAppUserLocation(
++        lat: Double,
++        lon: Double,
++        courseDeg: Double,
++        speedMps: Double,
++        accuracyM: Double,
++        leadMs: Double,
++        flags: Int,
++    ) {
++        locationComponentManager.feed(lat, lon, courseDeg, speedMps, accuracyM, leadMs, flags)
++    }
++
+     val eventDispatcher: EventDispatcher?
+         get() {
+             val reactContext = context as ReactContext
+@@ -327,7 +358,8 @@ open class MLRNMapView(
          }
  
          val reactContext = context as ReactContext
@@ -12,7 +565,30 @@ index b088909..9d87cdf 100644
  
          if (!paused) {
              onPause()
-@@ -1414,6 +1415,9 @@ open class MLRNMapView(
+@@ -524,6 +556,13 @@ open class MLRNMapView(
+         }
+ 
+         mapLibreMap.addOnCameraMoveListener {
++            // wtf.ai: following the fed location moves the camera every frame; JS needs the view a few times a
++            // second.
++            if (appUserLocation && locationComponentManager.isTracking()) {
++                val now = android.os.SystemClock.uptimeMillis()
++                if (now - lastRegionIsChangingAt < FOLLOW_REGION_EVENT_INTERVAL_MS) return@addOnCameraMoveListener
++                lastRegionIsChangingAt = now
++            }
+             handleMapChangedEvent("onRegionIsChanging", true)
+         }
+ 
+@@ -796,6 +835,8 @@ open class MLRNMapView(
+     override fun onDidFinishLoadingStyle() {
+         handleMapChangedEvent("onDidFinishLoadingStyle")
+         applyLight()
++        // wtf.ai: a new style has no puck image yet.
++        if (appUserLocation) mapLibreMap?.style?.let { locationComponentManager.addAppPuckImage(it) }
+     }
+ 
+     override fun onStyleImageMissing(id: String) {
+@@ -1414,6 +1455,9 @@ open class MLRNMapView(
      }
  
      private fun setLifecycleListeners() {
@@ -22,7 +598,7 @@ index b088909..9d87cdf 100644
          val reactContext = context as ReactContext
  
          lifeCycleListener =
-@@ -1434,6 +1438,20 @@ open class MLRNMapView(
+@@ -1434,6 +1478,20 @@ open class MLRNMapView(
          reactContext.addLifecycleEventListener(lifeCycleListener)
      }
  
@@ -43,6 +619,46 @@ index b088909..9d87cdf 100644
      private fun makeViewState(isAnimated: Boolean?): WritableMap {
          val position = mapLibreMap!!.cameraPosition
          val viewState: WritableMap = Arguments.createMap()
+diff --git a/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/mapview/MLRNMapViewModule.kt b/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/mapview/MLRNMapViewModule.kt
+index 961d649..ee209e0 100644
+--- a/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/mapview/MLRNMapViewModule.kt
++++ b/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/mapview/MLRNMapViewModule.kt
+@@ -199,4 +199,35 @@ class MLRNMapViewModule(
+             promise.resolve(null)
+         }
+     }
++
++    // wtf.ai: the app's own position as the map's user location (LocationComponentManager).
++    override fun setUserLocationSource(
++        reactTag: Double,
++        source: String,
++        anchorX: Double,
++        anchorY: Double,
++        puckStyle: String?,
++        promise: Promise,
++    ) {
++        withViewportOnUIThread(reactTag, promise) {
++            it.setAppUserLocationSource(source, anchorX, anchorY, puckStyle)
++            promise.resolve(null)
++        }
++    }
++
++    override fun feedUserLocation(
++        reactTag: Double,
++        lat: Double,
++        lon: Double,
++        courseDeg: Double,
++        speedMps: Double,
++        accuracyM: Double,
++        leadMs: Double,
++        flags: Double,
++    ) {
++        // No promise: a map view that is gone (a reload, a screen torn down) drops the feed.
++        reactTagResolver.withViewResolved<MLRNMapView>(reactTag.toInt()) {
++            it.feedAppUserLocation(lat, lon, courseDeg, speedMps, accuracyM, leadMs, flags.toInt())
++        }
++    }
+ }
 diff --git a/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/utils/ReactTagResolver.kt b/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/utils/ReactTagResolver.kt
 index b257692..225886d 100644
 --- a/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/utils/ReactTagResolver.kt
@@ -96,3 +712,819 @@ index b257692..225886d 100644
              try {
                  val resolvedView: View? = manager.resolveView(reactTag)
                  val view = resolvedView as? V
+diff --git a/node_modules/@maplibre/maplibre-react-native/ios/components/camera/MLRNCamera.m b/node_modules/@maplibre/maplibre-react-native/ios/components/camera/MLRNCamera.m
+index f5c8dec..361e826 100644
+--- a/node_modules/@maplibre/maplibre-react-native/ios/components/camera/MLRNCamera.m
++++ b/node_modules/@maplibre/maplibre-react-native/ios/components/camera/MLRNCamera.m
+@@ -94,6 +94,51 @@ - (void)_updateCameraFromStop {
+ }
+ 
+ - (void)_updateCameraFromTrackUserLocation {
++  // wtf.ai: with the app-fed location, a stop with a duration is one ease to the followed view (the dot at its
++  // anchor, the stop's zoom and pitch, the course as bearing), and following takes over where it ends; while
++  // following, a zoom change eases without a jump. The device-location path below is the wrapper's own.
++  if ([_map usesAppUserLocation]) {
++    MLNUserTrackingMode target = [self _userTrackingMode];
++    CLLocation *location = _map.userLocation.location;
++    NSTimeInterval duration = _stop[@"duration"] ? [MLRNUtils fromMS:_stop[@"duration"]] : 0;
++    BOOL hasZoom = _stop[@"zoom"] != nil;
++    BOOL hasPitch = _stop[@"pitch"] != nil;
++    if (target != MLNUserTrackingModeNone && _map.userTrackingMode == target) {
++      if (hasZoom && fabs(_map.zoomLevel - [_stop[@"zoom"] doubleValue]) > 0.01) {
++        [_map setZoomLevel:[_stop[@"zoom"] doubleValue] animated:duration > 0];
++      }
++      return;
++    }
++    if (target != MLNUserTrackingModeNone && duration > 0 && location != nil &&
++        CLLocationCoordinate2DIsValid(location.coordinate)) {
++      MLNMapCamera *camera = [_map.camera copy];
++      camera.centerCoordinate = location.coordinate;
++      if (hasPitch) camera.pitch = [_stop[@"pitch"] doubleValue];
++      if (hasZoom) {
++        camera.altitude = [_map altitudeFromZoom:[_stop[@"zoom"] doubleValue]
++                                      atLatitude:location.coordinate.latitude
++                                         atPitch:camera.pitch];
++      }
++      if (target == MLNUserTrackingModeFollowWithCourse && location.course >= 0) {
++        camera.heading = location.course;
++      } else if (target == MLNUserTrackingModeFollow && _stop[@"bearing"] != nil) {
++        camera.heading = [_stop[@"bearing"] doubleValue];
++      }
++      __weak MLRNMapView *weakMap = _map;
++      [_map setCamera:camera
++                 withDuration:duration
++      animationTimingFunction:[CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut]
++                  edgePadding:[_map appFollowEdgePadding]
++            completionHandler:^{
++              MLRNMapView *map = weakMap;
++              if (map != nil && map.userTrackingMode != target) {
++                [map setUserTrackingMode:target animated:YES completionHandler:nil];
++              }
++            }];
++      return;
++    }
++  }
++
+   MLNMapCamera *camera = _map.camera;
+ 
+   if (_stop != nil) {
+diff --git a/node_modules/@maplibre/maplibre-react-native/ios/components/map-view/MLRNAppUserLocation.h b/node_modules/@maplibre/maplibre-react-native/ios/components/map-view/MLRNAppUserLocation.h
+new file mode 100644
+index 0000000..6811f97
+--- /dev/null
++++ b/node_modules/@maplibre/maplibre-react-native/ios/components/map-view/MLRNAppUserLocation.h
+@@ -0,0 +1,49 @@
++// wtf.ai: the app's own fused position shown as MapLibre's user location, so the dot and the follow camera animate
++// on MapLibre's render thread between the app's updates (UI-SPEC §6.2). `MLRNFedLocationManager` stands in for
++// CoreLocation and delivers what the app feeds; `MLRNAppPuckView` draws the dot the way the app's GeoJSON puck did.
++#import <CoreLocation/CoreLocation.h>
++#import <MapLibre/MapLibre.h>
++#import <UIKit/UIKit.h>
++
++NS_ASSUME_NONNULL_BEGIN
++
++/** A location manager with no device behind it: the map gets the locations the app hands it. */
++@interface MLRNFedLocationManager : NSObject <MLNLocationManager>
++- (void)feed:(CLLocation *)location;
++@end
++
++/** The puck's look, from the app's style JSON (colours as 0xAARRGGBB, sizes in points, angles in degrees). */
++@interface MLRNAppPuckStyle : NSObject
++@property (nonatomic, strong) UIColor *dot;
++@property (nonatomic, strong) UIColor *doubt;
++/** The dot's fill in doubt (the theme's background), inside the doubt-coloured ring. */
++@property (nonatomic, strong) UIColor *bg;
++@property (nonatomic, strong) UIColor *ring;
++@property (nonatomic, strong) UIColor *edge;
++@property (nonatomic, strong) UIColor *halo;
++@property (nonatomic, assign) double haloOpacity;
++@property (nonatomic, assign) double r;
++@property (nonatomic, assign) double ringWidth;
++@property (nonatomic, assign) double edgeWidth;
++@property (nonatomic, assign) double haloR;
++@property (nonatomic, assign) double coneR;
++@property (nonatomic, assign) double coneHalfDeg;
++@property (nonatomic, assign) double coneOpacity;
++@property (nonatomic, assign) double coneEdge;
++@property (nonatomic, assign) double coneRing;
+++ (instancetype)fromDictionary:(nullable NSDictionary *)dict;
++@end
++
++/** The dot with its ring and edge, a halo under it, and the heading cone, turned by the course against the map. */
++@interface MLRNAppPuckView : MLNUserLocationAnnotationView
++@property (nonatomic, strong) MLRNAppPuckStyle *style;
++/** Without trusted GPS the dot is drawn in the doubt colour. */
++@property (nonatomic, assign) BOOL doubt;
++/** The dot gives way (standing on the drawn car). */
++@property (nonatomic, assign) BOOL concealed;
++/** No cone when the heading is unknown. */
++@property (nonatomic, assign) BOOL showsCone;
++- (instancetype)initWithStyle:(MLRNAppPuckStyle *)style;
++@end
++
++NS_ASSUME_NONNULL_END
+diff --git a/node_modules/@maplibre/maplibre-react-native/ios/components/map-view/MLRNAppUserLocation.m b/node_modules/@maplibre/maplibre-react-native/ios/components/map-view/MLRNAppUserLocation.m
+new file mode 100644
+index 0000000..a06b225
+--- /dev/null
++++ b/node_modules/@maplibre/maplibre-react-native/ios/components/map-view/MLRNAppUserLocation.m
+@@ -0,0 +1,259 @@
++// wtf.ai: see MLRNAppUserLocation.h.
++#import "MLRNAppUserLocation.h"
++
++static UIColor *MLRNColorFromARGB(id value, UIColor *fallback) {
++  if (![value isKindOfClass:[NSNumber class]]) return fallback;
++  uint32_t v = (uint32_t)[value unsignedLongLongValue];
++  CGFloat a = ((v >> 24) & 0xFF) / 255.0;
++  CGFloat r = ((v >> 16) & 0xFF) / 255.0;
++  CGFloat g = ((v >> 8) & 0xFF) / 255.0;
++  CGFloat b = (v & 0xFF) / 255.0;
++  return [UIColor colorWithRed:r green:g blue:b alpha:a];
++}
++
++static double MLRNNumber(id value, double fallback) {
++  return [value isKindOfClass:[NSNumber class]] ? [value doubleValue] : fallback;
++}
++
++@implementation MLRNFedLocationManager
++
++@synthesize delegate = _delegate;
++@synthesize headingOrientation = _headingOrientation;
++
++- (CLAuthorizationStatus)authorizationStatus {
++  return kCLAuthorizationStatusAuthorizedWhenInUse;
++}
++
++- (void)requestAlwaysAuthorization {
++}
++
++- (void)requestWhenInUseAuthorization {
++}
++
++- (void)startUpdatingLocation {
++}
++
++- (void)stopUpdatingLocation {
++}
++
++- (void)startUpdatingHeading {
++}
++
++- (void)stopUpdatingHeading {
++}
++
++- (void)dismissHeadingCalibrationDisplay {
++}
++
++- (void)feed:(CLLocation *)location {
++  id<MLNLocationManagerDelegate> delegate = self.delegate;
++  if (delegate) {
++    [delegate locationManager:self didUpdateLocations:@[ location ]];
++  }
++}
++
++@end
++
++@implementation MLRNAppPuckStyle
++
+++ (instancetype)fromDictionary:(NSDictionary *)dict {
++  MLRNAppPuckStyle *s = [[MLRNAppPuckStyle alloc] init];
++  s.dot = MLRNColorFromARGB(dict[@"dot"], [UIColor colorWithRed:0.04 green:0.52 blue:1 alpha:1]);
++  s.doubt = MLRNColorFromARGB(dict[@"doubt"], [UIColor colorWithRed:0.71 green:0.49 blue:0.22 alpha:1]);
++  s.bg = MLRNColorFromARGB(dict[@"bg"], [UIColor whiteColor]);
++  s.ring = MLRNColorFromARGB(dict[@"ring"], [UIColor whiteColor]);
++  s.edge = MLRNColorFromARGB(dict[@"edge"], [UIColor colorWithWhite:0 alpha:0.9]);
++  s.halo = MLRNColorFromARGB(dict[@"halo"], s.dot);
++  s.haloOpacity = MLRNNumber(dict[@"haloOpacity"], 0);
++  s.r = MLRNNumber(dict[@"r"], 8);
++  s.ringWidth = MLRNNumber(dict[@"ringWidth"], 3.5);
++  s.edgeWidth = MLRNNumber(dict[@"edgeWidth"], 1.5);
++  s.haloR = MLRNNumber(dict[@"haloR"], 0);
++  s.coneR = MLRNNumber(dict[@"coneR"], 34);
++  s.coneHalfDeg = MLRNNumber(dict[@"coneHalfDeg"], 28);
++  s.coneOpacity = MLRNNumber(dict[@"coneOpacity"], 0.32);
++  s.coneEdge = MLRNNumber(dict[@"coneEdge"], 1.5);
++  s.coneRing = MLRNNumber(dict[@"coneRing"], 0);
++  return s;
++}
++
++@end
++
++/** The accuracy circle at most this many points across; beyond, the fill alone would tint the whole screen. */
++static CGFloat const MLRN_ACCURACY_MAX_PT = 4000;
++
++@implementation MLRNAppPuckView {
++  CAShapeLayer *_accuracyFill;
++  CAShapeLayer *_accuracyLine;
++  CALayer *_cone;
++  CAShapeLayer *_coneFill;
++  CAShapeLayer *_coneEdge;
++  CAShapeLayer *_coneRing;
++  CAShapeLayer *_shadow;
++  CAGradientLayer *_halo;
++  CAShapeLayer *_edge;
++  CAShapeLayer *_ring;
++  CAShapeLayer *_dot;
++  CGFloat _accuracyRadiusPt;
++}
++
++- (instancetype)initWithStyle:(MLRNAppPuckStyle *)style {
++  double side = 2 * MAX(style.coneR, MAX(style.haloR, style.r + style.ringWidth + style.edgeWidth));
++  if (self = [super initWithFrame:CGRectMake(0, 0, side, side)]) {
++    _showsCone = YES;
++    self.userInteractionEnabled = NO;
++    _accuracyFill = [CAShapeLayer layer];
++    _accuracyLine = [CAShapeLayer layer];
++    _accuracyLine.fillColor = nil;
++    [self.layer addSublayer:_accuracyFill];
++    [self.layer addSublayer:_accuracyLine];
++    _cone = [CALayer layer];
++    _coneFill = [CAShapeLayer layer];
++    _coneEdge = [CAShapeLayer layer];
++    _coneRing = [CAShapeLayer layer];
++    _shadow = [CAShapeLayer layer];
++    _halo = [CAGradientLayer layer];
++    _halo.type = kCAGradientLayerRadial;
++    _halo.startPoint = CGPointMake(0.5, 0.5);
++    _halo.endPoint = CGPointMake(1, 1);
++    _edge = [CAShapeLayer layer];
++    _ring = [CAShapeLayer layer];
++    _dot = [CAShapeLayer layer];
++    [_cone addSublayer:_coneEdge];
++    [_cone addSublayer:_coneRing];
++    [_cone addSublayer:_coneFill];
++    // Bottom to top as the app's layers: the cone, a soft shadow, the halo, the dot's edge, ring and fill.
++    [self.layer addSublayer:_cone];
++    [self.layer addSublayer:_shadow];
++    [self.layer addSublayer:_halo];
++    [self.layer addSublayer:_edge];
++    [self.layer addSublayer:_ring];
++    [self.layer addSublayer:_dot];
++    self.style = style;
++  }
++  return self;
++}
++
++- (void)setStyle:(MLRNAppPuckStyle *)style {
++  _style = style;
++  [self layout];
++}
++
++- (void)setDoubt:(BOOL)doubt {
++  if (_doubt == doubt) return;
++  _doubt = doubt;
++  [self paint];
++}
++
++- (void)setConcealed:(BOOL)concealed {
++  _concealed = concealed;
++  self.hidden = concealed;
++}
++
++- (void)setShowsCone:(BOOL)showsCone {
++  _showsCone = showsCone;
++  _cone.hidden = !showsCone;
++}
++
++/** Geometry from the style: paths around the view's centre, the cone pointing up. */
++- (void)layout {
++  MLRNAppPuckStyle *s = _style;
++  CGRect b = self.bounds;
++  CGPoint c = CGPointMake(CGRectGetMidX(b), CGRectGetMidY(b));
++  for (CALayer *l in @[ _cone, _coneFill, _coneEdge, _coneRing, _shadow, _edge, _ring, _dot ]) {
++    l.frame = b;
++  }
++  _cone.anchorPoint = CGPointMake(0.5, 0.5);
++  _cone.position = c;
++  UIBezierPath *(^circle)(double) = ^(double r) {
++    return [UIBezierPath bezierPathWithArcCenter:c radius:r startAngle:0 endAngle:2 * M_PI clockwise:YES];
++  };
++  double outer = s.r + s.ringWidth + s.edgeWidth;
++  // The dot's soft shadow (the app's: black at 22 %, blurred, 2 pt down) as a layer shadow with no fill of its own.
++  _shadow.path = nil;
++  _shadow.fillColor = [UIColor clearColor].CGColor;
++  _shadow.shadowPath = circle(outer + 2).CGPath;
++  _shadow.shadowColor = [UIColor blackColor].CGColor;
++  _shadow.shadowOpacity = 0.22;
++  _shadow.shadowRadius = 2.5;
++  _shadow.shadowOffset = CGSizeMake(0, 2);
++  // The halo fades out over its outer part (the app's `circle-blur`).
++  _halo.frame = CGRectMake(c.x - s.haloR, c.y - s.haloR, 2 * s.haloR, 2 * s.haloR);
++  _halo.locations = @[ @0, @0.6, @1 ];
++  _edge.path = circle(outer).CGPath;
++  _ring.path = circle(s.r + s.ringWidth).CGPath;
++  _dot.path = circle(s.r).CGPath;
++  double half = s.coneHalfDeg * M_PI / 180;
++  UIBezierPath *sector = [UIBezierPath bezierPath];
++  [sector moveToPoint:c];
++  [sector addArcWithCenter:c radius:s.coneR startAngle:-M_PI_2 - half endAngle:-M_PI_2 + half clockwise:YES];
++  [sector closePath];
++  _coneFill.path = sector.CGPath;
++  _coneEdge.path = sector.CGPath;
++  _coneRing.path = sector.CGPath;
++  _coneEdge.fillColor = nil;
++  _coneRing.fillColor = nil;
++  _coneEdge.lineWidth = s.coneEdge * 2;
++  _coneRing.lineWidth = s.coneRing * 2;
++  _coneEdge.lineJoin = kCALineJoinRound;
++  _coneRing.lineJoin = kCALineJoinRound;
++  _coneEdge.hidden = s.coneEdge <= 0;
++  _coneRing.hidden = s.coneRing <= 0;
++  _halo.hidden = s.haloR <= 0 || s.haloOpacity <= 0;
++  [self paint];
++}
++
++- (void)paint {
++  MLRNAppPuckStyle *s = _style;
++  UIColor *tint = _doubt ? s.doubt : s.dot;
++  // The accuracy circle as the app's layer drew it: a faint fill, a thin line, dashed and a little heavier in doubt.
++  _accuracyFill.fillColor = [tint colorWithAlphaComponent:_doubt ? 0.18 : 0.16].CGColor;
++  _accuracyLine.strokeColor = tint.CGColor;
++  _accuracyLine.lineWidth = _doubt ? 1.5 : 1;
++  _accuracyLine.lineDashPattern = _doubt ? @[ @4.5, @3 ] : nil;
++  // The halo only while trusted; in doubt the fill is the theme's background inside the doubt-coloured ring.
++  UIColor *glow = [s.halo colorWithAlphaComponent:_doubt ? 0 : s.haloOpacity];
++  _halo.colors = @[ (id)glow.CGColor, (id)glow.CGColor, (id)[s.halo colorWithAlphaComponent:0].CGColor ];
++  _edge.fillColor = s.edge.CGColor;
++  _ring.fillColor = (_doubt ? s.doubt : s.ring).CGColor;
++  _dot.fillColor = (_doubt ? s.bg : s.dot).CGColor;
++  _coneFill.fillColor = [tint colorWithAlphaComponent:s.coneOpacity].CGColor;
++  _coneEdge.strokeColor = s.edge.CGColor;
++  _coneRing.strokeColor = (_doubt ? s.doubt : s.ring).CGColor;
++}
++
++/** MapLibre's call on each location and camera change: the cone turns with the course against the map's heading. */
++- (void)update {
++  CLLocation *location = self.userLocation.location;
++  MLNMapView *map = self.mapView;
++  BOOL hasCourse = location != nil && location.course >= 0 && map != nil;
++  _cone.hidden = !_showsCone || !hasCourse;
++  [CATransaction begin];
++  [CATransaction setDisableActions:YES];
++  if (hasCourse) {
++    double deg = location.course - map.camera.heading;
++    _cone.transform = CATransform3DMakeRotation(deg * M_PI / 180, 0, 0, 1);
++  }
++  // The accuracy circle in points at this zoom (the app drew at least 5 m); hidden while it would be a speck under
++  // the dot or wider than the screen.
++  CGFloat radiusPt = 0;
++  if (location != nil && map != nil && location.horizontalAccuracy > 0) {
++    CLLocationDistance mpp = [map metersPerPointAtLatitude:location.coordinate.latitude];
++    if (mpp > 0) radiusPt = MAX(5, location.horizontalAccuracy) / mpp;
++  }
++  BOOL showAccuracy = radiusPt > _style.r + _style.ringWidth + _style.edgeWidth && radiusPt < MLRN_ACCURACY_MAX_PT;
++  _accuracyFill.hidden = !showAccuracy;
++  _accuracyLine.hidden = !showAccuracy;
++  if (showAccuracy && fabs(radiusPt - _accuracyRadiusPt) > 0.25) {
++    _accuracyRadiusPt = radiusPt;
++    CGRect b = self.bounds;
++    CGPoint c = CGPointMake(CGRectGetMidX(b), CGRectGetMidY(b));
++    CGPathRef path =
++        [UIBezierPath bezierPathWithArcCenter:c radius:radiusPt startAngle:0 endAngle:2 * M_PI clockwise:YES].CGPath;
++    _accuracyFill.path = path;
++    _accuracyLine.path = path;
++  }
++  [CATransaction commit];
++}
++
++@end
+diff --git a/node_modules/@maplibre/maplibre-react-native/ios/components/map-view/MLRNMapView.h b/node_modules/@maplibre/maplibre-react-native/ios/components/map-view/MLRNMapView.h
+index f24e510..2ed4949 100644
+--- a/node_modules/@maplibre/maplibre-react-native/ios/components/map-view/MLRNMapView.h
++++ b/node_modules/@maplibre/maplibre-react-native/ios/components/map-view/MLRNMapView.h
+@@ -116,4 +116,22 @@ typedef void (^StyleLoadedBlock)(MLNStyle *__nonnull style);
+ 
+ - (void)notifyStyleLoaded;
+ 
++// wtf.ai: the app's own fused position as the map's user location (MLRNAppUserLocation.h): MapLibre animates the
++// dot and the follow camera between the app's feeds. `flags`: 1 snap (no animation), 2 doubt (no trusted GPS), 4
++// hidden (the dot gives way to the drawn car).
++- (void)setAppUserLocationSource:(nonnull NSString *)source
++                         anchorX:(double)anchorX
++                         anchorY:(double)anchorY
++                       puckStyle:(nullable NSDictionary *)puckStyle;
++- (void)feedAppUserLocationLat:(double)lat
++                           lon:(double)lon
++                     courseDeg:(double)courseDeg
++                      speedMps:(double)speedMps
++                     accuracyM:(double)accuracyM
++                        leadMs:(double)leadMs
++                         flags:(NSInteger)flags;
++- (BOOL)usesAppUserLocation;
++/** The edge padding MapLibre follows with when the dot sits at the anchor, for a camera that should end there. */
++- (UIEdgeInsets)appFollowEdgePadding;
++
+ @end
+diff --git a/node_modules/@maplibre/maplibre-react-native/ios/components/map-view/MLRNMapView.m b/node_modules/@maplibre/maplibre-react-native/ios/components/map-view/MLRNMapView.m
+index 2221274..50a0756 100644
+--- a/node_modules/@maplibre/maplibre-react-native/ios/components/map-view/MLRNMapView.m
++++ b/node_modules/@maplibre/maplibre-react-native/ios/components/map-view/MLRNMapView.m
+@@ -1,6 +1,7 @@
+ #import "MLRNMapView.h"
+ 
+ #import "CameraUpdateQueue.h"
++#import "MLRNAppUserLocation.h"
+ #import "MLRNGeoJSONSource.h"
+ #import "MLRNImageUtils.h"
+ #import "MLRNImages.h"
+@@ -14,8 +15,19 @@
+ @implementation MLRNMapView {
+   BOOL _pendingInitialLayout;
+   CGPoint _lastTapPoint;
++  // wtf.ai: the app-fed user location (MLRNAppUserLocation.h).
++  MLRNFedLocationManager *_appLocationManager;
++  BOOL _appUserLocation;
++  CGPoint _appAnchor;
++  MLRNAppPuckStyle *_appPuckStyle;
++  BOOL _appPuckDoubt;
++  BOOL _appPuckHidden;
++  CFTimeInterval _lastRegionIsChangingAt;
+ }
+ 
++/** While the map follows the fed location, `regionIsChanging` reaches JS at most this often (it fires per frame). */
++static CFTimeInterval const MLRN_FOLLOW_REGION_EVENT_INTERVAL = 0.2;
++
+ static double const DEG2RAD = M_PI / 180;
+ static double const LAT_MAX = 85.051128779806604;
+ static double const TILE_SIZE = 256;
+@@ -28,6 +40,7 @@ - (instancetype)initWithFrame:(CGRect)frame {
+ 
+     _pendingInitialLayout = YES;
+     _lastTapPoint = CGPointZero;
++    _appAnchor = CGPointMake(0.5, 0.5);
+     _annotationSelected = NO;
+     _reactTouchZoomEnabled = YES;
+     _reactDoubleTapZoomEnabled = YES;
+@@ -547,6 +560,100 @@ - (void)setReactShowUserLocation:(BOOL)reactShowUserLocation {
+   self.showsUserLocation = reactShowUserLocation;
+ }
+ 
++// MARK: - wtf.ai: app-fed user location
++
++- (BOOL)usesAppUserLocation {
++  return _appUserLocation;
++}
++
++- (MLRNAppPuckView *)appPuckView {
++  if (!_appUserLocation || self.userLocation == nil) return nil;
++  MLNAnnotationView *view = [self viewForAnnotation:self.userLocation];
++  return [view isKindOfClass:[MLRNAppPuckView class]] ? (MLRNAppPuckView *)view : nil;
++}
++
++- (void)setAppUserLocationSource:(NSString *)source
++                         anchorX:(double)anchorX
++                         anchorY:(double)anchorY
++                       puckStyle:(NSDictionary *)puckStyle {
++  _appAnchor = CGPointMake(anchorX, anchorY);
++  BOOL app = [source isEqualToString:@"app"];
++  if (puckStyle) {
++    _appPuckStyle = [MLRNAppPuckStyle fromDictionary:puckStyle];
++    [self appPuckView].style = _appPuckStyle;
++  }
++  if (app == _appUserLocation) return;
++  _appUserLocation = app;
++  if (app) {
++    if (!_appLocationManager) _appLocationManager = [[MLRNFedLocationManager alloc] init];
++    // Set before showing the location: MapLibre starts whatever manager it has then.
++    self.locationManager = _appLocationManager;
++    // The follow camera eases over the time since the last fed location, not a fixed second.
++    self.dynamicNavigationCameraAnimationDuration = YES;
++    // A new annotation view for the new source (MLRNNativeUserLocation does the same toggle).
++    self.showsUserLocation = NO;
++    self.showsUserLocation = YES;
++  } else {
++    self.showsUserLocation = NO;
++    self.locationManager = nil;
++    self.dynamicNavigationCameraAnimationDuration = NO;
++  }
++}
++
++- (void)feedAppUserLocationLat:(double)lat
++                           lon:(double)lon
++                     courseDeg:(double)courseDeg
++                      speedMps:(double)speedMps
++                     accuracyM:(double)accuracyM
++                        leadMs:(double)leadMs
++                         flags:(NSInteger)flags {
++  if (!_appUserLocation || !_appLocationManager) return;
++  BOOL snap = (flags & 1) != 0;
++  BOOL doubt = (flags & 2) != 0;
++  BOOL hidden = (flags & 4) != 0;
++  MLRNAppPuckView *puck = [self appPuckView];
++  if (puck) {
++    puck.doubt = doubt;
++    puck.concealed = hidden;
++    puck.showsCone = !isnan(courseDeg);
++  }
++  _appPuckDoubt = doubt;
++  _appPuckHidden = hidden;
++  // MapLibre's dot and follow camera ease linearly over the gap between two timestamps (capped at a second): the
++  // app feeds a pose predicted the same interval ahead, so the ease lands where the car is when it gets there.
++  CLLocation *location = [[CLLocation alloc] initWithCoordinate:CLLocationCoordinate2DMake(lat, lon)
++                                                       altitude:0
++                                             horizontalAccuracy:isnan(accuracyM) ? -1 : accuracyM
++                                               verticalAccuracy:-1
++                                                         course:isnan(courseDeg) ? -1 : courseDeg
++                                                          speed:isnan(speedMps) ? -1 : speedMps
++                                                      timestamp:[NSDate date]];
++  if (snap) {
++    // A new annotation view: the next location is placed, not animated from the old one.
++    MLNUserTrackingMode mode = self.userTrackingMode;
++    self.showsUserLocation = NO;
++    self.showsUserLocation = YES;
++    [_appLocationManager feed:location];
++    if (mode != MLNUserTrackingModeNone) [self setUserTrackingMode:mode animated:NO completionHandler:nil];
++    return;
++  }
++  [_appLocationManager feed:location];
++}
++
++- (UIEdgeInsets)appFollowEdgePadding {
++  CGRect b = self.bounds;
++  CGPoint p = CGPointMake(_appAnchor.x * CGRectGetWidth(b), _appAnchor.y * CGRectGetHeight(b));
++  // As MapLibre's edgePaddingForFollowing: the frame shifted so that its middle is the anchor.
++  return UIEdgeInsetsMake(p.y - CGRectGetMidY(b), p.x - CGRectGetMidX(b), CGRectGetMidY(b) - p.y,
++                          CGRectGetMidX(b) - p.x);
++}
++
++- (CGPoint)mapViewUserLocationAnchorPoint:(MLNMapView *)mapView {
++  CGRect b = mapView.bounds;
++  if (!_appUserLocation) return CGPointMake(CGRectGetMidX(b), CGRectGetMidY(b));
++  return CGPointMake(_appAnchor.x * CGRectGetWidth(b), _appAnchor.y * CGRectGetHeight(b));
++}
++
+ // MARK: - Methods
+ 
+ - (NSString *)takeSnap:(BOOL)writeToDisk {
+@@ -675,6 +782,13 @@ - (MLNAnnotationView *)mapView:(MLNMapView *)mapView
+              viewForAnnotation:(id<MLNAnnotation>)annotation {
+   if ([annotation isKindOfClass:[MLNUserLocation class]] && mapView.userLocation != nil) {
+     MLRNMapView *reactMapView = ((MLRNMapView *)mapView);
++    if (reactMapView->_appUserLocation) {
++      MLRNAppPuckView *puck = [[MLRNAppPuckView alloc]
++          initWithStyle:reactMapView->_appPuckStyle ?: [MLRNAppPuckStyle fromDictionary:nil]];
++      puck.doubt = reactMapView->_appPuckDoubt;
++      puck.concealed = reactMapView->_appPuckHidden;
++      return puck;
++    }
+     if (reactMapView.useNativeUserLocationAnnotationView) {
+       return nil;
+     }
+@@ -754,6 +868,12 @@ - (void)mapView:(MLNMapView *)mapView
+ }
+ 
+ - (void)mapViewRegionIsChanging:(MLNMapView *)mapView {
++  // wtf.ai: following the fed location moves the camera every frame; JS needs the view a few times a second.
++  if (_appUserLocation && mapView.userTrackingMode != MLNUserTrackingModeNone) {
++    CFTimeInterval now = CACurrentMediaTime();
++    if (now - _lastRegionIsChangingAt < MLRN_FOLLOW_REGION_EVENT_INTERVAL) return;
++    _lastRegionIsChangingAt = now;
++  }
+   NSDictionary *viewState = [self makeViewState:mapView animated:false];
+ 
+   self.reactOnRegionIsChanging(viewState);
+diff --git a/node_modules/@maplibre/maplibre-react-native/ios/components/map-view/MLRNMapViewModule.mm b/node_modules/@maplibre/maplibre-react-native/ios/components/map-view/MLRNMapViewModule.mm
+index ea96279..59650aa 100644
+--- a/node_modules/@maplibre/maplibre-react-native/ios/components/map-view/MLRNMapViewModule.mm
++++ b/node_modules/@maplibre/maplibre-react-native/ios/components/map-view/MLRNMapViewModule.mm
+@@ -245,4 +245,52 @@ - (void)setSourceVisibility:(NSInteger)reactTag
+          methodName:@"setSourceVisibility"];
+ }
+ 
++// wtf.ai: the app's own position as the map's user location (MLRNAppUserLocation.h).
++- (void)setUserLocationSource:(NSInteger)reactTag
++                       source:(nonnull NSString *)source
++                      anchorX:(double)anchorX
++                      anchorY:(double)anchorY
++                    puckStyle:(nullable NSString *)puckStyle
++                      resolve:(RCTPromiseResolveBlock)resolve
++                       reject:(RCTPromiseRejectBlock)reject {
++  NSDictionary *style = nil;
++  if (puckStyle.length > 0) {
++    id parsed = [NSJSONSerialization JSONObjectWithData:[puckStyle dataUsingEncoding:NSUTF8StringEncoding]
++                                                options:0
++                                                  error:nil];
++    if ([parsed isKindOfClass:[NSDictionary class]]) style = parsed;
++  }
++  [self withMapView:reactTag
++              block:^(MLRNMapView *view) {
++                [view setAppUserLocationSource:source anchorX:anchorX anchorY:anchorY puckStyle:style];
++                resolve(nil);
++              }
++             reject:reject
++         methodName:@"setUserLocationSource"];
++}
++
++- (void)feedUserLocation:(NSInteger)reactTag
++                     lat:(double)lat
++                     lon:(double)lon
++               courseDeg:(double)courseDeg
++                speedMps:(double)speedMps
++               accuracyM:(double)accuracyM
++                  leadMs:(double)leadMs
++                   flags:(NSInteger)flags {
++  [self withMapView:reactTag
++              block:^(MLRNMapView *view) {
++                [view feedAppUserLocationLat:lat
++                                         lon:lon
++                                   courseDeg:courseDeg
++                                    speedMps:speedMps
++                                   accuracyM:accuracyM
++                                      leadMs:leadMs
++                                       flags:flags];
++              }
++             reject:^(NSString *code, NSString *message, NSError *error) {
++               // The map view is gone (a reload, a screen torn down): nothing to show it on.
++             }
++         methodName:@"feedUserLocation"];
++}
++
+ @end
+diff --git a/node_modules/@maplibre/maplibre-react-native/lib/commonjs/components/map/Map.js b/node_modules/@maplibre/maplibre-react-native/lib/commonjs/components/map/Map.js
+index 67fcdb2..5d6ebe9 100644
+--- a/node_modules/@maplibre/maplibre-react-native/lib/commonjs/components/map/Map.js
++++ b/node_modules/@maplibre/maplibre-react-native/lib/commonjs/components/map/Map.js
+@@ -58,6 +58,9 @@ const Map = exports.Map = /*#__PURE__*/(0, _react.memo)(({
+   const nativeRef = (0, _react.useRef)(null);
+   (0, _react.useImperativeHandle)(ref, () => ({
+     getCenter: () => _NativeMapViewModule.default.getCenter((0, _findNodeHandle.findNodeHandle)(nativeRef.current)),
++    // wtf.ai: the app's own position as the map's user location (see src/components/map/Map.tsx).
++    setUserLocationSource: (source, anchor, puckStyle) => _NativeMapViewModule.default.setUserLocationSource((0, _findNodeHandle.findNodeHandle)(nativeRef.current), source, anchor.x, anchor.y, puckStyle),
++    feedUserLocation: (lat, lon, courseDeg, speedMps, accuracyM, leadMs, flags) => _NativeMapViewModule.default.feedUserLocation((0, _findNodeHandle.findNodeHandle)(nativeRef.current), lat, lon, courseDeg, speedMps, accuracyM, leadMs, flags),
+     getZoom: () => _NativeMapViewModule.default.getZoom((0, _findNodeHandle.findNodeHandle)(nativeRef.current)),
+     getBearing: () => _NativeMapViewModule.default.getBearing((0, _findNodeHandle.findNodeHandle)(nativeRef.current)),
+     getPitch: () => _NativeMapViewModule.default.getPitch((0, _findNodeHandle.findNodeHandle)(nativeRef.current)),
+diff --git a/node_modules/@maplibre/maplibre-react-native/lib/module/components/map/Map.js b/node_modules/@maplibre/maplibre-react-native/lib/module/components/map/Map.js
+index ee4ada4..b2038fa 100644
+--- a/node_modules/@maplibre/maplibre-react-native/lib/module/components/map/Map.js
++++ b/node_modules/@maplibre/maplibre-react-native/lib/module/components/map/Map.js
+@@ -53,6 +53,9 @@ export const Map = /*#__PURE__*/memo(({
+   const nativeRef = useRef(null);
+   useImperativeHandle(ref, () => ({
+     getCenter: () => NativeMapViewModule.getCenter(findNodeHandle(nativeRef.current)),
++    // wtf.ai: the app's own position as the map's user location (see src/components/map/Map.tsx).
++    setUserLocationSource: (source, anchor, puckStyle) => NativeMapViewModule.setUserLocationSource(findNodeHandle(nativeRef.current), source, anchor.x, anchor.y, puckStyle),
++    feedUserLocation: (lat, lon, courseDeg, speedMps, accuracyM, leadMs, flags) => NativeMapViewModule.feedUserLocation(findNodeHandle(nativeRef.current), lat, lon, courseDeg, speedMps, accuracyM, leadMs, flags),
+     getZoom: () => NativeMapViewModule.getZoom(findNodeHandle(nativeRef.current)),
+     getBearing: () => NativeMapViewModule.getBearing(findNodeHandle(nativeRef.current)),
+     getPitch: () => NativeMapViewModule.getPitch(findNodeHandle(nativeRef.current)),
+diff --git a/node_modules/@maplibre/maplibre-react-native/lib/typescript/commonjs/components/map/Map.d.ts b/node_modules/@maplibre/maplibre-react-native/lib/typescript/commonjs/components/map/Map.d.ts
+index 2565757..193887c 100644
+--- a/node_modules/@maplibre/maplibre-react-native/lib/typescript/commonjs/components/map/Map.d.ts
++++ b/node_modules/@maplibre/maplibre-react-native/lib/typescript/commonjs/components/map/Map.d.ts
+@@ -69,6 +69,13 @@ export interface MapRef {
+      * ```
+      */
+     getCenter(): Promise<LngLat>;
++    /** wtf.ai: the app's own position as the map's user location (see src/components/map/Map.tsx). */
++    setUserLocationSource(source: "device" | "app", anchor: {
++        x: number;
++        y: number;
++    }, puckStyle: string | null): Promise<void>;
++    /** wtf.ai: one fed position; `flags`: 1 snap, 2 doubt, 4 hidden. */
++    feedUserLocation(lat: number, lon: number, courseDeg: number, speedMps: number, accuracyM: number, leadMs: number, flags: number): void;
+     /**
+      * Returns the current zoom level of the map
+      *
+diff --git a/node_modules/@maplibre/maplibre-react-native/lib/typescript/commonjs/components/map/NativeMapViewModule.d.ts b/node_modules/@maplibre/maplibre-react-native/lib/typescript/commonjs/components/map/NativeMapViewModule.d.ts
+index d784f0f..06e0a19 100644
+--- a/node_modules/@maplibre/maplibre-react-native/lib/typescript/commonjs/components/map/NativeMapViewModule.d.ts
++++ b/node_modules/@maplibre/maplibre-react-native/lib/typescript/commonjs/components/map/NativeMapViewModule.d.ts
+@@ -25,6 +25,8 @@ export interface Spec extends TurboModule {
+     setSourceVisibility: (reactTag: CodegenTypes.Int32, visible: boolean, source: string, sourceLayer: string | null) => Promise<void>;
+     createStaticMapImage: (reactTag: CodegenTypes.Int32, output: "base64" | "file") => Promise<string>;
+     showAttribution: (reactTag: CodegenTypes.Int32) => Promise<void>;
++    setUserLocationSource: (reactTag: CodegenTypes.Int32, source: string, anchorX: CodegenTypes.Double, anchorY: CodegenTypes.Double, puckStyle: string | null) => Promise<void>;
++    feedUserLocation: (reactTag: CodegenTypes.Int32, lat: CodegenTypes.Double, lon: CodegenTypes.Double, courseDeg: CodegenTypes.Double, speedMps: CodegenTypes.Double, accuracyM: CodegenTypes.Double, leadMs: CodegenTypes.Double, flags: CodegenTypes.Int32) => void;
+ }
+ declare const _default: Spec;
+ export default _default;
+diff --git a/node_modules/@maplibre/maplibre-react-native/lib/typescript/module/components/map/Map.d.ts b/node_modules/@maplibre/maplibre-react-native/lib/typescript/module/components/map/Map.d.ts
+index 2565757..193887c 100644
+--- a/node_modules/@maplibre/maplibre-react-native/lib/typescript/module/components/map/Map.d.ts
++++ b/node_modules/@maplibre/maplibre-react-native/lib/typescript/module/components/map/Map.d.ts
+@@ -69,6 +69,13 @@ export interface MapRef {
+      * ```
+      */
+     getCenter(): Promise<LngLat>;
++    /** wtf.ai: the app's own position as the map's user location (see src/components/map/Map.tsx). */
++    setUserLocationSource(source: "device" | "app", anchor: {
++        x: number;
++        y: number;
++    }, puckStyle: string | null): Promise<void>;
++    /** wtf.ai: one fed position; `flags`: 1 snap, 2 doubt, 4 hidden. */
++    feedUserLocation(lat: number, lon: number, courseDeg: number, speedMps: number, accuracyM: number, leadMs: number, flags: number): void;
+     /**
+      * Returns the current zoom level of the map
+      *
+diff --git a/node_modules/@maplibre/maplibre-react-native/lib/typescript/module/components/map/NativeMapViewModule.d.ts b/node_modules/@maplibre/maplibre-react-native/lib/typescript/module/components/map/NativeMapViewModule.d.ts
+index d784f0f..06e0a19 100644
+--- a/node_modules/@maplibre/maplibre-react-native/lib/typescript/module/components/map/NativeMapViewModule.d.ts
++++ b/node_modules/@maplibre/maplibre-react-native/lib/typescript/module/components/map/NativeMapViewModule.d.ts
+@@ -25,6 +25,8 @@ export interface Spec extends TurboModule {
+     setSourceVisibility: (reactTag: CodegenTypes.Int32, visible: boolean, source: string, sourceLayer: string | null) => Promise<void>;
+     createStaticMapImage: (reactTag: CodegenTypes.Int32, output: "base64" | "file") => Promise<string>;
+     showAttribution: (reactTag: CodegenTypes.Int32) => Promise<void>;
++    setUserLocationSource: (reactTag: CodegenTypes.Int32, source: string, anchorX: CodegenTypes.Double, anchorY: CodegenTypes.Double, puckStyle: string | null) => Promise<void>;
++    feedUserLocation: (reactTag: CodegenTypes.Int32, lat: CodegenTypes.Double, lon: CodegenTypes.Double, courseDeg: CodegenTypes.Double, speedMps: CodegenTypes.Double, accuracyM: CodegenTypes.Double, leadMs: CodegenTypes.Double, flags: CodegenTypes.Int32) => void;
+ }
+ declare const _default: Spec;
+ export default _default;
+diff --git a/node_modules/@maplibre/maplibre-react-native/src/components/map/Map.tsx b/node_modules/@maplibre/maplibre-react-native/src/components/map/Map.tsx
+index b193cda..4c0affe 100644
+--- a/node_modules/@maplibre/maplibre-react-native/src/components/map/Map.tsx
++++ b/node_modules/@maplibre/maplibre-react-native/src/components/map/Map.tsx
+@@ -103,6 +103,32 @@ export interface MapRef {
+    */
+   getCenter(): Promise<LngLat>;
+ 
++  /**
++   * wtf.ai: the app's own position as the map's user location. `source` "app" makes the map show and follow what
++   * `feedUserLocation` hands it instead of the device's location; the anchor is where the dot sits (fractions of
++   * the map, 0.5/0.5 the centre); `puckStyle` is the puck's look as JSON.
++   */
++  setUserLocationSource(
++    source: "device" | "app",
++    anchor: { x: number; y: number },
++    puckStyle: string | null,
++  ): Promise<void>;
++
++  /**
++   * wtf.ai: one fed position (see `setUserLocationSource`). MapLibre eases the dot and the follow camera linearly
++   * over the time between two feeds, so feed a pose predicted that far ahead. `courseDeg` NaN: no heading.
++   * `flags`: 1 snap (placed, not animated), 2 doubt (no trusted GPS), 4 hidden.
++   */
++  feedUserLocation(
++    lat: number,
++    lon: number,
++    courseDeg: number,
++    speedMps: number,
++    accuracyM: number,
++    leadMs: number,
++    flags: number,
++  ): void;
++
+   /**
+    * Returns the current zoom level of the map
+    *
+@@ -562,6 +588,27 @@ export const Map = memo(
+       getCenter: () =>
+         NativeMapViewModule.getCenter(findNodeHandle(nativeRef.current)),
+ 
++      setUserLocationSource: (source, anchor, puckStyle) =>
++        NativeMapViewModule.setUserLocationSource(
++          findNodeHandle(nativeRef.current),
++          source,
++          anchor.x,
++          anchor.y,
++          puckStyle,
++        ),
++
++      feedUserLocation: (lat, lon, courseDeg, speedMps, accuracyM, leadMs, flags) =>
++        NativeMapViewModule.feedUserLocation(
++          findNodeHandle(nativeRef.current),
++          lat,
++          lon,
++          courseDeg,
++          speedMps,
++          accuracyM,
++          leadMs,
++          flags,
++        ),
++
+       getZoom: () =>
+         NativeMapViewModule.getZoom(findNodeHandle(nativeRef.current)),
+ 
+diff --git a/node_modules/@maplibre/maplibre-react-native/src/components/map/NativeMapViewModule.ts b/node_modules/@maplibre/maplibre-react-native/src/components/map/NativeMapViewModule.ts
+index 38d0244..beda379 100644
+--- a/node_modules/@maplibre/maplibre-react-native/src/components/map/NativeMapViewModule.ts
++++ b/node_modules/@maplibre/maplibre-react-native/src/components/map/NativeMapViewModule.ts
+@@ -72,6 +72,28 @@ export interface Spec extends TurboModule {
+     output: "base64" | "file",
+   ) => Promise<string>;
+ 
++  // wtf.ai: the app's own position as the map's user location (MapLibre animates the dot and the follow camera
++  // between feeds). `source` "device" | "app"; the anchor is where the dot sits on the map (fractions); `puckStyle`
++  // is the puck's look as JSON. `flags`: 1 snap, 2 doubt, 4 hidden.
++  setUserLocationSource: (
++    reactTag: CodegenTypes.Int32,
++    source: string,
++    anchorX: CodegenTypes.Double,
++    anchorY: CodegenTypes.Double,
++    puckStyle: string | null,
++  ) => Promise<void>;
++
++  feedUserLocation: (
++    reactTag: CodegenTypes.Int32,
++    lat: CodegenTypes.Double,
++    lon: CodegenTypes.Double,
++    courseDeg: CodegenTypes.Double,
++    speedMps: CodegenTypes.Double,
++    accuracyM: CodegenTypes.Double,
++    leadMs: CodegenTypes.Double,
++    flags: CodegenTypes.Int32,
++  ) => void;
++
+   showAttribution: (reactTag: CodegenTypes.Int32) => Promise<void>;
+ }
+ 

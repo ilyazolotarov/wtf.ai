@@ -41,6 +41,11 @@ export default function DeveloperScreen() {
           onValueChange={(v) => setDevSettings({ phoneOnly: v })}
           label={t("phoneOnlySetting")}
         />
+        <SwitchRow
+          value={dev.nativePuck}
+          onValueChange={(v) => setDevSettings({ nativePuck: v })}
+          label={t("nativePuckSetting")}
+        />
         <CycleRow labelKey="rpmPeriod" value={dev.rpmPeriodS} options={[2, 5, 10]} format={(v) => `${v} s`} onChange={(v) => setDevSettings({ rpmPeriodS: v })} />
       </ScreenSection>
       <ScreenAction
