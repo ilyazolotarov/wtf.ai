@@ -235,11 +235,13 @@ persisted in kv-store. No hardcoded user-facing strings in components.
   a turn over 90° or a change to or from a placed position is placed, not animated. The phone's map is fed while the
   app is in front, the car's always. The follow camera is MapLibre's tracking (`Camera` `trackUserLocation`:
   `course` heading-up, `default` north-up with bearing 0) with the dot pinned at the anchor (`dotAnchor`: the same spot
-  the padding put it at), the stop's zoom and pitch; entering follow, or a new mode, zoom or tilt while following, is one
-  450 ms ease to that view, then tracking takes over. Only the driver's gesture turns the mode free: a pan ends tracking
+  the padding put it at), the stop's zoom and pitch; entering follow, or a new mode, zoom, tilt or anchor while
+  following, is one 450 ms ease to that view, then tracking takes over. A mode switch moves the anchor too (centre ↔
+  0.8): the anchor and the mode reach the native side apart, and either's ease replaces the other's, so the dot slides
+  to its new place in that one ease, never in a step. Only the driver's gesture turns the mode free: a pan ends tracking
   natively and `onTrackUserLocationChange` reports it; the patch's own tracking switches (the ease, a placed dot) are
-  kept from JS, and the source's anchor and look change without leaving the app's location. While following, `regionIsChanging` reaches JS at most 5 times a
-  second.
+  kept from JS, and the source's anchor and look change without leaving the app's location or setting the puck's layer
+  up again. While following, `regionIsChanging` reaches JS at most 5 times a second.
 - **Motion, JS** (`pose-smoother.ts`, the setting off): moving (≥ 2 m/s, with a heading, not a placed position) the
   dot, its circle and cone and the following camera are drawn ~30 times a second in even steps (every second 60 Hz
   frame): between the navigator's 2 Hz positions the pose goes on along the heading at the speed (≤ 1 s), the gap to

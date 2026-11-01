@@ -265,7 +265,7 @@ index 0000000..ba435af
 +    }
 +}
 diff --git a/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/LocationComponentManager.kt b/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/LocationComponentManager.kt
-index fca5b22..53e84e0 100644
+index fca5b22..1d18329 100644
 --- a/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/LocationComponentManager.kt
 +++ b/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/LocationComponentManager.kt
 @@ -2,14 +2,21 @@ package org.maplibre.reactnative.components.location
@@ -290,7 +290,7 @@ index fca5b22..53e84e0 100644
  import org.maplibre.reactnative.R
  import org.maplibre.reactnative.components.mapview.MLRNMapView
  import org.maplibre.reactnative.location.LocationManager
-@@ -38,6 +45,229 @@ class LocationComponentManager(
+@@ -38,6 +45,250 @@ class LocationComponentManager(
  
      private var mShowingUserLocation = false
  
@@ -302,6 +302,10 @@ index fca5b22..53e84e0 100644
 +    private var appAnchorX = 0.5
 +    private var appAnchorY = 0.5
 +    private var appStyle: JSONObject? = null
++    private var appStyleJson: String? = null
++
++    // The map style and puck look the location layer was last set up for.
++    private var appSetUpFor: Pair<Style, String?>? = null
 +    private var appDoubt = false
 +    private var appHidden = false
 +    private var appWithCone = true
@@ -310,6 +314,9 @@ index fca5b22..53e84e0 100644
 +    // applied when it ends.
 +    private var appTransitioning = false
 +    private var appPendingStop: Triple<Double?, Double?, Long>? = null
++
++    // The last stop's duration: the dot eases to a new anchor over it, as it does with a new mode.
++    private var appEaseMs = 0L
 +
 +    fun isAppSource(): Boolean = appSource
 +
@@ -321,9 +328,11 @@ index fca5b22..53e84e0 100644
 +        anchorY: Double,
 +        styleJson: String?,
 +    ) {
++        val anchorMoved = anchorX != appAnchorX || anchorY != appAnchorY
 +        appAnchorX = anchorX
 +        appAnchorY = anchorY
-+        if (styleJson != null) {
++        if (styleJson != null && styleJson != appStyleJson) {
++            appStyleJson = styleJson
 +            appStyle =
 +                try {
 +                    JSONObject(styleJson)
@@ -341,12 +350,21 @@ index fca5b22..53e84e0 100644
 +                mLocationComponent?.setLocationComponentEnabled(false)
 +            }
 +        }
-+        if (on && isTracking()) applyAppPadding(0)
++        if (on && isTracking()) applyAppPadding(if (was && anchorMoved) appEaseMs else 0)
 +    }
 +
 +    @SuppressLint("MissingPermission")
 +    private fun updateApp(style: Style) {
 +        val map = mMap ?: return
++        val setUp = appSetUpFor
++        if (appActivated && setUp != null && setUp.first === style && setUp.second == appStyleJson) {
++            // Already set up for this style and look; a new anchor or camera mode asks again. Styling the layer again
++            // blanks the dot for a few frames, and enabling it again re-feeds the last location.
++            val component = mLocationComponent!!
++            if (!component.isLocationComponentEnabled) component.isLocationComponentEnabled = true
++            mShowingUserLocation = true
++            return
++        }
 +        if (!appActivated) {
 +            mLocationComponent = map.locationComponent
 +            mLocationComponent!!.activateLocationComponent(
@@ -365,6 +383,7 @@ index fca5b22..53e84e0 100644
 +        mLocationComponent!!.isLocationComponentEnabled = true
 +        mShowingUserLocation = true
 +        addAppPuckImage(style)
++        appSetUpFor = Pair(style, appStyleJson)
 +    }
 +
 +    /** The puck image the GPS render mode draws turned by the course; the style's own images are blank. */
@@ -459,6 +478,7 @@ index fca5b22..53e84e0 100644
 +        tilt: Double?,
 +    ) {
 +        val component = mLocationComponent ?: return
++        if (durationMs > 0) appEaseMs = durationMs
 +        if (mode == CameraMode.NONE) {
 +            appPendingStop = null
 +            appTransitioning = false
@@ -496,7 +516,7 @@ index fca5b22..53e84e0 100644
 +        appTransitioning = false
 +        val pending = appPendingStop
 +        appPendingStop = null
-+        if (pending != null) appTrackingStop(pending.first, pending.second, pending.third) else applyAppPadding(0)
++        if (pending != null) appTrackingStop(pending.first, pending.second, pending.third) else applyAppPadding(appEaseMs)
 +    }
 +
 +    /** While following: the stop's zoom and tilt ease without leaving the tracking camera. */
@@ -506,6 +526,7 @@ index fca5b22..53e84e0 100644
 +        durationMs: Long,
 +    ) {
 +        val component = mLocationComponent ?: return
++        if (durationMs > 0) appEaseMs = durationMs
 +        if (!isTracking()) return
 +        if (appTransitioning) {
 +            val prev = appPendingStop
@@ -520,19 +541,19 @@ index fca5b22..53e84e0 100644
      private var mOnCameraTrackingChangedListener: OnCameraTrackingChangedListener? = null
  
      init {
-@@ -94,6 +324,11 @@ class LocationComponentManager(
+@@ -94,6 +345,11 @@ class LocationComponentManager(
  
      @SuppressLint("MissingPermission")
      private fun stateChanged() {
 +        if (appSource) {
 +            // wtf.ai: the fed location is always shown; its camera modes come through `setAppCameraMode`.
-+            mLocationComponent?.isLocationComponentEnabled = true
++            mLocationComponent?.let { if (!it.isLocationComponentEnabled) it.isLocationComponentEnabled = true }
 +            return
 +        }
          mLocationComponent?.setLocationComponentEnabled((mFollowUserLocation || mShowUserLocation))
  
          if (mShowingUserLocation != mShowUserLocation) {
-@@ -122,6 +357,10 @@ class LocationComponentManager(
+@@ -122,6 +378,10 @@ class LocationComponentManager(
          displayUserLocation: Boolean,
          style: Style,
      ) {
@@ -750,7 +771,7 @@ index b257692..225886d 100644
                  val resolvedView: View? = manager.resolveView(reactTag)
                  val view = resolvedView as? V
 diff --git a/node_modules/@maplibre/maplibre-react-native/ios/components/camera/MLRNCamera.m b/node_modules/@maplibre/maplibre-react-native/ios/components/camera/MLRNCamera.m
-index f5c8dec..de1396b 100644
+index f5c8dec..356d188 100644
 --- a/node_modules/@maplibre/maplibre-react-native/ios/components/camera/MLRNCamera.m
 +++ b/node_modules/@maplibre/maplibre-react-native/ios/components/camera/MLRNCamera.m
 @@ -11,6 +11,8 @@
@@ -770,7 +791,7 @@ index f5c8dec..de1396b 100644
    if (_map != nil) {
      if ([self _userTrackingMode] == MLNUserTrackingModeNone) {
        [self _updateCameraFromStop];
-@@ -94,6 +97,73 @@ - (void)_updateCameraFromStop {
+@@ -94,6 +97,23 @@ - (void)_updateCameraFromStop {
  }
  
  - (void)_updateCameraFromTrackUserLocation {
@@ -781,8 +802,6 @@ index f5c8dec..de1396b 100644
 +  // wrapper's own.
 +  if ([_map usesAppUserLocation]) {
 +    MLNUserTrackingMode target = [self _userTrackingMode];
-+    CLLocation *location = _map.userLocation.location;
-+    NSTimeInterval duration = _stop[@"duration"] ? [MLRNUtils fromMS:_stop[@"duration"]] : 0;
 +    BOOL hasZoom = _stop[@"zoom"] != nil;
 +    BOOL hasPitch = _stop[@"pitch"] != nil;
 +    if (target != MLNUserTrackingModeNone && _map.userTrackingMode == target &&
@@ -790,60 +809,94 @@ index f5c8dec..de1396b 100644
 +        (!hasPitch || fabs(_map.camera.pitch - [_stop[@"pitch"] doubleValue]) < 0.5)) {
 +      return;
 +    }
-+    if (target != MLNUserTrackingModeNone && duration > 0 && location != nil &&
-+        CLLocationCoordinate2DIsValid(location.coordinate)) {
-+      MLRNMapView *map = _map;
-+      [map withQuietTracking:^{
-+        if (map.userTrackingMode != MLNUserTrackingModeNone) {
-+          [map setUserTrackingMode:MLNUserTrackingModeNone animated:NO completionHandler:nil];
-+        }
-+      }];
-+      MLNMapCamera *camera = [map.camera copy];
-+      // Where the dot will be when the ease ends, so following takes over without a catch-up.
-+      CLLocationCoordinate2D center = location.coordinate;
-+      if (location.speed > 0 && location.course >= 0) {
-+        double d = location.speed * duration;
-+        double c = location.course * M_PI / 180;
-+        center.latitude += d * cos(c) / 111320.0;
-+        center.longitude += d * sin(c) / (111320.0 * cos(center.latitude * M_PI / 180));
-+      }
-+      camera.centerCoordinate = center;
-+      if (hasPitch) camera.pitch = [_stop[@"pitch"] doubleValue];
-+      if (hasZoom) {
-+        camera.altitude = [map altitudeFromZoom:[_stop[@"zoom"] doubleValue]
-+                                     atLatitude:center.latitude
-+                                        atPitch:camera.pitch];
-+      }
-+      if (target == MLNUserTrackingModeFollowWithCourse && location.course >= 0) {
-+        camera.heading = location.course;
-+      } else if (target == MLNUserTrackingModeFollow && _stop[@"bearing"] != nil) {
-+        camera.heading = [_stop[@"bearing"] doubleValue];
-+      }
-+      NSUInteger seq = _appEaseSeq;
-+      __weak MLRNCamera *weakSelf = self;
-+      [map setCamera:camera
-+                 withDuration:duration
-+      animationTimingFunction:[CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut]
-+                  edgePadding:[map appFollowEdgePadding]
-+            completionHandler:^{
-+              MLRNCamera *strongSelf = weakSelf;
-+              MLRNMapView *m = strongSelf.map;
-+              // A newer update (a gesture's free mode, another stop) has taken over: not following again here.
-+              if (strongSelf == nil || m == nil || strongSelf->_appEaseSeq != seq ||
-+                  [strongSelf _userTrackingMode] != target) {
-+                return;
-+              }
-+              if (m.userTrackingMode != target) {
-+                [m setUserTrackingMode:target animated:YES completionHandler:nil];
-+              }
-+            }];
-+      return;
-+    }
++    if ([self _appEaseToFollow:target]) return;
 +  }
 +
    MLNMapCamera *camera = _map.camera;
  
    if (_stop != nil) {
+@@ -120,6 +140,81 @@ - (void)_updateCameraFromTrackUserLocation {
+   }
+ }
+ 
++/**
++ * wtf.ai: one ease, over the stop's duration, to the followed view of the app-fed location (the dot at its anchor, the
++ * stop's zoom and pitch, the course or the stop's bearing as heading); following takes over where it ends. NO when
++ * there is nothing to ease to (no mode, no duration, no location yet): tracking then places the camera itself.
++ */
++- (BOOL)_appEaseToFollow:(MLNUserTrackingMode)target {
++  CLLocation *location = _map.userLocation.location;
++  NSTimeInterval duration = _stop[@"duration"] ? [MLRNUtils fromMS:_stop[@"duration"]] : 0;
++  if (target == MLNUserTrackingModeNone || duration <= 0 || location == nil ||
++      !CLLocationCoordinate2DIsValid(location.coordinate)) {
++    return NO;
++  }
++  BOOL hasZoom = _stop[@"zoom"] != nil;
++  BOOL hasPitch = _stop[@"pitch"] != nil;
++  MLRNMapView *map = _map;
++  [map withQuietTracking:^{
++    if (map.userTrackingMode != MLNUserTrackingModeNone) {
++      [map setUserTrackingMode:MLNUserTrackingModeNone animated:NO completionHandler:nil];
++    }
++  }];
++  MLNMapCamera *camera = [map.camera copy];
++  // Where the dot will be when the ease ends, so following takes over without a catch-up.
++  CLLocationCoordinate2D center = location.coordinate;
++  if (location.speed > 0 && location.course >= 0) {
++    double d = location.speed * duration;
++    double c = location.course * M_PI / 180;
++    center.latitude += d * cos(c) / 111320.0;
++    center.longitude += d * sin(c) / (111320.0 * cos(center.latitude * M_PI / 180));
++  }
++  camera.centerCoordinate = center;
++  if (hasPitch) camera.pitch = [_stop[@"pitch"] doubleValue];
++  if (hasZoom) {
++    camera.altitude = [map altitudeFromZoom:[_stop[@"zoom"] doubleValue]
++                                 atLatitude:center.latitude
++                                    atPitch:camera.pitch];
++  }
++  if (target == MLNUserTrackingModeFollowWithCourse && location.course >= 0) {
++    camera.heading = location.course;
++  } else if (target == MLNUserTrackingModeFollow && _stop[@"bearing"] != nil) {
++    camera.heading = [_stop[@"bearing"] doubleValue];
++  }
++  NSUInteger seq = _appEaseSeq;
++  __weak MLRNCamera *weakSelf = self;
++  [map setCamera:camera
++             withDuration:duration
++  animationTimingFunction:[CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut]
++              edgePadding:[map appFollowEdgePadding]
++        completionHandler:^{
++          MLRNCamera *strongSelf = weakSelf;
++          MLRNMapView *m = strongSelf.map;
++          // A newer update (a gesture's free mode, another stop) has taken over: not following again here.
++          if (strongSelf == nil || m == nil || strongSelf->_appEaseSeq != seq ||
++              [strongSelf _userTrackingMode] != target) {
++            return;
++          }
++          if (m.userTrackingMode != target) {
++            [m setUserTrackingMode:target animated:YES completionHandler:nil];
++          }
++        }];
++  return YES;
++}
++
++/**
++ * wtf.ai: the dot's anchor moved while following (heading-up lowers it, follow centres it): the same ease takes it
++ * there, in place of the step MapLibre's tracking would make within one feed. It comes with a new mode, a moment after
++ * or before the mode's own update: whichever is later replaces the other's ease, so the switch stays one motion.
++ */
++- (void)appAnchorDidChange {
++  if (_map == nil || ![_map usesAppUserLocation]) return;
++  MLNUserTrackingMode target = [self _userTrackingMode];
++  if (target == MLNUserTrackingModeNone) return;
++  _appEaseSeq += 1;
++  [self _appEaseToFollow:target];
++}
++
+ - (void)_setInitialCamera {
+   if (!_initialViewState) {
+     return;
 diff --git a/node_modules/@maplibre/maplibre-react-native/ios/components/map-view/MLRNAppUserLocation.h b/node_modules/@maplibre/maplibre-react-native/ios/components/map-view/MLRNAppUserLocation.h
 new file mode 100644
 index 0000000..6811f97
@@ -1167,10 +1220,19 @@ index 0000000..32ac151
 +
 +@end
 diff --git a/node_modules/@maplibre/maplibre-react-native/ios/components/map-view/MLRNMapView.h b/node_modules/@maplibre/maplibre-react-native/ios/components/map-view/MLRNMapView.h
-index f24e510..3920bb0 100644
+index f24e510..87405bd 100644
 --- a/node_modules/@maplibre/maplibre-react-native/ios/components/map-view/MLRNMapView.h
 +++ b/node_modules/@maplibre/maplibre-react-native/ios/components/map-view/MLRNMapView.h
-@@ -116,4 +116,24 @@ typedef void (^StyleLoadedBlock)(MLNStyle *__nonnull style);
+@@ -13,6 +13,8 @@
+ @protocol MLRNMapViewCamera <NSObject>
+ - (void)initialLayout;
+ - (void)didChangeUserTrackingMode:(MLNUserTrackingMode)mode animated:(BOOL)animated;
++// wtf.ai: the app's location moved its dot to another anchor (setAppUserLocationSource).
++- (void)appAnchorDidChange;
+ @end
+ 
+ typedef void (^FoundLayerBlock)(MLNStyleLayer *__nonnull layer);
+@@ -116,4 +118,24 @@ typedef void (^StyleLoadedBlock)(MLNStyle *__nonnull style);
  
  - (void)notifyStyleLoaded;
  
@@ -1196,7 +1258,7 @@ index f24e510..3920bb0 100644
 +
  @end
 diff --git a/node_modules/@maplibre/maplibre-react-native/ios/components/map-view/MLRNMapView.m b/node_modules/@maplibre/maplibre-react-native/ios/components/map-view/MLRNMapView.m
-index 2221274..0f93e5d 100644
+index 2221274..23d4019 100644
 --- a/node_modules/@maplibre/maplibre-react-native/ios/components/map-view/MLRNMapView.m
 +++ b/node_modules/@maplibre/maplibre-react-native/ios/components/map-view/MLRNMapView.m
 @@ -1,6 +1,7 @@
@@ -1238,7 +1300,7 @@ index 2221274..0f93e5d 100644
      _annotationSelected = NO;
      _reactTouchZoomEnabled = YES;
      _reactDoubleTapZoomEnabled = YES;
-@@ -547,6 +563,111 @@ - (void)setReactShowUserLocation:(BOOL)reactShowUserLocation {
+@@ -547,6 +563,117 @@ - (void)setReactShowUserLocation:(BOOL)reactShowUserLocation {
    self.showsUserLocation = reactShowUserLocation;
  }
  
@@ -1258,13 +1320,19 @@ index 2221274..0f93e5d 100644
 +                         anchorX:(double)anchorX
 +                         anchorY:(double)anchorY
 +                       puckStyle:(NSDictionary *)puckStyle {
-+  _appAnchor = CGPointMake(anchorX, anchorY);
++  CGPoint anchor = CGPointMake(anchorX, anchorY);
++  BOOL anchorMoved = !CGPointEqualToPoint(anchor, _appAnchor);
++  _appAnchor = anchor;
 +  BOOL app = [source isEqualToString:@"app"];
 +  if (puckStyle) {
 +    _appPuckStyle = [MLRNAppPuckStyle fromDictionary:puckStyle];
 +    [self appPuckView].style = _appPuckStyle;
 +  }
-+  if (app == _appUserLocation) return;
++  if (app == _appUserLocation) {
++    // Following, the camera eases the dot to its new place; MapLibre's tracking would step there with the next feed.
++    if (app && anchorMoved) [_reactCamera appAnchorDidChange];
++    return;
++  }
 +  _appUserLocation = app;
 +  if (app) {
 +    if (!_appLocationManager) _appLocationManager = [[MLRNFedLocationManager alloc] init];
@@ -1350,7 +1418,7 @@ index 2221274..0f93e5d 100644
  // MARK: - Methods
  
  - (NSString *)takeSnap:(BOOL)writeToDisk {
-@@ -665,7 +786,14 @@ - (void)_removeAllSourcesFromMap {
+@@ -665,7 +792,14 @@ - (void)_removeAllSourcesFromMap {
    }
  }
  
@@ -1365,7 +1433,7 @@ index 2221274..0f93e5d 100644
    [_reactCamera didChangeUserTrackingMode:mode animated:animated];
  }
  
-@@ -675,6 +803,13 @@ - (MLNAnnotationView *)mapView:(MLNMapView *)mapView
+@@ -675,6 +809,13 @@ - (MLNAnnotationView *)mapView:(MLNMapView *)mapView
               viewForAnnotation:(id<MLNAnnotation>)annotation {
    if ([annotation isKindOfClass:[MLNUserLocation class]] && mapView.userLocation != nil) {
      MLRNMapView *reactMapView = ((MLRNMapView *)mapView);
@@ -1379,7 +1447,7 @@ index 2221274..0f93e5d 100644
      if (reactMapView.useNativeUserLocationAnnotationView) {
        return nil;
      }
-@@ -754,6 +889,12 @@ - (void)mapView:(MLNMapView *)mapView
+@@ -754,6 +895,12 @@ - (void)mapView:(MLNMapView *)mapView
  }
  
  - (void)mapViewRegionIsChanging:(MLNMapView *)mapView {
