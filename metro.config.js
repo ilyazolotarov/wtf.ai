@@ -1,6 +1,7 @@
 // Sentry's wrapper around Expo's default Metro config (adds debug IDs for source maps).
 const path = require("path");
 const { getSentryExpoConfig } = require("@sentry/react-native/metro");
+const { getBundleModeMetroConfig } = require("react-native-worklets/bundleMode");
 
 const config = getSentryExpoConfig(__dirname);
 
@@ -22,4 +23,5 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
   return (upstreamResolveRequest ?? context.resolveRequest)(context, moduleName, platform);
 };
 
-module.exports = config;
+// Last: worklets' Bundle Mode (babel.config.js) numbers the modules so a worker runtime finds them, and keeps ours.
+module.exports = getBundleModeMetroConfig(config);
