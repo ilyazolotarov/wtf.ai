@@ -10,7 +10,7 @@ import type { MapMatchConfig } from "@/nav/mapmatch/particle-filter";
 import type { UpdateTimingSummary } from "@/nav/mapmatch/update-timing";
 import type { PoseAfterWake } from "@/services/on-the-way";
 import type { FixOutcome, MapMatchEstimate, NavConfig, NavMode, ParkedPose } from "@/nav/navigator";
-import { DRIVE_OFF_KPH, Navigator } from "@/nav/navigator";
+import { DRIVE_OFF_KPH } from "@/nav/navigator";
 import { PhoneNavigator, type PhoneGraph, type PhonePose, type PhoneRouteState } from "@/nav/phone/phone-navigator";
 import { carryDrivePose, DRIVE_POSE_MAX_AGE_S } from "@/nav/drive-pose";
 import { haversineM } from "@/nav/geo";
@@ -18,11 +18,9 @@ import { FUSED_WINDOW_US, puckAccuracyM, puckHypothesis, steadyDot, type DrawnDo
 import type { PositionEstimate, PositionSourceKind, RawGnssFix } from "@/nav/position/types";
 import type { CompassTrust } from "@/nav/compass/compass";
 import type { CameraIndex } from "@/nav/speed/cameras";
-import type { GnssFix, ImuSample, MagSample, ObdSpeedSample } from "@/nav/types";
+import type { GnssFix } from "@/nav/types";
 import type { CanSpeedSample } from "@/nav/odometry/can/can-speed";
 import { DEFAULT_WHEEL_YAW_CALIBRATION_CONFIG, type WheelYawCalibration } from "@/nav/odometry/can/wheel-yaw-calibration";
-import { WheelYawSource } from "@/nav/odometry/can/wheel-yaw-source";
-import { ImuProcessor } from "@/nav/odometry/imu/imu-processor";
 import type { EngineState, SpeedSample, VehicleLinkSnapshot } from "@/obd/types";
 import { UNKNOWN_CAR } from "@/obd/types";
 import { isSatelliteRecord, mapFixToPosition } from "@/services/position/gnss-position-source";
@@ -46,6 +44,7 @@ import {
 import type { CalibrationStore, StoredPose } from "./calibration-store";
 import { ManualHold, USER_HEADING_SIGMA_RAD, USER_POSITION_SIGMA_M } from "./manual-hold";
 import { MapMatchTiming } from "./map-match-timing";
+import { LocalNavigatorHost, type NavigatorHost, type NavInput, type NavObserver, type NavView } from "./navigator-host";
 import { compassOff, NavigatorNotes } from "./navigator-notes";
 import { SimulatedOutageTool } from "./simulated-outage";
 
@@ -64,8 +63,6 @@ export const REORDER_US = 300_000;
 export const CAN_REORDER_US = 500_000;
 /** CAN speed this recent: the inputs are held `CAN_REORDER_US`. */
 const CAN_RECENT_US = 5_000_000;
-/** A fix delivered later than this behind the navigator is dropped (its state history spans 3 s). */
-const LATE_FIX_MAX_US = 2_000_000;
 /** Without OBD speed for this long the map falls back to phone GNSS (the EKF's speed has drifted). */
 const OBD_TIMEOUT_US = 10_000_000;
 /** Draw the position up to this far ahead of the navigator, which runs `REORDER_US` behind. */
@@ -224,12 +221,9 @@ export interface ServiceClock {
   clearInterval(handle: unknown): void;
 }
 
-export interface NavigatorObserver {
-  navigator?(nav: Navigator): void;
-  fix?(fix: GnssFix, outcome: FixOutcome): void;
+/** A replay looking in (navigator-host.ts), and the fixes a simulated outage withholds. */
+export interface NavigatorObserver extends NavObserver {
   withheld?(record: GnssRecord): void;
-  /** The navigator took an input of this time (IMU, OBD speed or a fix). */
-  fed?(tUs: number): void;
 }
 
 const SYSTEM_CLOCK: ServiceClock = {
@@ -239,12 +233,9 @@ const SYSTEM_CLOCK: ServiceClock = {
 };
 const GRANTED = { granted: true, status: "granted", canAskAgain: true, expires: "never" } as LocationPermissionResponse;
 
-type Input =
-  | { tUs: number; imu: ImuSample }
-  | { tUs: number; mag: MagSample }
-  | { tUs: number; obd: ObdSpeedSample }
-  | { tUs: number; wheels: CanSpeedSample }
-  | { tUs: number; fix: GnssFix; record: GnssRecord };
+/** A fix with the record it came as (phone GNSS shows the record). */
+type FixInput = { tUs: number; fix: GnssFix; record: GnssRecord };
+type Input = Exclude<NavInput, { fix: GnssFix }> | FixInput;
 
 /** CoreLocation record → navigator fix (as the trip-log reader does); null for unusable fixes. */
 export function toNavFix(r: GnssRecord): GnssFix | null {
@@ -271,22 +262,17 @@ export class NavigatorService implements PositionSource {
   private foreground = false;
   private keepAlive = false;
 
-  private nav: Navigator | null = null;
+  /** Where the navigator runs. */
+  private readonly host: NavigatorHost;
   private pending: Input[] = [];
   private readonly advanceListeners = new Set<(a: NavAdvance) => void>();
-  /** The navigator's turning from the wheels (§5.4): the source, while on. */
-  private wheelYaw: WheelYawSource | null = null;
+  /** The navigator turns by the rear wheels (§5.4). */
+  private wheelYaw = false;
   /** The link's last engine state, for a navigator started meanwhile. */
   private engineState: EngineState = "unknown";
   /** The tyre term was saved once this session (noted once). */
   private wheelYawStored = false;
-  /** The last IMU sample the rear wheels turned (`turnsFromWheels`). */
-  private wheelTurnsUs = -Infinity;
-  /** The gyro as the navigator would read it, for the wheels to learn from. */
-  private readonly gyroProc = new ImuProcessor();
   private lastCanUs = -Infinity;
-  /** Time of the last input fed to the navigator. */
-  private fedUs = -Infinity;
   /** The latest fix (the ghost marker), and the latest the navigator took (phone GNSS shows it: not a refused one). */
   private lastFix: GnssRecord | null = null;
   private lastShownFix: GnssRecord | null = null;
@@ -364,6 +350,7 @@ export class NavigatorService implements PositionSource {
   constructor(deps: NavigatorServiceDeps) {
     this.deps = deps;
     this.clock = deps.clock ?? SYSTEM_CLOCK;
+    this.host = new LocalNavigatorHost({ observer: deps.observer, longTasks: deps.longTasks });
     this.held = new ManualHold(deps.calibration, () => this.clock.nowMs());
     this.timing = new MapMatchTiming(() => this.clock.nowMs());
     const open = deps.openLimitGraph;
@@ -375,6 +362,11 @@ export class NavigatorService implements PositionSource {
 
   private get manual() {
     return this.held.current;
+  }
+
+  /** The navigator as last known (null: none). */
+  private get nav(): NavView | null {
+    return this.host.nav;
   }
 
   getSnapshot = (): PositionEstimate | null => this.testDot ?? this.position;
@@ -414,16 +406,16 @@ export class NavigatorService implements PositionSource {
    * phone may be in a hand, a pocket or on a seat. The gyro teaches the wheels wherever the two agree.
    */
   setWheelYaw(on: boolean): void {
-    if (on === (this.wheelYaw !== null)) return;
+    if (on === this.wheelYaw) return;
     this.note(`nav wheel yaw ${on ? "on" : "off"}`);
     if (!on) {
       this.noteWheelYaw();
       this.saveWheelYaw();
     }
     // The tyres' difference the gyro teaches is applied, from what the car's last drives learned.
-    this.wheelYaw = on ? new WheelYawSource() : null;
+    this.wheelYaw = on;
+    this.host.setWheelYaw(on);
     this.seedWheelYaw();
-    this.nav?.setWheelYaw(on);
   }
 
   /** Held this long and fed in time order (`REORDER_US`; `CAN_REORDER_US` with CAN wheel samples). */
@@ -432,15 +424,14 @@ export class NavigatorService implements PositionSource {
   }
 
   private onWheels(s: CanSpeedSample): void {
-    const w = this.wheelYaw;
-    if (!w) return;
-    w.addWheels(s);
+    if (!this.wheelYaw) return;
+    this.host.addWheels(s);
     this.pending.push({ tUs: s.tUs, wheels: s });
   }
 
   /** The tyre term this drive learned, for the car's next drives (once learned well enough, CalibrationStore). */
   private saveWheelYaw(): void {
-    const w = this.wheelYaw?.calibration;
+    const w = this.host.wheelYaw;
     if (!w || !this.car || !this.deps.calibration.saveWheelYaw(this.car, w.tyre, w.tyreSigma, w.learnedS, this.clock.nowMs())) return;
     if (this.wheelYawStored) return;
     this.wheelYawStored = true;
@@ -453,13 +444,14 @@ export class NavigatorService implements PositionSource {
     if (!v || !this.wheelYaw) return;
     const p = DEFAULT_WHEEL_YAW_CALIBRATION_CONFIG.prior;
     const start: WheelYawCalibration = { trackM: p.trackM, tyre: v.tyre, trackSigmaM: p.trackSigmaM, tyreSigma: v.tyreSigma, learnedS: 0 };
-    if (this.wheelYaw.seed(start)) this.note(`nav wheel yaw: tyres ${(v.tyre * 100).toFixed(3)} % ±${(v.tyreSigma * 100).toFixed(3)} from storage`);
+    this.host.seedWheelYaw(start, (seeded) => {
+      if (seeded) this.note(`nav wheel yaw: tyres ${(v.tyre * 100).toFixed(3)} % ±${(v.tyreSigma * 100).toFixed(3)} from storage`);
+    });
   }
 
   private noteWheelYaw(): void {
-    const w = this.wheelYaw;
-    if (!w || w.calibration.learnedS <= 0) return;
-    const c = w.calibration;
+    const c = this.host.wheelYaw;
+    if (!c || c.learnedS <= 0) return;
     this.note(`nav wheel yaw: tyres ${(c.tyre * 100).toFixed(3)} % ±${(c.tyreSigma * 100).toFixed(3)}, track ${c.trackM.toFixed(3)} m, learned from ${Math.round(c.learnedS)} s`);
   }
 
@@ -508,8 +500,7 @@ export class NavigatorService implements PositionSource {
       this.phone.started = true;
       this.note("nav phone-only start (the driver's placing)");
     }
-    this.flush(this.deps.nowUs() - this.reorderUs);
-    this.publish();
+    this.flush(this.deps.nowUs() - this.reorderUs, () => this.publish());
     return true;
   }
 
@@ -557,16 +548,18 @@ export class NavigatorService implements PositionSource {
 
   /** The driver's answer to `poseQuestion`: the car is (not) where the dot is. */
   answerPose(here: boolean): void {
-    if (!this.poseQuestion || !this.nav) return;
-    const answered = this.nav.answerPose(here);
-    this.note(`nav parked pose ${here ? "confirmed" : "rejected"} by the driver (Wi-Fi ${Math.round(this.poseQuestion.distanceM)} m away)${answered ? "" : ", too late"}`);
+    const asked = this.poseQuestion;
+    if (!asked || !this.nav) return;
     this.poseQuestion = null;
-    if (answered) {
-      this.poseStatus = here ? "confirmed" : "rejected";
-      if (!here && this.car) this.clearPose(this.car);
-      if (!here) this.poseStored = false;
-    }
-    this.publish();
+    this.host.answerPose(here, (answered) => {
+      this.note(`nav parked pose ${here ? "confirmed" : "rejected"} by the driver (Wi-Fi ${Math.round(asked.distanceM)} m away)${answered ? "" : ", too late"}`);
+      if (answered) {
+        this.poseStatus = here ? "confirmed" : "rejected";
+        if (!here && this.car) this.clearPose(this.car);
+        if (!here) this.poseStored = false;
+      }
+      this.publish();
+    });
   }
 
   get simulatedOutage(): boolean {
@@ -612,7 +605,7 @@ export class NavigatorService implements PositionSource {
    * The rear wheels turn the dot now, not the phone (NAVIGATOR-SPEC §5.4): what the app read from this car's port, not
    * what the car has. A car that gives one speed message, not each wheel's, never does. Read on the Car page.
    */
-  turnsFromWheels = (): boolean => this.wheelYaw !== null && this.deps.nowUs() - this.wheelTurnsUs < WHEEL_TURNS_RECENT_US;
+  turnsFromWheels = (): boolean => this.wheelYaw && this.deps.nowUs() - this.host.wheelTurnsUs < WHEEL_TURNS_RECENT_US;
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
@@ -758,7 +751,7 @@ export class NavigatorService implements PositionSource {
       this.deps.canSpeed?.onSample((s) => this.onWheels(s)) ?? (() => {}),
       link.onEngineState((state) => {
         this.engineState = state;
-        this.nav?.setEngine(state);
+        this.host.setEngine(state);
         if (state === "engine-running" && this.poseKeptForCar && this.nav) {
           // The driver back in the car: start from where it was left; fixes in the car check it.
           this.note("nav restart: the engine starts, from the parked pose kept for it");
@@ -766,9 +759,10 @@ export class NavigatorService implements PositionSource {
         }
         // Parked: keep the pose for the next start, even if the app is killed later.
         if (state !== "engine-off" && state !== "ignition-off") return;
-        this.flush(this.deps.nowUs() - this.reorderUs);
-        this.saveCalibration();
-        this.noteDrive();
+        this.flush(this.deps.nowUs() - this.reorderUs, () => {
+          this.saveCalibration();
+          this.noteDrive();
+        });
       }),
     );
     this.lastSaveAt = this.clock.nowMs();
@@ -790,7 +784,7 @@ export class NavigatorService implements PositionSource {
     if (this.timer) this.clock.clearInterval(this.timer);
     this.timer = null;
     // A later start begins afresh: the car may have moved meanwhile.
-    this.nav = null;
+    this.host.drop();
     this.pending = [];
     this.setMode("none");
   }
@@ -858,15 +852,10 @@ export class NavigatorService implements PositionSource {
     const lag = calibration.gnssLag();
     // What this navigator starts from, raw, so a replay can start from the same (app-replay.ts).
     this.note(`${STORAGE_NOTE}${JSON.stringify(calibration.snapshot(null))}`);
-    const nav = new Navigator({ ...this.deps.nav, ...(lag ? { gnssLagS: lag.lagS } : {}) });
-    nav.setWheelYaw(this.wheelYaw !== null);
-    nav.setEngine(this.engineState);
-    this.nav = nav;
+    this.host.create({ ...this.deps.nav, ...(lag ? { gnssLagS: lag.lagS } : {}) }, this.engineState);
     this.lastPuck = null;
     this.lastDot = null;
-    this.deps.observer?.navigator?.(nav);
     if (lag) this.note(`nav gnss lag ${lag.lagS} s from storage (${lag.windows} turn windows)`);
-    this.fedUs = -Infinity;
     this.lastAcceptedSatUs = -Infinity;
     // `lastShownFix` stays: the navigator before checked it, and phone GNSS goes on showing it.
     this.notes.reset();
@@ -908,7 +897,7 @@ export class NavigatorService implements PositionSource {
   private applyManual(): void {
     const m = this.manual;
     if (!m || !this.nav) return;
-    this.nav.setPosition({ lat: m.lat, lon: m.lon, headingRad: m.headingRad, posSigmaM: USER_POSITION_SIGMA_M, headingSigmaRad: USER_HEADING_SIGMA_RAD });
+    this.host.setPosition({ lat: m.lat, lon: m.lon, headingRad: m.headingRad, posSigmaM: USER_POSITION_SIGMA_M, headingSigmaRad: USER_HEADING_SIGMA_RAD });
     this.held.setApplied(true);
     this.poseQuestion = null;
     this.poseStatus = "none";
@@ -925,14 +914,18 @@ export class NavigatorService implements PositionSource {
     if (pose && speedMps > 0) {
       const gapS = (this.clock.nowMs() - pose.savedAt) / 1000;
       const carried = carryDrivePose({ ...pose, speedMps }, gapS);
-      if (!carried) this.note(`nav pose saved while driving ${Math.round(gapS)} s ago: not used`);
-      else if (this.nav?.startFromPose(carried)) {
+      if (!carried) {
+        this.note(`nav pose saved while driving ${Math.round(gapS)} s ago: not used`);
+        return;
+      }
+      this.host.startFromPose(carried, (started) => {
+        if (!started) return;
         this.poseStatus = "unverified";
         this.note(
           `nav mode dr (pose saved while driving, ${Math.round(gapS)} s old, carried ${Math.round(carried.carriedM)} m on at ${Math.round(speedMps * 3.6)} km/h, ` +
             `±${Math.round(carried.posSigmaM)} m, heading ±${Math.round((carried.headingSigmaRad * 180) / Math.PI)}°${late ? ", VIN known late" : ""})`,
         );
-      }
+      });
       return;
     }
     // Started on the way: the car left this pose before the app was running. Saved within a drive pose's age, it is
@@ -946,20 +939,21 @@ export class NavigatorService implements PositionSource {
       return;
     }
     if (wake === "standing") this.note("nav parked pose kept: the app was started on the way, but the phone is still at it");
-    if (pose && this.nav?.startFromPose(widen(pose))) {
+    if (!pose) return;
+    this.host.startFromPose(widen(pose), (started) => {
+      if (!started) return;
       this.poseStatus = "unverified";
       this.note(`nav mode dr (parked pose, ${Math.round((this.clock.nowMs() - pose.savedAt) / 60_000)} min old${late ? ", VIN known late" : ""})`);
-    }
+    });
   }
 
   /** The active region's road graph onto the navigator; a new region (or graph version) restarts the filter. */
   private applyRoadGraph(): void {
-    const nav = this.nav;
-    if (!nav || !this.deps.roadGraph) return;
+    if (!this.nav || !this.deps.roadGraph) return;
     const active = this.deps.roadGraph.current();
     if ((active?.key ?? null) === (this.graph?.key ?? null)) return;
     this.drainUpdateTimes(); // the filter is about to be replaced
-    nav.setRoadGraph(active?.graph ?? null, this.deps.mapMatch);
+    this.host.setRoadGraph(active, this.deps.mapMatch);
     this.graph = active ? { key: active.key, region: active.region, builtAt: active.graph.info.builtAt } : null;
     this.note(active ? `mm graph ${active.region} (OSM ${active.graph.info.osmDate})` : "mm graph none");
   }
@@ -993,13 +987,13 @@ export class NavigatorService implements PositionSource {
     this.note(`${STORAGE_NOTE}${JSON.stringify(this.deps.calibration.snapshot(vin))}`);
     const ks = this.deps.calibration.speedScale(vin);
     if (ks && this.nav) {
-      this.nav.setSpeedScalePrior(ks.ks, ks.ksVar);
+      this.host.setSpeedScalePrior(ks.ks, ks.ksVar);
       this.note(`nav speed scale ${ks.ks.toFixed(4)} from storage`);
     }
     this.seedWheelYaw();
     const compass = this.deps.calibration.compassCalibrations(vin);
     if (compass.length && this.nav) {
-      this.nav.setCompassCalibrations(compass);
+      this.host.setCompassCalibrations(compass);
       const each = compass.map((c) => `${c.samples} samples${c.confirmed ? "" : " unconfirmed"}`).join(", ");
       this.note(`nav compass from storage: ${compass.length} mounting(s) (${each})`);
     }
@@ -1026,8 +1020,7 @@ export class NavigatorService implements PositionSource {
     // One the navigator never gets (a simulated location, no accuracy) is shown as it was before integrity.
     else this.lastShownFix = r;
     // Process now, so the map doesn't wait for the next tick.
-    this.flush(this.deps.nowUs() - this.reorderUs);
-    this.publish();
+    this.flush(this.deps.nowUs() - this.reorderUs, () => this.publish());
   }
 
   private onImu(motion: ImuMotionRecord[], mag: Vec3Record[]): void {
@@ -1049,9 +1042,10 @@ export class NavigatorService implements PositionSource {
         this.held.drop();
       }
     }
-    this.flush(this.deps.nowUs() - this.reorderUs);
-    // A fix the navigator just took: phone GNSS shows it now rather than at the next tick.
-    if (this.shownChanged && this.deps.nowUs() - this.lastObdUs >= OBD_TIMEOUT_US) this.publish();
+    this.flush(this.deps.nowUs() - this.reorderUs, () => {
+      // A fix the navigator just took: phone GNSS shows it now rather than at the next tick.
+      if (this.shownChanged && this.deps.nowUs() - this.lastObdUs >= OBD_TIMEOUT_US) this.publish();
+    });
   }
 
   private onSpeed(s: SpeedSample): void {
@@ -1084,92 +1078,74 @@ export class NavigatorService implements PositionSource {
     this.pending.push({ tUs: s.tUs, obd: { tUs: s.tUs, speedMps: s.speedMps, rawKph: s.raw, ...(s.source ? { source: s.source } : {}) } });
   }
 
-  /** Feed everything up to `untilUs` in time order. */
-  private flush(untilUs: number): void {
-    const nav = this.nav;
-    if (!nav || this.pending.length === 0) return;
+  /** Feed everything up to `untilUs` in time order; `then` once the navigator has taken it. */
+  private flush(untilUs: number, then?: () => void): void {
+    if (!this.nav || this.pending.length === 0) {
+      then?.();
+      return;
+    }
     this.pending.sort((a, b) => a.tUs - b.tUs);
     let n = 0;
     while (n < this.pending.length && this.pending[n].tUs <= untilUs) n++;
     const ready = this.pending.splice(0, n);
-    this.label("mm update", () => {
-    for (const input of ready) {
-      const late = input.tUs < this.fedUs;
-      if ("fix" in input) {
-        // A fix delivered late can still update from the navigator's state history.
-        if (late && this.fedUs - input.tUs > LATE_FIX_MAX_US) continue;
-        const out = nav.onGnss(input.fix);
-        this.deps.observer?.fix?.(input.fix, out);
-        this.notes.fixOutcome(out, input.fix);
-        // Only a fix the navigator took: phone GNSS shows this one when there is no car speed, and `skipped`
-        // means too coarse to weigh (over `maxFixAccuracyM`) or a repeat. Showing a skipped one threw the dot
-        // 1.4-10.7 km at each ignition-off of a jammed day (2026-10-06).
-        if (out.status !== "untrusted" && out.status !== "skipped") {
-          this.lastShownFix = input.record;
-          this.shownChanged = true;
-        }
-        if (out.integrity === "ok" && nav.trustAt(input.tUs) === "TRUSTED") {
-          const released = this.held.checkAgainst(input.fix);
-          if (released) this.note(released);
-        }
-        const phone = this.phone;
-        if (phone) {
-          phone.engine.onFix(input.fix, out.integrity === "ok" && nav.trustAt(input.tUs) === "TRUSTED");
-          if (!phone.started && phone.engine.started) {
-            phone.started = true;
-            this.note(`nav phone-only start (GPS fix ±${Math.round(input.fix.hAccM)} m)`);
-          }
-        }
-        if (out.status === "accepted" && input.fix.speedMps !== undefined) this.lastAcceptedSatUs = input.tUs;
-        if (out.status === "init") this.note(`nav mode dr (${out.initMethod})`);
-        if (out.relocated) this.note(`nav track lost: moved to the Wi-Fi/cell fixes (${Math.round(out.errorM ?? 0)} m away, ±${Math.round(input.fix.hAccM)} m)`);
-        if (out.pose && out.pose !== "doubted") {
-          this.poseStatus = out.pose;
-          this.poseQuestion = null;
-        }
-        if (out.pose === "doubted") {
-          if (!this.poseQuestion) this.note(`nav parked pose doubted: Wi-Fi fix ${Math.round(out.errorM ?? 0)} m away (±${Math.round(input.fix.hAccM)} m), asking the driver`);
-          this.poseQuestion = { distanceM: out.errorM ?? 0 };
-        }
-        if (out.pose === "confirmed") this.note("nav parked pose confirmed");
-        if (out.pose === "rejected") {
-          this.note(`nav parked pose rejected: fix ${Math.round(out.errorM ?? 0)} m away (±${Math.round(input.fix.hAccM)} m)`);
-          if (this.phoneInCar()) {
-            if (this.car) this.clearPose(this.car);
-            this.poseStored = false;
-          } else {
-            // The phone may be anywhere (at home, on the way back to the car, walking off with the ECU still awake). The
-            // dot follows the phone; the car is still where it was left.
-            this.keepPoseForCar("the fix is the phone's");
-          }
-        }
-      } else if (late) {
-        continue;
-      } else if ("wheels" in input) {
-        // In time order with the IMU's: the gyro around it is in.
-        this.wheelYaw?.learn(input.wheels);
-        continue;
-      } else if ("imu" in input) {
-        const w = this.wheelYaw;
-        if (w) {
-          const o = this.gyroProc.process(input.imu);
-          w.addGyro(input.tUs, o.valid ? o.yawRate : null);
-          const car = w.substitute(input.imu);
-          if (car) this.wheelTurnsUs = input.tUs;
-          nav.onImu(car ?? input.imu);
-        } else nav.onImu(input.imu);
-      } else if ("mag" in input) {
-        // The compass reads the phone's field against the IMU's "up": with the car's IMU in its place (wheel yaw) it
-        // would learn a mounting from the field turned with the phone, and keep it. Off meanwhile.
-        if (!this.wheelYaw) nav.onMag(input.mag);
-      } else {
-        nav.onObdSpeed(input.obd);
-      }
-      this.fedUs = Math.max(this.fedUs, input.tUs);
-      if (!("mag" in input)) this.deps.observer?.fed?.(input.tUs);
+    this.host.feed(
+      ready,
+      (i, out, trusted) => {
+        const input = ready[i];
+        if ("fix" in input) this.fixFed(input, out, trusted);
+      },
+      () => {
+        this.noteAdvance();
+        then?.();
+      },
+    );
+  }
+
+  /** A fix the navigator was fed (`trusted`: integrity passed it and trusts GNSS at its time). */
+  private fixFed(input: FixInput, out: FixOutcome, trusted: boolean): void {
+    this.notes.fixOutcome(out, input.fix);
+    // Only a fix the navigator took: phone GNSS shows this one when there is no car speed, and `skipped`
+    // means too coarse to weigh (over `maxFixAccuracyM`) or a repeat. Showing a skipped one threw the dot
+    // 1.4-10.7 km at each ignition-off of a jammed day (2026-10-06).
+    if (out.status !== "untrusted" && out.status !== "skipped") {
+      this.lastShownFix = input.record;
+      this.shownChanged = true;
     }
-    });
-    this.noteAdvance();
+    if (trusted) {
+      const released = this.held.checkAgainst(input.fix);
+      if (released) this.note(released);
+    }
+    const phone = this.phone;
+    if (phone) {
+      phone.engine.onFix(input.fix, trusted);
+      if (!phone.started && phone.engine.started) {
+        phone.started = true;
+        this.note(`nav phone-only start (GPS fix ±${Math.round(input.fix.hAccM)} m)`);
+      }
+    }
+    if (out.status === "accepted" && input.fix.speedMps !== undefined) this.lastAcceptedSatUs = input.tUs;
+    if (out.status === "init") this.note(`nav mode dr (${out.initMethod})`);
+    if (out.relocated) this.note(`nav track lost: moved to the Wi-Fi/cell fixes (${Math.round(out.errorM ?? 0)} m away, ±${Math.round(input.fix.hAccM)} m)`);
+    if (out.pose && out.pose !== "doubted") {
+      this.poseStatus = out.pose;
+      this.poseQuestion = null;
+    }
+    if (out.pose === "doubted") {
+      if (!this.poseQuestion) this.note(`nav parked pose doubted: Wi-Fi fix ${Math.round(out.errorM ?? 0)} m away (±${Math.round(input.fix.hAccM)} m), asking the driver`);
+      this.poseQuestion = { distanceM: out.errorM ?? 0 };
+    }
+    if (out.pose === "confirmed") this.note("nav parked pose confirmed");
+    if (out.pose === "rejected") {
+      this.note(`nav parked pose rejected: fix ${Math.round(out.errorM ?? 0)} m away (±${Math.round(input.fix.hAccM)} m)`);
+      if (this.phoneInCar()) {
+        if (this.car) this.clearPose(this.car);
+        this.poseStored = false;
+      } else {
+        // The phone may be anywhere (at home, on the way back to the car, walking off with the ECU still awake). The
+        // dot follows the phone; the car is still where it was left.
+        this.keepPoseForCar("the fix is the phone's");
+      }
+    }
   }
 
   /**
@@ -1200,11 +1176,12 @@ export class NavigatorService implements PositionSource {
     this.checkVehicle();
     const ask = this.held.askNote();
     if (ask) this.note(ask);
-    this.flush(this.deps.nowUs() - this.reorderUs);
-    this.publish();
-    if (this.nav) this.notes.compassTrustChange(this.nav);
-    if (this.clock.nowMs() - this.lastSaveAt >= SAVE_EVERY_MS) this.saveCalibration();
-    if (this.clock.nowMs() - this.lastDriveSaveAt >= DRIVE_SAVE_EVERY_MS) this.saveDrivePose();
+    this.flush(this.deps.nowUs() - this.reorderUs, () => {
+      this.publish();
+      if (this.nav) this.notes.compassTrustChange(this.nav);
+      if (this.clock.nowMs() - this.lastSaveAt >= SAVE_EVERY_MS) this.saveCalibration();
+      if (this.clock.nowMs() - this.lastDriveSaveAt >= DRIVE_SAVE_EVERY_MS) this.saveDrivePose();
+    });
   }
 
   /** While the car moves: where it is, so a start soon after the app dies mid-drive carries on from there (§6.1). */

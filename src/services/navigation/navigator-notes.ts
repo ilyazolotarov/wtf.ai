@@ -1,7 +1,9 @@
 import type { CompassTrust } from "@/nav/compass/compass";
 import type { MapMatchState } from "@/nav/mapmatch/particle-filter";
-import type { FixOutcome, Navigator } from "@/nav/navigator";
+import type { FixOutcome } from "@/nav/navigator";
 import type { GnssFix } from "@/nav/types";
+
+import type { NavView } from "./navigator-host";
 
 const DEG = 180 / Math.PI;
 
@@ -51,7 +53,7 @@ export class NavigatorNotes {
   }
 
   /** Map-match state changes, except the flips between tracking and multimodal. */
-  mapMatch(nav: Navigator, state: MapMatchState): void {
+  mapMatch(nav: NavView, state: MapMatchState): void {
     const onRoad = (s: MapMatchState) => s === "tracking" || s === "multimodal";
     if (state === this.mapMatchState || (onRoad(state) && onRoad(this.mapMatchState))) return;
     const mm = nav.estimate()?.mapMatch;
@@ -72,13 +74,13 @@ export class NavigatorNotes {
   }
 
   /** The heading just became known: what the compass said at that moment. */
-  compassAtStart(nav: Navigator): void {
+  compassAtStart(nav: NavView): void {
     const off = compassOff(nav);
     this.note(`nav compass at start: ${off === null ? "none" : `${off.toFixed(0)}° off`} (${nav.compassTrust})`);
   }
 
   /** A stored calibration checked against the known heading: confirmed or rejected. */
-  compassTrustChange(nav: Navigator): void {
+  compassTrustChange(nav: NavView): void {
     if (nav.compassTrust === this.compassTrust) return;
     const before = this.compassTrust;
     this.compassTrust = nav.compassTrust;
@@ -88,7 +90,7 @@ export class NavigatorNotes {
   }
 
   /** At the end of a drive: how the compass did against the known heading. */
-  compassSummary(nav: Navigator): void {
+  compassSummary(nav: NavView): void {
     const diffs = nav.compassCheckDiffs.map((d) => Math.abs(d) * DEG);
     if (diffs.length === this.summarisedChecks) return;
     this.summarisedChecks = diffs.length;
@@ -99,7 +101,7 @@ export class NavigatorNotes {
   }
 
   /** At the end of a drive: the road corrections map matching sent the navigator, and how many it refused. */
-  roadCorrections(nav: Navigator): void {
+  roadCorrections(nav: NavView): void {
     const s = nav.stats;
     const heading = s.roadHeadingAccepted + s.roadHeadingRejected;
     const position = s.roadPositionAccepted + s.roadPositionRejected;
@@ -113,7 +115,7 @@ export class NavigatorNotes {
 }
 
 /** Compass heading minus the EKF heading now, degrees (null: either unknown). */
-export function compassOff(nav: Navigator): number | null {
+export function compassOff(nav: NavView): number | null {
   const compass = nav.compassHeading;
   const heading = nav.estimate()?.headingRad;
   if (!compass || heading === undefined) return null;
