@@ -109,7 +109,7 @@ export function RouteLayers({
           [headTo.lon, headTo.lat],
         ])
       : emptyLines();
-  const opacity = route?.replanning ? 0.4 : 1;
+  const opacity = route?.replanning || route?.preview?.plan ? 0.4 : 1;
   const size = ROUTE_LINE;
   const routeCasing = { "line-color": palette.routeCasing, "line-width": size.casing, "line-opacity": route?.replanning ? 0.4 : 0.9 };
   const routePaint = { "line-color": palette.route, "line-width": size.line, "line-opacity": opacity };
@@ -132,6 +132,25 @@ export function RouteLayers({
       : undefined;
   const maneuverPoint = nextManeuver && nextManeuver.kind !== "arrive" ? pointFeatures(nextManeuver) : emptyPoints();
   const destination = route ? pointFeatures(route.destination) : emptyPoints();
+  // Stops on the way (STOPS-SPEC §5.1): numbered dots ringed in the route's colour; one left behind greyed while its
+  // card shows; a place previewed as a stop, and the way through it (the route then quieter, as an alternative).
+  const stopPoints = useMemo((): GeoJSON.FeatureCollection<GeoJSON.Point> => {
+    const features: GeoJSON.Feature<GeoJSON.Point>[] = (route?.stops ?? []).map((x, i) => ({
+      type: "Feature",
+      properties: { label: String(i + 1), kind: "stop" },
+      geometry: { type: "Point", coordinates: [x.lon, x.lat] },
+    }));
+    const passed = route?.passedStop?.stop;
+    if (passed) features.push({ type: "Feature", properties: { label: "", kind: "passed" }, geometry: { type: "Point", coordinates: [passed.lon, passed.lat] } });
+    const preview = route?.preview?.place;
+    if (preview) features.push({ type: "Feature", properties: { label: "+", kind: "preview" }, geometry: { type: "Point", coordinates: [preview.lon, preview.lat] } });
+    return { type: "FeatureCollection", features };
+  }, [route?.stops, route?.passedStop, route?.preview]);
+  const previewPlan = route?.preview?.plan;
+  const previewLine = useMemo(
+    () => (previewPlan ? routeFeatures(previewPlan.coordinates.map((c) => [c.lon, c.lat])) : emptyLines()),
+    [previewPlan],
+  );
   const alternativeRoutes = route?.alternatives;
   const alternativeLines = useMemo(() => alternativeLineFeatures(alternativeRoutes), [alternativeRoutes]);
   const alternativeLabels = alternativeLabelFeatures(alternativeRoutes, (deltaS) => formatAlternativeDelta(deltaS, t));
@@ -161,6 +180,10 @@ export function RouteLayers({
         <Layer id="active-route-head-underlay" type="line" beforeId={UNDER_NAMES} layout={ROUTE_HEAD_LAYOUT} paint={routeHeadUnderlay} />
         <Layer id="active-route-head-line" type="line" beforeId={UNDER_NAMES} layout={ROUTE_HEAD_LAYOUT} paint={routeHeadPaint} />
       </GeoJSONSource>
+      <GeoJSONSource id="stop-preview-route" data={previewLine}>
+        <Layer id="stop-preview-route-casing" type="line" beforeId={UNDER_NAMES} layout={ROUTE_LAYOUT} paint={{ "line-color": palette.routeCasing, "line-width": size.casing }} />
+        <Layer id="stop-preview-route-line" type="line" beforeId={UNDER_NAMES} layout={ROUTE_LAYOUT} paint={{ "line-color": palette.route, "line-width": size.line }} />
+      </GeoJSONSource>
       <GeoJSONSource id="route-next-maneuver" data={maneuverPoint}>
         <Layer
           id="route-next-maneuver-dot"
@@ -173,6 +196,24 @@ export function RouteLayers({
           id="route-destination-dot"
           type="circle"
           paint={{ "circle-radius": DESTINATION_DOT.r, "circle-color": palette.route, "circle-stroke-color": palette.routeCasing, "circle-stroke-width": DESTINATION_DOT.ring }}
+        />
+      </GeoJSONSource>
+      <GeoJSONSource id="route-stops" data={stopPoints}>
+        <Layer
+          id="route-stop-dot"
+          type="circle"
+          paint={{
+            "circle-radius": 11,
+            "circle-color": palette.routeCasing,
+            "circle-stroke-color": ["match", ["get", "kind"], "passed", palette.text2, palette.route],
+            "circle-stroke-width": 3,
+          }}
+        />
+        <Layer
+          id="route-stop-label"
+          type="symbol"
+          layout={{ "text-field": ["get", "label"], "text-font": LABEL_FONT, "text-size": 13, "text-allow-overlap": true, "text-ignore-placement": true }}
+          paint={{ "text-color": palette.route }}
         />
       </GeoJSONSource>
       <GeoJSONSource id="alternative-route-labels" data={alternativeLabels} onPress={pickAlternative}>

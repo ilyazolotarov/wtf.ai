@@ -74,6 +74,12 @@ export function RouteBanner({
     iconBg = palette.bad.c;
     title = t("routeFailedTitle");
     sub = t(route.failure ? PROBLEM_TEXT[route.failure] : "routeCancelled");
+  } else if (route.atStop && route.guidance?.state !== "arrived") {
+    // At a stop on the way (STOPS-SPEC §5.2): the wait, until the car goes on.
+    icon = "flag";
+    iconBg = palette.ok.c;
+    title = t("atStopTitle");
+    sub = route.atStop.stop.name ?? null;
   } else if (route.guidance?.state === "arrived") {
     icon = "flag";
     iconBg = palette.ok.c;
@@ -99,6 +105,12 @@ export function RouteBanner({
     } else if (g?.state === "unsure") {
       sub = t("routeUnsure");
       subColor = palette.warn.c;
+    }
+    // With a stop ahead, the last line counts to it (STOPS-SPEC §5.1); the final arrival is on the route page.
+    const nextStop = g?.nextStop != null ? route.plan?.stops?.[g.nextStop] : undefined;
+    const stop = nextStop && route.stops.find((x) => x.key === nextStop.key);
+    if (!sub && stop && g?.toStopM !== undefined && g.toStopS !== undefined) {
+      sub = `${t("toStop").replace("{name}", stop.name ?? t("droppedPin"))} · ${formatDistance(g.toStopM, language)} · ${formatDurationS(g.toStopS, t)} · ${formatArrival(g.toStopS, nowMs)}`;
     }
     sub ??= `${formatDistance(remainingM, language)} · ${formatDurationS(remainingS, t)} · ${t("arriveAt").replace("{time}", formatArrival(remainingS, nowMs))}`;
   }

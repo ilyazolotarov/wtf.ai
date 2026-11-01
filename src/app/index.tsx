@@ -29,6 +29,7 @@ import { isLost, usePlacing } from "@/components/map/use-placing";
 import { openLessons } from "@/components/guide/lesson-bodies";
 import { LessonsInvite, MapTour, TourInvite, type TourTry } from "@/components/guide/map-tour";
 import { RouteBanner } from "@/components/route/route-banner";
+import { AtStopCard, PassedStopCard, StopPreviewCard } from "@/components/route/stop-cards";
 import { useAudioOutput } from "@/components/route/use-audio-output";
 import { useVoiceGuidance, useVoiceMuted, useVoiceVolume } from "@/components/route/use-voice-guidance";
 import { UpdatePrompts } from "@/components/update/update-prompts";
@@ -427,6 +428,18 @@ export default function HomeScreen() {
                   onConfirm={held.confirm}
                 />
               )}
+              {route?.preview && !placing && (
+                <StopPreviewCard
+                  route={route}
+                  nowMs={position?.timestamp ?? 0}
+                  onOnlyHere={() => {
+                    const place = route.preview!.place;
+                    startRoute({ lat: place.lat, lon: place.lon, name: place.name, id: place.id });
+                  }}
+                />
+              )}
+              {route?.atStop && !route.preview && !placing && <AtStopCard route={route} nowMs={position?.timestamp ?? 0} onEnd={stopRoute} />}
+              {route?.passedStop && !route.atStop && !route.preview && !placing && <PassedStopCard route={route} />}
               {/* On the tour the pin is only tried: its card would sit under the dimmed screen. */}
               {pin && !touring && (
                 <PinCard
@@ -439,6 +452,15 @@ export default function HomeScreen() {
                     startRoute({ lat: pin.lat, lon: pin.lon, name });
                     setPin(null);
                   }}
+                  // While a route is on: a stop on the way, shown with its detour first (STOPS-SPEC §7.4).
+                  onStop={
+                    route?.status === "active"
+                      ? (name) => {
+                          runtime.routes.previewStop({ lat: pin.lat, lon: pin.lon, name });
+                          setPin(null);
+                        }
+                      : undefined
+                  }
                 />
               )}
               {mapReady && !tourOffered && !touring && !pin && !placing && !position?.poseQuestion && (

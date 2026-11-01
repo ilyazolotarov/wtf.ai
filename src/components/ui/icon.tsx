@@ -69,6 +69,15 @@ const SF = {
   ios_share: "square.and.arrow.up",
   // A speed camera ahead (UI-SPEC §6.5).
   speed_camera: "camera.fill",
+  // Stops on the way (STOPS-SPEC §7): the kinds of places, adding and moving stops.
+  local_gas_station: "fuelpump.fill",
+  ev_station: "bolt.car.fill",
+  local_cafe: "cup.and.saucer.fill",
+  restaurant: "fork.knife",
+  local_pharmacy: "cross.case.fill",
+  local_parking: "parkingsign",
+  add: "plus",
+  arrow_upward: "arrow.up",
 } as const satisfies Record<string, SFSymbol>;
 
 export type IconName = keyof typeof SF;

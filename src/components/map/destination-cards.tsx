@@ -23,6 +23,7 @@ export function PinCard({
   onClose,
   onPlace,
   onRoute,
+  onStop,
 }: {
   pin: Pin;
   position: PositionEstimate | null;
@@ -30,6 +31,8 @@ export function PinCard({
   onPlace: (() => void) | undefined;
   /** `name`: what the pin is ("вулиця Шевченка, 10", a street, a town), for the route's banner. */
   onRoute(name: string | undefined): void;
+  /** While a route is on: the pin as a stop on the way. */
+  onStop?: (name: string | undefined) => void;
 }) {
   const { t, language } = useT();
   const palette = usePalette();
@@ -74,6 +77,7 @@ export function PinCard({
     >
       <CardActions gap={10}>
         {onPlace && <PillButton icon="location_on" label={t("placeMeHere")} onPress={onPlace} />}
+        {onStop && <PillButton icon="add" label={t("addAsStop")} onPress={() => onStop(named ? title : undefined)} />}
         <PillButton icon="alt_route" label={t("routeHere")} onPress={() => onRoute(named ? title : undefined)} primary />
       </CardActions>
     </HudCard>

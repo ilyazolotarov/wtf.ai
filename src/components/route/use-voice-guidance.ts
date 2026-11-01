@@ -165,6 +165,8 @@ export class VoiceGuide {
       maneuvers: route.maneuvers,
       guidance: route.guidance,
       speedMps,
+      atStop: route.atStop?.stop.key ?? null,
+      passedStop: route.passedStop?.stop.key ?? null,
     });
     if (!said.length || voiceClaims[0] !== this) return;
     if (muted) {

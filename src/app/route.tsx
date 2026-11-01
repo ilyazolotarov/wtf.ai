@@ -16,7 +16,8 @@ import {
     formatEta,
     toDegrees,
 } from "@/components/status/format-geo";
-import { formatDurationS, PROBLEM_TEXT } from "@/components/route/guidance-text";
+import { formatArrival, formatDurationS, PROBLEM_TEXT } from "@/components/route/guidance-text";
+import { CATEGORY_ICON, CATEGORY_LABEL, detourText, STOP_CATEGORIES } from "@/components/route/stop-text";
 import { Flash, SaveConfirmation } from "@/components/route/save-feedback";
 import { pointPlace, resultPlace } from "@/components/route/place-search";
 import { Icon, type IconName } from "@/components/ui/icon";
@@ -34,6 +35,8 @@ import { requestPlacing } from "@/services/navigation/place-request";
 import type { Place, SavedKind, SavedPlace } from "@/services/navigation/places-store";
 import { useMapPacks } from "@/services/offline-map/map-packs";
 import { activeSearchIndex } from "@/services/offline-map/search-file";
+import type { RouteSnapshot } from "@/services/navigation/route-service";
+import { getRuntime } from "@/services/runtime";
 
 /** Search after typing pauses this long (ms). */
 const SEARCH_DELAY_MS = 120;
@@ -105,8 +108,13 @@ export default function RouteScreen() {
   const { q: linked = "" } = useLocalSearchParams<{ q?: string }>();
   const [selected, setSelected] = useState<Place | null>(() => {
     const d = route?.destination;
-    return !linked && d?.id ? { id: d.id, title: d.name ?? "", detail: null, lat: d.lat, lon: d.lon } : null;
+    // With a route on, the page opens on its trip (STOPS-SPEC §7.1), not on the destination's card.
+    return !linked && d?.id && route?.status !== "active" ? { id: d.id, title: d.name ?? "", detail: null, lat: d.lat, lon: d.lon } : null;
   });
+  // Searching for a stop to add (STOPS-SPEC §7.1): a result picked becomes a stop, each shown with its detour.
+  const [adding, setAdding] = useState(false);
+  const routes = getRuntime().routes;
+  const routeOn = route != null && route.status !== "failed";
   const [query, setQuery] = useState(linked);
   // Another link while the screen is open: searched instead.
   const [shownLink, setShownLink] = useState(linked);
@@ -148,6 +156,16 @@ export default function RouteScreen() {
         ? searched.results.map((r) => resultPlace(r, language, t))
         : cities.filter((c) => c.title.toLocaleLowerCase().includes(q));
   const savedHere = reachable(saved);
+  // Adding a stop: the detours of what is listed (results, else saved places), worked out one by one.
+  const estimating = adding && route?.status === "active" ? (results ?? savedHere).slice(0, ESTIMATED) : null;
+  const estimateKey = estimating?.map((d) => d.id).join("|") ?? "";
+  useEffect(() => {
+    if (!estimating?.length) return;
+    getRuntime().routes.estimateDetours(estimating.map((d) => ({ key: d.id, lat: d.lat, lon: d.lon })));
+    return () => getRuntime().routes.clearEstimates();
+    // The list's ids say when it changed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [estimateKey]);
   const recentHere = reachable(recent);
   const selectedSaved = selected ? places.savedAt(selected) : null;
   // What the last save or removal on the card did, with what Undo puts back.
@@ -195,6 +213,13 @@ export default function RouteScreen() {
     setFlashId(null);
   };
 
+  const addStop = (d: Place) => {
+    routes.addStop({ lat: d.lat, lon: d.lon, name: d.title, id: d.id });
+    setAdding(false);
+    setQuery("");
+    Keyboard.dismiss();
+  };
+
   const row = (
     d: Place,
     key: string,
@@ -203,12 +228,15 @@ export default function RouteScreen() {
     const { distanceM, bearing } = summary(d);
     // Elsewhere than the Saved section, a saved place shows its kind's icon at the end.
     const savedKind = options.icon ? null : (places.savedAt(d)?.kind ?? null);
-    const where = `${formatDistance(distanceM, language)} · ${cardinal(bearing, language)}`;
+    const estimate = adding ? route?.estimates : undefined;
+    const where = estimate
+      ? detourText(d.id in estimate ? estimate[d.id] : undefined, t)
+      : `${formatDistance(distanceM, language)} · ${cardinal(bearing, language)}`;
     const detail = options.detail === undefined ? d.detail : options.detail;
     return (
       <Pressable
         key={key}
-        onPress={() => select(d)}
+        onPress={() => (adding ? addStop(d) : select(d))}
         accessibilityRole="button"
         style={({ pressed }) => [styles.destination, pressed && styles.pressed]}
       >
@@ -242,7 +270,8 @@ export default function RouteScreen() {
   };
 
   return (
-    <ScreenContent title={t("route")}>
+    <ScreenContent title={t(adding ? "addStopTitle" : "route")}>
+      {routeOn && !adding && !selected && !q && <TripSection route={route} nowMs={position?.timestamp ?? 0} onAdd={() => setAdding(true)} onStop={stopRoute} />}
       <View style={[styles.search, { backgroundColor: palette.surface }]}>
         <Icon name="search" size={18} color={palette.text2} />
         <TextInput
@@ -266,7 +295,7 @@ export default function RouteScreen() {
       {!selected && results && (
         <ScreenSection>
           {results.length > 0 ? (
-            results.map((d) => row(d, d.id))
+            byDetour(results, adding ? route?.estimates : undefined).map((d) => row(d, d.id))
           ) : !searched || searched.settled ? (
             <View style={styles.empty}>
               <T size={14} color={palette.text2}>
@@ -291,12 +320,14 @@ export default function RouteScreen() {
               })}
             </ScreenSection>
           )}
-          {recentHere.length > 0 && (
+          {adding && <ScreenLink label={t("cancel")} onPress={() => setAdding(false)} />}
+          {!adding && recentHere.length > 0 && (
             <ScreenSection title={t("recentPlaces")}>
               {recentHere.map((p) => row(p, `recent:${p.id}`, { icon: "history" }))}
             </ScreenSection>
           )}
-          {recentHere.length > 0 && <ScreenLink label={t("clearRecent")} onPress={() => places.clearRecent()} />}
+          {!adding && recentHere.length > 0 && <ScreenLink label={t("clearRecent")} onPress={() => places.clearRecent()} />}
+          {!adding && (
           <ScreenSection title={region ? `${t("regionCities")} · ${region.name[language]}` : t("regionCities")}>
             {cities.length === 0 ? (
               <View style={styles.empty}>
@@ -308,6 +339,7 @@ export default function RouteScreen() {
               cities.map((d) => row(d, `city:${d.id}`))
             )}
           </ScreenSection>
+          )}
         </>
       )}
 
@@ -388,6 +420,24 @@ export default function RouteScreen() {
               }}
             />
           )}
+          {routeOn && routeId !== target.id && route.stops.length < routes.maxStops ? (
+            // A route on: this place as a stop on the way instead of the new destination.
+            <ScreenAction labelKey="addAsStop" icon="add" secondary onPress={() => addStop(target)} />
+          ) : !routeOn ? (
+            // No route yet: go there, then pick a stop on the way.
+            <ScreenAction
+              labelKey="addStop"
+              icon="add"
+              secondary
+              onPress={() => {
+                places.addRecent(target);
+                startRoute({ lat: target.lat, lon: target.lon, name: target.title, id: target.id });
+                select(null);
+                setQuery("");
+                setAdding(true);
+              }}
+            />
+          ) : null}
           <ScreenAction
             labelKey="placeMeHere"
             icon="location_on"
@@ -429,6 +479,162 @@ export default function RouteScreen() {
     </ScreenContent>
   );
 }
+
+/** The add-a-stop search's results with their detours shown: once every detour is known, the least first. */
+const ESTIMATED = 10;
+
+function byDetour(list: Place[], estimates: RouteSnapshot["estimates"]): Place[] {
+  if (!estimates) return list;
+  const head = list.slice(0, ESTIMATED);
+  if (!head.every((d) => d.id in estimates)) return list;
+  const cost = (d: Place) => estimates[d.id] ?? Infinity;
+  return [...head.sort((a, b) => cost(a) - cost(b)), ...list.slice(ESTIMATED)];
+}
+
+/**
+ * The trip on the route page (STOPS-SPEC §7.1): "Pull in on the way" by kind, then my position, the stops (earlier,
+ * remove), the destination with the arrival, "Add a stop", the whole trip's distance and time, and Stop guidance.
+ */
+function TripSection({ route, nowMs, onAdd, onStop }: { route: RouteSnapshot; nowMs: number; onAdd(): void; onStop(): void }) {
+  const { t, language } = useT();
+  const palette = usePalette();
+  const routes = getRuntime().routes;
+  const plan = route.plan;
+  const g = route.guidance;
+  const leftS = g?.remainingS ?? plan?.durationS ?? 0;
+  const leftM = g?.remainingM ?? plan?.lengthM ?? 0;
+  // The plan's time already behind the car: each stop's arrival is its time on the plan less that.
+  const doneS = plan ? plan.durationS - leftS : 0;
+  const atStopS = (key: string) => {
+    const at = plan?.stops?.find((x) => x.key === key);
+    return at ? Math.max(0, at.atS - doneS) : null;
+  };
+  return (
+    <>
+      {route.status === "active" && (
+        <ScreenSection title={t("pullInOnTheWay")} plain>
+          <View style={tripStyles.tiles}>
+            {STOP_CATEGORIES.map((c) => (
+              <Pressable
+                key={c}
+                onPress={() => router.push({ pathname: "/along", params: { category: c } })}
+                accessibilityRole="button"
+                style={({ pressed }) => [tripStyles.tile, { backgroundColor: palette.groupBg }, pressed && styles.pressed]}
+              >
+                <Icon name={CATEGORY_ICON[c]} size={24} color={palette.accent} />
+                <T w="medium" size={15} fit>
+                  {t(CATEGORY_LABEL[c])}
+                </T>
+              </Pressable>
+            ))}
+          </View>
+        </ScreenSection>
+      )}
+      <ScreenSection>
+        <View style={styles.destination}>
+          <View style={tripStyles.mark}>
+            <View style={[tripStyles.me, { backgroundColor: palette.puck, borderColor: palette.groupBg }]} />
+          </View>
+          <T w="medium" size={16} style={styles.flex}>
+            {t("myPosition")}
+          </T>
+        </View>
+        {route.stops.map((stop, i) => {
+          const s = atStopS(stop.key);
+          const name = stop.name ?? t("droppedPin");
+          return (
+            <View key={stop.key} style={styles.destination}>
+              <View style={[tripStyles.stop, { borderColor: palette.route, backgroundColor: palette.groupBg }]}>
+                {stop.category ? (
+                  <Icon name={CATEGORY_ICON[stop.category]} size={16} color={palette.route} />
+                ) : (
+                  <T w="semibold" size={14} color={palette.route}>
+                    {String(i + 1)}
+                  </T>
+                )}
+              </View>
+              <View style={styles.destinationCopy}>
+                <T w="semibold" size={16} numberOfLines={2}>
+                  {name}
+                </T>
+                {s !== null && (
+                  <T size={12} color={palette.text2}>
+                    {t("stopAt").replace("{time}", formatArrival(s, nowMs))}
+                  </T>
+                )}
+              </View>
+              {i > 0 && (
+                <Pressable
+                  onPress={() => routes.moveStop(stop.key, -1)}
+                  accessibilityRole="button"
+                  accessibilityLabel={t("moveStopUp").replace("{name}", name)}
+                  hitSlop={6}
+                  style={({ pressed }) => [tripStyles.button, { backgroundColor: palette.surface }, pressed && styles.pressed]}
+                >
+                  <Icon name="arrow_upward" size={16} color={palette.text2} />
+                </Pressable>
+              )}
+              <Pressable
+                onPress={() => routes.removeStop(stop.key)}
+                accessibilityRole="button"
+                accessibilityLabel={t("removeStop").replace("{name}", name)}
+                hitSlop={6}
+                style={({ pressed }) => [tripStyles.button, { backgroundColor: palette.surface }, pressed && styles.pressed]}
+              >
+                <Icon name="close" size={16} color={palette.text2} />
+              </Pressable>
+            </View>
+          );
+        })}
+        <View style={styles.destination}>
+          <View style={[tripStyles.stop, { borderColor: palette.route, backgroundColor: palette.route }]}>
+            <Icon name="flag" size={16} color={palette.onAccent} />
+          </View>
+          <View style={styles.destinationCopy}>
+            <T w="semibold" size={16} numberOfLines={2}>
+              {route.destination.name ?? t("droppedPin")}
+            </T>
+            {plan && (
+              <T size={12} color={palette.text2}>
+                {t("arriveAt").replace("{time}", formatArrival(leftS, nowMs))}
+              </T>
+            )}
+          </View>
+        </View>
+        {route.stops.length < routes.maxStops && (
+          <Pressable onPress={onAdd} accessibilityRole="button" style={({ pressed }) => [styles.destination, pressed && styles.pressed]}>
+            <View style={[tripStyles.stop, { borderColor: palette.accentA, backgroundColor: palette.accentA }]}>
+              <Icon name="add" size={18} color={palette.accent} />
+            </View>
+            <T w="semibold" size={16} color={palette.accent}>
+              {t("addStop")}
+            </T>
+          </Pressable>
+        )}
+      </ScreenSection>
+      {route.status === "planning" && <ScreenNote>{t("planningRoute")}</ScreenNote>}
+      {plan && (
+        <ScreenCard>
+          <View style={styles.metrics}>
+            <Metric label={t("distance")} value={formatDistance(leftM, language)} />
+            <Metric label={t("eta")} value={formatDurationS(leftS, t)} />
+            <Metric label={t("stopArrival")} value={formatArrival(leftS, nowMs)} />
+          </View>
+        </ScreenCard>
+      )}
+      <ScreenAction labelKey="stopGuidance" secondary onPress={onStop} />
+    </>
+  );
+}
+
+const tripStyles = StyleSheet.create({
+  tiles: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  tile: { flexBasis: "31%", flexGrow: 1, minHeight: 76, borderRadius: 16, alignItems: "center", justifyContent: "center", gap: 6, paddingHorizontal: 6 },
+  mark: { width: 36, alignItems: "center" },
+  me: { width: 16, height: 16, borderRadius: 8, borderWidth: 3 },
+  stop: { width: 36, height: 36, borderRadius: 18, borderWidth: 2, alignItems: "center", justifyContent: "center" },
+  button: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
+});
 
 function Metric({ label, value }: { label: string; value: string }) {
   const palette = usePalette();

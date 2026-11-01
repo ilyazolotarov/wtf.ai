@@ -11,7 +11,7 @@ import { ALONG_PAGE, placesAlong, RouteLine, type Box } from "@/nav/routing/alon
 import { AlternativeSearch, edgeSet, labelPoint, sharedM } from "@/nav/routing/alternatives";
 import { congestionAt } from "@/nav/routing/congestion";
 import { RouteGuidance, type GuidanceState, type GuidanceStep } from "@/nav/routing/guidance";
-import { DetourSearch, DETOUR_MAX_STATES, type DetourJob } from "@/nav/routing/detour";
+import { DetourSearch, type DetourJob } from "@/nav/routing/detour";
 import type { Maneuver } from "@/nav/routing/maneuvers";
 import type { RoadSide, RouteFailure, RoutePlan, RouteStart } from "@/nav/routing/router";
 import { insertionIndex, joinPlans, MAX_STOPS, tripManeuvers, TripSearch, type TripPoint, type TripStatus } from "@/nav/routing/trip";
@@ -101,6 +101,8 @@ export interface TripStop extends RouteDestination {
   key: string;
   /** What it is, when it came from the places along the route (or a search result of one of their kinds). */
   category?: PlaceCategory;
+  /** What the map knows of it (`PlaceFlag`: fuels, 24/7). */
+  flags?: number;
 }
 
 /** The stop the car is at, waiting to go on (STOPS-SPEC §5.2). */
@@ -291,7 +293,7 @@ function startOf(p: PositionEstimate) {
 const reliable = (p: PositionEstimate) => !(p.source === "gnss" && p.trust !== "TRUSTED");
 
 /** A stop as given: a place, a pin, a search result; its key is made if it has none. */
-export type StopInput = RouteDestination & { key?: string; category?: PlaceCategory };
+export type StopInput = RouteDestination & { key?: string; category?: PlaceCategory; flags?: number };
 
 type JobName = "preview" | "back" | "along" | "estimates";
 
