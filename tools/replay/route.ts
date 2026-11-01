@@ -6,6 +6,7 @@
 //   npm run route -- --bench 50 --at 51.4939,31.2947 --radius 8             # ... within 8 km of a point
 //   npm run route -- --bench 30 --graph tools/tiles/out/release/kyiv-city.graph.bin
 //   npm run route -- --from ... --to ... --alternatives                       # alternative routes too (§8.7)
+//   npm run route -- --from ... --via 50.44,30.51 --via ... --to ...           # a trip through stops (STOPS-SPEC §4)
 //   npm run route -- --bench 50 --alternatives                               # how often, how different, how long
 
 import { writeFileSync } from "node:fs";
@@ -17,6 +18,7 @@ import { TiledRoadGraph } from "../../src/nav/mapmatch/graph/road-graph";
 import { AlternativeSearch, sharedM } from "../../src/nav/routing/alternatives";
 import { routeManeuvers } from "../../src/nav/routing/maneuvers";
 import { planRoute, type RoutePlan, type RouteStart } from "../../src/nav/routing/router";
+import { planTrip, tripManeuvers } from "../../src/nav/routing/trip";
 import { fileByteSource, findGraph } from "./graph-file";
 
 function parseArgs(argv: string[]) {
@@ -35,10 +37,12 @@ function parseArgs(argv: string[]) {
   let warm = false;
   let cacheTiles = 2048;
   let alternatives = false;
+  const via: Coordinate[] = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--from") from = point(argv[++i]);
     else if (a === "--to") to = point(argv[++i]);
+    else if (a === "--via") via.push(point(argv[++i]));
     else if (a === "--graph") graph = argv[++i];
     else if (a === "--geojson") geojson = argv[++i];
     else if (a === "--bench") bench = Number(argv[++i]);
@@ -50,13 +54,13 @@ function parseArgs(argv: string[]) {
     else if (a === "--alternatives") alternatives = true;
     else if (a === "-h" || a === "--help") {
       console.log(
-        "route --from lat,lon[,headingDeg] --to lat,lon [--alternatives] [--graph <file>] [--geojson <out>]\n" +
+        "route --from lat,lon[,headingDeg] [--via lat,lon ...] --to lat,lon [--alternatives] [--graph <file>] [--geojson <out>]\n" +
           "route --bench <n> [--alternatives] [--at lat,lon] [--radius km] [--seed 1] [--warm] [--cache-tiles 2048] [--graph <file>]",
       );
       process.exit(0);
     }
   }
-  return { from, to, graph, geojson, bench, at, radiusKm, seed, warm, cacheTiles, alternatives };
+  return { from, to, via, graph, geojson, bench, at, radiusKm, seed, warm, cacheTiles, alternatives };
 }
 
 const args = parseArgs(process.argv.slice(2));
@@ -86,8 +90,12 @@ if (!args.bench) {
   if (!args.from || !args.to) throw new Error("pass --from and --to, or --bench <n>");
   const opened = openGraph(args.from);
   const { graph, frame, close } = opened;
-  const r = planRoute(graph, frame, args.from, args.to);
-  const maneuvers = r.status === "done" ? routeManeuvers(graph, r.plan) : [];
+  // Through stops: a leg each, joined (STOPS-SPEC §4); else the plain route.
+  const points = [...args.via.map((c, i) => ({ key: `s${i + 1}`, ...c })), { key: "destination", ...args.to }];
+  const trip = args.via.length ? planTrip(graph, frame, args.from, points) : null;
+  if (trip?.status === "failed") console.log(`no route on leg ${trip.leg + 1}`);
+  const r = trip ?? planRoute(graph, frame, args.from, args.to);
+  const maneuvers = trip?.status === "done" ? tripManeuvers(graph, trip.legs, trip.plan) : r.status === "done" ? routeManeuvers(graph, r.plan) : [];
   const alts = r.status === "done" && args.alternatives ? findAlternatives(opened, args.from, args.to, r.plan) : null;
   close();
   console.log(`${path.basename(graphFile)}: ${r.stats.states} states, ${r.stats.tilesRead} tiles read, ${r.stats.ms.toFixed(0)} ms`);
@@ -98,7 +106,13 @@ if (!args.bench) {
   const { plan } = r;
   console.log(`${km(plan.lengthM)}, ${min(plan.durationS)}, ${plan.legs.length} edges; ends ${Math.round(plan.offRoadM.start)} m and ${Math.round(plan.offRoadM.end)} m off the points`);
   for (const m of maneuvers) {
-    const extra = m.exit ? ` exit ${m.exit}` : m.kind === "depart" || m.kind === "arrive" ? "" : ` ${Math.round((m.turnRad * 180) / Math.PI)}°`;
+    const extra = m.exit
+      ? ` exit ${m.exit}`
+      : m.kind === "stop"
+        ? ` ${m.side ?? "on the road"}`
+        : m.kind === "depart" || m.kind === "arrive"
+          ? ""
+          : ` ${Math.round((m.turnRad * 180) / Math.PI)}°`;
     console.log(`  ${km(m.atM).padStart(9)}  ${m.kind}${extra}  ${m.lat.toFixed(5)},${m.lon.toFixed(5)}`);
   }
   if (alts) {
