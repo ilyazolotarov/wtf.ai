@@ -373,16 +373,24 @@ export function useMapCamera({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ghostView, hasGhost]);
 
-  const onRegionIsChanging = (event: NativeSyntheticEvent<{ userInteraction?: boolean }>) => {
-    // Still moving: the gesture hasn't settled yet.
-    clearTimeout(flattenTimer.current);
-    if (!event.nativeEvent.userInteraction) return;
+  /** The driver's gesture: the map stays where the finger takes it, and a tilted follow flattens once it settles. */
+  const leaveByGesture = () => {
     if (follow) {
       leftByGesture.current = true;
       flattenPending.current = follow.pitch > 0;
     }
     onUserInteraction();
   };
+  const onRegionIsChanging = (event: NativeSyntheticEvent<{ userInteraction?: boolean }>) => {
+    // Still moving: the gesture hasn't settled yet.
+    clearTimeout(flattenTimer.current);
+    if (event.nativeEvent.userInteraction) leaveByGesture();
+  };
+  /**
+   * MapLibre's own following ended (the native follow): only a gesture on the map ends it, and this can reach JS before
+   * the gesture's first region event. Taken for the button's exit, it stepped back to `FREE_ZOOM` under the finger.
+   */
+  const onFollowEnded = leaveByGesture;
   const onRegionDidChange = (
     event: NativeSyntheticEvent<{
       pitch: number;
@@ -438,5 +446,5 @@ export function useMapCamera({
     if (follow) leftByGesture.current = true;
   };
 
-  return { cameraRef, onRegionIsChanging, onRegionDidChange, onOutsideGesture, native };
+  return { cameraRef, onRegionIsChanging, onRegionDidChange, onOutsideGesture, onFollowEnded, native };
 }

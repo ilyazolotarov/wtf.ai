@@ -210,7 +210,7 @@ export function MapSurface({
   const [mapHeightPt, setMapHeightPt] = useState(0);
   const [mapWidthPt, setMapWidthPt] = useState(0);
   const mapSize = useRef({ width: 0, height: 0 });
-  const { cameraRef, onRegionIsChanging, onRegionDidChange, onOutsideGesture, native } = useMapCamera({
+  const { cameraRef, onRegionIsChanging, onRegionDidChange, onOutsideGesture, onFollowEnded, native } = useMapCamera({
     mapReady,
     mapHeightPt,
     mapWidthPt,
@@ -416,7 +416,7 @@ export function MapSurface({
           bearing={native?.bearing}
           duration={native?.duration}
           onTrackUserLocationChange={(event) => {
-            if (nativePuck && event.nativeEvent.trackUserLocation == null && mode !== "free") onUserInteraction();
+            if (nativePuck && event.nativeEvent.trackUserLocation == null && mode !== "free") onFollowEnded();
           }}
         />
         {/* Placed in the style, above its house numbers: not part of the stack below. */}

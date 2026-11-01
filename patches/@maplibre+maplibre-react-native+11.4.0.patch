@@ -770,8 +770,68 @@ index b257692..225886d 100644
              try {
                  val resolvedView: View? = manager.resolveView(reactTag)
                  val view = resolvedView as? V
+diff --git a/node_modules/@maplibre/maplibre-react-native/ios/components/camera/CameraUpdateItem.m b/node_modules/@maplibre/maplibre-react-native/ios/components/camera/CameraUpdateItem.m
+index 97ffd49..3c37324 100644
+--- a/node_modules/@maplibre/maplibre-react-native/ios/components/camera/CameraUpdateItem.m
++++ b/node_modules/@maplibre/maplibre-react-native/ios/components/camera/CameraUpdateItem.m
+@@ -12,6 +12,11 @@ @implementation MLRNCameraWithPadding
+ 
+ @end
+ 
++// wtf.ai: the padding the camera has now (MLNMapView's own, not in its public header; contentInset included).
++@interface MLNMapView (MLRNCameraEdgeInsets)
++- (UIEdgeInsets)cameraEdgeInsets;
++@end
++
+ @implementation CameraUpdateItem
+ 
+ - (void)execute:(MLRNMapView *)mapView withCompletionHandler:(void (^)(void))completionHandler {
+@@ -63,7 +68,16 @@ - (MLRNCameraWithPadding *)_makeCamera:(MLRNMapView *)mapView {
+   MLNMapCamera *nextCamera = [mapView.camera copy];
+ 
+   UIEdgeInsets padding = [self _clippedPadding:_cameraStop.padding forView:mapView];
+-  if (padding.top <= 0 && padding.bottom <= 0) {
++  // wtf.ai: with the app's location, a stop without a centre or bounds keeps the padding the camera has, as on Android.
++  // The follow padding a gesture left (the dot at its anchor) went at once, or with the free mode's flatten, and the
++  // whole view moved: on a tilted map no view without that padding looks the same.
++  if ([mapView usesAppUserLocation] && ![self _isCenterValid:_cameraStop.center] &&
++      ![self _areBoundsValid:_cameraStop.bounds] && [mapView respondsToSelector:@selector(cameraEdgeInsets)]) {
++    UIEdgeInsets now = [mapView cameraEdgeInsets];
++    UIEdgeInsets inset = mapView.contentInset;
++    padding = UIEdgeInsetsMake(now.top - inset.top, now.left - inset.left, now.bottom - inset.bottom,
++                               now.right - inset.right);
++  } else if (padding.top <= 0 && padding.bottom <= 0) {
+     // TODO: Report Bug
+     // If all padding properties are 0 in the update, and the bounds and centerCoordinate do not
+     // change, the padding doesn't change either. This seems to be a bug in the iOS SDK.
+@@ -92,16 +106,19 @@ - (MLRNCameraWithPadding *)_makeCamera:(MLRNMapView *)mapView {
+     nextCamera.heading = [_cameraStop.bearing floatValue];
+   }
+ 
+-  if (_cameraStop.zoom != nil && hasSetAltitude == false) {
+-    nextCamera.altitude = [mapView altitudeFromZoom:[_cameraStop.zoom doubleValue]
+-                                         atLatitude:nextCamera.centerCoordinate.latitude
+-                                            atPitch:nextCamera.pitch];
+-  }
+-
++  // wtf.ai: a new pitch keeps the zoom level, not the altitude (from 50° to flat at one altitude came about a level
++  // closer): the pitch first, and the altitude for it.
++  double zoom = _cameraStop.zoom != nil ? [_cameraStop.zoom doubleValue] : mapView.zoomLevel;
+   if (_cameraStop.pitch != nil) {
+     nextCamera.pitch = [_cameraStop.pitch floatValue];
+   }
+ 
++  if ((_cameraStop.zoom != nil || _cameraStop.pitch != nil) && hasSetAltitude == false) {
++    nextCamera.altitude = [mapView altitudeFromZoom:zoom
++                                         atLatitude:nextCamera.centerCoordinate.latitude
++                                            atPitch:nextCamera.pitch];
++  }
++
+   MLRNCameraWithPadding *cameraWithPadding = [[MLRNCameraWithPadding alloc] init];
+   cameraWithPadding.camera = nextCamera;
+   cameraWithPadding.boundsPadding = padding;
 diff --git a/node_modules/@maplibre/maplibre-react-native/ios/components/camera/MLRNCamera.m b/node_modules/@maplibre/maplibre-react-native/ios/components/camera/MLRNCamera.m
-index f5c8dec..356d188 100644
+index f5c8dec..f68f7d1 100644
 --- a/node_modules/@maplibre/maplibre-react-native/ios/components/camera/MLRNCamera.m
 +++ b/node_modules/@maplibre/maplibre-react-native/ios/components/camera/MLRNCamera.m
 @@ -11,6 +11,8 @@
@@ -791,7 +851,22 @@ index f5c8dec..356d188 100644
    if (_map != nil) {
      if ([self _userTrackingMode] == MLNUserTrackingModeNone) {
        [self _updateCameraFromStop];
-@@ -94,6 +97,23 @@ - (void)_updateCameraFromStop {
+@@ -87,6 +90,14 @@ - (void)_updateCameraFromStop {
+     _map.userTrackingMode = MLNUserTrackingModeNone;
+   }
+ 
++  // wtf.ai: leaving the app-fed follow, the props hold no camera, only the default padding. Applied, it took the follow
++  // padding off at once, and the dot jumped from its anchor to the middle (with tilt, no view without that padding
++  // looks the same): a stop that moves nothing leaves the map as the gesture has it.
++  if ([_map usesAppUserLocation] && _stop[@"center"] == nil && _stop[@"bounds"] == nil && _stop[@"zoom"] == nil &&
++      _stop[@"pitch"] == nil && _stop[@"bearing"] == nil) {
++    return;
++  }
++
+   if (_stop != nil) {
+     [cameraUpdateQueue enqueue:[CameraStop fromDictionary:_stop]];
+     [cameraUpdateQueue execute:_map];
+@@ -94,6 +105,23 @@ - (void)_updateCameraFromStop {
  }
  
  - (void)_updateCameraFromTrackUserLocation {
@@ -815,7 +890,7 @@ index f5c8dec..356d188 100644
    MLNMapCamera *camera = _map.camera;
  
    if (_stop != nil) {
-@@ -120,6 +140,81 @@ - (void)_updateCameraFromTrackUserLocation {
+@@ -120,6 +148,81 @@ - (void)_updateCameraFromTrackUserLocation {
    }
  }
  
