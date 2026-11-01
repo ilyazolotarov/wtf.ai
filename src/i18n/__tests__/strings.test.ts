@@ -8,6 +8,10 @@ const placeholders = (s: string) => [...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1
 
 /** Strings that are the same in both languages on purpose: names and symbols. */
 const SAME_IN_BOTH = new Set<keyof typeof en>([
+  // Stops on the way: symbols (a detour being worked out, none, open around the clock).
+  "alongCounting",
+  "detourNone",
+  "open24h",
   "gpsOk",
   "vin",
   "englishLanguage",
