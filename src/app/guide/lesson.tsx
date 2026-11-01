@@ -1,6 +1,6 @@
 import { router, useLocalSearchParams } from "expo-router";
 import { useRef, useState } from "react";
-import { Pressable, StyleSheet, type ScrollView } from "react-native";
+import { Pressable, StyleSheet, type ScrollViewInstance } from "react-native";
 
 import { AVAILABLE_LESSONS, LessonBody } from "@/components/guide/lesson-bodies";
 import { NextTabContext, ScrollLockContext, type NextTab } from "@/components/guide/lesson-ui";
@@ -23,7 +23,7 @@ export default function LessonScreen() {
   // A lesson's map being dragged (placing the car) holds the page still.
   const [locked, setLocked] = useState(false);
   const [nextTab, setNextTab] = useState<NextTab | null>(null);
-  const scroll = useRef<ScrollView>(null);
+  const scroll = useRef<ScrollViewInstance>(null);
   const index = AVAILABLE_LESSONS.findIndex((lesson) => lesson.id === id);
   const lesson = AVAILABLE_LESSONS[index];
   if (!lesson) return <ScreenContent title={t("guideTitle")} />;

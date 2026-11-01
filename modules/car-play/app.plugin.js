@@ -1,7 +1,7 @@
 // Config plugin for modules/car-play (docs/CARPLAY-SPEC.md §3). Never edit ios/ by hand; prebuild applies this.
-// The phone's scene comes from expo-build-properties' `ios.enableSceneSupport` (SDK 57; the template's own from SDK 58);
-// this adds the CarPlay scene beside it, the navigation app's entitlement when `CARPLAY_ENTITLEMENT` is set, and the
-// map links another app opens a navigator with.
+// The phone's scene is the prebuild template's (SDK 58: SceneDelegate.swift and its scene manifest); this adds the
+// CarPlay scene beside it, the navigation app's entitlement when `CARPLAY_ENTITLEMENT` is set, and the map links
+// another app opens a navigator with.
 const { withBaseMod, withEntitlementsPlist } = require("expo/config-plugins");
 
 /**
@@ -16,7 +16,7 @@ const CARPLAY_SCENE = {
   UISceneClassName: "CPTemplateApplicationScene",
   UISceneConfigurationName: "CarPlay",
   // `@objc(WTFCarPlaySceneDelegate)` in ios/CarPlaySceneDelegate.swift: a pod's Swift class has no module prefix to
-  // resolve, so it is found by its Objective-C name, as Expo's own EXExpoAppSceneDelegate is.
+  // resolve, so it is found by its Objective-C name.
   UISceneDelegateClassName: "WTFCarPlaySceneDelegate",
 };
 
@@ -38,10 +38,10 @@ function addMapLinks(urlTypes) {
 function addCarPlayScene(manifest) {
   if (!manifest?.UISceneConfigurations?.UIWindowSceneSessionRoleApplication) {
     throw new Error(
-      "modules/car-play needs the scene life cycle: set ios.enableSceneSupport in expo-build-properties (SDK 57).",
+      "modules/car-play needs the scene life cycle: the prebuild template's scene manifest (SDK 58) is missing.",
     );
   }
-  // A copy: expo-build-properties hands over its own constant, which it compares against on the next run.
+  // A copy: the manifest belongs to the template's Info.plist, not to this plugin.
   return {
     ...manifest,
     // Phone and car screens at once.
@@ -60,8 +60,8 @@ module.exports = function withCarPlay(config) {
       return cfg;
     });
   }
-  // After every other plugin's Info.plist change, whatever the order in app.json: expo-build-properties refuses a scene
-  // manifest it didn't write, so the CarPlay scene goes in once it has written its own.
+  // After every other plugin's Info.plist change, whatever the order in app.json, so the CarPlay scene goes into the
+  // manifest as prebuild writes it.
   return withBaseMod(config, {
     platform: "ios",
     mod: "infoPlist",

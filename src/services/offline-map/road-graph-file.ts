@@ -30,7 +30,7 @@ export function fileHandleByteSource(file: File): ByteSource & { close(): void }
     size,
     read(offset, length) {
       handle.offset = offset;
-      const bytes = handle.readBytes(length);
+      const bytes = handle.readBytesSync(length);
       if (bytes.byteLength !== length) throw new Error(`short read at ${offset}: ${bytes.byteLength} of ${length}`);
       return bytes;
     },

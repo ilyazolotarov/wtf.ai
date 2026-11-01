@@ -26,7 +26,7 @@ function* readChunks(file: File): Generator<Uint8Array> {
   const handle = file.open(FileMode.ReadOnly);
   try {
     for (;;) {
-      const chunk = handle.readBytes(ARCHIVE_CHUNK);
+      const chunk = handle.readBytesSync(ARCHIVE_CHUNK);
       if (chunk.length === 0) return;
       yield chunk;
     }
@@ -48,7 +48,7 @@ export function createTripFiles(): TripFiles {
       const handle = file.open(FileMode.Append);
       return {
         uri: file.uri,
-        write: (bytes) => handle.writeBytes(bytes),
+        write: (bytes) => handle.writeBytesSync(bytes),
         close: () => handle.close(),
       };
     },
@@ -74,7 +74,7 @@ export function createTripFiles(): TripFiles {
       const out = new File(archives, archiveName);
       out.create();
       const handle = out.open(FileMode.Truncate);
-      const zip = new ZipWriter({ write: (bytes) => handle.writeBytes(bytes), close: () => handle.close() });
+      const zip = new ZipWriter({ write: (bytes) => handle.writeBytesSync(bytes), close: () => handle.close() });
       try {
         for (const e of entries) {
           const file = new File(dir, e.name);

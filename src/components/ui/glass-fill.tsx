@@ -1,6 +1,6 @@
 import { BlurTargetView, BlurView } from "expo-blur";
 import { createContext, useContext, useRef, type PropsWithChildren, type RefObject } from "react";
-import { Platform, StyleSheet, useColorScheme, View } from "react-native";
+import { Platform, StyleSheet, useColorScheme, View, type ViewInstance } from "react-native";
 
 import { usePalette } from "@/constants/theme";
 
@@ -11,10 +11,10 @@ import { usePalette } from "@/constants/theme";
  * (Until 2026-10-14 the target's ref was provided inside the BlurTarget, around the map only: no panel ever saw it,
  * and every Android panel was the dense tint.)
  */
-const BlurTargetContext = createContext<RefObject<View | null> | null>(null);
+const BlurTargetContext = createContext<RefObject<ViewInstance | null> | null>(null);
 
 export function BlurScope({ children }: PropsWithChildren) {
-  const ref = useRef<View | null>(null);
+  const ref = useRef<ViewInstance | null>(null);
   if (Platform.OS !== "android") return <>{children}</>;
   return <BlurTargetContext.Provider value={ref}>{children}</BlurTargetContext.Provider>;
 }

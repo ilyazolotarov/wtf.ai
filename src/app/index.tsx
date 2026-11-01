@@ -1,7 +1,7 @@
 import { useKeepAwake } from "expo-keep-awake";
 import { router, useIsFocused } from "expo-router";
 import { useEffect, useEffectEvent, useRef, useState, useSyncExternalStore } from "react";
-import { Platform, StyleSheet, useWindowDimensions, View } from "react-native";
+import { Platform, StyleSheet, useWindowDimensions, View, type ViewInstance } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomBar } from "@/components/map/bottom-bar";
@@ -202,9 +202,9 @@ export default function HomeScreen() {
   const [tourOffered, setTourOffered] = useState(isTourOffered);
   // The status stop's hole follows the top stack as it unfolds.
   const [tourLayout, setTourLayout] = useState(0);
-  const statusRef = useRef<View>(null);
-  const followRef = useRef<View>(null);
-  const toolbarRef = useRef<View>(null);
+  const statusRef = useRef<ViewInstance>(null);
+  const followRef = useRef<ViewInstance>(null);
+  const toolbarRef = useRef<ViewInstance>(null);
   const [tourTargets] = useState(() => ({ status: statusRef, follow: followRef, toolbar: toolbarRef }));
   const answerTour = (take: boolean) => {
     markTourOffered();

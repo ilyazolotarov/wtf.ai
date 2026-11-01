@@ -6,6 +6,7 @@ import {
   useWindowDimensions,
   View,
   type StyleProp,
+  type ViewInstance,
   type ViewStyle,
 } from "react-native";
 import Svg, { Path } from "react-native-svg";
@@ -20,10 +21,10 @@ import { useT } from "@/i18n/provider";
 /** The map controls the tour points at, measured in window coordinates when it starts and as their layout changes. */
 export interface TourTargets {
   /** The top stack: the status pill, and its explanation once unfolded. */
-  status: RefObject<View | null>;
-  follow: RefObject<View | null>;
+  status: RefObject<ViewInstance | null>;
+  follow: RefObject<ViewInstance | null>;
   /** The bottom bar: Route, Vehicle, More in equal thirds (padding 6, gap 4). */
-  toolbar: RefObject<View | null>;
+  toolbar: RefObject<ViewInstance | null>;
 }
 
 interface Box {

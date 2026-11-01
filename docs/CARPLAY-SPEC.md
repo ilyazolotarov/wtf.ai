@@ -26,13 +26,12 @@ car's screen is no help otherwise.
 
 CarPlay draws in a `CPTemplateApplicationScene`, so the app adopts the UIKit scene life cycle:
 
-- **SDK 57**: `ios.enableSceneSupport` in expo-build-properties (app.json). Prebuild moves the window out of
-  `AppDelegate` into Expo's `EXExpoAppSceneDelegate`, which creates it when the phone's scene connects and starts
-  React Native into it. **SDK 58** makes this the template's default (the iOS 27 SDK requires it): the costs below
-  come with the next SDK upgrade whether or not CarPlay ships.
+- The prebuild template (SDK 58; the iOS 27 SDK requires the scene life cycle) declares the phone's scene, whose
+  `SceneDelegate` (Expo's `ExpoAppSceneDelegate`) creates the window when that scene connects and starts React Native
+  into it. The costs below come with the SDK, whether or not CarPlay ships.
 - `modules/car-play/app.plugin.js` adds the CarPlay scene beside the phone's (`WTFCarPlaySceneDelegate`),
   `UIApplicationSupportsMultipleScenes` (phone and car at once) and, with `CARPLAY_ENTITLEMENT=1`, the entitlement. It
-  runs after expo-build-properties whatever the order in app.json (that plugin refuses a manifest it didn't write).
+  runs after every other plugin's Info.plist change, whatever the order in app.json.
   Jest: `modules/car-play/__tests__/app-plugin.test.ts`.
 
 - The plugin also adds the map links' URL types (`geo`, `google.navigation`): iOS opens the app for them as Android does

@@ -1,5 +1,5 @@
 import type { Ref } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { Pressable, StyleSheet, type ViewInstance } from "react-native";
 
 import { GlassFill } from "@/components/ui/glass-fill";
 import { Icon, type IconName } from "@/components/ui/icon";
@@ -18,7 +18,7 @@ const CAMERA: Record<CameraMode, { icon: IconName; label: "follow" | "followHead
 };
 
 /** Shows the camera mode; a tap goes between heading-up and follow, and from free to heading-up (UI-SPEC §6.2). */
-export function CameraButton({ mode, onPress, ref }: { mode: CameraMode; onPress(): void; ref?: Ref<View> }) {
+export function CameraButton({ mode, onPress, ref }: { mode: CameraMode; onPress(): void; ref?: Ref<ViewInstance> }) {
   const { t } = useT();
   const palette = usePalette();
   const panel = usePanelStyle();

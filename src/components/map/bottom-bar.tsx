@@ -1,6 +1,6 @@
 import { Link } from "expo-router";
 import { useEffect, useState, type Ref } from "react";
-import { Animated, Pressable, StyleSheet, View, type LayoutChangeEvent } from "react-native";
+import { Animated, Pressable, StyleSheet, View, type LayoutChangeEvent, type ViewInstance } from "react-native";
 
 import { useLinkBadge, type LinkBadge } from "@/components/status/use-nav-status";
 import { GlassFill } from "@/components/ui/glass-fill";
@@ -26,7 +26,7 @@ export function BottomBar({
   recording: boolean;
   onLayout(e: LayoutChangeEvent): void;
   /** The bar, for the map tour. */
-  ref?: Ref<View>;
+  ref?: Ref<ViewInstance>;
 }) {
   const { t } = useT();
   const panel = usePanelStyle();

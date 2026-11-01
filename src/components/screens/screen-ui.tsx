@@ -8,6 +8,7 @@ import {
   StyleSheet,
   useWindowDimensions,
   View,
+  type ScrollViewInstance,
   type StyleProp,
   type ViewStyle,
 } from "react-native";
@@ -30,7 +31,7 @@ export function ScreenContent({
   fullScreen = false,
   scrollRef,
   children,
-}: React.PropsWithChildren<{ title?: string; scrollEnabled?: boolean; fullScreen?: boolean; scrollRef?: Ref<ScrollView> }>) {
+}: React.PropsWithChildren<{ title?: string; scrollEnabled?: boolean; fullScreen?: boolean; scrollRef?: Ref<ScrollViewInstance> }>) {
   const palette = usePalette();
   const insets = useSafeAreaInsets();
   if (title)

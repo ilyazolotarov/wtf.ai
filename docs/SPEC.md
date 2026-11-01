@@ -29,7 +29,7 @@ wheel speeds from the CAN bus where the adapter and car allow) and heading rate 
 | --- | --- |
 | Platform | **iOS first**; **Android** for testers' own phones, sideloaded as an APK from CI ([ANDROID-SPEC.md](ANDROID-SPEC.md), [ANDROID-TESTING.md](ANDROID-TESTING.md)). |
 | Dev environment | Windows only, no Mac, **no paid Apple Developer account**. iOS builds: GitHub Actions macOS runner, `expo prebuild` + `xcodebuild` with signing disabled → unsigned IPA, sideloaded with **AltStore**. **No EAS.** JS-only changes reach Release builds over the air from our own update server ([OTA.md](OTA.md)). CI: [CI.md](CI.md). |
-| Framework | Expo SDK 57, Expo Router, TypeScript. Dev builds only (no Expo Go). |
+| Framework | Expo SDK 58, Expo Router, TypeScript. Dev builds only (no Expo Go). |
 | Odometry roadmap | **Staged** (§2.1). Each stage is a drop-in odometry source; the EKF, integrity and map matching don't change between stages. |
 | Adapter protocol | Plain ELM327 command subset for polling (§3.1); STN commands only for identification (`STI`) and the CAN monitor on STN adapters. |
 | Adapter transport | iOS: **BLE** (CoreBluetooth, no MFi: any Bluetooth 4.0+ LE ELM327) and **MFi Classic Bluetooth** (`ExternalAccessory`: OBDLink MX+, vLinker FS/MS). Android: BLE and Classic SPP. The ELM327 layer is transport-agnostic. |

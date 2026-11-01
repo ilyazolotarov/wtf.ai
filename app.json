@@ -144,9 +144,6 @@
           "android": {
             "minSdkVersion": 29,
             "enableMinifyInReleaseBuilds": true
-          },
-          "ios": {
-            "enableSceneSupport": true
           }
         }
       ],

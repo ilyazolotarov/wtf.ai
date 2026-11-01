@@ -1,5 +1,5 @@
 // Config plugin for modules/car-play: the CarPlay scene beside the phone's (docs/CARPLAY-SPEC.md §3). The mods'
-// order with expo-build-properties is checked by `npx expo config --type introspect`, not here.
+// place after the other plugins' Info.plist changes is checked by `npx expo config --type introspect`, not here.
 
 jest.mock("expo/config-plugins", () => ({
   withBaseMod: jest.fn((config: any) => config),
@@ -11,12 +11,12 @@ jest.mock("expo/config-plugins", () => ({
 const withCarPlay = require("../app.plugin.js");
 const { addCarPlayScene, addMapLinks } = withCarPlay;
 
-/** What expo-build-properties' `ios.enableSceneSupport` writes. */
+/** The phone's scene as the prebuild template's Info.plist declares it (SDK 58). */
 const PHONE_SCENE = {
   UIApplicationSupportsMultipleScenes: false,
   UISceneConfigurations: {
     UIWindowSceneSessionRoleApplication: [
-      { UISceneConfigurationName: "Default Configuration", UISceneDelegateClassName: "EXExpoAppSceneDelegate" },
+      { UISceneConfigurationName: "Default Configuration", UISceneDelegateClassName: "$(PRODUCT_MODULE_NAME).SceneDelegate" },
     ],
   },
 };
@@ -37,7 +37,7 @@ describe("car-play config plugin", () => {
     ]);
   });
 
-  test("leaves expo-build-properties' manifest as it was: it compares against it", () => {
+  test("leaves the manifest it was given as it was", () => {
     const before = JSON.stringify(PHONE_SCENE);
     addCarPlayScene(PHONE_SCENE);
     expect(JSON.stringify(PHONE_SCENE)).toBe(before);
@@ -52,7 +52,7 @@ describe("car-play config plugin", () => {
   });
 
   test("refuses to run without the phone's scene", () => {
-    expect(() => addCarPlayScene(undefined)).toThrow(/enableSceneSupport/);
+    expect(() => addCarPlayScene(undefined)).toThrow(/scene manifest/);
   });
 
   test("claims the navigation entitlement only with CARPLAY_ENTITLEMENT: signing fails before Apple grants it", () => {

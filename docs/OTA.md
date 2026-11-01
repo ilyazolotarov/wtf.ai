@@ -36,7 +36,7 @@ from a branch is not registered.
 - **Release builds only.** `expo-updates` is off in Debug builds (the dev client loads its JS itself), so `main`
   builds Release; a branch with `[build]` still gives a Debug dev client for Metro.
 - **Runtime version = fingerprint** (`runtimeVersion.policy` in `app.json`): a hash of everything native (Expo SDK,
-  native modules, config plugins, `patches/`, `app.json`, …; `fingerprint.config.js` leaves out package.json scripts,
+  native modules (a library by its name and version, `modules/` by its files), config plugins, `patches/`, `app.json`, …; `fingerprint.config.js` leaves out package.json scripts,
   `.gitignore` and app.config's `extra`, which an update carries itself, but keeps the distribution). An update goes only to builds with exactly its runtime version, so JS can never land on a
   binary without the native code it needs. Resolve it in CI (Linux/macOS), never on Windows: line endings change it.
   `.fingerprintignore` leaves out the library `AndroidManifest.xml` files in `node_modules`: React Native's Gradle

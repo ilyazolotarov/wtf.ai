@@ -136,7 +136,7 @@ src/components/car-screen/car-session.ts ◀───────┘  route, pla
     the camera (direct commands) moving. While the car's map shows, `CarFabricFrames` keeps them running and restarts
     them after each pause; after, they follow the activity again.
   - MapLibre's React Native map pauses and is destroyed with the activity. A map on another display ignores the
-    activity (`patches/@maplibre+maplibre-react-native+11.4.0.patch`) and is disposed with its React view.
+    activity (`patches/@maplibre+maplibre-react-native+11.5.1.patch`) and is disposed with its React view.
   - The same patch drops a camera command that arrives after a JS reload or an applied update has torn the React
     context down (`ReactTagResolver`; unpatched, a NullPointerException). The car's map sends one every frame, so it
     meets that window.

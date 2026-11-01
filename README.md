@@ -28,7 +28,7 @@ What works:
 
 Not yet: a CAN yaw rate (Stage 3 of [the spec](docs/SPEC.md)).
 
-Built with Expo SDK 57, React Native, TypeScript and Expo Router. Development happens on Windows; unsigned iOS builds come from GitHub Actions macOS runners and are sideloaded with AltStore. Android APKs come from the same CI ([docs/ANDROID-TESTING.md](docs/ANDROID-TESTING.md)).
+Built with Expo SDK 58, React Native, TypeScript and Expo Router. Development happens on Windows; unsigned iOS builds come from GitHub Actions macOS runners and are sideloaded with AltStore. Android APKs come from the same CI ([docs/ANDROID-TESTING.md](docs/ANDROID-TESTING.md)).
 
 ## Configuration: your own servers
 

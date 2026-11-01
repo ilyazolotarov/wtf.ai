@@ -8,7 +8,7 @@ jest.mock("expo/config-plugins", () => ({
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { patchGradle, patchGradleProperties } = require("../android-build.js");
 
-// The relevant part of the SDK 57 prebuild template (android/app/build.gradle).
+// The relevant part of the SDK 58 prebuild template (android/app/build.gradle).
 const TEMPLATE = `android {
     signingConfigs {
         debug {

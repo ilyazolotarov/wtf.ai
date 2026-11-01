@@ -265,7 +265,7 @@ index 0000000..ba435af
 +    }
 +}
 diff --git a/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/LocationComponentManager.kt b/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/LocationComponentManager.kt
-index fca5b22..2dec495 100644
+index 5f0cc06..5b38be9 100644
 --- a/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/LocationComponentManager.kt
 +++ b/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/LocationComponentManager.kt
 @@ -2,14 +2,21 @@ package org.maplibre.reactnative.components.location
@@ -290,7 +290,7 @@ index fca5b22..2dec495 100644
  import org.maplibre.reactnative.R
  import org.maplibre.reactnative.components.mapview.MLRNMapView
  import org.maplibre.reactnative.location.LocationManager
-@@ -38,6 +45,254 @@ class LocationComponentManager(
+@@ -40,6 +47,254 @@ class LocationComponentManager(
  
      private var mShowingUserLocation = false
  
@@ -545,7 +545,7 @@ index fca5b22..2dec495 100644
      private var mOnCameraTrackingChangedListener: OnCameraTrackingChangedListener? = null
  
      init {
-@@ -94,6 +349,11 @@ class LocationComponentManager(
+@@ -93,6 +348,11 @@ class LocationComponentManager(
  
      @SuppressLint("MissingPermission")
      private fun stateChanged() {
@@ -557,7 +557,7 @@ index fca5b22..2dec495 100644
          mLocationComponent?.setLocationComponentEnabled((mFollowUserLocation || mShowUserLocation))
  
          if (mShowingUserLocation != mShowUserLocation) {
-@@ -122,6 +382,10 @@ class LocationComponentManager(
+@@ -121,6 +381,10 @@ class LocationComponentManager(
          displayUserLocation: Boolean,
          style: Style,
      ) {

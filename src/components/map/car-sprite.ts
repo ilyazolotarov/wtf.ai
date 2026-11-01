@@ -42,7 +42,7 @@ async function install(): Promise<void> {
   for (const n of NAMES) {
     await new File(localUri).copy(new File(dir, `${n}.png`), { overwrite: true });
     // The index last: its presence says the sheet beside it is whole.
-    new File(dir, `${n}.json`).write(JSON.stringify(SPRITE.images));
+    new File(dir, `${n}.json`).writeSync(JSON.stringify(SPRITE.images));
   }
   url = null;
   if (installed()) listeners.forEach((l) => l());

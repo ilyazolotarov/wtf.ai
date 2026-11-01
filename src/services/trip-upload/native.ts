@@ -49,9 +49,9 @@ export async function putPart(url: string, fileUri: string, offset: number, leng
   try {
     from.offset = offset;
     for (let left = length; left > 0; ) {
-      const bytes = from.readBytes(Math.min(COPY_CHUNK, left));
+      const bytes = from.readBytesSync(Math.min(COPY_CHUNK, left));
       if (bytes.length === 0) throw new Error(`short read at ${offset + length - left} of ${fileUri}`);
-      to.writeBytes(bytes);
+      to.writeBytesSync(bytes);
       left -= bytes.length;
     }
   } finally {

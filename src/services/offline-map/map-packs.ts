@@ -317,7 +317,7 @@ function saveJob() {
 function saveInstalled(installed: InstalledState) {
   const root = ROOT();
   if (!root.exists) root.create({ intermediates: true });
-  INSTALLED().write(JSON.stringify(installed));
+  INSTALLED().writeSync(JSON.stringify(installed));
   setState({ installed });
 }
 

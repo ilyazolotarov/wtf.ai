@@ -4,7 +4,8 @@
 // support address or Sentry DSN goes out as an update instead of orphaning every installed build (2026-10-14: a support
 // email alone made a new runtime). Except the distribution: store and sideloaded builds must never share a runtime,
 // or one's updates (AltStore, the APK installer, trip upload) would reach the other. Anything else native, from
-// app.json to patches/, still makes a new runtime that needs a new IPA/APK.
+// app.json to patches/, still makes a new runtime that needs a new IPA/APK. A library in node_modules counts by its name
+// and version (the SDK's `balanced` preset), the app's own modules/ by their files.
 /** @type {import('expo/fingerprint').Config} */
 const config = {
   sourceSkips: ["PackageJsonScriptsAll", "GitIgnore", "ExpoConfigExtraSection"],
