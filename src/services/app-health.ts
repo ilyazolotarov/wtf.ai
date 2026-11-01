@@ -26,7 +26,7 @@ export interface AppHealthDeps {
   record(r: AppStatsRecord): void;
   note(text: string): void;
   /** An ending worth knowing about without the log (Sentry). */
-  report(message: string, extra: Record<string, unknown>): void;
+  report(message: string, extra: Record<string, unknown>, tags: Record<string, string>): void;
   setInterval(fn: () => void, ms: number): unknown;
   clearInterval(handle: unknown): void;
 }
@@ -39,6 +39,8 @@ export class AppHealth {
   private stats: NativeProcessStats | null = null;
   /** The previous run and the OS reports go into the first trip of this process only. */
   private toldPrevious = false;
+  /** What the OS reported since the last launch, taken once. */
+  private reports: HealthReport[] | null = null;
 
   constructor(private readonly deps: AppHealthDeps) {
     this.launch = deps.launchInfo();
@@ -48,16 +50,23 @@ export class AppHealth {
     if (this.timer) return;
     const prev = this.launch.previous;
     if (prev && endedMidTrip(prev)) {
-      this.deps.report("app ended mid-trip without notice", {
-        appState: prev.appState,
-        footprintMb: prev.footprintMb,
-        headroomMb: prev.headroomMb,
-        thermal: prev.thermal,
-        memoryWarnings: prev.memoryWarnings,
-        secondsBeforeLaunch: Math.round((this.launch.wallMs - prev.wallMs) / 1000),
-        launchedInBackground: this.launch.inBackground,
-        launchReasons: this.launch.reasons.join(","),
-      });
+      // The OS's own record of that ending (Android's exit history, an iOS crash report), when it has one.
+      const ending = this.osReports().filter((r) => endedAfter(r, prev.wallMs));
+      this.deps.report(
+        "app ended mid-trip without notice",
+        {
+          appState: prev.appState,
+          footprintMb: prev.footprintMb,
+          headroomMb: prev.headroomMb,
+          thermal: prev.thermal,
+          memoryWarnings: prev.memoryWarnings,
+          secondsBeforeLaunch: Math.round((this.launch.wallMs - prev.wallMs) / 1000),
+          launchedInBackground: this.launch.inBackground,
+          launchReasons: this.launch.reasons.join(","),
+          osReports: ending.map(reportNote).join("; "),
+        },
+        { ended_by: ending.length ? endingName(ending[0]) : "unreported" },
+      );
     }
     this.offWarning = this.deps.onMemoryWarning((level) => {
       const s = this.stats;
@@ -89,7 +98,12 @@ export class AppHealth {
     if (this.toldPrevious) return;
     this.toldPrevious = true;
     if (this.launch.previous) this.deps.note(previousRunNote(this.launch.previous, this.launch.wallMs));
-    for (const r of this.deps.takeReports()) this.deps.note(reportNote(r));
+    for (const r of this.osReports()) this.deps.note(reportNote(r));
+  }
+
+  private osReports(): HealthReport[] {
+    this.reports ??= this.deps.takeReports();
+    return this.reports;
   }
 
   private async poll(): Promise<void> {
@@ -119,6 +133,19 @@ export class AppHealth {
 /** The run before was recording and nothing told it it would end: killed, crashed or swiped away mid-drive. */
 export function endedMidTrip(prev: PreviousRun): boolean {
   return prev.context.startsWith("recording") && prev.willTerminateWallMs === undefined;
+}
+
+/** Heartbeats come every 5 s: an ending reported from shortly before the last one may still be that run's. */
+const ENDING_SLACK_MS = 2 * APP_STATS_EVERY_MS;
+
+/** A process ending (Android exit, iOS crash) after the run last seen at `lastSeenMs`. */
+function endedAfter(r: HealthReport, lastSeenMs: number): boolean {
+  return (r.kind === "exit" || r.kind === "crash") && r.atMs >= lastSeenMs - ENDING_SLACK_MS;
+}
+
+/** One word for how it ended, for grouping in Sentry: "low-memory", "user-requested", "crash". */
+function endingName(r: HealthReport): string {
+  return r.kind === "exit" ? r.reason : r.kind;
 }
 
 export function launchNote(launch: LaunchInfo, ageS: number): string {

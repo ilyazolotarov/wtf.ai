@@ -139,7 +139,9 @@ ended can't log why. What it can, it logs; the next process logs the rest.
   `iOS crash report …`, `Android exit …`). Memory warnings (iOS) and trim levels (Android) are notes when they
   come.
 - **Sentry**: a previous run that was recording and ended without notice is a warning event (`app ended mid-trip
-  without notice`) with the heartbeat's numbers: known without the trip log.
+  without notice`, one issue: grouped by the message) with the heartbeat's numbers and the OS's record of that
+  ending (Android exits and iOS crash reports from the last heartbeat on, as their notes), tagged `ended_by` (the
+  exit reason, `crash`, or `unreported`): known without the trip log.
 
 ## 5. Sensor capture (`modules/sensor-capture`)
 

@@ -71,7 +71,8 @@ export async function downloadBuild(build: AppBuildInfo, onProgress: (bytes: num
   folder.create({ intermediates: true, idempotent: true });
   const dest = new File(folder, build.file);
   if (dest.exists) dest.delete();
-  const task = new DownloadTask(buildFileUrl(build), dest, { onProgress: ({ bytesWritten }) => onProgress(bytesWritten) });
+  // iOS sends the count as a BigInt (Swift's Int64), despite the `number` type.
+  const task = new DownloadTask(buildFileUrl(build), dest, { onProgress: ({ bytesWritten }) => onProgress(Number(bytesWritten)) });
   const abort = () => task.cancel();
   signal.addEventListener("abort", abort);
   try {
