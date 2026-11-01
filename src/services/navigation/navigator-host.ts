@@ -5,7 +5,7 @@
 
 import type { CompassCalibration } from "@/nav/compass/compass";
 import type { MapMatchConfig } from "@/nav/mapmatch/particle-filter";
-import { Navigator, type FixOutcome, type NavConfig, type ParkedPose, type UserPosition } from "@/nav/navigator";
+import { Navigator, type FixOutcome, type MapMatchGraph, type NavConfig, type ParkedPose, type UserPosition } from "@/nav/navigator";
 import type { CanSpeedSample } from "@/nav/odometry/can/can-speed";
 import type { WheelYawCalibration } from "@/nav/odometry/can/wheel-yaw-calibration";
 import { WheelYawSource } from "@/nav/odometry/can/wheel-yaw-source";
@@ -129,7 +129,7 @@ export class LocalNavigatorHost implements NavigatorHost {
     this.navigator = null;
   }
 
-  setRoadGraph(graph: ActiveRoadGraph | null, config?: Partial<MapMatchConfig>): void {
+  setRoadGraph(graph: { graph: MapMatchGraph } | null, config?: Partial<MapMatchConfig>): void {
     this.navigator?.setRoadGraph(graph?.graph ?? null, config);
   }
 

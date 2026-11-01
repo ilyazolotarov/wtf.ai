@@ -279,12 +279,14 @@ src/triplog/             pure TS: ULog encoder and reader, trip log schemas, tri
 src/services/            RN glue: navigation (navigator, routes, places), position, vehicle-link, sensor-capture, trip-recorder,
                          trip-upload, offline-map, app-update, guide, telemetry; runtime.ts creates them once
 src/providers/           React bindings of the services; src/components/ UI; src/i18n/ strings (en, uk); src/config/ map styles, Sentry, distribution
+src/workers/             worklets worker runtimes: the navigator's (NAVIGATOR-SPEC §9)
 modules/vehicle-link/    Expo module (Swift, Kotlin): BLE + EA (MFi) on iOS, BLE + Classic SPP on Android; config plugin for permissions
 modules/sensor-capture/  Expo module (Swift, Kotlin): GNSS and IMU capture, batched; the Android trip foreground service
 modules/audio-output/    Expo module (Swift, Kotlin): where the phone plays audio, the system output picker, play on the speaker
 modules/app-notice/      Expo module (Kotlin): Android's local "update ready" notification (UPDATES-SPEC §5.2)
 modules/android-auto/    Expo module (Kotlin): the Android Auto car app: templates, the map's surface, the session (ANDROID-AUTO-SPEC)
 modules/car-play/        Expo module (Swift): the CarPlay scene, its templates for the car session (CARPLAY-SPEC)
+modules/graph-bytes/     Expo module (C++ JSI, Swift, Kotlin): random access file reads on any runtime (the navigator's worker)
 native-tests/            XCTest for the modules' Foundation-only Swift logic (Package.swift at the root)
 native-tests-android/    JUnit for the modules' plain-Kotlin logic
 tools/replay/            replay CLI, viewer, benchmarks, route tools over src/nav/replay (Node)
@@ -316,6 +318,10 @@ against the gyro's vertical yaw rate).
 
 - Follow [AGENTS.md](../AGENTS.md) (Expo rules, `npx expo install`, no hand-editing `ios/`/`android/`).
 - `src/nav/**`, `src/obd/**` and `src/triplog/**` stay pure TypeScript with no React Native / Expo imports.
+- Code on a worker runtime (worklets Bundle Mode, `src/workers/`): its worklets import relatively (the files
+  generated for them resolve no `@/`), and nothing they import at run time reaches React Native or Expo modules,
+  which don't run there; files reach the worker through `modules/graph-bytes`. The navigator's host and protocol
+  (`navigator-host.ts`, `navigator-remote.ts`) keep to this.
 - Native modules stay thin: I/O and bridging only. Non-trivial Swift logic goes in `modules/*/ios/Logic/`
   (Foundation only, XCTest in `native-tests/`); Android-free Kotlin in `modules/*/android/**/logic/` (JUnit in
   `native-tests-android/`). Payloads use the iOS conventions, so the TypeScript is the same on both platforms. The JS
@@ -358,7 +364,8 @@ routing.
    (woken by the car's Bluetooth), not yet against other vendors' battery killers; a woken trip has GNSS with
    location "all the time", else after a tap on the notification or opening the app.
 6. **Particle filter CPU on the phone**: ~8 ms per update at 500 particles on the test iPhone against a 5 ms budget;
-   smooth at 2–3 updates a second, spikes can drop frames (MAPMATCH-SPEC §14).
+   smooth at 2–3 updates a second, spikes can drop frames (MAPMATCH-SPEC §14). With the navigator on its worker
+   (NAVIGATOR-SPEC §9, a developer setting for now) they stay off the JS thread.
 7. **Routing time on the phone**: A\* in slices on the JS thread; long routes fall back to a stronger heuristic.
 8. **OSM completeness**: missing roads and wrong tags. Mitigated by off-road particles and soft restriction factors.
 9. **Sentry** needs the `SENTRY_DSN` variable and, for readable stack traces, the source map upload secrets

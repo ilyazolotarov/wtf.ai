@@ -11,6 +11,7 @@ const defaults: DevSettings = {
   carReports: true,
   rpmPeriodS: 5,
   positionShare: false,
+  navigatorWorker: false,
 };
 
 describe("loadDevSettings", () => {

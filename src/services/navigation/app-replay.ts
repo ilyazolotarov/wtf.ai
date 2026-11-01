@@ -23,6 +23,7 @@ import { ENGINE_STATE_CODES, type GnssRecord, type ImuMotionRecord, type NavEsti
 import type { KeyValueStore } from "@/obd/vehicle-link-core";
 
 import type { CalibrationStore, PhoneKey, StoredSnapshot } from "./calibration-store";
+import type { NavigatorHost } from "./navigator-host";
 import { NavigatorService, STORAGE_NOTE, toNavFix, type ParkedCar, type ServiceClock } from "./navigator-service";
 
 /** The app's key-value storage in memory: one carried through drives replayed in order, copied to try variants. */
@@ -105,6 +106,11 @@ export interface AppReplayOptions extends Pick<RecorderOptions, "trackStepS" | "
    * drive. Default: as the log says, from the start (`nav_wheel_yaw: on`) and at each note `nav wheel yaw on|off`.
    */
   wheelYaw?: boolean;
+  /**
+   * Where the navigator runs (default in-process): the worker's protocol, to check it reproduces the in-process
+   * navigator. The recorder looks in only in-process: with another host, `published` and `notes` are the result.
+   */
+  navigatorHost?: NavigatorHost;
 }
 
 export interface AppReplayResult extends ReplayResult {
@@ -233,6 +239,7 @@ export function replayTripInApp(logged: TripLog, o: AppReplayOptions): AppReplay
     ...(o.phoneOnly ? { openPhoneGraph: o.phoneOnly.openGraph } : {}),
     nav: o.nav,
     mapMatch: o.mapMatchConfig,
+    navigatorHost: o.navigatorHost,
     observer: {
       navigator: (nav) => rec.use(nav),
       fix: (fix, out) => rec.fixOutcome(fix, out),

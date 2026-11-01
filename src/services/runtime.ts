@@ -10,6 +10,7 @@ import PositionShareModule from "../../modules/position-share/src/PositionShareM
 import VehicleLinkModule from "../../modules/vehicle-link/src/VehicleLinkModule";
 import { RESTORE_IDENTIFIER } from "../../modules/vehicle-link/src/restore";
 import SensorCaptureModule from "../../modules/sensor-capture/src/SensorCaptureModule";
+import { installGraphBytes } from "../../modules/graph-bytes/src/GraphBytesModule";
 import { Sentry, sentryMetricSink } from "@/config/sentry";
 import { TRIP_UPLOAD_URL } from "@/config/trip-upload";
 import type { Profile } from "@/nav/odometry/can/profile";
@@ -21,7 +22,10 @@ import { OnTheWay, poseAfterWake } from "./on-the-way";
 import { LocationSession } from "./location-session";
 import { kvStore } from "./kv-store";
 import { CalibrationStore } from "./navigation/calibration-store";
+import type { NavigatorHost } from "./navigation/navigator-host";
 import { NavigatorService } from "./navigation/navigator-service";
+import { WorkerNavigatorHost } from "./navigation/worker-navigator-host";
+import { startNavigatorWorker } from "../workers/navigator-worker";
 import { ROUTER_CACHE_TILES, RouteService } from "./navigation/route-service";
 import { startUpdateCenter, waitingUpdateInfo } from "./app-update/update-center";
 import { activeCameras } from "./offline-map/camera-file";
@@ -77,6 +81,8 @@ export interface DevSettings {
   rpmPeriodS: number;
   /** More → Waze and Google Maps: share the car's position with other navigators during a trip (ANDROID-SPEC §8). */
   positionShare: boolean;
+  /** The navigator on a worker runtime of its own, off the JS thread (NAVIGATOR-SPEC §9); read at the app's start. */
+  navigatorWorker: boolean;
 }
 
 const DEV_SETTINGS_KEY = "dev.settings";
@@ -123,6 +129,22 @@ export interface Runtime {
 
 let runtime: Runtime | null = null;
 
+/**
+ * The navigator on its worker runtime (NAVIGATOR-SPEC §9), when wanted and this build has the file reader it needs
+ * there (modules/graph-bytes); otherwise undefined: in-process.
+ */
+function navigatorWorkerHost(wanted: boolean): NavigatorHost | undefined {
+  const bytes = wanted ? installGraphBytes() : null;
+  if (!bytes) return undefined;
+  return new WorkerNavigatorHost(startNavigatorWorker(bytes), {
+    nowMs: () => Date.now(),
+    error: (text) => {
+      console.warn(text);
+      Sentry.captureMessage(text, { level: "error", tags: { feature: "navigator" } });
+    },
+  });
+}
+
 export function getRuntime(): Runtime {
   if (runtime) return runtime;
 
@@ -137,6 +159,8 @@ export function getRuntime(): Runtime {
     carReports: true,
     rpmPeriodS: 5,
     positionShare: false,
+    // Tried in development builds first.
+    navigatorWorker: __DEV__,
   };
   let dev: DevSettings = loadDevSettings(kvStore.getJson(DEV_SETTINGS_KEY), defaults);
   const devListeners = new Set<() => void>();
@@ -410,6 +434,7 @@ export function getRuntime(): Runtime {
     sensors,
     link,
     longTasks: jsLongTasks,
+    navigatorHost: navigatorWorkerHost(dev.navigatorWorker),
     // The GNSS lag is stored per phone model and iOS version (NAVIGATOR-SPEC §7.4).
     calibration: new CalibrationStore(kvStore, { model: sysHw, os: sysOsVer }),
     nowUs,

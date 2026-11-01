@@ -45,6 +45,7 @@ example
 /android
 # a local Gradle build's output inside the Expo modules
 /modules/*/android/build/
+/modules/*/android/.cxx/
 
 # Python (tools/)
 __pycache__/

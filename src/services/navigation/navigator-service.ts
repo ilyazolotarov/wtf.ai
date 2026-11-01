@@ -213,6 +213,8 @@ export interface NavigatorServiceDeps {
   onTheWay?: { poseAfterWake(pose: { lat: number; lon: number; savedAt: number }): PoseAfterWake; poseBehind(): void };
   /** What blocked the JS thread (src/services/long-tasks.ts): the filter's work and each publish run labelled on it. */
   longTasks?: { label<T>(name: string, fn: () => T): T; endDrive(): string | null };
+  /** Where the navigator runs: on its worker runtime (WorkerNavigatorHost); in-process without (the observer's needs it). */
+  navigatorHost?: NavigatorHost;
 }
 
 export interface ServiceClock {
@@ -350,7 +352,7 @@ export class NavigatorService implements PositionSource {
   constructor(deps: NavigatorServiceDeps) {
     this.deps = deps;
     this.clock = deps.clock ?? SYSTEM_CLOCK;
-    this.host = new LocalNavigatorHost({ observer: deps.observer, longTasks: deps.longTasks });
+    this.host = deps.navigatorHost ?? new LocalNavigatorHost({ observer: deps.observer, longTasks: deps.longTasks });
     this.held = new ManualHold(deps.calibration, () => this.clock.nowMs());
     this.timing = new MapMatchTiming(() => this.clock.nowMs());
     const open = deps.openLimitGraph;

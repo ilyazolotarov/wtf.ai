@@ -3,6 +3,7 @@
 
 import type { File } from "expo-file-system";
 
+import type { Coordinate } from "@/nav/geo";
 import { LocalFrame } from "@/nav/geo/local-frame";
 import type { ByteSource } from "@/nav/mapmatch/graph/byte-source";
 import { TiledRoadGraph } from "@/nav/mapmatch/graph/road-graph";
@@ -13,6 +14,8 @@ export interface ActiveRoadGraph {
   key: string;
   region: string;
   graph: TiledRoadGraph;
+  /** The file, for a runtime that opens it for itself (the navigator's worker); `centre`: the frame `graph` starts in. */
+  file?: { path: string; centre: Coordinate };
 }
 
 /** Where the navigator gets its road graph; the app's is `activeRoadGraph`, tests pass their own. */
@@ -38,6 +41,11 @@ export function fileHandleByteSource(file: File): ByteSource & { close(): void }
   };
 }
 
+/** A local file's path, from its `file://` URI. */
+function filePath(file: File): string {
+  return decodeURIComponent(file.uri.replace(/^file:\/\//, ""));
+}
+
 let open: (ActiveRoadGraph & { close(): void }) | null = null;
 /** A file that failed to open isn't retried until the installed graph changes. */
 let failedKey: string | null = null;
@@ -54,8 +62,9 @@ function current(): ActiveRoadGraph | null {
     const source = fileHandleByteSource(active.file);
     // The navigator moves the graph into its own frame; until then, the region's centre.
     const [w, s, e, n] = installed.regions[active.region].bounds;
-    const graph = new TiledRoadGraph(source, new LocalFrame({ lat: (s + n) / 2, lon: (w + e) / 2 }));
-    open = { key, region: active.region, graph, close: source.close };
+    const centre = { lat: (s + n) / 2, lon: (w + e) / 2 };
+    const graph = new TiledRoadGraph(source, new LocalFrame(centre));
+    open = { key, region: active.region, graph, file: { path: filePath(active.file), centre }, close: source.close };
     failedKey = null;
     return open;
   } catch (e) {

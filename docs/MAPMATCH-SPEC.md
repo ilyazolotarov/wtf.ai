@@ -13,7 +13,7 @@ Place the car on the offline road network, so that:
 2. Under jamming from the start of a session, the heading comes from matching the OBD + gyro track to the roads,
    sooner than alignment to coarse fixes.
 3. Ambiguity is shown, not hidden: when two roads fit, both stay alive until a turn decides between them.
-4. It works the same for one oblast and for the whole of Ukraine, on the JS thread, within a few ms per update.
+4. It works the same for one oblast and for the whole of Ukraine, on the phone, within a few ms per update.
 
 ## 2. Decisions
 
@@ -510,8 +510,9 @@ repeating; `MEASURED_JAM_ARRIVALS` reproduces the real jams' Wi-Fi bursts and ce
   Beside it, `js long tasks: <n> (<r>/min), p50 … ms, p99 … ms, max … ms, … % of the time; <label> <k> (max … ms), …`
   (`none in … min` when there were none): every task that held the JS thread 50 ms or more (React Native's `longtask`
   entries, `src/services/long-tasks.ts`), counted under the work running then: `mm update` (the navigator fed, the
-  filter in it), `route slice` (a plan's or its alternatives' slice), `smooth frame` (the map's dot between
-  positions), `publish`, else `other`. The map's frame is 33 ms: any of these is a dropped frame while the map moves.
+  filter in it, when it runs in-process: on its worker it holds no JS time, NAVIGATOR-SPEC §9), `route slice` (a
+  plan's or its alternatives' slice), `publish`, else `other`. The map's frame is 33 ms: any of these is a dropped
+  frame while the map moves.
 - **Developer → "Map matching on the map (particles)"** draws the 200 heaviest particles (size by weight, amber
   off-road) and each hypothesis as a dashed ring of its spread labelled with its weight: the navigator's state
   ~300 ms back.
@@ -563,8 +564,9 @@ repeating; `MEASURED_JAM_ARRIVALS` reproduces the real jams' Wi-Fi bursts and ce
    the oblast graph.
 5. PF update < 5 ms p99 on the phone at 500 particles. **Not met** on the test iPhone: ~8 ms median per update (p99
    ~40 ms, the slowest 143 ms; ~25 ms with 2 000 particles at an unknown-heading start), about 10× Node. Smooth at
-   2–3 updates a second; spikes can drop frames. Next: profile one drive's updates on the phone (weighting vs
-   resampling vs tile reads) before cutting particles.
+   2–3 updates a second; spikes can drop frames. With the navigator on its worker (NAVIGATOR-SPEC §9) they hold the
+   worker, not the JS thread. Next: profile one drive's updates on the phone (weighting vs resampling vs tile reads)
+   before cutting particles.
 6. Lint, typecheck, Jest and `tools/tiles` pytest green.
 
 ## 15. Open items

@@ -1,0 +1,45 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'ai.wtf'
+version = '1.0.0'
+
+def reactNativeArchitectures() {
+  def value = project.getProperties().get("reactNativeArchitectures")
+  return value ? value.split(",") : ["armeabi-v7a", "x86", "x86_64", "arm64-v8a"]
+}
+
+android {
+  if (rootProject.hasProperty("ndkVersion")) {
+    ndkVersion rootProject.ext.ndkVersion
+  }
+  namespace = "ai.wtf.graphbytes"
+  defaultConfig {
+    versionCode = 1
+    versionName = "1.0.0"
+    externalNativeBuild {
+      cmake {
+        arguments "-DANDROID_STL=c++_shared", "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON"
+        abiFilters(*reactNativeArchitectures())
+      }
+    }
+  }
+  externalNativeBuild {
+    cmake {
+      path "CMakeLists.txt"
+    }
+  }
+  buildFeatures {
+    prefab true
+  }
+  packagingOptions {
+    // React Native's own, loaded by the app.
+    excludes += ["**/libc++_shared.so", "**/libfbjni.so", "**/libjsi.so", "**/libreactnative.so"]
+  }
+}
+
+dependencies {
+  implementation 'com.facebook.react:react-android'
+}
