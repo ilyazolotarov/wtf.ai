@@ -11,6 +11,7 @@ import { RouteBanner } from "@/components/route/route-banner";
 import { hushVoice } from "@/components/route/voice-player";
 import { cardinal, formatDistance, toDegrees } from "@/components/status/format-geo";
 import { Icon } from "@/components/ui/icon";
+import { PressableFeedback } from "@/components/ui/press-feedback";
 import { T } from "@/components/ui/text";
 import { Radius, usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
@@ -140,7 +141,7 @@ export function LessonRoute() {
               <MapCard style={styles.bottom}>
                 <MapCardHeader icon="place" title={t("droppedPin")} body={fromDot(pin)} onClose={() => setPin(null)} closeLabel={t("cancel")} />
                 <View style={styles.pinActions}>
-                  <Pressable
+                  <PressableFeedback
                     // As the map: "I'm here" puts the car where the pin is, then asks which way it faces.
                     onPress={() => {
                       setAiming(pin);
@@ -148,23 +149,23 @@ export function LessonRoute() {
                       setPin(null);
                     }}
                     accessibilityRole="button"
-                    style={({ pressed }) => [styles.pinButton, { backgroundColor: palette.surface }, pressed && styles.pressed]}
+                    style={[styles.pinButton, { backgroundColor: palette.surface }]}
                   >
-                    <Icon name="location_on" size={16} color={palette.accent} />
-                    <T w="semibold" size={15} color={palette.accent}>
+                    <Icon name="location_on" size={16} color={palette.text} />
+                    <T w="semibold" size={15} color={palette.text}>
                       {t("placeMeHere")}
                     </T>
-                  </Pressable>
-                  <Pressable
+                  </PressableFeedback>
+                  <PressableFeedback
                     onPress={() => routeTo(pin)}
                     accessibilityRole="button"
-                    style={({ pressed }) => [styles.pinButton, { backgroundColor: palette.accent }, pressed && styles.pressed]}
+                    style={[styles.pinButton, { backgroundColor: palette.accent }]}
                   >
                     <Icon name="alt_route" size={16} color={palette.onAccent} />
                     <T w="semibold" size={15} color={palette.onAccent}>
                       {t("routeHere")}
                     </T>
-                  </Pressable>
+                  </PressableFeedback>
                 </View>
               </MapCard>
             )}
@@ -221,10 +222,11 @@ export function LessonRoute() {
                   {PLACES.map((place, i) => (
                     <Fragment key={place.name}>
                       {i > 0 && <View style={[styles.line, { backgroundColor: palette.line }]} />}
-                      <Pressable
+                      <PressableFeedback
+                        look="row"
                         onPress={() => setChosen(place)}
                         accessibilityRole="button"
-                        style={({ pressed }) => [styles.place, pressed && styles.pressed]}
+                        style={styles.place}
                       >
                         <View style={[styles.placeIcon, { backgroundColor: palette.accentA }]}>
                           <Icon name={place.icon} size={16} color={palette.accent} />
@@ -232,7 +234,7 @@ export function LessonRoute() {
                         <T w="medium" size={15}>
                           {t(place.name)}
                         </T>
-                      </Pressable>
+                      </PressableFeedback>
                     </Fragment>
                   ))}
                 </View>
@@ -247,15 +249,15 @@ export function LessonRoute() {
                     <T size={13} color={palette.text2}>
                       {fromDot(chosen.at)}
                     </T>
-                    <Pressable
+                    <PressableFeedback
                       onPress={() => routeTo(chosen.at)}
                       accessibilityRole="button"
-                      style={({ pressed }) => [styles.start, { backgroundColor: palette.accent }, pressed && styles.pressed]}
+                      style={[styles.start, { backgroundColor: palette.accent }]}
                     >
                       <T w="semibold" size={15} color={palette.onAccent}>
                         {t("startGuidance")}
                       </T>
-                    </Pressable>
+                    </PressableFeedback>
                   </View>
                 )}
               </View>
@@ -316,7 +318,6 @@ const styles = StyleSheet.create({
     gap: 8,
     borderRadius: Radius.pill,
   },
-  pressed: { opacity: 0.75 },
   search: { ...StyleSheet.absoluteFill, padding: 14, gap: 12 },
   field: { height: 44, borderRadius: Radius.pill, flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14 },
   list: { borderRadius: 20, paddingHorizontal: 12 },

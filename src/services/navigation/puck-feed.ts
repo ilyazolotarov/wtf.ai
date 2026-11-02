@@ -19,6 +19,12 @@ const HEADING_TAKES_OVER_RAD = (3 * Math.PI) / 180;
 const LEAD_MIN_MS = 50;
 const LEAD_MAX_MS = 1000;
 const DEFAULT_INTERVAL_MS = 100;
+/**
+ * The feed interval is the longest of the last few: the IMU batches come every ~100 ms with one close behind another a
+ * quarter of the time (16–40 ms), and a lead of their average (~75 ms) ended each ease before the next pose came, the
+ * dot and the camera standing a quarter of the drive. The longest of 6 leaves them standing ~2 %.
+ */
+const INTERVAL_WINDOW = 6;
 const M_PER_DEG_LAT = 111_320;
 
 /** The navigator's estimate after an advance (an IMU batch fed): NAVIGATOR-SPEC §9. */
@@ -64,6 +70,7 @@ export class PuckFeed {
   private lastAdvanceAtMs = 0;
   private lastPublishAtMs = 0;
   private intervalMs = DEFAULT_INTERVAL_MS;
+  private intervals: number[] = [];
   private lastFed: FedPose | null = null;
   private lastSource: PositionEstimate["source"] | null = null;
 
@@ -83,7 +90,16 @@ export class PuckFeed {
       return null;
     }
     const moving = fedMoving(p);
-    return this.pose(p, 0, 0, p.headingRad, moving ? this.intervalMs : 0);
+    // In a turn the published heading is the matched road's until the car is on the next one: fed as it is, every
+    // publish swung the course (and the heading-up camera) back up to 45° and the next step forward again.
+    const a = this.lastAdvance;
+    const heading = moving && a && now - this.lastAdvanceAtMs <= LEAD_MAX_MS ? this.heading(p, a) : p.headingRad;
+    return this.pose(p, 0, 0, heading, moving ? this.intervalMs : 0);
+  }
+
+  /** The estimate's heading once it turned from the published one (a turn under way), else the published. */
+  private heading(p: PositionEstimate & { headingRad: number }, a: NavAdvance): number {
+    return a.headingRad !== undefined && Math.abs(wrapRad(a.headingRad - p.headingRad)) > HEADING_TAKES_OVER_RAD ? a.headingRad : p.headingRad;
   }
 
   /** The navigator advanced: the published dot moved on by the estimate's displacement since the publish. */
@@ -96,13 +112,14 @@ export class PuckFeed {
     const base = this.baseAdvance;
     if (!p || !base || !fedMoving(p)) return null;
     const d = offsetM(base, a);
-    const heading =
-      a.headingRad !== undefined && Math.abs(wrapRad(a.headingRad - p.headingRad)) > HEADING_TAKES_OVER_RAD ? a.headingRad : p.headingRad;
-    return this.pose(p, d.e, d.n, heading, this.intervalMs);
+    return this.pose(p, d.e, d.n, this.heading(p, a), this.intervalMs);
   }
 
   private pace(dt: number): void {
-    if (dt > 0 && dt < 2 * LEAD_MAX_MS) this.intervalMs = 0.7 * this.intervalMs + 0.3 * dt;
+    if (!(dt > 0 && dt < 2 * LEAD_MAX_MS)) return;
+    this.intervals.push(dt);
+    if (this.intervals.length > INTERVAL_WINDOW) this.intervals.shift();
+    this.intervalMs = Math.max(...this.intervals);
   }
 
   private pose(p: PositionEstimate, dE: number, dN: number, headingRad: number | undefined, leadMs: number): FedPose {
@@ -204,8 +221,14 @@ export class PuckFeeder {
 
   start(): void {
     if (this.stop) return;
-    const offPublish = this.deps.position.subscribe(() => this.send(this.feed.publish(this.deps.position.getSnapshot())));
-    const offAdvance = this.deps.position.onAdvance((a) => this.send(this.feed.advance(a)));
+    const offPublish = this.deps.position.subscribe(() => {
+      const pose = this.feed.publish(this.deps.position.getSnapshot());
+      this.send(pose);
+    });
+    const offAdvance = this.deps.position.onAdvance((a) => {
+      const pose = this.feed.advance(a);
+      this.send(pose);
+    });
     this.stop = () => {
       offPublish();
       offAdvance();

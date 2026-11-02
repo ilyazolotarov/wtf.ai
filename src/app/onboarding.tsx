@@ -1,10 +1,11 @@
 import { router, useLocalSearchParams } from "expo-router";
 import { useState } from "react";
-import { Platform, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { Platform, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ScreenCard, useSidePadding } from "@/components/screens/screen-ui";
 import { useNavStatus } from "@/components/status/use-nav-status";
+import { PressableFeedback } from "@/components/ui/press-feedback";
 import { useWakeSetup, wakeSupported } from "@/components/vehicle/use-wake-setup";
 import { Icon, type IconName } from "@/components/ui/icon";
 import { T } from "@/components/ui/text";
@@ -197,35 +198,26 @@ export default function OnboardingScreen() {
       )}
 
       <View style={styles.buttons}>
-        <Pressable
+        <PressableFeedback
           onPress={primary.onPress}
           disabled={primary.disabled}
           accessibilityRole="button"
-          style={({ pressed }) => [
-            styles.button,
-            { backgroundColor: palette.accent },
-            primary.disabled && styles.disabled,
-            pressed && styles.pressed,
-          ]}
+          style={[styles.button, { backgroundColor: palette.accent }, primary.disabled && styles.disabled]}
         >
           <T w="semibold" size={16} color={palette.onAccent} fit={2} style={styles.buttonLabel}>
             {primary.label}
           </T>
-        </Pressable>
+        </PressableFeedback>
         {secondary && (
-          <Pressable
+          <PressableFeedback
             onPress={secondary.onPress}
             accessibilityRole="button"
-            style={({ pressed }) => [
-              styles.button,
-              { backgroundColor: palette.secBg },
-              pressed && styles.pressed,
-            ]}
+            style={[styles.button, { backgroundColor: palette.secBg }]}
           >
             <T w="semibold" size={16} fit={2} style={styles.buttonLabel}>
               {secondary.label}
             </T>
-          </Pressable>
+          </PressableFeedback>
         )}
       </View>
     </View>
@@ -265,5 +257,4 @@ const styles = StyleSheet.create({
   },
   buttonLabel: { textAlign: "center" },
   disabled: { opacity: 0.5 },
-  pressed: { opacity: 0.8 },
 });

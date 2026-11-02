@@ -1,6 +1,6 @@
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo } from "react";
-import { Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { ScrollView, StyleSheet, View } from "react-native";
 
 import { ScreenContent, ScreenLink, ScreenNote, ScreenSection } from "@/components/screens/screen-ui";
 import { formatDistance } from "@/components/status/format-geo";
@@ -8,6 +8,7 @@ import { resultTitle } from "@/components/route/search-text";
 import { CATEGORY_ICON, CATEGORY_LABEL, detourText, placeDetail, placeName, STOP_CATEGORIES } from "@/components/route/stop-text";
 import { addStopWithUndo, offerRouteUndo } from "@/components/route/trip-undo";
 import { Icon } from "@/components/ui/icon";
+import { PressableFeedback } from "@/components/ui/press-feedback";
 import { T } from "@/components/ui/text";
 import { Radius, usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
@@ -91,11 +92,12 @@ export default function AlongScreen() {
     const detail = placeDetail(item.place, item.side, t, nowMs);
     const onTheWay = item.detourS !== undefined && detourMinutes(item.detourS) === 0;
     return (
-      <Pressable
+      <PressableFeedback
         key={item.place.key}
         onPress={() => pick(item)}
         accessibilityRole="button"
-        style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+        look="row"
+        style={styles.row}
       >
         <View style={[styles.icon, { backgroundColor: palette.accentA }]}>
           <Icon name={CATEGORY_ICON[item.place.category]} size={18} color={palette.accent} />
@@ -130,7 +132,7 @@ export default function AlongScreen() {
             </T>
           </View>
         )}
-      </Pressable>
+      </PressableFeedback>
     );
   };
 
@@ -140,18 +142,18 @@ export default function AlongScreen() {
         {STOP_CATEGORIES.map((c) => {
           const on = c === category;
           return (
-            <Pressable
+            <PressableFeedback
               key={c}
               onPress={() => router.setParams({ category: c })}
               accessibilityRole="button"
               accessibilityState={{ selected: on }}
-              style={({ pressed }) => [styles.chip, { backgroundColor: on ? palette.accent : palette.groupBg }, pressed && styles.pressed]}
+              style={[styles.chip, { backgroundColor: on ? palette.accent : palette.groupBg }]}
             >
-              <Icon name={CATEGORY_ICON[c]} size={18} color={on ? palette.onAccent : palette.accent} />
+              <Icon name={CATEGORY_ICON[c]} size={18} color={on ? palette.onAccent : palette.text} />
               <T w="medium" size={15} color={on ? palette.onAccent : palette.text}>
                 {t(CATEGORY_LABEL[c])}
               </T>
-            </Pressable>
+            </PressableFeedback>
           );
         })}
       </ScrollView>
@@ -187,6 +189,5 @@ const styles = StyleSheet.create({
   icon: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
   copy: { flex: 1, gap: 2 },
   right: { alignItems: "flex-end", gap: 2 },
-  pressed: { opacity: 0.7 },
   tabular: { fontVariant: ["tabular-nums"] },
 });

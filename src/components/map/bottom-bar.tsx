@@ -1,10 +1,11 @@
 import { Link } from "expo-router";
 import { useEffect, useState, type Ref } from "react";
-import { Animated, Pressable, StyleSheet, View, type LayoutChangeEvent, type ViewInstance } from "react-native";
+import { Animated, StyleSheet, View, type LayoutChangeEvent, type ViewInstance } from "react-native";
 
 import { useLinkBadge, type LinkBadge } from "@/components/status/use-nav-status";
 import { GlassFill } from "@/components/ui/glass-fill";
 import { Icon, type IconName } from "@/components/ui/icon";
+import { PressableFeedback } from "@/components/ui/press-feedback";
 import { T } from "@/components/ui/text";
 import { usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
@@ -75,19 +76,16 @@ function HudAction({
   const palette = usePalette();
   const badgeColor = badge === "ok" ? palette.ok.c : badge === "busy" ? palette.warn.c : palette.bad.c;
   return (
-    // Link asChild drops function styles, so press feedback lives on the content.
     <Link href={href} asChild>
-      <Pressable style={styles.action} accessibilityRole="button">
-        {({ pressed }) => (
-          <View style={[styles.actionContent, pressed && { backgroundColor: palette.line }]}>
-            <Icon name={icon} size={24} color={palette.text} />
-            {badge && <BadgeDot color={badgeColor} border={palette.groupBg} pulse={badge === "busy"} label={badgeLabel} />}
-            <T w="medium" size={12} color={highlight ? palette.accent : undefined} fit>
-              {label}
-            </T>
-          </View>
-        )}
-      </Pressable>
+      <PressableFeedback style={styles.action} accessibilityRole="button">
+        <View style={styles.actionContent}>
+          <Icon name={icon} size={24} color={palette.text} />
+          {badge && <BadgeDot color={badgeColor} border={palette.groupBg} pulse={badge === "busy"} label={badgeLabel} />}
+          <T w="medium" size={12} color={highlight ? palette.accent : undefined} fit>
+            {label}
+          </T>
+        </View>
+      </PressableFeedback>
     </Link>
   );
 }

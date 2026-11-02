@@ -1,9 +1,10 @@
-import { Pressable, StyleSheet, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 
 import { formatDistance } from "@/components/status/format-geo";
 import { useAgeText } from "@/components/status/use-age-text";
 import { GlassFill } from "@/components/ui/glass-fill";
 import { Icon } from "@/components/ui/icon";
+import { PressableFeedback } from "@/components/ui/press-feedback";
 import { T } from "@/components/ui/text";
 import { Radius, usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
@@ -71,26 +72,25 @@ export function ManualChip({
   return (
     <View style={[panel, hud.chip, styles.manual]}>
       <GlassFill radius={Radius.pill} />
-      <Pressable
+      <PressableFeedback
         onPress={onPlace}
         disabled={!onPlace}
         accessibilityRole="button"
-        style={({ pressed }) => [styles.manualBody, pressed && hud.pressed]}
+        style={styles.manualBody}
       >
-        <Icon name="location_on" size={16} color={palette.accent} />
-        <T w="semibold" size={13} color={palette.accent} fit>
+        <Icon name="location_on" size={16} color={palette.text} />
+        <T w="semibold" size={13} color={palette.text} fit>
           {t("manualChip").replace("{age}", age)}
         </T>
-      </Pressable>
-      <Pressable
+      </PressableFeedback>
+      <PressableFeedback
         onPress={onForget}
         hitSlop={10}
         accessibilityRole="button"
         accessibilityLabel={t("manualForget")}
-        style={({ pressed }) => pressed && hud.pressed}
       >
         <Icon name="close" size={16} color={palette.text2} />
-      </Pressable>
+      </PressableFeedback>
     </View>
   );
 }

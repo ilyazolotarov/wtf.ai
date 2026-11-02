@@ -1,10 +1,11 @@
 import { router } from "expo-router";
 import { Fragment, useState } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 
 import { LessonIntro } from "@/components/guide/lesson-ui";
 import { useNavStatus } from "@/components/status/use-nav-status";
 import { Icon } from "@/components/ui/icon";
+import { PressableFeedback } from "@/components/ui/press-feedback";
 import { T } from "@/components/ui/text";
 import { Radius, usePalette } from "@/constants/theme";
 import type { Strings } from "@/i18n/en";
@@ -105,7 +106,7 @@ export function LessonBefore() {
           <Fragment key={row.key}>
             {i > 0 && <View style={[styles.line, { backgroundColor: palette.line }]} />}
             <View style={styles.row}>
-              <Pressable
+              <PressableFeedback
                 onPress={row.onToggle}
                 disabled={!row.onToggle}
                 hitSlop={8}
@@ -120,7 +121,7 @@ export function LessonBefore() {
                 ]}
               >
                 {row.done && <Icon name="check" size={15} color={palette.ok.fg} />}
-              </Pressable>
+              </PressableFeedback>
               <View style={styles.copy}>
                 <T w="medium" size={15}>
                   {row.title}
@@ -130,15 +131,15 @@ export function LessonBefore() {
                 </T>
               </View>
               {row.action && (
-                <Pressable
+                <PressableFeedback
                   onPress={row.action.onPress}
                   accessibilityRole="button"
-                  style={({ pressed }) => [styles.action, { backgroundColor: palette.accent }, pressed && styles.pressed]}
+                  style={[styles.action, { backgroundColor: palette.accent }]}
                 >
                   <T w="semibold" size={13} color={palette.onAccent}>
                     {row.action.label}
                   </T>
-                </Pressable>
+                </PressableFeedback>
               )}
             </View>
           </Fragment>
@@ -167,7 +168,6 @@ const styles = StyleSheet.create({
   copy: { flex: 1, gap: 2 },
   sub: { lineHeight: 18 },
   action: { height: 36, borderRadius: Radius.pill, paddingHorizontal: 14, justifyContent: "center" },
-  pressed: { opacity: 0.75 },
   ready: { borderRadius: Radius.rL, padding: 14, flexDirection: "row", alignItems: "center", gap: 12 },
   readyText: { flex: 1, lineHeight: 20 },
 });

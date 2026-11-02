@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 import { Circle, G, Line, Path, Rect, Text as SvgText } from "react-native-svg";
 
 import { ExplainCard, LessonIntro } from "@/components/guide/lesson-ui";
@@ -8,6 +8,7 @@ import { MapChip, useMapColors, useNudgedHeading } from "@/components/guide/mini
 import { PlacingMap, type PlaceStep, type Point } from "@/components/guide/placing-map";
 import { formatDistance } from "@/components/status/format-geo";
 import { Icon } from "@/components/ui/icon";
+import { PressableFeedback } from "@/components/ui/press-feedback";
 import { T } from "@/components/ui/text";
 import { Radius, usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
@@ -145,11 +146,11 @@ export function PoseTab() {
               </T>
             </View>
           )}
-          <Pressable onPress={askAgain} hitSlop={8} accessibilityRole="button" style={styles.again}>
+          <PressableFeedback onPress={askAgain} hitSlop={8} accessibilityRole="button" style={styles.again}>
             <T w="semibold" size={14} color={palette.accent}>
               {t("poseAskAgain")}
             </T>
-          </Pressable>
+          </PressableFeedback>
         </View>
       )}
 

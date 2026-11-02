@@ -1,8 +1,9 @@
 import type { PropsWithChildren } from "react";
-import { Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
+import { StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
 
 import { GlassFill } from "@/components/ui/glass-fill";
 import { Icon, type IconName } from "@/components/ui/icon";
+import { PressableFeedback } from "@/components/ui/press-feedback";
 import { T } from "@/components/ui/text";
 import { Radius, usePalette } from "@/constants/theme";
 
@@ -54,9 +55,9 @@ export function MapCardHeader({
         ) : null}
       </View>
       {onClose && (
-        <Pressable onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel={closeLabel}>
+        <PressableFeedback onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel={closeLabel}>
           <Icon name="close" size={20} color={palette.text2} />
-        </Pressable>
+        </PressableFeedback>
       )}
     </View>
   );
@@ -72,23 +73,18 @@ export function MapCardButtons({
   return (
     <View style={styles.buttons}>
       {buttons.map((button) => (
-        <Pressable
+        <PressableFeedback
           key={button.label}
           onPress={button.onPress}
           disabled={button.disabled}
           accessibilityRole="button"
           accessibilityState={{ disabled: button.disabled }}
-          style={({ pressed }) => [
-            styles.button,
-            { backgroundColor: palette.surface },
-            button.disabled && styles.disabled,
-            pressed && styles.pressed,
-          ]}
+          style={[styles.button, { backgroundColor: palette.surface }, button.disabled && styles.disabled]}
         >
-          <T w="semibold" size={14} color={button.muted ? palette.text2 : palette.accent} fit>
+          <T w="semibold" size={14} color={button.muted ? palette.text2 : palette.text} fit>
             {button.label}
           </T>
-        </Pressable>
+        </PressableFeedback>
       ))}
     </View>
   );
@@ -114,21 +110,21 @@ export function MapChipButton({
   return (
     <View style={[styles.chip, { boxShadow: palette.shadow }, style]}>
       <GlassFill radius={Radius.pill} />
-      <Pressable
+      <PressableFeedback
         onPress={onPress}
         disabled={!onPress}
         accessibilityRole="button"
-        style={({ pressed }) => [styles.chipBody, pressed && styles.pressed]}
+        style={styles.chipBody}
       >
-        <Icon name={icon} size={16} color={palette.accent} />
-        <T w="semibold" size={13} color={palette.accent} fit>
+        <Icon name={icon} size={16} color={palette.text} />
+        <T w="semibold" size={13} color={palette.text} fit>
           {label}
         </T>
-      </Pressable>
+      </PressableFeedback>
       {onClose && (
-        <Pressable onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel={closeLabel}>
+        <PressableFeedback onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel={closeLabel}>
           <Icon name="close" size={16} color={palette.text2} />
-        </Pressable>
+        </PressableFeedback>
       )}
     </View>
   );
@@ -144,7 +140,6 @@ const styles = StyleSheet.create({
   buttons: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   button: { flexGrow: 1, minWidth: "40%", alignItems: "center", paddingHorizontal: 16, paddingVertical: 10, borderRadius: 18 },
   disabled: { opacity: 0.4 },
-  pressed: { opacity: 0.75 },
   chip: {
     position: "absolute",
     maxWidth: "94%",

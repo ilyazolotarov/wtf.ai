@@ -30,8 +30,11 @@ export function CameraCard({ camera }: { camera: CameraShown }) {
       accessibilityLabel={[title, line, limit].filter(Boolean).join(". ")}
     >
       {red ? <View style={[styles.fill, { backgroundColor: palette.bad.c }]} /> : <GlassFill radius={Radius.rL} />}
-      <View style={[styles.icon, { backgroundColor: red ? "rgba(255,255,255,0.18)" : palette.text }]}>
-        <Icon name="speed_camera" size={26} color={red ? palette.bad.fg : palette.bg} />
+      {/* The map's camera badge (scripts/map-car.py): white on the sign's red, a white ring, a dark edge. */}
+      <View style={styles.badgeEdge}>
+        <View style={[styles.badge, { backgroundColor: palette.signRing }]}>
+          <Icon name="speed_camera" size={24} color="#FFFFFF" />
+        </View>
       </View>
       <View style={styles.text}>
         <T w="semibold" size={red ? 17 : 15} color={ink}>
@@ -67,7 +70,15 @@ const styles = StyleSheet.create({
     borderRadius: Radius.rL,
   },
   fill: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, borderRadius: Radius.rL },
-  icon: { width: 44, height: 44, borderRadius: 14, alignItems: "center", justifyContent: "center" },
+  badgeEdge: { width: 44, height: 44, borderRadius: 14, padding: 1, backgroundColor: "rgba(0,0,0,0.9)" },
+  badge: {
+    flex: 1,
+    borderRadius: 13,
+    borderWidth: 2.5,
+    borderColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   text: { flex: 1, gap: 2 },
   signOnRed: { borderRadius: 24, borderWidth: 2 },
   // Inside the rounded corners: the card isn't clipped (its shadow would go with it).

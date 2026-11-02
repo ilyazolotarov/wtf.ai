@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { Pressable, StyleSheet, Text, TextInput, useColorScheme, View } from "react-native";
+import { StyleSheet, Text, TextInput, useColorScheme, View } from "react-native";
 
 import { ScreenAction, ScreenContent, ScreenNote, ScreenSection } from "@/components/screens/screen-ui";
+import { PressableFeedback } from "@/components/ui/press-feedback";
 import { INPUT_MAX_FONT_SCALE, MAX_FONT_SCALE } from "@/components/ui/text";
 import { Colors } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
@@ -85,9 +86,9 @@ export default function DebugTerminalScreen() {
         />
         <View style={styles.quick}>
           {QUICK.map((q) => (
-            <Pressable key={q} onPress={() => void run(q)} disabled={!connected || busy} style={[styles.chip, { backgroundColor: palette.accentA }]}>
-              <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[styles.chipText, { color: palette.accent }]}>{q}</Text>
-            </Pressable>
+            <PressableFeedback key={q} onPress={() => void run(q)} disabled={!connected || busy} style={[styles.chip, { backgroundColor: palette.surface }]}>
+              <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[styles.chipText, { color: palette.text }]}>{q}</Text>
+            </PressableFeedback>
           ))}
         </View>
         <ScreenAction labelKey="send" disabled={!connected || busy} onPress={() => void run(command)} />

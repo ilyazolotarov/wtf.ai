@@ -285,12 +285,12 @@ export function StatusPillMock({
   );
 }
 
-/** A small chip over a lesson map ("Last trusted GPS: 4 min ago, 2.3 km back"). */
-export function MapChip({ text, accent, style }: { text: string; accent?: boolean; style?: object }) {
+/** A small chip over a lesson map ("Last trusted GPS: 4 min ago, 2.3 km back"); `button` draws one to press. */
+export function MapChip({ text, button, style }: { text: string; button?: boolean; style?: object }) {
   const palette = usePalette();
   return (
     <View style={[styles.chip, { backgroundColor: palette.panelSolid }, style]}>
-      <T w={accent ? "semibold" : "medium"} size={12} color={accent ? palette.accent : palette.text2} style={styles.chipText}>
+      <T w={button ? "semibold" : "medium"} size={12} color={button ? palette.text : palette.text2} style={styles.chipText}>
         {text}
       </T>
     </View>

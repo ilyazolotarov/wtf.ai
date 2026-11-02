@@ -65,7 +65,7 @@ export function LessonDot() {
           <>
             <StatusPillMock color={color} label={t(s.label)} source={t(s.source)} accuracyM={s.accuracyM} trusted={state === "ok"} />
             {state === "nofix" && <MapChip text={since} style={styles.strip} />}
-            {state === "spoof" && <MapChip text={t("showGhost")} accent style={styles.ghostButton} />}
+            {state === "spoof" && <MapChip text={t("showGhost")} button style={styles.ghostButton} />}
           </>
         }
       >

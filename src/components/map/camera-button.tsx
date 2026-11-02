@@ -1,12 +1,13 @@
 import type { Ref } from "react";
-import { Pressable, StyleSheet, type ViewInstance } from "react-native";
+import { StyleSheet, type ViewInstance } from "react-native";
 
 import { GlassFill } from "@/components/ui/glass-fill";
 import { Icon, type IconName } from "@/components/ui/icon";
+import { PressableFeedback } from "@/components/ui/press-feedback";
 import { usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
 
-import { hud, usePanelStyle } from "./hud-card";
+import { usePanelStyle } from "./hud-card";
 import type { CameraMode } from "./use-camera-mode";
 
 export const CAMERA_BUTTON_SIZE = 52;
@@ -23,16 +24,16 @@ export function CameraButton({ mode, onPress, ref }: { mode: CameraMode; onPress
   const palette = usePalette();
   const panel = usePanelStyle();
   return (
-    <Pressable
+    <PressableFeedback
       ref={ref}
-      style={({ pressed }) => [panel, styles.button, pressed && hud.pressed]}
+      style={[panel, styles.button]}
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={mode === "free" ? `${t(CAMERA.free.label)}, ${t("tapToFollow")}` : t(CAMERA[mode].label)}
     >
       <GlassFill radius={CAMERA_BUTTON_SIZE / 2} />
       <Icon name={CAMERA[mode].icon} size={24} color={mode === "free" ? palette.text2 : palette.accent} />
-    </Pressable>
+    </PressableFeedback>
   );
 }
 

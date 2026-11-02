@@ -1,6 +1,6 @@
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Animated, Keyboard, Pressable, StyleSheet, TextInput, View } from "react-native";
+import { Animated, Keyboard, StyleSheet, TextInput, View } from "react-native";
 
 import { ScreenAction, ScreenCard, ScreenContent, ScreenLink, ScreenNote, ScreenSection } from "@/components/screens/screen-ui";
 import { cardinal, formatDistance, toDegrees } from "@/components/status/format-geo";
@@ -12,6 +12,7 @@ import { addStopWithUndo, useTripUndo } from "@/components/route/trip-undo";
 import { useStopDrag } from "@/components/route/use-stop-drag";
 import { pointPlace, resultPlace } from "@/components/route/place-search";
 import { Icon, type IconName } from "@/components/ui/icon";
+import { PressableFeedback } from "@/components/ui/press-feedback";
 import { INPUT_MAX_FONT_SCALE, T } from "@/components/ui/text";
 import { Font, Radius, usePalette } from "@/constants/theme";
 import type { Strings } from "@/i18n/en";
@@ -210,11 +211,12 @@ export default function RouteScreen() {
       : `${formatDistance(distanceM, language)} · ${cardinal(bearing, language)}`;
     const detail = options.detail === undefined ? d.detail : options.detail;
     return (
-      <Pressable
+      <PressableFeedback
         key={key}
         onPress={() => (adding ? addStop(d) : open(d))}
         accessibilityRole="button"
-        style={({ pressed }) => [styles.destination, pressed && styles.pressed]}
+        look="row"
+        style={styles.destination}
       >
         {options.flash && <Flash onDone={() => setFlashId(null)} />}
         {options.icon && (
@@ -241,7 +243,7 @@ export default function RouteScreen() {
           <Icon name={SAVED_ICON[savedKind]} size={14} color={palette.accent} />
         )}
         <Icon name="chevron_right" size={14} color={palette.text2} />
-      </Pressable>
+      </PressableFeedback>
     );
   };
 
@@ -349,17 +351,17 @@ function PullInTiles({ back = 1 }: { back?: number }) {
     <ScreenSection title={t("pullInOnTheWay")} plain>
       <View style={tripStyles.tiles}>
         {STOP_CATEGORIES.map((c) => (
-          <Pressable
+          <PressableFeedback
             key={c}
             onPress={() => router.push({ pathname: "/along", params: { category: c, back: String(back) } })}
             accessibilityRole="button"
-            style={({ pressed }) => [tripStyles.tile, { backgroundColor: palette.groupBg }, pressed && styles.pressed]}
+            style={[tripStyles.tile, { backgroundColor: palette.groupBg }]}
           >
-            <Icon name={CATEGORY_ICON[c]} size={24} color={palette.accent} />
+            <Icon name={CATEGORY_ICON[c]} size={24} color={palette.text} />
             <T w="medium" size={15} fit>
               {t(CATEGORY_LABEL[c])}
             </T>
-          </Pressable>
+          </PressableFeedback>
         ))}
       </View>
     </ScreenSection>
@@ -472,15 +474,15 @@ function TripSection({
                   <Icon name="drag_handle" size={16} color={palette.text2} />
                 </View>
               )}
-              <Pressable
+              <PressableFeedback
                 onPress={() => routes.removeStop(stop.key)}
                 accessibilityRole="button"
                 accessibilityLabel={t("removeStop").replace("{name}", name)}
                 hitSlop={6}
-                style={({ pressed }) => [tripStyles.button, { backgroundColor: palette.surface }, pressed && styles.pressed]}
+                style={[tripStyles.button, { backgroundColor: palette.surface }]}
               >
                 <Icon name="close" size={16} color={palette.text2} />
-              </Pressable>
+              </PressableFeedback>
             </Animated.View>
           );
         })}
@@ -500,14 +502,14 @@ function TripSection({
           </View>
         </View>
         {route.stops.length < routes.maxStops && (
-          <Pressable onPress={onAdd} accessibilityRole="button" style={({ pressed }) => [styles.destination, pressed && styles.pressed]}>
+          <PressableFeedback look="row" onPress={onAdd} accessibilityRole="button" style={styles.destination}>
             <View style={[tripStyles.stop, { borderColor: palette.accentA, backgroundColor: palette.accentA }]}>
               <Icon name="add" size={18} color={palette.accent} />
             </View>
-            <T w="semibold" size={16} color={palette.accent}>
+            <T w="semibold" size={16} color={palette.text}>
               {t("addStop")}
             </T>
-          </Pressable>
+          </PressableFeedback>
         )}
       </ScreenSection>
       {route.status === "planning" && <ScreenNote>{t("planningRoute")}</ScreenNote>}
@@ -545,7 +547,6 @@ const styles = StyleSheet.create({
   empty: { paddingVertical: 18 },
   destination: { minHeight: 58, flexDirection: "row", alignItems: "center", gap: 12 },
   destinationCopy: { flex: 1, gap: 2 },
-  pressed: { opacity: 0.7 },
   badge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: Radius.pill },
   flex: { flex: 1 },
   rowIcon: { width: 30, height: 30, borderRadius: 15, alignItems: "center", justifyContent: "center" },

@@ -66,6 +66,16 @@ persisted in kv-store. No hardcoded user-facing strings in components.
 
 - `src/constants/theme.ts`: light and dark palettes (`bg`, `text`, `accent`, `route`, `routeAlt`, `routeCasing`,
   `maneuver`, `puck*`, status colours `ok` / `warn` / `bad` / `idle`, …), `usePalette()`.
+- **The accent marks, it doesn't decorate.** Labels and icons on a neutral-filled button (`surface`, `secBg`, an
+  unselected chip, the glass HUD pills and chips, a button's round grey tile) are in the text colour (`text`); a
+  disabled or muted/off one in `text2`. The accent is kept for: the one filled primary action (accent fill, `onAccent`
+  content); plain text links with no background; an active, selected or on state the colour itself marks (the current
+  bottom-bar tab, a selected chip, segment or entrance, the camera button's follow modes against free); and graphics
+  that aren't buttons (illustrations and big screen icons, progress bars, map layers, the Guide's drawings and pulse
+  rings, kicker labels, tinted `accentA` icon tiles). A list row's leading icon is the row's, not a button's. Why:
+  blue on every button said nothing about which one mattered, read washed out in dark (#90BAF1 thin strokes on
+  #2C2B29) and failed text contrast in light (#4371B7 on #E8E6E0, 3.9:1). Must not drift: no accent content on a
+  grey fill; a new button picks primary (filled) or grey (text colour), never blue text on grey.
 - `src/config/map.ts`: the active region's offline style (`useMapStyle(scheme)`, `hasUsableMap`, `withAttribution`),
   with the world drawn around it (`map-world.ts`) and street-level labels (`map-labels.ts`): house numbers from z15
   (the tiles' `housenumber` layer, which Liberty doesn't draw, above the buildings and below every other label) and
@@ -123,6 +133,23 @@ persisted in kv-store. No hardcoded user-facing strings in components.
   a phone's proportions, the map showing around the panels. Must not drift: a phone never reaches either width, and
   a badge or anything placed on a stretched element anchors to its content, not to the element's edge.
 
+### 4.8 Press feedback
+
+- **Every tappable shows its press through `PressableFeedback`** (`src/components/ui/press-feedback.tsx`), a drop-in
+  `Pressable`: buttons, chips, pills, icon and map buttons, the bottom bar's tabs, list rows, cards. No per-screen
+  pressed styles. Its style goes on the pressable itself, so it lays out exactly as a `Pressable` would (flex,
+  `alignSelf`, absolute placing, `hitSlop`, a ref that measures it).
+- **Two looks:** `button` (the default) shrinks to 94 % and dims to 55 % of its own opacity (a disabled look stays
+  under it); `row` (full-width list and setting rows, cards) doesn't move: a tint of the text colour (14 %) fades in
+  over the row's own shape, or on a bare row in a card a rounded band 8 pt wider each side. Both on the native driver.
+- **Seen on a quick tap** (`press-timing.ts`): eased in over 80 ms; a tap holds the pressed look until 150 ms after
+  the touch, then eases out over 220 ms, so a 50 ms tap, or a scripted one on a store recording, shows for about a
+  third of a second. A touch that turns into a scroll lets go without the hold; a touch while it eases out starts it
+  over. Disabled: no feedback. Reduce Motion: it dims but doesn't shrink.
+- **Exempt:** what isn't a button: the drawn maps' tap and long-press surfaces in the Guide (`placing-map.tsx`,
+  `lesson-route.tsx`), the map tour's dimming (its hole lets touches through to the map), Settings' hidden tap on the
+  version, an inline text link.
+
 ## 5. App shell
 
 - `src/app/_layout.tsx`: `Stack` inside `ThemeProvider` → `I18nProvider` → `PositionProvider` → `RuntimeProvider`
@@ -151,6 +178,11 @@ persisted in kv-store. No hardcoded user-facing strings in components.
   laid on the ground for the camera), filled at 32 % and outlined as the dot. Must not drift: the outline over the
   fill, each band at its whole width across the edge (a MapLibre line's `line-width`, an SVG stroke), on both
   platforms' native dot as in the lessons; doubled under the fill, the cone read as a black wedge on the dark map.
+  On Android the cone is an image of its own on the LocationComponent's background layer, lying on the map, drawn
+  1 / cos(tilt) as long so the tilt keeps it 34 pt up the screen (drawn again as the tilt changes), and the dot the
+  foreground's, upright. Must not drift: never the cone on the upright layer, where MapLibre turns a map-aligned
+  icon by the tilted screen angle of the tile's east axis: at 50° tilt it pointed up to 12° off the road on diagonal
+  headings (0° on cardinal ones) and swung across it as the heading turned.
   Pins and marks are banded the same way;
   the placing pin (`placing-pin.tsx`) is one component on the map and in the lessons. `map-contrast.test.ts` holds
   everything the app draws on the map to 3:1 against every surface under it, in both themes.
@@ -235,8 +267,12 @@ persisted in kv-store. No hardcoded user-facing strings in components.
   with the phone's screen dark on the car's. The feed runs at the navigator's pace, each IMU batch (~10 Hz, the
   service's `onAdvance`): the published dot (map matching's, the one the parity tool checks) moved on by the EKF's
   displacement since that publish and predicted one feed interval ahead, so the ease lands where the car is when it
-  gets there (without the navigator's steps, the publishes set that interval); the estimate's heading takes over once
-  it turned 3° from the published one; each publish re-bases.
+  gets there (without the navigator's steps, the publishes set that interval). The interval is the longest of the last
+  six, never their average: batches come ~100 ms apart with one close behind another a quarter of the time, and an
+  average lead ends each ease before the next pose, the dot and the camera standing still in between. The estimate's
+  heading takes over once it turned 3° from the published one, at publishes too; each publish re-bases. Must not
+  drift: in a turn the published heading is the matched road's until the car is on the next one, and fed at each
+  publish it swung the heading-up camera back and forth across the turn, up to 45°.
   Standing (< 2 m/s, no heading, or a placed position) the dot is fed as published, without lead. A step over 80 m,
   a turn over 90° or a change to or from a placed position is placed, not animated. iOS's user location drops a
   location at the very spot of the one before, its course with it: a turn alone (the walking compass, a heading set at
@@ -411,8 +447,8 @@ One small component each; the screen only places them and wires their state. Car
   held up to a minute, never passed meanwhile. A camera 50 m nearer than the card's takes it. In the trip log:
   `camera ahead #<id> in <m> m, limit <kph>` (`(OSM only)` for one the list lacks), `camera passed #<id>`, `camera out
   of sight #<id> at <m> m`, and from the screen `camera warning #<id>: …` and `camera slow down #<id>: …`.
-- **The card** (`CameraCard`), under the status row and the route banner: the camera icon on a dark tile, "Speed
-  camera in 600 m" (10 m steps under 200 m, 50 m above), the limit at the camera as its sign at the right (in words
+- **The card** (`CameraCard`), under the status row and the route banner: the map's camera badge (white on red, white
+  ring, dark edge; the same on the red card), "Speed camera in 600 m" (10 m steps under 200 m, 50 m above), the limit at the camera as its sign at the right (in words
   only to a screen reader: the sign says it), and a bar filling from where it showed to the camera. Past the driver's
   margin over the camera's limit by the speed warning's rules (§6.4: after 1.5 s past it, until 3 km/h back under, so
   hovering at the line doesn't flicker; kept through a moment out of sight for 2 min, as the voice remembers the

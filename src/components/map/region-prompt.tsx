@@ -1,9 +1,10 @@
 import { router } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
-import { Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
+import { StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
 
 import { GlassFill } from "@/components/ui/glass-fill";
 import { Icon } from "@/components/ui/icon";
+import { PressableFeedback } from "@/components/ui/press-feedback";
 import { T } from "@/components/ui/text";
 import { Radius, usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
@@ -162,24 +163,24 @@ export function RegionPromptCard({
         </View>
       </View>
       <View style={styles.buttons}>
-        <Pressable
+        <PressableFeedback
           onPress={action.onPress}
           accessibilityRole="button"
-          style={({ pressed }) => [styles.button, { backgroundColor: palette.accent }, pressed && styles.pressed]}
+          style={[styles.button, { backgroundColor: palette.accent }]}
         >
           <T w="semibold" size={14} color={palette.onAccent} fit>
             {action.label}
           </T>
-        </Pressable>
-        <Pressable
+        </PressableFeedback>
+        <PressableFeedback
           onPress={onDismiss}
           accessibilityRole="button"
-          style={({ pressed }) => [styles.button, { backgroundColor: palette.surface }, pressed && styles.pressed]}
+          style={[styles.button, { backgroundColor: palette.surface }]}
         >
-          <T w="semibold" size={14} color={palette.accent} fit>
+          <T w="semibold" size={14} color={palette.text} fit>
             {t("notNow")}
           </T>
-        </Pressable>
+        </PressableFeedback>
       </View>
     </View>
   );
@@ -193,5 +194,4 @@ const styles = StyleSheet.create({
   // Side by side, equal, while both labels fit; otherwise stacked (a large text size, a long label).
   buttons: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   button: { flexGrow: 1, minWidth: "40%", alignItems: "center", paddingHorizontal: 16, paddingVertical: 10, borderRadius: 18 },
-  pressed: { opacity: 0.7 },
 });

@@ -1,9 +1,10 @@
 import { router } from "expo-router";
-import { Pressable, StyleSheet, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 
 import { AVAILABLE_GROUPS, AVAILABLE_LESSONS, nextLesson } from "@/components/guide/lesson-bodies";
 import { ScreenContent, ScreenSection } from "@/components/screens/screen-ui";
 import { Icon } from "@/components/ui/icon";
+import { PressableFeedback } from "@/components/ui/press-feedback";
 import { T } from "@/components/ui/text";
 import { Radius, usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
@@ -29,10 +30,11 @@ export default function GuideScreen() {
       <T size={13} color={palette.text2} style={styles.progress}>
         {t("guideProgress").replace("{done}", String(doneCount)).replace("{total}", String(AVAILABLE_LESSONS.length))}
       </T>
-      <Pressable
+      <PressableFeedback
         onPress={startTour}
         accessibilityRole="button"
-        style={({ pressed }) => [styles.tour, { backgroundColor: palette.accent }, pressed && styles.pressed]}
+        look="row"
+        style={[styles.tour, { backgroundColor: palette.accent }]}
       >
         <View style={styles.tourCopy}>
           <T w="semibold" size={12} color={palette.onAccent} style={styles.kicker}>
@@ -48,7 +50,7 @@ export default function GuideScreen() {
         <View style={[styles.play, { backgroundColor: palette.onAccent }]}>
           <Icon name="play_arrow" size={20} color={palette.accent} />
         </View>
-      </Pressable>
+      </PressableFeedback>
 
       {doneCount < AVAILABLE_LESSONS.length && (
         // The lessons' call: practice before the first drives, where the next one is a tap away.
@@ -59,15 +61,15 @@ export default function GuideScreen() {
           <T size={14} color={palette.text2} style={styles.practiceBody}>
             {t("lessonsInviteBody")}
           </T>
-          <Pressable
+          <PressableFeedback
             onPress={() => router.push(`/guide/lesson?id=${next.id}`)}
             accessibilityRole="button"
-            style={({ pressed }) => [styles.practiceButton, { backgroundColor: palette.accent }, pressed && styles.pressed]}
+            style={[styles.practiceButton, { backgroundColor: palette.accent }]}
           >
             <T w="semibold" size={15} color={palette.onAccent} fit>
               {doneCount === 0 ? t("lessonsInviteStart") : t("guideContinue").replace("{title}", t(next.title))}
             </T>
-          </Pressable>
+          </PressableFeedback>
         </View>
       )}
 
@@ -77,11 +79,12 @@ export default function GuideScreen() {
             const number = AVAILABLE_LESSONS.indexOf(lesson) + 1;
             const finished = done.has(lesson.id);
             return (
-              <Pressable
+              <PressableFeedback
                 key={lesson.id}
                 onPress={() => router.push(`/guide/lesson?id=${lesson.id}`)}
                 accessibilityRole="button"
-                style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+                look="row"
+                style={styles.row}
               >
                 <View style={[styles.badge, { backgroundColor: finished ? palette.ok.c : palette.surface }]}>
                   {finished ? (
@@ -101,21 +104,21 @@ export default function GuideScreen() {
                   </T>
                 </View>
                 <Icon name="chevron_right" size={14} color={palette.text2} />
-              </Pressable>
+              </PressableFeedback>
             );
           })}
         </ScreenSection>
       ))}
 
-      <Pressable
+      <PressableFeedback
         onPress={() => router.push("/onboarding")}
         accessibilityRole="button"
-        style={({ pressed }) => [styles.replay, pressed && styles.pressed]}
+        style={styles.replay}
       >
         <T w="medium" size={14} color={palette.accent}>
           {t("guideReplayOnboarding")}
         </T>
-      </Pressable>
+      </PressableFeedback>
     </ScreenContent>
   );
 }
@@ -148,5 +151,4 @@ const styles = StyleSheet.create({
   badge: { width: 30, height: 30, borderRadius: 15, alignItems: "center", justifyContent: "center" },
   copy: { flex: 1, gap: 2 },
   replay: { alignSelf: "center", paddingVertical: 10, paddingHorizontal: 14 },
-  pressed: { opacity: 0.7 },
 });

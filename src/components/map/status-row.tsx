@@ -1,8 +1,9 @@
-import { Pressable, StyleSheet, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 
 import type { useNavStatus } from "@/components/status/use-nav-status";
 import { GlassFill } from "@/components/ui/glass-fill";
 import { Icon } from "@/components/ui/icon";
+import { PressableFeedback } from "@/components/ui/press-feedback";
 import { T } from "@/components/ui/text";
 import { Radius, usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
@@ -51,7 +52,7 @@ export function StatusRow({
       : t(over ? "speedOverLimitA11y" : "speedLimitA11y").replace("{speed}", speed).replace("{limit}", String(limitKph));
   return (
     <View style={styles.row}>
-      <Pressable
+      <PressableFeedback
         onPress={onToggle}
         disabled={!expandable}
         accessibilityRole="button"
@@ -82,7 +83,7 @@ export function StatusRow({
             <Icon name="chevron_right" size={16} color={palette.text2} />
           </View>
         )}
-      </Pressable>
+      </PressableFeedback>
       <View
         style={[panel, styles.speed, sign && styles.withSign]}
         accessible

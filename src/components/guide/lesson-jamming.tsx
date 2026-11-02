@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Animated, Easing, Pressable, StyleSheet, View } from "react-native";
+import { Animated, Easing, StyleSheet, View } from "react-native";
 import { Circle, G, Path } from "react-native-svg";
 
 import { ExplainCard, FadeIn, LessonIntro, LessonTabs } from "@/components/guide/lesson-ui";
@@ -7,6 +7,7 @@ import { CarGlyph, MapChip, MiniMap, Puck, StatusPillMock, useMapColors } from "
 import { useTween } from "@/components/guide/use-tween";
 import { formatDistance } from "@/components/status/format-geo";
 import { Icon } from "@/components/ui/icon";
+import { PressableFeedback } from "@/components/ui/press-feedback";
 import { T } from "@/components/ui/text";
 import { usePalette } from "@/constants/theme";
 import type { Strings } from "@/i18n/en";
@@ -172,7 +173,7 @@ export function LessonJamming() {
       </MiniMap>
 
       <View style={styles.controls}>
-        <Pressable
+        <PressableFeedback
           onPress={() => {
             if (playing) setPlaying(false);
             else {
@@ -182,13 +183,13 @@ export function LessonJamming() {
           }}
           accessibilityRole="button"
           accessibilityLabel={playing ? t("jamPause") : t("jamPlay")}
-          style={({ pressed }) => [styles.play, { backgroundColor: palette.accent }, pressed && styles.pressed]}
+          style={[styles.play, { backgroundColor: palette.accent }]}
         >
           <Icon name={playing ? "pause" : "play_arrow"} size={18} color={palette.onAccent} />
-        </Pressable>
+        </PressableFeedback>
         <View style={styles.stops}>
           {STAGE_LABELS.map((label, i) => (
-            <Pressable
+            <PressableFeedback
               key={label}
               onPress={() => {
                 setPlaying(false);
@@ -217,7 +218,7 @@ export function LessonJamming() {
               <T w="semibold" size={11} color={i === stage ? palette.text : palette.text2} fit>
                 {t(label)}
               </T>
-            </Pressable>
+            </PressableFeedback>
           ))}
         </View>
       </View>
@@ -239,7 +240,6 @@ const styles = StyleSheet.create({
   carTag: { right: 10, bottom: 10 },
   controls: { flexDirection: "row", gap: 6 },
   play: { width: 44, height: 52, borderRadius: 16, alignItems: "center", justifyContent: "center" },
-  pressed: { opacity: 0.75 },
   stops: { flex: 1, flexDirection: "row", gap: 4 },
   stop: { flex: 1, height: 52, borderRadius: 12, alignItems: "center", justifyContent: "center", gap: 5 },
   track: { width: "78%", height: 4, borderRadius: 2, overflow: "hidden" },

@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, View } from "react-native";
+import { ActivityIndicator, StyleSheet, View } from "react-native";
 
 import {
     ScreenAction,
@@ -9,6 +9,7 @@ import {
     ScreenSection,
 } from "@/components/screens/screen-ui";
 import { Icon, type IconName } from "@/components/ui/icon";
+import { PressableFeedback } from "@/components/ui/press-feedback";
 import { T } from "@/components/ui/text";
 import { usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
@@ -44,15 +45,15 @@ interface RegionRow {
 export function IconButton({ icon, label, danger, filled, onPress }: { icon: IconName; label: string; danger?: boolean; filled?: boolean; onPress(): void }) {
   const palette = usePalette();
   return (
-    <Pressable
+    <PressableFeedback
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={label}
       hitSlop={4}
-      style={({ pressed }) => [styles.iconButton, { backgroundColor: filled ? palette.accent : palette.surface }, pressed && { opacity: 0.6 }]}
+      style={[styles.iconButton, { backgroundColor: filled ? palette.accent : palette.surface }]}
     >
-      <Icon name={icon} size={18} color={filled ? palette.onAccent : danger ? palette.bad.c : palette.accent} />
-    </Pressable>
+      <Icon name={icon} size={18} color={filled ? palette.onAccent : danger ? palette.bad.c : palette.text} />
+    </PressableFeedback>
   );
 }
 
@@ -193,16 +194,17 @@ export function RegionDownloads() {
               : undefined;
           return (
             // The row for touch; its name for a screen reader, as the row would hide its buttons in one element.
-            <Pressable
+            <PressableFeedback
               key={row.region}
-              style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+              look="row"
+              style={styles.row}
               disabled={!onPress}
               onPress={onPress}
               accessible={false}
             >
               <View style={styles.rowHead}>
-                <Pressable
-                  style={({ pressed }) => [styles.copy, pressed && styles.pressed]}
+                <PressableFeedback
+                  style={styles.copy}
                   disabled={!onPress}
                   onPress={onPress}
                   accessibilityRole="button"
@@ -219,7 +221,7 @@ export function RegionDownloads() {
                       .filter(Boolean)
                       .join(" · ")}
                   </T>
-                </Pressable>
+                </PressableFeedback>
                 {canDownload && (
                   <IconButton icon="download" label={t("download")} onPress={() => void downloadRegion(row.region)} />
                 )}
@@ -228,7 +230,7 @@ export function RegionDownloads() {
                 )}
               </View>
               {busy && !isActive && download && <DownloadProgress download={download} release={release} />}
-            </Pressable>
+            </PressableFeedback>
           );
         })}
       </ScreenSection>
@@ -249,7 +251,6 @@ const styles = StyleSheet.create({
   head: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: 10 },
   copy: { flex: 1, minWidth: "55%", gap: 3 },
   row: { gap: 8, paddingVertical: 10 },
-  pressed: { opacity: 0.6 },
   rowHead: { flexDirection: "row", alignItems: "center", gap: 8 },
   iconButton: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
   progress: { gap: 8 },

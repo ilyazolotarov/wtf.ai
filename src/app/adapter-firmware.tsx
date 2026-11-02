@@ -1,10 +1,11 @@
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useRef, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ScreenCard, useSidePadding } from "@/components/screens/screen-ui";
 import { Icon } from "@/components/ui/icon";
+import { PressableFeedback } from "@/components/ui/press-feedback";
 import { T } from "@/components/ui/text";
 import { Radius, usePalette } from "@/constants/theme";
 import type { Strings } from "@/i18n/en";
@@ -120,24 +121,24 @@ export default function AdapterFirmwareScreen() {
       )}
 
       <View style={styles.buttons}>
-        <Pressable
+        <PressableFeedback
           onPress={isReleased ? close : openApp}
           accessibilityRole="button"
-          style={({ pressed }) => [styles.button, { backgroundColor: palette.accent }, pressed && styles.pressed]}
+          style={[styles.button, { backgroundColor: palette.accent }]}
         >
           <T w="semibold" size={16} color={palette.onAccent} fit={2} style={styles.buttonLabel}>
             {isReleased ? t("fwReconnect") : fill(t("fwOpenApp"))}
           </T>
-        </Pressable>
-        <Pressable
+        </PressableFeedback>
+        <PressableFeedback
           onPress={isReleased ? openApp : close}
           accessibilityRole="button"
-          style={({ pressed }) => [styles.button, { backgroundColor: palette.secBg }, pressed && styles.pressed]}
+          style={[styles.button, { backgroundColor: palette.secBg }]}
         >
           <T w="semibold" size={16} fit={2} style={styles.buttonLabel}>
             {isReleased ? fill(t("fwOpenApp")) : t("fwSkip")}
           </T>
-        </Pressable>
+        </PressableFeedback>
       </View>
     </View>
   );
@@ -167,5 +168,4 @@ const styles = StyleSheet.create({
     borderRadius: Radius.pill,
   },
   buttonLabel: { textAlign: "center" },
-  pressed: { opacity: 0.8 },
 });

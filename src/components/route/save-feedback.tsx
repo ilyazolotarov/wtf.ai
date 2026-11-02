@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Animated, Pressable, StyleSheet, View } from "react-native";
+import { Animated, StyleSheet, View } from "react-native";
 
 import { Icon } from "@/components/ui/icon";
+import { PressableFeedback } from "@/components/ui/press-feedback";
 import { T } from "@/components/ui/text";
 import { Radius, usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
@@ -61,11 +62,11 @@ export function SaveConfirmation({
           </T>
         )}
       </View>
-      <Pressable onPress={onUndo} accessibilityRole="button" hitSlop={8} style={({ pressed }) => [styles.undo, pressed && styles.pressed]}>
-        <T w="semibold" size={14} color={palette.accent}>
+      <PressableFeedback onPress={onUndo} accessibilityRole="button" hitSlop={8} style={styles.undo}>
+        <T w="semibold" size={14} color={palette.text}>
           {t("undo")}
         </T>
-      </Pressable>
+      </PressableFeedback>
     </Animated.View>
   );
 }
@@ -101,6 +102,5 @@ const styles = StyleSheet.create({
   },
   copy: { flex: 1, minWidth: "60%", gap: 1 },
   undo: { marginLeft: "auto" },
-  pressed: { opacity: 0.6 },
   flash: { marginHorizontal: -8, borderRadius: 12 },
 });

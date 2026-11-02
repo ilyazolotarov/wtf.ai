@@ -3,7 +3,7 @@
 // the back swipe returns to the list it was picked from; the host says where each action leaves to.
 
 import { useState } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 
 import { ScreenAction, ScreenCard, ScreenLink, ScreenNote } from "@/components/screens/screen-ui";
 import { cardinal, formatDistance, formatEta, toDegrees } from "@/components/status/format-geo";
@@ -11,6 +11,7 @@ import { formatDurationS, PROBLEM_TEXT } from "@/components/route/guidance-text"
 import { SaveConfirmation } from "@/components/route/save-feedback";
 import { addStopWithUndo, offerRouteUndo } from "@/components/route/trip-undo";
 import { Icon, type IconName } from "@/components/ui/icon";
+import { PressableFeedback } from "@/components/ui/press-feedback";
 import { T } from "@/components/ui/text";
 import { Radius, usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
@@ -115,18 +116,18 @@ export function PlaceCard({ place: selected, onExit }: { place: Place; onExit(ho
             {[null, ...selected.entrances.map((e) => e.ref)].map((ref) => {
               const on = door === ref;
               return (
-                <Pressable
+                <PressableFeedback
                   key={ref ?? "building"}
                   onPress={() => setDoor(ref)}
                   accessibilityRole="button"
                   accessibilityState={{ selected: on }}
                   accessibilityLabel={ref ? t("searchEntrance").replace("{n}", ref) : t("entranceBuilding")}
-                  style={({ pressed }) => [styles.door, { backgroundColor: on ? palette.accent : palette.surface }, pressed && styles.pressed]}
+                  style={[styles.door, { backgroundColor: on ? palette.accent : palette.surface }]}
                 >
                   <T w="semibold" size={15} color={on ? palette.onAccent : palette.text} style={styles.tabular}>
                     {ref ?? t("entranceBuilding")}
                   </T>
-                </Pressable>
+                </PressableFeedback>
               );
             })}
           </View>
@@ -251,6 +252,5 @@ const styles = StyleSheet.create({
   // Home, Work and Save in one line on a 393-pt phone in Ukrainian: the compact 16 left it ~2 pt short.
   saveAction: { paddingHorizontal: 14 },
   flex: { flex: 1 },
-  pressed: { opacity: 0.7 },
   tabular: { fontVariant: ["tabular-nums"] },
 });

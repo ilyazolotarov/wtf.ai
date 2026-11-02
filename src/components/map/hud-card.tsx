@@ -1,8 +1,9 @@
 import type { PropsWithChildren, ReactNode } from "react";
-import { Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
+import { StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
 
 import { GlassFill } from "@/components/ui/glass-fill";
 import { Icon, type IconName } from "@/components/ui/icon";
+import { PressableFeedback } from "@/components/ui/press-feedback";
 import { T } from "@/components/ui/text";
 import { Radius, usePalette, type StatusColor } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
@@ -47,15 +48,15 @@ export function HudCard({
           {lines}
         </View>
         {onClose && (
-          <Pressable
+          <PressableFeedback
             onPress={onClose}
             hitSlop={10}
             accessibilityRole="button"
             accessibilityLabel={t("cancel")}
-            style={({ pressed }) => pressed && hud.pressed}
+            style={hud.close}
           >
             <Icon name="close" size={20} color={palette.text2} />
-          </Pressable>
+          </PressableFeedback>
         )}
       </View>
       {children}
@@ -96,20 +97,14 @@ export function CardButton({
 }) {
   const palette = usePalette();
   return (
-    <Pressable
+    <PressableFeedback
       onPress={onPress}
       disabled={disabled}
       accessibilityRole="button"
       accessibilityState={{ disabled: !!disabled }}
-      style={({ pressed }) => [
-        hud.button,
-        wide && hud.wide,
-        { backgroundColor: palette.surface },
-        disabled && hud.disabled,
-        pressed && hud.pressed,
-      ]}
+      style={[hud.button, wide && hud.wide, { backgroundColor: palette.surface }, disabled && hud.disabled]}
     >
-      <T w="semibold" size={14} color={color ?? palette.accent} fit>
+      <T w="semibold" size={14} color={color ?? palette.text} fit>
         {label}
       </T>
       {sub && (
@@ -117,11 +112,11 @@ export function CardButton({
           {sub}
         </T>
       )}
-    </Pressable>
+    </PressableFeedback>
   );
 }
 
-/** A pill button with an icon on a card; `primary` is filled with the accent. */
+/** A pill button with an icon on a card; `primary` is filled with the accent, the others grey in the text colour. */
 export function PillButton({
   icon,
   label,
@@ -134,22 +129,18 @@ export function PillButton({
   primary?: boolean;
 }) {
   const palette = usePalette();
-  const color = primary ? palette.onAccent : palette.accent;
+  const color = primary ? palette.onAccent : palette.text;
   return (
-    <Pressable
+    <PressableFeedback
       onPress={onPress}
       accessibilityRole="button"
-      style={({ pressed }) => [
-        hud.pill,
-        { backgroundColor: primary ? palette.accent : palette.surface },
-        pressed && hud.pressed,
-      ]}
+      style={[hud.pill, { backgroundColor: primary ? palette.accent : palette.surface }]}
     >
       <Icon name={icon} size={16} color={color} />
       <T w="semibold" size={15} color={color} fit>
         {label}
       </T>
-    </Pressable>
+    </PressableFeedback>
   );
 }
 
@@ -180,19 +171,14 @@ export function HudChip({
   );
   if (!onPress) return <View style={[panel, hud.chip]}>{body}</View>;
   return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [panel, hud.chip, pressed && hud.pressed]}
-      accessibilityRole="button"
-    >
+    <PressableFeedback onPress={onPress} style={[panel, hud.chip]} accessibilityRole="button">
       {body}
-    </Pressable>
+    </PressableFeedback>
   );
 }
 
 export const hud = StyleSheet.create({
   panel: { borderCurve: "continuous" },
-  pressed: { opacity: 0.75 },
   disabled: { opacity: 0.4 },
   fitBox: { flexShrink: 1 },
   card: { gap: 12, padding: 16, borderRadius: Radius.rL },
@@ -204,7 +190,9 @@ export const hud = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  text: { flex: 1 },
+  // As tall as the icon at least: a title alone sits level with it; more lines start at its top.
+  text: { flex: 1, minHeight: 40, justifyContent: "center" },
+  close: { minHeight: 40, justifyContent: "center" },
   // Side by side, equal, while both labels fit; otherwise stacked (a large text size, a long label).
   actions: { flexDirection: "row", flexWrap: "wrap" },
   button: {

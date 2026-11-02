@@ -1,11 +1,12 @@
 import { router, useLocalSearchParams } from "expo-router";
 import { useRef, useState } from "react";
-import { Pressable, StyleSheet, type ScrollViewInstance } from "react-native";
+import { StyleSheet, type ScrollViewInstance } from "react-native";
 
 import { AVAILABLE_LESSONS, LessonBody } from "@/components/guide/lesson-bodies";
 import { NextTabContext, ScrollLockContext, type NextTab } from "@/components/guide/lesson-ui";
 import type { LessonId } from "@/components/guide/lessons";
 import { ScreenContent } from "@/components/screens/screen-ui";
+import { PressableFeedback } from "@/components/ui/press-feedback";
 import { T } from "@/components/ui/text";
 import { Radius, usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
@@ -52,26 +53,23 @@ export default function LessonScreen() {
         </NextTabContext>
       </ScrollLockContext>
       {nextTab && (
-        <Pressable
+        <PressableFeedback
           onPress={() => {
             nextTab.show();
             scroll.current?.scrollTo({ y: Math.max(0, nextTab.y - 12), animated: true });
           }}
           accessibilityRole="button"
-          style={({ pressed }) => [styles.next, { backgroundColor: palette.accent }, pressed && styles.pressed]}
+          style={[styles.next, { backgroundColor: palette.accent }]}
         >
           <T w="semibold" size={16} color={palette.onAccent} fit>
             {t("guideNextLesson").replace("{title}", nextTab.label)}
           </T>
-        </Pressable>
+        </PressableFeedback>
       )}
-      <Pressable
+      <PressableFeedback
         onPress={finish}
         accessibilityRole="button"
-        style={({ pressed }) => [
-          nextTab ? styles.skip : [styles.next, { backgroundColor: palette.accent }],
-          pressed && styles.pressed,
-        ]}
+        style={nextTab ? styles.skip : [styles.next, { backgroundColor: palette.accent }]}
       >
         <T w="semibold" size={nextTab ? 15 : 16} color={nextTab ? palette.accent : palette.onAccent} fit>
           {nextTab
@@ -82,7 +80,7 @@ export default function LessonScreen() {
               ? t("guideNextLesson").replace("{title}", t(next.title))
               : t("guideAllDone")}
         </T>
-      </Pressable>
+      </PressableFeedback>
     </ScreenContent>
   );
 }
@@ -98,5 +96,4 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   skip: { minHeight: 44, alignItems: "center", justifyContent: "center", paddingHorizontal: 20, marginTop: -8 },
-  pressed: { opacity: 0.8 },
 });

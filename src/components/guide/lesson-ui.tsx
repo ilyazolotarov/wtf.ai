@@ -1,7 +1,8 @@
 import { createContext, Fragment, useContext, useEffect, useRef, useState, type PropsWithChildren } from "react";
-import { Animated, Pressable, StyleSheet, View, type DimensionValue } from "react-native";
+import { Animated, StyleSheet, View, type DimensionValue } from "react-native";
 
 import { Segmented } from "@/components/screens/screen-ui";
+import { PressableFeedback } from "@/components/ui/press-feedback";
 import { T } from "@/components/ui/text";
 import { Radius, usePalette } from "@/constants/theme";
 
@@ -71,23 +72,22 @@ export function ChoiceChips<K extends string>({
       {options.map((option) => {
         const on = option.value === value;
         return (
-          <Pressable
+          <PressableFeedback
             key={option.value}
             onPress={() => onChange(option.value)}
             accessibilityRole="radio"
             accessibilityState={{ checked: on }}
-            style={({ pressed }) => [
+            style={[
               styles.chip,
               columns ? { width: `${100 / columns - 2}%` } : null,
               { borderColor: on ? palette.accent : palette.line, backgroundColor: on ? palette.groupBg : "transparent" },
-              pressed && styles.pressed,
             ]}
           >
             <View style={[styles.chipDot, { backgroundColor: option.color }]} />
             <T w="medium" size={14}>
               {option.label}
             </T>
-          </Pressable>
+          </PressableFeedback>
         );
       })}
     </View>
@@ -219,7 +219,6 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   chipDot: { width: 10, height: 10, borderRadius: 5 },
-  pressed: { opacity: 0.75 },
   intro: { lineHeight: 21 },
   ringAnchor: { position: "absolute", width: 0, height: 0, overflow: "visible" },
 });

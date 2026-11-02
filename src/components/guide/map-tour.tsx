@@ -1,7 +1,6 @@
 import { useEffect, useEffectEvent, useState, type RefObject } from "react";
 import {
   Animated,
-  Pressable,
   StyleSheet,
   useWindowDimensions,
   View,
@@ -13,6 +12,7 @@ import Svg, { Path } from "react-native-svg";
 
 import { GlassFill } from "@/components/ui/glass-fill";
 import { Icon } from "@/components/ui/icon";
+import { PressableFeedback } from "@/components/ui/press-feedback";
 import { T } from "@/components/ui/text";
 import { Radius, usePalette } from "@/constants/theme";
 import type { Strings } from "@/i18n/en";
@@ -120,24 +120,24 @@ function InviteCard({
         </View>
       </View>
       <View style={styles.buttons}>
-        <Pressable
+        <PressableFeedback
           onPress={onDismiss}
           accessibilityRole="button"
-          style={({ pressed }) => [styles.button, { backgroundColor: palette.surface }, pressed && styles.pressed]}
+          style={[styles.button, { backgroundColor: palette.surface }]}
         >
           <T w="semibold" size={14} color={palette.text2} fit>
             {t("notNow")}
           </T>
-        </Pressable>
-        <Pressable
+        </PressableFeedback>
+        <PressableFeedback
           onPress={onStart}
           accessibilityRole="button"
-          style={({ pressed }) => [styles.button, { backgroundColor: palette.accent }, pressed && styles.pressed]}
+          style={[styles.button, { backgroundColor: palette.accent }]}
         >
           <T w="semibold" size={14} color={palette.onAccent} fit>
             {t(start)}
           </T>
-        </Pressable>
+        </PressableFeedback>
       </View>
     </View>
   );
@@ -237,11 +237,11 @@ export function MapTour({
           <T w="semibold" size={12} color={palette.accent} style={styles.kicker}>
             {t("tourStep").replace("{n}", String(step + 1)).replace("{total}", String(stops.length))}
           </T>
-          <Pressable onPress={() => onClose(false)} hitSlop={10} accessibilityRole="button">
+          <PressableFeedback onPress={() => onClose(false)} hitSlop={10} accessibilityRole="button">
             <T w="medium" size={13} color={palette.text2}>
               {t("tourSkip")}
             </T>
-          </Pressable>
+          </PressableFeedback>
         </View>
         <T w="semibold" size={18} style={styles.cardTitle}>
           {t(stop.title)}
@@ -259,25 +259,25 @@ export function MapTour({
         )}
         <View style={styles.buttons}>
           {step > 0 && (
-            <Pressable
+            <PressableFeedback
               onPress={() => onStep(step - 1)}
               accessibilityRole="button"
-              style={({ pressed }) => [styles.button, { backgroundColor: palette.surface }, pressed && styles.pressed]}
+              style={[styles.button, { backgroundColor: palette.surface }]}
             >
               <T w="semibold" size={14} fit>
                 {t("tourBack")}
               </T>
-            </Pressable>
+            </PressableFeedback>
           )}
-          <Pressable
+          <PressableFeedback
             onPress={() => (last ? onClose(true) : onStep(step + 1))}
             accessibilityRole="button"
-            style={({ pressed }) => [styles.button, { backgroundColor: palette.accent }, pressed && styles.pressed]}
+            style={[styles.button, { backgroundColor: palette.accent }]}
           >
             <T w="semibold" size={14} color={palette.onAccent} fit>
               {last ? t("tourDone") : t("tourNext")}
             </T>
-          </Pressable>
+          </PressableFeedback>
         </View>
       </View>
     </View>
@@ -378,7 +378,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  pressed: { opacity: 0.75 },
   card: {
     position: "absolute",
     left: 16,

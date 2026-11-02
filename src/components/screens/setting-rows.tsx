@@ -1,6 +1,7 @@
 import { Host, Switch } from "@expo/ui";
-import { Pressable, StyleSheet, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 
+import { PressableFeedback } from "@/components/ui/press-feedback";
 import { T } from "@/components/ui/text";
 import { usePalette } from "@/constants/theme";
 import type { Strings } from "@/i18n/en";
@@ -24,14 +25,14 @@ export function CycleRow<T extends number | string | null>({
   const palette = usePalette();
   const next = () => onChange(options[(options.indexOf(value) + 1) % options.length]);
   return (
-    <Pressable onPress={next} accessibilityRole="button" style={styles.cycle}>
+    <PressableFeedback look="row" onPress={next} accessibilityRole="button" style={styles.cycle}>
       <T size={14} color={palette.text2} style={styles.flex}>
         {t(labelKey)}
       </T>
       <T w="semibold" size={14} color={palette.accent}>
         {format(value)} ›
       </T>
-    </Pressable>
+    </PressableFeedback>
   );
 }
 

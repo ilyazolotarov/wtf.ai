@@ -227,7 +227,7 @@ export default function UiGalleryScreen() {
           <HudChip
             icon="location_on"
             label={t("placeOffer")}
-            color={palette.accent}
+            color={palette.text}
             onPress={none}
           />
           <HudChip
@@ -238,7 +238,7 @@ export default function UiGalleryScreen() {
           <HudChip
             icon="gps_off"
             label={t("cutGps")}
-            color={palette.accent}
+            color={palette.text}
             onPress={none}
           />
           <ManualChip manual={manual} onPlace={none} onForget={none} />

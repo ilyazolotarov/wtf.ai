@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 import { G, Path, Rect } from "react-native-svg";
 
 import { PoseTab } from "@/components/guide/lesson-pose";
@@ -8,6 +8,7 @@ import { MapCard, MapCardButtons, MapCardHeader, MapChipButton } from "@/compone
 import { PinDot, useMapColors, useNudgedHeading, type Box } from "@/components/guide/mini-map";
 import { PlacingMap, type PlaceStep, type Point } from "@/components/guide/placing-map";
 import { Icon } from "@/components/ui/icon";
+import { PressableFeedback } from "@/components/ui/press-feedback";
 import { T } from "@/components/ui/text";
 import { Radius, usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
@@ -171,11 +172,11 @@ function SetPositionTab() {
           <T size={14} style={styles.verdictText}>
             {t("placeDone")}
           </T>
-          <Pressable onPress={reset} hitSlop={8} accessibilityRole="button">
+          <PressableFeedback onPress={reset} hitSlop={8} accessibilityRole="button">
             <T w="semibold" size={14} color={palette.accent}>
               {t("placeAgain")}
             </T>
-          </Pressable>
+          </PressableFeedback>
         </View>
       )}
     </>

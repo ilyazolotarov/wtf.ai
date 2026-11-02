@@ -1,10 +1,11 @@
 import { router, type Href } from "expo-router";
 import { useSyncExternalStore } from "react";
-import { Platform, Pressable, StyleSheet, useColorScheme, View } from "react-native";
+import { Platform, StyleSheet, useColorScheme, View } from "react-native";
 
 import { AVAILABLE_LESSONS } from "@/components/guide/lesson-bodies";
 import { ScreenContent, ScreenSection } from "@/components/screens/screen-ui";
 import { Icon, type IconName } from "@/components/ui/icon";
+import { PressableFeedback } from "@/components/ui/press-feedback";
 import { T } from "@/components/ui/text";
 import { fmtBytes } from "@/components/vehicle/format";
 import { STORE_BUILD } from "@/config/distribution";
@@ -107,11 +108,12 @@ export default function MoreScreen() {
   }
 
   const row = (item: Item) => (
-    <Pressable
+    <PressableFeedback
       key={item.label}
       onPress={() => router.push(item.href)}
       accessibilityRole="button"
-      style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+      look="row"
+      style={styles.row}
     >
       <View style={[styles.tile, { backgroundColor: palette.accentA }]}>
         <Icon name={item.icon} size={20} color={palette.accent} />
@@ -126,7 +128,7 @@ export default function MoreScreen() {
         </T>
       </View>
       <Icon name="chevron_right" size={14} color={palette.text2} />
-    </Pressable>
+    </PressableFeedback>
   );
 
   return (
@@ -139,7 +141,6 @@ export default function MoreScreen() {
 
 const styles = StyleSheet.create({
   row: { minHeight: 64, flexDirection: "row", alignItems: "center", gap: 14 },
-  pressed: { opacity: 0.7 },
   tile: {
     width: 38,
     height: 38,

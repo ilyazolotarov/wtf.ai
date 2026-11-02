@@ -3,7 +3,6 @@ import { Children, Fragment, isValidElement, type Ref } from "react";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   useWindowDimensions,
@@ -14,6 +13,7 @@ import {
 } from "react-native";
 
 import { Icon, type IconName } from "@/components/ui/icon";
+import { PressableFeedback, RowSlotContext } from "@/components/ui/press-feedback";
 import { T } from "@/components/ui/text";
 import { PageMaxWidth, Radius, usePalette } from "@/constants/theme";
 import type { Strings } from "@/i18n/en";
@@ -131,19 +131,15 @@ function RoundButton({
 }) {
   const palette = usePalette();
   return (
-    <Pressable
+    <PressableFeedback
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={label}
       hitSlop={6}
-      style={({ pressed }) => [
-        styles.roundButton,
-        { backgroundColor: palette.surface },
-        pressed && styles.pressed,
-      ]}
+      style={[styles.roundButton, { backgroundColor: palette.surface }]}
     >
       <Icon name={icon} size={16} color={palette.text} />
-    </Pressable>
+    </PressableFeedback>
   );
 }
 
@@ -171,7 +167,9 @@ export function ScreenSection({
                 {i > 0 && (
                   <View style={[styles.separator, { backgroundColor: palette.line }]} />
                 )}
-                {item}
+                <RowSlotContext value={{ padding: GROUP_PADDING, radius: Radius.rL, first: i === 0, last: i === items.length - 1 }}>
+                  {item}
+                </RowSlotContext>
               </Fragment>
             ))}
       </View>
@@ -255,25 +253,24 @@ export function ScreenAction({
   const palette = usePalette();
   const fg = secondary ? palette.text : palette.onAccent;
   return (
-    <Pressable
+    <PressableFeedback
       onPress={onPress}
       disabled={disabled}
       accessibilityRole="button"
       accessibilityState={{ disabled }}
-      style={({ pressed }) => [
+      style={[
         styles.action,
         compact && styles.actionCompact,
         style,
         { backgroundColor: secondary ? palette.secBg : palette.accent },
         disabled && styles.disabled,
-        pressed && !disabled && styles.pressed,
       ]}
     >
       {icon && <Icon name={icon} size={18} color={fg} />}
       <T w="semibold" size={compact ? 14 : 15} color={fg} fit>
         {label ?? (labelKey ? t(labelKey) : "")}
       </T>
-    </Pressable>
+    </PressableFeedback>
   );
 }
 
@@ -286,15 +283,15 @@ export function ScreenLink({
 }) {
   const palette = usePalette();
   return (
-    <Pressable
+    <PressableFeedback
       onPress={onPress}
       accessibilityRole="button"
-      style={({ pressed }) => [styles.link, pressed && styles.pressed]}
+      style={styles.link}
     >
       <T w="semibold" size={14} color={palette.accent} fit>
         {label}
       </T>
-    </Pressable>
+    </PressableFeedback>
   );
 }
 
@@ -325,7 +322,7 @@ export function Segmented<V extends string>({
       {options.map((option) => {
         const active = option.value === value;
         return (
-          <Pressable
+          <PressableFeedback
             key={option.value}
             onPress={() => onChange(option.value)}
             accessibilityRole="button"
@@ -335,7 +332,7 @@ export function Segmented<V extends string>({
             <T w="semibold" size={14} fit color={active ? palette.onAccent : palette.text}>
               {option.label}
             </T>
-          </Pressable>
+          </PressableFeedback>
         );
       })}
     </View>
@@ -359,6 +356,9 @@ export const screenStyles = StyleSheet.create({
   },
   smallGap: { gap: 8 },
 });
+
+/** A grouped card's side padding: its rows' pressed tint reaches out over it. */
+const GROUP_PADDING = 16;
 
 const styles = StyleSheet.create({
   content: {
@@ -390,7 +390,7 @@ const styles = StyleSheet.create({
   },
   section: { gap: 8 },
   sectionLabel: { paddingHorizontal: 4 },
-  group: { paddingHorizontal: 16, borderRadius: Radius.rL, borderCurve: "continuous" },
+  group: { paddingHorizontal: GROUP_PADDING, borderRadius: Radius.rL, borderCurve: "continuous" },
   plainGroup: { padding: 16, gap: 12, borderRadius: Radius.rL, borderCurve: "continuous" },
   separator: { height: StyleSheet.hairlineWidth },
   card: { padding: 16, gap: 8, borderRadius: Radius.rL, borderCurve: "continuous" },
@@ -424,7 +424,6 @@ const styles = StyleSheet.create({
   },
   actionCompact: { minHeight: 40, paddingHorizontal: 16 },
   disabled: { opacity: 0.4 },
-  pressed: { opacity: 0.75 },
   link: { alignSelf: "center", paddingVertical: 4, paddingHorizontal: 8 },
   note: { paddingHorizontal: 4, lineHeight: 19 },
   segmented: {

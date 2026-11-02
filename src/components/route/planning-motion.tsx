@@ -1,20 +1,7 @@
 import { useEffect, useState } from "react";
-import { AccessibilityInfo, Animated, Easing, StyleSheet, View } from "react-native";
+import { Animated, Easing, StyleSheet, View } from "react-native";
 
-/** The system's Reduce Motion setting (iOS, Android "Remove animations"): animations hold still. */
-function useReduceMotion(): boolean {
-  const [reduce, setReduce] = useState(false);
-  useEffect(() => {
-    let live = true;
-    void AccessibilityInfo.isReduceMotionEnabled().then((v) => live && setReduce(v));
-    const sub = AccessibilityInfo.addEventListener("reduceMotionChanged", setReduce);
-    return () => {
-      live = false;
-      sub.remove();
-    };
-  }, []);
-  return reduce;
-}
+import { useReduceMotion } from "@/components/ui/reduce-motion";
 
 /** 0 → 1 over `ms`, again and again, on the native driver; held at 0 with Reduce Motion. */
 function useLoop(ms: number, easing: (t: number) => number): Animated.Value {

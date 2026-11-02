@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { Pressable, StyleSheet, Text, useColorScheme, View } from "react-native";
+import { StyleSheet, Text, useColorScheme, View } from "react-native";
 
+import { PressableFeedback } from "@/components/ui/press-feedback";
 import { MAX_FONT_SCALE } from "@/components/ui/text";
 import { Colors } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
@@ -35,10 +36,11 @@ function DeviceRow({
     .filter(Boolean)
     .join(" · ");
   return (
-    <Pressable
+    <PressableFeedback
       onPress={onPress}
       accessibilityRole="button"
-      style={({ pressed }) => [styles.row, pressed && styles.pressed, active && { backgroundColor: palette.accentA }]}
+      look="row"
+      style={[styles.row, active && { backgroundColor: palette.accentA }]}
     >
       <View style={styles.rowText}>
         <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[styles.name, { color: palette.text }]} numberOfLines={1}>
@@ -49,7 +51,7 @@ function DeviceRow({
         </Text>
       </View>
       <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[styles.rssi, { color: palette.textSecondary }]}>{rssiBars(device.rssi)}</Text>
-    </Pressable>
+    </PressableFeedback>
   );
 }
 
@@ -87,9 +89,9 @@ export function DeviceList({
         <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[styles.subtitle, { color: palette.textSecondary }]}>{t("noAdaptersFound")}</Text>
       )}
       {showOther && section(`${t("otherDevices")} · ${t("tryAnyway")}`, other)}
-      <Pressable onPress={() => setShowOther((v) => !v)} accessibilityRole="button">
+      <PressableFeedback onPress={() => setShowOther((v) => !v)} accessibilityRole="button">
         <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[styles.link, { color: palette.accent }]}>{showOther ? t("hideOtherDevices") : t("showOtherDevices")}</Text>
-      </Pressable>
+      </PressableFeedback>
     </View>
   );
 }
@@ -111,6 +113,5 @@ const styles = StyleSheet.create({
   name: { fontSize: 15, fontWeight: "600" },
   subtitle: { fontSize: 12 },
   rssi: { fontSize: 12, fontVariant: ["tabular-nums"] },
-  pressed: { opacity: 0.7 },
   link: { fontSize: 14, fontWeight: "600", paddingVertical: 4 },
 });

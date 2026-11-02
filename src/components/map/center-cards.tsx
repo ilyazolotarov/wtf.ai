@@ -1,15 +1,14 @@
 import { useEffect, useState, type PropsWithChildren } from "react";
-import { Animated, Linking, Pressable, StyleSheet, View } from "react-native";
+import { Animated, Linking, StyleSheet, View } from "react-native";
 
 import { Icon } from "@/components/ui/icon";
+import { PressableFeedback } from "@/components/ui/press-feedback";
 import { T } from "@/components/ui/text";
 import { Radius, usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
 import { insideUkraine } from "@/nav/integrity/border";
 import { usePositionPermission } from "@/providers/position-provider";
 import { useSensorValue } from "@/providers/runtime-provider";
-
-import { hud } from "./hud-card";
 
 /** Location not allowed: why the app needs it, and the system's ask, or Settings once it may not ask again. */
 export function PermissionCard() {
@@ -35,16 +34,16 @@ export function PermissionCard() {
       <T size={14} color={palette.text2} style={styles.body}>
         {t("locationNeeded")}
       </T>
-      <Pressable
+      <PressableFeedback
         onPress={toSettings ? () => void Linking.openURL("app-settings:") : enableLocation}
         disabled={requesting}
-        style={({ pressed }) => [styles.button, { backgroundColor: palette.accent }, pressed && hud.pressed]}
+        style={[styles.button, { backgroundColor: palette.accent }]}
         accessibilityRole="button"
       >
         <T w="semibold" size={15} color={palette.onAccent}>
           {toSettings ? t("openSettings") : t("enableLocation")}
         </T>
-      </Pressable>
+      </PressableFeedback>
     </CenterCard>
   );
 }
@@ -69,15 +68,15 @@ export function NoFixCard({ onPlace }: { onPlace: () => void }) {
         <T size={14} color={palette.text2} style={styles.body}>
           {t("gpsAbroadBody")}
         </T>
-        <Pressable
+        <PressableFeedback
           onPress={onPlace}
-          style={({ pressed }) => [styles.button, { backgroundColor: palette.accent }, pressed && hud.pressed]}
+          style={[styles.button, { backgroundColor: palette.accent }]}
           accessibilityRole="button"
         >
           <T w="semibold" size={15} color={palette.onAccent}>
             {t("noAdapterRouteSetButton")}
           </T>
-        </Pressable>
+        </PressableFeedback>
       </CenterCard>
     );
   }

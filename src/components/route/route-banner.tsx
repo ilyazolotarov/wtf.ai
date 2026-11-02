@@ -1,9 +1,10 @@
 import { useRef } from "react";
-import { Pressable, processColor, StyleSheet, View } from "react-native";
+import { processColor, StyleSheet, View } from "react-native";
 
 import { formatDistance } from "@/components/status/format-geo";
 import { GlassFill } from "@/components/ui/glass-fill";
 import { Icon, type IconName } from "@/components/ui/icon";
+import { PressableFeedback } from "@/components/ui/press-feedback";
 import { T } from "@/components/ui/text";
 import { Radius, usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
@@ -151,7 +152,7 @@ export function RouteBanner({
             )}
           </View>
           {route.status === "active" && onToggleVoice && (
-            <Pressable
+            <PressableFeedback
               onPress={onToggleVoice}
               onLongPress={canPickAudioOutput ? openPicker : undefined}
               accessibilityRole="button"
@@ -160,12 +161,12 @@ export function RouteBanner({
               accessibilityActions={canPickAudioOutput ? [{ name: "activate" }, { name: "longpress", label: t("voiceOutput") }] : undefined}
               onAccessibilityAction={(e) => (e.nativeEvent.actionName === "longpress" ? openPicker() : onToggleVoice())}
               hitSlop={HIT_SLOP}
-              style={({ pressed }) => [styles.button, { backgroundColor: palette.surface }, pressed && styles.pressed]}
+              style={[styles.button, { backgroundColor: palette.surface }]}
             >
               <Icon
                 name={muted ? "volume_off" : offPhone ? "airplay" : "volume_up"}
                 size={17}
-                color={muted ? palette.text2 : palette.accent}
+                color={muted ? palette.text2 : palette.text}
               />
               {AudioOutputPicker && (
                 // Invisible: only its sheet is wanted, opened by the long press.
@@ -177,19 +178,19 @@ export function RouteBanner({
                   activeTint={processColor(palette.accent) as number}
                 />
               )}
-            </Pressable>
+            </PressableFeedback>
           )}
           {/* Apart: × ends the route, a slip off the voice button must not reach it. */}
           <View style={styles.spacer} />
-          <Pressable
+          <PressableFeedback
             onPress={onStop}
             accessibilityRole="button"
             accessibilityLabel={t("stopGuidance")}
             hitSlop={HIT_SLOP}
-            style={({ pressed }) => [styles.button, { backgroundColor: palette.surface }, pressed && styles.pressed]}
+            style={[styles.button, { backgroundColor: palette.surface }]}
           >
             <Icon name="close" size={17} color={palette.text2} />
-          </Pressable>
+          </PressableFeedback>
         </View>
         {distance && (
           <T w="semibold" size={15} fit={2}>
@@ -261,5 +262,4 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   picker: { position: "absolute", width: 1, height: 1, opacity: 0 },
-  pressed: { opacity: 0.7 },
 });

@@ -63,6 +63,21 @@ describe("PuckFeed", () => {
     expect(feed.advance({ ...a0, headingRad: (10 * Math.PI) / 180 })!.courseDeg).toBeCloseTo(10, 5);
   });
 
+  it("a publish in a turn keeps the estimate's heading, never the old road's", () => {
+    let now = 0;
+    const feed = new PuckFeed(() => now);
+    const a0: NavAdvance = { lat: 50.4, lon: 30.5, headingRad: 0, speedMps: 20, tUs: 0 };
+    feed.advance(a0);
+    feed.publish(position());
+    now += 100;
+    feed.advance({ ...a0, headingRad: (40 * Math.PI) / 180 });
+    // Map matching still has the car on the road it turns off: heading north.
+    expect(feed.publish(position())!.courseDeg).toBeCloseTo(40, 5);
+    now += 100;
+    feed.advance({ ...a0, headingRad: (1 * Math.PI) / 180 });
+    expect(feed.publish(position())!.courseDeg).toBeCloseTo(0, 5);
+  });
+
   it("standing: fed at publishes only, no lead", () => {
     const feed = new PuckFeed(() => 0);
     const p = position({ speedMps: 0.5 });
@@ -83,6 +98,27 @@ describe("PuckFeed", () => {
       feed.advance(a);
     }
     expect(feed.advance(a)!.leadMs).toBeGreaterThan(450);
+  });
+
+  it("the lead covers the batches' gap, not their average with the ones close behind", () => {
+    let now = 0;
+    const feed = new PuckFeed(() => now);
+    const a: NavAdvance = { lat: 50.4, lon: 30.5, headingRad: 0, speedMps: 20, tUs: 0 };
+    feed.advance(a);
+    feed.publish(position());
+    for (let i = 0; i < 20; i++) {
+      now += i % 3 === 2 ? 20 : 100;
+      feed.advance(a);
+    }
+    expect(feed.advance(a)!.leadMs).toBe(100);
+    // Slower batches lengthen it at once; faster ones shorten it once the slow ones are out of the window.
+    now += 300;
+    expect(feed.advance(a)!.leadMs).toBe(300);
+    for (let i = 0; i < 6; i++) {
+      now += 50;
+      feed.advance(a);
+    }
+    expect(feed.advance(a)!.leadMs).toBe(50);
   });
 
   it("without the navigator's steps the publishes pace the lead", () => {

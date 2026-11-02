@@ -353,7 +353,7 @@ export default function HomeScreen() {
               )}
 
               {placeOffered && (
-                <HudChip icon="location_on" label={t("placeOffer")} color={palette.accent} onPress={() => place.start()} />
+                <HudChip icon="location_on" label={t("placeOffer")} color={palette.text} onPress={() => place.start()} />
               )}
 
               {showManual && detailsOpen && (
@@ -392,7 +392,7 @@ export default function HomeScreen() {
                 <HudChip
                   icon="gps_off"
                   label={t("cutGps")}
-                  color={palette.accent}
+                  color={palette.text}
                   onPress={() => navigator.setSimulatedOutage(true)}
                 />
               )}

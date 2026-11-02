@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 
 import { formatMb, IconButton } from "@/components/downloads/region-downloads";
 import { ExplainCard, LessonIntro } from "@/components/guide/lesson-ui";
 import { ScreenAction, ScreenCard, ScreenSection, SectionLabel } from "@/components/screens/screen-ui";
 import { Icon } from "@/components/ui/icon";
+import { PressableFeedback } from "@/components/ui/press-feedback";
 import { T } from "@/components/ui/text";
 import { Radius, usePalette } from "@/constants/theme";
 import type { Strings } from "@/i18n/en";
@@ -136,7 +137,7 @@ export function LessonMaps() {
           return (
             <View key={row.id} style={styles.row}>
               <View style={styles.rowHead}>
-                <Pressable
+                <PressableFeedback
                   style={styles.copy}
                   disabled={!owned || isActive}
                   onPress={() => setActive(row.id)}
@@ -150,7 +151,7 @@ export function LessonMaps() {
                     {[row.size && formatMb(row.size), owned && (isActive ? t("activeMap") : t("downloaded"))].filter(Boolean).join(" · ") ||
                       t("notDownloaded")}
                   </T>
-                </Pressable>
+                </PressableFeedback>
                 {!download && !owned && (
                   <IconButton icon="download" label={t("download")} onPress={() => setDownload({ id: row.id, step: 0, paused: false })} />
                 )}
@@ -185,7 +186,7 @@ export function LessonMaps() {
               </T>
             </View>
             <View style={[styles.button, { backgroundColor: palette.surface }]}>
-              <T w="semibold" size={14} color={palette.accent} fit>
+              <T w="semibold" size={14} color={palette.text} fit>
                 {t("regionSwitch")}
               </T>
             </View>
