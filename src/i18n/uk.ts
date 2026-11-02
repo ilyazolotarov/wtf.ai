@@ -450,6 +450,7 @@ export const uk = {
   alternativeSlower: "+{n} хв",
   alternativeFaster: "−{n} хв",
   alternativeSame: "Той самий час",
+  findingAlternatives: "Шукаємо інші маршрути…",
   replanning: "Ви з’їхали з маршруту, прокладаємо новий…",
   routeUnsure: "Позиція неточна: маршрут поки не змінюємо",
   replanFailed: "Звідси поки не вдається прокласти маршрут",

@@ -1,5 +1,5 @@
 import { at, frame, ladder } from "@/nav/routing/__fixtures__/ladder";
-import { AlternativeSearch, edgeSet, labelPoint, sharedM } from "@/nav/routing/alternatives";
+import { AlternativeSearch, edgeSet, labelPoint, planAlternatives, sharedM } from "@/nav/routing/alternatives";
 import { planRoute, type RoutePlan } from "@/nav/routing/router";
 
 const from = { ...at(0, 0), headingRad: Math.PI / 2 };
@@ -9,9 +9,7 @@ function plans() {
   const g = ladder();
   const main = planRoute(g, frame, from, to);
   if (main.status !== "done") throw new Error(main.status);
-  const r = new AlternativeSearch(g, frame, from, to, main.plan).run();
-  if (r.status !== "done") throw new Error("unfinished");
-  return { g, main: main.plan, ...r };
+  return { g, main: main.plan, ...planAlternatives(g, frame, from, to, main.plan) };
 }
 const minNorth = (p: RoutePlan) => Math.min(...p.coordinates.map((c) => frame.toEnu(c)[1]));
 
@@ -47,12 +45,37 @@ describe("alternative routes", () => {
     expect(e).toBeCloseTo(1100, -2);
   });
 
-  test("slower than allowed: no alternative", () => {
+  test("slower than allowed: no alternative, and no search after it", () => {
     const g = ladder();
     const main = planRoute(g, frame, from, to);
     if (main.status !== "done") throw new Error(main.status);
-    const r = new AlternativeSearch(g, frame, from, to, main.plan, {}, { maxSlower: 1.05 }).run();
-    expect(r.status === "done" && r.alternatives).toEqual([]);
+    const r = planAlternatives(g, frame, from, to, main.plan, {}, { maxSlower: 1.05 });
+    expect(r.alternatives).toEqual([]);
+    expect(r.stats.searches).toBe(1);
+  });
+
+  test("a route turned down as too shared is slowed too: the next search goes elsewhere, not the same way again", () => {
+    const g = ladder();
+    const main = planRoute(g, frame, from, to);
+    if (main.status !== "done") throw new Error(main.status);
+    // 15 % slower, the north branch is still the fastest (the south one wins from ~21 %): the first search finds the
+    // route itself again. Slowed twice, the south one.
+    const r = planAlternatives(g, frame, from, to, main.plan, {}, { penalty: 1.15 });
+    expect(r.alternatives.map((a) => Math.round(minNorth(a)))).toContain(-400);
+    expect(r.stats.searches).toBeGreaterThanOrEqual(2);
+  });
+
+  test("each alternative is returned as soon as it is kept, the search going on", () => {
+    const g = ladder();
+    const main = planRoute(g, frame, from, to);
+    if (main.status !== "done") throw new Error(main.status);
+    const search = new AlternativeSearch(g, frame, from, to, main.plan);
+    const first = search.run();
+    expect(first.status).toBe("more");
+    expect(first.alternatives).toHaveLength(1);
+    const r = search.run();
+    expect(r.status).toBe("done");
+    expect(r.alternatives[0]).toBe(first.alternatives[0]);
   });
 
   test("runs in slices: a small budget returns `more` until it is done", () => {

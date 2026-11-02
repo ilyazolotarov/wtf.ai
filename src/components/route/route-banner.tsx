@@ -123,9 +123,11 @@ export function RouteBanner({
     sub ??= `${formatDistance(remainingM, language)} · ${formatDurationS(remainingS, t)} · ${t("arriveAt").replace("{time}", formatArrival(remainingS, nowMs))}`;
   }
 
-  // The planner at work: a ring pulsing out of the icon for a first plan, a sweeping bar for it and for a re-plan.
+  // The planner at work: a ring pulsing out of the icon for a first plan, a sweeping bar for it, for a re-plan and,
+  // with a line saying so, while the new route's alternatives are searched (they come one by one, seconds later).
   const planning = route.status === "planning";
-  const working = planning || (route.status === "active" && route.replanning);
+  const finding = route.status === "active" && !route.replanning && !!route.findingAlternatives;
+  const working = planning || (route.status === "active" && route.replanning) || finding;
   return (
     <View style={[styles.banner, { boxShadow: palette.shadow }]}>
       <GlassFill radius={Radius.rL} />
@@ -212,7 +214,12 @@ export function RouteBanner({
             {sub}
           </T>
         )}
-        {working && <PlanningSweep color={planning ? palette.accent : palette.warn.c} />}
+        {finding && (
+          <T size={13} color={palette.text2} fit={2} accessibilityLiveRegion="polite">
+            {t("findingAlternatives")}
+          </T>
+        )}
+        {working && <PlanningSweep color={planning || finding ? palette.accent : palette.warn.c} />}
       </View>
     </View>
   );

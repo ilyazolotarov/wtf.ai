@@ -309,7 +309,9 @@ One small component each; the screen only places them and wires their state. Car
   distance, time and arrival clock left; or "Planning route…", "Off route, planning again…", "Position uncertain:
   keeping the route", "No route" with the reason, "You've arrived". While the planner works a thin bar sweeps under
   the text (amber for a re-plan), and for a first plan a ring pulses out of the icon; both hold still with Reduce
-  Motion. Its × ends the route; its speaker button mutes the voice (hidden while the volume in Settings is 0),
+  Motion. While a new route's alternatives are searched (ROUTING-SPEC §8.7) the bar sweeps under a "Looking for other
+  routes…" line, until the search is over; the alternatives come onto the map one by one meanwhile. Its × ends the
+  route; its speaker button mutes the voice (hidden while the volume in Settings is 0),
   holding it opens the system's audio output picker, and while the voice goes off the phone it shows the AirPlay
   audio glyph. Both buttons are 38 pt, on the distance's line (the title's, without one): the speaker right after the
   distance, the × in the corner, far apart. The lines under it take the card's whole width and the card stays low.

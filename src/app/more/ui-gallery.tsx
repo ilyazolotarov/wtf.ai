@@ -595,6 +595,12 @@ function demoRouteStates(
     ],
     [label("on route", "на маршруті"), active(guidance("on")), false, false],
     [
+      label("new route, looking for other routes", "новий маршрут, шукаємо інші"),
+      active(guidance("on"), { findingAlternatives: true }),
+      false,
+      false,
+    ],
+    [
       label(
         "on route, then keep right, muted",
         "на маршруті, потім тримайтеся правіше, без звуку",

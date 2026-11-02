@@ -15,7 +15,7 @@ import path from "node:path";
 import type { Coordinate } from "../../src/nav/geo";
 import { LocalFrame } from "../../src/nav/geo/local-frame";
 import { TiledRoadGraph } from "../../src/nav/mapmatch/graph/road-graph";
-import { AlternativeSearch, sharedM } from "../../src/nav/routing/alternatives";
+import { planAlternatives, sharedM } from "../../src/nav/routing/alternatives";
 import { routeManeuvers } from "../../src/nav/routing/maneuvers";
 import { planRoute, type RoutePlan, type RouteStart } from "../../src/nav/routing/router";
 import { planTrip, tripManeuvers } from "../../src/nav/routing/trip";
@@ -79,8 +79,7 @@ const km = (m: number) => `${(m / 1000).toFixed(1)} km`;
 
 /** Alternatives to `main`, searched to the end; with each one's share on the main route's roads. */
 function findAlternatives(g: ReturnType<typeof openGraph>, from: RouteStart, to: Coordinate, main: RoutePlan) {
-  const r = new AlternativeSearch(g.graph, g.frame, from, to, main).run();
-  if (r.status !== "done") throw new Error("unfinished");
+  const r = planAlternatives(g.graph, g.frame, from, to, main);
   const mainEdges = new Set(main.legs.map((l) => l.edge));
   return { ...r, shared: r.alternatives.map((a) => sharedM(g.graph, a, mainEdges) / a.lengthM) };
 }

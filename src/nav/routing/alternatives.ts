@@ -1,18 +1,18 @@
 // Alternative routes (ROUTING-SPEC §8.7): after the main route, the planner runs again with the roads already
-// taken made slower (the penalty method), and keeps what comes out if it is a real choice: different enough from
+// found made slower (the penalty method), and keeps what comes out if it is a real choice: different enough from
 // every route kept so far and not much slower than the main one. Pure TS, advanced in slices like `RouteSearch`.
 
 import { haversineM, type Coordinate } from "../geo";
 import type { LocalFrame } from "../geo/local-frame";
 import type { EdgeId, GraphStats, RoadGraph } from "../mapmatch/graph/road-graph";
-import { legCoordinates, legLengthM, RouteSearch, type RouteOptions, type RoutePlan, type RouteStart } from "./router";
+import { FALLBACK_WEIGHT, legCoordinates, legLengthM, RouteSearch, type RouteOptions, type RoutePlan, type RouteStart } from "./router";
 
 export interface AlternativeRules {
   /** Alternatives kept at most. */
   max: number;
   /** Searches at most (the main one not counted): a rejected result still costs one. */
   maxSearches: number;
-  /** Time on every road of a route kept so far × this, once per route that has it. */
+  /** Time on every road of a route found so far (kept, or turned down as too shared) × this, once per route. */
   penalty: number;
   /** Kept only if it takes at most this × the main route's time … */
   maxSlower: number;
@@ -41,8 +41,9 @@ export interface AlternativeStats {
   ms: number;
 }
 
+/** `alternatives`: those kept so far (each kept for good: a later search only adds). */
 export type AlternativeStatus =
-  | { status: "more"; stats: AlternativeStats }
+  | { status: "more"; alternatives: readonly RoutePlan[]; stats: AlternativeStats }
   | { status: "done"; alternatives: RoutePlan[]; stats: AlternativeStats };
 
 /** Metres of `plan` on edges of `edges`. */
@@ -93,8 +94,22 @@ export function labelPoint(graph: RoadGraph, plan: RoutePlan, others: readonly R
 
 export class AlternativeSearch {
   private readonly rules: AlternativeRules;
+  private readonly options: RouteOptions;
   private readonly kept: RoutePlan[] = [];
+  /** The main route's roads, then each kept alternative's: what a new one must differ from. */
   private readonly keptEdges: Set<EdgeId>[];
+  /**
+   * The routes whose roads the next search is slowed on: the kept ones and those turned down as too shared. Without
+   * the latter the next search had the same penalties and found the same route again, turned down again: a long
+   * route's three searches cost three times one (2026-11-02).
+   */
+  private readonly penalised: Set<EdgeId>[];
+  /**
+   * A search fell back to the higher weight (`RouteOptions.fallbackAfterStates`): the next ones start there, instead
+   * of each settling the fallback's worth of states and starting again. Weight 2 from the first search lost
+   * alternatives the main weight finds (2 of 44 routes, 2026-11-02).
+   */
+  private fellBack = false;
   private search: RouteSearch | null = null;
   /** States the current search had settled after its last slice. */
   private searchStates = 0;
@@ -107,11 +122,13 @@ export class AlternativeSearch {
     private readonly from: RouteStart,
     private readonly to: Coordinate,
     private readonly main: RoutePlan,
-    private readonly options: RouteOptions = {},
+    options: RouteOptions = {},
     rules: Partial<AlternativeRules> = {},
   ) {
     this.rules = { ...DEFAULT_ALTERNATIVE_RULES, ...rules };
+    this.options = options;
     this.keptEdges = [edgeSet(main)];
+    this.penalised = [...this.keptEdges];
   }
 
   /** Settle up to `maxStates` more states, over as many searches as that reaches. */
@@ -121,7 +138,8 @@ export class AlternativeSearch {
     while (budget > 0) {
       if (!this.search) {
         if (this.kept.length >= this.rules.max || this.stats.searches >= this.rules.maxSearches) return this.finish();
-        this.search = new RouteSearch(this.graph, this.frame, this.from, this.to, { ...this.options, avoid: this.avoidMap() });
+        const weight = this.fellBack ? { heuristicWeight: this.options.fallbackWeight ?? FALLBACK_WEIGHT, fallbackAfterStates: Infinity } : {};
+        this.search = new RouteSearch(this.graph, this.frame, this.from, this.to, { ...this.options, ...weight, avoid: this.avoidMap() });
         this.searchStates = 0;
         this.stats.searches++;
       }
@@ -132,13 +150,21 @@ export class AlternativeSearch {
       this.stats.states += r.stats.states;
       this.stats.ms += r.stats.ms;
       this.search = null;
+      if (r.stats.fellBackAt) this.fellBack = true;
       if (r.status === "failed") return this.finish();
-      if (this.acceptable(r.plan)) {
+      const verdict = this.verdict(r.plan);
+      // Too slow: slowing more roads makes the next search's routes cost more, not less; it is over.
+      if (verdict === "slower") return this.finish();
+      const edges = edgeSet(r.plan);
+      this.penalised.push(edges);
+      if (verdict === "kept") {
         this.kept.push(r.plan);
-        this.keptEdges.push(edgeSet(r.plan));
+        this.keptEdges.push(edges);
+        // Back to the caller with it at once: it goes on the map while the next one is searched.
+        break;
       }
     }
-    return { status: "more", stats: this.stats };
+    return { status: "more", alternatives: this.kept, stats: this.stats };
   }
 
   private finish(): AlternativeStatus {
@@ -146,17 +172,34 @@ export class AlternativeSearch {
     return this.finished;
   }
 
-  /** Every edge of the routes kept so far (the main one included): the penalty once per route that has it. */
+  /** Every edge of the routes found so far (the main one included): the penalty once per route that has it. */
   private avoidMap(): Map<EdgeId, number> {
     const avoid = new Map<EdgeId, number>();
-    for (const edges of this.keptEdges) for (const e of edges) avoid.set(e, (avoid.get(e) ?? 1) * this.rules.penalty);
+    for (const edges of this.penalised) for (const e of edges) avoid.set(e, (avoid.get(e) ?? 1) * this.rules.penalty);
     return avoid;
   }
 
-  private acceptable(plan: RoutePlan): boolean {
+  private verdict(plan: RoutePlan): "kept" | "slower" | "shared" {
     const r = this.rules;
-    if (plan.durationS > this.main.durationS * r.maxSlower || plan.durationS - this.main.durationS > r.maxExtraS) return false;
-    if (plan.lengthM <= 0) return false;
-    return this.keptEdges.every((edges) => sharedM(this.graph, plan, edges) <= r.maxShared * plan.lengthM);
+    if (plan.durationS > this.main.durationS * r.maxSlower || plan.durationS - this.main.durationS > r.maxExtraS) return "slower";
+    if (plan.lengthM <= 0) return "slower";
+    return this.keptEdges.every((edges) => sharedM(this.graph, plan, edges) <= r.maxShared * plan.lengthM) ? "kept" : "shared";
+  }
+}
+
+/** The alternatives in one go (tools, tests). */
+export function planAlternatives(
+  graph: RoadGraph & { stats?: GraphStats },
+  frame: LocalFrame,
+  from: RouteStart,
+  to: Coordinate,
+  main: RoutePlan,
+  options: RouteOptions = {},
+  rules: Partial<AlternativeRules> = {},
+): Extract<AlternativeStatus, { status: "done" }> {
+  const search = new AlternativeSearch(graph, frame, from, to, main, options, rules);
+  for (;;) {
+    const r = search.run();
+    if (r.status === "done") return r;
   }
 }

@@ -337,15 +337,25 @@ matching fails without it. (The route does tip which hypothesis the *dot* draws:
 
 After a new route (reason `new`), up to two other ways to the destination.
 
-- **Search (penalty method):** the planner runs again with every road of the routes kept so far slower by 1.4×
-  (`RouteOptions.avoid`, left out of the plan's `durationS`). A result is kept when it takes at most 1.3× the main
-  route's time and at most 20 min more, and at most 60 % of its length is on the roads of any route kept so far. At
-  most 3 searches.
+- **Search (penalty method):** the planner runs again with every road of the routes found so far slower by 1.4×, once
+  per route (`RouteOptions.avoid`, left out of the plan's `durationS`). A result is kept when it takes at most 1.3×
+  the main route's time and at most 20 min more, and at most 60 % of its length is on the roads of any route kept so
+  far. At most 3 searches.
+  - A result turned down as **too shared** counts as found: its roads are slowed too, so the next search goes
+    elsewhere. Never the same penalties twice: an unchanged search finds the same route again.
+  - A result turned down as **too slow** ends the search: slowing more roads only makes the routes found cost more.
+  - **Weight:** the main search's, with its fallback (§5.4). Once a search has fallen back, the next ones start at
+    the fallback weight instead of settling the fallback's states again first. Weight 2 from the first search found
+    fewer alternatives than the main weight does.
+  - The rules are judged by states settled, on logged drives and random routes on the current graph, with the
+    alternatives each finds compared against the previous rules: none may be lost.
 - **Never in the way of the route:** the main plan is published and guided first; the alternatives search runs after
-  it in its own slices, and a re-plan, arrival or stop cancels it. Note `route alternatives: n (+m min, km, % shared)
-  …; searches, states, ms`.
+  it in its own slices (`findingAlternatives` meanwhile), and a re-plan, arrival or stop cancels it, as does an
+  alternative taken (chosen or driven) while it runs. Each one kept is on the map at once, the search going on. Notes
+  `route alternatives: n (+m min, km, % shared) …; searches, states, ms (wall ms, the first after ms)` when it ends,
+  `alternatives search cancelled (why) after ms, n found` when it doesn't.
 - **A faster one takes over:** the weighted heuristic can miss the fastest route; an alternative at least 30 s faster
-  replaces it while the car is within 50 m of the start (`route alternative taken (faster)`).
+  replaces it when the search is over, while the car is within 50 m of the start (`route alternative taken (faster)`).
 - **Choosing:** a tap on a grey route or its label makes it the route (`chooseAlternative`, logged as a plan with
   reason `alternative`); the route becomes an alternative.
 - **Driving one:** each alternative is followed by its own guidance. When the route goes `off` while an alternative is

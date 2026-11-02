@@ -449,14 +449,42 @@ describe("RouteService", () => {
       const s = h.service.getSnapshot()!;
       expect(south(s.plan!.coordinates)).toBe(false);
       expect(s.alternatives).toBeUndefined();
+      expect(s.findingAlternatives).toBe(true);
       expect(h.pending()).toBeGreaterThan(0); // the alternatives search, queued behind the route
       h.flush();
+      expect(h.service.getSnapshot()!.findingAlternatives).toBeUndefined();
       const alts = h.service.getSnapshot()!.alternatives!;
       expect(alts).toHaveLength(1);
       expect(south(alts[0].plan.coordinates)).toBe(true);
       expect(alts[0].deltaS).toBeGreaterThan(0);
       expect(alts[0].labelAt.lat).toBeLessThan(ladderAt(0, -350).lat);
       expect(h.notes.some((n) => /^route alternatives: 1 \(\+\d+ min/.test(n))).toBe(true);
+    });
+
+    test("an alternative is on the map as soon as it is found, the search still looking for another", () => {
+      const h = start();
+      h.flushUntil(() => !!h.service.getSnapshot()?.alternatives?.length);
+      const s = h.service.getSnapshot()!;
+      expect(south(s.alternatives![0].plan.coordinates)).toBe(true);
+      expect(s.findingAlternatives).toBe(true);
+      expect(h.pending()).toBeGreaterThan(0);
+      expect(h.notes.some((n) => n.startsWith("route alternatives"))).toBe(false);
+      h.flush();
+      expect(h.service.getSnapshot()!.alternatives).toBe(s.alternatives); // not published again: the map isn't framed again
+      expect(h.notes.some((n) => /^route alternatives: 1 .*, the first after \d+ ms\)$/.test(n))).toBe(true);
+    });
+
+    test("chosen while the search still runs: the rest isn't searched", () => {
+      const h = start();
+      h.flushUntil(() => !!h.service.getSnapshot()?.alternatives?.length);
+      h.service.chooseAlternative(0);
+      h.flush();
+      const s = h.service.getSnapshot()!;
+      expect(south(s.plan!.coordinates)).toBe(true);
+      expect(s.findingAlternatives).toBeUndefined();
+      expect(s.alternatives).toHaveLength(1);
+      expect(h.notes.some((n) => /^alternatives search cancelled \(one chosen\) after \d+ ms, 1 found$/.test(n))).toBe(true);
+      expect(h.notes.some((n) => n.startsWith("route alternatives"))).toBe(false);
     });
 
     test("choosing the alternative makes it the route (logged, reason alternative); the old route is the alternative", () => {
@@ -515,6 +543,7 @@ describe("RouteService", () => {
       h.flush();
       expect(h.service.getSnapshot()).toBeNull();
       expect(h.notes.some((n) => n.startsWith("route alternatives"))).toBe(false);
+      expect(h.notes.some((n) => n.startsWith("alternatives search cancelled (dropped)"))).toBe(true);
     });
   });
 });

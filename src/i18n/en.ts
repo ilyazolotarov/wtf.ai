@@ -427,6 +427,7 @@ export const en = {
   alternativeSlower: "+{n} min",
   alternativeFaster: "−{n} min",
   alternativeSame: "Same time",
+  findingAlternatives: "Looking for other routes…",
   replanning: "Off route, planning again…",
   routeUnsure: "Position uncertain: keeping the route",
   replanFailed: "Can't plan from here yet",

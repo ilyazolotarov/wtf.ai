@@ -167,7 +167,7 @@ const HEURISTIC_WEIGHT = 1.5;
  * (median 0); after 300 k the same routes for 6.5 M states.
  */
 const FALLBACK_AFTER_STATES = 150_000;
-const FALLBACK_WEIGHT = 2;
+export const FALLBACK_WEIGHT = 2;
 export const DEFAULT_MAX_STATES = 2_000_000;
 
 const EARTH_RADIUS_M = 6_371_000;
