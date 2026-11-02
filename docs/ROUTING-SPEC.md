@@ -335,7 +335,9 @@ matching fails without it. (The route does tip which hypothesis the *dot* draws:
 
 ### 8.7 Alternative routes (`alternatives.ts`)
 
-After a new route (reason `new`), up to two other ways to the destination.
+Up to two other ways, after every plan (a new route, a stop added, removed or moved, a re-plan; none for a driver
+keeping to their own way) and again on the way: alternatives to the leg the car is on (to the next stop or the
+destination), the rest of the trip shared (STOPS-SPEC §4).
 
 - **Search (penalty method):** the planner runs again with every road of the routes found so far slower by 1.4×, once
   per route (`RouteOptions.avoid`, left out of the plan's `durationS`). A result is kept when it takes at most 1.3×
@@ -354,8 +356,17 @@ After a new route (reason `new`), up to two other ways to the destination.
   alternative taken (chosen or driven) while it runs. Each one kept is on the map at once, the search going on. Notes
   `route alternatives: n (+m min, km, % shared) …; searches, states, ms (wall ms, the first after ms)` when it ends,
   `alternatives search cancelled (why) after ms, n found` when it doesn't.
+- **On the way** (`refreshAlternatives`): with none on the map (the car left those found behind, or none was found),
+  the rest of the leg is searched again from the car once it has driven 2 km since the last search began, while 2 km
+  or more of the leg is left; only on the route, with a position fit to plan from, not at a stop. Its "main route" is
+  the leg's roads with the time left on them. Quiet: no `findingAlternatives`. An alternative found there starts at
+  the car, with the rest of the trip's legs after it; taken, it is the route from there.
+- **Times** (the labels, the note): what each alternative has left from where the car is against what the route has
+  left, so one found on the way is compared with the rest of the route, not its whole time.
 - **A faster one takes over:** the weighted heuristic can miss the fastest route; an alternative at least 30 s faster
-  replaces it when the search is over, while the car is within 50 m of the start (`route alternative taken (faster)`).
+  replaces it when the search is over, while the car is within 50 m of the plan's start (`route alternative taken
+  (faster)`). After a re-plan (a stop added, the route left) only while the car stands (under 1 m/s): driving, the
+  route just told ("Route recalculated", the next turn) would change under it unannounced; it stays on the map.
 - **Choosing:** a tap on a grey route or its label makes it the route (`chooseAlternative`, logged as a plan with
   reason `alternative`); the route becomes an alternative.
 - **Driving one:** each alternative is followed by its own guidance. When the route goes `off` while an alternative is

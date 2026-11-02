@@ -58,8 +58,9 @@ items: §12.
 - **Where a new stop goes:** within 1 km of the route ahead, by its place along it among the stops; otherwise between
   the two consecutive points where it adds the least straight-line distance (`insertionIndex`). The route page moves
   a stop earlier.
-- **Alternatives** (ROUTING-SPEC §8.7): searched for the first leg only, each joined with the rest of the trip, so
-  "+4 min" compares the whole trip.
+- **Alternatives** (ROUTING-SPEC §8.7): for the leg the car is on, each joined with the rest of the trip, so "+4
+  min" compares the whole trip; searched after every plan (a stop added included) and again on the way, so a trip
+  with stops has them all along, each leg's in turn.
 - **One frame per route:** every search of a route (plans, the way back to a stop, detours) shares the graph
   reader, which projects what it decodes into one local frame. The route keeps one frame and makes a new one only
   when the car is 30 km from it; the searches beside the route's own stop then.

@@ -7,6 +7,7 @@ import { TiledRoadGraph } from "@/nav/mapmatch/graph/road-graph";
 import type { Coordinate } from "@/nav/geo";
 import type { PositionEstimate } from "@/nav/position/types";
 import { at as ladderAt, ladder } from "@/nav/routing/__fixtures__/ladder";
+import { RouteLine } from "@/nav/routing/along";
 import { ROUTER_IDLE_TILES, RouteService, type RoutingGraph } from "@/services/navigation/route-service";
 import type { NavRouteProgressRecord, NavRouteRecord } from "@/triplog/schema";
 
@@ -109,7 +110,7 @@ describe("RouteService", () => {
     expect(h.trims).toEqual([]); // the alternatives still to search
     h.flush();
     expect(h.trims).toEqual([ROUTER_IDLE_TILES]);
-    // Off the route: a re-plan, no alternatives after it.
+    // Off the route: a re-plan (its own alternatives searched after it).
     for (let i = 1; i <= 12; i++) {
       h.tick(1000);
       h.move(1 + 0.25 * i, 0);
@@ -534,6 +535,75 @@ describe("RouteService", () => {
       }
       expect(h.service.getSnapshot()!.alternatives).toBeUndefined();
       expect(h.service.getSnapshot()!.guidance).toMatchObject({ state: "on" });
+    });
+
+    test("a stop added: planned again with alternatives of its own, not without any", () => {
+      const h = start();
+      h.flush();
+      expect(h.service.addStop({ ...ladderAt(2150, 0), name: "Shop" })).toBe(true);
+      h.flush();
+      const s = h.service.getSnapshot()!;
+      expect(s.planReason).toBe("stops");
+      expect(s.alternatives).toHaveLength(1);
+      expect(south(s.alternatives![0].plan.coordinates)).toBe(true);
+      // The alternative goes through the stop too.
+      expect(s.alternatives![0].plan.stops?.map((x) => x.key)).toEqual(s.plan!.stops!.map((x) => x.key));
+    });
+
+    // To a stop at the east end and back: the way back's alternative is found on the way, from the car (the test graph
+    // keeps its own frame: the trip starts at its origin).
+    test("on the way: the next leg's alternatives searched again from the car, quietly, and taken from there", () => {
+      const h = harness({ network: "ladder" });
+      h.moveTo(ladderAt(0, 0));
+      h.service.start(ladderAt(0, 0), { stops: [{ ...ladderAt(2250, 0), name: "East" }] });
+      h.flush();
+      const first = h.service.getSnapshot()!;
+      const searches = () => h.notes.filter((n) => n.startsWith("route alternatives:")).length;
+      expect(searches()).toBe(1);
+      // Drive it: the first leg's alternative left behind, the stop reached, 150 m on.
+      const line = new RouteLine(first.plan!);
+      const to = first.plan!.stops![0].atM + 150;
+      let quiet = true;
+      for (let m = 0; m <= to; m += 20) {
+        h.tick(2000);
+        const p = line.at(m);
+        h.moveTo(p.point, { headingRad: p.headingRad });
+        if (h.service.getSnapshot()!.findingAlternatives) quiet = false;
+      }
+      h.flush();
+      const s = h.service.getSnapshot()!;
+      expect(s.atStop).toBeUndefined();
+      expect(searches()).toBe(2);
+      expect(quiet).toBe(true);
+      expect(s.alternatives).toHaveLength(1);
+      expect(south(s.alternatives![0].plan.coordinates)).toBe(true);
+      // Against what is left of the route from here, not the whole trip's time.
+      expect(s.alternatives![0].deltaS).toBeGreaterThan(0);
+      expect(s.alternatives![0].deltaS).toBeLessThan(120);
+      h.service.chooseAlternative(0);
+      const taken = h.service.getSnapshot()!;
+      expect(taken.planReason).toBe("alternative");
+      expect(south(taken.plan!.coordinates)).toBe(true);
+      expect(taken.plan!.stops ?? []).toEqual([]);
+      expect(taken.alternatives).toHaveLength(1);
+    });
+
+    test("on the way: not searched again before 2 km more driven", () => {
+      const h = start();
+      h.flush();
+      const searches = () => h.notes.filter((n) => n.startsWith("route alternatives:")).length;
+      // Up the north branch: the south one left behind, under 2 km driven.
+      for (const n of [80, 160, 240, 300]) {
+        h.tick(8000);
+        h.moveTo(ladderAt(100, n), { headingRad: 0 });
+      }
+      for (const e of [180, 260, 340, 420]) {
+        h.tick(8000);
+        h.moveTo(ladderAt(e, 300), { headingRad: Math.PI / 2 });
+      }
+      h.flush();
+      expect(h.service.getSnapshot()!.alternatives).toBeUndefined();
+      expect(searches()).toBe(1);
     });
 
     test("stopping cancels an alternatives search still running", () => {
