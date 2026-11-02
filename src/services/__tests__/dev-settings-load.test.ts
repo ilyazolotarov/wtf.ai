@@ -11,7 +11,6 @@ const defaults: DevSettings = {
   carReports: true,
   rpmPeriodS: 5,
   positionShare: false,
-  navigatorWorker: false,
 };
 
 describe("loadDevSettings", () => {
@@ -29,7 +28,7 @@ describe("loadDevSettings", () => {
   });
 
   it("removed settings are dropped: an old CAN mode leaves the wheels' speed on", () => {
-    const loaded = loadDevSettings({ can: "off", canShadowIds: "215", mapMatchLoop: "open", routeHint: true, showParticles: true }, defaults);
+    const loaded = loadDevSettings({ can: "off", canShadowIds: "215", mapMatchLoop: "open", routeHint: true, navigatorWorker: false, showParticles: true }, defaults);
     expect(loaded).toEqual({ ...defaults, showParticles: true });
   });
 });

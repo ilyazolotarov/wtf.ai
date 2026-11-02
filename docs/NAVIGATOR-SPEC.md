@@ -447,14 +447,13 @@ to the nearest hypothesis, and nothing uses it. The map's trust is `Navigator.tr
 - Owns one `Navigator`; GNSS and IMU from `SensorService` (owner `navigator`), speed from `VehicleLink.onSpeed` or
   the CAN speed feed. It is the runtime's `PositionSource` (UI-SPEC §4.3).
 - **Where the navigator runs** (`navigator-host.ts`): the service drives it through a host and reads it through a
-  view. In-process (`LocalNavigatorHost`: the replay, Jest, the app with the setting off), or on a worklets worker
-  runtime of its own (Developer → "The navigator on its own thread", on in development builds, read at the app's
-  start): `WorkerNavigatorHost` posts each input batch and command to `NavigatorRemote` on the worker
-  (`src/workers/navigator-worker.ts`), which runs a `LocalNavigatorHost` there and reads the road graph file through
-  `modules/graph-bytes` (a JSI object shared into the worker: Expo modules don't run there). A build without that
-  module stays in-process. Requests are answered in order; a feed's answer carries each fix's outcome and a snapshot
-  of everything the service reads (`NavSnapshot`), and the fix bookkeeping and the publish after it run when it
-  arrives. Answers about a navigator replaced since are dropped. On the worker, trust is read at the last input fed.
+  view. In the app it runs on a worklets worker runtime of its own, off the JS thread: `WorkerNavigatorHost` posts
+  each input batch and command to `NavigatorRemote` on the worker (`src/workers/navigator-worker.ts`), which runs a
+  `LocalNavigatorHost` there and reads the road graph file through `modules/graph-bytes` (a JSI object shared into
+  the worker: Expo modules don't run there). A build without that module runs it in-process (`LocalNavigatorHost`,
+  as the replay and Jest do). Requests are answered in order; a feed's answer carries each fix's outcome and a
+  snapshot of everything the service reads (`NavSnapshot`), and the fix bookkeeping and the publish after it run
+  when it arrives. Answers about a navigator replaced since are dropped. On the worker, trust is read at the last input fed.
   Through the worker's protocol the service publishes the same dots, filter records and notes as in-process
   (`worker-navigator-host.test.ts`; `inProcessLink` runs the protocol in one runtime, each message copied).
 - **Runs** while the map is on screen or a trip records. When it stops, the next start begins with a fresh navigator.
