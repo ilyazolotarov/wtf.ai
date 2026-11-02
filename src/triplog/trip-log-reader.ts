@@ -16,8 +16,10 @@ import {
   NAV_TRUST_CODES,
   ROUTE_MANEUVER_CODES,
   ROUTE_REASON_CODES,
+  ROUTE_SIDE_CODES,
   ROUTE_STATE_CODES,
   ROUTE_STATUS_CODES,
+  ROUTE_STOP_CATEGORY_CODES,
   TRIP_EVENTS,
   type NavEstimateRecord,
   type GnssRecord,
@@ -26,6 +28,7 @@ import {
   type NavRoutePointRecord,
   type NavRouteProgressRecord,
   type NavRouteRecord,
+  type NavRouteStopRecord,
 } from "./schema";
 import { readULog, type RecordValue, type ULogRecord } from "./ulog/reader";
 
@@ -62,6 +65,8 @@ export interface TripLog {
   navRoutePoints: (Omit<NavRoutePointRecord, "timestampUs"> & { tUs: number })[];
   navRouteManeuvers: (Omit<NavRouteManeuverRecord, "timestampUs"> & { tUs: number })[];
   navRouteProgress: (Omit<NavRouteProgressRecord, "timestampUs"> & { tUs: number })[];
+  /** Each plan's stops on the way, by `index` (STOPS-SPEC §10); none in logs before stops. */
+  navRouteStops?: (Omit<NavRouteStopRecord, "timestampUs"> & { tUs: number })[];
   /** CAN shadow frames (VEHICLE-LINK-SPEC §16.2), by arrival; absent when it didn't run. */
   can?: { tUs: number; id: number; data: number[] }[];
   /** Its listening windows: a frame missing outside them wasn't heard. The last five fields: logs since 2026-10-12. */
@@ -248,6 +253,17 @@ export function readTripLog(bytes: Uint8Array): TripLog {
     atM: num(r, "at_m"),
     turnRad: num(r, "turn_rad"),
   }));
+  const navRouteStops = rows("nav_route_stop").map((r) => ({
+    tUs: num(r, "timestamp"),
+    planId: num(r, "plan_id"),
+    index: num(r, "index"),
+    latDeg: num(r, "lat_deg"),
+    lonDeg: num(r, "lon_deg"),
+    atM: num(r, "at_m"),
+    atS: num(r, "at_s"),
+    side: ROUTE_SIDE_CODES[num(r, "side")] ?? "none",
+    category: ROUTE_STOP_CATEGORY_CODES[num(r, "category")] ?? "none",
+  }));
   const navRouteProgress = rows("nav_route_progress").map((r) => ({
     tUs: num(r, "timestamp"),
     planId: num(r, "plan_id"),
@@ -300,6 +316,7 @@ export function readTripLog(bytes: Uint8Array): TripLog {
     navRoutePoints,
     navRouteManeuvers,
     navRouteProgress,
+    navRouteStops,
     ...(can.length ? { can } : {}),
     ...(canWindows.length ? { canWindows } : {}),
     truncated: log.truncated,

@@ -11,7 +11,7 @@ import { drawnTruthTrack, type DrawnTruth } from "../../src/nav/replay/drawn-tru
 import { decodeTripCan, withWheelYaw } from "../../src/nav/replay/can";
 import { obdOdometer } from "../../src/nav/replay/truth-match";
 import { LocalFrame } from "../../src/nav/geo/local-frame";
-import { planRoute } from "../../src/nav/routing/router";
+import { planTrip, type TripPoint } from "../../src/nav/routing/trip";
 import type { ActiveRoadGraph } from "../../src/services/offline-map/road-graph-file";
 import type { TripLog } from "../../src/triplog/trip-log-reader";
 import { findGraph, openGraph } from "./graph-file";
@@ -215,11 +215,43 @@ export function phoneRouteFor(trip: TripLog, drawn: DrawnTruth | null): { source
   return all > 0 && on / all >= FOLLOWED_SHARE ? { source: "log", routes: plans, rebuilt } : drawnRoute;
 }
 
+/** A stop in the route's notes (`stopLabel` in route-service): `route stop <what>: <name> (<lat>,<lon>)…`. */
+const STOP_NOTE = /^route stop (reached|passed|added): .*\((-?\d+\.\d{5}),(-?\d+\.\d{5})\)/;
+
+/**
+ * The trip's stops not yet reached or passed at `tUs`, in order, as the app had them (STOPS-SPEC §4): the stops of the
+ * plan in force then, less those the notes say were reached or passed since. Before the first plan, its stops with
+ * those reached or passed until it put back in front, and without those added until it. A stop's key is its point.
+ */
+export function tripStopsAt(trip: TripLog, tUs: number): TripPoint[] {
+  const done = trip.navRoute.filter((p) => p.status === "done");
+  const plan = done.findLast((p) => p.tUs <= tUs) ?? done[0];
+  if (!plan) return [];
+  const where = (lat: number, lon: number) => `${lat.toFixed(5)},${lon.toFixed(5)}`;
+  let stops: TripPoint[] = (trip.navRouteStops ?? [])
+    .filter((s) => s.planId === plan.planId && s.tUs === plan.tUs)
+    .sort((a, b) => a.index - b.index)
+    .map((s) => ({ key: where(s.latDeg, s.lonDeg), lat: s.latDeg, lon: s.lonDeg }));
+  const after = plan.tUs <= tUs;
+  const notes = trip.messages.filter((m) => (after ? m.tUs > plan.tUs && m.tUs <= tUs : m.tUs >= tUs && m.tUs < plan.tUs));
+  // Before the plan, undone from it backwards: the last stop reached before it goes in front first.
+  for (const m of after ? notes : notes.reverse()) {
+    const n = STOP_NOTE.exec(m.text);
+    if (!n) continue;
+    const stop = { key: `${n[2]},${n[3]}`, lat: Number(n[2]), lon: Number(n[3]) };
+    const rest = stops.filter((s) => s.key !== stop.key);
+    if (after) stops = n[1] === "added" ? stops : rest;
+    else stops = n[1] === "added" ? rest : [stop, ...rest];
+  }
+  return stops;
+}
+
 /**
  * A route the app guided along before its plan reached the log: progress under a plan the log doesn't have, before
  * its first logged one (planned with the engine off: until 2026-10-09 a trip's log missed it). Planned again, as the
- * app does, from where the drive starts (the drawn start, else the first position the app showed) to the destination
- * of the log's first plan, on the region's graph. Null when nothing is missing or it can't be planned.
+ * app does, from where the drive starts (the drawn start, else the first position the app showed) through the trip's
+ * stops then (`tripStopsAt` the log's start) to the destination of the log's first plan, on the region's graph. Null
+ * when nothing is missing or it can't be planned.
  */
 export function routeBeforeLog(trip: TripLog, start: { lat: number; lon: number; headingRad?: number } | null = null): { points: { lat: number; lon: number }[]; lengthM: number } | null {
   const first = trip.navRoute.find((p) => p.status === "done");
@@ -233,7 +265,8 @@ export function routeBeforeLog(trip: TripLog, start: { lat: number; lon: number;
   try {
     const frame = new LocalFrame(from);
     graph.setFrame(frame);
-    const r = planRoute(graph, frame, from, { lat: first.toLatDeg, lon: first.toLonDeg });
+    const points = [...tripStopsAt(trip, trip.startUs), { key: "destination", lat: first.toLatDeg, lon: first.toLonDeg }];
+    const r = planTrip(graph, frame, from, points);
     return r.status === "done" ? { points: r.plan.coordinates, lengthM: r.plan.lengthM } : null;
   } finally {
     close();

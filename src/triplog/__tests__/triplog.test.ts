@@ -111,7 +111,7 @@ describe("TripLogWriter", () => {
     ]);
   });
 
-  test("route records: plan, polyline, maneuvers, progress", () => {
+  test("route records: plan, polyline, maneuvers, stops, progress", () => {
     const log = readTripLog(buildFixture());
     expect(log.navRoute).toEqual([
       expect.objectContaining({ tUs: FIXTURE_START_US + 1_600_000, planId: 1, reason: "new", status: "done", lengthM: 1500, states: 1234, slices: 2, maneuvers: 2 }),
@@ -119,6 +119,9 @@ describe("TripLogWriter", () => {
     expect(log.navRoute[0].fromHeadingRad).toBeCloseTo(0.25, 6);
     expect(log.navRoutePoints.map((p) => [p.index, p.latDeg, p.lonDeg])).toEqual([[0, 50.4501, 30.52], [1, 50.46, 30.53]]);
     expect(log.navRouteManeuvers.map((m) => [m.kind, m.exit, m.atM])).toEqual([["depart", 0, 0], ["roundabout", 2, 700]]);
+    expect(log.navRouteStops).toEqual([
+      { tUs: FIXTURE_START_US + 1_600_000, planId: 1, index: 0, latDeg: 50.455, lonDeg: 30.526, atM: 700, atS: 70, side: "right", category: "fuel" },
+    ]);
     expect(log.navRouteProgress).toEqual([
       { tUs: FIXTURE_START_US + 1_700_000, planId: 1, state: "leaving", nextIndex: 1, alongM: 100, offM: 45, remainingM: 1400, remainingS: 140, toNextM: 600 },
     ]);
