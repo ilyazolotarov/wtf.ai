@@ -86,7 +86,7 @@ class Trip:
     imu: pd.DataFrame
     gyro_raw: pd.DataFrame
     accel_raw: pd.DataFrame
-    # Raw magnetic field, µT, phone frame; empty in logs from before it was recorded.
+    # Raw magnetic field, µT, phone frame; only older builds recorded it, empty in other logs.
     mag: pd.DataFrame
     engine: pd.DataFrame
     trip_events: pd.DataFrame

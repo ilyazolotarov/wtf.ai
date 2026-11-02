@@ -14,7 +14,6 @@ import { MAP_CAR } from "../../../src/components/map/puck-style";
 import { carScale } from "../../../src/components/map/map-features";
 import { tintDarkStyle, type MapStyleJson } from "../../../src/config/map-dark";
 
-import { mergeCalibrations, type CompassCalibration } from "../../../src/nav/compass/compass";
 import { LocalFrame } from "../../../src/nav/geo/local-frame";
 import type { TiledRoadGraph } from "../../../src/nav/mapmatch/graph/road-graph";
 import type { NavConfig } from "../../../src/nav/navigator";
@@ -22,7 +21,7 @@ import { puckTuning } from "../../../src/nav/position/puck";
 import { obdFromCan } from "../../../src/nav/replay/can";
 import { drawnTruthTrack, drawPath, type DrawnPoint, type DrawnTruth } from "../../../src/nav/replay/drawn-truth";
 import { findIncidents, INCIDENT_STEP_S } from "../../../src/nav/replay/incidents";
-import { appOutageCuts, replayTrip, type ReplayOptions } from "../../../src/nav/replay/replay";
+import { appOutageCuts, type ReplayOptions } from "../../../src/nav/replay/replay";
 import { buildViewerData } from "../../../src/nav/replay/viewer-data";
 import { driverPlacings, replayTripInApp, MemoryKeyValueStore, phoneOf, seedFromLog } from "../../../src/services/navigation/app-replay";
 import { CalibrationStore } from "../../../src/services/navigation/calibration-store";
@@ -49,28 +48,11 @@ function loadTrip(file: string): TripLog {
   return lastTrip.trip;
 }
 
-// What each log's compass learns on its own (NAVIGATOR-SPEC §7.6), replayed once per log and kept.
-const learned = new Map<string, CompassCalibration | null>();
-/** The compass calibration for a log: pooled from every other log in the folder (null: none learned). */
-function compassFromOtherLogs(file: string): { calibration: CompassCalibration; logs: number } | null {
-  const cals: CompassCalibration[] = [];
-  for (const { file: other } of listLogs()) {
-    if (other === file || !samePhone(other, file)) continue;
-    if (!learned.has(other)) {
-      const trip = readTripLog(new Uint8Array(readFileSync(path.join(LOG_DIR, other))));
-      learned.set(other, trip.mag?.length ? replayTrip(trip).summary.compass.calibration : null);
-    }
-    const cal = learned.get(other);
-    if (cal) cals.push(cal);
-  }
-  return cals.length ? { calibration: cals.reduce((a, b) => mergeCalibrations(a, b)), logs: cals.length } : null;
-}
-
 /** The road graph a log's region has (`--graph` overrides), opened for one replay. */
 const graphFor = (trip: TripLog) => graphForTrip(trip, GRAPH);
 
 interface AppState {
-  /** The app's storage before the log: parked poses, speed scales, compass calibrations, GNSS lag. */
+  /** The app's storage before the log: parked poses, speed scales, GNSS lag. */
   store: MemoryKeyValueStore;
   /** The car (VIN) the app takes the log's to be. */
   vin: string | null;
@@ -310,14 +292,10 @@ function replayReply(url: URL): Reply {
   const obdSpeed = !phoneOnly && q("speed") === "obd";
   const gyroTurns = !phoneOnly && q("turns") === "gyro";
   const compareLoop = q("compare") === "before" ? BEFORE_DOT : null;
-  // Compass: off, or calibrated on the other logs, optionally turned (a wrong calibration).
-  const compassArg = url.searchParams.get("compass") ?? "";
-  const compass = compassArg ? compassFromOtherLogs(file) : null;
-  const rotateDeg = Number(compassArg) || 0;
   const started = Date.now();
   const trip = loadTrip(file);
-  // The app replay unless a research option asks for the navigator alone (a later start, a fixed GNSS lag, a compass).
-  const inApp = phoneOnly || (!(start > 0) && !lag && !compassArg);
+  // The app replay unless a research option asks for the navigator alone (a later start, a fixed GNSS lag).
+  const inApp = phoneOnly || (!(start > 0) && !lag);
   const fresh = (): AppState => ({ store: new MemoryKeyValueStore(), vin: carOf(trip, new Map()), parkedAfter: null });
   const logged = inApp && startFrom === "phone" ? appStateFromLog(trip) : null;
   // A log without the stored state: the chain, as "parked".
@@ -345,7 +323,6 @@ function replayReply(url: URL): Reply {
       ...(gps === "jam" ? { jam: asked.length ? asked : [{ fromS: 0, toS: Infinity }] } : {}),
       ...(opened ? { mapMatch: { graph: opened.graph } } : {}),
       ...(start > 0 ? { startAtS: start } : {}),
-      ...(compass ? { compass: { calibration: compass.calibration, rotateRad: (rotateDeg * Math.PI) / 180 } } : {}),
     };
     const navFor = (nav: Partial<NavConfig>): Partial<NavConfig> => ({ ...nav, ...(lag ? { gnssLagS: Number(lag), estimateGnssLag: false } : {}) });
     const mainNav = navFor({});
@@ -412,7 +389,6 @@ function replayReply(url: URL): Reply {
           )
         : null;
     const incidents = found ? { list: found.incidents, coverage: found.coverage, unjudged: found.unjudged ?? null } : null;
-    const compassInfo = compassArg ? { logs: compass?.logs ?? 0, rotateDeg, trust: data.summary.compass.trust } : null;
     const startNote =
       startFrom === "drawn" ? (drawnPose ? "drawn" : "no drawing: cold") : startFrom === "phone" && inApp ? (logged ? "phone" : "phone-missing") : null;
     // A route guided along before its plan reached the log: planned again and drawn as the plan then (reason
@@ -425,7 +401,7 @@ function replayReply(url: URL): Reply {
         maneuvers: [],
       });
     }
-    reply = { status: 200, type: "application/json", body: JSON.stringify({ ...data, incidents, compassInfo, placings: driverPlacings(trip).map((p) => ({ t: Math.round((p.tUs - trip.startUs) / 1e5) / 10, lat: p.lat, lon: p.lon, headingRad: p.headingRad })), odo: odometryTrack(trip), startNote, parkedCar: mainParkedCar, carStyle: carStyleFor(trip), phoneRouteSource: phoneRoute?.source ?? null, appCuts: appCuts.length, parkedFrom: state && chained ? { file: state.parkedAfter, status: data.summary.startPose?.status ?? null } : null, inApp }) };
+    reply = { status: 200, type: "application/json", body: JSON.stringify({ ...data, incidents, placings: driverPlacings(trip).map((p) => ({ t: Math.round((p.tUs - trip.startUs) / 1e5) / 10, lat: p.lat, lon: p.lon, headingRad: p.headingRad })), odo: odometryTrack(trip), startNote, parkedCar: mainParkedCar, carStyle: carStyleFor(trip), phoneRouteSource: phoneRoute?.source ?? null, appCuts: appCuts.length, parkedFrom: state && chained ? { file: state.parkedAfter, status: data.summary.startPose?.status ?? null } : null, inApp }) };
   } finally {
     opened?.close();
   }
@@ -434,8 +410,8 @@ function replayReply(url: URL): Reply {
 }
 
 // ---------- the replay worker ----------
-// One worker replays, and keeps its caches (the earlier drives replayed for a parked start, the compass learned on
-// the other logs) from one replay to the next. A new replay request while one runs, or the page closing the request,
+// One worker replays, and keeps its caches (the earlier drives replayed for a parked start) from one replay to the
+// next. A new replay request while one runs, or the page closing the request,
 // terminates it and starts a fresh worker: replays are synchronous, and only a worker can be stopped mid-way.
 let replayWorker: Worker | null = null;
 let replayJob: { id: number; worker: Worker; resolve: (r: Reply) => void } | null = null;

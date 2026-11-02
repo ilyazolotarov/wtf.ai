@@ -3,14 +3,13 @@
 // own. The host takes the inputs the service's reorder window put in time order, and the service's commands; the
 // service reads the navigator through `nav`, which in-process is the navigator itself.
 
-import type { CompassCalibration } from "@/nav/compass/compass";
 import type { MapMatchConfig } from "@/nav/mapmatch/particle-filter";
 import { Navigator, type FixOutcome, type MapMatchGraph, type NavConfig, type ParkedPose, type UserPosition } from "@/nav/navigator";
 import type { CanSpeedSample } from "@/nav/odometry/can/can-speed";
 import type { WheelYawCalibration } from "@/nav/odometry/can/wheel-yaw-calibration";
 import { WheelYawSource } from "@/nav/odometry/can/wheel-yaw-source";
 import { ImuProcessor } from "@/nav/odometry/imu/imu-processor";
-import type { GnssFix, ImuSample, MagSample, ObdSpeedSample } from "@/nav/types";
+import type { GnssFix, ImuSample, ObdSpeedSample } from "@/nav/types";
 import type { EngineState } from "@/obd/types";
 import type { ActiveRoadGraph } from "@/services/offline-map/road-graph-file";
 
@@ -20,7 +19,6 @@ const LATE_FIX_MAX_US = 2_000_000;
 /** An input to the navigator, in time order with the others. */
 export type NavInput =
   | { tUs: number; imu: ImuSample }
-  | { tUs: number; mag: MagSample }
   | { tUs: number; obd: ObdSpeedSample }
   | { tUs: number; wheels: CanSpeedSample }
   | { tUs: number; fix: GnssFix };
@@ -41,10 +39,6 @@ export type NavView = Pick<
   | "parkedPose"
   | "restsOnStoredPose"
   | "drivePose"
-  | "compassTrust"
-  | "compassHeading"
-  | "compassCheckDiffs"
-  | "compassCalibrations"
   | "mapMatchParticles"
 > & {
   /** The filter's start and update times, drained by `MapMatchTiming` (null: no filter). */
@@ -79,7 +73,6 @@ export interface NavigatorHost {
   /** A wheel sample as it arrives, for the IMU around it; it comes again in `feed`, in time order, to learn from. */
   addWheels(s: CanSpeedSample): void;
   setSpeedScalePrior(ks: number, ksVar: number): void;
-  setCompassCalibrations(cals: readonly CompassCalibration[]): void;
   setPosition(p: UserPosition): void;
   startFromPose(pose: ParkedPose, then: (started: boolean) => void): void;
   answerPose(here: boolean, then: (answered: boolean) => void): void;
@@ -154,10 +147,6 @@ export class LocalNavigatorHost implements NavigatorHost {
     this.navigator?.setSpeedScalePrior(ks, ksVar);
   }
 
-  setCompassCalibrations(cals: readonly CompassCalibration[]): void {
-    this.navigator?.setCompassCalibrations(cals);
-  }
-
   setPosition(p: UserPosition): void {
     this.navigator?.setPosition(p);
   }
@@ -206,15 +195,11 @@ export class LocalNavigatorHost implements NavigatorHost {
           if (car) this.turnsUs = input.tUs;
           nav.onImu(car ?? input.imu);
         } else nav.onImu(input.imu);
-      } else if ("mag" in input) {
-        // The compass reads the phone's field against the IMU's "up": with the car's IMU in its place (wheel yaw) it
-        // would learn a mounting from the field turned with the phone, and keep it. Off meanwhile.
-        if (!this.wheels) nav.onMag(input.mag);
       } else {
         nav.onObdSpeed(input.obd);
       }
       this.fedUs = Math.max(this.fedUs, input.tUs);
-      if (!("mag" in input)) observer?.fed?.(input.tUs);
+      observer?.fed?.(input.tUs);
     }
   }
 }

@@ -19,13 +19,6 @@ export interface ImuSample {
   handled?: true;
 }
 
-/** Raw magnetometer (`CMMagnetometerData`, uncalibrated), ~20 Hz. */
-export interface MagSample {
-  tUs: number;
-  /** Magnetic field, µT, device frame. */
-  field: Vec3;
-}
-
 /** OBD PID 0D. `tUs` is the sample time (midpoint of tx and rx). */
 export interface ObdSpeedSample {
   tUs: number;

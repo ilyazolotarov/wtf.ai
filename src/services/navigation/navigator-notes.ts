@@ -1,16 +1,12 @@
-import type { CompassTrust } from "@/nav/compass/compass";
 import type { MapMatchState } from "@/nav/mapmatch/particle-filter";
 import type { FixOutcome } from "@/nav/navigator";
 import type { GnssFix } from "@/nav/types";
 
 import type { NavView } from "./navigator-host";
 
-const DEG = 180 / Math.PI;
-
 /**
  * The navigator's state changes as trip-log notes, each only when it changes: GNSS integrity, map matching, the
- * position doubt, the compass in shadow (NAVIGATOR-SPEC §7.6: logged, never navigated with), and at the end of a
- * drive the road corrections map matching sent. `reset` with each new navigator.
+ * position doubt, and at the end of a drive the road corrections map matching sent. `reset` with each new navigator.
  */
 export class NavigatorNotes {
   /** The latest integrity verdict noted. */
@@ -18,9 +14,6 @@ export class NavigatorNotes {
   /** The doubt last noted. */
   private doubtM: number | undefined;
   private mapMatchState: MapMatchState = "off";
-  /** The compass trust last noted, and the trust checks already summarised. */
-  private compassTrust: CompassTrust = "none";
-  private summarisedChecks = 0;
   /** Road corrections already summarised. */
   private road = { heading: 0, position: 0 };
 
@@ -30,8 +23,6 @@ export class NavigatorNotes {
     this.integrity = "ok";
     this.doubtM = undefined;
     this.mapMatchState = "off";
-    this.compassTrust = "none";
-    this.summarisedChecks = 0;
     this.road = { heading: 0, position: 0 };
   }
 
@@ -73,33 +64,6 @@ export class NavigatorNotes {
     );
   }
 
-  /** The heading just became known: what the compass said at that moment. */
-  compassAtStart(nav: NavView): void {
-    const off = compassOff(nav);
-    this.note(`nav compass at start: ${off === null ? "none" : `${off.toFixed(0)}° off`} (${nav.compassTrust})`);
-  }
-
-  /** A stored calibration checked against the known heading: confirmed or rejected. */
-  compassTrustChange(nav: NavView): void {
-    if (nav.compassTrust === this.compassTrust) return;
-    const before = this.compassTrust;
-    this.compassTrust = nav.compassTrust;
-    const diffs = nav.compassCheckDiffs.slice(-10).map((d) => Math.abs(d) * DEG);
-    const median = diffs.length ? ` (median ${percentile(diffs, 0.5).toFixed(0)}° over ${diffs.length} checks)` : "";
-    this.note(`nav compass ${before} → ${nav.compassTrust}${median}`);
-  }
-
-  /** At the end of a drive: how the compass did against the known heading. */
-  compassSummary(nav: NavView): void {
-    const diffs = nav.compassCheckDiffs.map((d) => Math.abs(d) * DEG);
-    if (diffs.length === this.summarisedChecks) return;
-    this.summarisedChecks = diffs.length;
-    this.note(
-      `nav compass drive: ${nav.compassTrust}, ${diffs.length} checks, median ${percentile(diffs, 0.5).toFixed(0)}°, ` +
-        `p90 ${percentile(diffs, 0.9).toFixed(0)}°, ${nav.compassCalibrations.length} mounting(s) kept`,
-    );
-  }
-
   /** At the end of a drive: the road corrections map matching sent the navigator, and how many it refused. */
   roadCorrections(nav: NavView): void {
     const s = nav.stats;
@@ -112,17 +76,4 @@ export class NavigatorNotes {
         `road position ${s.roadPositionAccepted} (${s.roadPositionRejected} refused)`,
     );
   }
-}
-
-/** Compass heading minus the EKF heading now, degrees (null: either unknown). */
-export function compassOff(nav: NavView): number | null {
-  const compass = nav.compassHeading;
-  const heading = nav.estimate()?.headingRad;
-  if (!compass || heading === undefined) return null;
-  return Math.atan2(Math.sin(compass.psi - heading), Math.cos(compass.psi - heading)) * DEG;
-}
-
-function percentile(values: number[], q: number): number {
-  const s = [...values].sort((a, b) => a - b);
-  return s[Math.min(s.length - 1, Math.floor(q * s.length))];
 }

@@ -7,9 +7,6 @@
 //   instead of waiting for a GNSS course, or for ~500 m of alignment under jamming. One per car: with a
 //   single slot, a second car's pose replaced the first's (2026-10-05).
 //   Saved every few seconds while driving too, with the speed: a start soon after the app died mid-drive carries on.
-// - the compass calibrations, per VIN (§7.6): the car's own magnetic field and the phone's angle in
-//   the mount, learned against known headings over earlier drives, one per mounting (the phone's
-//   tilt), most recent first. This phone only (the store is local).
 // - the position the driver set on the map (§6.3): for this phone, not a car, so it outlives the session (and a
 //   placing made without a car connected) until it is released or discarded.
 // - how the phone sits in the car for navigation without an adapter (§9.6): the car's axes in the phone frame,
@@ -19,7 +16,6 @@
 // with temperature, and the learned k_ω mostly absorbs GNSS timing (§7.2), not the gyro.
 
 import type { GnssLagEstimate } from "@/nav/calibration/gnss-lag";
-import type { CompassCalibration } from "@/nav/compass/compass";
 import type { ParkedPose } from "@/nav/navigator";
 import type { PhoneMount } from "@/nav/odometry/imu/imu-speed";
 import type { KeyValueStore } from "@/obd/vehicle-link-core";
@@ -56,11 +52,6 @@ export interface StoredManualPosition {
   confirmedAt: number;
 }
 
-export interface StoredCompass {
-  calibrations: CompassCalibration[];
-  savedAt: number;
-}
-
 /** The rear tyres' difference learned for the car (wheel-yaw-calibration.ts), as a fraction of speed. */
 export interface StoredWheelYaw {
   tyre: number;
@@ -76,7 +67,6 @@ export interface StoredPhoneMount {
 interface Stored {
   gnssLag?: StoredLag;
   speedScaleByVin?: Record<string, StoredSpeedScale>;
-  compassByVin?: Record<string, StoredCompass>;
   wheelYawByVin?: Record<string, StoredWheelYaw>;
   phoneMountByCar?: Record<string, StoredPhoneMount>;
 }
@@ -88,8 +78,8 @@ interface Stored {
 export type StoredSnapshot =
   /** `manualPosition`: absent in notes from before 2026-10-11 (then left as it is). */
   | { gnssLag: StoredLag | null; manualPosition?: StoredManualPosition | null }
-  /** `wheelYaw`: absent in notes from before 2026-10-18 (then left as it is). */
-  | { vin: string; parkedPose: StoredPose | null; speedScale: StoredSpeedScale | null; compass: StoredCompass | null; wheelYaw?: StoredWheelYaw | null };
+  /** `wheelYaw`: absent in notes from before 2026-10-18 (then left as it is). Older notes' `compass` is ignored. */
+  | { vin: string; parkedPose: StoredPose | null; speedScale: StoredSpeedScale | null; wheelYaw?: StoredWheelYaw | null };
 
 export const CALIBRATION_KEY = "nav.calibration";
 /** Before poses were kept per car: one pose, with its VIN. */
@@ -169,16 +159,6 @@ export class CalibrationStore {
     return true;
   }
 
-  /** The compass calibrations learned in this car, one per mounting, most recent first (malformed ones dropped). */
-  compassCalibrations(vin: string): CompassCalibration[] {
-    const list = this.read().compassByVin?.[vin]?.calibrations;
-    return Array.isArray(list) ? list.filter(isCalibration) : [];
-  }
-
-  saveCompassCalibrations(vin: string, calibrations: CompassCalibration[], now = Date.now()): void {
-    this.write((s) => (s.compassByVin = { ...s.compassByVin, [vin]: { calibrations, savedAt: now } }));
-  }
-
   /** How the phone sat in this car when navigating without an adapter (malformed: null). */
   phoneMount(car: string): PhoneMount | null {
     const m = this.read().phoneMountByCar?.[car]?.mount;
@@ -224,7 +204,6 @@ export class CalibrationStore {
   moveCar(from: string, to: string): void {
     this.write((s) => {
       s.speedScaleByVin = moveEntry(s.speedScaleByVin, from, to);
-      s.compassByVin = moveEntry(s.compassByVin, from, to);
       s.wheelYawByVin = moveEntry(s.wheelYawByVin, from, to);
       s.phoneMountByCar = moveEntry(s.phoneMountByCar, from, to);
     });
@@ -242,7 +221,6 @@ export class CalibrationStore {
       vin,
       parkedPose: this.parkedPoses()[vin] ?? null,
       speedScale: s.speedScaleByVin?.[vin] ?? null,
-      compass: s.compassByVin?.[vin] ?? null,
       wheelYaw: s.wheelYawByVin?.[vin] ?? null,
     };
   }
@@ -257,9 +235,7 @@ export class CalibrationStore {
     const { vin } = snap;
     this.write((s) => {
       const { [vin]: _scale, ...scales } = s.speedScaleByVin ?? {};
-      const { [vin]: _compass, ...compasses } = s.compassByVin ?? {};
       s.speedScaleByVin = snap.speedScale ? { ...scales, [vin]: snap.speedScale } : scales;
-      s.compassByVin = snap.compass ? { ...compasses, [vin]: snap.compass } : compasses;
       if (snap.wheelYaw !== undefined) {
         const { [vin]: _wheel, ...wheels } = s.wheelYawByVin ?? {};
         s.wheelYawByVin = snap.wheelYaw ? { ...wheels, [vin]: snap.wheelYaw } : wheels;
@@ -293,9 +269,4 @@ function moveEntry<T extends { savedAt: number }>(map: Record<string, T> | undef
   const { [from]: _from, ...rest } = map;
   const kept = rest[to];
   return kept && kept.savedAt >= moved.savedAt ? rest : { ...rest, [to]: moved };
-}
-
-function isCalibration(c: CompassCalibration): boolean {
-  const numbers = [...(c?.xtx ?? []), ...(c?.xty ?? []), ...(c?.up ?? []), c?.yty, c?.samples, c?.sectors];
-  return c?.xtx?.length === 16 && c.xty?.length === 4 && c.up?.length === 3 && [0, 1, 2].includes(c.refAxis) && numbers.every(Number.isFinite);
 }

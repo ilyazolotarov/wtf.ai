@@ -84,13 +84,9 @@ object SensorLogic {
   /** Raw accelerometer row (4 values): t µs, x, y, z m/s² (Android already reports m/s²). */
   fun accelRow(tUs: Double, x: Double, y: Double, z: Double) = doubleArrayOf(tUs, x, y, z)
 
-  /** Raw magnetometer row (4 values): t µs, x, y, z µT. */
-  fun magRow(tUs: Double, x: Double, y: Double, z: Double) = doubleArrayOf(tUs, x, y, z)
-
   /**
    * Android's rotation-vector sensors give [x, y, z, w] (w = cos θ/2 in values[3]); the log stores w x y z.
-   * Only logged, never navigated with (the compass uses gravity + raw magnetometer), so the world/device
-   * direction of the rotation is not normalized.
+   * Only logged, never navigated with, so the world/device direction of the rotation is not normalized.
    */
   fun quaternionFromRotationVector(v: FloatArray): DoubleArray {
     val x = v[0].toDouble()
@@ -179,17 +175,16 @@ class MotionAssembler {
   }
 }
 
-/** Collects flat IMU rows per stream ("m", "g", "a", "f" magnetic field) and emits a batch every `intervalUs`. */
+/** Collects flat IMU rows per stream ("m", "g", "a") and emits a batch every `intervalUs`. */
 class ImuBatcher(intervalMs: Double, nowUs: Double) {
   companion object {
-    val STREAMS = listOf("m", "g", "a", "f")
+    val STREAMS = listOf("m", "g", "a")
 
-    /** Event payload keys used by JS (`motion`, `gyro`, `accel`, `mag`). */
+    /** Event payload keys used by JS (`motion`, `gyro`, `accel`). */
     fun payload(batch: Map<String, List<Double>>): Map<String, Any> = mapOf(
       "motion" to (batch["m"] ?: emptyList()),
       "gyro" to (batch["g"] ?: emptyList()),
       "accel" to (batch["a"] ?: emptyList()),
-      "mag" to (batch["f"] ?: emptyList()),
     )
   }
 

@@ -1,6 +1,6 @@
 // A trip log replayed through the app's own NavigatorService (not a Navigator alone), so a replay is what the app
 // would show now: the reorder window, the parked pose per car (started from, confirmed, saved every 30 s, dropped
-// once the car moves), the speed scale, GNSS lag and compass from storage, the simulated outages, and the dot the
+// once the car moves), the speed scale and GNSS lag from storage, the simulated outages, and the dot the
 // service publishes (`published`, the trip log's `nav_estimate`). Inputs arrive as on the phone: IMU in 100 ms
 // batches, OBD speed when its reply came, fixes after CoreLocation's delivery delay, all on a virtual clock (uptime
 // from the log, wall clock from its time sync). A ReplayRecorder looks in through the service's observer, so the
@@ -18,7 +18,7 @@ import { isSatelliteFix, type GnssFix } from "@/nav/types";
 import { UNKNOWN_CAR, type EngineState, type SpeedSample } from "@/obd/types";
 import type { ActiveRoadGraph } from "@/services/offline-map/road-graph-file";
 import type { TripLog } from "@/triplog/trip-log-reader";
-import { ENGINE_STATE_CODES, type GnssRecord, type ImuMotionRecord, type NavEstimateRecord, type NavMapMatchRecord, type Vec3Record } from "@/triplog/schema";
+import { ENGINE_STATE_CODES, type GnssRecord, type ImuMotionRecord, type NavEstimateRecord, type NavMapMatchRecord } from "@/triplog/schema";
 
 import type { KeyValueStore } from "@/obd/vehicle-link-core";
 
@@ -74,7 +74,7 @@ const IMU_BATCH_US = 100_000;
 const DEFAULT_DELIVERY_US = 50_000;
 
 export interface AppReplayOptions extends Pick<RecorderOptions, "trackStepS" | "truthAccuracyM" | "truthLagS"> {
-  /** What the app keeps between drives: parked poses, speed scales, compass calibrations, GNSS lag. */
+  /** What the app keeps between drives: parked poses, speed scales, GNSS lag. */
   calibration: CalibrationStore;
   nav?: Partial<NavConfig>;
   /** The active region's road graph (map matching off without it). */
@@ -193,7 +193,7 @@ export function replayTripInApp(logged: TripLog, o: AppReplayOptions): AppReplay
   };
 
   const gnss = new Channel<[GnssRecord]>();
-  const imu = new Channel<[{ motion: ImuMotionRecord[]; mag: Vec3Record[] }]>();
+  const imu = new Channel<[{ motion: ImuMotionRecord[] }]>();
   const speed = new Channel<[SpeedSample]>();
   const engine = new Channel<[EngineState, number]>();
   const logVin = typeof trip.info.vehicle_vin === "string" && trip.info.vehicle_vin ? trip.info.vehicle_vin : null;
@@ -284,7 +284,6 @@ export function replayTripInApp(logged: TripLog, o: AppReplayOptions): AppReplay
 
   service.setKeepAlive(true);
   let i = 0;
-  let k = 0;
   let ob = 0;
   let g = 0;
   let en = 0;
@@ -319,12 +318,7 @@ export function replayTripInApp(logged: TripLog, o: AppReplayOptions): AppReplay
       const s = trip.imu[i++];
       motion.push({ timestampUs: s.tUs, gyro: s.gyro, gravity: s.gravity, userAccel: s.userAccel, attitude: [1, 0, 0, 0] });
     }
-    const mag: Vec3Record[] = [];
-    while (k < (trip.mag?.length ?? 0) && trip.mag[k].tUs <= nowUs) {
-      const s = trip.mag[k++];
-      mag.push({ timestampUs: s.tUs, v: s.field });
-    }
-    if (motion.length || mag.length) imu.emit({ motion, mag });
+    if (motion.length) imu.emit({ motion });
     for (const t of [...timers]) {
       while (timers.includes(t) && t.nextUs <= nowUs) {
         t.nextUs += t.everyUs;

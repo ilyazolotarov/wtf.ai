@@ -512,7 +512,7 @@ export function getRuntime(): Runtime {
   });
   routes.resume();
   // A route planned before the trip started (engine off) goes into the trip's log once it is open.
-  // Likewise what the navigator has stored (parked pose, speed scale, compass, GNSS lag): a replay starts from it.
+  // Likewise what the navigator has stored (parked pose, speed scale, GNSS lag): a replay starts from it.
   // The app process (TRIP-LOGGER-SPEC §4.4): its memory and CPU while a trip records, and at a trip's start how it was
   // launched and how the run before it ended.
   const health = new AppHealth({

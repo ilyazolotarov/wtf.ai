@@ -155,10 +155,9 @@ It replays a drive through the app's own `NavigatorService` (`src/services/navig
 navigator alone: inputs arrive as on the phone (IMU in 100 ms batches, OBD when its reply came, fixes after
 CoreLocation's delivery delay) on a virtual clock, and the blue track is what the service publishes, the record the
 phone writes as `nav_estimate`. So the replay can't drift from the app: the reorder window, the parked pose per car
-(started from, confirmed, saved every 30 s, dropped once the car moves), the speed scale, GNSS lag and compass from
-storage, and the "Cut GPS" outages are the app's code. *Experiment*'s research options (a later start, a fixed GPS
-lag, the compass at a jammed start) replay the navigator alone (`replayTrip`), as the benchmarks do; the status
-line then says so.
+(started from, confirmed, saved every 30 s, dropped once the car moves), the speed scale and GNSS lag from storage,
+and the "Cut GPS" outages are the app's code. *Experiment*'s research options (a later start, a fixed GPS lag) replay
+the navigator alone (`replayTrip`), as the benchmarks do; the status line then says so.
 
 - **Header:** the drive (newest first; ‹ › step, the name opens the list, `/` too; its second line says how long,
   how far and how GPS was), the three modes, and the status: how the replay started, and in amber what it does
@@ -215,7 +214,7 @@ line then says so.
     with commas); jammed (Wi-Fi/cell-like fixes only, all drive or a window; `src/nav/replay/jam.ts`); gone after the
     start (pure dead reckoning once the heading is known); good all along.
   - *Where the car started*: where the phone remembered it (default: what the app had stored when the drive
-    started — parked pose, speed scale, compass, GNSS lag, a manual position — from the log's `nav storage` notes;
+    started — parked pose, speed scale, GNSS lag, a manual position — from the log's `nav storage` notes;
     a log from before 2026-10-11 falls back to the next); where your drawing starts (its parked pose at the drawn
     start, heading along it); where today's navigator would have parked it (every earlier log of the phone replayed
     in order through the app with one storage across them, the first from what the phone had stored then,
@@ -227,8 +226,7 @@ line then says so.
     (NAVIGATOR-SPEC §9.6), fed no OBD speed or engine states; the dot is the phone's own dead reckoning wherever GPS
     isn't good, the timeline draws its speed over OBD's, rings around the dot are the other roads its tracker holds.
   - *Research options*: your placings replayed (as on the phone: the car put where you put it, at that moment) or
-    ignored, GPS lag (empty = learned), a later start, the compass at a jammed start (MAPMATCH-SPEC §8.2), and clock
-    times local or UTC.
+    ignored, GPS lag (empty = learned), a later start, and clock times local or UTC.
 - **Layers** (on the map): *Where the dot was* — the replay in blue, what the phone showed in cyan (from the log's
   `nav_estimate`; older logs don't have it), the compare replay in orange, distance lines to where the car was, and
   the parked car where the replayed app's map drew it (the app's own car icon, while the car didn't answer; at the
@@ -327,8 +325,6 @@ npm run replay:mm -- tools/triplog/logs/*.ulg                          # map mat
 npm run replay:mm -- trip.ulg --cut 241:240 --trace 330:360            # one outage, second by second
 npm run replay:bench -- tools/triplog/logs/*.ulg --mm                  # outage benchmark with map matching
 npm run replay:bench -- tools/triplog/logs/*.ulg --jam-start --verbose # heading init under jamming, with and without the map
-npm run replay:bench -- tools/triplog/logs/*.ulg --jam-start --compass   # …and with a compass calibrated on the other drives (right, turned 90°/180°)
-npm run replay:compass -- tools/triplog/logs/*.ulg                        # what the app logged about the compass in shadow (NAVIGATOR-SPEC §7.6)
 npm run replay:bench -- tools/triplog/logs/*.ulg --speed can --mm        # the navigator on CAN wheel speeds where heard (NAVIGATOR-SPEC §5.3)
 npm run replay:regress -- --speed can --yaw wheels                       # and turning on the rear wheels, as the app does (NAVIGATOR-SPEC §5.4): a phone in a pocket
 npm run replay:regress -- --speed can --yaw wheels --yaw-from 120 --yaw-cal   # experiment: the gyro until 120 s, then the wheels with the learned tyre term

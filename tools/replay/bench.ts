@@ -73,7 +73,6 @@ function parseArgs(argv: string[]) {
   let mmConfig: Partial<MapMatchConfig> = {};
   let graph: string | undefined;
   let jamStart = false;
-  let compass = false;
   let everyS = 60;
   let seedCount = DEFAULT_SEEDS;
   let obdHz: number | undefined;
@@ -85,7 +84,6 @@ function parseArgs(argv: string[]) {
     else if (argv[i] === "--mm-config") mmConfig = JSON.parse(argv[++i]) as Partial<MapMatchConfig>;
     else if (argv[i] === "--graph") graph = argv[++i];
     else if (argv[i] === "--jam-start") jamStart = true;
-    else if (argv[i] === "--compass") compass = true;
     else if (argv[i] === "--every") everyS = Number(argv[++i]);
     else if (argv[i] === "--seeds") seedCount = Number(argv[++i]);
     else if (argv[i] === "--durations") DURATIONS_S = argv[++i].split(",").map(Number);
@@ -96,7 +94,7 @@ function parseArgs(argv: string[]) {
   if (!(Number.isInteger(seedCount) && seedCount >= 1)) throw new Error("--seeds takes a whole number ≥ 1");
   const first = mmConfig.seed ?? 1;
   const seeds = Array.from({ length: seedCount }, (_, k) => first + k);
-  return { files, nav, verbose, mm, mmConfig, graph, jamStart, everyS, compass, seeds, obdHz, speed };
+  return { files, nav, verbose, mm, mmConfig, graph, jamStart, everyS, seeds, obdHz, speed };
 }
 
 const median = (v: number[]) => {
@@ -249,9 +247,9 @@ function runJob(job: Job): Plan | WindowRun[] {
 async function main() {
   const argv = process.argv.slice(2);
   const threads = threadsArg(argv);
-  const { files, nav, verbose, mm, mmConfig, graph, jamStart, everyS, compass, seeds, obdHz, speed } = parseArgs(argv);
+  const { files, nav, verbose, mm, mmConfig, graph, jamStart, everyS, seeds, obdHz, speed } = parseArgs(argv);
   if (jamStart) {
-    await runInitBench(files, { nav, mmConfig, graph, everyS, verbose, compass, seeds, threads });
+    await runInitBench(files, { nav, mmConfig, graph, everyS, verbose, seeds, threads });
     return;
   }
   const o: Options = { nav, mm, mmConfig, graph, seeds, durationsS: DURATIONS_S, obdHz, speed };

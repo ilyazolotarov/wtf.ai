@@ -10,9 +10,6 @@ import SensorCaptureModule, {
 import { Emitter } from "@/obd/emitter";
 import { GNSS_FLAGS, type GnssRecord, type ImuMotionRecord, type Vec3Record } from "@/triplog/schema";
 
-/** Raw magnetometer, always logged with the IMU; never used for navigation (SPEC §2). */
-export const MAG_RATE_HZ = 20;
-
 /** The phone's motion sensors (CMDeviceMotion), what the navigator and the log are tuned on (TRIP-LOGGER-SPEC §3.2). */
 export const IMU_RATE_HZ = 100;
 
@@ -51,7 +48,6 @@ export function decodeImuBatch(b: NativeImuBatch): {
   motion: ImuMotionRecord[];
   gyro: Vec3Record[];
   accel: Vec3Record[];
-  mag: Vec3Record[];
 } {
   const motion: ImuMotionRecord[] = [];
   for (let i = 0; i + MOTION_ROW <= b.motion.length; i += MOTION_ROW) {
@@ -71,7 +67,7 @@ export function decodeImuBatch(b: NativeImuBatch): {
     }
     return out;
   };
-  return { motion, gyro: vec(b.gyro), accel: vec(b.accel), mag: vec(b.mag) };
+  return { motion, gyro: vec(b.gyro), accel: vec(b.accel) };
 }
 
 class RateMeter {
@@ -193,7 +189,7 @@ export class SensorService {
           this.update({ gnssRunning: false, gnssHz: 0 });
         }
         if (imu && !this.snapshot.imuRunning) {
-          const started = await SensorCaptureModule.startImu({ rateHz: IMU_RATE_HZ, raw: false, batchMs: 100, magRateHz: MAG_RATE_HZ });
+          const started = await SensorCaptureModule.startImu({ rateHz: IMU_RATE_HZ, raw: false, batchMs: 100, magRateHz: 0 });
           this.update({ imuRunning: started });
         } else if (!imu && this.snapshot.imuRunning) {
           await SensorCaptureModule.stopImu();

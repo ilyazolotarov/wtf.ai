@@ -350,8 +350,6 @@
         <label title="Where you put the car during the drive is put there again at the same moment, as on the phone">Your placings <select id="placings"><option value="">replayed</option><option value="off">ignored</option></select></label>
         <label title="GPS timing offset. Empty = learned on the drive, as in the app">GPS lag <input id="lag" type="number" step="0.05" placeholder="learned" style="width:90px" /> s</label>
         <label title="Start the session this far into the log, as if the app started then">Start later, at <input id="start" type="number" step="10" min="0" placeholder="0" style="width:90px" /> s</label>
-        <label title="Compass at a jammed start (MAPMATCH-SPEC §8.2), calibrated on the other logs; turned = a wrong calibration">Compass at a jammed start
-          <select id="compass"><option value="">off</option><option value="on">from other drives</option><option value="90">turned 90°</option><option value="180">turned 180°</option></select></label>
         <span class="muted">These run the navigator alone, not the whole app.</span>
         <label title="Clock times on the page: this computer's local time, or UTC. Hover a time to see the other.">Clock times <select id="tz"><option value="local">local</option><option value="utc">UTC</option></select></label>
       </div>
@@ -1553,7 +1551,6 @@ function renderSummary() {
     `fixes ${fx.total} (${fx.satellite} satellite): ${fx.accepted} used, ${fx.rejected} rejected, ${fx.cut} withheld`,
     s.params ? `speed scale ${s.params.speedScale.toFixed(4)}, gyro bias ${s.params.gyroBiasDegS.toFixed(4)} °/s, gyro scale ${s.params.gyroScale.toFixed(4)}` : "",
     `road heading into the navigator: ${s.roadHeading.accepted} (rejected ${s.roadHeading.rejected}); road position: ${s.roadPosition.accepted} (rejected ${s.roadPosition.rejected})`,
-    data.compassInfo ? `compass: ${data.compassInfo.logs ? `from ${data.compassInfo.logs} other logs${data.compassInfo.rotateDeg ? `, turned ${data.compassInfo.rotateDeg}°` : ""}, ${data.compassInfo.trust}` : "no other log learned one"}` : "",
   ].filter(Boolean).join("\n");
 }
 
@@ -1754,11 +1751,11 @@ document.addEventListener("keydown", (e) => {
 window.addEventListener("resize", drawTimeline);
 
 // ---------- loading ----------
-const PARAMS = ["file", "adapter", "speed", "turns", "gps", "cut", "from", "compare", "lag", "start", "compass", "placings"];
+const PARAMS = ["file", "adapter", "speed", "turns", "gps", "cut", "from", "compare", "lag", "start", "placings"];
 /** The replay settings: three are radio groups (by name), the rest inputs and selects (by id). */
 const RADIOS = ["adapter", "gps", "from"];
 /** What each setting is when the replay runs as it happened. */
-const AS_IT_HAPPENED = { adapter: "", speed: "", turns: "", gps: "app", cut: "", from: "phone", compare: "", lag: "", start: "", compass: "", placings: "" };
+const AS_IT_HAPPENED = { adapter: "", speed: "", turns: "", gps: "app", cut: "", from: "phone", compare: "", lag: "", start: "", placings: "" };
 function param(k) {
   if (RADIOS.includes(k)) return document.querySelector(`input[name="${k}"]:checked`)?.value ?? "";
   return $(k).value;
@@ -1791,7 +1788,6 @@ function changedFromApp() {
   if ($("placings").value) out.push("placings ignored");
   if ($("lag").value) out.push(`GPS lag ${$("lag").value} s`);
   if (Number($("start").value) > 0) out.push(`started at ${$("start").value} s`);
-  if ($("compass").value) out.push("compass at the start");
   return out;
 }
 function renderChanged() {
@@ -2047,7 +2043,7 @@ async function run() {
   }
   seek(0);
 }
-for (const id of ["compare", "compass", "placings", "speed", "turns"]) $(id).onchange = run;
+for (const id of ["compare", "placings", "speed", "turns"]) $(id).onchange = run;
 for (const r of document.querySelectorAll('input[name="adapter"], input[name="from"]')) r.onchange = run;
 for (const r of document.querySelectorAll('input[name="gps"]')) {
   r.onchange = () => { syncCutInput(); if (param("gps") !== "cut") run(); else { renderChanged(); $("cut").focus(); } };

@@ -2,7 +2,6 @@
 // worker's NavigatorRemote, and the service reads the snapshot that came with the latest answer. The work after a
 // feed (each fix's bookkeeping, the publish) runs when its answer arrives.
 
-import type { CompassCalibration } from "@/nav/compass/compass";
 import type { MapMatchConfig } from "@/nav/mapmatch/particle-filter";
 import { Navigator, type FixOutcome, type NavConfig, type ParkedPose, type UserPosition } from "@/nav/navigator";
 import type { CanSpeedSample } from "@/nav/odometry/can/can-speed";
@@ -24,8 +23,6 @@ const PARTICLES_WANTED_MS = 2_000;
 
 /** The navigator as its latest snapshot shows it. */
 class SnapshotView implements NavView {
-  private readonly checks: number[] = [];
-
   constructor(
     private s: NavSnapshot,
     readonly mapMatcher: { updateTimes: number[]; startTimes: number[] },
@@ -36,8 +33,6 @@ class SnapshotView implements NavView {
 
   update(s: NavSnapshot): void {
     this.s = s;
-    this.checks.length = s.compassChecksFrom;
-    this.checks.push(...s.compassChecks);
   }
 
   get mode() {
@@ -79,18 +74,6 @@ class SnapshotView implements NavView {
   }
   get drivePose() {
     return this.s.drivePose;
-  }
-  get compassTrust() {
-    return this.s.compassTrust;
-  }
-  get compassHeading() {
-    return this.s.compassHeading;
-  }
-  get compassCheckDiffs(): readonly number[] {
-    return this.checks;
-  }
-  get compassCalibrations() {
-    return this.s.compassCalibrations;
   }
   /** The particles the latest answer carried; asking makes the next answers carry them. */
   mapMatchParticles(max: number): [number, number, number, number][] {
@@ -137,7 +120,7 @@ export class WorkerNavigatorHost implements NavigatorHost {
     const fresh = new Navigator(config);
     fresh.setWheelYaw(this.wheelYawOn);
     fresh.setEngine(engine);
-    this.view = new SnapshotView(snapshotOf(fresh, -Infinity, 0, false), this.times, () => {
+    this.view = new SnapshotView(snapshotOf(fresh, -Infinity, false), this.times, () => {
       this.particlesUntilMs = this.o.nowMs() + PARTICLES_WANTED_MS;
     });
   }
@@ -175,10 +158,6 @@ export class WorkerNavigatorHost implements NavigatorHost {
 
   setSpeedScalePrior(ks: number, ksVar: number): void {
     this.link.post({ kind: "speedScalePrior", ks, ksVar });
-  }
-
-  setCompassCalibrations(cals: readonly CompassCalibration[]): void {
-    this.link.post({ kind: "compassCalibrations", cals });
   }
 
   setPosition(position: UserPosition): void {

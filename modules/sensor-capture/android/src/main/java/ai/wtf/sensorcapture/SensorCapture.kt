@@ -123,7 +123,7 @@ class SensorCapture(private val context: Context, private val emit: (String, Map
    * `motion` rows need a gyroscope (the yaw source) and gravity. Gravity and linear acceleration come from their
    * sensors, or are derived from the accelerometer on phones (and the emulator) that lack them.
    */
-  fun startImu(rateHz: Double, raw: Boolean, batchMs: Double, magRateHz: Double): Boolean {
+  fun startImu(rateHz: Double, raw: Boolean, batchMs: Double): Boolean {
     if (sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE) == null) return false
     val derived = sensorManager.getDefaultSensor(Sensor.TYPE_GRAVITY) == null ||
       sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION) == null
@@ -155,16 +155,14 @@ class SensorCapture(private val context: Context, private val emit: (String, Map
             if (derived) assembler.onAccelerometer(tUs, v[0].toDouble(), v[1].toDouble(), v[2].toDouble())
             if (raw) append("a", SensorLogic.accelRow(tUs, v[0].toDouble(), v[1].toDouble(), v[2].toDouble()))
           }
-          Sensor.TYPE_MAGNETIC_FIELD_UNCALIBRATED, Sensor.TYPE_MAGNETIC_FIELD ->
-            append("f", SensorLogic.magRow(tUs, v[0].toDouble(), v[1].toDouble(), v[2].toDouble()))
         }
       }
     }
     imuListener = listener
 
-    fun register(type: Int, periodUs: Int = period): Boolean {
+    fun register(type: Int): Boolean {
       val s = sensorManager.getDefaultSensor(type) ?: return false
-      return sensorManager.registerListener(listener, s, periodUs, h)
+      return sensorManager.registerListener(listener, s, period, h)
     }
     if (!derived) {
       register(Sensor.TYPE_GRAVITY)
@@ -174,10 +172,6 @@ class SensorCapture(private val context: Context, private val emit: (String, Map
     register(Sensor.TYPE_GYROSCOPE)
     if (derived || raw) register(Sensor.TYPE_ACCELEROMETER)
     if (raw) register(Sensor.TYPE_GYROSCOPE_UNCALIBRATED)
-    if (magRateHz > 0) {
-      val magPeriod = SensorLogic.samplingPeriodUs(magRateHz)
-      if (!register(Sensor.TYPE_MAGNETIC_FIELD_UNCALIBRATED, magPeriod)) register(Sensor.TYPE_MAGNETIC_FIELD, magPeriod)
-    }
     return true
   }
 
@@ -203,7 +197,7 @@ class SensorCapture(private val context: Context, private val emit: (String, Map
     batcher.append(stream, row, nowUs())?.let {
       emit("onImuBatch", ImuBatcher.payload(it))
       if (imuBatches++ % 100 == 0) {
-        Log.i(TAG, "imu batch #$imuBatches motion=${it["m"]?.size?.div(14)} gyro=${it["g"]?.size?.div(4)} mag=${it["f"]?.size?.div(4)}")
+        Log.i(TAG, "imu batch #$imuBatches motion=${it["m"]?.size?.div(14)} gyro=${it["g"]?.size?.div(4)}")
       }
     }
   }

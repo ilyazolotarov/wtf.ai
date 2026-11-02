@@ -305,7 +305,7 @@ EKF when that starts otherwise and the filter doesn't already agree with it; aga
 EKF pose and accepted fixes, and moves the graph's frame with the navigator's. Tests: `__tests__/particle-filter.test.ts`
 on the fixture graph (a cut before a junction follows the branch the car turned onto; a turn into open country hands
 over to off-road; reversing 36 m ends 0.4 m from the truth; a jammed start at a dead end starts the EKF within 400 m;
-mid-road both directions stay alive and no start; the compass right and turned 180°).
+mid-road both directions stay alive and no start).
 
 ## 8. Heading initialization from the map (jammed start)
 
@@ -315,12 +315,13 @@ course or alignment starts the EKF. The PF can resolve both faster: it only need
 - **Start:** in `anchored`, at the first fix with a graph and an anchor radius ≤ 1 km, with unknown heading (§7.2).
   The filter runs from the first fix even when GNSS is clean: a course start then usually finds it already tracking.
 - **Inputs:** `relative` odometry (§6.1), the relative-heading weight, every fix (coarse ones with the `coarseOutlier`
-  floor), the off-road penalty, re-seeding on the anchor's roads. No absolute heading. The anchor circle follows the
-  navigator's anchor after each fix.
+  floor), the off-road penalty, re-seeding on the anchor's roads. No absolute heading (no compass: NAVIGATOR-SPEC
+  §7.5). The anchor circle follows the navigator's anchor after each fix.
 - **EKF start** (`initialization.method` = `map`, note `nav init map`), checked every 10 m:
   - the heading settled over 100 m: the filter is `tracking`, or one travel direction (particles within 45° of the
     circular mean) holds ≥ 0.9 of the weight with heading spread ≤ 10° and position spread ≤ 150 m (one direction
     along one road, before the turn that will fix the position along it);
+  - ≥ 0.5 of the weight travels within 45° of that heading (`mapStartDirectionShare`);
   - the car drives straight (< 8° over 10 m) and ≥ 0.9 of the weight is where the road is straight (within 5°) over
     ±(15 m + the position spread): a polyline bends at a vertex, the car gradually (starts just past a 9° bend were
     9–10° off);
@@ -333,21 +334,11 @@ course or alignment starts the EKF. The PF can resolve both faster: it only need
 - **Ambiguity:** on a straight road both directions stay alive until a turn, a dead end or the coarse fixes separate
   them; in a grid, all junctions with the same turn sequence stay alive. Unimodality is the rule; no "needs N turns".
 - **The pull-out turn is weighed like any other:** leaving a parking space turns the car 50–120° within the first
-  10–25 m; it is often a mapped turn, and it is what lets the roads overrule a wrong alias or compass. Skipping the
+  10–25 m; it is often a mapped turn, and it is what lets the roads overrule a wrong alias. Skipping the
   first 30 m gave more map starts and more wrong ones.
 - Measured on simulated jams from the clean drives: the map starts first in most sessions, about 0.4 km in,
   heading within 2.6°; every start over 10° off is an alignment start the map didn't beat (alignment is
   overconfident on some drives, NAVIGATOR-SPEC §13).
-
-### 8.2 Compass at a jammed start (replay only; NAVIGATOR-SPEC §7.6)
-
-While the heading is unknown, at each straight moment each particle's compass factor
-`inlier · N(travel direction − compass; 25°) + (1 − inlier)`, `inlier` 0.85, replaces the one already in its weight
-(not added up: the compass error is a bias that lasts the drive, and stacking it left the true direction ~1/280 of the
-weight); bounded to 6.7:1 between the best and worst directions. Only from a calibration confirmed on the drive that
-kept it. A map-start guard requires the start's direction (±45°) to hold ≥ 0.5 of the weight with the compass divided
-back out. Measured with a calibration pooled from other drives: more and sooner map starts with the right compass,
-none wrong; turned 90° or 180°, three wrong starts in 180 sessions, which is why the app stays in shadow.
 
 ## 9. Closed loop (PF → EKF)
 
@@ -545,10 +536,9 @@ repeating; `MEASURED_JAM_ARRIVALS` reproduces the real jams' Wi-Fi bursts and ce
 | U-turn on an edge | > 135° over 20 m, share 0.2 | §7.3 |
 | Cluster radius / heading / max | 30 m / 45° / 64 | §7.6 |
 | `tracking` threshold | top ≥ 0.9, spread ≤ 25 m | §7.6 |
-| Map heading init | settled over 100 m (`tracking`, or one direction ≥ 0.9 with ≤ 10° / ≤ 150 m spread); straight car and road (±15 m + spread, 5°); anchor radius ≤ 1 km | §8 |
+| Map heading init | settled over 100 m (`tracking`, or one direction ≥ 0.9 with ≤ 10° / ≤ 150 m spread); ≥ 0.5 of the weight within 45° of it; straight car and road (±15 m + spread, 5°); anchor radius ≤ 1 km | §8 |
 | Map start σ | position max(spread, 10 m); heading hypot(max(spread, 3°), 0.1°/m × spread) | §8 |
 | Keep the filter at an EKF start | top cluster within 3σ + 30 m and 3σ_ψ + 30° | §8 |
-| Compass | inlier 0.85, σ 25°; replay only | §8.2 |
 | Road heading | every 25 m, σ 4° | §9 |
 | Road position | every 200 m; floors 12 m along, 5 m across; along floor + 1 % of the distance since the last turn | §9 |
 | Tile cache / working-set margin | 128 tiles / 300 m | §5 |

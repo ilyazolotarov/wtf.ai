@@ -4,20 +4,16 @@
 // (drives with clean GNSS only). Starts are scored against the ground truth (truth-match.ts), else
 // against a clean replay's EKF, else (heading only) against its later heading taken back by the gyro.
 //
-//   npm run replay:bench -- --jam-start [--every 60] [--seeds 3] [--graph <file>] [--mm-config '<json>'] [--compass] [--verbose] <logs>
+//   npm run replay:bench -- --jam-start [--every 60] [--seeds 3] [--graph <file>] [--mm-config '<json>'] [--verbose] <logs>
 //
 // The particle filter is random, and one seed is too noisy to compare changes by (single sessions
 // flip between a map and an alignment start): each session runs with `--seeds` seeds, pooled.
-//
-// --compass (drives with a magnetometer only) adds map runs with a compass calibrated on the other
-// drives, and with that calibration turned 90° and 180°: a wrong one must cost time, never the road.
 //
 // Sessions run on worker threads (pool.ts, `--threads <n>`); output keeps the drive and session order.
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
-import { mergeCalibrations, type CompassCalibration } from "../../src/nav/compass/compass";
 import { haversineM } from "../../src/nav/geo";
 import type { MapMatchConfig } from "../../src/nav/mapmatch/particle-filter";
 import type { NavConfig } from "../../src/nav/navigator";
@@ -35,7 +31,6 @@ export interface InitBenchOptions {
   graph?: string;
   everyS: number;
   verbose: boolean;
-  compass?: boolean;
   /** Particle-filter seeds: every session runs once per seed and the results are pooled. */
   seeds: number[];
   threads: number;
@@ -138,16 +133,11 @@ const median = (v: number[]) => {
   return s.length ? s[Math.floor(s.length / 2)] : NaN;
 };
 
-const COMPASS_KEYS = ["compass", "compass 90°", "compass 180°"] as const;
-const ROTATIONS: Record<(typeof COMPASS_KEYS)[number], number> = { compass: 0, "compass 90°": Math.PI / 2, "compass 180°": Math.PI };
-type Key = "plain" | "map" | (typeof COMPASS_KEYS)[number];
+type Key = "plain" | "map";
 type Row = { file: string; session: string; seed: number } & Partial<Record<Key, Scored>>;
 
 type Session = { label: string; options: ReplayOptions };
-type Job =
-  | { kind: "calibration"; file: string; o: InitBenchOptions }
-  | { kind: "sessions"; file: string; o: InitBenchOptions }
-  | { kind: "session"; file: string; o: InitBenchOptions; session: Session; compassCal: CompassCalibration | null };
+type Job = { kind: "sessions"; file: string; o: InitBenchOptions } | { kind: "session"; file: string; o: InitBenchOptions; session: Session };
 /** A drive's sessions and its header line, or the line to print when no graph covers it. */
 type Plan = { header: string; sessions: Session[] } | { skip: string };
 
@@ -189,7 +179,7 @@ function plan(file: string, o: InitBenchOptions): Plan {
 }
 
 /** One session, every seed: its rows and what it prints. */
-function runSession(file: string, o: InitBenchOptions, s: Session, compassCal: CompassCalibration | null): { rows: Row[]; lines: string[] } {
+function runSession(file: string, o: InitBenchOptions, s: Session): { rows: Row[]; lines: string[] } {
   const { trip, navGraph, ref, truth } = drive(file, o)!;
   const name = path.basename(file);
   const rows: Row[] = [];
@@ -200,31 +190,22 @@ function runSession(file: string, o: InitBenchOptions, s: Session, compassCal: C
   const plainScore = score(plain.summary.init, ref, totalM);
   // The particle filter is random: each seed is a row (the run without the map is the same in each).
   for (const seed of o.seeds) {
-    const withMap = (extra: ReplayOptions) => {
-      const config = { ...o.mmConfig, seed };
-      const r = replayTrip(trip, { nav: o.nav, ...s.options, ...extra, mapMatch: { graph: navGraph, truth, config } });
-      return score(r.summary.init, ref, totalM, r.summary.mapMatch?.truthSurvival ?? null);
-    };
-    const row: Row = { file: name, session: s.label, seed, plain: plainScore, map: withMap({}) };
-    if (compassCal) for (const key of COMPASS_KEYS) row[key] = withMap({ compass: { calibration: compassCal, rotateRad: ROTATIONS[key] } });
+    const config = { ...o.mmConfig, seed };
+    const r = replayTrip(trip, { nav: o.nav, ...s.options, mapMatch: { graph: navGraph, truth, config } });
+    const map = score(r.summary.init, ref, totalM, r.summary.mapMatch?.truthSurvival ?? null);
+    const row: Row = { file: name, session: s.label, seed, plain: plainScore, map };
     rows.push(row);
     if (o.verbose || s.options.startAtS === undefined) {
-      const extra = compassCal ? COMPASS_KEYS.map((k) => `   |   ${k}: ${fmt(row[k]!)}`).join("") : "";
       const label = o.seeds.length > 1 ? `${s.label} #${seed}` : s.label;
-      lines.push(`  ${label.padEnd(20)} no map: ${fmt(row.plain!)}   |   map: ${fmt(row.map!)}${extra}`);
+      lines.push(`  ${label.padEnd(20)} no map: ${fmt(row.plain!)}   |   map: ${fmt(row.map!)}`);
     }
   }
   return { rows, lines };
 }
 
 function runJob(job: Job) {
-  if (job.kind === "calibration") {
-    const trip = readTripLog(new Uint8Array(readFileSync(job.file)));
-    const mag = !!trip.mag?.length;
-    return { mag, calibration: mag ? replayTrip(trip, { nav: job.o.nav }).summary.compass.calibration : null };
-  }
   if (job.kind === "sessions") return plan(job.file, job.o);
-  return runSession(job.file, job.o, job.session, job.compassCal);
+  return runSession(job.file, job.o, job.session);
 }
 serveJobs(import.meta.url, runJob);
 
@@ -232,35 +213,19 @@ export async function runInitBench(files: string[], o: InitBenchOptions): Promis
   const rows: Row[] = [];
   const pool = new Pool(import.meta.url, o.threads);
   try {
-    // Each drive's compass calibration as it learns it alone; a drive then runs with the others' merged.
-    const learned = new Map<string, CompassCalibration>();
-    const withMag = new Set<string>();
-    if (o.compass) {
-      const cals = await pool.map<Job, { mag: boolean; calibration: CompassCalibration | null }>(files.map((file) => ({ kind: "calibration", file, o })));
-      files.forEach((file, k) => {
-        if (cals[k].mag) withMag.add(file);
-        if (cals[k].calibration) learned.set(file, cals[k].calibration);
-      });
-    }
-    const compassFor = (file: string) => {
-      const others = [...learned].filter(([f]) => f !== file).map(([, c]) => c);
-      return withMag.has(file) && others.length ? others.reduce((a, b) => mergeCalibrations(a, b)) : null;
-    };
-    const kept = o.compass ? files.filter((file) => compassFor(file) !== null) : files;
-    const plans = await pool.map<Job, Plan>(kept.map((file) => ({ kind: "sessions", file, o })));
+    const plans = await pool.map<Job, Plan>(files.map((file) => ({ kind: "sessions", file, o })));
     const jobs: Job[] = [];
     const owner: number[] = [];
-    kept.forEach((file, k) => {
+    files.forEach((file, k) => {
       const p = plans[k];
       if ("skip" in p) return;
-      const compassCal = o.compass ? compassFor(file) : null;
       for (const session of p.sessions) {
-        jobs.push({ kind: "session", file, o, session, compassCal });
+        jobs.push({ kind: "session", file, o, session });
         owner.push(k);
       }
     });
     const done = await pool.map<Job, { rows: Row[]; lines: string[] }>(jobs);
-    kept.forEach((_, k) => {
+    files.forEach((_, k) => {
       const p = plans[k];
       console.log("skip" in p ? p.skip : p.header);
       done.forEach((d, j) => {
@@ -281,7 +246,7 @@ export async function runInitBench(files: string[], o: InitBenchOptions): Promis
     if (!set.length) continue;
     const seeds = o.seeds.length > 1 ? ` × ${o.seeds.length} seeds (${o.seeds.join(", ")})` : "";
     console.log(`\n${label}: ${set.length / o.seeds.length} sessions${seeds}, counts over all ${set.length}`);
-    const keys: Key[] = ["plain", "map", ...(o.compass ? COMPASS_KEYS : [])];
+    const keys: Key[] = ["plain", "map"];
     for (const key of keys) {
       const all = set.map((r) => r[key]).filter((v): v is Scored => v !== undefined);
       const started = all.filter((r) => r.tS !== null);
@@ -304,11 +269,5 @@ export async function runInitBench(files: string[], o: InitBenchOptions): Promis
     const both = set.filter((r) => r.map!.tS !== null);
     const sooner = both.filter((r) => r.plain!.tS === null || r.map!.distanceM < r.plain!.distanceM).length;
     console.log(`  map starts sooner than without it in ${sooner} of ${set.length}`);
-    if (o.compass) {
-      const c = set.filter((r) => r.compass && r.compass.tS !== null);
-      const sooner = c.filter((r) => r.map!.tS === null || r.compass!.distanceM < r.map!.distanceM).length;
-      const later = c.filter((r) => r.map!.tS !== null && r.compass!.distanceM > r.map!.distanceM).length;
-      console.log(`  with the compass the EKF starts sooner than with the map alone in ${sooner} of ${set.length}, later in ${later}`);
-    }
   }
 }

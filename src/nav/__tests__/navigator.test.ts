@@ -472,7 +472,6 @@ describe("Navigator from a parked pose", () => {
     parked.trip.imu = later(parked.trip.imu);
     parked.trip.obdSpeed = later(parked.trip.obdSpeed);
     parked.trip.gnss = later(parked.trip.gnss);
-    parked.trip.mag = later(parked.trip.mag);
     const r = replayTrip(parked.trip);
     const end = r.track.at(-1)!;
     expect(haversineM(end, parked.truth.at(-1)!)).toBeLessThan(10);

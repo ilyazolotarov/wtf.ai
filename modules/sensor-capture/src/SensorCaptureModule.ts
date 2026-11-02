@@ -30,14 +30,13 @@ export interface NativeGnssFix {
 
 /**
  * Flat rows. `motion`: 14 values per sample (tUs, gyro xyz rad/s, user accel xyz m/s²,
- * gravity xyz m/s², attitude quaternion w x y z). `gyro`/`accel`/`mag`: 4 per sample (tUs, x, y, z);
- * `mag` is the raw magnetic field in µT.
+ * gravity xyz m/s², attitude quaternion w x y z). `gyro`/`accel`: 4 per sample (tUs, x, y, z).
+ * Older native builds also send `mag` (the raw magnetic field), empty with `magRateHz` 0; it is not read.
  */
 export interface NativeImuBatch {
   motion: number[];
   gyro: number[];
   accel: number[];
-  mag: number[];
 }
 
 export const MOTION_ROW = 14;
@@ -120,7 +119,11 @@ declare class SensorCaptureNativeModule extends NativeModule<SensorCaptureEvents
   requestLocationPermission(): Promise<LocationPermission>;
   startGnss(): Promise<boolean>;
   stopGnss(): Promise<void>;
-  startImu(options: { rateHz: number; raw: boolean; batchMs: number; magRateHz: number }): Promise<boolean>;
+  /**
+   * `magRateHz`: read only by older native builds, which capture the magnetometer at this rate unless it is 0 (their
+   * default is 20 Hz). Always 0; the current builds have no magnetometer capture.
+   */
+  startImu(options: { rateHz: number; raw: boolean; batchMs: number; magRateHz: 0 }): Promise<boolean>;
   stopImu(): Promise<void>;
   /** The app process (TRIP-LOGGER-SPEC §4.4). */
   launchInfo(): LaunchInfo;

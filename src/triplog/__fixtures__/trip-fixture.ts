@@ -69,7 +69,7 @@ export function buildFixture(): Uint8Array {
       attitude: [1, 0, 0, 0],
     });
   }
-  // Raw magnetometer at 20 Hz: horizontal field rotating 1°/sample, 45 µT down.
+  // Raw magnetometer at 20 Hz, as older builds logged it: horizontal field rotating 1°/sample, 45 µT down.
   for (let i = 0; i < 20; i++) {
     const a = (i * Math.PI) / 180;
     w.magRaw({ timestampUs: t0 + 50_000 * i, v: [20 * Math.cos(a), 20 * Math.sin(a), -45] });

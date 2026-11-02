@@ -9,7 +9,6 @@
 //   shape to coarse fixes when jamming leaves no course, from the pose saved when parked, or
 //   from map matching the track to the roads).
 
-import { Compass, type CompassCalibration, type CompassConfig, type CompassTrust } from "./compass/compass";
 import { GnssLagEstimator, type GnssLagConfig, type GnssLagEstimate } from "./calibration/gnss-lag";
 import { deepCopy } from "./deep-copy";
 import { DEFAULT_EKF_CONFIG, DrEkf, wrapAngle, type EkfConfig } from "./ekf/dr-ekf";
@@ -23,7 +22,7 @@ import { ParticleFilter, type MapMatchConfig, type MapMatchState, type RoadWeigh
 import { ImuProcessor, type ImuConfig } from "./odometry/imu/imu-processor";
 import { OdometryChunker, type OdometryStep } from "./odometry/odometry-output";
 import type { TrustState } from "./position/types";
-import { isSatelliteFix, type GnssFix, type ImuSample, type MagSample, type ObdSpeedSample } from "./types";
+import { isSatelliteFix, type GnssFix, type ImuSample, type ObdSpeedSample } from "./types";
 
 export type NavMode = "none" | "anchored" | "dr";
 
@@ -110,16 +109,6 @@ export interface NavConfig {
   ekf: Partial<EkfConfig>;
   gnssLag: Partial<GnssLagConfig>;
   imu: Partial<ImuConfig>;
-  compass: Partial<CompassConfig>;
-  /**
-   * `shadow`: the compass learns, checks itself and reports its heading (`compassHeading`), but the
-   * particle filter never gets it (the app, until real drives show how often a stored calibration is
-   * wrong, §7.6). `on`: the particle filter weighs it at a jammed start (MAPMATCH-SPEC §8.2).
-   */
-  compassUse: "shadow" | "on";
-  /** The compass learns from the EKF heading while its σ is below this, driving at least `compassMinSpeedMps`. */
-  compassLearnSigmaRad: number;
-  compassMinSpeedMps: number;
   align: Partial<AlignConfig>;
   /**
    * A map-free twin EKF (MAPMATCH-SPEC §9.5): the same sensors and GNSS, never a road correction. It can give the
@@ -207,10 +196,6 @@ export const DEFAULT_NAV_CONFIG: NavConfig = {
   ekf: {},
   gnssLag: {},
   imu: {},
-  compass: {},
-  compassUse: "shadow",
-  compassLearnSigmaRad: (3 * Math.PI) / 180,
-  compassMinSpeedMps: 4,
   align: {},
   mapMatchTwin: {},
   roadHeading: {},
@@ -586,8 +571,6 @@ export class Navigator {
    */
   private stoppedPose: ParkedPose | null = null;
   private lagEstimator: GnssLagEstimator;
-  private readonly compass: Compass;
-  private nextCompassUs = -Infinity;
   private readonly ekfConfig: EkfConfig;
   private odometryListeners: ((step: OdometryStep) => void)[] = [];
   private readonly odometry = new OdometryChunker();
@@ -630,7 +613,6 @@ export class Navigator {
     this.roadPositionConfig = { ...DEFAULT_ROAD_POSITION_CONFIG, ...this.config.roadPosition };
     this.imu = new ImuProcessor(this.config.imu);
     this.lagEstimator = new GnssLagEstimator(this.config.gnssLag);
-    this.compass = new Compass(this.config.compass);
     this.integrity = new GnssIntegrity(this.config.integrity);
   }
 
@@ -779,45 +761,6 @@ export class Navigator {
     this.speedScale = { ks, ksVar, ...(offset ?? {}) };
   }
 
-  /** Raw magnetometer: the compass (§7.6), at most a hint for the heading at a jammed start (`compassUse`). */
-  onMag(s: MagSample): void {
-    this.compass.onMag(s.tUs, s.field);
-  }
-
-  /** A compass calibration from earlier drives of this car and phone (null: none). */
-  setCompassCalibration(cal: CompassCalibration | null): void {
-    this.compass.setCalibration(cal);
-  }
-
-  /** Compass calibrations from earlier drives of this car and phone, one per mounting, most recent first. */
-  setCompassCalibrations(cals: readonly CompassCalibration[]): void {
-    this.compass.setCalibrations(cals);
-  }
-
-  /** The compass calibration of the mounting this drive used most (stored + learned on this one). */
-  get compassCalibration(): CompassCalibration | null {
-    return this.compass.calibration;
-  }
-
-  /** The compass calibrations to keep for the next drive, one per mounting, most recent first. */
-  get compassCalibrations(): CompassCalibration[] {
-    return this.compass.calibrations;
-  }
-
-  get compassTrust(): CompassTrust {
-    return this.compass.trust;
-  }
-
-  /** The compass's heading now (null: no usable calibration, or the phone handled or tilted). */
-  get compassHeading(): { psi: number; sigma: number } | null {
-    return this.compass.heading();
-  }
-
-  /** Compass minus EKF heading at each trust check (replay statistics). */
-  get compassCheckDiffs(): readonly number[] {
-    return this.compass.checkDiffs;
-  }
-
   /**
    * The IMU's turning comes from the CAN wheels (NAVIGATOR-SPEC §5.4), not the phone's gyro: noisier than the gyro the
    * EKF's noise is for, so the fixes and the roads correct its heading harder.
@@ -861,7 +804,6 @@ export class Navigator {
     // fix gave just before would carry the dead reckoning off at the driver's pace, fixes or not.
     if (this.heldParked && this.ekf) for (const ekf of this.twin ? [this.ekf, this.twin] : [this.ekf]) ekf.updateZeroSpeed(0.02);
     this.lastYaw = { tUs: s.tUs, rate: out.yawRate, valid: out.valid };
-    this.feedCompass(s, out.yawRate, out.valid);
 
     if (this.standstill && s.tUs - this.lastBiasUpdateUs >= 1_000_000) {
       this.lastBiasUpdateUs = s.tUs;
@@ -1208,22 +1150,6 @@ export class Navigator {
 
   // ---- internals ----
 
-  /**
-   * The compass gets the phone's attitude at the IMU rate. Once a second, while the EKF knows the heading
-   * well and the car drives, it checks itself against that heading and learns from it.
-   */
-  private feedCompass(s: ImuSample, yawRate: number, valid: boolean): void {
-    const g = s.gravity;
-    const gn = Math.hypot(g[0], g[1], g[2]);
-    if (gn > 0) this.compass.onImu(s.tUs, [-g[0] / gn, -g[1] / gn, -g[2] / gn], yawRate, valid);
-    if (s.tUs < this.nextCompassUs) return;
-    this.nextCompassUs = s.tUs + 1_000_000;
-    const ekf = this.ekf;
-    const o = this.lastObd;
-    const moving = o !== null && s.tUs - o.tUs < this.config.obdStaleUs && o.speedMps >= this.config.compassMinSpeedMps;
-    if (ekf && moving && ekf.psiSigma <= this.config.compassLearnSigmaRad) this.compass.observe(ekf.psi);
-  }
-
   /** Yaw rate to hold over an interval that has no IMU sample (null = unknown). */
   private heldYaw(tUs: number): number | null {
     const y = this.lastYaw;
@@ -1483,7 +1409,6 @@ export class Navigator {
     const pf = this.pf;
     if (!pf?.isActive) return;
     const ekf = this.ekf;
-    pf.setCompass(pf.initializing && this.config.compassUse === "on" ? this.compass.heading() : null);
     // The position prior from the twin when asked: it hasn't taken the filter's own corrections (§9.5).
     const prior = this.config.mapMatchTwin.prior && this.twin ? this.twin : ekf;
     pf.onOdometry(step, prior ? { psi: prior.psi, psiSigma: prior.psiSigma, e: prior.east, n: prior.north, posSigma: prior.positionSigma } : null);
@@ -1505,8 +1430,8 @@ export class Navigator {
       // Heading unknown: a heading settled over `mapStartTrackingM` starts the EKF.
       this.nextMapStartCheckM = step.distanceM + pf.config.evalIntervalM;
       const settled = this.mapPose();
-      // The roads alone must lean this way too: a wrong compass may delay a start, never make one.
-      if (settled && pf.directionShare(settled.headingRad, MAP_START_DIRECTION_RAD, true) >= pf.config.mapStartCompassFreeShare) {
+      // And `mapStartDirectionShare` of the weight must travel within 45° of that heading.
+      if (settled && pf.directionShare(settled.headingRad, MAP_START_DIRECTION_RAD) >= pf.config.mapStartDirectionShare) {
         this.trackingFromM ??= step.distanceM;
         // Mid-turn, or near a bend of the road polyline, the road heading is not the car's: start on a
         // straight road, driving straight. The car is somewhere within the cloud's spread along it.

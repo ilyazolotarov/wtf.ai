@@ -2,7 +2,6 @@
 // the worker's NavigatorRemote, which runs a LocalNavigatorHost there, and the snapshot each answer carries: what the
 // service reads of the navigator, as it was after that step. Plain data both ways, copied between the runtimes.
 
-import type { CompassCalibration, CompassTrust } from "@/nav/compass/compass";
 import type { Coordinate } from "@/nav/geo";
 import { LocalFrame } from "@/nav/geo/local-frame";
 import type { ByteSource } from "@/nav/mapmatch/graph/byte-source";
@@ -40,7 +39,6 @@ export type ToRemote =
   | { kind: "wheelYaw"; on: boolean }
   | { kind: "wheels"; sample: CanSpeedSample }
   | { kind: "speedScalePrior"; ks: number; ksVar: number }
-  | { kind: "compassCalibrations"; cals: readonly CompassCalibration[] }
   | { kind: "position"; position: UserPosition }
   | { kind: "seedWheelYaw"; id: number; start: WheelYawCalibration }
   | { kind: "startFromPose"; id: number; pose: ParkedPose }
@@ -81,12 +79,6 @@ export interface NavSnapshot {
   parkedPose: ParkedPose | null;
   restsOnStoredPose: boolean;
   drivePose: Navigator["drivePose"];
-  compassTrust: CompassTrust;
-  compassHeading: Navigator["compassHeading"];
-  /** The compass checks after the first `compassChecksFrom` (the ones before were in earlier snapshots). */
-  compassChecks: number[];
-  compassChecksFrom: number;
-  compassCalibrations: CompassCalibration[];
   /** [lat, lon, weight, off-road 1/0], heaviest first: when asked. */
   particles?: [number, number, number, number][];
 }
@@ -94,8 +86,8 @@ export interface NavSnapshot {
 /** Particles a snapshot carries when the debug overlay asks (it draws 200). */
 const SNAPSHOT_PARTICLES = 200;
 
-/** The navigator's state as plain data; compass checks from `checksFrom` on. */
-export function snapshotOf(nav: Navigator, trustAtUs: number, checksFrom: number, particles: boolean): NavSnapshot {
+/** The navigator's state as plain data. */
+export function snapshotOf(nav: Navigator, trustAtUs: number, particles: boolean): NavSnapshot {
   return {
     mode: nav.mode,
     estimate: nav.estimate(),
@@ -110,11 +102,6 @@ export function snapshotOf(nav: Navigator, trustAtUs: number, checksFrom: number
     parkedPose: nav.parkedPose,
     restsOnStoredPose: nav.restsOnStoredPose,
     drivePose: nav.drivePose,
-    compassTrust: nav.compassTrust,
-    compassHeading: nav.compassHeading,
-    compassChecks: nav.compassCheckDiffs.slice(checksFrom),
-    compassChecksFrom: checksFrom,
-    compassCalibrations: [...nav.compassCalibrations],
     ...(particles ? { particles: nav.mapMatchParticles(SNAPSHOT_PARTICLES) } : {}),
   };
 }
@@ -158,8 +145,6 @@ export function inProcessLink(bytes: FileBytes): { post(m: ToRemote): void; onRe
 export class NavigatorRemote {
   private readonly host = new LocalNavigatorHost();
   private navId = 0;
-  /** Compass checks of this navigator already sent. */
-  private checksSent = 0;
   /** The latest input fed: trust is read at it. */
   private fedUs = -Infinity;
   private graph: { file: GraphFile; graph: TiledRoadGraph; close(): void } | null = null;
@@ -182,7 +167,6 @@ export class NavigatorRemote {
       case "create":
         this.drainTimes();
         this.navId = m.navId;
-        this.checksSent = 0;
         host.create(m.config, m.engine);
         return;
       case "drop":
@@ -202,9 +186,6 @@ export class NavigatorRemote {
         return;
       case "speedScalePrior":
         host.setSpeedScalePrior(m.ks, m.ksVar);
-        return;
-      case "compassCalibrations":
-        host.setCompassCalibrations(m.cals);
         return;
       case "position":
         host.setPosition(m.position);
@@ -259,8 +240,7 @@ export class NavigatorRemote {
 
   private answer(id: number, extra: Pick<FromRemote, "answer" | "fixes" | "error">, particles: boolean): void {
     const nav = this.host.nav;
-    const snapshot = nav ? snapshotOf(nav, this.fedUs, this.checksSent, particles) : null;
-    if (snapshot) this.checksSent += snapshot.compassChecks.length;
+    const snapshot = nav ? snapshotOf(nav, this.fedUs, particles) : null;
     this.drainTimes();
     const times = this.times;
     this.times = { startTimes: [], updateTimes: [] };

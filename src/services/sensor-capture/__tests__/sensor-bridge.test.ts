@@ -59,13 +59,12 @@ describe("payload decoding (row layouts shared with SensorLogic.swift)", () => {
     expect(r.courseRad).toBeNaN();
   });
 
-  test("IMU: 14-value motion rows, 4-value raw and magnetometer rows, partial rows ignored", () => {
+  test("IMU: 14-value motion rows, 4-value raw rows, partial rows ignored", () => {
     const motionRow = [12_500_000, 0.1, 0.2, 0.3, 9.8, 0, 0, 0, 0, -9.8, 1, 0, 0, 0];
     const decoded = decodeImuBatch({
       motion: [...motionRow, ...motionRow.map((v, i) => (i === 0 ? v + 10_000 : v)), 1, 2, 3],
       gyro: [1, 0.1, 0.2, 0.3],
       accel: [2, 0, 0, 9.8, 99],
-      mag: [3, 20, -5, -45],
     });
     expect(decoded.motion).toHaveLength(2);
     expect(decoded.motion[0]).toEqual({
@@ -78,7 +77,14 @@ describe("payload decoding (row layouts shared with SensorLogic.swift)", () => {
     expect(decoded.motion[1].timestampUs).toBe(12_510_000);
     expect(decoded.gyro).toEqual([{ timestampUs: 1, v: [0.1, 0.2, 0.3] }]);
     expect(decoded.accel).toEqual([{ timestampUs: 2, v: [0, 0, 9.8] }]);
-    expect(decoded.mag).toEqual([{ timestampUs: 3, v: [20, -5, -45] }]);
+  });
+
+  test("IMU: the magnetometer rows an older native build sends are ignored", () => {
+    const motionRow = [12_500_000, 0.1, 0.2, 0.3, 9.8, 0, 0, 0, 0, -9.8, 1, 0, 0, 0];
+    const batch = { motion: motionRow, gyro: [], accel: [], mag: [3, 20, -5, -45] };
+    const decoded = decodeImuBatch(batch);
+    expect(Object.keys(decoded).sort()).toEqual(["accel", "gyro", "motion"]);
+    expect(decoded.motion).toHaveLength(1);
   });
 });
 
@@ -97,7 +103,7 @@ describe("SensorService", () => {
     s.want(true, true);
     await flush();
     expect(mockNative.startGnss).toHaveBeenCalledTimes(1);
-    expect(mockNative.startImu).toHaveBeenCalledWith({ rateHz: 100, raw: false, batchMs: 100, magRateHz: 20 });
+    expect(mockNative.startImu).toHaveBeenCalledWith({ rateHz: 100, raw: false, batchMs: 100, magRateHz: 0 });
     expect(s.getSnapshot()).toMatchObject({ gnssRunning: true, imuRunning: true });
 
     s.want(true, false);
@@ -156,10 +162,10 @@ describe("SensorService", () => {
     expect(s.getSnapshot().lastError).toBe("denied");
   });
 
-  test("the IMU starts at 100 Hz without the raw streams", async () => {
+  test("the IMU starts at 100 Hz without the raw streams; an older native build's magnetometer stays off", async () => {
     const s = new SensorService();
     s.want(false, true);
     await flush();
-    expect(mockNative.startImu).toHaveBeenLastCalledWith({ rateHz: 100, raw: false, batchMs: 100, magRateHz: 20 });
+    expect(mockNative.startImu).toHaveBeenLastCalledWith({ rateHz: 100, raw: false, batchMs: 100, magRateHz: 0 });
   });
 });

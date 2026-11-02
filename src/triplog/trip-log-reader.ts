@@ -41,7 +41,7 @@ export interface TripLog {
   startUs: number;
   info: Record<string, RecordValue>;
   imu: ImuSample[];
-  /** Raw magnetic field, µT, phone frame (absent in logs before it was recorded). */
+  /** Raw magnetic field, µT, phone frame: only in logs of older builds (none before or after them). */
   mag: { tUs: number; field: Vec3 }[];
   /** `rxUs`: when the reply arrived (the record's time; `tUs` is the midpoint of request and reply). */
   obdSpeed: (ObdSpeedSample & { rxUs?: number })[];

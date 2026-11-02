@@ -25,9 +25,6 @@ class ImuOptions : Record {
   @Field var rateHz: Double = 100.0
   @Field var raw: Boolean = false
   @Field var batchMs: Double = 100.0
-
-  /** Raw magnetometer rate; 0 = off. Logged only, never used for navigation (SPEC §2). */
-  @Field var magRateHz: Double = 20.0
 }
 
 class SensorCaptureModule : Module() {
@@ -117,7 +114,7 @@ class SensorCaptureModule : Module() {
     AsyncFunction("stopGnss") { capture?.stopGnss() }
 
     AsyncFunction("startImu") { options: ImuOptions ->
-      capture().startImu(options.rateHz, options.raw, options.batchMs, options.magRateHz)
+      capture().startImu(options.rateHz, options.raw, options.batchMs)
     }
 
     AsyncFunction("stopImu") { capture?.stopImu() }

@@ -27,13 +27,12 @@ reproduces the phone's dot (§10). Open items: §13.
 | `ImuSample` | CoreMotion device motion (`xArbitraryZVertical`) / Android SensorManager normalized to it | 100 Hz | gyro, gravity, user acceleration; device frame |
 | `ObdSpeedSample` | PID `0D`, time = midpoint of tx and rx; or CAN wheel speeds (`source: "can"`) | OBD 2 Hz moving, 1 Hz parked; CAN ~10 Hz | raw km/h kept (1 km/h resolution, 0 below ~2–3 km/h) |
 | `GnssFix` | `modules/sensor-capture` | ~1 Hz; jammed ~0.1 Hz | invalid fields absent; simulated fixes dropped by the reader |
-| `MagSample` | raw magnetometer | 20 Hz | compass in shadow mode only (§7.6) |
 
 - **Satellite fix vs coarse fix:** a satellite fix has a speed (0 when standing). Under jamming the phone falls back
   to Wi-Fi/cell positions with no speed, claiming ±7 m … 150 km, often repeated, with correlated errors. Accuracy
   alone can't tell the two kinds apart.
-- All timestamps are monotonic uptime µs. Inputs are fed in time order (`Navigator.onImu / onObdSpeed / onGnss /
-  onMag`).
+- All timestamps are monotonic uptime µs. Inputs are fed in time order (`Navigator.onImu / onObdSpeed / onGnss`).
+- **No magnetometer** (§7.5).
 
 ## 4. Modes (`src/nav/navigator.ts`)
 
@@ -138,7 +137,6 @@ navigate with the phone in a hand, a pocket or on a seat.
   can't be told, and the unsigned wheels turn it the other way. So below 11 km/h (`NO_GEAR_MIN_MPS`; reversing is
   slower) the phone's own turning while its gyro reads it mounted, the wheels' only while it is handled (forwards
   being likelier); the tyres' term isn't learned there.
-- **The compass gets no field** meanwhile (§7.6): the IMU is then the car's, not the phone's.
 - **The service** holds its inputs 0.5 s instead of 0.3 while CAN speed comes or wheel yaw is on: a wheel sample
   comes out of the feed 0.07–0.15 s after its time, one in ten over 0.3 s.
 - **The tyres' difference** is learned (`wheel-yaw-calibration.ts`: over 5 s stretches, ∫ difference = track · ∫ gyro
@@ -379,37 +377,19 @@ kept apart.
   save). It seeds the next EKF with σ widened by 0.01 (one car's drives learn 1.00–1.03). Within a session it
   survives an EKF reset. Under jamming `k_s` doesn't sink on real drives, and holding it or adding a speed offset
   state was worse: the scale-only model stays.
-- **Compass calibrations** (§7.6), per VIN. **Phone mount** (phone-only mode, §9.6), per car or `phone`.
+- **Phone mount** (phone-only mode, §9.6), per car or `phone`.
 - **A car whose VIN never came** (VEHICLE-LINK-SPEC §9.1) is kept under `unknown-car` (`UNKNOWN_CAR`), not dropped:
   starting cold on every drive cost more than the rare second car without a VIN. The first VIN heard takes it over
   (`CalibrationStore.moveCar`: each item unless the VIN has a newer one), mid-drive without a restart.
 - **Not stored:** the gyro bias (drifts with temperature) and `k_ω`.
 
-### 7.5 Magnetometer (logged, not used; SPEC §2)
+### 7.5 No magnetometer (SPEC §2)
 
-The raw field is ~160 µT against Earth's ~50 µT (the phone's own and the car's offset); the heading-dependent part is
-Earth's horizontal field, so the car hardly distorts it. Calibrated as offset + rotation + scale in a gravity-levelled
-frame fixed to the phone, against GNSS course, it reads 4–18° off at the median on other drives and under 90° always;
-re-seating the phone moves it 15–20°. Good enough to pick the travel direction along a road, not for navigation.
-
-### 7.6 Compass (`compass/compass.ts`; in the app in shadow only)
-
-- **Input:** `Navigator.onMag`, the IMU's gravity and yaw rate, `setCompassCalibrations` from earlier drives;
-  `compassCalibrations` is what to keep. No field while the turning comes from the wheels (§5.4).
-- **Model** (§7.5): the fit's normal equations, so drives add up. **One calibration per mounting** (the phone's
-  tilt), at most 3 per car, most recent first; the active one is the one within 10° of the phone's tilt. A drive
-  learns only into the mounting it sits in, or starts a new one.
-- **Learning:** once a second while the EKF heading σ ≤ 3°, at ≥ 4 m/s, driving straight (< 3° over 1 s), the phone
-  in its mount. A fit needs 60 samples over 5 of 8 heading sectors.
-- **Trust:** a stored calibration starts `unverified`; the first 10 learning moments compare it with the EKF heading:
-  median > 45° → `rejected` (dropped, the drive's own learning takes over), else `confirmed`. Kept for the next drive
-  as `confirmed` only when learned or confirmed on this drive. Not covered: the phone turned in its mount at the same
-  tilt.
-- **Use** (`compassUse`): `shadow` (default, the app) computes, checks and learns, but the particle filter never gets
-  the heading; `on` (replay `--compass`) weighs it at the filter's jammed start (MAPMATCH-SPEC §8.2). The app stays in
-  shadow until real drives show how often a stored calibration is wrong (`npm run replay:compass` sums the notes:
-  `nav compass from storage …`, `nav compass at start: X° off (trust)`, `nav compass A → B …`, `nav compass drive:
-  …`).
+The navigator takes no magnetometer input, and the app neither captures nor logs the raw field while driving. A
+compass calibrated in the car (offset + rotation + scale in a gravity-levelled frame fixed to the phone, against GNSS
+course) reads 4–18° off at the median and up to 90°, and re-seating the phone in its mount moves it 15–20°: no
+heading for navigation, not even a hint at a jammed start. The walking cone on the map outside the car takes the OS
+heading (UI-SPEC §6.1), never fed to the navigator.
 
 ## 8. Integrity and trust (`integrity/integrity.ts`, SPEC §3.3)
 
@@ -619,8 +599,7 @@ Testers' drawn drives (their cars, adapters and phones) check every tuning chang
    speed.
 2. Longer outages (5–15 min) need longer clean drives than the logs have; Cut GPS on a long drive keeps the real
    fixes as truth.
-3. Compass in shadow (§7.6): collect how often a stored calibration is wrong before switching it on, or drop it.
-4. Wheel yaw (§5.4): the tyres' term needs learning that a phone in a pocket can't spoil before it leaves
+3. Wheel yaw (§5.4): the tyres' term needs learning that a phone in a pocket can't spoil before it leaves
    experimental.
-5. Reverse on cars that report reverse speed as positive, and on OBD-only cars that read 0 (the car turns in place
+4. Reverse on cars that report reverse speed as positive, and on OBD-only cars that read 0 (the car turns in place
    in the model).

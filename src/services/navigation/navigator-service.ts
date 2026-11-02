@@ -16,7 +16,6 @@ import { carryDrivePose, DRIVE_POSE_MAX_AGE_S } from "@/nav/drive-pose";
 import { haversineM } from "@/nav/geo";
 import { FUSED_WINDOW_US, puckAccuracyM, puckHypothesis, steadyDot, type DrawnDot, type LastPuck } from "@/nav/position/puck";
 import type { PositionEstimate, PositionSourceKind, RawGnssFix } from "@/nav/position/types";
-import type { CompassTrust } from "@/nav/compass/compass";
 import type { CameraIndex } from "@/nav/speed/cameras";
 import type { GnssFix } from "@/nav/types";
 import type { CanSpeedSample } from "@/nav/odometry/can/can-speed";
@@ -38,14 +37,13 @@ import {
   type ImuMotionRecord,
   type NavEstimateRecord,
   type NavMapMatchRecord,
-  type Vec3Record,
 } from "@/triplog/schema";
 
 import type { CalibrationStore, StoredPose } from "./calibration-store";
 import { ManualHold, USER_HEADING_SIGMA_RAD, USER_POSITION_SIGMA_M } from "./manual-hold";
 import { MapMatchTiming } from "./map-match-timing";
 import { LocalNavigatorHost, type NavigatorHost, type NavInput, type NavObserver, type NavView } from "./navigator-host";
-import { compassOff, NavigatorNotes } from "./navigator-notes";
+import { NavigatorNotes } from "./navigator-notes";
 import { SimulatedOutageTool } from "./simulated-outage";
 
 const OWNER = "navigator";
@@ -146,9 +144,6 @@ export interface NavigatorDebug {
   gnssLagWindows: number;
   /** The pose this session started from. */
   parkedPose: "none" | "unverified" | "confirmed" | "rejected" | "kept" | "behind";
-  /** Compass in shadow (NAVIGATOR-SPEC §7.6): its trust, and how far it is off the EKF heading now. */
-  compassTrust: CompassTrust | "off";
-  compassOffDeg: number | null;
   /** Map matching: the region whose graph is set (null: none), the filter's state and cost. */
   mapMatchRegion: string | null;
   /** The road corrections map matching sent the navigator this drive. */
@@ -691,8 +686,6 @@ export class NavigatorService implements PositionSource {
     }
     const lag = nav.gnssLagEstimate;
     if (lag && this.deps.calibration.saveGnssLag(lag, this.clock.nowMs())) this.note(`nav gnss lag saved ${lag.lagS} s (${lag.windows} turn windows)`);
-    const compass = nav.compassCalibrations;
-    if (compass.length && this.car) this.deps.calibration.saveCompassCalibrations(this.car, compass, this.clock.nowMs());
     this.saveWheelYaw();
     const params = nav.params;
     if (!params || !this.car || !this.deps.calibration.saveSpeedScale(this.car, params.ks, params.ksVar, this.clock.nowMs())) return;
@@ -717,8 +710,6 @@ export class NavigatorService implements PositionSource {
       gnssLagS: nav?.gnssLagS ?? null,
       gnssLagWindows: nav?.gnssLagEstimate?.windows ?? 0,
       parkedPose: this.poseStatus,
-      compassTrust: nav ? nav.compassTrust : "off",
-      compassOffDeg: nav ? compassOff(nav) : null,
       mapMatchRegion: this.graph?.region ?? null,
       roadHeading: nav ? { accepted: nav.stats.roadHeadingAccepted, rejected: nav.stats.roadHeadingRejected } : null,
       roadPosition: nav ? { accepted: nav.stats.roadPositionAccepted, rejected: nav.stats.roadPositionRejected } : null,
@@ -748,7 +739,7 @@ export class NavigatorService implements PositionSource {
         }
       }) ?? (() => {}),
       sensors.gnss.on((r) => this.onGnss(r)),
-      sensors.imu.on((batch) => this.onImu(batch.motion, batch.mag)),
+      sensors.imu.on((batch) => this.onImu(batch.motion)),
       link.onSpeed((s) => this.onSpeed(s)),
       this.deps.canSpeed?.onSample((s) => this.onWheels(s)) ?? (() => {}),
       link.onEngineState((state) => {
@@ -993,12 +984,6 @@ export class NavigatorService implements PositionSource {
       this.note(`nav speed scale ${ks.ks.toFixed(4)} from storage`);
     }
     this.seedWheelYaw();
-    const compass = this.deps.calibration.compassCalibrations(vin);
-    if (compass.length && this.nav) {
-      this.host.setCompassCalibrations(compass);
-      const each = compass.map((c) => `${c.samples} samples${c.confirmed ? "" : " unconfirmed"}`).join(", ");
-      this.note(`nav compass from storage: ${compass.length} mounting(s) (${each})`);
-    }
   }
 
   // ---- inputs ----
@@ -1025,11 +1010,10 @@ export class NavigatorService implements PositionSource {
     this.flush(this.deps.nowUs() - this.reorderUs, () => this.publish());
   }
 
-  private onImu(motion: ImuMotionRecord[], mag: Vec3Record[]): void {
+  private onImu(motion: ImuMotionRecord[]): void {
     for (const m of motion) {
       this.pending.push({ tUs: m.timestampUs, imu: { tUs: m.timestampUs, gyro: m.gyro, gravity: m.gravity, userAccel: m.userAccel } });
     }
-    for (const f of mag) this.pending.push({ tUs: f.timestampUs, mag: { tUs: f.timestampUs, field: [f.v[0], f.v[1], f.v[2]] } });
     const phone = this.phone;
     if (phone) {
       for (const m of motion) phone.engine.onImu({ tUs: m.timestampUs, gyro: m.gyro, gravity: m.gravity, userAccel: m.userAccel });
@@ -1180,7 +1164,6 @@ export class NavigatorService implements PositionSource {
     if (ask) this.note(ask);
     this.flush(this.deps.nowUs() - this.reorderUs, () => {
       this.publish();
-      if (this.nav) this.notes.compassTrustChange(this.nav);
       if (this.clock.nowMs() - this.lastSaveAt >= SAVE_EVERY_MS) this.saveCalibration();
       if (this.clock.nowMs() - this.lastDriveSaveAt >= DRIVE_SAVE_EVERY_MS) this.saveDrivePose();
     });
@@ -1197,11 +1180,10 @@ export class NavigatorService implements PositionSource {
   }
 
   /**
-   * At the end of a drive (engine off, the service stopping): how the compass did in shadow, how long map matching
-   * took, and the road corrections it sent.
+   * At the end of a drive (engine off, the service stopping): what the wheels learned, how long map matching
+   * took, the long tasks, and the road corrections it sent.
    */
   private noteDrive(): void {
-    if (this.nav) this.notes.compassSummary(this.nav);
     this.noteWheelYaw();
     this.drainUpdateTimes();
     const timing = this.timing.endDrive();
@@ -1444,7 +1426,6 @@ export class NavigatorService implements PositionSource {
     if (mode !== "dr") return;
     // Fix-based starts are noted with the fix; a map start happens between fixes.
     if (this.nav?.initialization?.method === "map") this.note("nav mode dr (map)");
-    if (this.nav) this.notes.compassAtStart(this.nav);
   }
 
   private note(text: string): void {

@@ -171,6 +171,7 @@ export class TripLogWriter {
     this.enc.data(ACCEL_RAW.name, [r.timestampUs, r.v]);
   }
 
+  /** Not recorded any more: kept to build logs as older builds wrote them (the readers still take `mag_raw`). */
   magRaw(r: Vec3Record): void {
     if (this.overBudget(r.timestampUs)) return;
     this.enc.data(MAG_RAW.name, [r.timestampUs, r.v]);

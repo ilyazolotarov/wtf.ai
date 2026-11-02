@@ -42,7 +42,7 @@ wheel speeds from the CAN bus where the adapter and car allow) and heading rate 
 | Estimator location | **TypeScript** (`src/nav/`), not native: logic must hot-reload and replay on Windows. Native code stays thin. |
 | GNSS integrity | Two checks only: **outside the Ukraine polygon** and **teleport vs odometry**. No raw GNSS (C/N0, AGC), no slow drag-off detection. |
 | Yaw source | Phone gyro projected onto gravity (any mount angle). On Stage 2 cars the rear wheels' speed difference from CAN, on by default (NAVIGATOR-SPEC §5.4). CAN yaw rate: later (Stage 3). |
-| Absolute heading | From trusted GNSS course, the particle filter's road heading, the driver placing the car, and the pose saved at ignition off. **The magnetometer is not used for navigation**: in-car distortion changes when the phone moves. The compass runs in **shadow mode** (computed, checked, logged; never navigated with) and a display-only compass shows where the phone points when walking. |
+| Absolute heading | From trusted GNSS course, the particle filter's road heading, the driver placing the car, and the pose saved at ignition off. **The magnetometer is not used for navigation**, nor read while driving: in-car distortion changes when the phone moves. Outside the car a display-only compass (the OS heading) shows where the phone points when walking. |
 | Phone mount | A **rigid phone mount** is required (the gyro is the only yaw source without CAN). |
 | Standstill bias calibration | 2 s of standstill, refined at every stop (ZUPT). No calibration drive, screen or wizard: everything is learned online. |
 | Distribution | Sideloading (AltStore source on iOS, the app installs its own APK on Android; UPDATES-SPEC). Store builds (`DISTRIBUTION=store`) drop self-installed updates and AltStore, and hide the Developer screen and the tester upload until unlocked (§2.2). Privacy policy: [PRIVACY.md](PRIVACY.md). |
@@ -137,7 +137,7 @@ GNSS + IMU ──────────────▶ src/nav (TypeScript, pu
 (modules/sensor-capture,      ├─ odometry   (imu: gyro · ĝ, handling detection, phone speed; can: profiles, decoder, wheel yaw)
  batched)                     ├─ integrity  (GNSS trust state machine, Ukraine border)
                               ├─ ekf        (dead reckoning + updates, heading alignment)
-                              ├─ calibration (GNSS lag), compass (shadow)
+                              ├─ calibration (GNSS lag)
                               ├─ mapmatch   (particle filter on the road graph; RoadGraph interface ◀─ graph file)
                               ├─ routing    (A* on the same graph, guidance, voice announcer)
                               ├─ search     (offline address search)
@@ -222,7 +222,7 @@ Out of scope: raw GNSS, slow drag-off, spoofs that follow the car's own motion.
 ### 3.5 Calibration (`src/nav/calibration/`, NAVIGATOR-SPEC §7)
 
 Online only: gyro bias at stops, speed scale `k_s` (persisted per VIN), GNSS lag (persisted per phone model and OS
-version), the compass (shadow, per car and mounting). The pose at ignition off starts the next drive.
+version). The pose at ignition off starts the next drive.
 
 ### 3.6 Map matching (`src/nav/mapmatch/`, [MAPMATCH-SPEC.md](MAPMATCH-SPEC.md))
 
@@ -258,7 +258,7 @@ device and in replay.
 ### 3.9 Logging and replay (`src/triplog`, `src/nav/replay`, `tools/replay`)
 
 - Every drive is recorded as a ULog file ([TRIP-LOGGER-SPEC.md](TRIP-LOGGER-SPEC.md)): OBD polls, GNSS fixes, IMU at
-  100 Hz, raw magnetometer, CAN frames, engine and trip events, and what the map showed (`nav_estimate`,
+  100 Hz, CAN frames, engine and trip events, and what the map showed (`nav_estimate`,
   `nav_mapmatch`, routes).
 - Replay runs the same navigator in Node (`npm run replay`, the viewer, benchmarks; NAVIGATOR-SPEC §10,
   `tools/replay/README.md`). Simulated outages, jamming and spoofing come from cutting or replacing fixes in clean
@@ -273,7 +273,7 @@ device and in replay.
 ```
 src/app/                 Expo Router screens only
 src/nav/                 pure TS core (no React Native imports)
-  odometry/{imu,can}/ ekf/ integrity/ calibration/ compass/ mapmatch/ routing/ search/ phone/ position/ geo/ replay/ sim/
+  odometry/{imu,can}/ ekf/ integrity/ calibration/ mapmatch/ routing/ search/ phone/ position/ geo/ replay/ sim/
   navigator.ts           sensor fusion entry point (live services and replay feed it)
 src/obd/                 pure TS: adapter catalog, ELM327 session/probe/parser, PIDs, poller, engine state, emulator, CAN monitor
 src/triplog/             pure TS: ULog encoder and reader, trip log schemas, trip detector, upload protocol

@@ -2,7 +2,6 @@
 // and DR error during simulated GNSS outages ("cuts"). Pure TS; the CLI is tools/replay.
 
 import type { GnssLagEstimate } from "../calibration/gnss-lag";
-import { rotateCalibration, type CompassCalibration, type CompassTrust } from "../compass/compass";
 import type { TripLog } from "../../triplog/trip-log-reader";
 import { haversineM } from "../geo";
 import type { MapMatchConfig } from "../mapmatch/particle-filter";
@@ -15,7 +14,7 @@ import { jamFixes, type JamOptions, type JamWindow } from "./jam";
 import { MapMatchMetrics, type MapMatchSummary } from "./mapmatch-metrics";
 import { spoofFixes, type SpoofWindow } from "./spoof";
 import type { TruthMatch } from "./truth-match";
-import { isSatelliteFix, type GnssFix, type MagSample } from "../types";
+import { isSatelliteFix, type GnssFix } from "../types";
 
 export interface ReplayCut {
   /** Seconds since log start. */
@@ -73,11 +72,6 @@ export interface ReplayOptions {
   jamOptions?: Partial<JamOptions>;
   /** Simulated spoofing (spoof.ts): satellite fixes in these windows are replaced by a spoofed position. */
   spoof?: SpoofWindow[];
-  /**
-   * A compass calibration from other drives (NAVIGATOR-SPEC §7.6); `rotateRad` turns it to simulate a
-   * wrong one (the phone turned in its mount, another car).
-   */
-  compass?: { calibration: CompassCalibration | null; rotateRad?: number };
   /** Receives the navigator's odometry chunks (MAPMATCH-SPEC §6.1). */
   odometry?: (step: OdometryStep) => void;
   /**
@@ -179,8 +173,6 @@ export interface ReplaySummary {
   cuts: CutResult[];
   /** Map-matching metrics (with `mapMatch.truth`). */
   mapMatch: MapMatchSummary | null;
-  /** The compass at the end: its trust, what it learned (stored + this drive), and its trust checks. */
-  compass: { trust: CompassTrust; calibration: CompassCalibration | null; checkDiffsRad: number[] };
   integrity: IntegritySummary;
 }
 
@@ -420,7 +412,6 @@ export class ReplayRecorder {
         roadHeading: { accepted: nav.stats.roadHeadingAccepted, rejected: nav.stats.roadHeadingRejected },
         roadPosition: { accepted: nav.stats.roadPositionAccepted, rejected: nav.stats.roadPositionRejected },
         mapMatch: this.metrics?.summary(nav.mapMatcher?.updateTimes ?? [], nav.mapMatcher?.startTimes) ?? null,
-        compass: { trust: nav.compassTrust, calibration: nav.compassCalibration, checkDiffsRad: [...nav.compassCheckDiffs] },
         integrity: integritySummary(fixes, track, this.options.spoof ?? []),
         cuts: cuts.map((c, k) => {
           const truth = fixes.filter(
@@ -483,7 +474,6 @@ interface ReplayInputs {
   imu: TripLog["imu"];
   obdSpeed: TripLog["obdSpeed"];
   gnss: GnssFix[];
-  mag: MagSample[];
   /** The link's engine states, as the app's service passes them on (`Navigator.setEngine`). */
   engine: TripLog["engine"];
   /** The navigator that last used the road graph (forks share it, each in its own frame). */
@@ -502,16 +492,13 @@ export class TripReplay {
     private readonly nav: Navigator,
     private readonly rec: ReplayRecorder,
     /** Next input of each stream; log time (s) of the last input fed. */
-    private readonly at: { i: number; o: number; g: number; k: number; e: number; fedS: number },
+    private readonly at: { i: number; o: number; g: number; e: number; fedS: number },
   ) {}
 
   static start(trip: TripLog, options: ReplayOptions = {}): TripReplay {
-    // With a compass option the particle filter uses it (`on`); otherwise it runs in shadow, as in the app.
     // The app's settings first, so a replay measures the system the phone runs (app-defaults.ts); `nav` overrides
     // them for an experiment.
-    const nav = new Navigator({ ...(options.compass ? { compassUse: "on" as const } : {}), ...options.nav });
-    const cal = options.compass?.calibration;
-    if (cal) nav.setCompassCalibration(options.compass?.rotateRad ? rotateCalibration(cal, options.compass.rotateRad) : cal);
+    const nav = new Navigator(options.nav);
     if (options.odometry) nav.subscribeOdometry(options.odometry);
     const mm = options.mapMatch;
     if (mm) nav.setRoadGraph(mm.graph, mm.config);
@@ -530,11 +517,10 @@ export class TripReplay {
       imu: from(trip.imu),
       obdSpeed: from(trip.obdSpeed),
       gnss: from(spoofed),
-      mag: from(trip.mag ?? []),
       engine: from(trip.engine ?? []),
       graphUser: nav,
     };
-    return new TripReplay(inputs, nav, rec, { i: 0, o: 0, g: 0, k: 0, e: 0, fedS: -Infinity });
+    return new TripReplay(inputs, nav, rec, { i: 0, o: 0, g: 0, e: 0, fedS: -Infinity });
   }
 
   /** Feed the inputs up to log time `untilS` (s), inclusive (as `ReplayOptions.untilS`). */
@@ -589,20 +575,17 @@ export class TripReplay {
   /** Merge the streams in time order until `stop` (at the next input's log time, s). */
   private feed(stop: (tS: number) => boolean): void {
     this.useGraph();
-    const { imu, obdSpeed, gnss, mag, engine } = this.inputs;
+    const { imu, obdSpeed, gnss, engine } = this.inputs;
     const { nav, rec, at } = this;
-    while (at.i < imu.length || at.o < obdSpeed.length || at.g < gnss.length || at.k < mag.length) {
+    while (at.i < imu.length || at.o < obdSpeed.length || at.g < gnss.length) {
       const ti = at.i < imu.length ? imu[at.i].tUs : Infinity;
       const to = at.o < obdSpeed.length ? obdSpeed[at.o].tUs : Infinity;
       const tg = at.g < gnss.length ? gnss[at.g].tUs : Infinity;
-      const tm = at.k < mag.length ? mag[at.k].tUs : Infinity;
-      const tNext = this.tS(Math.min(ti, to, tg, tm));
+      const tNext = this.tS(Math.min(ti, to, tg));
       if (stop(tNext)) break;
       at.fedS = tNext;
-      for (const tUs = Math.min(ti, to, tg, tm); at.e < engine.length && engine[at.e].tUs <= tUs; at.e++) nav.setEngine(engine[at.e].state as Parameters<Navigator["setEngine"]>[0]);
-      if (tm < ti && tm < to && tm < tg) {
-        nav.onMag(mag[at.k++]);
-      } else if (ti <= to && ti <= tg) {
+      for (const tUs = Math.min(ti, to, tg); at.e < engine.length && engine[at.e].tUs <= tUs; at.e++) nav.setEngine(engine[at.e].state as Parameters<Navigator["setEngine"]>[0]);
+      if (ti <= to && ti <= tg) {
         nav.onImu(imu[at.i++]);
         rec.afterEvent(ti);
       } else if (to <= tg) {

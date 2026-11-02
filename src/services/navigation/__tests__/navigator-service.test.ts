@@ -13,7 +13,7 @@ import type { CanSpeedSample } from "@/nav/odometry/can/can-speed";
 import { Emitter } from "@/obd/emitter";
 import { UNKNOWN_CAR, type EngineState, type SpeedSample } from "@/obd/types";
 import type { KeyValueStore } from "@/obd/vehicle-link-core";
-import { CALIBRATION_KEY, CalibrationStore, PARKED_POSES_KEY, type StoredPose } from "@/services/navigation/calibration-store";
+import { CALIBRATION_KEY, CalibrationStore, PARKED_POSES_KEY, type StoredPose, type StoredSnapshot } from "@/services/navigation/calibration-store";
 import { seedFromLog } from "@/services/navigation/app-replay";
 import { NavigatorService } from "@/services/navigation/navigator-service";
 import type { ActiveRoadGraph, RoadGraphSource } from "@/services/offline-map/road-graph-file";
@@ -148,8 +148,6 @@ function harness(
     if (i < 0) i = trip.imu.length;
     if (o < 0) o = trip.obdSpeed.length;
     if (g < 0) g = trip.gnss.length;
-    let k = trip.mag.findIndex((s) => s.tUs > nowUs);
-    if (k < 0) k = trip.mag.length;
     while (nowUs < lastUs) {
       nowUs += 100_000;
       const batch = [];
@@ -173,11 +171,6 @@ function harness(
         const diff = 1.6 * yaw + (opts.tyre ?? 0) * v;
         wheels.emit({ tUs: t, speedMps: v, wheelsMps: [v, v, v - diff / 2, v + diff / 2], gear: "D", reverse: false });
       }
-      const mag = [];
-      while (k < trip.mag.length && trip.mag[k].tUs <= nowUs) {
-        const s = trip.mag[k++];
-        mag.push({ timestampUs: s.tUs, v: s.field });
-      }
       while (o < trip.obdSpeed.length && trip.obdSpeed[o].tUs <= nowUs) {
         const s = trip.obdSpeed[o++];
         if (!opts.withoutObd) speed.emit({ txUs: s.tUs - 10_000, rxUs: s.tUs + 10_000, tUs: s.tUs, speedMps: s.speedMps, raw: s.rawKph });
@@ -186,7 +179,7 @@ function harness(
         const f = trip.gnss[g++];
         if (opts.withoutGnssFromS === undefined || f.tUs < trip.startUs + opts.withoutGnssFromS * 1e6) gnss.emit(record(f));
       }
-      imu.emit({ motion: batch, gyro: [], accel: [], mag });
+      imu.emit({ motion: batch, gyro: [], accel: [] });
       jest.advanceTimersByTime(100);
       opts.onStep?.(nowUs);
     }
@@ -1307,38 +1300,7 @@ describe("the manual position (NAVIGATOR-SPEC §6.3)", () => {
   });
 });
 
-describe("compass in shadow", () => {
-  // Turning right 45° at a time: every heading sector, enough for a drive to learn the compass alone.
-  const ROUND: DriveSegment[] = [{ durationS: 5, speedMps: 0, yawRateDegS: 0 }];
-  for (let i = 0; i < 9; i++) ROUND.push({ durationS: 15, speedMps: 12, yawRateDegS: 0 }, { durationS: 3, speedMps: 8, yawRateDegS: 15 });
-  ROUND.push({ durationS: 10, speedMps: 12, yawRateDegS: 0 });
-
-  test("learns the compass per car, keeps it, and logs how far off it was at the next start", async () => {
-    const store = memoryStore();
-    const drive = syntheticDrive({ segments: ROUND, gnss: "clean", magnetometer: {}, seed: 5 });
-    const first = harness({ store });
-    await first.service.start();
-    first.play(drive);
-    first.engine.emit("engine-off", first.now());
-    expect(first.notes).toContain("nav compass at start: none (none)");
-    expect(first.notes.some((n) => n.startsWith("nav compass none → confirmed"))).toBe(true);
-    expect(first.notes.some((n) => n.startsWith("nav compass drive: confirmed"))).toBe(true);
-    first.service.stop();
-    const kept = new CalibrationStore(store, PHONE).compassCalibrations(VIN);
-    expect(kept).toHaveLength(1);
-    expect(kept[0].confirmed).toBe(true);
-
-    const second = harness({ store });
-    await second.service.start();
-    second.play(drive, { untilS: 40 });
-    expect(second.notes).toContain(`nav compass from storage: 1 mounting(s) (${kept[0].samples} samples)`);
-    const atStart = second.notes.find((n) => n.startsWith("nav compass at start:"))!;
-    expect(atStart).toMatch(/° off \(unverified\)$/);
-    expect(Math.abs(parseFloat(atStart.slice("nav compass at start: ".length)))).toBeLessThan(10);
-    expect(second.service.getDebug().compassOffDeg).not.toBeNull();
-    second.service.stop();
-  });
-
+describe("turning from the rear wheels (NAVIGATOR-SPEC §5.4)", () => {
   test("the rear tyres apart: learned from the gyro and applied, kept for the car, the next drive starts from it", async () => {
     const store = memoryStore();
     const drive = syntheticDrive({ segments: cityDrive(6), gnss: "clean", seed: 6 });
@@ -1368,27 +1330,6 @@ describe("compass in shadow", () => {
     expect(prior.tyre).toBe(-0.0007);
     expect(prior.tyreSigma).toBeGreaterThan(0.0005);
     expect(calibration.wheelYaw("OTHERVIN")).toBeNull();
-  });
-
-  // The compass reads the phone's field against the IMU's "up"; with the turning from the wheels the IMU is the car's.
-  test("with the turning from the wheels it learns nothing, and keeps nothing", async () => {
-    const store = memoryStore();
-    const drive = syntheticDrive({ segments: ROUND, gnss: "clean", magnetometer: {}, seed: 5 });
-    const h = harness({ store });
-    await h.service.start();
-    h.service.setWheelYaw(true);
-    h.play(drive, { wheels: true });
-    h.engine.emit("engine-off", h.now());
-    h.service.stop();
-    expect(h.notes.some((n) => n.startsWith("nav compass none → confirmed"))).toBe(false);
-    expect(new CalibrationStore(store, PHONE).compassCalibrations(VIN)).toHaveLength(0);
-  });
-
-  test("another car doesn't get it", async () => {
-    const calibration = new CalibrationStore(memoryStore(), PHONE);
-    calibration.saveCompassCalibrations(VIN, [{ refAxis: 0, up: [0, 0, 1], xtx: new Array(16).fill(1), xty: [1, 1, 1, 1], yty: 1, samples: 80, sectors: 255, confirmed: true }]);
-    expect(calibration.compassCalibrations(VIN)).toHaveLength(1);
-    expect(calibration.compassCalibrations("OTHERVIN")).toEqual([]);
   });
 });
 
@@ -1649,7 +1590,18 @@ describe("CalibrationStore", () => {
     calibration.moveCar(UNKNOWN_CAR, VIN);
     expect(calibration.parkedPose(VIN)).toMatchObject({ lat: 51.5, vin: VIN, savedAt: 20 });
     expect(calibration.speedScale(VIN)?.ks).toBe(1.01);
-    expect(calibration.snapshot(UNKNOWN_CAR)).toEqual({ vin: UNKNOWN_CAR, parkedPose: null, speedScale: null, compass: null, wheelYaw: null });
+    expect(calibration.snapshot(UNKNOWN_CAR)).toEqual({ vin: UNKNOWN_CAR, parkedPose: null, speedScale: null, wheelYaw: null });
+  });
+
+  test("a compass kept by older versions, or in an older log's snapshot, is ignored", () => {
+    const store = memoryStore();
+    const calibration = new CalibrationStore(store, PHONE);
+    store.setJson(CALIBRATION_KEY, { speedScaleByVin: { [VIN]: { ks: 1.02, ksVar: 0.002 ** 2, savedAt: 1 } }, compassByVin: { [VIN]: { calibrations: [], savedAt: 1 } } });
+    expect(calibration.speedScale(VIN)?.ks).toBe(1.02);
+    const old = { vin: VIN, parkedPose: null, speedScale: { ks: 1.03, ksVar: 0.002 ** 2, savedAt: 2 }, compass: { calibrations: [], savedAt: 2 }, wheelYaw: null };
+    calibration.restore(old as StoredSnapshot);
+    expect(calibration.speedScale(VIN)?.ks).toBe(1.03);
+    expect(calibration.snapshot(VIN)).toEqual({ vin: VIN, parkedPose: null, speedScale: old.speedScale, wheelYaw: null });
   });
 });
 

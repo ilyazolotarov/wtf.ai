@@ -164,8 +164,8 @@ ended can't log why. What it can, it logs; the next process logs the rest.
   normalized to these conventions (ANDROID-SPEC §2). The rate is fixed: the navigator is tuned on 100 Hz. The raw
   gyro/accelerometer streams (the module's `raw` option) are not asked for; `gyro_raw` / `accel_raw` stay readable
   in older logs.
-- Raw magnetometer, **always on** with the IMU, 20 Hz, µT in the device frame, uncalibrated. Logged, and fed to the
-  compass in shadow mode (NAVIGATOR-SPEC §7.6).
+- No magnetometer (NAVIGATOR-SPEC §7.5): `mag_raw` (20 Hz, µT in the device frame, uncalibrated) stays readable in
+  older logs.
 - Device frame: Apple's (x right, y toward the top of the screen, z out of the screen).
 
 ### 5.3 Bridge (`src/SensorCaptureModule.ts`)
@@ -219,7 +219,7 @@ with columnar plain number arrays. Native configuration through config plugins o
 | `gnss` | `int64_t utc_us`, `double lat_deg`, `lon_deg`, `float alt_msl_m`, `alt_ellipsoid_m`, `h_acc_m`, `v_acc_m`, `speed_mps`, `speed_acc_mps`, `course_rad`, `course_acc_rad`, `uint32_t delivery_delay_us`, `uint8_t flags` (bit0 simulated, bit1 from accessory) | ~1 Hz |
 | `imu_motion` | `float[3] gyro_rad_s`, `user_accel_m_s2`, `gravity_m_s2`, `float[4] attitude_q` (w, x, y, z) | 100 Hz |
 | `gyro_raw`, `accel_raw` | `float[3]` | older logs only |
-| `mag_raw` | `float[3] mag_ut` | 20 Hz |
+| `mag_raw` | `float[3] mag_ut` | older logs only |
 | `engine_state` | `uint8_t state` (0 unknown, 1 ignition_off, 2 engine_off, 3 engine_running) | on change |
 | `trip_event` | `uint8_t event` (0 start, 1 end, 2 link_lost, 3 link_restored, 4 marker, 5 preroll_end), `uint8_t reason` (end: 0 ignition_off, 1 parked_timeout, 2 link_timeout, 3 manual) | on event |
 | `link_stats` | `float speed_hz`, `latency_p50_ms`, `latency_p95_ms`, `uint16_t errors`, `uint8_t link_state`, `float battery_v` (NaN if not read) | 1 Hz |
@@ -263,7 +263,7 @@ with columnar plain number arrays. Native configuration through config plugins o
 
 ### 6.7 Size
 
-About 7.8 KB/s with IMU, magnetometer and five CAN ids (≈ 28 MB/h); 26 MB/h without CAN. Recording refuses to start
+About 7.3 KB/s with IMU and five CAN ids (≈ 26 MB/h); 24 MB/h without CAN. Recording refuses to start
 below 200 MB free.
 
 ## 7. Export to PC
@@ -311,7 +311,7 @@ written, and logs waiting for upload while upload is on, are never deleted.
 ## 8. PC tooling (`tools/triplog/`, Python)
 
 `pip install -e "tools/triplog[dev]"`. `from triplog import load` gives `trip.info`, `trip.obd`, `trip.obd_speed`,
-`trip.obd_rpm`, `trip.gnss`, `trip.imu` (with `yaw_rate_up`), `trip.mag`, `trip.engine`, `trip.trip_events`,
+`trip.obd_rpm`, `trip.gnss`, `trip.imu` (with `yaw_rate_up`), `trip.mag` (older logs), `trip.engine`, `trip.trip_events`,
 `trip.link_stats`, `trip.app_stats`, `trip.time_sync`, `trip.transcript`, `trip.map_match`. CLI: `triplog info`, `export`, `plot`,
 `check`, `refresh` (`tools/triplog/README.md`). Cross-language golden test: `src/triplog/__fixtures__/trip-fixture.ts`
 builds `tools/triplog/tests/data/fixture.ulg` (regenerate with `UPDATE_TRIPLOG_FIXTURE=1 npx jest src/triplog`); the

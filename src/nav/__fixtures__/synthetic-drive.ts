@@ -2,10 +2,9 @@
 // the phone would log (IMU 100 Hz, OBD speed 20 Hz, CoreLocation 1 Hz).
 
 import type { TripLog } from "../../triplog/trip-log-reader";
-import { Compass, type CompassCalibration } from "../compass/compass";
 import type { Coordinate } from "../geo";
 import { LocalFrame } from "../geo/local-frame";
-import type { GnssFix, ImuSample, MagSample, ObdSpeedSample } from "../types";
+import type { GnssFix, ImuSample, ObdSpeedSample } from "../types";
 
 export interface DriveSegment {
   durationS: number;
@@ -30,8 +29,6 @@ export interface SyntheticOptions {
   gyroNoiseRadS?: number;
   /** Phone in hand during [fromS, toS): tilt swinging up to `tiltRad` (0.5 Hz), plus a spin. */
   handling?: { fromS: number; toS: number; tiltRad: number; yawRateRadS?: number };
-  /** Raw magnetometer at 20 Hz: Earth's field (19 µT horizontal, 46 µT down) plus a constant offset. */
-  magnetometer?: { offsetUt?: [number, number, number] };
   /**
    * The accelerometer feels the drive (phone-only speed, imu-speed.ts): forward acceleration on x, the turn's v·ω
    * on y (left), and the road's vertical shake on z while moving (`roadShakeMS2` RMS). Off: noise only.
@@ -82,8 +79,6 @@ export function syntheticDrive(o: SyntheticOptions): SyntheticDrive {
   const imu: ImuSample[] = [];
   const obdSpeed: ObdSpeedSample[] = [];
   const gnss: GnssFix[] = [];
-  const mag: MagSample[] = [];
-  const magOffset = o.magnetometer?.offsetUt ?? [45, 135, 60];
 
   let e = 0;
   let n = 0;
@@ -123,14 +118,6 @@ export function syntheticDrive(o: SyntheticOptions): SyntheticDrive {
           : // A car's turn pushes it sideways (v·ω): the IMU processor takes a turn without it for the phone's own.
             [(v > 0 ? along : 0) + 0.02 * r.gauss(), v * yawCcw + 0.02 * r.gauss(), 0.02 * r.gauss()],
       });
-      if (o.magnetometer && step % 5 === 0) {
-        // The phone lies flat with x forward: in (forward, left) Earth's horizontal field is
-        // B·(cos ψ, sin ψ) for a heading ψ clockwise from north; z (up) sees the vertical field.
-        mag.push({
-          tUs,
-          field: [magOffset[0] + 19 * Math.cos(psi) + 0.5 * r.gauss(), magOffset[1] + 19 * Math.sin(psi) + 0.5 * r.gauss(), magOffset[2] - 46 + 0.5 * r.gauss()],
-        });
-      }
       if (step % 5 === 0) {
         const rawKph = Math.round(v * 3.6 * (o.obdScale ?? 1));
         obdSpeed.push({ tUs, speedMps: rawKph / 3.6, rawKph });
@@ -168,28 +155,8 @@ export function syntheticDrive(o: SyntheticOptions): SyntheticDrive {
   }
 
   return {
-    trip: { startUs, info: {}, imu, mag, obdSpeed, gnss, engine: [], rpm: [], events: [], timeSync: [], messages: [], navEstimate: [], navMapMatch: [], navRoute: [], navRoutePoints: [], navRouteManeuvers: [], navRouteProgress: [], truncated: false },
+    trip: { startUs, info: {}, imu, mag: [], obdSpeed, gnss, engine: [], rpm: [], events: [], timeSync: [], messages: [], navEstimate: [], navMapMatch: [], navRoute: [], navRoutePoints: [], navRouteManeuvers: [], navRouteProgress: [], truncated: false },
     truth,
     truthAt,
   };
-}
-
-/**
- * A compass calibration for `magnetometer` drives (default offset): the flat phone turned through
- * every heading twice, driving straight at each, as if the EKF knew the heading.
- */
-export function syntheticCompassCalibration(offsetUt: [number, number, number] = [45, 135, 60]): CompassCalibration {
-  const compass = new Compass();
-  let tUs = 0;
-  for (let pass = 0; pass < 2; pass++) {
-    for (let deg = 0; deg < 360; deg += 10) {
-      const psi = (deg * Math.PI) / 180;
-      for (let k = 0; k < 120; k++, tUs += 10_000) {
-        compass.onImu(tUs, [0, 0, 1], 0, true);
-        if (k % 5 === 0) compass.onMag(tUs, [offsetUt[0] + 19 * Math.cos(psi), offsetUt[1] + 19 * Math.sin(psi), offsetUt[2] - 46]);
-      }
-      compass.observe(psi);
-    }
-  }
-  return compass.calibration!;
 }

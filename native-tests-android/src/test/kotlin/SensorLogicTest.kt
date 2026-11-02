@@ -130,7 +130,6 @@ class RowTest {
   @Test
   fun rawRows() {
     assertEquals(listOf(1.0, 1.0, 2.0, 3.0), SensorLogic.gyroRow(1.0, 1.0, 2.0, 3.0).toList())
-    assertEquals(listOf(3.0, 20.0, -5.0, -45.0), SensorLogic.magRow(3.0, 20.0, -5.0, -45.0).toList())
     assertEquals(4, SensorLogic.accelRow(2.0, 0.0, 0.0, g).size)
   }
 
@@ -231,8 +230,6 @@ class ImuBatcherTest {
     assertNull(b.flush(10.0))
     b.append("a", doubleArrayOf(1.0, 2.0, 3.0, 4.0), 20.0)
     assertEquals(listOf(1.0, 2.0, 3.0, 4.0), b.flush(30.0)!!["a"])
-    b.append("f", doubleArrayOf(5.0, 6.0, 7.0, 8.0), 40.0)
-    assertEquals(listOf(5.0, 6.0, 7.0, 8.0), b.flush(50.0)!!["f"])
   }
 
   @Test
@@ -242,11 +239,11 @@ class ImuBatcherTest {
 
   @Test
   fun payloadKeysMatchJs() {
-    val p = ImuBatcher.payload(mapOf("m" to listOf(1.0), "g" to listOf(2.0), "a" to listOf(3.0), "f" to listOf(4.0)))
+    val p = ImuBatcher.payload(mapOf("m" to listOf(1.0), "g" to listOf(2.0), "a" to listOf(3.0)))
     assertEquals(listOf(1.0), p["motion"])
     assertEquals(listOf(2.0), p["gyro"])
     assertEquals(listOf(3.0), p["accel"])
-    assertEquals(listOf(4.0), p["mag"])
+    assertEquals(3, p.size)
   }
 }
 

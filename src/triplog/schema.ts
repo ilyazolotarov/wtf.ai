@@ -63,7 +63,7 @@ export const ACCEL_RAW: ULogFormat = {
   fields: [ts, { type: "float", name: "accel_m_s2", count: 3 }],
 };
 
-/** Raw (uncalibrated) magnetic field, µT, phone frame. Logged only (SPEC §2). */
+/** Raw (uncalibrated) magnetic field, µT, phone frame. Only older builds wrote it; kept readable. */
 export const MAG_RAW: ULogFormat = {
   name: "mag_raw",
   fields: [ts, { type: "float", name: "mag_ut", count: 3 }],
