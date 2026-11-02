@@ -25,9 +25,9 @@ const STATION = at(1500, -150);
 const DESTINATION = { ...at(3000, 0), name: "End" };
 
 const places: StopPlace[] = [
-  { key: "p1", category: "fuel", name: "Station", ...at(1500, -150), flags: 2 },
-  { key: "p2", category: "pharmacy", name: null, ...at(2400, 200), flags: 0 },
-  { key: "p3", category: "fuel", name: "Behind", ...at(100, 50), flags: 0 },
+  { key: "p1", category: "fuel", name: "Station", ...at(1500, -150), flags: 2, hours: null },
+  { key: "p2", category: "pharmacy", name: null, ...at(2400, 200), flags: 0, hours: null },
+  { key: "p3", category: "fuel", name: "Behind", ...at(100, 50), flags: 0, hours: null },
 ];
 
 function harness() {

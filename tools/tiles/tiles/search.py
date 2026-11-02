@@ -47,6 +47,7 @@ import osmium
 import shapely
 
 from .graph import date_stamp, read_locations
+from .hours import WEEK_MIN, week_hours
 from .streets import read_relation_streets
 
 FORMAT = 1
@@ -62,6 +63,14 @@ ENTRANCE_MAGIC = b"WTFE"
 # which stays last: a reader without places reads the file as before.
 FLAG_PLACES = 2
 PLACE_MAGIC = b"WTFP"
+# Their opening hours (STOPS-SPEC §6.1), just before the places: each place's schedule (u16, HOURS_NONE: unknown;
+# padded to 4 bytes), the schedules' first ranges (u32, one more than the schedules), the ranges (u16 start, end:
+# [start, end) minutes of the week from Monday 00:00; padded to 4 bytes), and a footer (section offset, schedule
+# count, "WTFH") that ends where the places begin. The file's last two trailers stay as they were: readers before
+# it read the file as before.
+FLAG_HOURS = 4
+HOURS_MAGIC = b"WTFH"
+HOURS_NONE = 0xFFFF
 NONE = 0xFFFFFFFF
 EARTH_R = 6_371_008.8
 M_PER_DEG = EARTH_R * math.pi / 180
@@ -117,7 +126,7 @@ PLACE_CATEGORIES = {
 PLACE_CATEGORY_COUNT = 6
 PARKING_CLOSED = {"private", "customers", "no"}
 PLACE_NAME_KEYS = ("name", "name:uk", "brand")
-# Flags: open 24/7, and for fuel the fuels sold (`<tag>` = yes).
+# Flags: open 24/7 (the whole week, however `opening_hours` says it), and for fuel the fuels sold (`<tag>` = yes).
 FLAG_24_7 = 1
 FUEL_FLAGS = (("fuel:diesel", 2), ("fuel:lpg", 4), ("fuel:octane_92", 8), ("fuel:octane_95", 16), ("fuel:octane_98", 32))
 # Grid cell of a place: 0.01°, key = row × CELL_COLS + column, from the stored 1e-6° coordinates.
@@ -243,18 +252,23 @@ def poi_tag(tags: Mapping[str, str]) -> str | None:
 
 
 def stop_place(tags: Mapping[str, str]) -> Item | None:
-    """A place to stop at (STOPS-SPEC §6.1), named or not: tags `category`, `flags`, and `name` if any."""
+    """A place to stop at (STOPS-SPEC §6.1), named or not: tags `category`, `flags`, `name` if any, and `hours`
+    when its opening hours are known (`start-end` minutes of the week, comma-separated; empty: always closed)."""
     amenity = tags.get("amenity")
     category = PLACE_CATEGORIES.get(amenity)
     if category is None or (amenity == "parking" and (tags.get("access") or "").strip() in PARKING_CLOSED):
         return None
-    flags = FLAG_24_7 if (tags.get("opening_hours") or "").strip().lower() == "24/7" else 0
+    hours = week_hours(tags.get("opening_hours"))
+    flags = FLAG_24_7 if hours == ((0, WEEK_MIN),) else 0
     if amenity == "fuel":
         for key, bit in FUEL_FLAGS:
             if (tags.get(key) or "").strip() == "yes":
                 flags |= bit
     name = next((v for k in PLACE_NAME_KEYS if (v := (tags.get(k) or "").strip())), "")
-    return Item({}, {"category": str(category), "flags": str(flags), "name": name})
+    out = {"category": str(category), "flags": str(flags), "name": name}
+    if hours is not None:
+        out["hours"] = ",".join(f"{s}-{e}" for s, e in hours)
+    return Item({}, out)
 
 
 def classify(tags: Mapping[str, str], refs: list[int] | None, raw: Raw, relation_street: str = "") -> list[Item]:
@@ -707,13 +721,14 @@ def cell_key(lat6: int, lon6: int) -> int:
     return (lat6 + 90_000_000) // CELL_E6 * CELL_COLS + min(CELL_COLS - 1, (lon6 + 180_000_000) // CELL_E6)
 
 
-def place_section(stops: Sequence[Item], strings: Strings) -> tuple[np.ndarray, np.ndarray]:
-    """The places by (cell, lat, lon, category), their names added to `strings`, and the cell table:
-    each used cell's key and first place, ascending, then (NONE, place count)."""
+def place_section(stops: Sequence[Item], strings: Strings) -> tuple[np.ndarray, np.ndarray, list[str | None]]:
+    """The places by (cell, lat, lon, category), their names added to `strings`, the cell table: each used
+    cell's key and first place, ascending, then (NONE, place count); and each place's hours tag (None: unknown)."""
     rows = []
     for it in stops:
         lat, lon = q6(it.lat), q6(it.lon)
-        rows.append((cell_key(lat, lon), lat, lon, int(it.tags["category"]), int(it.tags["flags"]), it.tags["name"]))
+        rows.append((cell_key(lat, lon), lat, lon, int(it.tags["category"]), int(it.tags["flags"]), it.tags["name"],
+                     it.tags.get("hours", "?")))
     rows.sort()
     rec = np.zeros(len(rows), dtype=PLACE_DT)
     if rows:
@@ -724,7 +739,21 @@ def place_section(stops: Sequence[Item], strings: Strings) -> tuple[np.ndarray, 
     cells = np.zeros(len(used) + 1, dtype=CELL_DT)
     cells["key"][:-1], cells["first"][:-1] = used, first
     cells[-1] = (NONE, len(rows))
-    return rec, cells
+    return rec, cells, [None if r[6] == "?" else r[6] for r in rows]
+
+
+def hours_section(hours: Sequence[str | None], offset: int) -> tuple[bytes, int]:
+    """The places' opening hours (FLAG_HOURS) for a section at `offset`, with its footer; and its schedule count.
+    Each schedule once, the most common first: past 65,535 of them the rarest are unknown."""
+    counts = Counter(h for h in hours if h is not None)
+    schedules = [h for h, _ in counts.most_common(HOURS_NONE)]
+    index = {h: i for i, h in enumerate(schedules)}
+    which = np.array([HOURS_NONE if h is None else index.get(h, HOURS_NONE) for h in hours], dtype="<u2")
+    ranges = [[int(v) for r in h.split(",") for v in r.split("-")] if h else [] for h in schedules]
+    first = np.concatenate([[0], np.cumsum([len(r) // 2 for r in ranges], dtype=np.int64)]).astype("<u4")
+    flat = np.array([v for r in ranges for v in r], dtype="<u2")
+    body = pad4(which.tobytes()) + first.tobytes() + pad4(flat.tobytes())
+    return body + TRAILER.pack(offset, len(schedules), HOURS_MAGIC), len(schedules)
 
 
 def write_index(entities: list[Entity], path: Path, osm_date: str, built_at: int | None = None,
@@ -784,7 +813,7 @@ def write_index(entities: list[Entity], path: Path, osm_date: str, built_at: int
     entr_rec = np.zeros(len(entrances), dtype=ENTRANCE_DT)
     if entrances:
         entr_rec["address"], entr_rec["ref"], entr_rec["lat"], entr_rec["lon"] = zip(*entrances)
-    place_rec, cell_rec = place_section(stops, strings)  # before the strings are written
+    place_rec, cell_rec, place_hours = place_section(stops, strings)  # before the strings are written
 
     tokens = sorted(postings)
     encoded = [t.encode("ascii") for t in tokens]
@@ -797,17 +826,21 @@ def write_index(entities: list[Entity], path: Path, osm_date: str, built_at: int
     sections = [
         pad4(bytes(strings.data)), ent.tobytes(), addr_rec.tobytes(), tok_off.tobytes(),
         pad4(tok_blob), post_start.tobytes(), post_arr.tobytes(), entr_rec.tobytes(),
-        place_rec.tobytes(), cell_rec.tobytes(),
     ]
     offsets, pos = [], HEADER.size
     for s in sections:
         offsets.append(pos)
         pos += len(s)
+    hours_bytes, n_schedules = hours_section(place_hours, pos)
+    for s in (hours_bytes, place_rec.tobytes(), cell_rec.tobytes()):
+        sections.append(s)
+        offsets.append(pos)
+        pos += len(s)
     # The entrances' trailer stays last: readers before places find it there.
-    trailer = TRAILER.pack(offsets[8], len(place_rec), PLACE_MAGIC) + TRAILER.pack(offsets[7], len(entr_rec), ENTRANCE_MAGIC)
+    trailer = TRAILER.pack(offsets[9], len(place_rec), PLACE_MAGIC) + TRAILER.pack(offsets[7], len(entr_rec), ENTRANCE_MAGIC)
     pos += len(trailer)
     header = HEADER.pack(
-        MAGIC, FORMAT, FLAG_ENTRANCES | FLAG_PLACES, len(ent), n_settlements, len(addr_rec), len(tokens), *offsets[:7],
+        MAGIC, FORMAT, FLAG_ENTRANCES | FLAG_PLACES | FLAG_HOURS, len(ent), n_settlements, len(addr_rec), len(tokens), *offsets[:7],
         osm_date.encode("ascii").ljust(16, b"\0"), int(built_at if built_at is not None else date_stamp(osm_date)), pos,
     )
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -820,7 +853,9 @@ def write_index(entities: list[Entity], path: Path, osm_date: str, built_at: int
         "pois": kinds[KIND_POI], "addresses": len(addr_rec), "tokens": len(tokens), "postings": len(post_arr),
         "string_bytes": len(strings.data), "entrances": len(entr_rec),
         "numbered_entrances": int((entr_rec["ref"] != NONE).sum()),
-        "stops": len(place_rec), "stop_cells": len(cell_rec) - 1, "stop_bytes": len(place_rec.tobytes()) + len(cell_rec.tobytes()) + TRAILER.size,
+        "stops": len(place_rec), "stop_cells": len(cell_rec) - 1,
+        "stop_bytes": len(hours_bytes) + len(place_rec.tobytes()) + len(cell_rec.tobytes()) + TRAILER.size,
+        "stops_with_hours": sum(h is not None for h in place_hours), "hours_schedules": n_schedules,
     }
 
 
@@ -851,6 +886,17 @@ class SearchFile:
     entrances: np.ndarray  # ENTRANCE_DT, sorted by address (NONE last); empty in a file without them
     places: np.ndarray | None = None  # PLACE_DT, by cell; None in a file without the section
     cells: np.ndarray | None = None  # CELL_DT, ending with (NONE, place count)
+    # Opening hours (FLAG_HOURS): each place's schedule (HOURS_NONE: unknown), the schedules' first ranges, the ranges.
+    hours_of: np.ndarray | None = None
+    hours_first: np.ndarray | None = None
+    hours_ranges: np.ndarray | None = None  # (start, end) rows, minutes of the week
+
+    def hours(self, place: int) -> tuple[tuple[int, int], ...] | None:
+        """A place's open minutes of the week; None: unknown (or a file without hours)."""
+        if self.hours_of is None or self.hours_of[place] == HOURS_NONE:
+            return None
+        s = int(self.hours_of[place])
+        return tuple((int(a), int(e)) for a, e in self.hours_ranges[self.hours_first[s] : self.hours_first[s + 1]])
 
     def string(self, offset: int) -> str | None:
         if offset == NONE:
@@ -896,13 +942,22 @@ def read_search(path: Path) -> SearchFile:
         places = np.frombuffer(data, dtype=PLACE_DT, count=n_pl, offset=o_pl)
         o_cells = o_pl + n_pl * PLACE_DT.itemsize
         cells = np.frombuffer(data, dtype=CELL_DT, count=(len(data) - 2 * TRAILER.size - o_cells) // CELL_DT.itemsize, offset=o_cells)
+    hours_of = hours_first = hours_ranges = None
+    if flags & FLAG_HOURS and places is not None:
+        o_h, n_h, h_magic = TRAILER.unpack_from(data, o_pl - TRAILER.size)
+        if h_magic != HOURS_MAGIC:
+            raise ValueError(f"hours footer missing: {path}")
+        hours_of = np.frombuffer(data, dtype="<u2", count=len(places), offset=o_h)
+        o_first = o_h + 2 * len(places) + (-2 * len(places) % 4)
+        hours_first = np.frombuffer(data, dtype="<u4", count=n_h + 1, offset=o_first)
+        hours_ranges = np.frombuffer(data, dtype="<u2", count=2 * int(hours_first[-1]), offset=o_first + 4 * (n_h + 1)).reshape(-1, 2)
     return SearchFile(
         date.rstrip(b"\0").decode(), built, n_settlements, data,
         np.frombuffer(data, dtype=ENTITY_DT, count=n_ent, offset=o_ent),
         np.frombuffer(data, dtype=ADDR_DT, count=n_addr, offset=o_addr),
         tokens, post_start,
         np.frombuffer(data, dtype="<u4", count=int(post_start[-1]), offset=o_post),
-        o_str, entrances, places, cells,
+        o_str, entrances, places, cells, hours_of, hours_first, hours_ranges,
     )
 
 
@@ -938,6 +993,30 @@ def validate(sf: SearchFile) -> list[str]:
         problems.append("entrance address out of range")
     if sf.places is not None:
         problems += validate_places(sf.places, sf.cells)
+    if sf.hours_of is not None:
+        problems += validate_hours(sf)
+    return problems
+
+
+def validate_hours(sf: SearchFile) -> list[str]:
+    """Each place's schedule in the table; each schedule's ranges within the week, ascending and apart; 24/7 the
+    flag of the whole week."""
+    problems: list[str] = []
+    n = len(sf.hours_first) - 1
+    of = sf.hours_of.astype(np.int64)
+    if ((of >= n) & (of != HOURS_NONE)).any():
+        return ["place hours out of the schedules"]
+    if sf.hours_first[0] != 0 or (np.diff(sf.hours_first.astype(np.int64)) < 0).any():
+        problems.append("hours schedules unordered")
+        return problems
+    for s in range(n):
+        r = sf.hours_ranges[sf.hours_first[s] : sf.hours_first[s + 1]].astype(np.int64).ravel()
+        if len(r) and (r[0] < 0 or r[-1] > WEEK_MIN or (np.diff(r) <= 0).any()):
+            problems.append(f"hours schedule {s}: ranges outside the week, unordered or touching")
+            break
+    whole = [i for i in range(len(sf.places)) if sf.hours(i) == ((0, WEEK_MIN),)]
+    if any(not sf.places[i]["flags"] & FLAG_24_7 for i in whole):
+        problems.append("a place open the whole week without the 24/7 flag")
     return problems
 
 
@@ -979,6 +1058,6 @@ def build_region_search(pbf: Path, output: Path, osm_date: str) -> dict[str, int
     log(f"{output.name}: {stats['bytes'] / 1e6:.1f} MB, {stats['places']} places, {stats['streets']} streets, "
         f"{stats['addresses']} addresses, {stats['pois']} POIs, {stats['tokens']} tokens, "
         f"{stats['entrances']} entrances ({stats['numbered_entrances']} numbered), {stats['stops']} places to stop "
-        f"({stats['stop_bytes'] / 1e3:.0f} kB); "
+        f"({stats['stops_with_hours']} with hours, {stats['hours_schedules']} schedules; {stats['stop_bytes'] / 1e3:.0f} kB); "
         f"read {t1 - t0:.0f} s, build {t2 - t1:.0f} s, write {t3 - t2:.0f} s")
     return stats

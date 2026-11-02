@@ -11,6 +11,7 @@ import { Radius, usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
 import { detourMinutes } from "@/nav/routing/detour";
 import type { PlaceCategory } from "@/nav/search/search-index";
+import { usePosition } from "@/providers/position-provider";
 import { useRoute } from "@/providers/route-provider";
 import type { AlongItem } from "@/services/navigation/route-service";
 import { getRuntime } from "@/services/runtime";
@@ -22,6 +23,8 @@ import { getRuntime } from "@/services/runtime";
 export default function AlongScreen() {
   const { t, language } = useT();
   const palette = usePalette();
+  // Open or closed now: the clock of the last position (a render reads no clock of its own).
+  const nowMs = usePosition()?.timestamp ?? 0;
   const { route } = useRoute();
   const params = useLocalSearchParams<{ category?: string }>();
   const routes = getRuntime().routes;
@@ -44,6 +47,7 @@ export default function AlongScreen() {
       id: `place:${item.place.key}`,
       category: item.place.category,
       flags: item.place.flags,
+      hours: item.place.hours,
     });
     router.dismissAll();
   };
@@ -79,7 +83,7 @@ export default function AlongScreen() {
       ) : (
         <ScreenSection>
           {(along?.items ?? []).map((item) => {
-            const detail = placeDetail(item.place, item.side, t);
+            const detail = placeDetail(item.place, item.side, t, nowMs);
             const onTheWay = item.detourS !== undefined && detourMinutes(item.detourS) === 0;
             return (
               <Pressable

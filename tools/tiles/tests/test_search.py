@@ -7,9 +7,11 @@ import pytest
 
 from tiles.graph import date_stamp
 from tiles.search import (
-    CELL_DT, ENTRANCE_DT, FLAG_ENTRANCES, HEADER, KIND_PLACE, KIND_POI, KIND_STREET, NONE, PLACE_DT, TRAILER,
-    build_index, cell_key, fold, fold_house, read_objects, read_search, stop_place, validate, write_index,
+    CELL_DT, ENTRANCE_DT, FLAG_ENTRANCES, FLAG_HOURS, FLAG_PLACES, HEADER, HOURS_NONE, KIND_PLACE, KIND_POI,
+    KIND_STREET, NONE, PLACE_DT, TRAILER, build_index, cell_key, fold, fold_house, read_objects, read_search, stop_place,
+    validate, write_index,
 )
+from tiles.hours import DAY_MIN, WEEK_MIN
 
 REPO = Path(__file__).resolve().parents[3]
 FOLD_CASES = REPO / "src" / "nav" / "search" / "__fixtures__" / "fold-cases.json"
@@ -33,7 +35,7 @@ def test_fold_cases_shared_with_the_app():
 # the city. "вулиця Шевченка" in both the city (two ways, merged) and the village; "проспект
 # Миру" with name:en and old_name; houses on both Шевченка, an address-only street "вулиця
 # Нова", an `addr:place` house in the village; a fuel station node and a shop area. Places to
-# stop at: the fuel stations (one unnamed), a café with a brand only, a 24/7 pharmacy, a fast-food
+# stop at: the fuel stations (one unnamed), a café with a brand only and its hours, a 24/7 pharmacy, a fast-food
 # kiosk, a charging station in another cell, a public parking area and a private one (left out).
 
 C = (31.2947, 51.4939)
@@ -81,7 +83,7 @@ NODES = {
                           "fuel:diesel": "yes", "fuel:lpg": "yes", "fuel:octane_95": "yes", "fuel:octane_98": "no"}),
     # unnamed fuel: no POI, a place to stop at
     71: (at(C, 2, -2.5), {"amenity": "fuel"}),
-    76: (at(C, -2, -1), {"amenity": "cafe", "brand": "Aroma Kava"}),
+    76: (at(C, -2, -1), {"amenity": "cafe", "brand": "Aroma Kava", "opening_hours": "Mo-Fr 08:00-21:00; Sa,Su 09:00-20:00"}),
     77: (at(C, -2, -3), {"amenity": "parking", "access": "private"}),
     78: (at(C, -1, -1), {"amenity": "pharmacy", "opening_hours": " 24/7 "}),
     79: (at(C, 8, 0), {"amenity": "charging_station"}),
@@ -234,6 +236,12 @@ def test_stop_place_tags():
                  fuel_octane_98="yes", opening_hours="24/7") == (1, 63, "")
     assert place(amenity="fuel", fuel_diesel="no", fuel_octane_95="yes", opening_hours="Mo-Su 06:00-23:00") == (1, 16, "")
     assert place(amenity="cafe", fuel_diesel="yes", opening_hours="24/7")[1] == 1
+    # the whole week however it is said; other hours as minutes of the week; unknown ones left out
+    assert place(amenity="cafe", opening_hours="Mo-Su 00:00-24:00")[1] == 1
+    assert stop_place({"amenity": "cafe", "opening_hours": "Sa 10:00-14:00"}).tags["hours"] == f"{5 * DAY_MIN + 600}-{5 * DAY_MIN + 840}"
+    assert stop_place({"amenity": "cafe", "opening_hours": "closed"}).tags["hours"] == ""
+    assert "hours" not in stop_place({"amenity": "cafe", "opening_hours": "sunrise-sunset"}).tags
+    assert "hours" not in stop_place({"amenity": "cafe"}).tags
     # parking only where anyone may park
     for access in ("private", "customers", "no"):
         assert place(amenity="parking", access=access) is None
@@ -250,6 +258,13 @@ def test_places_by_cell(built):
     assert rows == {(1, "WOG", 1 | 2 | 4 | 16), (1, None, 0), (3, "Aroma Kava", 0), (5, None, 1), (2, None, 0),
                     (4, None, 0), (6, None, 0)}
     assert (pl["reserved"] == 0).all()
+    # opening hours: the 24/7 ones the whole week, the café its weekdays and weekend, the rest unknown
+    hours = {(int(c), sf.string(int(n))): sf.hours(i) for i, (c, n) in enumerate(zip(pl["category"], pl["name"]))}
+    assert hours[(1, "WOG")] == hours[(5, None)] == ((0, WEEK_MIN),)
+    assert hours[(3, "Aroma Kava")] == tuple((d * DAY_MIN + 480, d * DAY_MIN + 1260) for d in range(5)) + tuple(
+        (d * DAY_MIN + 540, d * DAY_MIN + 1200) for d in (5, 6))
+    assert sum(h is None for h in hours.values()) == 4
+    assert len(sf.hours_first) - 1 == 2  # each schedule once
     # the parking area at its nodes' centroid (the closing node once)
     (parking,) = pl[pl["category"] == 6]
     assert (int(parking["lon"]), int(parking["lat"])) == (round((C[0] - 0.8 * D) * 1e6), round((C[1] - 2.8 * D) * 1e6))
@@ -291,15 +306,30 @@ def test_a_reader_before_places_reads_the_file_as_before(built):
     data = path.read_bytes()
     fields = HEADER.unpack_from(data)
     flags, size = fields[2], fields[-1]
-    assert size == len(data) and flags & FLAG_ENTRANCES and flags == 3
+    assert size == len(data) and flags & FLAG_ENTRANCES and flags == FLAG_ENTRANCES | FLAG_PLACES | FLAG_HOURS
     o_entr, n_entr, magic = TRAILER.unpack_from(data, len(data) - TRAILER.size)
     assert magic == b"WTFE" and n_entr == 3
     entrances = np.frombuffer(data, dtype=ENTRANCE_DT, count=n_entr, offset=o_entr)
     assert entrances.tobytes() == sf.entrances.tobytes()
-    assert o_entr + n_entr * ENTRANCE_DT.itemsize == TRAILER.unpack_from(data, len(data) - 2 * TRAILER.size)[0]
-    # the places run up to their cells, the cells up to the places' trailer
+    # The app before hours: the places run up to their cells, the cells up to the places' trailer.
     o_pl, n_pl, _ = TRAILER.unpack_from(data, len(data) - 2 * TRAILER.size)
     assert o_pl + n_pl * PLACE_DT.itemsize + len(sf.cells) * CELL_DT.itemsize == len(data) - 2 * TRAILER.size
+    # The hours run from the entrances' end up to the places, their footer last.
+    o_h, n_h, magic = TRAILER.unpack_from(data, o_pl - TRAILER.size)
+    assert magic == b"WTFH" and n_h == len(sf.hours_first) - 1 and o_h == o_entr + n_entr * ENTRANCE_DT.itemsize
+
+
+def test_hours_checked(built, tmp_path):
+    _, _, path, sf = built
+    data = path.read_bytes()
+    o_pl = TRAILER.unpack_from(data, len(data) - 2 * TRAILER.size)[0]
+    o_h = TRAILER.unpack_from(data, o_pl - TRAILER.size)[0]
+    known = int(np.flatnonzero(sf.hours_of != HOURS_NONE)[0])
+    bad = bytearray(data)
+    bad[o_h + 2 * known : o_h + 2 * known + 2] = (7).to_bytes(2, "little")  # a schedule past the table
+    p = tmp_path / "bad.search.bin"
+    p.write_bytes(bytes(bad))
+    assert "place hours out of the schedules" in validate(read_search(p))
 
 
 def test_a_file_without_places_to_stop(tmp_path):

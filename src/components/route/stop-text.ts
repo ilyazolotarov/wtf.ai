@@ -5,6 +5,7 @@ import type { IconName } from "@/components/ui/icon";
 import type { Strings } from "@/i18n/en";
 import { detourMinutes } from "@/nav/routing/detour";
 import type { RoadSide } from "@/nav/routing/router";
+import { openAt, weekMinute } from "@/nav/search/places";
 import { PlaceFlag, type PlaceCategory, type StopPlace } from "@/nav/search/search-index";
 
 type T = (key: keyof Strings) => string;
@@ -43,8 +44,16 @@ const PLACE_WORD: Record<PlaceCategory, keyof Strings> = {
 
 export const placeName = (p: Pick<StopPlace, "name" | "category">, t: T) => p.name ?? t(PLACE_WORD[p.category]);
 
-/** The side of the road, the fuels sold and 24/7, as far as the map knows them. */
-export function placeDetail(p: Pick<StopPlace, "flags" | "category">, side: RoadSide | null, t: T): string {
+/**
+ * The side of the road, the fuels sold, and 24/7 or whether it is open at `nowMs` and till when, as far as the map
+ * knows them.
+ */
+export function placeDetail(
+  p: Pick<StopPlace, "flags" | "category"> & { hours?: StopPlace["hours"] },
+  side: RoadSide | null,
+  t: T,
+  nowMs: number,
+): string {
   const parts: string[] = [];
   if (side) parts.push(t(side === "left" ? "sideLeft" : "sideRight"));
   if (p.category === "fuel") {
@@ -58,7 +67,23 @@ export function placeDetail(p: Pick<StopPlace, "flags" | "category">, side: Road
     if (fuels.length) parts.push(fuels.join(", "));
   }
   if (p.flags & PlaceFlag.open24h) parts.push(t("open24h"));
+  else if (p.hours && nowMs > 0) parts.push(hoursText(p.hours, new Date(nowMs), t));
   return parts.join(" · ");
+}
+
+/**
+ * "open till 22:00", "closed till 8:00"; with the day ("closed till Mon 8:00") when that is a day or more away.
+ * `hours`: minutes of the week (`StopPlace.hours`), in the phone's local time.
+ */
+export function hoursText(hours: readonly number[], now: Date, t: T): string {
+  const minute = weekMinute(now);
+  const { open, until } = openAt(hours, minute);
+  if (until === null) return open ? t("open24h") : t("closedAlways");
+  const inDay = until % 1440;
+  const clock = `${Math.floor(inDay / 60)}:${String(inDay % 60).padStart(2, "0")}`;
+  const away = (until - minute + 7 * 1440) % (7 * 1440);
+  const time = away >= 1440 ? `${t("weekdaysShort").split(" ")[Math.floor(until / 1440)]} ${clock}` : clock;
+  return t(open ? "openUntil" : "closedUntil").replace("{time}", time);
 }
 
 /** "on the way", "+4 min"; "…" while it is worked out. */

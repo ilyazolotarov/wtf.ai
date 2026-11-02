@@ -104,7 +104,7 @@ export function StopPreviewCard({ route, nowMs, onOnlyHere }: { route: RouteSnap
             .filter(Boolean)
             .join(" · ");
   const side = at?.side ?? null;
-  const detail = category ? placeDetail({ category, flags: pv.place.flags ?? 0 }, side, t) : "";
+  const detail = category ? placeDetail({ category, flags: pv.place.flags ?? 0, hours: pv.place.hours }, side, t, nowMs) : "";
   return (
     <HudCard
       icon={category ? CATEGORY_ICON[category] : "place"}

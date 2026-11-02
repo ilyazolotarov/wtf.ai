@@ -25,7 +25,10 @@ import {
   CELL_COLS,
   cellCol,
   cellRow,
+  FLAG_HOURS,
   FLAG_PLACES,
+  HOURS_MAGIC,
+  HOURS_NONE,
   PLACE_BYTES,
   PLACE_CATEGORIES,
   PLACE_MAGIC,
@@ -262,6 +265,10 @@ export class SearchIndex {
   private readonly placeSection: [number, number] | null = null;
   /** The used cells' keys and first places, the closing (NONE, count) last; read once. */
   private placeCells: { keys: Uint32Array; first: Uint32Array } | null = null;
+  /** The places' opening hours: each place's schedule, the schedules' first ranges, the ranges; null without them. */
+  private readonly hoursSection: { at: number; firstAt: number; rangesAt: number } | null = null;
+  /** Schedules read, by index: many places share one. */
+  private readonly schedules = new Map<number, readonly number[]>();
   /** The last house scan (a dropped pin asks for its settlement, then its address). */
   private lastHouse: { at: Coordinate; maxM: number; best: { owner: Entity; house: House; d: number } | null } | null = null;
   /** Where each settlement is, and the farthest any of them reaches, read once (`settlementsNear`). */
@@ -284,6 +291,16 @@ export class SearchIndex {
       const v = new DataView(t.buffer, t.byteOffset, TRAILER_BYTES);
       if (String.fromCharCode(...t.subarray(8, 12)) !== PLACE_MAGIC) throw new Error("search file: no place trailer");
       this.placeSection = [v.getUint32(0, true), v.getUint32(4, true)];
+    }
+    if (this.header.flags & FLAG_HOURS && this.placeSection) {
+      // Its footer ends where the places begin.
+      const [placesAt, count] = this.placeSection;
+      const t = source.read(placesAt - TRAILER_BYTES, TRAILER_BYTES);
+      const v = new DataView(t.buffer, t.byteOffset, TRAILER_BYTES);
+      if (String.fromCharCode(...t.subarray(8, 12)) !== HOURS_MAGIC) throw new Error("search file: no hours footer");
+      const at = v.getUint32(0, true);
+      const firstAt = at + 2 * count + ((2 * count) % 4);
+      this.hoursSection = { at, firstAt, rangesAt: firstAt + 4 * (v.getUint32(4, true) + 1) };
     }
   }
 
@@ -327,6 +344,9 @@ export class SearchIndex {
   ) {
     const b = this.source.read(at + from * PLACE_BYTES, (to - from) * PLACE_BYTES);
     const v = new DataView(b.buffer, b.byteOffset, b.byteLength);
+    const hs = this.hoursSection;
+    const h = hs ? this.source.read(hs.at + from * 2, (to - from) * 2) : null;
+    const hv = h ? new DataView(h.buffer, h.byteOffset, h.byteLength) : null;
     for (let i = 0; i < to - from; i++) {
       const o = i * PLACE_BYTES;
       const category = PLACE_CATEGORIES[v.getUint8(o + 14)];
@@ -342,8 +362,26 @@ export class SearchIndex {
         lat,
         lon,
         flags: v.getUint16(o + 12, true),
+        hours: hv ? this.schedule(hv.getUint16(i * 2, true)) : null,
       });
     }
+  }
+
+  /** A schedule of opening hours by its index, read once; null: unknown. */
+  private schedule(s: number): readonly number[] | null {
+    const hs = this.hoursSection;
+    if (!hs || s === HOURS_NONE) return null;
+    const known = this.schedules.get(s);
+    if (known) return known;
+    const f = this.source.read(hs.firstAt + 4 * s, 8);
+    const fv = new DataView(f.buffer, f.byteOffset, 8);
+    const first = fv.getUint32(0, true);
+    const n = fv.getUint32(4, true) - first;
+    const r = this.source.read(hs.rangesAt + 4 * first, 4 * n);
+    const rv = new DataView(r.buffer, r.byteOffset, r.byteLength);
+    const out = Array.from({ length: 2 * n }, (_, k) => rv.getUint16(2 * k, true));
+    this.schedules.set(s, out);
+    return out;
   }
 
   /** The cell table, read once (8 bytes a used cell: Kyiv's few thousand, tens of kB). */

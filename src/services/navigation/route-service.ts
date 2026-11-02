@@ -103,6 +103,8 @@ export interface TripStop extends RouteDestination {
   category?: PlaceCategory;
   /** What the map knows of it (`PlaceFlag`: fuels, 24/7). */
   flags?: number;
+  /** Its opening hours (`StopPlace.hours`); null or none: unknown. */
+  hours?: readonly number[] | null;
 }
 
 /** The stop the car is at, waiting to go on (STOPS-SPEC §5.2). */
@@ -293,7 +295,7 @@ function startOf(p: PositionEstimate) {
 const reliable = (p: PositionEstimate) => !(p.source === "gnss" && p.trust !== "TRUSTED");
 
 /** A stop as given: a place, a pin, a search result; its key is made if it has none. */
-export type StopInput = RouteDestination & { key?: string; category?: PlaceCategory; flags?: number };
+export type StopInput = RouteDestination & { key?: string; category?: PlaceCategory; flags?: number; hours?: readonly number[] | null };
 
 type JobName = "preview" | "back" | "along" | "estimates";
 

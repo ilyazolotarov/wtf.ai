@@ -24,7 +24,7 @@ agents.
 | Guidance | One `RouteGuidance` over the joined plan; stops are points along it (§5). |
 | Time at a stop | None added: arrival times assume no wait; at a stop the times count from now. |
 | Stop passed by | Guidance goes on to the next point; a card offers to go back (§5.3). |
-| Places along the route | A section of the search file (§6.1), unnamed places included, with fuel types and 24/7. |
+| Places along the route | A section of the search file (§6.1), unnamed places included, with fuel types and opening hours. |
 | Categories | Fuel, charging, cafe, food (fast food, restaurant), pharmacy, parking. |
 | Detour | Two small searches per place near the route, not a full plan per place (§6.3). |
 | Car's screen | Shows the trip's stops; adds, removes and reorders none (§9). |
@@ -113,8 +113,15 @@ the car's screen replaces the whole trip, as "Route here" does.
   pharmacy, parking (not `access` = private, customers or no), named or not. Name: `name`, else `name:uk`, else
   `brand`.
 - **Place, 16 B:** i32 lat, lon (1e-6°); u32 name (or none: the row shows the kind's word); u16 flags; u8 kind; u8
-  reserved. Flags: 24/7 (`opening_hours` = 24/7), and for fuel diesel, LPG, 92, 95 and 98 (`fuel:diesel`, `fuel:lpg`,
+  reserved. Flags: 24/7 (open the whole week), and for fuel diesel, LPG, 92, 95 and 98 (`fuel:diesel`, `fuel:lpg`,
   `fuel:octane_92/95/98` = yes).
+- **Opening hours** (`tools/tiles/tiles/hours.py`): `opening_hours` as the minutes of the week open, Monday 00:00 =
+  0, in [start, end) ranges. Read: rules split by ";" (a later one replaces the days it names) or by "," before a
+  weekday (adds to them); weekdays Mo–Su, ranges and lists in any case (PH dropped, a rule of PH alone skipped; none:
+  every day); times H:MM-H:MM, several, past midnight into the next day (equal ends: the whole day; a trailing "+"
+  read as the end given), off or closed; days no rule names are closed. Anything else (months, dates, sunrise,
+  comments) is unknown: the row says nothing rather than something wrong. Kyiv: 4,087 places tag it, 5 unread. In
+  the file a section just before the places (SEARCH-SPEC §3.3): each place's schedule, each schedule once.
 - **Cells:** sorted by a 0.01° grid cell, with a table of the used cells for a binary search; the places trailer
   (`"WTFP"`) just before the entrances' one, which stays last. Header flag 2. `tiles search-check` validates both. A
   file without the section has no places along the route; the page says to download the region again. Older apps
@@ -175,7 +182,9 @@ it.
 ### 7.2 Along the way (`src/app/along.tsx`, a page like the route page)
 
 Kind chips, the selected one filled; rows: icon, name, side and what the file knows ("right · diesel, 95, LPG ·
-24/7"), distance along the route, the detour ("on the way" in green). A row shows it on the map (§7.3).
+24/7", "left · open till 22:00", "closed till 8:00", "closed till Mon 8:00" when that is a day or more away; now
+by the phone's clock and time zone), distance along the route, the detour ("on the way" in green). A row shows it on
+the map (§7.3), its card the same words.
 
 ### 7.3 Stop preview (the map)
 
@@ -236,7 +245,6 @@ Display only: stops are added, removed and moved on the phone. The payload carri
 
 ## 12. Open items
 
-1. "Open now" from full `opening_hours`, not just 24/7.
 2. Charging stations' sockets and power.
 3. Replays rebuild a trip's stops (`tools/replay/app-chain.ts` replans to the destination only).
 4. CarPlay: run in the Simulator (a trip per leg, the arrival at a stop); whether its SDK has multi-stop trips.
