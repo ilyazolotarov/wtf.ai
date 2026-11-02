@@ -31,8 +31,8 @@ agents.
 
 ## 3. Status
 
-Built and tested in Jest, the emulator and the Desktop Head Unit; not yet driven. CarPlay's side is built, not run
-(§9). Open items: §12.
+Built and tested in Jest, the emulator, the Desktop Head Unit and the CarPlay Simulator (§9); not yet driven. Open
+items: §12.
 
 ## 4. The trip and its plan (`src/nav/routing/trip.ts`, `route-service.ts`)
 
@@ -144,7 +144,9 @@ the car's screen replaces the whole trip, as "Route here" does.
 - **Which places** (`placesAlong`): those of the kind within 500 m of the route *ahead* of the car, the route read in
   5 km stretches, each stretch's box of cells read from the file. Each place is measured against the route's segments
   near it only (`RouteLine`, a 500 m grid); one whose closest point of the route is behind the car is left out (the
-  car passed it). The distance shown is its projection's distance along the route from the car.
+  car passed it), and so is one whose closest point is before the plan's start: a plan made from the car (any plan
+  after the first, a stop added included) has no route behind the car to measure on. The distance shown is its
+  projection's distance along the route from the car.
 - **The list:** the first 10 by distance along the route; "Further along the route" adds the next 10 beyond the last.
 - **Detour** (`DetourSearch`) per place, in list order, in slices after the list shows (a row waiting says "…"): from
   the route point 1 km before its projection (the car's progress point if nearer), driving, to the place; plus from the
@@ -218,7 +220,15 @@ Display only: stops are added, removed and moved on the phone. The payload carri
   flag, "You're at the stop: <name>", the session still navigating.
 - **CarPlay** (CARPLAY-SPEC §4): a trip per leg. The payload's destination and estimates are the next stop's; at a
   stop the route reads as arrived there ("You're at the stop", `.arriveAtDestination`); going on is a new destination,
-  so a new trip (`CarPlayLogic.tripPlan`). The `stop` kinds draw as the arrival.
+  so a new trip (`CarPlayLogic.tripPlan`). The `stop` kinds draw as the arrival. A stop left behind changes the
+  destination without an arrival: the trip is cancelled and the next one starts. Run in the iOS 26.3 Simulator: the
+  estimates count to the stop, the flag ahead of it, the arrival card at it, the next trip a second after the wait
+  ends (two stops 300 m apart, back to back), a stop left behind; no crash. The payload's `stops` and `atStop` are
+  ignored by CarPlay's record.
+- **One CarPlay trip through the stops:** iOS 26.4 has a trip of route segments, each between two waypoints
+  (`CPRouteSegment`, `CPNavigationWaypoint`, `CPNavigationSession.addRouteSegments`, `currentSegment`), part of route
+  sharing with the car's own navigation. Not used: the Simulator's CarPlay from iOS 26.4 (26.5 too) aborts on any
+  map template (`CPSMapTemplateViewController _updateShareButtonVisibility`), so it can't be tried there (§12).
 - A destination picked on the car replaces the trip (§5.4).
 
 ## 10. Trip log (TRIP-LOGGER-SPEC §6.3)
@@ -230,6 +240,11 @@ Display only: stops are added, removed and moved on the phone. The payload carri
   route) or `…, <m> m from it at the closest` (off it), `route stop left: …, next leg|go on|off the route`, `route stop
   back: …`, `route plan #n failed on the way to …`, `along the way: <kind>, n places in <km> (ms)`, `along the way: n
   detours in <ms>`.
+- **Replays** rebuild a trip's stops from its log (`tools/replay/app-chain.ts`, `tripStopsAt`): the stops at a moment
+  are the `nav_route_stop` rows of the plan in force, less those the `route stop reached|passed` notes name since
+  (a stop's key is its point, as the notes print it). Before the log's first plan, the stops reached or passed until
+  then go back in front and those added until then are left out. A route the log misses (`routeBeforeLog`) is planned
+  through the trip's stops at the log's start; logged plans replay as they are, already through their stops.
 
 ## 11. Verification
 
@@ -245,6 +260,6 @@ Display only: stops are added, removed and moved on the phone. The payload carri
 
 ## 12. Open items
 
-2. Charging stations' sockets and power.
-3. Replays rebuild a trip's stops (`tools/replay/app-chain.ts` replans to the destination only).
-4. CarPlay: run in the Simulator (a trip per leg, the arrival at a stop); whether its SDK has multi-stop trips.
+1. Charging stations' sockets and power.
+2. CarPlay: one trip through the stops with iOS 26.4's route segments (§9), tried in a car (the Simulator can't show
+   a map template from 26.4); a trip per leg below 26.4 either way.

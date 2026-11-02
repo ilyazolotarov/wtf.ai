@@ -460,5 +460,8 @@ over CarPlay's Settings. The cameras' badges and the pill's speed on a simulated
 2. Later: the dashboard and instrument cluster scenes of the app's own (`CPSupportsDashboardNavigationScene`,
    `CPSupportsInstrumentClusterNavigationScene`); iOS 26.4's route sharing with the car; iOS 27's panels on the map
    template.
-3. Stops on the way: a trip per leg, a stop reached an arrival there (STOPS-SPEC §9), built, not yet run in the
-   Simulator. None are added on the car.
+3. Stops on the way: a trip per leg, a stop reached an arrival there (STOPS-SPEC §9), run in the iOS 26.3
+   Simulator (estimates to the stop, the flag, the arrival card, the next trip after it, a stop left behind; no
+   crash on back-to-back trips). None are added on the car. One trip through the stops needs iOS 26.4's route
+   segments (`CPRouteSegment`), part of route sharing; the Simulator's CarPlay from 26.4 (26.5 too) aborts on any map
+   template (`CPSMapTemplateViewController _updateShareButtonVisibility`), so that waits for a car.
