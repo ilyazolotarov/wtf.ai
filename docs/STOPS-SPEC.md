@@ -162,8 +162,11 @@ it.
 ### 7.1 Route page (`src/app/route.tsx`, UI-SPEC §7.1)
 
 - **With a route** (planned or being planned), the page opens on **Pull in on the way**, six large tiles (§6.2), then
-  the trip: My position, each stop (kind's icon or number, name, "at 18:46", ↑ earlier, ✕), the destination with its
+  the trip: My position, each stop (kind's icon or number, name, "at 18:46", ≡, ✕), the destination with its
   arrival, **Add a stop**; distance, time and arrival of what is left; **Stop guidance**. Typing searches as before.
+- **Moving a stop** (`use-stop-drag.ts`, two stops or more): its ≡ handle drags the row, the page holding still; the
+  stops it passes make room, and the drop puts it where its middle passed the others' (one plan, §5.4). Screen
+  readers get "earlier" and "later" actions on the handle instead.
 - **Add a stop** opens the search (the same field and index): each result's detour in place of its straight-line
   distance, the least first once all ten are known; saved places with theirs. A result picked becomes a stop.
 - A selected place's card, a route on: **Add as a stop** beside Start guidance. No route: **Add a stop** starts the
@@ -237,4 +240,3 @@ Display only: stops are added, removed and moved on the phone. The payload carri
 2. Charging stations' sockets and power.
 3. Replays rebuild a trip's stops (`tools/replay/app-chain.ts` replans to the destination only).
 4. CarPlay: run in the Simulator (a trip per leg, the arrival at a stop); whether its SDK has multi-stop trips.
-5. Dragging stops to reorder (the page moves one earlier at a time).

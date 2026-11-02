@@ -462,6 +462,8 @@ export const en = {
   myPosition: "My position",
   removeStop: "Remove {name}",
   moveStopUp: "Move {name} earlier",
+  moveStopDown: "Move {name} later",
+  reorderStop: "Drag to move {name}",
   stopAt: "at {time}",
   tripTotal: "Whole trip",
   catFuel: "Fuel",

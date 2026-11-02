@@ -487,6 +487,8 @@ export const uk = {
   myPosition: "Моє місце",
   removeStop: "Прибрати {name}",
   moveStopUp: "Перемістити {name} раніше",
+  moveStopDown: "Перемістити {name} пізніше",
+  reorderStop: "Перетягніть, щоб перемістити {name}",
   stopAt: "о {time}",
   tripTotal: "Уся поїздка",
   catFuel: "АЗС",

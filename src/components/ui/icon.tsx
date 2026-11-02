@@ -77,7 +77,7 @@ const SF = {
   local_pharmacy: "cross.case.fill",
   local_parking: "parkingsign",
   add: "plus",
-  arrow_upward: "arrow.up",
+  drag_handle: "line.3.horizontal",
 } as const satisfies Record<string, SFSymbol>;
 
 export type IconName = keyof typeof SF;

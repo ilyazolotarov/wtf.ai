@@ -1,6 +1,6 @@
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Keyboard, Pressable, StyleSheet, TextInput, View } from "react-native";
+import { Animated, Keyboard, Pressable, StyleSheet, TextInput, View } from "react-native";
 
 import {
     ScreenAction,
@@ -19,6 +19,7 @@ import {
 import { formatArrival, formatDurationS, PROBLEM_TEXT } from "@/components/route/guidance-text";
 import { CATEGORY_ICON, CATEGORY_LABEL, detourText, STOP_CATEGORIES } from "@/components/route/stop-text";
 import { Flash, SaveConfirmation } from "@/components/route/save-feedback";
+import { useStopDrag } from "@/components/route/use-stop-drag";
 import { pointPlace, resultPlace } from "@/components/route/place-search";
 import { Icon, type IconName } from "@/components/ui/icon";
 import { INPUT_MAX_FONT_SCALE, T } from "@/components/ui/text";
@@ -106,6 +107,8 @@ export default function RouteScreen() {
   const bounds = region?.bounds ?? null;
   // A place another app sent (a `geo:` link, +native-intent.tsx): its words or coordinates, searched.
   const { q: linked = "" } = useLocalSearchParams<{ q?: string }>();
+  // A stop held by its handle: the page doesn't scroll under it.
+  const [dragging, setDragging] = useState(false);
   const [selected, setSelected] = useState<Place | null>(() => {
     const d = route?.destination;
     // With a route on, the page opens on its trip (STOPS-SPEC §7.1), not on the destination's card.
@@ -270,8 +273,10 @@ export default function RouteScreen() {
   };
 
   return (
-    <ScreenContent title={t(adding ? "addStopTitle" : "route")}>
-      {routeOn && !adding && !selected && !q && <TripSection route={route} nowMs={position?.timestamp ?? 0} onAdd={() => setAdding(true)} onStop={stopRoute} />}
+    <ScreenContent title={t(adding ? "addStopTitle" : "route")} scrollEnabled={!dragging}>
+      {routeOn && !adding && !selected && !q && (
+        <TripSection route={route} nowMs={position?.timestamp ?? 0} onAdd={() => setAdding(true)} onStop={stopRoute} onDragging={setDragging} />
+      )}
       <View style={[styles.search, { backgroundColor: palette.surface }]}>
         <Icon name="search" size={18} color={palette.text2} />
         <TextInput
@@ -495,10 +500,25 @@ function byDetour(list: Place[], estimates: RouteSnapshot["estimates"]): Place[]
  * The trip on the route page (STOPS-SPEC §7.1): "Pull in on the way" by kind, then my position, the stops (earlier,
  * remove), the destination with the arrival, "Add a stop", the whole trip's distance and time, and Stop guidance.
  */
-function TripSection({ route, nowMs, onAdd, onStop }: { route: RouteSnapshot; nowMs: number; onAdd(): void; onStop(): void }) {
+function TripSection({
+  route,
+  nowMs,
+  onAdd,
+  onStop,
+  onDragging,
+}: {
+  route: RouteSnapshot;
+  nowMs: number;
+  onAdd(): void;
+  onStop(): void;
+  onDragging(on: boolean): void;
+}) {
   const { t, language } = useT();
   const palette = usePalette();
   const routes = getRuntime().routes;
+  const keys = useMemo(() => route.stops.map((s) => s.key), [route.stops]);
+  const move = useMemo(() => routes.moveStop.bind(routes), [routes]);
+  const drag = useStopDrag(keys, move, onDragging);
   const plan = route.plan;
   const g = route.guidance;
   const leftS = g?.remainingS ?? plan?.durationS ?? 0;
@@ -543,7 +563,11 @@ function TripSection({ route, nowMs, onAdd, onStop }: { route: RouteSnapshot; no
           const s = atStopS(stop.key);
           const name = stop.name ?? t("droppedPin");
           return (
-            <View key={stop.key} style={styles.destination}>
+            <Animated.View
+              key={stop.key}
+              onLayout={drag.layout(i)}
+              style={[styles.destination, { backgroundColor: palette.groupBg }, drag.offset(i)]}
+            >
               <View style={[tripStyles.stop, { borderColor: palette.route, backgroundColor: palette.groupBg }]}>
                 {stop.category ? (
                   <Icon name={CATEGORY_ICON[stop.category]} size={16} color={palette.route} />
@@ -563,16 +587,22 @@ function TripSection({ route, nowMs, onAdd, onStop }: { route: RouteSnapshot; no
                   </T>
                 )}
               </View>
-              {i > 0 && (
-                <Pressable
-                  onPress={() => routes.moveStop(stop.key, -1)}
-                  accessibilityRole="button"
-                  accessibilityLabel={t("moveStopUp").replace("{name}", name)}
+              {route.stops.length > 1 && (
+                // Dragged to its place; screen readers move it a place at a time.
+                <View
+                  {...drag.handlers[i]}
+                  accessible
+                  accessibilityLabel={t("reorderStop").replace("{name}", name)}
+                  accessibilityActions={[
+                    ...(i > 0 ? [{ name: "earlier", label: t("moveStopUp").replace("{name}", name) }] : []),
+                    ...(i < route.stops.length - 1 ? [{ name: "later", label: t("moveStopDown").replace("{name}", name) }] : []),
+                  ]}
+                  onAccessibilityAction={(e) => routes.moveStop(stop.key, e.nativeEvent.actionName === "earlier" ? -1 : 1)}
                   hitSlop={6}
-                  style={({ pressed }) => [tripStyles.button, { backgroundColor: palette.surface }, pressed && styles.pressed]}
+                  style={[tripStyles.button, { backgroundColor: palette.surface }]}
                 >
-                  <Icon name="arrow_upward" size={16} color={palette.text2} />
-                </Pressable>
+                  <Icon name="drag_handle" size={16} color={palette.text2} />
+                </View>
               )}
               <Pressable
                 onPress={() => routes.removeStop(stop.key)}
@@ -583,10 +613,10 @@ function TripSection({ route, nowMs, onAdd, onStop }: { route: RouteSnapshot; no
               >
                 <Icon name="close" size={16} color={palette.text2} />
               </Pressable>
-            </View>
+            </Animated.View>
           );
         })}
-        <View style={styles.destination}>
+        <View onLayout={drag.layout(route.stops.length)} style={styles.destination}>
           <View style={[tripStyles.stop, { borderColor: palette.route, backgroundColor: palette.route }]}>
             <Icon name="flag" size={16} color={palette.onAccent} />
           </View>
