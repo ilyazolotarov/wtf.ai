@@ -1,4 +1,4 @@
-import { router } from "expo-router";
+import { useEffect, useState } from "react";
 
 import { CardActions, CardLine, HudCard, PillButton } from "@/components/map/hud-card";
 import { formatDistance } from "@/components/status/format-geo";
@@ -8,7 +8,8 @@ import type { RouteSnapshot } from "@/services/navigation/route-service";
 import { getRuntime } from "@/services/runtime";
 
 import { formatArrival, formatDurationS } from "./guidance-text";
-import { CATEGORY_ICON, CATEGORY_LABEL, detourText, placeDetail } from "./stop-text";
+import { CATEGORY_ICON } from "./stop-text";
+import { TRIP_UNDO_MS, tripUndo, type TripUndo } from "./trip-undo";
 
 /** Where the trip goes after the stop it is at: the next stop, else the destination. */
 function nextPoint(route: RouteSnapshot) {
@@ -83,56 +84,32 @@ export function PassedStopCard({ route }: { route: RouteSnapshot }) {
 }
 
 /**
- * A place before it becomes a stop (STOPS-SPEC §7.3): its detour, the time there and the new arrival, from the trip
- * through it; **Add stop** takes that trip, **Route only here** makes it the destination.
+ * A trip change made in one tap (STOPS-SPEC §7.4): what it did and **Undo**, counting down the seconds left; gone
+ * after `TRIP_UNDO_MS` or on ✕. Keyed by the offer, so a new one counts from the start.
  */
-export function StopPreviewCard({ route, nowMs, onOnlyHere }: { route: RouteSnapshot; nowMs: number; onOnlyHere(): void }) {
+export function TripUndoCard({ undo }: { undo: TripUndo }) {
   const { t } = useT();
   const palette = usePalette();
-  const pv = route.preview!;
-  const routes = getRuntime().routes;
-  const category = pv.place.category;
-  const at = pv.plan?.stops?.find((s) => s.key === pv.place.key);
-  const lines =
-    pv.status === "planning"
-      ? t("stopPlanning")
-      : pv.status === "failed" || !pv.plan || pv.deltaS === undefined
-        ? t("stopNoWay")
-        : [
-            `${t("stopDetour")} ${detourText(pv.deltaS, t)}`,
-            at ? `${t("stopThereAt")} ${formatArrival(at.atS, nowMs)}` : null,
-            `${t("stopArrival")} ${formatArrival(pv.plan.durationS, nowMs)}`,
-          ]
-            .filter(Boolean)
-            .join(" · ");
-  const side = at?.side ?? null;
-  const detail = category ? placeDetail({ category, flags: pv.place.flags ?? 0, hours: pv.place.hours }, side, t, nowMs) : "";
+  const [left, setLeft] = useState(Math.round(TRIP_UNDO_MS / 1000));
+  useEffect(() => {
+    const started = Date.now();
+    const timer = setInterval(() => {
+      const n = Math.ceil((TRIP_UNDO_MS - (Date.now() - started)) / 1000);
+      if (n <= 0) tripUndo.clear(undo.id);
+      else setLeft(n);
+    }, 250);
+    return () => clearInterval(timer);
+  }, [undo.id]);
+  const name = undo.name ?? t("droppedPin");
   return (
     <HudCard
-      icon={category ? CATEGORY_ICON[category] : "place"}
-      tone={{ a: palette.accentA, c: palette.accent }}
-      title={pv.place.name ?? t("droppedPin")}
-      onClose={() => routes.cancelPreview()}
-      lines={
-        <>
-          {detail ? <CardLine>{category ? `${t(CATEGORY_LABEL[category])} · ${detail}` : detail}</CardLine> : null}
-          <CardLine>{lines}</CardLine>
-        </>
-      }
+      icon={undo.kind === "stop" ? "add" : "alt_route"}
+      tone={palette.ok}
+      title={t(undo.kind === "stop" ? "tripUndoStop" : "tripUndoRoute").replace("{name}", name)}
+      onClose={() => tripUndo.clear(undo.id)}
     >
-      <CardActions gap={10}>
-        {category && (
-          <PillButton
-            icon="arrow_back"
-            label={t(CATEGORY_LABEL[category])}
-            onPress={() => {
-              routes.cancelPreview();
-              router.push({ pathname: "/along", params: { category } });
-            }}
-          />
-        )}
-        <PillButton icon="flag" label={t("stopOnlyHere")} onPress={onOnlyHere} />
-        <PillButton icon="add" label={t("stopAddButton")} onPress={() => routes.confirmPreview()} primary />
+      <CardActions>
+        <PillButton icon="undo" label={`${t("undo")} · ${left}`} onPress={() => tripUndo.take()} />
       </CardActions>
     </HudCard>
   );

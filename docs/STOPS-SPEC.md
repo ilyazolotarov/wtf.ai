@@ -60,7 +60,7 @@ items: §12.
   a stop earlier.
 - **Alternatives** (ROUTING-SPEC §8.7): searched for the first leg only, each joined with the rest of the trip, so
   "+4 min" compares the whole trip.
-- **One frame per route:** every search of a route (plans, previews, the way back to a stop, detours) shares the graph
+- **One frame per route:** every search of a route (plans, the way back to a stop, detours) shares the graph
   reader, which projects what it decodes into one local frame. The route keeps one frame and makes a new one only
   when the car is 30 km from it; the searches beside the route's own stop then.
 - **Kept** in `route.active`: the destination and the stops not yet reached or passed. An app restarted within 12 h
@@ -72,8 +72,7 @@ items: §12.
 
 `GuidanceStep` gives the next stop (`nextStop`), the distance and time to it, and the stops reached and passed. The
 banner's maneuver lines are unchanged; its last line counts to the next stop: "to <stop> · 700 m · 2 min · 18:46".
-The final arrival is on the route page. The map draws each stop as a dot ringed in the route's colour with its number;
-a place previewed as a stop as "+".
+The final arrival is on the route page. The map draws each stop as a dot ringed in the route's colour with its number.
 
 ### 5.2 At a stop
 
@@ -107,9 +106,8 @@ a place previewed as a stop as "+".
 Adding, removing or moving a stop plans again from the car at once (reason `stops`); the route waits for it as for a
 re-plan. When that plan finds no way to a stop, the banner says so ("Couldn't find a route to the stop …", until the
 next plan or 2 km on) and the route in force stays; a stop just added or put back is taken out again (`route stop
-dropped`), since kept it would fail every re-plan after. A preview taken after the trip changed under it (a stop
-reached or left behind meanwhile) is planned again rather than taken as it is. "Route only here" on a place makes it the destination and drops the stops. A new destination from search, a pin or
-the car's screen replaces the whole trip, as "Route here" does.
+dropped`), since kept it would fail every re-plan after. A new destination from search, a pin or the car's screen
+replaces the whole trip, as "Route here" does (Undo, §7.4).
 
 ## 6. Places along the route
 
@@ -173,6 +171,15 @@ The side of the route the place is on, where its projection falls: left or right
 within 15 m of the line, none. Rows show it ("right", "left"); a stop's maneuver, its voice and its car maneuver carry
 it.
 
+### 6.5 Parking (`parkingNear` in `along.ts`, `RouteService.findParking`, `parkAt`)
+
+Parking is where the car is left to walk on, not a stop along the way: the kind lists car parks within 600 m (about 8
+minutes' walk, straight line) of the destination, the nearest first, up to 10; then up to 3 near each stop, in the
+trip's order, each car park once (for the destination first). None along the route ahead: those near the start are of
+no use. No detours: the drive there is the trip's own. A row shows the straight walk to what it is for. Picked, the car
+park takes that one's place: the destination (the route ends there, its stops kept) or the stop; planned from the car
+(reason `stops`, note `route parking for the destination|a stop: …, was …`), with Undo (§7.4).
+
 ## 7. Screens
 
 ### 7.1 Route page (`src/app/route.tsx`, UI-SPEC §7.1)
@@ -185,28 +192,34 @@ it.
   readers get "earlier" and "later" actions on the handle instead.
 - **Add a stop** opens the search (the same field and index): each result's detour in place of its straight-line
   distance, the least first once all ten are known; saved places with theirs. A result picked becomes a stop.
-- A selected place's card, a route on: **Add as a stop** beside Start guidance. No route: **Add a stop** starts the
-  route to it and opens the stop search.
+- A selected place's card, a route on: **Add as a stop** beside Start guidance (not for a place already a stop). It
+  goes back to the trip, the new stop's row glowing once. No route: **Add a stop** starts the route to it and opens the
+  stop search.
+- The card and the stop search are steps within the page: the back gesture and button close them first, not the page
+  (`usePreventRemove`; on iOS the swipe then closes the card without sliding). Start guidance and "I'm here" leave the
+  page as before.
 
 ### 7.2 Along the way (`src/app/along.tsx`, a page like the route page)
 
 Kind chips, the selected one filled; rows: icon, name, side and what the file knows ("right · diesel, 95, LPG ·
 24/7", "left · open till 22:00", "closed till 8:00", "closed till Mon 8:00" when that is a day or more away; now
-by the phone's clock and time zone), distance along the route, the detour ("on the way" in green). A row shows it on
-the map (§7.3), its card the same words.
+by the phone's clock and time zone), distance along the route, the detour ("on the way" in green). A place without a
+name is titled by the address nearest it (within 150 m), else by its kind. A row is added as a stop at once, with Undo
+(§7.4), and the page goes back to the trip, the new stop's row glowing once. Parking (§6.5): a note that the route
+goes there instead, then sections "Near <destination>", "Near <stop>", each row with its walk ("350 m on foot").
 
-### 7.3 Stop preview (the map)
+### 7.3 Dropped pin (UI-SPEC §6.3)
 
-The pages close; the trip through the place is planned from the car (`previewStop`) and drawn as the route, the current
-one quieter beneath it. Guidance follows the current route meanwhile. A card: the kind's icon, name, kind and what
-the file knows; the detour, "Stop at" for the stop's arrival time and "Destination at" for the final arrival, from that
-plan. **Add stop** takes it as the route (no new plan, reason `stops`); **Route only here** makes the place the
-destination; the kind's button goes back to the list;
-✕ drops it.
+While a route is on, the pin's card offers **Add as a stop** beside **Route here**. Either acts at once, without a
+confirmation: the stop is added (planned where it adds least, §4), or the route is replaced; Undo follows (§7.4).
 
-### 7.4 Dropped pin (UI-SPEC §6.3)
+### 7.4 Undo (`src/components/route/trip-undo.ts`)
 
-While a route is on, the pin's card offers **Add as a stop** (a preview, §7.3) beside **Route here**.
+A trip change made in one tap is offered back for 10 s on a card above the map's bottom bar: "Stop added: <name>" or
+"New route: <name>", **Undo · 9** counting down, ✕. Undo takes the stop out again, or plans the old trip again from the
+car (its destination and the stops it hadn't reached). Offered for a stop added (from a pin, the route page, the places
+on the way), for a route replaced (from a pin, the route page's Start guidance) and for parking picked (§6.5); none
+when no route was on.
 
 ## 8. Voice (ROUTING-SPEC §8.5)
 
@@ -265,10 +278,10 @@ Display only: stops are added, removed and moved on the phone. The payload carri
    insertion), `stops-along.test.ts` (guidance at stops, passing on the route, the voice, places along, detours),
    `route-service-stops.test.ts` (waiting at a stop with the phone walking, going on, a plan made at a stop, leaving
    without a speed, left behind on and off the route, adding, moving, removing, a stop no road reaches, five at most,
-   resume, places along, previews, search detours), `places.test.ts`, `stop-text.test.ts`, `car-guidance.test.ts`,
+   resume, places along, parking, search detours), `places.test.ts`, `stop-text.test.ts`, `car-guidance.test.ts`,
    `app-chain.test.ts` (stops rebuilt from a log); the Kotlin and Swift logic tests for the stop kinds; `test_hours.py`.
 2. `npm run route -- --from … --via … --to …`: a trip from the command line.
-3. The emulator: the route page, the list, a preview taken, the drive through a stop with the cards (GPS fixes along
+3. The emulator: the route page, the list, a stop added from it and from a pin, the drive through a stop with the cards (GPS fixes along
    the route); Android Auto in the Desktop Head Unit.
 4. On the road: a fuel stop on the driver's side, one across a divided road, a long stop with the engine off.
 

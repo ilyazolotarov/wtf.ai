@@ -29,6 +29,11 @@ const places: StopPlace[] = [
   { key: "p1", category: "fuel", name: "Station", ...at(1500, -150), flags: 2, hours: null },
   { key: "p2", category: "pharmacy", name: null, ...at(2400, 200), flags: 0, hours: null },
   { key: "p3", category: "fuel", name: "Behind", ...at(100, 50), flags: 0, hours: null },
+  // Parking: two a walk from the end, one at the start, one by the pharmacy.
+  { key: "k1", category: "parking", name: null, ...at(2600, 40), flags: 0, hours: null },
+  { key: "k2", category: "parking", name: "Square", ...at(2950, 60), flags: 0, hours: null },
+  { key: "k3", category: "parking", name: null, ...at(150, -30), flags: 0, hours: null },
+  { key: "k4", category: "parking", name: null, ...at(2350, 260), flags: 0, hours: null },
 ];
 
 function harness() {
@@ -345,42 +350,33 @@ describe("RouteService with stops (STOPS-SPEC §4–5)", () => {
     expect(h.snap().along).toBeUndefined();
   });
 
-  test("a stop's preview: the trip through it from the car, its extra time; taken as the route without planning again", () => {
+  test("parking: near the destination, the nearest first, then near the stops; not along the route from the start", () => {
     const h = harness();
     h.moveTo(at(100, 0));
-    h.service.start(DESTINATION);
+    h.service.start(DESTINATION, { stops: [{ ...at(2400, 200), name: "Pharmacy", key: "ph" }] });
     h.flush();
-    h.follow(0, 300);
-    const before = h.snap().planId;
-    h.service.previewStop({ ...STATION, name: "Station", category: "fuel", key: "p1" });
-    expect(h.snap().preview?.status).toBe("planning");
-    h.flush();
-    const pv = h.snap().preview!;
-    expect(pv.status).toBe("done");
-    expect(pv.deltaS).toBeGreaterThan(30);
-    expect(h.snap().planId).toBe(before);
-    h.service.confirmPreview();
-    expect(h.snap()).toMatchObject({ planReason: "stops", preview: undefined });
-    expect(h.snap().planId).toBeGreaterThan(before);
-    expect(h.snap().stops.map((x) => x.key)).toEqual(["p1"]);
-    expect(h.snap().plan!.stops).toHaveLength(1);
+    h.service.findAlong("parking");
+    const along = h.snap().along!;
+    expect(along.status).toBe("done");
+    expect(along.items.map((x) => [x.place.key, x.parkFor])).toEqual([["k2", "destination"], ["k1", "destination"], ["k4", "ph"]]);
+    expect(along.items[0].walkM).toBeGreaterThan(70);
+    expect(along.items[0].walkM).toBeLessThan(85);
   });
 
-  test("a preview taken after a stop was reached meanwhile: planned again, not through the stop behind", () => {
+  test("parking picked: the car goes there instead of the destination, or of the stop, the rest of the trip kept", () => {
     const h = harness();
     h.moveTo(at(100, 0));
-    h.service.start(DESTINATION, { stops: [{ ...STATION, name: "Station" }] });
+    h.service.start(DESTINATION, { stops: [{ ...STATION, name: "Station", key: "st" }, { ...at(2400, 200), name: "Pharmacy", key: "ph" }] });
     h.flush();
-    h.follow(0, 300);
-    h.service.previewStop({ ...at(2400, 200), name: "Pharmacy", key: "p2" });
+    h.service.parkAt({ ...at(2950, 60), name: "Square" }, "destination");
     h.flush();
-    expect(h.snap().preview).toMatchObject({ status: "done", index: 1 });
-    h.follow(300, h.snap().plan!.stops![0].atM);
-    expect(h.snap().atStop?.stop.name).toBe("Station");
-    h.service.confirmPreview();
+    expect(h.snap()).toMatchObject({ planReason: "stops", destination: { name: "Square" } });
+    expect(h.snap().stops.map((x) => x.key)).toEqual(["st", "ph"]);
+    expect(h.store.get("route.active")).toMatchObject({ destination: { name: "Square" } });
+    h.service.parkAt({ ...at(2350, 260), name: "By the pharmacy", key: "k4" }, "ph");
     h.flush();
-    expect(h.snap().stops.map((x) => x.key)).toEqual(["p2"]);
-    expect(h.snap().plan!.stops!.map((x) => x.key)).toEqual(["p2"]);
+    expect(h.snap().stops.map((x) => x.name)).toEqual(["Station", "By the pharmacy"]);
+    expect(h.snap().plan!.stops!.map((x) => x.key)).toEqual(["st", "k4"]);
   });
 
   test("detours of search results, for the add-a-stop search", () => {

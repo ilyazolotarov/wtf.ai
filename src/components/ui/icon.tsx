@@ -78,6 +78,7 @@ const SF = {
   local_parking: "parkingsign",
   add: "plus",
   drag_handle: "line.3.horizontal",
+  undo: "arrow.uturn.backward",
 } as const satisfies Record<string, SFSymbol>;
 
 export type IconName = keyof typeof SF;

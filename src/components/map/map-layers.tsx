@@ -109,8 +109,8 @@ export function RouteLayers({
           [headTo.lon, headTo.lat],
         ])
       : emptyLines();
-  // Planning again, or a stop's preview drawn over it: the route quieter, its casing too (it covered the preview's line).
-  const quiet = route?.replanning || route?.preview?.plan != null;
+  // Planning again: the route quieter, its casing too.
+  const quiet = route?.replanning === true;
   const opacity = quiet ? 0.4 : 1;
   const size = ROUTE_LINE;
   const routeCasing = { "line-color": palette.routeCasing, "line-width": size.casing, "line-opacity": quiet ? 0.4 : 0.9 };
@@ -135,7 +135,7 @@ export function RouteLayers({
   const maneuverPoint = nextManeuver && nextManeuver.kind !== "arrive" ? pointFeatures(nextManeuver) : emptyPoints();
   const destination = route ? pointFeatures(route.destination) : emptyPoints();
   // Stops on the way (STOPS-SPEC §5.1): numbered dots ringed in the route's colour; one left behind greyed while its
-  // card shows; a place previewed as a stop, and the way through it (the route then quieter, as an alternative).
+  // card shows.
   const stopPoints = useMemo((): GeoJSON.FeatureCollection<GeoJSON.Point> => {
     const features: GeoJSON.Feature<GeoJSON.Point>[] = (route?.stops ?? []).map((x, i) => ({
       type: "Feature",
@@ -144,15 +144,8 @@ export function RouteLayers({
     }));
     const passed = route?.passedStop?.stop;
     if (passed) features.push({ type: "Feature", properties: { label: "", kind: "passed" }, geometry: { type: "Point", coordinates: [passed.lon, passed.lat] } });
-    const preview = route?.preview?.place;
-    if (preview) features.push({ type: "Feature", properties: { label: "+", kind: "preview" }, geometry: { type: "Point", coordinates: [preview.lon, preview.lat] } });
     return { type: "FeatureCollection", features };
-  }, [route?.stops, route?.passedStop, route?.preview]);
-  const previewPlan = route?.preview?.plan;
-  const previewLine = useMemo(
-    () => (previewPlan ? routeFeatures(previewPlan.coordinates.map((c) => [c.lon, c.lat])) : emptyLines()),
-    [previewPlan],
-  );
+  }, [route?.stops, route?.passedStop]);
   const alternativeRoutes = route?.alternatives;
   const alternativeLines = useMemo(() => alternativeLineFeatures(alternativeRoutes), [alternativeRoutes]);
   const alternativeLabels = alternativeLabelFeatures(alternativeRoutes, (deltaS) => formatAlternativeDelta(deltaS, t));
@@ -181,10 +174,6 @@ export function RouteLayers({
         <Layer id="active-route-head-casing" type="line" beforeId={UNDER_NAMES} layout={ROUTE_HEAD_LAYOUT} paint={routeHeadCasing} />
         <Layer id="active-route-head-underlay" type="line" beforeId={UNDER_NAMES} layout={ROUTE_HEAD_LAYOUT} paint={routeHeadUnderlay} />
         <Layer id="active-route-head-line" type="line" beforeId={UNDER_NAMES} layout={ROUTE_HEAD_LAYOUT} paint={routeHeadPaint} />
-      </GeoJSONSource>
-      <GeoJSONSource id="stop-preview-route" data={previewLine}>
-        <Layer id="stop-preview-route-casing" type="line" beforeId={UNDER_NAMES} layout={ROUTE_LAYOUT} paint={{ "line-color": palette.routeCasing, "line-width": size.casing }} />
-        <Layer id="stop-preview-route-line" type="line" beforeId={UNDER_NAMES} layout={ROUTE_LAYOUT} paint={{ "line-color": palette.route, "line-width": size.line }} />
       </GeoJSONSource>
       <GeoJSONSource id="route-next-maneuver" data={maneuverPoint}>
         <Layer

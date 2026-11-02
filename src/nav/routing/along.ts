@@ -198,3 +198,49 @@ export function placesAlong<P extends Coordinate & { key: string }>(
   const hits = [...found.values()].sort((a, b) => a.alongM - b.alongM);
   return { hits: hits.slice(skip, want), more: hits.length > want || chunkFrom < line.lengthM };
 }
+
+/** Parking up to this far from where the driver is going: a walk of some 8 minutes. */
+export const PARKING_WALK_M = 600;
+/** Parking listed for the destination, and for each stop. */
+export const PARKING_FOR_DESTINATION = 10;
+export const PARKING_FOR_STOP = 3;
+
+export interface ParkingTarget extends Coordinate {
+  /** `destination`, or the stop's key. */
+  key: string;
+}
+
+export interface ParkingHit<P> {
+  place: P;
+  /** The target it is for, and the straight walk from it to the target, m. */
+  forKey: string;
+  walkM: number;
+}
+
+/**
+ * Parking to leave the car at and walk (STOPS-SPEC §6.5): within `PARKING_WALK_M` of the destination, the nearest
+ * first, then a few near each stop. Not along the route ahead: a car park at the start is of no use. Each place once,
+ * for the first target it is near (the destination first).
+ */
+export function parkingNear<P extends Coordinate & { key: string }>(
+  targets: readonly ParkingTarget[],
+  placesIn: (box: Box) => P[],
+  { walkM = PARKING_WALK_M }: { walkM?: number } = {},
+): ParkingHit<P>[] {
+  const out: ParkingHit<P>[] = [];
+  const taken = new Set<string>();
+  targets.forEach((target, i) => {
+    const dLat = walkM / M_PER_DEG;
+    const dLon = walkM / (M_PER_DEG * Math.cos((target.lat * Math.PI) / 180));
+    const box = { south: target.lat - dLat, north: target.lat + dLat, west: target.lon - dLon, east: target.lon + dLon };
+    const near = placesIn(box)
+      .filter((p) => !taken.has(p.key))
+      .map((place) => ({ place, forKey: target.key, walkM: haversineM(place, target) }))
+      .filter((h) => h.walkM <= walkM)
+      .sort((a, b) => a.walkM - b.walkM)
+      .slice(0, i === 0 ? PARKING_FOR_DESTINATION : PARKING_FOR_STOP);
+    for (const h of near) taken.add(h.place.key);
+    out.push(...near);
+  });
+  return out;
+}

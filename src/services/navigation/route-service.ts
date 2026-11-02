@@ -7,14 +7,14 @@ import { DRIVER_WORD_M } from "@/nav/navigator";
 import { haversineM, type Coordinate } from "@/nav/geo";
 import { LocalFrame } from "@/nav/geo/local-frame";
 import type { GraphStats, RoadGraph } from "@/nav/mapmatch/graph/road-graph";
-import { ALONG_PAGE, placesAlong, RouteLine, type Box } from "@/nav/routing/along";
+import { ALONG_PAGE, parkingNear, placesAlong, RouteLine, type Box } from "@/nav/routing/along";
 import { AlternativeSearch, edgeSet, labelPoint, sharedM } from "@/nav/routing/alternatives";
 import { congestionAt } from "@/nav/routing/congestion";
 import { RouteGuidance, type GuidanceState, type GuidanceStep } from "@/nav/routing/guidance";
 import { DetourSearch, type DetourJob } from "@/nav/routing/detour";
 import type { Maneuver } from "@/nav/routing/maneuvers";
 import type { RoadSide, RouteFailure, RoutePlan, RouteStart } from "@/nav/routing/router";
-import { insertionIndex, joinPlans, MAX_STOPS, tripManeuvers, TripSearch, type TripPoint, type TripStatus } from "@/nav/routing/trip";
+import { insertionIndex, joinPlans, MAX_STOPS, tripManeuvers, TripSearch, type TripPoint } from "@/nav/routing/trip";
 import type { PlaceCategory, StopPlace } from "@/nav/search/search-index";
 import type { PositionEstimate } from "@/nav/position/types";
 import type {
@@ -123,18 +123,6 @@ export interface PassedStop {
   atDrivenM: number;
 }
 
-/** A place on the map before it becomes a stop (STOPS-SPEC §7.3): the trip through it, planned from where the car is. */
-export interface StopPreview {
-  place: TripStop;
-  /** Where it would go among the stops. */
-  index: number;
-  status: "planning" | "done" | "failed";
-  plan?: RoutePlan;
-  maneuvers?: Maneuver[];
-  /** The trip through it against the route as it is, s. */
-  deltaS?: number;
-}
-
 /** A place along the route ahead (STOPS-SPEC §6.3). */
 export interface AlongItem {
   place: StopPlace;
@@ -143,6 +131,9 @@ export interface AlongItem {
   side: RoadSide | null;
   /** Its detour, s; undefined while it is worked out. */
   detourS?: number;
+  /** Parking (STOPS-SPEC §6.5): what it is for (`destination` or a stop's key) and the walk from it there, m. */
+  parkFor?: string;
+  walkM?: number;
 }
 
 export interface AlongState {
@@ -178,8 +169,6 @@ export interface RouteSnapshot {
   atStop?: AtStop;
   /** A stop left behind: the card offering it back. */
   passedStop?: PassedStop;
-  /** A place shown on the map before it becomes a stop. */
-  preview?: StopPreview;
   /** The places along the route ahead, of one kind. */
   along?: AlongState;
   /** The first plan failed on the way to this stop (`failure`), by key. */
@@ -313,7 +302,7 @@ interface Other {
   guidance: RouteGuidance;
 }
 
-type JobName = "preview" | "back" | "along" | "estimates";
+type JobName = "back" | "along" | "estimates";
 
 export class RouteService {
   private readonly deps: RouteServiceDeps;
@@ -363,8 +352,6 @@ export class RouteService {
   /** Searches beside the route's own, each in its own slices: how to cancel the next, and whose it is. */
   private jobCancels: Partial<Record<JobName, () => void>> = {};
   private jobTokens: Partial<Record<JobName, object>> = {};
-  /** The preview's legs, for taking it as the route without planning again. */
-  private previewTrip: { key: string; legs: RoutePlan[]; points: TripPoint[]; from: RouteStart; stats: TripStatus["stats"]; wallMs: number } | null = null;
   /** The current plan as a line (places along it, detours), made once per plan. */
   private line: { planId: number; line: RouteLine } | null = null;
 
@@ -427,7 +414,7 @@ export class RouteService {
     this.planning?.cancel();
     this.planning = null;
     this.dropAlternatives(false);
-    (["preview", "back", "along", "estimates"] as const).forEach((j) => this.cancelJob(j));
+    (["back", "along", "estimates"] as const).forEach((j) => this.cancelJob(j));
     this.arrivedTimer?.();
     this.arrivedTimer = null;
     this.unsubscribe?.();
@@ -439,7 +426,6 @@ export class RouteService {
     this.points = [];
     this.handledStops.clear();
     this.closest = null;
-    this.previewTrip = null;
     this.line = null;
     this.frame = null;
     this.frameOrigin = null;
@@ -527,84 +513,6 @@ export class RouteService {
   }
 
   /**
-   * A place on the map before it becomes a stop (STOPS-SPEC §7.3): the trip through it, planned from where the car
-   * is, in slices; the route is guided as before meanwhile.
-   */
-  previewStop(place: StopInput, index?: number): void {
-    const s = this.snapshot;
-    const position = this.deps.position.getSnapshot();
-    const graph = this.graph;
-    if (!s || s.status !== "active" || !position || !graph) return;
-    const stop = this.keyed(place);
-    const at = Math.max(0, Math.min(s.stops.length, index ?? this.stopIndexFor(stop)));
-    const stops = [...s.stops];
-    stops.splice(at, 0, stop);
-    this.set({ ...s, preview: { place: stop, index: at, status: stops.length > MAX_STOPS ? "failed" : "planning" } });
-    if (stops.length > MAX_STOPS) return;
-    const points = pointsOf(stops, s.destination);
-    const frame = this.frameAt(graph, position);
-    const from = startOf(position);
-    const search = new TripSearch(graph.graph, frame, from, points, { costs: { congestion: this.planCongestion } });
-    const startedAt = this.now();
-    this.runJob("preview", (budget) => {
-      const r = search.run(budget);
-      if (r.status === "more") return false;
-      const cur = this.snapshot;
-      if (!cur?.preview || cur.preview.place.key !== stop.key) return true;
-      if (r.status === "failed") {
-        this.set({ ...cur, preview: { ...cur.preview, status: "failed" } });
-        return true;
-      }
-      const maneuvers = tripManeuvers(graph.graph, r.legs, r.plan);
-      this.previewTrip = { key: stop.key, legs: r.legs, points, from, stats: r.stats, wallMs: this.now() - startedAt };
-      const nowS = cur.guidance?.remainingS ?? cur.plan?.durationS ?? r.plan.durationS;
-      this.set({ ...cur, preview: { ...cur.preview, status: "done", plan: r.plan, maneuvers, deltaS: r.plan.durationS - nowS } });
-      return true;
-    });
-  }
-
-  /** The preview becomes a stop: its trip is the route (no new plan when it is ready). */
-  confirmPreview(): void {
-    const s = this.snapshot;
-    const pv = s?.preview;
-    if (!s || !pv) return;
-    this.cancelJob("preview");
-    const trip = this.previewTrip;
-    const graph = this.graph;
-    const position = this.deps.position.getSnapshot();
-    const stops = [...s.stops];
-    stops.splice(pv.index, 0, pv.place);
-    // A stop reached, left behind or changed since the preview was planned: its trip isn't this one, plan it again.
-    const same = trip !== null && keysOf(trip.points) === keysOf(pointsOf(stops, s.destination));
-    if (pv.status !== "done" || !pv.plan || !trip || trip.key !== pv.place.key || !same || !graph || !this.frame || !position) {
-      this.set({ ...s, preview: undefined });
-      this.addStop(pv.place, pv.index);
-      return;
-    }
-    this.note(`route stop added: ${stopLabel(pv.place)}, ${pv.index + 1} of ${stops.length}${pv.deltaS != null ? `, ${signedMin(pv.deltaS)}` : ""}`);
-    this.save(s.destination, stops);
-    this.set({ ...s, stops, preview: undefined });
-    this.planning?.cancel();
-    this.planning = null;
-    this.dropAlternatives();
-    const id = this.nextPlanId++;
-    this.lastReason = "stops";
-    this.lastPlanAt = this.now();
-    this.offSincePlanAt = null;
-    this.followedM = 0;
-    const stats = { states: trip.stats.states, tiles: trip.stats.tilesRead, planMs: trip.stats.ms, wallMs: trip.wallMs, slices: 0 };
-    this.adopt(id, "stops", pv.plan, trip.legs, trip.points, graph, this.frame, trip.from, position, stats, false);
-    this.previewTrip = null;
-  }
-
-  cancelPreview(): void {
-    const s = this.snapshot;
-    this.cancelJob("preview");
-    this.previewTrip = null;
-    if (s?.preview) this.set({ ...s, preview: undefined });
-  }
-
-  /**
    * The places of `category` along the route ahead (STOPS-SPEC §6.3), then their detours one by one; `more`: the next
    * ones after those listed.
    */
@@ -620,6 +528,10 @@ export class RouteService {
     const places = this.deps.places?.();
     if (!places?.hasPlaces) {
       this.set({ ...s, along: { category, status: "no-places", items: [], more: false } });
+      return;
+    }
+    if (category === "parking") {
+      this.findParking(places);
       return;
     }
     const line = this.lineOf(s.planId, guidance.plan);
@@ -654,6 +566,51 @@ export class RouteService {
       }
       return out.done;
     });
+  }
+
+  /**
+   * Parking to leave the car at (STOPS-SPEC §6.5): near the destination, then near each stop, not along the route
+   * ahead; no detours (the drive there is the trip's own).
+   */
+  private findParking(places: { placesIn(box: Box, categories?: ReadonlySet<PlaceCategory>): StopPlace[] }): void {
+    const s = this.snapshot!;
+    this.cancelJob("along");
+    const parking = new Set<PlaceCategory>(["parking"]);
+    const targets = [
+      { key: "destination", lat: s.destination.lat, lon: s.destination.lon },
+      ...s.stops.map((x) => ({ key: x.key, lat: x.lat, lon: x.lon })),
+    ];
+    const hits = parkingNear(targets, (box) => places.placesIn(box, parking));
+    this.note(`along the way: parking, ${hits.length} near the destination and ${s.stops.length} stops`);
+    const items = hits.map((h) => ({ place: h.place, alongM: 0, side: null, parkFor: h.forKey, walkM: h.walkM }));
+    this.set({ ...s, along: { category: "parking", status: "done", items, more: false } });
+  }
+
+  /**
+   * Parking picked for the destination or a stop (`forKey`): the car's trip ends there, or stops there, instead; the
+   * walk on is the driver's. Planned again from the car (reason `stops`).
+   */
+  parkAt(place: StopInput, forKey: string): void {
+    const s = this.snapshot;
+    if (!s) return;
+    const parking = this.keyed(place);
+    if (forKey === "destination") {
+      const destination: RouteDestination = {
+        lat: parking.lat,
+        lon: parking.lon,
+        ...(parking.name ? { name: parking.name } : {}),
+        ...(parking.id ? { id: parking.id } : {}),
+      };
+      this.note(`route parking for the destination: ${stopLabel(parking)}, was ${stopLabel(s.destination)}`);
+      this.save(destination, s.stops);
+      this.set({ ...s, destination });
+      this.plan("stops");
+      return;
+    }
+    const i = s.stops.findIndex((x) => x.key === forKey);
+    if (i < 0) return;
+    this.note(`route parking for a stop: ${stopLabel(parking)}, was ${stopLabel(s.stops[i])}`);
+    this.changeStops(s.stops.map((x, j) => (j === i ? parking : x)));
   }
 
   closeAlong(): void {
@@ -701,7 +658,7 @@ export class RouteService {
   private changeStops(stops: TripStop[]): void {
     const s = this.snapshot!;
     this.save(s.destination, stops);
-    this.set({ ...s, stops, preview: undefined });
+    this.set({ ...s, stops });
     this.plan("stops");
   }
 
@@ -763,12 +720,12 @@ export class RouteService {
    */
   private frameAt(graph: RoutingGraph, near: Coordinate): LocalFrame {
     if (!this.frame || !this.frameOrigin || haversineM(this.frameOrigin, near) > FRAME_REACH_M) {
-      (["preview", "back", "along", "estimates"] as const).forEach((j) => this.cancelJob(j));
+      (["back", "along", "estimates"] as const).forEach((j) => this.cancelJob(j));
       this.frame = new LocalFrame(near);
       this.frameOrigin = { lat: near.lat, lon: near.lon };
       graph.graph.setFrame(this.frame);
       const s = this.snapshot;
-      if (s?.preview || s?.estimates) this.set({ ...s, preview: undefined, estimates: undefined });
+      if (s?.estimates) this.set({ ...s, estimates: undefined });
     }
     return this.frame;
   }
@@ -873,7 +830,7 @@ export class RouteService {
     this.planning = { id, cancel: this.defer(step, 0) };
   }
 
-  /** A plan made (or a preview taken) becomes the route: guided, published, logged; alternatives after a new one. */
+  /** A plan made becomes the route: guided, published, logged; alternatives after a new one. */
   private adopt(
     id: number,
     reason: Reason,
@@ -1423,8 +1380,6 @@ const FAR_PROJECT_M = 20_000;
 function pointsOf(stops: readonly TripStop[], destination: RouteDestination): TripPoint[] {
   return [...stops.map((x) => ({ key: x.key, lat: x.lat, lon: x.lon })), { key: "destination", lat: destination.lat, lon: destination.lon }];
 }
-
-const keysOf = (points: readonly TripPoint[]) => points.map((x) => x.key).join(" ");
 
 /** A stop in notes: its name or what it is, and where. */
 const stopLabel = (x: RouteDestination & { category?: string }) =>

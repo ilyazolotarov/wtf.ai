@@ -29,7 +29,8 @@ import { isLost, usePlacing } from "@/components/map/use-placing";
 import { openLessons } from "@/components/guide/lesson-bodies";
 import { LessonsInvite, MapTour, TourInvite, type TourTry } from "@/components/guide/map-tour";
 import { RouteBanner } from "@/components/route/route-banner";
-import { AtStopCard, PassedStopCard, StopPreviewCard } from "@/components/route/stop-cards";
+import { AtStopCard, PassedStopCard, TripUndoCard } from "@/components/route/stop-cards";
+import { addStopWithUndo, offerRouteUndo, useTripUndo } from "@/components/route/trip-undo";
 import { useAudioOutput } from "@/components/route/use-audio-output";
 import { useVoiceGuidance, useVoiceMuted, useVoiceVolume } from "@/components/route/use-voice-guidance";
 import { UpdatePrompts } from "@/components/update/update-prompts";
@@ -116,6 +117,7 @@ export default function HomeScreen() {
   const { position, trust } = nav;
   const { permission } = usePositionPermission();
   const { route, startRoute, stopRoute } = useRoute();
+  const tripUndo = useTripUndo();
   // A route asked for without an adapter waits here for the driver's word (UI-SPEC §6.3).
   const held = useHeldRoute();
   // A long press on the map drops a pin to route to (ROUTING-SPEC §8), or to say the car is there.
@@ -428,18 +430,9 @@ export default function HomeScreen() {
                   onConfirm={held.confirm}
                 />
               )}
-              {route?.preview && !placing && (
-                <StopPreviewCard
-                  route={route}
-                  nowMs={position?.timestamp ?? 0}
-                  onOnlyHere={() => {
-                    const place = route.preview!.place;
-                    startRoute({ lat: place.lat, lon: place.lon, name: place.name, id: place.id });
-                  }}
-                />
-              )}
-              {route?.atStop && !route.preview && !placing && <AtStopCard route={route} nowMs={position?.timestamp ?? 0} onEnd={stopRoute} />}
-              {route?.passedStop && !route.atStop && !route.preview && !placing && <PassedStopCard route={route} />}
+              {tripUndo && !placing && (tripUndo.kind === "route" || route) && <TripUndoCard key={tripUndo.id} undo={tripUndo} />}
+              {route?.atStop && !placing && <AtStopCard route={route} nowMs={position?.timestamp ?? 0} onEnd={stopRoute} />}
+              {route?.passedStop && !route.atStop && !placing && <PassedStopCard route={route} />}
               {/* On the tour the pin is only tried: its card would sit under the dimmed screen. */}
               {pin && !touring && (
                 <PinCard
@@ -448,15 +441,17 @@ export default function HomeScreen() {
                   onClose={() => setPin(null)}
                   // The car is here, not a destination: the same placing as from the chip, starting at the pin.
                   onPlace={place.mayPlace ? () => place.start(pin) : undefined}
+                  // A route on is replaced at once, with Undo after (STOPS-SPEC §7.4).
                   onRoute={(name) => {
+                    offerRouteUndo(runtime.routes, route, name ?? null);
                     startRoute({ lat: pin.lat, lon: pin.lon, name });
                     setPin(null);
                   }}
-                  // While a route is on: a stop on the way, shown with its detour first (STOPS-SPEC §7.4).
+                  // While a route is on: a stop on the way, added at once, with Undo after (STOPS-SPEC §7.3).
                   onStop={
                     route?.status === "active"
                       ? (name) => {
-                          runtime.routes.previewStop({ lat: pin.lat, lon: pin.lon, name });
+                          addStopWithUndo(runtime.routes, { lat: pin.lat, lon: pin.lon, name });
                           setPin(null);
                         }
                       : undefined

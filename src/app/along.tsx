@@ -1,10 +1,12 @@
 import { router, useLocalSearchParams } from "expo-router";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 
 import { ScreenContent, ScreenLink, ScreenNote, ScreenSection } from "@/components/screens/screen-ui";
 import { formatDistance } from "@/components/status/format-geo";
+import { resultTitle } from "@/components/route/search-text";
 import { CATEGORY_ICON, CATEGORY_LABEL, detourText, placeDetail, placeName, STOP_CATEGORIES } from "@/components/route/stop-text";
+import { addStopWithUndo, offerRouteUndo } from "@/components/route/trip-undo";
 import { Icon } from "@/components/ui/icon";
 import { T } from "@/components/ui/text";
 import { Radius, usePalette } from "@/constants/theme";
@@ -14,11 +16,14 @@ import type { PlaceCategory } from "@/nav/search/search-index";
 import { usePosition } from "@/providers/position-provider";
 import { useRoute } from "@/providers/route-provider";
 import type { AlongItem } from "@/services/navigation/route-service";
+import { activeSearchIndex } from "@/services/offline-map/search-file";
 import { getRuntime } from "@/services/runtime";
 
 /**
  * Places to pull in at along the route ahead (STOPS-SPEC §7.2): a kind at a time, in order along the route, each with
- * its side, what the map knows of it, how far and its detour. A row shows it on the map as a stop to add.
+ * its side, what the map knows of it, how far and its detour. A row is added as a stop at once (Undo on the map), and
+ * the page goes back to the trip. Parking is where the driver is going instead (§6.5): near the destination, then near
+ * each stop, with the walk; a row makes it where the car goes in that one's place.
  */
 export default function AlongScreen() {
   const { t, language } = useT();
@@ -39,17 +44,91 @@ export default function AlongScreen() {
   useEffect(() => () => getRuntime().routes.closeAlong(), []);
 
   const carM = route?.guidance?.alongM ?? 0;
-  const show = (item: AlongItem) => {
-    routes.previewStop({
+  const parking = category === "parking";
+  // A place without a name (most parking) by the address nearest to it, so the rows can be told apart.
+  const titles = useMemo(() => {
+    const index = activeSearchIndex();
+    return new Map(
+      (along?.items ?? []).map((item) => {
+        let title = item.place.name;
+        if (!title) {
+          try {
+            const house = index?.nearestAddress(item.place, 150) ?? null;
+            title = house ? resultTitle(house, language, t) : null;
+          } catch (e) {
+            console.warn(`place address: ${e instanceof Error ? e.message : String(e)}`);
+          }
+        }
+        return [item.place.key, title] as const;
+      }),
+    );
+  }, [along?.items, language, t]);
+  const titleOf = (item: AlongItem) => titles.get(item.place.key) ?? placeName(item.place, t);
+  const forName = (key: string) =>
+    key === "destination" ? route?.destination.name : route?.stops.find((x) => x.key === key)?.name;
+
+  const pick = (item: AlongItem) => {
+    const stop = {
       lat: item.place.lat,
       lon: item.place.lon,
-      name: placeName(item.place, t),
+      name: titleOf(item),
       id: `place:${item.place.key}`,
       category: item.place.category,
       flags: item.place.flags,
       hours: item.place.hours,
-    });
-    router.dismissAll();
+    };
+    if (item.parkFor) {
+      offerRouteUndo(routes, route, stop.name);
+      routes.parkAt(stop, item.parkFor);
+    } else addStopWithUndo(routes, stop);
+    router.back();
+  };
+
+  const row = (item: AlongItem) => {
+    const detail = placeDetail(item.place, item.side, t, nowMs);
+    const onTheWay = item.detourS !== undefined && detourMinutes(item.detourS) === 0;
+    return (
+      <Pressable
+        key={item.place.key}
+        onPress={() => pick(item)}
+        accessibilityRole="button"
+        style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+      >
+        <View style={[styles.icon, { backgroundColor: palette.accentA }]}>
+          <Icon name={CATEGORY_ICON[item.place.category]} size={18} color={palette.accent} />
+        </View>
+        <View style={styles.copy}>
+          <T w="semibold" size={16} numberOfLines={2}>
+            {titleOf(item)}
+          </T>
+          {detail ? (
+            <T size={13} color={palette.text2} fit>
+              {detail}
+            </T>
+          ) : null}
+        </View>
+        {item.walkM !== undefined ? (
+          // Parking: the walk from it to where the driver is going.
+          <View style={styles.right}>
+            <T w="semibold" size={15} style={styles.tabular}>
+              {formatDistance(item.walkM, language)}
+            </T>
+            <T w="medium" size={13} color={palette.text2}>
+              {t("parkingWalk")}
+            </T>
+          </View>
+        ) : (
+          <View style={styles.right}>
+            <T w="semibold" size={15} style={styles.tabular}>
+              {formatDistance(Math.max(0, item.alongM - carM), language)}
+            </T>
+            <T w="medium" size={13} color={onTheWay ? palette.ok.c : palette.text2} style={styles.tabular}>
+              {detourText(item.detourS, t)}
+            </T>
+          </View>
+        )}
+      </Pressable>
+    );
   };
 
   return (
@@ -79,44 +158,19 @@ export default function AlongScreen() {
       ) : along?.status === "no-places" ? (
         <ScreenNote>{t("alongNoPlaces")}</ScreenNote>
       ) : along && along.items.length === 0 && along.status === "done" ? (
-        <ScreenNote>{t("alongNone")}</ScreenNote>
+        <ScreenNote>{t(parking ? "parkingNone" : "alongNone")}</ScreenNote>
+      ) : parking ? (
+        <>
+          <ScreenNote>{t("parkingNote")}</ScreenNote>
+          {/* Grouped by where each is for: the destination first, then the stops in order. */}
+          {[...new Set((along?.items ?? []).map((item) => item.parkFor!))].map((key) => (
+            <ScreenSection key={key} title={t("parkingFor").replace("{name}", forName(key) ?? t("droppedPin"))}>
+              {along!.items.filter((item) => item.parkFor === key).map((item) => row(item))}
+            </ScreenSection>
+          ))}
+        </>
       ) : (
-        <ScreenSection>
-          {(along?.items ?? []).map((item) => {
-            const detail = placeDetail(item.place, item.side, t, nowMs);
-            const onTheWay = item.detourS !== undefined && detourMinutes(item.detourS) === 0;
-            return (
-              <Pressable
-                key={item.place.key}
-                onPress={() => show(item)}
-                accessibilityRole="button"
-                style={({ pressed }) => [styles.row, pressed && styles.pressed]}
-              >
-                <View style={[styles.icon, { backgroundColor: palette.accentA }]}>
-                  <Icon name={CATEGORY_ICON[item.place.category]} size={18} color={palette.accent} />
-                </View>
-                <View style={styles.copy}>
-                  <T w="semibold" size={16} numberOfLines={2}>
-                    {placeName(item.place, t)}
-                  </T>
-                  {detail ? (
-                    <T size={13} color={palette.text2} fit>
-                      {detail}
-                    </T>
-                  ) : null}
-                </View>
-                <View style={styles.right}>
-                  <T w="semibold" size={15} style={styles.tabular}>
-                    {formatDistance(Math.max(0, item.alongM - carM), language)}
-                  </T>
-                  <T w="medium" size={13} color={onTheWay ? palette.ok.c : palette.text2} style={styles.tabular}>
-                    {detourText(item.detourS, t)}
-                  </T>
-                </View>
-              </Pressable>
-            );
-          })}
-        </ScreenSection>
+        <ScreenSection>{(along?.items ?? []).map((item) => row(item))}</ScreenSection>
       )}
       {along?.more && along.status === "done" && <ScreenLink label={t("alongMore")} onPress={() => routes.findAlong(category, true)} />}
     </ScreenContent>

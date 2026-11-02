@@ -1,4 +1,4 @@
-import { router, useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams, usePreventRemove } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Animated, Keyboard, Pressable, StyleSheet, TextInput, View } from "react-native";
 
@@ -19,6 +19,7 @@ import {
 import { formatArrival, formatDurationS, PROBLEM_TEXT } from "@/components/route/guidance-text";
 import { CATEGORY_ICON, CATEGORY_LABEL, detourText, STOP_CATEGORIES } from "@/components/route/stop-text";
 import { Flash, SaveConfirmation } from "@/components/route/save-feedback";
+import { addStopWithUndo, offerRouteUndo, useTripUndo } from "@/components/route/trip-undo";
 import { useStopDrag } from "@/components/route/use-stop-drag";
 import { pointPlace, resultPlace } from "@/components/route/place-search";
 import { Icon, type IconName } from "@/components/ui/icon";
@@ -196,6 +197,8 @@ export default function RouteScreen() {
           lon: doorAt.lon,
         }
       : selected;
+  // Already a stop of the trip: not offered again.
+  const isStop = target !== null && (route?.stops.some((s) => s.id === target.id) ?? false);
   const save = (place: Place, kind: SavedKind) => {
     const before = places.getSnapshot().saved;
     const was = places.savedAt(place);
@@ -216,8 +219,23 @@ export default function RouteScreen() {
     setFlashId(null);
   };
 
+  // The place's card and the stop search are steps within this page: the back gesture and button close them first,
+  // not the page under them. Leaving on purpose (a route started, the car placed) goes on.
+  const leaving = useRef(false);
+  usePreventRemove(selected !== null || adding, ({ repeat }) => {
+    if (leaving.current) repeat();
+    else if (selected) select(null);
+    else setAdding(false);
+  });
+  const leave = () => {
+    leaving.current = true;
+    router.back();
+  };
+
   const addStop = (d: Place) => {
-    routes.addStop({ lat: d.lat, lon: d.lon, name: d.title, id: d.id });
+    addStopWithUndo(routes, { lat: d.lat, lon: d.lon, name: d.title, id: d.id });
+    // Back to the trip, the stop in it: the card's button can't be pressed twice.
+    select(null);
     setAdding(false);
     setQuery("");
     Keyboard.dismiss();
@@ -275,7 +293,13 @@ export default function RouteScreen() {
   return (
     <ScreenContent title={t(adding ? "addStopTitle" : "route")} scrollEnabled={!dragging}>
       {routeOn && !adding && !selected && !q && (
-        <TripSection route={route} nowMs={position?.timestamp ?? 0} onAdd={() => setAdding(true)} onStop={stopRoute} onDragging={setDragging} />
+        <TripSection
+          route={route}
+          nowMs={position?.timestamp ?? 0}
+          onAdd={() => setAdding(true)}
+          onStop={stopRoute}
+          onDragging={setDragging}
+        />
       )}
       <View style={[styles.search, { backgroundColor: palette.surface }]}>
         <Icon name="search" size={18} color={palette.text2} />
@@ -420,13 +444,15 @@ export default function RouteScreen() {
               icon="navigation"
               onPress={() => {
                 places.addRecent(target);
+                // Replacing a route on: Undo on the map puts it back (STOPS-SPEC §7.4).
+                if (routeOn) offerRouteUndo(routes, route, target.title);
                 startRoute({ lat: target.lat, lon: target.lon, name: target.title, id: target.id });
-                router.back();
+                leave();
               }}
             />
           )}
-          {routeOn && routeId !== target.id && route.stops.length < routes.maxStops ? (
-            // A route on: this place as a stop on the way instead of the new destination.
+          {routeOn && routeId !== target.id && route.stops.length < routes.maxStops && !isStop ? (
+            // A route on: this place as a stop on the way instead of the new destination (not twice).
             <ScreenAction labelKey="addAsStop" icon="add" secondary onPress={() => addStop(target)} />
           ) : !routeOn ? (
             // No route yet: go there, then pick a stop on the way.
@@ -449,7 +475,7 @@ export default function RouteScreen() {
             secondary
             onPress={() => {
               requestPlacing(target);
-              router.back();
+              leave();
             }}
           />
           {feedback?.placeId === selected.id && (
@@ -526,6 +552,10 @@ function TripSection({
   const keys = useMemo(() => route.stops.map((s) => s.key), [route.stops]);
   const move = useMemo(() => routes.moveStop.bind(routes), [routes]);
   const drag = useStopDrag(keys, move, onDragging);
+  // The stop just added (here, or from the places on the way): its row glows once.
+  const undo = useTripUndo();
+  const [glowed, setGlowed] = useState<number | null>(null);
+  const added = undo?.kind === "stop" && undo.id !== glowed ? undo.stopKey : undefined;
   const plan = route.plan;
   const g = route.guidance;
   const leftS = g?.remainingS ?? plan?.durationS ?? 0;
@@ -575,6 +605,7 @@ function TripSection({
               onLayout={drag.layout(i)}
               style={[styles.destination, { backgroundColor: palette.groupBg }, drag.offset(i)]}
             >
+              {stop.key === added && <Flash onDone={() => setGlowed(undo!.id)} />}
               <View style={[tripStyles.stop, { borderColor: palette.route, backgroundColor: palette.groupBg }]}>
                 {stop.category ? (
                   <Icon name={CATEGORY_ICON[stop.category]} size={16} color={palette.route} />
@@ -713,7 +744,8 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   rowIcon: { width: 30, height: 30, borderRadius: 15, alignItems: "center", justifyContent: "center" },
   selectedName: { letterSpacing: -0.56 },
-  metrics: { flexDirection: "row", gap: 10 },
-  metric: { flex: 1, gap: 4 },
+  // Columns as wide as their words, the room left shared: "Кінець маршруту о" on one line beside the others.
+  metrics: { flexDirection: "row", gap: 6 },
+  metric: { flexGrow: 1, flexShrink: 1, flexBasis: "auto", gap: 4 },
   tabular: { fontVariant: ["tabular-nums"] },
 });
