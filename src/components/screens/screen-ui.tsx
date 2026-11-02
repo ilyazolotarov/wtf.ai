@@ -240,6 +240,7 @@ export function ScreenAction({
   disabled = false,
   secondary = false,
   compact = false,
+  style,
 }: {
   labelKey?: keyof Strings;
   label?: string;
@@ -248,6 +249,7 @@ export function ScreenAction({
   disabled?: boolean;
   secondary?: boolean;
   compact?: boolean;
+  style?: StyleProp<ViewStyle>;
 }) {
   const { t } = useT();
   const palette = usePalette();
@@ -261,6 +263,7 @@ export function ScreenAction({
       style={({ pressed }) => [
         styles.action,
         compact && styles.actionCompact,
+        style,
         { backgroundColor: secondary ? palette.secBg : palette.accent },
         disabled && styles.disabled,
         pressed && !disabled && styles.pressed,

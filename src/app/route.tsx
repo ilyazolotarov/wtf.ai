@@ -470,9 +470,16 @@ export default function RouteScreen() {
             </View>
           ) : (
             <View style={styles.saveRow}>
-              <ScreenAction labelKey="placeHome" icon="home" compact secondary onPress={() => save(selected, "home")} />
-              <ScreenAction labelKey="placeWork" icon="work" compact secondary onPress={() => save(selected, "work")} />
-              <ScreenAction labelKey="savePlace" icon="star_border" compact secondary onPress={() => save(selected, "favorite")} />
+              <ScreenAction labelKey="placeHome" icon="home" compact secondary style={styles.saveAction} onPress={() => save(selected, "home")} />
+              <ScreenAction labelKey="placeWork" icon="work" compact secondary style={styles.saveAction} onPress={() => save(selected, "work")} />
+              <ScreenAction
+                labelKey="savePlace"
+                icon="star_border"
+                compact
+                secondary
+                style={styles.saveAction}
+                onPress={() => save(selected, "favorite")}
+              />
             </View>
           )}
           <ScreenLink label={t("chooseAnotherCity")} onPress={() => select(null)} />
@@ -701,6 +708,8 @@ const styles = StyleSheet.create({
   doorRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   door: { minWidth: 48, minHeight: 44, paddingHorizontal: 14, borderRadius: Radius.pill, alignItems: "center", justifyContent: "center" },
   saveRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 },
+  // Home, Work and Save in one line on a 393-pt phone in Ukrainian: the compact 16 left it ~2 pt short.
+  saveAction: { paddingHorizontal: 14 },
   flex: { flex: 1 },
   rowIcon: { width: 30, height: 30, borderRadius: 15, alignItems: "center", justifyContent: "center" },
   selectedName: { letterSpacing: -0.56 },
