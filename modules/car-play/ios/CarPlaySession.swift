@@ -603,7 +603,7 @@ final class CarPlaySession: NSObject {
   /** The navigation session follows the route: CarPlay's guidance panel, its banners, the car's cluster. */
   private func syncTrip() {
     guard let mapTemplate else { return }
-    let plan = CarPlayLogic.tripPlan(current: tripKey, arrived: tripShows == .arrived, route: route)
+    let plan = CarPlayLogic.tripPlan(current: tripKey, shown: tripShows, route: route)
     if let end = plan.end {
       if end == .finish { navigation?.finishTrip() } else { navigation?.cancelTrip() }
       navigation = nil
@@ -638,14 +638,17 @@ final class CarPlaySession: NSObject {
         navigation.pauseTrip(for: rerouting ? .rerouting : .loading, description: route.message)
         maneuversKey = nil
       }
-    case .arrived:
-      if tripShows != .arrived {
+    case .arrived, .atStop:
+      if tripShows != plan.shows {
         maneuvers = [arrival(route)]
         navigation.upcomingManeuvers = maneuvers
         maneuversKey = nil
         stepEstimatesKey = nil
-        // Nothing left: the last estimates sent were from some metres before (arrival counts within a radius).
-        mapTemplate.updateEstimates(Self.estimates(0, "m", 0), for: navigation.trip)
+        // At the destination nothing is left: the last estimates sent were from some metres before (arrival counts
+        // within a radius). At a stop, what is left to the next one.
+        let left = plan.shows == .atStop
+          ? Self.estimates(route.remainingShown, route.remainingUnit, route.remainingS) : Self.estimates(0, "m", 0)
+        mapTemplate.updateEstimates(left, for: navigation.trip)
         tripEstimatesKey = nil
       }
     case .steps:

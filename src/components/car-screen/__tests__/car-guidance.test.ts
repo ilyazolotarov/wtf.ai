@@ -208,13 +208,14 @@ describe("stops on the way (STOPS-SPEC §9)", () => {
     expect(r).toMatchObject({ status: "active", atStop: true, message: "You're at the stop: Fuel" });
   });
 
-  test("CarPlay: a trip per leg, to the next stop; a stop reached is that trip's arrival", () => {
+  test("CarPlay: one trip to the destination, its estimates to the next stop; a stop reached an arrival there", () => {
     const r = carRoute(withStop(), t, "en", [], true)!;
-    expect(r).toMatchObject({ destinationName: "Fuel", destinationLat: 50.43, destinationLon: 30.51, remainingM: 3000 });
+    expect(r).toMatchObject({ destinationName: "Kyiv", remainingM: 3000 });
     const at = carRoute(withStop({ stops: [], atStop: { stop: fuel, atM: 5300 } }), t, "en", [], true)!;
-    expect(at).toMatchObject({ status: "arrived", message: "You're at the stop", destinationName: "Fuel", steps: [] });
-    // Gone on: the next trip is to the destination.
+    expect(at).toMatchObject({ status: "arrived", atStop: true, message: "You're at the stop", destinationName: "Kyiv", steps: [] });
+    // No stop ahead of it: what is left to the destination.
+    expect(at.remainingM).toBe(10_000);
     const on = carRoute(withStop({ stops: [] }), t, "en", [], true)!;
-    expect(on).toMatchObject({ status: "active", destinationName: "Kyiv" });
+    expect(on).toMatchObject({ status: "active", atStop: false, destinationName: "Kyiv", remainingM: 10_000 });
   });
 });

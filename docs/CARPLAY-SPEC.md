@@ -173,8 +173,9 @@ GNSS and the adapter as they were. What the JS side sent is kept on the native s
   with several answers opens them in a list (`openSearch`): CarPlay's search can't be given a text. The routes list:
   the route followed, then each alternative, titled by the street it goes by, then how it compares, its time and
   distance (`choose-alternative`). The car's words are the app's (en/uk), sent by the session; English until it has.
-- **The navigation session** (`CPNavigationSession`): a trip per destination (a re-plan or an alternative to the same
-  one is the same trip; setting off again after arriving is a new one), started when a route is planned. A trip
+- **The navigation session** (`CPNavigationSession`): a trip per destination (a re-plan, an alternative or a stop on
+  the way to the same one is the same trip, a stop reached an arrival card within it, STOPS-SPEC §9; setting off
+  again after arriving is a new one), started when a route is planned. A trip
   starts at least `CarPlayLogic.tripRestartS` (1 s) after the one before it ended: CarPlay ends a trip outside the
   app, and a start in the same turn as an end finds the old trip active and CarPlay ends the app. The car's screen
   going keeps a followed route, shown at once when it comes on again, but not an arrived one. Maneuvers
@@ -460,8 +461,6 @@ over CarPlay's Settings. The cameras' badges and the pill's speed on a simulated
 2. Later: the dashboard and instrument cluster scenes of the app's own (`CPSupportsDashboardNavigationScene`,
    `CPSupportsInstrumentClusterNavigationScene`); iOS 26.4's route sharing with the car; iOS 27's panels on the map
    template.
-3. Stops on the way: a trip per leg, a stop reached an arrival there (STOPS-SPEC §9), run in the iOS 26.3
-   Simulator (estimates to the stop, the flag, the arrival card, the next trip after it, a stop left behind; no
-   crash on back-to-back trips). None are added on the car. One trip through the stops needs iOS 26.4's route
-   segments (`CPRouteSegment`), part of route sharing; the Simulator's CarPlay from 26.4 (26.5 too) aborts on any map
-   template (`CPSMapTemplateViewController _updateShareButtonVisibility`), so that waits for a car.
+3. Stops on the way: one trip through them, a stop reached an arrival card within it (STOPS-SPEC §9), run in the
+   iOS 26.3 Simulator; not yet driven in a car. None are added on the car. Route sharing's segments
+   (`CPRouteSegment`) only in a car that shares routes: no Simulator shows CarPlay's map from iOS 26.4.

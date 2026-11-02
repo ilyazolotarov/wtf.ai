@@ -37,44 +37,29 @@ export function carRoute(
   /** The street each route goes by (`viaNames`): the route's, then its alternatives'. */
   via: (string | null)[] = [],
   /**
-   * CarPlay: the failures' words without the phone's screens (Apple's guidelines), and a trip per leg (STOPS-SPEC §9):
-   * the destination is the next stop, a stop reached is an arrival there.
+   * CarPlay: the failures' words without the phone's screens (Apple's guidelines), and one trip through the stops
+   * (STOPS-SPEC §9): the estimates to the next stop, a stop reached an arrival there.
    */
   phoneFree = false,
 ): CarRoutePayload | null {
   const payload = carRouteAll(route, t, language, via, phoneFree);
-  return payload && phoneFree ? perLeg(payload, route!, t) : payload;
+  return payload && phoneFree ? byStops(payload, route!, t) : payload;
 }
 
-/** CarPlay's trip is one leg: to the next stop (its estimates), and a stop reached is that trip's arrival. */
-function perLeg(p: CarRoutePayload, route: RouteSnapshot, t: (key: keyof Strings) => string): CarRoutePayload {
-  if (route.atStop && p.status === "active") {
-    const { stop } = route.atStop;
-    return {
-      ...p,
-      status: "arrived",
-      message: t("atStopTitle"),
-      destinationName: stop.name ?? "",
-      destinationLat: stop.lat,
-      destinationLon: stop.lon,
-      steps: [],
-      alternatives: [],
-      ...carRemaining(0, 0),
-    };
-  }
-  const next = route.stops[0];
+/**
+ * CarPlay's trip to the destination, told stop by stop: its estimates to the next stop, and a stop reached is an
+ * arrival there (`atStop`), the estimates then to the one after.
+ */
+function byStops(p: CarRoutePayload, route: RouteSnapshot, t: (key: keyof Strings) => string): CarRoutePayload {
   const ahead = p.stops[0];
-  if (!next || !ahead || (p.status !== "active" && p.status !== "planning")) return p;
-  return {
-    ...p,
-    destinationName: next.name ?? "",
-    destinationLat: next.lat,
-    destinationLon: next.lon,
-    remainingM: ahead.remainingM,
-    remainingS: ahead.remainingS,
-    remainingShown: ahead.remainingShown,
-    remainingUnit: ahead.remainingUnit,
-  };
+  const leg =
+    ahead && (p.status === "active" || p.status === "planning")
+      ? { remainingM: ahead.remainingM, remainingS: ahead.remainingS, remainingShown: ahead.remainingShown, remainingUnit: ahead.remainingUnit }
+      : {};
+  if (route.atStop && p.status === "active") {
+    return { ...p, ...leg, status: "arrived", message: t("atStopTitle"), steps: [], alternatives: [] };
+  }
+  return { ...p, ...leg };
 }
 
 const carRemaining = (remainingM: number, remainingS: number) => {

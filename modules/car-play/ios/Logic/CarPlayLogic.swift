@@ -47,6 +47,8 @@ struct CarRoute: Equatable {
   var detail: String = ""
   /** The other ways to the destination (ROUTING-SPEC §8.7), to choose from. */
   var alternatives: [CarAlternative] = []
+  /** `arrived` at a stop on the way, not at the destination (STOPS-SPEC §9). */
+  var atStop: Bool = false
 }
 
 /** Another way to the destination: `index` in the route's alternatives; the street it goes by, else its time; more. */
@@ -171,6 +173,8 @@ enum CarTripShows: Equatable {
   case steps
   /** At the destination. */
   case arrived
+  /** At a stop on the way (STOPS-SPEC §9): an arrival there, the trip going on to the destination. */
+  case atStop
 }
 
 /** What the navigation session is told for a new route state. */
@@ -265,31 +269,35 @@ enum CarPlayLogic {
     return route.status == "active" && !route.replanning && !route.steps.isEmpty
   }
 
-  /** A trip per destination: a re-plan or an alternative to the same one is the same trip. */
+  /**
+   * A trip per destination: a re-plan or an alternative to the same one is the same trip, and so is a trip through
+   * stops (the stops change, the destination doesn't).
+   */
   static func tripKey(_ route: CarRoute) -> String {
     String(format: "%.6f,%.6f", route.destinationLat, route.destinationLon)
   }
 
   /**
-   * The navigation session for a new route state, given the trip shown (`current`, its key) and whether it arrived.
+   * The navigation session for a new route state, given the trip shown (`current`, its key) and what it shows.
    * Arrival keeps the trip until the route goes: the panel says so, with the flag. A failed plan cancels it
-   * (an alert says why).
+   * (an alert says why). A stop reached is an arrival there within the trip, which goes on from it.
    */
-  static func tripPlan(current: String?, arrived: Bool, route: CarRoute?) -> CarTripPlan {
+  static func tripPlan(current: String?, shown: CarTripShows, route: CarRoute?) -> CarTripPlan {
+    let arrived = shown == .arrived || shown == .atStop
     let ending: CarTripPlan.End? = current == nil ? nil : arrived ? .finish : .cancel
     guard let route, navigating(route) else { return CarTripPlan(end: ending, start: nil, shows: .none) }
     let key = tripKey(route)
     let same = current == key
     let shows: CarTripShows
     if route.status == "arrived" {
-      shows = .arrived
+      shows = route.atStop ? .atStop : .arrived
     } else if showsSteps(route) {
       shows = .steps
     } else {
       shows = .loading(rerouting: route.replanning)
     }
     // Back on the way after arriving (a new route to the same place): a trip of its own.
-    let again = same && arrived && route.status != "arrived"
+    let again = same && shown == .arrived && route.status != "arrived"
     if same && !again { return CarTripPlan(end: nil, start: nil, shows: shows) }
     return CarTripPlan(end: ending, start: key, shows: shows)
   }

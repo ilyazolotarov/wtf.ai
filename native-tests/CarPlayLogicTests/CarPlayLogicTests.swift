@@ -11,12 +11,12 @@ private func step(_ id: String = "left:@50.45,30.52", kind: String = "left", dis
 
 private func route(
   _ status: String = "active", steps: [CarStep] = [step()], replanning: Bool = false, quiet: Bool = false,
-  lat: Double = 49.84, lon: Double = 24.03, alternatives: [CarAlternative] = []
+  lat: Double = 49.84, lon: Double = 24.03, alternatives: [CarAlternative] = [], atStop: Bool = false
 ) -> CarRoute {
   CarRoute(
     status: status, message: nil, destinationName: "Lviv", destinationLat: lat, destinationLon: lon,
     replanning: replanning, quiet: quiet, steps: steps, remainingM: 12_000, remainingS: 900, remainingShown: 12,
-    remainingUnit: "km1", alternatives: alternatives)
+    remainingUnit: "km1", alternatives: alternatives, atStop: atStop)
 }
 
 private let lviv = "49.840000,24.030000"
@@ -24,25 +24,39 @@ private let notice = CarNotice(kind: CarNotice.location, title: "Location is off
 
 final class TripPlanTests: XCTestCase {
   func testARouteStartsATripThatFollowsItsStates() {
-    XCTAssertEqual(CarPlayLogic.tripPlan(current: nil, arrived: false, route: route("planning", steps: [])), CarTripPlan(end: nil, start: lviv, shows: .loading(rerouting: false)))
-    XCTAssertEqual(CarPlayLogic.tripPlan(current: lviv, arrived: false, route: route()), CarTripPlan(end: nil, start: nil, shows: .steps))
+    XCTAssertEqual(CarPlayLogic.tripPlan(current: nil, shown: .none, route: route("planning", steps: [])), CarTripPlan(end: nil, start: lviv, shows: .loading(rerouting: false)))
+    XCTAssertEqual(CarPlayLogic.tripPlan(current: lviv, shown: .steps, route: route()), CarTripPlan(end: nil, start: nil, shows: .steps))
     XCTAssertEqual(
-      CarPlayLogic.tripPlan(current: lviv, arrived: false, route: route(replanning: true)),
+      CarPlayLogic.tripPlan(current: lviv, shown: .steps, route: route(replanning: true)),
       CarTripPlan(end: nil, start: nil, shows: .loading(rerouting: true)))
-    XCTAssertEqual(CarPlayLogic.tripPlan(current: lviv, arrived: false, route: route("arrived", steps: [])), CarTripPlan(end: nil, start: nil, shows: .arrived))
+    XCTAssertEqual(CarPlayLogic.tripPlan(current: lviv, shown: .steps, route: route("arrived", steps: [])), CarTripPlan(end: nil, start: nil, shows: .arrived))
   }
 
   func testArrivalFinishesTheTripWhenTheRouteGoesAndOtherwiseItIsCancelled() {
-    XCTAssertEqual(CarPlayLogic.tripPlan(current: lviv, arrived: true, route: nil), CarTripPlan(end: .finish, start: nil, shows: .none))
-    XCTAssertEqual(CarPlayLogic.tripPlan(current: lviv, arrived: false, route: nil), CarTripPlan(end: .cancel, start: nil, shows: .none))
-    XCTAssertEqual(CarPlayLogic.tripPlan(current: lviv, arrived: false, route: route("failed", steps: [])), CarTripPlan(end: .cancel, start: nil, shows: .none))
-    XCTAssertEqual(CarPlayLogic.tripPlan(current: nil, arrived: false, route: nil), CarTripPlan(end: nil, start: nil, shows: .none))
+    XCTAssertEqual(CarPlayLogic.tripPlan(current: lviv, shown: .arrived, route: nil), CarTripPlan(end: .finish, start: nil, shows: .none))
+    XCTAssertEqual(CarPlayLogic.tripPlan(current: lviv, shown: .steps, route: nil), CarTripPlan(end: .cancel, start: nil, shows: .none))
+    XCTAssertEqual(CarPlayLogic.tripPlan(current: lviv, shown: .steps, route: route("failed", steps: [])), CarTripPlan(end: .cancel, start: nil, shows: .none))
+    XCTAssertEqual(CarPlayLogic.tripPlan(current: nil, shown: .none, route: nil), CarTripPlan(end: nil, start: nil, shows: .none))
   }
 
   func testAnotherDestinationIsAnotherTripAndSoIsSettingOffAgainAfterArriving() {
     let kyiv = route(lat: 50.45, lon: 30.52)
-    XCTAssertEqual(CarPlayLogic.tripPlan(current: lviv, arrived: false, route: kyiv), CarTripPlan(end: .cancel, start: "50.450000,30.520000", shows: .steps))
-    XCTAssertEqual(CarPlayLogic.tripPlan(current: lviv, arrived: true, route: route()), CarTripPlan(end: .finish, start: lviv, shows: .steps))
+    XCTAssertEqual(CarPlayLogic.tripPlan(current: lviv, shown: .steps, route: kyiv), CarTripPlan(end: .cancel, start: "50.450000,30.520000", shows: .steps))
+    XCTAssertEqual(CarPlayLogic.tripPlan(current: lviv, shown: .arrived, route: route()), CarTripPlan(end: .finish, start: lviv, shows: .steps))
+  }
+
+  func testOneTripThroughTheStops() {
+    let atStop = route("arrived", steps: [], atStop: true)
+    XCTAssertEqual(CarPlayLogic.tripPlan(current: lviv, shown: .steps, route: atStop), CarTripPlan(end: nil, start: nil, shows: .atStop))
+    // Going on from it, planned again from it, or a stop left behind: the same trip.
+    XCTAssertEqual(CarPlayLogic.tripPlan(current: lviv, shown: .atStop, route: route()), CarTripPlan(end: nil, start: nil, shows: .steps))
+    XCTAssertEqual(
+      CarPlayLogic.tripPlan(current: lviv, shown: .atStop, route: route(replanning: true)),
+      CarTripPlan(end: nil, start: nil, shows: .loading(rerouting: true)))
+    // Ended at the stop: the trip arrived.
+    XCTAssertEqual(CarPlayLogic.tripPlan(current: lviv, shown: .atStop, route: nil), CarTripPlan(end: .finish, start: nil, shows: .none))
+    // The destination reached after it.
+    XCTAssertEqual(CarPlayLogic.tripPlan(current: lviv, shown: .steps, route: route("arrived", steps: [])), CarTripPlan(end: nil, start: nil, shows: .arrived))
   }
 
   func testATripStartsOnlyOnceCarPlayHasHadTimeToEndTheOneBefore() {

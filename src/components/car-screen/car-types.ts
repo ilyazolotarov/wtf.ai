@@ -49,10 +49,13 @@ export interface CarRoutePayload {
   alternatives: CarAlternativePayload[];
   /**
    * The stops on the way not reached yet (STOPS-SPEC §9), each from the car: Android Auto's trip lists them before the
-   * destination. CarPlay gets a trip per leg instead: the destination is then the next stop.
+   * destination. CarPlay's one trip has the next stop's estimates instead.
    */
   stops: CarStopPayload[];
-  /** At a stop, waiting to go on: Android Auto shows the message (the stop's words), not the next leg's maneuvers. */
+  /**
+   * At a stop, waiting to go on: Android Auto shows the message (the stop's words), not the next leg's maneuvers;
+   * CarPlay an arrival there (`arrived`), its trip going on.
+   */
   atStop: boolean;
 }
 

@@ -218,17 +218,16 @@ Display only: stops are added, removed and moved on the phone. The payload carri
 - **Android Auto** (ANDROID-AUTO-SPEC §4): the `Trip` gets a destination per stop ahead, then the destination. The
   stop maneuver is `TYPE_DESTINATION_LEFT`/`_RIGHT` (or plain), the flag icon. At a stop: the message card with the
   flag, "You're at the stop: <name>", the session still navigating.
-- **CarPlay** (CARPLAY-SPEC §4): a trip per leg. The payload's destination and estimates are the next stop's; at a
-  stop the route reads as arrived there ("You're at the stop", `.arriveAtDestination`); going on is a new destination,
-  so a new trip (`CarPlayLogic.tripPlan`). The `stop` kinds draw as the arrival. A stop left behind changes the
-  destination without an arrival: the trip is cancelled and the next one starts. Run in the iOS 26.3 Simulator: the
-  estimates count to the stop, the flag ahead of it, the arrival card at it, the next trip a second after the wait
-  ends (two stops 300 m apart, back to back), a stop left behind; no crash. The payload's `stops` and `atStop` are
-  ignored by CarPlay's record.
-- **One CarPlay trip through the stops:** iOS 26.4 has a trip of route segments, each between two waypoints
-  (`CPRouteSegment`, `CPNavigationWaypoint`, `CPNavigationSession.addRouteSegments`, `currentSegment`), part of route
-  sharing with the car's own navigation. Not used: the Simulator's CarPlay from iOS 26.4 (26.5 too) aborts on any
-  map template (`CPSMapTemplateViewController _updateShareButtonVisibility`), so it can't be tried there (§12).
+- **CarPlay** (CARPLAY-SPEC §4): one trip to the destination, on every iOS. Its estimates are the next stop's; at a
+  stop the payload reads as arrived (`atStop`), shown as the arrival card ("You're at the stop",
+  `.arriveAtDestination`) with the estimates to the next stop or the destination, and the trip goes on from it
+  (`CarPlayLogic.tripPlan`: `.atStop`). The `stop` kinds draw as the arrival. A stop left behind or a stop added keeps
+  the trip; the route ended at a stop finishes it. Run in the iOS 26.3 Simulator through two stops 360 m apart to
+  the destination: one trip started, the arrival card at each stop, the flag and its distance between them.
+- **Not used: iOS 26.4's route segments** (`CPRouteSegment`, `CPNavigationWaypoint`, `addRouteSegments`). They are
+  route sharing, the route and its stops handed to a car's own navigation, and change nothing on CarPlay's screen.
+  Tried only in a car with route sharing: the Simulator's CarPlay from iOS 26.4 aborts on any map template
+  (`CPSMapTemplateViewController _updateShareButtonVisibility`), and Xcode 27 has no Simulator CarPlay.
 - A destination picked on the car replaces the trip (§5.4).
 
 ## 10. Trip log (TRIP-LOGGER-SPEC §6.3)
@@ -261,5 +260,4 @@ Display only: stops are added, removed and moved on the phone. The payload carri
 ## 12. Open items
 
 1. Charging stations' sockets and power.
-2. CarPlay: one trip through the stops with iOS 26.4's route segments (§9), tried in a car (the Simulator can't show
-   a map template from 26.4); a trip per leg below 26.4 either way.
+2. CarPlay's one trip through the stops (§9) driven in a car: the arrival card at a stop and the trip going on.

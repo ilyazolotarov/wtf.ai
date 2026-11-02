@@ -38,6 +38,7 @@ struct CarRouteRecord: Record {
   @Field var title: String = ""
   @Field var detail: String = ""
   @Field var alternatives: [CarAlternativeRecord] = []
+  @Field var atStop: Bool = false
 }
 
 struct CarPlaceRecord: Record {
@@ -135,7 +136,8 @@ public class CarPlayModule: Module {
             },
             remainingM: r.remainingM, remainingS: r.remainingS, remainingShown: r.remainingShown,
             remainingUnit: r.remainingUnit, title: r.title, detail: r.detail,
-            alternatives: r.alternatives.map { CarAlternative(index: $0.index, title: $0.title, detail: $0.detail) })
+            alternatives: r.alternatives.map { CarAlternative(index: $0.index, title: $0.title, detail: $0.detail) },
+            atStop: r.atStop)
         })
     }.runOnQueue(.main)
 
