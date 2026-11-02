@@ -365,7 +365,7 @@ passes the probe on this phone, it sends the driver to the maker's own updater a
      the last car seen on the same protocol (`vinSource: "remembered"`, link event `vin: not read; the last car on
      protocol 6: …`); with none, the car is unknown (`vin: null`, `"missing"` after every retry), and what is kept per
      car is kept under `UNKNOWN_CAR` until a VIN comes (`expectedCar()`, NAVIGATOR-SPEC §7.4). Before this, a
-     missed read cleared the adapter's VIN, and with it the parked pose, speed scale and compass of the next start.
+     missed read cleared the adapter's VIN, and with it the parked pose and speed scale of the next start.
    - The trip log has `vehicle_vin_source` next to `vehicle_vin`, both written again when a retry reads the VIN.
 
 ### 9.2 Pin the speed ECU
@@ -526,7 +526,11 @@ BLE and Classic adapters (§13).
   variants, NUL bytes, `SEARCHING...`, multiple ECUs, ignition/engine states, K-line sessions (`klineSessionMs`),
   clone profiles (no response count, `v2.1` banner, `?` on `AT@1`/`STI`, drops the first command, occasional
   `STOPPED`), the STN pass filters, hardware filter and `STM` monitor with a per-profile broadcast list. Also the
-  developer's emulated adapters in the app (with a scripted drive).
+  developer's emulated adapters in the app (with a scripted drive: `wtfai://vehicle?emulators=1&cycle=…&turn=…`, the
+  speed and the heading in time). The STN and vLinker ones broadcast the emulators' car (a Mazda VIN) as its profile
+  reads it: the four wheels at 50 Hz turning with the heading (the rear ones apart by the yaw over the 1.6 m track),
+  the speed and the gear; the app picks the profile, checks it (§16.5) and drives on the wheels, so the store video's
+  car turns without a gyro too (the iOS Simulator has none).
 - **Unit tests:** parser (golden strings), probe outcomes, init fallbacks, scheduler priorities and rate stats,
   engine-state transitions, the CAN shadow and monitor, the core's lifecycle and car list.
 - **Native logic** (`modules/vehicle-link/ios/Logic/LinkLogic.swift`, `android/**/logic/LinkLogic.kt`): UART

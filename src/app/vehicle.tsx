@@ -19,7 +19,7 @@ import { usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
 import { firmwareUpdaterFor } from "@/obd/catalog";
 import type { DiscoveredDevice } from "@/obd/types";
-import { driveProfileNext, parseSpeedProfile } from "@/services/vehicle-link/driving-emulator";
+import { driveProfileNext, parseHeadingProfile, parseSpeedProfile } from "@/services/vehicle-link/driving-emulator";
 import { releaseUpdaterHold } from "@/services/vehicle-link/firmware-notice";
 import {
   useDevSettings,
@@ -29,15 +29,16 @@ import {
 
 export default function VehicleScreen() {
   const { t } = useT();
-  const params = useLocalSearchParams<{ emulators?: string; cycle?: string }>();
+  const params = useLocalSearchParams<{ emulators?: string; cycle?: string; turn?: string }>();
   const { setDevSettings: setDev } = useRuntime();
   // `wtfai://vehicle?emulators=1` lists the simulated adapters: the emulator smoke test (scripts/android-smoke.sh)
   // has no Bluetooth and drives the real app against them. Same switch as Developer → Show emulated adapters.
-  // `&cycle=0:0,10:0,22:50,…` (seconds:km/h): the emulator connected next drives that speed profile (the store video).
+  // `&cycle=0:0,10:0,22:50,…` (seconds:km/h): the emulator connected next drives that speed profile (the store video);
+  // `&turn=0:270,12:270,15:360,…` (seconds:heading in degrees): its wheels turn as the car's heading does.
   useEffect(() => {
     if (params.emulators === "1") setDev({ showEmulators: true });
-    if (params.cycle) driveProfileNext(parseSpeedProfile(params.cycle));
-  }, [params.emulators, params.cycle, setDev]);
+    if (params.cycle) driveProfileNext(parseSpeedProfile(params.cycle), parseHeadingProfile(params.turn));
+  }, [params.emulators, params.cycle, params.turn, setDev]);
 
   return (
     <ScreenContent title={t("vehicle")}>

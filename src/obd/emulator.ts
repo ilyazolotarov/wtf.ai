@@ -179,6 +179,8 @@ export class Elm327Emulator implements Transport {
   private stopIgnored: "next" | "now" | null = null;
   private monitorStartUs = 0;
   private broadcastSent: number[] = [];
+  /** A broadcast frame's data as it goes out, in place of the profile's (null: the profile's). */
+  private broadcastSource: ((id: number) => number[] | null) | null = null;
   private frozen: "until-reconnect" | "for-good" | null = null;
   private freezeAtMonitor: "until-reconnect" | "for-good" | null = null;
   private poweredOff = false;
@@ -199,6 +201,11 @@ export class Elm327Emulator implements Transport {
 
   setVehicle(state: Partial<VehicleState>): void {
     this.vehicle = { ...this.vehicle, ...state };
+  }
+
+  /** The broadcast frames' data from `source` as they go out (the car's wheels as it drives), else the profile's. */
+  setBroadcastSource(source: ((id: number) => number[] | null) | null): void {
+    this.broadcastSource = source;
   }
 
   async connect(): Promise<ConnectedInfo> {
@@ -329,7 +336,8 @@ export class Elm327Emulator implements Transport {
 
   private broadcastLine(b: { id: number; data: number[] }): string {
     const sep = this.spaces ? " " : "";
-    return [...(this.headers ? [b.id.toString(16).toUpperCase().padStart(3, "0")] : []), ...b.data.map(hex2)].join(sep);
+    const data = this.broadcastSource?.(b.id) ?? b.data;
+    return [...(this.headers ? [b.id.toString(16).toUpperCase().padStart(3, "0")] : []), ...data.map(hex2)].join(sep);
   }
 
   onLinkLost(listener: (reason: string) => void): () => void {
