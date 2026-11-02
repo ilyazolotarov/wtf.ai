@@ -606,9 +606,10 @@ async function run(id: number) {
       continue;
     }
     // Not gated on `id`: a paused in-memory task keeps the callback from the run that created it.
-    const onProgress = ({ bytesWritten }: { bytesWritten: number }) => {
+    // iOS sends the count as a BigInt (Swift's Int64), despite the `number` type; adding it to a number throws.
+    const onProgress = ({ bytesWritten }: { bytesWritten: number | bigint }) => {
       if (job === j && j.index === index && getState().download?.phase === "downloading") {
-        setDownload("downloading", j.done + bytesWritten);
+        setDownload("downloading", j.done + Number(bytesWritten));
       }
     };
     let operation: Promise<File | null>;

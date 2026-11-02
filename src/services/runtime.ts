@@ -535,7 +535,8 @@ export function getRuntime(): Runtime {
     nowUs,
     record: (r) => recorder.appStats(r),
     note: (text) => recorder.note(text),
-    report: (message, extra) => Sentry.captureMessage(message, { level: "warning", extra }),
+    // Grouped by the message: by the stack, a bundle without source maps made a second issue of the same ending.
+    report: (message, extra, tags) => Sentry.captureMessage(message, { level: "warning", extra, tags, fingerprint: [message] }),
     setInterval: (fn, ms) => setInterval(fn, ms),
     clearInterval: (handle) => clearInterval(handle as ReturnType<typeof setInterval>),
   });

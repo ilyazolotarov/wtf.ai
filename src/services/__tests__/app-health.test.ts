@@ -11,7 +11,7 @@ function harness(launch: Partial<LaunchInfo> = {}, reports: HealthReport[] = [])
   let warn: ((level?: string) => void) | null = null;
   const records: AppStatsRecord[] = [];
   const notes: string[] = [];
-  const sent: { message: string; extra: Record<string, unknown> }[] = [];
+  const sent: { message: string; extra: Record<string, unknown>; tags: Record<string, string> }[] = [];
   const stats = (): NativeProcessStats => ({ footprintMb: 412.4, headroomMb: 1210, cpuS, thermal: "fair", lowPower: true, memoryWarnings: 0 });
   const deps: AppHealthDeps = {
     launchInfo: () => ({ wallMs: LAUNCH_MS, uptimeUs: 990_000_000, inBackground: false, reasons: [], ...launch }),
@@ -23,7 +23,7 @@ function harness(launch: Partial<LaunchInfo> = {}, reports: HealthReport[] = [])
     nowUs: () => nowUs,
     record: (r) => records.push(r),
     note: (t) => notes.push(t),
-    report: (message, extra) => sent.push({ message, extra }),
+    report: (message, extra, tags) => sent.push({ message, extra, tags }),
     setInterval: (fn) => ((tick = fn), 1),
     clearInterval: () => (tick = null),
   };
@@ -79,12 +79,26 @@ test("a run that ended mid-trip without notice goes to Sentry at launch; one the
   const killed = harness({ previous: prev });
   killed.health.start();
   expect(killed.sent).toEqual([expect.objectContaining({ message: "app ended mid-trip without notice" })]);
-  expect(killed.sent[0].extra).toMatchObject({ secondsBeforeLaunch: 25, footprintMb: 412 });
+  expect(killed.sent[0].extra).toMatchObject({ secondsBeforeLaunch: 25, footprintMb: 412, osReports: "" });
+  expect(killed.sent[0].tags).toEqual({ ended_by: "unreported" });
   killed.health.stop();
 
   expect(endedMidTrip({ ...prev, willTerminateWallMs: LAUNCH_MS - 24_000 })).toBe(false);
   expect(endedMidTrip({ ...prev, context: "idle" })).toBe(false);
   expect(previousRunNote({ ...prev, willTerminateWallMs: prev.wallMs + 1000 }, LAUNCH_MS)).toMatch(/; the OS said it would end it 1 s after$/);
+});
+
+test("the Sentry report says how the OS ended that run; the trip log still gets every report", () => {
+  const prev = { wallMs: LAUNCH_MS - 600_000, appState: "background", context: "recording u37h65", footprintMb: 412, headroomMb: 300, thermal: "nominal", memoryWarnings: 3 };
+  const older = { kind: "exit", atMs: LAUNCH_MS - 7_200_000, reason: "user-requested", importance: "foreground" } as const;
+  const lmk = { kind: "exit", atMs: LAUNCH_MS - 598_000, reason: "low-memory", importance: "foreground-service", pssMb: 520 } as const;
+  const h = harness({ previous: prev }, [older, lmk]);
+  h.health.start();
+  expect(h.sent[0].tags).toEqual({ ended_by: "low-memory" });
+  expect(h.sent[0].extra.osReports).toBe("Android exit 2026-10-21 11:51 UTC: low-memory, foreground-service, 520 MB PSS");
+  h.health.tripStarted();
+  expect(h.notes.filter((n) => n.startsWith("Android exit"))).toHaveLength(2);
+  h.health.stop();
 });
 
 test("a memory warning is a note, with the memory last seen", async () => {
