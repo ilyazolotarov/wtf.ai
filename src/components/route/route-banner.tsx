@@ -103,6 +103,10 @@ export function RouteBanner({
     if (route.replanning) {
       sub = t("replanning");
       subColor = palette.warn.c;
+    } else if (route.noRouteTo) {
+      // A stop just added that no road reaches: said, the route going on without it (STOPS-SPEC §5.4).
+      sub = t("routeNoRouteToStop").replace("{name}", route.noRouteTo.stop.name ?? t("droppedPin"));
+      subColor = palette.warn.c;
     } else if (g?.state === "off" || g?.state === "leaving") {
       sub = route.replanFailure ? t("replanFailed") : null;
       subColor = palette.warn.c;

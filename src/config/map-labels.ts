@@ -1,8 +1,9 @@
+import { DRIVER_POI_FILTER } from "@/config/map-car";
 import type { MapStyleJson, MapStyleLayer } from "@/config/map-dark";
 
 /**
  * Street-level labels (SPEC §3.8): house numbers from z15, shop and other POI names from z16, so a street's
- * houses can be read before the shops crowd them.
+ * houses can be read before the shops crowd them; a driver's POIs (fuel, railway and metro stations) earlier.
  *
  * House numbers: the tiles carry them (OpenMapTiles `housenumber`: every `addr:housenumber`, a building's at its
  * centre) but Liberty draws none. The layer goes right above the buildings, below every other label: MapLibre places
@@ -66,24 +67,35 @@ export function withHouseNumbers(style: MapStyleJson): MapStyleJson {
 }
 
 /**
+ * A driver's POIs (`DRIVER_POI_FILTER`: fuel and charging stations, railway and metro stations) in a layer of their
+ * own, drawn like Liberty's `poi_r1` but without a minzoom: from wherever their tiles carry them (stations z12, fuel
+ * z14, as bus stops), not from street level with the shops.
+ */
+export const DRIVER_POI_LAYER = "poi_driver";
+
+/**
  * POI labels that start below `POI_MINZOOM` start there instead, and the hidden POIs aren't drawn. Only
- * layers with a minzoom move: transit stops (`poi_transit`, none) keep showing from wherever their tiles carry them.
+ * layers with a minzoom move: transit stops (`poi_transit`, none) keep showing from wherever their tiles carry them,
+ * and a driver's POIs move out of the ranked layers into `DRIVER_POI_LAYER`, right above `poi_r1`.
  */
 export function withPoisFromStreetLevel(style: MapStyleJson): MapStyleJson {
   const hide = [
     "all",
     ["!", ["in", ["get", "class"], ["literal", HIDDEN_POI_CLASSES]]],
     ["!", ["in", ["get", "subclass"], ["literal", HIDDEN_POI_SUBCLASSES]]],
+    ["!", DRIVER_POI_FILTER],
   ];
-  return {
-    ...style,
-    layers: style.layers.map((l) => {
-      if (l["source-layer"] !== "poi") return l;
-      const minzoom = typeof l.minzoom === "number" && l.minzoom < POI_MINZOOM ? POI_MINZOOM : l.minzoom;
-      const filter = l.filter ? ["all", l.filter, hide] : hide;
-      return { ...l, ...(minzoom === undefined ? {} : { minzoom }), filter };
-    }),
-  };
+  const r1 = style.layers.find((l) => l.id === "poi_r1");
+  const layers = style.layers.flatMap((l) => {
+    if (l["source-layer"] !== "poi" || l.id === DRIVER_POI_LAYER) return [l];
+    const { minzoom: from, ...rest } = l;
+    const minzoom = typeof from === "number" && from < POI_MINZOOM ? POI_MINZOOM : from;
+    const filter = l.filter ? ["all", l.filter, hide] : hide;
+    const moved = { ...rest, ...(minzoom === undefined ? {} : { minzoom }), filter };
+    if (l !== r1 || style.layers.some((x) => x.id === DRIVER_POI_LAYER)) return [moved];
+    return [moved, { ...rest, id: DRIVER_POI_LAYER, filter: DRIVER_POI_FILTER }];
+  });
+  return { ...style, layers };
 }
 
 /**

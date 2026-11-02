@@ -111,6 +111,13 @@ class CarGuidanceLogicTest {
     assertFalse(CarGuidanceLogic.showsSteps(waiting))
     assertTrue(CarGuidanceLogic.navigating(waiting))
     assertEquals(CarCard.MESSAGE, CarGuidanceLogic.card(waiting, null))
+    // The cluster's trip: the points ahead at a stop, loading only while planned (again).
+    assertFalse(CarGuidanceLogic.tripLoading(waiting))
+    assertFalse(CarGuidanceLogic.tripLoading(route("active")))
+    assertTrue(CarGuidanceLogic.tripLoading(waiting.copy(replanning = true)))
+    assertTrue(CarGuidanceLogic.tripLoading(route("planning")))
+    assertTrue(CarGuidanceLogic.tripLoading(route("active", steps = emptyList())))
+    assertTrue(CarGuidanceLogic.tripLoading(null))
   }
 
   @Test

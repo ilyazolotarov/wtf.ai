@@ -119,12 +119,14 @@ FILTER_KEYS = ("highway", "addr:housenumber", "place", "entrance", *POI_KEYS, *P
 # `ref`, else `addr:unit`, else a `name` of up to three letters or digits ("1", "Б").
 ENTRANCE_KINDS = {"staircase", "main", "yes", "home", "secondary"}
 SHORT_NAME_RE = re.compile(r"[0-9A-Za-zА-Яа-яІіЇїЄєҐґ]{1,3}")
-# Places to stop at, named or not: `amenity` → category (u8). Parking only where anyone may park.
+# Places to stop at, named or not: `amenity` → category (u8). Fuel, charging and parking only where anyone may use them
+# (a fleet's pump, a hotel's charger for its guests, a shop's car park are not a stop on the way).
 PLACE_CATEGORIES = {
     "fuel": 1, "charging_station": 2, "cafe": 3, "fast_food": 4, "restaurant": 4, "pharmacy": 5, "parking": 6,
 }
 PLACE_CATEGORY_COUNT = 6
-PARKING_CLOSED = {"private", "customers", "no"}
+CLOSED_ACCESS = {"private", "customers", "no"}
+CLOSED_ACCESS_AMENITIES = {"fuel", "charging_station", "parking"}
 PLACE_NAME_KEYS = ("name", "name:uk", "brand")
 # Flags: open 24/7 (the whole week, however `opening_hours` says it), and for fuel the fuels sold (`<tag>` = yes).
 FLAG_24_7 = 1
@@ -256,7 +258,7 @@ def stop_place(tags: Mapping[str, str]) -> Item | None:
     when its opening hours are known (`start-end` minutes of the week, comma-separated; empty: always closed)."""
     amenity = tags.get("amenity")
     category = PLACE_CATEGORIES.get(amenity)
-    if category is None or (amenity == "parking" and (tags.get("access") or "").strip() in PARKING_CLOSED):
+    if category is None or (amenity in CLOSED_ACCESS_AMENITIES and (tags.get("access") or "").strip() in CLOSED_ACCESS):
         return None
     hours = week_hours(tags.get("opening_hours"))
     flags = FLAG_24_7 if hours == ((0, WEEK_MIN),) else 0

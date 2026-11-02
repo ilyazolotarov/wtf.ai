@@ -215,13 +215,17 @@ export function phoneRouteFor(trip: TripLog, drawn: DrawnTruth | null): { source
   return all > 0 && on / all >= FOLLOWED_SHARE ? { source: "log", routes: plans, rebuilt } : drawnRoute;
 }
 
-/** A stop in the route's notes (`stopLabel` in route-service): `route stop <what>: <name> (<lat>,<lon>)…`. */
-const STOP_NOTE = /^route stop (reached|passed|added): .*\((-?\d+\.\d{5}),(-?\d+\.\d{5})\)/;
+/**
+ * A change to the trip's stops in the route's notes (`stopLabel` in route-service): `route stop <what>: <name>
+ * (<lat>,<lon>)…`, with `, <k> of <n>` where it went (added, moved) or was (removed), and ` (was <i>)` (moved).
+ */
+const STOP_NOTE = /^route stop (reached|passed|added|removed|moved|back|dropped): .*\((-?\d+\.\d{5}),(-?\d+\.\d{5})\)(?:, (\d+) of \d+)?(?: \(was (\d+)\))?/;
 
 /**
  * The trip's stops not yet reached or passed at `tUs`, in order, as the app had them (STOPS-SPEC §4): the stops of the
- * plan in force then, less those the notes say were reached or passed since. Before the first plan, its stops with
- * those reached or passed until it put back in front, and without those added until it. A stop's key is its point.
+ * plan in force then, changed as the notes say since. Before the first plan, its stops with the notes until it undone:
+ * those reached or passed put back in front, those removed back where they were, those added taken out. A stop's key
+ * is its point (a second stop at the same point `#2`).
  */
 export function tripStopsAt(trip: TripLog, tUs: number): TripPoint[] {
   const done = trip.navRoute.filter((p) => p.status === "done");
@@ -234,16 +238,42 @@ export function tripStopsAt(trip: TripLog, tUs: number): TripPoint[] {
     .map((s) => ({ key: where(s.latDeg, s.lonDeg), lat: s.latDeg, lon: s.lonDeg }));
   const after = plan.tUs <= tUs;
   const notes = trip.messages.filter((m) => (after ? m.tUs > plan.tUs && m.tUs <= tUs : m.tUs >= tUs && m.tUs < plan.tUs));
+  // The stop at `index` when it is this one, else the first at its point.
+  const find = (key: string, index?: number) => (index !== undefined && stops[index]?.key === key ? index : stops.findIndex((s) => s.key === key));
+  const take = (i: number) => (stops = i < 0 ? stops : stops.filter((_, j) => j !== i));
+  const put = (i: number, stop: TripPoint) => (stops = [...stops.slice(0, Math.min(i, stops.length)), stop, ...stops.slice(Math.min(i, stops.length))]);
   // Before the plan, undone from it backwards: the last stop reached before it goes in front first.
   for (const m of after ? notes : notes.reverse()) {
     const n = STOP_NOTE.exec(m.text);
     if (!n) continue;
     const stop = { key: `${n[2]},${n[3]}`, lat: Number(n[2]), lon: Number(n[3]) };
-    const rest = stops.filter((s) => s.key !== stop.key);
-    if (after) stops = n[1] === "added" ? stops : rest;
-    else stops = n[1] === "added" ? rest : [stop, ...rest];
+    const what = n[1];
+    const k = n[4] !== undefined ? Number(n[4]) - 1 : undefined;
+    const was = n[5] !== undefined ? Number(n[5]) - 1 : undefined;
+    if (after) {
+      if (what === "added") put(k ?? stops.length, stop);
+      else if (what === "back") put(0, stop);
+      else if (what === "moved") {
+        take(find(stop.key, was));
+        put(k ?? stops.length, stop);
+      } else take(find(stop.key, what === "removed" ? k : undefined));
+    } else if (what === "added") take(find(stop.key, k));
+    else if (what === "back") take(find(stop.key, 0));
+    else if (what === "moved") {
+      // Where it was is in the note since 2026-11-02; before, left where it went.
+      if (was !== undefined) {
+        take(find(stop.key, k));
+        put(was, stop);
+      }
+    } else put(what === "removed" ? (k ?? 0) : 0, stop);
   }
-  return stops;
+  // Two stops at one point: keys of their own.
+  const seen = new Map<string, number>();
+  return stops.map((s) => {
+    const count = (seen.get(s.key) ?? 0) + 1;
+    seen.set(s.key, count);
+    return count > 1 ? { ...s, key: `${s.key}#${count}` } : s;
+  });
 }
 
 /**

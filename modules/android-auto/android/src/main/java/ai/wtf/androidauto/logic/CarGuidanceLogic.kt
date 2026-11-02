@@ -238,6 +238,13 @@ object CarGuidanceLogic {
   fun showsSteps(route: CarRoute?): Boolean =
     route != null && route.status == "active" && !route.replanning && !route.atStop && route.steps.isNotEmpty()
 
+  /**
+   * The host's own displays (the cluster) show the trip ahead: loading only while it is planned or planned again, not
+   * at a stop (its points and their times then, no steps).
+   */
+  fun tripLoading(route: CarRoute?): Boolean =
+    !showsSteps(route) && !(route != null && route.status == "active" && !route.replanning && route.atStop)
+
   /** The results shown answer the text typed (an older text's would mislead); none yet while it is searched. */
   fun searchList(search: CarSearch?, typed: String): CarSearchList {
     val text = typed.trim()

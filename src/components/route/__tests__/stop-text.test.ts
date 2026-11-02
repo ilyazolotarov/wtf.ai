@@ -23,6 +23,8 @@ describe("opening hours in words (STOPS-SPEC §7.2)", () => {
     // Saturday evening: Monday morning next.
     expect(hoursText(cafe, at(7, 20, 30), tEn)).toBe("closed till Mon 8:00");
     expect(hoursText(cafe, at(7, 20, 30), tUk)).toBe("зачинено до пн 8:00");
+    // Open all weekend: till Sunday 24:00, that is Monday 0:00.
+    expect(hoursText([d(5, 0), d(7, 0)], at(7, 10), tEn)).toBe("open till Mon 0:00");
   });
 
   test("never closing, never opening", () => {

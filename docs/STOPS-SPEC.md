@@ -44,7 +44,7 @@ items: §12.
   the other way costs the parked turnaround (60 s). Each leg's end is found as a destination is.
 - **Search** (`TripSearch`): the legs one after another in the same slices (ROUTING-SPEC §5.4), each with the
   planner's limits, the states counted over all of them. A leg that finds no route fails the trip, naming its leg; a
-  first plan's failure names the stop (`failedStop`), the banner says "No route to <stop>", and the route page's ✕
+  first plan's failure names the stop (`failedStop`), the banner says "Couldn't find a route to the stop “<stop>”.", and the route page's ✕
   removes it.
 - **Joined plan** (`joinPlans`): the legs' edges and polylines one after the other (a leg's first point dropped when it
   is the last one's end); length and time summed; `stops` (`PlanStop`): each stop's key, its leg's end along the
@@ -80,13 +80,15 @@ a place previewed as a stop as "+".
 - **Reached:** within 30 m of its leg's end along the route while on it (as an arrival), or within 30 m of the road
   point or of the stop's own point (a forecourt) while it is within 300 m along. A stop passed within 30 m without
   stopping counts as reached.
-- The banner turns green with the flag: "You're at the stop", its name. A card shows the next point (name, distance,
-  time, arrival) and "We'll go on once you drive off", with **End here** (ends the route) and **Go on** (ends the
+- The banner turns green with the flag: "You've reached your stop", its name. A card shows the next point (name, distance,
+  time, arrival) and "Guidance will resume when you drive off", with **End route** (ends the route) and **Continue** (ends the
   wait). Guidance is already on the next leg.
-- **The route waits:** no re-plan within 150 m of the stop's point, nor while the car is slower than 1 m/s. A
-  forecourt beside the road is off the route; a driver walking into the shop with the phone is not driving.
-- **Going on:** the wait ends once the car has followed the next leg 100 m past the stop, or on **Go on**. Leaving
-  another way, off the route and beyond 150 m, ends it too, and the rest of the trip is planned from there.
+- **The route waits:** no re-plan within 150 m of the stop's point, nor while the car is slower than 1 m/s (with no
+  speed, as from GNSS alone, the distance decides). A forecourt beside the road is off the route; a driver walking into
+  the shop with the phone is not driving.
+- **Going on:** the wait ends once the car has followed the next leg 100 m past the stop, or on **Continue**. Leaving
+  another way, off the route and beyond 150 m, ends it too, and the rest of the trip is planned from there. A plan made
+  while waiting (a stop added, removed or moved at the pump) starts at the car: the wait ends 100 m along it.
 
 ### 5.3 A stop left behind
 
@@ -95,14 +97,18 @@ a place previewed as a stop as "+".
 - **Off the route:** before an off-route plan, if the car came within 200 m of the next stop and is now 100 m further
   from it than that, the stop is behind: the new plan leaves it out. A car that leaves the route before coming near
   the stop gets a plan through it, as before.
-- A card: "Stop behind: <stop>", "Going on to <next point>", ✕, and **Back to it · +5 min**, the minutes from a plan
+- A card: "You passed the stop: <stop>", "Next: <next point>", ✕, and **Go back · +5 min**, the minutes from a plan
   through it and the rest of the trip, made at once (`searchBack`). A tap puts it back as the next stop and plans from
-  the car (reason `stop-back`). The card goes after 2 km or on ✕.
+  the car (reason `stop-back`); not offered while the trip has five stops (none is dropped for it). The card goes
+  after 2 km or on ✕.
 
 ### 5.4 Changing the trip while driving
 
 Adding, removing or moving a stop plans again from the car at once (reason `stops`); the route waits for it as for a
-re-plan. "Only here" on a place makes it the destination and drops the stops. A new destination from search, a pin or
+re-plan. When that plan finds no way to a stop, the banner says so ("Couldn't find a route to the stop …", until the
+next plan or 2 km on) and the route in force stays; a stop just added or put back is taken out again (`route stop
+dropped`), since kept it would fail every re-plan after. A preview taken after the trip changed under it (a stop
+reached or left behind meanwhile) is planned again rather than taken as it is. "Route only here" on a place makes it the destination and drops the stops. A new destination from search, a pin or
 the car's screen replaces the whole trip, as "Route here" does.
 
 ## 6. Places along the route
@@ -110,8 +116,8 @@ the car's screen replaces the whole trip, as "Route here" does.
 ### 6.1 In the search file (`tools/tiles/tiles/search.py`, SEARCH-SPEC §3)
 
 - **Read:** nodes and ways (at their centroid) with `amenity` = fuel, charging_station, cafe, fast_food, restaurant,
-  pharmacy, parking (not `access` = private, customers or no), named or not. Name: `name`, else `name:uk`, else
-  `brand`.
+  pharmacy, parking (fuel, charging and parking not with `access` = private, customers or no), named or not. Name:
+  `name`, else `name:uk`, else `brand`.
 - **Place, 16 B:** i32 lat, lon (1e-6°); u32 name (or none: the row shows the kind's word); u16 flags; u8 kind; u8
   reserved. Flags: 24/7 (open the whole week), and for fuel diesel, LPG, 92, 95 and 98 (`fuel:diesel`, `fuel:lpg`,
   `fuel:octane_92/95/98` = yes).
@@ -119,8 +125,9 @@ the car's screen replaces the whole trip, as "Route here" does.
   0, in [start, end) ranges. Read: rules split by ";" (a later one replaces the days it names) or by "," before a
   weekday (adds to them); weekdays Mo–Su, ranges and lists in any case (PH dropped, a rule of PH alone skipped; none:
   every day); times H:MM-H:MM, several, past midnight into the next day (equal ends: the whole day; a trailing "+"
-  read as the end given), off or closed; days no rule names are closed. Anything else (months, dates, sunrise,
-  comments) is unknown: the row says nothing rather than something wrong. Kyiv: 4,087 places tag it, 5 unread. In
+  read as the end given), off or closed; days no rule names are closed once a rule opens some day ("off" or "closed"
+  alone: closed always; "Su off" or "PH off" alone says nothing of the other days: unknown). Anything else (months,
+  dates, sunrise, comments) is unknown: the row says nothing rather than something wrong. Kyiv: 4,087 places tag it, 5 unread. In
   the file a section just before the places (SEARCH-SPEC §3.3): each place's schedule, each schedule once.
 - **Cells:** sorted by a 0.01° grid cell, with a table of the used cells for a binary search; the places trailer
   (`"WTFP"`) just before the entrances' one, which stays last. Header flag 2. `tiles search-check` validates both. A
@@ -171,7 +178,7 @@ it.
 ### 7.1 Route page (`src/app/route.tsx`, UI-SPEC §7.1)
 
 - **With a route** (planned or being planned), the page opens on **Pull in on the way**, six large tiles (§6.2), then
-  the trip: My position, each stop (kind's icon or number, name, "at 18:46", ≡, ✕), the destination with its
+  the trip: My location, each stop (kind's icon or number, name, "at 18:46", ≡, ✕), the destination with its
   arrival, **Add a stop**; distance, time and arrival of what is left; **Stop guidance**. Typing searches as before.
 - **Moving a stop** (`use-stop-drag.ts`, two stops or more): its ≡ handle drags the row, the page holding still; the
   stops it passes make room, and the drop puts it where its middle passed the others' (one plan, §5.4). Screen
@@ -192,8 +199,9 @@ the map (§7.3), its card the same words.
 
 The pages close; the trip through the place is planned from the car (`previewStop`) and drawn as the route, the current
 one quieter beneath it. Guidance follows the current route meanwhile. A card: the kind's icon, name, kind and what
-the file knows; the detour, the time there and the new arrival, from that plan. **Add stop** takes it as the route
-(no new plan, reason `stops`); **Only here** makes the place the destination; the kind's button goes back to the list;
+the file knows; the detour, "Stop at" for the stop's arrival time and "Destination at" for the final arrival, from that
+plan. **Add stop** takes it as the route (no new plan, reason `stops`); **Route only here** makes the place the
+destination; the kind's button goes back to the list;
 ✕ drops it.
 
 ### 7.4 Dropped pin (UI-SPEC §6.3)
@@ -206,7 +214,9 @@ Recorded phrases, both languages (`npm run voice:render`):
 
 - The `stop` maneuver, ahead and at it like a turn: "Через триста метрів, зупинка праворуч", "Зупинка праворуч" (left,
   right, or no side); "потім зупинка …" after a turn close before it.
-- Reached: "Ви на зупинці". Left behind: "Зупинку пропущено". Each once per stop (`Announcer`, by the stop's key).
+- Reached: "Ви прибули до місця зупинки" / "You've reached your stop". Left behind: "Ви проїхали зупинку" /
+  "You've passed your stop". Each as it comes (`Announcer`): a stop put back and missed again is said again; a plan
+  made while waiting at a stop doesn't say it again.
 - "і ви на місці" stays the destination's alone.
 
 ## 9. The car's screen (`car-guidance.ts`)
@@ -217,10 +227,12 @@ Display only: stops are added, removed and moved on the phone. The payload carri
 
 - **Android Auto** (ANDROID-AUTO-SPEC §4): the `Trip` gets a destination per stop ahead, then the destination. The
   stop maneuver is `TYPE_DESTINATION_LEFT`/`_RIGHT` (or plain), the flag icon. At a stop: the message card with the
-  flag, "You're at the stop: <name>", the session still navigating.
+  flag, "You've reached your stop: <name>", the session still navigating; the cluster's `Trip` keeps the points ahead
+  and their times, without steps (`CarGuidanceLogic.tripLoading`: loading only while planned or planned again).
 - **CarPlay** (CARPLAY-SPEC §4): one trip to the destination, on every iOS. Its estimates are the next stop's; at a
-  stop the payload reads as arrived (`atStop`), shown as the arrival card ("You're at the stop",
-  `.arriveAtDestination`) with the estimates to the next stop or the destination, and the trip goes on from it
+  stop the payload reads as arrived (`atStop`), shown as the arrival card ("You've reached your stop",
+  `.arriveAtDestination`) with the estimates to the next stop or the destination (sent again when the stops change on
+  the phone meanwhile), and the trip goes on from it
   (`CarPlayLogic.tripPlan`: `.atStop`). The `stop` kinds draw as the arrival. A stop left behind or a stop added keeps
   the trip; the route ended at a stop finishes it. Run in the iOS 26.3 Simulator through two stops 360 m apart to
   the destination: one trip started, the arrival card at each stop, the flag and its distance between them.
@@ -235,23 +247,26 @@ Display only: stops are added, removed and moved on the phone. The payload carri
 - Each plan's stops: `nav_route_stop` (plan, index, the stop's point, `at_m`, `at_s`, side, kind); its name is in the
   notes. Maneuver kind `stop`; plan reasons `stops`, `stop-back`. `tools/triplog` reads them (`route_stops`).
 - Notes: `route to … via <stops>`, `route plan #n (reason): …, k stops`, `route stop added: <name> (<lat,lon>), i of
-  n[, +m min]`, `route stop removed|moved: …`, `route stop reached: … at <km>`, `route stop passed: … at <km>` (on the
-  route) or `…, <m> m from it at the closest` (off it), `route stop left: …, next leg|go on|off the route`, `route stop
-  back: …`, `route plan #n failed on the way to …`, `along the way: <kind>, n places in <km> (ms)`, `along the way: n
-  detours in <ms>`.
+  n[, +m min]`, `route stop removed: …, i of n` (where it was), `route stop moved: …, i of n (was j)`, `route stop
+  reached: … at <km>`, `route stop passed: … at <km>` (on the route) or `…, <m> m from it at the closest` (off it),
+  `route stop left: …, next leg|go on|off the route`, `route stop back: …`, `route stop dropped: …, no route to it`,
+  `route plan #n failed on the way to …`, `along the way: <kind>, n places in <km> (ms)`, `along the way: n detours in
+  <ms>`.
 - **Replays** rebuild a trip's stops from its log (`tools/replay/app-chain.ts`, `tripStopsAt`): the stops at a moment
-  are the `nav_route_stop` rows of the plan in force, less those the `route stop reached|passed` notes name since
-  (a stop's key is its point, as the notes print it). Before the log's first plan, the stops reached or passed until
-  then go back in front and those added until then are left out. A route the log misses (`routeBeforeLog`) is planned
+  are the `nav_route_stop` rows of the plan in force, changed as the `route stop …` notes since say (a stop's key is
+  its point, as the notes print it; a second stop at the same point `#2`). Before the log's first plan, those notes
+  are undone: the stops reached or passed go back in front, those removed back where they were, those moved back
+  (logs before 2026-11-02 lack where from), those added left out. A route the log misses (`routeBeforeLog`) is planned
   through the trip's stops at the log's start; logged plans replay as they are, already through their stops.
 
 ## 11. Verification
 
 1. Jest: `trip.test.ts` (joined plans, stop maneuvers, the turnaround at a stop, failed legs, slices, sides, time,
    insertion), `stops-along.test.ts` (guidance at stops, passing on the route, the voice, places along, detours),
-   `route-service-stops.test.ts` (waiting at a stop with the phone walking, going on, left behind on and off the
-   route, adding, moving, removing, five at most, resume, places along, previews, search detours), `places.test.ts`,
-   `car-guidance.test.ts`; the Kotlin and Swift logic tests for the stop kinds.
+   `route-service-stops.test.ts` (waiting at a stop with the phone walking, going on, a plan made at a stop, leaving
+   without a speed, left behind on and off the route, adding, moving, removing, a stop no road reaches, five at most,
+   resume, places along, previews, search detours), `places.test.ts`, `stop-text.test.ts`, `car-guidance.test.ts`,
+   `app-chain.test.ts` (stops rebuilt from a log); the Kotlin and Swift logic tests for the stop kinds; `test_hours.py`.
 2. `npm run route -- --from … --via … --to …`: a trip from the command line.
 3. The emulator: the route page, the list, a preview taken, the drive through a stop with the cards (GPS fixes along
    the route); Android Auto in the Desktop Head Unit.

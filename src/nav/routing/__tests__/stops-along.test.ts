@@ -6,7 +6,7 @@ import { LocalFrame } from "@/nav/geo/local-frame";
 import { bufferByteSource } from "@/nav/mapmatch/graph/byte-source";
 import { TiledRoadGraph } from "@/nav/mapmatch/graph/road-graph";
 import { ALONG_CORRIDOR_M, placesAlong, RouteLine } from "@/nav/routing/along";
-import { Announcer } from "@/nav/routing/announcer";
+import { Announcer, type AnnouncerInput } from "@/nav/routing/announcer";
 import { DetourSearch, detourMinutes } from "@/nav/routing/detour";
 import { RouteGuidance } from "@/nav/routing/guidance";
 import type { Maneuver } from "@/nav/routing/maneuvers";
@@ -106,6 +106,24 @@ describe("guidance at stops (STOPS-SPEC §5)", () => {
     expect(said).toEqual(["prepare-stop-right", "now-stop-right", "stop-reached"]);
     const again = a.update({ planId: 1, maneuvers: m, guidance: g.step!, speedMps: 0, atStop: "s1", passedStop: "s9" });
     expect(again.map((o) => o.kind)).toEqual(["stop-passed"]);
+  });
+
+  test("the voice: a stop taken back and missed again is said again; a re-plan made at a stop is not a new arrival", () => {
+    const plan = straight();
+    const m = maneuvers(plan);
+    const g = new RouteGuidance(plan, m);
+    const step = g.update({ ...east(0), tMs: 0, accuracyM: 5, headingRad: Math.PI / 2, speedMps: 10 });
+    const a = new Announcer();
+    const kinds = (input: Partial<AnnouncerInput>) =>
+      a.update({ planId: 1, maneuvers: m, guidance: step, speedMps: 10, ...input }).map((o) => o.kind).filter((k) => k.startsWith("stop"));
+    expect(kinds({ passedStop: "s1" })).toEqual(["stop-passed"]);
+    expect(kinds({ passedStop: "s1" })).toEqual([]);
+    // "Go back": the card goes, the stop is ahead again; missed again.
+    expect(kinds({ planId: 2, planReason: "stop-back" })).toEqual([]);
+    expect(kinds({ planId: 2, passedStop: "s1" })).toEqual(["stop-passed"]);
+    expect(kinds({ planId: 2, atStop: "s2" })).toEqual(["stop-reached"]);
+    // A stop added while standing at this one: planned again, still at it.
+    expect(kinds({ planId: 3, planReason: "stops", atStop: "s2" })).toEqual([]);
   });
 });
 

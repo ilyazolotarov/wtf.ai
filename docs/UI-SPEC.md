@@ -69,7 +69,9 @@ persisted in kv-store. No hardcoded user-facing strings in components.
 - `src/config/map.ts`: the active region's offline style (`useMapStyle(scheme)`, `hasUsableMap`, `withAttribution`),
   with the world drawn around it (`map-world.ts`) and street-level labels (`map-labels.ts`): house numbers from z15
   (the tiles' `housenumber` layer, which Liberty doesn't draw, above the buildings and below every other label) and
-  shop and other POI names from z16, not Liberty's z15, without the POIs of no use to a driver (bins, recycling,
+  shop and other POI names from z16, not Liberty's z15, but a driver's POIs (`DRIVER_POI_FILTER`: fuel and charging
+  stations, railway and metro stations) from where the tiles start carrying them (stations z12, fuel z14 as bus stops;
+  their own layer, `DRIVER_POI_LAYER`), without the POIs of no use to a driver (bins, recycling,
   playgrounds, pitches, bicycle parking, shelters, bollards, information boards, drinking water, artworks); names in
   the app's language only, one line each where Liberty writes the Latin and the local name (`withLabelLanguage`):
   Ukrainian `name:uk`, else the local name; English `name:en`, else the tiles' Latin form; the world's country names

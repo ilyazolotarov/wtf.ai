@@ -1,5 +1,6 @@
 import { DARK_PALETTE, tintDarkStyle, type MapStyleJson } from "@/config/map-dark";
 import {
+  DRIVER_POI_LAYER,
   HOUSE_NUMBER_LAYER,
   LIGHT_LABEL_COLOR,
   POI_MINZOOM,
@@ -11,11 +12,13 @@ import {
   withUprightLineNames,
 } from "@/config/map-labels";
 
-/** Evaluates the few expressions the POI filter uses (all, !, in, get, literal) against a feature's properties. */
+/** Evaluates the few expressions the POI filters use (all, any, !, ==, in, get, literal) against a feature's properties. */
 function evaluate(e: unknown, props: Record<string, string>): unknown {
   if (!Array.isArray(e)) return e;
   const [op, ...args] = e as [string, ...unknown[]];
   if (op === "all") return args.every((a) => evaluate(a, props) === true);
+  if (op === "any") return args.some((a) => evaluate(a, props) === true);
+  if (op === "==") return evaluate(args[0], props) === evaluate(args[1], props);
   if (op === "!") return !evaluate(args[0], props);
   if (op === "get") return props[args[0] as string];
   if (op === "literal") return args[0];
@@ -66,6 +69,25 @@ describe("house numbers", () => {
     expect(POI_MINZOOM).toBe(16);
   });
 
+  test("fuel, charging, railway and metro stations show from where their tiles carry them, in their own layer", () => {
+    const layers = withStreetLabels(style()).layers;
+    expect(layers.map((l) => l.id).slice(5, 9)).toEqual(["poi_r1", DRIVER_POI_LAYER, "poi_r20", "poi_transit"]);
+    const driver = layers.find((l) => l.id === DRIVER_POI_LAYER)!;
+    expect(driver).toMatchObject({ type: "symbol", source: "openmaptiles", "source-layer": "poi" });
+    expect(driver.minzoom).toBeUndefined();
+    const others = layers.filter((x) => x["source-layer"] === "poi" && x.id !== DRIVER_POI_LAYER);
+    // As the tiles carry them (OpenMapTiles poi: class and subclass).
+    for (const [cls, subclass] of [["fuel", "fuel"], ["fuel", "charging_station"], ["railway", "station"], ["railway", "halt"], ["railway", "subway"]]) {
+      expect(evaluate(driver.filter, { class: cls, subclass })).toBe(true);
+      for (const l of others) expect(evaluate(l.filter, { class: cls, subclass })).toBe(false);
+    }
+    for (const [cls, subclass] of [["shop", "supermarket"], ["railway", "tram_stop"]]) {
+      expect(evaluate(driver.filter, { class: cls, subclass })).toBe(false);
+      expect(evaluate(layers.find((l) => l.id === "poi_r1")!.filter, { class: cls, subclass })).toBe(true);
+    }
+    expect(withStreetLabels(withStreetLabels(style())).layers.filter((l) => l.id === DRIVER_POI_LAYER)).toHaveLength(1);
+  });
+
   test("bins, playgrounds and artworks aren't drawn; gates and galleries are; the layers' own filters still apply", () => {
     const poi = withStreetLabels(style()).layers.find((l) => l.id === "poi_r1")!;
     const shown = (props: Record<string, string>) => evaluate(poi.filter, props);
@@ -74,7 +96,7 @@ describe("house numbers", () => {
     expect(shown({ class: "art_gallery", subclass: "artwork" })).toBe(false);
     expect(shown({ class: "art_gallery", subclass: "gallery" })).toBe(true);
     expect(shown({ class: "gate", subclass: "gate" })).toBe(true);
-    expect(shown({ class: "fuel", subclass: "fuel" })).toBe(true);
+    expect(shown({ class: "shop", subclass: "supermarket" })).toBe(true);
     const filtered = withStreetLabels({ version: 8, layers: [{ id: "poi_r7", type: "symbol", "source-layer": "poi", filter: ["==", 1, 1] }] });
     expect(filtered.layers[0].filter).toEqual(["all", ["==", 1, 1], poi.filter]);
   });

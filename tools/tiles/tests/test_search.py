@@ -242,9 +242,10 @@ def test_stop_place_tags():
     assert stop_place({"amenity": "cafe", "opening_hours": "closed"}).tags["hours"] == ""
     assert "hours" not in stop_place({"amenity": "cafe", "opening_hours": "sunrise-sunset"}).tags
     assert "hours" not in stop_place({"amenity": "cafe"}).tags
-    # parking only where anyone may park
-    for access in ("private", "customers", "no"):
-        assert place(amenity="parking", access=access) is None
+    # fuel, charging and parking only where anyone may use them
+    for amenity in ("parking", "fuel", "charging_station"):
+        for access in ("private", "customers", "no"):
+            assert place(amenity=amenity, access=access) is None
     assert place(amenity="parking", access="yes") == place(amenity="parking", access="permissive") == (6, 0, "")
     assert place(amenity="cafe", access="private") is not None
 

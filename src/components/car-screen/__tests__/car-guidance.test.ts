@@ -205,14 +205,14 @@ describe("stops on the way (STOPS-SPEC §9)", () => {
 
   test("Android Auto at a stop: the stop's words, still navigating", () => {
     const r = carRoute(withStop({ stops: [], atStop: { stop: fuel, atM: 5300 } }), t, "en")!;
-    expect(r).toMatchObject({ status: "active", atStop: true, message: "You're at the stop: Fuel" });
+    expect(r).toMatchObject({ status: "active", atStop: true, message: "You've reached your stop: Fuel" });
   });
 
   test("CarPlay: one trip to the destination, its estimates to the next stop; a stop reached an arrival there", () => {
     const r = carRoute(withStop(), t, "en", [], true)!;
     expect(r).toMatchObject({ destinationName: "Kyiv", remainingM: 3000 });
     const at = carRoute(withStop({ stops: [], atStop: { stop: fuel, atM: 5300 } }), t, "en", [], true)!;
-    expect(at).toMatchObject({ status: "arrived", atStop: true, message: "You're at the stop", destinationName: "Kyiv", steps: [] });
+    expect(at).toMatchObject({ status: "arrived", atStop: true, message: "You've reached your stop", destinationName: "Kyiv", steps: [] });
     // No stop ahead of it: what is left to the destination.
     expect(at.remainingM).toBe(10_000);
     const on = carRoute(withStop({ stops: [] }), t, "en", [], true)!;

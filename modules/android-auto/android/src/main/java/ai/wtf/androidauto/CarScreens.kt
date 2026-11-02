@@ -349,12 +349,12 @@ internal object CarTemplates {
   /**
    * The route for the host's own displays (cluster, heads-up display, the rail when another app is in front): the
    * steps ahead, each with its distance and time from the car, and the destination. Loading while it is planned or
-   * planned again.
+   * planned again; at a stop the points ahead without steps.
    */
   fun trip(context: CarContext, route: CarRoute): Trip {
     val trip = Trip.Builder()
-    if (!CarGuidanceLogic.showsSteps(route)) return trip.setLoading(true).build()
-    for (step in route.steps) {
+    if (CarGuidanceLogic.tripLoading(route)) return trip.setLoading(true).build()
+    if (CarGuidanceLogic.showsSteps(route)) for (step in route.steps) {
       trip.addStep(step(context, step), estimate(step.shownDistance, step.shownUnit, step.timeS))
     }
     // The stops on the way first, each with its own estimate (STOPS-SPEC §9), then the destination.

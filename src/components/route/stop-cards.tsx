@@ -16,8 +16,7 @@ function nextPoint(route: RouteSnapshot) {
 }
 
 /**
- * At a stop (STOPS-SPEC §5.2): what is next and when, "we'll go on once you drive off"; **End here** ends the route,
- * **Go on** the wait.
+ * At a stop (STOPS-SPEC §5.2): what is next and when; **End route** ends the route, **Continue** the wait.
  */
 export function AtStopCard({ route, nowMs, onEnd }: { route: RouteSnapshot; nowMs: number; onEnd(): void }) {
   const { t, language } = useT();
@@ -47,7 +46,10 @@ export function AtStopCard({ route, nowMs, onEnd }: { route: RouteSnapshot; nowM
   );
 }
 
-/** A stop left behind (STOPS-SPEC §5.3): going on to the next point; **Back to it · +n min** plans back through it. */
+/**
+ * A stop left behind (STOPS-SPEC §5.3): going on to the next point; **Go back · +n min** plans back through it, while
+ * the trip has room for it.
+ */
 export function PassedStopCard({ route }: { route: RouteSnapshot }) {
   const { t } = useT();
   const palette = usePalette();
@@ -63,7 +65,7 @@ export function PassedStopCard({ route }: { route: RouteSnapshot }) {
       onClose={() => routes.dismissPassed()}
       lines={<CardLine>{t("stopGoingOn").replace("{name}", next.name ?? t("droppedPin"))}</CardLine>}
     >
-      {passed.backDeltaS !== null && (
+      {passed.backDeltaS !== null && route.stops.length < routes.maxStops && (
         <CardActions gap={10}>
           <PillButton
             icon="u_turn_left"
@@ -82,7 +84,7 @@ export function PassedStopCard({ route }: { route: RouteSnapshot }) {
 
 /**
  * A place before it becomes a stop (STOPS-SPEC §7.3): its detour, the time there and the new arrival, from the trip
- * through it; **Add stop** takes that trip, **Only here** makes it the destination.
+ * through it; **Add stop** takes that trip, **Route only here** makes it the destination.
  */
 export function StopPreviewCard({ route, nowMs, onOnlyHere }: { route: RouteSnapshot; nowMs: number; onOnlyHere(): void }) {
   const { t } = useT();

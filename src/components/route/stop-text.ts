@@ -79,10 +79,12 @@ export function hoursText(hours: readonly number[], now: Date, t: T): string {
   const minute = weekMinute(now);
   const { open, until } = openAt(hours, minute);
   if (until === null) return open ? t("open24h") : t("closedAlways");
-  const inDay = until % 1440;
+  // Sunday 24:00 is Monday 0:00.
+  const at = until % (7 * 1440);
+  const inDay = at % 1440;
   const clock = `${Math.floor(inDay / 60)}:${String(inDay % 60).padStart(2, "0")}`;
-  const away = (until - minute + 7 * 1440) % (7 * 1440);
-  const time = away >= 1440 ? `${t("weekdaysShort").split(" ")[Math.floor(until / 1440)]} ${clock}` : clock;
+  const away = (at - minute + 7 * 1440) % (7 * 1440);
+  const time = away >= 1440 ? `${t("weekdaysShort").split(" ")[Math.floor(at / 1440)]} ${clock}` : clock;
   return t(open ? "openUntil" : "closedUntil").replace("{time}", time);
 }
 

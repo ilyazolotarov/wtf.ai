@@ -9,7 +9,7 @@ import { RouteService, type RouteSnapshot } from "@/services/navigation/route-se
 import type { NavRouteStopRecord } from "@/triplog/schema";
 
 // A main road east, 0–3000 m; at 1500 m a side road south to a fuel station's forecourt (1500, −150); a cul-de-sac
-// north at 2400 m to a pharmacy (2400, 200). Metres east, north of the origin.
+// north at 2400 m to a pharmacy (2400, 200); a road no other reaches north of the end. Metres east, north of the origin.
 const frame = new LocalFrame({ lat: 50.45, lon: 30.52 });
 const at = (e: number, n: number) => frame.toCoordinate(e, n);
 const network = () =>
@@ -20,6 +20,7 @@ const network = () =>
     { cls: RoadClass.service, points: [at(1500, 0), at(1500, -150)] },
     { cls: RoadClass.residential, points: [at(2400, 0), at(2400, 200)] },
     { cls: RoadClass.residential, points: [at(1500, 0), at(1500, 900)] },
+    { cls: RoadClass.residential, points: [at(2600, 700), at(2800, 700)] },
   ]);
 const STATION = at(1500, -150);
 const DESTINATION = { ...at(3000, 0), name: "End" };
@@ -118,6 +119,39 @@ describe("RouteService with stops (STOPS-SPEC §4–5)", () => {
     expect(h.notes.some((n) => n.startsWith("route stop left: Station"))).toBe(true);
     h.follow(stopAt + 300, h.snap().plan!.lengthM);
     expect(h.snap().guidance?.state).toBe("arrived");
+  });
+
+  test("a stop added while standing at one: the wait ends once the car follows the new route, not the old one's", () => {
+    const h = harness();
+    h.moveTo(at(100, 0));
+    h.service.start(DESTINATION, { stops: [{ ...STATION, name: "Station" }] });
+    h.flush();
+    h.follow(0, h.snap().plan!.stops![0].atM);
+    expect(h.snap().atStop).toBeDefined();
+    h.moveTo(STATION, { speedMps: 0, headingRad: 0 });
+    expect(h.service.addStop({ ...at(2400, 200), name: "Pharmacy" })).toBe(true);
+    h.flush();
+    expect(h.snap()).toMatchObject({ planReason: "stops", atStop: { stop: { name: "Station" }, atM: 0 } });
+    // The new route starts at the pump, 1950 m long; 300 m along it the car has gone on.
+    h.follow(0, 300);
+    expect(h.snap().atStop).toBeUndefined();
+    expect(h.notes.some((n) => n.startsWith("route stop left: Station"))).toBe(true);
+  });
+
+  test("leaving a stop another way with no speed known (GNSS alone): planned on from there", () => {
+    const h = harness();
+    h.moveTo(at(100, 0));
+    h.service.start(DESTINATION, { stops: [{ ...STATION, name: "Station" }] });
+    h.flush();
+    h.follow(0, h.snap().plan!.stops![0].atM);
+    const plans = h.snap().planId;
+    h.tick(60_000);
+    // Up the road north instead, positions without a speed.
+    for (let n = 300; n <= 500; n += 20) h.moveTo(at(1500, n), { speedMps: undefined, headingRad: 0 });
+    h.flush();
+    expect(h.snap().atStop).toBeUndefined();
+    expect(h.snap().planId).toBeGreaterThan(plans);
+    expect(h.snap().planReason).toBe("off-route");
   });
 
   test("'go on' at a stop ends the wait at once", () => {
@@ -222,12 +256,53 @@ describe("RouteService with stops (STOPS-SPEC §4–5)", () => {
     expect(h.snap().plan!.stops).toHaveLength(1);
   });
 
+  test("a stop added that no road reaches: said, taken out again, the route going on without it", () => {
+    const h = harness();
+    h.moveTo(at(100, 0));
+    h.service.start(DESTINATION);
+    h.flush();
+    h.follow(0, 200);
+    const planId = h.snap().planId;
+    expect(h.service.addStop({ ...at(2700, 700), name: "Island" })).toBe(true);
+    h.flush();
+    const s = h.snap();
+    expect(s.noRouteTo).toMatchObject({ stop: { name: "Island" }, dropped: true });
+    expect(s.stops).toEqual([]);
+    expect(s.planId).toBe(planId);
+    expect(h.store.get("route.active")).toMatchObject({ stops: [] });
+    expect(h.notes.some((n) => n.startsWith("route stop dropped: Island"))).toBe(true);
+    // The next change plans as before, and the message goes.
+    expect(h.service.addStop({ ...STATION, name: "Station" })).toBe(true);
+    h.flush();
+    expect(h.snap()).toMatchObject({ planReason: "stops", noRouteTo: undefined });
+  });
+
   test("at most five stops", () => {
     const h = harness();
     h.moveTo(at(100, 0));
     h.service.start(DESTINATION, { stops: Array.from({ length: 7 }, (_, i) => ({ ...at(500 + i * 100, 0) })) });
     expect(h.snap().stops).toHaveLength(5);
     expect(h.service.addStop({ ...STATION })).toBe(false);
+  });
+
+  test("a stop left behind is not put back into a trip of five stops (none dropped for it)", () => {
+    const h = harness();
+    h.moveTo(at(100, 0));
+    h.service.start(DESTINATION, { stops: [{ ...STATION, name: "Station" }, { ...at(2600, 0), name: "S1" }] });
+    h.flush();
+    for (let e = 100; e <= 2000; e += 10) h.moveTo(at(e, 0));
+    h.flush();
+    expect(h.snap().passedStop?.stop.name).toBe("Station");
+    for (const [e, name] of [[2700, "S2"], [2800, "S3"], [2900, "S4"]] as const) {
+      expect(h.service.addStop({ ...at(e, 0), name })).toBe(true);
+      h.flush();
+    }
+    expect(h.service.addStop({ ...at(2400, 200), name: "Pharmacy" })).toBe(true);
+    h.flush();
+    expect(h.snap().stops).toHaveLength(5);
+    expect(h.service.backToPassed()).toBe(false);
+    expect(h.snap().stops.map((x) => x.name)).toEqual(["Pharmacy", "S1", "S2", "S3", "S4"]);
+    expect(h.snap().passedStop?.stop.name).toBe("Station");
   });
 
   test("a restarted app goes on through the stops not yet reached", () => {
@@ -289,6 +364,23 @@ describe("RouteService with stops (STOPS-SPEC §4–5)", () => {
     expect(h.snap().planId).toBeGreaterThan(before);
     expect(h.snap().stops.map((x) => x.key)).toEqual(["p1"]);
     expect(h.snap().plan!.stops).toHaveLength(1);
+  });
+
+  test("a preview taken after a stop was reached meanwhile: planned again, not through the stop behind", () => {
+    const h = harness();
+    h.moveTo(at(100, 0));
+    h.service.start(DESTINATION, { stops: [{ ...STATION, name: "Station" }] });
+    h.flush();
+    h.follow(0, 300);
+    h.service.previewStop({ ...at(2400, 200), name: "Pharmacy", key: "p2" });
+    h.flush();
+    expect(h.snap().preview).toMatchObject({ status: "done", index: 1 });
+    h.follow(300, h.snap().plan!.stops![0].atM);
+    expect(h.snap().atStop?.stop.name).toBe("Station");
+    h.service.confirmPreview();
+    h.flush();
+    expect(h.snap().stops.map((x) => x.key)).toEqual(["p2"]);
+    expect(h.snap().plan!.stops!.map((x) => x.key)).toEqual(["p2"]);
   });
 
   test("detours of search results, for the add-a-stop search", () => {

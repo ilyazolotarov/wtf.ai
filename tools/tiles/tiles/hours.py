@@ -5,7 +5,8 @@ Read: rules separated by ";" (a later one replaces the days it names) or by "," 
 each rule's weekdays (Mo–Su, ranges such as Mo-Fr or Fr-Mo, lists, any case; PH dropped, a rule of PH alone
 skipped; none: every day) and its times (H:MM-H:MM, a list; past midnight into the next day; equal ends: the whole
 day; a trailing "+" read as the end given), or off / closed, or nothing (the whole day). Days no rule names are
-closed. "24/7" is the whole week. Anything else (months, dates, weeks, sunrise, comments, open ends without a time)
+closed, once a rule opens some day: a value that only closes some days ("Su off", "PH off") says nothing of the
+others and is unknown, while "off" or "closed" alone is closed always. "24/7" is the whole week. Anything else (months, dates, weeks, sunrise, comments, open ends without a time)
 makes the value unknown: the app says nothing rather than something wrong.
 """
 
@@ -87,6 +88,8 @@ def week_hours(value: str | None) -> Hours | None:
                     # A rule after ";" replaces the day's times; one after "," adds to them.
                     day[d] = [] if times is None else ([*(day[d] or []), *times] if k else list(times))
     except ValueError:
+        return None
+    if not any(day) and None in day:
         return None
     ranges = sorted((d * DAY_MIN + s, d * DAY_MIN + e) for d in range(7) for s, e in day[d] or [])
     week: list[tuple[int, int]] = []

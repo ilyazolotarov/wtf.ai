@@ -644,12 +644,16 @@ final class CarPlaySession: NSObject {
         navigation.upcomingManeuvers = maneuvers
         maneuversKey = nil
         stepEstimatesKey = nil
-        // At the destination nothing is left: the last estimates sent were from some metres before (arrival counts
-        // within a radius). At a stop, what is left to the next one.
-        let left = plan.shows == .atStop
-          ? Self.estimates(route.remainingShown, route.remainingUnit, route.remainingS) : Self.estimates(0, "m", 0)
-        mapTemplate.updateEstimates(left, for: navigation.trip)
         tripEstimatesKey = nil
+      }
+      // At the destination nothing is left: the last estimates sent were from some metres before (arrival counts
+      // within a radius). At a stop, what is left to the next one, sent again when the stops change on the phone.
+      let (shown, unit, seconds): (Double, String, Double) =
+        plan.shows == .atStop ? (route.remainingShown, route.remainingUnit, route.remainingS) : (0, "m", 0)
+      let left = CarPlayLogic.estimatesKey(shown, unit, seconds)
+      if left != tripEstimatesKey {
+        tripEstimatesKey = left
+        mapTemplate.updateEstimates(Self.estimates(shown, unit, seconds), for: navigation.trip)
       }
     case .steps:
       guide(navigation, route)

@@ -4,8 +4,8 @@
   "phrases": {
     "replanned": "Route recalculated",
     "arrived": "You've arrived",
-    "stop-reached": "You're at the stop",
-    "stop-passed": "Stop passed",
+    "stop-reached": "You've reached your stop",
+    "stop-passed": "You've passed your stop",
     "place-car": "Show on the map where the car is",
     "camera": "Speed camera ahead",
     "camera-slow-down": "Speed camera ahead. Slow down",

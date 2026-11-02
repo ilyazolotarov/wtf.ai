@@ -130,8 +130,9 @@ export class Announcer {
   /** "Route replanned" said, and nothing since: a re-plan after it says nothing of its own. */
   private replannedLast = false;
   private arrived = false;
-  /** Stops said "you're at the stop" or "stop passed" of, by key. */
-  private stopsSaid = new Set<string>();
+  /** The stop the car was last seen at and the one last left behind, by key: each is said as it comes. */
+  private atStop: string | null = null;
+  private passedStop: string | null = null;
 
   constructor(config: Partial<AnnouncerConfig> = {}) {
     this.config = { ...DEFAULT_ANNOUNCER, ...config };
@@ -176,15 +177,11 @@ export class Announcer {
     this.maneuvers = maneuvers;
     this.nextIndex = g.nextIndex;
     this.alongM = g.alongM;
-    // Each once: a stop's key is its own for the whole trip.
-    if (input.atStop && !this.stopsSaid.has(`at:${input.atStop}`)) {
-      this.stopsSaid.add(`at:${input.atStop}`);
-      out.push({ kind: "stop-reached" });
-    }
-    if (input.passedStop && !this.stopsSaid.has(`passed:${input.passedStop}`)) {
-      this.stopsSaid.add(`passed:${input.passedStop}`);
-      out.push({ kind: "stop-passed" });
-    }
+    // Each as it comes: a stop offered back and missed again is said again; a re-plan while at it is not a new one.
+    if (input.atStop && input.atStop !== this.atStop) out.push({ kind: "stop-reached" });
+    if (input.passedStop && input.passedStop !== this.passedStop) out.push({ kind: "stop-passed" });
+    this.atStop = input.atStop ?? null;
+    this.passedStop = input.passedStop ?? null;
     if (g.state === "arrived") {
       if (!this.arrived) out.push({ kind: "arrived" });
       this.arrived = true;

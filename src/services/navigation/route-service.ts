@@ -64,8 +64,8 @@ const ACTIVE_KEY = "route.active";
 const RESUME_MAX_AGE_MS = 12 * 3600_000;
 /**
  * At a stop (STOPS-SPEC §5.2) the route waits: no re-plan within this of the stop's point, nor while the car stands
- * (slower than `STOP_STANDING_MPS`). A forecourt beside the road is off the route; a driver walking into the shop with
- * the phone isn't driving.
+ * (slower than `STOP_STANDING_MPS`, when the speed is known). A forecourt beside the road is off the route; a driver
+ * walking into the shop with the phone isn't driving.
  */
 const STOP_HOLD_M = 150;
 const STOP_STANDING_MPS = 1;
@@ -184,6 +184,12 @@ export interface RouteSnapshot {
   along?: AlongState;
   /** The first plan failed on the way to this stop (`failure`), by key. */
   failedStop?: string;
+  /**
+   * A change of stops couldn't be planned: no way to this stop. One added or put back is taken out again, so the
+   * route and every later re-plan go on without it; one already on the route stays. Shown until the next plan or
+   * `PASSED_CARD_M` on.
+   */
+  noRouteTo?: { stop: TripStop; dropped: boolean; atDrivenM: number };
   /** Detours of the add-a-stop search's results, by key: s, null when unreachable; absent while worked out. */
   estimates?: Readonly<Record<string, number | null>>;
   /** `planning`: the first plan is being made; `failed`: it couldn't be. */
@@ -460,9 +466,10 @@ export class RouteService {
 
   removeStop(key: string): void {
     const s = this.snapshot;
-    const stop = s?.stops.find((x) => x.key === key);
-    if (!s || !stop) return;
-    this.note(`route stop removed: ${stopLabel(stop)}`);
+    const i = s?.stops.findIndex((x) => x.key === key) ?? -1;
+    if (!s || i < 0) return;
+    const stop = s.stops[i];
+    this.note(`route stop removed: ${stopLabel(stop)}, ${i + 1} of ${s.stops.length}`);
     this.changeStops(s.stops.filter((x) => x !== stop));
   }
 
@@ -476,7 +483,7 @@ export class RouteService {
     const stops = [...s.stops];
     const [stop] = stops.splice(i, 1);
     stops.splice(j, 0, stop);
-    this.note(`route stop moved: ${stopLabel(stop)}, ${j + 1} of ${stops.length}`);
+    this.note(`route stop moved: ${stopLabel(stop)}, ${j + 1} of ${stops.length} (was ${i + 1})`);
     this.changeStops(stops);
   }
 
@@ -488,17 +495,18 @@ export class RouteService {
     this.set({ ...s, atStop: undefined });
   }
 
-  /** Back to the stop left behind: it is the next stop again, planned from the car. */
-  backToPassed(): void {
+  /** Back to the stop left behind: it is the next stop again, planned from the car. False: `MAX_STOPS` are left. */
+  backToPassed(): boolean {
     const s = this.snapshot;
     const passed = s?.passedStop;
-    if (!s || !passed) return;
+    if (!s || !passed || s.stops.length >= MAX_STOPS) return false;
     this.cancelJob("back");
     this.note(`route stop back: ${stopLabel(passed.stop)}${passed.backDeltaS != null ? `, ${signedMin(passed.backDeltaS)}` : ""}`);
-    const stops = [passed.stop, ...s.stops].slice(0, MAX_STOPS);
+    const stops = [passed.stop, ...s.stops];
     this.save(s.destination, stops);
     this.set({ ...s, stops, passedStop: undefined });
     this.plan("stop-back");
+    return true;
   }
 
   dismissPassed(): void {
@@ -554,13 +562,15 @@ export class RouteService {
     const trip = this.previewTrip;
     const graph = this.graph;
     const position = this.deps.position.getSnapshot();
-    if (pv.status !== "done" || !pv.plan || !trip || trip.key !== pv.place.key || !graph || !this.frame || !position) {
+    const stops = [...s.stops];
+    stops.splice(pv.index, 0, pv.place);
+    // A stop reached, left behind or changed since the preview was planned: its trip isn't this one, plan it again.
+    const same = trip !== null && keysOf(trip.points) === keysOf(pointsOf(stops, s.destination));
+    if (pv.status !== "done" || !pv.plan || !trip || trip.key !== pv.place.key || !same || !graph || !this.frame || !position) {
       this.set({ ...s, preview: undefined });
       this.addStop(pv.place, pv.index);
       return;
     }
-    const stops = [...s.stops];
-    stops.splice(pv.index, 0, pv.place);
     this.note(`route stop added: ${stopLabel(pv.place)}, ${pv.index + 1} of ${stops.length}${pv.deltaS != null ? `, ${signedMin(pv.deltaS)}` : ""}`);
     this.save(s.destination, stops);
     this.set({ ...s, stops, preview: undefined });
@@ -790,17 +800,19 @@ export class RouteService {
     const id = this.nextPlanId++;
     const outside = (c: Coordinate) => (graph?.graph.tileAt?.(c) ?? 0) < 0;
     const points = pointsOf(s.stops, s.destination);
+    const outsideAt = graph ? points.findIndex(outside) : -1;
     const problem: RouteProblem | null = !position
       ? "no-position"
       : !graph
         ? "no-road-graph"
-        : points.some(outside) || outside(position)
+        : outsideAt >= 0 || outside(position)
           ? "outside-region"
           : s.stops.length > MAX_STOPS
             ? "too-many-stops"
             : null;
     if (problem || !position || !graph) {
-      this.failed(id, reason, problem ?? "no-position", position, 0);
+      const stop = problem === "outside-region" && outsideAt >= 0 && outsideAt < points.length - 1 ? points[outsideAt].key : undefined;
+      this.failed(id, reason, problem ?? "no-position", position, 0, undefined, stop);
       return;
     }
     this.dropAlternatives();
@@ -880,10 +892,13 @@ export class RouteService {
     const cur = this.snapshot!;
     this.set({
       ...cur,
+      // Planned again while waiting at a stop: the new route starts at the car, so the wait ends once it follows that.
+      ...(cur.atStop ? { atStop: { ...cur.atStop, atM: 0 } } : {}),
       status: "active",
       failure: undefined,
       failedStop: undefined,
       replanFailure: undefined,
+      noRouteTo: undefined,
       planId: id,
       planReason: reason,
       plan,
@@ -1051,8 +1066,24 @@ export class RouteService {
       graphBuilt: this.graph?.graph.info?.builtAt ?? 0,
     });
     // A failed re-plan keeps the route the car left; a failed first plan ends in `failed`.
-    if (s.plan) this.set({ ...s, replanning: false, replanFailure: problem });
-    else this.set({ ...s, status: "failed", failure: problem, failedStop, planId: id, replanning: false });
+    if (!s.plan) {
+      this.set({ ...s, status: "failed", failure: problem, failedStop, planId: id, replanning: false });
+      return;
+    }
+    const stop = failedStop !== undefined ? s.stops.find((x) => x.key === failedStop) : undefined;
+    if (!stop || (reason !== "stops" && reason !== "stop-back")) {
+      this.set({ ...s, replanning: false, replanFailure: problem });
+      return;
+    }
+    // A stop just added or put back that can't be reached leaves the trip again: the route still in force was planned
+    // without it, and kept, it would fail every re-plan after.
+    const dropped = !(this.guidance?.plan.stops ?? []).some((ps) => ps.key === stop.key);
+    const stops = dropped ? s.stops.filter((x) => x !== stop) : s.stops;
+    if (dropped) {
+      this.note(`route stop dropped: ${stopLabel(stop)}, no route to it`);
+      this.save(s.destination, stops);
+    }
+    this.set({ ...s, stops, replanning: false, replanFailure: problem, noRouteTo: { stop, dropped, atDrivenM: this.trip?.drivenM ?? 0 } });
   }
 
   private logPlan(
@@ -1230,6 +1261,7 @@ export class RouteService {
       patch.atStop = undefined;
       this.note(`route stop left: ${stopLabel(atStop.stop)}, next leg`);
     }
+    if (s.noRouteTo && this.trip && this.trip.drivenM - s.noRouteTo.atDrivenM > PASSED_CARD_M) patch.noRouteTo = undefined;
     const passed = "passedStop" in patch ? patch.passedStop : s.passedStop;
     if (passed && !("passedStop" in patch) && this.trip && this.trip.drivenM - passed.atDrivenM > PASSED_CARD_M) {
       patch.passedStop = undefined;
@@ -1257,7 +1289,8 @@ export class RouteService {
     const s = this.snapshot!;
     const at = s.atStop;
     if (!at) return false;
-    if (haversineM(p, at.stop) < STOP_HOLD_M || (p.speedMps ?? 0) < STOP_STANDING_MPS) return true;
+    // No speed (GNSS alone may give none): the distance from the stop says it alone.
+    if (haversineM(p, at.stop) < STOP_HOLD_M || (p.speedMps !== undefined && p.speedMps < STOP_STANDING_MPS)) return true;
     this.note(`route stop left: ${stopLabel(at.stop)}, off the route`);
     this.set({ ...s, atStop: undefined });
     return false;
@@ -1351,6 +1384,8 @@ const FAR_PROJECT_M = 20_000;
 function pointsOf(stops: readonly TripStop[], destination: RouteDestination): TripPoint[] {
   return [...stops.map((x) => ({ key: x.key, lat: x.lat, lon: x.lon })), { key: "destination", lat: destination.lat, lon: destination.lon }];
 }
+
+const keysOf = (points: readonly TripPoint[]) => points.map((x) => x.key).join(" ");
 
 /** A stop in notes: its name or what it is, and where. */
 const stopLabel = (x: RouteDestination & { category?: string }) =>

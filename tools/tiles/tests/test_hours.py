@@ -61,6 +61,13 @@ def test_an_open_end_reads_as_the_end_given():
 def test_closed_always():
     assert week_hours("closed") == ()
     assert week_hours("off") == ()
+    assert week_hours("Mo-Su off") == ()
+
+
+def test_closing_some_days_alone_says_nothing_of_the_others():
+    assert week_hours("PH off") is None
+    assert week_hours("Su off") is None
+    assert week_hours("Sa,Su closed; PH off") is None
 
 
 def test_a_rule_of_holidays_alone_is_skipped():
