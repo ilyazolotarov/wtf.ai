@@ -112,7 +112,7 @@ export class RouteLine {
     // Ahead only: measured from a little behind the car, then dropped if its closest point is behind it.
     const fromPoly = ahead ? carPoly - 2 * maxOffM : carPoly;
     const k = Math.cos((p.lat * Math.PI) / 180) * M_PER_DEG;
-    let best: { alongPoly: number; offM: number; i: number } | null = null;
+    let best: { alongPoly: number; offM: number; i: number; beforeStart: boolean } | null = null;
     for (let cx = cx0 - reach; cx <= cx0 + reach; cx++) {
       for (let cy = cy0 - reach; cy <= cy0 + reach; cy++) {
         for (const i of this.cells.get(`${cx},${cy}`) ?? []) {
@@ -124,16 +124,20 @@ export class RouteLine {
           const dx = (pts[i + 1].lon - p.lon) * k - ax;
           const dy = (pts[i + 1].lat - p.lat) * M_PER_DEG - ay;
           const len2 = dx * dx + dy * dy;
-          let t = len2 > 0 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / len2)) : 0;
+          const foot = len2 > 0 ? -(ax * dx + ay * dy) / len2 : 0;
+          let t = Math.max(0, Math.min(1, foot));
           // Not behind `fromM` on the segment it falls in.
           const segLen = this.cum[i + 1] - this.cum[i];
           if (segLen > 0 && this.cum[i] + t * segLen < fromPoly) t = (fromPoly - this.cum[i]) / segLen;
           const offM = Math.hypot(ax + t * dx, ay + t * dy);
-          if (offM <= maxOffM && (!best || offM < best.offM)) best = { alongPoly: this.cum[i] + t * segLen, offM, i };
+          if (offM <= maxOffM && (!best || offM < best.offM)) {
+            best = { alongPoly: this.cum[i] + t * segLen, offM, i, beforeStart: i === 0 && foot < 0 };
+          }
         }
       }
     }
-    if (!best || (ahead && best.alongPoly < carPoly)) return null;
+    // Before the plan's start is behind the car too: a plan made from the car has no route behind it to measure on.
+    if (!best || (ahead && (best.alongPoly < carPoly || best.beforeStart))) return null;
     return { alongM: best.alongPoly / this.scale, offM: best.offM, side: sideOf(pts[best.i], pts[best.i + 1], p) };
   }
 

@@ -141,6 +141,12 @@ describe("places along the route (STOPS-SPEC §6.3)", () => {
     expect(line.project(east(700, 30), 800, ALONG_CORRIDOR_M)?.alongM).toBeCloseTo(800, -1);
     expect(line.project(east(700, 800), 0, ALONG_CORRIDOR_M)).toBeNull();
   });
+
+  test("a plan made from the car: a place behind its start is behind the car, not at 0 m", () => {
+    const behind = [place("back", -300, -60), place("beside", 0, 40)];
+    const r = placesAlong(line, 0, (box) => behind.filter((p) => p.lat >= box.south && p.lat <= box.north && p.lon >= box.west && p.lon <= box.east));
+    expect(r.hits.map((h) => h.place.key)).toEqual(["beside"]);
+  });
 });
 
 // net.graph.bin (router.test.ts): 1 (0,0) — 2 (1,0) — 3 — 4 (3,0), 2 — 6 (1,−1) south.
