@@ -178,26 +178,32 @@ minutes' walk, straight line) of the destination, the nearest first, up to 10; t
 trip's order, each car park once (for the destination first). None along the route ahead: those near the start are of
 no use. No detours: the drive there is the trip's own. A row shows the straight walk to what it is for. Picked, the car
 park takes that one's place: the destination (the route ends there, its stops kept) or the stop; planned from the car
-(reason `stops`, note `route parking for the destination|a stop: …, was …`), with Undo (§7.4).
+(reason `stops`, note `route parking for the destination|a stop: …, was …`), with Undo (§7.4). It is named for what it
+is for, "Parking near <destination or stop>", wherever the trip shows it (the trip, the banner, the car's screens,
+Undo); its own name or address is its `detail`, under that name on the route page.
 
 ## 7. Screens
 
 ### 7.1 Route page (`src/app/route.tsx`, UI-SPEC §7.1)
 
 - **With a route** (planned or being planned), the page opens on **Pull in on the way**, six large tiles (§6.2), then
-  the trip: My location, each stop (kind's icon or number, name, "at 18:46", ≡, ✕), the destination with its
-  arrival, **Add a stop**; distance, time and arrival of what is left; **Stop guidance**. Typing searches as before.
+  the trip, each mark a light-blue icon in a dark-blue circle like "Add a stop" (the route's colour is the map's): My
+  location, each stop (kind's icon or number, name, "at 18:46", ≡, ✕), the destination with its arrival, **Add a
+  stop**; distance, time and arrival of what is left; **Stop guidance**. Typing searches as before.
 - **Moving a stop** (`use-stop-drag.ts`, two stops or more): its ≡ handle drags the row, the page holding still; the
   stops it passes make room, and the drop puts it where its middle passed the others' (one plan, §5.4). Screen
   readers get "earlier" and "later" actions on the handle instead.
-- **Add a stop** opens the search (the same field and index): each result's detour in place of its straight-line
-  distance, the least first once all ten are known; saved places with theirs. A result picked becomes a stop.
-- A selected place's card, a route on: **Add as a stop** beside Start guidance (not for a place already a stop). It
-  goes back to the trip, the new stop's row glowing once. No route: **Add a stop** starts the route to it and opens the
-  stop search.
-- The card and the stop search are steps within the page: the back gesture and button close them first, not the page
-  (`usePreventRemove`; on iOS the swipe then closes the card without sliding). Start guidance and "I'm here" leave the
-  page as before.
+- **Add a stop** opens the stop search, the route page pushed again over the trip (`/route?adding=1`): **Pull in on
+  the way** first (its list goes back two pages, to the trip), then the field (the same index) with each result's
+  detour in place of its straight-line distance, the least first once all ten are known; saved places with theirs. A
+  result picked becomes a stop and the page goes back to the trip.
+- A place picked opens its card on a page of its own (`/place`, `place-card.tsx`), so the back swipe slides back to
+  the list it came from. A route on: **Add as a stop** beside Start guidance (not for a place already a stop); it goes
+  back to the trip, the new stop's row glowing once. No route: **Add a stop** starts the route to it and opens the stop
+  search in the card's place. Start guidance and "I'm here" go back to the map. A route planned or failed (not
+  followed yet) opens the route page on its destination's card, in the page itself.
+- Back on the route page after the trip changed under a card or the stop search, the search is cleared: the trip
+  shows, not the results it was found in.
 
 ### 7.2 Along the way (`src/app/along.tsx`, a page like the route page)
 

@@ -92,6 +92,8 @@ export interface RouteDestination extends Coordinate {
   name?: string;
   /** The list entry it came from. */
   id?: string;
+  /** What else to show under its name (a car park's own address, under "Parking near …"). */
+  detail?: string;
 }
 
 export type RouteProblem = RouteFailure | "no-road-graph" | "no-position" | "outside-region" | "too-many-stops";
@@ -600,6 +602,7 @@ export class RouteService {
         lon: parking.lon,
         ...(parking.name ? { name: parking.name } : {}),
         ...(parking.id ? { id: parking.id } : {}),
+        ...(parking.detail ? { detail: parking.detail } : {}),
       };
       this.note(`route parking for the destination: ${stopLabel(parking)}, was ${stopLabel(s.destination)}`);
       this.save(destination, s.stops);

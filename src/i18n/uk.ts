@@ -523,6 +523,7 @@ export const uk = {
   parkingNone: "Стоянок у межах 600 м від пункту призначення чи зупинок не знайдено.",
   parkingFor: "Поруч із «{name}»",
   parkingWalk: "пішки",
+  parkingNearName: "Стоянка поруч із «{name}»",
   detourNone: "—",
   carDestinations: "Куди їхати",
   carNoDestinations: "Тут з’являться збережені місця й останні пункти призначення з телефона.",

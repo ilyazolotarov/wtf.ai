@@ -500,6 +500,7 @@ export const en = {
   parkingNone: "No parking found within 600 m of your destination or stops.",
   parkingFor: "Near {name}",
   parkingWalk: "on foot",
+  parkingNearName: "Parking near {name}",
   detourNone: "—",
   carDestinations: "Destinations",
   carNoDestinations: "Saved places and recent destinations from your phone will appear here.",

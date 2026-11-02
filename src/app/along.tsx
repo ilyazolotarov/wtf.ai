@@ -31,7 +31,8 @@ export default function AlongScreen() {
   // Open or closed now: the clock of the last position (a render reads no clock of its own).
   const nowMs = usePosition()?.timestamp ?? 0;
   const { route } = useRoute();
-  const params = useLocalSearchParams<{ category?: string }>();
+  // `back`: the pages to go back after a pick to reach the trip (2 from the stop search, pushed over it).
+  const params = useLocalSearchParams<{ category?: string; back?: string }>();
   const routes = getRuntime().routes;
   const category: PlaceCategory = STOP_CATEGORIES.includes(params.category as PlaceCategory) ? (params.category as PlaceCategory) : "fuel";
   const along = route?.along?.category === category ? route.along : null;
@@ -78,10 +79,12 @@ export default function AlongScreen() {
       hours: item.place.hours,
     };
     if (item.parkFor) {
-      offerRouteUndo(routes, route, stop.name);
-      routes.parkAt(stop, item.parkFor);
+      // Named for what it is for ("Parking near Хрещатик, 22"), everywhere the trip shows it; its own name under it.
+      const parking = { ...stop, name: t("parkingNearName").replace("{name}", forName(item.parkFor) ?? t("droppedPin")), detail: stop.name };
+      offerRouteUndo(routes, route, parking.name);
+      routes.parkAt(parking, item.parkFor);
     } else addStopWithUndo(routes, stop);
-    router.back();
+    router.dismiss(Math.max(1, Number(params.back) || 1));
   };
 
   const row = (item: AlongItem) => {

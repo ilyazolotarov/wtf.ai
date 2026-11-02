@@ -77,6 +77,7 @@ function RootLayout() {
  */
 const PAGES = [
   "route",
+  "place",
   "along",
   "vehicle",
   "downloads",
