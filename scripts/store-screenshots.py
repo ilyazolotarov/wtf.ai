@@ -505,6 +505,8 @@ def keyboard_language(lang):
     for tag, code in re.findall(r"mSubtypeLanguageTag=(\S+) .*?mSubtypeHashCode=(-?\d+)", dump):
         if code in hashes and tag.split("-")[0] == lang:
             shell("settings", "put", "secure", "selected_input_method_subtype", code)
+            # Gboard reads it when it starts: a running one kept its language (a Ukrainian take typed in English).
+            shell("am", "force-stop", "com.google.android.inputmethod.latin")
             shell("ime", "set", gboard.split(";")[0])
             break
     else:
