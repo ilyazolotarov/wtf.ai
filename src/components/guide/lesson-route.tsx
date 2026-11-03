@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
+import Animated from "react-native-reanimated";
 import { G, Path } from "react-native-svg";
 
 import { ExplainCard, LessonIntro, LessonTabs, PulseRing } from "@/components/guide/lesson-ui";
@@ -10,6 +11,7 @@ import { BLOCKS, CAR, H, PARKS, PLACES, plan, roads, toCoordinate, TOP, W, type 
 import { RouteBanner } from "@/components/route/route-banner";
 import { hushVoice } from "@/components/route/voice-player";
 import { cardinal, formatDistance, toDegrees } from "@/components/status/format-geo";
+import { useAppearing } from "@/components/ui/appear";
 import { Icon } from "@/components/ui/icon";
 import { PressableFeedback } from "@/components/ui/press-feedback";
 import { T } from "@/components/ui/text";
@@ -24,6 +26,8 @@ type Tab = "hold" | "search";
 export function LessonRoute() {
   const { t, language } = useT();
   const palette = usePalette();
+  const fading = useAppearing("none");
+  const fromTop = useAppearing("top");
   const [tab, setTab] = useState<Tab>("hold");
   const [scale, setScale] = useState(1);
   const [dot, setDot] = useState<Point>(CAR);
@@ -116,11 +120,15 @@ export function LessonRoute() {
             {!searching && !pin && !route && !aiming && (
               <>
                 <PulseRing left={`${(280 / W) * 100}%`} top={`${((TOP + 150) / H) * 100}%`} />
-                <View pointerEvents="none" style={[styles.hint, placed && styles.hintBelowChip, { backgroundColor: palette.text }]}>
+                <Animated.View
+                  pointerEvents="none"
+                  style={[styles.hint, placed && styles.hintBelowChip, { backgroundColor: palette.text }]}
+                  {...fading}
+                >
                   <T w="medium" size={13} color={palette.bg}>
                     {t("routeHoldHint")}
                   </T>
-                </View>
+                </Animated.View>
               </>
             )}
             {placed && !route && !aiming && (
@@ -197,7 +205,7 @@ export function LessonRoute() {
             )}
 
             {route && (
-              <View style={styles.banner}>
+              <Animated.View style={styles.banner} {...fromTop}>
                 <RouteBanner
                   route={route.snapshot}
                   nowMs={route.nowMs}
@@ -208,7 +216,7 @@ export function LessonRoute() {
                     setMuted(!muted);
                   }}
                 />
-              </View>
+              </Animated.View>
             )}
 
             {searching && (

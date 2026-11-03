@@ -36,6 +36,7 @@ import { useVoiceGuidance, useVoiceMuted, useVoiceVolume } from "@/components/ro
 import { UpdatePrompts } from "@/components/update/update-prompts";
 import { useNavStatus } from "@/components/status/use-nav-status";
 import { useFirmwareNotice } from "@/components/vehicle/use-firmware-notice";
+import { Appear } from "@/components/ui/appear";
 import { ANDROID_BLURS, BlurScope, BlurTarget } from "@/components/ui/glass-fill";
 import { FontScaleLimit, MAP_MAX_FONT_SCALE, T } from "@/components/ui/text";
 import { useHasUsableMap } from "@/config/map";
@@ -333,137 +334,192 @@ export default function HomeScreen() {
                 }}
               />
 
+              {/* The pill's unfolded details, right under it (§6.3). */}
               {tourStatus && detailsOpen && !alertText && !outage && (
-                <HudCard icon={nav.icon} tone={nav.color} lines={<T size={14} style={styles.tourExplain}>{t("tourStatusExplain")}</T>} />
+                <Appear from="top">
+                  <HudCard icon={nav.icon} tone={nav.color} lines={<T size={14} style={styles.tourExplain}>{t("tourStatusExplain")}</T>} />
+                </Appear>
               )}
 
               {outage && detailsOpen && (
-                <OutageCard outage={outage} nowMs={position.timestamp} onRestore={() => navigator.setSimulatedOutage(false)} />
-              )}
-
-              {!placing && <RegionPrompt panelStyle={panel} />}
-
-              {placing && (
-                <PlacingCard
-                  step={placing}
-                  hasHeading={place.hasHeading}
-                  onCancel={place.stop}
-                  onNext={placing === "position" ? place.placeHere : place.finish}
-                />
-              )}
-
-              {placeOffered && (
-                <HudChip icon="location_on" label={t("placeOffer")} primary onPress={() => place.start()} />
-              )}
-
-              {showManual && detailsOpen && (
-                <ManualChip
-                  manual={manual}
-                  onPlace={() => place.start()}
-                  onForget={() => place.forgetManual()}
-                />
-              )}
-
-              {!placing && manual?.asking && (
-                <ManualQuestionCard
-                  manual={manual}
-                  onAnswer={(here) => (here ? navigator.answerManual(true) : place.forgetManual(true))}
-                />
-              )}
-
-              {!placing && onTheWay && <OnTheWayCard onClose={() => runtime.onTheWay.clear()} />}
-
-              {!placing && position?.poseQuestion && (
-                <PoseQuestionCard
-                  distanceM={position.poseQuestion.distanceM}
-                  onAnswer={(here) => {
-                    navigator.answerPose(here);
-                    // Not there: show where it is instead.
-                    if (!here) place.start();
-                  }}
-                />
-              )}
-
-              {nav.protocolSearch && (
-                <HudChip icon="bluetooth" label={t("obdFindingProtocol")} color={palette.warn.c} />
-              )}
-
-              {showCutGps && detailsOpen && (
-                <HudChip
-                  icon="gps_off"
-                  label={t("cutGps")}
-                  color={palette.text}
-                  onPress={() => navigator.setSimulatedOutage(true)}
-                />
+                <Appear from="top">
+                  <OutageCard outage={outage} nowMs={position.timestamp} onRestore={() => navigator.setSimulatedOutage(false)} />
+                </Appear>
               )}
 
               {alertText && !outage && detailsOpen && (
-                <TrustAlertCard
-                  nav={nav}
-                  text={alertText}
-                  ghost={ghost}
-                  showingGhost={showingGhost}
-                  onToggleGhost={() => setGhostView(!showingGhost)}
-                />
+                <Appear from="top">
+                  <TrustAlertCard
+                    nav={nav}
+                    text={alertText}
+                    ghost={ghost}
+                    showingGhost={showingGhost}
+                    onToggleGhost={() => setGhostView(!showingGhost)}
+                  />
+                </Appear>
               )}
 
               {/* Unfolded only: driving, it took a line of the map under the pill. */}
               {!placing && position && detailsOpen && <SinceTrustedStrip position={position} />}
 
+              {showCutGps && detailsOpen && (
+                <Appear from="top">
+                  <HudChip
+                    icon="gps_off"
+                    label={t("cutGps")}
+                    color={palette.text}
+                    onPress={() => navigator.setSimulatedOutage(true)}
+                  />
+                </Appear>
+              )}
+
+              {showManual && detailsOpen && (
+                <Appear from="top">
+                  <ManualChip
+                    manual={manual}
+                    onPlace={() => place.start()}
+                    onForget={() => place.forgetManual()}
+                  />
+                </Appear>
+              )}
+
+              {!placing && <RegionPrompt panelStyle={panel} />}
+
+              {placing && (
+                <Appear from="top">
+                  <PlacingCard
+                    step={placing}
+                    hasHeading={place.hasHeading}
+                    onCancel={place.stop}
+                    onNext={placing === "position" ? place.placeHere : place.finish}
+                  />
+                </Appear>
+              )}
+
+              {placeOffered && (
+                <Appear from="top">
+                  <HudChip icon="location_on" label={t("placeOffer")} primary onPress={() => place.start()} />
+                </Appear>
+              )}
+
+              {!placing && manual?.asking && (
+                <Appear from="top">
+                  <ManualQuestionCard
+                    manual={manual}
+                    onAnswer={(here) => (here ? navigator.answerManual(true) : place.forgetManual(true))}
+                  />
+                </Appear>
+              )}
+
+              {!placing && onTheWay && (
+                <Appear from="top">
+                  <OnTheWayCard onClose={() => runtime.onTheWay.clear()} />
+                </Appear>
+              )}
+
+              {!placing && position?.poseQuestion && (
+                <Appear from="top">
+                  <PoseQuestionCard
+                    distanceM={position.poseQuestion.distanceM}
+                    onAnswer={(here) => {
+                      navigator.answerPose(here);
+                      // Not there: show where it is instead.
+                      if (!here) place.start();
+                    }}
+                  />
+                </Appear>
+              )}
+
+              {nav.protocolSearch && (
+                <Appear from="top">
+                  <HudChip icon="bluetooth" label={t("obdFindingProtocol")} color={palette.warn.c} />
+                </Appear>
+              )}
+
               {route && (
-                <RouteBanner route={route} nowMs={position?.timestamp ?? 0} onStop={stopRoute} muted={voiceMuted} onToggleVoice={voiceOff ? undefined : toggleVoice} offPhone={audioOutput.offPhone} />
+                <Appear from="top">
+                  <RouteBanner route={route} nowMs={position?.timestamp ?? 0} onStop={stopRoute} muted={voiceMuted} onToggleVoice={voiceOff ? undefined : toggleVoice} offPhone={audioOutput.offPhone} />
+                </Appear>
               )}
 
               {/* Under the banner it changed, where the eyes are while driving. */}
-              {tripUndo && !placing && (tripUndo.kind === "route" || route) && <TripUndoCard key={tripUndo.id} undo={tripUndo} />}
-              {camera && !placing && <CameraCard camera={camera} />}
+              {tripUndo && !placing && (tripUndo.kind === "route" || route) && (
+                <Appear key={tripUndo.id} from="top">
+                  <TripUndoCard undo={tripUndo} />
+                </Appear>
+              )}
+              {camera && !placing && (
+                <Appear from="top">
+                  <CameraCard camera={camera} />
+                </Appear>
+              )}
             </View>
 
-            {!position && !placing && (permission != null && !permission.granted ? <PermissionCard /> : <NoFixCard onPlace={() => place.start()} />)}
+            {!position && !placing && (
+              <Appear from="none">
+                {permission != null && !permission.granted ? <PermissionCard /> : <NoFixCard onPlace={() => place.start()} />}
+              </Appear>
+            )}
 
             <View pointerEvents="box-none" style={styles.bottomStack}>
               {held.destination && !placing && (
-                <HeldRouteCard
-                  manual={manual}
-                  trusted={trust === "TRUSTED"}
-                  mayPlace={place.mayPlace}
-                  onPlace={() => place.start()}
-                  onCancel={held.cancel}
-                  onConfirm={held.confirm}
-                />
+                <Appear from="bottom">
+                  <HeldRouteCard
+                    manual={manual}
+                    trusted={trust === "TRUSTED"}
+                    mayPlace={place.mayPlace}
+                    onPlace={() => place.start()}
+                    onCancel={held.cancel}
+                    onConfirm={held.confirm}
+                  />
+                </Appear>
               )}
-              {route?.atStop && !placing && <AtStopCard route={route} nowMs={position?.timestamp ?? 0} onEnd={stopRoute} />}
-              {route?.passedStop && !route.atStop && !placing && <PassedStopCard route={route} />}
+              {route?.atStop && !placing && (
+                <Appear from="bottom">
+                  <AtStopCard route={route} nowMs={position?.timestamp ?? 0} onEnd={stopRoute} />
+                </Appear>
+              )}
+              {route?.passedStop && !route.atStop && !placing && (
+                <Appear from="bottom">
+                  <PassedStopCard route={route} />
+                </Appear>
+              )}
               {/* On the tour the pin is only tried: its card would sit under the dimmed screen. */}
               {pin && !touring && (
-                <PinCard
-                  pin={pin}
-                  position={position}
-                  onClose={() => setPin(null)}
-                  // The car is here, not a destination: the same placing as from the chip, starting at the pin.
-                  onPlace={place.mayPlace ? () => place.start(pin) : undefined}
-                  // A route on is replaced at once, with Undo after (STOPS-SPEC §7.4).
-                  onRoute={(name) => {
-                    offerRouteUndo(runtime.routes, route, name ?? null);
-                    startRoute({ lat: pin.lat, lon: pin.lon, name });
-                    setPin(null);
-                  }}
-                  // While a route is on: a stop on the way, added at once, with Undo after (STOPS-SPEC §7.3).
-                  onStop={
-                    route?.status === "active"
-                      ? (name) => {
-                          addStopWithUndo(runtime.routes, { lat: pin.lat, lon: pin.lon, name });
-                          setPin(null);
-                        }
-                      : undefined
-                  }
-                />
+                <Appear from="bottom">
+                  <PinCard
+                    pin={pin}
+                    position={position}
+                    onClose={() => setPin(null)}
+                    // The car is here, not a destination: the same placing as from the chip, starting at the pin.
+                    onPlace={place.mayPlace ? () => place.start(pin) : undefined}
+                    // A route on is replaced at once, with Undo after (STOPS-SPEC §7.4).
+                    onRoute={(name) => {
+                      offerRouteUndo(runtime.routes, route, name ?? null);
+                      startRoute({ lat: pin.lat, lon: pin.lon, name });
+                      setPin(null);
+                    }}
+                    // While a route is on: a stop on the way, added at once, with Undo after (STOPS-SPEC §7.3).
+                    onStop={
+                      route?.status === "active"
+                        ? (name) => {
+                            addStopWithUndo(runtime.routes, { lat: pin.lat, lon: pin.lon, name });
+                            setPin(null);
+                          }
+                        : undefined
+                    }
+                  />
+                </Appear>
               )}
               {mapReady && !tourOffered && !touring && !pin && !placing && !position?.poseQuestion && (
-                <TourInvite panelStyle={panel} onStart={() => answerTour(true)} onDismiss={() => answerTour(false)} />
+                <Appear from="bottom">
+                  <TourInvite panelStyle={panel} onStart={() => answerTour(true)} onDismiss={() => answerTour(false)} />
+                </Appear>
               )}
               {showLessonsInvite && (
-                <LessonsInvite panelStyle={panel} afterTour={tourFinished} onStart={() => answerLessons(true)} onDismiss={() => answerLessons(false)} />
+                <Appear from="bottom">
+                  <LessonsInvite panelStyle={panel} afterTour={tourFinished} onStart={() => answerLessons(true)} onDismiss={() => answerLessons(false)} />
+                </Appear>
               )}
               <CameraButton ref={followRef} mode={cameraMode} onPress={toggleCameraMode} />
               <BottomBar ref={toolbarRef} recording={recording} onLayout={(e) => setBarHeight(e.nativeEvent.layout.height)} />

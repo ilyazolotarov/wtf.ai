@@ -1,6 +1,8 @@
 import type { PropsWithChildren } from "react";
 import { StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
+import Animated from "react-native-reanimated";
 
+import { useAppearing, type AppearFrom } from "@/components/ui/appear";
 import { GlassFill } from "@/components/ui/glass-fill";
 import { Icon, type IconName } from "@/components/ui/icon";
 import { PressableFeedback } from "@/components/ui/press-feedback";
@@ -9,14 +11,22 @@ import { Radius, usePalette } from "@/constants/theme";
 
 // The map screen's floating cards and chips (index.tsx: alertCard, ghostButton, chip), for the lessons' maps.
 
-/** A card over the map: glass, the map's shadow; place it with `style` (absolute). */
-export function MapCard({ style, children }: PropsWithChildren<{ style?: StyleProp<ViewStyle> }>) {
+/**
+ * A card over the map: glass, the map's shadow; place it with `style` (absolute). It comes and goes as the map's
+ * (UI-SPEC §4.9), from the edge it sits at (`from`, the bottom's by default).
+ */
+export function MapCard({
+  style,
+  from = "bottom",
+  children,
+}: PropsWithChildren<{ style?: StyleProp<ViewStyle>; from?: AppearFrom }>) {
   const palette = usePalette();
+  const appearing = useAppearing(from);
   return (
-    <View style={[styles.card, { boxShadow: palette.shadow }, style]}>
+    <Animated.View style={[styles.card, { boxShadow: palette.shadow }, style]} {...appearing}>
       <GlassFill radius={Radius.rL} />
       {children}
-    </View>
+    </Animated.View>
   );
 }
 
@@ -100,7 +110,7 @@ export function MapCardButtons({
   );
 }
 
-/** The map's chip ("Set your position on the map", "Position set manually · …"). */
+/** The map's chip ("Set your position on the map", "Position set manually · …"), coming in from the top. */
 export function MapChipButton({
   icon,
   label,
@@ -121,8 +131,12 @@ export function MapChipButton({
 }) {
   const palette = usePalette();
   const ink = primary ? palette.onAccent : palette.text;
+  const appearing = useAppearing("top");
   return (
-    <View style={[styles.chip, { boxShadow: palette.shadow }, primary && { backgroundColor: palette.accent }, style]}>
+    <Animated.View
+      style={[styles.chip, { boxShadow: palette.shadow }, primary && { backgroundColor: palette.accent }, style]}
+      {...appearing}
+    >
       {!primary && <GlassFill radius={Radius.pill} />}
       <PressableFeedback
         onPress={onPress}
@@ -140,7 +154,7 @@ export function MapChipButton({
           <Icon name="close" size={16} color={palette.text2} />
         </PressableFeedback>
       )}
-    </View>
+    </Animated.View>
   );
 }
 

@@ -17,7 +17,7 @@ import {
   PUCK_OUTER,
   ROUTE_LINE,
 } from "@/components/map/puck-style";
-import { GlassFill } from "@/components/ui/glass-fill";
+import { BlurScope, BlurTarget, GlassFill } from "@/components/ui/glass-fill";
 import { DRAWING_MAX_FONT_SCALE, FontScaleLimit, T } from "@/components/ui/text";
 import { useMapPalette } from "@/config/map";
 import { Radius, usePalette, type StatusColor } from "@/constants/theme";
@@ -66,25 +66,30 @@ export function MiniMap({
 }>) {
   const c = useMapColors();
   return (
-    <View style={[styles.frame, { aspectRatio: width / height, backgroundColor: c.land }]} onLayout={onLayout}>
-      <Svg width="100%" height="100%" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="xMidYMid slice">
-        <Rect width={width} height={height} fill={c.land} />
-        {parks.map((b, i) => (
-          <Rect key={`p${i}`} x={b.x} y={b.y} width={b.w} height={b.h} rx={5} fill={c.park} />
-        ))}
-        {blocks.map((b, i) => (
-          <Rect key={`b${i}`} x={b.x} y={b.y} width={b.w} height={b.h} rx={3} fill={c.building} />
-        ))}
-        <G fill="none" strokeLinecap="round">
-          {minor && <Path d={minor} stroke={c.minorCasing} strokeWidth={13} />}
-          {minor && <Path d={minor} stroke={c.minor} strokeWidth={10} />}
-          {major && <Path d={major} stroke={c.majorCasing} strokeWidth={17} />}
-          {major && <Path d={major} stroke={c.major} strokeWidth={13} />}
-        </G>
-        {children}
-      </Svg>
-      <FontScaleLimit max={DRAWING_MAX_FONT_SCALE}>{overlay}</FontScaleLimit>
-    </View>
+    // Its own blur, as the map screen's: on Android the overlay's glass blurs only the drawing in its BlurTarget.
+    <BlurScope>
+      <View style={[styles.frame, { aspectRatio: width / height, backgroundColor: c.land }]} onLayout={onLayout}>
+        <BlurTarget>
+          <Svg width="100%" height="100%" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="xMidYMid slice">
+            <Rect width={width} height={height} fill={c.land} />
+            {parks.map((b, i) => (
+              <Rect key={`p${i}`} x={b.x} y={b.y} width={b.w} height={b.h} rx={5} fill={c.park} />
+            ))}
+            {blocks.map((b, i) => (
+              <Rect key={`b${i}`} x={b.x} y={b.y} width={b.w} height={b.h} rx={3} fill={c.building} />
+            ))}
+            <G fill="none" strokeLinecap="round">
+              {minor && <Path d={minor} stroke={c.minorCasing} strokeWidth={13} />}
+              {minor && <Path d={minor} stroke={c.minor} strokeWidth={10} />}
+              {major && <Path d={major} stroke={c.majorCasing} strokeWidth={17} />}
+              {major && <Path d={major} stroke={c.major} strokeWidth={13} />}
+            </G>
+            {children}
+          </Svg>
+        </BlurTarget>
+        <FontScaleLimit max={DRAWING_MAX_FONT_SCALE}>{overlay}</FontScaleLimit>
+      </View>
+    </BlurScope>
   );
 }
 

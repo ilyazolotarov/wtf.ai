@@ -150,6 +150,20 @@ persisted in kv-store. No hardcoded user-facing strings in components.
   `lesson-route.tsx`), the map tour's dimming (its hole lets touches through to the map), Settings' hidden tap on the
   version, an inline text link.
 
+### 4.9 Panels coming and going
+
+- **The map's panels come and go through `Appear`** (`src/components/ui/appear.tsx`): every card, chip and invite in
+  the top and bottom stacks and the centre card. In: a fade over 200 ms, eased out, sliding 10 pt from its edge (the
+  top stack's from above, the bottom stack's from below, the centre card in place); out: 150 ms, eased in, back the
+  way it came. Its neighbours glide to their new places over 200 ms instead of jumping. No bounce: the eyes are on
+  the road, and a panel must be readable as soon as it is there.
+- **A warning's red** (the speed bubble, the camera card; `red-fade.ts`) fades in and out over 150 ms over the glass;
+  the speed bubble pulses once to 106 % (120 ms out, 200 ms back) as it turns red, with the chime, not when a screen
+  opens on it already red.
+- **Still:** what changes every second (the speed, distances, times) never rolls or fades; the map's dot, cone and
+  badges; the status pill and the bottom bar, always there; CarPlay and Android Auto, drawn by the car's system.
+- **Reduce Motion:** fades only, no slide, no pulse, the neighbours jump.
+
 ## 5. App shell
 
 - `src/app/_layout.tsx`: `Stack` inside `ThemeProvider` → `I18nProvider` → `PositionProvider` → `RuntimeProvider`

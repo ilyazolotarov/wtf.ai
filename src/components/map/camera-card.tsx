@@ -1,7 +1,9 @@
 import { StyleSheet, View } from "react-native";
+import Animated from "react-native-reanimated";
 
 import { GlassFill } from "@/components/ui/glass-fill";
 import { Icon } from "@/components/ui/icon";
+import { RED_IN, RED_OUT } from "@/components/ui/red-fade";
 import { T } from "@/components/ui/text";
 import { Radius, usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
@@ -29,7 +31,8 @@ export function CameraCard({ camera }: { camera: CameraShown }) {
       accessibilityRole="alert"
       accessibilityLabel={[title, line, limit].filter(Boolean).join(". ")}
     >
-      {red ? <View style={[styles.fill, { backgroundColor: palette.bad.c }]} /> : <GlassFill radius={Radius.rL} />}
+      <GlassFill radius={Radius.rL} />
+      {red && <Animated.View entering={RED_IN} exiting={RED_OUT} style={[styles.fill, { backgroundColor: palette.bad.c }]} />}
       {/* The map's camera badge (scripts/map-car.py) without its dark edge: white on the sign's red, a white ring. */}
       <View style={[styles.badge, { backgroundColor: palette.signRing }]}>
         <Icon name="speed_camera" size={24} color="#FFFFFF" />

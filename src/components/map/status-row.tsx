@@ -1,9 +1,13 @@
+import { useEffect, useRef } from "react";
 import { StyleSheet, View } from "react-native";
+import Animated, { useAnimatedStyle, useSharedValue } from "react-native-reanimated";
 
 import type { useNavStatus } from "@/components/status/use-nav-status";
 import { GlassFill } from "@/components/ui/glass-fill";
 import { Icon } from "@/components/ui/icon";
 import { PressableFeedback } from "@/components/ui/press-feedback";
+import { RED_IN, RED_OUT, pulse } from "@/components/ui/red-fade";
+import { useReduceMotion } from "@/components/ui/reduce-motion";
 import { T } from "@/components/ui/text";
 import { Radius, usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
@@ -46,6 +50,15 @@ export function StatusRow({
   const speed = shown.speedKph === undefined ? "—" : String(shown.speedKph);
   const { limitKph, over } = shown;
   const sign = limitKph !== undefined;
+  const reduceMotion = useReduceMotion();
+  // One pulse as it turns red, with the chime (not on mount: a screen opened while too fast just shows it red).
+  const scale = useSharedValue(1);
+  const wasOver = useRef(over);
+  useEffect(() => {
+    if (over && !wasOver.current && !reduceMotion) pulse(scale);
+    wasOver.current = over;
+  }, [over, reduceMotion, scale]);
+  const pulsing = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
   const speedLabel =
     limitKph === undefined
       ? `${speed} ${t("speed")}`
@@ -84,17 +97,21 @@ export function StatusRow({
           </View>
         )}
       </PressableFeedback>
-      <View
-        style={[panel, styles.speed, sign && styles.withSign]}
+      <Animated.View
+        style={[panel, styles.speed, sign && styles.withSign, pulsing]}
         accessible
         accessibilityRole="text"
         accessibilityLabel={speedLabel}
       >
+        <GlassFill radius={28} />
         {/*
-          Too fast, the whole bubble red. The red in a view of its own, made red and round at once: a background colour
-          added later to a view came out square on Android (new architecture), its corner radius lost.
+          Too fast, the whole bubble red, fading in over the glass. The red in a view of its own, made red and round at
+          once: a background colour added later to a view came out square on Android (new architecture), its corner
+          radius lost.
         */}
-        {over ? <View style={[styles.overFill, { backgroundColor: palette.bad.c }]} /> : <GlassFill radius={28} />}
+        {over && (
+          <Animated.View entering={RED_IN} exiting={RED_OUT} style={[styles.overFill, { backgroundColor: palette.bad.c }]} />
+        )}
         {sign && (
           // On red, a ring of the sign's white keeps its own red ring apart, drawn outside the sign's place.
           <View style={over && [styles.signOnRed, { borderColor: palette.signFill }]}>
@@ -116,7 +133,7 @@ export function StatusRow({
             {speed}
           </T>
         </View>
-      </View>
+      </Animated.View>
     </View>
   );
 }
