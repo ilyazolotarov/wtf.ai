@@ -123,10 +123,10 @@ index a789f4d1200e409bb1b3cf9f702dfbf247e10c06..f1b3762f8daeeaa74cfe248d5429b1c9
          }
 diff --git a/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/AppPuck.kt b/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/AppPuck.kt
 new file mode 100644
-index 0000000000000000000000000000000000000000..39ab04ef04df76d4cd5f8e5a6830fcc2d79fcb28
+index 0000000000000000000000000000000000000000..3af2ebba1b567e8432f3a421e857982278e560d1
 --- /dev/null
 +++ b/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/AppPuck.kt
-@@ -0,0 +1,171 @@
+@@ -0,0 +1,179 @@
 +package org.maplibre.reactnative.components.location
 +
 +import android.graphics.Bitmap
@@ -152,6 +152,14 @@ index 0000000000000000000000000000000000000000..39ab04ef04df76d4cd5f8e5a6830fcc2
 +object AppPuck {
 +    const val IMAGE = "wtf-ai-puck"
 +    const val CONE_IMAGE = "wtf-ai-puck-cone"
++
++    /**
++     * In doubt, images of their own: the layers are pointed at them (the component's style), so the colour shows at
++     * once. Drawn again under the same name, the trusted image stayed on the map through a spoofed drive.
++     */
++    fun image(doubt: Boolean) = if (doubt) "$IMAGE-doubt" else IMAGE
++
++    fun coneImage(doubt: Boolean) = if (doubt) "$CONE_IMAGE-doubt" else CONE_IMAGE
 +
 +    private class Style(
 +        private val json: JSONObject?,
@@ -299,7 +307,7 @@ index 0000000000000000000000000000000000000000..39ab04ef04df76d4cd5f8e5a6830fcc2
 +    }
 +}
 diff --git a/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/LocationComponentManager.kt b/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/LocationComponentManager.kt
-index 5f0cc06185e274e2daf3521c3bfffa4858d57ebf..dab2a01240275dd8c9f19714d5d5ceccb310e667 100644
+index 5f0cc06185e274e2daf3521c3bfffa4858d57ebf..b69a104762bef0852a9522c0c9a522a90f0cf8e6 100644
 --- a/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/LocationComponentManager.kt
 +++ b/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/LocationComponentManager.kt
 @@ -2,14 +2,22 @@ package org.maplibre.reactnative.components.location
@@ -456,13 +464,13 @@ index 5f0cc06185e274e2daf3521c3bfffa4858d57ebf..dab2a01240275dd8c9f19714d5d5cecc
 +        LocationComponentOptions
 +            .builder(context)
 +            .gpsDrawable(R.drawable.empty)
-+            .gpsName(AppPuck.IMAGE)
++            .gpsName(AppPuck.image(appDoubt))
 +            .foregroundDrawable(R.drawable.empty)
 +            .foregroundDrawableStale(R.drawable.empty)
 +            .backgroundDrawable(R.drawable.empty)
 +            .backgroundDrawableStale(R.drawable.empty)
-+            .backgroundName(AppPuck.CONE_IMAGE)
-+            .backgroundStaleName(AppPuck.CONE_IMAGE)
++            .backgroundName(AppPuck.coneImage(appDoubt))
++            .backgroundStaleName(AppPuck.coneImage(appDoubt))
 +            .bearingDrawable(R.drawable.empty)
 +            // The accuracy circle as the app's layer drew it: a faint fill in the dot's colour (doubt: amber).
 +            .accuracyAlpha(if (appDoubt) 0.18f else 0.16f)
@@ -476,8 +484,8 @@ index 5f0cc06185e274e2daf3521c3bfffa4858d57ebf..dab2a01240275dd8c9f19714d5d5cecc
 +    fun addAppPuckImage(style: Style) {
 +        if (!appSource) return
 +        val metrics = context.resources.displayMetrics
-+        style.addImage(AppPuck.IMAGE, AppPuck.bitmap(metrics, appStyle, appDoubt, appHidden))
-+        style.addImage(AppPuck.CONE_IMAGE, AppPuck.cone(metrics, appStyle, appDoubt, appHidden, appWithCone, appConeHalfDeg, appConeTiltDeg))
++        style.addImage(AppPuck.image(appDoubt), AppPuck.bitmap(metrics, appStyle, appDoubt, appHidden))
++        style.addImage(AppPuck.coneImage(appDoubt), AppPuck.cone(metrics, appStyle, appDoubt, appHidden, appWithCone, appConeHalfDeg, appConeTiltDeg))
 +        // The dot upright on a tilted map, as the app's round dot (the layer's icon would otherwise lie flat on the map).
 +        // Not the cone: on an upright layer MapLibre turns a map-aligned icon by the tilted screen angle of the tile's east
 +        // axis, not the map's bearing, so the cone left the road on diagonal headings. On the map it points along it.
