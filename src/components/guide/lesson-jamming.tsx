@@ -120,7 +120,12 @@ export function LessonJamming() {
       <LessonIntro>{t("jamIntro")}</LessonIntro>
       <LessonTabs<"with" | "without">
         value={adapter ? "with" : "without"}
-        onChange={(value) => setAdapter(value === "with")}
+        // The other drive from its start: the same stage of it would tell a different moment of the story.
+        onChange={(value) => {
+          setAdapter(value === "with");
+          setStage(0);
+          setPlaying(false);
+        }}
         options={[
           { value: "with", label: t("jamWithAdapter") },
           { value: "without", label: t("jamWithoutAdapter") },

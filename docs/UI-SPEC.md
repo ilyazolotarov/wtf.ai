@@ -341,7 +341,7 @@ One small component each; the screen only places them and wires their state. Car
 | Bottom | `CameraButton` | Camera mode (§6.2) |
 | Bottom | `BottomBar` | Route, Vehicle (with the connection dot; "Driving" while a trip records), More (a red dot while an app or map update waits, UPDATES-SPEC §5.4) |
 | Center | `PermissionCard` (`center-cards.tsx`) | Location denied → explanation + "Open Settings" |
-| Center | `NoFixCard` | "Waiting for GPS…" when no fix yet; "GPS puts you outside Ukraine" + Set position when the phone's last location is abroad |
+| Center | `NoFixCard` | "Waiting for GPS…" when no fix yet, with "Set your position on the map" (grey) from the start: jammed at the start, a fix may never come; "GPS puts you outside Ukraine" + Set position when the phone's last location is abroad |
 
 - **Outside the region** (`region-prompt.tsx`): when the position (any fix to 5 km, Wi-Fi ones too, not one suspected
   of spoofing) is more than max(1 km, its accuracy) outside the active region's outline (`region-check.ts`), a card
@@ -613,7 +613,7 @@ How to use the app, for drivers. Design sources: [design/guide/](design/guide/).
      the placing (`placing-map.tsx`).
   4. **The car button** (`car`): its four states, a checklist when red.
   5. **Driving through jamming** (`jamming`): a drive played in five stages (GPS ok, jammed, 4 min, a turn, GPS back;
-     4 s each), with or without the adapter.
+     4 s each), with or without the adapter; switching between them starts the other drive from its first stage.
   6. **Plan a route** (`route`): a long press drops the pin (I'm here, then Route here) or search a saved place; the
      drawn map is a real road network (`route-map.ts`, `MemoryRoadGraph`): the app's router plans on it, the real
      banner shows the maneuvers and the voice says the first one.

@@ -328,7 +328,6 @@ export default function RouteScreen() {
             )}
           </ScreenSection>
           )}
-          {adding && <ScreenLink label={t("cancel")} onPress={() => router.back()} />}
         </>
       )}
 
