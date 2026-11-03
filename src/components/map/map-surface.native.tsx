@@ -205,12 +205,18 @@ export function MapSurface({
   // Camera commands wait for the style (`useMapCamera`); a new map (after none) waits again.
   const [mapReady, setMapReady] = useState(false);
   if (mapStyle == null && mapReady) setMapReady(false);
+  // The map shows the app's position, not the device's: the follow camera and the feed wait for it. Followed before,
+  // MapLibre followed the device's location (with no GPS fix, none: the camera stayed on the region's middle), the
+  // switch ended that following and JS took it for the driver's gesture (free), and the poses fed before it were
+  // dropped, so the camera button had no dot to go to.
+  const [sourceOn, setSourceOn] = useState(false);
+  if (!mapReady && sourceOn) setSourceOn(false);
   // Heading-up places the dot by the map's own height (turned sideways, it is the screen's width).
   const [mapHeightPt, setMapHeightPt] = useState(0);
   const [mapWidthPt, setMapWidthPt] = useState(0);
   const mapSize = useRef({ width: 0, height: 0 });
   const { cameraRef, onRegionIsChanging, onRegionDidChange, onOutsideGesture, onFollowEnded, native } = useMapCamera({
-    mapReady,
+    mapReady: mapReady && sourceOn,
     mapHeightPt,
     mapWidthPt,
     insets,
@@ -257,7 +263,10 @@ export function MapSurface({
   // device's location and back, iOS would drop the dot and following at every change of mode.)
   useEffect(() => {
     if (!mapReady) return;
-    mapRef.current?.setUserLocationSource("app", { x: anchorX, y: anchorY }, nativePuckStyle(scheme)).catch(() => {});
+    mapRef.current
+      ?.setUserLocationSource("app", { x: anchorX, y: anchorY }, nativePuckStyle(scheme))
+      .then(() => setSourceOn(true))
+      .catch(() => {});
   }, [mapReady, scheme, anchorX, anchorY]);
   const onCarRef = useRef(onCar);
   useEffect(() => {
@@ -269,7 +278,7 @@ export function MapSurface({
   const compassRef = useRef(compassCone);
   const fed = useRef<PuckRegistration | null>(null);
   useEffect(() => {
-    if (!mapReady) return;
+    if (!sourceOn) return;
     const map = mapRef.current;
     if (!map) return;
     // The phone's map is fed while the app is in front; the car's own screen always.
@@ -283,7 +292,7 @@ export function MapSurface({
       registration.unregister();
       if (fed.current === registration) fed.current = null;
     };
-  }, [mapReady, onOwnScreen, puckFeed]);
+  }, [sourceOn, onOwnScreen, puckFeed]);
   const [compassDeg, compassHalfDeg] = [compassCone?.courseDeg ?? null, compassCone?.halfDeg ?? null];
   useEffect(() => {
     compassRef.current = compassDeg === null || compassHalfDeg === null ? null : { courseDeg: compassDeg, halfDeg: compassHalfDeg };
