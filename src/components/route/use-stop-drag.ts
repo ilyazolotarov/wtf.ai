@@ -30,9 +30,19 @@ interface Drag {
   pitch: number;
 }
 
+/** From a row's top to the next row's: the next row's top, or for the last row its height and the gap above it. */
+export function rowPitch(rows: readonly (Row | undefined)[], i: number): number | null {
+  const r = rows[i];
+  if (!r) return null;
+  const next = rows[i + 1];
+  if (next) return next.top - r.top;
+  const prev = rows[i - 1];
+  return r.height + (prev ? Math.max(0, r.top - prev.top - prev.height) : 0);
+}
+
 /**
- * The stops' rows (`keys`), laid out one after another in the same parent, then the row after them (`layout` at
- * `keys.length`: its top ends the last stop's slot). `move(key, delta)` on a drop to another place; `onDragging` while
+ * The trip's rows (`keys`: the stops, then the destination), laid out one after another in the same parent (`layout`
+ * of each). `move(key, delta)` on a drop to another place; `onDragging` while
  * a row is held (the page stops scrolling, which would take the finger away). The responders stay the same while the
  * stops and their rows do: a new one in the middle of a drag would lose it.
  */
@@ -42,7 +52,7 @@ export function useStopDrag(keys: readonly string[], move: (key: string, delta: 
   const [drag, setDrag] = useState<Drag | null>(null);
 
   const handlers = useMemo(() => {
-    const ready = (i: number) => rows[i] !== undefined && rows[i + 1] !== undefined;
+    const ready = (i: number) => keys.every((_k, k) => rows[k] !== undefined) && rowPitch(rows, i) !== null;
     const target = (from: number, d: number) => dropPlace(rows, keys.length, from, d);
     const end = (from: number, d: number, dropped: boolean) => {
       const to = target(from, d);
@@ -60,7 +70,7 @@ export function useStopDrag(keys: readonly string[], move: (key: string, delta: 
           onPanResponderTerminationRequest: () => false,
           onPanResponderGrant: () => {
             dy.setValue(0);
-            setDrag({ from: i, to: i, pitch: rows[i + 1].top - rows[i].top });
+            setDrag({ from: i, to: i, pitch: rowPitch(rows, i)! });
             onDragging(true);
           },
           onPanResponderMove: (_e, g) => {
@@ -76,7 +86,7 @@ export function useStopDrag(keys: readonly string[], move: (key: string, delta: 
 
   return {
     handlers,
-    /** The row's place, for `onLayout` of each stop's row and of the row after them. */
+    /** The row's place, for `onLayout` of each of the trip's rows. */
     layout: (i: number) => (e: LayoutChangeEvent) => {
       const { y, height } = e.nativeEvent.layout;
       setRows((r) => {

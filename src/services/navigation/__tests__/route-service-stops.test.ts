@@ -5,7 +5,7 @@ import { MemoryRoadGraph } from "@/nav/mapmatch/graph/memory-graph";
 import type { PositionEstimate } from "@/nav/position/types";
 import { RouteLine } from "@/nav/routing/along";
 import type { StopPlace } from "@/nav/search/search-index";
-import { RouteService, type RouteSnapshot } from "@/services/navigation/route-service";
+import { DESTINATION_KEY, RouteService, type RouteSnapshot } from "@/services/navigation/route-service";
 import type { NavRouteStopRecord } from "@/triplog/schema";
 
 // A main road east, 0–3000 m; at 1500 m a side road south to a fuel station's forecourt (1500, −150); a cul-de-sac
@@ -259,6 +259,28 @@ describe("RouteService with stops (STOPS-SPEC §4–5)", () => {
     h.flush();
     expect(h.snap().stops.map((x) => x.name)).toEqual(["Station"]);
     expect(h.snap().plan!.stops).toHaveLength(1);
+  });
+
+  test("a stop moved past the destination ends the trip there, the destination a stop on the way", () => {
+    const h = harness();
+    h.moveTo(at(100, 0));
+    h.service.start(DESTINATION);
+    h.flush();
+    h.follow(0, 200);
+    expect(h.service.addStop({ ...STATION, name: "Station", category: "fuel" })).toBe(true);
+    h.flush();
+    h.service.moveStop(h.snap().stops[0].key, 1);
+    h.flush();
+    const s = h.snap();
+    expect(s.destination).toEqual({ ...STATION, name: "Station" });
+    expect(s.stops.map((x) => x.name)).toEqual(["End"]);
+    expect(s.planReason).toBe("stops");
+    expect(h.store.get("route.active")).toMatchObject({ destination: { name: "Station" }, stops: [{ name: "End" }] });
+    // And back: the destination moved earlier.
+    h.service.moveStop(DESTINATION_KEY, -1);
+    h.flush();
+    expect(h.snap().destination.name).toBe("End");
+    expect(h.snap().stops.map((x) => x.name)).toEqual(["Station"]);
   });
 
   test("a stop added that no road reaches: said, taken out again, the route going on without it", () => {

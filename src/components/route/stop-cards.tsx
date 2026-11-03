@@ -1,13 +1,16 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
+import { StyleSheet, View } from "react-native";
 
-import { CardActions, CardLine, HudCard, PillButton } from "@/components/map/hud-card";
+import { CardActions, CardLine, HudCard, PillButton, usePanelStyle } from "@/components/map/hud-card";
 import { formatDistance } from "@/components/status/format-geo";
-import { usePalette } from "@/constants/theme";
+import { GlassFill } from "@/components/ui/glass-fill";
+import { Radius, usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
 import type { RouteSnapshot } from "@/services/navigation/route-service";
 import { getRuntime } from "@/services/runtime";
 
 import { formatArrival, formatDurationS } from "./guidance-text";
+import { UndoStrip } from "./save-feedback";
 import { CATEGORY_ICON } from "./stop-text";
 import { TRIP_UNDO_MS, tripUndo, type TripUndo } from "./trip-undo";
 
@@ -89,28 +92,26 @@ export function PassedStopCard({ route }: { route: RouteSnapshot }) {
  */
 export function TripUndoCard({ undo }: { undo: TripUndo }) {
   const { t } = useT();
-  const palette = usePalette();
-  const [left, setLeft] = useState(Math.round(TRIP_UNDO_MS / 1000));
+  const panel = usePanelStyle();
   useEffect(() => {
-    const started = Date.now();
-    const timer = setInterval(() => {
-      const n = Math.ceil((TRIP_UNDO_MS - (Date.now() - started)) / 1000);
-      if (n <= 0) tripUndo.clear(undo.id);
-      else setLeft(n);
-    }, 250);
-    return () => clearInterval(timer);
+    const timer = setTimeout(() => tripUndo.clear(undo.id), TRIP_UNDO_MS);
+    return () => clearTimeout(timer);
   }, [undo.id]);
   const name = undo.name ?? t("droppedPin");
+  // The saved place's strip (save-feedback.tsx), on the map's glass.
   return (
-    <HudCard
-      icon={undo.kind === "stop" ? "add" : "alt_route"}
-      tone={palette.ok}
-      title={t(undo.kind === "stop" ? "tripUndoStop" : "tripUndoRoute").replace("{name}", name)}
-      onClose={() => tripUndo.clear(undo.id)}
-    >
-      <CardActions>
-        <PillButton icon="undo" label={`${t("undo")} · ${left}`} onPress={() => tripUndo.take()} />
-      </CardActions>
-    </HudCard>
+    <View style={[panel, styles.glass]}>
+      <GlassFill radius={Radius.rL} />
+      <UndoStrip
+        done
+        icon={undo.kind === "stop" ? "check_circle" : "alt_route"}
+        message={t(undo.kind === "stop" ? "tripUndoStop" : "tripUndoRoute").replace("{name}", name)}
+        onUndo={() => tripUndo.take()}
+      />
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  glass: { borderRadius: Radius.rL, overflow: "hidden" },
+});

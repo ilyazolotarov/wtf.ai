@@ -48,6 +48,7 @@ export function PlacingCard({
           // A placing always has a heading: Confirm waits for the first tap.
           disabled={!atPosition && !hasHeading}
           wide
+          primary
         />
       </CardActions>
     </HudCard>
@@ -108,7 +109,7 @@ export function ManualQuestionCard({ manual, onAnswer }: { manual: Manual; onAns
       lines={<CardLine>{t("manualQuestionWhy").replace("{age}", age)}</CardLine>}
     >
       <CardActions>
-        <CardButton label={t("manualYes")} onPress={() => onAnswer(true)} wide />
+        <CardButton label={t("manualYes")} onPress={() => onAnswer(true)} wide primary />
         <CardButton label={t("poseNo")} onPress={() => onAnswer(false)} wide />
       </CardActions>
     </HudCard>
@@ -142,7 +143,7 @@ export function PoseQuestionCard({ distanceM, onAnswer }: { distanceM: number; o
       lines={<CardLine>{t("poseQuestionWhy").replace("{d}", formatDistance(distanceM, language))}</CardLine>}
     >
       <CardActions>
-        <CardButton label={t("poseYes")} onPress={() => onAnswer(true)} wide />
+        <CardButton label={t("poseYes")} onPress={() => onAnswer(true)} wide primary />
         <CardButton label={t("poseNo")} onPress={() => onAnswer(false)} wide />
       </CardActions>
     </HudCard>

@@ -1,4 +1,4 @@
-import { dropPlace } from "../use-stop-drag";
+import { dropPlace, rowPitch } from "../use-stop-drag";
 
 // Three stops' rows, 58 pt each with a 1 pt line between them (the route page's trip).
 const rows = [0, 59, 118].map((top) => ({ top, height: 58 }));
@@ -20,5 +20,13 @@ describe("dropPlace (STOPS-SPEC §7.1)", () => {
 
   test("a row not laid out yet stays where it is", () => {
     expect(dropPlace([], 3, 1, 100)).toBe(1);
+  });
+});
+
+describe("rowPitch", () => {
+  test("to the next row's top; the last row its height and the line above it", () => {
+    expect(rowPitch(rows, 0)).toBe(59);
+    expect(rowPitch(rows, 2)).toBe(59);
+    expect(rowPitch([], 0)).toBeNull();
   });
 });

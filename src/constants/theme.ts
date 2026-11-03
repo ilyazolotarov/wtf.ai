@@ -23,7 +23,8 @@ export const Colors = {
     bg: "#F5F4F1",
     sheetBg: "#F5F4F1",
     groupBg: "#FFFFFF",
-    surface: "#EDEBE6",
+    // Grey buttons on the light cards and glass: darker than the page (#F5F4F1) so they read as buttons there.
+    surface: "#E2DFD8",
     panel: "rgba(255,255,255,0.35)",
     /** Panel tint where the map behind can't be blurred (Android before 12): dense enough to read on. */
     panelSolid: "rgba(255,255,255,0.86)",

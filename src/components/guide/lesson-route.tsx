@@ -182,6 +182,7 @@ export function LessonRoute() {
                     { label: t("placeCancel"), muted: true, onPress: () => setAiming(null) },
                     {
                       label: t("placeConfirm"),
+                      primary: true,
                       disabled: aimDeg == null,
                       onPress: () => {
                         setDot(aiming);

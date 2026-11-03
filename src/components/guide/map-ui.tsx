@@ -67,7 +67,8 @@ export function MapCardHeader({
 export function MapCardButtons({
   buttons,
 }: {
-  buttons: { label: string; onPress(): void; muted?: boolean; disabled?: boolean }[];
+  /** `primary`: the card's main action, filled with the accent. */
+  buttons: { label: string; onPress(): void; muted?: boolean; disabled?: boolean; primary?: boolean }[];
 }) {
   const palette = usePalette();
   return (
@@ -79,9 +80,18 @@ export function MapCardButtons({
           disabled={button.disabled}
           accessibilityRole="button"
           accessibilityState={{ disabled: button.disabled }}
-          style={[styles.button, { backgroundColor: palette.surface }, button.disabled && styles.disabled]}
+          style={[
+            styles.button,
+            { backgroundColor: button.primary ? palette.accent : palette.surface },
+            button.disabled && styles.disabled,
+          ]}
         >
-          <T w="semibold" size={14} color={button.muted ? palette.text2 : palette.text} fit>
+          <T
+            w="semibold"
+            size={14}
+            color={button.primary ? palette.onAccent : button.muted ? palette.text2 : palette.text}
+            fit
+          >
             {button.label}
           </T>
         </PressableFeedback>
@@ -98,6 +108,7 @@ export function MapChipButton({
   onClose,
   closeLabel,
   style,
+  primary,
 }: {
   icon: IconName;
   label: string;
@@ -105,19 +116,22 @@ export function MapChipButton({
   onClose?: () => void;
   closeLabel?: string;
   style?: StyleProp<ViewStyle>;
+  /** An action the map offers: filled with the accent instead of glass (the app's HudChip). */
+  primary?: boolean;
 }) {
   const palette = usePalette();
+  const ink = primary ? palette.onAccent : palette.text;
   return (
-    <View style={[styles.chip, { boxShadow: palette.shadow }, style]}>
-      <GlassFill radius={Radius.pill} />
+    <View style={[styles.chip, { boxShadow: palette.shadow }, primary && { backgroundColor: palette.accent }, style]}>
+      {!primary && <GlassFill radius={Radius.pill} />}
       <PressableFeedback
         onPress={onPress}
         disabled={!onPress}
         accessibilityRole="button"
         style={styles.chipBody}
       >
-        <Icon name={icon} size={16} color={palette.text} />
-        <T w="semibold" size={13} color={palette.text} fit>
+        <Icon name={icon} size={16} color={ink} />
+        <T w="semibold" size={13} color={ink} fit>
           {label}
         </T>
       </PressableFeedback>

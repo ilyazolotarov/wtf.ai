@@ -353,7 +353,7 @@ export default function HomeScreen() {
               )}
 
               {placeOffered && (
-                <HudChip icon="location_on" label={t("placeOffer")} color={palette.text} onPress={() => place.start()} />
+                <HudChip icon="location_on" label={t("placeOffer")} primary onPress={() => place.start()} />
               )}
 
               {showManual && detailsOpen && (
@@ -414,6 +414,8 @@ export default function HomeScreen() {
                 <RouteBanner route={route} nowMs={position?.timestamp ?? 0} onStop={stopRoute} muted={voiceMuted} onToggleVoice={voiceOff ? undefined : toggleVoice} offPhone={audioOutput.offPhone} />
               )}
 
+              {/* Under the banner it changed, where the eyes are while driving. */}
+              {tripUndo && !placing && (tripUndo.kind === "route" || route) && <TripUndoCard key={tripUndo.id} undo={tripUndo} />}
               {camera && !placing && <CameraCard camera={camera} />}
             </View>
 
@@ -430,7 +432,6 @@ export default function HomeScreen() {
                   onConfirm={held.confirm}
                 />
               )}
-              {tripUndo && !placing && (tripUndo.kind === "route" || route) && <TripUndoCard key={tripUndo.id} undo={tripUndo} />}
               {route?.atStop && !placing && <AtStopCard route={route} nowMs={position?.timestamp ?? 0} onEnd={stopRoute} />}
               {route?.passedStop && !route.atStop && !placing && <PassedStopCard route={route} />}
               {/* On the tour the pin is only tried: its card would sit under the dimmed screen. */}

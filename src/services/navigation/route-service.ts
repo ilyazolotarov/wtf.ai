@@ -301,6 +301,9 @@ function startOf(p: PositionEstimate) {
 const reliable = (p: PositionEstimate) => !(p.source === "gnss" && p.trust !== "TRUSTED");
 
 /** A stop as given: a place, a pin, a search result; its key is made if it has none. */
+/** The destination's key where a stop's is asked for (`moveStop`, `parkAt`). */
+export const DESTINATION_KEY = "destination";
+
 export type StopInput = RouteDestination & { key?: string; category?: PlaceCategory; flags?: number; hours?: readonly number[] | null };
 
 /** Another way there, followed by its own guidance from the start: the one the car is on can take over. */
@@ -483,18 +486,32 @@ export class RouteService {
     this.changeStops(s.stops.filter((x) => x !== stop));
   }
 
-  /** Moves a stop `delta` places earlier (−) or later (+) among the stops. */
+  /**
+   * Moves a stop, or the destination (`DESTINATION_KEY`), `delta` places earlier (−) or later (+) in the trip: what
+   * ends up last is the destination, and the destination moved earlier is a stop.
+   */
   moveStop(key: string, delta: number): void {
     const s = this.snapshot;
-    const i = s?.stops.findIndex((x) => x.key === key) ?? -1;
-    if (!s || i < 0) return;
-    const j = Math.max(0, Math.min(s.stops.length - 1, i + delta));
+    if (!s) return;
+    const points: TripStop[] = [...s.stops, { ...s.destination, key: DESTINATION_KEY }];
+    const i = points.findIndex((x) => x.key === key);
+    if (i < 0) return;
+    const j = Math.max(0, Math.min(points.length - 1, i + delta));
     if (j === i) return;
-    const stops = [...s.stops];
-    const [stop] = stops.splice(i, 1);
-    stops.splice(j, 0, stop);
-    this.note(`route stop moved: ${stopLabel(stop)}, ${j + 1} of ${stops.length} (was ${i + 1})`);
-    this.changeStops(stops);
+    const [point] = points.splice(i, 1);
+    points.splice(j, 0, point);
+    const last = points.pop()!;
+    const stops = points.map((x) => (x.key === DESTINATION_KEY ? this.keyed(placeOf(x)) : x));
+    if (last.key === DESTINATION_KEY) {
+      this.note(`route stop moved: ${stopLabel(point)}, ${j + 1} of ${stops.length} (was ${i + 1})`);
+      this.changeStops(stops);
+      return;
+    }
+    const destination = placeOf(last);
+    this.note(`route destination now ${stopLabel(last)}, was ${stopLabel(s.destination)}, now a stop`);
+    this.save(destination, stops);
+    this.set({ ...s, destination, stops });
+    this.plan("stops");
   }
 
   /** "Go on" at a stop: its card goes; guidance is already on the next leg. */
@@ -608,14 +625,8 @@ export class RouteService {
     const s = this.snapshot;
     if (!s) return;
     const parking = this.keyed(place);
-    if (forKey === "destination") {
-      const destination: RouteDestination = {
-        lat: parking.lat,
-        lon: parking.lon,
-        ...(parking.name ? { name: parking.name } : {}),
-        ...(parking.id ? { id: parking.id } : {}),
-        ...(parking.detail ? { detail: parking.detail } : {}),
-      };
+    if (forKey === DESTINATION_KEY) {
+      const destination = placeOf(parking);
       this.note(`route parking for the destination: ${stopLabel(parking)}, was ${stopLabel(s.destination)}`);
       this.save(destination, s.stops);
       this.set({ ...s, destination });
@@ -1451,6 +1462,17 @@ const NEAR_ROUTE_M = 1000;
 const FAR_PROJECT_M = 20_000;
 
 /** The trip's points for a search: its stops, then the destination. */
+/** A trip point as a destination: where it is and what to call it (a stop's kind and key stay behind). */
+function placeOf(p: RouteDestination): RouteDestination {
+  return {
+    lat: p.lat,
+    lon: p.lon,
+    ...(p.name ? { name: p.name } : {}),
+    ...(p.id ? { id: p.id } : {}),
+    ...(p.detail ? { detail: p.detail } : {}),
+  };
+}
+
 function pointsOf(stops: readonly TripStop[], destination: RouteDestination): TripPoint[] {
   return [...stops.map((x) => ({ key: x.key, lat: x.lat, lon: x.lon })), { key: "destination", lat: destination.lat, lon: destination.lon }];
 }

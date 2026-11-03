@@ -87,6 +87,7 @@ export function CardButton({
   sub,
   wide,
   disabled,
+  primary,
 }: {
   label: string;
   onPress(): void;
@@ -94,6 +95,8 @@ export function CardButton({
   sub?: string;
   wide?: boolean;
   disabled?: boolean;
+  /** The card's main action: filled with the accent. */
+  primary?: boolean;
 }) {
   const palette = usePalette();
   return (
@@ -102,13 +105,18 @@ export function CardButton({
       disabled={disabled}
       accessibilityRole="button"
       accessibilityState={{ disabled: !!disabled }}
-      style={[hud.button, wide && hud.wide, { backgroundColor: palette.surface }, disabled && hud.disabled]}
+      style={[
+        hud.button,
+        wide && hud.wide,
+        { backgroundColor: primary ? palette.accent : palette.surface },
+        disabled && hud.disabled,
+      ]}
     >
-      <T w="semibold" size={14} color={color ?? palette.text} fit>
+      <T w="semibold" size={14} color={primary ? palette.onAccent : (color ?? palette.text)} fit>
         {label}
       </T>
       {sub && (
-        <T size={12} color={palette.text2} fit>
+        <T size={12} color={primary ? palette.onAccent : palette.text2} fit>
           {sub}
         </T>
       )}
@@ -150,20 +158,25 @@ export function HudChip({
   label,
   color,
   onPress,
+  primary,
 }: {
   icon: IconName;
   label: string;
-  color: string;
+  color?: string;
   onPress?(): void;
+  /** An action the map offers: filled with the accent instead of glass. */
+  primary?: boolean;
 }) {
   const panel = usePanelStyle();
+  const palette = usePalette();
+  const ink = primary ? palette.onAccent : (color ?? palette.text);
   const body = (
     <>
-      <GlassFill radius={Radius.pill} />
-      <Icon name={icon} size={16} color={color} />
+      {primary ? <View style={[hud.fill, { backgroundColor: palette.accent }]} /> : <GlassFill radius={Radius.pill} />}
+      <Icon name={icon} size={16} color={ink} />
       {/* Its own box: in a row sized by its content, a label measured wide and then narrowed is cut off, not shrunk. */}
       <View style={hud.fitBox}>
-        <T w="semibold" size={13} color={color} fit>
+        <T w="semibold" size={13} color={ink} fit>
           {label}
         </T>
       </View>
@@ -180,6 +193,7 @@ export function HudChip({
 export const hud = StyleSheet.create({
   panel: { borderCurve: "continuous" },
   disabled: { opacity: 0.4 },
+  fill: { ...StyleSheet.absoluteFill, borderRadius: Radius.pill },
   fitBox: { flexShrink: 1 },
   card: { gap: 12, padding: 16, borderRadius: Radius.rL },
   row: { flexDirection: "row", alignItems: "flex-start", gap: 12 },

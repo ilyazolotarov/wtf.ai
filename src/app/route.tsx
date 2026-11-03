@@ -1,12 +1,12 @@
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Animated, Keyboard, StyleSheet, TextInput, View } from "react-native";
+import { Animated, Keyboard, StyleSheet, TextInput, View, type GestureResponderHandlers } from "react-native";
 
 import { ScreenAction, ScreenCard, ScreenContent, ScreenLink, ScreenNote, ScreenSection } from "@/components/screens/screen-ui";
 import { cardinal, formatDistance, toDegrees } from "@/components/status/format-geo";
 import { formatArrival, formatDurationS } from "@/components/route/guidance-text";
 import { Metric, metricStyles, PlaceCard, SAVED_ICON, takeSavedLast, type PlaceCardExit } from "@/components/route/place-card";
-import { CATEGORY_ICON, CATEGORY_LABEL, detourText, STOP_CATEGORIES } from "@/components/route/stop-text";
+import { CATEGORY_COLOR, CATEGORY_ICON, CATEGORY_LABEL, detourText, STOP_CATEGORIES } from "@/components/route/stop-text";
 import { Flash } from "@/components/route/save-feedback";
 import { addStopWithUndo, useTripUndo } from "@/components/route/trip-undo";
 import { useStopDrag } from "@/components/route/use-stop-drag";
@@ -26,7 +26,7 @@ import { destinations, useRoute } from "@/providers/route-provider";
 import type { Place, SavedKind } from "@/services/navigation/places-store";
 import { useMapPacks } from "@/services/offline-map/map-packs";
 import { activeSearchIndex } from "@/services/offline-map/search-file";
-import type { RouteSnapshot } from "@/services/navigation/route-service";
+import { DESTINATION_KEY, type RouteSnapshot } from "@/services/navigation/route-service";
 import { getRuntime } from "@/services/runtime";
 
 /** Search after typing pauses this long (ms). */
@@ -225,7 +225,7 @@ export default function RouteScreen() {
           </View>
         )}
         <View style={styles.destinationCopy}>
-          <T w="semibold" size={16} numberOfLines={2}>
+          <T w="medium" size={16} numberOfLines={2}>
             {options.title ?? d.title}
           </T>
           <T size={12} color={palette.text2} fit>
@@ -344,6 +344,40 @@ export default function RouteScreen() {
  * The kinds to pull in at along the route (STOPS-SPEC §6.2), each opening its list; `back`: the pages a place picked
  * there goes back to reach the trip (2 from the stop search, pushed over the trip).
  */
+/** A trip row's ≡: dragged to its place; screen readers move it a place at a time. */
+function DragHandle({
+  handlers,
+  name,
+  earlier,
+  later,
+  onMove,
+}: {
+  handlers: GestureResponderHandlers | undefined;
+  name: string;
+  earlier: boolean;
+  later: boolean;
+  onMove(delta: number): void;
+}) {
+  const { t } = useT();
+  const palette = usePalette();
+  return (
+    <View
+      {...handlers}
+      accessible
+      accessibilityLabel={t("reorderStop").replace("{name}", name)}
+      accessibilityActions={[
+        ...(earlier ? [{ name: "earlier", label: t("moveStopUp").replace("{name}", name) }] : []),
+        ...(later ? [{ name: "later", label: t("moveStopDown").replace("{name}", name) }] : []),
+      ]}
+      onAccessibilityAction={(e) => onMove(e.nativeEvent.actionName === "earlier" ? -1 : 1)}
+      hitSlop={6}
+      style={[tripStyles.button, { backgroundColor: palette.surface }]}
+    >
+      <Icon name="drag_handle" size={16} color={palette.text2} />
+    </View>
+  );
+}
+
 function PullInTiles({ back = 1 }: { back?: number }) {
   const { t } = useT();
   const palette = usePalette();
@@ -357,7 +391,10 @@ function PullInTiles({ back = 1 }: { back?: number }) {
             accessibilityRole="button"
             style={[tripStyles.tile, { backgroundColor: palette.groupBg }]}
           >
-            <Icon name={CATEGORY_ICON[c]} size={24} color={palette.text} />
+            {/* The map's badge for the kind: a round one, parking the square road sign. */}
+            <View style={[c === "parking" ? tripStyles.sign : tripStyles.badge, { backgroundColor: CATEGORY_COLOR[c] }]}>
+              <Icon name={CATEGORY_ICON[c]} size={22} color="#FFFFFF" />
+            </View>
             <T w="medium" size={15} fit>
               {t(CATEGORY_LABEL[c])}
             </T>
@@ -399,7 +436,9 @@ function TripSection({
   const { t, language } = useT();
   const palette = usePalette();
   const routes = getRuntime().routes;
-  const keys = useMemo(() => route.stops.map((s) => s.key), [route.stops]);
+  // The destination drags among the stops too: what is dropped last is where the trip ends.
+  const keys = useMemo(() => [...route.stops.map((s) => s.key), DESTINATION_KEY], [route.stops]);
+  const last = route.stops.length;
   const move = useMemo(() => routes.moveStop.bind(routes), [routes]);
   const drag = useStopDrag(keys, move, onDragging);
   // The stop just added (here, or from the places on the way): its row glows once.
@@ -448,7 +487,7 @@ function TripSection({
                 )}
               </View>
               <View style={styles.destinationCopy}>
-                <T w="semibold" size={16} numberOfLines={2}>
+                <T w="medium" size={16} numberOfLines={2}>
                   {name}
                 </T>
                 {(s !== null || stop.detail) && (
@@ -457,23 +496,13 @@ function TripSection({
                   </T>
                 )}
               </View>
-              {route.stops.length > 1 && (
-                // Dragged to its place; screen readers move it a place at a time.
-                <View
-                  {...drag.handlers[i]}
-                  accessible
-                  accessibilityLabel={t("reorderStop").replace("{name}", name)}
-                  accessibilityActions={[
-                    ...(i > 0 ? [{ name: "earlier", label: t("moveStopUp").replace("{name}", name) }] : []),
-                    ...(i < route.stops.length - 1 ? [{ name: "later", label: t("moveStopDown").replace("{name}", name) }] : []),
-                  ]}
-                  onAccessibilityAction={(e) => routes.moveStop(stop.key, e.nativeEvent.actionName === "earlier" ? -1 : 1)}
-                  hitSlop={6}
-                  style={[tripStyles.button, { backgroundColor: palette.surface }]}
-                >
-                  <Icon name="drag_handle" size={16} color={palette.text2} />
-                </View>
-              )}
+              <DragHandle
+                handlers={drag.handlers[i]}
+                name={name}
+                earlier={i > 0}
+                later
+                onMove={(delta) => routes.moveStop(stop.key, delta)}
+              />
               <PressableFeedback
                 onPress={() => routes.removeStop(stop.key)}
                 accessibilityRole="button"
@@ -486,12 +515,15 @@ function TripSection({
             </Animated.View>
           );
         })}
-        <View onLayout={drag.layout(route.stops.length)} style={styles.destination}>
+        <Animated.View
+          onLayout={drag.layout(last)}
+          style={[styles.destination, { backgroundColor: palette.groupBg }, drag.offset(last)]}
+        >
           <View style={[tripStyles.stop, { borderColor: palette.accentA, backgroundColor: palette.accentA }]}>
             <Icon name="flag" size={16} color={palette.accent} />
           </View>
           <View style={styles.destinationCopy}>
-            <T w="semibold" size={16} numberOfLines={2}>
+            <T w="medium" size={16} numberOfLines={2}>
               {route.destination.name ?? t("droppedPin")}
             </T>
             {(plan || route.destination.detail) && (
@@ -500,7 +532,18 @@ function TripSection({
               </T>
             )}
           </View>
-        </View>
+          {last > 0 && (
+            <DragHandle
+              handlers={drag.handlers[last]}
+              name={route.destination.name ?? t("droppedPin")}
+              earlier
+              later={false}
+              onMove={(delta) => routes.moveStop(DESTINATION_KEY, delta)}
+            />
+          )}
+          {/* Level with the stops' handles: the destination has no ✕ (Stop guidance ends the trip). */}
+          {last > 0 && <View style={tripStyles.button} />}
+        </Animated.View>
         {route.stops.length < routes.maxStops && (
           <PressableFeedback look="row" onPress={onAdd} accessibilityRole="button" style={styles.destination}>
             <View style={[tripStyles.stop, { borderColor: palette.accentA, backgroundColor: palette.accentA }]}>
@@ -529,7 +572,9 @@ function TripSection({
 
 const tripStyles = StyleSheet.create({
   tiles: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  tile: { flexBasis: "31%", flexGrow: 1, minHeight: 76, borderRadius: 16, alignItems: "center", justifyContent: "center", gap: 6, paddingHorizontal: 6 },
+  tile: { flexBasis: "31%", flexGrow: 1, minHeight: 88, borderRadius: 16, alignItems: "center", justifyContent: "center", gap: 8, paddingHorizontal: 6 },
+  badge: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
+  sign: { width: 40, height: 40, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   stop: { width: 36, height: 36, borderRadius: 18, borderWidth: 2, alignItems: "center", justifyContent: "center" },
   button: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
 });

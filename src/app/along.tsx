@@ -5,7 +5,7 @@ import { ScrollView, StyleSheet, View } from "react-native";
 import { ScreenContent, ScreenLink, ScreenNote, ScreenSection } from "@/components/screens/screen-ui";
 import { formatDistance } from "@/components/status/format-geo";
 import { resultTitle } from "@/components/route/search-text";
-import { CATEGORY_ICON, CATEGORY_LABEL, detourText, placeDetail, placeName, STOP_CATEGORIES } from "@/components/route/stop-text";
+import { CATEGORY_COLOR, CATEGORY_ICON, CATEGORY_LABEL, detourText, placeDetail, placeName, STOP_CATEGORIES } from "@/components/route/stop-text";
 import { addStopWithUndo, offerRouteUndo } from "@/components/route/trip-undo";
 import { Icon } from "@/components/ui/icon";
 import { PressableFeedback } from "@/components/ui/press-feedback";
@@ -99,11 +99,11 @@ export default function AlongScreen() {
         look="row"
         style={styles.row}
       >
-        <View style={[styles.icon, { backgroundColor: palette.accentA }]}>
-          <Icon name={CATEGORY_ICON[item.place.category]} size={18} color={palette.accent} />
+        <View style={[styles.icon, { backgroundColor: CATEGORY_COLOR[item.place.category] }]}>
+          <Icon name={CATEGORY_ICON[item.place.category]} size={18} color="#FFFFFF" />
         </View>
         <View style={styles.copy}>
-          <T w="semibold" size={16} numberOfLines={2}>
+          <T w="medium" size={16} numberOfLines={2}>
             {titleOf(item)}
           </T>
           {detail ? (
@@ -147,10 +147,11 @@ export default function AlongScreen() {
               onPress={() => router.setParams({ category: c })}
               accessibilityRole="button"
               accessibilityState={{ selected: on }}
-              style={[styles.chip, { backgroundColor: on ? palette.accent : palette.groupBg }]}
+              // Each kind in its colour (the Route page's tiles, the map's icons): its icon, and the chip filled when on.
+              style={[styles.chip, { backgroundColor: on ? CATEGORY_COLOR[c] : palette.groupBg }]}
             >
-              <Icon name={CATEGORY_ICON[c]} size={18} color={on ? palette.onAccent : palette.text} />
-              <T w="medium" size={15} color={on ? palette.onAccent : palette.text}>
+              <Icon name={CATEGORY_ICON[c]} size={18} color={on ? "#FFFFFF" : CATEGORY_COLOR[c]} />
+              <T w="medium" size={15} color={on ? "#FFFFFF" : palette.text}>
                 {t(CATEGORY_LABEL[c])}
               </T>
             </PressableFeedback>

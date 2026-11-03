@@ -267,7 +267,7 @@ export function PlacingMap({
               buttons={[
                 { label: t("placeCancel"), muted: true, onPress: onCancel },
                 // Only on the car: the lesson leads there.
-                { label: t("placeHere"), disabled: !onCar, onPress: () => onStep("heading") },
+                { label: t("placeHere"), primary: true, disabled: !onCar, onPress: () => onStep("heading") },
               ]}
             />
           </MapCard>
@@ -282,7 +282,7 @@ export function PlacingMap({
             <MapCardButtons
               buttons={[
                 { label: t("placeCancel"), muted: true, onPress: onCancel },
-                { label: t("placeConfirm"), disabled: !headingRight, onPress: () => onStep("done") },
+                { label: t("placeConfirm"), primary: true, disabled: !headingRight, onPress: () => onStep("done") },
               ]}
             />
           </MapCard>

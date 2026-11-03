@@ -134,7 +134,7 @@ function SetPositionTab() {
                 {t("placeCarTag")}
               </T>
             </View>
-            <MapChipButton icon="location_on" label={t("placeOffer")} onPress={() => setStep("position")} style={styles.topLeft} />
+            <MapChipButton icon="location_on" label={t("placeOffer")} onPress={() => setStep("position")} style={styles.topLeft} primary />
             {pin ? (
               <MapCard style={styles.bottom}>
                 <MapCardHeader icon="place" title={t("droppedPin")} body={t("placePinBody")} onClose={() => setPin(null)} closeLabel={t("cancel")} />
@@ -142,6 +142,7 @@ function SetPositionTab() {
                   buttons={[
                     {
                       label: t("placeMeHere"),
+                      primary: true,
                       // As the map: placing starts at the pin.
                       onPress: () => {
                         setStartAt(pin);

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Animated, StyleSheet, View } from "react-native";
 
-import { Icon } from "@/components/ui/icon";
+import { Icon, type IconName } from "@/components/ui/icon";
 import { PressableFeedback } from "@/components/ui/press-feedback";
 import { T } from "@/components/ui/text";
 import { Radius, usePalette } from "@/constants/theme";
@@ -24,24 +24,53 @@ export function SaveConfirmation({
   onUndo(): void;
 }) {
   const { t } = useT();
+  const message =
+    kind === null
+      ? t("removedFromQuickPicks")
+      : t(kind === "home" ? "addedAsHome" : kind === "work" ? "addedAsWork" : "addedToQuickPicks");
+  return (
+    <UndoStrip
+      done={kind !== null}
+      icon={kind === null ? "delete" : "check_circle"}
+      message={message}
+      detail={replaced ? t("replacedPlace").replace("{name}", replaced) : undefined}
+      onUndo={onUndo}
+    />
+  );
+}
+
+/**
+ * A change just made and Undo (a place saved, a stop added on the way): green with a check when something was added,
+ * grey when removed. Fades and slides in so the tap visibly did something.
+ */
+export function UndoStrip({
+  done,
+  icon,
+  message,
+  detail,
+  onUndo,
+}: {
+  /** Added (green), or removed (grey). */
+  done: boolean;
+  icon: IconName;
+  message: string;
+  detail?: string;
+  onUndo(): void;
+}) {
+  const { t } = useT();
   const palette = usePalette();
   const [shown] = useState(() => new Animated.Value(0));
   useEffect(() => {
     Animated.spring(shown, { toValue: 1, useNativeDriver: true, speed: 18, bounciness: 6 }).start();
   }, [shown]);
-
-  const message =
-    kind === null
-      ? t("removedFromQuickPicks")
-      : t(kind === "home" ? "addedAsHome" : kind === "work" ? "addedAsWork" : "addedToQuickPicks");
-  const color = kind === null ? palette.text2 : palette.ok.c;
+  const color = done ? palette.ok.c : palette.text2;
 
   return (
     <Animated.View
       accessibilityLiveRegion="polite"
       style={[
         styles.strip,
-        { backgroundColor: kind === null ? palette.surface : palette.ok.a },
+        { backgroundColor: done ? palette.ok.a : palette.surface },
         {
           opacity: shown,
           transform: [
@@ -51,14 +80,14 @@ export function SaveConfirmation({
         },
       ]}
     >
-      <Icon name={kind === null ? "delete" : "check_circle"} size={18} color={color} />
+      <Icon name={icon} size={18} color={color} />
       <View style={styles.copy}>
-        <T w="semibold" size={14} color={kind === null ? palette.text : color}>
+        <T w="semibold" size={14} color={done ? color : palette.text}>
           {message}
         </T>
-        {replaced && (
+        {detail && (
           <T size={12} color={palette.text2} fit>
-            {t("replacedPlace").replace("{name}", replaced)}
+            {detail}
           </T>
         )}
       </View>

@@ -22,6 +22,20 @@ export const CATEGORY_ICON: Record<PlaceCategory, IconName> = {
   parking: "local_parking",
 };
 
+/**
+ * The kind's colour, the map's own for its places (the style's sprite: fuel and parking #4898FF, cafés and food
+ * #D97200, pharmacies #5D60BE), so a tile reads like the icon to look for on the map; charging, which the map has no
+ * icon for, the usual EV green. White glyphs on it.
+ */
+export const CATEGORY_COLOR: Record<PlaceCategory, string> = {
+  fuel: "#4898FF",
+  charging: "#2E9B5F",
+  cafe: "#D97200",
+  food: "#D97200",
+  pharmacy: "#5D60BE",
+  parking: "#4898FF",
+};
+
 /** The kind's word on a chip or a tile ("Fuel", "Pharmacies"). */
 export const CATEGORY_LABEL: Record<PlaceCategory, keyof Strings> = {
   fuel: "catFuel",

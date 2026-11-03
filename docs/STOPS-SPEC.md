@@ -187,13 +187,17 @@ Undo); its own name or address is its `detail`, under that name on the route pag
 
 ### 7.1 Route page (`src/app/route.tsx`, UI-SPEC §7.1)
 
-- **With a route** (planned or being planned), the page opens on **Pull in on the way**, six large tiles (§6.2), then
-  the trip, each mark a light-blue icon in a dark-blue circle like "Add a stop" (the route's colour is the map's): My
-  location, each stop (kind's icon or number, name, "at 18:46", ≡, ✕), the destination with its arrival, **Add a
-  stop**; distance, time and arrival of what is left; **Stop guidance**. Typing searches as before.
-- **Moving a stop** (`use-stop-drag.ts`, two stops or more): its ≡ handle drags the row, the page holding still; the
-  stops it passes make room, and the drop puts it where its middle passed the others' (one plan, §5.4). Screen
-  readers get "earlier" and "later" actions on the handle instead.
+- **With a route** (planned or being planned), the page opens on **Pull in on the way**, six large tiles (§6.2), each
+  kind as its badge in the map's colour for its places (`CATEGORY_COLOR`: fuel and parking blue, parking the square
+  sign, cafés and food orange, pharmacies violet; charging, with no map icon, green), as are the places on the way's
+  chips and rows; then the trip, each mark a light-blue icon in a dark-blue circle like "Add a stop" (the route's
+  colour is the map's): My location, each stop (kind's icon or number, name, "at 18:46", ≡, ✕), the destination with
+  its arrival, **Add a stop**, the only name in bold; distance, time and arrival of what is left; **Stop guidance**. Typing searches as before.
+- **Moving a stop** (`use-stop-drag.ts`, a stop or more): each stop's ≡ handle and the destination's drag the row, the
+  page holding still; the rows it passes make room, and the drop puts it where its middle passed the others' (one
+  plan, §5.4). What is dropped last is the destination, and the destination dropped earlier is a stop
+  (`RouteService.moveStop` with `DESTINATION_KEY`). Screen readers get "earlier" and "later" actions on the handle
+  instead.
 - **Add a stop** opens the stop search, the route page pushed again over the trip (`/route?adding=1`): **Pull in on
   the way** first (its list goes back two pages, to the trip), then the field (the same index) with each result's
   detour in place of its straight-line distance, the least first once all ten are known; saved places with theirs. A
@@ -222,8 +226,9 @@ confirmation: the stop is added (planned where it adds least, §4), or the route
 
 ### 7.4 Undo (`src/components/route/trip-undo.ts`)
 
-A trip change made in one tap is offered back for 10 s on a card above the map's bottom bar: "Stop added: <name>" or
-"New route: <name>", **Undo · 9** counting down, ✕. Undo takes the stop out again, or plans the old trip again from the
+A trip change made in one tap is offered back for 10 s under the route banner, on the strip a saved place shows
+(`UndoStrip`, save-feedback.tsx) laid on the map's glass: "Stop added: <name>" or "New route: <name>" and **Undo**. Undo
+takes the stop out again, or plans the old trip again from the
 car (its destination and the stops it hadn't reached). Offered for a stop added (from a pin, the route page, the places
 on the way), for a route replaced (from a pin, the route page's Start guidance) and for parking picked (§6.5); none
 when no route was on.

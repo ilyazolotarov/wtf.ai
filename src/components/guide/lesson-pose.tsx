@@ -114,7 +114,7 @@ export function PoseTab() {
                 <MapCardHeader icon="directions_car" tone="warn" title={t("poseQuestion")} body={t("poseQuestionWhy").replace("{d}", distance)} />
                 <MapCardButtons
                   buttons={[
-                    { label: t("poseYes"), onPress: () => setAnswer("yes") },
+                    { label: t("poseYes"), primary: true, onPress: () => setAnswer("yes") },
                     {
                       label: t("poseNo"),
                       onPress: () => {
