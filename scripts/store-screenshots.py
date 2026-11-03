@@ -563,6 +563,12 @@ def demo_status_bar(on):
         shell("am", "broadcast", "-a", "com.android.systemui.demo", "-e", "command", "exit")
         return
     shell("settings", "put", "global", "sysui_demo_allowed", "1")
+    # Just after a boot the SIM's network isn't up yet, and the demo bar has no mobile signal to show (the takes of one
+    # set must match): waited for, up to a minute.
+    for _ in range(30):
+        if b"mDataConnectionState=2" in shell("dumpsys", "telephony.registry").stdout:
+            break
+        time.sleep(2)
     for extra in (
         ["-e", "command", "clock", "-e", "hhmm", "0941"],
         ["-e", "command", "battery", "-e", "level", "100", "-e", "plugged", "false"],
