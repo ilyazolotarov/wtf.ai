@@ -31,7 +31,9 @@ host (scripts/emulator-record.py, the emulator's gRPC screen and audio streams, 
 -grpc), cropped to the screen, then cut to the scenes (the drive between them left out, driving at 2x and the rest at
 1.5x, crossfading; the emulator's sound dropouts bridged; `promo*.scenes.json` lists them, the whole recording stays as
 `*.source.mp4`, and --recut cuts it again). --no-gyro keeps the phone still: the app turns by the wheels alone,
-as in the iOS Simulator. Leaves the emulator's size, theme and status bar as they were.
+as in the iOS Simulator. The emulator's time zone puts its clock at midday for the take: the router's rush hours would
+plan the demo route slower and without its alternative. Leaves the emulator's size, theme, status bar and time zone
+as they were.
 
     python scripts/store-screenshots.py out-dir
     python scripts/store-screenshots.py out-dir --lang uk --dark --video
@@ -558,6 +560,27 @@ def shot(out_dir, name):
     print("shot", name, flush=True)
 
 
+def midday_time_zone():
+    """Puts the emulator's clock at about 13:00 by its time zone, and returns how to put it back. The router's rush
+    hours (src/nav/routing/congestion.ts) make the demo route slower in the morning and evening and leave out its
+    alternative, and the route shot then shows no overview: every take plans at midday. The clock itself stays (GPS
+    fixes carry the real time); only the zone moves, so the times the app shows are a midday's."""
+    zone = shell("getprop", "persist.sys.timezone").stdout.decode().strip()
+    auto = shell("settings", "get", "global", "auto_time_zone").stdout.decode().strip()
+    utc_hour = time.gmtime().tm_hour
+    offset = (13 - utc_hour + 12) % 24 - 12  # UTC-12 … UTC+11: "Etc/GMT-3" is three hours ahead of UTC
+    shell("settings", "put", "global", "auto_time_zone", "0")
+    shell("cmd", "alarm", "set-timezone", "Etc/GMT" + (f"{-offset:+d}" if offset else ""))
+
+    def restore():
+        if zone:
+            shell("cmd", "alarm", "set-timezone", zone)
+        if auto in ("0", "1"):
+            shell("settings", "put", "global", "auto_time_zone", auto)
+
+    return restore
+
+
 def demo_status_bar(on):
     if not on:
         shell("am", "broadcast", "-a", "com.android.systemui.demo", "-e", "command", "exit")
@@ -802,6 +825,7 @@ def main():
     subtype = keyboard_language(args.lang)
     shell("wm", "size", SIZE)
     shell("cmd", "uimode", "night", "yes" if args.dark else "no")
+    restore_time_zone = midday_time_zone()
     demo_status_bar(True)
     suffix = ("" if args.lang == "en" else f"-{args.lang}") + ("-dark" if args.dark else "")
     say = LABELS[args.lang]
@@ -945,6 +969,7 @@ def main():
         if re.fullmatch(r"-?\d+", subtype):
             shell("settings", "put", "secure", "selected_input_method_subtype", subtype)
         demo_status_bar(False)
+        restore_time_zone()
         shell("wm", "size", "reset")
         shell("cmd", "uimode", "night", "no")
 
