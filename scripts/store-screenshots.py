@@ -28,12 +28,14 @@ At 1080x2160, the tallest Play takes (it refuses a long side more than twice the
 1080x2400 is 2.22:1), with a clean status bar (demo mode). --lang uk shoots the app in Ukrainian from its first screen
 (Android's per-app language), --dark the dark theme, --video records it all with its sound for a promo video: on the
 host (scripts/emulator-record.py, the emulator's gRPC screen and audio streams, needs the emulator started with
--grpc), cropped to the screen, then cut to the scenes (the drive between them left out; `promo*.scenes.json` lists
-them, the whole recording stays as `*.source.mp4`). --no-gyro keeps the phone still: the app turns by the wheels alone,
+-grpc), cropped to the screen, then cut to the scenes (the drive between them left out, driving at 2x and the rest at
+1.5x, crossfading; the emulator's sound dropouts bridged; `promo*.scenes.json` lists them, the whole recording stays as
+`*.source.mp4`, and --recut cuts it again). --no-gyro keeps the phone still: the app turns by the wheels alone,
 as in the iOS Simulator. Leaves the emulator's size, theme and status bar as they were.
 
     python scripts/store-screenshots.py out-dir
     python scripts/store-screenshots.py out-dir --lang uk --dark --video
+    python scripts/store-screenshots.py out-dir --recut      # the promo cut again from out-dir's recording
 
 The current sets are in store-assets/play/ (Git LFS): light/, dark/, uk-light/, uk-dark/ and promo[-uk][-dark].mp4. The
 website's screenshots and videos are made from them (scripts/site-media.sh), so re-run after UI changes.
@@ -50,6 +52,7 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+import wave
 import xml.etree.ElementTree as ET
 
 from emulator_grpc import connect
@@ -105,6 +108,12 @@ ADAPTER = "Emulator · OBDLink (STN)"
 # The recording: the emulator's frames over gRPC, H.264 on the GPU (scripts/emulator-record.py). 30 fps: the tilted
 # moving map draws ~22 fps in the emulator, so 60 only repeated frames.
 VIDEO_FPS = 30
+# The promo's cut: the drive between scenes left out, driving at twice its speed and the rest (planning, parking,
+# adding the stop, whose taps are to be followed, the maps) at 1.5, the scenes crossfading into each other.
+DRIVING_SCENES = {"drive-off", "spoof", "pull-in", "camera", "arrive"}
+DRIVE_SPEED, OTHER_SPEED = 2.0, 1.5
+CROSSFADE_S = 0.4
+AUDIO_RATE = 48000
 
 ADB = os.environ.get("ADB") or os.path.join(os.environ.get("LOCALAPPDATA", ""), "Android", "Sdk", "platform-tools", "adb.exe")
 if not os.path.exists(ADB):
@@ -569,9 +578,17 @@ class Recorder:
     cropped to the `wm size` area; cut to the scenes when it stops."""
 
     def __init__(self, out_dir, name, port):
-        physical = re.search(rb"Physical size: (\d+)x(\d+)", shell("wm", "size").stdout)
+        # The `wm size` area sits in the middle of the emulator's frame. Asked until adb answers: a take whose answer
+        # got lost was cropped from the frame's top, a black band over the app and its bottom cut off.
+        for _ in range(5):
+            physical = re.search(rb"Physical size: (\d+)x(\d+)", shell("wm", "size").stdout)
+            if physical:
+                break
+            time.sleep(1)
+        else:
+            raise SystemExit("wm size gave no physical size: the video's crop would be wrong")
         width, height = map(int, SIZE.split("x"))
-        top = (int(physical.group(2)) - height) // 2 if physical else 0
+        top = (int(physical.group(2)) - height) // 2
         self.mp4 = os.path.abspath(os.path.join(out_dir, f"{name}.mp4"))
         self.source = os.path.abspath(os.path.join(out_dir, f"{name}.source.mp4"))
         script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "emulator-record.py")
@@ -597,23 +614,79 @@ class Recorder:
                 spans[-1] = (spans[-1][0] + "+" + name, spans[-1][1], max(spans[-1][2], b))
             else:
                 spans.append((name, a, b))
+        scenes = [{"scene": n, "from_s": round(a, 2), "to_s": round(b, 2)} for n, a, b in spans]
         with open(self.mp4[:-4] + ".scenes.json", "w", encoding="utf-8") as f:
-            json.dump([{"scene": n, "from_s": round(a, 2), "to_s": round(b, 2)} for n, a, b in spans], f, indent=1)
-        # Each span trimmed from the recording, video and sound alike, then one after the other. x264 at CRF 23 looks the
-        # same as the recording's near-lossless GPU encode at a quarter of its size: the store set lives in Git LFS.
-        parts = []
-        for i, (_, a, b) in enumerate(spans):
-            parts.append(f"[0:v]trim=start={a:.3f}:end={b:.3f},setpts=PTS-STARTPTS[v{i}];"
-                         f"[0:a]atrim=start={a:.3f}:end={b:.3f},asetpts=PTS-STARTPTS[a{i}]")
-        joined = "".join(f"[v{i}][a{i}]" for i in range(len(spans)))
-        graph = ";".join(parts) + f";{joined}concat=n={len(spans)}:v=1:a=1[v][a]"
+            json.dump(scenes, f, indent=1)
+        cut_promo(self.source, scenes, self.mp4)
+
+
+def repaired_sound(source):
+    """The recording's sound with the emulator's dropouts bridged, as a WAV path (a temporary file) and how many. Its
+    audio card runs dry now and then: for about a millisecond the sound falls to nothing in the middle of a voice (zeros
+    in the stream, near-zero noise after AAC), which clicks. A dropout: 5 samples to 5 ms under a tenth of the level
+    before it, the sound back after it; it is bridged by a cubic through clean samples on both sides, its edges (AAC
+    smears each over a few samples) taken in. Nothing is cut, so the sound stays with the picture."""
+    import numpy as np  # only for the video
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", source, "-vn", "-ac", "2", "-ar", str(AUDIO_RATE), "-f",
+                          "s16le", "-"], capture_output=True, check=True).stdout
+    x = np.frombuffer(raw, np.int16).reshape(-1, 2).astype(float)
+    m = np.abs(x).max(axis=1)
+    level = np.convolve(m, np.ones(96) / 96, "same")  # over 2 ms
+    longest, edge = AUDIO_RATE // 200, 4
+    bridged, n, i = 0, len(x), 96
+    while i < n - 200:
+        before = level[i - 48]
+        if before < 300 or m[i] >= 0.1 * before:
+            i += 1
+            continue
+        b = i
+        while b < n - 100 and b - i <= longest and m[b] < 0.1 * before:
+            b += 1
+        if 5 <= b - i <= longest and np.abs(x[b:b + 96]).max(axis=1).mean() > 0.5 * before:
+            p0, p1 = i - edge, b + edge
+            t = np.r_[np.arange(p0 - 8, p0), np.arange(p1, p1 + 8)]
+            for ch in range(2):
+                x[p0:p1, ch] = np.polyval(np.polyfit(t - p0, x[t, ch], 3), np.arange(p0, p1) - p0)
+            bridged += 1
+        i = max(b, i + 1)
+    fd, path = tempfile.mkstemp(suffix=".wav")
+    os.close(fd)
+    with wave.open(path, "wb") as w:
+        w.setnchannels(2)
+        w.setsampwidth(2)
+        w.setframerate(AUDIO_RATE)
+        w.writeframes(np.clip(x, -32768, 32767).astype(np.int16).tobytes())
+    return path, bridged
+
+
+def cut_promo(source, scenes, out):
+    """The promo from the whole recording: each scene trimmed, sped up (driving `DRIVE_SPEED`, the rest `OTHER_SPEED`;
+    the voice keeps its pitch), the next crossfading in over `CROSSFADE_S`, picture and sound alike. The sound: the
+    dropouts bridged (`repaired_sound`), what clicks are left taken out (adeclick). x264 at CRF 23 looks the same as the
+    recording's near-lossless GPU encode at a quarter of its size: the store set lives in Git LFS."""
+    sound, bridged = repaired_sound(source)
+    spans = [(s["from_s"], s["to_s"], DRIVE_SPEED if set(s["scene"].split("+")) <= DRIVING_SCENES else OTHER_SPEED)
+             for s in scenes]
+    graph = []
+    for i, (a, b, k) in enumerate(spans):
+        graph.append(f"[0:v]trim=start={a:.3f}:end={b:.3f},setpts=(PTS-STARTPTS)/{k},fps={VIDEO_FPS},format=yuv420p[v{i}]")
+        graph.append(f"[1:a]atrim=start={a:.3f}:end={b:.3f},asetpts=PTS-STARTPTS,adeclick,atempo={k}[a{i}]")
+    v, a, length = "v0", "a0", (spans[0][1] - spans[0][0]) / spans[0][2]
+    for i in range(1, len(spans)):
+        graph.append(f"[{v}][v{i}]xfade=transition=fade:duration={CROSSFADE_S}:offset={length - CROSSFADE_S:.3f}[vx{i}]")
+        graph.append(f"[{a}][a{i}]acrossfade=d={CROSSFADE_S}[ax{i}]")
+        v, a = f"vx{i}", f"ax{i}"
+        length += (spans[i][1] - spans[i][0]) / spans[i][2] - CROSSFADE_S
+    try:
         subprocess.run(
-            ["ffmpeg", "-v", "error", "-y", "-i", self.source, "-filter_complex", graph, "-map", "[v]", "-map", "[a]",
-             "-r", str(VIDEO_FPS), "-c:v", "libx264", "-preset", "slow", "-tune", "film", "-crf", "23",
-             "-x264-params", "aq-mode=3", "-g", str(VIDEO_FPS), "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k",
-             "-movflags", "+faststart", self.mp4],
+            ["ffmpeg", "-v", "error", "-y", "-i", source, "-i", sound, "-filter_complex", ";".join(graph), "-map",
+             f"[{v}]", "-map", f"[{a}]", "-r", str(VIDEO_FPS), "-c:v", "libx264", "-preset", "slow", "-tune", "film",
+             "-crf", "23", "-x264-params", "aq-mode=3", "-g", str(VIDEO_FPS), "-pix_fmt", "yuv420p", "-c:a", "aac",
+             "-b:a", "160k", "-movflags", "+faststart", out],
             check=True)
-        print(f"video {self.mp4}: {sum(b - a for _, a, b in spans):.0f} s of {len(spans)} scenes", flush=True)
+    finally:
+        os.remove(sound)
+    print(f"video {out}: {length:.0f} s of {len(spans)} scenes, {bridged} sound dropouts bridged", flush=True)
 
 
 def search(query, field):
@@ -687,7 +760,15 @@ def main():
     ap.add_argument("--grpc-port", type=int, default=GRPC_PORT, help="the emulator's gRPC port (emulator -grpc PORT)")
     ap.add_argument("--dev-url", help="a debug build's Metro, e.g. http://127.0.0.1:8081: for trying the drive with fast "
                                       "refresh (the store video itself comes from a Release build)")
+    ap.add_argument("--recut", action="store_true",
+                    help="only cut the promo again from out_dir's recording (promo*.source.mp4 and its scenes.json)")
     args = ap.parse_args()
+    if args.recut:
+        for source in sorted(f for f in os.listdir(args.out_dir) if f.endswith(".source.mp4")):
+            stem = os.path.join(args.out_dir, source[: -len(".source.mp4")])
+            with open(stem + ".scenes.json", encoding="utf-8") as f:
+                cut_promo(os.path.join(args.out_dir, source), json.load(f), stem + ".mp4")
+        return
     os.makedirs(args.out_dir, exist_ok=True)
     global FAIL_DIR
     FAIL_DIR = args.out_dir
@@ -736,6 +817,9 @@ def main():
         tap(*route_tab)
         time.sleep(1.5)
         adb("logcat", "-c")
+        # The emulator shares the host's clipboard, and Gboard offers what was copied last over the keys: a path of
+        # this PC showed in a take. Emptied right before the keyboard opens.
+        car.stub.setClipboard(car.pb.ClipData(text=""))
         result = search(DESTINATION, say["search"])
         shell("input", "keyevent", "111")  # Escape: hide the keyboard
         time.sleep(1)

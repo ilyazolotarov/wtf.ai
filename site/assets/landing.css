@@ -43,6 +43,11 @@ section p.sub { color: var(--text2); margin: 0 0 32px; max-width: 40em; }
 .card { background: var(--card); border-radius: 20px; padding: 22px; }
 .card h3 { margin: 0 0 6px; font-size: 19px; }
 .card p { margin: 0; color: var(--text2); font-size: 16px; }
+/* A feature's icon, before its title: the accent on its tint, as the app marks a trip's stops. */
+.card h3.with-icon { display: flex; align-items: center; gap: 16px; }
+.card .icon { display: grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: 10px;
+  background: var(--accentA); color: var(--accent); }
+.card .icon svg { width: 20px; height: 20px; }
 .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; vertical-align: middle; }
 .steps { counter-reset: s; display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
 .steps .card::before { counter-increment: s; content: counter(s); display: inline-grid; place-items: center;
