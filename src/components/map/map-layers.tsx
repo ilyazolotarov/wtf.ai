@@ -34,6 +34,7 @@ import {
   DESTINATION_DOT,
   MAP_CAR,
   PIN_DOT,
+  PLACED_ARROW,
   PUCK,
   PUCK_HALO,
   PUCK_OUTER,
@@ -45,10 +46,6 @@ import { NEAR_NUMBERS_M, NEAR_POIS_M, nearFilter, nearOpacity, type NearHouses }
  * The map's own layers, in groups. MapLibre stacks layers in the order they are declared, so `MapSurface` renders
  * the groups bottom to top: route, parked car, marks, position, debug, puck.
  */
-
-/** The placed car's arrow: narrow and long enough to read at zoom 18. */
-const PLACED_ARROW_HALF_ANGLE_RAD = (14 * Math.PI) / 180;
-const PLACED_ARROW_M = 28;
 
 
 /**
@@ -317,7 +314,7 @@ export function MarkLayers({
   const placedPoint = placedMark ? pointFeatures(placedMark.at) : emptyPoints();
   const placedArrow =
     placedMark && placedMark.headingRad !== null
-      ? sectorFeatures(placedMark.at, placedMark.headingRad, PLACED_ARROW_HALF_ANGLE_RAD, PLACED_ARROW_M)
+      ? sectorFeatures(placedMark.at, placedMark.headingRad, PLACED_ARROW.halfAngleRad, PLACED_ARROW.m)
       : emptyPolygons();
   const arrowOutline = CONE_OUTLINE[scheme];
   return (
@@ -340,7 +337,7 @@ export function MarkLayers({
         <Layer
           id="placed-arrow-fill"
           type="fill"
-          paint={{ "fill-color": palette.mapPin, "fill-opacity": 0.55 }}
+          paint={{ "fill-color": palette.mapPin, "fill-opacity": PLACED_ARROW.fillOpacity }}
         />
         {/* Outlined as the heading cone. */}
         <Layer

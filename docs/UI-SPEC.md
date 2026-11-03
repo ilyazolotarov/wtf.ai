@@ -311,7 +311,8 @@ persisted in kv-store. No hardcoded user-facing strings in components.
 - **Putting the car on the map** (NAVIGATOR-SPEC §6.2): while standing, without GPS and with nothing vouching for the
   dot, a chip "Set your position on the map"; "No" to the pose question opens it too. The map zooms in (18, flat,
   north up) with a centre pin and a card ("Where is the car?" · Cancel / Here), then "Which way does it face?": a tap
-  draws an arrow from the pin, another tap turns it (Cancel / Confirm; Confirm needs a tap). Moving off cancels. The
+  draws a narrow cone from the pin that way, another tap turns it (Cancel / Confirm; Confirm needs a tap); the
+  lessons' drawn maps draw the same cone (`PlacedArrow`). Moving off cancels. The
   confirmed placing is drawn as the car (the parked car's icon, §6.1, nose the way it was aimed, in place of the
   parked car) until the dot is 50 m away or the car is placed again. When the ignition
   comes on while the chip is offered, the voice says once, within 2 min, "Show on the map where the car is"

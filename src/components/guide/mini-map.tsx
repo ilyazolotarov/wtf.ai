@@ -12,6 +12,7 @@ import {
   CONE_OUTLINE,
   DESTINATION_DOT,
   PIN_DOT,
+  PLACED_ARROW,
   PUCK,
   PUCK_HALO,
   PUCK_OUTER,
@@ -164,6 +165,25 @@ export function Puck({
         stroke={trusted ? palette.puckRing : palette.puckDoubt}
         strokeWidth={PUCK.ring}
       />
+    </G>
+  );
+}
+
+/**
+ * The way the car being placed faces, as the map's placing draws it (map-layers.tsx `MarkLayers`, puck-style.ts): a
+ * narrow cone from the spot, outlined as the heading cone. `headingDeg` clockwise from up.
+ */
+export function PlacedArrow({ x, y, headingDeg }: { x: number; y: number; headingDeg: number }) {
+  const palette = usePalette();
+  const outline = CONE_OUTLINE[useColorScheme() === "dark" ? "dark" : "light"];
+  const { points: r, halfAngleRad } = PLACED_ARROW;
+  const h = (headingDeg * Math.PI) / 180;
+  const point = (a: number) => `${x + r * Math.sin(a)} ${y - r * Math.cos(a)}`;
+  const d = `M${x} ${y} L${point(h - halfAngleRad)} A${r} ${r} 0 0 1 ${point(h + halfAngleRad)} Z`;
+  return (
+    <G strokeLinejoin="round">
+      <Path d={d} fill={palette.mapPin} fillOpacity={PLACED_ARROW.fillOpacity} stroke={palette.puckEdge} strokeWidth={outline.edge} />
+      {outline.ring > 0 && <Path d={d} fill="none" stroke={palette.puckRing} strokeWidth={outline.ring} />}
     </G>
   );
 }

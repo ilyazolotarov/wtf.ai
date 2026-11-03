@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, type Ref } from "react";
+import { createContext, useContext, useLayoutEffect, useState, type Ref } from "react";
 import {
   Animated,
   Easing,
@@ -125,11 +125,18 @@ export function PressableFeedback({
   // Hover is web only, and the app runs on phones.
   const state = { pressed, hovered: false };
   const own = StyleSheet.flatten(typeof style === "function" ? style(state) : style) ?? {};
+  // The call site's own opacity (a disabled look) under the pressed look: a value of its own, set when it changes. Once
+  // a press has run on the native driver, a new interpolation's opacity never reached the view: a button disabled as
+  // its own press took effect (the placing card's Here turning into Confirm) stayed dim once enabled.
+  const base = typeof own.opacity === "number" ? own.opacity : 1;
+  const [baseOpacity] = useState(() => new Animated.Value(base));
+  const [opacity] = useState(() =>
+    Animated.multiply(baseOpacity, progress.interpolate({ inputRange: [0, 1], outputRange: [1, PRESSED_OPACITY] })),
+  );
+  useLayoutEffect(() => baseOpacity.setValue(base), [baseOpacity, base]);
   let animated: Animated.WithAnimatedValue<ViewStyle> | null = null;
   if (look === "button") {
-    // The call site's own opacity (a disabled look) and transform are kept under the pressed look.
-    const base = typeof own.opacity === "number" ? own.opacity : 1;
-    const opacity = progress.interpolate({ inputRange: [0, 1], outputRange: [base, base * PRESSED_OPACITY] });
+    // The call site's transform is kept under the pressed look too.
     const scale = progress.interpolate({ inputRange: [0, 1], outputRange: [1, reduceMotion ? 1 : PRESSED_SCALE] });
     animated =
       own.transform == null

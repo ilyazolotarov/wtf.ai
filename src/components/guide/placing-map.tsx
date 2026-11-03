@@ -1,11 +1,11 @@
 import { useNavigation } from "expo-router";
 import { useEffect, useEffectEvent, useMemo, useState, type ReactNode } from "react";
 import { Animated, BackHandler, PanResponder, Pressable, StyleSheet, View } from "react-native";
-import Svg, { Circle, G, Path, Rect } from "react-native-svg";
+import Svg, { Circle, G, Rect } from "react-native-svg";
 
 import { useScrollLock } from "@/components/guide/lesson-ui";
 import { MapCard, MapCardButtons, MapCardHeader, MapChipButton } from "@/components/guide/map-ui";
-import { CarGlyph, Puck, useMapColors, useNudgedHeading } from "@/components/guide/mini-map";
+import { CarGlyph, PlacedArrow, Puck, useMapColors, useNudgedHeading } from "@/components/guide/mini-map";
 import { PlacingPinShape } from "@/components/map/placing-pin";
 import { BlurScope, BlurTarget } from "@/components/ui/glass-fill";
 import { DRAWING_MAX_FONT_SCALE, FontScaleLimit } from "@/components/ui/text";
@@ -241,10 +241,7 @@ export function PlacingMap({
                 <Circle cx={pinX} cy={pinY - AHEAD_UNITS} r={AHEAD_R} fill={palette.mapPin} fillOpacity={0.16} stroke={palette.mapPin} strokeWidth={2} strokeDasharray="6 4" />
               )}
               {step === "heading" && headingDeg != null && (
-                <G transform={`rotate(${headingDeg} ${pinX} ${pinY})`}>
-                  <Path d={`M${pinX} ${pinY} V${pinY - 70}`} stroke={palette.mapPin} strokeWidth={4} strokeLinecap="round" />
-                  <Path d={`M${pinX - 11} ${pinY - 62} L${pinX} ${pinY - 84} L${pinX + 11} ${pinY - 62} Z`} fill={palette.mapPin} />
-                </G>
+                <PlacedArrow x={pinX} y={pinY} headingDeg={headingDeg} />
               )}
               {/* The pin: its point is exactly the spot that is placed, the frame's centre. */}
               <G transform={`translate(${pinX} ${pinY})`}>

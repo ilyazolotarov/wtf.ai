@@ -28,6 +28,12 @@ export const CONE_OUTLINE = {
 /** The cone's fill opacity: the road under it still shows. */
 export const CONE_FILL_OPACITY = 0.32;
 
+/**
+ * The car being placed: the way it faces, before Confirm, a narrow cone long enough to read at zoom 18 (metres on the
+ * map, outlined as the heading cone); the lessons' drawn maps draw it in points, about its length at zoom 18.
+ */
+export const PLACED_ARROW = { m: 28, points: 74, halfAngleRad: (14 * Math.PI) / 180, fillOpacity: 0.55 } as const;
+
 /** A dropped pin on the map (ROUTING-SPEC §8), banded as the dot: fill, white ring, dark edge, a faint halo; points. */
 export const PIN_DOT = { r: 7, ring: 3, halo: 16 } as const;
 

@@ -93,6 +93,10 @@ async function runCarScreen(native: CarSessionDeps["native"], name: string, feat
   // The process may have started for the car, the phone's screens (and the root layout's setup) never loaded.
   initSentry();
   Sentry.setTag(CAR_SCREEN_TAG, feature);
+  // iOS's hang detector counts the phone's screen frames, and with only the car's screen showing the app there are
+  // none while the app is active: every drive with the phone dark was a "fully blocked" hang, and a fatal one when the
+  // app then ended (WTF-AI-18, WTF-AI-1G: idle threads, the car's map updating through the "hang"). No-op on Android.
+  Sentry.pauseAppHangTracking();
   const runtime = getRuntime();
   const { recorder, routes, position, link } = runtime;
   // The voice as the phone's map sets it up: its notes, the driver's volume and voice (Settings), and as navigation
@@ -181,5 +185,6 @@ async function runCarScreen(native: CarSessionDeps["native"], name: string, feat
   } finally {
     setVoiceAsGuidance(false);
     Sentry.setTag(CAR_SCREEN_TAG, "none");
+    Sentry.resumeAppHangTracking();
   }
 }
