@@ -411,7 +411,7 @@ One small component each; the screen only places them and wires their state. Car
   `PositionEstimate.speedLimit`; `speed limit <kph> (OSM|default)` / `none` notes in the trip log.
 - **Too fast** (`SpeedWarning`): only past the driver's margin over the limit (Settings: +10, **+15**, +20 km/h): fines
   start at more than 20 km/h over, so up to the margin nothing changes, no colour and no sound. Past it for 1.5 s the
-  speed shows red (`bad`, a 44 pt pill inside the bubble) and one chime sounds (`assets/sounds/speed-warning.mp3`, two
+  speed shows red (`bad`: the whole bubble, the sign ringed in white) and one chime sounds (`assets/sounds/speed-warning.mp3`, two
   falling notes at −17 LUFS, `tools/voice/speed-warning.sh`; ahead of waiting voice phrases; said "Slow down" if it
   won't play; not with the chime off in Settings, the voice muted or at 0); it ends 3 km/h back under the line, or after 30 s without a sign
   (not red meanwhile: a sign gone for a moment and back finds the warning still on, no second chime), and only then
@@ -447,8 +447,8 @@ One small component each; the screen only places them and wires their state. Car
   held up to a minute, never passed meanwhile. A camera 50 m nearer than the card's takes it. In the trip log:
   `camera ahead #<id> in <m> m, limit <kph>` (`(OSM only)` for one the list lacks), `camera passed #<id>`, `camera out
   of sight #<id> at <m> m`, and from the screen `camera warning #<id>: …` and `camera slow down #<id>: …`.
-- **The card** (`CameraCard`), under the status row and the route banner: the map's camera badge (white on red, white
-  ring, dark edge; the same on the red card), "Speed camera in 600 m" (10 m steps under 200 m, 50 m above), the limit at the camera as its sign at the right (in words
+- **The card** (`CameraCard`), under the status row and the route banner: the map's camera badge without its dark edge (white
+  on red, a white ring; the same on the red card), "Speed camera in 600 m" (10 m steps under 200 m, 50 m above), the limit at the camera as its sign at the right (in words
   only to a screen reader: the sign says it), and a bar filling from where it showed to the camera. Past the driver's
   margin over the camera's limit by the speed warning's rules (§6.4: after 1.5 s past it, until 3 km/h back under, so
   hovering at the line doesn't flicker; kept through a moment out of sight for 2 min, as the voice remembers the

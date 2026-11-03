@@ -30,11 +30,9 @@ export function CameraCard({ camera }: { camera: CameraShown }) {
       accessibilityLabel={[title, line, limit].filter(Boolean).join(". ")}
     >
       {red ? <View style={[styles.fill, { backgroundColor: palette.bad.c }]} /> : <GlassFill radius={Radius.rL} />}
-      {/* The map's camera badge (scripts/map-car.py): white on the sign's red, a white ring, a dark edge. */}
-      <View style={styles.badgeEdge}>
-        <View style={[styles.badge, { backgroundColor: palette.signRing }]}>
-          <Icon name="speed_camera" size={24} color="#FFFFFF" />
-        </View>
+      {/* The map's camera badge (scripts/map-car.py) without its dark edge: white on the sign's red, a white ring. */}
+      <View style={[styles.badge, { backgroundColor: palette.signRing }]}>
+        <Icon name="speed_camera" size={24} color="#FFFFFF" />
       </View>
       <View style={styles.text}>
         <T w="semibold" size={red ? 17 : 15} color={ink}>
@@ -70,10 +68,10 @@ const styles = StyleSheet.create({
     borderRadius: Radius.rL,
   },
   fill: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, borderRadius: Radius.rL },
-  badgeEdge: { width: 44, height: 44, borderRadius: 14, padding: 1, backgroundColor: "rgba(0,0,0,0.9)" },
   badge: {
-    flex: 1,
-    borderRadius: 13,
+    width: 44,
+    height: 44,
+    borderRadius: 14,
     borderWidth: 2.5,
     borderColor: "#FFFFFF",
     alignItems: "center",

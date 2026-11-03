@@ -20,7 +20,7 @@ const ROUGH_ACCURACY_M = 25;
 
 /**
  * The map's top row: the status pill (trust in words, where the position comes from, its accuracy) and the speed with
- * the limit's sign beside it (UI-SPEC §6.4), red when too fast. A tap on the pill unfolds its explanation when there is
+ * the limit's sign beside it (UI-SPEC §6.4), the bubble red when too fast. A tap on the pill unfolds its explanation when there is
  * one (`expandable`). Beside a speed camera's card, the speed as `speedBesideCard` gives it (§6.5).
  */
 export function StatusRow({
@@ -90,14 +90,18 @@ export function StatusRow({
         accessibilityRole="text"
         accessibilityLabel={speedLabel}
       >
-        <GlassFill radius={28} />
-        {sign && <SpeedLimitSign kph={limitKph} />}
+        {/*
+          Too fast, the whole bubble red. The red in a view of its own, made red and round at once: a background colour
+          added later to a view came out square on Android (new architecture), its corner radius lost.
+        */}
+        {over ? <View style={[styles.overFill, { backgroundColor: palette.bad.c }]} /> : <GlassFill radius={28} />}
+        {sign && (
+          // On red, a ring of the sign's white keeps its own red ring apart, drawn outside the sign's place.
+          <View style={over && [styles.signOnRed, { borderColor: palette.signFill }]}>
+            <SpeedLimitSign kph={limitKph} />
+          </View>
+        )}
         <View style={styles.speedValue}>
-          {/*
-            The red in a view of its own, made red and round at once: a background colour added later to the speed's
-            view came out square on Android (new architecture), its corner radius lost.
-          */}
-          {over && <View style={[styles.overFill, { backgroundColor: palette.bad.c }]} />}
           {/*
             Already large: it grows less than the text beside it, which needs the room. No unit under it: the app's
             speeds are all km/h, and the pill beside it needs the width "км/год" took (the label read aloud says it).
@@ -153,8 +157,9 @@ const styles = StyleSheet.create({
   },
   /** The sign at the left end, round inside the bubble's round end. */
   withSign: { justifyContent: "flex-start" },
-  /** Red, a pill of its own inside the bubble, when too fast. */
-  overFill: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, borderRadius: 22 },
+  /** The bubble red when too fast. */
+  overFill: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, borderRadius: 28 },
+  signOnRed: { margin: -2, borderRadius: 24, borderWidth: 2 },
   /** As wide red or not: crossing the margin doesn't move the pill's text. */
   speedValue: {
     minWidth: 48,
