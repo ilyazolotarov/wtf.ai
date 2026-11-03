@@ -299,7 +299,7 @@ index 0000000000000000000000000000000000000000..39ab04ef04df76d4cd5f8e5a6830fcc2
 +    }
 +}
 diff --git a/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/LocationComponentManager.kt b/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/LocationComponentManager.kt
-index 5f0cc06185e274e2daf3521c3bfffa4858d57ebf..6f142e3815ed8eabb118f55d365a284d8e678bcd 100644
+index 5f0cc06185e274e2daf3521c3bfffa4858d57ebf..dab2a01240275dd8c9f19714d5d5ceccb310e667 100644
 --- a/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/LocationComponentManager.kt
 +++ b/node_modules/@maplibre/maplibre-react-native/android/src/main/java/org/maplibre/reactnative/components/location/LocationComponentManager.kt
 @@ -2,14 +2,22 @@ package org.maplibre.reactnative.components.location
@@ -325,7 +325,7 @@ index 5f0cc06185e274e2daf3521c3bfffa4858d57ebf..6f142e3815ed8eabb118f55d365a284d
  import org.maplibre.reactnative.R
  import org.maplibre.reactnative.components.mapview.MLRNMapView
  import org.maplibre.reactnative.location.LocationManager
-@@ -40,6 +48,366 @@ class LocationComponentManager(
+@@ -40,6 +48,377 @@ class LocationComponentManager(
  
      private var mShowingUserLocation = false
  
@@ -348,6 +348,12 @@ index 5f0cc06185e274e2daf3521c3bfffa4858d57ebf..6f142e3815ed8eabb118f55d365a284d
 +    private var appConeHalfDeg = Double.NaN
 +    // The map's tilt the cone was drawn for, whole degrees.
 +    private var appConeTiltDeg = 0.0
++
++    // The style the puck images were last added to and the look they show: a feed draws them again until both are the
++    // current ones. A change fed while a style loads can't be drawn (no style to add images to), and nothing else would
++    // draw it later: the dot kept the trusted colour through a whole spoofed drive.
++    private var appDrawnStyle: Style? = null
++    private var appDrawnLook: String? = null
 +
 +    // While a camera-mode transition runs, MapLibre ignores padding/zoom/tilt changes: the last stop asked for then is
 +    // applied when it ends.
@@ -481,7 +487,12 @@ index 5f0cc06185e274e2daf3521c3bfffa4858d57ebf..6f142e3815ed8eabb118f55d365a284d
 +        style.getLayer(LocationComponentConstants.BACKGROUND_LAYER)?.setProperties(
 +            PropertyFactory.iconPitchAlignment(Property.ICON_PITCH_ALIGNMENT_MAP),
 +        )
++        appDrawnStyle = style
++        appDrawnLook = appLook()
 +    }
++
++    private fun appLook(): String =
++        "${appStyleJson.hashCode()} $appDoubt $appHidden $appWithCone $appConeHalfDeg $appConeTiltDeg"
 +
 +    /**
 +     * One fed position; `flags`: 1 snap (placed, not animated), 2 doubt, 4 hidden; `coneHalfDeg` the cone's half-width,
@@ -522,8 +533,8 @@ index 5f0cc06185e274e2daf3521c3bfffa4858d57ebf..6f142e3815ed8eabb118f55d365a284d
 +                component.applyStyle(appOptions())
 +                applyAppPadding(0)
 +            }
-+            mMap?.style?.let { if (it.isFullyLoaded) addAppPuckImage(it) }
 +        }
++        mMap?.style?.let { if (it.isFullyLoaded && (it !== appDrawnStyle || appLook() != appDrawnLook)) addAppPuckImage(it) }
 +        val now = System.currentTimeMillis()
 +        val location =
 +            Location("wtf.ai").apply {
@@ -692,7 +703,7 @@ index 5f0cc06185e274e2daf3521c3bfffa4858d57ebf..6f142e3815ed8eabb118f55d365a284d
      private var mOnCameraTrackingChangedListener: OnCameraTrackingChangedListener? = null
  
      init {
-@@ -93,6 +461,11 @@ class LocationComponentManager(
+@@ -93,6 +472,11 @@ class LocationComponentManager(
  
      @SuppressLint("MissingPermission")
      private fun stateChanged() {
@@ -704,7 +715,7 @@ index 5f0cc06185e274e2daf3521c3bfffa4858d57ebf..6f142e3815ed8eabb118f55d365a284d
          mLocationComponent?.setLocationComponentEnabled((mFollowUserLocation || mShowUserLocation))
  
          if (mShowingUserLocation != mShowUserLocation) {
-@@ -121,6 +494,10 @@ class LocationComponentManager(
+@@ -121,6 +505,10 @@ class LocationComponentManager(
          displayUserLocation: Boolean,
          style: Style,
      ) {

@@ -182,7 +182,9 @@ persisted in kv-store. No hardcoded user-facing strings in components.
   1 / cos(tilt) as long so the tilt keeps it 34 pt up the screen (drawn again as the tilt changes), and the dot the
   foreground's, upright. Must not drift: never the cone on the upright layer, where MapLibre turns a map-aligned
   icon by the tilted screen angle of the tile's east axis: at 50° tilt it pointed up to 12° off the road on diagonal
-  headings (0° on cardinal ones) and swung across it as the heading turned.
+  headings (0° on cardinal ones) and swung across it as the heading turned. Both images are drawn again at a feed
+  until they show the current colour, cone and tilt in the current style: a doubt fed while the style reloaded (the
+  first parked-car sprite reloads it) was never drawn, and the dot stayed blue through a spoofed drive.
   Pins and marks are banded the same way;
   the placing pin (`placing-pin.tsx`) is one component on the map and in the lessons. `map-contrast.test.ts` holds
   everything the app draws on the map to 3:1 against every surface under it, in both themes.
