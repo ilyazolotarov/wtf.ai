@@ -38,8 +38,8 @@ export interface RouteOptions {
   fallbackAfterStates?: number;
   fallbackWeight?: number;
   /**
-   * Time on these edges × the factor (≥ 1) while searching: alternative routes (§8.7). The plan's `durationS` leaves
-   * it out (the time the route takes).
+   * Time on these edges × the factor while searching: over 1 for alternative routes, under 1 for the roads of a route
+   * the driver chose (§8.7). The plan's `durationS` leaves it out (the time the route takes).
    */
   avoid?: ReadonlyMap<EdgeId, number>;
 }
@@ -270,6 +270,8 @@ export class RouteSearch {
   /** States settled before the search started again at the fallback weight (0: it hasn't). */
   private fellBackAt = 0;
   private readonly avoid: ReadonlyMap<EdgeId, number> | null;
+  /** The smallest avoid factor under 1, else 1: the heuristic's speed is divided by it, so it never overestimates more. */
+  private readonly fastest: number;
   /**
    * Goal entries (queued as −(index + 1)): the destination end, the parent state index (−1: straight from `start`
    * on the same edge), and where the last leg enters the destination's edge.
@@ -303,7 +305,10 @@ export class RouteSearch {
     this.fallbackAfter = options.fallbackAfterStates ?? FALLBACK_AFTER_STATES;
     this.fallbackWeight = options.fallbackWeight ?? FALLBACK_WEIGHT;
     this.avoid = options.avoid?.size ? options.avoid : null;
-    this.vmax = maxSpeedMps(this.costs);
+    let fastest = 1;
+    for (const f of this.avoid?.values() ?? []) fastest = Math.min(fastest, f);
+    this.fastest = fastest;
+    this.vmax = maxSpeedMps(this.costs) / fastest;
     this.tilesAtStart = graph.stats?.tileLoads ?? 0;
   }
 
@@ -391,7 +396,7 @@ export class RouteSearch {
     const nearStart = this.graph.edgesNear(se, sn, FALLBACK_RADIUS_M);
     if (!nearStart.length) return "no-road-at-start";
     // The heuristic's speed for this graph: with speed attributes or without (a graph is built one way or the other).
-    this.vmax = maxSpeedMps(this.costs, (nearStart[0].edge.flags & EdgeFlag.attributes) !== 0);
+    this.vmax = maxSpeedMps(this.costs, (nearStart[0].edge.flags & EdgeFlag.attributes) !== 0) / this.fastest;
     // Within the position's accuracy, the nearest road and those as near (a parallel road); off the roads, the
     // nearest road. Not the roads that only touch the nearest one at a junction close by: the car isn't on them.
     const nearest = nearStart[0];

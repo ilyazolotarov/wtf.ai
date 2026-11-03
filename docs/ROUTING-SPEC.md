@@ -336,8 +336,9 @@ matching fails without it. (The route does tip which hypothesis the *dot* draws:
 ### 8.7 Alternative routes (`alternatives.ts`)
 
 Up to two other ways, after every plan (a new route, a stop added, removed or moved, a re-plan; none for a driver
-keeping to their own way) and again on the way: alternatives to the leg the car is on (to the next stop or the
-destination), the rest of the trip shared (STOPS-SPEC §4).
+keeping to their own way) and again on the way. After a plan, each leg's in turn, the longest first, until two are
+found: a stop by the start leaves the first leg nothing to choose, the trip after it still has. On the way, the leg
+the car is on. Each is that leg's other way, the rest of the trip shared (STOPS-SPEC §4).
 
 - **Search (penalty method):** the planner runs again with every road of the routes found so far slower by 1.4×, once
   per route (`RouteOptions.avoid`, left out of the plan's `durationS`). A result is kept when it takes at most 1.3×
@@ -353,7 +354,8 @@ destination), the rest of the trip shared (STOPS-SPEC §4).
     alternatives each finds compared against the previous rules: none may be lost.
 - **Never in the way of the route:** the main plan is published and guided first; the alternatives search runs after
   it in its own slices (`findingAlternatives` meanwhile), and a re-plan, arrival or stop cancels it, as does an
-  alternative taken (chosen or driven) while it runs. Each one kept is on the map at once, the search going on. Notes
+  alternative taken (chosen or driven) while it runs. One search at a time: a plan's starts before the position that
+  would start the search on the way. Each one kept is on the map at once, the search going on. Notes
   `route alternatives: n (+m min, km, % shared) …; searches, states, ms (wall ms, the first after ms)` when it ends,
   `alternatives search cancelled (why) after ms, n found` when it doesn't.
 - **On the way** (`refreshAlternatives`): with none on the map (the car left those found behind, or none was found),
@@ -367,11 +369,21 @@ destination), the rest of the trip shared (STOPS-SPEC §4).
   replaces it when the search is over, while the car is within 50 m of the plan's start (`route alternative taken
   (faster)`). After a re-plan (a stop added, the route left) only while the car stands (under 1 m/s): driving, the
   route just told ("Route recalculated", the next turn) would change under it unannounced; it stays on the map.
+  Never over a route the driver chose or drove onto: the faster one is the way they turned down.
 - **Choosing:** a tap on a grey route or its label makes it the route (`chooseAlternative`, logged as a plan with
   reason `alternative`); the route becomes an alternative.
+- **A change of stops keeps the route's roads** (STOPS-SPEC §5.4): the roads of the route as planned or taken
+  (chosen, driven onto, or the faster one), not of the stops added since. The trip is searched twice: keeping to them
+  (time on them × 0.6, `KEPT_ROADS_FACTOR`: `RouteOptions.avoid` under 1, the heuristic's speed divided by it), then
+  afresh. The fresh plan is taken only if it saves over 30 s more than the driver accepted when choosing the route
+  (its "+n min" then; 0 for the app's own): so a stop along the way never loses a faster way the main search missed
+  (the leg after the stop is searched as weighted as the route was), and a stop removed doesn't keep the way to it.
+  Notes `; kept to the route's roads` or `; the fastest way, n s faster than the route's roads`. A fresh plan, and
+  any other plan, gives the roads kept next. Random Kyiv trips, a stop on an alternative's own stretch: 0.6 kept it on
+  all, no preference on 57 %, 0.7 lost it on 2 %.
 - **Driving one:** each alternative is followed by its own guidance. When the route goes `off` while an alternative is
-  `on`, that one becomes the route instead of planning again (`route alternative taken (taken)`). On the route and
-  off every alternative, they go away.
+  `on`, that one becomes the route instead of planning again (`route alternative taken (taken)`). On the route, each
+  alternative the car is off goes; one for a later leg stays while the car drives the roads it shares.
 - **Map** (UI-SPEC §6.3): quieter lines under the route, each labelled with its time against the route. They come
   while the car stands: the map frames the route as soon as it is planned (one over 1 km; a shorter one with its
   alternatives), then all routes once they come, unless the map was moved meanwhile.

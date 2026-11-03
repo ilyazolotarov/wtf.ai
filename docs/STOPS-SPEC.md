@@ -58,9 +58,9 @@ items: §12.
 - **Where a new stop goes:** within 1 km of the route ahead, by its place along it among the stops; otherwise between
   the two consecutive points where it adds the least straight-line distance (`insertionIndex`). The route page moves
   a stop earlier.
-- **Alternatives** (ROUTING-SPEC §8.7): for the leg the car is on, each joined with the rest of the trip, so "+4
-  min" compares the whole trip; searched after every plan (a stop added included) and again on the way, so a trip
-  with stops has them all along, each leg's in turn.
+- **Alternatives** (ROUTING-SPEC §8.7): one leg's other way each, joined with the rest of the trip, so "+4 min"
+  compares the whole trip; after every plan (a stop added included) each leg's, the longest first, and again on the
+  way for the leg the car is on, so a trip with stops has them all along.
 - **One frame per route:** every search of a route (plans, the way back to a stop, detours) shares the graph
   reader, which projects what it decodes into one local frame. The route keeps one frame and makes a new one only
   when the car is 30 km from it; the searches beside the route's own stop then.
@@ -105,9 +105,10 @@ The final arrival is on the route page. The map draws each stop as a dot ringed 
 ### 5.4 Changing the trip while driving
 
 Adding, removing or moving a stop plans again from the car at once (reason `stops`); the route waits for it as for a
-re-plan. When that plan finds no way to a stop, the banner says so ("Couldn't find a route to the stop …", until the
-next plan or 2 km on) and the route in force stays; a stop just added or put back is taken out again (`route stop
-dropped`), since kept it would fail every re-plan after. A new destination from search, a pin or the car's screen
+re-plan. The new plan keeps to the route's roads where the stops allow, unless a fresh one is clearly faster
+(ROUTING-SPEC §8.7). When that plan finds no way to a stop, the banner says so ("Couldn't find a route to the stop …",
+until the next plan or 2 km on) and the route in force stays; a stop just added or put back is taken out again
+(`route stop dropped`), since kept it would fail every re-plan after. A new destination from search, a pin or the car's screen
 replaces the whole trip, as "Route here" does (Undo, §7.4).
 
 ## 6. Places along the route
@@ -164,7 +165,7 @@ replaces the whole trip, as "Route here" does (Undo, §7.4).
   15 km/h, turning out); one across a divided road 6–14 minutes (the U-turn) on Kyiv's avenues.
 - **Search results** (adding a stop, §7.1): the same detours for the first 10 results, each projected on the route
   within 20 km, 2 km either side and 150,000 states a search.
-- **Searched again** along a new plan; the list goes with the page.
+- **Searched again** along a new plan or an alternative taken; the list goes with the page.
 
 ### 6.4 Side of the road
 

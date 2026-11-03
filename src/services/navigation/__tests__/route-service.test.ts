@@ -550,9 +550,53 @@ describe("RouteService", () => {
       expect(s.alternatives![0].plan.stops?.map((x) => x.key)).toEqual(s.plan!.stops!.map((x) => x.key));
     });
 
-    // To a stop at the east end and back: the way back's alternative is found on the way, from the car (the test graph
-    // keeps its own frame: the trip starts at its origin).
-    test("on the way: the next leg's alternatives searched again from the car, quietly, and taken from there", () => {
+    test("a stop added on a chosen alternative: planned again along it, the faster route not taken back, standing", () => {
+      const h = start();
+      h.flush();
+      h.service.chooseAlternative(0);
+      h.moveTo(ladderAt(0, 0), { speedMps: 0 });
+      expect(h.service.addStop({ ...ladderAt(2150, 0), name: "Shop" })).toBe(true);
+      h.flush();
+      const s = h.service.getSnapshot()!;
+      expect(s.planReason).toBe("stops");
+      expect(south(s.plan!.coordinates)).toBe(true);
+      expect(s.plan!.stops).toHaveLength(1);
+      // The way it turned down is still there to tap, faster.
+      expect(s.alternatives).toHaveLength(1);
+      expect(south(s.alternatives![0].plan.coordinates)).toBe(false);
+      expect(s.alternatives![0].deltaS).toBeLessThan(0);
+      expect(h.notes.some((n) => n.startsWith("route plan #") && n.endsWith("; kept to the route's roads"))).toBe(true);
+      expect(h.notes.some((n) => n.startsWith("route alternative taken (faster)"))).toBe(false);
+    });
+
+    // Planned through a stop on the south branch, the route's roads are the south ones: kept, they cost 32 s.
+    test("a stop removed: the way to it isn't kept when the fresh plan is faster", () => {
+      const h = harness({ network: "ladder" });
+      h.moveTo(ladderAt(0, 0));
+      h.service.start(ladderAt(2200, 0), { stops: [{ ...ladderAt(1100, -400), name: "South" }] });
+      h.flush();
+      expect(south(h.service.getSnapshot()!.plan!.coordinates)).toBe(true);
+      h.service.removeStop(h.service.getSnapshot()!.stops[0].key);
+      h.flush();
+      const s = h.service.getSnapshot()!;
+      expect(south(s.plan!.coordinates)).toBe(false);
+      expect(h.notes.some((n) => /; the fastest way, \d+ s faster than the route's roads$/.test(n))).toBe(true);
+    });
+
+    test("a stop by the start: the trip after it still has its alternatives", () => {
+      const h = harness({ network: "ladder" });
+      h.moveTo(ladderAt(0, 0));
+      h.service.start(ladderAt(2200, 0), { stops: [{ ...ladderAt(60, 0), name: "Kiosk" }] });
+      h.flush();
+      const s = h.service.getSnapshot()!;
+      expect(south(s.plan!.coordinates)).toBe(false);
+      expect(s.alternatives).toHaveLength(1);
+      expect(south(s.alternatives![0].plan.coordinates)).toBe(true);
+      expect(s.alternatives![0].plan.stops?.map((x) => x.key)).toEqual(s.plan!.stops!.map((x) => x.key));
+    });
+
+    // To a stop at the east end and back (the test graph keeps its own frame: the trip starts at its origin).
+    test("each leg's alternatives after the plan; one left behind goes, the next leg's stays and is taken from there", () => {
       const h = harness({ network: "ladder" });
       h.moveTo(ladderAt(0, 0));
       h.service.start(ladderAt(0, 0), { stops: [{ ...ladderAt(2250, 0), name: "East" }] });
@@ -560,6 +604,7 @@ describe("RouteService", () => {
       const first = h.service.getSnapshot()!;
       const searches = () => h.notes.filter((n) => n.startsWith("route alternatives:")).length;
       expect(searches()).toBe(1);
+      expect(first.alternatives).toHaveLength(2);
       // Drive it: the first leg's alternative left behind, the stop reached, 150 m on.
       const line = new RouteLine(first.plan!);
       const to = first.plan!.stops![0].atM + 150;
@@ -573,7 +618,7 @@ describe("RouteService", () => {
       h.flush();
       const s = h.service.getSnapshot()!;
       expect(s.atStop).toBeUndefined();
-      expect(searches()).toBe(2);
+      expect(searches()).toBe(1);
       expect(quiet).toBe(true);
       expect(s.alternatives).toHaveLength(1);
       expect(south(s.alternatives![0].plan.coordinates)).toBe(true);
@@ -584,7 +629,6 @@ describe("RouteService", () => {
       const taken = h.service.getSnapshot()!;
       expect(taken.planReason).toBe("alternative");
       expect(south(taken.plan!.coordinates)).toBe(true);
-      expect(taken.plan!.stops ?? []).toEqual([]);
       expect(taken.alternatives).toHaveLength(1);
     });
 
