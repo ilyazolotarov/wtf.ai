@@ -190,9 +190,10 @@ export function PlacedArrow({ x, y, headingDeg }: { x: number; y: number; headin
 
 /**
  * A dropped pin as the map draws it (map-layers.tsx): a dot banded as the car's, in a faint halo; once a route goes
- * there (`destination`), the route's destination dot. SVG strokes straddle their circle: radius to the ring's middle.
+ * there (`destination`), the route's destination dot; without the halo (`halo`), the spot of the car being placed. SVG
+ * strokes straddle their circle: radius to the ring's middle.
  */
-export function PinDot({ x, y, destination = false }: { x: number; y: number; destination?: boolean }) {
+export function PinDot({ x, y, destination = false, halo = true }: { x: number; y: number; destination?: boolean; halo?: boolean }) {
   const palette = usePalette();
   if (destination) {
     return (
@@ -208,7 +209,7 @@ export function PinDot({ x, y, destination = false }: { x: number; y: number; de
   }
   return (
     <G>
-      <Circle cx={x} cy={y} r={PIN_DOT.halo} fill={palette.mapPin} fillOpacity={0.18} />
+      {halo && <Circle cx={x} cy={y} r={PIN_DOT.halo} fill={palette.mapPin} fillOpacity={0.18} />}
       <Circle cx={x} cy={y} r={PIN_DOT.r + PIN_DOT.ring + PUCK.edge} fill={palette.puckEdge} />
       <Circle cx={x} cy={y} r={PIN_DOT.r + PIN_DOT.ring / 2} fill={palette.mapPin} stroke={palette.puckRing} strokeWidth={PIN_DOT.ring} />
     </G>

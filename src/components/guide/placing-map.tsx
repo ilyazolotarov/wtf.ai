@@ -5,7 +5,7 @@ import Svg, { Circle, G, Rect } from "react-native-svg";
 
 import { useScrollLock } from "@/components/guide/lesson-ui";
 import { MapCard, MapCardButtons, MapCardHeader, MapChipButton } from "@/components/guide/map-ui";
-import { CarGlyph, PlacedArrow, Puck, useMapColors, useNudgedHeading } from "@/components/guide/mini-map";
+import { CarGlyph, PinDot, PlacedArrow, Puck, useMapColors, useNudgedHeading } from "@/components/guide/mini-map";
 import { PlacingPinShape } from "@/components/map/placing-pin";
 import { BlurScope, BlurTarget } from "@/components/ui/glass-fill";
 import { DRAWING_MAX_FONT_SCALE, FontScaleLimit } from "@/components/ui/text";
@@ -44,6 +44,7 @@ export function PlacingMap({
   onStep,
   onCancel,
   scene,
+  marks,
   car,
   carVisible = true,
   dot,
@@ -60,6 +61,8 @@ export function PlacingMap({
   onCancel(): void;
   /** What the map shows, in map units (within `PLACING_MAP`), under the car and the dot. */
   scene: ReactNode;
+  /** Pins and marks, as the map stacks them: over the car, under the dot. */
+  marks?: ReactNode;
   /** Where the car really is: it faces up its road. */
   car: Point;
   carVisible?: boolean;
@@ -213,6 +216,7 @@ export function PlacingMap({
                   />
                 )}
                 {carVisible && !done && <CarGlyph x={car.x} y={car.y} />}
+                {marks}
                 {done ? (
                   <Puck x={car.x} y={car.y} r={10} trusted={false} headingDeg={placedHeading} />
                 ) : (
@@ -243,10 +247,15 @@ export function PlacingMap({
               {step === "heading" && headingDeg != null && (
                 <PlacedArrow x={pinX} y={pinY} headingDeg={headingDeg} />
               )}
-              {/* The pin: its point is exactly the spot that is placed, the frame's centre. */}
-              <G transform={`translate(${pinX} ${pinY})`}>
-                <PlacingPinShape />
-              </G>
+              {step === "position" ? (
+                // The pin: its point is exactly the spot that is placed, the frame's centre.
+                <G transform={`translate(${pinX} ${pinY})`}>
+                  <PlacingPinShape />
+                </G>
+              ) : (
+                // Placed, as the map: the pin gives way to the spot's dot, over the cone.
+                <PinDot x={pinX} y={pinY} halo={false} />
+              )}
             </Svg>
           )}
 

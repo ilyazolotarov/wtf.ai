@@ -122,9 +122,9 @@ function SetPositionTab() {
               <Path d={MAJOR} stroke={c.majorCasing} strokeWidth={17} />
               <Path d={MAJOR} stroke={c.major} strokeWidth={13} />
             </G>
-            {pin && step === "idle" && <PinDot x={pin.x} y={pin.y} />}
           </>
         }
+        marks={pin && step === "idle" && <PinDot x={pin.x} y={pin.y} />}
         overlay={(at) => (
           <>
             <View pointerEvents="none" style={[styles.tag, { backgroundColor: palette.text }, at({ x: DOT.x + 22, y: DOT.y + 24 })]}>

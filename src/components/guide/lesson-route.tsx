@@ -280,7 +280,7 @@ export function LessonRoute() {
           <>
             {/* As the map's placing: the cone the way it faces, under the spot. */}
             {aimDeg != null && <PlacedArrow x={aiming.x} y={aiming.y} headingDeg={aimDeg} />}
-            <PinDot x={aiming.x} y={aiming.y} />
+            <PinDot x={aiming.x} y={aiming.y} halo={false} />
           </>
         ) : (
           <Puck x={dot.x} y={dot.y} r={12} headingDeg={heading} />
