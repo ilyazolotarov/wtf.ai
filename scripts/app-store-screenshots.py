@@ -7,6 +7,10 @@ Plaza on the app's emulated STN adapter, the stop at the Socar station added on 
 first turn. The Simulator has no gyroscope, so the app turns by the wheels alone, as `--no-gyro` does on Android. It
 shoots 01-guidance … 08-maps (see store-screenshots.py) at 1320x2868, the 6.9" iPhone's native size (an iPhone 17 Pro
 Max on iOS 26.3, the runtime whose CarPlay works), flattened to RGB (App Store Connect refuses an alpha channel).
+`--size 6.3` takes the same trip on an iPhone 17 Pro, 1206x2622: the size App Store Connect requires (Dynamic Island,
+medium), as it never scales the 6.9" shots down to it, and the app laid out for that phone's 402 points.
+Every file is named with its set and size, as App Store Connect's media library shows only names:
+01-guidance-uk-dark-6.9.png, 01-guidance-uk-dark-6.3.png, preview-1-spoofed-uk-dark.mp4.
 
 How it drives the Simulator:
 - Taps, typing and the UI tree through AXe (`brew install cameroncooke/axe/axe`): HID events into the Simulator, so
@@ -45,10 +49,11 @@ checkout's JS is what runs):
     python3 scripts/app-store-screenshots.py store-assets/app-store/dark --dark --video
     python3 scripts/app-store-screenshots.py store-assets/app-store/uk-light --lang uk --video
     python3 scripts/app-store-screenshots.py store-assets/app-store/dark --dark --recut   # the previews cut again
-    python3 scripts/app-store-screenshots.py OUT --medium-from store-assets/app-store/dark  # 6.3" copies, 1206x2622
+    python3 scripts/app-store-screenshots.py store-assets/app-store/dark --dark --size 6.3  # the 6.3" shots
 
-The sets are in store-assets/app-store/ (Git LFS): light/, dark/, uk-light/, uk-dark/, each with its
-preview[-uk][-dark]-N-*.mp4.
+The sets are in store-assets/app-store/ (Git LFS): light/, dark/, uk-light/, uk-dark/ (en-light, en-dark, uk-light,
+uk-dark in the names), each with its 6.9" and 6.3" shots and its three previews (886x1920, recorded at 6.9", for
+both sizes).
 
 --carplay shoots the car's screen on the same trip instead, for the website and the listing (the App Store has no
 CarPlay slot): 01-guidance, 02-spoofed, 03-camera as the phone's, and 04-stop standing at the station. It needs
@@ -57,7 +62,7 @@ there: 1920x720, scale 3, the wide screen) and the Mac unlocked (the app is open
 destination comes by link, as the window puts the Mac's keyboard in the device. The Simulator's car is always at
 night: without --dark the app is launched with `-CarPlayDay YES`, which in a Simulator build draws the car by day (its
 map, bar and buttons; CarPlay's own dock and cards stay dark). The sets are store-assets/carplay/{light,dark,uk-light,
-uk-dark}/, for the website's light and dark modes.
+uk-dark}/, for the website's light and dark modes (scripts/site-media.sh), named as the phone's moments alone.
 
     python3 scripts/app-store-screenshots.py store-assets/carplay/uk-light --carplay --lang uk
 """
@@ -88,11 +93,16 @@ play = _play()
 
 BUNDLE = "ai.wtf.navigator"
 APP = os.path.join(ROOT, "build", "Build", "Products", "Release-iphonesimulator", "wtfai.app")
-DEVICE, RUNTIME = "iPhone 17 Pro Max", "com.apple.CoreSimulator.SimRuntime.iOS-26-3"
-SIZE, POINTS = (1320, 2868), (440, 956)
-# App previews for the 6.9" (and 6.5") iPhones; screenshots for the 6.3" ones (--medium-from): the same picture
-# within 0.3 % (a few rows trimmed, never stretched further).
-PREVIEW_SIZE, MEDIUM_SIZE = (886, 1920), (1206, 2622)
+RUNTIME = "com.apple.CoreSimulator.SimRuntime.iOS-26-3"
+# --size: the simulated iPhone, its pixels and points. The size is in the shots' names.
+SIZES = {
+    "6.9": ("iPhone 17 Pro Max", (1320, 2868), (440, 956)),
+    "6.3": ("iPhone 17 Pro", (1206, 2622), (402, 874)),
+}
+DEVICE, SIZE, POINTS = SIZES["6.9"]
+SIZE_TAG = "6.9"
+# App previews: 886x1920 serves the 6.9" and the 6.3" iPhones alike, cut from the 6.9" recording (a few rows trimmed).
+PREVIEW_SIZE = (886, 1920)
 PREVIEW_MIN_S, PREVIEW_MAX_S = 15.5, 29.5
 # The previews: each a few of the recording's scenes (store-screenshots.py's names; "arrive-end" the arrival's last
 # ARRIVE_END_S, as the whole one is too long to share a preview), in order.
@@ -128,6 +138,7 @@ UDID = None
 FAIL_DIR = None
 CARPLAY = False  # --carplay: the car's screen is shot, not the phone's
 CAR_DAY = False  # --carplay without --dark: the car drawn by day (the app's `-CarPlayDay`, Simulator builds only)
+SET = None  # the set in the files' names: en-light, en-dark, uk-light, uk-dark
 # The car's shots, at the phone shots' moments of the same names, and at the station.
 CAR_SHOTS = ("01-guidance", "02-spoofed", "03-camera")
 # The app's icon in CarPlay's side dock, in pixels of a 720 px high car display (the dock's width is fixed: the
@@ -145,7 +156,7 @@ def simctl(*args, **kw):
 
 
 def find_device():
-    """The UDID of an iPhone 17 Pro Max on iOS 26.3, made if there is none."""
+    """The UDID of the size's iPhone (DEVICE) on iOS 26.3, made if there is none."""
     devices = json.loads(simctl("list", "devices", "-j", check=True).stdout)["devices"].get(RUNTIME, [])
     for d in devices:
         if d["name"] == DEVICE and d.get("isAvailable", True):
@@ -360,7 +371,8 @@ def connected(seconds=20):
 def swipe_up():
     """A short, slow scroll up (250 pt, no fling): a long one carried Ukrainian Kyiv's row, higher in the list, past the
     top."""
-    run("axe", "swipe", "--start-x", "220", "--start-y", "700", "--end-x", "220", "--end-y", "450", "--duration", "1.0",
+    mid = str(POINTS[0] // 2)
+    run("axe", "swipe", "--start-x", mid, "--start-y", "700", "--end-x", mid, "--end-y", "450", "--duration", "1.0",
         "--udid", UDID)
     time.sleep(1.5)
 
@@ -539,7 +551,7 @@ def shot(out_dir, name):
     time.sleep(1.5)
     raw = os.path.join(tempfile.gettempdir(), f"wtf-app-store-{name}.png")
     screenshot(raw)
-    path = os.path.join(out_dir, f"{name}.png")
+    path = os.path.join(out_dir, f"{name}-{SET}-{SIZE_TAG}.png")
     run("ffmpeg", "-v", "error", "-y", "-i", raw, "-pix_fmt", "rgb24", path, check=True)
     os.remove(raw)
     print("shot", name, flush=True)
@@ -604,7 +616,7 @@ def clean_video(source):
     return clean
 
 
-def cut_previews(source, sound, cut, out_dir, suffix):
+def cut_previews(source, sound, cut, out_dir):
     """The previews from the whole recording: each one's scenes trimmed, sped up as the Play promo's (driving
     DRIVE_SPEED, the rest OTHER_SPEED; the voice keeps its pitch), all faster still or slower (never under real time) to
     fit 15-30 s, crossfading into each other, picture and sound alike; scaled to 886 wide and two rows trimmed off the
@@ -652,7 +664,7 @@ def cut_previews(source, sound, cut, out_dir, suffix):
             graph.append(f"[{v}]tpad=stop_mode=clone:stop_duration={pad:.3f}[vp]")
             v = "vp"
         graph.append(f"[{a}]apad[ap]")  # the held last frame silent
-        out = os.path.join(out_dir, f"preview{suffix}-{n}-{name}.mp4")
+        out = os.path.join(out_dir, f"preview-{n}-{name}-{SET}.mp4")
         run("ffmpeg", "-v", "error", "-y", "-i", clean_video(source), "-i", sound, "-filter_complex", ";".join(graph), "-map", f"[{v}]", "-map", "[ap]", "-t", f"{total + pad:.3f}",
             "-r", str(play.VIDEO_FPS), "-c:v", "libx264", "-preset", "slow", "-profile:v", "high", "-level", "4.0",
             "-b:v", "10M", "-maxrate", "12M", "-bufsize", "24M", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "256k",
@@ -692,16 +704,6 @@ def drive_link(drive):
                   flush=True)
             return link
     raise SystemExit(f"the drive's link is {len(link)} characters even with its heading within {tol}°: iOS cuts it")
-
-
-def medium_copies(src_dir, out_dir):
-    """The 6.3" iPhones' screenshots from a 6.9" set: 1206x2622 (the aspect within 0.07 %)."""
-    os.makedirs(out_dir, exist_ok=True)
-    for name in sorted(f for f in os.listdir(src_dir) if f.endswith(".png")):
-        run("ffmpeg", "-v", "error", "-y", "-i", os.path.join(src_dir, name), "-vf",
-            f"scale={MEDIUM_SIZE[0]}:{MEDIUM_SIZE[1]}:flags=lanczos", "-pix_fmt", "rgb24", os.path.join(out_dir, name),
-            check=True)
-        print("6.3\"", name, flush=True)
 
 
 def app_time_zone():
@@ -766,7 +768,8 @@ def main():
     ap.add_argument("--udid", help="the simulator (default: an iPhone 17 Pro Max on iOS 26.3, made if missing)")
     ap.add_argument("--work", help="where the recording and its scenes stay (default: a folder in the temp dir)")
     ap.add_argument("--recut", action="store_true", help="only cut the previews again from --work's recording")
-    ap.add_argument("--medium-from", metavar="SET_DIR", help="only write 6.3\" copies of SET_DIR's shots into out_dir")
+    ap.add_argument("--size", choices=sorted(SIZES), default="6.9",
+                    help="the iPhone's display: 6.9 (iPhone 17 Pro Max) or 6.3 (iPhone 17 Pro, shots only)")
     ap.add_argument("--carplay", action="store_true",
                     help="shoot the car's screen instead (CarPlay; by day unless --dark): Simulator.app open, the Mac "
                          "unlocked")
@@ -777,14 +780,17 @@ def main():
     work = args.work or os.path.join(tempfile.gettempdir(), "wtf-app-store", f"run{suffix or '-en'}")
     os.makedirs(args.out_dir, exist_ok=True)
     os.makedirs(work, exist_ok=True)
-    if args.medium_from:
-        medium_copies(args.medium_from, args.out_dir)
-        return
+    global SET, DEVICE, SIZE, POINTS, SIZE_TAG
+    SET = f"{args.lang}-{'dark' if args.dark else 'light'}"
+    DEVICE, SIZE, POINTS = SIZES[args.size]
+    SIZE_TAG = args.size
+    if args.size != "6.9" and (args.video or args.recut or args.carplay):
+        raise SystemExit("--size 6.3 shoots the phone's screenshots only: the previews and CarPlay come from 6.9")
     name = f"preview{suffix}"
     if args.recut:
         with open(os.path.join(work, f"{name}.scenes.json"), encoding="utf-8") as f:
             cut_previews(os.path.join(work, f"{name}.source.mov"), os.path.join(work, f"{name}.sound.wav"), json.load(f),
-                         args.out_dir, suffix)
+                         args.out_dir)
         return
 
     global UDID, FAIL_DIR, CARPLAY, CAR_DAY
@@ -934,7 +940,7 @@ def main():
             video = None
             with open(os.path.join(work, f"{name}.scenes.json"), encoding="utf-8") as f:
                 cut_previews(os.path.join(work, f"{name}.source.mov"), os.path.join(work, f"{name}.sound.wav"),
-                             json.load(f), out, suffix)
+                             json.load(f), out)
     finally:
         if video:
             video.proc.send_signal(signal.SIGINT)
