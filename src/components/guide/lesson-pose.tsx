@@ -110,7 +110,7 @@ export function PoseTab() {
             {answer === null && <MapChip text={t("poseWifiTag").replace("{d}", distance)} style={[styles.wifiTag, at({ x: 224, y: 176 })]} />}
             {answer === null && (
               // The map's parked-pose card (index.tsx).
-              <MapCard style={styles.cardTop}>
+              <MapCard style={styles.cardTop} from="top">
                 <MapCardHeader icon="directions_car" tone="warn" title={t("poseQuestion")} body={t("poseQuestionWhy").replace("{d}", distance)} />
                 <MapCardButtons
                   buttons={[

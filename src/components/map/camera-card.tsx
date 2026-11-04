@@ -1,7 +1,9 @@
 import { StyleSheet, View } from "react-native";
+import Animated from "react-native-reanimated";
 
 import { GlassFill } from "@/components/ui/glass-fill";
 import { Icon } from "@/components/ui/icon";
+import { RED_IN, RED_OUT } from "@/components/ui/red-fade";
 import { T } from "@/components/ui/text";
 import { Radius, usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
@@ -29,12 +31,11 @@ export function CameraCard({ camera }: { camera: CameraShown }) {
       accessibilityRole="alert"
       accessibilityLabel={[title, line, limit].filter(Boolean).join(". ")}
     >
-      {red ? <View style={[styles.fill, { backgroundColor: palette.bad.c }]} /> : <GlassFill radius={Radius.rL} />}
-      {/* The map's camera badge (scripts/map-car.py): white on the sign's red, a white ring, a dark edge. */}
-      <View style={styles.badgeEdge}>
-        <View style={[styles.badge, { backgroundColor: palette.signRing }]}>
-          <Icon name="speed_camera" size={24} color="#FFFFFF" />
-        </View>
+      <GlassFill radius={Radius.rL} />
+      {red && <Animated.View entering={RED_IN} exiting={RED_OUT} style={[styles.fill, { backgroundColor: palette.bad.c }]} />}
+      {/* The map's camera badge (scripts/map-car.py) without its dark edge: white on the sign's red, a white ring. */}
+      <View style={[styles.badge, { backgroundColor: palette.signRing }]}>
+        <Icon name="speed_camera" size={24} color="#FFFFFF" />
       </View>
       <View style={styles.text}>
         <T w="semibold" size={red ? 17 : 15} color={ink}>
@@ -70,10 +71,10 @@ const styles = StyleSheet.create({
     borderRadius: Radius.rL,
   },
   fill: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, borderRadius: Radius.rL },
-  badgeEdge: { width: 44, height: 44, borderRadius: 14, padding: 1, backgroundColor: "rgba(0,0,0,0.9)" },
   badge: {
-    flex: 1,
-    borderRadius: 13,
+    width: 44,
+    height: 44,
+    borderRadius: 14,
     borderWidth: 2.5,
     borderColor: "#FFFFFF",
     alignItems: "center",

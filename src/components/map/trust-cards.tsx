@@ -4,6 +4,7 @@ import { cardinal, formatDistance, toDegrees } from "@/components/status/format-
 import { formatDuration } from "@/components/status/format-time";
 import { useAgeMs, useAgeText } from "@/components/status/use-age-text";
 import type { useNavStatus } from "@/components/status/use-nav-status";
+import { Appear } from "@/components/ui/appear";
 import { GlassFill } from "@/components/ui/glass-fill";
 import { Icon } from "@/components/ui/icon";
 import { T } from "@/components/ui/text";
@@ -135,14 +136,16 @@ export function SinceTrustedStrip({ position }: { position: PositionEstimate }) 
       ? t("sinceTrustedBack").replace("{age}", age).replace("{d}", formatDistance(backM, language))
       : t("sinceTrusted").replace("{age}", age);
   return (
-    // Wraps: in Ukrainian the age and the distance back don't fit one line.
-    <View style={[panel, hud.chip, styles.since]}>
-      <GlassFill radius={Radius.rL} />
-      <Icon name="history" size={16} color={palette.text2} />
-      <T w="medium" size={13} style={styles.sinceText}>
-        {text}
-      </T>
-    </View>
+    <Appear from="top">
+      {/* Wraps: in Ukrainian the age and the distance back don't fit one line. */}
+      <View style={[panel, hud.chip, styles.since]}>
+        <GlassFill radius={Radius.rL} />
+        <Icon name="history" size={16} color={palette.text2} />
+        <T w="medium" size={13} style={styles.sinceText}>
+          {text}
+        </T>
+      </View>
+    </Appear>
   );
 }
 

@@ -3,6 +3,13 @@ import { decodeImuBatch, SensorService, toGnssRecord } from "../sensor-service";
 
 type Listener = (e: any) => void;
 
+// A phone unless a test says otherwise (a getter: the namespace import copies plain values once).
+jest.mock("expo-device", () => {
+  const state = { isDevice: true };
+  return { __state: state, get isDevice() { return state.isDevice; } };
+});
+const mockDevice: { isDevice: boolean } = jest.requireMock("expo-device").__state;
+
 jest.mock("../../../../modules/sensor-capture/src/SensorCaptureModule", () => {
   const listeners = new Map<string, Set<(e: any) => void>>();
   const native = {
@@ -57,6 +64,17 @@ describe("payload decoding (row layouts shared with SensorLogic.swift)", () => {
     expect(r.altMslM).toBeNaN();
     expect(r.speedAccMps).toBeNaN();
     expect(r.courseRad).toBeNaN();
+  });
+
+  test("GNSS: a simulator's fixes are all simulated, and its only GPS: not flagged there, only on a phone", () => {
+    const fix = { tUs: 1, utcUs: 1, deliveryDelayUs: 0, lat: 50.45, lon: 30.52, simulated: true, fromAccessory: false };
+    expect(toGnssRecord(fix).flags).toBe(1);
+    mockDevice.isDevice = false;
+    try {
+      expect(toGnssRecord(fix).flags).toBe(0);
+    } finally {
+      mockDevice.isDevice = true;
+    }
   });
 
   test("IMU: 14-value motion rows, 4-value raw rows, partial rows ignored", () => {
@@ -160,6 +178,48 @@ describe("SensorService", () => {
     expect((fixes[0] as { flags: number }).flags).toBe(1);
     expect(batches).toHaveLength(1);
     expect(s.getSnapshot().lastError).toBe("denied");
+  });
+
+  test("a simulator without device motion is a still, upright phone at 100 Hz; a phone without it gets none", async () => {
+    jest.useFakeTimers();
+    let nowUs = 1_000_000;
+    mockNative.nowUs.mockImplementation(() => nowUs);
+    mockNative.startImu.mockResolvedValue(false);
+    try {
+      const phone = new SensorService();
+      phone.want(false, true);
+      await flush();
+      expect(phone.getSnapshot().imuRunning).toBe(false);
+
+      mockDevice.isDevice = false;
+      const sim = new SensorService();
+      const batches: ReturnType<typeof decodeImuBatch>[] = [];
+      sim.imu.on((b) => batches.push(b));
+      sim.want(false, true);
+      await flush();
+      expect(sim.getSnapshot().imuRunning).toBe(true);
+      for (let i = 0; i < 3; i++) {
+        nowUs += 100_000;
+        jest.advanceTimersByTime(100);
+      }
+      const samples = batches.flatMap((b) => b.motion);
+      expect(samples).toHaveLength(30);
+      expect(samples[1].timestampUs - samples[0].timestampUs).toBe(10_000);
+      expect(samples[0].gyro).toEqual([0, 0, 0]);
+      expect(samples[0].gravity[1]).toBeCloseTo(-9.81, 2);
+
+      sim.want(false, false);
+      await flush();
+      nowUs += 100_000;
+      jest.advanceTimersByTime(100);
+      expect(batches.flatMap((b) => b.motion)).toHaveLength(30);
+      expect(mockNative.stopImu).not.toHaveBeenCalled();
+    } finally {
+      mockDevice.isDevice = true;
+      mockNative.nowUs.mockImplementation(() => 0);
+      mockNative.startImu.mockImplementation(async () => true);
+      jest.useRealTimers();
+    }
   });
 
   test("the IMU starts at 100 Hz without the raw streams; an older native build's magnetometer stays off", async () => {

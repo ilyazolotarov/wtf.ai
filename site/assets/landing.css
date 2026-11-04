@@ -4,6 +4,8 @@
   --accentA: #90BAF133; --ok: #82CB9B; --bad: #ED8C80; --line: #34322F;
   color-scheme: dark;
 }
+/* The screens' bezel, the same in both themes: thick black with a thin light rim outside it. */
+:root { --bezel: #000; --bezel-rim: #A6A29B; }
 :root[data-theme="light"] {
   --bg: #F5F4F1; --card: #FFFFFF; --text: #1D1C1A; --text2: #6B675F; --accent: #4371B7;
   --accentA: #4371B729; --ok: #3D865A; --bad: #BC4A3F; --line: #E4E1DA;
@@ -32,10 +34,13 @@ nav a:hover { color: var(--text); }
 .badge { display: inline-flex; align-items: center; gap: 8px; padding: 12px 20px; border-radius: 999px;
   background: var(--accent); color: var(--bg); font-weight: 600; text-decoration: none; }
 .badge.soon { background: var(--accentA); color: var(--accent); }
-/* The screen at the screenshots' own 1:2, the frame outside it: nothing of the picture is cut. */
-.phone { justify-self: center; box-sizing: content-box; width: min(280px, 72vw); aspect-ratio: 1 / 2; border-radius: 40px;
-  background: var(--card); border: 10px solid var(--text); overflow: hidden; box-shadow: 0 30px 60px #0002; }
-.phone img, .phone video { width: 100%; height: 100%; object-fit: contain; display: block; }
+/* The screen at the screenshots' own 1:2, the frame outside it: nothing of the picture is cut. The ratio sits on the
+   picture, not the frame: Safari resolves height: 100% inside a content-box aspect-ratio box as if the border were part
+   of it (20px too tall), centring the video 10px low and cutting its bottom. */
+.phone { justify-self: center; box-sizing: content-box; width: min(280px, 72vw); border-radius: 40px;
+  background: var(--bezel); border: 10px solid var(--bezel); overflow: hidden;
+  box-shadow: 0 0 0 1px var(--bezel-rim), 0 30px 60px #0002; }
+.phone img, .phone video { width: 100%; height: auto; aspect-ratio: 1 / 2; object-fit: contain; display: block; }
 section { padding: 56px 0; border-top: 1px solid var(--line); }
 section h2 { font-size: 32px; margin: 0 0 8px; letter-spacing: -0.01em; }
 section p.sub { color: var(--text2); margin: 0 0 32px; max-width: 40em; }
@@ -53,8 +58,17 @@ section p.sub { color: var(--text2); margin: 0 0 32px; max-width: 40em; }
 .steps .card::before { counter-increment: s; content: counter(s); display: inline-grid; place-items: center;
   width: 32px; height: 32px; border-radius: 50%; background: var(--accentA); color: var(--accent);
   font-weight: 700; margin-bottom: 12px; }
-.shots { display: flex; gap: 16px; overflow-x: auto; padding-bottom: 8px; scroll-snap-type: x mandatory; }
-.shots img { height: 480px; border-radius: 24px; scroll-snap-align: start; flex: none; background: var(--card); }
+.shots { display: flex; gap: var(--shots-gap); overflow-x: auto; padding-bottom: 8px; scroll-snap-type: x mandatory; }
+/* A shot's caption under it, as the CarPlay stills': the figure as wide as the 1:2 shot, a long caption wrapping.
+   shots.js moves the captions into a row of their own under the scrollbar, scrolled with the strip. */
+.shots figure { flex: none; width: var(--shot-w); margin: 0; scroll-snap-align: start; }
+/* The phone's screen in a black bezel, as the CarPlay stills: the picture fitted inside it, unsquashed. The rim is the
+   border and the bezel the padding, inside the box: the strip scrolls, and clips what is outside it (a shadow). The
+   ratio is the picture's (content-box, as the hero's), so it fills the screen and its corners are the rounded ones. */
+.shots img { display: block; box-sizing: content-box; width: calc(100% - 12px); height: auto; aspect-ratio: 1 / 2;
+  object-fit: contain; padding: 5px;
+  background: var(--bezel); border: 1px solid var(--bezel-rim); border-radius: 28px; }
+.shots figcaption { margin-top: 10px; padding-right: 24px; color: var(--text2); font-size: 15px; overflow-wrap: break-word; }
 footer { padding: 32px 0 48px; color: var(--text2); font-size: 15px; border-top: 1px solid var(--line); }
 footer a { color: var(--text2); margin-right: 16px; }
 /* A section's heading with a picture beside it (above it on a phone): "wtf.ai ❤ Waze". */
@@ -72,7 +86,6 @@ footer a { color: var(--text2); margin-right: 16px; }
   .duo .love { order: -1; }
   .love { font-size: 48px; }
   .grid, .steps { grid-template-columns: 1fr; }
-  .shots img { height: 380px; }
 }
 .theme-toggle { margin-left: 18px; display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px 7px 12px;
   border-radius: 999px; border: 1px solid var(--line); background: var(--card); color: var(--text);
@@ -104,3 +117,41 @@ footer a { color: var(--text2); margin-right: 16px; }
 .card ol b, .card p b { color: var(--text); font-weight: 600; }
 .contact { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; margin-bottom: 24px; }
 .contact .badge { font-size: 18px; }
+/* The car's screen: CarPlay's stills (1920x720, the wide display) in a black bezel, their own rounded corners in it. */
+.car-shots { display: grid; grid-template-columns: repeat(2, 1fr); gap: 24px 16px; }
+.car-shots figure { margin: 0; }
+.car-shots img { display: block; box-sizing: content-box; width: calc(100% - 12px); height: auto; aspect-ratio: 8 / 3;
+  object-fit: contain; padding: 5px;
+  background: var(--bezel); border: 1px solid var(--bezel-rim); border-radius: 22px; box-shadow: 0 20px 40px #0002; }
+.car-shots figcaption { margin-top: 10px; color: var(--text2); font-size: 15px; }
+@media (max-width: 820px) { .car-shots { grid-template-columns: 1fr; } }
+/* The strip's arrows (shots.js shows them where there is a mouse), beside it at the shots' middle: in the page's margin
+   where there is room for them, the strip a little narrower where there is not. */
+.shots-frame { --shot-w: 240px; --shots-gap: 10px; }
+.shots-arrow { display: grid; place-items: center; width: 48px; height: 48px; padding: 0; border: 0; border-radius: 50%;
+  cursor: pointer; color: var(--text); background: var(--card); box-shadow: 0 0 0 1px var(--line), 0 8px 24px #0003;
+  transition: color .15s, transform .15s; }
+.shots-arrow[hidden] { display: none; }
+.shots-arrow:hover { color: var(--accent); transform: scale(1.06); }
+.shots-arrow:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* On a phone, a shot almost as wide as the screen, the next one's edge showing beside it: it scrolls. */
+@media (max-width: 820px) { .shots-frame { --shot-w: min(calc(100vw - 88px), 360px); } .shots-arrow { display: none; } }
+.shots-captions { display: flex; gap: var(--shots-gap); overflow: hidden; margin-top: 10px; }
+/* A caption stops short of the next one's (the gap between the shots alone reads as one line), a long word broken. */
+.shots-captions span { flex: none; width: var(--shot-w); padding-right: 24px; color: var(--text2); font-size: 15px;
+  overflow-wrap: break-word; }
+.shots-frame.split .shots figcaption { display: none; }
+/* With a mouse and room for the arrows, they scroll the strip (and a trackpad or shift and the wheel): no scrollbar.
+   On a phone's width, a swipe and the scrollbar, no arrows. */
+@media (hover: hover) and (pointer: fine) and (min-width: 821px) {
+  .shots-frame.split { display: grid; grid-template-columns: 48px minmax(0, 1fr) 48px; column-gap: 16px; }
+  .shots-frame.split .shots { grid-column: 2; grid-row: 1; scrollbar-width: none; padding-bottom: 0; }
+  .shots-frame.split .shots::-webkit-scrollbar { display: none; }
+  .shots-frame.split .shots-captions { grid-column: 2; grid-row: 2; }
+  .shots-frame.split .shots-arrow { grid-row: 1; align-self: center; }
+  .shots-frame.split .shots-arrow[data-step="-1"] { grid-column: 1; }
+  .shots-frame.split .shots-arrow[data-step="1"] { grid-column: 3; }
+}
+@media (hover: hover) and (pointer: fine) and (min-width: 1200px) {
+  .shots-frame.split { margin: 0 -64px; }
+}

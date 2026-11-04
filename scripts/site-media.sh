@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # The website's screenshots (and the link preview cards made from them, scripts/site-share-card.py) and demo videos,
-# made from the store set in store-assets/play/ (scripts/store-screenshots.py) so there is one copy of each in the repo. The site's are smaller: screenshots 720x1440, videos 540x1080 at 30 fps. Run by
+# made from the store set in store-assets/play/ (scripts/store-screenshots.py) so there is one copy of each in the repo, and
+# the CarPlay stills from store-assets/carplay/ (scripts/app-store-screenshots.py --carplay). The site's are smaller:
+# screenshots 720x1440, CarPlay 1280x480 JPEG, videos 540x1080 at 30 fps. Run by
 # .github/workflows/pages.yml; locally before a preview.
 #
 #   bash scripts/site-media.sh            # screenshots and videos
@@ -9,6 +11,7 @@
 set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 play="$root/store-assets/play"
+carplay="$root/store-assets/carplay"
 out="$root/site/assets"
 what=${1:-all}
 
@@ -26,6 +29,15 @@ if [ "$what" = all ] || [ "$what" = screens ]; then
     done
   done
   echo "screens: $out/screens"
+  for pair in "${sets[@]}"; do
+    src="$carplay/${pair%%:*}" dst="$out/carplay/${pair#*:screens}"
+    mkdir -p "$dst"
+    # JPEG: the wide map shots are ~130 KB each, a quarter of the PNG.
+    for png in "$src"/*.png; do
+      ffmpeg -v error -y -i "$png" -vf "scale=1280:480:flags=lanczos" -q:v 3 "$dst/$(basename "$png" .png).jpg"
+    done
+  done
+  echo "carplay: $out/carplay"
   # The link previews (og:image) show a screenshot.
   python3 "$root/scripts/site-share-card.py" 2>/dev/null || python "$root/scripts/site-share-card.py"
 fi

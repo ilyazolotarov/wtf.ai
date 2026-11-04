@@ -41,18 +41,22 @@ interface RegionRow {
   available: boolean;
 }
 
-
+/**
+ * A region's round icon action, tinted as the app's icons (the saved and recent places'): the accent's icon on its dim
+ * circle, `danger` the bad status's (as untrusted GPS), `filled` solid accent for the card's main action.
+ */
 export function IconButton({ icon, label, danger, filled, onPress }: { icon: IconName; label: string; danger?: boolean; filled?: boolean; onPress(): void }) {
   const palette = usePalette();
+  const [background, color] = filled ? [palette.accent, palette.onAccent] : danger ? [palette.bad.a, palette.bad.c] : [palette.accentA, palette.accent];
   return (
     <PressableFeedback
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={label}
       hitSlop={4}
-      style={[styles.iconButton, { backgroundColor: filled ? palette.accent : palette.surface }]}
+      style={[styles.iconButton, { backgroundColor: background }]}
     >
-      <Icon name={icon} size={18} color={filled ? palette.onAccent : danger ? palette.bad.c : palette.text} />
+      <Icon name={icon} size={18} color={color} />
     </PressableFeedback>
   );
 }

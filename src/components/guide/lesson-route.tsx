@@ -1,15 +1,16 @@
 import { Fragment, useEffect, useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
-import { G, Path } from "react-native-svg";
+import Animated from "react-native-reanimated";
 
 import { ExplainCard, LessonIntro, LessonTabs, PulseRing } from "@/components/guide/lesson-ui";
 import { sayFirstInstruction } from "@/components/guide/lesson-voice-sample";
 import { MapCard, MapCardButtons, MapCardHeader, MapChipButton } from "@/components/guide/map-ui";
-import { MiniMap, PinDot, Puck, RouteLine, useNudgedHeading } from "@/components/guide/mini-map";
+import { MiniMap, PinDot, PlacedArrow, Puck, RouteLine, useNudgedHeading } from "@/components/guide/mini-map";
 import { BLOCKS, CAR, H, PARKS, PLACES, plan, roads, toCoordinate, TOP, W, type Planned, type Point } from "@/components/guide/route-map";
 import { RouteBanner } from "@/components/route/route-banner";
 import { hushVoice } from "@/components/route/voice-player";
 import { cardinal, formatDistance, toDegrees } from "@/components/status/format-geo";
+import { useAppearing } from "@/components/ui/appear";
 import { Icon } from "@/components/ui/icon";
 import { PressableFeedback } from "@/components/ui/press-feedback";
 import { T } from "@/components/ui/text";
@@ -24,6 +25,8 @@ type Tab = "hold" | "search";
 export function LessonRoute() {
   const { t, language } = useT();
   const palette = usePalette();
+  const fading = useAppearing("none");
+  const fromTop = useAppearing("top");
   const [tab, setTab] = useState<Tab>("hold");
   const [scale, setScale] = useState(1);
   const [dot, setDot] = useState<Point>(CAR);
@@ -116,11 +119,15 @@ export function LessonRoute() {
             {!searching && !pin && !route && !aiming && (
               <>
                 <PulseRing left={`${(280 / W) * 100}%`} top={`${((TOP + 150) / H) * 100}%`} />
-                <View pointerEvents="none" style={[styles.hint, placed && styles.hintBelowChip, { backgroundColor: palette.text }]}>
+                <Animated.View
+                  pointerEvents="none"
+                  style={[styles.hint, placed && styles.hintBelowChip, { backgroundColor: palette.text }]}
+                  {...fading}
+                >
                   <T w="medium" size={13} color={palette.bg}>
                     {t("routeHoldHint")}
                   </T>
-                </View>
+                </Animated.View>
               </>
             )}
             {placed && !route && !aiming && (
@@ -197,7 +204,7 @@ export function LessonRoute() {
             )}
 
             {route && (
-              <View style={styles.banner}>
+              <Animated.View style={styles.banner} {...fromTop}>
                 <RouteBanner
                   route={route.snapshot}
                   nowMs={route.nowMs}
@@ -208,7 +215,7 @@ export function LessonRoute() {
                     setMuted(!muted);
                   }}
                 />
-              </View>
+              </Animated.View>
             )}
 
             {searching && (
@@ -271,14 +278,9 @@ export function LessonRoute() {
         {pin && <PinDot x={pin.x} y={pin.y} destination={route != null} />}
         {aiming ? (
           <>
-            <PinDot x={aiming.x} y={aiming.y} />
-            {aimDeg != null && (
-              // The arrow from the placed spot, as the map's placing draws it.
-              <G transform={`rotate(${aimDeg} ${aiming.x} ${aiming.y})`}>
-                <Path d={`M${aiming.x} ${aiming.y} V${aiming.y - 44}`} stroke={palette.accent} strokeWidth={4} strokeLinecap="round" />
-                <Path d={`M${aiming.x - 9} ${aiming.y - 38} L${aiming.x} ${aiming.y - 56} L${aiming.x + 9} ${aiming.y - 38} Z`} fill={palette.accent} />
-              </G>
-            )}
+            {/* As the map's placing: the cone the way it faces, under the spot. */}
+            {aimDeg != null && <PlacedArrow x={aiming.x} y={aiming.y} headingDeg={aimDeg} />}
+            <PinDot x={aiming.x} y={aiming.y} halo={false} />
           </>
         ) : (
           <Puck x={dot.x} y={dot.y} r={12} headingDeg={heading} />

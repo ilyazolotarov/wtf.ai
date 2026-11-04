@@ -150,6 +150,20 @@ persisted in kv-store. No hardcoded user-facing strings in components.
   `lesson-route.tsx`), the map tour's dimming (its hole lets touches through to the map), Settings' hidden tap on the
   version, an inline text link.
 
+### 4.9 Panels coming and going
+
+- **The map's panels come and go through `Appear`** (`src/components/ui/appear.tsx`): every card, chip and invite in
+  the top and bottom stacks and the centre card. In: a fade over 200 ms, eased out, sliding 10 pt from its edge (the
+  top stack's from above, the bottom stack's from below, the centre card in place); out: 150 ms, eased in, back the
+  way it came. Its neighbours glide to their new places over 200 ms instead of jumping. No bounce: the eyes are on
+  the road, and a panel must be readable as soon as it is there.
+- **A warning's red** (the speed bubble, the camera card; `red-fade.ts`) fades in and out over 150 ms over the glass;
+  the speed bubble pulses once to 106 % (120 ms out, 200 ms back) as it turns red, with the chime, not when a screen
+  opens on it already red.
+- **Still:** what changes every second (the speed, distances, times) never rolls or fades; the map's dot, cone and
+  badges; the status pill and the bottom bar, always there; CarPlay and Android Auto, drawn by the car's system.
+- **Reduce Motion:** fades only, no slide, no pulse, the neighbours jump.
+
 ## 5. App shell
 
 - `src/app/_layout.tsx`: `Stack` inside `ThemeProvider` → `I18nProvider` → `PositionProvider` → `RuntimeProvider`
@@ -301,7 +315,8 @@ persisted in kv-store. No hardcoded user-facing strings in components.
 - **Putting the car on the map** (NAVIGATOR-SPEC §6.2): while standing, without GPS and with nothing vouching for the
   dot, a chip "Set your position on the map"; "No" to the pose question opens it too. The map zooms in (18, flat,
   north up) with a centre pin and a card ("Where is the car?" · Cancel / Here), then "Which way does it face?": a tap
-  draws an arrow from the pin, another tap turns it (Cancel / Confirm; Confirm needs a tap). Moving off cancels. The
+  draws a narrow cone from the pin that way, another tap turns it (Cancel / Confirm; Confirm needs a tap); the
+  lessons' drawn maps draw the same cone (`PlacedArrow`). Moving off cancels. The
   confirmed placing is drawn as the car (the parked car's icon, §6.1, nose the way it was aimed, in place of the
   parked car) until the dot is 50 m away or the car is placed again. When the ignition
   comes on while the chip is offered, the voice says once, within 2 min, "Show on the map where the car is"
@@ -331,7 +346,7 @@ One small component each; the screen only places them and wires their state. Car
 | Bottom | `CameraButton` | Camera mode (§6.2) |
 | Bottom | `BottomBar` | Route, Vehicle (with the connection dot; "Driving" while a trip records), More (a red dot while an app or map update waits, UPDATES-SPEC §5.4) |
 | Center | `PermissionCard` (`center-cards.tsx`) | Location denied → explanation + "Open Settings" |
-| Center | `NoFixCard` | "Waiting for GPS…" when no fix yet; "GPS puts you outside Ukraine" + Set position when the phone's last location is abroad |
+| Center | `NoFixCard` | "Waiting for GPS…" when no fix yet, with "Set your position on the map" (grey) from the start: jammed at the start, a fix may never come; "GPS puts you outside Ukraine" + Set position when the phone's last location is abroad |
 
 - **Outside the region** (`region-prompt.tsx`): when the position (any fix to 5 km, Wi-Fi ones too, not one suspected
   of spoofing) is more than max(1 km, its accuracy) outside the active region's outline (`region-check.ts`), a card
@@ -415,7 +430,7 @@ One small component each; the screen only places them and wires their state. Car
   `PositionEstimate.speedLimit`; `speed limit <kph> (OSM|default)` / `none` notes in the trip log.
 - **Too fast** (`SpeedWarning`): only past the driver's margin over the limit (Settings: +10, **+15**, +20 km/h): fines
   start at more than 20 km/h over, so up to the margin nothing changes, no colour and no sound. Past it for 1.5 s the
-  speed shows red (`bad`, a 44 pt pill inside the bubble) and one chime sounds (`assets/sounds/speed-warning.mp3`, two
+  speed shows red (`bad`: the whole bubble, the sign ringed in white) and one chime sounds (`assets/sounds/speed-warning.mp3`, two
   falling notes at −17 LUFS, `tools/voice/speed-warning.sh`; ahead of waiting voice phrases; said "Slow down" if it
   won't play; not with the chime off in Settings, the voice muted or at 0); it ends 3 km/h back under the line, or after 30 s without a sign
   (not red meanwhile: a sign gone for a moment and back finds the warning still on, no second chime), and only then
@@ -451,8 +466,8 @@ One small component each; the screen only places them and wires their state. Car
   held up to a minute, never passed meanwhile. A camera 50 m nearer than the card's takes it. In the trip log:
   `camera ahead #<id> in <m> m, limit <kph>` (`(OSM only)` for one the list lacks), `camera passed #<id>`, `camera out
   of sight #<id> at <m> m`, and from the screen `camera warning #<id>: …` and `camera slow down #<id>: …`.
-- **The card** (`CameraCard`), under the status row and the route banner: the map's camera badge (white on red, white
-  ring, dark edge; the same on the red card), "Speed camera in 600 m" (10 m steps under 200 m, 50 m above), the limit at the camera as its sign at the right (in words
+- **The card** (`CameraCard`), under the status row and the route banner: the map's camera badge without its dark edge (white
+  on red, a white ring; the same on the red card), "Speed camera in 600 m" (10 m steps under 200 m, 50 m above), the limit at the camera as its sign at the right (in words
   only to a screen reader: the sign says it), and a bar filling from where it showed to the camera. Past the driver's
   margin over the camera's limit by the speed warning's rules (§6.4: after 1.5 s past it, until 3 km/h back under, so
   hovering at the line doesn't flicker; kept through a moment out of sight for 2 min, as the voice remembers the
@@ -603,7 +618,7 @@ How to use the app, for drivers. Design sources: [design/guide/](design/guide/).
      the placing (`placing-map.tsx`).
   4. **The car button** (`car`): its four states, a checklist when red.
   5. **Driving through jamming** (`jamming`): a drive played in five stages (GPS ok, jammed, 4 min, a turn, GPS back;
-     4 s each), with or without the adapter.
+     4 s each), with or without the adapter; switching between them starts the other drive from its first stage.
   6. **Plan a route** (`route`): a long press drops the pin (I'm here, then Route here) or search a saved place; the
      drawn map is a real road network (`route-map.ts`, `MemoryRoadGraph`): the app's router plans on it, the real
      banner shows the maneuvers and the voice says the first one.

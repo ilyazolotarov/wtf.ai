@@ -1,9 +1,13 @@
+import { useEffect, useRef } from "react";
 import { StyleSheet, View } from "react-native";
+import Animated, { useAnimatedStyle, useSharedValue } from "react-native-reanimated";
 
 import type { useNavStatus } from "@/components/status/use-nav-status";
 import { GlassFill } from "@/components/ui/glass-fill";
 import { Icon } from "@/components/ui/icon";
 import { PressableFeedback } from "@/components/ui/press-feedback";
+import { RED_IN, RED_OUT, pulse } from "@/components/ui/red-fade";
+import { useReduceMotion } from "@/components/ui/reduce-motion";
 import { T } from "@/components/ui/text";
 import { Radius, usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
@@ -20,7 +24,7 @@ const ROUGH_ACCURACY_M = 25;
 
 /**
  * The map's top row: the status pill (trust in words, where the position comes from, its accuracy) and the speed with
- * the limit's sign beside it (UI-SPEC §6.4), red when too fast. A tap on the pill unfolds its explanation when there is
+ * the limit's sign beside it (UI-SPEC §6.4), the bubble red when too fast. A tap on the pill unfolds its explanation when there is
  * one (`expandable`). Beside a speed camera's card, the speed as `speedBesideCard` gives it (§6.5).
  */
 export function StatusRow({
@@ -46,6 +50,15 @@ export function StatusRow({
   const speed = shown.speedKph === undefined ? "—" : String(shown.speedKph);
   const { limitKph, over } = shown;
   const sign = limitKph !== undefined;
+  const reduceMotion = useReduceMotion();
+  // One pulse as it turns red, with the chime (not on mount: a screen opened while too fast just shows it red).
+  const scale = useSharedValue(1);
+  const wasOver = useRef(over);
+  useEffect(() => {
+    if (over && !wasOver.current && !reduceMotion) pulse(scale);
+    wasOver.current = over;
+  }, [over, reduceMotion, scale]);
+  const pulsing = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
   const speedLabel =
     limitKph === undefined
       ? `${speed} ${t("speed")}`
@@ -84,20 +97,28 @@ export function StatusRow({
           </View>
         )}
       </PressableFeedback>
-      <View
-        style={[panel, styles.speed, sign && styles.withSign]}
+      <Animated.View
+        style={[panel, styles.speed, sign && styles.withSign, pulsing]}
         accessible
         accessibilityRole="text"
         accessibilityLabel={speedLabel}
       >
         <GlassFill radius={28} />
-        {sign && <SpeedLimitSign kph={limitKph} />}
+        {/*
+          Too fast, the whole bubble red, fading in over the glass. The red in a view of its own, made red and round at
+          once: a background colour added later to a view came out square on Android (new architecture), its corner
+          radius lost.
+        */}
+        {over && (
+          <Animated.View entering={RED_IN} exiting={RED_OUT} style={[styles.overFill, { backgroundColor: palette.bad.c }]} />
+        )}
+        {sign && (
+          // On red, a ring of the sign's white keeps its own red ring apart, drawn outside the sign's place.
+          <View style={over && [styles.signOnRed, { borderColor: palette.signFill }]}>
+            <SpeedLimitSign kph={limitKph} />
+          </View>
+        )}
         <View style={styles.speedValue}>
-          {/*
-            The red in a view of its own, made red and round at once: a background colour added later to the speed's
-            view came out square on Android (new architecture), its corner radius lost.
-          */}
-          {over && <View style={[styles.overFill, { backgroundColor: palette.bad.c }]} />}
           {/*
             Already large: it grows less than the text beside it, which needs the room. No unit under it: the app's
             speeds are all km/h, and the pill beside it needs the width "км/год" took (the label read aloud says it).
@@ -112,7 +133,7 @@ export function StatusRow({
             {speed}
           </T>
         </View>
-      </View>
+      </Animated.View>
     </View>
   );
 }
@@ -153,8 +174,9 @@ const styles = StyleSheet.create({
   },
   /** The sign at the left end, round inside the bubble's round end. */
   withSign: { justifyContent: "flex-start" },
-  /** Red, a pill of its own inside the bubble, when too fast. */
-  overFill: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, borderRadius: 22 },
+  /** The bubble red when too fast. */
+  overFill: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, borderRadius: 28 },
+  signOnRed: { margin: -2, borderRadius: 24, borderWidth: 2 },
   /** As wide red or not: crossing the margin doesn't move the pill's text. */
   speedValue: {
     minWidth: 48,

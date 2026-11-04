@@ -35,6 +35,11 @@ export interface EkfConfig {
   initSpeedScaleSigma: number;
   initBiasSigma: number;
   initYawScaleSigma: number;
+  /**
+   * false: the yaw scale is a consider parameter (Schmidt): its σ widens the heading through turns, but no measurement
+   * moves it or its σ, and it stays 1.
+   */
+  learnYawScale: boolean;
   /** Speed offset prior σ, m/s; 0 fixes the offset at 0 (the scale-only model). */
   initSpeedOffsetSigma: number;
 }
@@ -47,13 +52,16 @@ export const DEFAULT_EKF_CONFIG: EkfConfig = {
   handlingYawNoise: 0.3,
   biasWalk: 2e-5,
   speedScaleWalk: 1e-5,
-  yawScaleWalk: 1e-5,
+  yawScaleWalk: 0,
   positionNoise: 0.1,
   initSpeedScaleSigma: 0.03,
   // CoreMotion's rotation rate is already bias-corrected (0.007 °/s measured at standstill);
   // a loose prior lets heading errors from GNSS course leak into the bias.
   initBiasSigma: 0.0005,
-  initYawScaleSigma: 0.02,
+  // The yaw scale stays 1 and ±1 % (NAVIGATOR-SPEC §7.2): the phones' gyros and the wheels turn within ~1 % of the
+  // satellite course, and the scale the EKF learned from fixes (0.965–1.019 by drive) put turns further off, not nearer.
+  initYawScaleSigma: 0.01,
+  learnYawScale: false,
   // Off (0): the CX-5 reads 0.23 km/h low on top of its scale, but the EKF can't tell the offset from the scale
   // (both explain town speeds), so it learned 0.5 km/h on a drive whose truth was 0.23. Neutral on the 14 logs,
   // mixed on simulated highways (NAVIGATOR-SPEC §13.12). 0.15 m/s turns it on.
@@ -304,6 +312,8 @@ export class DrEkf {
     if (!accepted || !apply) return { accepted, nis };
 
     const K = mulInto(m.K, PHt, Si);
+    // A consider parameter takes no gain; Joseph form below stays valid for any gain.
+    if (!this.config.learnYawScale) K[IX.KW].fill(0);
     for (let i = 0; i < DIM; i++) this.x[i] += K[i].reduce((acc, k, j) => acc + k * y[j], 0);
     this.x[IX.PSI] = wrapAngle(this.x[IX.PSI]);
 

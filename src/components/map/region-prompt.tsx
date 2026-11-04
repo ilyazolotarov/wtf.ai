@@ -2,6 +2,7 @@ import { router } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import { StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
 
+import { Appear } from "@/components/ui/appear";
 import { GlassFill } from "@/components/ui/glass-fill";
 import { Icon } from "@/components/ui/icon";
 import { PressableFeedback } from "@/components/ui/press-feedback";
@@ -117,16 +118,18 @@ export function RegionPrompt({ panelStyle }: { panelStyle: StyleProp<ViewStyle> 
         : { label: t("downloads"), onPress: () => router.push("/downloads") };
 
   return (
-    <RegionPromptCard
-      panelStyle={panelStyle}
-      title={t("regionOutsideTitle").replace("{region}", active.name[language])}
-      body={body}
-      action={action}
-      onDismiss={() => {
-        dismissed.add(key);
-        setDismissals((n) => n + 1);
-      }}
-    />
+    <Appear from="top">
+      <RegionPromptCard
+        panelStyle={panelStyle}
+        title={t("regionOutsideTitle").replace("{region}", active.name[language])}
+        body={body}
+        action={action}
+        onDismiss={() => {
+          dismissed.add(key);
+          setDismissals((n) => n + 1);
+        }}
+      />
+    </Appear>
   );
 }
 

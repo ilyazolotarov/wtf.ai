@@ -1,3 +1,4 @@
+import * as Device from "expo-device";
 import type { EventSubscription } from "expo-modules-core";
 
 import SensorCaptureModule, {
@@ -40,7 +41,9 @@ export function toGnssRecord(f: NativeGnssFix): GnssRecord {
     courseRad: nan(f.courseRad),
     courseAccRad: nan(f.courseAccRad),
     deliveryDelayUs: Math.round(f.deliveryDelayUs),
-    flags: (f.simulated ? GNSS_FLAGS.simulated : 0) | (f.fromAccessory ? GNSS_FLAGS.fromAccessory : 0),
+    // The iOS Simulator marks every fix it gives as simulated (`simctl location`): there it is the device's GPS, not a
+    // spoofer's, and the App Store media drive on it (scripts/app-store-screenshots.py). A phone's stay refused.
+    flags: (f.simulated && Device.isDevice ? GNSS_FLAGS.simulated : 0) | (f.fromAccessory ? GNSS_FLAGS.fromAccessory : 0),
   };
 }
 
@@ -110,6 +113,8 @@ export class SensorService {
   /** What each consumer (trip recorder, map position) needs; capture runs for their union. */
   private owners = new Map<string, { gnss: boolean; imu: boolean }>();
   private applying: Promise<void> = Promise.resolve();
+  /** The still phone's samples on a simulator (`startStillPhone`). */
+  private stillPhone: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     this.subscriptions.push(
@@ -120,20 +125,44 @@ export class SensorService {
         this.update({ lastFix: rec, gnssHz: this.gnssRate.hz(), lastError: null });
       }),
       SensorCaptureModule.addListener("onGnssError", (e) => this.update({ lastError: e.message })),
-      SensorCaptureModule.addListener("onImuBatch", (batch) => {
-        const decoded = decodeImuBatch(batch);
-        const last = decoded.motion[decoded.motion.length - 1];
-        if (last) this.imuRate.add(last.timestampUs, decoded.motion.length);
-        this.imu.emit(decoded);
-        const now = last?.timestampUs ?? 0;
-        if (now - this.lastNotifyUs > 1_000_000) {
-          this.lastNotifyUs = now;
-          this.update({ imuHz: this.imuRate.hz() });
-        }
-      }),
+      SensorCaptureModule.addListener("onImuBatch", (batch) => this.onImuBatch(batch)),
       SensorCaptureModule.addListener("onAuthorization", (p) => this.update({ permission: p.location })),
     );
     void SensorCaptureModule.getPermissions().then((p) => this.update({ permission: p.location }));
+  }
+
+  private onImuBatch(batch: NativeImuBatch): void {
+    const decoded = decodeImuBatch(batch);
+    const last = decoded.motion[decoded.motion.length - 1];
+    if (last) this.imuRate.add(last.timestampUs, decoded.motion.length);
+    this.imu.emit(decoded);
+    const now = last?.timestampUs ?? 0;
+    if (now - this.lastNotifyUs > 1_000_000) {
+      this.lastNotifyUs = now;
+      this.update({ imuHz: this.imuRate.hz() });
+    }
+  }
+
+  /**
+   * A simulator has no motion hardware: there the phone stands still in a holder, upright, its samples batched as the
+   * native module's. The navigator turns by the car's wheels inside these samples (they take the gyro's place,
+   * NAVIGATOR-SPEC §5.4), so without them a car on the iOS Simulator never turned (the App Store media drive there,
+   * scripts/app-store-screenshots.py). A phone without device motion stays without.
+   */
+  private startStillPhone(): boolean {
+    if (Device.isDevice) return false;
+    const stepUs = 1_000_000 / IMU_RATE_HZ;
+    let lastUs = SensorCaptureModule.nowUs();
+    const g = 9.80665;
+    this.stillPhone = setInterval(() => {
+      const motion: number[] = [];
+      for (const now = SensorCaptureModule.nowUs(); lastUs + stepUs <= now; ) {
+        lastUs += stepUs;
+        motion.push(lastUs, 0, 0, 0, 0, 0, 0, 0, -g, 0, 1, 0, 0, 0);
+      }
+      if (motion.length > 0) this.onImuBatch({ motion, gyro: [], accel: [] });
+    }, 100);
+    return true;
   }
 
   getSnapshot = (): SensorSnapshot => this.snapshot;
@@ -190,9 +219,11 @@ export class SensorService {
         }
         if (imu && !this.snapshot.imuRunning) {
           const started = await SensorCaptureModule.startImu({ rateHz: IMU_RATE_HZ, raw: false, batchMs: 100, magRateHz: 0 });
-          this.update({ imuRunning: started });
+          this.update({ imuRunning: started || this.startStillPhone() });
         } else if (!imu && this.snapshot.imuRunning) {
-          await SensorCaptureModule.stopImu();
+          if (this.stillPhone) clearInterval(this.stillPhone);
+          else await SensorCaptureModule.stopImu();
+          this.stillPhone = null;
           this.imuRate.reset();
           this.update({ imuRunning: false, imuHz: 0 });
         }

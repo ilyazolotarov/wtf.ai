@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { StyleSheet, View } from "react-native";
+import Animated from "react-native-reanimated";
 import { G, Path, Rect } from "react-native-svg";
 
 import { PoseTab } from "@/components/guide/lesson-pose";
@@ -7,6 +8,7 @@ import { LessonIntro, LessonTabs, PulseRing, StepsCard } from "@/components/guid
 import { MapCard, MapCardButtons, MapCardHeader, MapChipButton } from "@/components/guide/map-ui";
 import { PinDot, useMapColors, useNudgedHeading, type Box } from "@/components/guide/mini-map";
 import { PlacingMap, type PlaceStep, type Point } from "@/components/guide/placing-map";
+import { Appear, useAppearing } from "@/components/ui/appear";
 import { Icon } from "@/components/ui/icon";
 import { PressableFeedback } from "@/components/ui/press-feedback";
 import { T } from "@/components/ui/text";
@@ -80,6 +82,7 @@ function SetPositionTab() {
   const { t } = useT();
   const palette = usePalette();
   const c = useMapColors();
+  const fading = useAppearing("none");
   const [step, setStep] = useState<PlaceStep>("idle");
   // A new attempt starts the map afresh.
   const [attempt, setAttempt] = useState(0);
@@ -119,9 +122,9 @@ function SetPositionTab() {
               <Path d={MAJOR} stroke={c.majorCasing} strokeWidth={17} />
               <Path d={MAJOR} stroke={c.major} strokeWidth={13} />
             </G>
-            {pin && step === "idle" && <PinDot x={pin.x} y={pin.y} />}
           </>
         }
+        marks={pin && step === "idle" && <PinDot x={pin.x} y={pin.y} />}
         overlay={(at) => (
           <>
             <View pointerEvents="none" style={[styles.tag, { backgroundColor: palette.text }, at({ x: DOT.x + 22, y: DOT.y + 24 })]}>
@@ -156,11 +159,11 @@ function SetPositionTab() {
             ) : (
               <>
                 <PulseRing {...at(CAR)} />
-                <View pointerEvents="none" style={[styles.hint, { backgroundColor: palette.text }]}>
+                <Animated.View pointerEvents="none" style={[styles.hint, { backgroundColor: palette.text }]} {...fading}>
                   <T w="medium" size={13} color={palette.bg}>
                     {t("placeHoldHint")}
                   </T>
-                </View>
+                </Animated.View>
               </>
             )}
           </>
@@ -168,7 +171,7 @@ function SetPositionTab() {
       />
 
       {step === "done" && (
-        <View style={[styles.verdict, { backgroundColor: palette.ok.a }]}>
+        <Appear from="none" style={[styles.verdict, { backgroundColor: palette.ok.a }]}>
           <Icon name="check" size={20} color={palette.ok.c} />
           <T size={14} style={styles.verdictText}>
             {t("placeDone")}
@@ -178,7 +181,7 @@ function SetPositionTab() {
               {t("placeAgain")}
             </T>
           </PressableFeedback>
-        </View>
+        </Appear>
       )}
     </>
   );

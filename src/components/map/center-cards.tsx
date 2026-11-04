@@ -49,10 +49,10 @@ export function PermissionCard() {
 }
 
 /**
- * "Waiting for GPS…" before the first position. When the phone's location is outside Ukraine, it is never used:
- * integrity refuses a satellite fix there as spoofed (SPEC §3.3), and the navigator drops a Wi-Fi/cell one (iOS gave
- * one on another continent under jamming, 2026-10-15). There never is a first position: say so, and offer placing the
- * car instead, not "looking for satellites".
+ * "Waiting for GPS…" before the first position, with "Set your position on the map" under it. When the phone's
+ * location is outside Ukraine, it is never used: integrity refuses a satellite fix there as spoofed (SPEC §3.3), and the
+ * navigator drops a Wi-Fi/cell one (iOS gave one on another continent under jamming, 2026-10-15). There never is a
+ * first position: say so, and offer placing the car instead, not "looking for satellites".
  */
 export function NoFixCard({ onPlace }: { onPlace: () => void }) {
   const { t } = useT();
@@ -91,6 +91,20 @@ export function NoFixCard({ onPlace }: { onPlace: () => void }) {
       <T size={14} color={palette.text2} style={styles.body}>
         {t("waitingBody")}
       </T>
+      {/*
+        From the start, not after a wait: jammed at the app's start, there may never be a fix. Grey, not the accent:
+        with satellites in view the fix is seconds away, and placing isn't what to do then.
+      */}
+      <PressableFeedback
+        onPress={onPlace}
+        style={[styles.button, styles.withIcon, { backgroundColor: palette.surface }]}
+        accessibilityRole="button"
+      >
+        <Icon name="location_on" size={18} color={palette.text} />
+        <T w="semibold" size={15} color={palette.text}>
+          {t("placeOffer")}
+        </T>
+      </PressableFeedback>
     </CenterCard>
   );
 }
@@ -141,4 +155,5 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderRadius: Radius.pill,
   },
+  withIcon: { flexDirection: "row", gap: 8, paddingHorizontal: 16 },
 });

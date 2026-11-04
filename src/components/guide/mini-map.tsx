@@ -12,12 +12,13 @@ import {
   CONE_OUTLINE,
   DESTINATION_DOT,
   PIN_DOT,
+  PLACED_ARROW,
   PUCK,
   PUCK_HALO,
   PUCK_OUTER,
   ROUTE_LINE,
 } from "@/components/map/puck-style";
-import { GlassFill } from "@/components/ui/glass-fill";
+import { BlurScope, BlurTarget, GlassFill } from "@/components/ui/glass-fill";
 import { DRAWING_MAX_FONT_SCALE, FontScaleLimit, T } from "@/components/ui/text";
 import { useMapPalette } from "@/config/map";
 import { Radius, usePalette, type StatusColor } from "@/constants/theme";
@@ -66,25 +67,30 @@ export function MiniMap({
 }>) {
   const c = useMapColors();
   return (
-    <View style={[styles.frame, { aspectRatio: width / height, backgroundColor: c.land }]} onLayout={onLayout}>
-      <Svg width="100%" height="100%" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="xMidYMid slice">
-        <Rect width={width} height={height} fill={c.land} />
-        {parks.map((b, i) => (
-          <Rect key={`p${i}`} x={b.x} y={b.y} width={b.w} height={b.h} rx={5} fill={c.park} />
-        ))}
-        {blocks.map((b, i) => (
-          <Rect key={`b${i}`} x={b.x} y={b.y} width={b.w} height={b.h} rx={3} fill={c.building} />
-        ))}
-        <G fill="none" strokeLinecap="round">
-          {minor && <Path d={minor} stroke={c.minorCasing} strokeWidth={13} />}
-          {minor && <Path d={minor} stroke={c.minor} strokeWidth={10} />}
-          {major && <Path d={major} stroke={c.majorCasing} strokeWidth={17} />}
-          {major && <Path d={major} stroke={c.major} strokeWidth={13} />}
-        </G>
-        {children}
-      </Svg>
-      <FontScaleLimit max={DRAWING_MAX_FONT_SCALE}>{overlay}</FontScaleLimit>
-    </View>
+    // Its own blur, as the map screen's: on Android the overlay's glass blurs only the drawing in its BlurTarget.
+    <BlurScope>
+      <View style={[styles.frame, { aspectRatio: width / height, backgroundColor: c.land }]} onLayout={onLayout}>
+        <BlurTarget>
+          <Svg width="100%" height="100%" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="xMidYMid slice">
+            <Rect width={width} height={height} fill={c.land} />
+            {parks.map((b, i) => (
+              <Rect key={`p${i}`} x={b.x} y={b.y} width={b.w} height={b.h} rx={5} fill={c.park} />
+            ))}
+            {blocks.map((b, i) => (
+              <Rect key={`b${i}`} x={b.x} y={b.y} width={b.w} height={b.h} rx={3} fill={c.building} />
+            ))}
+            <G fill="none" strokeLinecap="round">
+              {minor && <Path d={minor} stroke={c.minorCasing} strokeWidth={13} />}
+              {minor && <Path d={minor} stroke={c.minor} strokeWidth={10} />}
+              {major && <Path d={major} stroke={c.majorCasing} strokeWidth={17} />}
+              {major && <Path d={major} stroke={c.major} strokeWidth={13} />}
+            </G>
+            {children}
+          </Svg>
+        </BlurTarget>
+        <FontScaleLimit max={DRAWING_MAX_FONT_SCALE}>{overlay}</FontScaleLimit>
+      </View>
+    </BlurScope>
   );
 }
 
@@ -164,10 +170,30 @@ export function Puck({
 }
 
 /**
- * A dropped pin as the map draws it (map-layers.tsx): a dot banded as the car's, in a faint halo; once a route goes
- * there (`destination`), the route's destination dot. SVG strokes straddle their circle: radius to the ring's middle.
+ * The way the car being placed faces, as the map's placing draws it (map-layers.tsx `MarkLayers`, puck-style.ts): a
+ * narrow cone from the spot, outlined as the heading cone. `headingDeg` clockwise from up.
  */
-export function PinDot({ x, y, destination = false }: { x: number; y: number; destination?: boolean }) {
+export function PlacedArrow({ x, y, headingDeg }: { x: number; y: number; headingDeg: number }) {
+  const palette = usePalette();
+  const outline = CONE_OUTLINE[useColorScheme() === "dark" ? "dark" : "light"];
+  const { points: r, halfAngleRad } = PLACED_ARROW;
+  const h = (headingDeg * Math.PI) / 180;
+  const point = (a: number) => `${x + r * Math.sin(a)} ${y - r * Math.cos(a)}`;
+  const d = `M${x} ${y} L${point(h - halfAngleRad)} A${r} ${r} 0 0 1 ${point(h + halfAngleRad)} Z`;
+  return (
+    <G strokeLinejoin="round">
+      <Path d={d} fill={palette.mapPin} fillOpacity={PLACED_ARROW.fillOpacity} stroke={palette.puckEdge} strokeWidth={outline.edge} />
+      {outline.ring > 0 && <Path d={d} fill="none" stroke={palette.puckRing} strokeWidth={outline.ring} />}
+    </G>
+  );
+}
+
+/**
+ * A dropped pin as the map draws it (map-layers.tsx): a dot banded as the car's, in a faint halo; once a route goes
+ * there (`destination`), the route's destination dot; without the halo (`halo`), the spot of the car being placed. SVG
+ * strokes straddle their circle: radius to the ring's middle.
+ */
+export function PinDot({ x, y, destination = false, halo = true }: { x: number; y: number; destination?: boolean; halo?: boolean }) {
   const palette = usePalette();
   if (destination) {
     return (
@@ -183,7 +209,7 @@ export function PinDot({ x, y, destination = false }: { x: number; y: number; de
   }
   return (
     <G>
-      <Circle cx={x} cy={y} r={PIN_DOT.halo} fill={palette.mapPin} fillOpacity={0.18} />
+      {halo && <Circle cx={x} cy={y} r={PIN_DOT.halo} fill={palette.mapPin} fillOpacity={0.18} />}
       <Circle cx={x} cy={y} r={PIN_DOT.r + PIN_DOT.ring + PUCK.edge} fill={palette.puckEdge} />
       <Circle cx={x} cy={y} r={PIN_DOT.r + PIN_DOT.ring / 2} fill={palette.mapPin} stroke={palette.puckRing} strokeWidth={PIN_DOT.ring} />
     </G>

@@ -179,15 +179,16 @@ export function LessonMaps() {
               </T>
             </View>
           </View>
+          {/* As the map's card (RegionPromptCard): the action first, filled with the accent. */}
           <View style={styles.buttons}>
-            <View style={[styles.button, { backgroundColor: palette.surface }]}>
-              <T w="semibold" size={14} color={palette.text2} fit>
-                {t("notNow")}
+            <View style={[styles.button, { backgroundColor: palette.accent }]}>
+              <T w="semibold" size={14} color={palette.onAccent} fit>
+                {t("regionSwitch")}
               </T>
             </View>
             <View style={[styles.button, { backgroundColor: palette.surface }]}>
               <T w="semibold" size={14} color={palette.text} fit>
-                {t("regionSwitch")}
+                {t("notNow")}
               </T>
             </View>
           </View>
