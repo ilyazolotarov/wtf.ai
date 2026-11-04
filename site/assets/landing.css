@@ -32,10 +32,12 @@ nav a:hover { color: var(--text); }
 .badge { display: inline-flex; align-items: center; gap: 8px; padding: 12px 20px; border-radius: 999px;
   background: var(--accent); color: var(--bg); font-weight: 600; text-decoration: none; }
 .badge.soon { background: var(--accentA); color: var(--accent); }
-/* The screen at the screenshots' own 1:2, the frame outside it: nothing of the picture is cut. */
-.phone { justify-self: center; box-sizing: content-box; width: min(280px, 72vw); aspect-ratio: 1 / 2; border-radius: 40px;
+/* The screen at the screenshots' own 1:2, the frame outside it: nothing of the picture is cut. The ratio sits on the
+   picture, not the frame: Safari resolves height: 100% inside a content-box aspect-ratio box as if the border were part
+   of it (20px too tall), centring the video 10px low and cutting its bottom. */
+.phone { justify-self: center; box-sizing: content-box; width: min(280px, 72vw); border-radius: 40px;
   background: var(--card); border: 10px solid var(--text); overflow: hidden; box-shadow: 0 30px 60px #0002; }
-.phone img, .phone video { width: 100%; height: 100%; object-fit: contain; display: block; }
+.phone img, .phone video { width: 100%; height: auto; aspect-ratio: 1 / 2; object-fit: contain; display: block; }
 section { padding: 56px 0; border-top: 1px solid var(--line); }
 section h2 { font-size: 32px; margin: 0 0 8px; letter-spacing: -0.01em; }
 section p.sub { color: var(--text2); margin: 0 0 32px; max-width: 40em; }
