@@ -152,7 +152,8 @@ ended can't log why. What it can, it logs; the next process logs the rest.
   `gps` and `network` providers (ANDROID-SPEC §2).
 - Per fix: latitude, longitude, altitude (MSL and ellipsoidal), horizontal/vertical accuracy, speed, speed accuracy,
   course, course accuracy, the fix's wall-clock time, `isSimulatedBySoftware`, `isProducedByAccessory`. Invalid
-  fields are omitted (NaN in the log).
+  fields are omitted (NaN in the log). On a simulator (`Device.isDevice` false) the simulated flag is not set: every
+  fix there is simulated, and it is the device's only GPS.
 - Fix timestamp → uptime: `fixUs = nowUptimeUs − (nowWall − fix.timestamp)` at delivery (Android: the fix's own
   `elapsedRealtimeNanos`). The delivery delay is recorded.
 - No heading (`CLHeading` is the magnetometer).
@@ -167,6 +168,9 @@ ended can't log why. What it can, it logs; the next process logs the rest.
 - No magnetometer (NAVIGATOR-SPEC §7.5): `mag_raw` (20 Hz, µT in the device frame, uncalibrated) stays readable in
   older logs.
 - Device frame: Apple's (x right, y toward the top of the screen, z out of the screen).
+- A simulator without device motion (the iOS Simulator) gets a still phone, upright in a holder, at the same rate and
+  batching (`SensorService`): the car's wheels turn the navigator inside IMU samples (NAVIGATOR-SPEC §5.4), so
+  without them a car there never turned. A phone without device motion gets nothing in its place.
 
 ### 5.3 Bridge (`src/SensorCaptureModule.ts`)
 

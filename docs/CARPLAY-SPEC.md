@@ -163,6 +163,7 @@ GNSS and the adapter as they were. What the JS side sent is kept on the native s
   `cardBackgroundColor`; the maneuver's icon white in a black edge on it, as every icon (Icons, below), not CarPlay's
   tint, which follows the car's day and drew it black. iOS 26.4 draws the card red when the app gives no colour, and a
   colour given after the template shows stays red (developer forums 822242): it is set as the template is made.
+  No glass to be had, unlike the trip estimates': CarPlay draws the colour opaque, its alpha ignored (iOS 26.3).
 
   Destinations: saved places, then recent ones, as many as `CPListTemplate.maximumItemCount`; one picked routes to it
   (`go`), the map popped back. Search (`CPSearchTemplate`): each change of the field goes to the session (`search`),
@@ -232,8 +233,10 @@ GNSS and the adapter as they were. What the JS side sent is kept on the native s
   too, once whatever screens show them; it sends the car what it shows (`carSpeed`, `setSpeed`, Android Auto's
   payload).
   - **The speed:** Android Auto's pill, drawn by the map's root (`CarSpeedPill`): the limit's sign and the speed (no
-    unit under it, as on the phone), red past the driver's margin; no speed, none. While the bar hides, in the top right corner above the
-    map's buttons, which CarPlay stacks from the bottom (on a 240 pt high screen the fourth one's top is 68 pt down);
+    unit under it, as on the phone), in the phone's glass as CarPlay's map buttons are in theirs (Android Auto's
+    can't blur: a solid panel); past the driver's margin the whole pill red, the sign ringed in white on it, as the
+    phone's bubble; no speed, none. While the bar hides, in the top right corner above the map's buttons, which
+    CarPlay stacks from the bottom (on a 240 pt high screen the fourth one's top is 68 pt down);
     the safe area ends at the buttons' 40 pt column whether they show or not, so the pill's room on the right is the
     safe area's less that column (`CarPlayLogic.speedRight`, the root's `speedRight`; a right-hand drive car's dock
     stays out). Not Android Auto's bottom left there: on a route the visible map is the narrow band between the
