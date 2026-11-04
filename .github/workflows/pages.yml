@@ -1,12 +1,13 @@
 name: Website
 
-# The project's website on GitHub Pages: site/ (the landing page; its screenshots and videos made from store-assets/play/ by scripts/site-media.sh) and
+# The project's website on GitHub Pages: site/ (the landing page; its screenshots and videos made from store-assets/play/, its CarPlay
+# stills from store-assets/carplay/, by scripts/site-media.sh) and
 # the privacy policy, copied from docs/PRIVACY.md so the stores' privacy URL always shows the current one
 # (docs/SPEC.md §2.2). Needs Settings → Pages → Source: GitHub Actions.
 on:
   push:
     branches: [main]
-    paths: ["site/**", "store-assets/play/**", "scripts/site-media.sh", "scripts/site-share-card.py", "docs/PRIVACY.md", "docs/PRIVACY.uk.md", ".github/workflows/pages.yml"]
+    paths: ["site/**", "store-assets/play/**", "store-assets/carplay/**", "scripts/site-media.sh", "scripts/site-share-card.py", "docs/PRIVACY.md", "docs/PRIVACY.uk.md", ".github/workflows/pages.yml"]
   workflow_dispatch:
 
 # The support address (a repository variable, so the repo names none): the policy's contact and the site's footer.
@@ -28,7 +29,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      # Only the LFS files the site needs: the store screenshots always, the promo videos when the site's encodes of
+      # Only the LFS files the site needs: the store and CarPlay screenshots always, the promo videos when the site's encodes of
       # them are not cached. The rest of store-assets/ (and its LFS bandwidth) stays out.
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -41,7 +42,7 @@ jobs:
       - name: Screenshots
         run: |
           pip install --quiet pillow
-          git lfs pull --include "store-assets/play/*/*.png"
+          git lfs pull --include "store-assets/play/*/*.png,store-assets/carplay/*/*.png"
           bash scripts/site-media.sh screens
 
       # Keyed on the videos' LFS pointers (their content hash) and the script: a new recording or recipe encodes again.
