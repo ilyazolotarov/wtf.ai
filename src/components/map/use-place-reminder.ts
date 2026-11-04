@@ -13,7 +13,7 @@ import {
   type AudioOutput,
 } from "../../../modules/audio-output/src/AudioOutputModule";
 
-/** The reminder is for setting off: this long after the ignition comes on. */
+/** The reminder is for setting off: this long after the engine starts. */
 const REMIND_WITHIN_MS = 2 * 60_000;
 /** Where it can't be played on the phone's speaker: said again when the audio moves to the car this soon after. */
 export const AGAIN_WITHIN_MS = 20_000;
@@ -21,17 +21,19 @@ export const AGAIN_WITHIN_MS = 20_000;
 export const AGAIN_AFTER_MS = 2_000;
 
 /**
- * Says "Show on the map where the car is" once when the ignition comes on while the map offers putting the car on
- * it (UI-SPEC §6.2): without a parked pose and without GPS, a drive started from nowhere stays lost, and the chip
- * alone was missed (2026-10-11: driven off 2 s after the engine started, placed by hand 2 min later). On the phone's
- * speaker where it can be (Android): the car's Bluetooth is still connecting then, or plays another source.
+ * Says "Show on the map where the car is" once when the engine starts while the map offers putting the car on it
+ * (UI-SPEC §6.2): without a parked pose and without GPS, a drive started from nowhere stays lost, and the chip alone
+ * was missed (2026-10-11: driven off 2 s after the engine started, placed by hand 2 min later). Not on the ECU merely
+ * answering (`engine-off`): a parked car's ECU wakes now and then, a door or the boot opened, and the phone in the
+ * house in the adapter's range heard it as the ignition coming on. On the phone's speaker where it can be (Android):
+ * the car's Bluetooth is still connecting then, or plays another source.
  */
 export function usePlaceReminder({ offered, muted }: { offered: boolean; muted: boolean }): void {
   const { t, language } = useT();
   const runtime = useRuntime();
   const engine = useVehicleLinkValue((s) => s.engine);
-  const awake = engine === "engine-off" || engine === "engine-running";
-  // When the ignition came on; cleared when it goes off (a link loss's `unknown` doesn't count as either).
+  // When the engine started; cleared when the ignition goes off (a link loss's `unknown` doesn't count as either, and
+  // an auto stop-start's `engine-off` keeps it).
   const onSince = useRef<number | null>(null);
   const said = useRef(false);
   // Whether it is still worth saying again: the chip offered and the voice not muted.
@@ -45,8 +47,8 @@ export function usePlaceReminder({ offered, muted }: { offered: boolean; muted: 
     if (engine === "ignition-off") {
       onSince.current = null;
       said.current = false;
-    } else if (awake) onSince.current ??= Date.now();
-  }, [engine, awake]);
+    } else if (engine === "engine-running") onSince.current ??= Date.now();
+  }, [engine]);
   useEffect(() => {
     if (!offered || said.current || onSince.current === null) return;
     if (Date.now() - onSince.current > REMIND_WITHIN_MS) return;

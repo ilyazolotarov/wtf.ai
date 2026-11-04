@@ -314,8 +314,9 @@ persisted in kv-store. No hardcoded user-facing strings in components.
   draws a narrow cone from the pin that way, another tap turns it (Cancel / Confirm; Confirm needs a tap); the
   lessons' drawn maps draw the same cone (`PlacedArrow`). Moving off cancels. The
   confirmed placing is drawn as the car (the parked car's icon, §6.1, nose the way it was aimed, in place of the
-  parked car) until the dot is 50 m away or the car is placed again. When the ignition
-  comes on while the chip is offered, the voice says once, within 2 min, "Show on the map where the car is"
+  parked car) until the dot is 50 m away or the car is placed again. When the engine
+  starts (`engine-running`; not the ECU merely answering, which a parked car's does when a door opens) while the chip
+  is offered, the voice says once, within 2 min, "Show on the map where the car is"
   (`place-car`; not when muted or at volume 0), on the phone's own speaker on Android (`playOnSpeaker`); on iOS where
   the voice goes, and once more 2 s after the audio moves off the phone within 20 s, while the chip is still offered.
 - **The vehicle button's dot** (`use-nav-status.ts`): green when the car answers and is known (VIN read or
