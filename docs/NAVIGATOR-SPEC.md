@@ -52,6 +52,11 @@ reproduces the phone's dot (§10). Open items: §13.
 ### 5.1 Gyro (`odometry/imu/imu-processor.ts`)
 
 - Yaw rate = gyro · up (up = −gravity), independent of how the phone sits. Counter-clockwise is positive.
+  Android's gravity leans with the sideways force in a turn, so there the turns read ~3 % short (one phone 0.972 of
+  the satellite course over 23 clean turns; iPhones 0.993–0.999). About the gyro-carried vertical below it read 1.010,
+  each clean turn within 2°; but jammed drives of that phone then lost the road its own dot had kept (from the Wi-Fi
+  fixes: the phone 73 m, replayed 104 → 443 m on one; 150 m, 151 → 386 m on another; all seeds), and every chain had
+  more incidents (2026-11-03). So gravity's.
 - **Handling detection:** the gyro is invalid while the phone moves in the mount or in a hand. Triggers:
   - the phone's vertical differs from its 3 s average by more than 8°. The vertical is carried by the gyro and
     pulled to gravity's over 30 s. Not gravity's own: Android's estimate leans with the car's sideways acceleration
@@ -353,8 +358,16 @@ already bias-corrected (~0.007 °/s at standstill), and a loose prior let GNSS c
 
 ### 7.2 Gyro scale `k_ω`
 
-The gyro's true scale is ~1.007; the EKF learns 1.02–1.04 because at 1 Hz GNSS a timing mismatch looks like a scale
-error. Fixing `k_ω = 1` didn't change the outage error, so it stays a state with a 0.02 prior. Not stored.
+1 ± 1 %, not learned: a consider parameter (`learnYawScale: false`, Schmidt): its σ widens the heading through
+turns, and through the odometry the turns' σ in map matching, but no measurement moves it. Against the
+satellite course across clean turns (two straight stretches of steady course at ≥ 5 m/s, 147 turns of 13 139° on
+every phone and car in the logs, 2026-11-03), the turning the navigator integrates reads 0.984–1.015 of each turn by
+phone and car; the scale the EKF learned from fixes (0.965–1.019 by drive: GNSS timing and course errors look like a
+scale) put the turns further off, 4.2° → 4.6° RMS per turn, one drive 6.8° → 8.9°. A ±0.5 % prior scores as fixed.
+On jammed drives, from the roads' headings, it learned 0.965–1.015 both ways on one phone and 0.92 on one drive: noise,
+no phone's own scale in it.
+Fixed, the regress chains are better from the parked and cold starts and level from the drawn ones. A scale that is
+off shows most where many turns come with nothing to correct the heading: car parks, roundabouts, jammed drives.
 
 ### 7.3 GNSS lag (`calibration/gnss-lag.ts`)
 
@@ -381,7 +394,7 @@ kept apart.
 - **A car whose VIN never came** (VEHICLE-LINK-SPEC §9.1) is kept under `unknown-car` (`UNKNOWN_CAR`), not dropped:
   starting cold on every drive cost more than the rare second car without a VIN. The first VIN heard takes it over
   (`CalibrationStore.moveCar`: each item unless the VIN has a newer one), mid-drive without a restart.
-- **Not stored:** the gyro bias (drifts with temperature) and `k_ω`.
+- **Not stored:** the gyro bias (drifts with temperature). `k_ω` isn't learned (§7.2).
 
 ### 7.5 No magnetometer (SPEC §2)
 
@@ -574,6 +587,7 @@ the yaw rate, class speeds, stops at junctions), which makes the phone's speed t
 | Gyro noise | 0.003 rad/s | mount, car | from `replay:bench`; ≤ 0.001 makes the filter overconfident |
 | Handling thresholds | 8°, 1.0 rad/s, 1.5 s; standing 0.2 / 0.08 rad/s, 3 s, turns 1.5 s late; push 1.0 m/s² + 30 % | mount, road | from logged mounted drives; standing and push from the wheels as truth |
 | Gyro bias prior | 0.0005 rad/s | CoreMotion | learned at every stop |
+| Gyro scale `k_ω` | 1 ± 1 %, not learned | phone, wheels | checked against the satellite course across clean turns (§7.2) |
 | Speed scale `k_s` | 1 ± 0.03 | car, tyres | learned online; persisted per VIN (§7.4) |
 | OBD σ / zero σ | 0.3 / 0.8 m/s | ECU | CAN: 0.1 / 0.3 m/s |
 
