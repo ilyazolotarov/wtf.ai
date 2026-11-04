@@ -134,6 +134,7 @@ final class CarPlaySession: NSObject {
     self.scene = scene
     interfaceController = controller
     self.window = window
+    if Self.dayInSimulator { window.overrideUserInterfaceStyle = .light }
     controller.delegate = self
     let configuration = CPSessionConfiguration(delegate: self)
     sessionConfiguration = configuration
@@ -264,7 +265,19 @@ final class CarPlaySession: NSObject {
     openLock.unlock()
   }
 
-  private var dark: Bool { scene?.contentStyle == .dark }
+  private var dark: Bool { scene?.contentStyle == .dark && !Self.dayInSimulator }
+
+  #if targetEnvironment(simulator)
+    /**
+     * The Simulator's car is always at night (CARPLAY-SPEC §5): launched with `-CarPlayDay YES`, the app draws the car
+     * by day there, its window light and its map's root out of `dark`, for the website's light screenshots
+     * (scripts/app-store-screenshots.py --carplay without --dark). CarPlay's own dock and cards stay dark. Not in a
+     * phone's build.
+     */
+    static let dayInSimulator = UserDefaults.standard.bool(forKey: "CarPlayDay")
+  #else
+    static let dayInSimulator = false
+  #endif
 
   // MARK: - The map's React root
 

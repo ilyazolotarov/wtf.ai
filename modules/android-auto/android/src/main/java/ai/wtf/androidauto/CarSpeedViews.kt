@@ -100,9 +100,10 @@ private class BarView(context: Context) : View(context) {
 
 /**
  * The speed on the car's map, in the visible map's bottom left corner as Google Maps has it: the limit's sign and the
- * speed, red past the driver's margin. No unit under the speed, as on the phone's pill (all the app's speeds are
- * km/h; the payload's `unit` is for the builds that drew it). No sign while the camera's card shows one (the JS side
- * leaves it out: one sign on the screen, as on the phone).
+ * speed; past the driver's margin the whole pill red and the sign ringed in white on it, as the phone's bubble. No unit
+ * under the speed, as on the phone's pill (all the app's speeds are km/h; the payload's `unit` is for the builds that
+ * drew it). No sign while the camera's card shows one (the JS side leaves it out: one sign on the screen, as on the
+ * phone).
  */
 internal class SpeedPill(context: Context) : LinearLayout(context) {
   private val dp = resources.displayMetrics.density
@@ -142,23 +143,19 @@ internal class SpeedPill(context: Context) : LinearLayout(context) {
     val limitKph = speed.limitKph
     background = GradientDrawable().apply {
       cornerRadius = px(SIGN_DP / 2 + PAD_DP).toFloat()
-      setColor(palette.panel)
+      setColor(if (speed.over) palette.bad else palette.panel)
     }
     sign.visibility = if (limitKph != null) VISIBLE else GONE
     sign.kph = limitKph ?: 0
+    sign.halo = speed.over
     sign.palette = palette
     sign.invalidate()
     value.layoutParams = (value.layoutParams as LayoutParams).apply { marginStart = if (limitKph != null) px(6) else 0 }
     number.text = kph.toString()
     if (speed.over) {
-      value.background = GradientDrawable().apply {
-        cornerRadius = px(SIGN_DP / 2).toFloat()
-        setColor(palette.bad)
-      }
       number.typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
       number.setTextColor(palette.badText)
     } else {
-      value.background = null
       number.typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
       number.setTextColor(palette.text)
     }

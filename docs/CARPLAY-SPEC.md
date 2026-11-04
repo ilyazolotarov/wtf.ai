@@ -413,9 +413,11 @@ alone. Not seen there: a link to the car's scene (the simulator gives links to t
 has no night mode), iOS 26's pinch, a car that limits the keyboard. CarPlay's Settings › Appearance offers Automatic or
 Always Dark; Automatic follows the car, and the simulated car stays at night whatever the phone's appearance, its
 location (midday in Cupertino, the display reconnected) or the Mac's; the Simulator's hidden CarPlay options set only
-size and scale. Day mode is previewed by a temporary build that sets the CarPlay window's `overrideUserInterfaceStyle`
-to light and the root's `dark` to false: the map, the bar and the map's buttons go light (on iOS 26.3 a template image
-was tinted dark there), CarPlay's guidance card stays dark. Each map button's glass takes its shade from the map
+size and scale. Day mode: a Simulator build launched with `-CarPlayDay YES` (`CarPlaySession.dayInSimulator`, not in
+a phone's build) sets the CarPlay window's `overrideUserInterfaceStyle` to light and the root's `dark` to false: the
+map, the bar and the map's buttons go light (on iOS 26.3 a template image was tinted dark there), CarPlay's dock and
+guidance card stay dark. The website's light CarPlay screenshots are made so (scripts/app-store-screenshots.py). Each
+map button's glass takes its shade from the map
 behind it there: near white over land, dark over the river beside it. The simulator's CarPlay setup window
 (`CarPlayExtraOptions`) keeps scale 3 whatever is chosen: 1200×720 @3x is the 400×240 pt screen. Its Knob draws a knob
 under the screen; drags on it posted from a script showed the bar but moved no focus.
