@@ -67,12 +67,14 @@ export default function OnboardingScreen() {
   };
   const next = () => (step >= steps.length - 1 ? finish() : setStep(step + 1));
 
+  // A page before a system permission ask (location; iOS's Always) only goes on to it, with a neutral "Continue": the
+  // ask is where the driver says no (App Review, guideline 5.1.1(iv)).
   const primary: { label: string; disabled?: boolean; onPress(): void } =
     meta.id === "welcome"
       ? { label: t("obWelcomeCta"), onPress: next }
       : meta.id === "location"
         ? {
-            label: t("obLocationCta"),
+            label: t("continue"),
             disabled: busy,
             onPress: async () => {
               setBusy(true);
@@ -86,7 +88,7 @@ export default function OnboardingScreen() {
           }
         : meta.id === "wake"
           ? {
-              label: t("obWakeCta"),
+              label: Platform.OS === "ios" ? t("continue") : t("obWakeCta"),
               disabled: wake.busy,
               onPress: async () => {
                 await wake.turnOn(adapterId()).catch(() => false);
@@ -102,7 +104,7 @@ export default function OnboardingScreen() {
                 : { label: t("connect"), onPress: () => router.push("/vehicle") };
 
   const secondary: { label: string; onPress(): void } | null =
-    meta.id === "location" || meta.id === "wake"
+    meta.id === "wake" && Platform.OS !== "ios"
       ? { label: t("notNow"), onPress: next }
       : meta.id === "car" && nav.adapter !== "on"
         ? { label: t("skipForNow"), onPress: next }

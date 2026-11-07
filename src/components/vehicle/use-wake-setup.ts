@@ -59,12 +59,14 @@ async function askLocationAlways(t: (key: keyof Strings) => string): Promise<boo
     : ios
       ? "wakeLocationBodyIos"
       : "wakeLocationBody";
+  // Before iOS's own ask, only on to it: the ask is where the driver says no (App Review, guideline 5.1.1(iv)).
+  const decline = settings || !ios;
   const go = await new Promise<boolean>((resolve) =>
     Alert.alert(
       t("wakeLocationTitle"),
       t(body),
       [
-        { text: t("notNow"), style: "cancel", onPress: () => resolve(false) },
+        ...(decline ? [{ text: t("notNow"), style: "cancel" as const, onPress: () => resolve(false) }] : []),
         { text: t("continue"), onPress: () => resolve(true) },
       ],
       { cancelable: true, onDismiss: () => resolve(false) },
