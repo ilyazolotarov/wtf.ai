@@ -294,6 +294,12 @@ export class NavigatorService implements PositionSource {
   /** A pose saved standing is in storage: cleared once the car moves (one saved moving is replaced as it goes). */
   private poseStored = false;
   private poseStatus: NavigatorDebug["parkedPose"] = "none";
+  /** This navigator started from a pose stored standing (not one saved while driving, carried on): `restsOnParkedPose`. */
+  private startedOnParkedPose = false;
+  /** A start from a stored pose is on its way to the navigator (the worker answers later). */
+  private startPending = false;
+  /** The dot shown is not the car's yet, which comes (`PositionEstimate.waitingForCar`); set at each publish. */
+  private waitingForCar = false;
   /** A Wi-Fi fix doubts the parked pose the navigator started from: the driver is asked. */
   private poseQuestion: { distanceM: number } | null = null;
   /**
@@ -854,6 +860,8 @@ export class NavigatorService implements PositionSource {
     this.notes.reset();
     this.car = null;
     this.poseStatus = "none";
+    this.startedOnParkedPose = false;
+    this.startPending = false;
     this.poseQuestion = null;
     this.poseKeptForCar = false;
     this.notedPoseUnsaved = false;
@@ -904,6 +912,7 @@ export class NavigatorService implements PositionSource {
     const pose = this.deps.calibration.parkedPose(vin);
     const speedMps = pose?.speedMps ?? 0;
     this.poseStored = pose !== null && speedMps === 0;
+    this.startedOnParkedPose = false;
     if (pose && speedMps > 0) {
       const gapS = (this.clock.nowMs() - pose.savedAt) / 1000;
       const carried = carryDrivePose({ ...pose, speedMps }, gapS);
@@ -911,7 +920,9 @@ export class NavigatorService implements PositionSource {
         this.note(`nav pose saved while driving ${Math.round(gapS)} s ago: not used`);
         return;
       }
+      this.startPending = true;
       this.host.startFromPose(carried, (started) => {
+        this.startPending = false;
         if (!started) return;
         this.poseStatus = "unverified";
         this.note(
@@ -933,9 +944,12 @@ export class NavigatorService implements PositionSource {
     }
     if (wake === "standing") this.note("nav parked pose kept: the app was started on the way, but the phone is still at it");
     if (!pose) return;
+    this.startPending = true;
     this.host.startFromPose(widen(pose), (started) => {
+      this.startPending = false;
       if (!started) return;
       this.poseStatus = "unverified";
+      this.startedOnParkedPose = true;
       this.note(`nav mode dr (parked pose, ${Math.round((this.clock.nowMs() - pose.savedAt) / 60_000)} min old${late ? ", VIN known late" : ""})`);
     });
   }
@@ -1266,6 +1280,13 @@ export class NavigatorService implements PositionSource {
   }
 
   private publishPosition(): void {
+    this.publishDot();
+    // Only the flag changed (a start that came to nothing, no new fix to draw): the dot is published again with it.
+    const p = this.position;
+    if (p && (p.waitingForCar ?? false) !== this.waitingForCar) this.set(p);
+  }
+
+  private publishDot(): void {
     this.shownChanged = false;
     const now = this.clock.nowMs();
     const nowUs = this.deps.nowUs();
@@ -1279,6 +1300,8 @@ export class NavigatorService implements PositionSource {
     if (nav) this.setMode(nav.mode);
 
     const withObd = nowUs - this.lastObdUs < OBD_TIMEOUT_US;
+    // The navigator has a start (or one on its way) and draws the car with its speed: until then the dot is another's.
+    this.waitingForCar = estimate ? !withObd : this.startPending;
     const m = this.manual;
     if (m && (!nav || !estimate || !withObd)) {
       // No car speed, so the navigator can't follow the car: the driver's placing stands in for the fixes (§6.3).
@@ -1401,6 +1424,7 @@ export class NavigatorService implements PositionSource {
       accuracyM: puckAccuracyM(estimate, top),
       ...(mm ? { mapMatch: mm.state } : {}),
       ...(estimate.parkedOffRoad ? { parkedOffRoad: true } : {}),
+      ...(this.startedOnParkedPose && nav.restsOnStoredPose ? { restsOnParkedPose: true } : {}),
       ...(estimate.sinceDriverM === undefined ? {} : { sinceDriverM: estimate.sinceDriverM }),
       ...(alternatives?.length ? { alternatives } : {}),
       source,
@@ -1439,7 +1463,7 @@ export class NavigatorService implements PositionSource {
   private set(position: PositionEstimate, behindUs = 0, roads?: RoadWeights): void {
     this.drainUpdateTimes();
     this.lastSetMs = this.clock.nowMs();
-    const { simulatedOutage: _, poseQuestion: _q, manual: _m, speedLimit: _l, cameraAhead: _c, ...rest } = position;
+    const { simulatedOutage: _, poseQuestion: _q, manual: _m, speedLimit: _l, cameraAhead: _c, waitingForCar: _w, ...rest } = position;
     const outage = this.outage.info(rest, this.clock.nowMs(), this.nav?.stats.obdDistanceM);
     const m = this.manual;
     if (roads) this.lastRoads = { timestamp: rest.timestamp, roads };
@@ -1453,6 +1477,7 @@ export class NavigatorService implements PositionSource {
       ...(outage ? { simulatedOutage: outage } : {}),
       ...(this.shownPoseQuestion(rest) ? { poseQuestion: this.poseQuestion! } : {}),
       ...(m ? { manual: { placedAt: m.placedAt, confirmedAt: m.confirmedAt, asking: this.held.asking() } } : {}),
+      ...(this.waitingForCar ? { waitingForCar: true } : {}),
     };
     this.overlayStale = true;
     this.logPosition(position, behindUs);

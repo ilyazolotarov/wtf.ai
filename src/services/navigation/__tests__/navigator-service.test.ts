@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import type { PoseAfterWake } from "@/services/on-the-way";
 import path from "node:path";
 
+import { isLost } from "@/components/map/use-placing";
 import { syntheticDrive, type DriveSegment, type SyntheticDrive } from "@/nav/__fixtures__/synthetic-drive";
 import { destinationAtBearing, haversineM } from "@/nav/geo";
 import { LocalFrame } from "@/nav/geo/local-frame";
@@ -600,8 +601,10 @@ describe("parked pose", () => {
     await next.service.start();
     expect(next.notes.some((n) => n.startsWith("nav mode dr (parked pose"))).toBe(true);
     next.play(drive, { untilS: 5 });
-    expect(next.service.getSnapshot()).toMatchObject({ source: "dr" });
+    // Standing on it: the map doesn't offer putting the car on it, however wide the circle.
+    expect(next.service.getSnapshot()).toMatchObject({ source: "dr", restsOnParkedPose: true });
     next.play(drive);
+    expect(next.service.getSnapshot()?.restsOnParkedPose).toBeUndefined();
     expect(storedPose(store)?.speedMps).toBeGreaterThan(0);
     expect(next.notes).toContain("nav parked pose confirmed");
     // ~600 m on coarse fixes only: without the pose, alignment would still be waiting for spread.
@@ -983,6 +986,35 @@ describe("the car left parked, the phone elsewhere (NAVIGATOR-SPEC §6.1, UI-SPE
     };
     return { h, open, fixes, drive };
   }
+
+  test("the dot before the car answers is not the car's, which comes: the map's reminder waits for it", async () => {
+    const { store, pose, truth } = await atHome().then(async (a) => (a.h.service.stop(), a));
+    const { h, fixes, drive } = openedInTheHouse(store, truth, 10, "engine-running");
+    await h.service.start();
+    h.play(drive, { untilS: 15, withoutObd: true, onStep: fixes });
+    expect(h.service.getSnapshot()?.waitingForCar).toBe(true);
+    h.engine.emit("engine-running", h.now());
+    h.play(drive, { untilS: 20, onStep: fixes });
+    const p = h.service.getSnapshot()!;
+    expect(p).toMatchObject({ source: "dr", restsOnParkedPose: true });
+    expect(p.waitingForCar).toBeUndefined();
+    expect(haversineM(p, pose)).toBeLessThan(3);
+    h.service.stop();
+  });
+
+  test("nothing stored to start from: the car's dot comes from the Wi-Fi fixes, and is lost", async () => {
+    const h = harness({ store: memoryStore() });
+    await h.service.start();
+    const drive = standing({ lat: 51.5184, lon: 30.7465 }, "coarse", 40);
+    h.play(drive, { untilS: 20, withoutObd: true });
+    expect(h.service.getSnapshot()?.waitingForCar).toBe(true);
+    h.engine.emit("engine-running", h.now());
+    h.play(drive);
+    const p = h.service.getSnapshot()!;
+    expect(p.waitingForCar).toBeUndefined();
+    expect(isLost(p)).toBe(true);
+    h.service.stop();
+  });
 
   test("in the car with the engine running, jammed: the Wi-Fi fixes, the same from the car as from the house, don't move the stored pose either", async () => {
     // Wi-Fi places the phone ±10–30 m from the networks it hears, which are the same from the bay and from the house;

@@ -183,7 +183,7 @@ export default function HomeScreen() {
   const placeOffered = !placing && !position?.poseQuestion && !manual && place.standing && isLost(position);
   // Started on the way (iOS's wake): the parked pose was left aside until the car is found.
   const onTheWay = useSyncExternalStore(runtime.onTheWay.subscribe, runtime.onTheWay.get);
-  usePlaceReminder({ offered: placeOffered, muted: voiceMuted || voiceOff });
+  usePlaceReminder({ offered: placeOffered, muted: voiceMuted || voiceOff, dot: position });
 
   const ghost = trust === "UNTRUSTED" ? position?.rawGnss : undefined;
   const showingGhost = ghostView && ghost != null;

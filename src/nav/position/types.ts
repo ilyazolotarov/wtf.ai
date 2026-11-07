@@ -49,6 +49,17 @@ export interface PositionEstimate {
   mapMatch?: MapMatchState;
   /** Standing where it was parked off the roads, started from there: `offroad` is where the car is, not lost. */
   parkedOffRoad?: boolean;
+  /**
+   * Started from the pose stored where the car was parked and not driven from it yet (NAVIGATOR-SPEC §6.1): the car is
+   * there, however wide the circle (it widened before the car answered: ±1.3 km on 2026-11-07, placed 0 m from the dot).
+   */
+  restsOnParkedPose?: boolean;
+  /**
+   * Not the car's dot yet, and the car's comes: the navigator has a start (the parked pose, the driver's placing, a fix;
+   * or one on its way) but no speed from the car, so the dot shown is the phone's, or the one drawn before. Absent with
+   * nothing to start from: then no dot of the car's comes before a fix, and the one shown is all there is.
+   */
+  waitingForCar?: boolean;
   /** Phone-only mode's dead reckoning (NAVIGATOR-SPEC §9.6), not the navigator's: never shared with other apps. */
   phoneOnly?: boolean;
   /** Driven since the driver put the car on the map (or confirmed the parked pose), m (NAVIGATOR-SPEC §6.2). */

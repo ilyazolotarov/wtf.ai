@@ -24,12 +24,14 @@ const PLACED_SHOWN_M = 50;
 /**
  * Lost enough to offer putting the car on the map: no GPS, and nothing vouching for the dot — rough, no direction,
  * off any road (not where it was parked off the roads, started from there: a lot), or a long way on dead reckoning. A
- * confident filter on the wrong road looks like none of the first three.
+ * confident filter on the wrong road looks like none of the first three. Never while it rests on the pose stored where
+ * the car was parked: that vouches for it (a Wi-Fi fix far from it asks "is the car where the dot is?" instead).
  */
 export function isLost(position: PositionEstimate | null): boolean {
   return (
     position != null &&
     position.trust !== "TRUSTED" &&
+    !position.restsOnParkedPose &&
     (position.accuracyM > PLACE_OFFER_ACCURACY_M ||
       position.headingRad == null ||
       (position.mapMatch === "offroad" && !position.parkedOffRoad) ||

@@ -300,7 +300,9 @@ navigate with the phone in a hand, a pocket or on a seat.
 - **Offered** only while the car stands (speed < 1 m/s): the chip "Set your position on the map" when there is no
   GPS and nothing vouches for the dot: rougher than 75 m, no direction, map matching `offroad` (not at the spot it
   parked in off the roads), or more than 5 km driven since the last trusted fix; and after "No" to "Is the car where
-  the dot is?". Driving off cancels it. `accuracyM` alone was the rule once, and the chip was offerable in 3 of 20 792
+  the dot is?". A dot standing on the pose stored where the car was parked (§6.1, not one saved while driving; not
+  driven from yet, `restsOnParkedPose`) is vouched for, however wide its circle: a Wi-Fi fix far from it asks "Is the
+  car where the dot is?" instead. Driving off cancels it. `accuracyM` alone was the rule once, and the chip was offerable in 3 of 20 792
   samples over two hours with the dot up to 10 km out.
 - **Asked for** by the driver at any time, moving too, or before any position: **I'm here** on a dropped pin or on a
   place picked in the route screen (UI-SPEC §6, §7.1), the manual position's chip, "No" to "Is the car where the dot

@@ -3,6 +3,7 @@ import { useEffect, useRef } from "react";
 import { placeCarPhrase } from "@/components/route/voice-phrases";
 import { sayOnSpeaker } from "@/components/route/voice-player";
 import { useT } from "@/i18n/provider";
+import type { PositionEstimate } from "@/nav/position/types";
 import { useRuntime, useVehicleLinkValue } from "@/providers/runtime-provider";
 
 import {
@@ -19,16 +20,35 @@ const REMIND_WITHIN_MS = 2 * 60_000;
 export const AGAIN_WITHIN_MS = 20_000;
 /** …this long after the move, for the car to switch to the phone's audio. */
 export const AGAIN_AFTER_MS = 2_000;
+/**
+ * The dot to judge "lost" by: the car's, or the one shown when none of the car's comes (`waitingForCar`). The dot from
+ * before the car answered is the phone's own, with no direction: on 2026-10-12..11-07 the reminder was said on it at
+ * 17 starts with a parked pose stored, and a second later the navigator put the car on that pose, a direction and
+ * ±3–63 m.
+ */
+export function dotSettled(dot: Pick<PositionEstimate, "waitingForCar"> | null): boolean {
+  return dot != null && !dot.waitingForCar;
+}
 
 /**
  * Says "Show on the map where the car is" once when the engine starts while the map offers putting the car on it
  * (UI-SPEC §6.2): without a parked pose and without GPS, a drive started from nowhere stays lost, and the chip alone
  * was missed (2026-10-11: driven off 2 s after the engine started, placed by hand 2 min later). Not on the ECU merely
  * answering (`engine-off`): a parked car's ECU wakes now and then, a door or the boot opened, and the phone in the
- * house in the adapter's range heard it as the ignition coming on. On the phone's speaker where it can be (Android):
- * the car's Bluetooth is still connecting then, or plays another source.
+ * house in the adapter's range heard it as the ignition coming on. Not on the dot from before the car answered
+ * either (`dotSettled`). On the phone's speaker where it can be (Android): the car's Bluetooth is still connecting
+ * then, or plays another source.
  */
-export function usePlaceReminder({ offered, muted }: { offered: boolean; muted: boolean }): void {
+export function usePlaceReminder({
+  offered,
+  muted,
+  dot,
+}: {
+  offered: boolean;
+  muted: boolean;
+  /** The dot on the map. */
+  dot: Pick<PositionEstimate, "waitingForCar"> | null;
+}): void {
   const { t, language } = useT();
   const runtime = useRuntime();
   const engine = useVehicleLinkValue((s) => s.engine);
@@ -50,7 +70,7 @@ export function usePlaceReminder({ offered, muted }: { offered: boolean; muted: 
     } else if (engine === "engine-running") onSince.current ??= Date.now();
   }, [engine]);
   useEffect(() => {
-    if (!offered || said.current || onSince.current === null) return;
+    if (!offered || said.current || onSince.current === null || !dotSettled(dot)) return;
     if (Date.now() - onSince.current > REMIND_WITHIN_MS) return;
     said.current = true;
     if (muted) {
@@ -66,7 +86,7 @@ export function usePlaceReminder({ offered, muted }: { offered: boolean; muted: 
       runtime.recorder.note(`voice: place-car again, the audio moved to ${to.kind}${to.name ? ` "${to.name}"` : ""}`);
       say();
     });
-  }, [offered, muted, engine, t, language, runtime]);
+  }, [offered, muted, engine, dot, t, language, runtime]);
 }
 
 /**

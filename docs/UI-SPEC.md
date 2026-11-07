@@ -36,7 +36,8 @@ jamming).
   'manual'`.
 - `PositionEstimate`: `lat`, `lon`, `headingRad?`, `speedMps?`, `accuracyM`, `source`, `trust`, `timestamp`,
   `lastTrustedFixAt?`, `distanceSinceTrustedM?`, `rawGnss?` (the ghost marker), `alternatives?` (other roads the car
-  may be on), `mapMatch?`, `poseQuestion?`, `manual?`, `sinceDriverM?`, `parkedOffRoad?`.
+  may be on), `mapMatch?`, `poseQuestion?`, `manual?`, `sinceDriverM?`, `parkedOffRoad?`, `restsOnParkedPose?`,
+  `waitingForCar?`.
 
 ### 4.2 Geo helpers (`src/nav/geo/`)
 
@@ -318,7 +319,9 @@ persisted in kv-store. No hardcoded user-facing strings in components.
   confirmed placing is drawn as the car (the parked car's icon, §6.1, nose the way it was aimed, in place of the
   parked car) until the dot is 50 m away or the car is placed again. When the engine
   starts (`engine-running`; not the ECU merely answering, which a parked car's does when a door opens) while the chip
-  is offered, the voice says once, within 2 min, "Show on the map where the car is"
+  is offered, the voice says once, within 2 min, "Show on the map where the car is" — judged on the car's own dot,
+  not on one shown while it is on its way (`waitingForCar`: the navigator has a start but no speed from the car yet;
+  that dot is the phone's from while the car was silent). With nothing to start from, the dot shown is judged
   (`place-car`; not when muted or at volume 0), on the phone's own speaker on Android (`playOnSpeaker`); on iOS where
   the voice goes, and once more 2 s after the audio moves off the phone within 20 s, while the chip is still offered.
 - **The vehicle button's dot** (`use-nav-status.ts`): green when the car answers and is known (VIN read or

@@ -33,6 +33,11 @@ describe("offering to put the car on the map", () => {
     expect(isLost(at({ mapMatch: "offroad", parkedOffRoad: true, accuracyM: 80 }))).toBe(true);
   });
 
+  test("resting on the pose stored where it was parked: not lost, however wide the circle", () => {
+    expect(isLost(at({ restsOnParkedPose: true, accuracyM: 1257, mapMatch: "offroad" }))).toBe(false);
+    expect(isLost(at({ restsOnParkedPose: true, headingRad: undefined }))).toBe(false);
+  });
+
   test("a confident dot a long way on dead reckoning", () => {
     expect(isLost(at({ distanceSinceTrustedM: 4000 }))).toBe(false);
     expect(isLost(at({ distanceSinceTrustedM: 6000 }))).toBe(true);
