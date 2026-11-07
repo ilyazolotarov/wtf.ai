@@ -114,18 +114,19 @@ function ToolbarItem({ icon, label, dim }: { icon: IconName; label: string; dim?
   );
 }
 
-/** As the map's vehicle badge: pulsing (scaled 1 → 1.35 → 1 each second) while connecting. */
+/** As the map's vehicle badge (bottom-bar.tsx): drawn at its largest, resting at DOT_REST, pulsing while connecting. */
+const DOT_REST = 0.75;
 function BadgeDot({ color, border, pulse }: { color: string; border: string; pulse: boolean }) {
-  const [scale] = useState(() => new Animated.Value(1));
+  const [scale] = useState(() => new Animated.Value(DOT_REST));
   useEffect(() => {
     if (!pulse) {
-      scale.setValue(1);
+      scale.setValue(DOT_REST);
       return;
     }
     const loop = Animated.loop(
       Animated.sequence([
-        Animated.timing(scale, { toValue: 1.35, duration: 500, useNativeDriver: true }),
         Animated.timing(scale, { toValue: 1, duration: 500, useNativeDriver: true }),
+        Animated.timing(scale, { toValue: DOT_REST, duration: 500, useNativeDriver: true }),
       ]),
     );
     loop.start();
@@ -149,7 +150,7 @@ const styles = StyleSheet.create({
   item: { flex: 1 },
   itemContent: { height: 60, alignItems: "center", justifyContent: "center", gap: 3, borderRadius: 24 },
   dim: { opacity: 0.4 },
-  badge: { position: "absolute", top: 8, right: 22, width: 12, height: 12, borderRadius: 6, borderWidth: 2 },
+  badge: { position: "absolute", top: 6, right: 20, width: 16, height: 16, borderRadius: 8, borderWidth: 2.5 },
   group: { gap: 8 },
   card: { borderRadius: Radius.rL, paddingHorizontal: 16, paddingVertical: 4, borderCurve: "continuous" },
   line: { height: StyleSheet.hairlineWidth },

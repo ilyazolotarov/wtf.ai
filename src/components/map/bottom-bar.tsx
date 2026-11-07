@@ -90,18 +90,22 @@ function HudAction({
   );
 }
 
-/** The vehicle button's connection dot; `pulse` (connecting) scales it up and down a little. */
+/**
+ * The vehicle button's connection dot; `pulse` (connecting) scales it up and down a little. Drawn at its largest size
+ * and scaled down to rest: a transform scales the drawn pixels, and a dot drawn small and scaled up pulsed blurry.
+ */
+const DOT_REST = 0.75;
 function BadgeDot({ color, border, pulse, label }: { color: string; border: string; pulse: boolean; label?: string }) {
-  const [scale] = useState(() => new Animated.Value(1));
+  const [scale] = useState(() => new Animated.Value(DOT_REST));
   useEffect(() => {
     if (!pulse) {
-      scale.setValue(1);
+      scale.setValue(DOT_REST);
       return;
     }
     const loop = Animated.loop(
       Animated.sequence([
-        Animated.timing(scale, { toValue: 1.35, duration: 500, useNativeDriver: true }),
         Animated.timing(scale, { toValue: 1, duration: 500, useNativeDriver: true }),
+        Animated.timing(scale, { toValue: DOT_REST, duration: 500, useNativeDriver: true }),
       ]),
     );
     loop.start();
@@ -130,15 +134,16 @@ const styles = StyleSheet.create({
     gap: 3,
     borderRadius: 24,
   },
+  // 12 px with a 2 px border at rest (DOT_REST of this), its centre where the 12 px one was.
   dot: {
     position: "absolute",
-    top: 8,
+    top: 6,
     // From the button's centre (where the icon is), not its edge: a wider bar kept the dot far from its icon.
     left: "50%",
-    marginLeft: 23,
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    borderWidth: 2,
+    marginLeft: 21,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    borderWidth: 2.5,
   },
 });
