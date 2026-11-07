@@ -1,4 +1,4 @@
-import { createContext, useContext, useLayoutEffect, useState, type Ref } from "react";
+import { createContext, useContext, useState, type Ref } from "react";
 import {
   Animated,
   Easing,
@@ -133,7 +133,15 @@ export function PressableFeedback({
   const [opacity] = useState(() =>
     Animated.multiply(baseOpacity, progress.interpolate({ inputRange: [0, 1], outputRange: [1, PRESSED_OPACITY] })),
   );
-  useLayoutEffect(() => baseOpacity.setValue(base), [baseOpacity, base]);
+  // Set while rendering, not in an effect: React commits the node's JS-side value as the view's opacity from this very
+  // render, and a value set by an effect reached the view after it, in either order with the native driver's update.
+  // A button enabled again after a page where it was disabled (onboarding's car page, searching) kept the dim look
+  // until something else rendered it again.
+  const [baseSet, setBaseSet] = useState(base);
+  if (baseSet !== base) {
+    setBaseSet(base);
+    baseOpacity.setValue(base);
+  }
   let animated: Animated.WithAnimatedValue<ViewStyle> | null = null;
   if (look === "button") {
     // The call site's transform is kept under the pressed look too.
