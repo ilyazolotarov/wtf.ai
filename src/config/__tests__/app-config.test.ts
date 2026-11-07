@@ -98,7 +98,7 @@ describe("app.json for review", () => {
       motionUsagePermission: expect.any(String),
     });
     expect(options("expo-sensors")).toMatchObject({ motionPermission: expect.any(String) });
-    expect(options("expo-audio")).toMatchObject({ microphonePermission: expect.any(String) });
+    expect(options("expo-audio")).toMatchObject({ microphonePermission: false });
     expect(options("expo-secure-store")).toMatchObject({ faceIDPermission: false });
   });
 

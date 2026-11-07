@@ -361,8 +361,8 @@ routing.
    positive on others: NAVIGATOR-SPEC §5.2). CAN wheel speeds and gear remove this where available.
 3. **Heading at outage start** (~2° RMS) limits dead reckoning more than gyro drift does; the road heading from map
    matching is the correction.
-4. **MFi for the App Store**: each declared protocol string needs the vendor's authorization; Vgate's PPIDs haven't
-   come yet (VEHICLE-LINK-SPEC §3.4).
+4. **MFi for the App Store**: each declared protocol string needs the vendor's authorization; both makers have given
+   it, PPIDs in the review notes (VEHICLE-LINK-SPEC §3.4).
 5. **Auto-wake** of a non-running app: on iOS by the location session and Bluetooth state restoration after the OS
    ended the app, and with the opt-in for location "Always" by significant location changes for a drive the app wasn't
    opened for (TRIP-LOGGER-SPEC §4.3, VEHICLE-LINK-SPEC §11), untested on a drive; not after a swipe. Android

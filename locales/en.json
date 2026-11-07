@@ -1,8 +1,7 @@
 {
-  "NSLocationWhenInUseUsageDescription": "Allow location access while navigating.",
+  "NSLocationWhenInUseUsageDescription": "The app uses your location to show where you are on the map and guide you to your destination.",
   "NSBluetoothAlwaysUsageDescription": "Allow connections to your OBD-II adapter to read vehicle speed.",
   "NSMotionUsageDescription": "Allow access to the phone's motion sensors to track the car when satellite positioning is jammed.",
-  "NSLocationAlwaysAndWhenInUseUsageDescription": "Your location is used in the background only during a drive, to keep guiding you with the screen locked.",
-  "NSLocationAlwaysUsageDescription": "Your location is used in the background only during a drive, to keep guiding you with the screen locked.",
-  "NSMicrophoneUsageDescription": "The app doesn't record audio; it only speaks directions."
+  "NSLocationAlwaysAndWhenInUseUsageDescription": "The app uses your location in the background only while you are driving. Choosing \"Always\" allows the app to start automatically when you set off, even if you haven't opened it.",
+  "NSLocationAlwaysUsageDescription": "The app uses your location in the background only while you are driving. Choosing \"Always\" allows the app to start automatically when you set off, even if you haven't opened it."
 }

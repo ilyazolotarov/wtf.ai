@@ -74,14 +74,14 @@ Many adapters don't advertise their service UUID, so scanning doesn't filter by 
 | Adapter | Manufacturer | Protocol string | PPID |
 | --- | --- | --- | --- |
 | OBDLink MX+ (STN2255) | OBD Solutions LLC | `com.obdlink` | `221699-0001` |
-| Vgate vLinker FS (BT) | ShenZhen CheBoTong | `com.vgatemall` | not received (see below) |
-| Vgate vLinker MS | ShenZhen CheBoTong | `com.vgatemall` | not received (see below) |
+| Vgate vLinker FS (BT) | ShenZhen CheBoTong | `com.vgatemall` | `649626-112572`, `649626-099130` (one per model) |
+| Vgate vLinker MS | ShenZhen CheBoTong | `com.vgatemall` | (the other of the two) |
 
 These two strings are the complete `UISupportedExternalAccessoryProtocols` list (the config plugin's `mfiProtocols`).
 Declare only strings backed by an authorization: App Review checks every one. iOS only reports accessories whose
 string is declared, so MFi adapters cannot be discovered generically. The two Vgate models share a string; tell them
-apart by `EAAccessory.modelNumber` / `name`. Vgate has added the app to its MFi product plan but
-has not sent PPIDs: until it does, the App Store review notes give "PPID available from the manufacturer". The vLinker FS/MS over EA is untested (none on hand); their "BLE+BT"
+apart by `EAAccessory.modelNumber` / `name`. Both makers have authorized the app in their MFi product plans; the
+App Store review notes list every protocol string with its maker and PPIDs. The vLinker FS/MS over EA is untested (none on hand); their "BLE+BT"
 firmware mode makes them plain BLE adapters.
 
 ### 3.5 Expected performance
