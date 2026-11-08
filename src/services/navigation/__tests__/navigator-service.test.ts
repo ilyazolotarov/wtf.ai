@@ -1483,6 +1483,45 @@ describe("map matching", () => {
     service.stop();
   });
 
+  test("an emulated adapter's drive withholds GNSS while it lasts and scores the dot against its car", async () => {
+    const drive = syntheticDrive({ segments: JUNCTION_DRIVE, origin: GRAPH_ORIGIN, startHeadingRad: Math.PI / 2, gnss: "clean", obdScale: 0.99 });
+    const { service, play, notes } = harness({ roadGraph: fixtureGraphSource() });
+    await service.start();
+    play(drive, { untilS: 100 });
+    let car = { ...service.getSnapshot()! };
+    service.setEmulatedDrive(() => car);
+    // The replay's cut (`--app-cuts`) reads the outage's own note.
+    expect(notes.slice(-2)).toEqual(["emulated drive: gnss withheld, the dot scored against the emulated car", "sim gnss outage on"]);
+    play(drive);
+    const p = service.getSnapshot()!;
+    expect(p.trust).not.toBe("TRUSTED");
+    expect(p.simulatedOutage).toMatchObject({ emulated: true, gnss: { lat: car.lat, lon: car.lon }, errorM: expect.any(Number) });
+    car = { ...car, lat: car.lat + 0.001 };
+    service.setEmulatedDrive(null);
+    expect(notes.at(-1)).toMatch(/^sim gnss outage off: \d+ s, \d+\.\d\d km, dot \d+ m from the emulated car \(max \d+ m\)$/);
+    expect(service.getSnapshot()?.simulatedOutage).toBeUndefined();
+    service.stop();
+  });
+
+  test("an emulated drive leaves the driver's own cut alone; Restore GPS ends its hold", async () => {
+    const { service, notes } = harness({ roadGraph: fixtureGraphSource() });
+    await service.start();
+    service.setSimulatedOutage(true);
+    service.setEmulatedDrive(() => ({ lat: 50, lon: 30 }));
+    service.setEmulatedDrive(null);
+    expect(service.simulatedOutage).toBe(true);
+    service.setSimulatedOutage(false);
+    service.setEmulatedDrive(() => ({ lat: 50, lon: 30 }));
+    expect(service.simulatedOutage).toBe(true);
+    service.setSimulatedOutage(false);
+    expect(notes.filter((n) => n === "sim gnss outage on")).toHaveLength(2);
+    // Over after the driver restored GPS: nothing to give back.
+    service.setEmulatedDrive(null);
+    expect(service.simulatedOutage).toBe(false);
+    expect(notes.filter((n) => n.startsWith("sim gnss outage off"))).toHaveLength(2);
+    service.stop();
+  });
+
   test("the debug overlay has the heaviest particles and the hypotheses", async () => {
     const drive = syntheticDrive({ segments: JUNCTION_DRIVE, origin: GRAPH_ORIGIN, startHeadingRad: Math.PI / 2, gnss: "clean", obdScale: 0.99 });
     const { service, play } = harness({ roadGraph: fixtureGraphSource() });

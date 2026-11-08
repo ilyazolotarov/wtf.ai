@@ -1,6 +1,7 @@
 // The car's test drive (docs/ANDROID-AUTO-SPEC.md §4, Android for Cars quality guideline NF-7): a car that keeps to a
 // route's line exactly, at a town's speed, slowing for its bends and to a stop at its end. Not the navigator's
-// simulated drives (city-drive.ts): no sensors, only the dot the map and the guidance follow.
+// simulated drives (city-drive.ts): no sensors, only the dot the map and the guidance follow. The emulated adapter's
+// car drives the same way along the route or the road (VEHICLE-LINK-SPEC §13), its wheels turning as the line does.
 
 import { type Coordinate } from "../geo";
 import { LocalFrame } from "../geo/local-frame";
@@ -21,6 +22,11 @@ const BENDS: readonly [number, number][] = [
 const BEND_SPAN_M = 15;
 /** Bends further ahead don't slow the car yet (braking from the cruise to the slowest bend takes ~60 m). */
 const LOOK_AHEAD_M = 200;
+/**
+ * The car's own heading is the line's over this chord around it: a corner drawn as one vertex is turned through on an
+ * arc, a right angle on a ~8 m radius, as a car does, not in one step.
+ */
+const TURN_CHORD_M = 12;
 
 export interface DrivePoint extends Coordinate {
   /** Clockwise from north, rad. */
@@ -39,10 +45,12 @@ export class RouteDrive {
   private readonly bendMps: number[];
   private s: number;
   private v: number;
+  /** The speed on the straight; a bend or the end slows it below. */
+  cruiseMps = DRIVE_CRUISE_MPS;
 
   /**
-   * `from`: where the car is (on a line before this one, say), so it carries on from the nearest point of this line
-   * at `speedMps`; absent: from the line's start, standing.
+   * `from`: where the car is (on a line before this one, say), so it carries on from the nearest point of this line;
+   * absent: from the line's start. At `speedMps`, standing by default.
    */
   constructor(line: readonly Coordinate[], from?: Coordinate, speedMps = 0) {
     if (line.length === 0) throw new Error("a route with no points");
@@ -56,11 +64,31 @@ export class RouteDrive {
       return BENDS.find(([rad]) => turn >= rad)?.[1] ?? DRIVE_CRUISE_MPS;
     });
     this.s = from ? this.nearest(this.frame.toEnu(from)) : 0;
-    this.v = from ? speedMps : 0;
+    this.v = speedMps;
   }
 
   get lengthM(): number {
     return this.cum[this.cum.length - 1];
+  }
+
+  /** Along the line to the car, m. */
+  get alongM(): number {
+    return this.s;
+  }
+
+  /** Along the line to its point `i`, m. */
+  alongTo(i: number): number {
+    return this.cum[Math.max(0, Math.min(this.cum.length - 1, i))];
+  }
+
+  /**
+   * How fast the car turns now, rad/s, left positive (the phone's `yawRate`): its heading (`TURN_CHORD_M`) changing
+   * along the line at its speed. Over the line it adds up to the line's own change of heading.
+   */
+  yawRate(): number {
+    if (this.s >= this.lengthM) return 0;
+    const chord = (s: number) => heading(this.at(s - TURN_CHORD_M / 2), this.at(s + TURN_CHORD_M / 2));
+    return -wrap(chord(this.s + 0.5) - chord(this.s - 0.5)) * this.v;
   }
 
   /** Where the car is now. */
@@ -88,14 +116,21 @@ export class RouteDrive {
     for (let i = this.indexAt(this.s) + 1; i < this.cum.length - 1 && this.cum[i] - this.s <= LOOK_AHEAD_M; i++) {
       allowed = Math.min(allowed, Math.sqrt(this.bendMps[i] ** 2 + 2 * DRIVE_BRAKE_MPS2 * (this.cum[i] - this.s)));
     }
-    return Math.min(DRIVE_CRUISE_MPS, allowed);
+    return Math.min(this.cruiseMps, allowed);
   }
 
   /** The segment `s` is on (its first point). */
   private indexAt(s: number): number {
-    let i = 0;
-    while (i < this.cum.length - 2 && this.cum[i + 1] <= s) i++;
-    return i;
+    // The last point at or before `s`, short of the line's last one; searched, as a long route steps at 50 Hz (the
+    // emulated adapter's wheels).
+    let lo = 0;
+    let hi = Math.max(0, this.cum.length - 2);
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (this.cum[mid] <= s) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo;
   }
 
   private at(s: number): [number, number] {

@@ -56,6 +56,34 @@ describe("the car's test drive along a route", () => {
     expect(next.point().speedMps).toBeCloseTo(was.speedMps, 5);
   });
 
+  test("turns as the line does: on an arc through a corner, adding up to the corner's turn", () => {
+    const d = new RouteDrive([at(0, 0), at(300, 0), at(300, 300)]);
+    let turned = 0;
+    let fastest = 0;
+    const dtS = 0.05;
+    for (let t = 0; t < 120 && !d.point().arrived; t += dtS) {
+      d.step(dtS);
+      const yaw = d.yawRate();
+      turned += yaw * dtS;
+      fastest = Math.max(fastest, Math.abs(yaw));
+    }
+    // East, then north: 90° left.
+    expect(turned).toBeCloseTo(Math.PI / 2, 1);
+    // Through the corner at ≤ 4.5 m/s on the 12 m chord, not in one step.
+    expect(fastest).toBeLessThan(1);
+    expect(d.yawRate()).toBe(0);
+  });
+
+  test("cruises at the speed it is given; carries a speed onto a new line from its start", () => {
+    const d = new RouteDrive([at(0, 0), at(4000, 0)]);
+    d.cruiseMps = 70 / 3.6;
+    for (let i = 0; i < 400; i++) d.step(0.25);
+    expect(d.point().speedMps).toBeCloseTo(70 / 3.6, 5);
+    const next = new RouteDrive([d.point(), at(4000, 0), at(4000, 1000)], undefined, d.point().speedMps);
+    expect(next.alongM).toBe(0);
+    expect(next.point().speedMps).toBeCloseTo(70 / 3.6, 5);
+  });
+
   test("a route of one point is there already", () => {
     const d = new RouteDrive([at(0, 0)]);
     expect(d.step(1).arrived).toBe(true);

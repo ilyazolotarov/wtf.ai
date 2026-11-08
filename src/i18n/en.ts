@@ -288,6 +288,8 @@ export const en = {
   simOutageStats: "{t} · {d} driven",
   simOutageError: "Dot is {e} from GPS (max {m})",
   simOutageNoGps: "No good GPS fix to compare with",
+  emulatedDriveOutage: "Simulated drive: GPS not used",
+  emulatedDriveError: "Map position is {e} from the simulated car (max {m})",
   rpmPeriod: "RPM period (engine on)",
   parkedTimeout: "End trip after standing with engine off",
   lingerTime: "Wait for the next trip",

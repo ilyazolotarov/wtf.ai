@@ -29,16 +29,21 @@ import {
 
 export default function VehicleScreen() {
   const { t } = useT();
-  const params = useLocalSearchParams<{ emulators?: string; cycle?: string; turn?: string }>();
+  const params = useLocalSearchParams<{ emulators?: string; cycle?: string; turn?: string; at?: string }>();
   const { setDevSettings: setDev } = useRuntime();
   // `wtfai://vehicle?emulators=1` lists the simulated adapters: the emulator smoke test (scripts/android-smoke.sh)
   // has no Bluetooth and drives the real app against them. Same switch as Developer → Show emulated adapters.
   // `&cycle=0:0,10:0,22:50,…` (seconds:km/h): the emulator connected next drives that speed profile (the store video);
   // `&turn=0:270,12:270,15:360,…` (seconds:heading in degrees): its wheels turn as the car's heading does.
+  // `&at=<ms since the epoch>`: the profiles' seconds count from then, not from connecting (the GPS fed beside them
+  // keeps the same clock).
   useEffect(() => {
     if (params.emulators === "1") setDev({ showEmulators: true });
-    if (params.cycle) driveProfileNext(parseSpeedProfile(params.cycle), parseHeadingProfile(params.turn));
-  }, [params.emulators, params.cycle, params.turn, setDev]);
+    const at = params.at ? Number(params.at) : NaN;
+    if (params.cycle) {
+      driveProfileNext(parseSpeedProfile(params.cycle), parseHeadingProfile(params.turn), Number.isFinite(at) ? at : null);
+    }
+  }, [params.emulators, params.cycle, params.turn, params.at, setDev]);
 
   return (
     <ScreenContent title={t("vehicle")}>

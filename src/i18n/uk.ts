@@ -298,6 +298,8 @@ export const uk = {
   simOutageStats: "{t} · проїхано {d}",
   simOutageError: "Відстань від точки до GPS: {e} (максимум {m})",
   simOutageNoGps: "Немає точної позиції GPS для порівняння",
+  emulatedDriveOutage: "Імітація поїздки: GPS не використовується",
+  emulatedDriveError: "Точка на мапі за {e} від віртуального авто (максимум {m})",
   rpmPeriod: "Період опитування обертів (двигун працює)",
   parkedTimeout: "Завершити поїздку, коли авто стоїть із вимкненим двигуном",
   lingerTime: "Чекати на наступну поїздку",

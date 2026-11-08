@@ -19,8 +19,16 @@ export interface SimulatedOutage {
   startedAt: number;
   /** Distance driven since GNSS was cut (OBD odometry), m; absent without the navigator. */
   distanceM?: number;
-  /** The newest withheld satellite fix (≤ 10 m): where the car really is. */
+  /**
+   * The newest withheld satellite fix (≤ 10 m): where the car really is. In an emulated adapter's drive, where its car
+   * is (`emulated`), never the phone's fix.
+   */
   gnss?: RawGnssFix;
+  /**
+   * The emulated adapter drives the car along the roads (VEHICLE-LINK-SPEC §13): the phone stands, so its fixes are
+   * withheld for the whole drive, and the dot is scored against the emulated car.
+   */
+  emulated?: boolean;
   /** The dot's distance from that fix now, and the largest so far, m. */
   errorM?: number;
   maxErrorM?: number;

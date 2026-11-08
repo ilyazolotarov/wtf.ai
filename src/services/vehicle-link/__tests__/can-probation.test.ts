@@ -13,7 +13,7 @@ function memoryStore() {
   return { getJson: <T>(k: string) => (m.get(k) as T) ?? null, setJson: (k: string, v: unknown) => void m.set(k, v) };
 }
 
-function harness(store = memoryStore(), scope = "stn2255 v5.13.1|1.0.0", reportsOn?: () => boolean) {
+function harness(store = memoryStore(), scope = "stn2255 v5.13.1|1.0.0", reportsOn?: () => boolean, emulated?: () => boolean) {
   let now = 0;
   const obd = new Set<(s: SpeedSample) => void>();
   const can = new Set<(s: CanSpeed) => void>();
@@ -24,6 +24,7 @@ function harness(store = memoryStore(), scope = "stn2255 v5.13.1|1.0.0", reports
   const events: string[] = [];
   const p = new CanProbation({
     vin: () => VIN,
+    ...(emulated ? { emulated } : {}),
     nowUs: () => now,
     onSpeed: (l) => (obd.add(l), () => obd.delete(l)),
     onCanSpeed: (l) => (can.add(l), () => can.delete(l)),
@@ -75,6 +76,19 @@ describe("CAN probation (VEHICLE-LINK-SPEC §16.5)", () => {
     expect(next.p.admit(PROFILE)).toBe(true);
     expect(next.calls.trusted).toEqual([true]);
     expect(next.reports).toHaveLength(0);
+  });
+
+  test("an emulated adapter: its wheels carry the navigation at once, nothing kept or reported", () => {
+    const h = harness(undefined, undefined, undefined, () => true);
+    expect(h.p.admit(PROFILE)).toBe(true);
+    expect(h.calls.trusted).toEqual([true]);
+    expect(h.p.status).toEqual({ state: "passed", profile: PROFILE.key });
+    h.drive(600, 1.609);
+    expect(h.p.status.state).toBe("passed");
+    expect(h.reports).toHaveLength(0);
+    expect(h.store.getJson(CAN_PROBATION_KEY)).toBeNull();
+    // The same car's adapter a real one: checked as any new car.
+    expect(harness(h.store).p.admit(PROFILE)).toBe(false);
   });
 
   test("a find's wheels' order, learned after its pass, changes no speed: the pass holds", () => {
