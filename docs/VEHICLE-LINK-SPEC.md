@@ -470,7 +470,8 @@ within ~20 s of its ignition.
   (CARPLAY-SPEC §3) leaves the launch options empty, so the restoration launch can't be told apart; JS auto-connects as at any launch, and a
   peripheral restored still connected is set up without a new connect. GNSS then needs the location session
   (TRIP-LOGGER-SPEC §4.3); without it the trip dead-reckons. MFi (`EAAccessoryDidConnect`) wakes nothing: not built.
-- **Started with a drive (iOS, opt-in):** the same opt-in on iOS (onboarding and the Vehicle screen) asks for
+- **Started with a drive (iOS, opt-in):** the *Automatic startup* switch in Settings (onboarding's page only explains it
+  and names the switch: no permission is asked there, App Review 5.1.1(iv)) asks for
   location "Always" (`requestBackgroundPermissionsAsync`, after saying to pick *Change to Always Allow*) and turns on
   `DriveWake` (`AppHealth.swift`): significant location changes, which relaunch the app a few hundred metres into a
   drive whatever the adapter (cell and Wi-Fi, so under jamming too). iOS shows *Change to Always Allow* once per

@@ -67,8 +67,9 @@ export default function OnboardingScreen() {
   };
   const next = () => (step >= steps.length - 1 ? finish() : setStep(step + 1));
 
-  // A page before a system permission ask (location; iOS's Always) only goes on to it, with a neutral "Continue": the
-  // ask is where the driver says no (App Review, guideline 5.1.1(iv)).
+  // A page before a system permission ask (location) only goes on to it, with a neutral "Continue": the ask is where
+  // the driver says no (App Review, guideline 5.1.1(iv)). iOS's wake page asks nothing: it says where the switch is,
+  // and "Always" is asked only when the driver turns that on.
   const primary: { label: string; disabled?: boolean; onPress(): void } =
     meta.id === "welcome"
       ? { label: t("obWelcomeCta"), onPress: next }
@@ -86,9 +87,11 @@ export default function OnboardingScreen() {
               }
             },
           }
-        : meta.id === "wake"
+        : meta.id === "wake" && Platform.OS === "ios"
+          ? { label: t("continue"), onPress: next }
+          : meta.id === "wake"
           ? {
-              label: Platform.OS === "ios" ? t("continue") : t("obWakeCta"),
+              label: t("obWakeCta"),
               disabled: wake.busy,
               onPress: async () => {
                 await wake.turnOn(adapterId()).catch(() => false);
