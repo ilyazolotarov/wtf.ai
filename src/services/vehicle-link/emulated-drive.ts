@@ -29,8 +29,11 @@ export interface EmulatedDriveDeps {
   position(): PositionEstimate | null;
   /** The road graph around a point, in its frame (null: no map there); `close` lets the reader go. */
   roads: { near(at: Coordinate): { graph: RoadGraph; frame: LocalFrame } | null; close(): void };
-  /** The phone's fixes withheld, `truth` where the car is now; null: the phone's fixes again. */
-  ignoreGps(truth: (() => Coordinate) | null): void;
+  /**
+   * The phone's fixes withheld, `truth` where the car is now, the dot put where the car sets off (`from`, facing its
+   * way); null: the phone's fixes again.
+   */
+  ignoreGps(truth: (() => Coordinate) | null, from?: DrivePoint): void;
   note(text: string): void;
 }
 
@@ -88,7 +91,7 @@ export class EmulatedDrive {
     this.here = this.drive.point();
     this.lastMs = nowMs;
     this.unsubscribe = this.deps.routes.subscribe(this.onRoute);
-    this.deps.ignoreGps(() => this.here!);
+    this.deps.ignoreGps(() => this.here!, this.here);
     return true;
   }
 

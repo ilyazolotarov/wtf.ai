@@ -66,8 +66,11 @@ export interface NavigatorHost {
   drop(): void;
   setRoadGraph(graph: ActiveRoadGraph | null, config?: Partial<MapMatchConfig>): void;
   setEngine(state: EngineState): void;
-  /** The navigator's turning from the rear wheels (§5.4); on: a new wheel source, which outlives the navigator. */
-  setWheelYaw(on: boolean): void;
+  /**
+   * The navigator's turning from the rear wheels (§5.4); on: a new wheel source, which outlives the navigator.
+   * `exact`: an emulated adapter's wheels, untaught (`WheelYawSource`).
+   */
+  setWheelYaw(on: boolean, exact?: boolean): void;
   /** The wheels start from a stored tyre term (`seeded`: they hadn't learned yet). */
   seedWheelYaw(start: WheelYawCalibration, then: (seeded: boolean) => void): void;
   /** A wheel sample as it arrives, for the IMU around it; it comes again in `feed`, in time order, to learn from. */
@@ -130,8 +133,8 @@ export class LocalNavigatorHost implements NavigatorHost {
     this.navigator?.setEngine(state);
   }
 
-  setWheelYaw(on: boolean): void {
-    this.wheels = on ? new WheelYawSource() : null;
+  setWheelYaw(on: boolean, exact = false): void {
+    this.wheels = on ? new WheelYawSource(null, undefined, exact) : null;
     this.navigator?.setWheelYaw(on);
   }
 

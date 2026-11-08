@@ -429,7 +429,7 @@ export function GhostLayers({ position, palette }: { position: PositionEstimate 
 /**
  * Test tools (Developer settings): the filter's particles (heaviest 200, size by weight, amber off-road) and its
  * hypotheses as rings of their spread, labelled with their weight; under a simulated outage, where the withheld GPS
- * says the car is.
+ * says the car is (not in an emulated drive).
  */
 export function DebugLayers({ position, palette }: { position: PositionEstimate | null; palette: Palette }) {
   const { showParticles } = useDevSettings();
@@ -438,7 +438,10 @@ export function DebugLayers({ position, palette }: { position: PositionEstimate 
   const overlay = showParticles && position ? navigator.getMapMatchOverlay() : null;
   const particles = particleFeatures(overlay);
   const hypotheses = hypothesisFeatures(overlay);
-  const truth = position?.simulatedOutage?.gnss ? pointFeatures(position.simulatedOutage.gnss) : emptyPoints();
+  // Not in an emulated adapter's drive: there it is the emulated car, a "GPS" that drives along with it while GPS is
+  // meant to be gone (its card still gives the dot's distance from it).
+  const outage = position?.simulatedOutage;
+  const truth = outage?.gnss && !outage.emulated ? pointFeatures(outage.gnss) : emptyPoints();
   return (
     <>
       <GeoJSONSource id="map-match-hypotheses" data={hypotheses.rings}>

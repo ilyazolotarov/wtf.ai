@@ -52,6 +52,9 @@ export const STORAGE_NOTE = "nav storage ";
 const TICK_MS = 500;
 /** The test drive's dot: on its route exactly, its circle hidden under the dot. */
 const TEST_DRIVE_ACCURACY_M = 3;
+/** The emulated car's start (`placeEmulatedCar`): on its road, facing along it; as sure as a fix, not a guess. */
+const EMULATED_POSITION_SIGMA_M = 3;
+const EMULATED_HEADING_SIGMA_RAD = (3 * Math.PI) / 180;
 /** Inputs are held this long and fed in time order: IMU arrives in 100 ms batches, fixes ~50 ms late. */
 export const REORDER_US = 300_000;
 /**
@@ -265,6 +268,8 @@ export class NavigatorService implements PositionSource {
   private readonly advanceListeners = new Set<(a: NavAdvance) => void>();
   /** The navigator turns by the rear wheels (§5.4). */
   private wheelYaw = false;
+  /** The wheels are an emulated adapter's (`setExactWheels`): exact, the gyro teaching them nothing. */
+  private exactWheels = false;
   /** The link's last engine state, for a navigator started meanwhile. */
   private engineState: EngineState = "unknown";
   /** The tyre term was saved once this session (noted once). */
@@ -419,7 +424,23 @@ export class NavigatorService implements PositionSource {
     }
     // The tyres' difference the gyro teaches is applied, from what the car's last drives learned.
     this.wheelYaw = on;
-    this.host.setWheelYaw(on);
+    this.host.setWheelYaw(on, this.exactWheels);
+    this.seedWheelYaw();
+  }
+
+  /**
+   * The wheels are an emulated adapter's (VEHICLE-LINK-SPEC §13): exact, so the prior's track and no tyre term, and the
+   * phone's gyro teaches them nothing (`WheelYawSource`): the phone lies still while the emulated car turns. Nothing
+   * learned is saved for its car or seeded from storage.
+   */
+  setExactWheels(exact: boolean): void {
+    if (exact === this.exactWheels) return;
+    this.note(`nav wheel yaw exact ${exact ? "on" : "off"}`);
+    // What a learning source has is the car's: saved before it goes; an exact one has learned nothing.
+    if (exact && this.wheelYaw) this.saveWheelYaw();
+    this.exactWheels = exact;
+    if (!this.wheelYaw) return;
+    this.host.setWheelYaw(true, exact);
     this.seedWheelYaw();
   }
 
@@ -437,7 +458,7 @@ export class NavigatorService implements PositionSource {
   /** The tyre term this drive learned, for the car's next drives (once learned well enough, CalibrationStore). */
   private saveWheelYaw(): void {
     const w = this.host.wheelYaw;
-    if (!w || !this.car || !this.deps.calibration.saveWheelYaw(this.car, w.tyre, w.tyreSigma, w.learnedS, this.clock.nowMs())) return;
+    if (!w || this.exactWheels || !this.car || !this.deps.calibration.saveWheelYaw(this.car, w.tyre, w.tyreSigma, w.learnedS, this.clock.nowMs())) return;
     if (this.wheelYawStored) return;
     this.wheelYawStored = true;
     this.note(`nav wheel yaw: tyres ${(w.tyre * 100).toFixed(3)} % ±${(w.tyreSigma * 100).toFixed(3)} saved`);
@@ -594,18 +615,36 @@ export class NavigatorService implements PositionSource {
    * withheld for the drive as in a simulated outage, so the navigator drives on the car's wheels alone and the map
    * shows GPS lost, and the dot is scored against `truth`, where the emulated car is. Null: the drive is over, GNSS
    * back, unless it was cut before the drive began.
+   *
+   * `from`: where the car stands as it sets off, and which way it faces. The dot is put there as by the driver
+   * (`placeEmulatedCar`): with no fix to come, a dot neither placed nor started from a parked pose has no heading (a
+   * phone lying still gives none), and set off on a guessed one, away from the road (2026-11-08).
    */
-  setEmulatedDrive(truth: (() => { lat: number; lon: number }) | null): void {
+  setEmulatedDrive(truth: (() => { lat: number; lon: number }) | null, from?: { lat: number; lon: number; headingRad: number }): void {
     if (truth) {
       this.outage.setTruth(truth);
-      if (this.outage.on) return;
-      this.note("emulated drive: gnss withheld, the dot scored against the emulated car");
-      this.setSimulatedOutage(true);
-      this.emulatedOutage = true;
+      if (!this.outage.on) {
+        this.note("emulated drive: gnss withheld, the dot scored against the emulated car");
+        this.setSimulatedOutage(true);
+        this.emulatedOutage = true;
+      }
+      if (from) this.placeEmulatedCar(from);
       return;
     }
     if (this.emulatedOutage) this.setSimulatedOutage(false);
     this.outage.setTruth(null);
+  }
+
+  /**
+   * The emulated car's start (`setEmulatedDrive`) into the navigator, as a driver's placing with a heading (§6.2): the
+   * filter starts over there at once. Not held as the manual position: it is the car's word, not the driver's, and
+   * gone with the drive. The note is the replay's (`app-replay.ts`).
+   */
+  placeEmulatedCar(at: { lat: number; lon: number; headingRad: number }): void {
+    if (!this.nav) return;
+    this.note(`nav position set by the emulated car: ${at.lat.toFixed(6)},${at.lon.toFixed(6)}, heading ${Math.round(degrees360(at.headingRad))}°`);
+    this.host.setPosition({ ...at, posSigmaM: EMULATED_POSITION_SIGMA_M, headingSigmaRad: EMULATED_HEADING_SIGMA_RAD });
+    this.flush(this.deps.nowUs() - this.reorderUs, () => this.publish());
   }
 
   /**

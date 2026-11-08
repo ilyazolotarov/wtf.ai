@@ -41,17 +41,22 @@ export class WheelYawSource {
   /**
    * The wheels turn with the calibration learned so far: the rear tyres' difference read 0.6 °/s of right turn at
    * 70 km/h on one car, the dot 9 m right of clean fixes for a minute (ebwp4t, 2026-10-18).
+   *
+   * `exact`: an emulated adapter's wheels (VEHICLE-LINK-SPEC §13): the prior's track, no tyre term, and nothing taught
+   * by the gyro or seeded from storage. Its phone lies still while its car turns: every straight stretch read as the
+   * tyres' difference (the heading 9° off in 2.5 min, 2026-11-08).
    */
   constructor(
     start?: WheelYawCalibration | null,
     private readonly config?: Partial<WheelYawCalibrationConfig>,
+    private readonly exact = false,
   ) {
     this.calibrator = new WheelYawCalibrator(start, config);
   }
 
   /** Start from this calibration (the car's, known late) while nothing is learned yet; returns whether it took it. */
   seed(start: WheelYawCalibration): boolean {
-    if (this.calibrator.calibration.learnedS > 0) return false;
+    if (this.exact || this.calibrator.calibration.learnedS > 0) return false;
     this.calibrator = new WheelYawCalibrator(start, this.config);
     return true;
   }
@@ -84,6 +89,7 @@ export class WheelYawSource {
    * below `NO_GEAR_MIN_MPS`: it may be reversing.
    */
   learn(s: CanSpeedSample): boolean | null {
+    if (this.exact) return null;
     const [, , rl, rr] = s.wheelsMps;
     const reverse = s.reverse || (!!s.noGear && s.speedMps < NO_GEAR_MIN_MPS);
     return this.calibrator.push(s.tUs, rl, rr, this.gyroAround(s.tUs - WHEEL_LAG_US), reverse);

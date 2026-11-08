@@ -36,7 +36,7 @@ export type ToRemote =
   | { kind: "drop" }
   | { kind: "roadGraph"; graph: GraphFile | null; config?: Partial<MapMatchConfig> }
   | { kind: "engine"; state: EngineState }
-  | { kind: "wheelYaw"; on: boolean }
+  | { kind: "wheelYaw"; on: boolean; exact?: boolean }
   | { kind: "wheels"; sample: CanSpeedSample }
   | { kind: "speedScalePrior"; ks: number; ksVar: number }
   | { kind: "position"; position: UserPosition }
@@ -179,7 +179,7 @@ export class NavigatorRemote {
         host.setEngine(m.state);
         return;
       case "wheelYaw":
-        host.setWheelYaw(m.on);
+        host.setWheelYaw(m.on, m.exact);
         return;
       case "wheels":
         host.addWheels(m.sample);

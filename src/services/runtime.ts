@@ -205,6 +205,8 @@ export function getRuntime(): Runtime {
       can_shadow: dev.wheelSpeed ? "auto" : "off",
       can_primary: dev.wheelSpeed ? "on" : "off",
       nav_wheel_yaw: dev.wheelSpeed && dev.wheelYaw ? "on" : "off",
+      // An emulated adapter's exact wheels (`setExactWheels`), switched before the log opened.
+      ...(link.getSnapshot().activeDeviceId?.startsWith("emulator:") ? { nav_wheel_exact: "on" } : {}),
       // Waze and Google Maps got the map's dot (ANDROID-SPEC §8); notes say when it started, held and failed.
       ...(Platform.OS === "android" ? { position_share: dev.positionShare ? "on" : "off" } : {}),
     }),
@@ -231,9 +233,10 @@ export function getRuntime(): Runtime {
   // IPA or OTA update): the app.json version is the same for every build.
   const carReportScope = () => `${adapterModel(link.getSnapshot())}|${jsCommit() ?? "dev"}`;
   const canProbationListeners = new Set<() => void>();
+  const emulatedAdapter = () => link.getSnapshot().activeDeviceId?.startsWith("emulator:") ?? false;
   const canProbation = new CanProbation({
     vin: () => link.getSnapshot().vehicle?.vin ?? null,
-    emulated: () => link.getSnapshot().activeDeviceId?.startsWith("emulator:") ?? false,
+    emulated: emulatedAdapter,
     nowUs,
     onSpeed: (listener) => link.onSpeed(listener),
     onCanSpeed: (listener): (() => void) => canSpeed.onSpeed(listener),
@@ -263,6 +266,7 @@ export function getRuntime(): Runtime {
       const s = link.getSnapshot().lastSpeed;
       return s !== null && Math.abs(s.raw) >= 1 && nowUs() - s.rxUs <= 2_000_000;
     },
+    emulated: emulatedAdapter,
     store: kvStore,
     note: (text) => recorder.note(text),
     onStatus: () => {
@@ -469,6 +473,10 @@ export function getRuntime(): Runtime {
   puckFeed.start();
   const syncWheelYaw = () => position.setWheelYaw(dev.wheelSpeed && dev.wheelYaw);
   syncWheelYaw();
+  // An emulated adapter's wheels are exact; its phone lies still, so its gyro teaches them nothing (VEHICLE-LINK-SPEC §13).
+  const syncExactWheels = () => position.setExactWheels(emulatedAdapter());
+  link.subscribe(syncExactWheels);
+  syncExactWheels();
   // During a trip the navigator keeps running with the map off screen, so dead reckoning
   // doesn't start over each time the app comes back. So it does while a car's screen shows it, the phone's app closed.
   let carScreen = false;
@@ -527,7 +535,7 @@ export function getRuntime(): Runtime {
         open: () => openActiveRoadGraph(EMULATED_DRIVE_CACHE_TILES),
         activeKey: () => activeRoadGraph.current()?.key ?? null,
       }),
-      ignoreGps: (truth) => position.setEmulatedDrive(truth),
+      ignoreGps: (truth, from) => position.setEmulatedDrive(truth, from),
       note: (text) => recorder.note(text),
     });
   // A route planned before the trip started (engine off) goes into the trip's log once it is open.

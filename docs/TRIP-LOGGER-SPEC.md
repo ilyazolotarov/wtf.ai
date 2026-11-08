@@ -213,6 +213,7 @@ with columnar plain number arrays. Native configuration through config plugins o
 | `can_shadow` | `auto` (ids picked for the car, VEHICLE-LINK-SPEC §16.4) or `off` |
 | `can_primary` | `on` / `off`: Settings → Vehicle → Precise speed from the car's data bus (VEHICLE-LINK-SPEC §16.3) |
 | `nav_wheel_yaw` | `on` / `off`: turns from the wheels (NAVIGATOR-SPEC §5.4); a switch is the note `nav wheel yaw on|off` |
+| `nav_wheel_exact` | `on`, only with an emulated adapter connected as the log opens: its wheels exact, untaught (VEHICLE-LINK-SPEC §13); a switch is the note `nav wheel yaw exact on|off` |
 | `position_share` | Android only, `on` / `off`: the car's position shared with Waze and Google Maps (ANDROID-SPEC §8). What they got is `share.ts` over `nav_estimate`; the notes `position share on|off`, `position share hold: <reason>`, `position share resumed`, `position share failed: <code> <message>` say when; `position share gps taken|probing|real|failed: <reason>` when Waze's `gps` provider was wtf.ai's (`taken: a fix <km> km off, next probe in <n> min`: a probe cut short by a spoofed fix) |
 
 ### 6.3 Data messages (`F` + `D`; `src/triplog/schema.ts`)

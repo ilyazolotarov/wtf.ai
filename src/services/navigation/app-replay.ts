@@ -254,11 +254,16 @@ export function replayTripInApp(logged: TripLog, o: AppReplayOptions): AppReplay
   const wheelYaw = o.wheelYaw ?? trip.info.nav_wheel_yaw === "on";
   const yawSwitches =
     o.wheelYaw !== undefined ? [] : trip.messages.flatMap((m) => (m.text === "nav wheel yaw on" || m.text === "nav wheel yaw off" ? [{ tUs: m.tUs, on: m.text.endsWith(" on") }] : []));
+  // An emulated adapter's exact wheels, as the app switched them.
+  const exactSwitches = trip.messages.flatMap((m) =>
+    m.text === "nav wheel yaw exact on" || m.text === "nav wheel yaw exact off" ? [{ tUs: m.tUs, on: m.text.endsWith(" on") }] : [],
+  );
   // As the log says: the feed gave the navigator wheel samples only while their profile carried the speed (from a pass,
   // VEHICLE-LINK-SPEC §16.5; never, none). Asked for (research), the whole drive's.
   const wheelsFromUs = o.wheelYaw !== undefined ? -Infinity : (canPrimaryFromUs(trip) ?? Infinity);
   const wheels =
     wheelYaw || yawSwitches.some((s) => s.on) ? tripWheelSamples(decodeTripCan(trip)).filter((s) => s.tUs >= wheelsFromUs) : [];
+  if (trip.info.nav_wheel_exact === "on") service.setExactWheels(true);
   if (wheelYaw) service.setWheelYaw(true);
 
   // The inputs, each at the time the app would get it.
@@ -291,16 +296,19 @@ export function replayTripInApp(logged: TripLog, o: AppReplayOptions): AppReplay
   let pl = 0;
   let wh = 0;
   let ys = 0;
+  let xs = 0;
   const placings = o.placings === false ? [] : driverPlacings(trip);
   while (nowUs < endUs + IMU_BATCH_US) {
     nowUs += IMU_BATCH_US;
     // The scenario's outage, as the developer switch would set it.
     service.setSimulatedOutage(rec.inCut(tS(nowUs)));
     while (o.phoneRoutes && pr < o.phoneRoutes.length && o.phoneRoutes[pr].fromS <= tS(nowUs)) service.setPhoneRoute(o.phoneRoutes[pr++].points);
+    while (xs < exactSwitches.length && exactSwitches[xs].tUs <= nowUs) service.setExactWheels(exactSwitches[xs++].on);
     while (ys < yawSwitches.length && yawSwitches[ys].tUs <= nowUs) service.setWheelYaw(yawSwitches[ys++].on);
     while (pl < placings.length && placings[pl].tUs <= nowUs) {
       const p = placings[pl++];
-      service.setUserPosition(p, p.headingRad);
+      if (p.by === "emulated car") service.placeEmulatedCar(p);
+      else service.setUserPosition(p, p.headingRad);
     }
     while (en < engineStates.length && engineStates[en].tUs <= nowUs) {
       const e = engineStates[en++];
@@ -337,12 +345,15 @@ export function replayTripInApp(logged: TripLog, o: AppReplayOptions): AppReplay
   return { ...result, published, publishedMapMatch, publishedAlternatives, notes, parkedCar };
 }
 
-/** The driver's placings in a log: its notes `nav position set by the driver: <lat>,<lon>…, heading <deg>°`. */
-export function driverPlacings(trip: TripLog): { tUs: number; lat: number; lon: number; headingRad: number }[] {
-  const out: { tUs: number; lat: number; lon: number; headingRad: number }[] = [];
+/**
+ * The placings in a log: its notes `nav position set by the driver: <lat>,<lon>…, heading <deg>°`, and the emulated
+ * car's start (`… set by the emulated car: …`).
+ */
+export function driverPlacings(trip: TripLog): { tUs: number; by: "driver" | "emulated car"; lat: number; lon: number; headingRad: number }[] {
+  const out: { tUs: number; by: "driver" | "emulated car"; lat: number; lon: number; headingRad: number }[] = [];
   for (const m of trip.messages) {
-    const x = /^nav position set by the driver: (-?[\d.]+),(-?[\d.]+).*heading (-?[\d.]+)°/.exec(m.text);
-    if (x) out.push({ tUs: m.tUs, lat: Number(x[1]), lon: Number(x[2]), headingRad: (Number(x[3]) * Math.PI) / 180 });
+    const x = /^nav position set by the (driver|emulated car): (-?[\d.]+),(-?[\d.]+).*heading (-?[\d.]+)°/.exec(m.text);
+    if (x) out.push({ tUs: m.tUs, by: x[1] as "driver" | "emulated car", lat: Number(x[2]), lon: Number(x[3]), headingRad: (Number(x[4]) * Math.PI) / 180 });
   }
   return out;
 }
