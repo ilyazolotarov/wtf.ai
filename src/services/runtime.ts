@@ -31,6 +31,7 @@ import { startUpdateCenter, waitingUpdateInfo } from "./app-update/update-center
 import { activeCameras } from "./offline-map/camera-file";
 import { jsLongTasks } from "./long-tasks";
 import { PuckFeeder } from "./navigation/puck-feed";
+import { RoadReader } from "./navigation/road-reader";
 import { onMapDownloadFailed, onMapDownloadStep } from "./offline-map/map-packs";
 import { activeSearchIndex } from "./offline-map/search-file";
 import { activeRoadGraph, openActiveRoadGraph } from "./offline-map/road-graph-file";
@@ -52,6 +53,7 @@ import { CanProbation, probationReportAttributes, type CanProbationReport, type 
 import { CanSpeedFeed } from "./vehicle-link/can-speed-feed";
 import { CanWheelOrder } from "./vehicle-link/can-wheel-order";
 import { DrivingEmulator } from "./vehicle-link/driving-emulator";
+import { EmulatedDrive } from "./vehicle-link/emulated-drive";
 import { isHeldForUpdater } from "./vehicle-link/firmware-notice";
 import { NativeTransport } from "./vehicle-link/native-transport";
 
@@ -92,6 +94,8 @@ const PHONE_GRAPH_CACHE_TILES = 64;
  * around the cameras near it (UI-SPEC §6.4, §6.5).
  */
 const LIMIT_GRAPH_CACHE_TILES = 24;
+/** Tiles the emulated adapter's drive keeps decoded: the road a few km ahead of its car (VEHICLE-LINK-SPEC §13). */
+const EMULATED_DRIVE_CACHE_TILES = 16;
 /** How long after a start the trip service has taken its types. */
 const TRIP_SERVICE_TYPES_CHECK_MS = 2000;
 
@@ -163,6 +167,8 @@ export function getRuntime(): Runtime {
   const devListeners = new Set<() => void>();
   const nowUs = () => VehicleLinkModule.nowUs();
   const clock = createClock(nowUs);
+  // The emulated adapter's drive on the map's roads (VEHICLE-LINK-SPEC §13): set once the navigator and the routes are.
+  let emulatedDrive: (() => EmulatedDrive) | null = null;
 
   const link = new VehicleLinkCore({
     clock,
@@ -170,7 +176,7 @@ export function getRuntime(): Runtime {
     discovery: new NativeDiscovery(() => dev.showEmulators),
     createTransport: (device, remembered) =>
       device.transport === "emulator"
-        ? new DrivingEmulator(device.id, clock)
+        ? new DrivingEmulator(device.id, clock, () => emulatedDrive?.() ?? null)
         : new NativeTransport(device.id, device.transport, remembered),
   });
   const sensors = new SensorService();
@@ -227,6 +233,7 @@ export function getRuntime(): Runtime {
   const canProbationListeners = new Set<() => void>();
   const canProbation = new CanProbation({
     vin: () => link.getSnapshot().vehicle?.vin ?? null,
+    emulated: () => link.getSnapshot().activeDeviceId?.startsWith("emulator:") ?? false,
     nowUs,
     onSpeed: (listener) => link.onSpeed(listener),
     onCanSpeed: (listener): (() => void) => canSpeed.onSpeed(listener),
@@ -511,6 +518,18 @@ export function getRuntime(): Runtime {
     },
   });
   routes.resume();
+  // From the map's dot along the route or the road, on a graph reader of its own; the phone's fixes withheld meanwhile.
+  emulatedDrive = () =>
+    new EmulatedDrive({
+      routes,
+      position: () => position.getSnapshot(),
+      roads: new RoadReader({
+        open: () => openActiveRoadGraph(EMULATED_DRIVE_CACHE_TILES),
+        activeKey: () => activeRoadGraph.current()?.key ?? null,
+      }),
+      ignoreGps: (truth) => position.setEmulatedDrive(truth),
+      note: (text) => recorder.note(text),
+    });
   // A route planned before the trip started (engine off) goes into the trip's log once it is open.
   // Likewise what the navigator has stored (parked pose, speed scale, GNSS lag): a replay starts from it.
   // The app process (TRIP-LOGGER-SPEC §4.4): its memory and CPU while a trip records, and at a trip's start how it was

@@ -526,11 +526,36 @@ BLE and Classic adapters (§13).
   variants, NUL bytes, `SEARCHING...`, multiple ECUs, ignition/engine states, K-line sessions (`klineSessionMs`),
   clone profiles (no response count, `v2.1` banner, `?` on `AT@1`/`STI`, drops the first command, occasional
   `STOPPED`), the STN pass filters, hardware filter and `STM` monitor with a per-profile broadcast list. Also the
-  developer's emulated adapters in the app (with a scripted drive: `wtfai://vehicle?emulators=1&cycle=…&turn=…`, the
-  speed and the heading in time). The STN and vLinker ones broadcast the emulators' car (a Mazda VIN) as its profile
-  reads it: the four wheels at 50 Hz turning with the heading (the rear ones apart by the yaw over the 1.6 m track),
-  the speed and the gear; the app picks the profile, checks it (§16.5) and drives on the wheels, so the store video's
-  car turns without a gyro too (the iOS Simulator has none).
+  developer's emulated adapters in the app, listed only with Developer → Show emulated adapters (on in debug builds)
+  or after `wtfai://vehicle?emulators=1`, and never auto-connected. The STN and vLinker ones broadcast the emulators' car (a Mazda
+  VIN) as its profile reads it: the four wheels at 50 Hz turning with the car (the rear ones apart by the yaw over the
+  1.6 m track), the speed and the gear; the app picks the profile, takes it at once (§16.5) and drives on the wheels,
+  so the car turns without a gyro too (the iOS Simulator has none). What the emulated car drives:
+  - **A scripted drive** (`wtfai://vehicle?emulators=1&cycle=…&turn=…&at=…`: the speed and the heading in time, from
+    `at` or from connecting; the store screenshots and video, `scripts/store-screenshots.py`,
+    `scripts/app-store-screenshots.py`): exactly that, for the next emulator connected. The phone's fixes are used as
+    on any drive (the scripts feed the Simulator's GPS beside it).
+  - **Otherwise, the map's roads** (`emulated-drive.ts`): from the navigator's dot, once it is the car's own (not
+    `waitingForCar`), along the active route, or without one along the road under the dot (the nearest within 40 m
+    going the dot's way, a driveway, parking aisle or private road as if 25 m farther), straight on at each junction:
+    the exit turning least, never against a one-way or a turn restriction, a minor road only when nothing else goes
+    on, back round a turning bulb (6 m arcs) at a dead end, stopping where no way goes on (`nav/sim/road-follow.ts`).
+    It is the test drive's car (`nav/sim/route-drive.ts`): 60 km/h on the straight (70 for ~10 s in every second
+    2 min, past a 50 limit's margin: the speed warning, UI-SPEC §6.4), 1.5 m/s² up and down, slowing for the bends and
+    to a stop at the end; its yaw is the line's heading over a 12 m chord changing at its speed (a corner is an arc,
+    the turns add up to the line's). The OBD speed, the CAN speed and the wheels are its speed and yaw. **Open loop:**
+    once begun the car keeps its own place along its line and never reads the dot again, so the navigator, which
+    drives on these wheels, can't pull it. A new plan (re-plan, another route) is joined from where the car is at its
+    speed; a route ended on the way, the car drives on along the road from there; at a route's end it stands until the
+    next route. The road ahead is laid 3 km at a time from the car's own edge, again with 600 m left. **GPS:** the
+    phone stands while the car moves, so for the whole drive its fixes are withheld from the navigator as in the
+    simulated outage (NAVIGATOR-SPEC §9; `NavigatorService.setEmulatedDrive`): the car drives on its wheels with GPS
+    lost, the map's outage card titled "Emulated drive: GPS ignored", the dot scored against the emulated car, and
+    "Restore GPS" ends the withholding for the rest of the drive. Notes `emulated drive: …` and `sim gnss outage
+    on|off`, so `npm run replay -- --app-cuts` withholds the same fixes. Disconnecting gives GPS back.
+  - **No map, or no road at the dot and no route:** a repeating cycle, straight, with GPS: idle → accelerate →
+    cruise → brake → stop-start → key off (the spurt as above). The roads are asked for every 2 s while its car
+    stands (the first stand 30 s), and taken up from a standstill.
 - **Unit tests:** parser (golden strings), probe outcomes, init fallbacks, scheduler priorities and rate stats,
   engine-state transitions, the CAN shadow and monitor, the core's lifecycle and car list.
 - **Native logic** (`modules/vehicle-link/ios/Logic/LinkLogic.swift`, `android/**/logic/LinkLogic.kt`): UART
@@ -685,6 +710,10 @@ been checked against that car's own OBD speed.
   (`vehicleLink.canProbation`): the next drives start on the wheels at once. Every car goes through it once, the ones
   with tested profiles too. It is what makes the `dbcOnly` profiles (SPEC §3.2: layouts from DBCs no openpilot car
   drives on) safe to offer: a wrong one costs that car nothing but the wheels.
+- **Not for an emulated adapter** (`emulator:<id>`): its CAN speed is its own drive, exact, and carries the navigation
+  at once (`can probation: <profile> not needed, an emulated adapter`), with nothing kept or reported. An emulated
+  drive's phone lies still, or has no gyro at all (the iOS Simulator): nothing but the wheels turns its car, from the
+  first metre (App Review, the App Store media).
 - **During it** (`VehicleLinkCore.setCanTrusted(false)`): the monitor listens and the frames are decoded and logged,
   but nothing of them reaches the navigator, neither the speed nor the wheels' turning; the polls keep their 2 Hz while
   the car moves (no pause, no long window), the monitor listening in their breaks. The navigator is on OBD as with the

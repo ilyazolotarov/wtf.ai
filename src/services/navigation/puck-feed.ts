@@ -25,6 +25,11 @@ const DEFAULT_INTERVAL_MS = 100;
  * dot and the camera standing a quarter of the drive. The longest of 6 leaves them standing ~2 %.
  */
 const INTERVAL_WINDOW = 6;
+/**
+ * Without a heading of the navigator's own (anchored: its position is the last fix), the dot moves on from the publish
+ * along the published heading at the published speed for at most this long, s: the next publish comes long before.
+ */
+const ANCHORED_COAST_S = 2;
 const M_PER_DEG_LAT = 111_320;
 
 /** The navigator's estimate after an advance (an IMU batch fed): NAVIGATOR-SPEC §9. */
@@ -102,7 +107,12 @@ export class PuckFeed {
     return a.headingRad !== undefined && Math.abs(wrapRad(a.headingRad - p.headingRad)) > HEADING_TAKES_OVER_RAD ? a.headingRad : p.headingRad;
   }
 
-  /** The navigator advanced: the published dot moved on by the estimate's displacement since the publish. */
+  /**
+   * The navigator advanced: the published dot moved on by the estimate's displacement since the publish. Anchored (no
+   * heading of its own), the estimate is the last fix, standing between fixes and a second's way on at the next: the dot
+   * stood, leapt and fell back to the next publish. There it moves on along the published heading at the published
+   * speed for the time since the publish.
+   */
   advance(a: NavAdvance): FedPose | null {
     const now = this.nowMs();
     if (this.lastAdvanceAtMs) this.pace(now - this.lastAdvanceAtMs);
@@ -110,7 +120,12 @@ export class PuckFeed {
     this.lastAdvance = a;
     const p = this.published;
     const base = this.baseAdvance;
-    if (!p || !base || !fedMoving(p)) return null;
+    if (!p || !fedMoving(p)) return null;
+    if (a.headingRad === undefined) {
+      const d = p.speedMps * Math.min(ANCHORED_COAST_S, Math.max(0, now - this.lastPublishAtMs) / 1000);
+      return this.pose(p, d * Math.sin(p.headingRad), d * Math.cos(p.headingRad), p.headingRad, this.intervalMs);
+    }
+    if (!base) return null;
     const d = offsetM(base, a);
     return this.pose(p, d.e, d.n, this.heading(p, a), this.intervalMs);
   }

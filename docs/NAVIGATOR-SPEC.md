@@ -474,7 +474,9 @@ to the nearest hypothesis, and nothing uses it. The map's trust is `Navigator.tr
 - **Simulated GNSS outage** (Developer → "GPS outage button on the map"): a "Cut GPS" chip withholds every fix from
   the navigator while `SensorService` keeps logging them; the map shows the newest withheld satellite fix as a green
   marker and a card with time, distance and the dot's distance from it. Notes `sim gnss outage on|off …`; `npm run
-  replay -- --app-cuts` cuts the same windows.
+  replay -- --app-cuts` cuts the same windows. An emulated adapter driving the map's roads holds the same outage for
+  its drive (`setEmulatedDrive`, VEHICLE-LINK-SPEC §13): the marker and the distance are its car's, not the standing
+  phone's fix; a cut the driver made before is left to the driver.
 
 ### 9.6 Phone-only mode (experimental; Developer → "Navigate without an adapter")
 

@@ -14,9 +14,19 @@ const TRUTH_MAX_AGE_MS = 3000;
 export class SimulatedOutageTool {
   /** `hidden`: the newest fix withheld. */
   private outage: { startedAt: number; startDistanceM: number | null; hidden: GnssRecord | null; maxErrorM: number } | null = null;
+  /** The emulated adapter's car, where it is now: the truth instead of the withheld fixes (`setTruth`). */
+  private truth: (() => { lat: number; lon: number }) | null = null;
 
   get on(): boolean {
     return this.outage !== null;
+  }
+
+  /**
+   * An emulated adapter's drive (VEHICLE-LINK-SPEC §13): the dot is scored against where its car is, not against the
+   * withheld fixes of a phone that stands still; null: against the fixes again.
+   */
+  setTruth(truth: (() => { lat: number; lon: number }) | null): void {
+    this.truth = truth;
   }
 
   /** `startDistanceM`: the navigator's OBD distance now (null: no navigator). */
@@ -28,7 +38,9 @@ export class SimulatedOutageTool {
   stop(nowMs: number, shown: SimulatedOutage | undefined): string {
     const parts = [`${Math.round((nowMs - (this.outage?.startedAt ?? nowMs)) / 1000)} s`];
     if (shown?.distanceM !== undefined) parts.push(`${(shown.distanceM / 1000).toFixed(2)} km`);
-    if (shown?.errorM !== undefined) parts.push(`dot ${Math.round(shown.errorM)} m from GPS (max ${Math.round(shown.maxErrorM ?? 0)} m)`);
+    if (shown?.errorM !== undefined) {
+      parts.push(`dot ${Math.round(shown.errorM)} m from ${this.truth ? "the emulated car" : "GPS"} (max ${Math.round(shown.maxErrorM ?? 0)} m)`);
+    }
     this.outage = null;
     return `sim gnss outage off: ${parts.join(", ")}`;
   }
@@ -43,8 +55,10 @@ export class SimulatedOutageTool {
     const o = this.outage;
     if (!o) return undefined;
     const h = o.hidden;
-    const truth =
-      h && isSatelliteRecord(h) && h.hAccM <= TRUTH_MAX_ACC_M && nowMs - h.utcUs / 1000 <= TRUTH_MAX_AGE_MS
+    const car = this.truth?.();
+    const truth = car
+      ? { lat: car.lat, lon: car.lon, accuracyM: 0, timestamp: nowMs }
+      : h && isSatelliteRecord(h) && h.hAccM <= TRUTH_MAX_ACC_M && nowMs - h.utcUs / 1000 <= TRUTH_MAX_AGE_MS
         ? { lat: h.latDeg, lon: h.lonDeg, accuracyM: h.hAccM, timestamp: h.utcUs / 1000 }
         : undefined;
     const errorM = truth ? haversineM(p, truth) : undefined;
@@ -53,6 +67,7 @@ export class SimulatedOutageTool {
       startedAt: o.startedAt,
       ...(obdDistanceM !== undefined && o.startDistanceM !== null ? { distanceM: Math.max(0, obdDistanceM - o.startDistanceM) } : {}),
       ...(truth ? { gnss: truth, errorM, maxErrorM: o.maxErrorM } : {}),
+      ...(this.truth ? { emulated: true } : {}),
     };
   }
 }

@@ -291,7 +291,10 @@ persisted in kv-store. No hardcoded user-facing strings in components.
   gets there (without the navigator's steps, the publishes set that interval). The interval is the longest of the last
   six, never their average: batches come ~100 ms apart with one close behind another a quarter of the time, and an
   average lead ends each ease before the next pose, the dot and the camera standing still in between. The estimate's
-  heading takes over once it turned 3° from the published one, at publishes too; each publish re-bases. Must not
+  heading takes over once it turned 3° from the published one, at publishes too; each publish re-bases. Anchored (no
+  heading of the navigator's own, its estimate the last fix: a drive started without a stored pose), the dot moves on
+  from the publish along the published heading at the published speed for the time since it, at most 2 s: the
+  estimate stands between fixes and leaps a second's way at each, and the dot stood, leapt and fell back. Must not
   drift: in a turn the published heading is the matched road's until the car is on the next one, and fed at each
   publish it swung the heading-up camera back and forth across the turn, up to 45°.
   Standing (< 2 m/s, no heading, or a placed position) the dot is fed as published, without lead. A step over 80 m,

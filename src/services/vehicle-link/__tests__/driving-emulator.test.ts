@@ -1,7 +1,8 @@
 import { allProfiles } from "@/nav/odometry/can/profile";
 import { DEFAULT_TRACK_M } from "@/nav/odometry/can/wheel-yaw";
 import { VirtualClock } from "@/obd/clock";
-import { DrivingEmulator, parseHeadingProfile, parseSpeedProfile, driveProfileNext, profileAt, profileRate, wheelSpeeds } from "../driving-emulator";
+import { DrivingEmulator, parseHeadingProfile, parseSpeedProfile, driveProfileNext, profileAt, profileRate, roadCruiseKph, wheelSpeeds } from "../driving-emulator";
+import type { EmulatedCar, EmulatedDrive } from "../emulated-drive";
 
 const MAZDA = allProfiles().find((p) => p.key.startsWith("mazda/mazda/"))!;
 
@@ -99,6 +100,116 @@ describe("the car's wheels (VEHICLE-LINK-SPEC §16.3)", () => {
       await emu.disconnect();
       driveProfileNext(null);
       dateNow.mockRestore();
+    }
+  });
+
+  it("counts the profile from the link's start time, not from connecting", async () => {
+    const clock = new VirtualClock();
+    const now = 1_000_000;
+    const dateNow = jest.spyOn(Date, "now").mockImplementation(() => now);
+    // Standing 10 s, then 36 km/h: started 20 s before connecting, it is already moving.
+    driveProfileNext(parseSpeedProfile("0:0,10:0,11:36,60:36"), null, now - 20_000);
+    const emu = new DrivingEmulator("emulator:stn", clock);
+    try {
+      await emu.connect();
+      for (const cmd of ["ATZ", "ATE0", "ATH1", "ATSP6"]) await emu.exchange(cmd, 1000);
+      const lines: string[] = [];
+      emu.onUnsolicited((text) => lines.push(...text.split(/[\r\n]+/).filter(Boolean)));
+      await emu.writeRaw("STM");
+      for (let i = 0; i < 5; i++) await clock.sleep(20);
+      const wheels = lines.filter((l) => l.startsWith("215 ")).map((l) => l.slice(4).split(" ").map((b) => parseInt(b, 16)));
+      expect(wheels.length).toBeGreaterThan(0);
+      const [, , rl, rr] = readWheels(wheels[0]);
+      expect((rl + rr) / 2).toBeCloseTo(10, 1);
+    } finally {
+      await emu.disconnect();
+      driveProfileNext(null);
+      dateNow.mockRestore();
+    }
+  });
+});
+
+describe("the emulated car on the map's roads (VEHICLE-LINK-SPEC §13)", () => {
+  /** A drive on the roads that begins when asked once `ready`, then is at `car`. */
+  function fakeRoad(car: EmulatedCar = { speedKph: 36, yawRad: 0.2 }) {
+    const state = { ready: false, begun: false, begin: 0, stop: 0, cruise: [] as number[] };
+    const road = {
+      get begun() {
+        return state.begun;
+      },
+      begin: () => {
+        state.begin++;
+        state.begun = state.ready;
+        return state.begun;
+      },
+      at: (_nowMs: number, cruiseKph: number) => (state.cruise.push(cruiseKph), car),
+      stop: () => void state.stop++,
+    };
+    return { road: road as unknown as EmulatedDrive, state };
+  }
+  const step = (emu: DrivingEmulator) => (emu as unknown as { step(): void }).step();
+
+  it("stands at first and asks for the roads; driving them, its speed and its wheels' turning are the drive's", async () => {
+    const clock = new VirtualClock();
+    let now = 1_000_000;
+    const dateNow = jest.spyOn(Date, "now").mockImplementation(() => now);
+    const { road, state } = fakeRoad({ speedKph: 36, yawRad: 0.2 });
+    const emu = new DrivingEmulator("emulator:stn", clock, () => road);
+    try {
+      await emu.connect();
+      // No dot or no road yet: standing, idling, asked again every 2 s, past the cycle's own 10 s.
+      for (let t = 0; t <= 26_000; t += 200) {
+        now = 1_000_000 + t;
+        step(emu);
+        expect(emu.vehicle).toMatchObject({ ignition: true, speedKph: 0 });
+      }
+      expect(state.begin).toBe(14);
+      // It begins: the car's speed is the drive's.
+      state.ready = true;
+      now = 1_028_000;
+      step(emu);
+      step(emu);
+      expect(emu.vehicle).toMatchObject({ ignition: true, speedKph: 36 });
+      for (const cmd of ["ATZ", "ATE0", "ATH1", "ATSP6"]) await emu.exchange(cmd, 1000);
+      const lines: string[] = [];
+      emu.onUnsolicited((text) => lines.push(...text.split(/[\r\n]+/).filter(Boolean)));
+      await emu.writeRaw("STM");
+      for (let i = 0; i < 5; i++) await clock.sleep(20);
+      const wheels = lines.filter((l) => l.startsWith("215 ")).map((l) => l.slice(4).split(" ").map((b) => parseInt(b, 16)));
+      expect(wheels.length).toBeGreaterThan(0);
+      const [, , rl, rr] = readWheels(wheels[0]);
+      expect((rl + rr) / 2).toBeCloseTo(10, 1);
+      // Turning left at 0.2 rad/s: the right wheels faster.
+      expect((rr - rl) / DEFAULT_TRACK_M).toBeCloseTo(0.2, 2);
+      // The cycle's cruise on the straight.
+      expect(state.cruise.at(-1)).toBe(60);
+    } finally {
+      await emu.disconnect();
+      dateNow.mockRestore();
+    }
+    expect(state.stop).toBe(1);
+  });
+
+  it("cruises at 60, up to 70 every second 2 min, as the cycle did (the speed warning)", () => {
+    expect(roadCruiseKph(40)).toBe(60);
+    expect(roadCruiseKph(160)).toBe(70);
+    expect(roadCruiseKph(200)).toBe(60);
+    expect(roadCruiseKph(280)).toBe(60);
+  });
+
+  it("a link's profiles drive instead: no roads asked for, so the phone's fixes are kept", async () => {
+    const clock = new VirtualClock();
+    let asked = 0;
+    driveProfileNext(parseSpeedProfile("0:36,60:36"));
+    const emu = new DrivingEmulator("emulator:stn", clock, () => (asked++, fakeRoad().road));
+    try {
+      await emu.connect();
+      step(emu);
+      expect(asked).toBe(0);
+      expect(emu.vehicle.speedKph).toBe(36);
+    } finally {
+      await emu.disconnect();
+      driveProfileNext(null);
     }
   });
 });

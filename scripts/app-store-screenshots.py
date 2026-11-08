@@ -20,7 +20,8 @@ How it drives the Simulator:
   a speed (`simctl location set` fixes don't, and the app never trusts a fix without one), but every fix of a scenario
   carries the scenario's start time, so each second starts a new one (its interval longer than the second, so none
   repeats an old time). The Simulator flags all its fixes as simulated; on a simulator the app takes them as GPS
-  (sensor-service.ts), on a phone it refuses them.
+  (sensor-service.ts), on a phone it refuses them. The emulated adapter's link carries the moment its drive starts
+  (`&at=`), and GPS counts from the same one: the wheels and the satellites agree, and the dot glides.
 - The device: language, region and keyboard set and rebooted into, the theme, the status bar at 9:41 with full
   signal and battery; the app reinstalled (its data wiped) with location allowed ahead, as a driver would. Headless:
   quit Simulator.app first (its window puts the Mac's keyboard layout into the device). Deep links are opened as from
@@ -35,7 +36,10 @@ How it drives the Simulator:
 (scripts/mac-audio-record.swift: ScreenCaptureKit, no loopback driver; the process running this needs Screen
 Recording permission, and anything else the Mac plays is recorded too). It cuts them into app previews, each 15-30 s
 at 886x1920 and 30 fps, H.264 with AAC stereo: PREVIEWS lists their scenes, sped up as the Play promo's (driving 2x,
-the rest 1.5x) and fitted into App Store Connect's 15-30 s. The recordings and the scenes stay in --work for --recut.
+the rest 1.5x) and fitted into App Store Connect's 15-30 s. The first is mostly the drive on spoofed GPS: the search
+from its last letters to the route drawn, a few seconds of setting off, then from just before the spoof (SPOOF_AT_M,
+earlier here than on Play) through the bends on the wheels alone, until the stop is added. App Store Connect plays a preview streamed, its first
+seconds at a low resolution while the stream picks up: the file itself is sharp from its first frame. The recordings and the scenes stay in --work for --recut.
 Record with the Mac awake and idle (no builds, no replays): stalls show.
 
 Build first (a store build, the JS bundle embedded, maps from UPDATES_ORIGIN in .env.local; expo-updates off so this
@@ -44,7 +48,7 @@ checkout's JS is what runs):
     DISTRIBUTION=store CARPLAY_ENTITLEMENT=1 npx expo prebuild -p ios --clean && git checkout -- package.json
     /usr/libexec/PlistBuddy -c "Set :EXUpdatesEnabled false" ios/wtfai/Supporting/Expo.plist
     xcodebuild -workspace ios/wtfai.xcworkspace -scheme wtfai -configuration Release \\
-      -destination "platform=iOS Simulator,name=iPhone 17 Pro Max,OS=26.3" -derivedDataPath build CODE_SIGN_IDENTITY=- build
+      -destination "generic/platform=iOS Simulator" -derivedDataPath build CODE_SIGN_IDENTITY=- build
 
     python3 scripts/app-store-screenshots.py store-assets/app-store/dark --dark --video
     python3 scripts/app-store-screenshots.py store-assets/app-store/uk-light --lang uk --video
@@ -69,6 +73,7 @@ uk-dark}/, for the website's light and dark modes (scripts/site-media.sh), named
 import argparse
 import importlib.util
 import json
+import math
 import os
 import select
 import signal
@@ -107,15 +112,27 @@ PREVIEW_MIN_S, PREVIEW_MAX_S = 15.5, 29.5
 # The previews: each a few of the recording's scenes (store-screenshots.py's names; "arrive-end" the arrival's last
 # ARRIVE_END_S, as the whole one is too long to share a preview), in order.
 PREVIEWS = [
-    ("spoofed", ["plan", "drive-off", "spoof"]),
+    ("spoofed", ["plan", "drive-off", "spoofed"]),
     ("stop", ["add-stop", "pull-in"]),
     ("camera", ["camera", "arrive-end"]),
 ]
 ARRIVE_END_S = 26
-DRIVING_SCENES = play.DRIVING_SCENES | {"arrive-end"}
+DRIVING_SCENES = play.DRIVING_SCENES | {"spoofed", "arrive-end"}
+# GPS goes abroad here, just after 01-guidance (120 m) and before the first bends, not at Play's 300 m: the first
+# preview is the app's point, a drive on spoofed GPS, not a drive on good GPS spoofed at its end.
+SPOOF_AT_M = 130
+# The first preview's setting off, s from the car moving, and its spoofed drive: from this long before the spoof to this
+# long after, ending before the stop is added (the script taps the Route tab then).
+DRIVE_OFF_S = 4
+SPOOFED_FROM_S, SPOOFED_TO_S = 3, 36
 # iOS hands the app a link of up to about 2 KB (longer, the app got it without its query: the emulator drove its own
 # cycle): the drive's profiles are thinned to fit, straight lines between the points kept within these.
 LINK_MAX = 2000
+# The link's `&at=` (the emulator's clock, ms since the epoch) is added when it is opened.
+AT_PARAM_LEN = len("&at=") + 13
+# The plan's scene: from this long before the destination's name is typed in (the field, the last letters) to this long
+# after the other ways are drawn. The search's waits (the keyboard, the results) and the route standing are left out.
+PLAN_LEAD_S, PLAN_TAIL_S = 1.0, 1.5
 SPEED_TOL_KMH, HEADING_TOLS_DEG = 0.3, (0.5, 1.0, 1.5, 2.0, 2.5, 3.0)
 # The device per app language: its language, region (24-hour clock, metric) and its one keyboard. The search: "Ocean
 # Plaza" in both, as the Play takes (the map knows it by no Ukrainian spelling). In English typed on the on-screen
@@ -123,9 +140,9 @@ SPEED_TOL_KMH, HEADING_TOLS_DEG = 0.3, (0.5, 1.0, 1.5, 2.0, 2.5, 3.0)
 # (`hid`), and iOS hides the on-screen keyboard, as Play's Ukrainian shot has none. The camera card's warning (src/i18n).
 LOCALES = {
     "en": {"language": "en", "locale": "en_GB", "keyboard": "en_GB@sw=QWERTY;hw=Automatic", "hid": False,
-           "slow_down": "Slow down"},
+           "slow_down": "Slow down", "continue": "Continue"},
     "uk": {"language": "uk", "locale": "uk_UA", "keyboard": "uk_UA@sw=Ukrainian;hw=US", "hid": True,
-           "slow_down": "Зменште швидкість"},
+           "slow_down": "Зменште швидкість", "continue": "Продовжити"},
 }
 # The app's clock: launched in the time zone where it is APP_HOUR o'clock now, whatever the Mac's. From 17:00 to 19:00
 # the router slows a big city's main roads (×1.4): the demo route took 11 min instead of 9, found no alternative, and
@@ -201,7 +218,9 @@ def install(app):
     simctl("terminate", UDID, BUNDLE)
     simctl("uninstall", UDID, BUNDLE)
     simctl("install", UDID, app, check=True, timeout=300)
+    # Allowed ahead, Always too (automatic launch asks for it): iOS asks nothing during the first run.
     simctl("privacy", UDID, "grant", "location", BUNDLE)
+    simctl("privacy", UDID, "grant", "location-always", BUNDLE)
 
 
 class Car:
@@ -217,13 +236,15 @@ class Car:
         threading.Thread(target=self.run, daemon=True).start()
 
     def follow(self, drive, t0):
+        self.track = Track(drive)
         self.drive, self.t0 = drive, t0
 
     def run(self):
+        lands = 0.1  # how long a `simctl location start` takes to land: its fixes carry that moment
         while not self.stopped.is_set():
             now = time.time()
             drive = self.drive
-            t = now - self.t0 if drive else 0.0
+            t = now + lands - self.t0 if drive else 0.0
             # A standing car moves at a crawl: a scenario needs a speed, and the app reads 0 km/h.
             v = max(drive.kmh_at(t) / 3.6 if drive and not self.pos else 0.0, 0.05)
             if self.pos or not drive:
@@ -232,12 +253,13 @@ class Car:
                 points = [(lat, lon), (lat + ahead, lon)]
             else:
                 m = drive.metres_at(t)
-                points = [drive.point_at(min(m + v * k, drive.length)) for k in (0, 2, 4, 6)]
-                if drive.length - m < 1:  # arrived: standing at the end
+                points = [self.track.at(t + k) for k in (0, 2, 4, 6)]
+                if drive.length - m < 1 or v < 0.3:  # standing (arrived, or before setting off): one place
                     lat, lon = points[0]
                     points = [(lat, lon), (lat + v * 6 / 111_320, lon)]
             simctl("location", UDID, "start", f"--speed={v:.2f}", "--interval=5",
                    *[f"{lat:.7f},{lon:.7f}" for lat, lon in points])
+            lands = min(0.5, time.time() - now)
             self.stopped.wait(max(0.0, 1.0 - (time.time() - now)))
         simctl("location", UDID, "clear")
 
@@ -357,8 +379,8 @@ def back_to_map():
 
 
 def connected(seconds=20):
-    """When the adapter tapped in the list connects: the moment its name heads the Vehicle screen (the emulator's
-    profile counts from there; it came up to 8 s after the tap)."""
+    """When the adapter tapped in the list connects: the moment its name heads the Vehicle screen (it came up to 8 s
+    after the tap; each look at the screen takes about a second)."""
     end = time.time() + seconds
     while time.time() < end:
         before = time.time()
@@ -421,12 +443,13 @@ def type_keys(text):
 
 
 def search(query, field, hid):
-    """Types into the search field until a result with the query in it shows below the field; returns where it is.
+    """Types into the search field until a result with the query in it shows below the field; returns where it is and
+    when the typing ended.
     `hid`: typed as from a hardware keyboard, a lone Shift first, so the on-screen one doesn't show up and vanish. For
     the car's screen, searched by link (Simulator.app's window has put the Mac's keyboard in the device)."""
     if CARPLAY:
         open_link("route?q=" + urllib.parse.quote(query))
-        return wait_for(query, 20, kind="Button")
+        return wait_for(query, 20, kind="Button"), time.time()
     if hid:
         run("axe", "key", "225", "--udid", UDID)
     for _ in range(2):
@@ -437,11 +460,12 @@ def search(query, field, hid):
         elif not type_keys(query):
             print("the on-screen keyboard didn't come up: the field tapped again", flush=True)
             continue
+        typed = time.time()
         end = time.time() + 15
         while time.time() < end:
             found = sorted((y, x) for label, typ, x, y in nodes() if typ == "Button" and query.lower() in label.lower())
             if found:
-                return found[0][1], found[0][0]
+                return (found[0][1], found[0][0]), typed
             time.sleep(1)
     raise SystemExit(f"search for {query!r} found nothing")
 
@@ -697,13 +721,45 @@ def drive_link(drive):
     cycle = ",".join(f"{t:g}:{kmh:g}" for t, kmh in drive.profile)
     heading = [tuple(map(float, p.split(":"))) for p in drive.turn_spec().split(",")]
     for tol in HEADING_TOLS_DEG:
-        turn = ",".join(f"{t:g}:{deg:.0f}" for t, deg in thinned(heading, tol))
+        drive.turns = [(t, round(deg)) for t, deg in thinned(heading, tol)]
+        turn = ",".join(f"{t:g}:{deg:.0f}" for t, deg in drive.turns)
         link = f"vehicle?emulators=1&cycle={cycle}&turn={turn}"
-        if len(link) <= LINK_MAX:
+        if len(link) + AT_PARAM_LEN <= LINK_MAX:
             print(f"adapter link {len(link)} characters: speed within {SPEED_TOL_KMH} km/h, heading within {tol}°",
                   flush=True)
             return link
     raise SystemExit(f"the drive's link is {len(link)} characters even with its heading within {tol}°: iOS cuts it")
+
+
+class Track:
+    """Where the emulated car is, `t` s into its drive: the link's own speed and heading profiles integrated from the
+    route's start, as the app integrates the wheels they turn. The road's line instead was up to 9 m from where the
+    wheels took the car by the spoof (the link's heading kept within 1.5°), and each fix the app trusted pulled the dot
+    back or held it: on the straight the dot stood still a moment every second. GPS follows it only to the spoof,
+    SPOOF_AT_M in."""
+
+    DT = 0.05
+
+    def __init__(self, drive):
+        turns = drive.turns
+        heading = lambda t: play._interp(turns, t)
+        lat, lon = drive.route[0]
+        self.points = [(lat, lon)]
+        t, end = 0.0, drive.profile[-1][0]
+        while t < end:
+            v = (drive.kmh_at(t) + drive.kmh_at(t + self.DT)) / 2 / 3.6
+            h = math.radians(heading(t + self.DT / 2))
+            lat += v * self.DT * math.cos(h) / 111_320
+            lon += v * self.DT * math.sin(h) / (111_320 * math.cos(math.radians(lat)))
+            t += self.DT
+            self.points.append((lat, lon))
+
+    def at(self, t):
+        k = min(max(t / self.DT, 0.0), len(self.points) - 1.0)
+        i = min(int(k), len(self.points) - 2)
+        f = k - i
+        (a, b), (c, d) = self.points[i], self.points[i + 1]
+        return a + f * (c - a), b + f * (d - b)
 
 
 def app_time_zone():
@@ -712,16 +768,22 @@ def app_time_zone():
     return "Etc/GMT" if off == 0 else f"Etc/GMT{-off:+d}"
 
 
-def first_run(say):
+def first_run(say, cont):
+    """The first run as a new driver's, on iOS: Get started; the location page's Continue (the system's ask, answered
+    ahead); the car skipped; automatic launch's Continue and its alert's (iOS's page has no Not now); Done."""
     zone = app_time_zone()
     print(f"the app's time zone {zone}", flush=True)
     day = ["-CarPlayDay", "YES"] if CAR_DAY else []
     subprocess.run(["xcrun", "simctl", "launch", UDID, BUNDLE, *day], env=dict(os.environ, SIMCTL_CHILD_TZ=zone),
                    capture_output=True, check=True)
     tap_text(say["get_started"], 120)
-    tap_text(say["allow"])
-    tap_text(say["skip"])
-    tap_text(say["not_now"])  # automatic launch: not for the demo, which starts the drive itself
+    tap_text(cont)  # location
+    tap_text(say["skip"])  # the car
+    tap_text(cont)  # automatic launch
+    for _ in range(4):  # its alert, before iOS's ask for Always
+        if find(say["done"]):
+            break
+        tap_when(cont, 3)
     tap_text(say["done"])
 
 
@@ -748,7 +810,7 @@ def maps_only(args):
     car = Car()
     say = play.LABELS[args.lang]
     try:
-        first_run(say)
+        first_run(say, LOCALES[args.lang]["continue"])
         download_kyiv(say)
         tap_when(say["not_now"], 10)  # the map tour
         open_link("more/downloads")
@@ -830,7 +892,7 @@ def main():
     out = args.out_dir
     video = None
     try:
-        first_run(say)
+        first_run(say, LOCALES[args.lang]["continue"])
         download_kyiv(say)
         tap_when(say["not_now"], 10)  # the map tour
         # Emulated adapters on before the drive (the store build hides the Developer screen).
@@ -845,7 +907,7 @@ def main():
         route_tab = wait_for(say["route"], kind="Link")
         tap(*route_tab)
         time.sleep(1.5)
-        result = search(play.DESTINATION, say["search"], LOCALES[args.lang]["hid"])
+        result, typed = search(play.DESTINATION, say["search"], LOCALES[args.lang]["hid"])
         snap(out, "06-search")
         tap(*result)
         tap_text(say["start"], 20)
@@ -853,10 +915,11 @@ def main():
         # The route on the map, and the other ways found after it, one by one.
         time.sleep(2)
         wait_gone(say["finding_alternatives"], 30)
+        t_alternatives = time.time()
         time.sleep(2)
         snap(out, "05-route")
         if video:
-            video.scene("plan", rec_from, time.time())
+            video.scene("plan", max(rec_from, typed - PLAN_LEAD_S), t_alternatives + PLAN_TAIL_S)
 
         # Standing, from the Route tab's tiles: the fuel along the route, then parking near the destination.
         tap(*route_tab)
@@ -877,9 +940,15 @@ def main():
 
         # The adapter: it drives the trip's speed profile from connecting, its wheels turning as the car's heading
         # does; GPS follows the same drive.
-        open_link(link)
+        # The emulator's clock from the link: its profiles count from `t0`, the GPS below from the same moment (timed
+        # from when the script saw it connect, the GPS ran up to a second behind the wheels, and each fix the app
+        # trusted pulled the dot back along the road). The car stands STAND_S first, past the adapter's connecting.
+        t0 = time.time() + 1
+        open_link(f"{link}&at={round(t0 * 1000)}")
         tap(*wait_for(play.ADAPTER + ", ", 30, exact=False, kind="Button"))  # its row in the list
-        t0 = connected()
+        up = connected()
+        if up > t0 + drive.time_at(1) - 3:
+            raise SystemExit(f"the adapter connected {up - t0:.0f} s into the drive: the car was moving already")
         car.follow(drive, t0)
         tap_when(say["fw_skip"], 10)  # an STN connecting for the first time: the firmware notice
         back_to_map()
@@ -888,11 +957,13 @@ def main():
         t_move = drive.time_at(1)
         at(drive.time_at(play.GUIDANCE_AT_M))
         snap(out, "01-guidance")
-        at(drive.time_at(play.SPOOF_AT_M))
+        at(drive.time_at(SPOOF_AT_M))
         car.pos = play.ABROAD
         if video:
-            video.scene("drive-off", wall(t_move - 1), wall(t_move + 8))
-            video.scene("spoof", wall(drive.time_at(play.SPOOF_AT_M) - 3), wall(drive.time_at(play.SPOOF_AT_M) + 8))
+            t_spoof = drive.time_at(SPOOF_AT_M)
+            video.scene("drive-off", wall(t_move - 1), wall(t_move + DRIVE_OFF_S))
+            video.scene("spoofed", wall(t_spoof - SPOOFED_FROM_S),
+                        wall(min(t_spoof + SPOOFED_TO_S, drive.time_at(play.STOP_ADD_AT_M) - 2)))
 
         # The stop, added from the Route tab while driving: Fuel, the station's row (its detour), added with Undo.
         at(drive.time_at(play.STOP_ADD_AT_M))

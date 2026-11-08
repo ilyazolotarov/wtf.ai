@@ -322,6 +322,8 @@ export class NavigatorService implements PositionSource {
   private graph: { key: string; region: string; builtAt: number } | null = null;
   /** Test tool: GNSS withheld from the navigator. */
   private readonly outage = new SimulatedOutageTool();
+  /** The outage is the emulated adapter's drive's (`setEmulatedDrive`), not the driver's "Cut GPS". */
+  private emulatedOutage = false;
   private overlay: MapMatchOverlay | null = null;
   /** The active route's polyline (phone-only mode follows it, §9.6; it tips the dot's direction, puck.ts); and the state it last noted. */
   private phoneRoute: { lat: number; lon: number }[] | null = null;
@@ -578,8 +580,32 @@ export class NavigatorService implements PositionSource {
     if (on) {
       this.outage.start(this.clock.nowMs(), this.nav?.stats.obdDistanceM ?? null);
       this.note("sim gnss outage on");
-    } else this.note(this.outage.stop(this.clock.nowMs(), this.position?.simulatedOutage));
+    } else {
+      this.note(this.outage.stop(this.clock.nowMs(), this.position?.simulatedOutage));
+      // "Restore GPS" in an emulated drive: the phone's fixes for the rest of it.
+      this.outage.setTruth(null);
+      this.emulatedOutage = false;
+    }
     if (this.position) this.set(this.position);
+  }
+
+  /**
+   * The emulated adapter drives its car along the roads (VEHICLE-LINK-SPEC §13) while the phone stands still: GNSS is
+   * withheld for the drive as in a simulated outage, so the navigator drives on the car's wheels alone and the map
+   * shows GPS lost, and the dot is scored against `truth`, where the emulated car is. Null: the drive is over, GNSS
+   * back, unless it was cut before the drive began.
+   */
+  setEmulatedDrive(truth: (() => { lat: number; lon: number }) | null): void {
+    if (truth) {
+      this.outage.setTruth(truth);
+      if (this.outage.on) return;
+      this.note("emulated drive: gnss withheld, the dot scored against the emulated car");
+      this.setSimulatedOutage(true);
+      this.emulatedOutage = true;
+      return;
+    }
+    if (this.emulatedOutage) this.setSimulatedOutage(false);
+    this.outage.setTruth(null);
   }
 
   /**

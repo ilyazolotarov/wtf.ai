@@ -51,6 +51,28 @@ describe("PuckFeed", () => {
     expect(fed.snap).toBe(false);
   });
 
+  it("anchored (no heading of the navigator's own): the dot moves on along the published heading, not by the fixes", () => {
+    let now = 1_000;
+    const feed = new PuckFeed(() => now);
+    // The anchored estimate is the last fix: it stands, then leaps a second's way on at the next.
+    const fix: NavAdvance = { lat: 50.4, lon: 30.5, speedMps: 10, tUs: 0 };
+    feed.advance(fix);
+    const p = position({ speedMps: 10, headingRad: Math.PI / 2 }); // east
+    feed.publish(p);
+    const east: number[] = [];
+    for (let k = 1; k <= 4; k++) {
+      now += 100;
+      // The fix leaps 10 m at the third step: the dot keeps its pace.
+      const a = k < 3 ? fix : { ...fix, lon: fix.lon + 10 / (M_PER_DEG_LAT * Math.cos((50.4 * Math.PI) / 180)) };
+      east.push(metresEast(p, feed.advance(a)!));
+    }
+    // 10 m/s: 1 m a step, plus the 1 m lead (10 m/s for the 100 ms interval).
+    expect(east.map((m) => Math.round(m * 10) / 10)).toEqual([2, 3, 4, 5]);
+    // A publish long gone (the navigator stopped): coasting ends after 2 s.
+    now += 10_000;
+    expect(metresEast(p, feed.advance(fix)!)).toBeLessThan(22.5);
+  });
+
   it("the estimate's heading takes over once it turned away from the published one", () => {
     let now = 0;
     const feed = new PuckFeed(() => now);

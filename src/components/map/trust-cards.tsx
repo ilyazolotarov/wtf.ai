@@ -75,7 +75,10 @@ export function TrustAlertCard({
   );
 }
 
-/** The simulated outage's card (Developer settings, UI-SPEC §6.1): time, distance, the dot's error, "Restore GPS". */
+/**
+ * The simulated outage's card (Developer settings, UI-SPEC §6.1): time, distance, the dot's error, "Restore GPS". In an
+ * emulated adapter's drive (VEHICLE-LINK-SPEC §13) the error is from the emulated car.
+ */
 export function OutageCard({
   outage,
   nowMs,
@@ -92,7 +95,7 @@ export function OutageCard({
     <HudCard
       icon="gps_off"
       tone={palette.warn}
-      title={t("simOutage")}
+      title={t(outage.emulated ? "emulatedDriveOutage" : "simOutage")}
       lines={
         <>
           <CardLine>
@@ -103,7 +106,7 @@ export function OutageCard({
           <CardLine>
             {outage.errorM === undefined
               ? t("simOutageNoGps")
-              : t("simOutageError")
+              : t(outage.emulated ? "emulatedDriveError" : "simOutageError")
                   .replace("{e}", formatDistance(outage.errorM, language))
                   .replace("{m}", formatDistance(outage.maxErrorM ?? outage.errorM, language))}
           </CardLine>

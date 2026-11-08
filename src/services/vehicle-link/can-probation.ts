@@ -85,6 +85,11 @@ export interface CanProbationReport {
 
 export interface CanProbationDeps {
   vin(): string | null;
+  /**
+   * The adapter is an emulated one: its CAN speed is its own drive, exact, so it carries the navigation at once, with
+   * nothing stored or reported. Absent: never.
+   */
+  emulated?(): boolean;
   nowUs(): number;
   /** The link's speed samples: the OBD polls among them are the reference. */
   onSpeed(listener: (s: SpeedSample) => void): () => void;
@@ -158,6 +163,14 @@ export class CanProbation {
     const vin = this.deps.vin();
     this.vin = vin;
     this.profile = profile;
+    if (this.deps.emulated?.()) {
+      // An emulated drive's phone lies still (the iOS Simulator has no gyro at all): only the wheels turn its car, so
+      // they do from the first metre (App Review, the App Store media, a demo drive), not after a minute's check.
+      this.deps.setTrusted(true);
+      this.set({ state: "passed", profile: profile.key });
+      this.deps.note(`can probation: ${profile.key} not needed, an emulated adapter`);
+      return true;
+    }
     const record = vin ? this.records()[vin] : undefined;
     // A find's wheels' order, learned since, changes no speed: its pass holds.
     const same = record !== undefined && speedKey(record.profile) === speedKey(profile.key);
