@@ -551,9 +551,18 @@ BLE and Classic adapters (§13).
     next route. The road ahead is laid 3 km at a time from the car's own edge, again with 600 m left. **GPS:** the
     phone stands while the car moves, so for the whole drive its fixes are withheld from the navigator as in the
     simulated outage (NAVIGATOR-SPEC §9; `NavigatorService.setEmulatedDrive`): the car drives on its wheels with GPS
-    lost, the map's outage card titled "Emulated drive: GPS ignored", the dot scored against the emulated car, and
-    "Restore GPS" ends the withholding for the rest of the drive. Notes `emulated drive: …` and `sim gnss outage
-    on|off`, so `npm run replay -- --app-cuts` withholds the same fixes. Disconnecting gives GPS back.
+    lost, the map's outage card titled "Emulated drive: GPS ignored", the dot scored against the emulated car (no
+    "GPS" marker for it on the map: it would drive along with the car while GPS is gone), and "Restore GPS" ends the
+    withholding for the rest of the drive. Notes `emulated drive: …` and `sim gnss outage on|off`, so `npm run replay
+    -- --app-cuts` withholds the same fixes. Disconnecting gives GPS back.
+    **Start:** as it sets off the car puts the dot where it stands on its road, facing its way, as a driver's placing
+    with a heading (NAVIGATOR-SPEC §6.2; ±3 m, ±3°; not held as the manual position): with no fix to come, a dot
+    neither placed nor started from a parked pose has no heading (a phone lying still gives none). The note
+    `nav position set by the emulated car: <lat>,<lon>, heading <deg>°`, which the replay makes again.
+    **Wheels:** an emulated adapter's wheels are exact (`NavigatorService.setExactWheels` while one is connected; the
+    log's `nav_wheel_exact: on`, a switch the note `nav wheel yaw exact on|off`): the prior's track, no tyre term, and
+    the phone's gyro teaches them nothing, nothing saved or seeded for its car. Taught by a still phone, every straight
+    stretch read as the tyres' difference and the heading drifted (9° in 2.5 min).
   - **No map, or no road at the dot and no route:** a repeating cycle, straight, with GPS: idle → accelerate →
     cruise → brake → stop-start → key off (the spurt as above). The roads are asked for every 2 s while its car
     stands (the first stand 30 s), and taken up from a standstill.
@@ -698,7 +707,10 @@ while the car moves.
   showed the car moving during some of the silent listening → the car is OBD only from the start. Parked with the
   ECU awake the wheels may not be on the bus yet: that drive is OBD only, noted `not counted`. New candidates, or
   turning the setting off and on, try again; ids heard later forget it. Two drives, not one: a single deaf session
-  must not take the wheels from a car that has them.
+  must not take the wheels from a car that has them. **Never with an emulated adapter** (§13): its car's wheels are
+  on its bus, so its drives aren't counted (`not counted: an emulated adapter`) and a verdict kept from before is
+  passed over. Otherwise one phone's emulators' car stays OBD only for good, and its emulated drives turn only by a
+  phone lying still: the heading never followed the road.
 - A car without a profile: the ELM terminal's survey (§16.1) is the tool.
 
 ### 16.5 Probation (`can-probation.ts`, `nav/odometry/can/probation.ts`)

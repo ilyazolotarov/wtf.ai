@@ -6,7 +6,7 @@ import { CAN_AUTO_IDS_KEY, CAN_AUTO_NONE_KEY, CanAutoIds, candidateIds, idsAfter
 const MAZDA = "JM1AAAAAA00000000";
 const VW = "WVWAAAAAA00000000";
 
-function harness(vin: string | null, stored: Record<string, unknown> = {}) {
+function harness(vin: string | null, stored: Record<string, unknown> = {}, emulated = false) {
   let listener: ((frames: CanFrame[]) => void) | null = null;
   let windowListener: ((w: { startUs: number; endUs: number }) => void) | null = null;
   const store = new Map<string, unknown>(Object.entries(stored));
@@ -20,6 +20,7 @@ function harness(vin: string | null, stored: Record<string, unknown> = {}) {
     onFrames: (l) => ((listener = l), () => (listener = null)),
     onWindow: (l) => ((windowListener = l), () => (windowListener = null)),
     moving: () => moving,
+    emulated: () => emulated,
     store: { getJson: <T,>(k: string) => (store.get(k) ?? null) as T | null, setJson: (k, v) => void store.set(k, v) },
     note: (t) => notes.push(t),
   });
@@ -126,6 +127,23 @@ describe("CAN ids picked for the car (VEHICLE-LINK-SPEC §16.4)", () => {
     third.auto.stop();
     third.auto.start();
     expect(third.listens.at(-1)).toHaveLength(8);
+  });
+
+  test("an emulated adapter's car is never taken for OBD only, and a verdict kept from before is passed over", () => {
+    const h = harness(VW, {}, true);
+    h.auto.start();
+    h.silence(6);
+    expect(status(h.auto)).toEqual({ state: "none", heard: 0 });
+    expect(h.store.get(CAN_AUTO_NONE_KEY)).toBeUndefined();
+    expect(h.notes.at(-1)).toMatch(/not counted: an emulated adapter/);
+    // Kept by an older build: listened to again.
+    const kept = { [CAN_AUTO_NONE_KEY]: { [VW]: { candidates: [...candidateIds(VW)].sort((a, b) => a - b).join(","), drives: 2 } } };
+    const real = harness(VW, kept);
+    real.auto.start();
+    expect(real.listens).toEqual([null]);
+    const emulated = harness(VW, kept, true);
+    emulated.auto.start();
+    expect(emulated.listens[0]).toHaveLength(8);
   });
 
   // The main test car's ECU answers with the engine off: parked, the wheels may not be on the bus yet.

@@ -75,6 +75,12 @@ export interface CanAutoIdsDeps {
   onWindow(listener: (w: { startUs: number; endUs: number }) => void): () => void;
   /** OBD shows the car moving now (a fresh speed of at least 1 km/h). */
   moving(): boolean;
+  /**
+   * An emulated adapter is connected (VEHICLE-LINK-SPEC §13): its car's wheels are on its bus, so it is never taken for
+   * OBD only, and a verdict kept from before is passed over. Two emulated drives of 2026-11-01 heard none and left the
+   * emulators' car OBD only on that phone for good: its emulated drives turned by a phone lying still.
+   */
+  emulated?(): boolean;
   store: KeyValueStore;
   note(text: string): void;
   onStatus?(status: CanAutoStatus): void;
@@ -149,7 +155,7 @@ export class CanAutoIds {
       return;
     }
     const none = this.noneRecord()[vin];
-    if (none && none.candidates === candidatesKey(all) && none.drives >= NONE_DRIVES) {
+    if (none && !this.deps.emulated?.() && none.candidates === candidatesKey(all) && none.drives >= NONE_DRIVES) {
       this.batches = [];
       this.deps.listen(null);
       this.set({ state: "none", heard: 0 });
@@ -171,6 +177,10 @@ export class CanAutoIds {
       this.set({ state: "none", heard: 0 });
       if (!this.movedSilent) {
         this.deps.note("can auto: none of the make's wheel-speed ids heard while the car stood, the monitor stays off (not counted)");
+        return;
+      }
+      if (this.deps.emulated?.()) {
+        this.deps.note("can auto: none of the make's wheel-speed ids heard, the monitor stays off (not counted: an emulated adapter)");
         return;
       }
       const vin = this.vin!;

@@ -1089,6 +1089,22 @@ describe("the driver puts the car on the map", () => {
     h.service.stop();
   });
 
+  test("an emulated car setting off is put there facing its way: dead reckoning from it, with no GPS ever, not held as the manual position", async () => {
+    // The phone has no fix and no heading; the car drives off north-east as it said.
+    const drive = syntheticDrive({ segments: SEGMENTS, gnss: "none", origin, startHeadingRad: 0.8, seed: 3 });
+    const h = harness({ vin: null });
+    await h.service.start();
+    h.play(drive, { untilS: 3 });
+    h.service.setEmulatedDrive(() => drive.truthAt(h.now()), { ...origin, headingRad: 0.8 });
+    expect(h.notes).toContain("nav position set by the emulated car: 51.518400,30.746500, heading 46°");
+    h.play(drive);
+    const p = h.service.getSnapshot()!;
+    expect(p.source).toBe("dr");
+    expect(p.manual).toBeUndefined();
+    expect(p.simulatedOutage?.errorM).toBeLessThan(25);
+    h.service.stop();
+  });
+
   test("not saved as the car's parked pose: it is held as the manual position", async () => {
     const store = memoryStore();
     const drive = syntheticDrive({ segments: SEGMENTS, gnss: "none", origin, startHeadingRad: 0.8, seed: 3 });

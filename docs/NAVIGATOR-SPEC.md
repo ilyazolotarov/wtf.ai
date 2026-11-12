@@ -153,8 +153,10 @@ navigate with the phone in a hand, a pocket or on a seat.
 - **The EKF's yaw noise** is `wheelYawNoise` (0.01 rad/s) instead of the gyro's 0.003 while the wheels turn the car
   (`Navigator.setWheelYaw`): with the tyre term applied they still drift ~2.5° per 20 s from the mounted gyro, and with
   the gyro's noise clean fixes pulled the heading back too slowly (the dot 3–9 m beside them for a minute).
-- Replay: the log says `nav_wheel_yaw: on` and each switch is the note `nav wheel yaw on|off`; `replayTripInApp`
-  follows them. Experiments: `--yaw wheels --yaw-from s`, `--yaw-cal`, `--yaw-gaps gyro`.
+- An emulated adapter's wheels are exact (VEHICLE-LINK-SPEC §13): no tyre term, nothing taught by the gyro of a phone
+  that lies still while they turn, nothing saved or seeded.
+- Replay: the log says `nav_wheel_yaw: on` and each switch is the note `nav wheel yaw on|off` (`nav_wheel_exact`,
+  `nav wheel yaw exact on|off` likewise); `replayTripInApp` follows them. Experiments: `--yaw wheels --yaw-from s`, `--yaw-cal`, `--yaw-gaps gyro`.
 
 ## 6. EKF (`ekf/dr-ekf.ts`), heading initialization, and where the car starts
 

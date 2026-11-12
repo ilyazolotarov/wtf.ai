@@ -111,6 +111,23 @@ describe("the car's tyre term known late (its VIN after the wheels)", () => {
   });
 });
 
+describe("an emulated adapter's wheels (VEHICLE-LINK-SPEC §13)", () => {
+  test("exact: a still phone's gyro teaches them nothing, and no stored tyre term is taken", () => {
+    const src = new WheelYawSource(null, undefined, true);
+    expect(src.seed({ trackM: 1.6, tyre: 0.001, trackSigmaM: 0.003, tyreSigma: 0.0005, learnedS: 0 })).toBe(false);
+    // Gentle bends, 2° in a stretch, that the phone lying still reads as none.
+    for (let k = 0; k < 600; k++) {
+      const t = k * 100_000;
+      for (let j = 0; j < 10; j++) src.addGyro(t - WHEEL_LAG_US + j * 10_000, 0);
+      const s = wheels(t, 0.007, 16);
+      src.addWheels(s);
+      expect(src.learn(s)).toBeNull();
+    }
+    expect(src.calibration).toMatchObject({ tyre: 0, learnedS: 0 });
+    expect(src.yawAt(59_000_000 - WHEEL_LAG_US)).toBeCloseTo(0.007, 6);
+  });
+});
+
 describe("standing, the phone's turning is never the car's", () => {
   // The car stands (wheels at 0) and the phone turns 1 rad/s in the driver's hand.
   test("in a break in listening between two standing samples: no turning, still the car's frame", () => {

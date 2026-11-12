@@ -143,9 +143,9 @@ export class WorkerNavigatorHost implements NavigatorHost {
     this.link.post({ kind: "engine", state });
   }
 
-  setWheelYaw(on: boolean): void {
+  setWheelYaw(on: boolean, exact = false): void {
     this.wheelYawOn = on;
-    this.link.post({ kind: "wheelYaw", on });
+    this.link.post({ kind: "wheelYaw", on, exact });
   }
 
   seedWheelYaw(start: WheelYawCalibration, then: (seeded: boolean) => void): void {
