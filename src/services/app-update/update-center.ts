@@ -5,6 +5,7 @@ import { AppState, PermissionsAndroid, Platform } from "react-native";
 import { useSyncExternalStore } from "react";
 
 import AppNotice from "../../../modules/app-notice/src/AppNoticeModule";
+import { STORE_BUILD } from "@/config/distribution";
 import { Sentry } from "@/config/sentry";
 import { stringsNow } from "@/i18n/strings-now";
 import { kvStore } from "@/services/kv-store";
@@ -121,7 +122,7 @@ let saved: Saved = {
   ...(kvStore.getJson<Partial<Saved>>(STORE_KEY) ?? {}),
 };
 let state: UpdateCenterState = {
-  found: { native: null, js: null, map: null, mapAction: "none" },
+  found: { native: null, js: null, map: null, mapAction: "none", testFlight: false },
   latest: null,
   jsMessage: null,
   checking: false,
@@ -358,6 +359,19 @@ async function notifyNativeUpdate(): Promise<void> {
 }
 
 /**
+ * iOS store build: installed by TestFlight? Then the prompt and the dots ask the driver to install the App Store copy
+ * over it (§5.3), until they do. Asked once per launch: the answer can't change while the app runs.
+ */
+async function checkTestFlight(): Promise<void> {
+  if (Platform.OS !== "ios" || !STORE_BUILD || !AppNotice?.installedFromTestFlight) return;
+  try {
+    if (await AppNotice.installedFromTestFlight()) setState({ found: { ...state.found, testFlight: true } });
+  } catch (e) {
+    Sentry.captureException(e, { tags: { feature: "app-update" } });
+  }
+}
+
+/**
  * A downloaded JS update runs at once, in the background, when nothing would be cut short (§5.2, `reloadBlocker`);
  * otherwise from the next start. Android keeps the app's process for days, so the next start can be far off.
  */
@@ -430,5 +444,8 @@ export function startUpdateCenter(appDeps: UpdateCenterDeps): void {
     refreshMap({ start: unmetered });
   });
   AppState.addEventListener("change", onAppState);
-  setTimeout(() => void checkForUpdates("launch"), LAUNCH_DELAY_MS);
+  setTimeout(() => {
+    void checkTestFlight();
+    void checkForUpdates("launch");
+  }, LAUNCH_DELAY_MS);
 }

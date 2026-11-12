@@ -1,7 +1,7 @@
 **wtf.ai**
 
 - [[Українська|Home-uk]] · [[English|Home]]
-- Встановити / Get the app: [iPhone (TestFlight)](https://testflight.apple.com/join/nCHCN441) · [Android (APK)](https://wtf-ai.uk/) ([English](https://wtf-ai.uk/en.html))
+- Встановити / Get the app: [iPhone (App Store)](https://apps.apple.com/app/id6820505133) · [Android (APK)](https://wtf-ai.uk/) ([English](https://wtf-ai.uk/en.html))
 - [[Home]]
 - [[Getting started]]
 - [[Car adapter|Car-adapter]]

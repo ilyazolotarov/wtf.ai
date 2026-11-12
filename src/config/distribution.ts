@@ -7,6 +7,9 @@ import { extraString } from "./extra";
  */
 export const STORE_BUILD: boolean = extraString("distribution") === "store";
 
+/** wtf.ai on the App Store: where a TestFlight install is asked to move (docs/UPDATES-SPEC.md §5.3). */
+export const APP_STORE_URL = "https://apps.apple.com/app/id6820505133";
+
 /** Where Settings › Contact support writes (SUPPORT_EMAIL); null: no such row. */
 export const SUPPORT_EMAIL: string | null = extraString("supportEmail");
 

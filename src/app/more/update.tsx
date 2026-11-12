@@ -1,7 +1,7 @@
 import Constants from "expo-constants";
 import * as Updates from "expo-updates";
 import { useState } from "react";
-import { ActivityIndicator, StyleSheet, View } from "react-native";
+import { ActivityIndicator, Linking, StyleSheet, View } from "react-native";
 
 import { formatMb } from "@/components/downloads/region-downloads";
 import {
@@ -14,7 +14,7 @@ import {
 } from "@/components/screens/screen-ui";
 import { T } from "@/components/ui/text";
 import { appCode } from "@/components/update/app-code";
-import { STORE_BUILD } from "@/config/distribution";
+import { APP_STORE_URL, STORE_BUILD } from "@/config/distribution";
 import { usePalette } from "@/constants/theme";
 import { useT } from "@/i18n/provider";
 import type { AppBuildInfo } from "@/services/app-update/decide";
@@ -57,6 +57,16 @@ export default function UpdateScreen() {
           {jsMessage && <T size={14}>{jsMessage}</T>}
           <ScreenNote>{t("appUpdateRestartNote")}</ScreenNote>
           <ScreenAction labelKey="appUpdateRestart" icon="refresh" onPress={() => void Updates.reloadAsync()} />
+        </ScreenCard>
+      )}
+
+      {found.testFlight && (
+        <ScreenCard style={styles.card}>
+          <T w="semibold" size={16}>
+            {t("promptAppStoreTitle")}
+          </T>
+          <ScreenNote>{t("appStoreNote")}</ScreenNote>
+          <ScreenAction labelKey="appStoreOpen" icon="open_in_new" onPress={() => void Linking.openURL(APP_STORE_URL).catch(() => undefined)} />
         </ScreenCard>
       )}
 

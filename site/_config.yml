@@ -2,7 +2,9 @@
 title: wtf.ai
 description: Offline car navigation to help you stay on track when GPS lets you down.
 markdown: kramdown
-# The public TestFlight beta (iOS). The APK link (Android) is the update Worker's, added at build from UPDATES_ORIGIN.
-testflight_url: https://testflight.apple.com/join/nCHCN441
+# The App Store listing (iOS); app_store_id also drives Safari's Smart App Banner. The APK link (Android) is the update
+# Worker's, added at build from UPDATES_ORIGIN.
+app_store_id: 6820505133
+app_store_url: https://apps.apple.com/app/id6820505133
 plugins:
   - jekyll-github-metadata

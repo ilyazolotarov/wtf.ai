@@ -23,6 +23,7 @@ layout: null
   <meta name="twitter:title" content="wtf.ai — Where the f* am I?">
   <meta name="twitter:description" content="Офлайн-навігатор для авто, який допомагає не загубитися, коли GPS підводить. Мапи, пошук адрес і голосові підказки без інтернету.">
   <meta name="twitter:image" content="https://wtf-ai.uk/assets/share-uk.png">
+  <meta name="apple-itunes-app" content="app-id={{ site.app_store_id }}">
   <link rel="canonical" href="https://wtf-ai.uk/">
   <link rel="icon" href="assets/icon.png">
   <link rel="alternate" hreflang="en" href="en.html">
@@ -59,7 +60,7 @@ layout: null
         <h1>Where the f* am&nbsp;I?</h1>
         <p class="lead">Офлайн-навігатор для авто, який допомагає не загубитися, коли GPS підводить.</p>
         <div class="badges">
-          <a class="badge" href="#install">iPhone · публічна бета</a>
+          <a class="badge" href="{{ site.app_store_url }}">iPhone · App Store</a>
           <a class="badge" href="#install">Android · APK</a>
         </div>
         <p class="note"><b>Для навігації без GPS потрібен адаптер:</b> невеликий Bluetooth-пристрій, який передає
@@ -155,13 +156,9 @@ layout: null
       <h2>Встановлення</h2>
       <p class="sub">Безкоштовно, без реєстрації.</p>
       <div class="grid">
-        <div class="card"><h3 class="with-icon"><span class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20.94c1.5 0 2.75 1.06 4 1.06 3 0 6-8 6-12.22A4.91 4.91 0 0 0 17 5c-2.22 0-4 1.44-5 2-1-.56-2.78-2-5-2a4.9 4.9 0 0 0-5 4.78C2 14 5 22 8 22c1.25 0 2.5-1.06 4-1.06Z"/><path d="M10 2c1 .5 2 2 2 5"/></svg></span>iPhone</h3><ol>
-          <li>На iPhone відкрийте <a href="{{ site.testflight_url }}">запрошення до TestFlight</a>.</li>
-          <li>Встановіть з App Store <b>TestFlight</b> — застосунок Apple для тестування бета-версій.</li>
-          <li><b>Код запрошення не потрібен.</b> Якщо TestFlight просить ввести код, закрийте його, поверніться на
-            цю сторінку й ще раз відкрийте запрошення.</li>
-          <li>Натисніть <b>Прийняти</b> (Accept), потім <b>Встановити</b> (Install).</li>
-        </ol></div>
+        <div class="card"><h3 class="with-icon"><span class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20.94c1.5 0 2.75 1.06 4 1.06 3 0 6-8 6-12.22A4.91 4.91 0 0 0 17 5c-2.22 0-4 1.44-5 2-1-.56-2.78-2-5-2a4.9 4.9 0 0 0-5 4.78C2 14 5 22 8 22c1.25 0 2.5-1.06 4-1.06Z"/><path d="M10 2c1 .5 2 2 2 5"/></svg></span>iPhone</h3><p>Завантажте <a href="{{ site.app_store_url }}">wtf.ai з App
+          Store</a>.</p><p><b>Користуєтеся бета-версією з TestFlight?</b> Установіть натомість версію з App Store —
+          усі ваші мапи, місця й налаштування збережуться. Нагадування про це є й у застосунку.</p></div>
         <div class="card"><h3 class="with-icon"><span class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 19a10 10 0 0 1 20 0Z"/><path d="m4.9 11.9-2.4-2.4"/><path d="m19.1 11.9 2.4-2.4"/><path d="M8 15h.01"/><path d="M16 15h.01"/></svg></span>Android</h3><ol>
           <li>На телефоні завантажте <a href="{{ site.apk_url }}">застосунок (файл APK)</a>.</li>
           <li>Відкрийте завантажений файл.</li>
@@ -229,8 +226,7 @@ layout: null
           трапляються, особливо якщо почати поїздку без GPS і неправильно вказати початкову позицію або напрямок
           авто. Якщо мітка не там, де ви насправді, зупиніться в безпечному місці й скоригуйте позицію та напрямок
           вручну.</p></div>
-        <div class="card"><h3>Це справді безкоштовно?</h3><p>Так! Не лише під час бета-тестування —
-          застосунок безкоштовний і залишатиметься таким назавжди.</p></div>
+        <div class="card"><h3>Це справді безкоштовно?</h3><p>Так! Застосунок безкоштовний і завжди таким буде.</p></div>
         <div class="card"><h3>Чи можна надовго залишати адаптер у порту OBD?</h3><p>Зазвичай так, і багато
           водіїв так і роблять. Але деякі дешеві адаптери не переходять у режим сну й поступово розряджають
           акумулятор. Якщо не плануєте їздити кілька тижнів, краще від’єднати адаптер. Особливо це стосується
@@ -242,8 +238,7 @@ layout: null
   <section id="contact">
     <div class="wrap">
       <h2>Поділіться враженнями</h2>
-      <p class="sub">Застосунок ще в бета-версії. Ваші відгуки допомагають його вдосконалювати — ми читаємо кожне
-        повідомлення.</p>
+      <p class="sub">Ваші відгуки допомагають нам робити застосунок кращим. Ми читаємо кожне повідомлення.</p>
       {% if site.support_email %}<div class="contact">
         <a class="badge" href="mailto:{{ site.support_email }}?subject=wtf.ai%20%D0%B2%D1%96%D0%B4%D0%B3%D1%83%D0%BA">{{ site.support_email }}</a>
       </div>{% endif %}

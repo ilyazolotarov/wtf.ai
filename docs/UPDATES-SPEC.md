@@ -128,13 +128,14 @@ its own, so a failed prune never fails a publish. It never removes what `latest`
 
 ### 5.3 Prompts
 
-A system alert, one per check, the most important first: native update, then JS update, then map.
+A system alert, one per check, in priority order: native update, JS update, App Store migration, then map update.
 
 | Prompt      | Text                                                       | Buttons                                   |
 | ----------- | ---------------------------------------------------------- | ----------------------------------------- |
 | Native, Android | "App update" · version, build, size                    | Later · **Update** (opens App update and starts the download) |
 | Native, iOS | "App update" · version, build; "AltStore installs it"      | Later · **Open AltStore**                 |
 | JS          | "App update ready" · "Restart the app to use it."          | Later · **Restart** (`reloadAsync`)       |
+| App Store   | "wtf.ai is now on the App Store" · replaces the beta and preserves user data | Later · **Open App Store** |
 | Map         | "Map update: {region}" · size, OSM date                    | Skip · Later · **Download**               |
 
 - **Only when nothing is going on**: the map on screen (no page, onboarding, map setup or tour over it, no pin or
@@ -144,14 +145,21 @@ A system alert, one per check, the most important first: native update, then JS 
   release; Offline maps still offers it. A map release is known by its files (the region's tiles, road graph and search
   index MD5s and the shared files'), not its OSM date: a forced rebuild of the same extract that changes a file is a
   new question, for Later too.
+- **App Store**: shown for iOS store builds installed through TestFlight. `modules/app-notice` detects these using
+  StoreKit's app transaction environment (sandbox), or a `sandboxReceipt` receipt when no transaction is available.
+  Detection runs once per launch alongside the launch update check. After the App Store version replaces the beta,
+  detection returns false, so the prompt, dot and card no longer appear. Installing the App Store version over the
+  TestFlight beta preserves user data because both use the same bundle ID (verified on a phone; not documented by
+  Apple). iOS builds without the module's iOS implementation never show this prompt.
 - The app never installs or opens AltStore by itself; it restarts by itself only into a downloaded JS update, in the
   background, with nothing going on (§5.2).
 
 ### 5.4 Dots
 
-A red dot (the connection dot's size, `palette.bad`) on **More** in the bottom bar when an app update (native, or JS
-downloaded) or a map update (not skipped) is waiting. Inside More, on the row it belongs to: **App update** (a row of
-its own, under Offline maps) and **Offline maps**. Each goes when its update is installed.
+A red dot (the connection dot's size, `palette.bad`) appears on **More** in the bottom bar when a native app update,
+a downloaded JS update or a map update (not skipped) is waiting, or when the TestFlight beta can be replaced with
+the App Store version. Inside More, the dot appears on the relevant row: **App update** (a separate row under
+Offline maps) or **Offline maps**. Each dot disappears when the corresponding update or App Store version is installed.
 
 ### 5.5 App update page (`more/update`)
 
@@ -159,6 +167,7 @@ its own, under Offline maps) and **Offline maps**. Each goes when its update is 
 - Status: "Up to date", "Checking…", or the update: version, build, date, size and the notes (commit titles).
 - Actions:
   - JS update downloaded: **Restart to update**.
+  - TestFlight install: "wtf.ai is now on the App Store", **Open App Store**.
   - Android native: **Download and install** (progress, cancel), then **Install** (opens the installer again).
   - iOS native: **Open AltStore**, **Share IPA**; the first time: "Add the wtf.ai source in AltStore once; it then
     shows every update."

@@ -23,6 +23,7 @@ layout: null
   <meta name="twitter:title" content="wtf.ai — Where the f* am I?">
   <meta name="twitter:description" content="Offline car navigation to help you stay on track when GPS lets you down. Maps, address search and voice guidance without internet.">
   <meta name="twitter:image" content="https://wtf-ai.uk/assets/share.png">
+  <meta name="apple-itunes-app" content="app-id={{ site.app_store_id }}">
   <link rel="canonical" href="https://wtf-ai.uk/en.html">
   <link rel="icon" href="assets/icon.png">
   <link rel="alternate" hreflang="uk" href="./">
@@ -59,7 +60,7 @@ layout: null
         <h1>Where the f* am&nbsp;I?</h1>
         <p class="lead">Offline car navigation to help you stay on track when GPS lets you down.</p>
         <div class="badges">
-          <a class="badge" href="#install">iPhone · public beta</a>
+          <a class="badge" href="{{ site.app_store_url }}">iPhone · App Store</a>
           <a class="badge" href="#install">Android · APK</a>
         </div>
         <p class="note"><b>Navigation without GPS needs a car adapter:</b> a small Bluetooth device that reports
@@ -154,13 +155,9 @@ layout: null
       <h2>Install</h2>
       <p class="sub">Free, no account.</p>
       <div class="grid">
-        <div class="card"><h3 class="with-icon"><span class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20.94c1.5 0 2.75 1.06 4 1.06 3 0 6-8 6-12.22A4.91 4.91 0 0 0 17 5c-2.22 0-4 1.44-5 2-1-.56-2.78-2-5-2a4.9 4.9 0 0 0-5 4.78C2 14 5 22 8 22c1.25 0 2.5-1.06 4-1.06Z"/><path d="M10 2c1 .5 2 2 2 5"/></svg></span>iPhone</h3><ol>
-          <li>On the iPhone, open <a href="{{ site.testflight_url }}">the TestFlight invitation</a>.</li>
-          <li>Install <b>TestFlight</b>, Apple's app for beta versions, from the App Store.</li>
-          <li><b>No invitation code is needed.</b> If TestFlight asks for one, close it, come back to this page
-            and open the invitation again.</li>
-          <li>Tap <b>Accept</b>, then <b>Install</b>.</li>
-        </ol></div>
+        <div class="card"><h3 class="with-icon"><span class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20.94c1.5 0 2.75 1.06 4 1.06 3 0 6-8 6-12.22A4.91 4.91 0 0 0 17 5c-2.22 0-4 1.44-5 2-1-.56-2.78-2-5-2a4.9 4.9 0 0 0-5 4.78C2 14 5 22 8 22c1.25 0 2.5-1.06 4-1.06Z"/><path d="M10 2c1 .5 2 2 2 5"/></svg></span>iPhone</h3><p>Get <a href="{{ site.app_store_url }}">wtf.ai on the App
+          Store</a>.</p><p><b>Already using the TestFlight beta?</b> Install the App Store version to replace it.
+          Your maps, saved places and settings will be preserved. You'll also see a reminder in the app.</p></div>
         <div class="card"><h3 class="with-icon"><span class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 19a10 10 0 0 1 20 0Z"/><path d="m4.9 11.9-2.4-2.4"/><path d="m19.1 11.9 2.4-2.4"/><path d="M8 15h.01"/><path d="M16 15h.01"/></svg></span>Android</h3><ol>
           <li>On the phone, download <a href="{{ site.apk_url }}">the app (APK file)</a>.</li>
           <li>Open the downloaded file.</li>
@@ -231,8 +228,7 @@ layout: null
           highway. Mistakes can still happen, especially if you start a drive without GPS and set the initial
           position or the car's heading incorrectly. If the dot is in the wrong place, stop somewhere safe
           and correct the position and heading manually.</p></div>
-        <div class="card"><h3>Is it really free?</h3><p>Yes! Not just during the beta —
-          the app is free and will stay free forever.</p></div>
+        <div class="card"><h3>Is it really free?</h3><p>Yes! The app is free and always will be.</p></div>
         <div class="card"><h3>Can I leave the adapter plugged into the OBD port?</h3><p>Usually, yes,
           and many drivers do. But some cheap adapters don't go to sleep and slowly drain the car's battery.
           If you won't be driving for several weeks, it's best to unplug the adapter. This is especially
@@ -244,7 +240,7 @@ layout: null
   <section id="contact">
     <div class="wrap">
       <h2>Tell us what you think</h2>
-      <p class="sub">The app is still in beta. Your feedback helps us improve it, and we read every message.</p>
+      <p class="sub">Your feedback helps us make the app better. We read every message.</p>
       {% if site.support_email %}<div class="contact">
         <a class="badge" href="mailto:{{ site.support_email }}?subject=wtf.ai%20feedback">{{ site.support_email }}</a>
       </div>{% endif %}

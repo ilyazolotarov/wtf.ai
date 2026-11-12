@@ -10,7 +10,7 @@ It works **offline**: you download your region once, and the map, address search
 no internet after that. No account is needed. Your position and trip logs stay on your phone by default. You decide
 when to share them.
 
-**Get the app:** iPhone, the [public beta on TestFlight](https://testflight.apple.com/join/nCHCN441); Android, the newest APK from the [website](https://wtf-ai.uk/en.html).
+**Get the app:** download the iPhone app from the [App Store](https://apps.apple.com/app/id6820505133), or get the latest Android APK from the [website](https://wtf-ai.uk/en.html).
 
 ## Start here
 

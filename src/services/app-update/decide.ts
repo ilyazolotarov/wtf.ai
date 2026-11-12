@@ -56,7 +56,7 @@ export function mapAction(update: MapUpdate | null, unmetered: boolean, skippedR
   return update.bytes <= AUTO_MAP_BYTES ? "auto" : "prompt";
 }
 
-export type PromptKind = "native" | "js" | "map";
+export type PromptKind = "native" | "js" | "store" | "map";
 
 export interface Found {
   native: AppBuildInfo | null;
@@ -64,12 +64,15 @@ export interface Found {
   js: string | null;
   map: MapUpdate | null;
   mapAction: MapAction;
+  /** iOS: installed by TestFlight, while the app is on the App Store: the driver should move to it. */
+  testFlight: boolean;
 }
 
 /** Identifies a prompt's version, for "Later". */
 export function promptKey(kind: PromptKind, found: Found): string | null {
   if (kind === "native") return found.native ? `native:${found.native.build}` : null;
   if (kind === "js") return found.js ? `js:${found.js}` : null;
+  if (kind === "store") return found.testFlight ? "store" : null;
   return found.map && found.mapAction === "prompt" ? `map:${found.map.region}:${found.map.release}` : null;
 }
 
@@ -86,7 +89,7 @@ export interface PromptContext {
 /** The one prompt to show now, the most important first; null when nothing should interrupt. */
 export function nextPrompt(found: Found, ctx: PromptContext): { kind: PromptKind; key: string } | null {
   if (ctx.busy) return null;
-  for (const kind of ["native", "js", "map"] as const) {
+  for (const kind of ["native", "js", "store", "map"] as const) {
     const key = promptKey(kind, found);
     if (key && !ctx.shown.has(key) && !((ctx.snoozed[key] ?? 0) > ctx.now)) return { kind, key };
   }
@@ -95,7 +98,7 @@ export function nextPrompt(found: Found, ctx: PromptContext): { kind: PromptKind
 
 /** The red dots (§5.4): on More, and on its App update and Offline maps rows. */
 export function badges(found: Found): { app: boolean; maps: boolean; any: boolean } {
-  const app = found.native != null || found.js != null;
+  const app = found.native != null || found.js != null || found.testFlight;
   const maps = found.map != null && (found.mapAction === "prompt" || found.mapAction === "dot");
   return { app, maps, any: app || maps };
 }

@@ -26,7 +26,7 @@ const build = (n: number, runtime = `fp${n}`): AppBuildInfo => ({
 });
 
 const MAP: MapUpdate = { region: "kyiv", name: { en: "Kyiv", uk: "Київ" }, osmDate: "2026-10-08", release: "a1b2c3d4", bytes: 50e6 };
-const NONE: Found = { native: null, js: null, map: null, mapAction: "none" };
+const NONE: Found = { native: null, js: null, map: null, mapAction: "none", testFlight: false };
 const ctx = (patch: Partial<Parameters<typeof nextPrompt>[1]> = {}) => ({ busy: false, now: 1000, snoozed: {}, shown: new Set<string>(), ...patch });
 
 describe("nativeUpdate", () => {
@@ -68,12 +68,19 @@ describe("mapAction", () => {
 });
 
 describe("nextPrompt", () => {
-  const all: Found = { native: build(101), js: "upd-1", map: { ...MAP, bytes: 1.7e9 }, mapAction: "prompt" };
+  const all: Found = { native: build(101), js: "upd-1", map: { ...MAP, bytes: 1.7e9 }, mapAction: "prompt", testFlight: true };
 
-  it("asks about the native build first, then the JS update, then the map", () => {
+  it("asks about the native build first, then the JS update, then the App Store, then the map", () => {
     expect(nextPrompt(all, ctx())).toEqual({ kind: "native", key: "native:101" });
     expect(nextPrompt({ ...all, native: null }, ctx())).toEqual({ kind: "js", key: "js:upd-1" });
-    expect(nextPrompt({ ...all, native: null, js: null }, ctx())).toEqual({ kind: "map", key: "map:kyiv:a1b2c3d4" });
+    expect(nextPrompt({ ...all, native: null, js: null }, ctx())).toEqual({ kind: "store", key: "store" });
+    expect(nextPrompt({ ...all, native: null, js: null, testFlight: false }, ctx())).toEqual({ kind: "map", key: "map:kyiv:a1b2c3d4" });
+  });
+
+  it("asks a TestFlight install to move to the App Store, held back by Later like the others", () => {
+    expect(nextPrompt({ ...NONE, testFlight: true }, ctx())).toEqual({ kind: "store", key: "store" });
+    expect(nextPrompt({ ...NONE, testFlight: true }, ctx({ snoozed: { store: 2000 } }))).toBeNull();
+    expect(nextPrompt({ ...NONE, testFlight: true }, ctx({ shown: new Set(["store"]) }))).toBeNull();
   });
 
   it("never interrupts while something is going on", () => {
@@ -99,6 +106,7 @@ describe("badges", () => {
     expect(badges(NONE)).toEqual({ app: false, maps: false, any: false });
     expect(badges({ ...NONE, js: "u" })).toEqual({ app: true, maps: false, any: true });
     expect(badges({ ...NONE, native: build(101) }).app).toBe(true);
+    expect(badges({ ...NONE, testFlight: true })).toEqual({ app: true, maps: false, any: true });
     expect(badges({ ...NONE, map: MAP, mapAction: "dot" })).toEqual({ app: false, maps: true, any: true });
     expect(badges({ ...NONE, map: MAP, mapAction: "prompt" }).maps).toBe(true);
     // Coming by itself, or skipped: nothing to do.

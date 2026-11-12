@@ -1,9 +1,10 @@
 import { router } from "expo-router";
 import * as Updates from "expo-updates";
 import { useEffect, useRef, useState } from "react";
-import { Alert, type AlertButton } from "react-native";
+import { Alert, Linking, type AlertButton } from "react-native";
 
 import { formatMb } from "@/components/downloads/region-downloads";
+import { APP_STORE_URL } from "@/config/distribution";
 import { useT } from "@/i18n/provider";
 import { nextPrompt } from "@/services/app-update/decide";
 import { openAltStore } from "@/services/app-update/native-build";
@@ -19,9 +20,9 @@ import {
 
 /**
  * The update prompts (docs/UPDATES-SPEC.md §5.3), on the map screen: one system alert per check, the native build
- * first, then a downloaded JS update, then a map too big to fetch by itself. `busy` (a trip, a route, an adapter, the
- * car moving, another screen or card on top) keeps them back; the dots on More still show. Also tells the update
- * center which JS update `expo-updates` has downloaded.
+ * first, then a downloaded JS update, then the App Store for a TestFlight install, then a map too big to fetch by
+ * itself. `busy` (a trip, a route, an adapter, the car moving, another screen or card on top) keeps them back; the
+ * dots on More still show. Also tells the update center which JS update `expo-updates` has downloaded.
  */
 export function UpdatePrompts({ busy }: { busy: boolean }) {
   const { t, language } = useT();
@@ -81,6 +82,10 @@ export function UpdatePrompts({ busy }: { busy: boolean }) {
       title = t("promptJsTitle");
       body = t("promptJsBody");
       buttons = [later, { text: t("promptRestart"), onPress: close(() => void Updates.reloadAsync()) }];
+    } else if (next.kind === "store") {
+      title = t("promptAppStoreTitle");
+      body = t("promptAppStoreBody");
+      buttons = [later, { text: t("appStoreOpen"), onPress: close(() => void Linking.openURL(APP_STORE_URL).catch(() => undefined)) }];
     } else if (next.kind === "map" && found.map) {
       const map = found.map;
       title = t("promptMapTitle").replace("{region}", map.name[language]);

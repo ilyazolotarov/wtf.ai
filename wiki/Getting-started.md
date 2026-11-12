@@ -4,8 +4,8 @@
 
 ## 1. Install
 
-- **iPhone**: the public beta on [TestFlight](https://testflight.apple.com/join/nCHCN441). Open the link on the
-  iPhone: it asks you to install Apple's TestFlight app first, then wtf.ai from it.
+- **iPhone**: download [wtf.ai from the App Store](https://apps.apple.com/app/id6820505133). Already using the
+  TestFlight beta? Install the App Store version to replace it. Your maps, saved places and settings will be preserved.
 - **Android**: the APK linked on the [website](https://wtf-ai.uk/en.html), always the newest build. The first time,
   Android asks to allow installing apps from your browser.
 

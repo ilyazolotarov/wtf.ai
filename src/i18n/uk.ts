@@ -687,6 +687,12 @@ export const uk = {
   promptJsBody:
     "Перезапустіть застосунок, щоб застосувати оновлення. Це займе кілька секунд.",
   promptRestart: "Перезапустити",
+  promptAppStoreTitle: "wtf.ai вже в App Store",
+  promptAppStoreBody:
+    "Ви користуєтеся бета-версією з TestFlight. Установіть натомість версію з App Store — усі ваші мапи, місця й налаштування збережуться.",
+  appStoreOpen: "Відкрити App Store",
+  appStoreNote:
+    "Ви користуєтеся бета-версією з TestFlight. Установіть натомість версію з App Store — усі ваші мапи, місця й налаштування збережуться. Надалі застосунок оновлюватиметься через App Store.",
   promptMapTitle: "Оновлення мапи: {region}",
   promptMapBody:
     "Доступна новіша мапа (дані OSM від {date}). Розмір завантаження — {size}.",
