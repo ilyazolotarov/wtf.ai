@@ -1224,10 +1224,16 @@ export class NavigatorService implements PositionSource {
 
   private noteAdvance(): void {
     if (!this.advanceListeners.size) return;
-    const phoneEngine = this.phoneOnly && this.deps.nowUs() - this.lastObdUs >= OBD_TIMEOUT_US ? this.phone?.engine : undefined;
+    const withObd = this.deps.nowUs() - this.lastObdUs < OBD_TIMEOUT_US;
+    const phoneEngine = this.phoneOnly && !withObd ? this.phone?.engine : undefined;
     const e = phoneEngine?.estimate() ?? this.nav?.estimate();
     if (!e) return;
-    const advance: NavAdvance = { lat: e.lat, lon: e.lon, headingRad: e.headingRad, speedMps: e.speedMps, tUs: e.tUs };
+    // The car silent, the dot is the phone's fix (`publishDot`) and the navigator's heading is held (the car last stood:
+    // the driver may have walked off with the phone): fed with it, the map's dot and heading-up camera kept the heading
+    // the car had when the adapter dropped, all the way through a drive on good fixes (2026-11-13). Without a heading the
+    // feed moves the dot on along the published course.
+    const heading = phoneEngine || withObd ? e.headingRad : undefined;
+    const advance: NavAdvance = { lat: e.lat, lon: e.lon, headingRad: heading, speedMps: e.speedMps, tUs: e.tUs };
     this.advanceListeners.forEach((l) => l(advance));
   }
 

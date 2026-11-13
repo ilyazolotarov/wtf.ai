@@ -17,6 +17,7 @@ import type { KeyValueStore } from "@/obd/vehicle-link-core";
 import { CALIBRATION_KEY, CalibrationStore, PARKED_POSES_KEY, type StoredPose, type StoredSnapshot } from "@/services/navigation/calibration-store";
 import { seedFromLog } from "@/services/navigation/app-replay";
 import { NavigatorService } from "@/services/navigation/navigator-service";
+import { PuckFeeder } from "@/services/navigation/puck-feed";
 import type { ActiveRoadGraph, RoadGraphSource } from "@/services/offline-map/road-graph-file";
 import type { decodeImuBatch } from "@/services/sensor-capture/sensor-service";
 import { GNSS_FLAGS, type GnssRecord, type NavEstimateRecord, type NavMapMatchRecord } from "@/triplog/schema";
@@ -1062,6 +1063,51 @@ describe("the car left parked, the phone elsewhere (NAVIGATOR-SPEC §6.1, UI-SPE
     h.service.stop();
     expect(haversineM(storedPose(store)!, placed)).toBeLessThan(3);
     expect(haversineM(storedPose(store)!, pose)).toBeGreaterThan(9);
+  });
+});
+
+describe("the adapter lost while the car stands, then driving on GPS", () => {
+  // Standing, the adapter drops; the car drives off on good fixes and turns left, right and right (2026-11-13).
+  const SEGMENTS: DriveSegment[] = [
+    ...cityDrive(1),
+    { durationS: 4, speedMps: 0, yawRateDegS: 0 },
+    { durationS: 10, speedMps: 0, yawRateDegS: 0 },
+    { durationS: 10, speedMps: 10, yawRateDegS: 0 },
+    { durationS: 9, speedMps: 8, yawRateDegS: 10 },
+    { durationS: 15, speedMps: 10, yawRateDegS: 0 },
+    { durationS: 6, speedMps: 8, yawRateDegS: -15 },
+    { durationS: 15, speedMps: 10, yawRateDegS: 0 },
+    { durationS: 6, speedMps: 8, yawRateDegS: -15 },
+    { durationS: 15, speedMps: 10, yawRateDegS: 0 },
+  ];
+
+  test("the map's dot and heading-up camera turn with the car, not the heading the adapter left", async () => {
+    const drive = syntheticDrive({ segments: SEGMENTS, gnss: "clean", startHeadingRad: 1, seed: 4 });
+    const h = harness();
+    // Each pose fed to the map while the car drives without the adapter, beside the published heading (the GPS course).
+    const fed: { courseDeg: number; publishedDeg: number }[] = [];
+    let silent = false;
+    const feeder = new PuckFeeder({ position: h.service, nowMs: () => Date.now() });
+    feeder.start();
+    feeder.register(
+      {
+        feedUserLocation: (_lat, _lon, courseDeg) => {
+          const p = h.service.getSnapshot();
+          if (silent && p?.headingRad !== undefined && (p.speedMps ?? 0) > 3) fed.push({ courseDeg, publishedDeg: (p.headingRad * 180) / Math.PI });
+        },
+      },
+      { active: () => true, hidden: () => false },
+    );
+    await h.service.start();
+    h.play(drive, { untilS: 70 });
+    silent = true;
+    h.play(drive, { withoutObd: true });
+    expect(h.service.getSnapshot()!.source).toBe("gnss");
+    const off = fed.filter((f) => Math.abs((((f.courseDeg - f.publishedDeg) % 360) + 540) % 360 - 180) > 5);
+    expect(fed.length).toBeGreaterThan(300);
+    expect(off).toEqual([]);
+    feeder.dispose();
+    h.service.stop();
   });
 });
 
