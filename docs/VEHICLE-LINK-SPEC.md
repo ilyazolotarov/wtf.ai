@@ -139,6 +139,12 @@ src/services/vehicle-link   (RN glue: native transports, discovery, persistence,
 | `onLinkState` | `{ state: 'connecting' \| 'connected' \| 'disconnected', reason?, errorCode? }` | on change |
 | `onUnsolicited` | bytes received while no transaction is in flight (`LV RESET`, `STOPPED`, stray prompts, the CAN monitor's output), with `rxUs` | as received |
 
+On iOS a lost link's `reason` ends with what the link had carried (`LinkTraffic.lossDetail`), and the `link-lost` link
+event logs it: `accessory disconnected (up 312 s, heard 5.1 s before, sent 13.1 s before)`, with `, 7 bytes unsent`
+when the link had stopped taking bytes. An adapter heard up to the loss was cut off mid-stream; one that had gone
+quiet, or had stopped taking bytes, was failing before. An MFi stream that closes names its side and error
+(`accessory stream closed: input ended`, `… output error NSPOSIXErrorDomain 57`).
+
 ### 5.3 Framing and writes
 
 - **Rx**: append bytes to a buffer; drop `0x00`; a response is complete when `>` arrives. Pass the raw text to TS;
@@ -146,7 +152,9 @@ src/services/vehicle-link   (RN glue: native transports, discovery, persistence,
 - **Tx (BLE)**: chunks of `maximumWriteValueLength(for: .withoutResponse)` for both write types (`LinkLogic.bleChunkLimit`).
   Write with response when the characteristic supports it, waiting for `didWriteValueFor` before the next chunk;
   otherwise write without response, gated by `canSendWriteWithoutResponse`. Never queued (long) writes.
-- **Tx (MFi)**: `OutputStream` on a dedicated thread with its own run loop; `InputStream` events feed the same framer.
+- **MFi**: both streams of the `EASession` live on a dedicated thread with its own run loop (`StreamLoop`), never the
+  main one: the adapter's bytes are read and written whatever the main thread is doing (two scenes drawing with
+  CarPlay, a touch being tracked). `InputStream` events feed the same framer.
 - **Timestamps**: `txUs` immediately before the (first) write; `rxFirstUs` on the first byte after it; `rxUs` on the
   chunk containing `>`.
 
@@ -293,6 +301,12 @@ Rules:
 
 - Pass = steps 3 and 4 succeed; the adapter is then marked verified and remembered.
 - Every probe exchange goes to the logger transcript (TRIP-LOGGER-SPEC §6.4).
+- **How the adapter was met** (link event `adapter-met`, from the flush's and the reset's answers, before anything is
+  changed): `still sending the bus's frames` (the flush brought four or more frame lines, or `STOPPED`: a link lost
+  under the CAN monitor left it listening), `set up as the last session left it` (the reset came without an echo:
+  the `ATE0` held, so it was not reset or powered down since), `at its defaults` (the reset echoed). After a lost
+  link it tells which side went: an adapter that kept running lost only its link. No event when the answers tell
+  neither (no banner to `ATZ`).
 - The cached protocol is the adapter's last car's. An adapter moved to another car must not stay on it (a CAN
   protocol on a K-line car answered `CAN ERROR` every 5 s). `NO DATA` doesn't start a search: the bus is there and
   the ECUs are asleep.
@@ -654,7 +668,9 @@ adapter (`BUFFER FULL`, and the MX+ answered `STOPPED` to polls for seconds afte
   taking the adapter near home. Every silent monitor on the vLinker (2026-10-20..30, both phones) came at 0 km/h with
   the link lost within a second and back within seconds to minutes, and the adapter answered a reset moments later;
   one phone had stored a freeze from such a silence and lost the wheels' speed for good. Verdicts stored under that
-  rule are not read (the key changed).
+  rule are not read (the key changed). Turning the setting (§16.3) on again forgets the stored freezes (`can-shadow:
+  freezes forgotten: the monitor gets another try`): the adapter listens again on the firmware it has, and is kept
+  off again if it freezes while the car moves.
 - **Into the log, per window** (`can_window`, TRIP-LOGGER-SPEC §6.3): duration, frames, bytes, frames of other ids,
   the stop's latency, whether the first stop character got no prompt, how the filter was opened. Frames the stop
   drained are timed at the stop character. The transcript gets the shadow's own exchanges for the first three of each

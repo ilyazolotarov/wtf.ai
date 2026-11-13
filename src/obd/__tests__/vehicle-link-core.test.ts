@@ -264,12 +264,16 @@ describe("VehicleLinkCore", () => {
   });
 
   test("link loss → reconnecting → polling again", async () => {
-    const { core, emulators, states } = setup();
+    const { core, emulators, states, events } = setup();
+    const met = () => events.filter((e) => e.type === "adapter-met").map((e) => e.detail);
     core.startDiscovery();
     void core.connect("emu-1");
     await until(() => core.getSnapshot().link === "polling");
+    expect(met()).toEqual(["at its defaults: reset or powered up since the last session"]);
     emulators.get("emu-1")!.dropLink();
     await until(() => states.includes("reconnecting") && core.getSnapshot().link === "polling");
+    // The adapter kept its settings through the loss: the link went, not the adapter.
+    expect(met()[1]).toBe("set up as the last session left it: not reset or powered down since");
     await core.disconnect();
   });
 
@@ -711,6 +715,16 @@ describe("VehicleLinkCore", () => {
         core.setCanShadow(null);
         core.setCanShadow([0x215, 0x228]);
         await until(() => windows.length >= n + 3);
+        // The same firmware, the driver turning the setting on again: another try.
+        store.setJson("vehicleLink.canShadowFrozeDriving", { "emu-1": chip });
+        core.setCanShadow(null);
+        core.setCanShadow([0x215, 0x228]);
+        expect(core.getSnapshot().canOff).toBe("firmware");
+        const m = windows.length;
+        core.retryCanShadow();
+        expect(core.getSnapshot().canOff).toBeNull();
+        expect(store.getJson("vehicleLink.canShadowFrozeDriving")).toEqual({});
+        await until(() => windows.length >= m + 3);
       } finally {
         await core.disconnect();
       }
@@ -1022,6 +1036,8 @@ describe("VehicleLinkCore", () => {
         expect(core.getSnapshot().canShadow?.state).toBe("listening");
         emu.dropLink();
         await until(() => events.some((e) => e.type === "link-restored"));
+        await until(() => events.filter((e) => e.type === "adapter-met").length >= 2);
+        expect(events.filter((e) => e.type === "adapter-met")[1].detail).toBe("still sending the bus's frames: it kept running, only the link was down");
         expect(events.some((e) => e.type === "probe-failed")).toBe(false);
         // CAN speed stopped coming with the link: OBD's polls and the monitor's windows are back.
         const n = windows.length;

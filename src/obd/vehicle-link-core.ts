@@ -6,7 +6,7 @@ import { CanMonitorCollector, formatSurvey, sliceFilter, type CanFrame, type Can
 import { CanShadow, type CanShadowStatus, type CanWindow } from "./can-shadow";
 import { compareDevices, rankDevice } from "./catalog";
 import type { Clock } from "./clock";
-import { probeAdapter, searchProtocols, warmReset, wrongBus } from "./elm327/probe";
+import { probeAdapter, searchProtocols, warmReset, wrongBus, type AdapterMet } from "./elm327/probe";
 import { initVehicle, readVin } from "./elm327/init";
 import { parseMode01 } from "./elm327/parser";
 import { Elm327Session, Priority, SessionClosedError } from "./elm327/session";
@@ -89,6 +89,12 @@ const ADAPTERS_KEY = "vehicleLink.adapters";
  * silences while standing, which were the link dropping near home, not the adapter: 2026-10-30.)
  */
 const SHADOW_FROZE_KEY = "vehicleLink.canShadowFrozeDriving";
+/** How the probe met the adapter (§8.1), as the `adapter-met` link event says it. */
+const MET: Record<AdapterMet, string> = {
+  monitoring: "still sending the bus's frames: it kept running, only the link was down",
+  configured: "set up as the last session left it: not reset or powered down since",
+  defaults: "at its defaults: reset or powered up since the last session",
+};
 const CARS_KEY = "vehicleLink.cars";
 const STATS_INTERVAL_US = 250_000;
 
@@ -474,6 +480,17 @@ export class VehicleLinkCore implements VehicleLink {
   }
 
   /**
+   * The driver turned the wheels' speed on again (Settings): adapters kept off the monitor for freezing in it (§16.2)
+   * get another try, on the firmware they have. One that freezes again while the car moves is kept off again.
+   */
+  retryCanShadow(): void {
+    if (Object.keys(this.shadowFroze()).length === 0) return;
+    this.deps.store.setJson(SHADOW_FROZE_KEY, {});
+    this.event("can-shadow", "freezes forgotten: the monitor gets another try");
+    if (this.poller) this.attachShadow();
+  }
+
+  /**
    * The monitor is on this session and hasn't failed: only then can CAN carry the speed. Otherwise (no ids, an adapter
    * or car that can't, a failed monitor) the polls are all there is, and nothing pauses them.
    */
@@ -624,6 +641,8 @@ export class VehicleLinkCore implements VehicleLink {
       onSearch: (active) => this.update({ protocolSearch: active }),
     });
     this.check(gen);
+    // After a lost link this tells which side went: an adapter that kept running lost only its link.
+    if (probe.met) this.event("adapter-met", MET[probe.met]);
     if (!probe.ok) {
       // Under a reconnect it is retried, no fault yet: the detail says so (Sentry leaves those out).
       this.event("probe-failed", reconnect ? `${probe.failedStep}${RECONNECTING}` : probe.failedStep);

@@ -134,6 +134,47 @@ enum LinkLogic {
   }
 }
 
+/**
+ * What a link had carried when it was lost, for the reason JS logs with `link-lost` (VEHICLE-LINK-SPEC §5.2): an
+ * adapter heard up to the loss was cut off mid-stream; one that had gone quiet, or had stopped taking the bytes
+ * written to it, was failing before.
+ */
+struct LinkTraffic {
+  var openedUs: Double
+  var lastRxUs: Double?
+  var lastTxUs: Double?
+  /** Bytes handed over for writing that the link has not taken yet. */
+  var unsentBytes = 0
+
+  init(openedUs: Double) {
+    self.openedUs = openedUs
+  }
+
+  mutating func heard(nowUs: Double) {
+    lastRxUs = nowUs
+  }
+
+  mutating func queued(_ bytes: Int) {
+    unsentBytes += bytes
+  }
+
+  /** `bytes` went out at `nowUs`. Never below zero: a write of the link before this one can report late. */
+  mutating func sent(_ bytes: Int, nowUs: Double) {
+    unsentBytes = max(0, unsentBytes - bytes)
+    lastTxUs = nowUs
+  }
+
+  /** "up 312 s, heard 5.1 s before, sent 0.2 s before, 7 bytes unsent". */
+  func lossDetail(nowUs: Double) -> String {
+    func before(_ us: Double) -> String { String(format: "%.1f s before", max(0, nowUs - us) / 1_000_000) }
+    var parts = [String(format: "up %.0f s", max(0, nowUs - openedUs) / 1_000_000)]
+    parts.append(lastRxUs.map { "heard \(before($0))" } ?? "never heard")
+    parts.append(lastTxUs.map { "sent \(before($0))" } ?? "nothing sent")
+    if unsentBytes > 0 { parts.append("\(unsentBytes) bytes unsent") }
+    return parts.joined(separator: ", ")
+  }
+}
+
 /** Accumulates adapter bytes until the ELM `>` prompt (VEHICLE-LINK-SPEC §5.3). */
 struct PromptFramer {
   private(set) var buffer = Data()

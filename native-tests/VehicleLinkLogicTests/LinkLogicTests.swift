@@ -185,6 +185,28 @@ final class ChunkAndIdTests: XCTestCase {
   }
 }
 
+final class LinkTrafficTests: XCTestCase {
+  func testLossDetailSaysWhenTheAdapterWasLastHeardAndWrittenTo() {
+    var traffic = LinkTraffic(openedUs: 1_000_000)
+    XCTAssertEqual(traffic.lossDetail(nowUs: 3_000_000), "up 2 s, never heard, nothing sent")
+    traffic.queued(5)
+    traffic.sent(5, nowUs: 300_000_000)
+    traffic.heard(nowUs: 308_040_000)
+    XCTAssertEqual(traffic.lossDetail(nowUs: 313_100_000), "up 312 s, heard 5.1 s before, sent 13.1 s before")
+  }
+
+  func testLossDetailCountsBytesTheLinkNeverTook() {
+    var traffic = LinkTraffic(openedUs: 0)
+    traffic.queued(5)
+    traffic.queued(4)
+    traffic.sent(2, nowUs: 1_000_000)
+    XCTAssertEqual(traffic.lossDetail(nowUs: 1_500_000), "up 2 s, never heard, sent 0.5 s before, 7 bytes unsent")
+    // A write of the link before this one, reported late, takes nothing below zero.
+    traffic.sent(20, nowUs: 1_600_000)
+    XCTAssertEqual(traffic.unsentBytes, 0)
+  }
+}
+
 final class PromptFramerTests: XCTestCase {
   func testCompletesOnPromptAcrossChunks() {
     var f = PromptFramer()

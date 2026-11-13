@@ -773,8 +773,10 @@ export function getRuntime(): Runtime {
       // The log's info has the setting the drive started with; a change mid-drive is a note.
       if (patch.wheelSpeed !== undefined) {
         recorder.note(`can bus ${dev.wheelSpeed ? "primary" : "off"}`);
-        // Turned on again: cars taken for OBD only, and profiles that failed probation, get another try.
+        // Turned on again: cars taken for OBD only, profiles that failed probation, and adapters that froze in the
+        // monitor get another try.
         if (dev.wheelSpeed) {
+          link.retryCanShadow();
           canAuto.forgetNone();
           canProbation.forgetFailed();
           canDiscovery.forgetNone();

@@ -91,6 +91,17 @@ describe("probe", () => {
     expect((await probeAdapter(send)).chip).toBe("STN2255 v5.10.3");
   });
 
+  // After a lost link this tells which side went (the `adapter-met` link event).
+  test("how the adapter was met: at its defaults, as the last session left it, still in the CAN monitor", async () => {
+    const { send, emu } = await setup({ ...STN_PROFILE, broadcast: [{ id: 0x215, periodMs: 10, data: [0x27, 0x10] }] });
+    expect((await probeAdapter(send)).met).toBe("defaults");
+    // The probe's ATE0 holds while the adapter stays powered.
+    expect((await probeAdapter(send)).met).toBe("configured");
+    await emu.writeRaw("STM\r");
+    await until(() => false, 50).catch(() => undefined);
+    expect((await probeAdapter(send)).met).toBe("monitoring");
+  });
+
   test("non-ELM device fails at reset", async () => {
     const { send } = await setup({ isElm: false });
     // Not a byte back: nothing there talks (another phone holding the adapter looks the same).

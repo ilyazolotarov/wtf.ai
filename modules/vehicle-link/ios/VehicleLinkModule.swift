@@ -123,6 +123,35 @@ public class VehicleLinkModule: Module {
   }
 }
 
+/**
+ * The MFi streams' own thread and run loop (§5.3): the adapter's bytes are read and written whatever the main thread
+ * is doing (two scenes drawing with CarPlay, a touch being tracked).
+ */
+final class StreamLoop {
+  private var loop: CFRunLoop?
+
+  init() {
+    let ready = DispatchSemaphore(value: 0)
+    let thread = Thread { [self] in
+      loop = CFRunLoopGetCurrent()
+      // A port keeps the loop running while no stream is scheduled in it.
+      RunLoop.current.add(NSMachPort(), forMode: .default)
+      ready.signal()
+      CFRunLoopRun()
+    }
+    thread.name = "ai.wtf.vehiclelink.mfi"
+    thread.qualityOfService = .userInitiated
+    thread.start()
+    ready.wait()
+  }
+
+  /** Runs `block` on the streams' thread, in the order given. */
+  func async(_ block: @escaping () -> Void) {
+    CFRunLoopPerformBlock(loop, CFRunLoopMode.defaultMode.rawValue, block)
+    CFRunLoopWakeUp(loop)
+  }
+}
+
 // MARK: - Core
 
 final class LinkCore: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, StreamDelegate {
@@ -171,9 +200,13 @@ final class LinkCore: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
   private var eaProtocol: String?
   /** A connect is pending until the MFi accessory connects to iOS (EAAccessoryDidConnect). */
   private var mfiWaiting = false
-  /** Touched on the main thread only (MFi streams live on the main run loop). */
+  private lazy var streams = StreamLoop()
+  /** Touched on the streams' thread only. */
   private var eaOutput = Data()
-  private var mainOutputStream: OutputStream?
+  private var eaOutputStream: OutputStream?
+
+  /** What the link has carried, for the reason of its loss. On `queue`. */
+  private var traffic = LinkTraffic(openedUs: 0)
 
   // Transactions
   private struct Pending {
@@ -496,6 +529,7 @@ final class LinkCore: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
     connectTimer?.cancel()
     connectTimer = nil
     linkUp = true
+    traffic = LinkTraffic(openedUs: LinkCore.nowUs())
     emit("onLinkState", ["state": "connected"])
     promise.resolve(info)
   }
@@ -515,14 +549,14 @@ final class LinkCore: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
       central?.cancelPeripheralConnection(p)
     }
     if kind == .mfi, let session = eaSession {
-      DispatchQueue.main.async {
+      streams.async {
         for stream in [session.inputStream as Stream?, session.outputStream as Stream?].compactMap({ $0 }) {
           stream.delegate = nil
           stream.close()
-          stream.remove(from: RunLoop.main, forMode: .default)
+          stream.remove(from: .current, forMode: .default)
         }
         self.eaOutput.removeAll()
-        self.mainOutputStream = nil
+        self.eaOutputStream = nil
       }
     }
     if connectPromise == nil { kind = .none }
@@ -532,7 +566,7 @@ final class LinkCore: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
     eaSession = nil
     eaAccessory = nil
     if notify && wasUp {
-      emit("onLinkState", ["state": "disconnected", "reason": reason])
+      emit("onLinkState", ["state": "disconnected", "reason": "\(reason) (\(traffic.lossDetail(nowUs: LinkCore.nowUs())))"])
     }
   }
 
@@ -693,11 +727,15 @@ final class LinkCore: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
       if withResponse {
         if bleAwaitingWriteAck { return }
         bleAwaitingWriteAck = true
-        p.writeValue(bleChunks.removeFirst(), for: w, type: .withResponse)
+        let chunk = bleChunks.removeFirst()
+        p.writeValue(chunk, for: w, type: .withResponse)
+        traffic.sent(chunk.count, nowUs: LinkCore.nowUs())
         return
       }
       if !p.canSendWriteWithoutResponse { return }
-      p.writeValue(bleChunks.removeFirst(), for: w, type: .withoutResponse)
+      let chunk = bleChunks.removeFirst()
+      p.writeValue(chunk, for: w, type: .withoutResponse)
+      traffic.sent(chunk.count, nowUs: LinkCore.nowUs())
     }
   }
 
@@ -728,11 +766,13 @@ final class LinkCore: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
         self.queue.async { self.failConnect(code: "device-not-found", message: "MFi session could not be opened") }
         return
       }
-      self.mainOutputStream = output
-      for stream in [input as Stream, output as Stream] {
-        stream.delegate = self
-        stream.schedule(in: RunLoop.main, forMode: .default)
-        stream.open()
+      self.streams.async {
+        self.eaOutputStream = output
+        for stream in [input as Stream, output as Stream] {
+          stream.delegate = self
+          stream.schedule(in: .current, forMode: .default)
+          stream.open()
+        }
       }
       self.queue.async {
         self.kind = .mfi
@@ -754,7 +794,7 @@ final class LinkCore: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
     }
   }
 
-  /** MFi stream events arrive on the main thread. */
+  /** MFi stream events arrive on the streams' thread. */
   func stream(_ aStream: Stream, handle eventCode: Stream.Event) {
     switch eventCode {
     case .hasBytesAvailable:
@@ -768,16 +808,20 @@ final class LinkCore: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
       }
       if !data.isEmpty { queue.async { self.onBytes(data) } }
     case .hasSpaceAvailable:
-      pumpMfiOnMain()
+      pumpMfi()
     case .errorOccurred, .endEncountered:
-      queue.async { self.closeLink(reason: "accessory stream closed", notify: true) }
+      let side = aStream is InputStream ? "input" : "output"
+      let error = (aStream.streamError as NSError?).map { " \($0.domain) \($0.code)" } ?? ""
+      let what = eventCode == .endEncountered ? "ended" : "error\(error)"
+      queue.async { self.closeLink(reason: "accessory stream closed: \(side) \(what)", notify: true) }
     default:
       break
     }
   }
 
-  private func pumpMfiOnMain() {
-    guard let output = mainOutputStream else { return }
+  /** On the streams' thread. */
+  private func pumpMfi() {
+    guard let output = eaOutputStream else { return }
     while !eaOutput.isEmpty && output.hasSpaceAvailable {
       let written = eaOutput.withUnsafeBytes { (raw: UnsafeRawBufferPointer) -> Int in
         guard let base = raw.bindMemory(to: UInt8.self).baseAddress else { return 0 }
@@ -785,12 +829,15 @@ final class LinkCore: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
       }
       if written <= 0 { return }
       eaOutput.removeFirst(written)
+      let now = LinkCore.nowUs()
+      queue.async { self.traffic.sent(written, nowUs: now) }
     }
   }
 
   // MARK: Transactions
 
   private func write(_ data: Data) {
+    if kind != .none { traffic.queued(data.count) }
     switch kind {
     case .ble:
       guard let p = peripheral, writeChar != nil else { return }
@@ -801,9 +848,9 @@ final class LinkCore: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
       bleChunks.append(contentsOf: LinkLogic.chunk(data, size: limit))
       pumpBle()
     case .mfi:
-      DispatchQueue.main.async {
+      streams.async {
         self.eaOutput.append(data)
-        self.pumpMfiOnMain()
+        self.pumpMfi()
       }
     case .none:
       break
@@ -843,6 +890,7 @@ final class LinkCore: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
   /** Runs on `queue`. */
   private func onBytes(_ data: Data) {
     let now = LinkCore.nowUs()
+    traffic.heard(nowUs: now)
     let clean = PromptFramer.clean(data)
     if clean.isEmpty { return }
     guard var p = pending else {

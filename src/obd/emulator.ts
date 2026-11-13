@@ -388,6 +388,8 @@ export class Elm327Emulator implements Transport {
     if (cmd === "") cmd = this.lastCommand;
     else this.lastCommand = cmd;
 
+    // A reset is echoed as the adapter was set before it: one left at ATE0 answers with the banner alone.
+    const echo = this.echo;
     const { body, delayMs } = this.respond(cmd);
     const totalDelay = delayMs;
     if (totalDelay > timeoutMs) {
@@ -395,7 +397,7 @@ export class Elm327Emulator implements Transport {
       return { raw: "", status: "timeout", txUs, rxUs: this.clock.nowUs() };
     }
     await this.clock.sleep(totalDelay);
-    let raw = (this.echo ? command + eol : "") + body.join(eol) + eol + eol + ">";
+    let raw = (echo ? command + eol : "") + body.join(eol) + eol + eol + ">";
     if (this.profile.nulBytes) raw = "\0" + raw;
     if (this.desyncWhen?.(cmd)) {
       this.desyncWhen = null;

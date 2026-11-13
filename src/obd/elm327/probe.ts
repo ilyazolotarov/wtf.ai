@@ -14,6 +14,12 @@ export interface ProbeResult {
    * before, most likely another phone holds it (VEHICLE-LINK-SPEC §8.1), or it locked up.
    */
   silent?: boolean;
+  /**
+   * How the adapter was met, before the reset: still sending the bus's frames (a link lost under the CAN monitor left
+   * it listening), set up as the last session left it (no echo: not reset or powered down since), or at its defaults.
+   * Null: its answers tell neither.
+   */
+  met: AdapterMet | null;
   elmVersion: string | null;
   description: string | null;
   chip: string | null;
@@ -26,7 +32,23 @@ export interface ProbeResult {
   warnings: string[];
 }
 
+export type AdapterMet = "monitoring" | "configured" | "defaults";
+
 const BANNER = /ELM|STN|OBDLINK/i;
+/** A line of the monitor's output: an id and its data bytes in hex. */
+const FRAME = /^[0-9A-F ]{4,}$/i;
+
+/**
+ * What the flush and the reset say about the adapter before them. A monitor still running answers the flush with its
+ * frames (an ELM ends them with `STOPPED`; a poll answer repeated by the bare CR is a line or two, not four). An
+ * adapter that echoes the reset is at its defaults; one that doesn't kept the last session's `ATE0`.
+ */
+function metAs(flush: ElmResponse, reset: ElmResponse): AdapterMet | null {
+  const frames = flush.raw.split(/[\r\n]+/).filter((line) => FRAME.test(line.trim())).length;
+  if (/STOPPED/.test(flush.raw) || frames >= 4) return "monitoring";
+  if (!BANNER.test(reset.raw)) return null;
+  return /^[\s\0]*ATZ/i.test(reset.raw) ? "defaults" : "configured";
+}
 
 function text(r: ElmResponse): string {
   return r.lines.join(" ");
@@ -57,6 +79,7 @@ export interface ProbeOptions {
 export async function probeAdapter(send: Send, opts: ProbeOptions = {}): Promise<ProbeResult> {
   const result: ProbeResult = {
     ok: false,
+    met: null,
     elmVersion: null,
     description: null,
     chip: null,
@@ -76,10 +99,11 @@ export async function probeAdapter(send: Send, opts: ProbeOptions = {}): Promise
   };
 
   // 2. Flush half-typed input; some clones drop the first command after connect.
-  await resetSend("", { timeoutMs: 1000 });
+  const flush = await resetSend("", { timeoutMs: 1000 });
 
   // 3. Reset.
   let reset = await resetSend("ATZ", { timeoutMs: 3000 });
+  result.met = metAs(flush, reset);
   if (reset.status === "timeout" || !BANNER.test(text(reset))) {
     reset = await resetSend("ATWS", { timeoutMs: 3000 });
   }
