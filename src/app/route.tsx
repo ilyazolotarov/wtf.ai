@@ -27,6 +27,7 @@ import type { Place, SavedKind } from "@/services/navigation/places-store";
 import { useMapPacks } from "@/services/offline-map/map-packs";
 import { activeSearchIndex } from "@/services/offline-map/search-file";
 import { DESTINATION_KEY, type RouteSnapshot } from "@/services/navigation/route-service";
+import { requestPlacing } from "@/services/navigation/place-request";
 import { getRuntime } from "@/services/runtime";
 
 /** Search after typing pauses this long (ms). */
@@ -96,16 +97,22 @@ export default function RouteScreen() {
   const bounds = region?.bounds ?? null;
   // A place another app sent (a `geo:` link, +native-intent.tsx): its words or coordinates, searched. `adding`: this
   // page is the stop search (STOPS-SPEC §7.1), pushed over the trip: a result picked becomes a stop, each shown with
-  // its detour.
-  const { q: linked = "", adding: addingParam } = useLocalSearchParams<{ q?: string; adding?: string }>();
+  // its detour. `locating`: this page asks where the car is (no position yet, NAVIGATOR-SPEC §6.2): a result picked
+  // starts the placing there, so the pin is dragged a street, not across the region.
+  const { q: linked = "", adding: addingParam, locating: locatingParam } = useLocalSearchParams<{
+    q?: string;
+    adding?: string;
+    locating?: string;
+  }>();
   const adding = addingParam === "1";
+  const locating = addingParam !== "1" && locatingParam === "1";
   // A stop held by its handle: the page doesn't scroll under it.
   const [dragging, setDragging] = useState(false);
   // A route planned or failed (not followed yet): the page opens on its destination's card, in the page itself (no
   // list under it to go back to). With a route on, the page opens on its trip.
   const [destinationCard, setDestinationCard] = useState<Place | null>(() => {
     const d = route?.destination;
-    return !linked && !adding && d?.id && route?.status !== "active" ? { id: d.id, title: d.name ?? "", detail: null, lat: d.lat, lon: d.lon } : null;
+    return !linked && !adding && !locating && d?.id && route?.status !== "active" ? { id: d.id, title: d.name ?? "", detail: null, lat: d.lat, lon: d.lon } : null;
   });
   const routes = getRuntime().routes;
   const routeOn = route != null && route.status !== "failed";
@@ -187,6 +194,13 @@ export default function RouteScreen() {
     // Back to the trip, the stop in it.
     router.back();
   };
+  // Where the car is: back to the map, placing from there (null: from the map as it is).
+  const placeAt = (d: Coordinate | null) => {
+    Keyboard.dismiss();
+    requestPlacing(d);
+    router.dismissAll();
+  };
+  const pick = locating ? placeAt : adding ? addStop : open;
   // The destination's own card left: as the card on its page would be.
   const exitDestinationCard = (how: PlaceCardExit) => {
     setDestinationCard(null);
@@ -206,14 +220,18 @@ export default function RouteScreen() {
     // Elsewhere than the Saved section, a saved place shows its kind's icon at the end.
     const savedKind = options.icon ? null : (places.savedAt(d)?.kind ?? null);
     const estimate = adding ? route?.estimates : undefined;
+    // Asking where the car is with no position: a distance from the region's middle would only mislead.
     const where = estimate
       ? detourText(d.id in estimate ? estimate[d.id] : undefined, t)
-      : `${formatDistance(distanceM, language)} · ${cardinal(bearing, language)}`;
+      : locating && !position
+        ? null
+        : `${formatDistance(distanceM, language)} · ${cardinal(bearing, language)}`;
     const detail = options.detail === undefined ? d.detail : options.detail;
+    const line = [detail, where].filter(Boolean).join(" · ");
     return (
       <PressableFeedback
         key={key}
-        onPress={() => (adding ? addStop(d) : open(d))}
+        onPress={() => pick(d)}
         accessibilityRole="button"
         look="row"
         style={styles.destination}
@@ -228,9 +246,11 @@ export default function RouteScreen() {
           <T w="medium" size={16} numberOfLines={2}>
             {options.title ?? d.title}
           </T>
-          <T size={12} color={palette.text2} fit>
-            {detail ? `${detail} · ${where}` : where}
-          </T>
+          {line !== "" && (
+            <T size={12} color={palette.text2} fit>
+              {line}
+            </T>
+          )}
         </View>
         {routeId === d.id && (
           <View style={[styles.badge, { backgroundColor: palette.accentA }]}>
@@ -248,8 +268,8 @@ export default function RouteScreen() {
   };
 
   return (
-    <ScreenContent title={t(adding ? "addStopTitle" : "route")} scrollEnabled={!dragging}>
-      {routeOn && !adding && !destinationCard && !q && (
+    <ScreenContent title={t(adding ? "addStopTitle" : locating ? "locateTitle" : "route")} scrollEnabled={!dragging}>
+      {routeOn && !adding && !locating && !destinationCard && !q && (
         <TripSection
           route={route}
           nowMs={position?.timestamp ?? 0}
@@ -269,17 +289,21 @@ export default function RouteScreen() {
             setDestinationCard(null);
             // Coordinates pasted (not typed a digit at a time): straight to their card.
             const pasted = typed.length - query.length > 1 ? pointPlace(geoSearchText(typed) ?? typed, index, bounds, language, t) : null;
-            if (pasted) (adding ? addStop : open)(pasted);
+            if (pasted) pick(pasted);
           }}
-          onSubmitEditing={() => point && (adding ? addStop : open)(point)}
+          onSubmitEditing={() => point && pick(point)}
           placeholder={t(searched ? "searchPlaces" : "routeSearch")}
           placeholderTextColor={palette.text2}
           autoCorrect={false}
+          // Asked where the car is: the address first.
+          autoFocus={locating}
           returnKeyType="search"
           maxFontSizeMultiplier={INPUT_MAX_FONT_SCALE}
           style={[styles.searchInput, { color: palette.text }]}
         />
       </View>
+      {locating && <ScreenNote>{t("locateNote")}</ScreenNote>}
+      {locating && <ScreenLink label={t("locateOnMap")} onPress={() => placeAt(null)} />}
 
       {!destinationCard && results && (
         <ScreenSection>
@@ -314,7 +338,7 @@ export default function RouteScreen() {
               {recentHere.map((p) => row(p, `recent:${p.id}`, { icon: "history" }))}
             </ScreenSection>
           )}
-          {!adding && recentHere.length > 0 && <ScreenLink label={t("clearRecent")} onPress={() => places.clearRecent()} />}
+          {!adding && !locating && recentHere.length > 0 && <ScreenLink label={t("clearRecent")} onPress={() => places.clearRecent()} />}
           {!adding && (
           <ScreenSection title={region ? `${t("regionCities")} · ${region.name[language]}` : t("regionCities")}>
             {cities.length === 0 ? (
@@ -334,7 +358,7 @@ export default function RouteScreen() {
       {destinationCard && <PlaceCard place={destinationCard} onExit={exitDestinationCard} />}
 
       {!searched && q !== "" && !point && <ScreenNote>{t("searchNeedsData")}</ScreenNote>}
-      <ScreenNote>{`${t("routeTip")} ${t("routeOutsideRegion")}`}</ScreenNote>
+      {!locating && <ScreenNote>{`${t("routeTip")} ${t("routeOutsideRegion")}`}</ScreenNote>}
     </ScreenContent>
   );
 }

@@ -357,7 +357,7 @@ One small component each; the screen only places them and wires their state. Car
 | Bottom | `CameraButton` | Camera mode (§6.2) |
 | Bottom | `BottomBar` | Route, Vehicle (with the connection dot; "Driving" while a trip records), More (a red dot while an app or map update waits, UPDATES-SPEC §5.4) |
 | Center | `PermissionCard` (`center-cards.tsx`) | Location denied → explanation + "Open Settings" |
-| Center | `NoFixCard` | "Waiting for GPS…" when no fix yet, with "Set your position on the map" (grey) from the start: jammed at the start, a fix may never come; "GPS puts you outside Ukraine" + Set position when the phone's last location is abroad |
+| Center | `NoFixCard` | "Waiting for GPS…" when no fix yet, with "Find your location by address" (grey) from the start: jammed at the start, a fix may never come; "GPS puts you outside Ukraine" + Set position when the phone's last location is abroad. Both open "Where are you?" (§7.1) |
 
 - **Outside the region** (`region-prompt.tsx`): when the position (any fix to 5 km, Wi-Fi ones too, not one suspected
   of spoofing) is more than max(1 km, its accuracy) outside the active region's outline (`region-check.ts`), a card
@@ -520,6 +520,11 @@ One small component each; the screen only places them and wires their state. Car
 - "Start guidance" plans from the position (`runtime.routes`, `useRoute()`) and returns to the map; "Stop guidance"
   ends it. **I'm here** on the summary card, at any speed: placing starting at the place
   (`place-request.ts`).
+- **Where are you?** (`route?locating=1`), from the no-fix card's "Find your location by address": the field focused,
+  a note, and "Choose on the map instead" (placing from the region's middle). A result, saved, recent place or city
+  picked starts placing there at once, no summary card; rows show no distance (there is no position to measure from),
+  and no trip, footnote or "Clear recent". The address comes first because with no dot the placing pin starts in
+  the region's middle, up to hundreds of km from the car.
 - Footnote: long-press the map to route anywhere or to say the car is there; routes stay inside the region.
 - With a route on, the page opens on its trip: "Pull in on the way", the stops, "Add a stop" (STOPS-SPEC §7).
 
@@ -603,7 +608,9 @@ How to use the app, for drivers. Design sources: [design/guide/](design/guide/).
   angle, a phone picked up catches up; a note asks for the lessons before the first drive.
 - **Map tour** (`map-tour.tsx`): offered once on the map after onboarding and the first map (a card above the camera
   button, hidden while a pin, a placing or the pose question is up; kv-store `guide.tour-offered`), and from the
-  Guide at any time. The screen dims except one control at a time, with a card (step, title, text, Back / Next,
+  Guide at any time. Never before there is a dot (a fix, or placed by hand): without one the map shows the whole
+  region and the dot's stop circles nothing; asked for from the Guide, it waits for the dot. It starts the follow
+  camera, so the map is zoomed in on the dot. The screen dims except one control at a time, with a card (step, title, text, Back / Next,
   Skip): the status pill, the dot, press and hold (a pulsing ring), the camera button, Vehicle and More. Three stops
   are tried for real (their hole lets touches through: the pill unfolds, a long press drops a real pin, the camera
   button switches) and the card adds a ticked line once done. Done ends with the lessons offer.

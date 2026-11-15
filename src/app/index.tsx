@@ -1,6 +1,6 @@
 import { useKeepAwake } from "expo-keep-awake";
 import { router, useIsFocused } from "expo-router";
-import { useEffect, useEffectEvent, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Platform, StyleSheet, useWindowDimensions, View, type ViewInstance } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -212,8 +212,11 @@ export default function HomeScreen() {
   const [tourTargets] = useState(() => ({ status: statusRef, follow: followRef, toolbar: toolbarRef }));
   const answerTour = (take: boolean) => {
     markTourOffered();
+    if (take) startTour();
+    else setTourOffered(true);
+  };
+  const startTour = () => {
     setTourOffered(true);
-    if (!take) return;
     // The dot's stop is the screen centre, where the follow camera keeps the car.
     setPin(null);
     setDetailsOpen(false);
@@ -252,11 +255,23 @@ export default function HomeScreen() {
     !recording &&
     route == null &&
     (position?.speedMps ?? 0) <= MOVING_MPS;
-  const takeTour = useEffectEvent(() => {
-    if (takeTourRequest()) answerTour(true);
-  });
-  // The map stays mounted under the Guide page, so the request always comes while subscribed.
-  useEffect(() => onTourRequest(() => takeTour()), []);
+  // The tour shows the dot and the controls around it: not before there is a dot (a fix, or placed by hand). Without
+  // one the map shows the whole region and the dot's stop circles nothing; asked for from the Guide, it waits.
+  const located = position != null;
+  const [tourAsked, setTourAsked] = useState(false);
+  // The map stays mounted under the Guide page, so the request always comes while subscribed. The Guide marked the
+  // tour offered.
+  useEffect(
+    () =>
+      onTourRequest(() => {
+        if (takeTourRequest()) setTourAsked(true);
+      }),
+    [],
+  );
+  if (tourAsked && located) {
+    setTourAsked(false);
+    startTour();
+  }
   // First run: onboarding, then a map to download. Each time the map is back on top (the
   // last region deleted, say), it asks again: the app has no online map.
   useEffect(() => {
@@ -457,7 +472,12 @@ export default function HomeScreen() {
 
             {!position && !placing && (
               <Appear from="none">
-                {permission != null && !permission.granted ? <PermissionCard /> : <NoFixCard onPlace={() => place.start()} />}
+                {permission != null && !permission.granted ? (
+                  <PermissionCard />
+                ) : (
+                  // No dot to start from: the address first, or the pin starts in the region's middle, maybe 100 km off.
+                  <NoFixCard onPlace={() => router.push({ pathname: "/route", params: { locating: "1" } })} />
+                )}
               </Appear>
             )}
 
@@ -511,7 +531,7 @@ export default function HomeScreen() {
                   />
                 </Appear>
               )}
-              {mapReady && !tourOffered && !touring && !pin && !placing && !position?.poseQuestion && (
+              {mapReady && located && !tourOffered && !touring && !pin && !placing && !position?.poseQuestion && (
                 <Appear from="bottom">
                   <TourInvite panelStyle={panel} onStart={() => answerTour(true)} onDismiss={() => answerTour(false)} />
                 </Appear>

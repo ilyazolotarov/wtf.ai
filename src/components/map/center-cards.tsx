@@ -49,7 +49,8 @@ export function PermissionCard() {
 }
 
 /**
- * "Waiting for GPS…" before the first position, with "Set your position on the map" under it. When the phone's
+ * "Waiting for GPS…" before the first position, with "Find your location by address" under it (`onPlace`: the address
+ * first, then the pin from there; with no dot it started in the region's middle). When the phone's
  * location is outside Ukraine, it is never used: integrity refuses a satellite fix there as spoofed (SPEC §3.3), and the
  * navigator drops a Wi-Fi/cell one (iOS gave one on another continent under jamming, 2026-10-15). There never is a
  * first position: say so, and offer placing the car instead, not "looking for satellites".
@@ -100,9 +101,9 @@ export function NoFixCard({ onPlace }: { onPlace: () => void }) {
         style={[styles.button, styles.withIcon, { backgroundColor: palette.surface }]}
         accessibilityRole="button"
       >
-        <Icon name="location_on" size={18} color={palette.text} />
+        <Icon name="search" size={18} color={palette.text} />
         <T w="semibold" size={15} color={palette.text}>
-          {t("placeOffer")}
+          {t("placeByAddress")}
         </T>
       </PressableFeedback>
     </CenterCard>

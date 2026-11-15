@@ -308,7 +308,8 @@ navigate with the phone in a hand, a pocket or on a seat.
   samples over two hours with the dot up to 10 km out.
 - **Asked for** by the driver at any time, moving too, or before any position: **I'm here** on a dropped pin or on a
   place picked in the route screen (UI-SPEC §6, §7.1), the manual position's chip, "No" to "Is the car where the dot
-  is?". The placing then starts at that point; driving on doesn't cancel it.
+  is?". The placing then starts at that point; driving on doesn't cancel it. With no position at all it starts from
+  an address ("Where are you?", UI-SPEC §7.1): the map alone would start it in the region's middle.
 - **Placing** (UI-SPEC §6.2): the map zooms in with a centre pin; the driver drags the map until the pin is on the
   car, "Here", then taps where the front of the car points, "Confirm". A placing always has a heading: without one
   the car stayed anchored and a route started without a direction.

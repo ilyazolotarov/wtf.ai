@@ -110,10 +110,10 @@ export function usePlacing({
     setPlaced(null);
   };
 
-  // "I'm here" on a search result (route screen): placing starts there.
+  // "I'm here" on a search result (route screen): placing starts there; "on the map instead", from the dot.
   const takeRequest = useEffectEvent(() => {
-    const at = takePlacingRequest();
-    if (at && mayPlace) start(at);
+    const request = takePlacingRequest();
+    if (request && mayPlace) start(request.at ?? undefined);
   });
   // The map stays mounted under the route sheet, so the request always comes while subscribed.
   useEffect(() => onPlacingRequest(() => takeRequest()), []);
