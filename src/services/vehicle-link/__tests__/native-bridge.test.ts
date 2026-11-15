@@ -84,10 +84,10 @@ describe("NativeTransport", () => {
     await t.connect();
     const order: string[] = [];
     t.onLinkLost((reason) => order.push(`lost:${reason}`));
-    mockNative.transact.mockRejectedValueOnce(Object.assign(new Error("gone"), { code: "link-lost" }));
+    mockNative.transact.mockRejectedValueOnce(Object.assign(new Error("accessory disconnected (up 163 s)"), { code: "link-lost" }));
     await t.exchange("010D1", 1000).catch(() => order.push("rejected"));
     mockEmit("onLinkState", { state: "disconnected", reason: "again" });
-    expect(order).toEqual(["lost:link-lost", "rejected"]);
+    expect(order).toEqual(["lost:accessory disconnected (up 163 s)", "rejected"]);
   });
 
   test("other native errors don't count as link loss", async () => {

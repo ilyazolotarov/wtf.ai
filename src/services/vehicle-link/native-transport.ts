@@ -60,8 +60,9 @@ export class NativeTransport implements Transport {
       return await VehicleLinkModule.transact(command, timeoutMs);
     } catch (error) {
       const code = (error as { code?: string }).code;
-      // Report the loss before the rejection reaches the session, so the owner tears down cleanly.
-      if (code && LINK_ERRORS.has(code)) this.fireLinkLost(code);
+      // Report the loss before the rejection reaches the session, so the owner tears down cleanly. The rejection's
+      // message is the native side's reason for it.
+      if (code && LINK_ERRORS.has(code)) this.fireLinkLost((error as { message?: string }).message || code);
       throw error;
     }
   }

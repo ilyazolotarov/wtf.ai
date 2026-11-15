@@ -538,9 +538,11 @@ final class LinkCore: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
     let wasUp = linkUp
     linkUp = false
     mfiWaiting = false
+    // What the link had carried goes out both ways: a command in flight hears of the loss before the event does.
+    let detailed = notify && wasUp ? "\(reason) (\(traffic.lossDetail(nowUs: LinkCore.nowUs())))" : reason
     if let pending = pending {
       self.pending = nil
-      pending.promise.reject("link-lost", reason)
+      pending.promise.reject("link-lost", detailed)
     }
     framer.reset()
     bleChunks.removeAll()
@@ -566,7 +568,7 @@ final class LinkCore: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
     eaSession = nil
     eaAccessory = nil
     if notify && wasUp {
-      emit("onLinkState", ["state": "disconnected", "reason": "\(reason) (\(traffic.lossDetail(nowUs: LinkCore.nowUs())))"])
+      emit("onLinkState", ["state": "disconnected", "reason": detailed])
     }
   }
 
