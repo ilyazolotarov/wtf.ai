@@ -3,5 +3,6 @@
   "NSBluetoothAlwaysUsageDescription": "Allow connections to your OBD-II adapter to read vehicle speed.",
   "NSMotionUsageDescription": "Allow access to the phone's motion sensors to track the car when satellite positioning is jammed.",
   "NSLocationAlwaysAndWhenInUseUsageDescription": "The app uses your location in the background only while you are driving. Choosing \"Always\" allows the app to start automatically when you set off, even if you haven't opened it.",
-  "NSLocationAlwaysUsageDescription": "The app uses your location in the background only while you are driving. Choosing \"Always\" allows the app to start automatically when you set off, even if you haven't opened it."
+  "NSLocationAlwaysUsageDescription": "The app uses your location in the background only while you are driving. Choosing \"Always\" allows the app to start automatically when you set off, even if you haven't opened it.",
+  "ExpoLocationFullAccuracy": "The app needs your precise location to identify which road you're on. Your approximate location can be several kilometres off."
 }

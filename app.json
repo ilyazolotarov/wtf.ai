@@ -179,7 +179,8 @@
           "isAndroidBackgroundLocationEnabled": true,
           "locationAlwaysAndWhenInUsePermission": "The app uses your location in the background only while you are driving. Choosing \"Always\" allows the app to start automatically when you set off, even if you haven't opened it.",
           "locationAlwaysPermission": "The app uses your location in the background only while you are driving. Choosing \"Always\" allows the app to start automatically when you set off, even if you haven't opened it.",
-          "motionUsagePermission": "Allow access to the phone's motion sensors to track the car when satellite positioning is jammed."
+          "motionUsagePermission": "Allow access to the phone's motion sensors to track the car when satellite positioning is jammed.",
+          "locationFullAccuracyPermission": "The app needs your precise location to identify which road you're on. Your approximate location can be several kilometres off."
         }
       ],
       [

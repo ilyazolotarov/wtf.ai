@@ -243,14 +243,16 @@ jobs:
       - name: Permissions for AltStore
         # AltStore refuses an IPA whose entitlements and usage descriptions differ from its source's appPermissions
         # (docs/UPDATES-SPEC.md §3): read them from the app just built. Unsigned, it has no entitlements. Release only:
-        # only main's Release builds are published.
+        # only main's Release builds are published. AltStore counts every key with "UsageDescription" in it, suffixed
+        # ones too (expo-location's NSLocationTemporaryUsageDescriptionDictionary), and decodes each value as a
+        # string: a dictionary's texts are joined.
         id: permissions
         if: ${{ inputs.configuration == 'Release' }}
         # A failure here stops only the publish of this IPA (publish-builds checks for the output), not the build.
         continue-on-error: true
         run: |
           APP=$(ls -d build/Build/Products/${CONFIGURATION}-iphoneos/*.app | head -n 1)
-          PRIVACY=$(plutil -convert json -o - "$APP/Info.plist" | jq -c 'with_entries(select(.key | endswith("UsageDescription")))')
+          PRIVACY=$(plutil -convert json -o - "$APP/Info.plist" | jq -c 'with_entries(select(.key | contains("UsageDescription")) | .value |= if type == "string" then . else ([.. | strings] | join(" ")) end)')
           ENTITLEMENTS='[]'
           for BIN in "$APP" "$APP"/PlugIns/*.appex; do
             [ -e "$BIN" ] || continue

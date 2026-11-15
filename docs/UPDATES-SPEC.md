@@ -64,8 +64,10 @@ its own, so a failed prune never fails a publish. It never removes what `latest`
   AltStore (`altstore-classic://source?url=…`, AltStore 2.2+; else `altstore://source?url=…`), where the update is
   one tap. AltStore installs through AltServer: a PC on the same Wi-Fi, or (AltStore 2.3+) Remote AltServer from
   anywhere. Without AltStore, "Share IPA" downloads the IPA and opens the share sheet.
-  - AltStore refuses an IPA whose entitlements and `…UsageDescription` texts differ from the source's
-    `appPermissions`, so CI reads them from the IPA it built (`codesign`, `Info.plist`).
+  - AltStore refuses an IPA if its entitlements or usage descriptions don't match the source's `appPermissions`,
+    so CI extracts them from the built IPA (`codesign`, `Info.plist`). This includes every key containing
+    `UsageDescription`, even those with a suffix, such as `NSLocationTemporaryUsageDescriptionDictionary`.
+    AltStore expects each privacy value to be a string, so CI joins the text values in any dictionary into one string.
 - **Store builds** (`DISTRIBUTION=store`, [SPEC.md](SPEC.md) §2.2) never look for a native build: their store
   updates them. No APK installer, no AltStore. JS updates as above, each exported and signed a second time with
   `DISTRIBUTION=store`: that is in the store build's config, so its runtime is another one, and the update carries the
