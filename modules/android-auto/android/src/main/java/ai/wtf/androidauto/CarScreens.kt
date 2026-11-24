@@ -179,13 +179,23 @@ internal class NavigationScreen(carContext: CarContext) : Screen(carContext) {
     }
 }
 
-/** Saved places and recent destinations; picking one routes to it, as on the phone's route screen. */
+/**
+ * Saved places and recent destinations; picking one routes to it, as on the phone's route screen. Its search button
+ * is the way on from an empty list, on the car's screen: nothing here sends the driver to the phone (guideline VI-1).
+ */
 internal class DestinationsScreen(carContext: CarContext) : Screen(carContext) {
   @Suppress("DEPRECATION") // setTitle / setHeaderAction: Header needs Car API 7.
   override fun onGetTemplate(): Template {
     val labels = CarLink.labels
     val places = CarLink.places
-    val template = ListTemplate.Builder().setTitle(labels.destinations).setHeaderAction(Action.BACK)
+    val search = Action.Builder()
+      .setIcon(CarTemplates.icon(carContext, R.drawable.car_search))
+      .setOnClickListener { screenManager.push(SearchScreen(carContext, "", keyboard = true)) }
+      .build()
+    val template = ListTemplate.Builder()
+      .setTitle(labels.destinations)
+      .setHeaderAction(Action.BACK)
+      .setActionStrip(ActionStrip.Builder().addAction(search).build())
     if (places.isEmpty()) {
       template.setSingleList(ItemList.Builder().setNoItemsMessage(labels.noDestinations).build())
       return template.build()

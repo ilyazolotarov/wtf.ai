@@ -79,7 +79,8 @@ src/components/car-screen/car-session.ts ◀───────┘  route, pla
 - **Location permission:** without it (fine or approximate) the navigator has no GNSS and the car shows a notice
   instead of the route (§4): its button, parked only (`ParkedOnlyOnClickListener`), opens Android's permission dialog
   on the phone (`CarContext.requestPermissions`), and a toast on the car says to look at the phone only when it's safe
-  (quality guideline VI-1). The task checks again on the dialog's answer, when the phone's app
+  (quality guideline VI-1); the notice's own line says it too ("When it's safe, allow access on your phone."). The
+  task checks again on the dialog's answer, when the phone's app
   comes to the front, and every 5 s while the notice shows. Allowed: the notice goes, GNSS starts
   (`NavigatorService.retryCapture`), and `CarLocationService` starts if the car shows the app (else at the session's
   next start).
@@ -207,7 +208,13 @@ src/components/car-screen/car-session.ts ◀───────┘  route, pla
   Which card shows is `CarGuidanceLogic.card` (JUnit).
 
   Destinations: saved places (Home, Work, favourites) then recent ones, as many as the car allows; one picked routes
-  to it as the phone's route screen does (and becomes recent).
+  to it as the phone's route screen does (and becomes recent). A search button in its corner opens Search. With none
+  it says only that there are none yet: the way on is that button.
+
+  **No word of the phone without "when it's safe"** (quality guideline VI-1; Play's review refused an empty
+  Destinations list that said places "from your phone will appear here"): the car's words (`car*` strings) name the
+  phone only where the driver must go to it, and then say when: the location notice ("When it's safe, …") and its
+  toast, and the held route's "Stop and set your position on the phone."
 
   Search (`SearchTemplate`): each change of the field goes to the session, which searches the phone's offline index
   (SEARCH-SPEC §5, near the car) and sends the answers with the text they answer. The screen shows them only for the
