@@ -106,7 +106,8 @@ data class CarLabels(
   val destinations: String = "Destinations",
   val saved: String = "Saved",
   val recent: String = "Recent",
-  val noDestinations: String = "Saved places and recent destinations from your phone will appear here.",
+  /** No word of the phone: a car screen that sends the driver to it must say "only when it's safe" (guideline VI-1). */
+  val noDestinations: String = "No saved places or recent destinations yet.",
   val search: String = "Search",
   val searchHint: String = "Search addresses and places",
   val noResults: String = "Nothing found in the downloaded region",
