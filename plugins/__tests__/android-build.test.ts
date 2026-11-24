@@ -1,12 +1,13 @@
 // Config plugin: stable release signing key for sideloaded APKs (debug-key fallback), the lint setting, Gradle memory.
 
 jest.mock("expo/config-plugins", () => ({
+  withAndroidManifest: (config: any, mod: (c: any) => any) => mod(config),
   withAppBuildGradle: (config: any, mod: (c: any) => any) => mod(config),
   withGradleProperties: (config: any, mod: (c: any) => any) => mod(config),
 }));
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { patchGradle, patchGradleProperties } = require("../android-build.js");
+const { patchGradle, patchGradleProperties, patchManifest } = require("../android-build.js");
 
 // The relevant part of the SDK 58 prebuild template (android/app/build.gradle).
 const TEMPLATE = `android {
@@ -70,5 +71,17 @@ describe("android-build plugin", () => {
     expect(value("android.useAndroidX")).toEqual(["true"]);
     expect(out[0]).toEqual(template[0]);
     expect(patchGradleProperties(out)).toEqual(out);
+  });
+
+  test("declares the portrait screen as not required (the portrait lock implies it as required), once", () => {
+    const portrait = (m: any) => m["uses-feature"].filter((f: any) => f.$["android:name"] === "android.hardware.screen.portrait");
+    const out = patchManifest({ "uses-feature": [{ $: { "android:name": "android.hardware.bluetooth", "android:required": "false" } }] });
+    expect(portrait(out)).toEqual([{ $: { "android:name": "android.hardware.screen.portrait", "android:required": "false" } }]);
+    expect(out["uses-feature"]).toHaveLength(2);
+    expect(portrait(patchManifest(out))).toHaveLength(1);
+    // One that says "required" is turned, not doubled; a manifest with no features gets the list.
+    const required = { "uses-feature": [{ $: { "android:name": "android.hardware.screen.portrait", "android:required": "true" } }] };
+    expect(portrait(patchManifest(required))).toEqual([{ $: { "android:name": "android.hardware.screen.portrait", "android:required": "false" } }]);
+    expect(portrait(patchManifest({}))).toHaveLength(1);
   });
 });

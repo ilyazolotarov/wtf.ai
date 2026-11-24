@@ -119,7 +119,8 @@ persisted in kv-store. No hardcoded user-facing strings in components.
 - **System bars:** Android draws edge to edge, so every screen pads itself by the safe-area insets. The map's bottom
   bar sits fully above Android's navigation bar; iOS lets it reach into the home indicator's strip. The status bar
   icons follow the app's scheme.
-- **Orientation:** portrait only (`app.json`). **The map turns with the phone** (`map-turn.ts`): held sideways, only
+- **Orientation:** portrait only (`app.json`); the manifest declares `android.hardware.screen.portrait` as not
+  required (`plugins/android-build.js`), or Play hides the app from cars, desktops and XR. **The map turns with the phone** (`map-turn.ts`): held sideways, only
   the map view is rotated ±90° about the screen's centre, from the IMU's gravity, so north-up has north at the
   physical top; the panels stay. Never upside down: nobody holds a phone so and means it, and in a pocket the map
   turned over and didn't always turn back; held upside down, the turn stays as it was. Nor does it turn while the app

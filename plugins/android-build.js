@@ -4,8 +4,11 @@
 // without them it falls back to the debug key (fine for CI runs that are never sent to testers).
 // 3) More memory for Gradle: expo-updates' code generation (KSP) runs out of the template's 512 MB metaspace, and
 // Gradle then hangs until the job times out instead of failing.
+// 4) The portrait lock (app.json `orientation`) makes Android imply `android.hardware.screen.portrait` as a required
+// feature, and Play then hides the app from every device that doesn't report it: cars, desktops, XR, some tablets.
+// The manifest declares it not required; the lock stays, and the app runs where the system ignores it (UI-SPEC §4.7).
 // Never edit android/ by hand; prebuild applies this.
-const { withAppBuildGradle, withGradleProperties } = require("expo/config-plugins");
+const { withAndroidManifest, withAppBuildGradle, withGradleProperties } = require("expo/config-plugins");
 
 const MARKER = "// wtf.ai release signing";
 const LINT_MARKER = "// wtf.ai lint";
@@ -71,7 +74,24 @@ function patchGradleProperties(items) {
   return out;
 }
 
+const OPTIONAL_FEATURES = ["android.hardware.screen.portrait"];
+
+/** Declares OPTIONAL_FEATURES in the manifest as `android:required="false"`, once each. */
+function patchManifest(manifest) {
+  const features = (manifest["uses-feature"] = manifest["uses-feature"] ?? []);
+  for (const name of OPTIONAL_FEATURES) {
+    const existing = features.find((f) => f.$?.["android:name"] === name);
+    if (existing) existing.$["android:required"] = "false";
+    else features.push({ $: { "android:name": name, "android:required": "false" } });
+  }
+  return manifest;
+}
+
 module.exports = function withAndroidBuild(config) {
+  config = withAndroidManifest(config, (cfg) => {
+    patchManifest(cfg.modResults.manifest);
+    return cfg;
+  });
   config = withAppBuildGradle(config, (cfg) => {
     cfg.modResults.contents = patchGradle(cfg.modResults.contents);
     return cfg;
@@ -83,3 +103,4 @@ module.exports = function withAndroidBuild(config) {
 };
 module.exports.patchGradle = patchGradle;
 module.exports.patchGradleProperties = patchGradleProperties;
+module.exports.patchManifest = patchManifest;
